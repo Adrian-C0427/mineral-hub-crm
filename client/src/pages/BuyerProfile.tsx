@@ -3,6 +3,8 @@ import { useParams, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, RelationshipDot, Banner, StageBadge, ResponseBadge } from "../components/ui";
+import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
+import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
 import { money, pct, fmtDate, toInputDate } from "../lib/format";
 import type { BuyBox, Relationship, UserLite } from "../types";
 
@@ -122,11 +124,21 @@ export function BuyerProfile() {
           <h3>Buy Box & Criteria</h3>
           {edit ? (
             <>
-              {ARRAY_KEYS.map((k) => (
-                <Fld l={k} key={k}>
-                  <input value={(view.buyBox[k] as string[]).join(", ")} onChange={(e) => setBox(k, e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} placeholder="comma-separated" />
-                </Fld>
-              ))}
+              <Fld l="states">
+                <input value={view.buyBox.states.join(", ")} onChange={(e) => setBox("states", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} placeholder="comma-separated" />
+              </Fld>
+              <Fld l="counties">
+                <SearchableMultiSelect options={TEXAS_COUNTY_OPTIONS} value={view.buyBox.counties} onChange={(v) => setBox("counties", v)} placeholder="Search counties…" />
+              </Fld>
+              <Fld l="basins">
+                <SearchableMultiSelect options={TEXAS_BASIN_OPTIONS} value={view.buyBox.basins} onChange={(v) => setBox("basins", v)} placeholder="Search basins…" />
+              </Fld>
+              <Fld l="formations">
+                <SearchableMultiSelect options={TEXAS_FORMATION_OPTIONS} value={view.buyBox.formations} onChange={(v) => setBox("formations", v)} placeholder="Search formations…" />
+              </Fld>
+              <Fld l="asset types">
+                <SearchableMultiSelect options={ASSET_TYPE_OPTIONS} value={view.buyBox.assetTypes} onChange={(v) => setBox("assetTypes", v)} placeholder="Search asset types…" />
+              </Fld>
               <Row><Fld l="Min acreage"><input type="number" value={view.buyBox.minAcreage ?? ""} onChange={(e) => setBox("minAcreage", e.target.value === "" ? null : Number(e.target.value))} /></Fld><Fld l="Max acreage"><input type="number" value={view.buyBox.maxAcreage ?? ""} onChange={(e) => setBox("maxAcreage", e.target.value === "" ? null : Number(e.target.value))} /></Fld></Row>
               <Row><Fld l="Min price"><input type="number" value={view.buyBox.minPrice ?? ""} onChange={(e) => setBox("minPrice", e.target.value === "" ? null : Number(e.target.value))} /></Fld><Fld l="Max price"><input type="number" value={view.buyBox.maxPrice ?? ""} onChange={(e) => setBox("maxPrice", e.target.value === "" ? null : Number(e.target.value))} /></Fld></Row>
             </>

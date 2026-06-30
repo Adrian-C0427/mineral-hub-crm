@@ -9,6 +9,7 @@ import { DealDetail } from "./pages/DealDetail";
 import { Buyers } from "./pages/Buyers";
 import { BuyerProfile } from "./pages/BuyerProfile";
 import { Reports } from "./pages/Reports";
+import { Settings } from "./pages/Settings";
 
 function TopNav() {
   const { user, logout } = useAuth();
@@ -26,6 +27,7 @@ function TopNav() {
       </div>
       <div className="nav-user">
         <span>{user?.name} · {user?.role === "OWNER" ? "Owner" : "Associate"}</span>
+        <NavLink to="/settings" className="gear-link" title="Settings" aria-label="Settings">⚙</NavLink>
         <button className="small" onClick={() => logout()}>Sign out</button>
       </div>
     </nav>
@@ -49,6 +51,7 @@ export function App() {
         <Route path="/buyers" element={<Buyers />} />
         <Route path="/buyers/:id" element={<BuyerProfile />} />
         <Route path="/reports" element={<Reports />} />
+        <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>

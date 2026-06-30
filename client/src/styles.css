@@ -249,3 +249,18 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .kv .v { font-size: 14px; }
 .dropzone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 32px; text-align:center; color: var(--text-dim); cursor:pointer; }
 .dropzone.drag { border-color: var(--accent); background: var(--panel-2); }
+
+/* --- Searchable multi-select --- */
+.msel { position: relative; }
+.msel-box { display:flex; flex-wrap:wrap; gap:6px; align-items:center; min-height:38px; background: var(--bg); border:1px solid var(--border); border-radius:6px; padding:5px 8px; cursor:text; }
+.msel-box:focus-within { border-color: var(--accent); }
+.msel-chip { display:inline-flex; align-items:center; gap:5px; background: var(--panel-2); border:1px solid var(--border); border-radius:100px; padding:2px 8px; font-size:12px; }
+.msel-chip button { border:none; background:none; padding:0; color: var(--text-dim); font-size:14px; line-height:1; cursor:pointer; }
+.msel-input { flex:1; min-width:90px; border:none; background:none; padding:2px; width:auto; }
+.msel-input:focus { outline:none; }
+.msel-menu { position:absolute; z-index:60; left:0; right:0; margin-top:4px; max-height:240px; overflow-y:auto; background: var(--panel); border:1px solid var(--border); border-radius:6px; box-shadow: var(--shadow); }
+.msel-opt { padding:8px 12px; cursor:pointer; }
+.msel-opt:hover { background: var(--panel-2); }
+.msel-empty { padding:10px 12px; color: var(--text-dim); font-size:13px; }
+.gear-link { color: var(--text-dim); font-size:20px; display:inline-flex; align-items:center; padding:4px 6px; border-radius:6px; }
+.gear-link:hover { color: var(--text); background: var(--panel-2); text-decoration:none; }

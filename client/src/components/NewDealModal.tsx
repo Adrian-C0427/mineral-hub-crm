@@ -6,7 +6,7 @@ import type { DealSummary } from "../types";
 export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCreated: (d: DealSummary) => void }) {
   const [f, setF] = useState({
     name: "", state: "", county: "", basin: "", formation: "", assetType: "",
-    acreageNma: "", askPrice: "", operator: "", sellerNames: "",
+    acreageNma: "", nra: "", askPrice: "", operator: "", sellerNames: "",
     dateUnderContract: "", originalClosingDate: "", estimatedClosingCosts: "", notes: "",
   });
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +30,7 @@ export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCr
         assetType: f.assetType || null,
         operator: f.operator || null,
         acreageNma: numOrNull(f.acreageNma),
+        nra: numOrNull(f.nra),
         askPrice: numOrNull(f.askPrice),
         estimatedClosingCosts: numOrNull(f.estimatedClosingCosts),
         sellerNames: f.sellerNames ? f.sellerNames.split(",").map((s) => s.trim()).filter(Boolean) : [],
@@ -66,7 +67,8 @@ export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCr
         <div className="field"><label>Basin</label><input value={f.basin} onChange={set("basin")} /></div>
         <div className="field"><label>Formation</label><input value={f.formation} onChange={set("formation")} /></div>
         <div className="field"><label>Operator</label><input value={f.operator} onChange={set("operator")} /></div>
-        <div className="field"><label>Acreage (NMA)</label><input type="number" value={f.acreageNma} onChange={set("acreageNma")} /></div>
+        <div className="field"><label>NMA</label><input type="number" value={f.acreageNma} onChange={set("acreageNma")} /></div>
+        <div className="field"><label>NRA</label><input type="number" value={f.nra} onChange={set("nra")} /></div>
         <div className="field"><label>Ask Price</label><input type="number" value={f.askPrice} onChange={set("askPrice")} /></div>
         <div className="field"><label>Est. Closing Costs</label><input type="number" value={f.estimatedClosingCosts} onChange={set("estimatedClosingCosts")} /></div>
         <div className="field"><label>Date Under Contract</label><input type="date" value={f.dateUnderContract} onChange={set("dateUnderContract")} /></div>
