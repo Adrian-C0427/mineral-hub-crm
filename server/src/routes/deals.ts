@@ -1,0 +1,472 @@
+import { Router } from "express";
+import { z } from "zod";
+import type { Stage } from "@prisma/client";
+import { prisma } from "../db.js";
+import { asyncHandler, HttpError } from "../middleware/errors.js";
+import { requireAuth, requireOwner, type AuthedRequest } from "../middleware/auth.js";
+import { serializeDeal } from "../serializers.js";
+import { computeMatch } from "../domain/matching.js";
+import { STALE_CONTACT_DAYS } from "../config.js";
+import { daysUntil } from "../domain/dates.js";
+import { logActivity } from "../services/activityLog.js";
+
+export const dealsRouter = Router();
+dealsRouter.use(requireAuth);
+
+const STAGES: Stage[] = [
+  "UNDER_CONTRACT",
+  "PREPARING_PACKAGE",
+  "SENT_TO_BUYERS",
+  "NEGOTIATING",
+  "CLOSING",
+  "CLOSED",
+  "DEAD",
+];
+
+const dateField = z
+  .string()
+  .datetime({ offset: true })
+  .or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/))
+  .nullable()
+  .optional();
+
+function toDate(v: unknown): Date | null | undefined {
+  if (v === undefined) return undefined;
+  if (v === null || v === "") return null;
+  return new Date(v as string);
+}
+
+const dealInclude = { selectedBuyer: true, relationshipOwner: true } as const;
+
+// --------------------------------------------------------------------------
+// List
+// --------------------------------------------------------------------------
+dealsRouter.get(
+  "/",
+  asyncHandler(async (_req, res) => {
+    const deals = await prisma.deal.findMany({
+      include: { ...dealInclude, offers: { select: { amount: true } } },
+      orderBy: { createdAt: "desc" },
+    });
+    res.json(deals.map((d) => serializeDeal(d)));
+  }),
+);
+
+// --------------------------------------------------------------------------
+// Create — always into UNDER_CONTRACT
+// --------------------------------------------------------------------------
+const createSchema = z.object({
+  name: z.string().min(1),
+  sellerNames: z.array(z.string()).optional(),
+  county: z.string().nullish(),
+  state: z.string().nullish(),
+  acreageNma: z.number().nullish(),
+  operator: z.string().nullish(),
+  askPrice: z.number().nullish(),
+  assetType: z.string().nullish(),
+  basin: z.string().nullish(),
+  formation: z.string().nullish(),
+  dateUnderContract: dateField,
+  originalClosingDate: dateField,
+  estimatedClosingCosts: z.number().nullish(),
+  relationshipOwnerId: z.string().nullish(),
+  notes: z.string().nullish(),
+});
+
+dealsRouter.post(
+  "/",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const data = createSchema.parse(req.body);
+    const deal = await prisma.$transaction(async (tx) => {
+      const created = await tx.deal.create({
+        data: {
+          name: data.name,
+          sellerNames: data.sellerNames ?? [],
+          county: data.county ?? null,
+          state: data.state ?? null,
+          acreageNma: data.acreageNma ?? null,
+          operator: data.operator ?? null,
+          askPrice: data.askPrice ?? null,
+          assetType: data.assetType ?? null,
+          basin: data.basin ?? null,
+          formation: data.formation ?? null,
+          dateUnderContract: toDate(data.dateUnderContract) ?? null,
+          originalClosingDate: toDate(data.originalClosingDate) ?? null,
+          estimatedClosingCosts: data.estimatedClosingCosts ?? null,
+          relationshipOwnerId: data.relationshipOwnerId ?? req.user!.id,
+          notes: data.notes ?? null,
+          stage: "UNDER_CONTRACT",
+          currentStageEnteredAt: new Date(),
+        },
+        include: dealInclude,
+      });
+      await tx.dealStageHistory.create({
+        data: { dealId: created.id, fromStage: null, toStage: "UNDER_CONTRACT", changedByUserId: req.user!.id },
+      });
+      await logActivity(
+        {
+          eventType: "DEAL_CREATED",
+          summary: `${req.user!.name} created deal "${created.name}"`,
+          actorUserId: req.user!.id,
+          dealId: created.id,
+        },
+        tx,
+      );
+      return created;
+    });
+    res.status(201).json(serializeDeal(deal));
+  }),
+);
+
+// --------------------------------------------------------------------------
+// Detail
+// --------------------------------------------------------------------------
+dealsRouter.get(
+  "/:id",
+  asyncHandler(async (req, res) => {
+    const deal = await prisma.deal.findUnique({
+      where: { id: req.params.id },
+      include: {
+        ...dealInclude,
+        stageHistory: { orderBy: { createdAt: "asc" }, include: { changedBy: { select: { name: true } } } },
+        offers: { include: { buyer: { select: { id: true, name: true, companyName: true } } }, orderBy: { dateSubmitted: "desc" } },
+        files: { include: { uploadedBy: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
+        buyerActivity: {
+          include: { buyer: { include: { buyBox: true } }, sentBy: { select: { name: true } } },
+        },
+      },
+    });
+    if (!deal) throw new HttpError(404, "Deal not found");
+
+    const now = new Date();
+    // Buyer activity rows with live match %.
+    const activity = deal.buyerActivity.map((a) => {
+      const match = a.buyer.buyBox
+        ? computeMatch(deal, a.buyer.buyBox)
+        : computeMatch(deal, emptyBox());
+      return {
+        id: a.id,
+        buyerId: a.buyerId,
+        buyerName: a.buyer.name,
+        companyName: a.buyer.companyName,
+        matchPercent: match.matchPercent,
+        dateSent: a.dateSent,
+        responseStatus: a.responseStatus,
+        offerAmount: a.offerAmount,
+        lastActivityDate: a.lastActivityDate,
+        nextFollowUpDate: a.nextFollowUpDate,
+        notes: a.notes,
+        sentBy: a.sentBy?.name ?? null,
+      };
+    });
+
+    // Metrics row.
+    const buyersContacted = activity.length;
+    const interested = activity.filter((a) => a.responseStatus === "INTERESTED" || a.responseStatus === "OFFER_MADE").length;
+    const offerCount = deal.offers.length;
+    const highOffer = deal.offers.reduce<number | null>((max, o) => (max == null || o.amount > max ? o.amount : max), null);
+
+    res.json({
+      ...serializeDeal(deal, now),
+      stageHistory: deal.stageHistory.map((h) => ({
+        id: h.id,
+        fromStage: h.fromStage,
+        toStage: h.toStage,
+        changedBy: h.changedBy?.name ?? null,
+        deadReason: h.deadReason,
+        createdAt: h.createdAt,
+      })),
+      offers: deal.offers.map((o) => ({
+        id: o.id,
+        buyer: o.buyer,
+        amount: o.amount,
+        dateSubmitted: o.dateSubmitted,
+        conditions: o.conditions,
+        expirationDate: o.expirationDate,
+        status: o.status,
+        parentOfferId: o.parentOfferId,
+        notes: o.notes,
+      })),
+      files: deal.files.map((f) => ({
+        id: f.id,
+        category: f.category,
+        filename: f.filename,
+        mimeType: f.mimeType,
+        sizeBytes: f.sizeBytes,
+        uploadedBy: f.uploadedBy?.name ?? null,
+        createdAt: f.createdAt,
+      })),
+      buyerActivity: activity,
+      metrics: { buyersContacted, interested, offers: offerCount, highOffer },
+    });
+  }),
+);
+
+function emptyBox() {
+  return {
+    states: [], counties: [], basins: [], formations: [], assetTypes: [],
+    minAcreage: null, maxAcreage: null, minPrice: null, maxPrice: null,
+  };
+}
+
+// --------------------------------------------------------------------------
+// Match recommendations — live, every buyer, ranked, NO filters
+// --------------------------------------------------------------------------
+dealsRouter.get(
+  "/:id/matches",
+  asyncHandler(async (req, res) => {
+    const deal = await prisma.deal.findUnique({ where: { id: req.params.id } });
+    if (!deal) throw new HttpError(404, "Deal not found");
+
+    const buyers = await prisma.buyer.findMany({
+      where: { active: true },
+      include: {
+        buyBox: true,
+        owners: { include: { user: { select: { id: true, name: true } } } },
+      },
+    });
+
+    const now = new Date();
+    const recs = await Promise.all(
+      buyers.map(async (b) => {
+        const match = computeMatch(deal, b.buyBox ?? emptyBox());
+        // # previous deals closed with this buyer (selected buyer on a CLOSED deal).
+        const closedCount = await prisma.deal.count({
+          where: { selectedBuyerId: b.id, stage: "CLOSED" },
+        });
+        const lastContact = b.lastContactDate;
+        const stale = lastContact ? daysUntil(lastContact, now) < -STALE_CONTACT_DAYS : true;
+        return {
+          buyerId: b.id,
+          buyerName: b.name,
+          companyName: b.companyName,
+          matchPercent: match.matchPercent,
+          matching: match.matching,
+          nonMatching: match.nonMatching,
+          owners: b.owners.map((o) => o.user.name),
+          previousDealsClosed: closedCount,
+          lastContactDate: lastContact,
+          stale,
+        };
+      }),
+    );
+
+    recs.sort((a, b) => b.matchPercent - a.matchPercent);
+    res.json(recs.map((r, i) => ({ rank: i + 1, ...r })));
+  }),
+);
+
+// --------------------------------------------------------------------------
+// Update (characteristics + dates + overrides)
+// --------------------------------------------------------------------------
+const updateSchema = z.object({
+  name: z.string().min(1).optional(),
+  sellerNames: z.array(z.string()).optional(),
+  county: z.string().nullish(),
+  state: z.string().nullish(),
+  acreageNma: z.number().nullish(),
+  operator: z.string().nullish(),
+  askPrice: z.number().nullish(),
+  assetType: z.string().nullish(),
+  basin: z.string().nullish(),
+  formation: z.string().nullish(),
+  dateUnderContract: dateField,
+  originalClosingDate: dateField,
+  findBuyerByDateOverride: dateField,
+  finalClosingDateOverride: dateField,
+  estimatedClosingCosts: z.number().nullish(),
+  relationshipOwnerId: z.string().nullish(),
+  notes: z.string().nullish(),
+});
+
+dealsRouter.patch(
+  "/:id",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const data = updateSchema.parse(req.body);
+    const patch: Record<string, unknown> = {};
+    for (const k of ["name", "sellerNames", "county", "state", "acreageNma", "operator", "askPrice", "assetType", "basin", "formation", "estimatedClosingCosts", "relationshipOwnerId", "notes"] as const) {
+      if (k in data) patch[k] = (data as Record<string, unknown>)[k];
+    }
+    for (const k of ["dateUnderContract", "originalClosingDate", "findBuyerByDateOverride", "finalClosingDateOverride"] as const) {
+      if (k in data) patch[k] = toDate((data as Record<string, unknown>)[k]);
+    }
+    const deal = await prisma.deal.update({ where: { id: req.params.id }, data: patch, include: dealInclude });
+    res.json(serializeDeal(deal));
+  }),
+);
+
+// --------------------------------------------------------------------------
+// Stage change — records history; Dead requires a reason
+// --------------------------------------------------------------------------
+const stageSchema = z.object({
+  toStage: z.enum(STAGES as [Stage, ...Stage[]]),
+  deadReason: z.string().optional(),
+});
+
+dealsRouter.post(
+  "/:id/stage",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { toStage, deadReason } = stageSchema.parse(req.body);
+    const deal = await prisma.deal.findUnique({ where: { id: req.params.id } });
+    if (!deal) throw new HttpError(404, "Deal not found");
+
+    if (toStage === "DEAD" && (!deadReason || !deadReason.trim())) {
+      throw new HttpError(400, "A reason is required to move a deal to Dead");
+    }
+    if (toStage === deal.stage) {
+      res.json(serializeDeal(await reload(deal.id)));
+      return;
+    }
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const u = await tx.deal.update({
+        where: { id: deal.id },
+        data: {
+          stage: toStage,
+          currentStageEnteredAt: new Date(),
+          deadReason: toStage === "DEAD" ? deadReason!.trim() : deal.deadReason,
+        },
+        include: dealInclude,
+      });
+      await tx.dealStageHistory.create({
+        data: {
+          dealId: deal.id,
+          fromStage: deal.stage,
+          toStage,
+          changedByUserId: req.user!.id,
+          deadReason: toStage === "DEAD" ? deadReason!.trim() : null,
+        },
+      });
+      await logActivity(
+        {
+          eventType: "STAGE_CHANGE",
+          summary: `${req.user!.name} moved "${deal.name}" to ${prettyStage(toStage)}${toStage === "DEAD" ? ` (${deadReason!.trim()})` : ""}`,
+          actorUserId: req.user!.id,
+          dealId: deal.id,
+        },
+        tx,
+      );
+      return u;
+    });
+    res.json(serializeDeal(updated));
+  }),
+);
+
+// --------------------------------------------------------------------------
+// Log contact / upsert buyer activity
+// --------------------------------------------------------------------------
+const logContactSchema = z.object({
+  buyerId: z.string(),
+  responseStatus: z.enum(["PENDING", "INTERESTED", "NOT_INTERESTED", "PASSED", "OFFER_MADE"]).optional(),
+  dateSent: dateField,
+  offerAmount: z.number().nullish(),
+  nextFollowUpDate: dateField,
+  notes: z.string().nullish(),
+});
+
+dealsRouter.post(
+  "/:id/activity",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const data = logContactSchema.parse(req.body);
+    const deal = await prisma.deal.findUnique({ where: { id: req.params.id } });
+    if (!deal) throw new HttpError(404, "Deal not found");
+    const buyer = await prisma.buyer.findUnique({ where: { id: data.buyerId } });
+    if (!buyer) throw new HttpError(404, "Buyer not found");
+
+    const now = new Date();
+    const activity = await prisma.$transaction(async (tx) => {
+      const a = await tx.dealBuyerActivity.upsert({
+        where: { dealId_buyerId: { dealId: deal.id, buyerId: data.buyerId } },
+        create: {
+          dealId: deal.id,
+          buyerId: data.buyerId,
+          dateSent: toDate(data.dateSent) ?? now,
+          responseStatus: data.responseStatus ?? "PENDING",
+          offerAmount: data.offerAmount ?? null,
+          lastActivityDate: now,
+          nextFollowUpDate: toDate(data.nextFollowUpDate) ?? null,
+          notes: data.notes ?? null,
+          sentByUserId: req.user!.id,
+        },
+        update: {
+          responseStatus: data.responseStatus ?? undefined,
+          dateSent: data.dateSent !== undefined ? toDate(data.dateSent) : undefined,
+          offerAmount: data.offerAmount !== undefined ? data.offerAmount : undefined,
+          nextFollowUpDate: data.nextFollowUpDate !== undefined ? toDate(data.nextFollowUpDate) : undefined,
+          notes: data.notes !== undefined ? data.notes : undefined,
+          lastActivityDate: now,
+        },
+      });
+      // Touch the buyer's last-contact date.
+      await tx.buyer.update({ where: { id: data.buyerId }, data: { lastContactDate: now } });
+      await logActivity(
+        {
+          eventType: "CONTACT_LOGGED",
+          summary: `${req.user!.name} logged contact with ${buyer.name} on "${deal.name}"`,
+          actorUserId: req.user!.id,
+          dealId: deal.id,
+          buyerId: buyer.id,
+        },
+        tx,
+      );
+      return a;
+    });
+    res.status(201).json(activity);
+  }),
+);
+
+// --------------------------------------------------------------------------
+// Accept an offer — sets selectedBuyer/selectedOffer, does NOT change stage
+// --------------------------------------------------------------------------
+const acceptSchema = z.object({ offerId: z.string() });
+
+dealsRouter.post(
+  "/:id/accept-offer",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { offerId } = acceptSchema.parse(req.body);
+    const offer = await prisma.offer.findUnique({ where: { id: offerId } });
+    if (!offer || offer.dealId !== req.params.id) throw new HttpError(404, "Offer not found on this deal");
+
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.offer.update({ where: { id: offerId }, data: { status: "ACCEPTED" } });
+      const u = await tx.deal.update({
+        where: { id: req.params.id },
+        data: { selectedBuyerId: offer.buyerId, selectedOfferId: offerId },
+        include: dealInclude,
+      });
+      await logActivity(
+        {
+          eventType: "OFFER_ACCEPTED",
+          summary: `${req.user!.name} accepted an offer on "${u.name}"`,
+          actorUserId: req.user!.id,
+          dealId: u.id,
+          buyerId: offer.buyerId,
+        },
+        tx,
+      );
+      return u;
+    });
+    res.json(serializeDeal(updated));
+  }),
+);
+
+// --------------------------------------------------------------------------
+// Delete (Owner only)
+// --------------------------------------------------------------------------
+dealsRouter.delete(
+  "/:id",
+  requireOwner,
+  asyncHandler(async (req, res) => {
+    await prisma.deal.delete({ where: { id: req.params.id } });
+    res.json({ ok: true });
+  }),
+);
+
+async function reload(id: string) {
+  const d = await prisma.deal.findUniqueOrThrow({ where: { id }, include: dealInclude });
+  return d;
+}
+
+function prettyStage(s: Stage): string {
+  return s.split("_").map((w) => w[0] + w.slice(1).toLowerCase()).join(" ");
+}

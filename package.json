@@ -1,0 +1,21 @@
+{
+  "name": "mineral-hub-crm",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CRM for a mineral rights wholesaling business",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=server & npm run dev --workspace=client",
+    "build": "npm run build --workspace=server && npm run build --workspace=client",
+    "lint": "echo \"(per-workspace lint)\"",
+    "prisma:generate": "npm run prisma:generate --workspace=server",
+    "prisma:migrate": "npm run prisma:migrate --workspace=server",
+    "bootstrap:admin": "npm run bootstrap:admin --workspace=server"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

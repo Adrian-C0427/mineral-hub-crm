@@ -1,0 +1,330 @@
+// Mineral Hub CRM — data model
+// Ships with an EMPTY database (one bootstrapped Owner user via CLI). No seed data.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum Role {
+  OWNER
+  ASSOCIATE
+}
+
+enum UserStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum Stage {
+  UNDER_CONTRACT
+  PREPARING_PACKAGE
+  SENT_TO_BUYERS
+  NEGOTIATING
+  CLOSING
+  CLOSED
+  DEAD
+}
+
+enum RelationshipStatus {
+  HOT
+  WARM
+  COLD
+}
+
+// Buyer activity response states. PENDING is the internal "logged, awaiting reply" state.
+enum ResponseStatus {
+  PENDING
+  INTERESTED
+  NOT_INTERESTED
+  PASSED
+  OFFER_MADE
+}
+
+enum OfferStatus {
+  ACTIVE
+  ACCEPTED
+  REJECTED
+  EXPIRED
+  COUNTERED
+  WITHDRAWN
+}
+
+enum FileCategory {
+  PSA
+  LPOA
+  DEED
+  PLAT_MAP
+  TITLE_DOC
+  OTHER
+}
+
+// ---------------------------------------------------------------------------
+// Users
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String     @id @default(cuid())
+  name         String
+  email        String     @unique
+  passwordHash String
+  role         Role       @default(ASSOCIATE)
+  status       UserStatus @default(ACTIVE)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  ownedDeals        Deal[]              @relation("DealRelationshipOwner")
+  buyerOwnerships   BuyerOwner[]
+  stageChanges      DealStageHistory[]
+  sentActivities    DealBuyerActivity[]
+  uploadedFiles     FileAttachment[]
+  activityLogs      ActivityLog[]
+}
+
+// ---------------------------------------------------------------------------
+// Deals
+// ---------------------------------------------------------------------------
+
+model Deal {
+  id                  String   @id @default(cuid())
+  name                String
+  sellerNames         String[]
+  county              String?
+  state               String?
+  acreageNma          Float?
+  operator            String?
+  askPrice            Float?
+  assetType           String?
+  basin               String?
+  formation           String?
+
+  stage                 Stage    @default(UNDER_CONTRACT)
+  currentStageEnteredAt DateTime @default(now())
+  deadReason            String?
+
+  // Anchor dates. Effective Find-Buyer-By and Final-Closing are derived from
+  // these unless an override is set. See server/src/domain/dates.ts (single resolver).
+  dateUnderContract       DateTime?
+  originalClosingDate     DateTime?
+  findBuyerByDateOverride DateTime?
+  finalClosingDateOverride DateTime?
+
+  selectedBuyerId   String?
+  selectedBuyer     Buyer?  @relation("SelectedBuyer", fields: [selectedBuyerId], references: [id], onDelete: SetNull)
+  selectedOfferId   String? @unique
+  selectedOffer     Offer?  @relation("SelectedOffer", fields: [selectedOfferId], references: [id], onDelete: SetNull)
+
+  relationshipOwnerId String?
+  relationshipOwner   User?   @relation("DealRelationshipOwner", fields: [relationshipOwnerId], references: [id], onDelete: SetNull)
+
+  estimatedClosingCosts Float?
+  notes                 String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  stageHistory   DealStageHistory[]
+  buyerActivity  DealBuyerActivity[]
+  offers         Offer[]             @relation("DealOffers")
+  files          FileAttachment[]
+  activityLogs   ActivityLog[]
+
+  @@index([stage])
+  @@index([selectedBuyerId])
+}
+
+model DealStageHistory {
+  id              String   @id @default(cuid())
+  dealId          String
+  deal            Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  fromStage       Stage?
+  toStage         Stage
+  changedByUserId String?
+  changedBy       User?    @relation(fields: [changedByUserId], references: [id], onDelete: SetNull)
+  deadReason      String?
+  createdAt       DateTime @default(now())
+
+  @@index([dealId])
+}
+
+// ---------------------------------------------------------------------------
+// Buyers
+// ---------------------------------------------------------------------------
+
+model Buyer {
+  id                 String             @id @default(cuid())
+  name               String
+  companyName        String
+  contactName        String?
+  email              String?
+  phone              String?
+  website            String?
+  mailingAddress     String?
+  relationshipStatus RelationshipStatus @default(WARM)
+  lastContactDate    DateTime?
+  nextFollowUpDate   DateTime?
+  notes              String?
+  active             Boolean            @default(true)
+
+  // Normalized company name for dedup (lowercased/trimmed/punct-stripped).
+  normalizedCompany  String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  buyBox        BuyBoxCriteria?
+  owners        BuyerOwner[]
+  tags          BuyerTagOnBuyer[]
+  dealActivity  DealBuyerActivity[]
+  offers        Offer[]             @relation("BuyerOffers")
+  selectedFor   Deal[]              @relation("SelectedBuyer")
+  files         FileAttachment[]
+  activityLogs  ActivityLog[]
+
+  @@index([normalizedCompany])
+  @@index([email])
+}
+
+model BuyBoxCriteria {
+  id          String   @id @default(cuid())
+  buyerId     String   @unique
+  buyer       Buyer    @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  states      String[]
+  counties    String[]
+  basins      String[]
+  formations  String[]
+  assetTypes  String[]
+  minAcreage  Float?
+  maxAcreage  Float?
+  minPrice    Float?
+  maxPrice    Float?
+}
+
+model BuyerOwner {
+  buyerId String
+  buyer   Buyer  @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([buyerId, userId])
+}
+
+model BuyerTag {
+  id     String            @id @default(cuid())
+  name   String            @unique
+  buyers BuyerTagOnBuyer[]
+}
+
+model BuyerTagOnBuyer {
+  buyerId String
+  buyer   Buyer    @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  tagId   String
+  tag     BuyerTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([buyerId, tagId])
+}
+
+// ---------------------------------------------------------------------------
+// Deal <-> Buyer marketing activity (the permanent marketing log)
+// ---------------------------------------------------------------------------
+
+model DealBuyerActivity {
+  id               String         @id @default(cuid())
+  dealId           String
+  deal             Deal           @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  buyerId          String
+  buyer            Buyer          @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  dateSent         DateTime?
+  responseStatus   ResponseStatus @default(PENDING)
+  offerAmount      Float?
+  lastActivityDate DateTime?
+  nextFollowUpDate DateTime?
+  notes            String?
+  sentByUserId     String?
+  sentBy           User?          @relation(fields: [sentByUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([dealId, buyerId])
+  @@index([buyerId])
+}
+
+// ---------------------------------------------------------------------------
+// Offers (supports counter-chains)
+// ---------------------------------------------------------------------------
+
+model Offer {
+  id             String      @id @default(cuid())
+  dealId         String
+  deal           Deal        @relation("DealOffers", fields: [dealId], references: [id], onDelete: Cascade)
+  buyerId        String
+  buyer          Buyer       @relation("BuyerOffers", fields: [buyerId], references: [id], onDelete: Cascade)
+  amount         Float
+  dateSubmitted  DateTime    @default(now())
+  conditions     String?
+  expirationDate DateTime?
+  status         OfferStatus @default(ACTIVE)
+  parentOfferId  String?
+  parentOffer    Offer?      @relation("OfferCounters", fields: [parentOfferId], references: [id], onDelete: SetNull)
+  counters       Offer[]     @relation("OfferCounters")
+  notes          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  selectedOnDeal Deal? @relation("SelectedOffer")
+
+  @@index([dealId])
+  @@index([buyerId])
+}
+
+// ---------------------------------------------------------------------------
+// Files (S3) — exactly one of dealId / buyerId is set
+// ---------------------------------------------------------------------------
+
+model FileAttachment {
+  id               String       @id @default(cuid())
+  dealId           String?
+  deal             Deal?        @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  buyerId          String?
+  buyer            Buyer?       @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  category         FileCategory @default(OTHER)
+  filename         String
+  mimeType         String
+  sizeBytes        Int
+  s3Key            String
+  uploadedByUserId String?
+  uploadedBy       User?        @relation(fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  createdAt        DateTime     @default(now())
+
+  @@index([dealId])
+  @@index([buyerId])
+}
+
+// ---------------------------------------------------------------------------
+// Activity log — pre-rendered summary strings powering the dashboard feed
+// ---------------------------------------------------------------------------
+
+model ActivityLog {
+  id          String   @id @default(cuid())
+  eventType   String
+  dealId      String?
+  deal        Deal?    @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  buyerId     String?
+  buyer       Buyer?   @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  actorUserId String?
+  actor       User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  summary     String
+  createdAt   DateTime @default(now())
+
+  @@index([createdAt])
+}

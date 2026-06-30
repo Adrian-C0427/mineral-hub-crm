@@ -1,0 +1,218 @@
+import { useEffect, useState } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { api, ApiError } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
+import { Spinner, RelationshipDot, Banner, StageBadge, ResponseBadge } from "../components/ui";
+import { money, pct, fmtDate, toInputDate } from "../lib/format";
+import type { BuyBox, Relationship, UserLite } from "../types";
+
+interface BuyerProfileData {
+  id: string;
+  name: string;
+  companyName: string;
+  contactName: string | null;
+  email: string | null;
+  phone: string | null;
+  website: string | null;
+  mailingAddress: string | null;
+  relationshipStatus: Relationship;
+  lastContactDate: string | null;
+  nextFollowUpDate: string | null;
+  notes: string | null;
+  owners: { id: string; name: string }[];
+  tags: { id: string; name: string }[];
+  buyBox: BuyBox;
+  closeRate: number;
+  closedDeals: number;
+  dealHistory: { dealId: string; dealName: string; stage: string; responseStatus: string; amount: number | null; isSelectedBuyer: boolean; date: string }[];
+}
+
+const ARRAY_KEYS: (keyof BuyBox)[] = ["states", "counties", "basins", "formations", "assetTypes"];
+
+export function BuyerProfile() {
+  const { id } = useParams<{ id: string }>();
+  const nav = useNavigate();
+  const { isOwner } = useAuth();
+  const [b, setB] = useState<BuyerProfileData | null>(null);
+  const [users, setUsers] = useState<UserLite[]>([]);
+  const [edit, setEdit] = useState(false);
+  const [draft, setDraft] = useState<BuyerProfileData | null>(null);
+  const [tagInput, setTagInput] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  function load() { api.get<BuyerProfileData>(`/buyers/${id}`).then(setB); }
+  useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers); }, [id]);
+
+  if (!b) return <Spinner />;
+  const view = edit ? draft! : b;
+
+  function startEdit() { setDraft(JSON.parse(JSON.stringify(b))); setEdit(true); setErr(null); }
+  function cancel() { setEdit(false); setDraft(null); setTagInput(""); }
+
+  async function save() {
+    if (!draft) return;
+    setBusy(true); setErr(null);
+    try {
+      await api.patch(`/buyers/${id}`, {
+        name: draft.name, companyName: draft.companyName, contactName: draft.contactName,
+        email: draft.email || null, phone: draft.phone, website: draft.website, mailingAddress: draft.mailingAddress,
+        relationshipStatus: draft.relationshipStatus, lastContactDate: draft.lastContactDate, nextFollowUpDate: draft.nextFollowUpDate,
+        notes: draft.notes, ownerIds: draft.owners.map((o) => o.id), tags: draft.tags.map((t) => t.name), buyBox: draft.buyBox,
+      });
+      setEdit(false); setDraft(null); load();
+    } catch (e) { setErr(e instanceof ApiError ? e.message : "Save failed"); }
+    finally { setBusy(false); }
+  }
+
+  const setD = (patch: Partial<BuyerProfileData>) => setDraft((d) => (d ? { ...d, ...patch } : d));
+  const setBox = (k: keyof BuyBox, v: unknown) => setDraft((d) => (d ? { ...d, buyBox: { ...d.buyBox, [k]: v } } : d));
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <div className="row">
+          <h1 style={{ marginBottom: 0 }}>{view.name}</h1>
+          <span className="muted">{view.companyName}</span>
+          <RelationshipDot status={view.relationshipStatus} />
+        </div>
+        <div className="row">
+          {isOwner && !edit && <button className="danger" onClick={async () => { if (confirm("Hard-delete this buyer?")) { await api.del(`/buyers/${id}`); nav("/buyers"); } }}>Delete</button>}
+          {edit ? (
+            <><button onClick={cancel}>Cancel</button><button className="primary" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</button></>
+          ) : (
+            <button className="primary" onClick={startEdit}>Edit</button>
+          )}
+        </div>
+      </div>
+
+      {edit && <Banner kind="info">Editing the whole profile. Save commits everything; Cancel discards all changes.</Banner>}
+      {err && <div className="error-text">{err}</div>}
+
+      <div className="grid-2">
+        {/* Contact Info */}
+        <div className="panel">
+          <h3>Contact Info</h3>
+          {edit ? (
+            <>
+              <Row><Fld l="Name"><input value={view.name} onChange={(e) => setD({ name: e.target.value })} /></Fld><Fld l="Company"><input value={view.companyName} onChange={(e) => setD({ companyName: e.target.value })} /></Fld></Row>
+              <Row><Fld l="Contact name"><input value={view.contactName ?? ""} onChange={(e) => setD({ contactName: e.target.value })} /></Fld><Fld l="Email"><input value={view.email ?? ""} onChange={(e) => setD({ email: e.target.value })} /></Fld></Row>
+              <Row><Fld l="Phone"><input value={view.phone ?? ""} onChange={(e) => setD({ phone: e.target.value })} /></Fld><Fld l="Website"><input value={view.website ?? ""} onChange={(e) => setD({ website: e.target.value })} /></Fld></Row>
+              <Fld l="Mailing address"><input value={view.mailingAddress ?? ""} onChange={(e) => setD({ mailingAddress: e.target.value })} /></Fld>
+              <Fld l="Relationship owner(s)">
+                <select multiple value={view.owners.map((o) => o.id)} onChange={(e) => {
+                  const ids = Array.from(e.target.selectedOptions).map((o) => o.value);
+                  setD({ owners: users.filter((u) => ids.includes(u.id)).map((u) => ({ id: u.id, name: u.name })) });
+                }}>
+                  {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </Fld>
+            </>
+          ) : (
+            <div className="dd-grid">
+              <KV k="Contact" v={view.contactName} /><KV k="Email" v={view.email} /><KV k="Phone" v={view.phone} />
+              <KV k="Website" v={view.website} /><KV k="Address" v={view.mailingAddress} />
+              <KV k="Owner(s)" v={view.owners.map((o) => o.name).join(", ")} />
+            </div>
+          )}
+        </div>
+
+        {/* Buy Box */}
+        <div className="panel">
+          <h3>Buy Box & Criteria</h3>
+          {edit ? (
+            <>
+              {ARRAY_KEYS.map((k) => (
+                <Fld l={k} key={k}>
+                  <input value={(view.buyBox[k] as string[]).join(", ")} onChange={(e) => setBox(k, e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} placeholder="comma-separated" />
+                </Fld>
+              ))}
+              <Row><Fld l="Min acreage"><input type="number" value={view.buyBox.minAcreage ?? ""} onChange={(e) => setBox("minAcreage", e.target.value === "" ? null : Number(e.target.value))} /></Fld><Fld l="Max acreage"><input type="number" value={view.buyBox.maxAcreage ?? ""} onChange={(e) => setBox("maxAcreage", e.target.value === "" ? null : Number(e.target.value))} /></Fld></Row>
+              <Row><Fld l="Min price"><input type="number" value={view.buyBox.minPrice ?? ""} onChange={(e) => setBox("minPrice", e.target.value === "" ? null : Number(e.target.value))} /></Fld><Fld l="Max price"><input type="number" value={view.buyBox.maxPrice ?? ""} onChange={(e) => setBox("maxPrice", e.target.value === "" ? null : Number(e.target.value))} /></Fld></Row>
+            </>
+          ) : (
+            <div className="dd-grid">
+              {ARRAY_KEYS.map((k) => <KV key={k} k={k} v={(view.buyBox[k] as string[]).join(", ")} />)}
+              <KV k="Acreage" v={`${view.buyBox.minAcreage ?? "−∞"} – ${view.buyBox.maxAcreage ?? "∞"}`} />
+              <KV k="Price" v={`${money(view.buyBox.minPrice)} – ${money(view.buyBox.maxPrice)}`} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Relationship & Tracking */}
+      <div className="panel">
+        <h3>Relationship & Tracking</h3>
+        <div className="dd-grid">
+          <KV k="Close rate (computed)" v={`${pct(view.closeRate)} · ${view.closedDeals} closed`} />
+          {edit ? (
+            <>
+              <Fld l="Status"><select value={view.relationshipStatus} onChange={(e) => setD({ relationshipStatus: e.target.value as Relationship })}><option>HOT</option><option>WARM</option><option>COLD</option></select></Fld>
+              <Fld l="Last contact"><input type="date" value={toInputDate(view.lastContactDate)} onChange={(e) => setD({ lastContactDate: e.target.value || null })} /></Fld>
+              <Fld l="Next follow-up"><input type="date" value={toInputDate(view.nextFollowUpDate)} onChange={(e) => setD({ nextFollowUpDate: e.target.value || null })} /></Fld>
+            </>
+          ) : (
+            <>
+              <KV k="Last contact" v={fmtDate(view.lastContactDate)} />
+              <KV k="Next follow-up" v={fmtDate(view.nextFollowUpDate)} />
+            </>
+          )}
+        </div>
+        <Fld l="Notes">
+          {edit ? <textarea rows={3} value={view.notes ?? ""} onChange={(e) => setD({ notes: e.target.value })} /> : <div className="wrap">{view.notes || "—"}</div>}
+        </Fld>
+      </div>
+
+      {/* Tags */}
+      <div className="panel">
+        <h3>Tags</h3>
+        <div className="chip-row">
+          {view.tags.map((t) => (
+            <span className="tag" key={t.id || t.name}>{t.name}{edit && <button onClick={() => setD({ tags: view.tags.filter((x) => x.name !== t.name) })}>×</button>}</span>
+          ))}
+          {view.tags.length === 0 && !edit && <span className="muted">No tags.</span>}
+        </div>
+        {edit && (
+          <div className="row" style={{ marginTop: 8 }}>
+            <input style={{ width: 200 }} value={tagInput} onChange={(e) => setTagInput(e.target.value)} placeholder="Add tag…"
+              onKeyDown={(e) => { if (e.key === "Enter" && tagInput.trim()) { setD({ tags: [...view.tags, { id: "", name: tagInput.trim() }] }); setTagInput(""); } }} />
+            <button onClick={() => { if (tagInput.trim()) { setD({ tags: [...view.tags, { id: "", name: tagInput.trim() }] }); setTagInput(""); } }}>Add</button>
+          </div>
+        )}
+      </div>
+
+      {/* Deal History — every row clickable */}
+      <div className="panel">
+        <h3>Deal History</h3>
+        {view.dealHistory.length === 0 ? <p className="muted">No deal activity yet.</p> : (
+          <div className="table-scroll">
+            <table className="data-table">
+              <thead><tr><th>Deal</th><th>Stage</th><th>Status</th><th className="right">Amount</th><th>Date</th></tr></thead>
+              <tbody>
+                {view.dealHistory.map((h) => (
+                  <tr key={h.dealId} className="clickable" onClick={() => nav(`/deals/${h.dealId}`)}>
+                    <td><strong>{h.dealName}</strong>{h.isSelectedBuyer && <span className="badge resp-offer" style={{ marginLeft: 6 }}>Selected</span>}</td>
+                    <td><StageBadge stage={h.stage} /></td>
+                    <td><ResponseBadge status={h.responseStatus} /></td>
+                    <td className="right">{money(h.amount)}</td>
+                    <td>{fmtDate(h.date)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function KV({ k, v }: { k: string; v: React.ReactNode }) {
+  return <div className="kv"><span className="k">{k}</span><span className="v">{v || "—"}</span></div>;
+}
+function Fld({ l, children }: { l: string; children: React.ReactNode }) {
+  return <div className="field" style={{ flex: 1 }}><label>{l}</label>{children}</div>;
+}
+function Row({ children }: { children: React.ReactNode }) {
+  return <div className="row" style={{ alignItems: "flex-start", gap: 12 }}>{children}</div>;
+}
