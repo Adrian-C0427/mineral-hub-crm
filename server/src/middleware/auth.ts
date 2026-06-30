@@ -4,7 +4,15 @@ import { verifySession } from "../auth/session.js";
 import { prisma } from "../db.js";
 
 export interface AuthedRequest extends Request {
-  user?: { id: string; role: "OWNER" | "ASSOCIATE"; name: string; email: string };
+  user?: {
+    id: string;
+    role: "OWNER" | "ASSOCIATE";
+    name: string;
+    email: string;
+    firstName: string | null;
+    lastName: string | null;
+    phone: string | null;
+  };
 }
 
 /**
@@ -17,7 +25,15 @@ export async function attachUser(req: AuthedRequest, _res: Response, next: NextF
     if (session) {
       const user = await prisma.user.findUnique({ where: { id: session.userId } });
       if (user && user.status === "ACTIVE") {
-        req.user = { id: user.id, role: user.role, name: user.name, email: user.email };
+        req.user = {
+          id: user.id,
+          role: user.role,
+          name: user.name,
+          email: user.email,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          phone: user.phone,
+        };
       }
     }
   }

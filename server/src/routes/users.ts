@@ -23,8 +23,11 @@ usersRouter.get(
   }),
 );
 
+// Account creation requires all profile fields.
 const createSchema = z.object({
-  name: z.string().min(1),
+  firstName: z.string().trim().min(1, "First name is required"),
+  lastName: z.string().trim().min(1, "Last name is required"),
+  phone: z.string().trim().min(1, "Phone number is required"),
   email: z.string().email(),
   password: z.string().min(8),
   role: z.enum(["OWNER", "ASSOCIATE"]),
@@ -39,7 +42,10 @@ usersRouter.post(
     if (exists) throw new HttpError(409, "A user with that email already exists");
     const user = await prisma.user.create({
       data: {
-        name: data.name,
+        firstName: data.firstName,
+        lastName: data.lastName,
+        phone: data.phone,
+        name: `${data.firstName} ${data.lastName}`,
         email: data.email.toLowerCase(),
         passwordHash: await hashPassword(data.password),
         role: data.role,

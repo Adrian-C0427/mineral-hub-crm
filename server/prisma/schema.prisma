@@ -74,6 +74,9 @@ enum FileCategory {
 model User {
   id           String     @id @default(cuid())
   name         String
+  firstName    String?
+  lastName     String?
+  phone        String?
   email        String     @unique
   passwordHash String
   role         Role       @default(ASSOCIATE)
@@ -100,6 +103,7 @@ model Deal {
   county              String?
   state               String?
   acreageNma          Float?
+  nra                 Float?
   operator            String?
   askPrice            Float?
   assetType           String?

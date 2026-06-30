@@ -12,6 +12,7 @@ export interface DealSummary {
   county: string | null;
   state: string | null;
   acreageNma: number | null;
+  nra: number | null;
   askPrice: number | null;
   assetType: string | null;
   basin: string | null;

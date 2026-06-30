@@ -32,15 +32,18 @@ async function prompt(question: string, hidden = false): Promise<string> {
 }
 
 async function main() {
-  const name = process.env.ADMIN_NAME ?? (await prompt("Admin name: "));
+  const firstName = process.env.ADMIN_FIRST_NAME ?? (await prompt("Admin first name: "));
+  const lastName = process.env.ADMIN_LAST_NAME ?? (await prompt("Admin last name: "));
+  const phone = process.env.ADMIN_PHONE ?? (await prompt("Admin phone number: "));
   const emailRaw = process.env.ADMIN_EMAIL ?? (await prompt("Admin email: "));
   const password = process.env.ADMIN_PASSWORD ?? (await prompt("Admin password (min 8 chars): ", true));
 
   const email = emailRaw.trim().toLowerCase();
-  if (!name.trim() || !email || password.length < 8) {
-    console.error("Name, a valid email, and a password of at least 8 characters are required.");
+  if (!firstName.trim() || !lastName.trim() || !phone.trim() || !email || password.length < 8) {
+    console.error("First name, last name, phone, a valid email, and a password of at least 8 characters are required.");
     process.exit(1);
   }
+  const name = `${firstName.trim()} ${lastName.trim()}`;
 
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
@@ -51,7 +54,10 @@ async function main() {
   const ownerCount = await prisma.user.count({ where: { role: "OWNER" } });
   const user = await prisma.user.create({
     data: {
-      name: name.trim(),
+      name,
+      firstName: firstName.trim(),
+      lastName: lastName.trim(),
+      phone: phone.trim(),
       email,
       passwordHash: await hashPassword(password),
       role: "OWNER",

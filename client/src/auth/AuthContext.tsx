@@ -6,6 +6,9 @@ export interface CurrentUser {
   name: string;
   email: string;
   role: "OWNER" | "ASSOCIATE";
+  firstName: string | null;
+  lastName: string | null;
+  phone: string | null;
 }
 
 interface AuthState {
@@ -13,6 +16,7 @@ interface AuthState {
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  refresh: () => Promise<void>;
   isOwner: boolean;
 }
 
@@ -40,8 +44,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
   };
 
+  const refresh = async () => {
+    const r = await api.get<{ user: CurrentUser }>("/auth/me");
+    setUser(r.user);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, isOwner: user?.role === "OWNER" }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, refresh, isOwner: user?.role === "OWNER" }}>
       {children}
     </AuthContext.Provider>
   );
