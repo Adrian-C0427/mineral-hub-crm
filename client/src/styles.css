@@ -120,6 +120,17 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .report-capture.pdf-light .metric-card,
 .report-capture.pdf-light .panel { background: #ffffff; border-color: #d7dee6; }
 
+/* Settings tabs */
+.tab-row { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; flex-wrap: wrap; }
+.tab { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; color: var(--text-dim); padding: 8px 14px; font-weight: 500; }
+.tab:hover { background: none; color: var(--text); }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
+/* Role/permission matrix */
+.perm-matrix td.center, .perm-matrix th.center { text-align: center; }
+.perm-matrix .group-row td { background: var(--panel-2); font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); }
+.perm-matrix input[type="checkbox"] { cursor: pointer; }
+
 /* --- Universal tables ---
    border-collapse: separate, generous padding so headers/data never overlap,
    wrap the table in an overflow-x container. */

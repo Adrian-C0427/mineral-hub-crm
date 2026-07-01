@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { normalizeCompany } from "../serializers.js";
 import { normalizePhone } from "../domain/phone.js";
 import { closeRate } from "../domain/metrics.js";
@@ -19,7 +19,7 @@ function toDate(v: unknown): Date | null | undefined {
 }
 
 // CSV import lives under /buyers/import (no separate Import page/route).
-buyersRouter.use("/import", importRouter);
+buyersRouter.use("/import", requirePermission("createBuyers"), importRouter);
 
 /** Per-buyer close rate: closed-won deals ÷ deals where buyer made an offer. */
 async function buyerCloseRate(buyerId: string, organizationId: string): Promise<{ rate: number; closedWon: number; dealsWithOffer: number }> {
@@ -43,6 +43,7 @@ function focusArea(box: { states: string[]; counties: string[]; basins: string[]
 // --------------------------------------------------------------------------
 buyersRouter.get(
   "/",
+  requirePermission("viewBuyers"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const buyers = await prisma.buyer.findMany({
       where: { organizationId: orgId(req) },
@@ -73,6 +74,7 @@ buyersRouter.get(
 // --------------------------------------------------------------------------
 buyersRouter.get(
   "/:id",
+  requirePermission("viewBuyers"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const b = await prisma.buyer.findFirst({
       where: { id: req.params.id, organizationId: orgId(req) },
@@ -169,6 +171,7 @@ const upsertSchema = z.object({
 // --------------------------------------------------------------------------
 buyersRouter.post(
   "/",
+  requirePermission("createBuyers"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = upsertSchema.parse(req.body);
     const buyer = await prisma.$transaction(async (tx) => {
@@ -203,6 +206,7 @@ buyersRouter.post(
 // --------------------------------------------------------------------------
 buyersRouter.patch(
   "/:id",
+  requirePermission("editBuyers"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = upsertSchema.partial({ name: true, companyName: true }).parse(req.body);
     const existing = await prisma.buyer.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
@@ -242,6 +246,7 @@ buyersRouter.patch(
 
 buyersRouter.delete(
   "/:id",
+  requirePermission("deleteBuyers"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const result = await prisma.buyer.deleteMany({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (result.count === 0) throw new HttpError(404, "Buyer not found");

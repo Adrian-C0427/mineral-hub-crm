@@ -2,13 +2,18 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { logActivity } from "../services/activityLog.js";
 import { money } from "../domain/format.js";
 import { aggregateExpenseDashboard } from "../domain/expenses.js";
 
 export const expensesRouter = Router();
 expensesRouter.use(requireAuth, requireOrg);
+
+/** True if the caller may approve/settle reimbursements. */
+function canApprove(req: AuthedRequest): boolean {
+  return req.user!.orgRole === "OWNER" || req.user!.permissions.includes("approveExpenses");
+}
 
 // Seeded on first access so a new org always has a working category list.
 // Categories live in a table (not an enum) so admins can add/edit/remove them.
@@ -47,6 +52,7 @@ expensesRouter.get(
 
 expensesRouter.post(
   "/categories",
+  requirePermission("manageExpenses"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const { name } = z.object({ name: z.string().trim().min(1) }).parse(req.body);
     const existing = await prisma.expenseCategory.findFirst({
@@ -62,6 +68,7 @@ expensesRouter.post(
 
 expensesRouter.patch(
   "/categories/:id",
+  requirePermission("manageExpenses"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = z
       .object({ name: z.string().trim().min(1).optional(), active: z.boolean().optional() })
@@ -77,6 +84,7 @@ expensesRouter.patch(
 
 expensesRouter.delete(
   "/categories/:id",
+  requirePermission("manageExpenses"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const cat = await prisma.expenseCategory.findFirst({
       where: { id: req.params.id, organizationId: orgId(req) },
@@ -164,8 +172,11 @@ const createSchema = z.object({
 
 expensesRouter.post(
   "/",
+  requirePermission("manageExpenses"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = createSchema.parse(req.body);
+    // Settling reimbursement on creation requires approval rights.
+    if (data.reimbursed && !canApprove(req)) throw new HttpError(403, "You cannot mark expenses reimbursed");
     // Validate category belongs to the org (if provided).
     if (data.categoryId) {
       const cat = await prisma.expenseCategory.findFirst({
@@ -207,8 +218,11 @@ const updateSchema = z.object({
 
 expensesRouter.patch(
   "/:id",
+  requirePermission("manageExpenses"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = updateSchema.parse(req.body);
+    // Changing reimbursement status requires approval rights.
+    if (data.reimbursed !== undefined && !canApprove(req)) throw new HttpError(403, "You cannot change reimbursement status");
     const existing = await prisma.expense.findFirst({
       where: { id: req.params.id, organizationId: orgId(req) },
     });
@@ -246,6 +260,7 @@ expensesRouter.patch(
 
 expensesRouter.delete(
   "/:id",
+  requirePermission("manageExpenses"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const existing = await prisma.expense.findFirst({
       where: { id: req.params.id, organizationId: orgId(req) },
@@ -268,8 +283,13 @@ const bulkSchema = z.object({
 
 expensesRouter.post(
   "/bulk",
+  requirePermission("manageExpenses"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const { ids, action, categoryId } = bulkSchema.parse(req.body);
+    // Reimbursement actions require approval rights.
+    if ((action === "reimburse" || action === "unreimburse") && !canApprove(req)) {
+      throw new HttpError(403, "You cannot change reimbursement status");
+    }
     // Scope strictly to the caller's org — never touch rows outside it.
     const scoped = { id: { in: ids }, organizationId: orgId(req) };
 

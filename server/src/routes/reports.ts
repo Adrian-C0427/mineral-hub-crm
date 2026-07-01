@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
-import { requireAuth, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { netProfit, grossFee, avg, winRate } from "../domain/metrics.js";
 import {
   computeKpis, delta, buildMonthlySeries, buildBreakdowns,
@@ -10,7 +10,7 @@ import {
 } from "../domain/analytics.js";
 
 export const reportsRouter = Router();
-reportsRouter.use(requireAuth, requireOrg);
+reportsRouter.use(requireAuth, requireOrg, requirePermission("viewReports"));
 
 const periodSchema = z.object({
   from: z.string().datetime({ offset: true }).or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional(),

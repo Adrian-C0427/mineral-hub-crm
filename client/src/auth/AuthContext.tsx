@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, setAuthToken, getAuthToken } from "../api/client";
 
+export type OrgRole = "OWNER" | "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER";
+
 export interface CurrentUser {
   id: string;
   name: string;
@@ -9,7 +11,8 @@ export interface CurrentUser {
   firstName: string | null;
   lastName: string | null;
   phone: string | null;
-  orgRole: "OWNER" | "MEMBER" | null;
+  orgRole: OrgRole | null;
+  permissions: string[];
   organization: { id: string; name: string; teamId: string } | null;
 }
 
@@ -30,6 +33,10 @@ interface AuthState {
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   isOwner: boolean;
+  /** Org owner (RBAC authority), distinct from the legacy account `role`. */
+  isOrgOwner: boolean;
+  /** True if the current user holds the given permission (owner has all). */
+  can: (permission: string) => boolean;
 }
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
@@ -72,8 +79,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(r.user);
   };
 
+  const can = (permission: string): boolean =>
+    user?.orgRole === "OWNER" || (user?.permissions?.includes(permission) ?? false);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, refresh, isOwner: user?.role === "OWNER" }}>
+    <AuthContext.Provider
+      value={{
+        user, loading, login, register, logout, refresh,
+        isOwner: user?.role === "OWNER",
+        isOrgOwner: user?.orgRole === "OWNER",
+        can,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );

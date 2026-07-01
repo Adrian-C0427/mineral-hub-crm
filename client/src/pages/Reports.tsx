@@ -5,6 +5,7 @@ import {
   BarChart, PieChart, Pie, Cell,
 } from "recharts";
 import { api } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import { Spinner, Banner, Modal } from "../components/ui";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { SortableTable, type Column } from "../components/SortableTable";
@@ -78,6 +79,7 @@ const EMPTY_FILTERS: Record<string, string[]> = { counties: [], basins: [], form
 
 export function Reports() {
   const nav = useNavigate();
+  const { can } = useAuth();
   const [period, setPeriod] = useState<Period>("THIS_YEAR");
   const [custom, setCustom] = useState({ from: "", to: "" });
   const [compare, setCompare] = useState<Compare>("NONE");
@@ -137,7 +139,7 @@ export function Reports() {
     <div className="page">
       <div className="page-header">
         <h1>Reports & Analytics</h1>
-        <button className="primary" onClick={onExport} disabled={exporting || !data}>{exporting ? "Generating…" : "Export PDF"}</button>
+        {can("exportReports") && <button className="primary" onClick={onExport} disabled={exporting || !data}>{exporting ? "Generating…" : "Export PDF"}</button>}
       </div>
 
       {/* --- Controls (not captured in PDF) --- */}

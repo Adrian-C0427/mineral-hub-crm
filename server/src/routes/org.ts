@@ -2,13 +2,18 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requireOrgOwner, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requireOrgOwner, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { generateInviteCode } from "../services/org.js";
+import {
+  ASSIGNABLE_ROLES, ALL_ROLES, DEFAULT_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_META,
+  OWNER_ONLY_ACTIONS, resolvePermissions, type OrgRole,
+} from "../domain/permissions.js";
 
 export const orgRouter = Router();
 orgRouter.use(requireAuth, requireOrg);
 
-// Current organization info (any member).
+// Current organization info (any member). Includes the caller's effective
+// permissions so the UI can gate controls (server still enforces).
 orgRouter.get(
   "/",
   asyncHandler(async (req: AuthedRequest, res) => {
@@ -17,27 +22,77 @@ orgRouter.get(
       select: { id: true, name: true, teamId: true, createdAt: true },
     });
     const memberCount = await prisma.user.count({ where: { organizationId: orgId(req) } });
-    res.json({ ...org, memberCount, yourRole: req.user!.orgRole });
+    res.json({ ...org, memberCount, yourRole: req.user!.orgRole, yourPermissions: req.user!.permissions });
   }),
 );
 
-// --- Members (owner only) ---
+// Edit organization info (name).
+orgRouter.patch(
+  "/",
+  requirePermission("manageOrgSettings"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { name } = z.object({ name: z.string().trim().min(1, "Company name is required") }).parse(req.body);
+    const org = await prisma.organization.update({
+      where: { id: orgId(req) },
+      data: { name },
+      select: { id: true, name: true, teamId: true },
+    });
+    res.json(org);
+  }),
+);
+
+// --- Members ---
 orgRouter.get(
   "/members",
-  requireOrgOwner,
+  requirePermission("manageMembers"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const members = await prisma.user.findMany({
       where: { organizationId: orgId(req) },
-      select: { id: true, name: true, email: true, phone: true, orgRole: true, status: true, createdAt: true },
+      select: { id: true, name: true, email: true, phone: true, orgRole: true, status: true, lastActiveAt: true, createdAt: true },
       orderBy: { createdAt: "asc" },
     });
     res.json(members);
   }),
 );
 
+const memberPatchSchema = z.object({
+  orgRole: z.enum(["ADMIN", "MANAGER", "MEMBER", "VIEWER"]).optional(),
+  status: z.enum(["ACTIVE", "DISABLED"]).optional(),
+});
+
+// Change a member's role and/or activation status.
+orgRouter.patch(
+  "/members/:userId",
+  requirePermission("manageMembers"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { orgRole, status } = memberPatchSchema.parse(req.body);
+    const target = await prisma.user.findFirst({ where: { id: req.params.userId, organizationId: orgId(req) } });
+    if (!target) throw new HttpError(404, "Member not found in your organization");
+
+    const callerIsOwner = req.user!.orgRole === "OWNER";
+    if (target.id === req.user!.id && (orgRole || status)) {
+      throw new HttpError(400, "You cannot change your own role or status");
+    }
+    // Only the owner can modify an owner, promote to admin, or (de)activate admins.
+    if (target.orgRole === "OWNER" && !callerIsOwner) throw new HttpError(403, "Only the owner can modify the owner");
+    if (orgRole === "ADMIN" && !callerIsOwner) throw new HttpError(403, "Only the owner can designate administrators");
+    if (target.orgRole === "ADMIN" && !callerIsOwner) throw new HttpError(403, "Only the owner can modify administrators");
+
+    const data: Record<string, unknown> = {};
+    if (orgRole) data.orgRole = orgRole;
+    if (status) data.status = status;
+    const updated = await prisma.user.update({
+      where: { id: target.id },
+      data,
+      select: { id: true, name: true, email: true, phone: true, orgRole: true, status: true, lastActiveAt: true },
+    });
+    res.json(updated);
+  }),
+);
+
 orgRouter.delete(
   "/members/:userId",
-  requireOrgOwner,
+  requirePermission("inviteRemoveUsers"),
   asyncHandler(async (req: AuthedRequest, res) => {
     if (req.params.userId === req.user!.id) {
       throw new HttpError(400, "You cannot remove yourself from the organization");
@@ -46,6 +101,10 @@ orgRouter.delete(
       where: { id: req.params.userId, organizationId: orgId(req) },
     });
     if (!member) throw new HttpError(404, "Member not found in your organization");
+    if (member.orgRole === "OWNER") throw new HttpError(403, "The organization owner cannot be removed");
+    if (member.orgRole === "ADMIN" && req.user!.orgRole !== "OWNER") {
+      throw new HttpError(403, "Only the owner can remove an administrator");
+    }
     // Removing a member detaches them; their org-scoped records stay with the org.
     await prisma.user.update({
       where: { id: member.id },
@@ -55,10 +114,82 @@ orgRouter.delete(
   }),
 );
 
-// --- Invite codes (owner only) ---
+// --- Roles & permissions ---
+orgRouter.get(
+  "/roles",
+  requirePermission("manageRoles"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const overrides = await prisma.rolePermissions.findMany({ where: { organizationId: orgId(req) } });
+    const overrideMap = new Map(overrides.map((o) => [o.role, o.permissions]));
+    const roles = ALL_ROLES.map((role) => ({
+      role,
+      // OWNER is always all-permissions and not editable.
+      permissions: resolvePermissions(role, role === "OWNER" ? null : overrideMap.get(role) ?? null),
+      defaults: role === "OWNER" ? [...PERMISSIONS] : DEFAULT_ROLE_PERMISSIONS[role],
+      editable: role !== "OWNER",
+      customized: overrideMap.has(role),
+    }));
+    res.json({
+      roles,
+      permissions: PERMISSIONS.map((key) => ({ key, ...PERMISSION_META[key] })),
+      ownerOnlyActions: OWNER_ONLY_ACTIONS,
+    });
+  }),
+);
+
+orgRouter.patch(
+  "/roles/:role",
+  requirePermission("manageRoles"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const role = req.params.role as OrgRole;
+    if (!ASSIGNABLE_ROLES.includes(role)) throw new HttpError(400, "That role cannot be customized");
+    const { permissions } = z.object({ permissions: z.array(z.string()) }).parse(req.body);
+    // Only known permission keys are stored; owner-only actions are not part of
+    // PERMISSIONS so they can never be granted here.
+    const clean = permissions.filter((p) => (PERMISSIONS as readonly string[]).includes(p));
+    const saved = await prisma.rolePermissions.upsert({
+      where: { organizationId_role: { organizationId: orgId(req), role } },
+      create: { organizationId: orgId(req), role, permissions: clean },
+      update: { permissions: clean },
+    });
+    res.json({ role: saved.role, permissions: saved.permissions });
+  }),
+);
+
+// Reset a role to its code-defined defaults (removes the override row).
+orgRouter.delete(
+  "/roles/:role",
+  requirePermission("manageRoles"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const role = req.params.role as OrgRole;
+    if (!ASSIGNABLE_ROLES.includes(role)) throw new HttpError(400, "That role cannot be customized");
+    await prisma.rolePermissions.deleteMany({ where: { organizationId: orgId(req), role } });
+    res.json({ ok: true, role, permissions: DEFAULT_ROLE_PERMISSIONS[role] });
+  }),
+);
+
+// --- Ownership transfer (owner only) ---
+orgRouter.post(
+  "/transfer-ownership",
+  requireOrgOwner,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { userId } = z.object({ userId: z.string() }).parse(req.body);
+    if (userId === req.user!.id) throw new HttpError(400, "You already own this organization");
+    const target = await prisma.user.findFirst({ where: { id: userId, organizationId: orgId(req) } });
+    if (!target) throw new HttpError(404, "Member not found in your organization");
+    // Atomic swap: promote target to OWNER, demote current owner to ADMIN.
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: target.id }, data: { orgRole: "OWNER" } }),
+      prisma.user.update({ where: { id: req.user!.id }, data: { orgRole: "ADMIN" } }),
+    ]);
+    res.json({ ok: true });
+  }),
+);
+
+// --- Invite codes ---
 orgRouter.get(
   "/invites",
-  requireOrgOwner,
+  requirePermission("inviteRemoveUsers"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const invites = await prisma.inviteCode.findMany({
       where: { organizationId: orgId(req) },
@@ -85,7 +216,7 @@ const createInviteSchema = z.object({
 
 orgRouter.post(
   "/invites",
-  requireOrgOwner,
+  requirePermission("inviteRemoveUsers"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const { reusable, maxUses } = createInviteSchema.parse(req.body);
     const invite = await prisma.inviteCode.create({
@@ -104,7 +235,7 @@ orgRouter.post(
 
 orgRouter.patch(
   "/invites/:id",
-  requireOrgOwner,
+  requirePermission("inviteRemoveUsers"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const { active } = z.object({ active: z.boolean() }).parse(req.body);
     const invite = await prisma.inviteCode.findFirst({
@@ -118,7 +249,7 @@ orgRouter.patch(
 
 orgRouter.delete(
   "/invites/:id",
-  requireOrgOwner,
+  requirePermission("inviteRemoveUsers"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const invite = await prisma.inviteCode.findFirst({
       where: { id: req.params.id, organizationId: orgId(req) },

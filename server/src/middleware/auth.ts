@@ -2,6 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import { env } from "../config.js";
 import { verifySession } from "../auth/session.js";
 import { prisma } from "../db.js";
+import { resolvePermissions, type OrgRole, type Permission } from "../domain/permissions.js";
 
 export interface AuthedRequest extends Request {
   user?: {
@@ -13,12 +14,18 @@ export interface AuthedRequest extends Request {
     lastName: string | null;
     phone: string | null;
     organizationId: string | null;
-    orgRole: "OWNER" | "MEMBER" | null;
+    orgRole: OrgRole | null;
+    permissions: Permission[];
   };
 }
 
+// Refresh lastActiveAt at most this often, to avoid a write on every request.
+const ACTIVITY_THROTTLE_MS = 5 * 60 * 1000;
+
 /**
- * Populates req.user from the session cookie if valid. Does not block.
+ * Populates req.user from the session token if valid. Does not block.
+ * Also resolves the caller's effective permissions and (throttled) updates
+ * their last-activity timestamp.
  */
 export async function attachUser(req: AuthedRequest, _res: Response, next: NextFunction): Promise<void> {
   // Prefer the Authorization: Bearer header (works cross-site; not blocked like
@@ -31,6 +38,15 @@ export async function attachUser(req: AuthedRequest, _res: Response, next: NextF
     if (session) {
       const user = await prisma.user.findUnique({ where: { id: session.userId } });
       if (user && user.status === "ACTIVE") {
+        // Effective permissions = role defaults merged with any org override.
+        let permissions: Permission[] = [];
+        if (user.organizationId && user.orgRole) {
+          const override = await prisma.rolePermissions.findUnique({
+            where: { organizationId_role: { organizationId: user.organizationId, role: user.orgRole } },
+            select: { permissions: true },
+          });
+          permissions = resolvePermissions(user.orgRole as OrgRole, override?.permissions ?? null);
+        }
         req.user = {
           id: user.id,
           role: user.role,
@@ -40,12 +56,40 @@ export async function attachUser(req: AuthedRequest, _res: Response, next: NextF
           lastName: user.lastName,
           phone: user.phone,
           organizationId: user.organizationId,
-          orgRole: user.orgRole,
+          orgRole: user.orgRole as OrgRole | null,
+          permissions,
         };
+
+        // Throttled last-activity update (fire-and-forget).
+        const stale = !user.lastActiveAt || Date.now() - user.lastActiveAt.getTime() > ACTIVITY_THROTTLE_MS;
+        if (stale) {
+          prisma.user
+            .update({ where: { id: user.id }, data: { lastActiveAt: new Date() } })
+            .catch(() => {});
+        }
       }
     }
   }
   next();
+}
+
+/**
+ * Permission gate — enforced SERVER-SIDE. OWNER passes everything. Others must
+ * hold the named permission (role defaults + org overrides, resolved in
+ * attachUser).
+ */
+export function requirePermission(permission: Permission) {
+  return (req: AuthedRequest, res: Response, next: NextFunction): void => {
+    if (!req.user) {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
+    if (req.user.orgRole === "OWNER" || req.user.permissions.includes(permission)) {
+      next();
+      return;
+    }
+    res.status(403).json({ error: "You do not have permission to perform this action" });
+  };
 }
 
 /** Hard auth gate. 401 if not logged in. */
