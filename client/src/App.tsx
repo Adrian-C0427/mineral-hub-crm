@@ -9,12 +9,12 @@ import { DealDetail } from "./pages/DealDetail";
 import { Buyers } from "./pages/Buyers";
 import { BuyerProfile } from "./pages/BuyerProfile";
 import { Suspense, lazy } from "react";
-import { Reports } from "./pages/Reports";
 import { Settings } from "./pages/Settings";
 // MapLibre is heavy (~300KB gzip); load it only when the Map route is visited.
 const MapView = lazy(() => import("./pages/MapView").then((m) => ({ default: m.MapView })));
-// recharts is heavy (~180KB gzip); load the Expenses dashboard on demand.
+// recharts (+ jsPDF/html2canvas on Reports) is heavy; load analytics on demand.
 const Expenses = lazy(() => import("./pages/Expenses").then((m) => ({ default: m.Expenses })));
+const Reports = lazy(() => import("./pages/Reports").then((m) => ({ default: m.Reports })));
 
 function TopNav() {
   const { user, logout } = useAuth();
@@ -57,7 +57,7 @@ export function App() {
         <Route path="/deals/:id" element={<DealDetail />} />
         <Route path="/buyers" element={<Buyers />} />
         <Route path="/buyers/:id" element={<BuyerProfile />} />
-        <Route path="/reports" element={<Reports />} />
+        <Route path="/reports" element={<Suspense fallback={<Spinner label="Loading reports…" />}><Reports /></Suspense>} />
         <Route path="/expenses" element={<Suspense fallback={<Spinner label="Loading expenses…" />}><Expenses /></Suspense>} />
         <Route path="/map" element={<Suspense fallback={<Spinner label="Loading map…" />}><MapView /></Suspense>} />
         <Route path="/settings" element={<Settings />} />
