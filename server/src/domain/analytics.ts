@@ -14,6 +14,7 @@ export interface AnalyticsDeal {
   assetTypes: string[];
   operator: string | null;
   askPrice: number | null;
+  ourPrice: number | null;
   acceptedAmount: number | null;
   estimatedClosingCosts: number | null;
   relationshipOwnerId: string | null;
@@ -66,8 +67,9 @@ export function computeKpis(
   const lost = deals.filter((d) => inRange(d.deadAt, range));
   const existedByEnd = deals.filter((d) => d.createdAt <= range.to);
 
+  // Cost basis = Our Price (fall back to askPrice for pre-Our-Price deals).
   const grossFees = closed.reduce(
-    (s, d) => s + (d.acceptedAmount != null ? d.acceptedAmount - (d.askPrice ?? 0) : 0),
+    (s, d) => s + (d.acceptedAmount != null ? d.acceptedAmount - (d.ourPrice ?? d.askPrice ?? 0) : 0),
     0,
   );
   const closingCosts = closed.reduce((s, d) => s + (d.estimatedClosingCosts ?? 0), 0);
@@ -153,7 +155,7 @@ export function buildMonthlySeries(
       const c = idx.get(ymOf(d.closedAt));
       if (c) {
         c.dealsClosed++;
-        const fee = d.acceptedAmount != null ? d.acceptedAmount - (d.askPrice ?? 0) : 0;
+        const fee = d.acceptedAmount != null ? d.acceptedAmount - (d.ourPrice ?? d.askPrice ?? 0) : 0;
         c.revenue += fee;
         c.netProfit += fee - (d.estimatedClosingCosts ?? 0);
       }

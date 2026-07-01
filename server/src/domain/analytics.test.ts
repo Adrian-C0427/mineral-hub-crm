@@ -6,7 +6,7 @@ const range: Range = { from: new Date("2026-01-01"), to: new Date("2026-12-31T23
 const deal = (o: Partial<AnalyticsDeal>): AnalyticsDeal => ({
   id: "d", createdAt: new Date("2026-02-01"), stage: "CLOSED",
   counties: [], basins: [], formations: [], assetTypes: [], operator: null,
-  askPrice: null, acceptedAmount: null, estimatedClosingCosts: null,
+  askPrice: null, ourPrice: null, acceptedAmount: null, estimatedClosingCosts: null,
   relationshipOwnerId: null, selectedBuyerId: null, createdByUserId: null, closedByUserId: null,
   dateUnderContract: null, closedAt: null, deadAt: null, ...o,
 });
@@ -28,6 +28,20 @@ describe("computeKpis", () => {
     expect(k.dealsLost).toBe(1);
     expect(k.winRate).toBeCloseTo(0.5);
     expect(k.avgTimeToClose).toBe(28);   // Feb 1 → Mar 1
+  });
+
+  it("uses Our Price as cost basis, falling back to Ask Price when null", () => {
+    const withOur = computeKpis(
+      [deal({ acceptedAmount: 130000, askPrice: 120000, ourPrice: 100000, closedAt: new Date("2026-03-01") })],
+      [], [], [], range,
+    );
+    expect(withOur.revenue).toBe(30000); // 130k - ourPrice 100k (askPrice ignored)
+
+    const fallback = computeKpis(
+      [deal({ acceptedAmount: 130000, askPrice: 100000, ourPrice: null, closedAt: new Date("2026-03-01") })],
+      [], [], [], range,
+    );
+    expect(fallback.revenue).toBe(30000); // falls back to askPrice 100k
   });
 
   it("delta returns null when previous is zero and nonzero now", () => {

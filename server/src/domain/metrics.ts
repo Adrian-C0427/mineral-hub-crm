@@ -2,22 +2,25 @@
  * Computed metrics — formulas only, NEVER stored.
  *
  *  Close Rate   = closed-and-won deals ÷ deals with >= 1 offer made (per buyer)
- *  Net Profit   = accepted offer amount − deal ask price − manual closing costs
- *  Gross Fee    = accepted offer amount − deal ask price
+ *  Net Profit   = accepted offer amount − our price − manual closing costs
+ *  Gross Fee    = accepted offer amount − our price
  *  Avg Deal Size= mean of accepted offer amounts on closed deals
  *  Win Rate     = closed ÷ (closed + dead) within a period
+ *
+ * COST BASIS = ourPrice (our acquisition cost). Callers pass `ourPrice ?? askPrice`
+ * so pre-Our-Price deals (which recorded their cost in askPrice) stay correct.
  */
 
-export function grossFee(acceptedAmount: number, askPrice: number | null): number {
-  return acceptedAmount - (askPrice ?? 0);
+export function grossFee(acceptedAmount: number, costBasis: number | null): number {
+  return acceptedAmount - (costBasis ?? 0);
 }
 
 export function netProfit(
   acceptedAmount: number,
-  askPrice: number | null,
+  costBasis: number | null,
   closingCosts: number | null,
 ): number {
-  return acceptedAmount - (askPrice ?? 0) - (closingCosts ?? 0);
+  return acceptedAmount - (costBasis ?? 0) - (closingCosts ?? 0);
 }
 
 export function avg(nums: number[]): number {

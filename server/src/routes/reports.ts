@@ -49,8 +49,9 @@ reportsRouter.get(
 
     const rows = inPeriod.map((d) => {
       const accepted = d.selectedOffer?.amount ?? null;
-      const gross = accepted != null ? grossFee(accepted, d.askPrice) : null;
-      const net = accepted != null ? netProfit(accepted, d.askPrice, d.estimatedClosingCosts) : null;
+      const costBasis = d.ourPrice ?? d.askPrice;
+      const gross = accepted != null ? grossFee(accepted, costBasis) : null;
+      const net = accepted != null ? netProfit(accepted, costBasis, d.estimatedClosingCosts) : null;
       return {
         id: d.id,
         name: d.name,
@@ -132,6 +133,7 @@ async function loadAnalyticsDeals(organizationId: string): Promise<AnalyticsDeal
       assetTypes: d.assetTypes,
       operator: d.operator,
       askPrice: d.askPrice,
+      ourPrice: d.ourPrice,
       acceptedAmount: d.selectedOffer?.amount ?? null,
       estimatedClosingCosts: d.estimatedClosingCosts,
       relationshipOwnerId: d.relationshipOwnerId,
