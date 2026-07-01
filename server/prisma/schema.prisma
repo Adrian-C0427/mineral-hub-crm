@@ -122,6 +122,22 @@ model Organization {
   expenseCategories ExpenseCategory[]
   rolePermissions   RolePermissions[]
   buyerMessages     DealBuyerMessage[]
+  emailTemplates    EmailTemplate[]
+}
+
+// Reusable outbound email template (org-shared). Supports {{tokens}} that are
+// personalized per buyer at send time.
+model EmailTemplate {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  subject        String
+  body           String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
 }
 
 // Per-organization overrides of the default permission set for a role. Absence

@@ -15,6 +15,7 @@ import { dashboardRouter } from "./routes/dashboard.js";
 import { orgRouter } from "./routes/org.js";
 import { mapRouter } from "./routes/map.js";
 import { expensesRouter } from "./routes/expenses.js";
+import { emailTemplatesRouter } from "./routes/emailTemplates.js";
 
 export function createApp() {
   const app = express();
@@ -49,6 +50,7 @@ export function createApp() {
   app.use("/api/dashboard", dashboardRouter);
   app.use("/api/map", mapRouter);
   app.use("/api/expenses", expensesRouter);
+  app.use("/api/email-templates", emailTemplatesRouter);
 
   app.use(notFound);
   app.use(errorHandler);

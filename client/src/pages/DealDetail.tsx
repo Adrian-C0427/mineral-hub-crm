@@ -9,6 +9,7 @@ import {
 import { StageChangeModal } from "../components/StageChangeModal";
 import { LogContactModal } from "../components/LogContactModal";
 import { BuyerActivitySection } from "../components/BuyerActivitySection";
+import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { AbstractMultiPicker, useAbstractLabels } from "../components/AbstractPicker";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
@@ -41,6 +42,7 @@ export function DealDetail() {
   const [showStage, setShowStage] = useState(false);
   const [logBuyer, setLogBuyer] = useState<EditTarget | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showEmail, setShowEmail] = useState(false);
 
   const loadDeal = useCallback(() => api.get<DealDetailData>(`/deals/${id}`).then(setDeal), [id]);
   const loadMatches = useCallback(() => api.get<MatchRec[]>(`/deals/${id}/matches`).then(setMatches), [id]);
@@ -163,7 +165,7 @@ export function DealDetail() {
                   <input type="checkbox" checked={selected.size > 0 && selected.size === matches.length} onChange={selectAllMatches} /> Select all
                 </label>
                 <span className="muted" style={{ fontSize: 13 }}>{selected.size} selected</span>
-                <button className="small primary" disabled={selected.size === 0} title="Sends the deal package (email integration coming next phase)" onClick={markContacted}>Send Deal via Email</button>
+                <button className="small primary" disabled={selected.size === 0} onClick={() => setShowEmail(true)}>Send Deal via Email</button>
                 <button className="small" disabled={selected.size === 0} onClick={markContacted}>Mark as Contacted</button>
                 <button className="small" disabled={selected.size === 0} onClick={exportSelected}>Export Selected (CSV)</button>
                 <button className="small" disabled={selected.size === 0} onClick={() => setSelected(new Set())}>Remove Selection</button>
@@ -215,6 +217,15 @@ export function DealDetail() {
           initial={logBuyer.initial}
           onClose={() => setLogBuyer(null)}
           onLogged={() => { setLogBuyer(null); refreshAll(); }}
+        />
+      )}
+      {showEmail && (
+        <SendDealEmailModal
+          dealId={deal.id}
+          dealName={deal.name}
+          buyerIds={[...selected]}
+          onClose={() => setShowEmail(false)}
+          onSent={() => { setSelected(new Set()); refreshAll(); }}
         />
       )}
     </div>
