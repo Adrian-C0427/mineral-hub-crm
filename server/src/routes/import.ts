@@ -5,6 +5,7 @@ import { prisma } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
 import { requireAuth, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { normalizeCompany } from "../serializers.js";
+import { normalizePhoneNullable } from "../domain/phone.js";
 
 export const importRouter = Router();
 importRouter.use(requireAuth, requireOrg);
@@ -87,7 +88,7 @@ function buildBuyer(row: Record<string, string>, mapping: Record<string, string>
     name: get("name") || get("companyName"),
     contactName: get("contactName") || null,
     email: get("email") ? get("email").toLowerCase() : null,
-    phone: get("phone") || null,
+    phone: normalizePhoneNullable(get("phone")),
     website: get("website") || null,
     mailingAddress: get("mailingAddress") || null,
     relationshipStatus,

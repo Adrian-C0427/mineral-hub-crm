@@ -3,6 +3,7 @@ import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Banner } from "../components/ui";
 import { OrgSettings } from "../components/OrgSettings";
+import { PhoneInput } from "../components/PhoneInput";
 
 export function Settings() {
   const { user, refresh } = useAuth();
@@ -61,7 +62,7 @@ export function Settings() {
             <div className="field"><label>First name</label><input value={f.firstName} onChange={set("firstName")} /></div>
             <div className="field"><label>Last name</label><input value={f.lastName} onChange={set("lastName")} /></div>
           </div>
-          <div className="field"><label>Phone number</label><input value={f.phone} onChange={set("phone")} /></div>
+          <div className="field"><label>Phone number</label><PhoneInput value={f.phone} onChange={(v) => { setF((p) => ({ ...p, phone: v })); setOk(false); }} /></div>
           <div className="field"><label>Email address</label><input type="email" value={f.email} onChange={set("email")} /></div>
           <div className="field"><label>Password</label><input type="password" value={f.password} onChange={set("password")} placeholder="Enter a new or current password (min 8 chars)" /></div>
           {error && <div className="error-text">{error}</div>}
