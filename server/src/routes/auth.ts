@@ -8,6 +8,7 @@ import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
 import { LOGIN_RATE_LIMIT } from "../config.js";
 import { createOrganization, resolveJoinToken, consumeInvite } from "../services/org.js";
+import { normalizePhone } from "../domain/phone.js";
 
 export const authRouter = Router();
 
@@ -62,7 +63,7 @@ const registerLimiter = rateLimit({
 const registerSchema = z.object({
   firstName: z.string().trim().min(1, "First name is required"),
   lastName: z.string().trim().min(1, "Last name is required"),
-  phone: z.string().trim().min(1, "Phone number is required"),
+  phone: z.string().trim().min(1, "Phone number is required").transform(normalizePhone),
   email: z.string().email(),
   password: z.string().min(8, "Password must be at least 8 characters"),
   joinToken: z.string().trim().optional(),
@@ -164,7 +165,7 @@ authRouter.post(
 const accountSchema = z.object({
   firstName: z.string().trim().min(1, "First name is required"),
   lastName: z.string().trim().min(1, "Last name is required"),
-  phone: z.string().trim().min(1, "Phone number is required"),
+  phone: z.string().trim().min(1, "Phone number is required").transform(normalizePhone),
   email: z.string().email(),
   password: z.string().min(8, "Password must be at least 8 characters"),
 });

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { ApiError } from "../api/client";
+import { PhoneInput } from "../components/PhoneInput";
 
 export function Login() {
   const { login, register } = useAuth();
@@ -62,7 +63,7 @@ export function Login() {
             </div>
             <div className="field">
               <label>Phone number</label>
-              <input value={phone} onChange={(e) => setPhone(e.target.value)} required />
+              <PhoneInput value={phone} onChange={setPhone} required />
             </div>
           </>
         )}

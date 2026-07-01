@@ -4,6 +4,7 @@ import { prisma } from "../db.js";
 import { hashPassword } from "../auth/password.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOwner, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { normalizePhone } from "../domain/phone.js";
 
 export const usersRouter = Router();
 
@@ -27,7 +28,7 @@ usersRouter.get(
 const createSchema = z.object({
   firstName: z.string().trim().min(1, "First name is required"),
   lastName: z.string().trim().min(1, "Last name is required"),
-  phone: z.string().trim().min(1, "Phone number is required"),
+  phone: z.string().trim().min(1, "Phone number is required").transform(normalizePhone),
   email: z.string().email(),
   password: z.string().min(8),
   role: z.enum(["OWNER", "ASSOCIATE"]),

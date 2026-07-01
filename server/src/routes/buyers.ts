@@ -4,6 +4,7 @@ import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { normalizeCompany } from "../serializers.js";
+import { normalizePhone } from "../domain/phone.js";
 import { closeRate } from "../domain/metrics.js";
 import { importRouter } from "./import.js";
 
@@ -149,7 +150,8 @@ const upsertSchema = z.object({
   companyName: z.string().min(1),
   contactName: z.string().nullish(),
   email: z.string().email().nullish().or(z.literal("")),
-  phone: z.string().nullish(),
+  // Normalize to canonical digits, but preserve undefined (partial PATCH) and null.
+  phone: z.string().nullish().transform((v) => (v == null ? v : normalizePhone(v))),
   website: z.string().nullish(),
   mailingAddress: z.string().nullish(),
   relationshipStatus: z.enum(["HOT", "WARM", "COLD"]).optional(),

@@ -6,6 +6,8 @@ import { Spinner, RelationshipDot, Banner, StageBadge, ResponseBadge } from "../
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
 import { money, pct, fmtDate, toInputDate } from "../lib/format";
+import { formatPhone } from "../lib/phone";
+import { PhoneInput } from "../components/PhoneInput";
 import type { BuyBox, Relationship, UserLite } from "../types";
 
 interface BuyerProfileData {
@@ -99,7 +101,7 @@ export function BuyerProfile() {
             <>
               <Row><Fld l="Name"><input value={view.name} onChange={(e) => setD({ name: e.target.value })} /></Fld><Fld l="Company"><input value={view.companyName} onChange={(e) => setD({ companyName: e.target.value })} /></Fld></Row>
               <Row><Fld l="Contact name"><input value={view.contactName ?? ""} onChange={(e) => setD({ contactName: e.target.value })} /></Fld><Fld l="Email"><input value={view.email ?? ""} onChange={(e) => setD({ email: e.target.value })} /></Fld></Row>
-              <Row><Fld l="Phone"><input value={view.phone ?? ""} onChange={(e) => setD({ phone: e.target.value })} /></Fld><Fld l="Website"><input value={view.website ?? ""} onChange={(e) => setD({ website: e.target.value })} /></Fld></Row>
+              <Row><Fld l="Phone"><PhoneInput value={view.phone ?? ""} onChange={(v) => setD({ phone: v })} /></Fld><Fld l="Website"><input value={view.website ?? ""} onChange={(e) => setD({ website: e.target.value })} /></Fld></Row>
               <Fld l="Mailing address"><input value={view.mailingAddress ?? ""} onChange={(e) => setD({ mailingAddress: e.target.value })} /></Fld>
               <Fld l="Relationship owner(s)">
                 <select multiple value={view.owners.map((o) => o.id)} onChange={(e) => {
@@ -112,7 +114,7 @@ export function BuyerProfile() {
             </>
           ) : (
             <div className="dd-grid">
-              <KV k="Contact" v={view.contactName} /><KV k="Email" v={view.email} /><KV k="Phone" v={view.phone} />
+              <KV k="Contact" v={view.contactName} /><KV k="Email" v={view.email} /><KV k="Phone" v={view.phone ? formatPhone(view.phone) : null} />
               <KV k="Website" v={view.website} /><KV k="Address" v={view.mailingAddress} />
               <KV k="Owner(s)" v={view.owners.map((o) => o.name).join(", ")} />
             </div>

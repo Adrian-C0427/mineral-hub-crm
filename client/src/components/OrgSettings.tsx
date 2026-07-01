@@ -3,9 +3,10 @@ import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Banner } from "./ui";
 import { fmtDate } from "../lib/format";
+import { formatPhone } from "../lib/phone";
 
 interface OrgInfo { id: string; name: string; teamId: string; memberCount: number; yourRole: "OWNER" | "MEMBER" }
-interface Member { id: string; name: string; email: string; orgRole: "OWNER" | "MEMBER" | null; status: string }
+interface Member { id: string; name: string; email: string; phone: string | null; orgRole: "OWNER" | "MEMBER" | null; status: string }
 interface Invite { id: string; code: string; reusable: boolean; active: boolean; maxUses: number | null; uses: number; createdAt: string }
 
 export function OrgSettings() {
@@ -120,12 +121,13 @@ export function OrgSettings() {
           <div className="section-head" style={{ marginTop: 18 }}><h3 style={{ margin: 0 }}>Members</h3></div>
           <div className="table-scroll">
             <table className="data-table">
-              <thead><tr><th>Name</th><th>Email</th><th>Role</th><th></th></tr></thead>
+              <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th></th></tr></thead>
               <tbody>
                 {members.map((m) => (
                   <tr key={m.id}>
                     <td>{m.name}</td>
                     <td>{m.email}</td>
+                    <td>{m.phone ? formatPhone(m.phone) : "—"}</td>
                     <td>{m.orgRole === "OWNER" ? "Owner" : "Member"}</td>
                     <td className="right">
                       {m.id !== user?.id && <button className="small danger" onClick={() => removeMember(m)}>Remove</button>}
