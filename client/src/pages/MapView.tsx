@@ -15,14 +15,16 @@ interface MapDeal {
   profitEst: number | null; selectedBuyer: { id: string; name: string } | null;
 }
 type FC = { type: "FeatureCollection"; features: GeoFeature[] };
-type GeoFeature = { type: "Feature"; properties: Record<string, unknown>; geometry: { type: string; coordinates: unknown } };
+type GeoFeature = { type: "Feature"; id?: number; properties: Record<string, unknown>; geometry: { type: string; coordinates: unknown } };
 type SelAbstract = { kind: "abstract"; id: string; abstract: string; survey: string; county: string };
-type Well = { api: string; api8: string; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; lon: number; lat: number };
-type SelWell = { kind: "well" } & Well;
+type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null };
+type SelWell = { kind: "well" } & WellProps;
 type Selected = SelAbstract | SelWell | null;
 
 const ABSTRACTS_URL = "/data/leon-abstracts.geojson";
 const WELLS_URL = "/data/leon-wells.geojson";
+const BOTTOMHOLES_URL = "/data/leon-bottomholes.geojson";
+const WELLBORES_URL = "/data/leon-wellbores.geojson";
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
 
 const CATEGORY_COLOR = [
@@ -41,21 +43,15 @@ const STATUS_OPTIONS = [
 function styleWithGlyphs(): maplibregl.StyleSpecification {
   return {
     version: 8,
-    // Self-hosted glyphs (same-origin) so labels always render.
     glyphs: `${window.location.origin}/fonts/{fontstack}/{range}.pbf`,
     sources: { osm: { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap contributors" } },
     layers: [{ id: "osm", type: "raster", source: "osm" }],
   };
 }
-
 function bboxOf(geom: { type: string; coordinates: unknown }): [number, number, number, number] {
-  let minX = 180, minY = 90, maxX = -180, maxY = -90;
-  const walk = (c: unknown) => {
-    if (Array.isArray(c) && typeof c[0] === "number") { const [x, y] = c as number[]; if (x < minX) minX = x; if (y < minY) minY = y; if (x > maxX) maxX = x; if (y > maxY) maxY = y; }
-    else if (Array.isArray(c)) c.forEach(walk);
-  };
-  walk(geom.coordinates);
-  return [minX, minY, maxX, maxY];
+  let a = 180, b = 90, c = -180, d = -90;
+  const w = (x: unknown) => { if (Array.isArray(x) && typeof x[0] === "number") { const [px, py] = x as number[]; if (px < a) a = px; if (py < b) b = py; if (px > c) c = px; if (py > d) d = py; } else if (Array.isArray(x)) x.forEach(w); };
+  w(geom.coordinates); return [a, b, c, d];
 }
 
 export function MapView() {
@@ -63,13 +59,15 @@ export function MapView() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const styleReady = useRef(false);
   const activeIds = useRef<string[]>([]);
-  const selectedIdRef = useRef<string | null>(null);
+  const selAbstractRef = useRef<string | null>(null);
+  const selWellRef = useRef<number | null>(null);
   const abstractsFC = useRef<FC | null>(null);
   const wellsFC = useRef<FC | null>(null);
 
   const [deals, setDeals] = useState<MapDeal[] | null>(null);
   const [selected, setSelected] = useState<Selected>(null);
-  const [layers, setLayers] = useState({ boundaries: true, absNums: true, surveyNames: true, deals: true, wells: true });
+  const [choices, setChoices] = useState<WellProps[] | null>(null); // overlap disambiguation
+  const [layers, setLayers] = useState({ boundaries: true, absNums: true, surveyNames: true, deals: true, wells: true, wellbores: true, bottomHoles: false });
   const layersRef = useRef(layers); layersRef.current = layers;
   const [showLayers, setShowLayers] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -95,12 +93,13 @@ export function MapView() {
     mapRef.current = map;
 
     map.on("load", async () => {
-      const [absFC, welFC] = await Promise.all([
+      const [absFC, welFC, botFC, boreFC] = await Promise.all([
         fetch(ABSTRACTS_URL).then((r) => r.json()) as Promise<FC>,
         fetch(WELLS_URL).then((r) => r.json()) as Promise<FC>,
+        fetch(BOTTOMHOLES_URL).then((r) => r.json()) as Promise<FC>,
+        fetch(WELLBORES_URL).then((r) => r.json()) as Promise<FC>,
       ]);
       abstractsFC.current = absFC; wellsFC.current = welFC;
-
       const uniq = (arr: (string | null | undefined)[]) => [...new Set(arr.filter(Boolean) as string[])];
       setMeta({
         counties: ["Leon"],
@@ -111,52 +110,56 @@ export function MapView() {
       });
 
       map.addSource("abstracts", { type: "geojson", data: absFC as unknown as GeoJSON.FeatureCollection, promoteId: "id" });
-      map.addSource("wells", { type: "geojson", data: welFC as unknown as GeoJSON.FeatureCollection });
+      map.addSource("wells", { type: "geojson", data: welFC as unknown as GeoJSON.FeatureCollection, promoteId: "fid" });
+      map.addSource("bottomholes", { type: "geojson", data: botFC as unknown as GeoJSON.FeatureCollection, promoteId: "fid" });
+      map.addSource("wellbores", { type: "geojson", data: boreFC as unknown as GeoJSON.FeatureCollection, promoteId: "fid" });
 
-      map.addLayer({
-        id: "abstracts-fill", type: "fill", source: "abstracts",
-        paint: {
-          "fill-color": ["case", ["boolean", ["feature-state", "selected"], false], "#f59e0b", ["boolean", ["feature-state", "active"], false], "#ef4444", "#3b82f6"],
-          "fill-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 0.55, ["boolean", ["feature-state", "active"], false], 0.45, 0.05],
-        },
-      });
-      map.addLayer({
-        id: "abstracts-line", type: "line", source: "abstracts",
-        paint: { "line-color": ["case", ["boolean", ["feature-state", "selected"], false], "#b45309", "#64748b"], "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 3, 0.5] },
-      });
-      map.addLayer({
-        id: "wells", type: "circle", source: "wells",
-        paint: {
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 2.3, 12, 3.6, 15, 6],
-          "circle-color": CATEGORY_COLOR, "circle-stroke-width": 0.6, "circle-stroke-color": "#ffffff", "circle-opacity": 0.9,
-        },
-      });
-      map.addLayer({
-        id: "wells-highlight", type: "circle", source: "wells", filter: ["==", ["get", "api8"], "__none__"],
-        paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 6, 15, 11], "circle-color": "rgba(0,0,0,0)", "circle-stroke-width": 3, "circle-stroke-color": "#111827" },
-      });
-      map.addLayer({
-        id: "abstracts-num", type: "symbol", source: "abstracts", minzoom: 9,
-        layout: { "symbol-sort-key": ["*", -1, ["get", "area"]], "text-field": ["get", "abstract"], "text-font": ["Noto Sans Regular"], "text-size": ["interpolate", ["linear"], ["zoom"], 9, 10, 14, 13], "text-padding": 2, "text-allow-overlap": false, "text-optional": true },
-        paint: { "text-color": "#0f172a", "text-halo-color": "#ffffff", "text-halo-width": 1.4 },
-      });
-      map.addLayer({
-        id: "abstracts-survey", type: "symbol", source: "abstracts", minzoom: 12.5,
-        layout: { "symbol-sort-key": ["*", -1, ["get", "area"]], "text-field": ["get", "survey"], "text-font": ["Noto Sans Regular"], "text-size": 11, "text-offset": [0, 1.1], "text-max-width": 8, "text-padding": 2, "text-allow-overlap": false, "text-optional": true },
-        paint: { "text-color": "#334155", "text-halo-color": "#ffffff", "text-halo-width": 1.3 },
-      });
+      map.addLayer({ id: "abstracts-fill", type: "fill", source: "abstracts", paint: {
+        "fill-color": ["case", ["boolean", ["feature-state", "selected"], false], "#f59e0b", ["boolean", ["feature-state", "active"], false], "#ef4444", "#3b82f6"],
+        "fill-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 0.55, ["boolean", ["feature-state", "active"], false], 0.45, 0.05] } });
+      map.addLayer({ id: "abstracts-line", type: "line", source: "abstracts", paint: {
+        "line-color": ["case", ["boolean", ["feature-state", "selected"], false], "#b45309", "#64748b"], "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 3, 0.5] } });
+      // Wellbore laterals (surface -> bottom hole)
+      map.addLayer({ id: "wellbores", type: "line", source: "wellbores", layout: { "line-cap": "round" }, paint: {
+        "line-color": ["match", ["get", "wellboreType"], "Horizontal", "#0f766e", "Directional", "#9333ea", "#0f766e"],
+        "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1, 15, 2.5], "line-opacity": 0.8 } });
+      map.addLayer({ id: "wellbores-sel", type: "line", source: "wellbores", filter: ["==", ["get", "surfaceId"], -1], paint: { "line-color": "#111827", "line-width": 3 } });
+      // Bottom holes (hollow squares via small circle w/ dark ring)
+      map.addLayer({ id: "bottomholes", type: "circle", source: "bottomholes", layout: { visibility: "none" }, paint: {
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 1.6, 15, 3.4], "circle-color": "#1e293b", "circle-stroke-width": 0.5, "circle-stroke-color": "#ffffff", "circle-opacity": 0.7 } });
+      // Surface wells — selection via feature-state (unique fid)
+      map.addLayer({ id: "wells", type: "circle", source: "wells", paint: {
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 2.3, 12, 3.6, 15, 6],
+        "circle-color": CATEGORY_COLOR,
+        "circle-stroke-width": ["case", ["boolean", ["feature-state", "selected"], false], 3, 0.6],
+        "circle-stroke-color": ["case", ["boolean", ["feature-state", "selected"], false], "#111827", "#ffffff"],
+        "circle-opacity": 0.9 } });
+      map.addLayer({ id: "abstracts-num", type: "symbol", source: "abstracts", minzoom: 9, layout: {
+        "symbol-sort-key": ["*", -1, ["get", "area"]], "text-field": ["get", "abstract"], "text-font": ["Noto Sans Regular"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 9, 10, 14, 13], "text-padding": 2, "text-allow-overlap": false, "text-optional": true },
+        paint: { "text-color": "#0f172a", "text-halo-color": "#ffffff", "text-halo-width": 1.4 } });
+      map.addLayer({ id: "abstracts-survey", type: "symbol", source: "abstracts", minzoom: 12.5, layout: {
+        "symbol-sort-key": ["*", -1, ["get", "area"]], "text-field": ["get", "survey"], "text-font": ["Noto Sans Regular"],
+        "text-size": 11, "text-offset": [0, 1.1], "text-max-width": 8, "text-padding": 2, "text-allow-overlap": false, "text-optional": true },
+        paint: { "text-color": "#334155", "text-halo-color": "#ffffff", "text-halo-width": 1.3 } });
 
       map.on("click", (e) => {
-        const b = 5;
-        const wells = layersRef.current.wells
-          ? map.queryRenderedFeatures([[e.point.x - b, e.point.y - b], [e.point.x + b, e.point.y + b]], { layers: ["wells"] })
-          : [];
-        if (wells.length) { selectWell(wells[0].properties as Record<string, unknown>); return; }
+        // Precise well selection: gather wells under a small tolerance box.
+        const t = 6;
+        const bx: [maplibregl.PointLike, maplibregl.PointLike] = [[e.point.x - t, e.point.y - t], [e.point.x + t, e.point.y + t]];
+        const hits = layersRef.current.wells ? map.queryRenderedFeatures(bx, { layers: ["wells"] }) : [];
+        // De-dupe by fid (a feature can appear once), keep distinct wells.
+        const seen = new Map<number, WellProps>();
+        for (const h of hits) { const p = h.properties as Record<string, unknown>; const fid = Number(p.fid); if (!seen.has(fid)) seen.set(fid, toWellProps(p)); }
+        const wells = [...seen.values()];
+        if (wells.length === 1) { selectWell(wells[0]); return; }
+        if (wells.length > 1) { clearSelection(); setChoices(wells); return; }
+        // Otherwise an abstract (toggle).
         const feats = map.queryRenderedFeatures(e.point, { layers: ["abstracts-fill"] });
         if (feats.length === 0) { clearSelection(); return; }
-        const feat = feats[0]; const id = feat.properties?.id as string;
-        if (selected?.kind === "abstract" && selectedIdRef.current === id) { clearSelection(); return; }
-        selectAbstract(id, feat.properties as Record<string, unknown>);
+        const id = feats[0].properties?.id as string;
+        if (selAbstractRef.current === id) { clearSelection(); return; }
+        selectAbstract(id, feats[0].properties as Record<string, unknown>);
       });
       map.on("mouseenter", "wells", () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", "wells", () => (map.getCanvas().style.cursor = ""));
@@ -166,55 +169,50 @@ export function MapView() {
       styleReady.current = true;
       applyHighlight(); applyLayerVisibility(); applyAbstractFilter(); applyWellFilter();
     });
-
     return () => { map.remove(); mapRef.current = null; styleReady.current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  function toWellProps(p: Record<string, unknown>): WellProps {
+    return { fid: Number(p.fid), api: (p.api as string) || "", api8: (p.api8 as string) || "", wellNo: (p.wellNo as string) || null, wellId: (p.wellId as string) || "", symbol: (p.symbol as string) || "", type: (p.type as string) || "", status: (p.status as string) || "", county: (p.county as string) || "Leon", abstract: (p.abstract as string) || null, survey: (p.survey as string) || null };
+  }
   function clearSelection() {
     const map = mapRef.current;
     if (map) {
-      if (selectedIdRef.current) map.setFeatureState({ source: "abstracts", id: selectedIdRef.current }, { selected: false });
-      if (map.getLayer("wells-highlight")) map.setFilter("wells-highlight", ["==", ["get", "api8"], "__none__"]);
+      if (selAbstractRef.current) map.setFeatureState({ source: "abstracts", id: selAbstractRef.current }, { selected: false });
+      if (selWellRef.current != null) map.setFeatureState({ source: "wells", id: selWellRef.current }, { selected: false });
+      if (map.getLayer("wellbores-sel")) map.setFilter("wellbores-sel", ["==", ["get", "surfaceId"], -1]);
     }
-    selectedIdRef.current = null;
-    setSelected(null);
+    selAbstractRef.current = null; selWellRef.current = null;
+    setSelected(null); setChoices(null);
   }
-
   function selectAbstract(id: string, props: Record<string, unknown>) {
     const map = mapRef.current; if (!map) return;
     clearSelection();
-    selectedIdRef.current = id;
+    selAbstractRef.current = id;
     map.setFeatureState({ source: "abstracts", id }, { selected: true });
     setSelected({ kind: "abstract", id, abstract: (props.abstract as string) || id, survey: (props.survey as string) || "", county: (props.county as string) || "" });
   }
-
-  function selectWell(props: Record<string, unknown>) {
+  function selectWell(w: WellProps) {
     const map = mapRef.current; if (!map) return;
     clearSelection();
-    const api8 = props.api8 as string;
-    map.setFilter("wells-highlight", ["==", ["get", "api8"], api8]);
-    setSelected({
-      kind: "well", api: (props.api as string) || "", api8, wellId: (props.wellId as string) || "",
-      symbol: (props.symbol as string) || "", type: (props.type as string) || "", status: (props.status as string) || "",
-      county: (props.county as string) || "Leon", abstract: (props.abstract as string) || null, survey: (props.survey as string) || null,
-      lon: 0, lat: 0,
-    });
+    selWellRef.current = w.fid;
+    map.setFeatureState({ source: "wells", id: w.fid }, { selected: true });
+    if (map.getLayer("wellbores-sel")) map.setFilter("wellbores-sel", ["==", ["get", "surfaceId"], w.fid]);
+    setSelected({ kind: "well", ...w });
   }
-
   function selectAbstractById(id: string) {
     const map = mapRef.current; const fc = abstractsFC.current; if (!map || !fc) return;
     const feat = fc.features.find((f) => f.properties.id === id); if (!feat) return;
     selectAbstract(id, feat.properties);
-    const [minX, minY, maxX, maxY] = bboxOf(feat.geometry);
-    map.fitBounds([[minX, minY], [maxX, maxY]], { padding: 80, maxZoom: 14, duration: 800 });
+    const [a, b, c, d] = bboxOf(feat.geometry);
+    map.fitBounds([[a, b], [c, d]], { padding: 80, maxZoom: 14, duration: 800 });
   }
-
-  function selectWellByApi8(api8: string) {
+  function selectWellByFid(fid: number) {
     const map = mapRef.current; const fc = wellsFC.current; if (!map || !fc) return;
-    const feat = fc.features.find((f) => f.properties.api8 === api8); if (!feat) return;
-    selectWell(feat.properties);
-    const [lon, lat] = (feat.geometry.coordinates as number[]);
+    const feat = fc.features.find((f) => Number(f.properties.fid) === fid); if (!feat) return;
+    selectWell(toWellProps(feat.properties));
+    const [lon, lat] = feat.geometry.coordinates as number[];
     map.flyTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 13), duration: 800 });
   }
 
@@ -225,49 +223,41 @@ export function MapView() {
     activeIds.current = [...dealsByAbstract.keys()];
     for (const id of activeIds.current) map.setFeatureState({ source: "abstracts", id }, { active: true });
   }
-
   function applyLayerVisibility() {
     const map = mapRef.current; if (!map || !styleReady.current) return;
     const L = layersRef.current;
     const vis = (id: string, on: boolean) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
     vis("abstracts-fill", L.boundaries); vis("abstracts-line", L.boundaries);
     vis("abstracts-num", L.absNums); vis("abstracts-survey", L.surveyNames);
-    vis("wells", L.wells); vis("wells-highlight", L.wells);
+    vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores); vis("bottomholes", L.bottomHoles);
     applyHighlight();
   }
-
   function applyAbstractFilter() {
     const map = mapRef.current; if (!map || !styleReady.current) return;
-    const clauses: unknown[] = [];
-    if (fAbstracts.length) clauses.push(["in", ["get", "abstract"], ["literal", fAbstracts]]);
-    if (fSurveys.length) clauses.push(["in", ["get", "survey"], ["literal", fSurveys]]);
-    if (fCounties.length && !fCounties.includes("Leon")) clauses.push(["==", ["get", "id"], "__none__"]);
-    const filter = clauses.length ? (["all", ...clauses] as maplibregl.FilterSpecification) : null;
+    const cl: unknown[] = [];
+    if (fAbstracts.length) cl.push(["in", ["get", "abstract"], ["literal", fAbstracts]]);
+    if (fSurveys.length) cl.push(["in", ["get", "survey"], ["literal", fSurveys]]);
+    if (fCounties.length && !fCounties.includes("Leon")) cl.push(["==", ["get", "id"], "__none__"]);
+    const filter = cl.length ? (["all", ...cl] as maplibregl.FilterSpecification) : null;
     for (const id of ["abstracts-fill", "abstracts-line", "abstracts-num", "abstracts-survey"]) if (map.getLayer(id)) map.setFilter(id, filter);
   }
-
   function applyWellFilter() {
     const map = mapRef.current; if (!map || !styleReady.current || !map.getLayer("wells")) return;
-    const clauses: unknown[] = [];
-    if (fWellTypes.length) clauses.push(["in", ["get", "type"], ["literal", fWellTypes]]);
-    if (fWellStatuses.length) clauses.push(["in", ["get", "status"], ["literal", fWellStatuses]]);
-    if (fAbstracts.length) clauses.push(["in", ["get", "abstract"], ["literal", fAbstracts]]);
-    if (fSurveys.length) clauses.push(["in", ["get", "survey"], ["literal", fSurveys]]);
-    if (fCounties.length && !fCounties.includes("Leon")) clauses.push(["==", ["get", "county"], "__none__"]);
-    map.setFilter("wells", clauses.length ? (["all", ...clauses] as maplibregl.FilterSpecification) : null);
+    const cl: unknown[] = [];
+    if (fWellTypes.length) cl.push(["in", ["get", "type"], ["literal", fWellTypes]]);
+    if (fWellStatuses.length) cl.push(["in", ["get", "status"], ["literal", fWellStatuses]]);
+    if (fAbstracts.length) cl.push(["in", ["get", "abstract"], ["literal", fAbstracts]]);
+    if (fSurveys.length) cl.push(["in", ["get", "survey"], ["literal", fSurveys]]);
+    map.setFilter("wells", cl.length ? (["all", ...cl] as maplibregl.FilterSpecification) : null);
   }
 
-  function loadDeals() {
-    const qs = new URLSearchParams(); qs.set("status", statusFilter);
-    api.get<MapDeal[]>(`/map/deals?${qs.toString()}`).then(setDeals);
-  }
+  function loadDeals() { const qs = new URLSearchParams(); qs.set("status", statusFilter); api.get<MapDeal[]>(`/map/deals?${qs.toString()}`).then(setDeals); }
   useEffect(loadDeals, [statusFilter]);
   useEffect(applyHighlight, [dealsByAbstract]);
   useEffect(applyLayerVisibility, [layers]);
   useEffect(applyAbstractFilter, [fCounties, fSurveys, fAbstracts]);
   useEffect(applyWellFilter, [fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses]);
 
-  // Global search: abstracts (# / survey) + wells (API / well id).
   const results = useMemo(() => {
     const q = query.trim().toLowerCase(); if (!q) return [] as { kind: "abstract" | "well"; key: string; label: string; sub: string }[];
     const out: { kind: "abstract" | "well"; key: string; label: string; sub: string }[] = [];
@@ -276,8 +266,8 @@ export function MapView() {
       if (ab.toLowerCase().includes(q) || sv.toLowerCase().includes(q)) { out.push({ kind: "abstract", key: f.properties.id as string, label: ab, sub: sv }); if (out.length >= 6) break; }
     }
     for (const f of wellsFC.current?.features ?? []) {
-      const api = (f.properties.api as string) || ""; const api8 = (f.properties.api8 as string) || ""; const wid = (f.properties.wellId as string) || "";
-      if (api.toLowerCase().includes(q) || api8.toLowerCase().includes(q) || wid.toLowerCase().includes(q)) { out.push({ kind: "well", key: api8, label: `Well ${api}`, sub: `${f.properties.type} · ${f.properties.status}` }); if (out.length >= 12) break; }
+      const p = f.properties; const api = String(p.api || ""); const api8 = String(p.api8 || ""); const wn = String(p.wellNo || "");
+      if (api.toLowerCase().includes(q) || api8.toLowerCase().includes(q) || wn.toLowerCase().includes(q)) { out.push({ kind: "well", key: String(p.fid), label: `Well ${api}${wn ? ` #${wn}` : ""}`, sub: `${p.type} · ${p.status}` }); if (out.length >= 14) break; }
     }
     return out;
   }, [query]);
@@ -291,12 +281,12 @@ export function MapView() {
       <div className="page-header"><div className="row"><h1 style={{ marginBottom: 0 }}>Map</h1><span className="muted">Leon County, TX · proof of concept</span></div></div>
 
       <div className="row" style={{ marginBottom: 12, gap: 10, position: "relative" }}>
-        <div style={{ position: "relative", flex: 1, maxWidth: 420 }}>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search API #, abstract #, survey name…" />
+        <div style={{ position: "relative", flex: 1, maxWidth: 440 }}>
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search API #, well #, abstract #, survey…" />
           {results.length > 0 && (
             <div className="msel-menu" style={{ top: "100%" }}>
               {results.map((r) => (
-                <div className="msel-opt" key={r.kind + r.key} onClick={() => { r.kind === "abstract" ? selectAbstractById(r.key) : selectWellByApi8(r.key); setQuery(""); }}>
+                <div className="msel-opt" key={r.kind + r.key} onClick={() => { r.kind === "abstract" ? selectAbstractById(r.key) : selectWellByFid(Number(r.key)); setQuery(""); }}>
                   <strong>{r.label}</strong> <span className="muted">· {r.sub}</span>
                 </div>
               ))}
@@ -317,7 +307,7 @@ export function MapView() {
             <div className="field"><label>Abstract</label><SearchableMultiSelect options={meta.abstracts} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstracts…" /></div>
             <div className="field"><label>Well type</label><SearchableMultiSelect options={meta.wellTypes} value={fWellTypes} onChange={setFWellTypes} placeholder="Well types…" /></div>
             <div className="field"><label>Well status</label><SearchableMultiSelect options={meta.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} placeholder="Well statuses…" /></div>
-            <div className="field"><label>Operator <span className="muted">(not in RRC dataset)</span></label><SearchableMultiSelect options={[]} value={[]} onChange={() => {}} placeholder="Needs operator source" /></div>
+            <div className="field"><label>Operator <span className="muted">(needs external RRC data)</span></label><SearchableMultiSelect options={[]} value={[]} onChange={() => {}} placeholder="Not in GIS dataset" /></div>
           </div>
         </div>
       )}
@@ -329,13 +319,15 @@ export function MapView() {
             <Chk label="Abstract numbers" on={layers.absNums} onChange={() => toggle("absNums")} />
             <Chk label="Survey names" on={layers.surveyNames} onChange={() => toggle("surveyNames")} />
             <Chk label="Active deals" on={layers.deals} onChange={() => toggle("deals")} />
-            <Chk label="Wells" on={layers.wells} onChange={() => toggle("wells")} />
+            <Chk label="Wells (surface)" on={layers.wells} onChange={() => toggle("wells")} />
+            <Chk label="Wellbores (laterals)" on={layers.wellbores} onChange={() => toggle("wellbores")} />
+            <Chk label="Bottom holes" on={layers.bottomHoles} onChange={() => toggle("bottomHoles")} />
           </div>
         </div>
       )}
 
       <div className="row" style={{ marginBottom: 8 }}>
-        <span className="muted">{deals == null ? "…" : `${deals.length} deal${deals.length === 1 ? "" : "s"} · ${abstractCount} abstract${abstractCount === 1 ? "" : "s"} highlighted · ${wellsFC.current?.features.length ?? 0} wells`}</span>
+        <span className="muted">{deals == null ? "…" : `${deals.length} deal${deals.length === 1 ? "" : "s"} · ${abstractCount} highlighted · ${wellsFC.current?.features.length ?? 0} wells`}</span>
       </div>
 
       <div style={{ position: "relative", height: "calc(100vh - 250px)", minHeight: 460, borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
@@ -343,45 +335,47 @@ export function MapView() {
         {!deals && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}><Spinner label="Loading map…" /></div>}
 
         <div style={{ position: "absolute", left: 12, bottom: 26, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px", fontSize: 12 }}>
-          <Legend color="#ef4444" op={0.7} label="Active deal (abstract)" />
-          <Legend color="#f59e0b" op={0.8} label="Selected abstract" />
-          {layers.wells && <>
-            <Legend color="#22c55e" op={0.9} label="Producing well" />
-            <Legend color="#6b7280" op={0.9} label="Plugged" />
-            <Legend color="#f59e0b" op={0.9} label="Shut-in" />
-            <Legend color="#3b82f6" op={0.9} label="Permitted" />
-            <Legend color="#7c3aed" op={0.9} label="Injection/Disposal" />
-          </>}
+          <Legend color="#22c55e" label="Producing" /><Legend color="#6b7280" label="Plugged" /><Legend color="#f59e0b" label="Shut-in" />
+          <Legend color="#3b82f6" label="Permitted" /><Legend color="#7c3aed" label="Injection/Disposal" />
+          {layers.wellbores && <Legend color="#0f766e" label="Wellbore (lateral)" line />}
         </div>
 
-        {selected && (
+        {/* Overlap chooser */}
+        {choices && (
+          <div style={{ position: "absolute", top: 12, right: 12, width: 300, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "var(--shadow)", padding: 16 }}>
+            <div className="section-head"><h3 style={{ margin: 0 }}>{choices.length} wells here</h3><button className="icon-btn" onClick={() => setChoices(null)}>×</button></div>
+            <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Pick the well you meant:</p>
+            {choices.map((w) => (
+              <div key={w.fid} className="msel-opt" style={{ borderTop: "1px solid var(--border)" }} onClick={() => selectWell(w)}>
+                <strong>{w.api}{w.wellNo ? ` #${w.wellNo}` : ""}</strong><div className="muted" style={{ fontSize: 12 }}>{w.type} · {w.status}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {selected && !choices && (
           <div style={{ position: "absolute", top: 12, right: 12, width: 320, maxHeight: "calc(100% - 24px)", overflowY: "auto", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "var(--shadow)", padding: 16 }}>
             {selected.kind === "well" ? (
               <>
-                <div className="section-head"><div><h3 style={{ margin: 0 }}>Well</h3><div className="muted" style={{ fontSize: 12 }}>{selected.symbol}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
+                <div className="section-head"><div><h3 style={{ margin: 0 }}>Well {selected.wellNo ? `#${selected.wellNo}` : ""}</h3><div className="muted" style={{ fontSize: 12 }}>{selected.symbol}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
                 <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                  <KV k="API" v={selected.api} /><KV k="Well ID" v={selected.wellId} />
+                  <KV k="API" v={selected.api} /><KV k="Well No." v={selected.wellNo} />
                   <KV k="Type" v={selected.type} /><KV k="Status" v={selected.status} />
                   <KV k="County" v={selected.county} /><KV k="Abstract" v={selected.abstract} />
                   <KV k="Survey" v={selected.survey} />
                 </div>
-                <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Operator, lease name, and production are not included in the RRC well-location dataset.</p>
+                <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Operator, lease name/number, spud/completion dates, and production are not in the RRC GIS dataset — they require the RRC well-bore/production data or a commercial feed.</p>
               </>
             ) : (
               <>
                 <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.abstract}</h3><div className="muted" style={{ fontSize: 12 }}>{[selected.survey, selected.county ? `${selected.county} County` : ""].filter(Boolean).join(" · ")}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
-                <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
-                  <KV k="Abstract" v={selected.abstract} /><KV k="Survey" v={selected.survey} /><KV k="County" v={selected.county} />
-                </div>
+                <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}><KV k="Abstract" v={selected.abstract} /><KV k="Survey" v={selected.survey} /><KV k="County" v={selected.county} /></div>
                 <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 10 }}>{panelDeals.length} active deal{panelDeals.length === 1 ? "" : "s"}</div>
                 {panelDeals.length === 0 ? <p className="muted">No active deals in this abstract.</p> : panelDeals.map((d) => (
                   <div key={d.id} style={{ borderTop: "1px solid var(--border)", padding: "10px 0" }}>
                     <div className="row" style={{ justifyContent: "space-between" }}><Link to={`/deals/${d.id}`} style={{ fontWeight: 600 }}>{d.name}</Link><PriorityBadge priority={d.priority} /></div>
                     <div className="row" style={{ gap: 6, margin: "6px 0" }}><StageBadge stage={d.stage} />{d.selectedBuyer && <span className="muted" style={{ fontSize: 12 }}>→ {d.selectedBuyer.name}</span>}</div>
-                    <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                      <KV k="Operator" v={d.operator} /><KV k="Asset Type" v={d.assetTypes.join(", ")} />
-                      <KV k="NMA" v={num(d.acreageNma)} /><KV k="Profit est." v={money(d.profitEst)} />
-                    </div>
+                    <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}><KV k="Operator" v={d.operator} /><KV k="Asset Type" v={d.assetTypes.join(", ")} /><KV k="NMA" v={num(d.acreageNma)} /><KV k="Profit est." v={money(d.profitEst)} /></div>
                   </div>
                 ))}
               </>
@@ -396,8 +390,8 @@ export function MapView() {
 function Chk({ label, on, onChange }: { label: string; on: boolean; onChange: () => void }) {
   return <label style={{ display: "flex", alignItems: "center", gap: 8, textTransform: "none", letterSpacing: 0, margin: 0, cursor: "pointer" }}><input type="checkbox" checked={on} onChange={onChange} style={{ width: "auto" }} /> {label}</label>;
 }
-function Legend({ color, op, label }: { color: string; op: number; label: string }) {
-  return <div className="row" style={{ gap: 8, marginTop: 4 }}><span style={{ width: 12, height: 12, background: color, opacity: op, borderRadius: "50%", display: "inline-block" }} /> {label}</div>;
+function Legend({ color, label, line }: { color: string; label: string; line?: boolean }) {
+  return <div className="row" style={{ gap: 8, marginTop: 4 }}><span style={{ width: 12, height: line ? 3 : 12, background: color, opacity: 0.9, borderRadius: line ? 0 : "50%", display: "inline-block" }} /> {label}</div>;
 }
 function KV({ k, v }: { k: string; v: React.ReactNode }) {
   return <div className="kv"><span className="k">{k}</span><span className="v">{v || "—"}</span></div>;
