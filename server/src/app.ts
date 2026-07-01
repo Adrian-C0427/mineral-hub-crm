@@ -13,6 +13,7 @@ import { filesRouter } from "./routes/files.js";
 import { reportsRouter } from "./routes/reports.js";
 import { dashboardRouter } from "./routes/dashboard.js";
 import { orgRouter } from "./routes/org.js";
+import { mapRouter } from "./routes/map.js";
 
 export function createApp() {
   const app = express();
@@ -45,6 +46,7 @@ export function createApp() {
   app.use("/api/files", filesRouter);
   app.use("/api/reports", reportsRouter);
   app.use("/api/dashboard", dashboardRouter);
+  app.use("/api/map", mapRouter);
 
   app.use(notFound);
   app.use(errorHandler);

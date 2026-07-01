@@ -9,6 +9,7 @@ import {
 import { SortableTable, type Column } from "../components/SortableTable";
 import { StageChangeModal } from "../components/StageChangeModal";
 import { LogContactModal } from "../components/LogContactModal";
+import { AbstractPicker, useAbstractLabel } from "../components/AbstractPicker";
 import { money, num, fmtDate, toInputDate } from "../lib/format";
 import type { BuyerActivityRow, DealSummary, MatchRec } from "../types";
 
@@ -199,6 +200,7 @@ function BuyerActivityTable({ rows, onLog }: { rows: BuyerActivityRow[]; onLog: 
 function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved: () => void }) {
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState(deal);
+  const abstractLabel = useAbstractLabel(deal.abstractId);
   useEffect(() => setF(deal), [deal]);
   const set = (k: keyof DealDetailData) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setF((p) => ({ ...p, [k]: e.target.value === "" ? null : e.target.value } as DealDetailData));
@@ -208,7 +210,7 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
   async function save() {
     await api.patch(`/deals/${deal.id}`, {
       state: f.state, county: f.county, basin: f.basin, formation: f.formation,
-      assetType: f.assetType, acreageNma: f.acreageNma, nra: f.nra, askPrice: f.askPrice, operator: f.operator,
+      assetType: f.assetType, acreageNma: f.acreageNma, nra: f.nra, abstractId: f.abstractId, askPrice: f.askPrice, operator: f.operator,
     });
     setEdit(false);
     onSaved(); // editing characteristics auto-refreshes matches
@@ -226,6 +228,7 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
           <KV k="State" v={deal.state} /><KV k="County" v={deal.county} /><KV k="Basin" v={deal.basin} />
           <KV k="Formation" v={deal.formation} /><KV k="Asset Type" v={deal.assetType} /><KV k="NMA" v={num(deal.acreageNma)} />
           <KV k="NRA" v={num(deal.nra)} /><KV k="Ask Price" v={money(deal.askPrice)} /><KV k="Operator" v={deal.operator} />
+          <KV k="Abstract (Leon Co.)" v={abstractLabel} />
         </div>
       ) : (
         <div className="dd-grid">
@@ -238,6 +241,7 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
           <Fld l="NRA"><input type="number" value={f.nra ?? ""} onChange={setNum("nra")} /></Fld>
           <Fld l="Ask Price"><input type="number" value={f.askPrice ?? ""} onChange={setNum("askPrice")} /></Fld>
           <Fld l="Operator"><input value={f.operator ?? ""} onChange={set("operator")} /></Fld>
+          <Fld l="Abstract (Leon Co.)"><AbstractPicker value={f.abstractId} onChange={(id) => setF((p) => ({ ...p, abstractId: id }))} /></Fld>
         </div>
       )}
     </div>

@@ -64,6 +64,7 @@ const createSchema = z.object({
   state: z.string().nullish(),
   acreageNma: z.number().nullish(),
   nra: z.number().nullish(),
+  abstractId: z.string().nullish(),
   operator: z.string().nullish(),
   askPrice: z.number().nullish(),
   assetType: z.string().nullish(),
@@ -90,6 +91,7 @@ dealsRouter.post(
           state: data.state ?? null,
           acreageNma: data.acreageNma ?? null,
           nra: data.nra ?? null,
+          abstractId: data.abstractId ?? null,
           operator: data.operator ?? null,
           askPrice: data.askPrice ?? null,
           assetType: data.assetType ?? null,
@@ -272,6 +274,7 @@ const updateSchema = z.object({
   state: z.string().nullish(),
   acreageNma: z.number().nullish(),
   nra: z.number().nullish(),
+  abstractId: z.string().nullish(),
   operator: z.string().nullish(),
   askPrice: z.number().nullish(),
   assetType: z.string().nullish(),
@@ -291,7 +294,7 @@ dealsRouter.patch(
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = updateSchema.parse(req.body);
     const patch: Record<string, unknown> = {};
-    for (const k of ["name", "sellerNames", "county", "state", "acreageNma", "nra", "operator", "askPrice", "assetType", "basin", "formation", "estimatedClosingCosts", "relationshipOwnerId", "notes"] as const) {
+    for (const k of ["name", "sellerNames", "county", "state", "acreageNma", "nra", "abstractId", "operator", "askPrice", "assetType", "basin", "formation", "estimatedClosingCosts", "relationshipOwnerId", "notes"] as const) {
       if (k in data) patch[k] = (data as Record<string, unknown>)[k];
     }
     for (const k of ["dateUnderContract", "originalClosingDate", "findBuyerByDateOverride", "finalClosingDateOverride"] as const) {

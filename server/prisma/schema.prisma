@@ -155,6 +155,8 @@ model Deal {
   state               String?
   acreageNma          Float?
   nra                 Float?
+  // Survey/abstract this deal sits in (e.g. TX-289653). Links to map boundaries.
+  abstractId          String?
   operator            String?
   askPrice            Float?
   assetType           String?
@@ -195,6 +197,7 @@ model Deal {
   @@index([stage])
   @@index([selectedBuyerId])
   @@index([organizationId])
+  @@index([abstractId])
 }
 
 model DealStageHistory {

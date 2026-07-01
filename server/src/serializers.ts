@@ -27,6 +27,7 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     state: deal.state,
     acreageNma: deal.acreageNma,
     nra: deal.nra,
+    abstractId: deal.abstractId,
     operator: deal.operator,
     askPrice: deal.askPrice,
     assetType: deal.assetType,

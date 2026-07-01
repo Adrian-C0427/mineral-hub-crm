@@ -13,6 +13,7 @@ export interface DealSummary {
   state: string | null;
   acreageNma: number | null;
   nra: number | null;
+  abstractId: string | null;
   askPrice: number | null;
   assetType: string | null;
   basin: string | null;

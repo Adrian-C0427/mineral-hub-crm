@@ -8,8 +8,11 @@ import { Deals } from "./pages/Deals";
 import { DealDetail } from "./pages/DealDetail";
 import { Buyers } from "./pages/Buyers";
 import { BuyerProfile } from "./pages/BuyerProfile";
+import { Suspense, lazy } from "react";
 import { Reports } from "./pages/Reports";
 import { Settings } from "./pages/Settings";
+// MapLibre is heavy (~300KB gzip); load it only when the Map route is visited.
+const MapView = lazy(() => import("./pages/MapView").then((m) => ({ default: m.MapView })));
 
 function TopNav() {
   const { user, logout } = useAuth();
@@ -24,6 +27,7 @@ function TopNav() {
         <NavLink to="/deals">Deals</NavLink>
         <NavLink to="/buyers">Buyers</NavLink>
         <NavLink to="/reports">Reports</NavLink>
+        <NavLink to="/map">Map</NavLink>
       </div>
       <div className="nav-user">
         <span>{user?.name} · {user?.role === "OWNER" ? "Owner" : "Associate"}</span>
@@ -51,6 +55,7 @@ export function App() {
         <Route path="/buyers" element={<Buyers />} />
         <Route path="/buyers/:id" element={<BuyerProfile />} />
         <Route path="/reports" element={<Reports />} />
+        <Route path="/map" element={<Suspense fallback={<Spinner label="Loading map…" />}><MapView /></Suspense>} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
