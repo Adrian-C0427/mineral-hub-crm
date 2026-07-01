@@ -44,7 +44,8 @@ authRouter.post(
 
     const token = signSession({ userId: user.id, role: user.role });
     setSessionCookie(res, token);
-    res.json({ user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+    // Also return the token so the SPA can use Authorization: Bearer (cross-site safe).
+    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
   }),
 );
 
@@ -109,6 +110,7 @@ authRouter.post(
     const token = signSession({ userId: user.id, role: user.role });
     setSessionCookie(res, token);
     res.status(201).json({
+      token,
       user: { id: user.id, name: user.name, email: user.email, role: user.role, orgRole: user.orgRole },
     });
   }),

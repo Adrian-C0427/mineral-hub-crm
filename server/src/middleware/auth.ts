@@ -21,7 +21,11 @@ export interface AuthedRequest extends Request {
  * Populates req.user from the session cookie if valid. Does not block.
  */
 export async function attachUser(req: AuthedRequest, _res: Response, next: NextFunction): Promise<void> {
-  const token = req.cookies?.[env.COOKIE_NAME];
+  // Prefer the Authorization: Bearer header (works cross-site; not blocked like
+  // third-party cookies on public-suffix hosts such as *.up.railway.app).
+  const authHeader = req.headers.authorization;
+  const bearer = authHeader?.startsWith("Bearer ") ? authHeader.slice(7).trim() : undefined;
+  const token = bearer || req.cookies?.[env.COOKIE_NAME];
   if (token) {
     const session = verifySession(token);
     if (session) {

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { api } from "../api/client";
+import { api, setAuthToken, getAuthToken } from "../api/client";
 
 export interface CurrentUser {
   id: string;
@@ -39,26 +39,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Only attempt to restore a session if we have a stored token.
+    if (!getAuthToken()) { setLoading(false); return; }
     api
       .get<{ user: CurrentUser }>("/auth/me")
       .then((r) => setUser(r.user))
-      .catch(() => setUser(null))
+      .catch(() => { setAuthToken(null); setUser(null); })
       .finally(() => setLoading(false));
   }, []);
 
   const login = async (email: string, password: string) => {
-    await api.post<{ user: CurrentUser }>("/auth/login", { email, password });
+    const r = await api.post<{ token: string; user: CurrentUser }>("/auth/login", { email, password });
+    setAuthToken(r.token);
     // Fetch the full profile (incl. organization) after authenticating.
     await refresh();
   };
 
   const register = async (payload: RegisterPayload) => {
-    await api.post<{ user: CurrentUser }>("/auth/register", payload);
+    const r = await api.post<{ token: string; user: CurrentUser }>("/auth/register", payload);
+    setAuthToken(r.token);
     await refresh();
   };
 
   const logout = async () => {
-    await api.post("/auth/logout");
+    await api.post("/auth/logout").catch(() => {});
+    setAuthToken(null);
     setUser(null);
   };
 

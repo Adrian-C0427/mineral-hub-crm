@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Link } from "react-router-dom";
@@ -24,36 +24,25 @@ interface MapDeal {
   profitEst: number | null;
   selectedBuyer: { id: string; name: string } | null;
 }
-
 interface FilterOptions { counties: string[]; basins: string[]; formations: string[]; assetTypes: string[] }
+interface Selected { id: string; abstract: string; survey: string; county: string }
 
 const ABSTRACTS_URL = "/data/leon-abstracts.geojson";
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
 const OSM_STYLE: maplibregl.StyleSpecification = {
   version: 8,
-  // Glyphs are required for text/symbol labels (raster basemaps don't include them).
   glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
   sources: {
-    osm: {
-      type: "raster",
-      tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-      tileSize: 256,
-      attribution: "© OpenStreetMap contributors",
-    },
+    osm: { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap contributors" },
   },
   layers: [{ id: "osm", type: "raster", source: "osm" }],
 };
 
 const STATUS_OPTIONS = [
-  ["ACTIVE", "Active deals"],
-  ["ALL", "All linked deals"],
-  ["UNDER_CONTRACT", "Under Contract"],
-  ["PREPARING_PACKAGE", "Preparing Package"],
-  ["SENT_TO_BUYERS", "Sent to Buyers"],
-  ["NEGOTIATING", "Negotiating"],
-  ["CLOSING", "Closing"],
-  ["CLOSED", "Closed"],
-  ["DEAD", "Dead"],
+  ["ACTIVE", "Active deals"], ["ALL", "All linked deals"],
+  ["UNDER_CONTRACT", "Under Contract"], ["PREPARING_PACKAGE", "Preparing Package"],
+  ["SENT_TO_BUYERS", "Sent to Buyers"], ["NEGOTIATING", "Negotiating"],
+  ["CLOSING", "Closing"], ["CLOSED", "Closed"], ["DEAD", "Dead"],
 ] as const;
 
 export function MapView() {
@@ -61,20 +50,28 @@ export function MapView() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const styleReady = useRef(false);
   const activeIds = useRef<string[]>([]);
+  const selectedIdRef = useRef<string | null>(null);
 
   const [deals, setDeals] = useState<MapDeal[] | null>(null);
   const [options, setOptions] = useState<FilterOptions>({ counties: [], basins: [], formations: [], assetTypes: [] });
   const [filters, setFilters] = useState({ status: "ACTIVE", county: "", basin: "", formation: "", assetType: "" });
-  const [selected, setSelected] = useState<{ abstractId: string; label: string; survey: string; deals: MapDeal[] } | null>(null);
+  const [selected, setSelected] = useState<Selected | null>(null);
+
+  // Deals grouped by abstract id — recomputed whenever the fetched data changes, so
+  // the panel and highlights always reflect the current underlying data.
+  const dealsByAbstract = useMemo(() => {
+    const m = new Map<string, MapDeal[]>();
+    for (const d of deals ?? []) for (const aid of d.abstractIds) {
+      const arr = m.get(aid) ?? []; arr.push(d); m.set(aid, arr);
+    }
+    return m;
+  }, [deals]);
 
   // Init map once.
   useEffect(() => {
     if (mapRef.current || !mapContainer.current) return;
     const map = new maplibregl.Map({
-      container: mapContainer.current,
-      style: OSM_STYLE,
-      center: LEON_CENTER,
-      zoom: 9.2,
+      container: mapContainer.current, style: OSM_STYLE, center: LEON_CENTER, zoom: 10,
       attributionControl: { compact: true },
     });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
@@ -83,66 +80,59 @@ export function MapView() {
     map.on("load", () => {
       map.addSource("abstracts", { type: "geojson", data: ABSTRACTS_URL, promoteId: "id" });
       map.addLayer({
-        id: "abstracts-fill",
-        type: "fill",
-        source: "abstracts",
+        id: "abstracts-fill", type: "fill", source: "abstracts",
         paint: {
-          "fill-color": ["case", ["boolean", ["feature-state", "active"], false], "#ef4444", "#3b82f6"],
-          "fill-opacity": ["case", ["boolean", ["feature-state", "active"], false], 0.5, 0.05],
+          "fill-color": [
+            "case",
+            ["boolean", ["feature-state", "selected"], false], "#f59e0b",
+            ["boolean", ["feature-state", "active"], false], "#ef4444",
+            "#3b82f6",
+          ],
+          "fill-opacity": [
+            "case",
+            ["boolean", ["feature-state", "selected"], false], 0.6,
+            ["boolean", ["feature-state", "active"], false], 0.5,
+            0.05,
+          ],
         },
       });
       map.addLayer({
-        id: "abstracts-line",
-        type: "line",
-        source: "abstracts",
+        id: "abstracts-line", type: "line", source: "abstracts",
         paint: {
-          "line-color": ["case", ["boolean", ["feature-state", "selected"], false], "#111827", "#64748b"],
-          "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 2.5, 0.5],
+          "line-color": ["case", ["boolean", ["feature-state", "selected"], false], "#b45309", "#64748b"],
+          "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 3, 0.5],
         },
       });
-
-      // Labels: abstract number (+ survey name when zoomed in). Larger abstracts win
-      // collisions first (symbol-sort-key = -area); MapLibre declutters + repositions
-      // automatically on pan/zoom, so labels never overlap and reveal progressively.
+      // Zoom-progressive, collision-managed labels (larger abstracts win first).
       map.addLayer({
-        id: "abstracts-labels",
-        type: "symbol",
-        source: "abstracts",
-        minzoom: 10,
+        id: "abstracts-labels", type: "symbol", source: "abstracts", minzoom: 9,
         layout: {
           "symbol-sort-key": ["*", -1, ["get", "area"]],
-          "text-field": [
-            "step",
-            ["zoom"],
-            ["get", "abstract"],
-            12.5,
-            ["concat", ["get", "abstract"], "\n", ["get", "survey"]],
-          ],
+          "text-field": ["step", ["zoom"], ["get", "abstract"], 12.5, ["concat", ["get", "abstract"], "\n", ["get", "survey"]]],
           "text-font": ["Noto Sans Regular"],
-          "text-size": ["interpolate", ["linear"], ["zoom"], 10, 10, 13, 12, 15, 14],
-          "text-max-width": 8,
-          "text-line-height": 1.1,
-          "text-padding": 2,
-          "text-allow-overlap": false,
-          "text-optional": true,
+          "text-size": ["interpolate", ["linear"], ["zoom"], 9, 10, 13, 12, 15, 14],
+          "text-max-width": 8, "text-line-height": 1.1, "text-padding": 2,
+          "text-allow-overlap": false, "text-optional": true,
         },
-        paint: {
-          "text-color": "#0f172a",
-          "text-halo-color": "#ffffff",
-          "text-halo-width": 1.4,
-        },
+        paint: { "text-color": "#0f172a", "text-halo-color": "#ffffff", "text-halo-width": 1.4 },
       });
 
-      map.on("click", "abstracts-fill", (e) => {
-        const feat = e.features?.[0];
-        if (!feat) return;
+      // Single click handler: toggle selection, or deselect when clicking empty map.
+      map.on("click", (e) => {
+        const feats = map.queryRenderedFeatures(e.point, { layers: ["abstracts-fill"] });
+        if (feats.length === 0) { deselect(); return; }
+        const feat = feats[0];
         const id = feat.properties?.id as string;
-        const label = (feat.properties?.abstract as string) || id;
-        const survey = (feat.properties?.survey as string) || "";
-        // clear prior selection outline
-        clearState(map, "selected");
+        if (selectedIdRef.current === id) { deselect(); return; }
+        deselect();
+        selectedIdRef.current = id;
         map.setFeatureState({ source: "abstracts", id }, { selected: true });
-        setSelected({ abstractId: id, label, survey, deals: (dealsByAbstract.current[id] ?? []) });
+        setSelected({
+          id,
+          abstract: (feat.properties?.abstract as string) || id,
+          survey: (feat.properties?.survey as string) || "",
+          county: (feat.properties?.county as string) || "",
+        });
       });
       map.on("mouseenter", "abstracts-fill", () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", "abstracts-fill", () => (map.getCanvas().style.cursor = ""));
@@ -155,27 +145,23 @@ export function MapView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const dealsByAbstract = useRef<Record<string, MapDeal[]>>({});
-
-  function clearState(map: maplibregl.Map, key: string) {
-    for (const id of activeIds.current) map.setFeatureState({ source: "abstracts", id }, { [key]: false });
+  function deselect() {
+    const map = mapRef.current;
+    if (map && selectedIdRef.current) {
+      map.setFeatureState({ source: "abstracts", id: selectedIdRef.current }, { selected: false });
+    }
+    selectedIdRef.current = null;
+    setSelected(null);
   }
 
   function applyHighlight() {
     const map = mapRef.current;
-    if (!map || !styleReady.current || !deals) return;
-    // reset previous
+    if (!map || !styleReady.current) return;
     for (const id of activeIds.current) map.setFeatureState({ source: "abstracts", id }, { active: false });
-    const byAbs: Record<string, MapDeal[]> = {};
-    for (const d of deals) {
-      for (const aid of d.abstractIds) (byAbs[aid] ??= []).push(d);
-    }
-    dealsByAbstract.current = byAbs;
-    activeIds.current = Object.keys(byAbs);
+    activeIds.current = [...dealsByAbstract.keys()];
     for (const id of activeIds.current) map.setFeatureState({ source: "abstracts", id }, { active: true });
   }
 
-  // Load deals + filter options.
   function loadDeals() {
     const qs = new URLSearchParams();
     qs.set("status", filters.status);
@@ -187,10 +173,11 @@ export function MapView() {
   }
   useEffect(loadDeals, [filters]);
   useEffect(() => { api.get<FilterOptions>("/map/filters").then(setOptions); }, []);
-  useEffect(applyHighlight, [deals]);
+  useEffect(applyHighlight, [dealsByAbstract]);
 
+  const panelDeals = selected ? dealsByAbstract.get(selected.id) ?? [] : [];
   const activeCount = deals?.length ?? 0;
-  const abstractCount = Object.keys(dealsByAbstract.current).length;
+  const abstractCount = dealsByAbstract.size;
 
   return (
     <div className="page" style={{ maxWidth: 1400 }}>
@@ -202,16 +189,11 @@ export function MapView() {
       </div>
 
       <div className="row" style={{ marginBottom: 12, gap: 10 }}>
-        <Sel label="Status" value={filters.status} onChange={(v) => setFilters((f) => ({ ...f, status: v }))}
-          options={STATUS_OPTIONS.map(([v, l]) => ({ v, l }))} />
-        <Sel label="County" value={filters.county} onChange={(v) => setFilters((f) => ({ ...f, county: v }))}
-          options={[{ v: "", l: "All" }, ...options.counties.map((c) => ({ v: c, l: c }))]} />
-        <Sel label="Basin" value={filters.basin} onChange={(v) => setFilters((f) => ({ ...f, basin: v }))}
-          options={[{ v: "", l: "All" }, ...options.basins.map((c) => ({ v: c, l: c }))]} />
-        <Sel label="Formation" value={filters.formation} onChange={(v) => setFilters((f) => ({ ...f, formation: v }))}
-          options={[{ v: "", l: "All" }, ...options.formations.map((c) => ({ v: c, l: c }))]} />
-        <Sel label="Asset Type" value={filters.assetType} onChange={(v) => setFilters((f) => ({ ...f, assetType: v }))}
-          options={[{ v: "", l: "All" }, ...options.assetTypes.map((c) => ({ v: c, l: c }))]} />
+        <Sel label="Status" value={filters.status} onChange={(v) => setFilters((f) => ({ ...f, status: v }))} options={STATUS_OPTIONS.map(([v, l]) => ({ v, l }))} />
+        <Sel label="County" value={filters.county} onChange={(v) => setFilters((f) => ({ ...f, county: v }))} options={[{ v: "", l: "All" }, ...options.counties.map((c) => ({ v: c, l: c }))]} />
+        <Sel label="Basin" value={filters.basin} onChange={(v) => setFilters((f) => ({ ...f, basin: v }))} options={[{ v: "", l: "All" }, ...options.basins.map((c) => ({ v: c, l: c }))]} />
+        <Sel label="Formation" value={filters.formation} onChange={(v) => setFilters((f) => ({ ...f, formation: v }))} options={[{ v: "", l: "All" }, ...options.formations.map((c) => ({ v: c, l: c }))]} />
+        <Sel label="Asset Type" value={filters.assetType} onChange={(v) => setFilters((f) => ({ ...f, assetType: v }))} options={[{ v: "", l: "All" }, ...options.assetTypes.map((c) => ({ v: c, l: c }))]} />
         <div className="spacer" />
         <span className="muted">{deals == null ? "…" : `${activeCount} deal${activeCount === 1 ? "" : "s"} · ${abstractCount} abstract${abstractCount === 1 ? "" : "s"} highlighted`}</span>
       </div>
@@ -221,20 +203,25 @@ export function MapView() {
         {!deals && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}><Spinner label="Loading deals…" /></div>}
 
         <div style={{ position: "absolute", left: 12, bottom: 26, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px", fontSize: 12 }}>
-          <div className="row" style={{ gap: 8 }}><span style={{ width: 12, height: 12, background: "#ef4444", opacity: 0.7, borderRadius: 2, display: "inline-block" }} /> Abstract with active deal</div>
+          <div className="row" style={{ gap: 8 }}><span style={{ width: 12, height: 12, background: "#ef4444", opacity: 0.7, borderRadius: 2, display: "inline-block" }} /> Active deal</div>
+          <div className="row" style={{ gap: 8, marginTop: 4 }}><span style={{ width: 12, height: 12, background: "#f59e0b", opacity: 0.8, borderRadius: 2, display: "inline-block" }} /> Selected</div>
           <div className="row" style={{ gap: 8, marginTop: 4 }}><span style={{ width: 12, height: 12, background: "#3b82f6", opacity: 0.4, borderRadius: 2, display: "inline-block" }} /> Abstract boundary</div>
         </div>
 
         {selected && (
           <div style={{ position: "absolute", top: 12, right: 12, width: 320, maxHeight: "calc(100% - 24px)", overflowY: "auto", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "var(--shadow)", padding: 16 }}>
             <div className="section-head">
-              <div><h3 style={{ margin: 0 }}>{selected.label}</h3><div className="muted" style={{ fontSize: 12 }}>{selected.survey} · Leon County</div></div>
-              <button className="icon-btn" onClick={() => setSelected(null)}>×</button>
+              <div><h3 style={{ margin: 0 }}>{selected.abstract}</h3><div className="muted" style={{ fontSize: 12 }}>{[selected.survey, selected.county ? `${selected.county} County` : ""].filter(Boolean).join(" · ")}</div></div>
+              <button className="icon-btn" onClick={deselect} aria-label="Close">×</button>
             </div>
-            {selected.deals.length === 0 ? (
+            <div className="kv" style={{ margin: "8px 0" }}><span className="k">Abstract ID</span><span className="v"><code>{selected.id}</code></span></div>
+            <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 8 }}>
+              {panelDeals.length} active deal{panelDeals.length === 1 ? "" : "s"}
+            </div>
+            {panelDeals.length === 0 ? (
               <p className="muted">No active deals in this abstract.</p>
             ) : (
-              selected.deals.map((d) => (
+              panelDeals.map((d) => (
                 <div key={d.id} style={{ borderTop: "1px solid var(--border)", padding: "10px 0" }}>
                   <div className="row" style={{ justifyContent: "space-between" }}>
                     <Link to={`/deals/${d.id}`} style={{ fontWeight: 600 }}>{d.name}</Link>
