@@ -5,6 +5,7 @@ import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { normalizeCompany } from "../serializers.js";
 import { normalizePhone } from "../domain/phone.js";
+import { effectiveStatus } from "../domain/buyerStatus.js";
 import { closeRate } from "../domain/metrics.js";
 import { importRouter } from "./import.js";
 
@@ -100,7 +101,7 @@ buyersRouter.get(
         dealId: a.dealId,
         dealName: a.deal.name,
         stage: a.deal.stage,
-        responseStatus: a.responseStatus,
+        status: effectiveStatus(a),
         amount: amount ?? null,
         isSelectedBuyer: isSelected,
         date: a.lastActivityDate ?? a.dateSent ?? a.createdAt,

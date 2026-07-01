@@ -1,29 +1,41 @@
 import { useState } from "react";
 import { Modal } from "./ui";
 import { api, ApiError } from "../api/client";
-import type { ResponseStatus } from "../types";
+import { toInputDate } from "../lib/format";
+import type { BuyerStatus, UserLite } from "../types";
 
 interface Props {
   dealId: string;
   buyerId: string;
   buyerName: string;
+  users: UserLite[];
+  initial?: {
+    status?: BuyerStatus;
+    assignedTeamMemberId?: string | null;
+    responseReceived?: boolean;
+    notes?: string | null;
+  };
   onClose: () => void;
   onLogged: () => void;
 }
 
-const STATUSES: { v: ResponseStatus; label: string }[] = [
-  { v: "PENDING", label: "Awaiting response" },
+const STATUSES: { v: BuyerStatus; label: string }[] = [
+  { v: "CONTACTED", label: "Contacted" },
   { v: "INTERESTED", label: "Interested" },
-  { v: "NOT_INTERESTED", label: "Not Interested" },
+  { v: "REVIEWING", label: "Reviewing" },
+  { v: "OFFER_RECEIVED", label: "Offer Received" },
+  { v: "NEGOTIATING", label: "Negotiating" },
   { v: "PASSED", label: "Passed" },
-  { v: "OFFER_MADE", label: "Offer Made" },
+  { v: "CLOSED", label: "Closed" },
 ];
 
-export function LogContactModal({ dealId, buyerId, buyerName, onClose, onLogged }: Props) {
-  const [status, setStatus] = useState<ResponseStatus>("PENDING");
-  const [dateSent, setDateSent] = useState(new Date().toISOString().slice(0, 10));
+export function LogContactModal({ dealId, buyerId, buyerName, users, initial, onClose, onLogged }: Props) {
+  const [status, setStatus] = useState<BuyerStatus>(initial?.status ?? "CONTACTED");
+  const [assignee, setAssignee] = useState(initial?.assignedTeamMemberId ?? "");
+  const [responseReceived, setResponseReceived] = useState(initial?.responseReceived ?? false);
+  const [dateSent, setDateSent] = useState(toInputDate(new Date()));
   const [nextFollowUp, setNextFollowUp] = useState("");
-  const [notes, setNotes] = useState("");
+  const [notes, setNotes] = useState(initial?.notes ?? "");
   const [amount, setAmount] = useState("");
   const [conditions, setConditions] = useState("");
   const [expiration, setExpiration] = useState("");
@@ -34,9 +46,9 @@ export function LogContactModal({ dealId, buyerId, buyerName, onClose, onLogged 
     setBusy(true);
     setError(null);
     try {
-      if (status === "OFFER_MADE") {
-        if (!amount.trim()) { setError("Offer amount is required"); setBusy(false); return; }
-        // Offer Made creates a full Offer record (which also syncs the activity row).
+      if (status === "OFFER_RECEIVED" && amount.trim()) {
+        // A concrete offer amount records a formal Offer (which also sets the
+        // buyer status to Offer Received on the activity row).
         await api.post("/offers", {
           dealId, buyerId,
           amount: Number(amount),
@@ -46,7 +58,9 @@ export function LogContactModal({ dealId, buyerId, buyerName, onClose, onLogged 
       } else {
         await api.post(`/deals/${dealId}/activity`, {
           buyerId,
-          responseStatus: status,
+          status,
+          responseReceived,
+          assignedTeamMemberId: assignee || null,
           dateSent: dateSent || null,
           nextFollowUpDate: nextFollowUp || null,
           notes: notes || null,
@@ -62,7 +76,7 @@ export function LogContactModal({ dealId, buyerId, buyerName, onClose, onLogged 
 
   return (
     <Modal
-      title={`Log contact — ${buyerName}`}
+      title={`Update buyer — ${buyerName}`}
       onClose={onClose}
       footer={
         <>
@@ -72,24 +86,39 @@ export function LogContactModal({ dealId, buyerId, buyerName, onClose, onLogged 
       }
     >
       <div className="field">
-        <label>Response status</label>
-        <select value={status} onChange={(e) => setStatus(e.target.value as ResponseStatus)}>
+        <label>Status</label>
+        <select value={status} onChange={(e) => setStatus(e.target.value as BuyerStatus)}>
           {STATUSES.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
         </select>
       </div>
-      {status === "OFFER_MADE" ? (
+      <div className="grid-2">
+        <div className="field">
+          <label>Assigned team member</label>
+          <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+            <option value="">Unassigned</option>
+            {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>
+        </div>
+        <div className="field">
+          <label>Response</label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, textTransform: "none", fontSize: 14 }}>
+            <input type="checkbox" checked={responseReceived} onChange={(e) => setResponseReceived(e.target.checked)} /> Response received
+          </label>
+        </div>
+      </div>
+      {status === "OFFER_RECEIVED" && (
         <>
-          <div className="field"><label>Offer amount *</label><input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
+          <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Enter an amount to record a formal offer, or leave blank to just set the status.</p>
+          <div className="field"><label>Offer amount</label><input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
           <div className="field"><label>Conditions</label><textarea rows={2} value={conditions} onChange={(e) => setConditions(e.target.value)} /></div>
           <div className="field"><label>Expiration date</label><input type="date" value={expiration} onChange={(e) => setExpiration(e.target.value)} /></div>
         </>
-      ) : (
-        <>
-          <div className="field"><label>Date sent</label><input type="date" value={dateSent} onChange={(e) => setDateSent(e.target.value)} /></div>
-          <div className="field"><label>Next follow-up</label><input type="date" value={nextFollowUp} onChange={(e) => setNextFollowUp(e.target.value)} /></div>
-          <div className="field"><label>Internal notes</label><textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
-        </>
       )}
+      <div className="grid-2">
+        <div className="field"><label>Date sent</label><input type="date" value={dateSent} onChange={(e) => setDateSent(e.target.value)} /></div>
+        <div className="field"><label>Next follow-up</label><input type="date" value={nextFollowUp} onChange={(e) => setNextFollowUp(e.target.value)} /></div>
+      </div>
+      <div className="field"><label>Internal notes</label><textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
       {error && <div className="error-text">{error}</div>}
     </Modal>
   );

@@ -9,6 +9,7 @@ import { computeMatch } from "../domain/matching.js";
 import { STALE_CONTACT_DAYS } from "../config.js";
 import { daysUntil } from "../domain/dates.js";
 import { logActivity } from "../services/activityLog.js";
+import { effectiveStatus, ENGAGED_STATUSES, BUYER_STATUSES } from "../domain/buyerStatus.js";
 
 export const dealsRouter = Router();
 // All deal routes require membership in an organization and are scoped to it.
@@ -145,7 +146,12 @@ dealsRouter.get(
         offers: { include: { buyer: { select: { id: true, name: true, companyName: true } } }, orderBy: { dateSubmitted: "desc" } },
         files: { include: { uploadedBy: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
         buyerActivity: {
-          include: { buyer: { include: { buyBox: true } }, sentBy: { select: { name: true } } },
+          include: {
+            buyer: { include: { buyBox: true } },
+            sentBy: { select: { name: true } },
+            assignedTeamMember: { select: { id: true, name: true } },
+            messages: { orderBy: { occurredAt: "desc" }, include: { createdBy: { select: { name: true } } } },
+          },
         },
       },
     });
@@ -164,18 +170,29 @@ dealsRouter.get(
         companyName: a.buyer.companyName,
         matchPercent: match.matchPercent,
         dateSent: a.dateSent,
-        responseStatus: a.responseStatus,
+        status: effectiveStatus(a),
+        responseReceived: a.responseReceived,
         offerAmount: a.offerAmount,
         lastActivityDate: a.lastActivityDate,
         nextFollowUpDate: a.nextFollowUpDate,
         notes: a.notes,
         sentBy: a.sentBy?.name ?? null,
+        assignedTeamMember: a.assignedTeamMember ? { id: a.assignedTeamMember.id, name: a.assignedTeamMember.name } : null,
+        timeline: a.messages.map((m) => ({
+          id: m.id,
+          kind: m.kind,
+          subject: m.subject,
+          body: m.body,
+          occurredAt: m.occurredAt,
+          createdBy: m.createdBy?.name ?? null,
+          threadId: m.threadId,
+        })),
       };
     });
 
     // Metrics row.
     const buyersContacted = activity.length;
-    const interested = activity.filter((a) => a.responseStatus === "INTERESTED" || a.responseStatus === "OFFER_MADE").length;
+    const interested = activity.filter((a) => ENGAGED_STATUSES.includes(a.status)).length;
     const offerCount = deal.offers.length;
     const highOffer = deal.offers.reduce<number | null>((max, o) => (max == null || o.amount > max ? o.amount : max), null);
 
@@ -379,11 +396,13 @@ dealsRouter.post(
 // --------------------------------------------------------------------------
 const logContactSchema = z.object({
   buyerId: z.string(),
-  responseStatus: z.enum(["PENDING", "INTERESTED", "NOT_INTERESTED", "PASSED", "OFFER_MADE"]).optional(),
+  status: z.enum(BUYER_STATUSES as [string, ...string[]]).optional(),
   dateSent: dateField,
   offerAmount: z.number().nullish(),
   nextFollowUpDate: dateField,
   notes: z.string().nullish(),
+  responseReceived: z.boolean().optional(),
+  assignedTeamMemberId: z.string().nullish(),
 });
 
 dealsRouter.post(
@@ -395,8 +414,16 @@ dealsRouter.post(
     if (!deal) throw new HttpError(404, "Deal not found");
     const buyer = await prisma.buyer.findFirst({ where: { id: data.buyerId, organizationId: orgId(req) } });
     if (!buyer) throw new HttpError(404, "Buyer not found");
+    if (data.assignedTeamMemberId) {
+      const assignee = await prisma.user.findFirst({ where: { id: data.assignedTeamMemberId, organizationId: orgId(req) } });
+      if (!assignee) throw new HttpError(400, "Assigned team member is not in your organization");
+    }
 
     const now = new Date();
+    const existing = await prisma.dealBuyerActivity.findUnique({
+      where: { dealId_buyerId: { dealId: deal.id, buyerId: data.buyerId } },
+      select: { status: true },
+    });
     const activity = await prisma.$transaction(async (tx) => {
       const a = await tx.dealBuyerActivity.upsert({
         where: { dealId_buyerId: { dealId: deal.id, buyerId: data.buyerId } },
@@ -404,22 +431,35 @@ dealsRouter.post(
           dealId: deal.id,
           buyerId: data.buyerId,
           dateSent: toDate(data.dateSent) ?? now,
-          responseStatus: data.responseStatus ?? "PENDING",
+          status: (data.status as never) ?? "CONTACTED",
           offerAmount: data.offerAmount ?? null,
+          responseReceived: data.responseReceived ?? false,
           lastActivityDate: now,
           nextFollowUpDate: toDate(data.nextFollowUpDate) ?? null,
           notes: data.notes ?? null,
           sentByUserId: req.user!.id,
+          assignedTeamMemberId: data.assignedTeamMemberId ?? null,
         },
         update: {
-          responseStatus: data.responseStatus ?? undefined,
+          status: (data.status as never) ?? undefined,
           dateSent: data.dateSent !== undefined ? toDate(data.dateSent) : undefined,
           offerAmount: data.offerAmount !== undefined ? data.offerAmount : undefined,
+          responseReceived: data.responseReceived !== undefined ? data.responseReceived : undefined,
           nextFollowUpDate: data.nextFollowUpDate !== undefined ? toDate(data.nextFollowUpDate) : undefined,
           notes: data.notes !== undefined ? data.notes : undefined,
+          assignedTeamMemberId: data.assignedTeamMemberId !== undefined ? data.assignedTeamMemberId : undefined,
           lastActivityDate: now,
         },
       });
+      // Record a status change on the timeline when it actually changed.
+      if (data.status && data.status !== existing?.status) {
+        await tx.dealBuyerMessage.create({
+          data: {
+            organizationId: orgId(req), dealId: deal.id, buyerId: data.buyerId, activityId: a.id,
+            kind: "STATUS_CHANGE", body: `Status set to ${data.status}`, occurredAt: now, createdByUserId: req.user!.id,
+          },
+        });
+      }
       // Touch the buyer's last-contact date.
       await tx.buyer.update({ where: { id: data.buyerId }, data: { lastContactDate: now } });
       await logActivity(
@@ -436,6 +476,65 @@ dealsRouter.post(
       return a;
     });
     res.status(201).json(activity);
+  }),
+);
+
+// --------------------------------------------------------------------------
+// Add a manual communication-timeline entry (phone / meeting / note / negotiation)
+// --------------------------------------------------------------------------
+const messageSchema = z.object({
+  kind: z.enum(["PHONE", "MEETING", "NOTE", "NEGOTIATION", "EMAIL_OUT", "EMAIL_IN"]),
+  subject: z.string().nullish(),
+  body: z.string().min(1),
+  occurredAt: dateField,
+});
+
+dealsRouter.post(
+  "/:id/activity/:buyerId/messages",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const data = messageSchema.parse(req.body);
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
+    if (!deal) throw new HttpError(404, "Deal not found");
+    const now = new Date();
+    // Ensure an activity row exists so the timeline attaches to it.
+    const activity = await prisma.dealBuyerActivity.upsert({
+      where: { dealId_buyerId: { dealId: deal.id, buyerId: req.params.buyerId } },
+      create: { dealId: deal.id, buyerId: req.params.buyerId, status: "CONTACTED", lastActivityDate: now, sentByUserId: req.user!.id },
+      update: { lastActivityDate: now },
+    });
+    const message = await prisma.dealBuyerMessage.create({
+      data: {
+        organizationId: orgId(req), dealId: deal.id, buyerId: req.params.buyerId, activityId: activity.id,
+        kind: data.kind, subject: data.subject ?? null, body: data.body,
+        occurredAt: toDate(data.occurredAt) ?? now, createdByUserId: req.user!.id,
+      },
+    });
+    res.status(201).json(message);
+  }),
+);
+
+// --------------------------------------------------------------------------
+// Bulk "mark as contacted" from Match Recommendations
+// --------------------------------------------------------------------------
+dealsRouter.post(
+  "/:id/contact-bulk",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { buyerIds } = z.object({ buyerIds: z.array(z.string()).min(1) }).parse(req.body);
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
+    if (!deal) throw new HttpError(404, "Deal not found");
+    // Only buyers in this org.
+    const buyers = await prisma.buyer.findMany({ where: { id: { in: buyerIds }, organizationId: orgId(req) }, select: { id: true } });
+    const now = new Date();
+    for (const b of buyers) {
+      await prisma.dealBuyerActivity.upsert({
+        where: { dealId_buyerId: { dealId: deal.id, buyerId: b.id } },
+        create: { dealId: deal.id, buyerId: b.id, status: "CONTACTED", dateSent: now, lastActivityDate: now, sentByUserId: req.user!.id },
+        update: { lastActivityDate: now },
+      });
+    }
+    res.json({ ok: true, count: buyers.length });
   }),
 );
 

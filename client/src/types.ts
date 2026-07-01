@@ -4,7 +4,19 @@ export type Stage =
 
 export type Priority = "HIGH" | "MEDIUM" | "LOW";
 export type Relationship = "HOT" | "WARM" | "COLD";
-export type ResponseStatus = "PENDING" | "INTERESTED" | "NOT_INTERESTED" | "PASSED" | "OFFER_MADE";
+export type BuyerStatus =
+  | "CONTACTED" | "INTERESTED" | "REVIEWING" | "OFFER_RECEIVED" | "NEGOTIATING" | "PASSED" | "CLOSED";
+export type CommKind = "EMAIL_OUT" | "EMAIL_IN" | "PHONE" | "MEETING" | "NOTE" | "NEGOTIATION" | "STATUS_CHANGE";
+
+export interface TimelineEntry {
+  id: string;
+  kind: CommKind;
+  subject: string | null;
+  body: string | null;
+  occurredAt: string;
+  createdBy: string | null;
+  threadId: string | null;
+}
 
 export interface DealSummary {
   id: string;
@@ -66,10 +78,15 @@ export interface BuyerActivityRow {
   companyName: string;
   matchPercent: number;
   dateSent: string | null;
-  responseStatus: ResponseStatus;
+  status: BuyerStatus;
+  responseReceived: boolean;
   offerAmount: number | null;
   lastActivityDate: string | null;
+  nextFollowUpDate: string | null;
   notes: string | null;
+  sentBy: string | null;
+  assignedTeamMember: { id: string; name: string } | null;
+  timeline: TimelineEntry[];
 }
 
 export interface UserLite { id: string; name: string; email?: string; role?: string; }

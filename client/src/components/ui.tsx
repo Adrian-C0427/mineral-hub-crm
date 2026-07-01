@@ -30,6 +30,21 @@ export function ResponseBadge({ status }: { status: string }) {
   return <span className={`badge ${RESPONSE_CLASS[status] ?? ""}`}>{label}</span>;
 }
 
+// New buyer pipeline statuses (BuyerStatus).
+const STATUS_CLASS: Record<string, string> = {
+  CLOSED: "resp-offer",
+  OFFER_RECEIVED: "resp-offer",
+  NEGOTIATING: "resp-interested",
+  REVIEWING: "resp-interested",
+  INTERESTED: "resp-interested",
+  CONTACTED: "resp-pending",
+  PASSED: "resp-passed",
+};
+
+export function StatusBadge({ status }: { status: string }) {
+  return <span className={`badge ${STATUS_CLASS[status] ?? ""}`}>{prettyEnum(status)}</span>;
+}
+
 export function MetricCard({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
   return (
     <div className="metric-card">

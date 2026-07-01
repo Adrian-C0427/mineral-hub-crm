@@ -52,12 +52,35 @@ enum RelationshipStatus {
 }
 
 // Buyer activity response states. PENDING is the internal "logged, awaiting reply" state.
+// LEGACY — superseded by BuyerStatus; kept additively for the backfill.
 enum ResponseStatus {
   PENDING
   INTERESTED
   NOT_INTERESTED
   PASSED
   OFFER_MADE
+}
+
+// Buyer pipeline status within a deal (the actionable outreach lifecycle).
+enum BuyerStatus {
+  CONTACTED
+  INTERESTED
+  REVIEWING
+  OFFER_RECEIVED
+  NEGOTIATING
+  PASSED
+  CLOSED
+}
+
+// Communication-history entry types for the per-buyer deal timeline.
+enum CommKind {
+  EMAIL_OUT
+  EMAIL_IN
+  PHONE
+  MEETING
+  NOTE
+  NEGOTIATION
+  STATUS_CHANGE
 }
 
 enum OfferStatus {
@@ -98,6 +121,7 @@ model Organization {
   expenses          Expense[]
   expenseCategories ExpenseCategory[]
   rolePermissions   RolePermissions[]
+  buyerMessages     DealBuyerMessage[]
 }
 
 // Per-organization overrides of the default permission set for a role. Absence
@@ -156,13 +180,15 @@ model User {
   // member management view.
   lastActiveAt DateTime?
 
-  ownedDeals      Deal[]              @relation("DealRelationshipOwner")
-  buyerOwnerships BuyerOwner[]
-  stageChanges    DealStageHistory[]
-  sentActivities  DealBuyerActivity[]
-  uploadedFiles   FileAttachment[]
-  activityLogs    ActivityLog[]
-  expenses        Expense[]
+  ownedDeals         Deal[]              @relation("DealRelationshipOwner")
+  buyerOwnerships    BuyerOwner[]
+  stageChanges       DealStageHistory[]
+  sentActivities     DealBuyerActivity[] @relation("SentActivities")
+  assignedActivities DealBuyerActivity[] @relation("AssignedActivities")
+  authoredMessages   DealBuyerMessage[]  @relation("AuthoredMessages")
+  uploadedFiles      FileAttachment[]
+  activityLogs       ActivityLog[]
+  expenses           Expense[]
 
   @@index([organizationId])
 }
@@ -221,6 +247,7 @@ model Deal {
 
   stageHistory  DealStageHistory[]
   buyerActivity DealBuyerActivity[]
+  buyerMessages DealBuyerMessage[]
   offers        Offer[]             @relation("DealOffers")
   files         FileAttachment[]
   activityLogs  ActivityLog[]
@@ -271,14 +298,15 @@ model Buyer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  buyBox       BuyBoxCriteria?
-  owners       BuyerOwner[]
-  tags         BuyerTagOnBuyer[]
-  dealActivity DealBuyerActivity[]
-  offers       Offer[]             @relation("BuyerOffers")
-  selectedFor  Deal[]              @relation("SelectedBuyer")
-  files        FileAttachment[]
-  activityLogs ActivityLog[]
+  buyBox        BuyBoxCriteria?
+  owners        BuyerOwner[]
+  tags          BuyerTagOnBuyer[]
+  dealActivity  DealBuyerActivity[]
+  buyerMessages DealBuyerMessage[]
+  offers        Offer[]             @relation("BuyerOffers")
+  selectedFor   Deal[]              @relation("SelectedBuyer")
+  files         FileAttachment[]
+  activityLogs  ActivityLog[]
 
   @@index([normalizedCompany])
   @@index([email])
@@ -329,25 +357,61 @@ model BuyerTagOnBuyer {
 // ---------------------------------------------------------------------------
 
 model DealBuyerActivity {
-  id               String         @id @default(cuid())
-  dealId           String
-  deal             Deal           @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  buyerId          String
-  buyer            Buyer          @relation(fields: [buyerId], references: [id], onDelete: Cascade)
-  dateSent         DateTime?
-  responseStatus   ResponseStatus @default(PENDING)
-  offerAmount      Float?
-  lastActivityDate DateTime?
-  nextFollowUpDate DateTime?
-  notes            String?
-  sentByUserId     String?
-  sentBy           User?          @relation(fields: [sentByUserId], references: [id], onDelete: SetNull)
+  id                   String         @id @default(cuid())
+  dealId               String
+  deal                 Deal           @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  buyerId              String
+  buyer                Buyer          @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  dateSent             DateTime?
+  // Legacy status (kept additively; superseded by `status`). Backfilled → status.
+  responseStatus       ResponseStatus @default(PENDING)
+  // New buyer pipeline status. Nullable so the startup backfill fills existing
+  // rows from responseStatus exactly once (idempotent: WHERE status IS NULL).
+  status               BuyerStatus?
+  offerAmount          Float?
+  responseReceived     Boolean        @default(false)
+  lastActivityDate     DateTime?
+  nextFollowUpDate     DateTime?
+  notes                String?
+  sentByUserId         String?
+  sentBy               User?          @relation("SentActivities", fields: [sentByUserId], references: [id], onDelete: SetNull)
+  assignedTeamMemberId String?
+  assignedTeamMember   User?          @relation("AssignedActivities", fields: [assignedTeamMemberId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  messages DealBuyerMessage[]
+
   @@unique([dealId, buyerId])
   @@index([buyerId])
+}
+
+// Communication-history timeline entry for a buyer within a deal. Emails
+// (EMAIL_OUT/EMAIL_IN) group into threads via threadId; manual entries
+// (PHONE/MEETING/NOTE/NEGOTIATION) and STATUS_CHANGE build the interaction log.
+model DealBuyerMessage {
+  id              String             @id @default(cuid())
+  organizationId  String?
+  organization    Organization?      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  dealId          String
+  deal            Deal               @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  buyerId         String
+  buyer           Buyer              @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  activityId      String?
+  activity        DealBuyerActivity? @relation(fields: [activityId], references: [id], onDelete: Cascade)
+  kind            CommKind
+  subject         String?
+  body            String?
+  occurredAt      DateTime           @default(now())
+  createdByUserId String?
+  createdBy       User?              @relation("AuthoredMessages", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  threadId        String?
+
+  createdAt DateTime @default(now())
+
+  @@index([dealId, buyerId])
+  @@index([organizationId])
 }
 
 // ---------------------------------------------------------------------------
