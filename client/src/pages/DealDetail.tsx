@@ -213,7 +213,7 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
   async function save() {
     await api.patch(`/deals/${deal.id}`, {
       state: f.state, counties: f.counties, basins: f.basins, formations: f.formations,
-      assetTypes: f.assetTypes, acreageNma: f.acreageNma, nra: f.nra, abstractIds: f.abstractIds, askPrice: f.askPrice, operator: f.operator,
+      assetTypes: f.assetTypes, acreageNma: f.acreageNma, nra: f.nra, abstractIds: f.abstractIds, askPrice: f.askPrice, ourPrice: f.ourPrice, operator: f.operator,
     });
     setEdit(false);
     onSaved(); // editing characteristics auto-refreshes matches
@@ -230,7 +230,7 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
         <div className="dd-grid">
           <KV k="State" v={deal.state} /><KV k="County" v={deal.counties.join(", ")} /><KV k="Basin" v={deal.basins.join(", ")} />
           <KV k="Formation" v={deal.formations.join(", ")} /><KV k="Asset Type" v={deal.assetTypes.join(", ")} /><KV k="NMA" v={num(deal.acreageNma)} />
-          <KV k="NRA" v={num(deal.nra)} /><KV k="Ask Price" v={money(deal.askPrice)} /><KV k="Operator" v={deal.operator} />
+          <KV k="NRA" v={num(deal.nra)} /><KV k="Our Price" v={money(deal.ourPrice)} /><KV k="Ask Price (to buyers)" v={money(deal.askPrice)} /><KV k="Operator" v={deal.operator} />
           <KV k="Abstract (Leon Co.)" v={abstractLabel} />
         </div>
       ) : (
@@ -242,7 +242,8 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
           <Fld l="Asset Type"><SearchableMultiSelect options={ASSET_TYPE_OPTIONS} value={f.assetTypes} onChange={setArr("assetTypes")} placeholder="Search asset types…" /></Fld>
           <Fld l="NMA"><input type="number" value={f.acreageNma ?? ""} onChange={setNum("acreageNma")} /></Fld>
           <Fld l="NRA"><input type="number" value={f.nra ?? ""} onChange={setNum("nra")} /></Fld>
-          <Fld l="Ask Price"><input type="number" value={f.askPrice ?? ""} onChange={setNum("askPrice")} /></Fld>
+          <Fld l="Our Price"><input type="number" value={f.ourPrice ?? ""} onChange={setNum("ourPrice")} /></Fld>
+          <Fld l="Ask Price (to buyers)"><input type="number" value={f.askPrice ?? ""} onChange={setNum("askPrice")} /></Fld>
           <Fld l="Operator"><input value={f.operator ?? ""} onChange={set("operator")} /></Fld>
           <Fld l="Abstract"><AbstractMultiPicker value={f.abstractIds} counties={f.counties} onChange={setArr("abstractIds")} /></Fld>
         </div>

@@ -18,7 +18,10 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
   const bestOffer = deal.offers && deal.offers.length
     ? deal.offers.reduce((m, o) => (o.amount > m ? o.amount : m), -Infinity)
     : null;
-  const profitEst = bestOffer != null ? netProfit(bestOffer, deal.askPrice, deal.estimatedClosingCosts) : null;
+  // Cost basis is Our Price (acquisition cost); fall back to askPrice for
+  // pre-Our-Price deals so historical profit stays correct.
+  const costBasis = deal.ourPrice ?? deal.askPrice;
+  const profitEst = bestOffer != null ? netProfit(bestOffer, costBasis, deal.estimatedClosingCosts) : null;
   return {
     id: deal.id,
     name: deal.name,
@@ -30,6 +33,7 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     abstractIds: deal.abstractIds,
     operator: deal.operator,
     askPrice: deal.askPrice,
+    ourPrice: deal.ourPrice,
     assetTypes: deal.assetTypes,
     basins: deal.basins,
     formations: deal.formations,

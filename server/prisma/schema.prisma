@@ -185,7 +185,11 @@ model Deal {
   // Survey/abstracts this deal sits in (e.g. TX-289653). Links to map boundaries.
   abstractIds    String[]
   operator       String?
+  // Ask Price = our asking price to buyers (marketing/list price).
   askPrice       Float?
+  // Our Price = our acquisition cost (what the property is under contract for).
+  // Cost basis for profit: profit = accepted offer - ourPrice - closing costs.
+  ourPrice       Float?
   assetTypes     String[]
   basins         String[]
   formations     String[]

@@ -15,6 +15,7 @@ export interface DealSummary {
   nra: number | null;
   abstractIds: string[];
   askPrice: number | null;
+  ourPrice: number | null;
   assetTypes: string[];
   basins: string[];
   formations: string[];
