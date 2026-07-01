@@ -361,7 +361,7 @@ export function MapView() {
                 <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.leaseName || "Well"} {selected.wellNo ? `#${selected.wellNo}` : ""}</h3><div className="muted" style={{ fontSize: 12 }}>{selected.symbol}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
                 <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                   <KV k="Operator" v={selected.operator} /><KV k="Oil / Gas" v={selected.oilGas} />
-                  <KV k="Lease" v={selected.leaseName} /><KV k="Lease No." v={selected.leaseNo} />
+                  <KV k="Lease" v={selected.leaseName} /><KV k="RRC Lease #" v={selected.leaseNo} />
                   <KV k="Field" v={selected.field} /><KV k="API" v={selected.api} />
                   <KV k="Well No." v={selected.wellNo} /><KV k="Type" v={selected.type} />
                   <KV k="Status" v={selected.status} /><KV k="County" v={selected.county} />
