@@ -23,10 +23,10 @@ export const MATCH_TOTAL_WEIGHT = Object.values(MATCH_WEIGHTS).reduce((a, b) => 
 
 export interface DealForMatch {
   state: string | null;
-  county: string | null;
-  basin: string | null;
-  formation: string | null;
-  assetType: string | null;
+  counties: string[];
+  basins: string[];
+  formations: string[];
+  assetTypes: string[];
   acreageNma: number | null;
   askPrice: number | null;
 }
@@ -72,6 +72,21 @@ function setMatch(dealValue: string | null, allowed: string[]): { matched: boole
   return { matched, detail: matched ? `matches ${dealValue}` : `${dealValue} not in buy-box` };
 }
 
+/**
+ * Deal now carries multiple values per criterion. Empty buyer list => matches
+ * anything; otherwise a match is any overlap between the deal's values and the
+ * buyer's accepted values.
+ */
+function multiMatch(dealValues: string[], allowed: string[]): { matched: boolean; detail: string } {
+  if (!allowed || allowed.length === 0) return { matched: true, detail: "buyer accepts any" };
+  if (!dealValues || dealValues.length === 0) return { matched: false, detail: "deal value missing" };
+  const allowedSet = new Set(allowed.map(norm));
+  const hit = dealValues.find((v) => allowedSet.has(norm(v)));
+  return hit
+    ? { matched: true, detail: `matches ${hit}` }
+    : { matched: false, detail: `${dealValues.join(", ")} not in buy-box` };
+}
+
 /** Inclusive range check. Null bounds are unbounded. Missing deal value => no match. */
 function rangeMatch(
   dealValue: number | null,
@@ -99,10 +114,10 @@ export function computeMatch(deal: DealForMatch, box: BuyBoxForMatch): MatchResu
   };
 
   push("state", "State", setMatch(deal.state, box.states));
-  push("county", "County", setMatch(deal.county, box.counties));
-  push("basin", "Basin", setMatch(deal.basin, box.basins));
-  push("formation", "Formation", setMatch(deal.formation, box.formations));
-  push("assetType", "Asset Type", setMatch(deal.assetType, box.assetTypes));
+  push("county", "County", multiMatch(deal.counties, box.counties));
+  push("basin", "Basin", multiMatch(deal.basins, box.basins));
+  push("formation", "Formation", multiMatch(deal.formations, box.formations));
+  push("assetType", "Asset Type", multiMatch(deal.assetTypes, box.assetTypes));
   push("acreage", "Acreage", rangeMatch(deal.acreageNma, box.minAcreage, box.maxAcreage));
   push("price", "Price", rangeMatch(deal.askPrice, box.minPrice, box.maxPrice));
 

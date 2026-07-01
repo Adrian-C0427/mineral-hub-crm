@@ -50,7 +50,7 @@ reportsRouter.get(
       return {
         id: d.id,
         name: d.name,
-        county: d.county,
+        county: d.counties.join(", "),
         state: d.state,
         buyer: d.selectedBuyer?.name ?? null,
         askPrice: d.askPrice,

@@ -72,8 +72,8 @@ describe("priority", () => {
 
 describe("matching engine", () => {
   const deal = {
-    state: "TX", county: "Cherokee", basin: "Permian", formation: "Wolfcamp",
-    assetType: "Minerals", acreageNma: 40, askPrice: 100000,
+    state: "TX", counties: ["Cherokee"], basins: ["Permian"], formations: ["Wolfcamp"],
+    assetTypes: ["Minerals"], acreageNma: 40, askPrice: 100000,
   };
   it("empty buy-box matches everything = 100%", () => {
     const r = computeMatch(deal, {

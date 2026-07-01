@@ -32,17 +32,17 @@ mapRouter.get(
 
     const where: Prisma.DealWhereInput = {
       organizationId: orgId(req),
-      abstractId: { not: null },
+      abstractIds: { isEmpty: false },
     };
     if (f.status && f.status !== "ALL") {
       where.stage = f.status === "ACTIVE" ? { in: ACTIVE_STAGES } : (f.status as Stage);
     } else if (!f.status) {
       where.stage = { in: ACTIVE_STAGES };
     }
-    if (f.county) where.county = { equals: f.county, mode: "insensitive" };
-    if (f.basin) where.basin = { equals: f.basin, mode: "insensitive" };
-    if (f.formation) where.formation = { equals: f.formation, mode: "insensitive" };
-    if (f.assetType) where.assetType = { equals: f.assetType, mode: "insensitive" };
+    if (f.county) where.counties = { has: f.county };
+    if (f.basin) where.basins = { has: f.basin };
+    if (f.formation) where.formations = { has: f.formation };
+    if (f.assetType) where.assetTypes = { has: f.assetType };
 
     const deals = await prisma.deal.findMany({
       where,
@@ -56,16 +56,16 @@ mapRouter.get(
         const s = serializeDeal(d, now);
         return {
           id: s.id,
-          abstractId: s.abstractId,
+          abstractIds: s.abstractIds,
           name: s.name,
           stage: s.stage,
           priority: s.priority,
-          county: s.county,
+          counties: s.counties,
           state: s.state,
           operator: s.operator,
-          assetType: s.assetType,
-          basin: s.basin,
-          formation: s.formation,
+          assetTypes: s.assetTypes,
+          basins: s.basins,
+          formations: s.formations,
           acreageNma: s.acreageNma,
           nra: s.nra,
           askPrice: s.askPrice,
@@ -82,16 +82,15 @@ mapRouter.get(
   "/filters",
   asyncHandler(async (req: AuthedRequest, res) => {
     const deals = await prisma.deal.findMany({
-      where: { organizationId: orgId(req), abstractId: { not: null } },
-      select: { county: true, basin: true, formation: true, assetType: true },
+      where: { organizationId: orgId(req), abstractIds: { isEmpty: false } },
+      select: { counties: true, basins: true, formations: true, assetTypes: true },
     });
-    const uniq = (vals: (string | null)[]) =>
-      [...new Set(vals.filter((v): v is string => !!v))].sort();
+    const uniq = (vals: string[][]) => [...new Set(vals.flat())].filter(Boolean).sort();
     res.json({
-      counties: uniq(deals.map((d) => d.county)),
-      basins: uniq(deals.map((d) => d.basin)),
-      formations: uniq(deals.map((d) => d.formation)),
-      assetTypes: uniq(deals.map((d) => d.assetType)),
+      counties: uniq(deals.map((d) => d.counties)),
+      basins: uniq(deals.map((d) => d.basins)),
+      formations: uniq(deals.map((d) => d.formations)),
+      assetTypes: uniq(deals.map((d) => d.assetTypes)),
     });
   }),
 );

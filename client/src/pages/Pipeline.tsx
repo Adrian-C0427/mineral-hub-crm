@@ -90,7 +90,7 @@ function Card({ deal, onDragStart, onClick }: { deal: DealSummary; onDragStart: 
     >
       <div className="dc-name">{deal.name}</div>
       <div className="dc-meta">
-        <span>{[deal.county, deal.state].filter(Boolean).join(", ") || "—"}</span>
+        <span>{[deal.counties.join(", "), deal.state].filter(Boolean).join(", ") || "—"}</span>
         <span>{num(deal.acreageNma)} NMA</span>
       </div>
       <div className="dc-meta" style={{ marginTop: 4 }}>

@@ -151,17 +151,18 @@ model Deal {
   organization        Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name                String
   sellerNames         String[]
-  county              String?
+  // Deal characteristics support multiple selections (state stays single).
+  counties            String[]
   state               String?
   acreageNma          Float?
   nra                 Float?
-  // Survey/abstract this deal sits in (e.g. TX-289653). Links to map boundaries.
-  abstractId          String?
+  // Survey/abstracts this deal sits in (e.g. TX-289653). Links to map boundaries.
+  abstractIds         String[]
   operator            String?
   askPrice            Float?
-  assetType           String?
-  basin               String?
-  formation           String?
+  assetTypes          String[]
+  basins              String[]
+  formations          String[]
 
   stage                 Stage    @default(UNDER_CONTRACT)
   currentStageEnteredAt DateTime @default(now())
@@ -197,7 +198,6 @@ model Deal {
   @@index([stage])
   @@index([selectedBuyerId])
   @@index([organizationId])
-  @@index([abstractId])
 }
 
 model DealStageHistory {

@@ -1,14 +1,22 @@
 import { useState } from "react";
 import { Modal } from "./ui";
 import { api, ApiError } from "../api/client";
+import { SearchableMultiSelect } from "./SearchableMultiSelect";
+import { AbstractMultiPicker } from "./AbstractPicker";
+import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
 import type { DealSummary } from "../types";
 
 export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCreated: (d: DealSummary) => void }) {
   const [f, setF] = useState({
-    name: "", state: "", county: "", basin: "", formation: "", assetType: "",
-    acreageNma: "", nra: "", askPrice: "", operator: "", sellerNames: "",
-    dateUnderContract: "", originalClosingDate: "", estimatedClosingCosts: "", notes: "",
+    name: "", state: "", operator: "", sellerNames: "",
+    acreageNma: "", nra: "", askPrice: "", estimatedClosingCosts: "",
+    dateUnderContract: "", originalClosingDate: "", notes: "",
   });
+  const [counties, setCounties] = useState<string[]>([]);
+  const [basins, setBasins] = useState<string[]>([]);
+  const [formations, setFormations] = useState<string[]>([]);
+  const [assetTypes, setAssetTypes] = useState<string[]>([]);
+  const [abstractIds, setAbstractIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -24,10 +32,7 @@ export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCr
       const deal = await api.post<DealSummary>("/deals", {
         name: f.name.trim(),
         state: f.state || null,
-        county: f.county || null,
-        basin: f.basin || null,
-        formation: f.formation || null,
-        assetType: f.assetType || null,
+        counties, basins, formations, assetTypes, abstractIds,
         operator: f.operator || null,
         acreageNma: numOrNull(f.acreageNma),
         nra: numOrNull(f.nra),
@@ -62,10 +67,10 @@ export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCr
       <div className="field"><label>Deal name *</label><input value={f.name} onChange={set("name")} autoFocus /></div>
       <div className="dd-grid">
         <div className="field"><label>State</label><input value={f.state} onChange={set("state")} /></div>
-        <div className="field"><label>County</label><input value={f.county} onChange={set("county")} /></div>
-        <div className="field"><label>Asset Type</label><input value={f.assetType} onChange={set("assetType")} /></div>
-        <div className="field"><label>Basin</label><input value={f.basin} onChange={set("basin")} /></div>
-        <div className="field"><label>Formation</label><input value={f.formation} onChange={set("formation")} /></div>
+        <div className="field"><label>County</label><SearchableMultiSelect options={TEXAS_COUNTY_OPTIONS} value={counties} onChange={setCounties} placeholder="Search counties…" /></div>
+        <div className="field"><label>Asset Type</label><SearchableMultiSelect options={ASSET_TYPE_OPTIONS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
+        <div className="field"><label>Basin</label><SearchableMultiSelect options={TEXAS_BASIN_OPTIONS} value={basins} onChange={setBasins} placeholder="Search basins…" /></div>
+        <div className="field"><label>Formation</label><SearchableMultiSelect options={TEXAS_FORMATION_OPTIONS} value={formations} onChange={setFormations} placeholder="Search formations…" /></div>
         <div className="field"><label>Operator</label><input value={f.operator} onChange={set("operator")} /></div>
         <div className="field"><label>NMA</label><input type="number" value={f.acreageNma} onChange={set("acreageNma")} /></div>
         <div className="field"><label>NRA</label><input type="number" value={f.nra} onChange={set("nra")} /></div>
@@ -73,8 +78,9 @@ export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCr
         <div className="field"><label>Est. Closing Costs</label><input type="number" value={f.estimatedClosingCosts} onChange={set("estimatedClosingCosts")} /></div>
         <div className="field"><label>Date Under Contract</label><input type="date" value={f.dateUnderContract} onChange={set("dateUnderContract")} /></div>
         <div className="field"><label>Original Closing Date</label><input type="date" value={f.originalClosingDate} onChange={set("originalClosingDate")} /></div>
-        <div className="field"><label>Seller Names (comma-sep)</label><input value={f.sellerNames} onChange={set("sellerNames")} /></div>
       </div>
+      <div className="field"><label>Abstract</label><AbstractMultiPicker value={abstractIds} counties={counties} onChange={setAbstractIds} /></div>
+      <div className="field"><label>Seller Names (comma-sep)</label><input value={f.sellerNames} onChange={set("sellerNames")} /></div>
       <div className="field"><label>Notes</label><textarea rows={3} value={f.notes} onChange={set("notes")} /></div>
       {error && <div className="error-text">{error}</div>}
     </Modal>

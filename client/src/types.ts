@@ -9,15 +9,15 @@ export type ResponseStatus = "PENDING" | "INTERESTED" | "NOT_INTERESTED" | "PASS
 export interface DealSummary {
   id: string;
   name: string;
-  county: string | null;
+  counties: string[];
   state: string | null;
   acreageNma: number | null;
   nra: number | null;
-  abstractId: string | null;
+  abstractIds: string[];
   askPrice: number | null;
-  assetType: string | null;
-  basin: string | null;
-  formation: string | null;
+  assetTypes: string[];
+  basins: string[];
+  formations: string[];
   stage: Stage;
   daysInStage: number;
   priority: Priority;

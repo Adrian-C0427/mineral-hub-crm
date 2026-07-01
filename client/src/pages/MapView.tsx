@@ -8,16 +8,16 @@ import { money, num } from "../lib/format";
 
 interface MapDeal {
   id: string;
-  abstractId: string | null;
+  abstractIds: string[];
   name: string;
   stage: string;
   priority: "HIGH" | "MEDIUM" | "LOW";
-  county: string | null;
+  counties: string[];
   state: string | null;
   operator: string | null;
-  assetType: string | null;
-  basin: string | null;
-  formation: string | null;
+  assetTypes: string[];
+  basins: string[];
+  formations: string[];
   acreageNma: number | null;
   nra: number | null;
   askPrice: number | null;
@@ -31,6 +31,8 @@ const ABSTRACTS_URL = "/data/leon-abstracts.geojson";
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
 const OSM_STYLE: maplibregl.StyleSpecification = {
   version: 8,
+  // Glyphs are required for text/symbol labels (raster basemaps don't include them).
+  glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
   sources: {
     osm: {
       type: "raster",
@@ -99,6 +101,38 @@ export function MapView() {
         },
       });
 
+      // Labels: abstract number (+ survey name when zoomed in). Larger abstracts win
+      // collisions first (symbol-sort-key = -area); MapLibre declutters + repositions
+      // automatically on pan/zoom, so labels never overlap and reveal progressively.
+      map.addLayer({
+        id: "abstracts-labels",
+        type: "symbol",
+        source: "abstracts",
+        minzoom: 10,
+        layout: {
+          "symbol-sort-key": ["*", -1, ["get", "area"]],
+          "text-field": [
+            "step",
+            ["zoom"],
+            ["get", "abstract"],
+            12.5,
+            ["concat", ["get", "abstract"], "\n", ["get", "survey"]],
+          ],
+          "text-font": ["Noto Sans Regular"],
+          "text-size": ["interpolate", ["linear"], ["zoom"], 10, 10, 13, 12, 15, 14],
+          "text-max-width": 8,
+          "text-line-height": 1.1,
+          "text-padding": 2,
+          "text-allow-overlap": false,
+          "text-optional": true,
+        },
+        paint: {
+          "text-color": "#0f172a",
+          "text-halo-color": "#ffffff",
+          "text-halo-width": 1.4,
+        },
+      });
+
       map.on("click", "abstracts-fill", (e) => {
         const feat = e.features?.[0];
         if (!feat) return;
@@ -134,8 +168,7 @@ export function MapView() {
     for (const id of activeIds.current) map.setFeatureState({ source: "abstracts", id }, { active: false });
     const byAbs: Record<string, MapDeal[]> = {};
     for (const d of deals) {
-      if (!d.abstractId) continue;
-      (byAbs[d.abstractId] ??= []).push(d);
+      for (const aid of d.abstractIds) (byAbs[aid] ??= []).push(d);
     }
     dealsByAbstract.current = byAbs;
     activeIds.current = Object.keys(byAbs);
@@ -209,8 +242,8 @@ export function MapView() {
                   </div>
                   <div className="row" style={{ gap: 6, margin: "6px 0" }}><StageBadge stage={d.stage} />{d.selectedBuyer && <span className="muted" style={{ fontSize: 12 }}>→ {d.selectedBuyer.name}</span>}</div>
                   <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                    <KV k="County" v={d.county} /><KV k="Operator" v={d.operator} />
-                    <KV k="Asset Type" v={d.assetType} /><KV k="Basin" v={d.basin} />
+                    <KV k="County" v={d.counties.join(", ")} /><KV k="Operator" v={d.operator} />
+                    <KV k="Asset Type" v={d.assetTypes.join(", ")} /><KV k="Basin" v={d.basins.join(", ")} />
                     <KV k="NMA" v={num(d.acreageNma)} /><KV k="NRA" v={num(d.nra)} />
                     <KV k="Ask" v={money(d.askPrice)} /><KV k="Profit est." v={money(d.profitEst)} />
                   </div>
