@@ -23,15 +23,15 @@ type Selected = SelAbstract | SelWell | null;
 
 const ABSTRACTS_URL = "/data/leon-abstracts.geojson";
 const WELLS_URL = "/data/leon-wells.geojson";
-const BOTTOMHOLES_URL = "/data/leon-bottomholes.geojson";
 const WELLBORES_URL = "/data/leon-wellbores.geojson";
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
 
-const CATEGORY_COLOR = [
-  "match", ["get", "category"],
-  "producing", "#22c55e", "plugged", "#6b7280", "shutin", "#f59e0b", "dry", "#78350f",
-  "permitted", "#3b82f6", "injection", "#7c3aed", "water", "#06b6d4", "canceled", "#9ca3af",
-  "location", "#0ea5e9", "#64748b",
+// Wells are colored by RRC status.
+const STATUS_COLOR = [
+  "match", ["get", "status"],
+  "Producing", "#22c55e", "Shut-In", "#f59e0b", "Plugged", "#6b7280", "Permitted", "#3b82f6",
+  "Dry Hole", "#78350f", "Active", "#7c3aed", "Canceled/Abandoned", "#9ca3af", "Surface location", "#0ea5e9",
+  "#64748b",
 ] as unknown as maplibregl.ExpressionSpecification;
 
 const STATUS_OPTIONS = [
@@ -67,7 +67,7 @@ export function MapView() {
   const [deals, setDeals] = useState<MapDeal[] | null>(null);
   const [selected, setSelected] = useState<Selected>(null);
   const [choices, setChoices] = useState<WellProps[] | null>(null); // overlap disambiguation
-  const [layers, setLayers] = useState({ boundaries: true, absNums: true, surveyNames: true, deals: true, wells: true, wellbores: true, bottomHoles: false });
+  const [layers, setLayers] = useState({ boundaries: true, absNums: true, surveyNames: true, deals: true, wells: true, wellbores: true });
   const layersRef = useRef(layers); layersRef.current = layers;
   const [showLayers, setShowLayers] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -89,14 +89,13 @@ export function MapView() {
   useEffect(() => {
     if (mapRef.current || !mapContainer.current) return;
     const map = new maplibregl.Map({ container: mapContainer.current, style: styleWithGlyphs(), center: LEON_CENTER, zoom: 10, attributionControl: { compact: true } });
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
     mapRef.current = map;
 
     map.on("load", async () => {
-      const [absFC, welFC, botFC, boreFC] = await Promise.all([
+      const [absFC, welFC, boreFC] = await Promise.all([
         fetch(ABSTRACTS_URL).then((r) => r.json()) as Promise<FC>,
         fetch(WELLS_URL).then((r) => r.json()) as Promise<FC>,
-        fetch(BOTTOMHOLES_URL).then((r) => r.json()) as Promise<FC>,
         fetch(WELLBORES_URL).then((r) => r.json()) as Promise<FC>,
       ]);
       abstractsFC.current = absFC; wellsFC.current = welFC;
@@ -111,7 +110,6 @@ export function MapView() {
 
       map.addSource("abstracts", { type: "geojson", data: absFC as unknown as GeoJSON.FeatureCollection, promoteId: "id" });
       map.addSource("wells", { type: "geojson", data: welFC as unknown as GeoJSON.FeatureCollection, promoteId: "fid" });
-      map.addSource("bottomholes", { type: "geojson", data: botFC as unknown as GeoJSON.FeatureCollection, promoteId: "fid" });
       map.addSource("wellbores", { type: "geojson", data: boreFC as unknown as GeoJSON.FeatureCollection, promoteId: "fid" });
 
       map.addLayer({ id: "abstracts-fill", type: "fill", source: "abstracts", paint: {
@@ -124,13 +122,10 @@ export function MapView() {
         "line-color": ["match", ["get", "wellboreType"], "Horizontal", "#0f766e", "Directional", "#9333ea", "#0f766e"],
         "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1, 15, 2.5], "line-opacity": 0.8 } });
       map.addLayer({ id: "wellbores-sel", type: "line", source: "wellbores", filter: ["==", ["get", "surfaceId"], -1], paint: { "line-color": "#111827", "line-width": 3 } });
-      // Bottom holes (hollow squares via small circle w/ dark ring)
-      map.addLayer({ id: "bottomholes", type: "circle", source: "bottomholes", layout: { visibility: "none" }, paint: {
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 1.6, 15, 3.4], "circle-color": "#1e293b", "circle-stroke-width": 0.5, "circle-stroke-color": "#ffffff", "circle-opacity": 0.7 } });
-      // Surface wells — selection via feature-state (unique fid)
+      // Surface wells — colored by RRC status; selection via feature-state (unique fid)
       map.addLayer({ id: "wells", type: "circle", source: "wells", paint: {
         "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 2.3, 12, 3.6, 15, 6],
-        "circle-color": CATEGORY_COLOR,
+        "circle-color": STATUS_COLOR,
         "circle-stroke-width": ["case", ["boolean", ["feature-state", "selected"], false], 3, 0.6],
         "circle-stroke-color": ["case", ["boolean", ["feature-state", "selected"], false], "#111827", "#ffffff"],
         "circle-opacity": 0.9 } });
@@ -229,7 +224,7 @@ export function MapView() {
     const vis = (id: string, on: boolean) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
     vis("abstracts-fill", L.boundaries); vis("abstracts-line", L.boundaries);
     vis("abstracts-num", L.absNums); vis("abstracts-survey", L.surveyNames);
-    vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores); vis("bottomholes", L.bottomHoles);
+    vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores);
     applyHighlight();
   }
   function applyAbstractFilter() {
@@ -300,6 +295,7 @@ export function MapView() {
 
       {showFilters && (
         <div className="panel" style={{ marginBottom: 12 }}>
+          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Filters apply to all GIS data on the map (wells, abstracts, surveys) — independent of whether a deal exists. "Deal status" only affects the deal highlight.</p>
           <div className="dd-grid">
             <div className="field"><label>Deal status</label><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>{STATUS_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
             <div className="field"><label>County</label><SearchableMultiSelect options={meta.counties} value={fCounties} onChange={setFCounties} placeholder="Counties…" /></div>
@@ -319,9 +315,8 @@ export function MapView() {
             <Chk label="Abstract numbers" on={layers.absNums} onChange={() => toggle("absNums")} />
             <Chk label="Survey names" on={layers.surveyNames} onChange={() => toggle("surveyNames")} />
             <Chk label="Active deals" on={layers.deals} onChange={() => toggle("deals")} />
-            <Chk label="Wells (surface)" on={layers.wells} onChange={() => toggle("wells")} />
+            <Chk label="Well status" on={layers.wells} onChange={() => toggle("wells")} />
             <Chk label="Wellbores (laterals)" on={layers.wellbores} onChange={() => toggle("wellbores")} />
-            <Chk label="Bottom holes" on={layers.bottomHoles} onChange={() => toggle("bottomHoles")} />
           </div>
         </div>
       )}
@@ -335,8 +330,8 @@ export function MapView() {
         {!deals && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}><Spinner label="Loading map…" /></div>}
 
         <div style={{ position: "absolute", left: 12, bottom: 26, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px", fontSize: 12 }}>
-          <Legend color="#22c55e" label="Producing" /><Legend color="#6b7280" label="Plugged" /><Legend color="#f59e0b" label="Shut-in" />
-          <Legend color="#3b82f6" label="Permitted" /><Legend color="#7c3aed" label="Injection/Disposal" />
+          <Legend color="#22c55e" label="Producing" /><Legend color="#f59e0b" label="Shut-in" /><Legend color="#6b7280" label="Plugged" />
+          <Legend color="#3b82f6" label="Permitted" /><Legend color="#78350f" label="Dry hole" /><Legend color="#7c3aed" label="Injection/Disposal" />
           {layers.wellbores && <Legend color="#0f766e" label="Wellbore (lateral)" line />}
         </div>
 
