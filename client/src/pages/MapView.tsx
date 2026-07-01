@@ -17,7 +17,7 @@ interface MapDeal {
 type FC = { type: "FeatureCollection"; features: GeoFeature[] };
 type GeoFeature = { type: "Feature"; id?: number; properties: Record<string, unknown>; geometry: { type: string; coordinates: unknown } };
 type SelAbstract = { kind: "abstract"; id: string; abstract: string; survey: string; county: string };
-type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; operator: string | null; leaseName: string | null; leaseNo: string | null; field: string | null; oilGas: string | null };
+type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; operator: string | null; leaseName: string | null; leaseNo: string | null; field: string | null; oilGas: string | null; cumOil: number | null; cumGas: number | null; lastProd: string | null };
 type SelWell = { kind: "well" } & WellProps;
 type Selected = SelAbstract | SelWell | null;
 
@@ -171,7 +171,7 @@ export function MapView() {
   }, []);
 
   function toWellProps(p: Record<string, unknown>): WellProps {
-    return { fid: Number(p.fid), api: (p.api as string) || "", api8: (p.api8 as string) || "", wellNo: (p.wellNo as string) || null, wellId: (p.wellId as string) || "", symbol: (p.symbol as string) || "", type: (p.type as string) || "", status: (p.status as string) || "", county: (p.county as string) || "Leon", abstract: (p.abstract as string) || null, survey: (p.survey as string) || null, operator: (p.operator as string) || null, leaseName: (p.leaseName as string) || null, leaseNo: (p.leaseNo as string) || null, field: (p.field as string) || null, oilGas: (p.oilGas as string) || null };
+    return { fid: Number(p.fid), api: (p.api as string) || "", api8: (p.api8 as string) || "", wellNo: (p.wellNo as string) || null, wellId: (p.wellId as string) || "", symbol: (p.symbol as string) || "", type: (p.type as string) || "", status: (p.status as string) || "", county: (p.county as string) || "Leon", abstract: (p.abstract as string) || null, survey: (p.survey as string) || null, operator: (p.operator as string) || null, leaseName: (p.leaseName as string) || null, leaseNo: (p.leaseNo as string) || null, field: (p.field as string) || null, oilGas: (p.oilGas as string) || null, cumOil: p.cumOil != null ? Number(p.cumOil) : null, cumGas: p.cumGas != null ? Number(p.cumGas) : null, lastProd: (p.lastProd as string) || null };
   }
   function clearSelection() {
     const map = mapRef.current;
@@ -367,7 +367,16 @@ export function MapView() {
                   <KV k="Status" v={selected.status} /><KV k="County" v={selected.county} />
                   <KV k="Abstract" v={selected.abstract} /><KV k="Survey" v={selected.survey} />
                 </div>
-                <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Operator, lease, and field are from RRC production records. Production volumes, spud/completion dates, and formation are being added next.</p>
+                {(selected.cumOil != null || selected.cumGas != null) && (
+                  <>
+                    <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 10 }}>Lease production (RRC)</div>
+                    <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                      <KV k="Cum. oil (bbl)" v={num(selected.cumOil)} /><KV k="Cum. gas (MCF)" v={num(selected.cumGas)} />
+                      <KV k="Last produced" v={selected.lastProd} />
+                    </div>
+                  </>
+                )}
+                <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Operator, lease, field, and lease-level production are from RRC records. Completion/spud dates and formation come in Phase 2.</p>
               </>
             ) : (
               <>
