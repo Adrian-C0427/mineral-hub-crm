@@ -62,6 +62,19 @@ export const env = {
     SIGNED_URL_TTL_SECONDS: parseInt(process.env.S3_SIGNED_URL_TTL_SECONDS ?? "300", 10),
   },
   MAX_UPLOAD_BYTES: parseInt(process.env.MAX_UPLOAD_BYTES ?? String(25 * 1024 * 1024), 10),
+  // Outbound email (SMTP). Feature is inert until HOST/USER/PASS are set.
+  SMTP: {
+    HOST: process.env.SMTP_HOST ?? "",
+    PORT: parseInt(process.env.SMTP_PORT ?? "587", 10),
+    USER: process.env.SMTP_USER ?? "",
+    PASS: process.env.SMTP_PASS ?? "",
+    // Envelope From (falls back to SMTP_USER). May include a display name.
+    FROM: process.env.SMTP_FROM ?? process.env.SMTP_USER ?? "",
+    SECURE: process.env.SMTP_SECURE === "true", // true for port 465
+  },
 };
 
 export const isProd = env.NODE_ENV === "production";
+
+/** Email sending is available only when SMTP is configured. */
+export const emailConfigured = (): boolean => Boolean(env.SMTP.HOST && env.SMTP.USER && env.SMTP.PASS);

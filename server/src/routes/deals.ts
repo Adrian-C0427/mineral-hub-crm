@@ -10,6 +10,8 @@ import { STALE_CONTACT_DAYS } from "../config.js";
 import { daysUntil } from "../domain/dates.js";
 import { logActivity } from "../services/activityLog.js";
 import { effectiveStatus, ENGAGED_STATUSES, BUYER_STATUSES } from "../domain/buyerStatus.js";
+import { sendEmail, personalize, toHtmlBody } from "../services/email.js";
+import { money as fmtMoney } from "../domain/format.js";
 
 export const dealsRouter = Router();
 // All deal routes require membership in an organization and are scoped to it.
@@ -229,6 +231,78 @@ dealsRouter.get(
       buyerActivity: activity,
       metrics: { buyersContacted, interested, offers: offerCount, highOffer },
     });
+  }),
+);
+
+// --------------------------------------------------------------------------
+// Send the deal to selected buyers by email (CRM-side, SMTP). Each send logs a
+// Buyer Activity (CONTACTED) + an EMAIL_OUT timeline entry with sender + time.
+// --------------------------------------------------------------------------
+const sendEmailSchema = z.object({
+  buyerIds: z.array(z.string()).min(1),
+  subject: z.string().min(1),
+  body: z.string().min(1),
+});
+
+dealsRouter.post(
+  "/:id/email",
+  requirePermission("sendEmail"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { buyerIds, subject, body } = sendEmailSchema.parse(req.body);
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
+    if (!deal) throw new HttpError(404, "Deal not found");
+    const buyers = await prisma.buyer.findMany({
+      where: { id: { in: buyerIds }, organizationId: orgId(req) },
+      select: { id: true, name: true, companyName: true, email: true },
+    });
+
+    const threadId = `deal-${deal.id}-${Date.now()}`;
+    const sent: string[] = [];
+    const skipped: { buyer: string; reason: string }[] = [];
+
+    for (const b of buyers) {
+      if (!b.email) { skipped.push({ buyer: b.name, reason: "no email on file" }); continue; }
+      const tokens = {
+        buyer: b.name, company: b.companyName, deal: deal.name,
+        county: deal.counties.join(", "), askPrice: deal.askPrice != null ? fmtMoney(deal.askPrice) : "",
+        sender: req.user!.name,
+      };
+      const finalSubject = personalize(subject, tokens);
+      const finalBody = personalize(body, tokens);
+      try {
+        await sendEmail({ to: b.email, subject: finalSubject, html: toHtmlBody(finalBody), replyTo: req.user!.email });
+      } catch (e) {
+        // First failure (e.g. SMTP not configured) aborts with a clear error.
+        if (sent.length === 0) throw e;
+        skipped.push({ buyer: b.name, reason: e instanceof Error ? e.message : "send failed" });
+        continue;
+      }
+      const now = new Date();
+      await prisma.$transaction(async (tx) => {
+        const activity = await tx.dealBuyerActivity.upsert({
+          where: { dealId_buyerId: { dealId: deal.id, buyerId: b.id } },
+          create: { dealId: deal.id, buyerId: b.id, status: "CONTACTED", dateSent: now, lastActivityDate: now, sentByUserId: req.user!.id },
+          update: { lastActivityDate: now },
+        });
+        await tx.dealBuyerMessage.create({
+          data: {
+            organizationId: orgId(req), dealId: deal.id, buyerId: b.id, activityId: activity.id,
+            kind: "EMAIL_OUT", subject: finalSubject, body: finalBody, occurredAt: now,
+            createdByUserId: req.user!.id, threadId,
+          },
+        });
+      });
+      sent.push(b.name);
+    }
+
+    await logActivity({
+      eventType: "DEAL_EMAILED",
+      summary: `${req.user!.name} emailed "${deal.name}" to ${sent.length} buyer(s)`,
+      organizationId: orgId(req),
+      actorUserId: req.user!.id,
+      dealId: deal.id,
+    });
+    res.json({ ok: true, sent: sent.length, skipped });
   }),
 );
 
