@@ -9,12 +9,24 @@ export interface CurrentUser {
   firstName: string | null;
   lastName: string | null;
   phone: string | null;
+  orgRole: "OWNER" | "MEMBER" | null;
+  organization: { id: string; name: string; teamId: string } | null;
+}
+
+export interface RegisterPayload {
+  firstName: string;
+  lastName: string;
+  phone: string;
+  email: string;
+  password: string;
+  joinToken?: string;
 }
 
 interface AuthState {
   user: CurrentUser | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  register: (payload: RegisterPayload) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   isOwner: boolean;
@@ -35,8 +47,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const login = async (email: string, password: string) => {
-    const r = await api.post<{ user: CurrentUser }>("/auth/login", { email, password });
-    setUser(r.user);
+    await api.post<{ user: CurrentUser }>("/auth/login", { email, password });
+    // Fetch the full profile (incl. organization) after authenticating.
+    await refresh();
+  };
+
+  const register = async (payload: RegisterPayload) => {
+    await api.post<{ user: CurrentUser }>("/auth/register", payload);
+    await refresh();
   };
 
   const logout = async () => {
@@ -50,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout, refresh, isOwner: user?.role === "OWNER" }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, refresh, isOwner: user?.role === "OWNER" }}>
       {children}
     </AuthContext.Provider>
   );

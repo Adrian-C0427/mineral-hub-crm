@@ -11,6 +11,7 @@ import readline from "node:readline/promises";
 import { stdin, stdout } from "node:process";
 import { prisma } from "../db.js";
 import { hashPassword } from "../auth/password.js";
+import { createOrganization } from "../services/org.js";
 
 async function prompt(question: string, hidden = false): Promise<string> {
   const rl = readline.createInterface({ input: stdin, output: stdout, terminal: true });
@@ -52,6 +53,7 @@ async function main() {
   }
 
   const ownerCount = await prisma.user.count({ where: { role: "OWNER" } });
+  const org = await createOrganization(`${name}'s Workspace`);
   const user = await prisma.user.create({
     data: {
       name,
@@ -62,10 +64,13 @@ async function main() {
       passwordHash: await hashPassword(password),
       role: "OWNER",
       status: "ACTIVE",
+      organizationId: org.id,
+      orgRole: "OWNER",
     },
   });
 
   console.log(`\n✅ Created Owner user: ${user.name} <${user.email}>`);
+  console.log(`   Organization: ${org.name} · Team ID: ${org.teamId}`);
   if (ownerCount > 0) console.log("   (note: other Owner accounts already existed)");
   console.log("   You can now log in to the app.\n");
   await prisma.$disconnect();

@@ -2,11 +2,11 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
-import { requireAuth } from "../middleware/auth.js";
+import { requireAuth, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { netProfit, grossFee, avg, winRate } from "../domain/metrics.js";
 
 export const reportsRouter = Router();
-reportsRouter.use(requireAuth);
+reportsRouter.use(requireAuth, requireOrg);
 
 const periodSchema = z.object({
   from: z.string().datetime({ offset: true }).or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional(),
@@ -26,14 +26,14 @@ async function closedAtMap(dealIds: string[]): Promise<Map<string, Date>> {
 
 reportsRouter.get(
   "/closed",
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: AuthedRequest, res) => {
     const { from, to } = periodSchema.parse(req.query);
     const fromDate = from ? new Date(from) : new Date("1970-01-01");
     const toDate = to ? new Date(to) : new Date("2999-12-31");
 
     // Closed deals whose CLOSED transition falls in the period.
     const closedDeals = await prisma.deal.findMany({
-      where: { stage: "CLOSED" },
+      where: { stage: "CLOSED", organizationId: orgId(req) },
       include: { selectedOffer: true, selectedBuyer: { select: { name: true, companyName: true } } },
     });
     const closedAt = await closedAtMap(closedDeals.map((d) => d.id));
@@ -68,7 +68,7 @@ reportsRouter.get(
 
     // Win rate within period: closed / (closed + dead).
     const deadDeals = await prisma.dealStageHistory.findMany({
-      where: { toStage: "DEAD", createdAt: { gte: fromDate, lte: toDate } },
+      where: { toStage: "DEAD", createdAt: { gte: fromDate, lte: toDate }, deal: { organizationId: orgId(req) } },
       distinct: ["dealId"],
       select: { dealId: true },
     });

@@ -3,11 +3,11 @@ import { z } from "zod";
 import { parse } from "csv-parse/sync";
 import { prisma } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
-import { requireAuth } from "../middleware/auth.js";
+import { requireAuth, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { normalizeCompany } from "../serializers.js";
 
 export const importRouter = Router();
-importRouter.use(requireAuth);
+importRouter.use(requireAuth, requireOrg);
 
 // Target buyer fields the importer understands. companyName is required to proceed.
 export const IMPORT_FIELDS = [
@@ -117,8 +117,8 @@ const commitSchema = z.object({
   mapping: z.record(z.string(), z.string()),
 });
 
-// Dedup check shared by preview and commit.
-async function classifyRows(csv: string, mapping: Record<string, string>) {
+// Dedup check shared by preview and commit. Dedup is scoped to the caller's org.
+async function classifyRows(csv: string, mapping: Record<string, string>, organizationId: string) {
   const { rows } = parseCsv(csv);
   const seenCompany = new Set<string>();
   const seenEmail = new Set<string>();
@@ -137,7 +137,10 @@ async function classifyRows(csv: string, mapping: Record<string, string>) {
       }
       // Existing record — company (normalized) OR exact email is sufficient
       const existing = await prisma.buyer.findFirst({
-        where: { OR: [{ normalizedCompany: normCompany }, ...(buyer.email ? [{ email: buyer.email }] : [])] },
+        where: {
+          organizationId,
+          OR: [{ normalizedCompany: normCompany }, ...(buyer.email ? [{ email: buyer.email }] : [])],
+        },
         select: { id: true },
       });
       seenCompany.add(normCompany);
@@ -154,9 +157,9 @@ async function classifyRows(csv: string, mapping: Record<string, string>) {
 // Step 2: preview — per-row New/Duplicate/Error (no writes)
 importRouter.post(
   "/preview",
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: AuthedRequest, res) => {
     const { csv, mapping } = commitSchema.parse(req.body);
-    const results = await classifyRows(csv, mapping);
+    const results = await classifyRows(csv, mapping, orgId(req));
     res.json({
       rows: results.map((r) => ({
         index: r.index,
@@ -178,15 +181,16 @@ importRouter.post(
 // Step 3: commit — batch insert New rows in a single transaction
 importRouter.post(
   "/commit",
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: AuthedRequest, res) => {
     const { csv, mapping } = commitSchema.parse(req.body);
-    const results = await classifyRows(csv, mapping);
+    const results = await classifyRows(csv, mapping, orgId(req));
     const toInsert = results.filter((r) => r.status === "New");
 
     await prisma.$transaction(async (tx) => {
       for (const r of toInsert) {
         await tx.buyer.create({
           data: {
+            organizationId: orgId(req),
             name: r.buyer.name,
             companyName: r.buyer.companyName,
             normalizedCompany: normalizeCompany(r.buyer.companyName),

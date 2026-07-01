@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Stage } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOwner, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal } from "../serializers.js";
 import { computeMatch } from "../domain/matching.js";
 import { STALE_CONTACT_DAYS } from "../config.js";
@@ -11,7 +11,8 @@ import { daysUntil } from "../domain/dates.js";
 import { logActivity } from "../services/activityLog.js";
 
 export const dealsRouter = Router();
-dealsRouter.use(requireAuth);
+// All deal routes require membership in an organization and are scoped to it.
+dealsRouter.use(requireAuth, requireOrg);
 
 const STAGES: Stage[] = [
   "UNDER_CONTRACT",
@@ -43,8 +44,9 @@ const dealInclude = { selectedBuyer: true, relationshipOwner: true } as const;
 // --------------------------------------------------------------------------
 dealsRouter.get(
   "/",
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req: AuthedRequest, res) => {
     const deals = await prisma.deal.findMany({
+      where: { organizationId: orgId(req) },
       include: { ...dealInclude, offers: { select: { amount: true } } },
       orderBy: { createdAt: "desc" },
     });
@@ -81,6 +83,7 @@ dealsRouter.post(
     const deal = await prisma.$transaction(async (tx) => {
       const created = await tx.deal.create({
         data: {
+          organizationId: orgId(req),
           name: data.name,
           sellerNames: data.sellerNames ?? [],
           county: data.county ?? null,
@@ -109,6 +112,7 @@ dealsRouter.post(
         {
           eventType: "DEAL_CREATED",
           summary: `${req.user!.name} created deal "${created.name}"`,
+          organizationId: orgId(req),
           actorUserId: req.user!.id,
           dealId: created.id,
         },
@@ -125,9 +129,9 @@ dealsRouter.post(
 // --------------------------------------------------------------------------
 dealsRouter.get(
   "/:id",
-  asyncHandler(async (req, res) => {
-    const deal = await prisma.deal.findUnique({
-      where: { id: req.params.id },
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const deal = await prisma.deal.findFirst({
+      where: { id: req.params.id, organizationId: orgId(req) },
       include: {
         ...dealInclude,
         stageHistory: { orderBy: { createdAt: "asc" }, include: { changedBy: { select: { name: true } } } },
@@ -216,12 +220,12 @@ function emptyBox() {
 // --------------------------------------------------------------------------
 dealsRouter.get(
   "/:id/matches",
-  asyncHandler(async (req, res) => {
-    const deal = await prisma.deal.findUnique({ where: { id: req.params.id } });
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!deal) throw new HttpError(404, "Deal not found");
 
     const buyers = await prisma.buyer.findMany({
-      where: { active: true },
+      where: { active: true, organizationId: orgId(req) },
       include: {
         buyBox: true,
         owners: { include: { user: { select: { id: true, name: true } } } },
@@ -234,7 +238,7 @@ dealsRouter.get(
         const match = computeMatch(deal, b.buyBox ?? emptyBox());
         // # previous deals closed with this buyer (selected buyer on a CLOSED deal).
         const closedCount = await prisma.deal.count({
-          where: { selectedBuyerId: b.id, stage: "CLOSED" },
+          where: { selectedBuyerId: b.id, stage: "CLOSED", organizationId: orgId(req) },
         });
         const lastContact = b.lastContactDate;
         const stale = lastContact ? daysUntil(lastContact, now) < -STALE_CONTACT_DAYS : true;
@@ -293,6 +297,8 @@ dealsRouter.patch(
     for (const k of ["dateUnderContract", "originalClosingDate", "findBuyerByDateOverride", "finalClosingDateOverride"] as const) {
       if (k in data) patch[k] = toDate((data as Record<string, unknown>)[k]);
     }
+    const existing = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
+    if (!existing) throw new HttpError(404, "Deal not found");
     const deal = await prisma.deal.update({ where: { id: req.params.id }, data: patch, include: dealInclude });
     res.json(serializeDeal(deal));
   }),
@@ -310,7 +316,7 @@ dealsRouter.post(
   "/:id/stage",
   asyncHandler(async (req: AuthedRequest, res) => {
     const { toStage, deadReason } = stageSchema.parse(req.body);
-    const deal = await prisma.deal.findUnique({ where: { id: req.params.id } });
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!deal) throw new HttpError(404, "Deal not found");
 
     if (toStage === "DEAD" && (!deadReason || !deadReason.trim())) {
@@ -344,6 +350,7 @@ dealsRouter.post(
         {
           eventType: "STAGE_CHANGE",
           summary: `${req.user!.name} moved "${deal.name}" to ${prettyStage(toStage)}${toStage === "DEAD" ? ` (${deadReason!.trim()})` : ""}`,
+          organizationId: orgId(req),
           actorUserId: req.user!.id,
           dealId: deal.id,
         },
@@ -371,9 +378,9 @@ dealsRouter.post(
   "/:id/activity",
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = logContactSchema.parse(req.body);
-    const deal = await prisma.deal.findUnique({ where: { id: req.params.id } });
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!deal) throw new HttpError(404, "Deal not found");
-    const buyer = await prisma.buyer.findUnique({ where: { id: data.buyerId } });
+    const buyer = await prisma.buyer.findFirst({ where: { id: data.buyerId, organizationId: orgId(req) } });
     if (!buyer) throw new HttpError(404, "Buyer not found");
 
     const now = new Date();
@@ -406,6 +413,7 @@ dealsRouter.post(
         {
           eventType: "CONTACT_LOGGED",
           summary: `${req.user!.name} logged contact with ${buyer.name} on "${deal.name}"`,
+          organizationId: orgId(req),
           actorUserId: req.user!.id,
           dealId: deal.id,
           buyerId: buyer.id,
@@ -427,6 +435,8 @@ dealsRouter.post(
   "/:id/accept-offer",
   asyncHandler(async (req: AuthedRequest, res) => {
     const { offerId } = acceptSchema.parse(req.body);
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
+    if (!deal) throw new HttpError(404, "Deal not found");
     const offer = await prisma.offer.findUnique({ where: { id: offerId } });
     if (!offer || offer.dealId !== req.params.id) throw new HttpError(404, "Offer not found on this deal");
 
@@ -441,6 +451,7 @@ dealsRouter.post(
         {
           eventType: "OFFER_ACCEPTED",
           summary: `${req.user!.name} accepted an offer on "${u.name}"`,
+          organizationId: orgId(req),
           actorUserId: req.user!.id,
           dealId: u.id,
           buyerId: offer.buyerId,
@@ -454,13 +465,13 @@ dealsRouter.post(
 );
 
 // --------------------------------------------------------------------------
-// Delete (Owner only)
+// Delete — any organization member may delete their org's records
 // --------------------------------------------------------------------------
 dealsRouter.delete(
   "/:id",
-  requireOwner,
-  asyncHandler(async (req, res) => {
-    await prisma.deal.delete({ where: { id: req.params.id } });
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const result = await prisma.deal.deleteMany({ where: { id: req.params.id, organizationId: orgId(req) } });
+    if (result.count === 0) throw new HttpError(404, "Deal not found");
     res.json({ ok: true });
   }),
 );

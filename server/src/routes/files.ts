@@ -3,12 +3,12 @@ import multer from "multer";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOwner, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { env } from "../config.js";
 import { buildKey, putObject, getDownloadUrl, deleteObject, isAllowedMime, sniffMime, s3Configured } from "../services/s3.js";
 
 export const filesRouter = Router();
-filesRouter.use(requireAuth);
+filesRouter.use(requireAuth, requireOrg);
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: env.MAX_UPLOAD_BYTES } });
 
@@ -28,6 +28,14 @@ filesRouter.post(
     const meta = metaSchema.parse(req.body);
     if (!!meta.dealId === !!meta.buyerId) {
       throw new HttpError(400, "Provide exactly one of dealId or buyerId");
+    }
+    // Verify the target record belongs to the caller's organization.
+    if (meta.dealId) {
+      const d = await prisma.deal.findFirst({ where: { id: meta.dealId, organizationId: orgId(req) } });
+      if (!d) throw new HttpError(404, "Deal not found");
+    } else {
+      const b = await prisma.buyer.findFirst({ where: { id: meta.buyerId!, organizationId: orgId(req) } });
+      if (!b) throw new HttpError(404, "Buyer not found");
     }
 
     // Never trust the client-reported mimetype — sniff magic bytes.
@@ -57,10 +65,18 @@ filesRouter.post(
   }),
 );
 
+// Only files whose parent deal/buyer is in the caller's org are accessible.
+function fileOrgWhere(id: string, organizationId: string) {
+  return {
+    id,
+    OR: [{ deal: { organizationId } }, { buyer: { organizationId } }],
+  };
+}
+
 filesRouter.get(
   "/:id/download",
-  asyncHandler(async (req, res) => {
-    const file = await prisma.fileAttachment.findUnique({ where: { id: req.params.id } });
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const file = await prisma.fileAttachment.findFirst({ where: fileOrgWhere(req.params.id, orgId(req)) });
     if (!file) throw new HttpError(404, "File not found");
     const url = await getDownloadUrl(file.s3Key, file.filename);
     res.json({ url, expiresInSeconds: env.S3.SIGNED_URL_TTL_SECONDS });
@@ -69,9 +85,8 @@ filesRouter.get(
 
 filesRouter.delete(
   "/:id",
-  requireOwner,
-  asyncHandler(async (req, res) => {
-    const file = await prisma.fileAttachment.findUnique({ where: { id: req.params.id } });
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const file = await prisma.fileAttachment.findFirst({ where: fileOrgWhere(req.params.id, orgId(req)) });
     if (!file) throw new HttpError(404, "File not found");
     await deleteObject(file.s3Key);
     await prisma.fileAttachment.delete({ where: { id: file.id } });

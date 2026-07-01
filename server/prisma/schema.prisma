@@ -24,6 +24,13 @@ enum UserStatus {
   DISABLED
 }
 
+// Organization membership role. Kept intentionally small; the enum can grow to
+// ADMIN / EDITOR / VIEWER later without schema restructuring.
+enum OrgRole {
+  OWNER
+  MEMBER
+}
+
 enum Stage {
   UNDER_CONTRACT
   PREPARING_PACKAGE
@@ -68,6 +75,41 @@ enum FileCategory {
 }
 
 // ---------------------------------------------------------------------------
+// Organizations (companies / shared workspaces)
+// ---------------------------------------------------------------------------
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  // Shareable, human-friendly Team ID. Acts as an always-valid reusable join key.
+  teamId    String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users        User[]
+  deals        Deal[]
+  buyers       Buyer[]
+  activityLogs ActivityLog[]
+  inviteCodes  InviteCode[]
+}
+
+model InviteCode {
+  id              String   @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  code            String   @unique
+  // reusable=false => single-use (maxUses defaults to 1); reusable=true => many uses.
+  reusable        Boolean  @default(false)
+  active          Boolean  @default(true)
+  maxUses         Int?     // null = unlimited (reusable only)
+  uses            Int      @default(0)
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+
+  @@index([organizationId])
+}
+
+// ---------------------------------------------------------------------------
 // Users
 // ---------------------------------------------------------------------------
 
@@ -81,6 +123,11 @@ model User {
   passwordHash String
   role         Role       @default(ASSOCIATE)
   status       UserStatus @default(ACTIVE)
+
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  orgRole        OrgRole?
+
   createdAt    DateTime   @default(now())
   updatedAt    DateTime   @updatedAt
 
@@ -90,6 +137,8 @@ model User {
   sentActivities    DealBuyerActivity[]
   uploadedFiles     FileAttachment[]
   activityLogs      ActivityLog[]
+
+  @@index([organizationId])
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +147,8 @@ model User {
 
 model Deal {
   id                  String   @id @default(cuid())
+  organizationId      String?
+  organization        Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name                String
   sellerNames         String[]
   county              String?
@@ -143,6 +194,7 @@ model Deal {
 
   @@index([stage])
   @@index([selectedBuyerId])
+  @@index([organizationId])
 }
 
 model DealStageHistory {
@@ -165,6 +217,8 @@ model DealStageHistory {
 
 model Buyer {
   id                 String             @id @default(cuid())
+  organizationId     String?
+  organization       Organization?      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name               String
   companyName        String
   contactName        String?
@@ -195,6 +249,7 @@ model Buyer {
 
   @@index([normalizedCompany])
   @@index([email])
+  @@index([organizationId])
 }
 
 model BuyBoxCriteria {
@@ -319,16 +374,19 @@ model FileAttachment {
 // ---------------------------------------------------------------------------
 
 model ActivityLog {
-  id          String   @id @default(cuid())
-  eventType   String
-  dealId      String?
-  deal        Deal?    @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  buyerId     String?
-  buyer       Buyer?   @relation(fields: [buyerId], references: [id], onDelete: Cascade)
-  actorUserId String?
-  actor       User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
-  summary     String
-  createdAt   DateTime @default(now())
+  id             String   @id @default(cuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  eventType      String
+  dealId         String?
+  deal           Deal?    @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  buyerId        String?
+  buyer          Buyer?   @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  actorUserId    String?
+  actor          User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  summary        String
+  createdAt      DateTime @default(now())
 
   @@index([createdAt])
+  @@index([organizationId])
 }

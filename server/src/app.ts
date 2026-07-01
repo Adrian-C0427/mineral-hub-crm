@@ -12,6 +12,7 @@ import { offersRouter } from "./routes/offers.js";
 import { filesRouter } from "./routes/files.js";
 import { reportsRouter } from "./routes/reports.js";
 import { dashboardRouter } from "./routes/dashboard.js";
+import { orgRouter } from "./routes/org.js";
 
 export function createApp() {
   const app = express();
@@ -36,6 +37,7 @@ export function createApp() {
   app.get("/health", (_req, res) => res.json({ ok: true, env: env.NODE_ENV }));
 
   app.use("/api/auth", authRouter);
+  app.use("/api/org", orgRouter);
   app.use("/api/users", usersRouter);
   app.use("/api/deals", dealsRouter);
   app.use("/api/buyers", buyersRouter);

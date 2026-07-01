@@ -9,6 +9,7 @@ export async function logActivity(
   params: {
     eventType: string;
     summary: string;
+    organizationId?: string | null;
     actorUserId?: string | null;
     dealId?: string | null;
     buyerId?: string | null;
@@ -19,6 +20,7 @@ export async function logActivity(
     data: {
       eventType: params.eventType,
       summary: params.summary,
+      organizationId: params.organizationId ?? null,
       actorUserId: params.actorUserId ?? null,
       dealId: params.dealId ?? null,
       buyerId: params.buyerId ?? null,

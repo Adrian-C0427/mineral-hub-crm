@@ -12,6 +12,8 @@ export interface AuthedRequest extends Request {
     firstName: string | null;
     lastName: string | null;
     phone: string | null;
+    organizationId: string | null;
+    orgRole: "OWNER" | "MEMBER" | null;
   };
 }
 
@@ -33,6 +35,8 @@ export async function attachUser(req: AuthedRequest, _res: Response, next: NextF
           firstName: user.firstName,
           lastName: user.lastName,
           phone: user.phone,
+          organizationId: user.organizationId,
+          orgRole: user.orgRole,
         };
       }
     }
@@ -63,4 +67,38 @@ export function requireOwner(req: AuthedRequest, res: Response, next: NextFuncti
     return;
   }
   next();
+}
+
+/**
+ * Requires the user to belong to an organization, and exposes it as
+ * req.orgId for scoping. All record routes use this.
+ */
+export function requireOrg(req: AuthedRequest, res: Response, next: NextFunction): void {
+  if (!req.user) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  if (!req.user.organizationId) {
+    res.status(403).json({ error: "You must belong to an organization" });
+    return;
+  }
+  next();
+}
+
+/** Organization-owner gate: managing members and invite codes. */
+export function requireOrgOwner(req: AuthedRequest, res: Response, next: NextFunction): void {
+  if (!req.user) {
+    res.status(401).json({ error: "Authentication required" });
+    return;
+  }
+  if (!req.user.organizationId || req.user.orgRole !== "OWNER") {
+    res.status(403).json({ error: "Only the organization owner can perform this action" });
+    return;
+  }
+  next();
+}
+
+/** Convenience: the caller's organization id (throws-safe after requireOrg). */
+export function orgId(req: AuthedRequest): string {
+  return req.user!.organizationId as string;
 }

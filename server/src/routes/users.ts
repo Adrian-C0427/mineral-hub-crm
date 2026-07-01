@@ -3,19 +3,19 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { hashPassword } from "../auth/password.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOwner, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOwner, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
 
 export const usersRouter = Router();
 
-// All user management is Owner-only (enforced server-side).
-usersRouter.use(requireAuth);
+usersRouter.use(requireAuth, requireOrg);
 
 usersRouter.get(
   "/",
-  asyncHandler(async (_req, res) => {
-    // Any authed user can read the user list (for owner-attribution dropdowns),
-    // but never password hashes.
+  asyncHandler(async (req: AuthedRequest, res) => {
+    // Users within the caller's organization (for owner-attribution dropdowns),
+    // never password hashes.
     const users = await prisma.user.findMany({
+      where: { organizationId: orgId(req) },
       select: { id: true, name: true, email: true, role: true, status: true, createdAt: true },
       orderBy: { name: "asc" },
     });
@@ -36,7 +36,7 @@ const createSchema = z.object({
 usersRouter.post(
   "/",
   requireOwner,
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: AuthedRequest, res) => {
     const data = createSchema.parse(req.body);
     const exists = await prisma.user.findUnique({ where: { email: data.email.toLowerCase() } });
     if (exists) throw new HttpError(409, "A user with that email already exists");
@@ -49,6 +49,8 @@ usersRouter.post(
         email: data.email.toLowerCase(),
         passwordHash: await hashPassword(data.password),
         role: data.role,
+        organizationId: orgId(req),
+        orgRole: "MEMBER",
       },
       select: { id: true, name: true, email: true, role: true, status: true },
     });
@@ -68,6 +70,8 @@ usersRouter.patch(
   requireOwner,
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = updateSchema.parse(req.body);
+    const target = await prisma.user.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
+    if (!target) throw new HttpError(404, "User not found in your organization");
     const patch: Record<string, unknown> = {};
     if (data.name) patch.name = data.name;
     if (data.role) patch.role = data.role;
@@ -87,6 +91,8 @@ usersRouter.delete(
   requireOwner,
   asyncHandler(async (req: AuthedRequest, res) => {
     if (req.params.id === req.user!.id) throw new HttpError(400, "You cannot delete your own account");
+    const target = await prisma.user.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
+    if (!target) throw new HttpError(404, "User not found in your organization");
     await prisma.user.delete({ where: { id: req.params.id } });
     res.json({ ok: true });
   }),

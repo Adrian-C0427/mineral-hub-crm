@@ -1,29 +1,30 @@
 import { Router } from "express";
 import { prisma } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
-import { requireAuth } from "../middleware/auth.js";
+import { requireAuth, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal } from "../serializers.js";
 import { netProfit, avg } from "../domain/metrics.js";
 
 export const dashboardRouter = Router();
-dashboardRouter.use(requireAuth);
+dashboardRouter.use(requireAuth, requireOrg);
 
 const dealInclude = { selectedBuyer: true, relationshipOwner: true } as const;
 const ACTIVE_STAGES = ["UNDER_CONTRACT", "PREPARING_PACKAGE", "SENT_TO_BUYERS", "NEGOTIATING", "CLOSING"] as const;
 
 dashboardRouter.get(
   "/",
-  asyncHandler(async (_req, res) => {
+  asyncHandler(async (req: AuthedRequest, res) => {
     const now = new Date();
     const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+    const org = orgId(req);
 
     const [allActive, closedDeals, activeOffers] = await Promise.all([
-      prisma.deal.findMany({ where: { stage: { in: [...ACTIVE_STAGES] } }, include: { ...dealInclude, offers: true } }),
+      prisma.deal.findMany({ where: { stage: { in: [...ACTIVE_STAGES] }, organizationId: org }, include: { ...dealInclude, offers: true } }),
       prisma.deal.findMany({
-        where: { stage: "CLOSED" },
+        where: { stage: "CLOSED", organizationId: org },
         include: { ...dealInclude, selectedOffer: true, stageHistory: { where: { toStage: "CLOSED" }, orderBy: { createdAt: "desc" }, take: 1 } },
       }),
-      prisma.offer.count({ where: { status: "ACTIVE" } }),
+      prisma.offer.count({ where: { status: "ACTIVE", deal: { organizationId: org } } }),
     ]);
 
     // Metrics row
@@ -58,14 +59,14 @@ dashboardRouter.get(
 
     // Upcoming follow-ups (from buyer activity nextFollowUpDate)
     const followUps = await prisma.dealBuyerActivity.findMany({
-      where: { nextFollowUpDate: { gte: now } },
+      where: { nextFollowUpDate: { gte: now }, deal: { organizationId: org } },
       orderBy: { nextFollowUpDate: "asc" },
       take: 10,
       include: { buyer: { select: { name: true } }, deal: { select: { name: true } } },
     });
 
     // Recent activity feed
-    const recent = await prisma.activityLog.findMany({ orderBy: { createdAt: "desc" }, take: 15 });
+    const recent = await prisma.activityLog.findMany({ where: { organizationId: org }, orderBy: { createdAt: "desc" }, take: 15 });
 
     // Top buyers YTD by closed volume
     const topBuyersMap = new Map<string, { name: string; companyName: string; volume: number }>();

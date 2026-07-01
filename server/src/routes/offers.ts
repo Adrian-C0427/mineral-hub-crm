@@ -2,11 +2,11 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { logActivity } from "../services/activityLog.js";
 
 export const offersRouter = Router();
-offersRouter.use(requireAuth);
+offersRouter.use(requireAuth, requireOrg);
 
 const dateField = z.string().datetime({ offset: true }).or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).nullish();
 
@@ -26,9 +26,9 @@ offersRouter.post(
   "/",
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = createSchema.parse(req.body);
-    const deal = await prisma.deal.findUnique({ where: { id: data.dealId } });
+    const deal = await prisma.deal.findFirst({ where: { id: data.dealId, organizationId: orgId(req) } });
     if (!deal) throw new HttpError(404, "Deal not found");
-    const buyer = await prisma.buyer.findUnique({ where: { id: data.buyerId } });
+    const buyer = await prisma.buyer.findFirst({ where: { id: data.buyerId, organizationId: orgId(req) } });
     if (!buyer) throw new HttpError(404, "Buyer not found");
 
     const now = new Date();
@@ -65,6 +65,7 @@ offersRouter.post(
         {
           eventType: "OFFER_MADE",
           summary: `${buyer.name} made an offer of $${data.amount.toLocaleString()} on "${deal.name}"`,
+          organizationId: orgId(req),
           actorUserId: req.user!.id,
           dealId: deal.id,
           buyerId: buyer.id,
@@ -87,7 +88,7 @@ const updateSchema = z.object({
 
 offersRouter.patch(
   "/:id",
-  asyncHandler(async (req, res) => {
+  asyncHandler(async (req: AuthedRequest, res) => {
     const data = updateSchema.parse(req.body);
     const patch: Record<string, unknown> = {};
     if (data.amount !== undefined) patch.amount = data.amount;
@@ -95,6 +96,9 @@ offersRouter.patch(
     if (data.expirationDate !== undefined) patch.expirationDate = data.expirationDate ? new Date(data.expirationDate) : null;
     if (data.status !== undefined) patch.status = data.status;
     if (data.notes !== undefined) patch.notes = data.notes;
+    // Ensure the offer belongs to a deal in the caller's org.
+    const owned = await prisma.offer.findFirst({ where: { id: req.params.id, deal: { organizationId: orgId(req) } } });
+    if (!owned) throw new HttpError(404, "Offer not found");
     const offer = await prisma.offer.update({ where: { id: req.params.id }, data: patch });
     res.json(offer);
   }),
