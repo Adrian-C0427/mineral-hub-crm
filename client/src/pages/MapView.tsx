@@ -24,6 +24,7 @@ type Selected = SelAbstract | SelWell | null;
 const ABSTRACTS_URL = "/data/leon-abstracts.geojson";
 const WELLS_URL = "/data/leon-wells.geojson";
 const WELLBORES_URL = "/data/leon-wellbores.geojson";
+const PRODUCTION_URL = "/data/leon-production.json";
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
 
 // Wells are colored by RRC status.
@@ -79,6 +80,7 @@ export function MapView() {
   const [fWellStatuses, setFWellStatuses] = useState<string[]>([]);
   const [fOperators, setFOperators] = useState<string[]>([]);
   const [query, setQuery] = useState("");
+  const [prod, setProd] = useState<Record<string, [number, number, number][]>>({});
   const [meta, setMeta] = useState<{ counties: string[]; surveys: string[]; abstracts: string[]; wellTypes: string[]; wellStatuses: string[]; operators: string[] }>({ counties: [], surveys: [], abstracts: [], wellTypes: [], wellStatuses: [], operators: [] });
 
   const dealsByAbstract = useMemo(() => {
@@ -251,6 +253,7 @@ export function MapView() {
 
   function loadDeals() { const qs = new URLSearchParams(); qs.set("status", statusFilter); api.get<MapDeal[]>(`/map/deals?${qs.toString()}`).then(setDeals); }
   useEffect(loadDeals, [statusFilter]);
+  useEffect(() => { fetch(PRODUCTION_URL).then((r) => r.json()).then(setProd).catch(() => {}); }, []);
   useEffect(applyHighlight, [dealsByAbstract]);
   useEffect(applyLayerVisibility, [layers]);
   useEffect(applyAbstractFilter, [fCounties, fSurveys, fAbstracts]);
@@ -379,7 +382,21 @@ export function MapView() {
                     </div>
                   </>
                 )}
-                <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Operator, lease, field, and lease-level production are from RRC records. Completion/spud dates and formation come in Phase 2.</p>
+                {(() => {
+                  const key = selected.leaseNo ? `${selected.oilGas === "Gas" ? "G" : "O"}|05|${selected.leaseNo}` : null;
+                  const series = key ? prod[key] : null;
+                  if (!series || !series.length) return null;
+                  const kind: "oil" | "gas" = selected.oilGas === "Gas" ? "gas" : "oil";
+                  const last12 = series.slice(-12).reduce((s, p) => s + (kind === "gas" ? p[2] : p[1]), 0);
+                  return (
+                    <div style={{ marginTop: 10 }}>
+                      <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em" }}>Production trend · {kind === "gas" ? "gas (MCF)" : "oil (bbl)"} · last {Math.min(series.length, 36)} mo</div>
+                      <ProductionChart series={series} kind={kind} />
+                      <div className="muted" style={{ fontSize: 12 }}>Last 12 mo: {num(last12)} {kind === "gas" ? "MCF" : "bbl"}</div>
+                    </div>
+                  );
+                })()}
+                <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Operator, lease, field, and lease production/trend are from RRC records (lease-level; oil is reported per lease). Formation shows where a recent W-2 was filed.</p>
               </>
             ) : (
               <>
@@ -407,6 +424,21 @@ function Chk({ label, on, onChange }: { label: string; on: boolean; onChange: ()
 }
 function Legend({ color, label, line }: { color: string; label: string; line?: boolean }) {
   return <div className="row" style={{ gap: 8, marginTop: 4 }}><span style={{ width: 12, height: line ? 3 : 12, background: color, opacity: 0.9, borderRadius: line ? 0 : "50%", display: "inline-block" }} /> {label}</div>;
+}
+function ProductionChart({ series, kind }: { series: [number, number, number][]; kind: "oil" | "gas" }) {
+  const pts = series.slice(-36);
+  const idx = kind === "gas" ? 2 : 1;
+  const max = Math.max(1, ...pts.map((p) => p[idx]));
+  const W = 288, H = 56, bw = W / Math.max(pts.length, 1);
+  const color = kind === "gas" ? "#7c3aed" : "#22c55e";
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: "block", margin: "4px 0" }}>
+      {pts.map((p, i) => {
+        const h = (p[idx] / max) * (H - 2);
+        return <rect key={i} x={i * bw} y={H - h} width={Math.max(bw - 0.6, 0.6)} height={h} fill={color} opacity={0.85} />;
+      })}
+    </svg>
+  );
 }
 function KV({ k, v }: { k: string; v: React.ReactNode }) {
   return <div className="kv"><span className="k">{k}</span><span className="v">{v || "—"}</span></div>;
