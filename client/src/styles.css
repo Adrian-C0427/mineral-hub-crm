@@ -102,6 +102,11 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .metric-value { font-size: 24px; font-weight: 700; margin-top: 6px; }
 .metric-hint { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
 
+/* Responsive grid of chart panels (Expenses + Reports dashboards) */
+.chart-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-bottom: 20px; }
+.chart-grid .panel { margin-bottom: 0; }
+@media (max-width: 900px) { .chart-grid { grid-template-columns: 1fr; } }
+
 /* --- Universal tables ---
    border-collapse: separate, generous padding so headers/data never overlap,
    wrap the table in an overflow-x container. */

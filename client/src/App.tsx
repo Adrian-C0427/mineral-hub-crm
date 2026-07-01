@@ -13,6 +13,8 @@ import { Reports } from "./pages/Reports";
 import { Settings } from "./pages/Settings";
 // MapLibre is heavy (~300KB gzip); load it only when the Map route is visited.
 const MapView = lazy(() => import("./pages/MapView").then((m) => ({ default: m.MapView })));
+// recharts is heavy (~180KB gzip); load the Expenses dashboard on demand.
+const Expenses = lazy(() => import("./pages/Expenses").then((m) => ({ default: m.Expenses })));
 
 function TopNav() {
   const { user, logout } = useAuth();
@@ -27,6 +29,7 @@ function TopNav() {
         <NavLink to="/deals">Deals</NavLink>
         <NavLink to="/buyers">Buyers</NavLink>
         <NavLink to="/reports">Reports</NavLink>
+        <NavLink to="/expenses">Expenses</NavLink>
         <NavLink to="/map">Map</NavLink>
       </div>
       <div className="nav-user">
@@ -55,6 +58,7 @@ export function App() {
         <Route path="/buyers" element={<Buyers />} />
         <Route path="/buyers/:id" element={<BuyerProfile />} />
         <Route path="/reports" element={<Reports />} />
+        <Route path="/expenses" element={<Suspense fallback={<Spinner label="Loading expenses…" />}><Expenses /></Suspense>} />
         <Route path="/map" element={<Suspense fallback={<Spinner label="Loading map…" />}><MapView /></Suspense>} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />

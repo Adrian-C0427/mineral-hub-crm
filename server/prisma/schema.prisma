@@ -86,25 +86,27 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users        User[]
-  deals        Deal[]
-  buyers       Buyer[]
-  activityLogs ActivityLog[]
-  inviteCodes  InviteCode[]
+  users             User[]
+  deals             Deal[]
+  buyers            Buyer[]
+  activityLogs      ActivityLog[]
+  inviteCodes       InviteCode[]
+  expenses          Expense[]
+  expenseCategories ExpenseCategory[]
 }
 
 model InviteCode {
-  id              String   @id @default(cuid())
+  id              String       @id @default(cuid())
   organizationId  String
   organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  code            String   @unique
+  code            String       @unique
   // reusable=false => single-use (maxUses defaults to 1); reusable=true => many uses.
-  reusable        Boolean  @default(false)
-  active          Boolean  @default(true)
-  maxUses         Int?     // null = unlimited (reusable only)
-  uses            Int      @default(0)
+  reusable        Boolean      @default(false)
+  active          Boolean      @default(true)
+  maxUses         Int? // null = unlimited (reusable only)
+  uses            Int          @default(0)
   createdByUserId String?
-  createdAt       DateTime @default(now())
+  createdAt       DateTime     @default(now())
 
   @@index([organizationId])
 }
@@ -128,15 +130,16 @@ model User {
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   orgRole        OrgRole?
 
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  ownedDeals        Deal[]              @relation("DealRelationshipOwner")
-  buyerOwnerships   BuyerOwner[]
-  stageChanges      DealStageHistory[]
-  sentActivities    DealBuyerActivity[]
-  uploadedFiles     FileAttachment[]
-  activityLogs      ActivityLog[]
+  ownedDeals      Deal[]              @relation("DealRelationshipOwner")
+  buyerOwnerships BuyerOwner[]
+  stageChanges    DealStageHistory[]
+  sentActivities  DealBuyerActivity[]
+  uploadedFiles   FileAttachment[]
+  activityLogs    ActivityLog[]
+  expenses        Expense[]
 
   @@index([organizationId])
 }
@@ -146,23 +149,23 @@ model User {
 // ---------------------------------------------------------------------------
 
 model Deal {
-  id                  String   @id @default(cuid())
-  organizationId      String?
-  organization        Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  name                String
-  sellerNames         String[]
+  id             String        @id @default(cuid())
+  organizationId String?
+  organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  sellerNames    String[]
   // Deal characteristics support multiple selections (state stays single).
-  counties            String[]
-  state               String?
-  acreageNma          Float?
-  nra                 Float?
+  counties       String[]
+  state          String?
+  acreageNma     Float?
+  nra            Float?
   // Survey/abstracts this deal sits in (e.g. TX-289653). Links to map boundaries.
-  abstractIds         String[]
-  operator            String?
-  askPrice            Float?
-  assetTypes          String[]
-  basins              String[]
-  formations          String[]
+  abstractIds    String[]
+  operator       String?
+  askPrice       Float?
+  assetTypes     String[]
+  basins         String[]
+  formations     String[]
 
   stage                 Stage    @default(UNDER_CONTRACT)
   currentStageEnteredAt DateTime @default(now())
@@ -170,15 +173,15 @@ model Deal {
 
   // Anchor dates. Effective Find-Buyer-By and Final-Closing are derived from
   // these unless an override is set. See server/src/domain/dates.ts (single resolver).
-  dateUnderContract       DateTime?
-  originalClosingDate     DateTime?
-  findBuyerByDateOverride DateTime?
+  dateUnderContract        DateTime?
+  originalClosingDate      DateTime?
+  findBuyerByDateOverride  DateTime?
   finalClosingDateOverride DateTime?
 
-  selectedBuyerId   String?
-  selectedBuyer     Buyer?  @relation("SelectedBuyer", fields: [selectedBuyerId], references: [id], onDelete: SetNull)
-  selectedOfferId   String? @unique
-  selectedOffer     Offer?  @relation("SelectedOffer", fields: [selectedOfferId], references: [id], onDelete: SetNull)
+  selectedBuyerId String?
+  selectedBuyer   Buyer?  @relation("SelectedBuyer", fields: [selectedBuyerId], references: [id], onDelete: SetNull)
+  selectedOfferId String? @unique
+  selectedOffer   Offer?  @relation("SelectedOffer", fields: [selectedOfferId], references: [id], onDelete: SetNull)
 
   relationshipOwnerId String?
   relationshipOwner   User?   @relation("DealRelationshipOwner", fields: [relationshipOwnerId], references: [id], onDelete: SetNull)
@@ -189,11 +192,11 @@ model Deal {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  stageHistory   DealStageHistory[]
-  buyerActivity  DealBuyerActivity[]
-  offers         Offer[]             @relation("DealOffers")
-  files          FileAttachment[]
-  activityLogs   ActivityLog[]
+  stageHistory  DealStageHistory[]
+  buyerActivity DealBuyerActivity[]
+  offers        Offer[]             @relation("DealOffers")
+  files         FileAttachment[]
+  activityLogs  ActivityLog[]
 
   @@index([stage])
   @@index([selectedBuyerId])
@@ -236,19 +239,19 @@ model Buyer {
   active             Boolean            @default(true)
 
   // Normalized company name for dedup (lowercased/trimmed/punct-stripped).
-  normalizedCompany  String
+  normalizedCompany String
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  buyBox        BuyBoxCriteria?
-  owners        BuyerOwner[]
-  tags          BuyerTagOnBuyer[]
-  dealActivity  DealBuyerActivity[]
-  offers        Offer[]             @relation("BuyerOffers")
-  selectedFor   Deal[]              @relation("SelectedBuyer")
-  files         FileAttachment[]
-  activityLogs  ActivityLog[]
+  buyBox       BuyBoxCriteria?
+  owners       BuyerOwner[]
+  tags         BuyerTagOnBuyer[]
+  dealActivity DealBuyerActivity[]
+  offers       Offer[]             @relation("BuyerOffers")
+  selectedFor  Deal[]              @relation("SelectedBuyer")
+  files        FileAttachment[]
+  activityLogs ActivityLog[]
 
   @@index([normalizedCompany])
   @@index([email])
@@ -256,18 +259,18 @@ model Buyer {
 }
 
 model BuyBoxCriteria {
-  id          String   @id @default(cuid())
-  buyerId     String   @unique
-  buyer       Buyer    @relation(fields: [buyerId], references: [id], onDelete: Cascade)
-  states      String[]
-  counties    String[]
-  basins      String[]
-  formations  String[]
-  assetTypes  String[]
-  minAcreage  Float?
-  maxAcreage  Float?
-  minPrice    Float?
-  maxPrice    Float?
+  id         String   @id @default(cuid())
+  buyerId    String   @unique
+  buyer      Buyer    @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  states     String[]
+  counties   String[]
+  basins     String[]
+  formations String[]
+  assetTypes String[]
+  minAcreage Float?
+  maxAcreage Float?
+  minPrice   Float?
+  maxPrice   Float?
 }
 
 model BuyerOwner {
@@ -377,19 +380,63 @@ model FileAttachment {
 // ---------------------------------------------------------------------------
 
 model ActivityLog {
-  id             String   @id @default(cuid())
+  id             String        @id @default(cuid())
   organizationId String?
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   eventType      String
   dealId         String?
-  deal           Deal?    @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  deal           Deal?         @relation(fields: [dealId], references: [id], onDelete: Cascade)
   buyerId        String?
-  buyer          Buyer?   @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  buyer          Buyer?        @relation(fields: [buyerId], references: [id], onDelete: Cascade)
   actorUserId    String?
-  actor          User?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  actor          User?         @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
   summary        String
-  createdAt      DateTime @default(now())
+  createdAt      DateTime      @default(now())
 
   @@index([createdAt])
   @@index([organizationId])
+}
+
+// ---------------------------------------------------------------------------
+// Expenses — business expense tracking (feeds Net Profit in Reports)
+// ---------------------------------------------------------------------------
+
+// Categories are a table (not an enum) so admins can add/edit/remove them per
+// org over time. Defaults are seeded on first access.
+model ExpenseCategory {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+
+  expenses Expense[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+}
+
+model Expense {
+  id                String           @id @default(cuid())
+  organizationId    String
+  organization      Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Creator of the record — set from the session, never editable.
+  userId            String?
+  user              User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+  date              DateTime
+  amount            Float
+  categoryId        String?
+  category          ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  notes             String?
+  reimbursed        Boolean          @default(false)
+  reimbursementDate DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([userId])
+  @@index([categoryId])
+  @@index([date])
 }
