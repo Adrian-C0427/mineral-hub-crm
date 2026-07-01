@@ -17,7 +17,7 @@ interface MapDeal {
 type FC = { type: "FeatureCollection"; features: GeoFeature[] };
 type GeoFeature = { type: "Feature"; id?: number; properties: Record<string, unknown>; geometry: { type: string; coordinates: unknown } };
 type SelAbstract = { kind: "abstract"; id: string; abstract: string; survey: string; county: string };
-type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null };
+type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; operator: string | null; leaseName: string | null; leaseNo: string | null; field: string | null; oilGas: string | null };
 type SelWell = { kind: "well" } & WellProps;
 type Selected = SelAbstract | SelWell | null;
 
@@ -77,8 +77,9 @@ export function MapView() {
   const [fAbstracts, setFAbstracts] = useState<string[]>([]);
   const [fWellTypes, setFWellTypes] = useState<string[]>([]);
   const [fWellStatuses, setFWellStatuses] = useState<string[]>([]);
+  const [fOperators, setFOperators] = useState<string[]>([]);
   const [query, setQuery] = useState("");
-  const [meta, setMeta] = useState<{ counties: string[]; surveys: string[]; abstracts: string[]; wellTypes: string[]; wellStatuses: string[] }>({ counties: [], surveys: [], abstracts: [], wellTypes: [], wellStatuses: [] });
+  const [meta, setMeta] = useState<{ counties: string[]; surveys: string[]; abstracts: string[]; wellTypes: string[]; wellStatuses: string[]; operators: string[] }>({ counties: [], surveys: [], abstracts: [], wellTypes: [], wellStatuses: [], operators: [] });
 
   const dealsByAbstract = useMemo(() => {
     const m = new Map<string, MapDeal[]>();
@@ -106,6 +107,7 @@ export function MapView() {
         abstracts: uniq(absFC.features.map((f) => f.properties.abstract as string)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
         wellTypes: uniq(welFC.features.map((f) => f.properties.type as string)).sort(),
         wellStatuses: uniq(welFC.features.map((f) => f.properties.status as string)).sort(),
+        operators: uniq(welFC.features.map((f) => f.properties.operator as string)).sort(),
       });
 
       map.addSource("abstracts", { type: "geojson", data: absFC as unknown as GeoJSON.FeatureCollection, promoteId: "id" });
@@ -169,7 +171,7 @@ export function MapView() {
   }, []);
 
   function toWellProps(p: Record<string, unknown>): WellProps {
-    return { fid: Number(p.fid), api: (p.api as string) || "", api8: (p.api8 as string) || "", wellNo: (p.wellNo as string) || null, wellId: (p.wellId as string) || "", symbol: (p.symbol as string) || "", type: (p.type as string) || "", status: (p.status as string) || "", county: (p.county as string) || "Leon", abstract: (p.abstract as string) || null, survey: (p.survey as string) || null };
+    return { fid: Number(p.fid), api: (p.api as string) || "", api8: (p.api8 as string) || "", wellNo: (p.wellNo as string) || null, wellId: (p.wellId as string) || "", symbol: (p.symbol as string) || "", type: (p.type as string) || "", status: (p.status as string) || "", county: (p.county as string) || "Leon", abstract: (p.abstract as string) || null, survey: (p.survey as string) || null, operator: (p.operator as string) || null, leaseName: (p.leaseName as string) || null, leaseNo: (p.leaseNo as string) || null, field: (p.field as string) || null, oilGas: (p.oilGas as string) || null };
   }
   function clearSelection() {
     const map = mapRef.current;
@@ -241,6 +243,7 @@ export function MapView() {
     const cl: unknown[] = [];
     if (fWellTypes.length) cl.push(["in", ["get", "type"], ["literal", fWellTypes]]);
     if (fWellStatuses.length) cl.push(["in", ["get", "status"], ["literal", fWellStatuses]]);
+    if (fOperators.length) cl.push(["in", ["get", "operator"], ["literal", fOperators]]);
     if (fAbstracts.length) cl.push(["in", ["get", "abstract"], ["literal", fAbstracts]]);
     if (fSurveys.length) cl.push(["in", ["get", "survey"], ["literal", fSurveys]]);
     map.setFilter("wells", cl.length ? (["all", ...cl] as maplibregl.FilterSpecification) : null);
@@ -251,7 +254,7 @@ export function MapView() {
   useEffect(applyHighlight, [dealsByAbstract]);
   useEffect(applyLayerVisibility, [layers]);
   useEffect(applyAbstractFilter, [fCounties, fSurveys, fAbstracts]);
-  useEffect(applyWellFilter, [fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses]);
+  useEffect(applyWellFilter, [fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses, fOperators]);
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase(); if (!q) return [] as { kind: "abstract" | "well"; key: string; label: string; sub: string }[];
@@ -262,7 +265,10 @@ export function MapView() {
     }
     for (const f of wellsFC.current?.features ?? []) {
       const p = f.properties; const api = String(p.api || ""); const api8 = String(p.api8 || ""); const wn = String(p.wellNo || "");
-      if (api.toLowerCase().includes(q) || api8.toLowerCase().includes(q) || wn.toLowerCase().includes(q)) { out.push({ kind: "well", key: String(p.fid), label: `Well ${api}${wn ? ` #${wn}` : ""}`, sub: `${p.type} · ${p.status}` }); if (out.length >= 14) break; }
+      const op = String(p.operator || ""); const ln = String(p.leaseName || "");
+      if (api.toLowerCase().includes(q) || api8.toLowerCase().includes(q) || wn.toLowerCase().includes(q) || op.toLowerCase().includes(q) || ln.toLowerCase().includes(q)) {
+        out.push({ kind: "well", key: String(p.fid), label: `Well ${api}${wn ? ` #${wn}` : ""}`, sub: [op || null, ln || null, p.type].filter(Boolean).join(" · ") }); if (out.length >= 16) break;
+      }
     }
     return out;
   }, [query]);
@@ -303,7 +309,7 @@ export function MapView() {
             <div className="field"><label>Abstract</label><SearchableMultiSelect options={meta.abstracts} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstracts…" /></div>
             <div className="field"><label>Well type</label><SearchableMultiSelect options={meta.wellTypes} value={fWellTypes} onChange={setFWellTypes} placeholder="Well types…" /></div>
             <div className="field"><label>Well status</label><SearchableMultiSelect options={meta.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} placeholder="Well statuses…" /></div>
-            <div className="field"><label>Operator <span className="muted">(needs external RRC data)</span></label><SearchableMultiSelect options={[]} value={[]} onChange={() => {}} placeholder="Not in GIS dataset" /></div>
+            <div className="field"><label>Operator ({meta.operators.length})</label><SearchableMultiSelect options={meta.operators} value={fOperators} onChange={setFOperators} placeholder="Operators…" /></div>
           </div>
         </div>
       )}
@@ -352,14 +358,16 @@ export function MapView() {
           <div style={{ position: "absolute", top: 12, right: 12, width: 320, maxHeight: "calc(100% - 24px)", overflowY: "auto", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "var(--shadow)", padding: 16 }}>
             {selected.kind === "well" ? (
               <>
-                <div className="section-head"><div><h3 style={{ margin: 0 }}>Well {selected.wellNo ? `#${selected.wellNo}` : ""}</h3><div className="muted" style={{ fontSize: 12 }}>{selected.symbol}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
+                <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.leaseName || "Well"} {selected.wellNo ? `#${selected.wellNo}` : ""}</h3><div className="muted" style={{ fontSize: 12 }}>{selected.symbol}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
                 <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                  <KV k="API" v={selected.api} /><KV k="Well No." v={selected.wellNo} />
-                  <KV k="Type" v={selected.type} /><KV k="Status" v={selected.status} />
-                  <KV k="County" v={selected.county} /><KV k="Abstract" v={selected.abstract} />
-                  <KV k="Survey" v={selected.survey} />
+                  <KV k="Operator" v={selected.operator} /><KV k="Oil / Gas" v={selected.oilGas} />
+                  <KV k="Lease" v={selected.leaseName} /><KV k="Lease No." v={selected.leaseNo} />
+                  <KV k="Field" v={selected.field} /><KV k="API" v={selected.api} />
+                  <KV k="Well No." v={selected.wellNo} /><KV k="Type" v={selected.type} />
+                  <KV k="Status" v={selected.status} /><KV k="County" v={selected.county} />
+                  <KV k="Abstract" v={selected.abstract} /><KV k="Survey" v={selected.survey} />
                 </div>
-                <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Operator, lease name/number, spud/completion dates, and production are not in the RRC GIS dataset — they require the RRC well-bore/production data or a commercial feed.</p>
+                <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Operator, lease, and field are from RRC production records. Production volumes, spud/completion dates, and formation are being added next.</p>
               </>
             ) : (
               <>
