@@ -17,31 +17,42 @@ interface MapDeal {
 type FC = { type: "FeatureCollection"; features: GeoFeature[] };
 type GeoFeature = { type: "Feature"; properties: Record<string, unknown>; geometry: { type: string; coordinates: unknown } };
 type SelAbstract = { kind: "abstract"; id: string; abstract: string; survey: string; county: string };
-type SelPipeline = { kind: "pipeline"; operator: string; system: string; commodity: string; diameter: unknown; status: string; interstate: boolean };
-type Selected = SelAbstract | SelPipeline | null;
+type Well = { api: string; api8: string; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; lon: number; lat: number };
+type SelWell = { kind: "well" } & Well;
+type Selected = SelAbstract | SelWell | null;
 
 const ABSTRACTS_URL = "/data/leon-abstracts.geojson";
-const PIPELINES_URL = "/data/leon-pipelines.geojson";
+const WELLS_URL = "/data/leon-wells.geojson";
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
-const OSM_STYLE: maplibregl.StyleSpecification = {
-  version: 8,
-  glyphs: "https://fonts.openmaptiles.org/{fontstack}/{range}.pbf",
-  sources: { osm: { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap contributors" } },
-  layers: [{ id: "osm", type: "raster", source: "osm" }],
-};
+
+const CATEGORY_COLOR = [
+  "match", ["get", "category"],
+  "producing", "#22c55e", "plugged", "#6b7280", "shutin", "#f59e0b", "dry", "#78350f",
+  "permitted", "#3b82f6", "injection", "#7c3aed", "water", "#06b6d4", "canceled", "#9ca3af",
+  "location", "#0ea5e9", "#64748b",
+] as unknown as maplibregl.ExpressionSpecification;
+
 const STATUS_OPTIONS = [
   ["ACTIVE", "Active deals"], ["ALL", "All linked deals"], ["UNDER_CONTRACT", "Under Contract"],
   ["PREPARING_PACKAGE", "Preparing Package"], ["SENT_TO_BUYERS", "Sent to Buyers"], ["NEGOTIATING", "Negotiating"],
   ["CLOSING", "Closing"], ["CLOSED", "Closed"], ["DEAD", "Dead"],
 ] as const;
 
+function styleWithGlyphs(): maplibregl.StyleSpecification {
+  return {
+    version: 8,
+    // Self-hosted glyphs (same-origin) so labels always render.
+    glyphs: `${window.location.origin}/fonts/{fontstack}/{range}.pbf`,
+    sources: { osm: { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap contributors" } },
+    layers: [{ id: "osm", type: "raster", source: "osm" }],
+  };
+}
+
 function bboxOf(geom: { type: string; coordinates: unknown }): [number, number, number, number] {
   let minX = 180, minY = 90, maxX = -180, maxY = -90;
   const walk = (c: unknown) => {
-    if (Array.isArray(c) && typeof c[0] === "number") {
-      const [x, y] = c as number[];
-      if (x < minX) minX = x; if (y < minY) minY = y; if (x > maxX) maxX = x; if (y > maxY) maxY = y;
-    } else if (Array.isArray(c)) c.forEach(walk);
+    if (Array.isArray(c) && typeof c[0] === "number") { const [x, y] = c as number[]; if (x < minX) minX = x; if (y < minY) minY = y; if (x > maxX) maxX = x; if (y > maxY) maxY = y; }
+    else if (Array.isArray(c)) c.forEach(walk);
   };
   walk(geom.coordinates);
   return [minX, minY, maxX, maxY];
@@ -54,10 +65,11 @@ export function MapView() {
   const activeIds = useRef<string[]>([]);
   const selectedIdRef = useRef<string | null>(null);
   const abstractsFC = useRef<FC | null>(null);
+  const wellsFC = useRef<FC | null>(null);
 
   const [deals, setDeals] = useState<MapDeal[] | null>(null);
   const [selected, setSelected] = useState<Selected>(null);
-  const [layers, setLayers] = useState({ boundaries: true, absNums: true, surveyNames: true, deals: true, pipelines: false, wells: false });
+  const [layers, setLayers] = useState({ boundaries: true, absNums: true, surveyNames: true, deals: true, wells: true });
   const layersRef = useRef(layers); layersRef.current = layers;
   const [showLayers, setShowLayers] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -65,8 +77,10 @@ export function MapView() {
   const [fCounties, setFCounties] = useState<string[]>([]);
   const [fSurveys, setFSurveys] = useState<string[]>([]);
   const [fAbstracts, setFAbstracts] = useState<string[]>([]);
+  const [fWellTypes, setFWellTypes] = useState<string[]>([]);
+  const [fWellStatuses, setFWellStatuses] = useState<string[]>([]);
   const [query, setQuery] = useState("");
-  const [meta, setMeta] = useState<{ counties: string[]; surveys: string[]; abstracts: string[] }>({ counties: [], surveys: [], abstracts: [] });
+  const [meta, setMeta] = useState<{ counties: string[]; surveys: string[]; abstracts: string[]; wellTypes: string[]; wellStatuses: string[] }>({ counties: [], surveys: [], abstracts: [], wellTypes: [], wellStatuses: [] });
 
   const dealsByAbstract = useMemo(() => {
     const m = new Map<string, MapDeal[]>();
@@ -74,33 +88,36 @@ export function MapView() {
     return m;
   }, [deals]);
 
-  // Init map + load static layers once.
   useEffect(() => {
     if (mapRef.current || !mapContainer.current) return;
-    const map = new maplibregl.Map({ container: mapContainer.current, style: OSM_STYLE, center: LEON_CENTER, zoom: 10, attributionControl: { compact: true } });
+    const map = new maplibregl.Map({ container: mapContainer.current, style: styleWithGlyphs(), center: LEON_CENTER, zoom: 10, attributionControl: { compact: true } });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     mapRef.current = map;
 
     map.on("load", async () => {
-      const [absFC, pipeFC] = await Promise.all([
+      const [absFC, welFC] = await Promise.all([
         fetch(ABSTRACTS_URL).then((r) => r.json()) as Promise<FC>,
-        fetch(PIPELINES_URL).then((r) => r.json()) as Promise<FC>,
+        fetch(WELLS_URL).then((r) => r.json()) as Promise<FC>,
       ]);
-      abstractsFC.current = absFC;
+      abstractsFC.current = absFC; wellsFC.current = welFC;
 
-      // Build filter option lists from the abstracts data.
-      const surveys = [...new Set(absFC.features.map((f) => (f.properties.survey as string) || "").filter(Boolean))].sort();
-      const abstracts = [...new Set(absFC.features.map((f) => (f.properties.abstract as string) || "").filter(Boolean))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-      setMeta({ counties: ["Leon"], surveys, abstracts });
+      const uniq = (arr: (string | null | undefined)[]) => [...new Set(arr.filter(Boolean) as string[])];
+      setMeta({
+        counties: ["Leon"],
+        surveys: uniq(absFC.features.map((f) => f.properties.survey as string)).sort(),
+        abstracts: uniq(absFC.features.map((f) => f.properties.abstract as string)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+        wellTypes: uniq(welFC.features.map((f) => f.properties.type as string)).sort(),
+        wellStatuses: uniq(welFC.features.map((f) => f.properties.status as string)).sort(),
+      });
 
       map.addSource("abstracts", { type: "geojson", data: absFC as unknown as GeoJSON.FeatureCollection, promoteId: "id" });
-      map.addSource("pipelines", { type: "geojson", data: pipeFC as unknown as GeoJSON.FeatureCollection });
+      map.addSource("wells", { type: "geojson", data: welFC as unknown as GeoJSON.FeatureCollection });
 
       map.addLayer({
         id: "abstracts-fill", type: "fill", source: "abstracts",
         paint: {
           "fill-color": ["case", ["boolean", ["feature-state", "selected"], false], "#f59e0b", ["boolean", ["feature-state", "active"], false], "#ef4444", "#3b82f6"],
-          "fill-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 0.6, ["boolean", ["feature-state", "active"], false], 0.5, 0.05],
+          "fill-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 0.55, ["boolean", ["feature-state", "active"], false], 0.45, 0.05],
         },
       });
       map.addLayer({
@@ -108,83 +125,101 @@ export function MapView() {
         paint: { "line-color": ["case", ["boolean", ["feature-state", "selected"], false], "#b45309", "#64748b"], "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 3, 0.5] },
       });
       map.addLayer({
-        id: "pipelines", type: "line", source: "pipelines", layout: { visibility: "none", "line-cap": "round" },
-        paint: { "line-color": "#7c3aed", "line-width": ["interpolate", ["linear"], ["zoom"], 9, 0.8, 14, 2.2], "line-opacity": 0.85 },
+        id: "wells", type: "circle", source: "wells",
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 2.3, 12, 3.6, 15, 6],
+          "circle-color": CATEGORY_COLOR, "circle-stroke-width": 0.6, "circle-stroke-color": "#ffffff", "circle-opacity": 0.9,
+        },
       });
-      // Two independent label layers so numbers and survey names toggle separately.
+      map.addLayer({
+        id: "wells-highlight", type: "circle", source: "wells", filter: ["==", ["get", "api8"], "__none__"],
+        paint: { "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 6, 15, 11], "circle-color": "rgba(0,0,0,0)", "circle-stroke-width": 3, "circle-stroke-color": "#111827" },
+      });
       map.addLayer({
         id: "abstracts-num", type: "symbol", source: "abstracts", minzoom: 9,
-        layout: {
-          "symbol-sort-key": ["*", -1, ["get", "area"]], "text-field": ["get", "abstract"],
-          "text-font": ["Noto Sans Regular"], "text-size": ["interpolate", ["linear"], ["zoom"], 9, 10, 14, 13],
-          "text-padding": 2, "text-allow-overlap": false, "text-optional": true,
-        },
+        layout: { "symbol-sort-key": ["*", -1, ["get", "area"]], "text-field": ["get", "abstract"], "text-font": ["Noto Sans Regular"], "text-size": ["interpolate", ["linear"], ["zoom"], 9, 10, 14, 13], "text-padding": 2, "text-allow-overlap": false, "text-optional": true },
         paint: { "text-color": "#0f172a", "text-halo-color": "#ffffff", "text-halo-width": 1.4 },
       });
       map.addLayer({
         id: "abstracts-survey", type: "symbol", source: "abstracts", minzoom: 12.5,
-        layout: {
-          "symbol-sort-key": ["*", -1, ["get", "area"]], "text-field": ["get", "survey"],
-          "text-font": ["Noto Sans Regular"], "text-size": 11, "text-offset": [0, 1.1],
-          "text-max-width": 8, "text-padding": 2, "text-allow-overlap": false, "text-optional": true,
-        },
+        layout: { "symbol-sort-key": ["*", -1, ["get", "area"]], "text-field": ["get", "survey"], "text-font": ["Noto Sans Regular"], "text-size": 11, "text-offset": [0, 1.1], "text-max-width": 8, "text-padding": 2, "text-allow-overlap": false, "text-optional": true },
         paint: { "text-color": "#334155", "text-halo-color": "#ffffff", "text-halo-width": 1.3 },
       });
 
       map.on("click", (e) => {
-        // Pipelines first (thin lines): small tolerance box.
-        const b = 4;
-        const pipes = map.getLayoutProperty("pipelines", "visibility") === "visible"
-          ? map.queryRenderedFeatures([[e.point.x - b, e.point.y - b], [e.point.x + b, e.point.y + b]], { layers: ["pipelines"] })
+        const b = 5;
+        const wells = layersRef.current.wells
+          ? map.queryRenderedFeatures([[e.point.x - b, e.point.y - b], [e.point.x + b, e.point.y + b]], { layers: ["wells"] })
           : [];
-        if (pipes.length) {
-          const p = pipes[0].properties as Record<string, unknown>;
-          deselectAbstract();
-          setSelected({ kind: "pipeline", operator: (p.operator as string) || "Unknown operator", system: (p.system as string) || "", commodity: (p.commodity as string) || "", diameter: p.diameter, status: (p.status as string) || "", interstate: !!p.interstate });
-          return;
-        }
+        if (wells.length) { selectWell(wells[0].properties as Record<string, unknown>); return; }
         const feats = map.queryRenderedFeatures(e.point, { layers: ["abstracts-fill"] });
-        if (feats.length === 0) { deselectAbstract(); setSelected(null); return; }
+        if (feats.length === 0) { clearSelection(); return; }
         const feat = feats[0]; const id = feat.properties?.id as string;
-        if (selectedIdRef.current === id) { deselectAbstract(); setSelected(null); return; }
-        deselectAbstract();
-        selectedIdRef.current = id;
-        map.setFeatureState({ source: "abstracts", id }, { selected: true });
-        setSelected({ kind: "abstract", id, abstract: (feat.properties?.abstract as string) || id, survey: (feat.properties?.survey as string) || "", county: (feat.properties?.county as string) || "" });
+        if (selected?.kind === "abstract" && selectedIdRef.current === id) { clearSelection(); return; }
+        selectAbstract(id, feat.properties as Record<string, unknown>);
       });
+      map.on("mouseenter", "wells", () => (map.getCanvas().style.cursor = "pointer"));
+      map.on("mouseleave", "wells", () => (map.getCanvas().style.cursor = ""));
       map.on("mouseenter", "abstracts-fill", () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", "abstracts-fill", () => (map.getCanvas().style.cursor = ""));
 
       styleReady.current = true;
-      applyHighlight(); applyLayerVisibility(); applyAbstractFilter();
+      applyHighlight(); applyLayerVisibility(); applyAbstractFilter(); applyWellFilter();
     });
 
     return () => { map.remove(); mapRef.current = null; styleReady.current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function deselectAbstract() {
+  function clearSelection() {
     const map = mapRef.current;
-    if (map && selectedIdRef.current) map.setFeatureState({ source: "abstracts", id: selectedIdRef.current }, { selected: false });
+    if (map) {
+      if (selectedIdRef.current) map.setFeatureState({ source: "abstracts", id: selectedIdRef.current }, { selected: false });
+      if (map.getLayer("wells-highlight")) map.setFilter("wells-highlight", ["==", ["get", "api8"], "__none__"]);
+    }
     selectedIdRef.current = null;
+    setSelected(null);
+  }
+
+  function selectAbstract(id: string, props: Record<string, unknown>) {
+    const map = mapRef.current; if (!map) return;
+    clearSelection();
+    selectedIdRef.current = id;
+    map.setFeatureState({ source: "abstracts", id }, { selected: true });
+    setSelected({ kind: "abstract", id, abstract: (props.abstract as string) || id, survey: (props.survey as string) || "", county: (props.county as string) || "" });
+  }
+
+  function selectWell(props: Record<string, unknown>) {
+    const map = mapRef.current; if (!map) return;
+    clearSelection();
+    const api8 = props.api8 as string;
+    map.setFilter("wells-highlight", ["==", ["get", "api8"], api8]);
+    setSelected({
+      kind: "well", api: (props.api as string) || "", api8, wellId: (props.wellId as string) || "",
+      symbol: (props.symbol as string) || "", type: (props.type as string) || "", status: (props.status as string) || "",
+      county: (props.county as string) || "Leon", abstract: (props.abstract as string) || null, survey: (props.survey as string) || null,
+      lon: 0, lat: 0,
+    });
   }
 
   function selectAbstractById(id: string) {
-    const map = mapRef.current; const fc = abstractsFC.current;
-    if (!map || !fc) return;
-    const feat = fc.features.find((f) => f.properties.id === id);
-    if (!feat) return;
-    deselectAbstract();
-    selectedIdRef.current = id;
-    map.setFeatureState({ source: "abstracts", id }, { selected: true });
-    setSelected({ kind: "abstract", id, abstract: (feat.properties.abstract as string) || id, survey: (feat.properties.survey as string) || "", county: (feat.properties.county as string) || "" });
+    const map = mapRef.current; const fc = abstractsFC.current; if (!map || !fc) return;
+    const feat = fc.features.find((f) => f.properties.id === id); if (!feat) return;
+    selectAbstract(id, feat.properties);
     const [minX, minY, maxX, maxY] = bboxOf(feat.geometry);
     map.fitBounds([[minX, minY], [maxX, maxY]], { padding: 80, maxZoom: 14, duration: 800 });
   }
 
+  function selectWellByApi8(api8: string) {
+    const map = mapRef.current; const fc = wellsFC.current; if (!map || !fc) return;
+    const feat = fc.features.find((f) => f.properties.api8 === api8); if (!feat) return;
+    selectWell(feat.properties);
+    const [lon, lat] = (feat.geometry.coordinates as number[]);
+    map.flyTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 13), duration: 800 });
+  }
+
   function applyHighlight() {
-    const map = mapRef.current;
-    if (!map || !styleReady.current) return;
+    const map = mapRef.current; if (!map || !styleReady.current) return;
     for (const id of activeIds.current) map.setFeatureState({ source: "abstracts", id }, { active: false });
     if (!layersRef.current.deals) { activeIds.current = []; return; }
     activeIds.current = [...dealsByAbstract.keys()];
@@ -196,7 +231,8 @@ export function MapView() {
     const L = layersRef.current;
     const vis = (id: string, on: boolean) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
     vis("abstracts-fill", L.boundaries); vis("abstracts-line", L.boundaries);
-    vis("abstracts-num", L.absNums); vis("abstracts-survey", L.surveyNames); vis("pipelines", L.pipelines);
+    vis("abstracts-num", L.absNums); vis("abstracts-survey", L.surveyNames);
+    vis("wells", L.wells); vis("wells-highlight", L.wells);
     applyHighlight();
   }
 
@@ -207,12 +243,20 @@ export function MapView() {
     if (fSurveys.length) clauses.push(["in", ["get", "survey"], ["literal", fSurveys]]);
     if (fCounties.length && !fCounties.includes("Leon")) clauses.push(["==", ["get", "id"], "__none__"]);
     const filter = clauses.length ? (["all", ...clauses] as maplibregl.FilterSpecification) : null;
-    for (const id of ["abstracts-fill", "abstracts-line", "abstracts-num", "abstracts-survey"]) {
-      if (map.getLayer(id)) map.setFilter(id, filter);
-    }
+    for (const id of ["abstracts-fill", "abstracts-line", "abstracts-num", "abstracts-survey"]) if (map.getLayer(id)) map.setFilter(id, filter);
   }
 
-  // Data + reactive effects
+  function applyWellFilter() {
+    const map = mapRef.current; if (!map || !styleReady.current || !map.getLayer("wells")) return;
+    const clauses: unknown[] = [];
+    if (fWellTypes.length) clauses.push(["in", ["get", "type"], ["literal", fWellTypes]]);
+    if (fWellStatuses.length) clauses.push(["in", ["get", "status"], ["literal", fWellStatuses]]);
+    if (fAbstracts.length) clauses.push(["in", ["get", "abstract"], ["literal", fAbstracts]]);
+    if (fSurveys.length) clauses.push(["in", ["get", "survey"], ["literal", fSurveys]]);
+    if (fCounties.length && !fCounties.includes("Leon")) clauses.push(["==", ["get", "county"], "__none__"]);
+    map.setFilter("wells", clauses.length ? (["all", ...clauses] as maplibregl.FilterSpecification) : null);
+  }
+
   function loadDeals() {
     const qs = new URLSearchParams(); qs.set("status", statusFilter);
     api.get<MapDeal[]>(`/map/deals?${qs.toString()}`).then(setDeals);
@@ -221,41 +265,38 @@ export function MapView() {
   useEffect(applyHighlight, [dealsByAbstract]);
   useEffect(applyLayerVisibility, [layers]);
   useEffect(applyAbstractFilter, [fCounties, fSurveys, fAbstracts]);
+  useEffect(applyWellFilter, [fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses]);
 
-  // Global search over abstracts (number / survey / county). Wells to come.
+  // Global search: abstracts (# / survey) + wells (API / well id).
   const results = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q || !abstractsFC.current) return [];
-    const out: { id: string; label: string; sub: string }[] = [];
-    for (const f of abstractsFC.current.features) {
+    const q = query.trim().toLowerCase(); if (!q) return [] as { kind: "abstract" | "well"; key: string; label: string; sub: string }[];
+    const out: { kind: "abstract" | "well"; key: string; label: string; sub: string }[] = [];
+    for (const f of abstractsFC.current?.features ?? []) {
       const ab = (f.properties.abstract as string) || ""; const sv = (f.properties.survey as string) || "";
-      if (ab.toLowerCase().includes(q) || sv.toLowerCase().includes(q)) {
-        out.push({ id: f.properties.id as string, label: ab, sub: sv });
-        if (out.length >= 8) break;
-      }
+      if (ab.toLowerCase().includes(q) || sv.toLowerCase().includes(q)) { out.push({ kind: "abstract", key: f.properties.id as string, label: ab, sub: sv }); if (out.length >= 6) break; }
+    }
+    for (const f of wellsFC.current?.features ?? []) {
+      const api = (f.properties.api as string) || ""; const api8 = (f.properties.api8 as string) || ""; const wid = (f.properties.wellId as string) || "";
+      if (api.toLowerCase().includes(q) || api8.toLowerCase().includes(q) || wid.toLowerCase().includes(q)) { out.push({ kind: "well", key: api8, label: `Well ${api}`, sub: `${f.properties.type} · ${f.properties.status}` }); if (out.length >= 12) break; }
     }
     return out;
   }, [query]);
 
   const panelDeals = selected?.kind === "abstract" ? dealsByAbstract.get(selected.id) ?? [] : [];
   const abstractCount = dealsByAbstract.size;
-
   const toggle = (k: keyof typeof layers) => setLayers((p) => ({ ...p, [k]: !p[k] }));
 
   return (
     <div className="page" style={{ maxWidth: 1400 }}>
-      <div className="page-header">
-        <div className="row"><h1 style={{ marginBottom: 0 }}>Map</h1><span className="muted">Leon County, TX · proof of concept</span></div>
-      </div>
+      <div className="page-header"><div className="row"><h1 style={{ marginBottom: 0 }}>Map</h1><span className="muted">Leon County, TX · proof of concept</span></div></div>
 
-      {/* Toolbar */}
       <div className="row" style={{ marginBottom: 12, gap: 10, position: "relative" }}>
-        <div style={{ position: "relative", flex: 1, maxWidth: 380 }}>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search abstract #, survey name…" />
+        <div style={{ position: "relative", flex: 1, maxWidth: 420 }}>
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search API #, abstract #, survey name…" />
           {results.length > 0 && (
             <div className="msel-menu" style={{ top: "100%" }}>
               {results.map((r) => (
-                <div className="msel-opt" key={r.id} onClick={() => { selectAbstractById(r.id); setQuery(""); }}>
+                <div className="msel-opt" key={r.kind + r.key} onClick={() => { r.kind === "abstract" ? selectAbstractById(r.key) : selectWellByApi8(r.key); setQuery(""); }}>
                   <strong>{r.label}</strong> <span className="muted">· {r.sub}</span>
                 </div>
               ))}
@@ -270,15 +311,13 @@ export function MapView() {
       {showFilters && (
         <div className="panel" style={{ marginBottom: 12 }}>
           <div className="dd-grid">
-            <div className="field"><label>Deal status</label>
-              <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>{STATUS_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
-            </div>
+            <div className="field"><label>Deal status</label><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>{STATUS_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
             <div className="field"><label>County</label><SearchableMultiSelect options={meta.counties} value={fCounties} onChange={setFCounties} placeholder="Counties…" /></div>
             <div className="field"><label>Survey</label><SearchableMultiSelect options={meta.surveys} value={fSurveys} onChange={setFSurveys} placeholder="Surveys…" /></div>
             <div className="field"><label>Abstract</label><SearchableMultiSelect options={meta.abstracts} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstracts…" /></div>
-            <div className="field"><label>Operator <span className="muted">(needs wells data)</span></label><SearchableMultiSelect options={[]} value={[]} onChange={() => {}} placeholder="Requires wells layer" /></div>
-            <div className="field"><label>Well status <span className="muted">(needs wells data)</span></label><SearchableMultiSelect options={[]} value={[]} onChange={() => {}} placeholder="Requires wells layer" /></div>
-            <div className="field"><label>Well type <span className="muted">(needs wells data)</span></label><SearchableMultiSelect options={[]} value={[]} onChange={() => {}} placeholder="Requires wells layer" /></div>
+            <div className="field"><label>Well type</label><SearchableMultiSelect options={meta.wellTypes} value={fWellTypes} onChange={setFWellTypes} placeholder="Well types…" /></div>
+            <div className="field"><label>Well status</label><SearchableMultiSelect options={meta.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} placeholder="Well statuses…" /></div>
+            <div className="field"><label>Operator <span className="muted">(not in RRC dataset)</span></label><SearchableMultiSelect options={[]} value={[]} onChange={() => {}} placeholder="Needs operator source" /></div>
           </div>
         </div>
       )}
@@ -290,14 +329,13 @@ export function MapView() {
             <Chk label="Abstract numbers" on={layers.absNums} onChange={() => toggle("absNums")} />
             <Chk label="Survey names" on={layers.surveyNames} onChange={() => toggle("surveyNames")} />
             <Chk label="Active deals" on={layers.deals} onChange={() => toggle("deals")} />
-            <Chk label="Pipelines" on={layers.pipelines} onChange={() => toggle("pipelines")} />
-            <Chk label="Wells (coming soon)" on={false} onChange={() => {}} disabled />
+            <Chk label="Wells" on={layers.wells} onChange={() => toggle("wells")} />
           </div>
         </div>
       )}
 
       <div className="row" style={{ marginBottom: 8 }}>
-        <span className="muted">{deals == null ? "…" : `${deals.length} deal${deals.length === 1 ? "" : "s"} · ${abstractCount} abstract${abstractCount === 1 ? "" : "s"} highlighted`}</span>
+        <span className="muted">{deals == null ? "…" : `${deals.length} deal${deals.length === 1 ? "" : "s"} · ${abstractCount} abstract${abstractCount === 1 ? "" : "s"} highlighted · ${wellsFC.current?.features.length ?? 0} wells`}</span>
       </div>
 
       <div style={{ position: "relative", height: "calc(100vh - 250px)", minHeight: 460, borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
@@ -305,36 +343,44 @@ export function MapView() {
         {!deals && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}><Spinner label="Loading map…" /></div>}
 
         <div style={{ position: "absolute", left: 12, bottom: 26, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px", fontSize: 12 }}>
-          <Legend color="#ef4444" op={0.7} label="Active deal" />
-          <Legend color="#f59e0b" op={0.8} label="Selected" />
-          <Legend color="#3b82f6" op={0.4} label="Abstract boundary" />
-          {layers.pipelines && <Legend color="#7c3aed" op={0.9} label="Pipeline" />}
+          <Legend color="#ef4444" op={0.7} label="Active deal (abstract)" />
+          <Legend color="#f59e0b" op={0.8} label="Selected abstract" />
+          {layers.wells && <>
+            <Legend color="#22c55e" op={0.9} label="Producing well" />
+            <Legend color="#6b7280" op={0.9} label="Plugged" />
+            <Legend color="#f59e0b" op={0.9} label="Shut-in" />
+            <Legend color="#3b82f6" op={0.9} label="Permitted" />
+            <Legend color="#7c3aed" op={0.9} label="Injection/Disposal" />
+          </>}
         </div>
 
         {selected && (
           <div style={{ position: "absolute", top: 12, right: 12, width: 320, maxHeight: "calc(100% - 24px)", overflowY: "auto", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "var(--shadow)", padding: 16 }}>
-            {selected.kind === "pipeline" ? (
+            {selected.kind === "well" ? (
               <>
-                <div className="section-head"><div><h3 style={{ margin: 0 }}>Pipeline</h3><div className="muted" style={{ fontSize: 12 }}>{selected.system}</div></div><button className="icon-btn" onClick={() => setSelected(null)}>×</button></div>
+                <div className="section-head"><div><h3 style={{ margin: 0 }}>Well</h3><div className="muted" style={{ fontSize: 12 }}>{selected.symbol}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
                 <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                  <KV k="Operator" v={selected.operator} /><KV k="Commodity" v={selected.commodity} />
-                  <KV k="Diameter" v={selected.diameter ? `${selected.diameter}"` : "—"} /><KV k="Status" v={selected.status} />
-                  <KV k="Interstate" v={selected.interstate ? "Yes" : "No"} />
+                  <KV k="API" v={selected.api} /><KV k="Well ID" v={selected.wellId} />
+                  <KV k="Type" v={selected.type} /><KV k="Status" v={selected.status} />
+                  <KV k="County" v={selected.county} /><KV k="Abstract" v={selected.abstract} />
+                  <KV k="Survey" v={selected.survey} />
                 </div>
+                <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Operator, lease name, and production are not included in the RRC well-location dataset.</p>
               </>
             ) : (
               <>
-                <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.abstract}</h3><div className="muted" style={{ fontSize: 12 }}>{[selected.survey, selected.county ? `${selected.county} County` : ""].filter(Boolean).join(" · ")}</div></div><button className="icon-btn" onClick={() => { deselectAbstract(); setSelected(null); }}>×</button></div>
-                <div className="kv" style={{ margin: "8px 0" }}><span className="k">Abstract ID</span><span className="v"><code>{selected.id}</code></span></div>
-                <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 8 }}>{panelDeals.length} active deal{panelDeals.length === 1 ? "" : "s"}</div>
+                <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.abstract}</h3><div className="muted" style={{ fontSize: 12 }}>{[selected.survey, selected.county ? `${selected.county} County` : ""].filter(Boolean).join(" · ")}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
+                <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
+                  <KV k="Abstract" v={selected.abstract} /><KV k="Survey" v={selected.survey} /><KV k="County" v={selected.county} />
+                </div>
+                <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 10 }}>{panelDeals.length} active deal{panelDeals.length === 1 ? "" : "s"}</div>
                 {panelDeals.length === 0 ? <p className="muted">No active deals in this abstract.</p> : panelDeals.map((d) => (
                   <div key={d.id} style={{ borderTop: "1px solid var(--border)", padding: "10px 0" }}>
                     <div className="row" style={{ justifyContent: "space-between" }}><Link to={`/deals/${d.id}`} style={{ fontWeight: 600 }}>{d.name}</Link><PriorityBadge priority={d.priority} /></div>
                     <div className="row" style={{ gap: 6, margin: "6px 0" }}><StageBadge stage={d.stage} />{d.selectedBuyer && <span className="muted" style={{ fontSize: 12 }}>→ {d.selectedBuyer.name}</span>}</div>
                     <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                      <KV k="County" v={d.counties.join(", ")} /><KV k="Operator" v={d.operator} />
-                      <KV k="Asset Type" v={d.assetTypes.join(", ")} /><KV k="NMA" v={num(d.acreageNma)} />
-                      <KV k="NRA" v={num(d.nra)} /><KV k="Profit est." v={money(d.profitEst)} />
+                      <KV k="Operator" v={d.operator} /><KV k="Asset Type" v={d.assetTypes.join(", ")} />
+                      <KV k="NMA" v={num(d.acreageNma)} /><KV k="Profit est." v={money(d.profitEst)} />
                     </div>
                   </div>
                 ))}
@@ -347,15 +393,11 @@ export function MapView() {
   );
 }
 
-function Chk({ label, on, onChange, disabled }: { label: string; on: boolean; onChange: () => void; disabled?: boolean }) {
-  return (
-    <label style={{ display: "flex", alignItems: "center", gap: 8, textTransform: "none", letterSpacing: 0, margin: 0, opacity: disabled ? 0.5 : 1, cursor: disabled ? "not-allowed" : "pointer" }}>
-      <input type="checkbox" checked={on} disabled={disabled} onChange={onChange} style={{ width: "auto" }} /> {label}
-    </label>
-  );
+function Chk({ label, on, onChange }: { label: string; on: boolean; onChange: () => void }) {
+  return <label style={{ display: "flex", alignItems: "center", gap: 8, textTransform: "none", letterSpacing: 0, margin: 0, cursor: "pointer" }}><input type="checkbox" checked={on} onChange={onChange} style={{ width: "auto" }} /> {label}</label>;
 }
 function Legend({ color, op, label }: { color: string; op: number; label: string }) {
-  return <div className="row" style={{ gap: 8, marginTop: 4 }}><span style={{ width: 12, height: 12, background: color, opacity: op, borderRadius: 2, display: "inline-block" }} /> {label}</div>;
+  return <div className="row" style={{ gap: 8, marginTop: 4 }}><span style={{ width: 12, height: 12, background: color, opacity: op, borderRadius: "50%", display: "inline-block" }} /> {label}</div>;
 }
 function KV({ k, v }: { k: string; v: React.ReactNode }) {
   return <div className="kv"><span className="k">{k}</span><span className="v">{v || "—"}</span></div>;
