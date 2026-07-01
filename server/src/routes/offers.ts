@@ -54,13 +54,14 @@ offersRouter.post(
         create: {
           dealId: data.dealId,
           buyerId: data.buyerId,
-          responseStatus: "OFFER_MADE",
+          status: "OFFER_RECEIVED",
+          responseReceived: true,
           offerAmount: data.amount,
           dateSent: now,
           lastActivityDate: now,
           sentByUserId: req.user!.id,
         },
-        update: { responseStatus: "OFFER_MADE", offerAmount: data.amount, lastActivityDate: now },
+        update: { status: "OFFER_RECEIVED", responseReceived: true, offerAmount: data.amount, lastActivityDate: now },
       });
       await logActivity(
         {

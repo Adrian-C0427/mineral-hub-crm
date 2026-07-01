@@ -3,17 +3,18 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import {
-  Spinner, PriorityBadge, StageBadge, MetricCard, ResponseBadge,
+  Spinner, PriorityBadge, StageBadge, MetricCard,
   MatchPercentBadge, MatchBar, Banner,
 } from "../components/ui";
-import { SortableTable, type Column } from "../components/SortableTable";
 import { StageChangeModal } from "../components/StageChangeModal";
 import { LogContactModal } from "../components/LogContactModal";
+import { BuyerActivitySection } from "../components/BuyerActivitySection";
 import { AbstractMultiPicker, useAbstractLabels } from "../components/AbstractPicker";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
 import { money, num, fmtDate, toInputDate } from "../lib/format";
-import type { BuyerActivityRow, DealSummary, MatchRec } from "../types";
+import { downloadCsv } from "../lib/csv";
+import type { BuyerActivityRow, DealSummary, MatchRec, UserLite } from "../types";
 
 interface DealDetailData extends DealSummary {
   operator: string | null;
@@ -28,9 +29,7 @@ interface DealDetailData extends DealSummary {
 
 const FILE_CATEGORIES = ["PSA", "LPOA", "DEED", "PLAT_MAP", "TITLE_DOC", "OTHER"];
 
-const RESPONSE_ORDER: Record<string, number> = {
-  OFFER_MADE: 0, INTERESTED: 1, PENDING: 2, NOT_INTERESTED: 3, PASSED: 4,
-};
+interface EditTarget { id: string; name: string; initial?: { status?: BuyerActivityRow["status"]; assignedTeamMemberId?: string | null; responseReceived?: boolean; notes?: string | null } }
 
 export function DealDetail() {
   const { id } = useParams<{ id: string }>();
@@ -38,18 +37,42 @@ export function DealDetail() {
   const nav = useNavigate();
   const [deal, setDeal] = useState<DealDetailData | null>(null);
   const [matches, setMatches] = useState<MatchRec[] | null>(null);
+  const [users, setUsers] = useState<UserLite[]>([]);
   const [showStage, setShowStage] = useState(false);
-  const [logBuyer, setLogBuyer] = useState<{ id: string; name: string } | null>(null);
+  const [logBuyer, setLogBuyer] = useState<EditTarget | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const loadDeal = useCallback(() => api.get<DealDetailData>(`/deals/${id}`).then(setDeal), [id]);
   const loadMatches = useCallback(() => api.get<MatchRec[]>(`/deals/${id}/matches`).then(setMatches), [id]);
 
-  useEffect(() => { loadDeal(); loadMatches(); }, [loadDeal, loadMatches]);
+  useEffect(() => {
+    loadDeal(); loadMatches();
+    api.get<UserLite[]>("/users").then(setUsers).catch(() => {});
+  }, [loadDeal, loadMatches]);
 
   if (!deal) return <Spinner />;
 
   const refreshAll = () => { loadDeal(); loadMatches(); };
-  const hasUnresolved = deal.buyerActivity.some((a) => a.responseStatus === "PENDING");
+  const hasUnresolved = deal.buyerActivity.some((a) => a.status === "CONTACTED");
+
+  const toggleMatch = (buyerId: string) =>
+    setSelected((prev) => { const n = new Set(prev); n.has(buyerId) ? n.delete(buyerId) : n.add(buyerId); return n; });
+  const selectAllMatches = () =>
+    setSelected((prev) => (matches && prev.size === matches.length ? new Set() : new Set((matches ?? []).map((m) => m.buyerId))));
+  async function markContacted() {
+    if (selected.size === 0) return;
+    await api.post(`/deals/${id}/contact-bulk`, { buyerIds: [...selected] });
+    setSelected(new Set());
+    refreshAll();
+  }
+  function exportSelected() {
+    const chosen = (matches ?? []).filter((m) => selected.has(m.buyerId));
+    downloadCsv(
+      `matches-${deal!.name}-${new Date().toISOString().slice(0, 10)}.csv`,
+      ["Rank", "Buyer", "Company", "Match %", "Owners", "Closed together", "Last contact"],
+      chosen.map((m) => [m.rank, m.buyerName, m.companyName, m.matchPercent, m.owners.join("; "), m.previousDealsClosed, m.lastContactDate ?? ""]),
+    );
+  }
 
   return (
     <div className="page">
@@ -118,37 +141,58 @@ export function DealDetail() {
         </div>
       )}
 
-      {/* Buyer Activity table */}
+      {/* Buyer Activity — expandable per-buyer relationship + timeline */}
       <div className="panel">
-        <div className="section-head"><h3>Buyer Activity</h3><span className="muted">Complete marketing log — every buyer ever contacted</span></div>
-        <BuyerActivityTable rows={deal.buyerActivity} onLog={(b) => setLogBuyer(b)} />
+        <div className="section-head"><h3>Buyer Activity</h3><span className="muted">Every buyer's status, notes, and full communication history on this deal</span></div>
+        <BuyerActivitySection
+          dealId={deal.id}
+          rows={deal.buyerActivity}
+          onChanged={refreshAll}
+          onEdit={(r) => setLogBuyer({ id: r.buyerId, name: r.buyerName, initial: { status: r.status, assignedTeamMemberId: r.assignedTeamMember?.id ?? null, responseReceived: r.responseReceived, notes: r.notes } })}
+        />
       </div>
 
-      {/* Match recommendations */}
+      {/* Match recommendations — actionable outreach */}
       <div className="panel">
         <div className="section-head"><h3>Buyer Match Recommendations</h3><span className="muted">Ranked, every buyer, highest match first</span></div>
-        {!matches ? <Spinner /> : matches.length === 0 ? <p className="muted">No buyers in the system yet.</p> :
-          matches.map((m) => (
-            <div className="match-card" key={m.buyerId}>
-              <div className="match-card-head">
-                <span className="match-rank">#{m.rank}</span>
-                <Link to={`/buyers/${m.buyerId}`} style={{ fontWeight: 600 }}>{m.buyerName}</Link>
-                <span className="muted">· {m.companyName}</span>
-                <span className="spacer" />
-                <MatchPercentBadge value={m.matchPercent} />
+        {!matches ? <Spinner /> : matches.length === 0 ? <p className="muted">No buyers in the system yet.</p> : (
+          <>
+            {can("editDeals") && (
+              <div className="row" style={{ flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 10 }}>
+                <label style={{ fontSize: 13, textTransform: "none" }}>
+                  <input type="checkbox" checked={selected.size > 0 && selected.size === matches.length} onChange={selectAllMatches} /> Select all
+                </label>
+                <span className="muted" style={{ fontSize: 13 }}>{selected.size} selected</span>
+                <button className="small primary" disabled={selected.size === 0} title="Sends the deal package (email integration coming next phase)" onClick={markContacted}>Send Deal via Email</button>
+                <button className="small" disabled={selected.size === 0} onClick={markContacted}>Mark as Contacted</button>
+                <button className="small" disabled={selected.size === 0} onClick={exportSelected}>Export Selected (CSV)</button>
+                <button className="small" disabled={selected.size === 0} onClick={() => setSelected(new Set())}>Remove Selection</button>
               </div>
-              <MatchBar value={m.matchPercent} />
-              <div>
-                {m.matching.map((c) => <span key={c.key} className="crit-tag crit-yes">{c.label}</span>)}
-                {m.nonMatching.map((c) => <span key={c.key} className="crit-tag crit-no">{c.label}</span>)}
+            )}
+            {matches.map((m) => (
+              <div className={`match-card ${selected.has(m.buyerId) ? "match-selected" : ""}`} key={m.buyerId}>
+                <div className="match-card-head">
+                  {can("editDeals") && <input type="checkbox" checked={selected.has(m.buyerId)} onChange={() => toggleMatch(m.buyerId)} />}
+                  <span className="match-rank">#{m.rank}</span>
+                  <Link to={`/buyers/${m.buyerId}`} style={{ fontWeight: 600 }}>{m.buyerName}</Link>
+                  <span className="muted">· {m.companyName}</span>
+                  <span className="spacer" />
+                  <MatchPercentBadge value={m.matchPercent} />
+                </div>
+                <MatchBar value={m.matchPercent} />
+                <div>
+                  {m.matching.map((c) => <span key={c.key} className="crit-tag crit-yes">{c.label}</span>)}
+                  {m.nonMatching.map((c) => <span key={c.key} className="crit-tag crit-no">{c.label}</span>)}
+                </div>
+                <div className="dc-meta" style={{ marginTop: 8, justifyContent: "space-between" }}>
+                  <span>Owner(s): {m.owners.length ? m.owners.join(", ") : "—"} · {m.previousDealsClosed} closed together · Last contact: {fmtDate(m.lastContactDate)}
+                    {m.stale && <span className="stale-flag"> · stale</span>}</span>
+                  {can("editDeals") && <button className="small" onClick={() => setLogBuyer({ id: m.buyerId, name: m.buyerName })}>Log contact</button>}
+                </div>
               </div>
-              <div className="dc-meta" style={{ marginTop: 8, justifyContent: "space-between" }}>
-                <span>Owner(s): {m.owners.length ? m.owners.join(", ") : "—"} · {m.previousDealsClosed} closed together · Last contact: {fmtDate(m.lastContactDate)}
-                  {m.stale && <span className="stale-flag"> · stale</span>}</span>
-                <button className="small" onClick={() => setLogBuyer({ id: m.buyerId, name: m.buyerName })}>Log contact</button>
-              </div>
-            </div>
-          ))}
+            ))}
+          </>
+        )}
       </div>
 
       {/* Documents */}
@@ -167,35 +211,13 @@ export function DealDetail() {
           dealId={deal.id}
           buyerId={logBuyer.id}
           buyerName={logBuyer.name}
+          users={users}
+          initial={logBuyer.initial}
           onClose={() => setLogBuyer(null)}
           onLogged={() => { setLogBuyer(null); refreshAll(); }}
         />
       )}
     </div>
-  );
-}
-
-function BuyerActivityTable({ rows, onLog }: { rows: BuyerActivityRow[]; onLog: (b: { id: string; name: string }) => void }) {
-  const columns: Column<BuyerActivityRow>[] = [
-    { key: "buyerName", header: "Buyer Name", type: "text", value: (r) => r.buyerName, render: (r) => <strong>{r.buyerName}</strong> },
-    { key: "match", header: "Match %", type: "number", align: "right", value: (r) => r.matchPercent, render: (r) => <MatchPercentBadge value={r.matchPercent} /> },
-    { key: "dateSent", header: "Date Sent", type: "date", value: (r) => r.dateSent, render: (r) => fmtDate(r.dateSent) },
-    { key: "status", header: "Response Status", type: "text", value: (r) => RESPONSE_ORDER[r.responseStatus], render: (r) => <ResponseBadge status={r.responseStatus} /> },
-    { key: "offer", header: "Offer Made", type: "number", align: "right", value: (r) => r.offerAmount, render: (r) => money(r.offerAmount) },
-    { key: "last", header: "Last Activity", type: "date", value: (r) => r.lastActivityDate, render: (r) => fmtDate(r.lastActivityDate) },
-    { key: "notes", header: "Internal Notes", type: "text", value: (r) => r.notes ?? "", render: (r) => <span className="wrap">{r.notes ?? "—"}</span> },
-    { key: "actions", header: "", type: "text", value: () => "", render: (r) => <button className="small" onClick={(e) => { e.stopPropagation(); onLog({ id: r.buyerId, name: r.buyerName }); }}>Update</button> },
-  ];
-  return (
-    <SortableTable
-      columns={columns}
-      rows={rows}
-      rowKey={(r) => r.id}
-      // Default grouping: Offer Made → Interested → (Pending) → Not Interested → Passed
-      defaultCompare={(a, b) => RESPONSE_ORDER[a.responseStatus] - RESPONSE_ORDER[b.responseStatus]}
-      rowClassName={(r) => (r.responseStatus === "PASSED" || r.responseStatus === "NOT_INTERESTED" ? "row-dimmed" : undefined)}
-      empty="No buyers contacted yet. Use the match recommendations below to start marketing."
-    />
   );
 }
 

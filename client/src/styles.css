@@ -107,6 +107,23 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .chart-grid .panel { margin-bottom: 0; }
 @media (max-width: 900px) { .chart-grid { grid-template-columns: 1fr; } }
 
+/* Buyer Activity — expandable rows + communication timeline */
+.ba-list { display: flex; flex-direction: column; gap: 8px; }
+.ba-row { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel-2); }
+.ba-row.row-dimmed { opacity: 0.6; }
+.ba-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer; }
+.ba-caret { color: var(--text-dim); width: 12px; }
+.ba-body { padding: 4px 12px 12px 32px; border-top: 1px solid var(--border); }
+.ba-log { display: flex; gap: 6px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
+.ba-log input { flex: 1; min-width: 200px; }
+.timeline { list-style: none; margin: 8px 0 0; padding: 0; border-left: 2px solid var(--border); }
+.timeline-item { position: relative; padding: 6px 0 6px 14px; }
+.timeline-item::before { content: ""; position: absolute; left: -5px; top: 12px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.timeline-meta { display: flex; gap: 10px; align-items: center; }
+.timeline-kind { font-size: 12px; font-weight: 600; }
+.link-btn { background: none; border: none; color: var(--accent); padding: 0 4px; font-size: 12px; cursor: pointer; }
+.match-selected { outline: 2px solid var(--accent); }
+
 /* Report header block */
 .report-header h2 { font-size: 20px; }
 

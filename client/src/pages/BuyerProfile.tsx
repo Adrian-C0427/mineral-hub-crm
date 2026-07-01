@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, RelationshipDot, Banner, StageBadge, ResponseBadge } from "../components/ui";
+import { Spinner, RelationshipDot, Banner, StageBadge, StatusBadge } from "../components/ui";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
 import { money, pct, fmtDate, toInputDate } from "../lib/format";
@@ -28,7 +28,7 @@ interface BuyerProfileData {
   buyBox: BuyBox;
   closeRate: number;
   closedDeals: number;
-  dealHistory: { dealId: string; dealName: string; stage: string; responseStatus: string; amount: number | null; isSelectedBuyer: boolean; date: string }[];
+  dealHistory: { dealId: string; dealName: string; stage: string; status: string; amount: number | null; isSelectedBuyer: boolean; date: string }[];
 }
 
 const ARRAY_KEYS: (keyof BuyBox)[] = ["states", "counties", "basins", "formations", "assetTypes"];
@@ -207,7 +207,7 @@ export function BuyerProfile() {
                   <tr key={h.dealId} className="clickable" onClick={() => nav(`/deals/${h.dealId}`)}>
                     <td><strong>{h.dealName}</strong>{h.isSelectedBuyer && <span className="badge resp-offer" style={{ marginLeft: 6 }}>Selected</span>}</td>
                     <td><StageBadge stage={h.stage} /></td>
-                    <td><ResponseBadge status={h.responseStatus} /></td>
+                    <td><StatusBadge status={h.status} /></td>
                     <td className="right">{money(h.amount)}</td>
                     <td>{fmtDate(h.date)}</td>
                   </tr>
