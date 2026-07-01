@@ -34,7 +34,7 @@ const RESPONSE_ORDER: Record<string, number> = {
 
 export function DealDetail() {
   const { id } = useParams<{ id: string }>();
-  const { isOwner } = useAuth();
+  const { can } = useAuth();
   const nav = useNavigate();
   const [deal, setDeal] = useState<DealDetailData | null>(null);
   const [matches, setMatches] = useState<MatchRec[] | null>(null);
@@ -61,7 +61,7 @@ export function DealDetail() {
           <span className="muted">{deal.daysInStage}d in stage</span>
         </div>
         <div className="row">
-          {isOwner && <button className="danger" onClick={async () => { if (confirm("Hard-delete this deal?")) { await api.del(`/deals/${id}`); nav("/deals"); } }}>Delete</button>}
+          {can("deleteDeals") && <button className="danger" onClick={async () => { if (confirm("Hard-delete this deal?")) { await api.del(`/deals/${id}`); nav("/deals"); } }}>Delete</button>}
           <button className="primary" onClick={() => setShowStage(true)}>Move Stage</button>
         </div>
       </div>
@@ -152,7 +152,7 @@ export function DealDetail() {
       </div>
 
       {/* Documents */}
-      <DocumentsSection dealId={deal.id} files={deal.files} onChanged={loadDeal} canDelete={isOwner} />
+      <DocumentsSection dealId={deal.id} files={deal.files} onChanged={loadDeal} canDelete={can("deleteDeals")} />
 
       {showStage && (
         <StageChangeModal

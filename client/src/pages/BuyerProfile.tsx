@@ -36,7 +36,7 @@ const ARRAY_KEYS: (keyof BuyBox)[] = ["states", "counties", "basins", "formation
 export function BuyerProfile() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
-  const { isOwner } = useAuth();
+  const { can } = useAuth();
   const [b, setB] = useState<BuyerProfileData | null>(null);
   const [users, setUsers] = useState<UserLite[]>([]);
   const [edit, setEdit] = useState(false);
@@ -81,7 +81,7 @@ export function BuyerProfile() {
           <RelationshipDot status={view.relationshipStatus} />
         </div>
         <div className="row">
-          {isOwner && !edit && <button className="danger" onClick={async () => { if (confirm("Hard-delete this buyer?")) { await api.del(`/buyers/${id}`); nav("/buyers"); } }}>Delete</button>}
+          {can("deleteBuyers") && !edit && <button className="danger" onClick={async () => { if (confirm("Hard-delete this buyer?")) { await api.del(`/buyers/${id}`); nav("/buyers"); } }}>Delete</button>}
           {edit ? (
             <><button onClick={cancel}>Cancel</button><button className="primary" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</button></>
           ) : (

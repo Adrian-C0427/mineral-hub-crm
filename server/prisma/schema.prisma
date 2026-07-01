@@ -24,11 +24,15 @@ enum UserStatus {
   DISABLED
 }
 
-// Organization membership role. Kept intentionally small; the enum can grow to
-// ADMIN / EDITOR / VIEWER later without schema restructuring.
+// Organization membership role. Drives RBAC together with RolePermissions
+// (per-org overrides of the code-defined defaults). OWNER implicitly has every
+// permission and is the only role that can perform owner-only actions.
 enum OrgRole {
   OWNER
+  ADMIN
+  MANAGER
   MEMBER
+  VIEWER
 }
 
 enum Stage {
@@ -93,6 +97,22 @@ model Organization {
   inviteCodes       InviteCode[]
   expenses          Expense[]
   expenseCategories ExpenseCategory[]
+  rolePermissions   RolePermissions[]
+}
+
+// Per-organization overrides of the default permission set for a role. Absence
+// of a row means "use the code-defined defaults" (see domain/permissions.ts).
+// OWNER is never stored here — it always has every permission.
+model RolePermissions {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  role           OrgRole
+  permissions    String[]
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, role])
+  @@index([organizationId])
 }
 
 model InviteCode {
@@ -130,8 +150,11 @@ model User {
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   orgRole        OrgRole?
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  // Last authenticated request (throttled). Powers "last activity" in the
+  // member management view.
+  lastActiveAt DateTime?
 
   ownedDeals      Deal[]              @relation("DealRelationshipOwner")
   buyerOwnerships BuyerOwner[]

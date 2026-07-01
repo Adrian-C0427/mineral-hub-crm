@@ -5,11 +5,13 @@ import { Banner, PriorityBadge, StageBadge, Spinner } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { NewDealModal } from "../components/NewDealModal";
 import { money, num, fmtDate } from "../lib/format";
+import { useAuth } from "../auth/AuthContext";
 import type { DealSummary } from "../types";
 
 type Filter = "ALL" | "HIGH" | "NO_BUYER";
 
 export function Deals() {
+  const { can } = useAuth();
   const [deals, setDeals] = useState<DealSummary[] | null>(null);
   const [filter, setFilter] = useState<Filter>("ALL");
   const [showNew, setShowNew] = useState(false);
@@ -51,7 +53,7 @@ export function Deals() {
     <div className="page">
       <div className="page-header">
         <h1>Deals</h1>
-        <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>
+        {can("createDeals") && <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>}
       </div>
 
       {overdue.length > 0 && (

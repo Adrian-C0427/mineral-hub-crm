@@ -4,6 +4,7 @@ import { api, ApiError } from "../api/client";
 import { RelationshipDot, Spinner, Banner } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { pct } from "../lib/format";
+import { useAuth } from "../auth/AuthContext";
 
 interface BuyerRow {
   id: string;
@@ -16,6 +17,7 @@ interface BuyerRow {
 }
 
 export function Buyers() {
+  const { can } = useAuth();
   const [buyers, setBuyers] = useState<BuyerRow[] | null>(null);
   const [showImport, setShowImport] = useState(false);
   const nav = useNavigate();
@@ -48,8 +50,8 @@ export function Buyers() {
       <div className="page-header">
         <h1>Buyers</h1>
         <div className="row">
-          <button onClick={() => setShowImport((s) => !s)}>{showImport ? "Close import" : "Import CSV"}</button>
-          <button className="primary" onClick={newBuyer}>+ New Buyer</button>
+          {can("createBuyers") && <button onClick={() => setShowImport((s) => !s)}>{showImport ? "Close import" : "Import CSV"}</button>}
+          {can("createBuyers") && <button className="primary" onClick={newBuyer}>+ New Buyer</button>}
         </div>
       </div>
 
