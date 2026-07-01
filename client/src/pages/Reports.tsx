@@ -1,121 +1,396 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import {
+  ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
+  BarChart, PieChart, Pie, Cell,
+} from "recharts";
 import { api } from "../api/client";
-import { MetricCard, Spinner } from "../components/ui";
+import { Spinner, Banner, Modal } from "../components/ui";
+import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { SortableTable, type Column } from "../components/SortableTable";
-import { money, pct, fmtDate } from "../lib/format";
+import { money, pct, num, fmtDate, prettyStage } from "../lib/format";
+import { CHART_COLORS, COLOR_REVENUE, COLOR_PROFIT, COLOR_FORECAST, monthLabel } from "../lib/charts";
+import { exportElementToPdf } from "../lib/pdf";
+import type { DealSummary } from "../types";
 
-interface ClosedRow {
-  id: string; name: string; county: string | null; state: string | null; buyer: string | null;
-  askPrice: number | null; acceptedAmount: number | null; closingCosts: number | null;
-  grossFee: number | null; netProfit: number | null; closedDate: string;
+interface Kpis {
+  totalDeals: number; dealsAdded: number; dealsClosed: number; dealsLost: number; winRate: number;
+  totalDealValue: number; avgDealSize: number; avgTimeToClose: number; revenue: number; grossProfit: number;
+  netProfit: number; expenses: number; closingCosts: number; reimbursementsOutstanding: number;
+  activeBuyers: number; newBuyers: number; buyerActivity: number;
 }
-interface ReportData {
-  rows: ClosedRow[];
-  totals: { dealsClosed: number; grossFees: number; netProfit: number; avgProfitPerDeal: number; avgDealSize: number };
-  winRate: number;
-  deadInPeriod: number;
+interface MonthPoint { month: string; dealsAdded: number; dealsClosed: number; dealsLost: number; revenue: number; netProfit: number; expenses: number; forecast?: boolean }
+interface Analytics {
+  range: { from: string; to: string };
+  compare: { from: string; to: string } | null;
+  kpis: Kpis;
+  previous: Kpis | null;
+  deltas: Record<string, number | null> | null;
+  series: MonthPoint[];
+  breakdowns: {
+    counties: { name: string; count: number }[];
+    basins: { name: string; count: number }[];
+    formations: { name: string; count: number }[];
+    assetTypes: { name: string; count: number }[];
+    perUser: { userId: string; name: string; created: number; closed: number; activity: number }[];
+  };
+}
+interface FilterOpts {
+  counties: string[]; basins: string[]; formations: string[]; assetTypes: string[]; operators: string[];
+  buyers: { id: string; name: string }[]; users: { id: string; name: string }[]; stages: string[];
 }
 
-type Period = "THIS_MONTH" | "LAST_MONTH" | "THIS_YEAR" | "LAST_YEAR" | "CUSTOM";
+type Period = "THIS_MONTH" | "LAST_MONTH" | "THIS_QUARTER" | "THIS_YEAR" | "LAST_YEAR" | "CUSTOM";
+type Compare = "NONE" | "PREV_PERIOD" | "PREV_YEAR";
 
-function rangeFor(period: Period): { from?: string; to?: string } {
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+function rangeFor(period: Period, custom: { from: string; to: string }): { from: string; to: string } {
   const now = new Date();
   const y = now.getUTCFullYear();
   const m = now.getUTCMonth();
-  const iso = (d: Date) => d.toISOString().slice(0, 10);
   switch (period) {
     case "THIS_MONTH": return { from: iso(new Date(Date.UTC(y, m, 1))), to: iso(new Date(Date.UTC(y, m + 1, 0))) };
     case "LAST_MONTH": return { from: iso(new Date(Date.UTC(y, m - 1, 1))), to: iso(new Date(Date.UTC(y, m, 0))) };
+    case "THIS_QUARTER": { const q = Math.floor(m / 3) * 3; return { from: iso(new Date(Date.UTC(y, q, 1))), to: iso(new Date(Date.UTC(y, q + 3, 0))) }; }
     case "THIS_YEAR": return { from: iso(new Date(Date.UTC(y, 0, 1))), to: iso(new Date(Date.UTC(y, 11, 31))) };
     case "LAST_YEAR": return { from: iso(new Date(Date.UTC(y - 1, 0, 1))), to: iso(new Date(Date.UTC(y - 1, 11, 31))) };
-    default: return {};
+    default: return { from: custom.from, to: custom.to };
   }
 }
 
-export function Reports() {
-  const [period, setPeriod] = useState<Period>("THIS_YEAR");
-  const [custom, setCustom] = useState<{ from: string; to: string }>({ from: "", to: "" });
-  const [data, setData] = useState<ReportData | null>(null);
-  const nav = useNavigate();
+/** Previous comparison window derived from the current range. */
+function compareRange(mode: Compare, from: string, to: string): { from: string; to: string } | null {
+  if (mode === "NONE" || !from || !to) return null;
+  const f = new Date(from), t = new Date(to);
+  if (mode === "PREV_YEAR") {
+    return { from: iso(new Date(Date.UTC(f.getUTCFullYear() - 1, f.getUTCMonth(), f.getUTCDate()))),
+             to: iso(new Date(Date.UTC(t.getUTCFullYear() - 1, t.getUTCMonth(), t.getUTCDate()))) };
+  }
+  // PREV_PERIOD: same-length window immediately before `from`.
+  const days = Math.round((t.getTime() - f.getTime()) / 86400000) + 1;
+  const prevTo = new Date(f.getTime() - 86400000);
+  const prevFrom = new Date(prevTo.getTime() - (days - 1) * 86400000);
+  return { from: iso(prevFrom), to: iso(prevTo) };
+}
 
-  const range = useMemo(() => (period === "CUSTOM" ? custom : rangeFor(period)), [period, custom]);
+const EMPTY_FILTERS: Record<string, string[]> = { counties: [], basins: [], formations: [], assetTypes: [], operators: [], stages: [], buyers: [], users: [] };
+
+export function Reports() {
+  const nav = useNavigate();
+  const [period, setPeriod] = useState<Period>("THIS_YEAR");
+  const [custom, setCustom] = useState({ from: "", to: "" });
+  const [compare, setCompare] = useState<Compare>("NONE");
+  const [filters, setFilters] = useState<Record<string, string[]>>(EMPTY_FILTERS);
+  const [opts, setOpts] = useState<FilterOpts | null>(null);
+  const [data, setData] = useState<Analytics | null>(null);
+  const [deals, setDeals] = useState<DealSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [drill, setDrill] = useState<{ title: string; rows: DealSummary[] } | null>(null);
+  const reportRef = useRef<HTMLDivElement>(null);
+
+  const range = useMemo(() => rangeFor(period, custom), [period, custom]);
+  const cmp = useMemo(() => compareRange(compare, range.from, range.to), [compare, range.from, range.to]);
 
   useEffect(() => {
-    const qs = new URLSearchParams();
-    if (range.from) qs.set("from", range.from);
-    if (range.to) qs.set("to", range.to);
-    api.get<ReportData>(`/reports/closed?${qs.toString()}`).then(setData);
-  }, [range.from, range.to]);
+    api.get<FilterOpts>("/reports/filters").then(setOpts).catch(() => {});
+    api.get<DealSummary[]>("/deals").then(setDeals).catch(() => {});
+  }, []);
 
-  const columns: Column<ClosedRow>[] = [
-    { key: "name", header: "Deal", type: "text", value: (r) => r.name, render: (r) => <strong>{r.name}</strong> },
-    { key: "loc", header: "Location", type: "text", value: (r) => [r.county, r.state].filter(Boolean).join(", "), render: (r) => [r.county, r.state].filter(Boolean).join(", ") || "—" },
-    { key: "buyer", header: "Buyer", type: "text", value: (r) => r.buyer ?? "" },
-    { key: "ask", header: "Ask", type: "number", align: "right", value: (r) => r.askPrice, render: (r) => money(r.askPrice) },
-    { key: "accepted", header: "Accepted", type: "number", align: "right", value: (r) => r.acceptedAmount, render: (r) => money(r.acceptedAmount) },
-    { key: "gross", header: "Gross Fee", type: "number", align: "right", value: (r) => r.grossFee, render: (r) => money(r.grossFee) },
-    { key: "net", header: "Net Profit", type: "number", align: "right", value: (r) => r.netProfit, render: (r) => money(r.netProfit) },
-    { key: "closed", header: "Closed", type: "date", value: (r) => r.closedDate, render: (r) => fmtDate(r.closedDate) },
-  ];
+  useEffect(() => {
+    if (!range.from || !range.to) return;
+    setLoading(true);
+    const qs = new URLSearchParams();
+    qs.set("from", range.from); qs.set("to", range.to);
+    if (cmp) { qs.set("compareFrom", cmp.from); qs.set("compareTo", cmp.to); }
+    for (const [key, vals] of Object.entries(filters)) for (const v of vals) qs.append(key, v);
+    api.get<Analytics>(`/reports/analytics?${qs.toString()}`).then(setData).finally(() => setLoading(false));
+  }, [range.from, range.to, cmp?.from, cmp?.to, filters]);
+
+  async function onExport() {
+    if (!reportRef.current) return;
+    setExporting(true);
+    try { await exportElementToPdf(reportRef.current, `mineral-hub-report-${range.from}_to_${range.to}.pdf`); }
+    finally { setExporting(false); }
+  }
+
+  const activeFilterChips = Object.entries(filters).flatMap(([key, vals]) =>
+    vals.map((v) => {
+      const label = opts?.buyers.find((b) => b.id === v)?.name ?? opts?.users.find((u) => u.id === v)?.name ?? (key === "stages" ? prettyStage(v) : v);
+      return `${key}: ${label}`;
+    }),
+  );
+
+  function drillByDeal(title: string, pred: (d: DealSummary) => boolean) {
+    setDrill({ title, rows: deals.filter(pred) });
+  }
 
   const CHIPS: [Period, string][] = [
-    ["THIS_MONTH", "This Month"], ["LAST_MONTH", "Last Month"], ["THIS_YEAR", "This Year"], ["LAST_YEAR", "Last Year"], ["CUSTOM", "Custom"],
+    ["THIS_MONTH", "This Month"], ["LAST_MONTH", "Last Month"], ["THIS_QUARTER", "This Quarter"],
+    ["THIS_YEAR", "This Year"], ["LAST_YEAR", "Last Year"], ["CUSTOM", "Custom"],
   ];
+
+  const k = data?.kpis;
 
   return (
     <div className="page">
-      <div className="page-header"><h1>Reports</h1></div>
-
-      <div className="chip-row" style={{ marginBottom: 14 }}>
-        {CHIPS.map(([p, label]) => <span key={p} className={`chip ${period === p ? "active" : ""}`} onClick={() => setPeriod(p)}>{label}</span>)}
+      <div className="page-header">
+        <h1>Reports & Analytics</h1>
+        <button className="primary" onClick={onExport} disabled={exporting || !data}>{exporting ? "Generating…" : "Export PDF"}</button>
       </div>
-      {period === "CUSTOM" && (
-        <div className="row" style={{ marginBottom: 16 }}>
-          <div className="field" style={{ marginBottom: 0 }}><label>From</label><input type="date" value={custom.from} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} /></div>
-          <div className="field" style={{ marginBottom: 0 }}><label>To</label><input type="date" value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} /></div>
+
+      {/* --- Controls (not captured in PDF) --- */}
+      <div className="panel">
+        <div className="chip-row" style={{ marginBottom: 10 }}>
+          {CHIPS.map(([p, label]) => <span key={p} className={`chip ${period === p ? "active" : ""}`} onClick={() => setPeriod(p)}>{label}</span>)}
+        </div>
+        {period === "CUSTOM" && (
+          <div className="row" style={{ marginBottom: 10 }}>
+            <div className="field" style={{ marginBottom: 0 }}><label>From</label><input type="date" value={custom.from} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} /></div>
+            <div className="field" style={{ marginBottom: 0 }}><label>To</label><input type="date" value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} /></div>
+          </div>
+        )}
+        <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+          <div className="field" style={{ marginBottom: 0 }}><label>Compare to</label>
+            <select value={compare} onChange={(e) => setCompare(e.target.value as Compare)}>
+              <option value="NONE">No comparison</option>
+              <option value="PREV_PERIOD">Previous period</option>
+              <option value="PREV_YEAR">Previous year</option>
+            </select>
+          </div>
+          {opts && ([
+            ["counties", "Counties", opts.counties], ["basins", "Basins", opts.basins],
+            ["formations", "Formations", opts.formations], ["assetTypes", "Asset types", opts.assetTypes],
+            ["operators", "Operators", opts.operators], ["stages", "Deal status", opts.stages],
+          ] as [string, string, string[]][]).map(([key, label, options]) => (
+            <div key={key} className="field" style={{ marginBottom: 0, minWidth: 190, flex: 1 }}>
+              <label>{label}</label>
+              <SearchableMultiSelect
+                options={key === "stages" ? options.map(prettyStage) : options}
+                value={key === "stages" ? filters[key].map(prettyStage) : filters[key]}
+                onChange={(next) => setFilters((f) => ({ ...f, [key]: key === "stages" ? next.map((s) => s.toUpperCase().replace(/ /g, "_")) : next }))}
+                placeholder={`Filter ${label.toLowerCase()}…`}
+              />
+            </div>
+          ))}
+          {opts && (
+            <>
+              <div className="field" style={{ marginBottom: 0, minWidth: 190, flex: 1 }}><label>Buyers</label>
+                <SearchableMultiSelect options={opts.buyers.map((b) => b.name)} value={filters.buyers.map((id) => opts.buyers.find((b) => b.id === id)?.name ?? id)}
+                  onChange={(names) => setFilters((f) => ({ ...f, buyers: names.map((n) => opts.buyers.find((b) => b.name === n)?.id ?? n) }))} placeholder="Filter buyers…" />
+              </div>
+              <div className="field" style={{ marginBottom: 0, minWidth: 190, flex: 1 }}><label>Team members</label>
+                <SearchableMultiSelect options={opts.users.map((u) => u.name)} value={filters.users.map((id) => opts.users.find((u) => u.id === id)?.name ?? id)}
+                  onChange={(names) => setFilters((f) => ({ ...f, users: names.map((n) => opts.users.find((u) => u.name === n)?.id ?? n) }))} placeholder="Filter team…" />
+              </div>
+            </>
+          )}
+          {activeFilterChips.length > 0 && <button className="small" style={{ alignSelf: "flex-end" }} onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>}
+        </div>
+      </div>
+
+      {loading && !data ? <Spinner label="Building analytics…" /> : !data || !k ? <Banner kind="info">No data.</Banner> : (
+        <div ref={reportRef} className="report-capture">
+          {/* --- Report header (captured in PDF) --- */}
+          <div className="report-header panel">
+            <div className="brand" style={{ fontSize: 20 }}>Mineral Hub<span className="dot">.</span></div>
+            <h2 style={{ margin: "6px 0 2px" }}>Business Performance Report</h2>
+            <p className="muted" style={{ margin: 0 }}>
+              Period: {fmtDate(range.from)} – {fmtDate(range.to)}
+              {data.compare && <> · Compared to {fmtDate(data.compare.from)} – {fmtDate(data.compare.to)}</>}
+            </p>
+            <p className="muted" style={{ margin: "2px 0 0", fontSize: 12 }}>Generated {fmtDate(new Date())}</p>
+            {activeFilterChips.length > 0 && (
+              <p style={{ margin: "10px 0 0", fontSize: 12 }}><strong>Filters:</strong> {activeFilterChips.join(" · ")}</p>
+            )}
+            <p style={{ marginBottom: 0, marginTop: 10 }}>
+              <strong>Executive summary.</strong> Over this period the team closed <strong>{num(k.dealsClosed)}</strong> deal(s)
+              generating <strong>{money(k.revenue)}</strong> in revenue and <strong>{money(k.netProfit)}</strong> net profit,
+              added <strong>{num(k.dealsAdded)}</strong> new deal(s), and maintained a <strong>{pct(k.winRate)}</strong> win rate.
+              Total company expenses were <strong>{money(k.expenses)}</strong> with <strong>{money(k.reimbursementsOutstanding)}</strong> outstanding in reimbursements.
+            </p>
+          </div>
+
+          {/* --- KPI grid --- */}
+          <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
+            <Kpi label="Revenue (Gross Fees)" value={money(k.revenue)} d={data.deltas?.revenue} onClick={() => drillByDeal("Closed deals", (dd) => dd.stage === "CLOSED")} />
+            <Kpi label="Net Profit" value={money(k.netProfit)} d={data.deltas?.netProfit} />
+            <Kpi label="Gross Profit" value={money(k.grossProfit)} d={data.deltas?.grossProfit} />
+            <Kpi label="Expenses" value={money(k.expenses)} d={data.deltas?.expenses} invert onClick={() => nav("/expenses")} />
+            <Kpi label="Deals Closed" value={num(k.dealsClosed)} d={data.deltas?.dealsClosed} onClick={() => drillByDeal("Closed deals", (dd) => dd.stage === "CLOSED")} />
+            <Kpi label="Deals Added" value={num(k.dealsAdded)} d={data.deltas?.dealsAdded} />
+            <Kpi label="Deals Lost" value={num(k.dealsLost)} d={data.deltas?.dealsLost} invert onClick={() => drillByDeal("Lost (dead) deals", (dd) => dd.stage === "DEAD")} />
+            <Kpi label="Win Rate" value={pct(k.winRate)} d={data.deltas?.winRate} />
+            <Kpi label="Total Deals" value={num(k.totalDeals)} d={data.deltas?.totalDeals} onClick={() => nav("/deals")} />
+            <Kpi label="Total Deal Value" value={money(k.totalDealValue)} d={data.deltas?.totalDealValue} />
+            <Kpi label="Avg Deal Size" value={money(k.avgDealSize)} d={data.deltas?.avgDealSize} />
+            <Kpi label="Avg Time to Close" value={`${Math.round(k.avgTimeToClose)}d`} d={data.deltas?.avgTimeToClose} invert />
+            <Kpi label="Active Buyers" value={num(k.activeBuyers)} d={data.deltas?.activeBuyers} onClick={() => nav("/buyers")} />
+            <Kpi label="New Buyers" value={num(k.newBuyers)} d={data.deltas?.newBuyers} />
+            <Kpi label="Buyer Activity" value={num(k.buyerActivity)} d={data.deltas?.buyerActivity} />
+            <Kpi label="Reimbursements Outstanding" value={money(k.reimbursementsOutstanding)} d={data.deltas?.reimbursementsOutstanding} invert onClick={() => nav("/expenses")} />
+          </div>
+
+          {/* --- Trend + breakdowns --- */}
+          <div className="chart-grid">
+            <div className="panel">
+              <h3>Revenue & Net Profit Trend <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(dashed = forecast)</span></h3>
+              <TrendChart series={data.series} />
+            </div>
+            <div className="panel">
+              <h3>Deals Added vs Closed</h3>
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={data.series.filter((s) => !s.forecast).map((s) => ({ ...s, label: monthLabel(s.month) }))}>
+                  <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="dealsAdded" name="Added" fill={CHART_COLORS[0]} radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="dealsClosed" name="Closed" fill={CHART_COLORS[1]} radius={[3, 3, 0, 0]} />
+                  <Bar dataKey="dealsLost" name="Lost" fill={CHART_COLORS[4]} radius={[3, 3, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="panel">
+              <h3>Asset Type Breakdown</h3>
+              {data.breakdowns.assetTypes.length === 0 ? <p className="muted">No data.</p> : (
+                <ResponsiveContainer width="100%" height={240}>
+                  <PieChart>
+                    <Pie data={data.breakdowns.assetTypes} dataKey="count" nameKey="name" cx="50%" cy="50%" outerRadius={85}
+                      label={(e: { name?: string }) => e.name ?? ""}
+                      onClick={(e: { name?: string }) => e?.name && drillByDeal(`Asset type: ${e.name}`, (dd) => dd.assetTypes.includes(e.name!))}>
+                      {data.breakdowns.assetTypes.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} style={{ cursor: "pointer" }} />)}
+                    </Pie>
+                    <Tooltip />
+                  </PieChart>
+                </ResponsiveContainer>
+              )}
+            </div>
+            <div className="panel">
+              <h3>Most Active Counties</h3>
+              <BreakdownBars data={data.breakdowns.counties} onClick={(name) => drillByDeal(`County: ${name}`, (dd) => dd.counties.includes(name))} />
+            </div>
+            <div className="panel">
+              <h3>Most Active Formations</h3>
+              <BreakdownBars data={data.breakdowns.formations} color={CHART_COLORS[3]} onClick={(name) => drillByDeal(`Formation: ${name}`, (dd) => dd.formations.includes(name))} />
+            </div>
+            <div className="panel">
+              <h3>Most Active Basins</h3>
+              <BreakdownBars data={data.breakdowns.basins} color={CHART_COLORS[5]} onClick={(name) => drillByDeal(`Basin: ${name}`, (dd) => dd.basins.includes(name))} />
+            </div>
+          </div>
+
+          {/* --- Per-user productivity --- */}
+          <div className="panel">
+            <h3>User Productivity</h3>
+            {data.breakdowns.perUser.length === 0 ? <p className="muted">No activity in this period.</p> : (
+              <>
+                <ResponsiveContainer width="100%" height={Math.max(160, data.breakdowns.perUser.length * 44)}>
+                  <BarChart data={data.breakdowns.perUser} layout="vertical" margin={{ left: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                    <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+                    <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={120} />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="created" name="Deals created" fill={CHART_COLORS[0]} radius={[0, 3, 3, 0]} />
+                    <Bar dataKey="closed" name="Deals closed" fill={CHART_COLORS[1]} radius={[0, 3, 3, 0]} />
+                    <Bar dataKey="activity" name="Buyer touches" fill={CHART_COLORS[3]} radius={[0, 3, 3, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+                <div className="table-scroll" style={{ marginTop: 12 }}>
+                  <table className="data-table">
+                    <thead><tr><th>Team member</th><th className="right">Created</th><th className="right">Closed</th><th className="right">Buyer touches</th></tr></thead>
+                    <tbody>
+                      {data.breakdowns.perUser.map((u) => (
+                        <tr key={u.userId}><td>{u.name}</td><td className="right">{u.created}</td><td className="right">{u.closed}</td><td className="right">{u.activity}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
 
-      {!data ? <Spinner /> : (
-        <>
-          <div className="metrics-row" style={{ gridTemplateColumns: "repeat(6,1fr)" }}>
-            <MetricCard label="Deals Closed" value={data.totals.dealsClosed} />
-            <MetricCard label="Gross Fees" value={money(data.totals.grossFees)} />
-            <MetricCard label="Net Profit" value={money(data.totals.netProfit)} />
-            <MetricCard label="Avg Profit/Deal" value={money(data.totals.avgProfitPerDeal)} />
-            <MetricCard label="Avg Deal Size" value={money(data.totals.avgDealSize)} />
-            <MetricCard label="Win Rate" value={pct(data.winRate)} hint={`vs ${data.deadInPeriod} dead`} />
-          </div>
-
-          <div className="panel">
-            <h3>Closed deals in period</h3>
-            <SortableTable
-              columns={columns}
-              rows={data.rows}
-              rowKey={(r) => r.id}
-              onRowClick={(r) => nav(`/deals/${r.id}`)}
-              defaultSort={{ key: "closed", dir: "desc" }}
-              empty="No deals closed in this period."
-            />
-            {data.rows.length > 0 && (
-              <div className="table-scroll" style={{ marginTop: -1 }}>
-                <table className="data-table">
-                  <tfoot>
-                    <tr>
-                      <td>Totals ({data.totals.dealsClosed})</td><td></td><td></td><td></td>
-                      <td className="right">{money(data.rows.reduce((s, r) => s + (r.acceptedAmount ?? 0), 0))}</td>
-                      <td className="right">{money(data.totals.grossFees)}</td>
-                      <td className="right">{money(data.totals.netProfit)}</td>
-                      <td></td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            )}
-          </div>
-        </>
+      {drill && (
+        <Modal title={`${drill.title} (${drill.rows.length})`} onClose={() => setDrill(null)} wide>
+          <DrillTable rows={drill.rows} onOpen={(id) => { setDrill(null); nav(`/deals/${id}`); }} />
+        </Modal>
       )}
     </div>
   );
+}
+
+function Kpi({ label, value, d, invert, onClick }: { label: string; value: string; d?: number | null; invert?: boolean; onClick?: () => void }) {
+  const hasDelta = d !== undefined && d !== null;
+  const up = hasDelta && (d as number) > 0;
+  const flat = hasDelta && (d as number) === 0;
+  // "good" = improvement. For inverted metrics (expenses, losses) up is bad.
+  const good = flat ? null : invert ? !up : up;
+  const color = good == null ? "var(--text-dim)" : good ? "#22c55e" : "#ef4444";
+  const arrow = flat ? "→" : up ? "▲" : "▼";
+  return (
+    <div className="metric-card" style={onClick ? { cursor: "pointer" } : undefined} onClick={onClick}>
+      <div className="metric-label">{label}</div>
+      <div className="metric-value">{value}</div>
+      {hasDelta && <div className="metric-hint" style={{ color }}>{arrow} {pct(Math.abs(d as number))} vs prior</div>}
+    </div>
+  );
+}
+
+function TrendChart({ series }: { series: MonthPoint[] }) {
+  const lastActual = series.reduce((idx, s, i) => (!s.forecast ? i : idx), 0);
+  const rows = series.map((s, i) => ({
+    label: monthLabel(s.month),
+    revenue: s.forecast ? null : s.revenue,
+    netProfit: s.forecast ? null : s.netProfit,
+    // Forecast lines connect from the last actual point.
+    revenueF: s.forecast || i === lastActual ? s.revenue : null,
+    netProfitF: s.forecast || i === lastActual ? s.netProfit : null,
+  }));
+  return (
+    <ResponsiveContainer width="100%" height={240}>
+      <ComposedChart data={rows}>
+        <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+        <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+        <YAxis tickFormatter={(v) => money(v)} tick={{ fontSize: 11 }} width={70} />
+        <Tooltip formatter={(v: number) => money(v)} />
+        <Legend />
+        <Line type="monotone" dataKey="revenue" name="Revenue" stroke={COLOR_REVENUE} strokeWidth={2} dot={false} connectNulls />
+        <Line type="monotone" dataKey="netProfit" name="Net Profit" stroke={COLOR_PROFIT} strokeWidth={2} dot={false} connectNulls />
+        <Line type="monotone" dataKey="revenueF" name="Revenue (forecast)" stroke={COLOR_REVENUE} strokeDasharray="5 4" strokeWidth={2} dot={false} connectNulls legendType="none" />
+        <Line type="monotone" dataKey="netProfitF" name="Net Profit (forecast)" stroke={COLOR_FORECAST} strokeDasharray="5 4" strokeWidth={2} dot={false} connectNulls legendType="none" />
+      </ComposedChart>
+    </ResponsiveContainer>
+  );
+}
+
+function BreakdownBars({ data, color = CHART_COLORS[0], onClick }: { data: { name: string; count: number }[]; color?: string; onClick?: (name: string) => void }) {
+  if (data.length === 0) return <p className="muted">No data.</p>;
+  return (
+    <ResponsiveContainer width="100%" height={Math.max(160, data.length * 34)}>
+      <BarChart data={data} layout="vertical" margin={{ left: 20 }}>
+        <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+        <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+        <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={110} />
+        <Tooltip />
+        <Bar dataKey="count" name="Deals" fill={color} radius={[0, 3, 3, 0]} cursor="pointer"
+          onClick={(e: { name?: string }) => e?.name && onClick?.(e.name)} />
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
+function DrillTable({ rows, onOpen }: { rows: DealSummary[]; onOpen: (id: string) => void }) {
+  const cols: Column<DealSummary>[] = [
+    { key: "name", header: "Deal", type: "text", value: (r) => r.name, render: (r) => <strong>{r.name}</strong> },
+    { key: "stage", header: "Stage", type: "text", value: (r) => r.stage, render: (r) => prettyStage(r.stage) },
+    { key: "loc", header: "Counties", type: "text", value: (r) => r.counties.join(", "), render: (r) => r.counties.join(", ") || "—" },
+    { key: "ask", header: "Ask", type: "number", align: "right", value: (r) => r.askPrice, render: (r) => money(r.askPrice) },
+    { key: "buyer", header: "Buyer", type: "text", value: (r) => r.selectedBuyer?.name ?? "" },
+  ];
+  return <SortableTable columns={cols} rows={rows} rowKey={(r) => r.id} onRowClick={(r) => onOpen(r.id)} empty="No matching deals." />;
 }
