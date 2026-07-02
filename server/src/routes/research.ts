@@ -10,7 +10,7 @@ import {
   classifyTrajectory, detectHotspot, historyWindows, normalizeEntity, rollingAverage,
   surgeSeverity, trend, type Trend,
 } from "../domain/research.js";
-import { fieldsFor, guessMapping, RESEARCH_SOURCES } from "../domain/researchSources.js";
+import { fieldsFor, guessMapping, sourceFor } from "../domain/researchSources.js";
 
 /**
  * Research & Market Intelligence API.
@@ -628,15 +628,38 @@ researchRouter.get(
 );
 
 // ---------------------------------------------------------------------------
-// Ingest — CSV imports through the source-adapter registry
+// Ingest — CSV imports (Data Type: Deeds / Leases / Drilling Permits)
 // ---------------------------------------------------------------------------
+
+/**
+ * Import geography defaults. State/county are no longer entered by hand in the
+ * import UI: a per-row "County" column (when the file has one) wins, otherwise
+ * imports resolve to the platform's current scope — Leon County, Texas. This is
+ * the single place to re-scope; multi-county datasets carry their own County
+ * column and a state column can be added here the same way.
+ */
+const DEFAULT_IMPORT_STATE = "TX";
+const DEFAULT_IMPORT_COUNTY = "Leon";
+
+type ImportCategory = "deeds" | "leases" | "permits";
+
+/**
+ * Map a Data Type to the underlying ingest kind, a provenance tag, and (for
+ * recorded documents) the document class the category is scoped to — Deeds keep
+ * ownership-transfer instruments, Leases keep leasing instruments.
+ */
+function resolveCategory(category: ImportCategory): {
+  kind: "DOCUMENTS" | "PERMITS"; source: string; docClass?: ResearchDocClass;
+} {
+  if (category === "permits") return { kind: "PERMITS", source: "csv-permits" };
+  return { kind: "DOCUMENTS", source: `csv-${category}`, docClass: category === "deeds" ? "TRANSACTION" : "LEASE" };
+}
 
 researchRouter.get(
   "/ingest/sources",
   requirePermission("viewResearch"),
   asyncHandler(async (_req, res) => {
     res.json({
-      sources: RESEARCH_SOURCES.map(({ key, label, kind, description }) => ({ key, label, kind, description })),
       documentFields: fieldsFor("DOCUMENTS"),
       permitFields: fieldsFor("PERMITS"),
     });
@@ -664,8 +687,7 @@ function parseRecordDate(s: string): Date | null {
 }
 
 const analyzeSchema = z.object({
-  kind: z.enum(["DOCUMENTS", "PERMITS"]),
-  source: z.string().min(1),
+  category: z.enum(["deeds", "leases", "permits"]),
   csv: z.string().min(1),
 });
 
@@ -673,24 +695,23 @@ researchRouter.post(
   "/ingest/analyze",
   requirePermission("manageResearchData"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { kind, source, csv } = analyzeSchema.parse(req.body);
-    const src = RESEARCH_SOURCES.find((s) => s.key === source && s.kind === kind);
-    if (!src) { res.status(400).json({ error: "Unknown source for this data kind" }); return; }
+    const { category, csv } = analyzeSchema.parse(req.body);
+    const { kind } = resolveCategory(category);
     const { headers, rows } = parseCsv(csv);
     res.json({
       headers,
       fields: fieldsFor(kind),
-      suggestedMapping: guessMapping(src, headers),
+      suggestedMapping: guessMapping(sourceFor(kind), headers),
       rowCount: rows.length,
       sample: rows.slice(0, 5),
     });
   }),
 );
 
-const commitSchema = analyzeSchema.extend({
+const commitSchema = z.object({
+  category: z.enum(["deeds", "leases", "permits"]),
+  csv: z.string().min(1),
   mapping: z.record(z.string(), z.string()),
-  state: z.string().min(2).max(2).transform((s) => s.toUpperCase()),
-  county: z.string().optional(),
   filename: z.string().optional(),
 });
 
@@ -701,9 +722,9 @@ researchRouter.post(
   requirePermission("manageResearchData"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
-    const { kind, source, csv, mapping, state, county, filename } = commitSchema.parse(req.body);
-    const src = RESEARCH_SOURCES.find((s) => s.key === source && s.kind === kind);
-    if (!src) { res.status(400).json({ error: "Unknown source for this data kind" }); return; }
+    const { category, csv, mapping, filename } = commitSchema.parse(req.body);
+    const { kind, source, docClass: wantClass } = resolveCategory(category);
+    const state = DEFAULT_IMPORT_STATE;
     const { rows } = parseCsv(csv);
     const get = (row: Record<string, string>, field: string): string => {
       const header = mapping[field];
@@ -730,11 +751,15 @@ researchRouter.post(
       for (const row of rows) {
         const docTypeRaw = get(row, "docType");
         const cls = classifyDocType(docTypeRaw);
-        if (!cls) { skip(docTypeRaw ? `Not mineral-related: "${docTypeRaw}"` : "Missing instrument type"); continue; }
+        if (!cls) { skip(docTypeRaw ? `Not mineral-related: "${docTypeRaw}"` : "Missing document type"); continue; }
+        // Scope to the selected Data Type: Deeds keep transfers, Leases keep leases.
+        if (wantClass && cls.docClass !== wantClass) {
+          skip(cls.docClass === "LEASE" ? "Lease document — import under Leases" : "Deed document — import under Deeds");
+          continue;
+        }
         const recordingDate = parseRecordDate(get(row, "recordingDate"));
         if (!recordingDate) { failed++; continue; }
-        const rowCounty = get(row, "county") || county || "";
-        if (!rowCounty) { failed++; continue; }
+        const rowCounty = get(row, "county") || DEFAULT_IMPORT_COUNTY;
         const instrumentNumber = get(row, "instrumentNumber") || null;
         if (instrumentNumber) {
           const dedupeKey = `${rowCounty}|${instrumentNumber}`;
@@ -747,11 +772,10 @@ researchRouter.post(
           organizationId: org, state, county: rowCounty,
           docTypeRaw, docType: cls.docType, docClass: cls.docClass,
           instrumentNumber, volume: get(row, "volume") || null, page: get(row, "page") || null,
-          recordingDate, effectiveDate: parseRecordDate(get(row, "effectiveDate")),
+          recordingDate,
           grantor, grantee, grantorNorm: normalizeEntity(grantor), granteeNorm: normalizeEntity(grantee),
           abstractId: get(row, "abstractId") || null, survey: get(row, "survey") || null,
-          trs: get(row, "trs") || null, legalDescription: get(row, "legalDescription") || null,
-          acreage: numOf(get(row, "acreage")), consideration: numOf(get(row, "consideration")),
+          legalDescription: get(row, "legalDescription") || null,
           source,
         });
       }
@@ -770,8 +794,7 @@ researchRouter.post(
       for (const row of rows) {
         const operator = get(row, "operator");
         if (!operator) { failed++; continue; }
-        const rowCounty = get(row, "county") || county || "";
-        if (!rowCounty) { failed++; continue; }
+        const rowCounty = get(row, "county") || DEFAULT_IMPORT_COUNTY;
         const filedDate = parseRecordDate(get(row, "filedDate"));
         const approvedDate = parseRecordDate(get(row, "approvedDate"));
         const spudDate = parseRecordDate(get(row, "spudDate"));
@@ -793,7 +816,7 @@ researchRouter.post(
           activityDate, filedDate, approvedDate, spudDate, completionDate,
           formation: get(row, "formation") || null, field: get(row, "field") || null,
           totalDepth: numOf(get(row, "totalDepth")),
-          abstractId: get(row, "abstractId") || null, survey: get(row, "survey") || null, trs: get(row, "trs") || null,
+          abstractId: get(row, "abstractId") || null, survey: get(row, "survey") || null,
           latitude: numOf(get(row, "latitude")), longitude: numOf(get(row, "longitude")),
           source,
         });
@@ -806,7 +829,7 @@ researchRouter.post(
 
     const run = await prisma.researchIngestRun.create({
       data: {
-        organizationId: org, kind, source, state, county: county ?? null, filename: filename ?? null,
+        organizationId: org, kind, source, state, county: DEFAULT_IMPORT_COUNTY, filename: filename ?? null,
         rowsTotal: rows.length, rowsImported: imported, rowsSkipped: skipped, rowsFailed: failed,
         status: "COMPLETED", createdByUserId: req.user!.id,
       },

@@ -5,13 +5,16 @@ import { downloadCsv } from "../lib/csv";
 import { fmtDate } from "../lib/format";
 
 /**
- * Research data management: CSV import through the server's source-adapter
- * registry (analyze → map headers → commit), import history, and bulk delete.
+ * Research data management: CSV import (Deeds / Leases / Drilling Permits →
+ * analyze → map columns → commit), import history, and bulk delete. State and
+ * county are resolved server-side (per-row County column, else the platform's
+ * configured scope), so they aren't entered here.
  */
 
-interface SourceDef { key: string; label: string; kind: "DOCUMENTS" | "PERMITS"; description: string }
+type Category = "deeds" | "leases" | "permits";
+const CATEGORY_LABEL: Record<Category, string> = { deeds: "Deeds", leases: "Leases", permits: "Drilling Permits" };
+
 interface FieldDef { key: string; label: string; required?: boolean }
-interface SourcesResp { sources: SourceDef[]; documentFields: FieldDef[]; permitFields: FieldDef[] }
 interface AnalyzeResp { headers: string[]; fields: FieldDef[]; suggestedMapping: Record<string, string>; rowCount: number; sample: Record<string, string>[] }
 interface CommitResp { runId: string; rowsTotal: number; imported: number; skipped: number; failed: number; skippedReasons: { reason: string; count: number }[] }
 interface IngestRun {
@@ -19,20 +22,31 @@ interface IngestRun {
   rowsTotal: number; rowsImported: number; rowsSkipped: number; rowsFailed: number; status: string; createdAt: string;
 }
 
-const SAMPLE_DOC_ROWS = [
-  ["Mineral Deed", "03/12/2026", "Smith, John et ux", "Blackrock Minerals LLC", "2026-00412", "Leon", "289653", "J HALLMARK", "40", ""],
-  ["Oil & Gas Lease", "03/14/2026", "Jones Family Trust", "Apex Energy Partners LP", "2026-00418", "Leon", "289183", "T RAGSDALE", "120", ""],
-];
-const SAMPLE_PERMIT_ROWS = [
-  ["Apex Energy Partners LP", "Leon", "42-289-40012", "889321", "HALLMARK UNIT", "1H", "Approved", "Horizontal", "03/02/2026", "03/20/2026", "", ""],
-];
+// Templates match the canonical columns for each Data Type.
+const DEED_TEMPLATE = {
+  headers: ["Document Type", "Recording Date", "Grantor", "Grantee", "Instrument Number", "County", "Abstract", "Survey", "Legal Description"],
+  rows: [["Mineral Deed", "03/12/2026", "Smith, John et ux", "Blackrock Minerals LLC", "2026-00412", "Leon", "289653", "J HALLMARK", "40 ac in the J HALLMARK SURVEY A-289"]],
+};
+const LEASE_TEMPLATE = {
+  headers: ["Document Type", "Recording Date", "Grantor", "Grantee", "Instrument Number", "County", "Abstract", "Survey", "Legal Description"],
+  rows: [["Oil & Gas Lease", "03/14/2026", "Jones Family Trust", "Apex Energy Partners LP", "2026-00418", "Leon", "289183", "T RAGSDALE", "120 ac, T RAGSDALE SURVEY A-183"]],
+};
+const PERMIT_TEMPLATE = {
+  headers: ["Operator Name", "County", "API No", "Permit No", "Lease Name", "Well No", "Status", "Wellbore Profile", "Submitted Date", "Approved Date", "Spud Date", "Formation"],
+  rows: [["Apex Energy Partners LP", "Leon", "42-289-40012", "889321", "HALLMARK UNIT", "1H", "Approved", "Horizontal", "03/02/2026", "03/20/2026", "", "Eagle Ford"]],
+};
+
+/** Import-history "Type" label from the stored source tag. */
+function runTypeLabel(source: string): string {
+  if (source === "csv-deeds") return "Deeds";
+  if (source === "csv-leases") return "Leases";
+  if (source === "csv-permits") return "Drilling Permits";
+  if (source === "sample") return "Sample data";
+  return source;
+}
 
 export function ResearchImport({ onDataChanged }: { onDataChanged: () => void }) {
-  const [sources, setSources] = useState<SourcesResp | null>(null);
-  const [kind, setKind] = useState<"DOCUMENTS" | "PERMITS">("DOCUMENTS");
-  const [source, setSource] = useState("");
-  const [state, setState] = useState("TX");
-  const [county, setCounty] = useState("");
+  const [category, setCategory] = useState<Category>("deeds");
   const [csv, setCsv] = useState<string | null>(null);
   const [filename, setFilename] = useState("");
   const [analysis, setAnalysis] = useState<AnalyzeResp | null>(null);
@@ -45,15 +59,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadRuns = () => api.get<IngestRun[]>("/research/ingest/runs").then(setRuns).catch(() => {});
-  useEffect(() => {
-    api.get<SourcesResp>("/research/ingest/sources").then((s) => {
-      setSources(s);
-      setSource(s.sources.find((x) => x.kind === "DOCUMENTS")?.key ?? "");
-    }).catch(() => {});
-    loadRuns();
-  }, []);
-
-  const kindSources = sources?.sources.filter((s) => s.kind === kind) ?? [];
+  useEffect(() => { loadRuns(); }, []);
 
   function reset() {
     setCsv(null); setFilename(""); setAnalysis(null); setMapping({}); setResult(null); setError("");
@@ -67,7 +73,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
     setCsv(text);
     setBusy(true);
     try {
-      const a = await api.post<AnalyzeResp>("/research/ingest/analyze", { kind, source, csv: text });
+      const a = await api.post<AnalyzeResp>("/research/ingest/analyze", { category, csv: text });
       setAnalysis(a);
       setMapping(a.suggestedMapping);
     } catch (e) {
@@ -82,7 +88,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
     setBusy(true); setError("");
     try {
       const r = await api.post<CommitResp>("/research/ingest/commit", {
-        kind, source, csv, mapping, state, county: county || undefined, filename: filename || undefined,
+        category, csv, mapping, filename: filename || undefined,
       });
       setResult(r);
       setAnalysis(null);
@@ -98,15 +104,8 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
   }
 
   function downloadTemplate() {
-    if (kind === "DOCUMENTS") {
-      downloadCsv("research-documents-template.csv",
-        ["Instrument Type", "Recording Date", "Grantor", "Grantee", "Instrument Number", "County", "Abstract", "Survey", "Acreage", "Consideration"],
-        SAMPLE_DOC_ROWS);
-    } else {
-      downloadCsv("research-permits-template.csv",
-        ["Operator Name", "County", "API No", "Permit No", "Lease Name", "Well No", "Status", "Wellbore Profile", "Submitted Date", "Approved Date", "Spud Date", "Formation"],
-        SAMPLE_PERMIT_ROWS);
-    }
+    const t = category === "permits" ? PERMIT_TEMPLATE : category === "leases" ? LEASE_TEMPLATE : DEED_TEMPLATE;
+    downloadCsv(`research-${category}-template.csv`, t.headers, t.rows);
   }
 
   const requiredMissing = analysis?.fields.filter((f) => f.required && !mapping[f.key]) ?? [];
@@ -114,37 +113,28 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
   return (
     <div>
       <div className="panel">
-        <h3>Import Public-Records Data</h3>
+        <h3>Import Public Records</h3>
         <p className="muted" style={{ marginTop: 0 }}>
-          Upload county recording indexes (mineral deeds, leases, assignments…) or drilling-permit exports.
-          Rows are classified, normalized and de-duplicated automatically; non-mineral instruments (liens, deeds of trust, easements) are skipped.
+          Upload a CSV of recorded deeds or leases (or a drilling-permit export). Rows are classified,
+          normalized and de-duplicated automatically; non-mineral instruments (liens, deeds of trust, easements) are skipped.
+          County is read from the file where present, otherwise the configured county is used.
         </p>
         <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-          <div className="field" style={{ marginBottom: 0 }}><label>Data kind</label>
-            <select value={kind} onChange={(e) => { const k = e.target.value as "DOCUMENTS" | "PERMITS"; setKind(k); setSource(sources?.sources.find((s) => s.kind === k)?.key ?? ""); reset(); }}>
-              <option value="DOCUMENTS">County recordings (deeds & leases)</option>
-              <option value="PERMITS">Drilling permits</option>
+          <div className="field" style={{ marginBottom: 0, minWidth: 180 }}><label>Data Type</label>
+            <select value={category} onChange={(e) => { setCategory(e.target.value as Category); reset(); }}>
+              <option value="deeds">Deeds</option>
+              <option value="leases">Leases</option>
+              <option value="permits">Drilling Permits</option>
             </select>
           </div>
-          <div className="field" style={{ marginBottom: 0, minWidth: 240 }}><label>Source format</label>
-            <select value={source} onChange={(e) => { setSource(e.target.value); reset(); }}>
-              {kindSources.map((s) => <option key={s.key} value={s.key}>{s.label}</option>)}
-            </select>
-          </div>
-          <div className="field" style={{ marginBottom: 0, width: 90 }}><label>State</label>
-            <input value={state} maxLength={2} onChange={(e) => setState(e.target.value.toUpperCase())} placeholder="TX" />
-          </div>
-          <div className="field" style={{ marginBottom: 0, minWidth: 160 }}><label>County (default)</label>
-            <input value={county} onChange={(e) => setCounty(e.target.value)} placeholder="e.g. Leon" />
+          <div className="field" style={{ marginBottom: 0, width: 110 }}><label>Format</label>
+            <input value="CSV" disabled readOnly />
           </div>
           <div className="field" style={{ marginBottom: 0 }}><label>CSV file</label>
             <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
           </div>
           <button className="small" onClick={downloadTemplate}>Download template</button>
         </div>
-        {kindSources.find((s) => s.key === source) && (
-          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>{kindSources.find((s) => s.key === source)!.description}</p>
-        )}
 
         {busy && <Spinner label="Working…" />}
         {error && <Banner kind="error">{error}</Banner>}
@@ -168,7 +158,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
             )}
             <div style={{ marginTop: 10 }}>
               <button className="primary" disabled={busy || requiredMissing.length > 0} onClick={onCommit}>
-                Import {analysis.rowCount.toLocaleString()} rows
+                Import {analysis.rowCount.toLocaleString()} rows as {CATEGORY_LABEL[category]}
               </button>
             </div>
           </div>
@@ -187,13 +177,12 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
         <h3>Import History</h3>
         {runs.length === 0 ? <p className="muted">No imports yet.</p> : (
           <div className="table-scroll"><table className="data-table">
-            <thead><tr><th>Date</th><th>Kind</th><th>Source</th><th>Geography</th><th>File</th><th>Imported</th><th>Skipped</th><th>Failed</th></tr></thead>
+            <thead><tr><th>Date</th><th>Type</th><th>Geography</th><th>File</th><th>Imported</th><th>Skipped</th><th>Failed</th></tr></thead>
             <tbody>
               {runs.map((r) => (
                 <tr key={r.id}>
                   <td>{fmtDate(r.createdAt)}</td>
-                  <td>{r.kind === "DOCUMENTS" ? "Recordings" : "Permits"}</td>
-                  <td>{r.source}</td>
+                  <td>{runTypeLabel(r.source)}</td>
                   <td>{[r.county, r.state].filter(Boolean).join(", ") || "—"}</td>
                   <td>{r.filename ?? "—"}</td>
                   <td>{r.rowsImported.toLocaleString()}</td>

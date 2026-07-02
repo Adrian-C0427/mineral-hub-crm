@@ -4,7 +4,7 @@ import {
   classifyTrajectory, detectHotspot, historyWindows, normalizeEntity,
   rollingAverage, surgeSeverity, trend,
 } from "./research.js";
-import { guessMapping, RESEARCH_SOURCES } from "./researchSources.js";
+import { CSV_DOCUMENTS, CSV_PERMITS, guessMapping } from "./researchSources.js";
 
 describe("classifyDocType", () => {
   it("classifies the core transaction instruments", () => {
@@ -166,17 +166,15 @@ describe("time bucketing", () => {
 });
 
 describe("guessMapping", () => {
-  it("maps RRC W-1 style headers", () => {
-    const src = RESEARCH_SOURCES.find((s) => s.key === "tx-rrc-w1")!;
-    const m = guessMapping(src, ["Operator Name", "Lease Name", "Well #", "API No.", "County", "Wellbore Profile", "Submitted Date", "Approved Date"]);
+  it("maps RRC W-1 style permit headers", () => {
+    const m = guessMapping(CSV_PERMITS, ["Operator Name", "Lease Name", "Well #", "API No.", "County", "Wellbore Profile", "Submitted Date", "Approved Date"]);
     expect(m.operator).toBe("Operator Name");
     expect(m.trajectory).toBe("Wellbore Profile");
     expect(m.filedDate).toBe("Submitted Date");
     expect(m.approvedDate).toBe("Approved Date");
   });
-  it("maps Leon County publicsearch.us export headers", () => {
-    const src = RESEARCH_SOURCES.find((s) => s.key === "tx-leon-publicsearch")!;
-    const m = guessMapping(src, ["Grantor", "Grantee", "Doc Type", "Recorded Date", "Doc Number", "Book/Volume/Page", "Legal Description"]);
+  it("maps Leon County publicsearch.us export headers (documents)", () => {
+    const m = guessMapping(CSV_DOCUMENTS, ["Grantor", "Grantee", "Doc Type", "Recorded Date", "Doc Number", "Book/Volume/Page", "Legal Description"]);
     expect(m.docType).toBe("Doc Type");
     expect(m.recordingDate).toBe("Recorded Date");
     expect(m.grantor).toBe("Grantor");
@@ -184,12 +182,17 @@ describe("guessMapping", () => {
     expect(m.instrumentNumber).toBe("Doc Number");
     expect(m.legalDescription).toBe("Legal Description");
   });
-
-  it("maps county-clerk style headers", () => {
-    const src = RESEARCH_SOURCES.find((s) => s.key === "tx-county-clerk")!;
-    const m = guessMapping(src, ["Instrument Type", "File Date", "Grantor", "Grantee", "Instrument Number", "Legal Description"]);
-    expect(m.docType).toBe("Instrument Type");
+  it("maps generic county-clerk headers (documents)", () => {
+    const m = guessMapping(CSV_DOCUMENTS, ["Document Type", "File Date", "Grantor", "Grantee", "Instrument Number", "Legal Description"]);
+    expect(m.docType).toBe("Document Type");
     expect(m.recordingDate).toBe("File Date");
     expect(m.grantee).toBe("Grantee");
+  });
+  it("no longer maps removed fields (effectiveDate, trs, acreage, consideration)", () => {
+    const m = guessMapping(CSV_DOCUMENTS, ["Doc Type", "Recorded Date", "Effective Date", "Acreage", "Consideration", "Section-Township-Range"]);
+    expect(m.effectiveDate).toBeUndefined();
+    expect(m.acreage).toBeUndefined();
+    expect(m.consideration).toBeUndefined();
+    expect(m.trs).toBeUndefined();
   });
 });

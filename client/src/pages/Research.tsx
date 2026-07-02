@@ -311,7 +311,6 @@ function OverviewTab({ qs }: { qs: string }) {
         <TrendKpi label="Horizontal Permits" t={t.horizontalPermits} />
         <TrendKpi label="Active Buyers" t={t.uniqueBuyers} />
         <TrendKpi label="Active Operators" t={t.uniqueOperators} />
-        <TrendKpi label="Acreage Transacted" t={t.acreage} />
         <div className="metric-card">
           <div className="metric-label">Comparison Window</div>
           <div className="metric-value" style={{ fontSize: 15 }}>{fmtDate(data.compare.from)} – {fmtDate(data.compare.to)}</div>
@@ -336,7 +335,7 @@ function OverviewTab({ qs }: { qs: string }) {
           </ResponsiveContainer>
         </div>
         <div className="panel">
-          <h3>Instrument Type Breakdown</h3>
+          <h3>Document Type Breakdown</h3>
           {data.docTypeBreakdown.length === 0 ? <p className="muted">No documents in this period.</p> : (
             <ResponsiveContainer width="100%" height={Math.max(160, data.docTypeBreakdown.length * 30)}>
               <BarChart data={data.docTypeBreakdown.map((d) => ({ name: prettyEnum(d.docType), count: d.count }))} layout="vertical" margin={{ left: 60 }}>
@@ -509,7 +508,7 @@ function RankingsTab({ qs, opts, onDrill }: { qs: string; opts: FilterOpts | nul
     },
     ...(role === "operators"
       ? ([{ key: "horizontal", header: "Horizontal", value: (r) => r.horizontal, align: "right" }] as Column<EntityRow>[])
-      : ([{ key: "acreage", header: "Acreage", value: (r) => r.acreage, align: "right", render: (r) => (r.acreage ? num(r.acreage) : "—") }] as Column<EntityRow>[])),
+      : []),
     { key: "counties", header: "Counties", value: (r) => r.counties.length, render: (r) => r.counties.join(", ") || "—" },
   ];
 
@@ -529,8 +528,8 @@ function RankingsTab({ qs, opts, onDrill }: { qs: string; opts: FilterOpts | nul
               </div>
               <button className="small" disabled={!data?.rows.length} onClick={() => data && downloadCsv(
                 `research-${role}.csv`,
-                ["Name", "Count", "Prior", "Change %", "Acreage", "Counties", "New Entrant"],
-                data.rows.map((r) => [r.name, r.count, r.previous, r.pctChange == null ? "" : Math.round(r.pctChange * 100), r.acreage || "", r.counties.join("; "), r.newEntrant ? "YES" : ""]),
+                ["Name", "Count", "Prior", "Change %", "Counties", "New Entrant"],
+                data.rows.map((r) => [r.name, r.count, r.previous, r.pctChange == null ? "" : Math.round(r.pctChange * 100), r.counties.join("; "), r.newEntrant ? "YES" : ""]),
               )}>Export CSV</button>
             </div>
           </div>
@@ -645,8 +644,8 @@ function RecordsTab({ qs }: { qs: string }) {
     if (kind === "documents") {
       const d = await api.get<Paged<DocRecord>>(`/research/documents?${qs}&page=1&pageSize=1000`);
       downloadCsv("research-documents.csv",
-        ["Recording Date", "Type", "Class", "Grantor", "Grantee", "Instrument #", "State", "County", "Abstract", "Survey", "Acreage", "Source"],
-        d.rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.docClass, r.grantor, r.grantee, r.instrumentNumber, r.state, r.county, r.abstractId, r.survey, r.acreage, r.source]));
+        ["Recording Date", "Type", "Class", "Grantor", "Grantee", "Instrument #", "State", "County", "Abstract", "Survey", "Source"],
+        d.rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.docClass, r.grantor, r.grantee, r.instrumentNumber, r.state, r.county, r.abstractId, r.survey, r.source]));
     } else {
       const d = await api.get<Paged<PermitRecord>>(`/research/permits?${qs}&page=1&pageSize=1000`);
       downloadCsv("research-permits.csv",
@@ -665,7 +664,6 @@ function RecordsTab({ qs }: { qs: string }) {
     { key: "grantee", header: "Grantee (Buyer)", value: (r) => r.grantee },
     { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}` },
     { key: "abstractId", header: "Abstract", value: (r) => r.abstractId },
-    { key: "acreage", header: "Acres", value: (r) => r.acreage, align: "right", render: (r) => (r.acreage != null ? num(r.acreage) : "—") },
     { key: "instrumentNumber", header: "Instr #", value: (r) => r.instrumentNumber },
   ];
   const permitColumns: Column<PermitRecord>[] = [
