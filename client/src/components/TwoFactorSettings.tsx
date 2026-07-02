@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "../api/client";
-import { Banner } from "./ui";
+import { Banner, ConfirmDialog } from "./ui";
 
 /**
  * Two-factor (TOTP) management for the account settings page: enroll (secret +
@@ -25,6 +25,7 @@ export function TwoFactorSettings() {
   // Disable / regenerate state
   const [manageCode, setManageCode] = useState("");
   const [showDisable, setShowDisable] = useState(false);
+  const [confirmDisable, setConfirmDisable] = useState(false);
 
   const load = () => api.get<Status>("/auth/2fa/status").then(setStatus).catch(() => setStatus({ enabled: false, recoveryCodesRemaining: 0 }));
   useEffect(() => { load(); }, []);
@@ -50,6 +51,7 @@ export function TwoFactorSettings() {
   }
 
   async function disable() {
+    setConfirmDisable(false);
     setError(null); setBusy(true);
     try {
       await api.post("/auth/2fa/disable", { code: manageCode.trim() });
@@ -132,12 +134,23 @@ export function TwoFactorSettings() {
               </div>
               <div className="row">
                 <button className="small" disabled={busy || !manageCode.trim()} onClick={regenerate}>Regenerate recovery codes</button>
-                <button className="danger" disabled={busy || !manageCode.trim()} onClick={disable}>Disable 2FA</button>
+                <button className="danger" disabled={busy || !manageCode.trim()} onClick={() => setConfirmDisable(true)}>Disable 2FA</button>
                 <button className="small" onClick={() => { setShowDisable(false); setManageCode(""); }}>Cancel</button>
               </div>
             </div>
           )}
         </div>
+      )}
+      {confirmDisable && (
+        <ConfirmDialog
+          title="Disable two-factor authentication?"
+          message={<p style={{ margin: 0 }}>Your account will no longer require a second step when signing in. Are you sure you want to save this change?</p>}
+          confirmLabel="Disable 2FA"
+          danger
+          busy={busy}
+          onCancel={() => setConfirmDisable(false)}
+          onConfirm={disable}
+        />
       )}
     </div>
   );

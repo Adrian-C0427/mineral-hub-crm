@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api/client";
 import { useAuth, type OrgRole } from "../auth/AuthContext";
-import { Banner } from "./ui";
+import { Banner, ConfirmChanges, ConfirmDialog } from "./ui";
 import { fmtDate } from "../lib/format";
 import { formatPhone } from "../lib/phone";
 
@@ -55,12 +55,25 @@ export function OrgSettings({ initialTab }: { initialTab?: Tab } = {}) {
 }
 
 function OrgTab({ org, canEdit, onSaved, onJoined, onError }: { org: OrgInfo; canEdit: boolean; onSaved: () => void; onJoined: () => void; onError: (e: unknown) => void }) {
+  // The company name is read-only until an intentional Edit; saving requires
+  // an explicit confirmation, and Cancel restores the original value.
+  const [editingName, setEditingName] = useState(false);
   const [name, setName] = useState(org.name);
+  const [confirmingName, setConfirmingName] = useState(false);
+  const [savingName, setSavingName] = useState(false);
   const [joinToken, setJoinToken] = useState("");
-  useEffect(() => setName(org.name), [org.name]);
+  useEffect(() => { setName(org.name); setEditingName(false); setConfirmingName(false); }, [org.name]);
 
+  function cancelNameEdit() {
+    setName(org.name); // discard changes
+    setEditingName(false);
+    setConfirmingName(false);
+  }
   async function saveName() {
-    try { await api.patch("/org", { name: name.trim() }); onSaved(); } catch (e) { onError(e); }
+    setSavingName(true);
+    try { await api.patch("/org", { name: name.trim() }); setConfirmingName(false); setEditingName(false); onSaved(); }
+    catch (e) { setConfirmingName(false); onError(e); }
+    finally { setSavingName(false); }
   }
   async function join(e: React.FormEvent) {
     e.preventDefault();
@@ -72,12 +85,18 @@ function OrgTab({ org, canEdit, onSaved, onJoined, onError }: { org: OrgInfo; ca
     <>
       <div className="dd-grid" style={{ marginBottom: 12 }}>
         <div className="kv"><span className="k">Company</span><span className="v">
-          {canEdit ? (
+          {!editingName ? (
             <span className="row" style={{ gap: 6 }}>
-              <input value={name} onChange={(e) => setName(e.target.value)} style={{ maxWidth: 260 }} />
-              <button className="small primary" disabled={!name.trim() || name === org.name} onClick={saveName}>Save</button>
+              {org.name}
+              {canEdit && <button className="small" onClick={() => setEditingName(true)}>Edit</button>}
             </span>
-          ) : org.name}
+          ) : (
+            <span className="row" style={{ gap: 6 }}>
+              <input value={name} onChange={(e) => setName(e.target.value)} style={{ maxWidth: 260 }} autoFocus />
+              <button className="small primary" disabled={!name.trim() || name.trim() === org.name} onClick={() => setConfirmingName(true)}>Save</button>
+              <button className="small" onClick={cancelNameEdit}>Cancel</button>
+            </span>
+          )}
         </span></div>
         <div className="kv"><span className="k">Team ID</span><span className="v"><code>{org.teamId}</code> <button className="small" onClick={() => copy(org.teamId)}>Copy</button></span></div>
         <div className="kv"><span className="k">Your role</span><span className="v">{ROLE_LABEL[org.yourRole ?? ""] ?? "—"}</span></div>
@@ -91,6 +110,7 @@ function OrgTab({ org, canEdit, onSaved, onJoined, onError }: { org: OrgInfo; ca
         <button className="primary" disabled={!joinToken.trim()}>Join</button>
       </form>
       <p className="muted" style={{ fontSize: 12 }}>Joining another organization moves you into its shared workspace.</p>
+      {confirmingName && <ConfirmChanges busy={savingName} onCancel={() => setConfirmingName(false)} onConfirm={saveName} />}
     </>
   );
 }
@@ -99,6 +119,9 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
   const { user, can, isOrgOwner } = useAuth();
   const [members, setMembers] = useState<Member[]>([]);
   const [invites, setInvites] = useState<Invite[]>([]);
+  // Role/status changes commit only after an explicit confirmation.
+  const [pendingRole, setPendingRole] = useState<{ m: Member; orgRole: OrgRole } | null>(null);
+  const [pendingStatus, setPendingStatus] = useState<Member | null>(null);
 
   function load() {
     if (can("manageMembers")) api.get<Member[]>("/org/members").then(setMembers).catch(() => {});
@@ -108,9 +131,11 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
 
   async function changeRole(m: Member, orgRole: OrgRole) {
     try { await api.patch(`/org/members/${m.id}`, { orgRole }); onFlash(`Updated ${m.name}'s role.`); load(); } catch (e) { onError(e); }
+    finally { setPendingRole(null); }
   }
   async function toggleStatus(m: Member) {
     try { await api.patch(`/org/members/${m.id}`, { status: m.status === "ACTIVE" ? "DISABLED" : "ACTIVE" }); load(); } catch (e) { onError(e); }
+    finally { setPendingStatus(null); }
   }
   async function removeMember(m: Member) {
     if (!confirm(`Remove ${m.name} from the organization?`)) return;
@@ -146,7 +171,7 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
                       <td>{m.phone ? formatPhone(m.phone) : "—"}</td>
                       <td>
                         {locked ? (ROLE_LABEL[m.orgRole ?? ""] ?? "—") : (
-                          <select value={m.orgRole ?? "MEMBER"} onChange={(e) => changeRole(m, e.target.value as OrgRole)}>
+                          <select value={m.orgRole ?? "MEMBER"} onChange={(e) => setPendingRole({ m, orgRole: e.target.value as OrgRole })}>
                             {roleOptions(m).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
                           </select>
                         )}
@@ -156,7 +181,7 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
                       <td className="right">
                         {!isSelf && m.orgRole !== "OWNER" && (
                           <>
-                            <button className="small" onClick={() => toggleStatus(m)}>{m.status === "ACTIVE" ? "Deactivate" : "Activate"}</button>
+                            <button className="small" onClick={() => setPendingStatus(m)}>{m.status === "ACTIVE" ? "Deactivate" : "Activate"}</button>
                             {can("inviteRemoveUsers") && <button className="small danger" style={{ marginLeft: 6 }} onClick={() => removeMember(m)}>Remove</button>}
                           </>
                         )}
@@ -202,6 +227,27 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
           )}
         </>
       )}
+
+      {pendingRole && (
+        <ConfirmDialog
+          title="Confirm Changes"
+          message={<p style={{ margin: 0 }}>Change <strong>{pendingRole.m.name}</strong>'s role to <strong>{ROLE_LABEL[pendingRole.orgRole]}</strong>? Are you sure you want to save this change?</p>}
+          onCancel={() => setPendingRole(null)}
+          onConfirm={() => changeRole(pendingRole.m, pendingRole.orgRole)}
+        />
+      )}
+      {pendingStatus && (
+        <ConfirmDialog
+          title={pendingStatus.status === "ACTIVE" ? "Deactivate user?" : "Activate user?"}
+          message={<p style={{ margin: 0 }}>{pendingStatus.status === "ACTIVE"
+            ? <>Deactivate <strong>{pendingStatus.name}</strong>'s account? They will lose access until reactivated.</>
+            : <>Reactivate <strong>{pendingStatus.name}</strong>'s account?</>}</p>}
+          confirmLabel={pendingStatus.status === "ACTIVE" ? "Deactivate" : "Activate"}
+          danger={pendingStatus.status === "ACTIVE"}
+          onCancel={() => setPendingStatus(null)}
+          onConfirm={() => toggleStatus(pendingStatus)}
+        />
+      )}
     </>
   );
 }
@@ -210,6 +256,7 @@ function RolesTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
   const [data, setData] = useState<RolesResponse | null>(null);
   const [draft, setDraft] = useState<Record<string, Set<string>>>({});
   const [saving, setSaving] = useState(false);
+  const [confirmRole, setConfirmRole] = useState<OrgRole | null>(null);
 
   function load() {
     api.get<RolesResponse>("/org/roles").then((r) => {
@@ -238,7 +285,7 @@ function RolesTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
   async function saveRole(role: OrgRole) {
     setSaving(true);
     try { await api.patch(`/org/roles/${role}`, { permissions: [...(draft[role] ?? [])] }); onFlash(`${ROLE_LABEL[role]} permissions saved.`); load(); }
-    catch (e) { onError(e); } finally { setSaving(false); }
+    catch (e) { onError(e); } finally { setSaving(false); setConfirmRole(null); }
   }
   async function resetRole(role: OrgRole) {
     if (!confirm(`Reset ${ROLE_LABEL[role]} to default permissions?`)) return;
@@ -285,11 +332,12 @@ function RolesTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
       <div className="row" style={{ flexWrap: "wrap", gap: 8, marginTop: 12 }}>
         {ASSIGNABLE.map((r) => (
           <span key={r} className="row" style={{ gap: 4 }}>
-            <button className="small primary" disabled={saving} onClick={() => saveRole(r)}>Save {ROLE_LABEL[r]}</button>
+            <button className="small primary" disabled={saving} onClick={() => setConfirmRole(r)}>Save {ROLE_LABEL[r]}</button>
             <button className="small" disabled={saving} onClick={() => resetRole(r)}>Reset</button>
           </span>
         ))}
       </div>
+      {confirmRole && <ConfirmChanges busy={saving} onCancel={() => setConfirmRole(null)} onConfirm={() => saveRole(confirmRole)} />}
     </>
   );
 }

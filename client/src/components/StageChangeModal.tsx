@@ -24,9 +24,19 @@ export function StageChangeModal({ deal, initialStage, hasUnresolvedActivity, on
   const [deadReason, setDeadReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Closed/Dead are transition points out of the active Pipeline — they get an
+  // explicit second-step confirmation spelling out the consequence.
+  const [confirming, setConfirming] = useState(false);
+  const isTerminal = toStage === "CLOSED" || toStage === "DEAD";
 
-  async function confirm() {
+  function requestMove() {
     if (toStage === "DEAD" && !deadReason.trim()) { setError("A reason is required to mark a deal Dead."); return; }
+    setError(null);
+    if (isTerminal) { setConfirming(true); return; }
+    void commit();
+  }
+
+  async function commit() {
     setBusy(true);
     setError(null);
     try {
@@ -36,10 +46,38 @@ export function StageChangeModal({ deal, initialStage, hasUnresolvedActivity, on
       });
       onChanged(updated);
     } catch (err) {
+      setConfirming(false);
       setError(err instanceof ApiError ? err.message : "Failed to change stage");
     } finally {
       setBusy(false);
     }
+  }
+
+  if (confirming) {
+    const closed = toStage === "CLOSED";
+    return (
+      <Modal
+        title={closed ? "Move Deal to Closed?" : "Archive Deal?"}
+        onClose={() => setConfirming(false)}
+        footer={
+          <>
+            <button onClick={() => setConfirming(false)} disabled={busy}>Cancel</button>
+            <button className={closed ? "primary" : "danger"} onClick={commit} disabled={busy}>
+              {busy ? "Moving…" : closed ? "Move Deal" : "Archive Deal"}
+            </button>
+          </>
+        }
+      >
+        <p style={{ marginTop: 0 }}>
+          This action will remove the opportunity from the active Pipeline and move the
+          associated deal to <strong>{closed ? "Closed Deals" : "Archived Deals"}</strong>.
+        </p>
+        <p className="muted" style={{ marginBottom: 0 }}>
+          Nothing is deleted — all deal information, documents, buyer activity, emails, notes,
+          and history stay with the deal, and dashboards and reports update automatically.
+        </p>
+      </Modal>
+    );
   }
 
   return (
@@ -49,8 +87,8 @@ export function StageChangeModal({ deal, initialStage, hasUnresolvedActivity, on
       footer={
         <>
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={confirm} disabled={busy || toStage === deal.stage}>
-            {busy ? "Saving…" : `Move to ${prettyStage(toStage)}`}
+          <button className="primary" onClick={requestMove} disabled={busy || toStage === deal.stage}>
+            {busy ? "Saving…" : `Move to ${prettyStage(toStage)}${isTerminal ? "…" : ""}`}
           </button>
         </>
       }

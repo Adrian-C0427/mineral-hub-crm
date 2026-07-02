@@ -1,0 +1,110 @@
+import { useState } from "react";
+import { Modal } from "./ui";
+import { api, ApiError } from "../api/client";
+import { SearchableMultiSelect } from "./SearchableMultiSelect";
+import { PhoneInput } from "./PhoneInput";
+import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
+
+/**
+ * Standardized New Buyer template — the buyer counterpart of NewDealModal.
+ * Same layout, validation, and save behavior; every new buyer is created
+ * through this form so records start consistent.
+ */
+export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
+  const [f, setF] = useState({
+    companyName: "", name: "", contactName: "", email: "", phone: "",
+    website: "", mailingAddress: "", states: "",
+    minAcreage: "", maxAcreage: "", minPrice: "", maxPrice: "",
+    nextFollowUpDate: "", notes: "",
+  });
+  const [relationshipStatus, setRelationshipStatus] = useState<"HOT" | "WARM" | "COLD">("WARM");
+  const [counties, setCounties] = useState<string[]>([]);
+  const [basins, setBasins] = useState<string[]>([]);
+  const [formations, setFormations] = useState<string[]>([]);
+  const [assetTypes, setAssetTypes] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setF((p) => ({ ...p, [k]: e.target.value }));
+  const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
+
+  async function submit() {
+    if (!f.companyName.trim()) { setError("Company name is required"); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      const { id } = await api.post<{ id: string }>("/buyers", {
+        companyName: f.companyName.trim(),
+        name: f.name.trim() || f.companyName.trim(),
+        contactName: f.contactName.trim() || null,
+        email: f.email.trim() || null,
+        phone: f.phone.trim() || null,
+        website: f.website.trim() || null,
+        mailingAddress: f.mailingAddress.trim() || null,
+        relationshipStatus,
+        nextFollowUpDate: f.nextFollowUpDate || null,
+        notes: f.notes || null,
+        buyBox: {
+          states: f.states ? f.states.split(",").map((s) => s.trim()).filter(Boolean) : [],
+          counties, basins, formations, assetTypes,
+          minAcreage: numOrNull(f.minAcreage),
+          maxAcreage: numOrNull(f.maxAcreage),
+          minPrice: numOrNull(f.minPrice),
+          maxPrice: numOrNull(f.maxPrice),
+        },
+      });
+      onCreated(id);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Failed to create buyer");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      title="New Buyer"
+      onClose={onClose}
+      wide
+      footer={
+        <>
+          <button onClick={onClose}>Cancel</button>
+          <button className="primary" onClick={submit} disabled={busy}>{busy ? "Creating…" : "Create buyer"}</button>
+        </>
+      }
+    >
+      <p className="muted" style={{ marginTop: 0 }}>New buyers start as <strong>Warm</strong> unless set otherwise. The buy box drives deal matching — fill in what you know; everything except the company name can be added later.</p>
+      <div className="field"><label>Company name *</label><input value={f.companyName} onChange={set("companyName")} autoFocus /></div>
+      <div className="dd-grid">
+        <div className="field"><label>Display name</label><input value={f.name} onChange={set("name")} placeholder="Defaults to company name" /></div>
+        <div className="field"><label>Contact name</label><input value={f.contactName} onChange={set("contactName")} /></div>
+        <div className="field"><label>Email</label><input type="email" value={f.email} onChange={set("email")} /></div>
+        <div className="field"><label>Phone</label><PhoneInput value={f.phone} onChange={(v) => setF((p) => ({ ...p, phone: v }))} /></div>
+        <div className="field"><label>Website</label><input value={f.website} onChange={set("website")} /></div>
+        <div className="field"><label>Relationship</label>
+          <select value={relationshipStatus} onChange={(e) => setRelationshipStatus(e.target.value as "HOT" | "WARM" | "COLD")}>
+            <option value="HOT">Hot</option><option value="WARM">Warm</option><option value="COLD">Cold</option>
+          </select>
+        </div>
+        <div className="field"><label>Next follow-up</label><input type="date" value={f.nextFollowUpDate} onChange={set("nextFollowUpDate")} /></div>
+      </div>
+      <div className="field"><label>Mailing address</label><input value={f.mailingAddress} onChange={set("mailingAddress")} /></div>
+
+      <div className="section-head" style={{ marginTop: 6 }}><h3 style={{ margin: 0 }}>Buy box</h3></div>
+      <div className="dd-grid">
+        <div className="field"><label>States (comma-sep)</label><input value={f.states} onChange={set("states")} placeholder="TX, OK" /></div>
+        <div className="field"><label>Counties</label><SearchableMultiSelect options={TEXAS_COUNTY_OPTIONS} value={counties} onChange={setCounties} placeholder="Search counties…" /></div>
+        <div className="field"><label>Basins</label><SearchableMultiSelect options={TEXAS_BASIN_OPTIONS} value={basins} onChange={setBasins} placeholder="Search basins…" /></div>
+        <div className="field"><label>Formations</label><SearchableMultiSelect options={TEXAS_FORMATION_OPTIONS} value={formations} onChange={setFormations} placeholder="Search formations…" /></div>
+        <div className="field"><label>Asset types</label><SearchableMultiSelect options={ASSET_TYPE_OPTIONS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
+        <div className="field"><label>Min acreage</label><input type="number" value={f.minAcreage} onChange={set("minAcreage")} /></div>
+        <div className="field"><label>Max acreage</label><input type="number" value={f.maxAcreage} onChange={set("maxAcreage")} /></div>
+        <div className="field"><label>Min price</label><input type="number" value={f.minPrice} onChange={set("minPrice")} /></div>
+        <div className="field"><label>Max price</label><input type="number" value={f.maxPrice} onChange={set("maxPrice")} /></div>
+      </div>
+      <div className="field"><label>Notes</label><textarea rows={3} value={f.notes} onChange={set("notes")} /></div>
+      {error && <div className="error-text">{error}</div>}
+    </Modal>
+  );
+}

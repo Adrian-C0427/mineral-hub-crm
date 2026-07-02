@@ -7,12 +7,18 @@ import { StageChangeModal } from "../components/StageChangeModal";
 import { money, num, fmtDate, prettyStage } from "../lib/format";
 import type { DealSummary, Stage } from "../types";
 
-// The Pipeline shows only ACTIVE-lifecycle stages. When a deal is moved to
-// Closed or Dead it leaves the board automatically (→ Closed Deals / Archived
-// Deals). Closing or killing a deal is done from the deal's Move Stage action.
+// The Pipeline shows only ACTIVE-lifecycle stages as columns. Closed and Dead
+// remain valid workflow stages but act as transition points, not columns: the
+// TRANSITIONS targets below accept drops (and Move Stage offers them), always
+// behind a confirmation, after which the deal leaves the board for the Closed
+// Deals / Archived Deals subpage.
 const COLUMNS: Stage[] = [
   "UNDER_CONTRACT", "PREPARING_PACKAGE", "SENT_TO_BUYERS",
   "NEGOTIATING", "CLOSING",
+];
+const TRANSITIONS: { stage: Stage; label: string; hint: string }[] = [
+  { stage: "CLOSED", label: "Closed", hint: "→ Closed Deals" },
+  { stage: "DEAD", label: "Dead", hint: "→ Archived Deals" },
 ];
 
 export function Pipeline() {
@@ -66,6 +72,22 @@ export function Pipeline() {
             </div>
           );
         })}
+
+        {/* Transition targets: dropping here prompts the Closed/Archive confirmation. */}
+        <div className="kanban-col kanban-transitions">
+          {TRANSITIONS.map((t) => (
+            <div
+              key={t.stage}
+              className={`transition-zone ${t.stage === "DEAD" ? "dead" : "closed"} ${dropCol === t.stage ? "drop-target" : ""}`}
+              onDragOver={(e) => { e.preventDefault(); setDropCol(t.stage); }}
+              onDragLeave={() => setDropCol((c) => (c === t.stage ? null : c))}
+              onDrop={() => onDrop(t.stage)}
+            >
+              <span>{t.label}</span>
+              <span className="muted" style={{ fontSize: 11 }}>{t.hint}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {showNew && <NewDealModal onClose={() => setShowNew(false)} onCreated={(d) => { setShowNew(false); nav(`/deals/${d.id}`); }} />}

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Banner } from "../components/ui";
+import { Banner, ConfirmChanges } from "../components/ui";
 import { PhoneInput } from "../components/PhoneInput";
 import { TwoFactorSettings } from "../components/TwoFactorSettings";
 
@@ -18,13 +18,15 @@ export function SettingsGeneral() {
   const [error, setError] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setF((p) => ({ ...p, [k]: e.target.value }));
     setOk(false);
   };
 
-  async function save(e: React.FormEvent) {
+  // Validate on submit, but only commit after the user confirms.
+  function requestSave(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setOk(false);
@@ -32,6 +34,11 @@ export function SettingsGeneral() {
       setError("All fields are required, and the password must be at least 8 characters.");
       return;
     }
+    setConfirming(true);
+  }
+
+  async function save() {
+    setConfirming(false);
     setBusy(true);
     try {
       await api.patch("/auth/me", {
@@ -59,7 +66,7 @@ export function SettingsGeneral() {
       <div className="panel">
         <h3>Account & Security</h3>
         <p className="muted" style={{ marginTop: 0 }}>Your profile and sign-in details. Confirm your password to save changes.</p>
-        <form onSubmit={save}>
+        <form onSubmit={requestSave}>
           <div className="grid-2">
             <div className="field"><label>First name</label><input value={f.firstName} onChange={set("firstName")} /></div>
             <div className="field"><label>Last name</label><input value={f.lastName} onChange={set("lastName")} /></div>
@@ -71,6 +78,7 @@ export function SettingsGeneral() {
           {ok && <Banner kind="info">Account updated.</Banner>}
           <button className="primary" disabled={busy} style={{ marginTop: 8 }}>{busy ? "Saving…" : "Save changes"}</button>
         </form>
+        {confirming && <ConfirmChanges onCancel={() => setConfirming(false)} onConfirm={save} />}
       </div>
 
       <TwoFactorSettings />
