@@ -101,7 +101,10 @@ authRouter.post(
           name: `${data.firstName} ${data.lastName}`,
           email,
           passwordHash: await hashPassword(data.password),
-          role: "OWNER",
+          // Legacy account role: OWNER only for workspace creators. Invite-code
+          // joiners are ASSOCIATE — authorization runs on orgRole + permissions,
+          // and the legacy role must never grant a joiner elevated access.
+          role: join ? "ASSOCIATE" : "OWNER",
           organizationId,
           orgRole,
         },

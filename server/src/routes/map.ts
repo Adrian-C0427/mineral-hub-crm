@@ -3,11 +3,13 @@ import { z } from "zod";
 import type { Prisma, Stage } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
-import { requireAuth, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal } from "../serializers.js";
 
 export const mapRouter = Router();
-mapRouter.use(requireAuth, requireOrg);
+// viewMap is in every role's defaults; the gate only bites when an org
+// explicitly removes it — which previously only hid the UI, not this data.
+mapRouter.use(requireAuth, requireOrg, requirePermission("viewMap"));
 
 const ACTIVE_STAGES: Stage[] = ["UNDER_CONTRACT", "PREPARING_PACKAGE", "SENT_TO_BUYERS", "NEGOTIATING", "CLOSING"];
 

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { hashPassword } from "../auth/password.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOwner, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { normalizePhone } from "../domain/phone.js";
 
 export const usersRouter = Router();
@@ -24,6 +24,23 @@ usersRouter.get(
   }),
 );
 
+/**
+ * SECURITY: these mutating routes are authorized by the RBAC permission
+ * system (orgRole + RolePermissions), NOT the legacy account Role — the
+ * legacy role was historically "OWNER" for every signup and must never
+ * grant access. Target guards mirror routes/org.ts: only the org owner
+ * may touch the owner or administrators.
+ */
+function assertCanTouchTarget(req: AuthedRequest, target: { id: string; orgRole: string | null }): void {
+  const callerIsOrgOwner = req.user!.orgRole === "OWNER";
+  if (target.orgRole === "OWNER" && target.id !== req.user!.id) {
+    throw new HttpError(403, "Only the organization owner can modify the owner's account");
+  }
+  if (target.orgRole === "ADMIN" && !callerIsOrgOwner && target.id !== req.user!.id) {
+    throw new HttpError(403, "Only the organization owner can modify an administrator");
+  }
+}
+
 // Account creation requires all profile fields.
 const createSchema = z.object({
   firstName: z.string().trim().min(1, "First name is required"),
@@ -31,12 +48,11 @@ const createSchema = z.object({
   phone: z.string().trim().min(1, "Phone number is required").transform(normalizePhone),
   email: z.string().email(),
   password: z.string().min(8),
-  role: z.enum(["OWNER", "ASSOCIATE"]),
 });
 
 usersRouter.post(
   "/",
-  requireOwner,
+  requirePermission("manageMembers"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = createSchema.parse(req.body);
     const exists = await prisma.user.findUnique({ where: { email: data.email.toLowerCase() } });
@@ -49,7 +65,9 @@ usersRouter.post(
         name: `${data.firstName} ${data.lastName}`,
         email: data.email.toLowerCase(),
         passwordHash: await hashPassword(data.password),
-        role: data.role,
+        // New accounts always start as standard members; promotion happens
+        // through the org member-management routes, never at creation.
+        role: "ASSOCIATE",
         organizationId: orgId(req),
         orgRole: "MEMBER",
       },
@@ -61,21 +79,25 @@ usersRouter.post(
 
 const updateSchema = z.object({
   name: z.string().min(1).optional(),
-  role: z.enum(["OWNER", "ASSOCIATE"]).optional(),
   status: z.enum(["ACTIVE", "DISABLED"]).optional(),
   password: z.string().min(8).optional(),
 });
 
 usersRouter.patch(
   "/:id",
-  requireOwner,
+  requirePermission("manageMembers"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = updateSchema.parse(req.body);
     const target = await prisma.user.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!target) throw new HttpError(404, "User not found in your organization");
+    assertCanTouchTarget(req, target);
+    // Resetting someone else's password is an owner-only action (self-service
+    // password changes go through PATCH /auth/me).
+    if (data.password && target.id !== req.user!.id && req.user!.orgRole !== "OWNER") {
+      throw new HttpError(403, "Only the organization owner can reset another user's password");
+    }
     const patch: Record<string, unknown> = {};
     if (data.name) patch.name = data.name;
-    if (data.role) patch.role = data.role;
     if (data.status) patch.status = data.status;
     if (data.password) patch.passwordHash = await hashPassword(data.password);
     const user = await prisma.user.update({
@@ -89,11 +111,15 @@ usersRouter.patch(
 
 usersRouter.delete(
   "/:id",
-  requireOwner,
+  requirePermission("inviteRemoveUsers"),
   asyncHandler(async (req: AuthedRequest, res) => {
     if (req.params.id === req.user!.id) throw new HttpError(400, "You cannot delete your own account");
     const target = await prisma.user.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!target) throw new HttpError(404, "User not found in your organization");
+    if (target.orgRole === "OWNER") throw new HttpError(403, "The organization owner cannot be deleted");
+    if (target.orgRole === "ADMIN" && req.user!.orgRole !== "OWNER") {
+      throw new HttpError(403, "Only the organization owner can delete an administrator");
+    }
     await prisma.user.delete({ where: { id: req.params.id } });
     res.json({ ok: true });
   }),

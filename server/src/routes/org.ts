@@ -137,12 +137,29 @@ orgRouter.get(
   }),
 );
 
+/**
+ * SECURITY guards for role customization: a non-owner with manageRoles must
+ * not be able to (a) rewrite their OWN role's permission set (self-escalation)
+ * or (b) touch the ADMIN role (designating/limiting administrators is an
+ * owner-only concern, mirroring the member-management rules).
+ */
+function assertCanEditRole(req: AuthedRequest, role: OrgRole): void {
+  if (req.user!.orgRole === "OWNER") return;
+  if (role === req.user!.orgRole) {
+    throw new HttpError(403, "You cannot change your own role's permissions");
+  }
+  if (role === "ADMIN") {
+    throw new HttpError(403, "Only the organization owner can change administrator permissions");
+  }
+}
+
 orgRouter.patch(
   "/roles/:role",
   requirePermission("manageRoles"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const role = req.params.role as OrgRole;
     if (!ASSIGNABLE_ROLES.includes(role)) throw new HttpError(400, "That role cannot be customized");
+    assertCanEditRole(req, role);
     const { permissions } = z.object({ permissions: z.array(z.string()) }).parse(req.body);
     // Only known permission keys are stored; owner-only actions are not part of
     // PERMISSIONS so they can never be granted here.
@@ -163,6 +180,7 @@ orgRouter.delete(
   asyncHandler(async (req: AuthedRequest, res) => {
     const role = req.params.role as OrgRole;
     if (!ASSIGNABLE_ROLES.includes(role)) throw new HttpError(400, "That role cannot be customized");
+    assertCanEditRole(req, role);
     await prisma.rolePermissions.deleteMany({ where: { organizationId: orgId(req), role } });
     res.json({ ok: true, role, permissions: DEFAULT_ROLE_PERMISSIONS[role] });
   }),

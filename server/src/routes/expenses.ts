@@ -221,12 +221,16 @@ expensesRouter.patch(
   requirePermission("manageExpenses"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = updateSchema.parse(req.body);
-    // Changing reimbursement status requires approval rights.
-    if (data.reimbursed !== undefined && !canApprove(req)) throw new HttpError(403, "You cannot change reimbursement status");
     const existing = await prisma.expense.findFirst({
       where: { id: req.params.id, organizationId: orgId(req) },
     });
     if (!existing) throw new HttpError(404, "Expense not found");
+    // CHANGING reimbursement status requires approval rights. The client echoes
+    // the current value on every edit, so an unchanged flag must not 403 users
+    // who only hold manageExpenses (they'd be unable to edit any field at all).
+    if (data.reimbursed !== undefined && data.reimbursed !== existing.reimbursed && !canApprove(req)) {
+      throw new HttpError(403, "You cannot change reimbursement status");
+    }
     if (data.categoryId) {
       const cat = await prisma.expenseCategory.findFirst({
         where: { id: data.categoryId, organizationId: orgId(req) },
