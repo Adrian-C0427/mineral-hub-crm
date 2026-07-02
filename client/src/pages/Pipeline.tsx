@@ -7,9 +7,12 @@ import { StageChangeModal } from "../components/StageChangeModal";
 import { money, num, fmtDate, prettyStage } from "../lib/format";
 import type { DealSummary, Stage } from "../types";
 
+// The Pipeline shows only ACTIVE-lifecycle stages. When a deal is moved to
+// Closed or Dead it leaves the board automatically (→ Closed Deals / Archived
+// Deals). Closing or killing a deal is done from the deal's Move Stage action.
 const COLUMNS: Stage[] = [
   "UNDER_CONTRACT", "PREPARING_PACKAGE", "SENT_TO_BUYERS",
-  "NEGOTIATING", "CLOSING", "CLOSED", "DEAD",
+  "NEGOTIATING", "CLOSING",
 ];
 
 export function Pipeline() {
