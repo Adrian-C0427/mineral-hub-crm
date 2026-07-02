@@ -1,17 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
+import { COUNTIES } from "../lib/counties";
 
 interface AbstractEntry { id: string; abstract: string; survey: string; county: string; countyFips: string }
 
-// Module-level cache so the index (~130KB) loads at most once per session.
+// Module-level cache so the per-county indexes load at most once per session.
 let cache: AbstractEntry[] | null = null;
 let inflight: Promise<AbstractEntry[]> | null = null;
 function loadIndex(): Promise<AbstractEntry[]> {
   if (cache) return Promise.resolve(cache);
   if (!inflight) {
-    inflight = fetch("/data/leon-abstracts-index.json")
-      .then((r) => r.json())
-      .then((data: AbstractEntry[]) => { cache = data; return data; })
+    inflight = Promise.all(
+      COUNTIES.map((c) => fetch(`/data/${c.key}-abstracts-index.json`).then((r) => r.json()).catch(() => [])),
+    )
+      .then((parts: AbstractEntry[][]) => { cache = parts.flat(); return cache; })
       .catch(() => { cache = []; return []; });
   }
   return inflight;

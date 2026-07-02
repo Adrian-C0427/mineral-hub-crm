@@ -3,10 +3,10 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { collectCoords, bboxOfPoints, convexHull } from "../lib/geo";
 import { num } from "../lib/format";
+import { COUNTIES, COUNTIES_WITH_WELLS } from "../lib/counties";
 
-const ABSTRACTS_URL = "/data/leon-abstracts.geojson";
-const WELLS_URL = "/data/leon-wells.geojson";
-const WELLBORES_URL = "/data/leon-wellbores.geojson";
+const WELLS_URLS = COUNTIES_WITH_WELLS.map((k) => `/data/${k}-wells.geojson`);
+const WELLBORES_URLS = COUNTIES_WITH_WELLS.map((k) => `/data/${k}-wellbores.geojson`);
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
 
 const STATUS_COLOR = [
@@ -49,7 +49,10 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
     mapRef.current = map;
 
     map.on("load", async () => {
-      const abs = (await fetch(ABSTRACTS_URL).then((r) => r.json())) as FC;
+      const parts = await Promise.all(
+        COUNTIES.map((c) => fetch(`/data/${c.key}-abstracts.geojson`).then((r) => r.json()).catch(() => ({ features: [] }))),
+      );
+      const abs: FC = { type: "FeatureCollection", features: parts.flatMap((p) => p.features) };
       const dealFeats = abs.features.filter((f) => idSet.has(f.properties.id as string));
 
       map.addSource("abstracts", { type: "geojson", data: abs as unknown as GeoJSON.FeatureCollection, promoteId: "id" });
@@ -100,16 +103,18 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
   // Lazy-load heavy layers only when first enabled (perf: no statewide load up front).
   async function ensureWells() {
     const map = mapRef.current!; if (wellsLoaded.current) return; wellsLoaded.current = true;
-    const data = await fetch(WELLS_URL).then((r) => r.json());
-    map.addSource("wells", { type: "geojson", data, promoteId: "fid" });
+    const parts = await Promise.all(WELLS_URLS.map((u) => fetch(u).then((r) => r.json()).catch(() => ({ features: [] }))));
+    const data = { type: "FeatureCollection", features: parts.flatMap((p: { features: unknown[] }) => p.features) };
+    map.addSource("wells", { type: "geojson", data: data as unknown as GeoJSON.FeatureCollection, promoteId: "fid" });
     map.addLayer({ id: "wells", type: "circle", source: "wells", paint: {
       "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 2.3, 14, 5], "circle-color": STATUS_COLOR,
       "circle-stroke-width": 0.6, "circle-stroke-color": "#fff", "circle-opacity": 0.9 } });
   }
   async function ensureBores() {
     const map = mapRef.current!; if (boresLoaded.current) return; boresLoaded.current = true;
-    const data = await fetch(WELLBORES_URL).then((r) => r.json());
-    map.addSource("wellbores", { type: "geojson", data, promoteId: "fid" });
+    const parts = await Promise.all(WELLBORES_URLS.map((u) => fetch(u).then((r) => r.json()).catch(() => ({ features: [] }))));
+    const data = { type: "FeatureCollection", features: parts.flatMap((p: { features: unknown[] }) => p.features) };
+    map.addSource("wellbores", { type: "geojson", data: data as unknown as GeoJSON.FeatureCollection, promoteId: "fid" });
     map.addLayer({ id: "wellbores", type: "line", source: "wellbores", paint: {
       "line-color": ["match", ["get", "wellboreType"], "Directional", "#9333ea", "#0f766e"], "line-width": 1.5, "line-opacity": 0.8 } });
   }

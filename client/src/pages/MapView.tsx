@@ -4,6 +4,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
+import { COUNTIES, COUNTIES_WITH_WELLS } from "../lib/counties";
 import { Spinner, StageBadge, PriorityBadge } from "../components/ui";
 import { money, num } from "../lib/format";
 
@@ -21,9 +22,6 @@ type WellProps = { fid: number; api: string; api8: string; wellNo: string | null
 type SelWell = { kind: "well" } & WellProps;
 type Selected = SelAbstract | SelWell | null;
 
-const ABSTRACTS_URL = "/data/leon-abstracts.geojson";
-const WELLS_URL = "/data/leon-wells.geojson";
-const WELLBORES_URL = "/data/leon-wellbores.geojson";
 const PRODUCTION_URL = "/data/leon-production.json";
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
 
@@ -93,6 +91,24 @@ export function MapView() {
     return m;
   }, [deals]);
 
+  // Filter options scoped to the selected counties: picking Freestone shows only
+  // Freestone surveys/abstracts/operators; multiple counties combine. Recomputed
+  // once data has loaded (keyed on `meta`) and whenever the county filter changes.
+  const scoped = useMemo(() => {
+    const inC = (c: unknown) => fCounties.length === 0 || fCounties.includes(c as string);
+    const abs = (abstractsFC.current?.features ?? []).filter((f) => inC(f.properties.county));
+    const wel = (wellsFC.current?.features ?? []).filter((f) => inC(f.properties.county));
+    const uniq = (arr: unknown[]) => [...new Set(arr.filter(Boolean) as string[])];
+    return {
+      surveys: uniq(abs.map((f) => f.properties.survey)).sort(),
+      abstracts: uniq(abs.map((f) => f.properties.abstract)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+      operators: uniq(wel.map((f) => f.properties.operator)).sort(),
+      wellTypes: uniq(wel.map((f) => f.properties.type)).sort(),
+      wellStatuses: uniq(wel.map((f) => f.properties.status)).sort(),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fCounties, meta]);
+
   useEffect(() => {
     if (mapRef.current || !mapContainer.current) return;
     const map = new maplibregl.Map({ container: mapContainer.current, style: styleWithGlyphs(), center: LEON_CENTER, zoom: 10, attributionControl: { compact: true } });
@@ -100,15 +116,24 @@ export function MapView() {
     mapRef.current = map;
 
     map.on("load", async () => {
-      const [absFC, welFC, boreFC] = await Promise.all([
-        fetch(ABSTRACTS_URL).then((r) => r.json()) as Promise<FC>,
-        fetch(WELLS_URL).then((r) => r.json()) as Promise<FC>,
-        fetch(WELLBORES_URL).then((r) => r.json()) as Promise<FC>,
-      ]);
+      // Multi-county: merge every implemented county's abstracts into one source;
+      // load wells/wellbores for the counties that have them.
+      const absParts = await Promise.all(
+        COUNTIES.map((c) => fetch(`/data/${c.key}-abstracts.geojson`).then((r) => r.json()).catch(() => ({ features: [] }))),
+      );
+      const welParts = await Promise.all(
+        COUNTIES_WITH_WELLS.map((k) => fetch(`/data/${k}-wells.geojson`).then((r) => r.json()).catch(() => ({ features: [] }))),
+      );
+      const boreParts = await Promise.all(
+        COUNTIES_WITH_WELLS.map((k) => fetch(`/data/${k}-wellbores.geojson`).then((r) => r.json()).catch(() => ({ features: [] }))),
+      );
+      const absFC: FC = { type: "FeatureCollection", features: absParts.flatMap((p) => p.features) } as FC;
+      const welFC: FC = { type: "FeatureCollection", features: welParts.flatMap((p) => p.features) } as FC;
+      const boreFC: FC = { type: "FeatureCollection", features: boreParts.flatMap((p) => p.features) } as FC;
       abstractsFC.current = absFC; wellsFC.current = welFC;
       const uniq = (arr: (string | null | undefined)[]) => [...new Set(arr.filter(Boolean) as string[])];
       setMeta({
-        counties: ["Leon"],
+        counties: uniq(absFC.features.map((f) => f.properties.county as string)).sort(),
         surveys: uniq(absFC.features.map((f) => f.properties.survey as string)).sort(),
         abstracts: uniq(absFC.features.map((f) => f.properties.abstract as string)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
         wellTypes: uniq(welFC.features.map((f) => f.properties.type as string)).sort(),
@@ -240,7 +265,7 @@ export function MapView() {
     const cl: unknown[] = [];
     if (fAbstracts.length) cl.push(["in", ["get", "abstract"], ["literal", fAbstracts]]);
     if (fSurveys.length) cl.push(["in", ["get", "survey"], ["literal", fSurveys]]);
-    if (fCounties.length && !fCounties.includes("Leon")) cl.push(["==", ["get", "id"], "__none__"]);
+    if (fCounties.length) cl.push(["in", ["get", "county"], ["literal", fCounties]]);
     const filter = cl.length ? (["all", ...cl] as maplibregl.FilterSpecification) : null;
     for (const id of ["abstracts-fill", "abstracts-line", "abstracts-num", "abstracts-survey"]) if (map.getLayer(id)) map.setFilter(id, filter);
   }
@@ -252,6 +277,7 @@ export function MapView() {
     if (fOperators.length) cl.push(["in", ["get", "operator"], ["literal", fOperators]]);
     if (fAbstracts.length) cl.push(["in", ["get", "abstract"], ["literal", fAbstracts]]);
     if (fSurveys.length) cl.push(["in", ["get", "survey"], ["literal", fSurveys]]);
+    if (fCounties.length) cl.push(["in", ["get", "county"], ["literal", fCounties]]);
     map.setFilter("wells", cl.length ? (["all", ...cl] as maplibregl.FilterSpecification) : null);
 
     // A wellbore (lateral) is never an independent entity: it is shown only for
@@ -267,7 +293,8 @@ export function MapView() {
           (!fWellStatuses.length || fWellStatuses.includes(p.status as string)) &&
           (!fOperators.length || fOperators.includes(p.operator as string)) &&
           (!fAbstracts.length || fAbstracts.includes(p.abstract as string)) &&
-          (!fSurveys.length || fSurveys.includes(p.survey as string));
+          (!fSurveys.length || fSurveys.includes(p.survey as string)) &&
+          (!fCounties.length || fCounties.includes(p.county as string));
         const visibleFids = (wellsFC.current?.features ?? [])
           .filter((f) => pass(f.properties as Record<string, unknown>))
           .map((f) => (f.properties as { fid: number }).fid);
@@ -342,11 +369,11 @@ export function MapView() {
           <div className="dd-grid">
             <div className="field"><label>Deal status</label><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>{STATUS_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
             <div className="field"><label>County</label><SearchableMultiSelect options={meta.counties} value={fCounties} onChange={setFCounties} placeholder="Counties…" /></div>
-            <div className="field"><label>Survey</label><SearchableMultiSelect options={meta.surveys} value={fSurveys} onChange={setFSurveys} placeholder="Surveys…" /></div>
-            <div className="field"><label>Abstract</label><SearchableMultiSelect options={meta.abstracts} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstracts…" /></div>
-            <div className="field"><label>Well type</label><SearchableMultiSelect options={meta.wellTypes} value={fWellTypes} onChange={setFWellTypes} placeholder="Well types…" /></div>
-            <div className="field"><label>Well status</label><SearchableMultiSelect options={meta.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} placeholder="Well statuses…" /></div>
-            <div className="field"><label>Operator ({meta.operators.length})</label><SearchableMultiSelect options={meta.operators} value={fOperators} onChange={setFOperators} placeholder="Operators…" /></div>
+            <div className="field"><label>Survey</label><SearchableMultiSelect options={scoped.surveys} value={fSurveys} onChange={setFSurveys} placeholder="Surveys…" /></div>
+            <div className="field"><label>Abstract</label><SearchableMultiSelect options={scoped.abstracts} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstracts…" /></div>
+            <div className="field"><label>Well type</label><SearchableMultiSelect options={scoped.wellTypes} value={fWellTypes} onChange={setFWellTypes} placeholder="Well types…" /></div>
+            <div className="field"><label>Well status</label><SearchableMultiSelect options={scoped.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} placeholder="Well statuses…" /></div>
+            <div className="field"><label>Operator ({scoped.operators.length})</label><SearchableMultiSelect options={scoped.operators} value={fOperators} onChange={setFOperators} placeholder="Operators…" /></div>
           </div>
         </div>
       )}
