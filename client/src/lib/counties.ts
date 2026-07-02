@@ -9,4 +9,7 @@ export const COUNTIES: CountyDef[] = [
 ];
 
 /** County keys that currently have well/wellbore GIS layers available. */
-export const COUNTIES_WITH_WELLS = ["leon"];
+export const COUNTIES_WITH_WELLS = ["leon", "freestone"];
+
+/** County keys with a {key}-production.json monthly-production asset. */
+export const COUNTIES_WITH_PRODUCTION = ["leon", "freestone"];

@@ -4,7 +4,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
-import { COUNTIES, COUNTIES_WITH_WELLS } from "../lib/counties";
+import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION } from "../lib/counties";
 import { Spinner, StageBadge, PriorityBadge } from "../components/ui";
 import { money, num } from "../lib/format";
 
@@ -18,11 +18,10 @@ interface MapDeal {
 type FC = { type: "FeatureCollection"; features: GeoFeature[] };
 type GeoFeature = { type: "Feature"; id?: number; properties: Record<string, unknown>; geometry: { type: string; coordinates: unknown } };
 type SelAbstract = { kind: "abstract"; id: string; abstract: string; survey: string; county: string };
-type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; operator: string | null; leaseName: string | null; leaseNo: string | null; field: string | null; oilGas: string | null; cumOil: number | null; cumGas: number | null; lastProd: string | null; formations: string | null };
+type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; operator: string | null; leaseName: string | null; leaseNo: string | null; field: string | null; oilGas: string | null; district: string | null; cumOil: number | null; cumGas: number | null; lastProd: string | null; formations: string | null };
 type SelWell = { kind: "well" } & WellProps;
 type Selected = SelAbstract | SelWell | null;
 
-const PRODUCTION_URL = "/data/leon-production.json";
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
 
 // Wells are colored by RRC status.
@@ -202,7 +201,7 @@ export function MapView() {
   }, []);
 
   function toWellProps(p: Record<string, unknown>): WellProps {
-    return { fid: Number(p.fid), api: (p.api as string) || "", api8: (p.api8 as string) || "", wellNo: (p.wellNo as string) || null, wellId: (p.wellId as string) || "", symbol: (p.symbol as string) || "", type: (p.type as string) || "", status: (p.status as string) || "", county: (p.county as string) || "Leon", abstract: (p.abstract as string) || null, survey: (p.survey as string) || null, operator: (p.operator as string) || null, leaseName: (p.leaseName as string) || null, leaseNo: (p.leaseNo as string) || null, field: (p.field as string) || null, oilGas: (p.oilGas as string) || null, cumOil: p.cumOil != null ? Number(p.cumOil) : null, cumGas: p.cumGas != null ? Number(p.cumGas) : null, lastProd: (p.lastProd as string) || null, formations: Array.isArray(p.formations) ? (p.formations as string[]).join(", ") : ((p.formations as string) || null) };
+    return { fid: Number(p.fid), api: (p.api as string) || "", api8: (p.api8 as string) || "", wellNo: (p.wellNo as string) || null, wellId: (p.wellId as string) || "", symbol: (p.symbol as string) || "", type: (p.type as string) || "", status: (p.status as string) || "", county: (p.county as string) || "Leon", abstract: (p.abstract as string) || null, survey: (p.survey as string) || null, operator: (p.operator as string) || null, leaseName: (p.leaseName as string) || null, leaseNo: (p.leaseNo as string) || null, field: (p.field as string) || null, oilGas: (p.oilGas as string) || null, district: (p.district as string) || null, cumOil: p.cumOil != null ? Number(p.cumOil) : null, cumGas: p.cumGas != null ? Number(p.cumGas) : null, lastProd: (p.lastProd as string) || null, formations: Array.isArray(p.formations) ? (p.formations as string[]).join(", ") : ((p.formations as string) || null) };
   }
   function clearSelection() {
     const map = mapRef.current;
@@ -314,7 +313,13 @@ export function MapView() {
 
   function loadDeals() { const qs = new URLSearchParams(); qs.set("status", statusFilter); api.get<MapDeal[]>(`/map/deals?${qs.toString()}`).then(setDeals); }
   useEffect(loadDeals, [statusFilter]);
-  useEffect(() => { fetch(PRODUCTION_URL).then((r) => r.json()).then(setProd).catch(() => {}); }, []);
+  useEffect(() => {
+    // Merge every county's monthly-production asset. Keys are og|district|leaseNo
+    // and RRC lease numbers are unique within a district, so counties don't collide.
+    Promise.all(
+      COUNTIES_WITH_PRODUCTION.map((k) => fetch(`/data/${k}-production.json`).then((r) => r.json()).catch(() => ({}))),
+    ).then((parts) => setProd(Object.assign({}, ...parts))).catch(() => {});
+  }, []);
   useEffect(applyHighlight, [dealsByAbstract]);
   useEffect(applyLayerVisibility, [layers]);
   useEffect(applyAbstractFilter, [fCounties, fSurveys, fAbstracts]);
@@ -444,7 +449,7 @@ export function MapView() {
                   </>
                 )}
                 {(() => {
-                  const key = selected.leaseNo ? `${selected.oilGas === "Gas" ? "G" : "O"}|05|${selected.leaseNo}` : null;
+                  const key = selected.leaseNo ? `${selected.oilGas === "Gas" ? "G" : "O"}|${selected.district ?? "05"}|${selected.leaseNo}` : null;
                   const series = key ? prod[key] : null;
                   if (!series || !series.length) return null;
                   const kind: "oil" | "gas" = selected.oilGas === "Gas" ? "gas" : "oil";
