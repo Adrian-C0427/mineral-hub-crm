@@ -44,6 +44,10 @@ const STATUS_OPTIONS = [
 function styleWithGlyphs(): maplibregl.StyleSpecification {
   return {
     version: 8,
+    // Self-hosted SDF glyphs for the label layers (client/public/fonts). The
+    // previous files were an empty fontstack (0 glyphs) — an HTML error page
+    // saved as .pbf — so on-map labels never rendered. Replaced with real
+    // "Noto Sans Regular" glyph ranges.
     glyphs: `${window.location.origin}/fonts/{fontstack}/{range}.pbf`,
     sources: { osm: { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap contributors" } },
     layers: [{ id: "osm", type: "raster", source: "osm" }],
