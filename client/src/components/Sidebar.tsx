@@ -33,7 +33,13 @@ const NAV: NavItem[] = [
   { label: "Reports", icon: BarChart3, to: "/reports", perm: "viewReports" },
   { label: "Expenses", icon: Receipt, to: "/expenses", perm: "manageExpenses" },
   { label: "Organization", icon: Building2, to: "/organization", perm: "orgSection" },
-  { label: "Settings", icon: SettingsIcon, to: "/settings" },
+  {
+    label: "Settings", icon: SettingsIcon,
+    children: [
+      { label: "General", icon: SettingsIcon, to: "/settings/general" },
+      { label: "Integrations", icon: SettingsIcon, to: "/settings/integrations", perm: "manageApiIntegrations" },
+    ],
+  },
 ];
 
 const ROLE_LABEL: Record<string, string> = { OWNER: "Owner", ADMIN: "Administrator", MANAGER: "Manager", MEMBER: "Standard User", VIEWER: "Read-Only Viewer" };

@@ -16,6 +16,7 @@ import { orgRouter } from "./routes/org.js";
 import { mapRouter } from "./routes/map.js";
 import { expensesRouter } from "./routes/expenses.js";
 import { emailTemplatesRouter } from "./routes/emailTemplates.js";
+import { integrationsRouter } from "./routes/integrations.js";
 
 export function createApp() {
   const app = express();
@@ -51,6 +52,7 @@ export function createApp() {
   app.use("/api/map", mapRouter);
   app.use("/api/expenses", expensesRouter);
   app.use("/api/email-templates", emailTemplatesRouter);
+  app.use("/api/integrations", integrationsRouter);
 
   app.use(notFound);
   app.use(errorHandler);

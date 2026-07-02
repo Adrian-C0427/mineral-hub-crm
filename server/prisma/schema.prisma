@@ -123,6 +123,35 @@ model Organization {
   rolePermissions   RolePermissions[]
   buyerMessages     DealBuyerMessage[]
   emailTemplates    EmailTemplate[]
+  integrations      Integration[]
+}
+
+enum IntegrationStatus {
+  NOT_CONNECTED
+  CONNECTED
+  ERROR
+}
+
+// Per-organization state for a third-party integration. The catalog (which
+// providers exist, their category/description/auth type) lives in the client
+// registry; this table only tracks connection status + non-secret config +
+// sync metadata, so new providers need no schema change. Secure per-provider
+// credential/OAuth handling is layered on later without changing this shape.
+model Integration {
+  id             String            @id @default(cuid())
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  provider       String // registry key, e.g. "gmail", "quickbooks"
+  status         IntegrationStatus @default(NOT_CONNECTED)
+  config         Json? // non-secret settings (labels, sync schedule, etc.)
+  connectedAt    DateTime?
+  lastSyncAt     DateTime?
+  lastError      String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@unique([organizationId, provider])
+  @@index([organizationId])
 }
 
 // Reusable outbound email template (org-shared). Supports {{tokens}} that are
