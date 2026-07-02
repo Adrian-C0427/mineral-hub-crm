@@ -124,6 +124,9 @@ model Organization {
   buyerMessages     DealBuyerMessage[]
   emailTemplates    EmailTemplate[]
   integrations      Integration[]
+  researchDocuments ResearchDocument[]
+  researchPermits   ResearchPermit[]
+  researchIngests   ResearchIngestRun[]
 }
 
 enum IntegrationStatus {
@@ -575,4 +578,182 @@ model Expense {
   @@index([userId])
   @@index([categoryId])
   @@index([date])
+}
+
+// ---------------------------------------------------------------------------
+// Research & Market Intelligence — public-records activity (recorded mineral
+// instruments, leasing documents, drilling permits) imported per organization.
+// Texas-first, nationwide-ready: geography is stored as generic state/county
+// plus optional TX abstract/survey and non-TX section-township-range (`trs`),
+// so new states need a source adapter, not a schema change.
+// ---------------------------------------------------------------------------
+
+// Coarse class used for trend aggregation: ownership transfers vs leasing.
+enum ResearchDocClass {
+  TRANSACTION
+  LEASE
+}
+
+// Normalized instrument type (raw recorded type string is kept alongside).
+enum ResearchDocType {
+  MINERAL_DEED
+  ROYALTY_DEED
+  MINERAL_CONVEYANCE
+  OG_CONVEYANCE
+  QUITCLAIM_MINERAL_DEED
+  WARRANTY_MINERAL_DEED
+  ASSIGNMENT
+  RESERVATION
+  OG_LEASE
+  LEASE_MEMO
+  LEASE_ASSIGNMENT
+  LEASE_RELEASE
+  LEASE_AMENDMENT
+  LEASE_EXTENSION
+  LEASE_RATIFICATION
+  OTHER
+}
+
+// Well/permit lifecycle stage (union across states; TX W-1 maps onto this).
+enum ResearchPermitStatus {
+  SUBMITTED
+  APPROVED
+  SPUDDED
+  COMPLETED
+  CANCELED
+}
+
+enum WellTrajectory {
+  VERTICAL
+  HORIZONTAL
+  DIRECTIONAL
+  UNKNOWN
+}
+
+enum ResearchIngestKind {
+  DOCUMENTS
+  PERMITS
+}
+
+enum ResearchIngestStatus {
+  COMPLETED
+  FAILED
+}
+
+// A recorded county instrument related to mineral ownership or leasing.
+model ResearchDocument {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  state  String // "TX"
+  county String
+
+  docTypeRaw String // instrument type exactly as recorded
+  docType    ResearchDocType
+  docClass   ResearchDocClass
+
+  instrumentNumber String?
+  volume           String?
+  page             String?
+  recordingDate    DateTime
+  effectiveDate    DateTime?
+
+  grantor     String?
+  grantee     String?
+  // Normalized (uppercased, punctuation/suffix-stripped) for grouping/rankings.
+  grantorNorm String?
+  granteeNorm String?
+
+  // Geography below county level. TX: abstract/survey. Elsewhere: trs
+  // ("Sec 12 T2N R3W") or whatever the state's cadastral unit is.
+  abstractId       String?
+  survey           String?
+  trs              String?
+  legalDescription String?
+
+  acreage       Float?
+  consideration Float?
+
+  source    String  @default("manual") // adapter key (see domain/researchSources.ts)
+  sourceRef String? // row id / document URL at the source
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId, state, county, recordingDate])
+  @@index([organizationId, docClass, recordingDate])
+  @@index([organizationId, granteeNorm])
+  @@index([organizationId, grantorNorm])
+  @@index([organizationId, abstractId])
+}
+
+// A drilling permit / well lifecycle record (TX RRC W-1 and equivalents).
+model ResearchPermit {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  state  String
+  county String
+
+  apiNumber    String?
+  permitNumber String?
+  operator     String
+  operatorNorm String
+  leaseName    String?
+  wellName     String?
+
+  status     ResearchPermitStatus @default(SUBMITTED)
+  trajectory WellTrajectory       @default(UNKNOWN)
+
+  // Canonical date used for trend bucketing (earliest known lifecycle date).
+  activityDate   DateTime
+  filedDate      DateTime?
+  approvedDate   DateTime?
+  spudDate       DateTime?
+  completionDate DateTime?
+
+  formation  String?
+  field      String?
+  totalDepth Float?
+
+  abstractId String?
+  survey     String?
+  trs        String?
+  latitude   Float?
+  longitude  Float?
+
+  source    String  @default("manual")
+  sourceRef String?
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId, state, county, activityDate])
+  @@index([organizationId, operatorNorm])
+  @@index([organizationId, activityDate])
+}
+
+// Provenance for every import (CSV upload today; automated connectors later).
+model ResearchIngestRun {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  kind     ResearchIngestKind
+  source   String
+  state    String?
+  county   String?
+  filename String?
+
+  rowsTotal    Int @default(0)
+  rowsImported Int @default(0)
+  rowsSkipped  Int @default(0)
+  rowsFailed   Int @default(0)
+
+  status          ResearchIngestStatus @default(COMPLETED)
+  error           String?
+  createdByUserId String?
+  createdAt       DateTime             @default(now())
+
+  @@index([organizationId, createdAt])
 }

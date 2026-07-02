@@ -1,0 +1,710 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend, BarChart,
+} from "recharts";
+import { api } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
+import { Spinner, Banner } from "../components/ui";
+import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
+import { SortableTable, type Column } from "../components/SortableTable";
+import { ResearchImport } from "../components/ResearchImport";
+import { ResearchChoropleth, type CountyStat } from "../components/ResearchChoropleth";
+import { downloadCsv } from "../lib/csv";
+import { fmtDate, num, prettyEnum } from "../lib/format";
+import { CHART_COLORS } from "../lib/charts";
+import { exportElementToPdf } from "../lib/pdf";
+
+/**
+ * Research & Market Intelligence — trends in mineral transactions, leasing
+ * and drilling activity from imported public records, with hotspot detection
+ * and automatically surfaced acquisition opportunities.
+ */
+
+// ---------------------------------------------------------------------------
+// API types
+// ---------------------------------------------------------------------------
+
+interface TrendT { current: number; previous: number; absoluteChange: number; pctChange: number | null; direction: "up" | "down" | "flat" }
+interface SeriesPoint { key: string; transactions: number; leases: number; permits: number; total: number; rollingAvg: number }
+interface Summary {
+  range: { from: string; to: string };
+  compare: { from: string; to: string };
+  granularity: "day" | "week" | "month";
+  kpis: Record<string, number>;
+  previous: Record<string, number>;
+  trends: Record<string, TrendT>;
+  series: SeriesPoint[];
+  docTypeBreakdown: { docType: string; count: number }[];
+}
+interface GeoRow {
+  state: string; county: string | null; abstractId: string | null; survey: string | null;
+  transactions: number; leases: number; permits: number; total: number; previous: number;
+  absoluteChange: number; pctChange: number | null; direction: string; zScore: number | null; isHotspot: boolean;
+}
+interface EntityRow {
+  key: string; name: string; count: number; previous: number; absoluteChange: number; pctChange: number | null;
+  direction: string; acreage: number; counties: string[]; horizontal: number; newEntrant: boolean;
+}
+interface Signal {
+  id: string; kind: string; severity: number; title: string; detail: string;
+  state: string; county: string | null; abstractId: string | null;
+  metrics: Record<string, number | null>;
+}
+interface FilterOpts {
+  states: string[]; counties: { state: string; county: string }[]; docTypes: string[]; sources: string[];
+  buyers: { value: string; label: string }[]; sellers: { value: string; label: string }[]; operators: { value: string; label: string }[];
+}
+interface DocRecord {
+  id: string; state: string; county: string; docTypeRaw: string; docType: string; docClass: string;
+  instrumentNumber: string | null; recordingDate: string; grantor: string | null; grantee: string | null;
+  abstractId: string | null; survey: string | null; acreage: number | null; consideration: number | null; source: string;
+}
+interface PermitRecord {
+  id: string; state: string; county: string; apiNumber: string | null; permitNumber: string | null;
+  operator: string; leaseName: string | null; wellName: string | null; status: string; trajectory: string;
+  activityDate: string; formation: string | null; field: string | null; source: string;
+}
+interface Paged<T> { total: number; page: number; pageSize: number; rows: T[] }
+
+// ---------------------------------------------------------------------------
+// Period helpers
+// ---------------------------------------------------------------------------
+
+type Period = "LAST_30D" | "LAST_90D" | "LAST_6M" | "LAST_12M" | "THIS_YEAR" | "CUSTOM";
+type Compare = "PREV_PERIOD" | "PREV_YEAR";
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+const DAY = 86400000;
+
+function rangeFor(period: Period, custom: { from: string; to: string }): { from: string; to: string } {
+  const now = new Date();
+  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  switch (period) {
+    case "LAST_30D": return { from: iso(new Date(today.getTime() - 29 * DAY)), to: iso(today) };
+    case "LAST_90D": return { from: iso(new Date(today.getTime() - 89 * DAY)), to: iso(today) };
+    case "LAST_6M": return { from: iso(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 6, today.getUTCDate()))), to: iso(today) };
+    case "LAST_12M": return { from: iso(new Date(Date.UTC(today.getUTCFullYear() - 1, today.getUTCMonth(), today.getUTCDate()))), to: iso(today) };
+    case "THIS_YEAR": return { from: iso(new Date(Date.UTC(today.getUTCFullYear(), 0, 1))), to: iso(today) };
+    default: return { from: custom.from, to: custom.to };
+  }
+}
+
+/** For PREV_YEAR we pass explicit compare dates; PREV_PERIOD is the server default. */
+function compareParams(mode: Compare, from: string, to: string): { compareFrom?: string; compareTo?: string } {
+  if (mode !== "PREV_YEAR" || !from || !to) return {};
+  const shift = (s: string) => { const d = new Date(`${s}T00:00:00Z`); return iso(new Date(Date.UTC(d.getUTCFullYear() - 1, d.getUTCMonth(), d.getUTCDate()))); };
+  return { compareFrom: shift(from), compareTo: shift(to) };
+}
+
+const fmtPct = (p: number | null): string => (p == null ? "new" : `${p >= 0 ? "+" : ""}${Math.round(p * 100)}%`);
+
+// ---------------------------------------------------------------------------
+// Filters
+// ---------------------------------------------------------------------------
+
+interface Filters {
+  state: string;
+  counties: string[];
+  docTypes: string[];
+  buyers: string[];
+  sellers: string[];
+  operators: string[];
+  source: string;
+}
+const EMPTY_FILTERS: Filters = { state: "", counties: [], docTypes: [], buyers: [], sellers: [], operators: [], source: "" };
+
+type Tab = "overview" | "geography" | "rankings" | "opportunities" | "records" | "data";
+
+export function Research() {
+  const { can } = useAuth();
+  const [period, setPeriod] = useState<Period>("LAST_90D");
+  const [custom, setCustom] = useState({ from: "", to: "" });
+  const [compare, setCompare] = useState<Compare>("PREV_PERIOD");
+  const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
+  const [showFilters, setShowFilters] = useState(false);
+  const [tab, setTab] = useState<Tab>("overview");
+  const [opts, setOpts] = useState<FilterOpts | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const captureRef = useRef<HTMLDivElement>(null);
+
+  const range = useMemo(() => rangeFor(period, custom), [period, custom]);
+  const qs = useMemo(() => {
+    const q = new URLSearchParams();
+    if (range.from) q.set("from", range.from);
+    if (range.to) q.set("to", range.to);
+    const cp = compareParams(compare, range.from, range.to);
+    if (cp.compareFrom && cp.compareTo) { q.set("compareFrom", cp.compareFrom); q.set("compareTo", cp.compareTo); }
+    if (filters.state) q.set("state", filters.state);
+    for (const c of filters.counties) q.append("county", c);
+    for (const t of filters.docTypes) q.append("docType", t);
+    for (const b of filters.buyers) q.append("buyer", b);
+    for (const s of filters.sellers) q.append("seller", s);
+    for (const o of filters.operators) q.append("operator", o);
+    if (filters.source) q.set("source", filters.source);
+    return q.toString();
+  }, [range.from, range.to, compare, filters]);
+
+  const loadOpts = useCallback(() => { api.get<FilterOpts>("/research/filters").then(setOpts).catch(() => {}); }, []);
+  useEffect(loadOpts, [loadOpts]);
+
+  const hasAnyData = opts != null && (opts.states.length > 0 || opts.counties.length > 0);
+  const canManage = can("manageResearchData");
+
+  async function onExportPdf() {
+    if (!captureRef.current) return;
+    setExporting(true);
+    try { await exportElementToPdf(captureRef.current, `market-intel-${range.from}_to_${range.to}.pdf`); }
+    finally { setExporting(false); }
+  }
+
+  const activeFilterCount =
+    (filters.state ? 1 : 0) + filters.counties.length + filters.docTypes.length +
+    filters.buyers.length + filters.sellers.length + filters.operators.length + (filters.source ? 1 : 0);
+
+  const drillToRecords = useCallback((patch: Partial<Filters>) => {
+    setFilters((f) => ({ ...f, ...patch }));
+    setTab("records");
+  }, []);
+
+  const CHIPS: [Period, string][] = [
+    ["LAST_30D", "Last 30 Days"], ["LAST_90D", "Last 90 Days"], ["LAST_6M", "Last 6 Months"],
+    ["LAST_12M", "Last 12 Months"], ["THIS_YEAR", "This Year"], ["CUSTOM", "Custom"],
+  ];
+  const TABS: [Tab, string][] = [
+    ["overview", "Overview"], ["geography", "Geography"], ["rankings", "Rankings"],
+    ["opportunities", "Opportunities"], ["records", "Records"],
+    ...(canManage ? ([["data", "Data & Imports"]] as [Tab, string][]) : []),
+  ];
+
+  return (
+    <div className="page">
+      <div className="page-header">
+        <h1>Research & Market Intelligence</h1>
+        {can("exportReports") && tab !== "data" && (
+          <button className="primary" onClick={onExportPdf} disabled={exporting}>{exporting ? "Generating…" : "Export PDF"}</button>
+        )}
+      </div>
+
+      {/* --- Period + filter controls --- */}
+      <div className="panel">
+        <div className="chip-row" style={{ marginBottom: 10 }}>
+          {CHIPS.map(([p, label]) => <span key={p} className={`chip ${period === p ? "active" : ""}`} onClick={() => setPeriod(p)}>{label}</span>)}
+        </div>
+        {period === "CUSTOM" && (
+          <div className="row" style={{ marginBottom: 10 }}>
+            <div className="field" style={{ marginBottom: 0 }}><label>From</label><input type="date" value={custom.from} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} /></div>
+            <div className="field" style={{ marginBottom: 0 }}><label>To</label><input type="date" value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} /></div>
+          </div>
+        )}
+        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+          <button className="small" onClick={() => setShowFilters((s) => !s)}>
+            {showFilters ? "▾" : "▸"} Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+          </button>
+          <span className="muted" style={{ fontSize: 12 }}>
+            {fmtDate(range.from)} – {fmtDate(range.to)} vs {compare === "PREV_YEAR" ? "same period last year" : "previous period"}
+          </span>
+          {activeFilterCount > 0 && <button className="small" onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>}
+        </div>
+        {showFilters && opts && (
+          <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end", marginTop: 10 }}>
+            <div className="field" style={{ marginBottom: 0 }}><label>Compare to</label>
+              <select value={compare} onChange={(e) => setCompare(e.target.value as Compare)}>
+                <option value="PREV_PERIOD">Previous period</option>
+                <option value="PREV_YEAR">Previous year</option>
+              </select>
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}><label>State</label>
+              <select value={filters.state} onChange={(e) => setFilters((f) => ({ ...f, state: e.target.value, counties: [] }))}>
+                <option value="">All states</option>
+                {opts.states.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div className="field" style={{ marginBottom: 0, minWidth: 190, flex: 1 }}><label>Counties</label>
+              <SearchableMultiSelect
+                options={opts.counties.filter((c) => !filters.state || c.state === filters.state).map((c) => c.county)}
+                value={filters.counties}
+                onChange={(counties) => setFilters((f) => ({ ...f, counties }))}
+                placeholder="Filter counties…"
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0, minWidth: 190, flex: 1 }}><label>Document types</label>
+              <SearchableMultiSelect
+                options={opts.docTypes.map(prettyEnum)}
+                value={filters.docTypes.map(prettyEnum)}
+                onChange={(next) => setFilters((f) => ({ ...f, docTypes: next.map((s) => s.toUpperCase().replace(/ /g, "_")) }))}
+                placeholder="Filter doc types…"
+              />
+            </div>
+            {([
+              ["buyers", "Buyers", opts.buyers], ["sellers", "Sellers", opts.sellers], ["operators", "Operators", opts.operators],
+            ] as [keyof Filters & ("buyers" | "sellers" | "operators"), string, { value: string; label: string }[]][]).map(([key, label, options]) => (
+              <div key={key} className="field" style={{ marginBottom: 0, minWidth: 190, flex: 1 }}><label>{label}</label>
+                <SearchableMultiSelect
+                  options={options.map((o) => o.label)}
+                  value={(filters[key] as string[]).map((v) => options.find((o) => o.value === v)?.label ?? v)}
+                  onChange={(labels) => setFilters((f) => ({ ...f, [key]: labels.map((l) => options.find((o) => o.label === l)?.value ?? l) }))}
+                  placeholder={`Filter ${label.toLowerCase()}…`}
+                />
+              </div>
+            ))}
+            <div className="field" style={{ marginBottom: 0 }}><label>Source</label>
+              <select value={filters.source} onChange={(e) => setFilters((f) => ({ ...f, source: e.target.value }))}>
+                <option value="">All sources</option>
+                {opts.sources.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {opts != null && !hasAnyData && tab !== "data" && (
+        <Banner kind="info">
+          No research data yet. {canManage
+            ? <>Head to the <a style={{ cursor: "pointer", textDecoration: "underline" }} onClick={() => setTab("data")}>Data & Imports</a> tab to load county recordings or drilling permits (or run the sample-data CLI to explore).</>
+            : "Ask an administrator to import county recording or permit data."}
+        </Banner>
+      )}
+
+      <div className="tab-row">
+        {TABS.map(([t, label]) => <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{label}</button>)}
+      </div>
+
+      <div ref={captureRef} className="report-capture">
+        {tab === "overview" && <OverviewTab qs={qs} />}
+        {tab === "geography" && <GeographyTab qs={qs} filters={filters} onDrill={drillToRecords} onToggleCounty={(county) =>
+          setFilters((f) => ({ ...f, counties: f.counties.includes(county) ? f.counties.filter((c) => c !== county) : [...f.counties, county] }))} />}
+        {tab === "rankings" && <RankingsTab qs={qs} opts={opts} onDrill={drillToRecords} />}
+        {tab === "opportunities" && <OpportunitiesTab qs={qs} onDrill={drillToRecords} />}
+        {tab === "records" && <RecordsTab qs={qs} />}
+        {tab === "data" && canManage && <ResearchImport onDataChanged={loadOpts} />}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Overview
+// ---------------------------------------------------------------------------
+
+function OverviewTab({ qs }: { qs: string }) {
+  const [data, setData] = useState<Summary | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    setLoading(true);
+    api.get<Summary>(`/research/summary?${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
+  }, [qs]);
+
+  if (loading && !data) return <Spinner label="Analyzing market activity…" />;
+  if (!data) return <Banner kind="info">Could not load the summary.</Banner>;
+  const t = data.trends;
+
+  const label = (k: string) =>
+    data.granularity === "month"
+      ? new Date(`${k}-01T00:00:00Z`).toLocaleDateString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" })
+      : new Date(`${k}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+
+  return (
+    <>
+      <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
+        <TrendKpi label="Mineral Transactions" t={t.transactions} />
+        <TrendKpi label="Leasing Documents" t={t.leases} />
+        <TrendKpi label="Drilling Permits" t={t.permits} />
+        <TrendKpi label="Horizontal Permits" t={t.horizontalPermits} />
+        <TrendKpi label="Active Buyers" t={t.uniqueBuyers} />
+        <TrendKpi label="Active Operators" t={t.uniqueOperators} />
+        <TrendKpi label="Acreage Transacted" t={t.acreage} />
+        <div className="metric-card">
+          <div className="metric-label">Comparison Window</div>
+          <div className="metric-value" style={{ fontSize: 15 }}>{fmtDate(data.compare.from)} – {fmtDate(data.compare.to)}</div>
+        </div>
+      </div>
+
+      <div className="chart-grid">
+        <div className="panel" style={{ gridColumn: "1 / -1" }}>
+          <h3>Activity Trend <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(bars per {data.granularity}; line = rolling average of total)</span></h3>
+          <ResponsiveContainer width="100%" height={280}>
+            <ComposedChart data={data.series.map((s) => ({ ...s, label: label(s.key) }))}>
+              <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+              <XAxis dataKey="label" tick={{ fontSize: 11 }} minTickGap={24} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="transactions" name="Transactions" stackId="a" fill={CHART_COLORS[0]} />
+              <Bar dataKey="leases" name="Leases" stackId="a" fill={CHART_COLORS[1]} />
+              <Bar dataKey="permits" name="Permits" stackId="a" fill={CHART_COLORS[3]} radius={[3, 3, 0, 0]} />
+              <Line dataKey="rollingAvg" name="Rolling avg" stroke={CHART_COLORS[2]} strokeWidth={2} dot={false} />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="panel">
+          <h3>Instrument Type Breakdown</h3>
+          {data.docTypeBreakdown.length === 0 ? <p className="muted">No documents in this period.</p> : (
+            <ResponsiveContainer width="100%" height={Math.max(160, data.docTypeBreakdown.length * 30)}>
+              <BarChart data={data.docTypeBreakdown.map((d) => ({ name: prettyEnum(d.docType), count: d.count }))} layout="vertical" margin={{ left: 60 }}>
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+                <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Bar dataKey="count" name="Documents" fill={CHART_COLORS[0]} radius={[0, 3, 3, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+        <div className="panel">
+          <h3>Period vs Prior</h3>
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={[
+              { name: "Transactions", Current: data.kpis.transactions, Prior: data.previous.transactions },
+              { name: "Leases", Current: data.kpis.leases, Prior: data.previous.leases },
+              { name: "Permits", Current: data.kpis.permits, Prior: data.previous.permits },
+            ]}>
+              <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+              <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+              <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+              <Tooltip />
+              <Legend />
+              <Bar dataKey="Prior" fill={CHART_COLORS[6]} radius={[3, 3, 0, 0]} />
+              <Bar dataKey="Current" fill={CHART_COLORS[0]} radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function TrendKpi({ label, t }: { label: string; t?: TrendT }) {
+  if (!t) return null;
+  const color = t.direction === "flat" ? "var(--text-dim)" : t.direction === "up" ? "#22c55e" : "#ef4444";
+  const arrow = t.direction === "flat" ? "→" : t.direction === "up" ? "▲" : "▼";
+  return (
+    <div className="metric-card">
+      <div className="metric-label">{label}</div>
+      <div className="metric-value">{num(t.current)}</div>
+      <div className="metric-hint" style={{ color }}>
+        {arrow} {fmtPct(t.pctChange)} vs prior ({num(t.previous)})
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Geography
+// ---------------------------------------------------------------------------
+
+function GeographyTab({ qs, filters, onDrill, onToggleCounty }: {
+  qs: string; filters: Filters;
+  onDrill: (patch: Partial<Filters>) => void;
+  onToggleCounty: (county: string) => void;
+}) {
+  const [level, setLevel] = useState<"county" | "abstract" | "survey" | "state">("county");
+  const [metric, setMetric] = useState<"activity" | "change">("activity");
+  const [data, setData] = useState<{ level: string; rows: GeoRow[] } | null>(null);
+  const [loading, setLoading] = useState(true);
+  // The map always shows county-level stats regardless of the table level.
+  const [countyRows, setCountyRows] = useState<GeoRow[]>([]);
+
+  useEffect(() => {
+    setLoading(true);
+    api.get<{ level: string; rows: GeoRow[] }>(`/research/geography?level=${level}&${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
+  }, [qs, level]);
+  useEffect(() => {
+    if (level === "county" && data) { setCountyRows(data.rows); return; }
+    api.get<{ level: string; rows: GeoRow[] }>(`/research/geography?level=county&${qs}`).then((d) => setCountyRows(d.rows)).catch(() => {});
+  }, [qs, level, data]);
+
+  const geoName = (r: GeoRow) =>
+    level === "state" ? r.state
+      : level === "county" ? `${r.county}, ${r.state}`
+        : level === "abstract" ? `${r.abstractId} (${r.county} Co)`
+          : `${r.survey} (${r.county} Co)`;
+
+  const columns: Column<GeoRow>[] = [
+    { key: "name", header: level === "state" ? "State" : level === "county" ? "County" : level === "abstract" ? "Abstract" : "Survey", value: geoName, render: (r) => <>{geoName(r)} {r.isHotspot && <span className="badge" style={{ background: "rgba(239,68,68,0.15)", color: "#ef4444" }}>HOTSPOT</span>}</> },
+    { key: "transactions", header: "Transactions", value: (r) => r.transactions, align: "right" },
+    { key: "leases", header: "Leases", value: (r) => r.leases, align: "right" },
+    { key: "permits", header: "Permits", value: (r) => r.permits, align: "right" },
+    { key: "total", header: "Total", value: (r) => r.total, align: "right" },
+    { key: "previous", header: "Prior", value: (r) => r.previous, align: "right" },
+    {
+      key: "pctChange", header: "Change", value: (r) => r.pctChange ?? Number.MAX_SAFE_INTEGER, align: "right",
+      render: (r) => <span style={{ color: r.absoluteChange > 0 ? "#22c55e" : r.absoluteChange < 0 ? "#ef4444" : "var(--text-dim)" }}>{fmtPct(r.pctChange)} ({r.absoluteChange >= 0 ? "+" : ""}{r.absoluteChange})</span>,
+    },
+    { key: "zScore", header: "z", value: (r) => r.zScore, align: "right", render: (r) => (r.zScore == null ? "—" : r.zScore.toFixed(1)) },
+  ];
+
+  const countyStats: CountyStat[] = useMemo(
+    () => countyRows.filter((r) => r.state === "TX" && r.county).map((r) => ({ county: r.county!, total: r.total, pctChange: r.pctChange, isHotspot: r.isHotspot })),
+    [countyRows],
+  );
+  const showMap = countyStats.length > 0 && (!filters.state || filters.state === "TX");
+
+  return (
+    <>
+      {showMap && (
+        <div className="panel">
+          <div className="panel-title">
+            <h3 style={{ margin: 0 }}>Texas Activity Map <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(red outline = hotspot; click a county to filter)</span></h3>
+            <div className="chip-row">
+              <span className={`chip ${metric === "activity" ? "active" : ""}`} onClick={() => setMetric("activity")}>Volume</span>
+              <span className={`chip ${metric === "change" ? "active" : ""}`} onClick={() => setMetric("change")}>Change</span>
+            </div>
+          </div>
+          <div style={{ maxWidth: 640, margin: "0 auto" }}>
+            <ResearchChoropleth stats={countyStats} metric={metric} selected={filters.counties} onSelect={onToggleCounty} />
+          </div>
+        </div>
+      )}
+
+      <div className="panel">
+        <div className="panel-title">
+          <h3 style={{ margin: 0 }}>Activity by {level === "state" ? "State" : level === "county" ? "County" : level === "abstract" ? "Abstract" : "Survey"}</h3>
+          <div className="row" style={{ gap: 8 }}>
+            <div className="chip-row">
+              {(["state", "county", "abstract", "survey"] as const).map((l) => (
+                <span key={l} className={`chip ${level === l ? "active" : ""}`} onClick={() => setLevel(l)}>{l[0].toUpperCase() + l.slice(1)}</span>
+              ))}
+            </div>
+            <button className="small" disabled={!data?.rows.length} onClick={() => data && downloadCsv(
+              `research-geography-${level}.csv`,
+              ["Name", "State", "County", "Transactions", "Leases", "Permits", "Total", "Prior", "Change %", "Hotspot"],
+              data.rows.map((r) => [geoName(r), r.state, r.county, r.transactions, r.leases, r.permits, r.total, r.previous, r.pctChange == null ? "" : Math.round(r.pctChange * 100), r.isHotspot ? "YES" : ""]),
+            )}>Export CSV</button>
+          </div>
+        </div>
+        {loading && !data ? <Spinner /> : !data || data.rows.length === 0 ? <p className="muted">No activity in this period.</p> : (
+          <SortableTable
+            columns={columns}
+            rows={data.rows}
+            rowKey={(r) => `${r.state}|${r.county}|${r.abstractId}|${r.survey}`}
+            defaultSort={{ key: "total", dir: "desc" }}
+            onRowClick={(r) => onDrill({ state: r.state, counties: r.county ? [r.county] : [] })}
+          />
+        )}
+      </div>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Rankings
+// ---------------------------------------------------------------------------
+
+function RankingsTab({ qs, opts, onDrill }: { qs: string; opts: FilterOpts | null; onDrill: (patch: Partial<Filters>) => void }) {
+  const [role, setRole] = useState<"buyers" | "sellers" | "operators">("buyers");
+  const [data, setData] = useState<{ role: string; rows: EntityRow[] } | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    setLoading(true);
+    api.get<{ role: string; rows: EntityRow[] }>(`/research/entities?role=${role}&${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
+  }, [qs, role]);
+
+  const ROLE_LABEL = { buyers: "Most Active Buyers", sellers: "Most Active Sellers", operators: "Most Active Operators" } as const;
+
+  const columns: Column<EntityRow>[] = [
+    { key: "name", header: "Name", value: (r) => r.name, render: (r) => <>{r.name} {r.newEntrant && <span className="badge" style={{ background: "rgba(34,197,94,0.15)", color: "#22c55e" }}>NEW</span>}</> },
+    { key: "count", header: role === "operators" ? "Permits" : "Records", value: (r) => r.count, align: "right" },
+    { key: "previous", header: "Prior", value: (r) => r.previous, align: "right" },
+    {
+      key: "pctChange", header: "Change", value: (r) => r.pctChange ?? Number.MAX_SAFE_INTEGER, align: "right",
+      render: (r) => <span style={{ color: r.absoluteChange > 0 ? "#22c55e" : r.absoluteChange < 0 ? "#ef4444" : "var(--text-dim)" }}>{fmtPct(r.pctChange)}</span>,
+    },
+    ...(role === "operators"
+      ? ([{ key: "horizontal", header: "Horizontal", value: (r) => r.horizontal, align: "right" }] as Column<EntityRow>[])
+      : ([{ key: "acreage", header: "Acreage", value: (r) => r.acreage, align: "right", render: (r) => (r.acreage ? num(r.acreage) : "—") }] as Column<EntityRow>[])),
+    { key: "counties", header: "Counties", value: (r) => r.counties.length, render: (r) => r.counties.join(", ") || "—" },
+  ];
+
+  const top = (data?.rows ?? []).slice(0, 10);
+
+  return (
+    <>
+      <div className="chart-grid">
+        <div className="panel" style={{ gridColumn: "1 / -1" }}>
+          <div className="panel-title">
+            <h3 style={{ margin: 0 }}>{ROLE_LABEL[role]}</h3>
+            <div className="row" style={{ gap: 8 }}>
+              <div className="chip-row">
+                {(["buyers", "sellers", "operators"] as const).map((r) => (
+                  <span key={r} className={`chip ${role === r ? "active" : ""}`} onClick={() => setRole(r)}>{r[0].toUpperCase() + r.slice(1)}</span>
+                ))}
+              </div>
+              <button className="small" disabled={!data?.rows.length} onClick={() => data && downloadCsv(
+                `research-${role}.csv`,
+                ["Name", "Count", "Prior", "Change %", "Acreage", "Counties", "New Entrant"],
+                data.rows.map((r) => [r.name, r.count, r.previous, r.pctChange == null ? "" : Math.round(r.pctChange * 100), r.acreage || "", r.counties.join("; "), r.newEntrant ? "YES" : ""]),
+              )}>Export CSV</button>
+            </div>
+          </div>
+          {loading && !data ? <Spinner /> : top.length === 0 ? <p className="muted">No activity in this period.</p> : (
+            <ResponsiveContainer width="100%" height={Math.max(160, top.length * 32)}>
+              <BarChart data={top} layout="vertical" margin={{ left: 80 }}>
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+                <YAxis type="category" dataKey="name" width={200} tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Bar dataKey="count" name={role === "operators" ? "Permits" : "Records"} fill={CHART_COLORS[role === "buyers" ? 0 : role === "sellers" ? 4 : 3]} radius={[0, 3, 3, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+        </div>
+      </div>
+      <div className="panel">
+        {loading && !data ? <Spinner /> : data && data.rows.length > 0 ? (
+          <SortableTable
+            columns={columns}
+            rows={data.rows}
+            rowKey={(r) => r.key}
+            defaultSort={{ key: "count", dir: "desc" }}
+            onRowClick={(r) => onDrill(role === "buyers" ? { buyers: [r.key] } : role === "sellers" ? { sellers: [r.key] } : { operators: [r.key] })}
+          />
+        ) : null}
+      </div>
+      {opts && <p className="muted" style={{ fontSize: 12 }}>Names are grouped after normalizing punctuation and legal suffixes (LLC/LP/Inc), so filings under slightly different spellings roll up together.</p>}
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Opportunities
+// ---------------------------------------------------------------------------
+
+const SIGNAL_META: Record<string, { label: string; color: string }> = {
+  CONFLUENCE: { label: "Multiple Signals", color: "#f59e0b" },
+  TRANSACTION_SURGE: { label: "Transaction Surge", color: "#3b82f6" },
+  LEASE_SURGE: { label: "Leasing Surge", color: "#22c55e" },
+  PERMIT_SURGE: { label: "Permitting Surge", color: "#8b5cf6" },
+  ABSTRACT_CONCENTRATION: { label: "Concentrated Buying", color: "#ec4899" },
+  NEW_OPERATOR: { label: "New Operator", color: "#06b6d4" },
+};
+
+function OpportunitiesTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partial<Filters>) => void }) {
+  const [data, setData] = useState<{ signals: Signal[] } | null>(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    setLoading(true);
+    api.get<{ signals: Signal[] }>(`/research/opportunities?${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
+  }, [qs]);
+
+  if (loading && !data) return <Spinner label="Scanning for emerging opportunities…" />;
+  if (!data) return <Banner kind="info">Could not load opportunities.</Banner>;
+  if (data.signals.length === 0) {
+    return <Banner kind="info">No statistically significant surges detected in this period — try widening the date range or clearing filters.</Banner>;
+  }
+
+  return (
+    <div>
+      <p className="muted" style={{ marginTop: 0 }}>
+        Signals are detected by comparing the selected period against six equal history windows (z-score ≥ 2 plus a
+        material lift), clustering by geography, and flagging new entrants. Higher severity = stronger, higher-volume anomaly.
+      </p>
+      {data.signals.map((s) => {
+        const meta = SIGNAL_META[s.kind] ?? { label: s.kind, color: "#94a3b8" };
+        return (
+          <div key={s.id} className="panel" style={{ borderLeft: `3px solid ${meta.color}`, display: "flex", gap: 14, alignItems: "flex-start" }}>
+            <div style={{ minWidth: 64, textAlign: "center" }}>
+              <div style={{ fontSize: 22, fontWeight: 700, color: meta.color }}>{s.severity}</div>
+              <div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5 }}>severity</div>
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <span className="badge" style={{ background: `${meta.color}26`, color: meta.color }}>{meta.label}</span>
+                <strong>{s.title}</strong>
+              </div>
+              <p style={{ margin: "6px 0 8px" }}>{s.detail}</p>
+              <button className="small" onClick={() => onDrill({ state: s.state, counties: s.county ? [s.county] : [] })}>
+                View underlying records →
+              </button>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Records (drill-in tables)
+// ---------------------------------------------------------------------------
+
+function RecordsTab({ qs }: { qs: string }) {
+  const [kind, setKind] = useState<"documents" | "permits">("documents");
+  const [page, setPage] = useState(1);
+  const [docs, setDocs] = useState<Paged<DocRecord> | null>(null);
+  const [permits, setPermits] = useState<Paged<PermitRecord> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const pageSize = 50;
+
+  useEffect(() => { setPage(1); }, [qs, kind]);
+  useEffect(() => {
+    setLoading(true);
+    const url = `/research/${kind}?${qs}&page=${page}&pageSize=${pageSize}`;
+    if (kind === "documents") api.get<Paged<DocRecord>>(url).then(setDocs).catch(() => setDocs(null)).finally(() => setLoading(false));
+    else api.get<Paged<PermitRecord>>(url).then(setPermits).catch(() => setPermits(null)).finally(() => setLoading(false));
+  }, [qs, kind, page]);
+
+  async function exportAll() {
+    // Export up to 2000 most-recent matching rows.
+    if (kind === "documents") {
+      const d = await api.get<Paged<DocRecord>>(`/research/documents?${qs}&page=1&pageSize=1000`);
+      downloadCsv("research-documents.csv",
+        ["Recording Date", "Type", "Class", "Grantor", "Grantee", "Instrument #", "State", "County", "Abstract", "Survey", "Acreage", "Source"],
+        d.rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.docClass, r.grantor, r.grantee, r.instrumentNumber, r.state, r.county, r.abstractId, r.survey, r.acreage, r.source]));
+    } else {
+      const d = await api.get<Paged<PermitRecord>>(`/research/permits?${qs}&page=1&pageSize=1000`);
+      downloadCsv("research-permits.csv",
+        ["Date", "Operator", "Lease", "Well", "API #", "Permit #", "Status", "Trajectory", "State", "County", "Formation", "Source"],
+        d.rows.map((r) => [r.activityDate.slice(0, 10), r.operator, r.leaseName, r.wellName, r.apiNumber, r.permitNumber, r.status, r.trajectory, r.state, r.county, r.formation, r.source]));
+    }
+  }
+
+  const active = kind === "documents" ? docs : permits;
+  const totalPages = active ? Math.max(1, Math.ceil(active.total / pageSize)) : 1;
+
+  const docColumns: Column<DocRecord>[] = [
+    { key: "recordingDate", header: "Recorded", value: (r) => r.recordingDate, render: (r) => fmtDate(r.recordingDate), type: "date" },
+    { key: "docType", header: "Type", value: (r) => r.docTypeRaw, render: (r) => <span title={r.docTypeRaw}>{prettyEnum(r.docType)}</span> },
+    { key: "grantor", header: "Grantor (Seller)", value: (r) => r.grantor },
+    { key: "grantee", header: "Grantee (Buyer)", value: (r) => r.grantee },
+    { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}` },
+    { key: "abstractId", header: "Abstract", value: (r) => r.abstractId },
+    { key: "acreage", header: "Acres", value: (r) => r.acreage, align: "right", render: (r) => (r.acreage != null ? num(r.acreage) : "—") },
+    { key: "instrumentNumber", header: "Instr #", value: (r) => r.instrumentNumber },
+  ];
+  const permitColumns: Column<PermitRecord>[] = [
+    { key: "activityDate", header: "Date", value: (r) => r.activityDate, render: (r) => fmtDate(r.activityDate), type: "date" },
+    { key: "operator", header: "Operator", value: (r) => r.operator },
+    { key: "leaseName", header: "Lease / Well", value: (r) => `${r.leaseName ?? ""} ${r.wellName ?? ""}`.trim() || null },
+    { key: "status", header: "Status", value: (r) => r.status, render: (r) => prettyEnum(r.status) },
+    { key: "trajectory", header: "Trajectory", value: (r) => r.trajectory, render: (r) => prettyEnum(r.trajectory) },
+    { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}` },
+    { key: "formation", header: "Formation", value: (r) => r.formation },
+    { key: "apiNumber", header: "API #", value: (r) => r.apiNumber },
+  ];
+
+  return (
+    <div className="panel">
+      <div className="panel-title">
+        <div className="chip-row">
+          <span className={`chip ${kind === "documents" ? "active" : ""}`} onClick={() => setKind("documents")}>Recorded Documents</span>
+          <span className={`chip ${kind === "permits" ? "active" : ""}`} onClick={() => setKind("permits")}>Drilling Permits</span>
+        </div>
+        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+          {active && <span className="muted" style={{ fontSize: 12 }}>{num(active.total)} records</span>}
+          <button className="small" onClick={exportAll} disabled={!active?.total}>Export CSV</button>
+        </div>
+      </div>
+      {loading && !active ? <Spinner /> : !active || active.total === 0 ? <p className="muted">No matching records.</p> : (
+        <>
+          {kind === "documents"
+            ? <SortableTable columns={docColumns} rows={docs!.rows} rowKey={(r) => r.id} />
+            : <SortableTable columns={permitColumns} rows={permits!.rows} rowKey={(r) => r.id} />}
+          {totalPages > 1 && (
+            <div className="row" style={{ gap: 8, alignItems: "center", justifyContent: "flex-end", marginTop: 10 }}>
+              <button className="small" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Prev</button>
+              <span className="muted" style={{ fontSize: 12 }}>Page {page} of {num(totalPages)}</span>
+              <button className="small" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next →</button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}

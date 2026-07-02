@@ -13,6 +13,7 @@
     "prisma:migrate": "prisma migrate deploy",
     "prisma:migrate:dev": "prisma migrate dev",
     "bootstrap:admin": "tsx src/scripts/bootstrapAdmin.ts",
+    "research:sample": "tsx src/scripts/seedResearchSample.ts",
     "test": "vitest run"
   },
   "dependencies": {
