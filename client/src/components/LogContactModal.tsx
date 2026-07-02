@@ -14,6 +14,8 @@ interface Props {
     assignedTeamMemberId?: string | null;
     responseReceived?: boolean;
     notes?: string | null;
+    dateSent?: string | null;
+    nextFollowUpDate?: string | null;
   };
   onClose: () => void;
   onLogged: () => void;
@@ -33,8 +35,11 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, initial, on
   const [status, setStatus] = useState<BuyerStatus>(initial?.status ?? "CONTACTED");
   const [assignee, setAssignee] = useState(initial?.assignedTeamMemberId ?? "");
   const [responseReceived, setResponseReceived] = useState(initial?.responseReceived ?? false);
-  const [dateSent, setDateSent] = useState(toInputDate(new Date()));
-  const [nextFollowUp, setNextFollowUp] = useState("");
+  // Editing an existing contact must preserve its dates — only a brand-new
+  // contact defaults dateSent to today. Otherwise every status tweak would
+  // rewrite the original send date and wipe the pending follow-up.
+  const [dateSent, setDateSent] = useState(initial?.dateSent ? toInputDate(initial.dateSent) : toInputDate(new Date()));
+  const [nextFollowUp, setNextFollowUp] = useState(initial?.nextFollowUpDate ? toInputDate(initial.nextFollowUpDate) : "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [amount, setAmount] = useState("");
   const [conditions, setConditions] = useState("");
@@ -55,17 +60,19 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, initial, on
           conditions: conditions || null,
           expirationDate: expiration || null,
         });
-      } else {
-        await api.post(`/deals/${dealId}/activity`, {
-          buyerId,
-          status,
-          responseReceived,
-          assignedTeamMemberId: assignee || null,
-          dateSent: dateSent || null,
-          nextFollowUpDate: nextFollowUp || null,
-          notes: notes || null,
-        });
       }
+      // Always persist the rest of the form (assignee, response received,
+      // dates, notes) — previously the offer branch silently discarded them.
+      // An offer implies a response was received.
+      await api.post(`/deals/${dealId}/activity`, {
+        buyerId,
+        status,
+        responseReceived: status === "OFFER_RECEIVED" && amount.trim() ? true : responseReceived,
+        assignedTeamMemberId: assignee || null,
+        dateSent: dateSent || null,
+        nextFollowUpDate: nextFollowUp || null,
+        notes: notes || null,
+      });
       onLogged();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to log contact");

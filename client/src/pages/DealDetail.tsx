@@ -32,7 +32,7 @@ interface DealDetailData extends DealSummary {
 
 const FILE_CATEGORIES = ["PSA", "LPOA", "DEED", "PLAT_MAP", "TITLE_DOC", "OTHER"];
 
-interface EditTarget { id: string; name: string; initial?: { status?: BuyerActivityRow["status"]; assignedTeamMemberId?: string | null; responseReceived?: boolean; notes?: string | null } }
+interface EditTarget { id: string; name: string; initial?: { status?: BuyerActivityRow["status"]; assignedTeamMemberId?: string | null; responseReceived?: boolean; notes?: string | null; dateSent?: string | null; nextFollowUpDate?: string | null } }
 
 export function DealDetail() {
   const { id } = useParams<{ id: string }>();
@@ -158,7 +158,7 @@ export function DealDetail() {
           dealId={deal.id}
           rows={deal.buyerActivity}
           onChanged={refreshAll}
-          onEdit={(r) => setLogBuyer({ id: r.buyerId, name: r.buyerName, initial: { status: r.status, assignedTeamMemberId: r.assignedTeamMember?.id ?? null, responseReceived: r.responseReceived, notes: r.notes } })}
+          onEdit={(r) => setLogBuyer({ id: r.buyerId, name: r.buyerName, initial: { status: r.status, assignedTeamMemberId: r.assignedTeamMember?.id ?? null, responseReceived: r.responseReceived, notes: r.notes, dateSent: r.dateSent, nextFollowUpDate: r.nextFollowUpDate } })}
         />
       </div>
 

@@ -34,12 +34,12 @@ dashboardRouter.get(
     const projectedProfit = allActive.reduce((sum, d) => {
       const best = d.offers.reduce<number | null>((m, o) => (m == null || o.amount > m ? o.amount : m), null);
       if (best == null) return sum;
-      return sum + netProfit(best, d.askPrice, d.estimatedClosingCosts);
+      return sum + netProfit(best, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts);
     }, 0);
 
     const closedYtd = closedDeals.filter((d) => (d.stageHistory[0]?.createdAt ?? d.updatedAt) >= yearStart);
     const closedProfitYtd = closedYtd.reduce(
-      (sum, d) => sum + (d.selectedOffer ? netProfit(d.selectedOffer.amount, d.askPrice, d.estimatedClosingCosts) : 0),
+      (sum, d) => sum + (d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : 0),
       0,
     );
     const avgDealSize = avg(closedDeals.map((d) => d.selectedOffer?.amount).filter((n): n is number => n != null));
@@ -53,7 +53,7 @@ dashboardRouter.get(
     const byStage = allActive.map((d) => {
       const s = serializeDeal(d, now);
       const best = d.offers.reduce<number | null>((m, o) => (m == null || o.amount > m ? o.amount : m), null);
-      const profitEst = best != null ? netProfit(best, d.askPrice, d.estimatedClosingCosts) : null;
+      const profitEst = best != null ? netProfit(best, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : null;
       return { id: s.id, name: s.name, stage: s.stage, profitEst };
     });
 
@@ -87,7 +87,7 @@ dashboardRouter.get(
     for (const d of closedYtd) {
       const closedAt = d.stageHistory[0]?.createdAt ?? d.updatedAt;
       const m = closedAt.getUTCMonth();
-      const profit = d.selectedOffer ? netProfit(d.selectedOffer.amount, d.askPrice, d.estimatedClosingCosts) : 0;
+      const profit = d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : 0;
       monthly.set(m, (monthly.get(m) ?? 0) + profit);
     }
     const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
