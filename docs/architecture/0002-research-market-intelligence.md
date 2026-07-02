@@ -98,6 +98,35 @@ synthetic 18-month dataset (source `"sample"`, engineered surge storylines) so
 the module is explorable before real data arrives; `--clear` removes it. This
 respects the "no seed data" rule — it is opt-in and tagged for deletion.
 
+## Leon County, TX — first live source (2026-07)
+
+Reconnaissance of `leon.tx.publicsearch.us` (GovOS Public Search) established
+there is **no public/documented API**: the SSR page renders `numRecords: 0` and
+results load post-hydration over an **authenticated WebSocket** (`wss://…/ws`,
+messages `{type, payload, correlationId, authToken, sync}`) that closes the
+connection for any client not presenting the site's signed session cookies. This
+is a commercial platform whose ToS disallows automated access, so we chose the
+**manual export → import** path over scraping.
+
+Two things were salvaged from the site's JS bundle + embedded config and baked
+in permanently:
+
+- The **Real Property export column layout** (Grantor, Grantee, Doc Type,
+  Recorded Date, Doc Number, Book/Volume/Page, Legal Description) → the
+  `tx-leon-publicsearch` source adapter maps these directly.
+- Leon's **complete instrument-type vocabulary** (1,738 RP types). The
+  mineral/leasing subset drove hardening of `classifyDocType` to handle the terse
+  abbreviations Texas county-clerk systems emit (`O&GL`, `ASGMT OF LEASE`,
+  `REL OIL&GAS LS`, `Q/C MINERAL DEED`, `ASG ORR ROY INTR`, `MIN & ROYALTY
+  DEED`) — word-bounded so `MIN`/`ORR`/`ROY` don't match inside
+  `ADMIN`/`CORR`/etc. Coverage on genuine O&G/mineral descriptions is ~99% with
+  no non-mineral leaks (liens, easements, deeds of trust still reject). The
+  operator workflow + the recognized type list live in
+  `docs/leon-county-import.md`.
+
+This validates the source-adapter design: onboarding Leon was a registry entry +
+classifier hardening, no schema or route changes.
+
 ## Nationwide expansion path
 
 1. New state = registry entry (+ optional per-state boundary GeoJSON for the

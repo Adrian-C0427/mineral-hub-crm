@@ -33,13 +33,29 @@ const EXCLUDED = [
   "EASEMENT", "RIGHT OF WAY", "RIGHT-OF-WAY", "FORECLOSURE", "ABSTRACT OF JUDGMENT",
 ];
 
-/** Signals that a generic instrument is mineral/O&G-related at all. */
-const MINERAL_HINTS = ["MINERAL", "ROYALTY", "OIL", "GAS", "O&G", "OGM", "NPRI", "OVERRIDING"];
+/** Full-word mineral/O&G signals (safe as plain substrings). */
+const MINERAL_HINTS = ["MINERAL", "ROYALTY", "OIL", "GAS", "O&G", "OGM", "NPRI", "OVERRIDING", "PETROLEUM"];
+
+/**
+ * Abbreviation predicates for the terse vocabulary Texas county-clerk index
+ * systems emit (shared across a handful of vendors). All are word-bounded so
+ * "MIN"/"ORR"/"ROY" don't match inside "ADMIN"/"CORR"/"CORRECTION", etc.
+ */
+const reMineralAbbr = /\b(ROY|ORR|ORRI|MIN)\b/;      // "ASG ORR ROY INTR", "MIN & ROYALTY DEED"
+const reRoyalty = /ROYALTY|\b(ROY|ORR|ORRI)\b/;      // royalty transfers incl. overriding royalty
+const reLease = /\bLEASE\b|\bLSE\b|\bLS\b|O&GL|OGL/;  // "OIL-GAS LSE", "REL OIL&GAS LS", "O&GL"
+const reAssign = /ASSIGN|ASGMT|\bASG\b|\bASGN\b/;     // "ASGMT OF LEASE", "ASG ROYALTY INTR"
+const reRelease = /RELEASE|\bREL\b|TERMINAT|\bCANCEL/;// "REL OIL&GAS LS", "P/REL", "CANCEL LEASE"
+const reConvey = /CONVEY/;                            // "CONVEYNC" contains "CONVEY"
+const reMineral = /MINERAL|\bMIN\b/;                  // "MINERAL DEED", "MIN & ROYALTY DEED"
+const reQuit = /QUITCLAIM|QUIT CLAIM|\bQ C\b/;        // "Q/C MINERAL DEED" -> "Q C ..."
 
 /**
  * Classify a raw recorded instrument-type string into a normalized DocType +
  * DocClass. Returns null when the instrument is clearly not mineral-related
- * (excluded types, or generic instruments with no mineral signal).
+ * (excluded types, or generic instruments with no mineral signal). Handles both
+ * full descriptions ("Oil and Gas Lease") and the terse abbreviations Texas
+ * county recording systems emit ("O&GL", "ASGMT OF LEASE", "REL OIL&GAS LS").
  */
 export function classifyDocType(raw: string): { docType: DocType; docClass: DocClass } | null {
   const t = ` ${raw.toUpperCase().replace(/[^A-Z0-9&]+/g, " ").trim()} `;
@@ -47,40 +63,44 @@ export function classifyDocType(raw: string): { docType: DocType; docClass: DocC
   if (EXCLUDED.some((x) => t.includes(` ${x} `) || t.trim() === x)) return null;
 
   const has = (...words: string[]) => words.every((w) => t.includes(w));
-  const mineralish = MINERAL_HINTS.some((h) => t.includes(h));
+  const mineralish = MINERAL_HINTS.some((h) => t.includes(h)) || reMineralAbbr.test(t);
 
   // Leasing family first — "Assignment of Oil & Gas Lease" is a lease event,
-  // not a generic assignment.
-  if (t.includes("LEASE")) {
+  // not a generic assignment. Coal/surface/grazing/farm/pasture leases are not
+  // O&G and are rejected via the mineralish gate below.
+  if (reLease.test(t)) {
     if (has("MEMO")) return { docType: "LEASE_MEMO", docClass: "LEASE" };
-    if (has("ASSIGN")) return { docType: "LEASE_ASSIGNMENT", docClass: "LEASE" };
-    if (has("RELEASE") || has("TERMINAT")) return { docType: "LEASE_RELEASE", docClass: "LEASE" };
+    if (reAssign.test(t)) return { docType: "LEASE_ASSIGNMENT", docClass: "LEASE" };
+    if (reRelease.test(t)) return { docType: "LEASE_RELEASE", docClass: "LEASE" };
     if (has("AMEND")) return { docType: "LEASE_AMENDMENT", docClass: "LEASE" };
     if (has("EXTEN")) return { docType: "LEASE_EXTENSION", docClass: "LEASE" };
     if (has("RATIF")) return { docType: "LEASE_RATIFICATION", docClass: "LEASE" };
-    // Plain lease must look like O&G/mineral leasing (not a surface/grazing lease).
+    // Plain lease must look like O&G/mineral leasing (not surface/coal/grazing).
     if (mineralish) return { docType: "OG_LEASE", docClass: "LEASE" };
     return null;
   }
 
   // Ownership-transfer family.
-  if (t.includes("ROYALTY")) return { docType: "ROYALTY_DEED", docClass: "TRANSACTION" };
-  if (t.includes("QUITCLAIM") || t.includes("QUIT CLAIM")) {
+  if (reRoyalty.test(t)) {
+    return { docType: "ROYALTY_DEED", docClass: "TRANSACTION" };
+  }
+  if (reQuit.test(t)) {
     return mineralish ? { docType: "QUITCLAIM_MINERAL_DEED", docClass: "TRANSACTION" } : null;
   }
   if (t.includes("WARRANTY")) {
     return mineralish ? { docType: "WARRANTY_MINERAL_DEED", docClass: "TRANSACTION" } : null;
   }
-  if (has("MINERAL", "DEED")) return { docType: "MINERAL_DEED", docClass: "TRANSACTION" };
-  if (t.includes("MINERAL") && (t.includes("CONVEY") || t.includes("TRANSFER")))
+  if (reMineral.test(t) && t.includes("DEED")) return { docType: "MINERAL_DEED", docClass: "TRANSACTION" };
+  if (reMineral.test(t) && (reConvey.test(t) || t.includes("TRANSFER") || t.includes("GRANT")))
     return { docType: "MINERAL_CONVEYANCE", docClass: "TRANSACTION" };
-  if ((has("OIL", "GAS") || t.includes("O&G")) && (t.includes("CONVEY") || t.includes("DEED")))
+  if ((has("OIL", "GAS") || t.includes("O&G")) && (reConvey.test(t) || t.includes("DEED") || t.includes("GRANT")))
     return { docType: "OG_CONVEYANCE", docClass: "TRANSACTION" };
-  if (t.includes("ASSIGN")) {
+  if (reAssign.test(t)) {
     return mineralish ? { docType: "ASSIGNMENT", docClass: "TRANSACTION" } : null;
   }
-  if (t.includes("RESERVATION") || t.includes("EXCEPTION"))
+  if (t.includes("RESERVATION") || t.includes("EXCEPTION")) {
     return mineralish ? { docType: "RESERVATION", docClass: "TRANSACTION" } : null;
+  }
 
   // Generic instrument that still clearly concerns minerals ("Mineral Transaction").
   if (mineralish) return { docType: "OTHER", docClass: "TRANSACTION" };

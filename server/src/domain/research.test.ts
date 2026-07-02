@@ -40,6 +40,28 @@ describe("classifyDocType", () => {
     expect(classifyDocType("Plat")).toBeNull();
     expect(classifyDocType("")).toBeNull();
   });
+
+  // Terse abbreviations as emitted by Texas county-clerk index systems
+  // (verified against the Leon County publicsearch.us doc-type vocabulary).
+  it("handles Texas county-clerk abbreviations", () => {
+    expect(classifyDocType("MINERAL CONVEYNC")).toEqual({ docType: "MINERAL_CONVEYANCE", docClass: "TRANSACTION" });
+    expect(classifyDocType("O&GL")).toEqual({ docType: "OG_LEASE", docClass: "LEASE" });
+    expect(classifyDocType("ASGMT OF LEASE")).toEqual({ docType: "LEASE_ASSIGNMENT", docClass: "LEASE" });
+    expect(classifyDocType("REL OIL&GAS LS")).toEqual({ docType: "LEASE_RELEASE", docClass: "LEASE" });
+    expect(classifyDocType("P/REL OIL&GAS LS")).toEqual({ docType: "LEASE_RELEASE", docClass: "LEASE" });
+    expect(classifyDocType("OIL-GAS LSE")).toEqual({ docType: "OG_LEASE", docClass: "LEASE" });
+    expect(classifyDocType("Q/C MINERAL DEED")).toEqual({ docType: "QUITCLAIM_MINERAL_DEED", docClass: "TRANSACTION" });
+    expect(classifyDocType("ASG ROYALTY INTR")).toEqual({ docType: "ROYALTY_DEED", docClass: "TRANSACTION" });
+    expect(classifyDocType("ASG ORR ROY INTR")).toEqual({ docType: "ROYALTY_DEED", docClass: "TRANSACTION" });
+    expect(classifyDocType("MIN & ROYALTY DEED")).toEqual({ docType: "ROYALTY_DEED", docClass: "TRANSACTION" });
+    expect(classifyDocType("MINERAL GRANT")).toEqual({ docType: "MINERAL_CONVEYANCE", docClass: "TRANSACTION" });
+    expect(classifyDocType("OIL & GAS GRANT")).toEqual({ docType: "OG_CONVEYANCE", docClass: "TRANSACTION" });
+    // Non-O&G leases and lien/easement instruments still reject.
+    expect(classifyDocType("COAL LEASE")).toBeNull();
+    expect(classifyDocType("REL ROYALTY LIEN")).toBeNull(); // lien instrument, excluded
+    expect(classifyDocType("ASGMT OF F/S")).toBeNull(); // financing statement
+    expect(classifyDocType("CORR R/W EASEMENT")).toBeNull();
+  });
 });
 
 describe("permit classification", () => {
@@ -152,6 +174,17 @@ describe("guessMapping", () => {
     expect(m.filedDate).toBe("Submitted Date");
     expect(m.approvedDate).toBe("Approved Date");
   });
+  it("maps Leon County publicsearch.us export headers", () => {
+    const src = RESEARCH_SOURCES.find((s) => s.key === "tx-leon-publicsearch")!;
+    const m = guessMapping(src, ["Grantor", "Grantee", "Doc Type", "Recorded Date", "Doc Number", "Book/Volume/Page", "Legal Description"]);
+    expect(m.docType).toBe("Doc Type");
+    expect(m.recordingDate).toBe("Recorded Date");
+    expect(m.grantor).toBe("Grantor");
+    expect(m.grantee).toBe("Grantee");
+    expect(m.instrumentNumber).toBe("Doc Number");
+    expect(m.legalDescription).toBe("Legal Description");
+  });
+
   it("maps county-clerk style headers", () => {
     const src = RESEARCH_SOURCES.find((s) => s.key === "tx-county-clerk")!;
     const m = guessMapping(src, ["Instrument Type", "File Date", "Grantor", "Grantee", "Instrument Number", "Legal Description"]);

@@ -91,6 +91,26 @@ export const RESEARCH_SOURCES: ResearchSource[] = [
     },
   },
   {
+    key: "tx-leon-publicsearch",
+    label: "Leon County, TX — publicsearch.us export",
+    kind: "DOCUMENTS",
+    description:
+      "CSV exported from leon.tx.publicsearch.us (Real Property). On the site, filter by " +
+      "mineral/leasing document types and a recorded-date range, then Export. County defaults to Leon.",
+    aliases: {
+      // Column headers as they appear in the publicsearch.us Real Property export.
+      docType: ["doctype", "documenttype", "instrumenttype", "type"],
+      recordingDate: ["recordeddate", "recordingdate", "daterecorded", "recorded"],
+      grantor: ["grantor", "grantors", "grantorname"],
+      grantee: ["grantee", "grantees", "granteename"],
+      instrumentNumber: ["docnumber", "documentnumber", "instrumentnumber", "instrumentno", "documentno"],
+      // publicsearch emits a combined "Book/Volume/Page"; also accept split columns.
+      volume: ["bookvolumepage", "volume", "book", "vol"],
+      page: ["page", "pg"],
+      legalDescription: ["legaldescription", "legal", "description", "propertydescription"],
+    },
+  },
+  {
     key: "tx-county-clerk",
     label: "Texas County Clerk (OPR index)",
     kind: "DOCUMENTS",
