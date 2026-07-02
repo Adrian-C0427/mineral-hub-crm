@@ -1,97 +1,211 @@
+/**
+ * Integrations hub (admin-only). The server owns the catalog
+ * (domain/integrationCatalog.ts) and per-org state; the client renders what
+ * this router returns and never sees a stored credential — only a masked hint.
+ *
+ * Security model:
+ *  - API keys / webhook URLs are validated against the provider on connect,
+ *    then stored AES-256-GCM-encrypted inside the row's config JSON.
+ *  - Serialization strips every "_"-prefixed config key.
+ *  - Connect, disconnect, config changes, tests, and syncs are audit-logged
+ *    to ActivityLog with the acting user.
+ */
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
+import type { Integration } from "@prisma/client";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { INTEGRATION_CATALOG, providerByKey } from "../domain/integrationCatalog.js";
+import { validateSecret, validateEnvProvider, envConfigured } from "../services/integrationProviders.js";
+import { encryptSecret, secretHint } from "../services/secrets.js";
+import { syncIntegration, checkIntegration, configOf } from "../services/integrationSync.js";
+import { logActivity } from "../services/activityLog.js";
 
 export const integrationsRouter = Router();
-// The integrations hub is admin-only.
 integrationsRouter.use(requireAuth, requireOrg, requirePermission("manageApiIntegrations"));
 
-function serialize(i: {
-  provider: string; status: string; config: unknown; connectedAt: Date | null; lastSyncAt: Date | null; lastError: string | null; updatedAt: Date;
-}) {
+function publicConfig(row: Integration | null): Record<string, unknown> {
+  const cfg = (row?.config ?? {}) as Record<string, unknown>;
+  return Object.fromEntries(Object.entries(cfg).filter(([k]) => !k.startsWith("_")));
+}
+
+function serialize(def: (typeof INTEGRATION_CATALOG)[number], row: Integration | null) {
+  const cfg = row ? configOf(row) : {};
   return {
-    provider: i.provider,
-    status: i.status,
-    config: i.config ?? null,
-    connectedAt: i.connectedAt,
-    lastSyncAt: i.lastSyncAt,
-    lastError: i.lastError,
-    updatedAt: i.updatedAt,
+    ...def,
+    // Env-configured providers report their real runtime status; stored rows
+    // report connection state.
+    status: def.implementation === "env"
+      ? (envConfigured(def.key) ? "CONNECTED" : "NOT_CONNECTED")
+      : (row?.status ?? "NOT_CONNECTED"),
+    config: publicConfig(row),
+    secretMask: cfg._hint ?? null,
+    connectedAt: row?.connectedAt ?? null,
+    lastSyncAt: row?.lastSyncAt ?? null,
+    lastError: row?.lastError ?? null,
   };
 }
 
-// Stored per-org state for every integration the org has touched. The catalog
-// (available providers) lives in the client registry; the UI merges the two.
+async function getRow(req: AuthedRequest, provider: string): Promise<Integration | null> {
+  return prisma.integration.findUnique({
+    where: { organizationId_provider: { organizationId: orgId(req), provider } },
+  });
+}
+
+function requireDef(provider: string) {
+  const def = providerByKey(provider);
+  if (!def) throw new HttpError(404, "Unknown integration provider");
+  return def;
+}
+
+// Full catalog merged with this org's state.
 integrationsRouter.get(
   "/",
   asyncHandler(async (req: AuthedRequest, res) => {
     const rows = await prisma.integration.findMany({ where: { organizationId: orgId(req) } });
-    res.json(rows.map(serialize));
+    const byProvider = new Map(rows.map((r) => [r.provider, r]));
+    res.json(INTEGRATION_CATALOG.map((def) => serialize(def, byProvider.get(def.key) ?? null)));
   }),
 );
 
-const connectSchema = z.object({ config: z.record(z.unknown()).optional() });
+const connectSchema = z.object({
+  secret: z.string().min(1).max(4096).optional(),
+  config: z.object({ schedule: z.enum(["manual", "hourly", "daily"]).optional(), notes: z.string().max(2000).optional() }).optional(),
+});
 
 integrationsRouter.post(
   "/:provider/connect",
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { config } = connectSchema.parse(req.body);
-    const provider = req.params.provider;
-    const cfg = (config ?? undefined) as never;
+    const def = requireDef(req.params.provider);
+    const { secret, config } = connectSchema.parse(req.body);
+
+    if (def.implementation === "env") {
+      throw new HttpError(400, `${def.name} is configured with environment variables on the API service, not from this page.`);
+    }
+    if (def.implementation === "planned") {
+      throw new HttpError(400, `${def.name} requires an OAuth app registration before it can be enabled${def.setupUrl ? ` (${def.setupUrl})` : ""}. See docs/integrations-audit.md.`);
+    }
+    if (!secret) throw new HttpError(400, `${def.secretLabel ?? "A credential"} is required to connect ${def.name}.`);
+
+    // Validate against the provider BEFORE storing anything.
+    const result = await validateSecret(def.key, secret);
+    if (!result.ok) throw new HttpError(400, result.message);
+
     const row = await prisma.integration.upsert({
-      where: { organizationId_provider: { organizationId: orgId(req), provider } },
-      create: { organizationId: orgId(req), provider, status: "CONNECTED", connectedAt: new Date(), config: cfg, lastError: null },
-      update: { status: "CONNECTED", connectedAt: new Date(), config: cfg, lastError: null },
+      where: { organizationId_provider: { organizationId: orgId(req), provider: def.key } },
+      create: {
+        organizationId: orgId(req), provider: def.key, status: "CONNECTED", connectedAt: new Date(),
+        lastSyncAt: new Date(), lastError: null,
+        config: { ...(config ?? {}), _secret: encryptSecret(secret), _hint: secretHint(secret) },
+      },
+      update: {
+        status: "CONNECTED", connectedAt: new Date(), lastSyncAt: new Date(), lastError: null,
+        config: { ...(config ?? {}), _secret: encryptSecret(secret), _hint: secretHint(secret) },
+      },
     });
-    res.json(serialize(row));
+    await logActivity({
+      eventType: "integration.connected",
+      summary: `Integration ${def.name} connected`,
+      organizationId: orgId(req), actorUserId: req.user?.id ?? null,
+    });
+    res.json({ ...serialize(def, row), message: result.message });
   }),
 );
 
 integrationsRouter.post(
   "/:provider/disconnect",
   asyncHandler(async (req: AuthedRequest, res) => {
-    const provider = req.params.provider;
+    const def = requireDef(req.params.provider);
+    if (def.implementation === "env") {
+      throw new HttpError(400, `${def.name} is controlled by environment variables — remove them from the API service to disable it.`);
+    }
+    const existing = await getRow(req, def.key);
+    // Purge the credential, keep non-secret config for an easy reconnect.
     const row = await prisma.integration.upsert({
-      where: { organizationId_provider: { organizationId: orgId(req), provider } },
-      create: { organizationId: orgId(req), provider, status: "NOT_CONNECTED" },
-      update: { status: "NOT_CONNECTED", connectedAt: null },
+      where: { organizationId_provider: { organizationId: orgId(req), provider: def.key } },
+      create: { organizationId: orgId(req), provider: def.key, status: "NOT_CONNECTED" },
+      update: { status: "NOT_CONNECTED", connectedAt: null, lastError: null, config: publicConfig(existing) as never },
     });
-    res.json(serialize(row));
+    await logActivity({
+      eventType: "integration.disconnected",
+      summary: `Integration ${def.name} disconnected`,
+      organizationId: orgId(req), actorUserId: req.user?.id ?? null,
+    });
+    res.json(serialize(def, row));
   }),
 );
 
-// Update non-secret config (labels, sync schedule, etc.).
+// Non-secret settings (sync schedule, notes). Secrets only change via connect.
 integrationsRouter.patch(
   "/:provider",
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { config } = z.object({ config: z.record(z.unknown()) }).parse(req.body);
-    const provider = req.params.provider;
-    const existing = await prisma.integration.findUnique({
-      where: { organizationId_provider: { organizationId: orgId(req), provider } },
-    });
+    const def = requireDef(req.params.provider);
+    const { config } = z.object({
+      config: z.object({ schedule: z.enum(["manual", "hourly", "daily"]).optional(), notes: z.string().max(2000).optional() }),
+    }).parse(req.body);
+    const existing = await getRow(req, def.key);
     if (!existing) throw new HttpError(404, "Integration not configured");
+    const secretPart = Object.fromEntries(Object.entries((existing.config ?? {}) as Record<string, unknown>).filter(([k]) => k.startsWith("_")));
     const row = await prisma.integration.update({
       where: { id: existing.id },
-      data: { config: config as never },
+      data: { config: { ...config, ...secretPart } as never },
     });
-    res.json(serialize(row));
+    await logActivity({
+      eventType: "integration.config_updated",
+      summary: `Integration ${def.name} settings updated`,
+      organizationId: orgId(req), actorUserId: req.user?.id ?? null,
+    });
+    res.json(serialize(def, row));
   }),
 );
 
-// Connection test — placeholder until per-provider auth is wired. Records the
-// attempt so the UI can show a last-tested result.
+// Live connection test — validates against the provider and records the outcome.
 integrationsRouter.post(
   "/:provider/test",
   asyncHandler(async (req: AuthedRequest, res) => {
-    const provider = req.params.provider;
-    const existing = await prisma.integration.findUnique({
-      where: { organizationId_provider: { organizationId: orgId(req), provider } },
-    });
-    if (!existing || existing.status !== "CONNECTED") {
+    const def = requireDef(req.params.provider);
+    if (def.implementation === "env") {
+      const result = await validateEnvProvider(def.key);
+      await logActivity({
+        eventType: result.ok ? "integration.test_passed" : "integration.test_failed",
+        summary: `Integration ${def.name} test ${result.ok ? "passed" : `failed: ${result.message}`}`,
+        organizationId: orgId(req), actorUserId: req.user?.id ?? null,
+      });
+      return res.json(result);
+    }
+    const row = await getRow(req, def.key);
+    if (!row || row.status === "NOT_CONNECTED") {
       return res.json({ ok: false, message: "Connect this integration before testing." });
     }
-    res.json({ ok: true, message: "Connection tracking is active. Live credential validation is coming for this provider." });
+    const result = await checkIntegration(row);
+    await prisma.integration.update({
+      where: { id: row.id },
+      data: result.ok ? { lastError: null, status: "CONNECTED" } : { lastError: result.message, status: "ERROR" },
+    });
+    await logActivity({
+      eventType: result.ok ? "integration.test_passed" : "integration.test_failed",
+      summary: `Integration ${def.name} test ${result.ok ? "passed" : `failed: ${result.message}`}`,
+      organizationId: orgId(req), actorUserId: req.user?.id ?? null,
+    });
+    res.json(result);
+  }),
+);
+
+// Manual synchronization ("Sync now").
+integrationsRouter.post(
+  "/:provider/sync",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const def = requireDef(req.params.provider);
+    if (def.implementation === "env") {
+      const result = await validateEnvProvider(def.key);
+      return res.json(result);
+    }
+    const row = await getRow(req, def.key);
+    if (!row || row.status === "NOT_CONNECTED") {
+      return res.json({ ok: false, message: "Connect this integration before syncing." });
+    }
+    const result = await syncIntegration(row, req.user?.id ?? null);
+    res.json(result);
   }),
 );
