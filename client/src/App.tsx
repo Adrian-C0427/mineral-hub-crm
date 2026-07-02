@@ -18,6 +18,7 @@ const MapView = lazy(() => import("./pages/MapView").then((m) => ({ default: m.M
 // recharts (+ jsPDF/html2canvas on Reports) is heavy; load analytics on demand.
 const Expenses = lazy(() => import("./pages/Expenses").then((m) => ({ default: m.Expenses })));
 const Reports = lazy(() => import("./pages/Reports").then((m) => ({ default: m.Reports })));
+const Research = lazy(() => import("./pages/Research").then((m) => ({ default: m.Research })));
 
 /** Redirect to Dashboard if the user lacks the required permission. */
 function Guard({ perm, children }: { perm: string; children: ReactNode }) {
@@ -46,6 +47,7 @@ export function App() {
           <Route path="/buyers" element={<Guard perm="viewBuyers"><Buyers /></Guard>} />
           <Route path="/buyers/:id" element={<Guard perm="viewBuyers"><BuyerProfile /></Guard>} />
           <Route path="/reports" element={<Guard perm="viewReports"><Suspense fallback={<Spinner label="Loading reports…" />}><Reports /></Suspense></Guard>} />
+          <Route path="/research" element={<Guard perm="viewResearch"><Suspense fallback={<Spinner label="Loading research…" />}><Research /></Suspense></Guard>} />
           <Route path="/expenses" element={<Guard perm="manageExpenses"><Suspense fallback={<Spinner label="Loading expenses…" />}><Expenses /></Suspense></Guard>} />
           <Route path="/map" element={<Guard perm="viewMap"><Suspense fallback={<Spinner label="Loading map…" />}><MapView /></Suspense></Guard>} />
           <Route path="/organization" element={<Organization />} />

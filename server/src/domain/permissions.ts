@@ -22,6 +22,7 @@ export const PERMISSIONS = [
   "manageExpenses", "approveExpenses",
   "sendEmail",
   "viewMap", "editMapData",
+  "viewResearch", "manageResearchData",
   "manageMembers", "manageRoles", "manageOrgSettings",
   "inviteRemoveUsers", "manageApiIntegrations", "accessAdminSettings",
 ] as const;
@@ -45,6 +46,8 @@ export const PERMISSION_META: Record<Permission, { label: string; group: string 
   sendEmail: { label: "Send Deal Emails", group: "Deals" },
   viewMap: { label: "View the Interactive Map", group: "Map" },
   editMapData: { label: "Edit Map Data", group: "Map" },
+  viewResearch: { label: "View Research & Market Intel", group: "Research" },
+  manageResearchData: { label: "Import & Manage Research Data", group: "Research" },
   manageMembers: { label: "Manage Team Members", group: "Administration" },
   manageRoles: { label: "Manage Roles & Permissions", group: "Administration" },
   manageOrgSettings: { label: "Manage Organization Settings", group: "Administration" },
@@ -84,6 +87,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<OrgRole, Permission[]> = {
     "manageExpenses", "approveExpenses",
     "sendEmail",
     "viewMap", "editMapData",
+    "viewResearch", "manageResearchData",
     "manageMembers",
   ],
   MEMBER: [
@@ -93,8 +97,9 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<OrgRole, Permission[]> = {
     "manageExpenses",
     "sendEmail",
     "viewMap",
+    "viewResearch",
   ],
-  VIEWER: ["viewDeals", "viewBuyers", "viewReports", "viewMap"],
+  VIEWER: ["viewDeals", "viewBuyers", "viewReports", "viewMap", "viewResearch"],
 };
 
 /**

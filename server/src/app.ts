@@ -17,6 +17,7 @@ import { mapRouter } from "./routes/map.js";
 import { expensesRouter } from "./routes/expenses.js";
 import { emailTemplatesRouter } from "./routes/emailTemplates.js";
 import { integrationsRouter } from "./routes/integrations.js";
+import { researchRouter } from "./routes/research.js";
 
 export function createApp() {
   const app = express();
@@ -34,7 +35,9 @@ export function createApp() {
     }),
   );
 
-  app.use(express.json({ limit: "5mb" }));
+  // 25mb accommodates research CSV imports (county recording indexes / permit
+  // exports posted as JSON strings); other payloads stay small in practice.
+  app.use(express.json({ limit: "25mb" }));
   app.use(cookieParser());
   app.use(attachUser);
 
@@ -53,6 +56,7 @@ export function createApp() {
   app.use("/api/expenses", expensesRouter);
   app.use("/api/email-templates", emailTemplatesRouter);
   app.use("/api/integrations", integrationsRouter);
+  app.use("/api/research", researchRouter);
 
   app.use(notFound);
   app.use(errorHandler);
