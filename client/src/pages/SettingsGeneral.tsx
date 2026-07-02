@@ -4,7 +4,8 @@ import { useAuth } from "../auth/AuthContext";
 import { Banner } from "../components/ui";
 import { PhoneInput } from "../components/PhoneInput";
 
-export function Settings() {
+/** General settings — account/profile now; structured for more sections later. */
+export function SettingsGeneral() {
   const { user, refresh } = useAuth();
   const [f, setF] = useState({
     firstName: user?.firstName ?? "",
@@ -26,7 +27,6 @@ export function Settings() {
     e.preventDefault();
     setError(null);
     setOk(false);
-    // All fields are required on update.
     if (!f.firstName.trim() || !f.lastName.trim() || !f.phone.trim() || !f.email.trim() || f.password.length < 8) {
       setError("All fields are required, and the password must be at least 8 characters.");
       return;
@@ -51,11 +51,13 @@ export function Settings() {
   }
 
   return (
-    <div className="page" style={{ maxWidth: 640 }}>
-      <div className="page-header"><h1>Settings</h1></div>
+    <div className="page" style={{ maxWidth: 720 }}>
+      <div className="page-header"><h1>General</h1></div>
+
+      {/* Account & Security (live) */}
       <div className="panel">
-        <h3>Account information</h3>
-        <p className="muted" style={{ marginTop: 0 }}>All fields are required. You must confirm your password to save changes.</p>
+        <h3>Account & Security</h3>
+        <p className="muted" style={{ marginTop: 0 }}>Your profile and sign-in details. Confirm your password to save changes.</p>
         <form onSubmit={save}>
           <div className="grid-2">
             <div className="field"><label>First name</label><input value={f.firstName} onChange={set("firstName")} /></div>
@@ -69,6 +71,20 @@ export function Settings() {
           <button className="primary" disabled={busy} style={{ marginTop: 8 }}>{busy ? "Saving…" : "Save changes"}</button>
         </form>
       </div>
+
+      {/* Forthcoming general settings — laid out so each can be enabled in place. */}
+      <SoonPanel title="Notification Preferences" desc="Choose which deal, buyer, and reminder notifications you receive and how (email / in-app)." />
+      <SoonPanel title="Appearance" desc="Switch between light and dark mode and set display density." />
+      <SoonPanel title="Default Application Preferences" desc="Set your default landing page, date range, and other per-user defaults." />
+    </div>
+  );
+}
+
+function SoonPanel({ title, desc }: { title: string; desc: string }) {
+  return (
+    <div className="panel" style={{ opacity: 0.75 }}>
+      <div className="section-head"><h3 style={{ margin: 0 }}>{title}</h3><span className="badge resp-pending">Coming soon</span></div>
+      <p className="muted" style={{ marginBottom: 0 }}>{desc}</p>
     </div>
   );
 }

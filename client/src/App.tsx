@@ -10,8 +10,9 @@ import { DealDetail } from "./pages/DealDetail";
 import { Buyers } from "./pages/Buyers";
 import { BuyerProfile } from "./pages/BuyerProfile";
 import { Suspense, lazy, type ReactNode } from "react";
-import { Settings } from "./pages/Settings";
+import { SettingsGeneral } from "./pages/SettingsGeneral";
 import { Organization } from "./pages/Organization";
+const Integrations = lazy(() => import("./pages/Integrations").then((m) => ({ default: m.Integrations })));
 // MapLibre is heavy (~300KB gzip); load it only when the Map route is visited.
 const MapView = lazy(() => import("./pages/MapView").then((m) => ({ default: m.MapView })));
 // recharts (+ jsPDF/html2canvas on Reports) is heavy; load analytics on demand.
@@ -48,7 +49,9 @@ export function App() {
           <Route path="/expenses" element={<Guard perm="manageExpenses"><Suspense fallback={<Spinner label="Loading expenses…" />}><Expenses /></Suspense></Guard>} />
           <Route path="/map" element={<Guard perm="viewMap"><Suspense fallback={<Spinner label="Loading map…" />}><MapView /></Suspense></Guard>} />
           <Route path="/organization" element={<Organization />} />
-          <Route path="/settings" element={<Settings />} />
+          <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
+          <Route path="/settings/general" element={<SettingsGeneral />} />
+          <Route path="/settings/integrations" element={<Guard perm="manageApiIntegrations"><Suspense fallback={<Spinner label="Loading integrations…" />}><Integrations /></Suspense></Guard>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
