@@ -18,6 +18,7 @@ import { expensesRouter } from "./routes/expenses.js";
 import { emailTemplatesRouter } from "./routes/emailTemplates.js";
 import { integrationsRouter } from "./routes/integrations.js";
 import { researchRouter } from "./routes/research.js";
+import { wellsRouter } from "./routes/wells.js";
 
 export function createApp() {
   const app = express();
@@ -57,6 +58,7 @@ export function createApp() {
   app.use("/api/email-templates", emailTemplatesRouter);
   app.use("/api/integrations", integrationsRouter);
   app.use("/api/research", researchRouter);
+  app.use("/api/wells", wellsRouter);
 
   app.use(notFound);
   app.use(errorHandler);
