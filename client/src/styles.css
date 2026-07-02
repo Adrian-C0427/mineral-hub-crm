@@ -62,6 +62,17 @@ input, select, textarea {
   padding: 8px 10px;
   width: 100%;
 }
+/* Checkboxes/radios are controls, not text fields: keep them at natural size so
+   they don't stretch full-width and shove their labels away (which broke the
+   map layer panel and pushed buyer-match names off-screen). */
+input[type="checkbox"], input[type="radio"] {
+  width: auto;
+  flex: none;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
 label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
 .field { margin-bottom: 14px; }
@@ -164,8 +175,20 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 
 /* Embedded deal map */
 .deal-map { display: flex; flex-direction: column; }
-.dm-toolbar { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; }
-.dm-chk { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-dim); }
+/* Layer controls: a compact, bordered panel; every checkbox sits directly
+   beside its label with consistent spacing, wrapping cleanly on narrow widths. */
+.dm-toolbar {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px;
+  margin-bottom: 10px; padding: 8px 12px;
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px;
+}
+.dm-toolbar-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin-right: 4px; }
+.dm-chk {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 13px; color: var(--text); line-height: 1; white-space: nowrap;
+  cursor: pointer; user-select: none;
+}
+.dm-chk input[type="checkbox"] { width: 15px; height: 15px; }
 .dm-canvas { position: relative; height: 380px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
 .dm-info { position: absolute; top: 10px; right: 10px; max-width: 240px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
 .dm-empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: var(--text-dim); font-size: 13px; background: var(--panel-2); }
@@ -276,7 +299,10 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .tag button { border:none; background:none; padding:0; color: var(--text-dim); font-size: 14px; }
 
 /* --- Match --- */
-.match-pct { font-weight: 700; font-size: 15px; }
+/* Company name takes the remaining width and truncates; the percent badge stays
+   pinned on the right so nothing overflows the panel at any width. */
+.match-name { flex: 1 1 auto; min-width: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.match-pct { font-weight: 700; font-size: 15px; white-space: nowrap; }
 .match-green { color: var(--green); }
 .match-amber { color: var(--amber); }
 .match-gray { color: var(--text-dim); }
@@ -392,3 +418,10 @@ tr.row-base td { background: var(--panel-2); font-weight: 600; }
 .msel-empty { padding:10px 12px; color: var(--text-dim); font-size:13px; }
 .gear-link { color: var(--text-dim); font-size:20px; display:inline-flex; align-items:center; padding:4px 6px; border-radius:6px; }
 .gear-link:hover { color: var(--text); background: var(--panel-2); text-decoration:none; }
+
+/* Pipeline transition targets (Closed / Dead) — drop zones, not columns.
+   Dropping a deal here opens the Closed/Archive confirmation. */
+.kanban-transitions { background: transparent; border: none; min-width: 180px; width: 180px; gap: 14px; max-height: none; }
+.transition-zone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 18px 14px; display: flex; flex-direction: column; align-items: center; gap: 4px; font-weight: 600; color: var(--text-dim); flex: 1; justify-content: center; text-align: center; }
+.transition-zone.closed.drop-target { border-color: var(--green); color: var(--green); background: color-mix(in srgb, var(--green) 8%, transparent); }
+.transition-zone.dead.drop-target { border-color: var(--red); color: var(--red); background: color-mix(in srgb, var(--red) 8%, transparent); }

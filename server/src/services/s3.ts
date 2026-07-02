@@ -43,13 +43,15 @@ export async function putObject(key: string, body: Buffer, contentType: string):
   );
 }
 
-/** Signed, expiring download URL — never expose public links. */
-export async function getDownloadUrl(key: string, filename?: string): Promise<string> {
+/** Signed, expiring download URL — never expose public links. `inline` serves
+ *  the object for in-browser preview (PDF/image) instead of forcing a download. */
+export async function getDownloadUrl(key: string, filename?: string, inline = false): Promise<string> {
   if (!client) throw new Error("S3 is not configured");
+  const disposition = filename ? `${inline ? "inline" : "attachment"}; filename="${filename}"` : undefined;
   const cmd = new GetObjectCommand({
     Bucket: env.S3.BUCKET,
     Key: key,
-    ResponseContentDisposition: filename ? `attachment; filename="${filename}"` : undefined,
+    ResponseContentDisposition: disposition,
   });
   return getSignedUrl(client, cmd, { expiresIn: env.S3.SIGNED_URL_TTL_SECONDS });
 }

@@ -139,6 +139,7 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
   return (
     <div className="deal-map">
       <div className="dm-toolbar">
+        <span className="dm-toolbar-label">Layers</span>
         <Chk k="boundaries" label="Boundaries" /><Chk k="numbers" label="Abstract #" /><Chk k="surveys" label="Survey names" />
         <Chk k="wells" label="Wells" /><Chk k="wellbores" label="Wellbores" />
       </div>
