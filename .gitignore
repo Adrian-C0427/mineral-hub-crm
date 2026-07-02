@@ -11,6 +11,7 @@ client/dist/
 server/dist/
 prisma/*.db
 .railway/
+.claude/
 
 # RRC statewide bulk data (multi-GB, kept locally only)
 *.ebc
