@@ -2,8 +2,12 @@ import { createApp } from "./app.js";
 import { env } from "./config.js";
 import { ensureUsersHaveOrganizations } from "./services/org.js";
 import { backfillBuyerStatus } from "./services/backfill.js";
+import { startIntegrationScheduler } from "./services/integrationSync.js";
 
 const app = createApp();
+
+// Background re-validation of connected integrations on their configured schedule.
+startIntegrationScheduler();
 
 // Idempotent backfill so every existing user has an organization (multi-tenancy).
 ensureUsersHaveOrganizations().catch((e) =>

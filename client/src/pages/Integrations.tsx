@@ -1,103 +1,80 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Mail, Bot, Map as MapIcon, HardDrive, Calendar, Calculator, Megaphone, ShieldCheck, Code2,
+  Mail, Bot, Map as MapIcon, HardDrive, Calendar, Calculator, Megaphone, ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
 import { api, ApiError } from "../api/client";
-import { Spinner, Banner, Modal, ConfirmChanges } from "../components/ui";
+import { Spinner, Banner, Modal, ConfirmChanges, ConfirmDialog } from "../components/ui";
 import { fmtDate } from "../lib/format";
 
-type Auth = "oauth" | "apikey" | "smtp" | "builtin";
+// The catalog lives on the SERVER (domain/integrationCatalog.ts) — the single
+// source of truth for which providers exist, how they authenticate, and how far
+// each implementation has gotten. This page renders what the API returns; only
+// presentation (icons, ordering) is decided here.
 
-interface Provider { key: string; name: string; description: string; auth: Auth }
-interface Category { category: string; icon: LucideIcon; items: Provider[] }
+type Auth = "apikey" | "webhook" | "oauth" | "env";
+type Impl = "live" | "env" | "planned";
 
-// Catalog lives here (client registry) — add a provider without any schema or
-// API change; the backend just tracks per-org status/config for each key.
-const REGISTRY: Category[] = [
-  { category: "Email & Communication", icon: Mail, items: [
-    { key: "outlook", name: "Microsoft Outlook / 365", auth: "oauth", description: "Send deal emails and sync replies from your Microsoft 365 mailbox." },
-    { key: "gmail", name: "Gmail / Google Workspace", auth: "oauth", description: "Send and receive deal emails through Google Workspace." },
-    { key: "smtp", name: "SMTP / IMAP", auth: "smtp", description: "Generic mail server for outbound deal emails (configured via server env)." },
-    { key: "teams", name: "Microsoft Teams", auth: "oauth", description: "Post deal notifications and alerts to Teams channels." },
-    { key: "slack", name: "Slack", auth: "oauth", description: "Push deal and buyer activity notifications to Slack." },
-  ] },
-  { category: "AI & Automation", icon: Bot, items: [
-    { key: "claude", name: "Claude", auth: "apikey", description: "Draft outreach, summarize deals, and assist research with Anthropic Claude." },
-    { key: "openai", name: "ChatGPT / OpenAI", auth: "apikey", description: "AI drafting and analysis via OpenAI models." },
-    { key: "gemini", name: "Google Gemini", auth: "apikey", description: "AI assistance via Google Gemini." },
-    { key: "perplexity", name: "Perplexity", auth: "apikey", description: "Research and answer generation via Perplexity." },
-  ] },
-  { category: "GIS & Mapping", icon: MapIcon, items: [
-    { key: "rrc", name: "Texas Railroad Commission (RRC)", auth: "apikey", description: "Ingest RRC well, permit, and production datasets." },
-    { key: "qgis", name: "QGIS / QGIS Server", auth: "apikey", description: "Serve and consume spatial layers via QGIS Server." },
-    { key: "arcgis", name: "ArcGIS", auth: "oauth", description: "Connect Esri ArcGIS feature and map services." },
-    { key: "mapbox", name: "Mapbox", auth: "apikey", description: "Alternate basemaps and geocoding via Mapbox." },
-    { key: "googlemaps", name: "Google Maps", auth: "apikey", description: "Geocoding and mapping via Google Maps Platform." },
-  ] },
-  { category: "Storage & Documents", icon: HardDrive, items: [
-    { key: "googledrive", name: "Google Drive", auth: "oauth", description: "Store and attach deal documents from Google Drive." },
-    { key: "onedrive", name: "Microsoft OneDrive", auth: "oauth", description: "Store and attach documents from OneDrive." },
-    { key: "dropbox", name: "Dropbox", auth: "oauth", description: "Store and attach documents from Dropbox." },
-    { key: "box", name: "Box", auth: "oauth", description: "Store and attach documents from Box." },
-  ] },
-  { category: "Productivity", icon: Calendar, items: [
-    { key: "googlecalendar", name: "Google Calendar", auth: "oauth", description: "Sync closing dates and follow-ups to Google Calendar." },
-    { key: "outlookcalendar", name: "Outlook Calendar", auth: "oauth", description: "Sync deadlines and follow-ups to Outlook Calendar." },
-    { key: "calendly", name: "Calendly", auth: "apikey", description: "Book buyer calls and sync scheduled meetings." },
-  ] },
-  { category: "Accounting & Finance", icon: Calculator, items: [
-    { key: "quickbooks", name: "QuickBooks Online", auth: "oauth", description: "Sync expenses and revenue with QuickBooks." },
-    { key: "xero", name: "Xero", auth: "oauth", description: "Sync expenses and revenue with Xero." },
-  ] },
-  { category: "CRM & Marketing", icon: Megaphone, items: [
-    { key: "hubspot", name: "HubSpot", auth: "oauth", description: "Sync buyers and activity with HubSpot." },
-    { key: "salesforce", name: "Salesforce", auth: "oauth", description: "Sync buyers and deals with Salesforce." },
-    { key: "mailchimp", name: "Mailchimp", auth: "apikey", description: "Sync buyer lists for email campaigns." },
-  ] },
-  { category: "Authentication", icon: ShieldCheck, items: [
-    { key: "entra", name: "Microsoft Entra ID (Azure AD)", auth: "oauth", description: "Single sign-on with Microsoft Entra ID." },
-    { key: "googlesignin", name: "Google Sign-In", auth: "oauth", description: "Single sign-on with Google." },
-    { key: "okta", name: "Okta", auth: "oauth", description: "Single sign-on and provisioning with Okta." },
-  ] },
-  { category: "Developer & API", icon: Code2, items: [
-    { key: "apikeys", name: "API Keys", auth: "apikey", description: "Issue keys for programmatic access to your Mineral Hub data." },
-    { key: "webhooks", name: "Webhooks", auth: "apikey", description: "Send events to your endpoints when deals or buyers change." },
-    { key: "customapi", name: "Custom API Integration", auth: "apikey", description: "Connect a bespoke internal or third-party service." },
-  ] },
-];
+interface Provider {
+  key: string; name: string; category: string; auth: Auth; implementation: Impl;
+  description: string; secretLabel?: string; secretHint?: string; setupUrl?: string; syncable?: boolean;
+  status: "CONNECTED" | "NOT_CONNECTED" | "ERROR";
+  config: { schedule?: string; notes?: string };
+  secretMask: string | null;
+  connectedAt: string | null; lastSyncAt: string | null; lastError: string | null;
+}
 
-const AUTH_LABEL: Record<Auth, string> = { oauth: "OAuth", apikey: "API key", smtp: "SMTP", builtin: "Built-in" };
+const CATEGORY_ICON: Record<string, LucideIcon> = {
+  "Email & Communication": Mail, "AI & Automation": Bot, "GIS & Mapping": MapIcon,
+  "Storage & Documents": HardDrive, "Productivity": Calendar, "Accounting & Finance": Calculator,
+  "CRM & Marketing": Megaphone, "Authentication": ShieldCheck,
+};
 
-interface Record_ { provider: string; status: string; config: Record<string, unknown> | null; connectedAt: string | null; lastSyncAt: string | null; lastError: string | null }
+const AUTH_LABEL: Record<Auth, string> = { oauth: "OAuth 2.0", apikey: "API key", webhook: "Webhook", env: "Built-in" };
 
 export function Integrations() {
-  const [state, setState] = useState<Map<string, Record_>>(new Map());
-  const [loading, setLoading] = useState(true);
+  const [providers, setProviders] = useState<Provider[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [configure, setConfigure] = useState<Provider | null>(null);
+  const [flash, setFlash] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState<Provider | null>(null);
+  const [configuring, setConfiguring] = useState<Provider | null>(null);
+  const [disconnecting, setDisconnecting] = useState<Provider | null>(null);
+  const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [testResult, setTestResult] = useState<Record<string, { ok: boolean; message: string }>>({});
 
   function load() {
-    api.get<Record_[]>("/integrations")
-      .then((rows) => setState(new Map(rows.map((r) => [r.provider, r]))))
-      .catch((e) => setErr(e instanceof ApiError ? e.message : "Failed to load integrations"))
-      .finally(() => setLoading(false));
+    api.get<Provider[]>("/integrations")
+      .then(setProviders)
+      .catch((e) => setErr(e instanceof ApiError ? e.message : "Failed to load integrations"));
   }
   useEffect(load, []);
 
-  const connectedCount = useMemo(() => [...state.values()].filter((r) => r.status === "CONNECTED").length, [state]);
+  const categories = useMemo(() => {
+    const m = new Map<string, Provider[]>();
+    for (const p of providers ?? []) { const arr = m.get(p.category) ?? []; arr.push(p); m.set(p.category, arr); }
+    return [...m.entries()];
+  }, [providers]);
 
-  async function connect(p: Provider) {
-    try { await api.post(`/integrations/${p.key}/connect`, {}); load(); }
-    catch (e) { setErr(e instanceof ApiError ? e.message : "Failed"); }
+  const connectedCount = useMemo(() => (providers ?? []).filter((p) => p.status === "CONNECTED").length, [providers]);
+
+  async function run(p: Provider, action: "test" | "sync") {
+    setBusyKey(p.key); setErr(null);
+    try {
+      const r = await api.post<{ ok: boolean; message: string }>(`/integrations/${p.key}/${action}`, {});
+      setTestResult((m) => ({ ...m, [p.key]: r }));
+      load();
+    } catch (e) { setErr(e instanceof ApiError ? e.message : "Request failed"); }
+    finally { setBusyKey(null); }
   }
+
   async function disconnect(p: Provider) {
-    if (!confirm(`Disconnect ${p.name}?`)) return;
-    try { await api.post(`/integrations/${p.key}/disconnect`, {}); load(); }
+    setBusyKey(p.key); setErr(null);
+    try { await api.post(`/integrations/${p.key}/disconnect`, {}); setFlash(`${p.name} disconnected.`); load(); }
     catch (e) { setErr(e instanceof ApiError ? e.message : "Failed"); }
+    finally { setBusyKey(null); setDisconnecting(null); }
   }
 
-  if (loading) return <Spinner label="Loading integrations…" />;
+  if (!providers) return <Spinner label="Loading integrations…" />;
 
   return (
     <div className="page">
@@ -106,100 +83,173 @@ export function Integrations() {
         <span className="muted">{connectedCount} connected</span>
       </div>
       <p className="muted" style={{ marginTop: -8 }}>
-        Connect and manage third-party services. Connecting tracks the integration in your workspace;
-        secure per-provider credential/OAuth setup is rolled out provider by provider.
+        Every integration listed here passed a feasibility audit: it has an officially supported API and can run on our
+        stack. Credentials are validated live when you connect and stored encrypted; they are never sent back to the browser.
       </p>
       {err && <Banner kind="error">{err}</Banner>}
+      {flash && <Banner kind="info">{flash}</Banner>}
 
-      {REGISTRY.map((cat) => (
-        <div key={cat.category} className="panel">
-          <div className="section-head"><h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}><cat.icon size={18} /> {cat.category}</h3></div>
-          <div className="integration-grid">
-            {cat.items.map((p) => {
-              const rec = state.get(p.key);
-              const connected = rec?.status === "CONNECTED";
-              return (
-                <div key={p.key} className="integration-card">
-                  <div className="integration-head">
-                    <span className="integration-logo">{p.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase()}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="integration-name">{p.name}</div>
-                      <span className="chip-mini">{AUTH_LABEL[p.auth]}</span>
-                      <span className={`badge ${connected ? "resp-offer" : "resp-pending"}`} style={{ marginLeft: 6 }}>{connected ? "Connected" : "Not connected"}</span>
-                    </div>
-                  </div>
-                  <p className="integration-desc">{p.description}</p>
-                  {connected && rec?.lastSyncAt && <p className="muted" style={{ fontSize: 12, margin: "0 0 6px" }}>Last sync: {fmtDate(rec.lastSyncAt)}</p>}
-                  {connected && rec?.lastError && <p className="error-text" style={{ fontSize: 12 }}>{rec.lastError}</p>}
-                  <div className="row" style={{ gap: 6 }}>
-                    {connected ? (
-                      <>
-                        <button className="small" onClick={() => setConfigure(p)}>Configure</button>
-                        <button className="small danger" onClick={() => disconnect(p)}>Disconnect</button>
-                      </>
-                    ) : (
-                      <button className="small primary" onClick={() => connect(p)}>Connect</button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+      {categories.map(([category, items]) => {
+        const Icon = CATEGORY_ICON[category] ?? Bot;
+        return (
+          <div key={category} className="panel">
+            <div className="section-head"><h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}><Icon size={18} /> {category}</h3></div>
+            <div className="integration-grid">
+              {items.map((p) => (
+                <IntegrationCard
+                  key={p.key}
+                  p={p}
+                  busy={busyKey === p.key}
+                  result={testResult[p.key]}
+                  onConnect={() => setConnecting(p)}
+                  onDisconnect={() => setDisconnecting(p)}
+                  onConfigure={() => setConfiguring(p)}
+                  onTest={() => run(p, "test")}
+                  onSync={() => run(p, "sync")}
+                />
+              ))}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
 
-      {configure && (
+      {connecting && (
+        <ConnectModal
+          provider={connecting}
+          onClose={() => setConnecting(null)}
+          onConnected={(msg) => { setConnecting(null); setFlash(msg); load(); }}
+        />
+      )}
+      {configuring && (
         <ConfigureModal
-          provider={configure}
-          record={state.get(configure.key) ?? null}
-          onClose={() => setConfigure(null)}
-          onSaved={() => { setConfigure(null); load(); }}
+          provider={configuring}
+          onClose={() => setConfiguring(null)}
+          onSaved={() => { setConfiguring(null); setFlash("Settings saved."); load(); }}
+        />
+      )}
+      {disconnecting && (
+        <ConfirmDialog
+          title={`Disconnect ${disconnecting.name}?`}
+          message={<p style={{ margin: 0 }}>The stored credential will be deleted. You can reconnect at any time with a new {disconnecting.secretLabel?.toLowerCase() ?? "credential"}.</p>}
+          confirmLabel="Disconnect"
+          danger
+          busy={busyKey === disconnecting.key}
+          onCancel={() => setDisconnecting(null)}
+          onConfirm={() => disconnect(disconnecting)}
         />
       )}
     </div>
   );
 }
 
-function ConfigureModal({ provider, record, onClose, onSaved }: { provider: Provider; record: Record_ | null; onClose: () => void; onSaved: () => void }) {
-  const cfg = (record?.config ?? {}) as { schedule?: string; notes?: string };
-  const [schedule, setSchedule] = useState(cfg.schedule ?? "manual");
-  const [notes, setNotes] = useState(cfg.notes ?? "");
-  const [testMsg, setTestMsg] = useState<string | null>(null);
+function IntegrationCard({ p, busy, result, onConnect, onDisconnect, onConfigure, onTest, onSync }: {
+  p: Provider; busy: boolean; result?: { ok: boolean; message: string };
+  onConnect: () => void; onDisconnect: () => void; onConfigure: () => void; onTest: () => void; onSync: () => void;
+}) {
+  const connected = p.status === "CONNECTED";
+  const errored = p.status === "ERROR";
+  return (
+    <div className="integration-card">
+      <div className="integration-head">
+        <span className="integration-logo">{p.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase()}</span>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div className="integration-name">{p.name}</div>
+          <span className="chip-mini">{AUTH_LABEL[p.auth]}</span>
+          <span className={`badge ${connected ? "resp-offer" : errored ? "resp-no" : "resp-pending"}`} style={{ marginLeft: 6 }}>
+            {connected ? "Connected" : errored ? "Error" : p.implementation === "planned" ? "Setup required" : "Not connected"}
+          </span>
+        </div>
+      </div>
+      <p className="integration-desc">{p.description}</p>
+
+      {connected && p.secretMask && <p className="muted" style={{ fontSize: 12, margin: "0 0 4px" }}>Credential: <code>{p.secretMask}</code></p>}
+      {connected && p.lastSyncAt && <p className="muted" style={{ fontSize: 12, margin: "0 0 4px" }}>Last sync: {fmtDate(p.lastSyncAt)}{p.config.schedule && p.config.schedule !== "manual" ? ` · auto (${p.config.schedule})` : ""}</p>}
+      {p.lastError && <p className="error-text" style={{ fontSize: 12 }}>{p.lastError}</p>}
+      {result && <p className={result.ok ? "muted" : "error-text"} style={{ fontSize: 12 }}>{result.message}</p>}
+
+      <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+        {p.implementation === "planned" ? (
+          p.setupUrl && <a className="chip-mini" href={p.setupUrl} target="_blank" rel="noreferrer">Setup guide ↗</a>
+        ) : p.implementation === "env" ? (
+          <button className="small" disabled={busy} onClick={onTest}>{busy ? "Testing…" : "Test connection"}</button>
+        ) : connected || errored ? (
+          <>
+            <button className="small" disabled={busy} onClick={onTest}>{busy ? "Working…" : "Test"}</button>
+            {p.syncable && <button className="small" disabled={busy} onClick={onSync}>Sync now</button>}
+            <button className="small" onClick={onConfigure}>Configure</button>
+            <button className="small" onClick={onConnect}>Replace key</button>
+            <button className="small danger" onClick={onDisconnect}>Disconnect</button>
+          </>
+        ) : (
+          <button className="small primary" onClick={onConnect}>Connect</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ConnectModal({ provider, onClose, onConnected }: { provider: Provider; onClose: () => void; onConnected: (msg: string) => void }) {
+  const [secret, setSecret] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function connect() {
+    if (!secret.trim()) { setError(`${provider.secretLabel ?? "A credential"} is required.`); return; }
+    setBusy(true); setError(null);
+    try {
+      const r = await api.post<{ message?: string }>(`/integrations/${provider.key}/connect`, { secret: secret.trim() });
+      onConnected(r.message ?? `${provider.name} connected.`);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Connection failed");
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <Modal title={`Connect ${provider.name}`} onClose={onClose}
+      footer={<><button onClick={onClose}>Cancel</button><button className="primary" onClick={connect} disabled={busy}>{busy ? "Validating…" : "Validate & connect"}</button></>}>
+      <p className="muted" style={{ marginTop: 0 }}>{provider.description}</p>
+      <div className="field">
+        <label>{provider.secretLabel ?? "Credential"}</label>
+        <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={provider.secretHint ?? ""} autoFocus autoComplete="off" />
+      </div>
+      <p className="muted" style={{ fontSize: 12 }}>
+        The credential is checked against {provider.name} before anything is saved, then stored encrypted (AES-256-GCM).
+        It is never displayed again — only the last 4 characters are shown for identification.
+        {provider.setupUrl && <> Need a key? <a href={provider.setupUrl} target="_blank" rel="noreferrer">Create one here ↗</a></>}
+      </p>
+      {error && <div className="error-text">{error}</div>}
+    </Modal>
+  );
+}
+
+function ConfigureModal({ provider, onClose, onSaved }: { provider: Provider; onClose: () => void; onSaved: () => void }) {
+  const [schedule, setSchedule] = useState(provider.config.schedule ?? "manual");
+  const [notes, setNotes] = useState(provider.config.notes ?? "");
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   async function save() {
-    setConfirming(false);
-    setBusy(true);
+    setConfirming(false); setBusy(true); setError(null);
     try { await api.patch(`/integrations/${provider.key}`, { config: { schedule, notes } }); onSaved(); }
+    catch (e) { setError(e instanceof ApiError ? e.message : "Failed to save"); }
     finally { setBusy(false); }
-  }
-  async function test() {
-    const r = await api.post<{ ok: boolean; message: string }>(`/integrations/${provider.key}/test`, {});
-    setTestMsg(r.message);
   }
 
   return (
     <Modal title={`Configure ${provider.name}`} onClose={onClose}
       footer={<><button onClick={onClose}>Cancel</button><button className="primary" onClick={() => setConfirming(true)} disabled={busy}>{busy ? "Saving…" : "Save"}</button></>}>
       <div className="field">
-        <label>Synchronization</label>
+        <label>Automatic synchronization</label>
         <select value={schedule} onChange={(e) => setSchedule(e.target.value)}>
           <option value="manual">Manual only</option>
-          <option value="hourly">Every hour</option>
-          <option value="daily">Daily</option>
+          {provider.syncable && <option value="hourly">Every hour</option>}
+          {provider.syncable && <option value="daily">Daily</option>}
         </select>
+        <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Automatic sync re-validates the connection on schedule and records failures on this page and in the activity log.</p>
       </div>
       <div className="field"><label>Notes</label><textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Internal notes about this connection" /></div>
-      <div className="row" style={{ gap: 8, alignItems: "center" }}>
-        <button className="small" onClick={test}>Test connection</button>
-        {testMsg && <span className="muted" style={{ fontSize: 12 }}>{testMsg}</span>}
-      </div>
-      <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
-        {provider.auth === "smtp"
-          ? "SMTP is configured on the API service via SMTP_* environment variables."
-          : `Secure ${AUTH_LABEL[provider.auth]} connection for ${provider.name} is coming soon; this records the integration and its sync preferences in the meantime.`}
-      </p>
+      {error && <div className="error-text">{error}</div>}
       {confirming && <ConfirmChanges busy={busy} onCancel={() => setConfirming(false)} onConfirm={save} />}
     </Modal>
   );
