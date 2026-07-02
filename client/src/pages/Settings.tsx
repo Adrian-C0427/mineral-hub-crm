@@ -2,7 +2,6 @@ import { useState } from "react";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Banner } from "../components/ui";
-import { OrgSettings } from "../components/OrgSettings";
 import { PhoneInput } from "../components/PhoneInput";
 
 export function Settings() {
@@ -70,8 +69,6 @@ export function Settings() {
           <button className="primary" disabled={busy} style={{ marginTop: 8 }}>{busy ? "Saving…" : "Save changes"}</button>
         </form>
       </div>
-
-      <OrgSettings />
     </div>
   );
 }

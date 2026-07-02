@@ -16,9 +16,10 @@ const ASSIGNABLE: OrgRole[] = ["ADMIN", "MANAGER", "MEMBER", "VIEWER"];
 
 type Tab = "org" | "users" | "roles" | "owner";
 
-export function OrgSettings() {
+export function OrgSettings({ initialTab }: { initialTab?: Tab } = {}) {
   const { user, refresh, can, isOrgOwner } = useAuth();
-  const [tab, setTab] = useState<Tab>("org");
+  const [tab, setTab] = useState<Tab>(initialTab ?? "org");
+  useEffect(() => { if (initialTab) setTab(initialTab); }, [initialTab]);
   const [org, setOrg] = useState<OrgInfo | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
