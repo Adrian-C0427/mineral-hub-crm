@@ -91,7 +91,7 @@ function Card({ deal, onDragStart, onClick }: { deal: DealSummary; onDragStart: 
       <div className="dc-name">{deal.name}</div>
       <div className="dc-meta">
         <span>{[deal.counties.join(", "), deal.state].filter(Boolean).join(", ") || "—"}</span>
-        <span>{num(deal.acreageNma)} NMA</span>
+        <span>{num(deal.nra)} NRA</span>
       </div>
       <div className="dc-meta" style={{ marginTop: 4 }}>
         <span className={`badge priority-${deal.priority.toLowerCase()}`}>{deal.priority[0] + deal.priority.slice(1).toLowerCase()}</span>
