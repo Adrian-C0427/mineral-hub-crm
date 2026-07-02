@@ -9,8 +9,19 @@ import { useAuth } from "../auth/AuthContext";
 import type { DealSummary } from "../types";
 
 type Filter = "ALL" | "HIGH" | "NO_BUYER";
+type Scope = "all" | "active" | "closed" | "archived";
 
-export function Deals() {
+const SCOPE_TITLE: Record<Scope, string> = { all: "Deals", active: "Active Deals", closed: "Closed Deals", archived: "Archived Deals" };
+
+/** Active = still in play; Closed = won; Archived = dead. */
+function inScope(d: DealSummary, scope: Scope): boolean {
+  if (scope === "active") return d.stage !== "CLOSED" && d.stage !== "DEAD";
+  if (scope === "closed") return d.stage === "CLOSED";
+  if (scope === "archived") return d.stage === "DEAD";
+  return true;
+}
+
+export function Deals({ scope = "all" }: { scope?: Scope }) {
   const { can } = useAuth();
   const [deals, setDeals] = useState<DealSummary[] | null>(null);
   const [filter, setFilter] = useState<Filter>("ALL");
@@ -20,14 +31,14 @@ export function Deals() {
   function load() { api.get<DealSummary[]>("/deals").then(setDeals); }
   useEffect(load, []);
 
-  const overdue = useMemo(() => (deals ?? []).filter((d) => d.isOverdue), [deals]);
+  const scoped = useMemo(() => (deals ?? []).filter((d) => inScope(d, scope)), [deals, scope]);
+  const overdue = useMemo(() => scoped.filter((d) => d.isOverdue), [scoped]);
 
   const filtered = useMemo(() => {
-    if (!deals) return [];
-    if (filter === "HIGH") return deals.filter((d) => d.priority === "HIGH");
-    if (filter === "NO_BUYER") return deals.filter((d) => !d.selectedBuyer);
-    return deals;
-  }, [deals, filter]);
+    if (filter === "HIGH") return scoped.filter((d) => d.priority === "HIGH");
+    if (filter === "NO_BUYER") return scoped.filter((d) => !d.selectedBuyer);
+    return scoped;
+  }, [scoped, filter]);
 
   if (!deals) return <Spinner />;
 
@@ -52,7 +63,7 @@ export function Deals() {
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Deals</h1>
+        <h1>{SCOPE_TITLE[scope]}</h1>
         {can("createDeals") && <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>}
       </div>
 
