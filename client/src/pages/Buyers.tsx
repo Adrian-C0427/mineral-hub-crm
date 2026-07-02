@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { RelationshipDot, Spinner, Banner } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
+import { NewBuyerModal } from "../components/NewBuyerModal";
 import { pct } from "../lib/format";
 import { useAuth } from "../auth/AuthContext";
 
@@ -20,6 +21,7 @@ export function Buyers() {
   const { can } = useAuth();
   const [buyers, setBuyers] = useState<BuyerRow[] | null>(null);
   const [showImport, setShowImport] = useState(false);
+  const [showNew, setShowNew] = useState(false);
   const nav = useNavigate();
 
   function load() { api.get<BuyerRow[]>("/buyers").then(setBuyers); }
@@ -36,22 +38,13 @@ export function Buyers() {
     { key: "deals", header: "Deals", type: "number", align: "right", value: (b) => b.closedDeals },
   ];
 
-  async function newBuyer() {
-    const name = prompt("Company name for new buyer:");
-    if (!name) return;
-    try {
-      const { id } = await api.post<{ id: string }>("/buyers", { name, companyName: name });
-      nav(`/buyers/${id}`);
-    } catch (e) { alert(e instanceof ApiError ? e.message : "Failed"); }
-  }
-
   return (
     <div className="page">
       <div className="page-header">
         <h1>Buyers</h1>
         <div className="row">
           {can("createBuyers") && <button onClick={() => setShowImport((s) => !s)}>{showImport ? "Close import" : "Import CSV"}</button>}
-          {can("createBuyers") && <button className="primary" onClick={newBuyer}>+ New Buyer</button>}
+          {can("createBuyers") && <button className="primary" onClick={() => setShowNew(true)}>+ New Buyer</button>}
         </div>
       </div>
 
@@ -65,6 +58,7 @@ export function Buyers() {
       />
 
       {showImport && <ImportWizard onDone={() => { load(); }} />}
+      {showNew && <NewBuyerModal onClose={() => setShowNew(false)} onCreated={(id) => { setShowNew(false); nav(`/buyers/${id}`); }} />}
     </div>
   );
 }

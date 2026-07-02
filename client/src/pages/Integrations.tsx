@@ -4,7 +4,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { api, ApiError } from "../api/client";
-import { Spinner, Banner, Modal } from "../components/ui";
+import { Spinner, Banner, Modal, ConfirmChanges } from "../components/ui";
 import { fmtDate } from "../lib/format";
 
 type Auth = "oauth" | "apikey" | "smtp" | "builtin";
@@ -166,8 +166,10 @@ function ConfigureModal({ provider, record, onClose, onSaved }: { provider: Prov
   const [notes, setNotes] = useState(cfg.notes ?? "");
   const [testMsg, setTestMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   async function save() {
+    setConfirming(false);
     setBusy(true);
     try { await api.patch(`/integrations/${provider.key}`, { config: { schedule, notes } }); onSaved(); }
     finally { setBusy(false); }
@@ -179,7 +181,7 @@ function ConfigureModal({ provider, record, onClose, onSaved }: { provider: Prov
 
   return (
     <Modal title={`Configure ${provider.name}`} onClose={onClose}
-      footer={<><button onClick={onClose}>Cancel</button><button className="primary" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</button></>}>
+      footer={<><button onClick={onClose}>Cancel</button><button className="primary" onClick={() => setConfirming(true)} disabled={busy}>{busy ? "Saving…" : "Save"}</button></>}>
       <div className="field">
         <label>Synchronization</label>
         <select value={schedule} onChange={(e) => setSchedule(e.target.value)}>
@@ -198,6 +200,7 @@ function ConfigureModal({ provider, record, onClose, onSaved }: { provider: Prov
           ? "SMTP is configured on the API service via SMTP_* environment variables."
           : `Secure ${AUTH_LABEL[provider.auth]} connection for ${provider.name} is coming soon; this records the integration and its sync preferences in the meantime.`}
       </p>
+      {confirming && <ConfirmChanges busy={busy} onCancel={() => setConfirming(false)} onConfirm={save} />}
     </Modal>
   );
 }
