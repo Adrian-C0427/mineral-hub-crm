@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, lazy, Suspense } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -6,6 +6,7 @@ import {
   Spinner, PriorityBadge, StageBadge, MetricCard,
   MatchPercentBadge, MatchBar, Banner,
 } from "../components/ui";
+import { SortableTable, type Column } from "../components/SortableTable";
 import { StageChangeModal } from "../components/StageChangeModal";
 import { LogContactModal } from "../components/LogContactModal";
 import { BuyerActivitySection } from "../components/BuyerActivitySection";
@@ -13,6 +14,7 @@ import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { AbstractMultiPicker, useAbstractLabels } from "../components/AbstractPicker";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
+import { operatorsForCounties } from "../lib/operators";
 import { money, num, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import type { BuyerActivityRow, DealSummary, MatchRec, UserLite } from "../types";
@@ -26,11 +28,18 @@ interface DealDetailData extends DealSummary {
   deadReason: string | null;
   buyerActivity: BuyerActivityRow[];
   offers: { id: string; buyer: { id: string; name: string }; amount: number; status: string; conditions: string | null; expirationDate: string | null; dateSubmitted: string }[];
-  files: { id: string; category: string; filename: string; sizeBytes: number; createdAt: string }[];
+  files: DocFile[];
   metrics: { buyersContacted: number; interested: number; offers: number; highOffer: number | null };
 }
 
-const FILE_CATEGORIES = ["PSA", "LPOA", "DEED", "PLAT_MAP", "TITLE_DOC", "OTHER"];
+interface DocFile {
+  id: string; category: string; folder: string; filename: string; mimeType: string;
+  sizeBytes: number; uploadedBy: string | null; createdAt: string; updatedAt: string; versionCount: number;
+}
+
+// Default document folders. `folder` is a free string server-side, so this list
+// can grow (or become org-configurable) without any schema/route change.
+const DOC_FOLDERS = ["Seller PSA", "Wholesale PSA", "Check Stubs", "Division Orders", "Deeds", "Title", "Other"];
 
 interface EditTarget { id: string; name: string; initial?: { status?: BuyerActivityRow["status"]; assignedTeamMemberId?: string | null; responseReceived?: boolean; notes?: string | null; dateSent?: string | null; nextFollowUpDate?: string | null } }
 
@@ -184,9 +193,9 @@ export function DealDetail() {
                 <div className="match-card-head">
                   {can("editDeals") && <input type="checkbox" checked={selected.has(m.buyerId)} onChange={() => toggleMatch(m.buyerId)} />}
                   <span className="match-rank">#{m.rank}</span>
-                  <Link to={`/buyers/${m.buyerId}`} style={{ fontWeight: 600 }}>{m.buyerName}</Link>
-                  <span className="muted">· {m.companyName}</span>
-                  <span className="spacer" />
+                  {/* Company name only — the primary identifier when evaluating matches.
+                      Contact person is available on the Buyer Profile. */}
+                  <Link to={`/buyers/${m.buyerId}`} className="match-name" title={m.companyName || m.buyerName}>{m.companyName || m.buyerName}</Link>
                   <MatchPercentBadge value={m.matchPercent} />
                 </div>
                 <MatchBar value={m.matchPercent} />
@@ -206,7 +215,7 @@ export function DealDetail() {
       </div>
 
       {/* Documents */}
-      <DocumentsSection dealId={deal.id} files={deal.files} onChanged={loadDeal} canDelete={can("deleteDeals")} />
+      <DocumentsSection dealId={deal.id} files={deal.files} onChanged={loadDeal} canEdit={can("editDeals")} canDelete={can("deleteDeals")} />
 
       {showStage && (
         <StageChangeModal
@@ -245,6 +254,15 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
   const [f, setF] = useState(deal);
   const abstractLabel = useAbstractLabels(deal.abstractIds);
   useEffect(() => setF(deal), [deal]);
+
+  // Operator suggestions come from the deal's counties (same source as the Map
+  // page), recomputed whenever the selected counties change.
+  const [operatorOptions, setOperatorOptions] = useState<string[]>([]);
+  useEffect(() => {
+    let live = true;
+    operatorsForCounties(f.counties).then((ops) => { if (live) setOperatorOptions(ops); });
+    return () => { live = false; };
+  }, [f.counties]);
   const set = (k: keyof DealDetailData) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setF((p) => ({ ...p, [k]: e.target.value === "" ? null : e.target.value } as DealDetailData));
   const setNum = (k: keyof DealDetailData) => (e: React.ChangeEvent<HTMLInputElement>) =>
@@ -285,7 +303,17 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
           <Fld l="NRA"><input type="number" value={f.nra ?? ""} onChange={setNum("nra")} /></Fld>
           <Fld l="Our Price"><input type="number" value={f.ourPrice ?? ""} onChange={setNum("ourPrice")} /></Fld>
           <Fld l="Ask Price (to buyers)"><input type="number" value={f.askPrice ?? ""} onChange={setNum("askPrice")} /></Fld>
-          <Fld l="Operator"><input value={f.operator ?? ""} onChange={set("operator")} /></Fld>
+          <Fld l="Operator">
+            <input
+              list="deal-operator-options"
+              value={f.operator ?? ""}
+              onChange={set("operator")}
+              placeholder={operatorOptions.length ? `Search ${operatorOptions.length} operators in these counties…` : (f.counties.length ? "No operator data for these counties" : "Add a county to see operators")}
+            />
+            <datalist id="deal-operator-options">
+              {operatorOptions.map((o) => <option key={o} value={o} />)}
+            </datalist>
+          </Fld>
           <Fld l="Abstract"><AbstractMultiPicker value={f.abstractIds} counties={f.counties} onChange={setArr("abstractIds")} /></Fld>
         </div>
       )}
@@ -360,63 +388,128 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
   );
 }
 
-function DocumentsSection({ dealId, files, onChanged, canDelete }: { dealId: string; files: DealDetailData["files"]; onChanged: () => void; canDelete: boolean }) {
-  const [category, setCategory] = useState("PSA");
+/** Human file size and a short type label (from extension, else mime subtype). */
+function humanSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+function fileType(f: DocFile): string {
+  const ext = f.filename.includes(".") ? f.filename.split(".").pop()!.toUpperCase() : "";
+  if (ext && ext.length <= 5) return ext;
+  return (f.mimeType.split("/")[1] || f.mimeType || "file").toUpperCase();
+}
+const isPreviewable = (f: DocFile) => f.mimeType === "application/pdf" || f.mimeType.startsWith("image/");
+
+function DocumentsSection({ dealId, files, onChanged, canEdit, canDelete }: { dealId: string; files: DocFile[]; onChanged: () => void; canEdit: boolean; canDelete: boolean }) {
+  const [folder, setFolder] = useState(DOC_FOLDERS[0]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const uploadRef = useRef<HTMLInputElement>(null);
+  const replaceRef = useRef<HTMLInputElement>(null);
+  const replaceId = useRef<string | null>(null);
 
-  async function upload(file: File) {
+  // Folders = the defaults, plus any folder already present that isn't a default.
+  const folders = useMemo(() => {
+    const present = new Set(files.map((f) => f.folder || "Other"));
+    return [...DOC_FOLDERS, ...[...present].filter((p) => !DOC_FOLDERS.includes(p)).sort()];
+  }, [files]);
+  const countByFolder = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const f of files) m.set(f.folder || "Other", (m.get(f.folder || "Other") ?? 0) + 1);
+    return m;
+  }, [files]);
+  const inFolder = useMemo(() => files.filter((f) => (f.folder || "Other") === folder), [files, folder]);
+
+  async function run(fn: () => Promise<unknown>) {
     setBusy(true); setErr(null);
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      form.append("dealId", dealId);
-      form.append("category", category);
-      await api.upload("/files", form);
-      onChanged();
-    } catch (e) { setErr(e instanceof Error ? e.message : "Upload failed"); }
+    try { await fn(); onChanged(); }
+    catch (e) { setErr(e instanceof Error ? e.message : "Something went wrong"); }
     finally { setBusy(false); }
   }
-
-  async function download(fileId: string) {
-    const { url } = await api.get<{ url: string }>(`/files/${fileId}/download`);
+  const upload = (file: File) => run(async () => {
+    const form = new FormData();
+    form.append("file", file); form.append("dealId", dealId); form.append("folder", folder);
+    await api.upload("/files", form);
+  });
+  const replace = (file: File) => run(async () => {
+    const form = new FormData(); form.append("file", file);
+    await api.upload(`/files/${replaceId.current}/replace`, form);
+  });
+  const rename = (f: DocFile) => {
+    const filename = window.prompt("Rename document", f.filename);
+    if (filename && filename.trim() && filename !== f.filename) run(() => api.patch(`/files/${f.id}`, { filename: filename.trim() }));
+  };
+  const move = (f: DocFile, toFolder: string) => { if (toFolder !== f.folder) run(() => api.patch(`/files/${f.id}`, { folder: toFolder })); };
+  const open = async (id: string, inline: boolean) => {
+    const { url } = await api.get<{ url: string }>(`/files/${id}/download${inline ? "?inline=1" : ""}`);
     window.open(url, "_blank");
-  }
+  };
+
+  const columns: Column<DocFile>[] = [
+    {
+      key: "filename", header: "Document Name", value: (f) => f.filename.toLowerCase(),
+      render: (f) => <span title={f.filename}>{f.filename}{f.versionCount > 0 && <span className="chip-mini" style={{ marginLeft: 6 }} title={`${f.versionCount} previous version(s)`}>v{f.versionCount + 1}</span>}</span>,
+    },
+    { key: "createdAt", header: "Date Uploaded", type: "date", value: (f) => f.createdAt, render: (f) => fmtDate(f.createdAt) },
+    { key: "updatedAt", header: "Date Modified", type: "date", value: (f) => f.updatedAt, render: (f) => fmtDate(f.updatedAt) },
+    { key: "uploadedBy", header: "Uploaded By", value: (f) => f.uploadedBy ?? "" , render: (f) => f.uploadedBy ?? "—" },
+    { key: "type", header: "File Type", value: (f) => fileType(f) },
+    { key: "sizeBytes", header: "File Size", align: "right", value: (f) => f.sizeBytes, render: (f) => humanSize(f.sizeBytes) },
+    {
+      key: "actions", header: "", value: () => "", align: "right", width: "1%",
+      render: (f) => (
+        <div className="row" style={{ gap: 4, justifyContent: "flex-end", flexWrap: "nowrap" }}>
+          {isPreviewable(f) && <button className="small" onClick={() => open(f.id, true)}>Preview</button>}
+          <button className="small" onClick={() => open(f.id, false)}>Download</button>
+          {canEdit && <button className="small" onClick={() => rename(f)}>Rename</button>}
+          {canEdit && (
+            <select value={f.folder || "Other"} title="Move to folder" style={{ width: "auto", padding: "4px 6px" }}
+              onChange={(e) => move(f, e.target.value)}>
+              {folders.map((fl) => <option key={fl} value={fl}>{fl === (f.folder || "Other") ? fl : `Move → ${fl}`}</option>)}
+            </select>
+          )}
+          {canEdit && <button className="small" onClick={() => { replaceId.current = f.id; replaceRef.current?.click(); }}>Replace</button>}
+          {canDelete && <button className="small danger" onClick={() => run(() => api.del(`/files/${f.id}`))}>Delete</button>}
+        </div>
+      ),
+    },
+  ];
 
   return (
     <div className="panel">
-      <div className="section-head"><h3>Documents</h3></div>
-      <div className="row" style={{ marginBottom: 12 }}>
-        <select style={{ width: 160 }} value={category} onChange={(e) => setCategory(e.target.value)}>
-          {FILE_CATEGORIES.map((c) => <option key={c} value={c}>{c.replace("_", " ")}</option>)}
-        </select>
-        <label className="chip" style={{ margin: 0 }}>
-          {busy ? "Uploading…" : "Upload file"}
-          <input type="file" style={{ display: "none" }} disabled={busy} onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} />
-        </label>
+      <div className="section-head"><h3>Documents</h3><span className="muted">Organized by folder · sortable</span></div>
+
+      <div className="dm-toolbar" style={{ background: "transparent", border: "none", padding: 0 }}>
+        {folders.map((fl) => (
+          <span key={fl} className={`chip ${folder === fl ? "active" : ""}`} onClick={() => setFolder(fl)}>
+            {fl} <span className="muted" style={{ marginLeft: 4 }}>{countByFolder.get(fl) ?? 0}</span>
+          </span>
+        ))}
       </div>
-      {err && <div className="error-text">{err}</div>}
-      {files.length === 0 ? <p className="muted">No documents yet.</p> : (
-        <div className="table-scroll">
-          <table className="data-table">
-            <thead><tr><th>Category</th><th>Filename</th><th className="right">Size</th><th>Uploaded</th><th></th></tr></thead>
-            <tbody>
-              {files.map((f) => (
-                <tr key={f.id}>
-                  <td><span className="badge stage-under_contract">{f.category.replace("_", " ")}</span></td>
-                  <td>{f.filename}</td>
-                  <td className="right">{(f.sizeBytes / 1024).toFixed(0)} KB</td>
-                  <td>{fmtDate(f.createdAt)}</td>
-                  <td className="right">
-                    <button className="small" onClick={() => download(f.id)}>Download</button>
-                    {canDelete && <button className="small danger" style={{ marginLeft: 6 }} onClick={async () => { await api.del(`/files/${f.id}`); onChanged(); }}>Delete</button>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+
+      <div className="row" style={{ margin: "12px 0", justifyContent: "space-between" }}>
+        <strong>{folder}</strong>
+        {canEdit && (
+          <label className="chip" style={{ margin: 0 }}>
+            {busy ? "Working…" : `Upload to ${folder}`}
+            <input ref={uploadRef} type="file" style={{ display: "none" }} disabled={busy}
+              onChange={(e) => { if (e.target.files?.[0]) upload(e.target.files[0]); e.target.value = ""; }} />
+          </label>
+        )}
+      </div>
+
+      {err && <Banner kind="error">{err}</Banner>}
+
+      {inFolder.length === 0 ? (
+        <p className="muted">No documents in {folder}.</p>
+      ) : (
+        <SortableTable columns={columns} rows={inFolder} rowKey={(f) => f.id} defaultSort={{ key: "createdAt", dir: "desc" }} />
       )}
+
+      {/* Hidden input used by per-row Replace buttons. */}
+      <input ref={replaceRef} type="file" style={{ display: "none" }}
+        onChange={(e) => { if (e.target.files?.[0]) replace(e.target.files[0]); e.target.value = ""; }} />
     </div>
   );
 }

@@ -541,7 +541,10 @@ model FileAttachment {
   deal             Deal?        @relation(fields: [dealId], references: [id], onDelete: Cascade)
   buyerId          String?
   buyer            Buyer?       @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  // Legacy fixed category, kept for back-compat. The folder-based document
+  // manager uses `folder` (a free string) so new folders need no schema change.
   category         FileCategory @default(OTHER)
+  folder           String       @default("Other")
   filename         String
   mimeType         String
   sizeBytes        Int
@@ -549,6 +552,15 @@ model FileAttachment {
   uploadedByUserId String?
   uploadedBy       User?        @relation(fields: [uploadedByUserId], references: [id], onDelete: SetNull)
   createdAt        DateTime     @default(now())
+  // @default(now()) backfills existing rows; @updatedAt maintains it thereafter.
+  updatedAt        DateTime     @default(now()) @updatedAt
+
+  // Replace-with-history: a replaced file points at the record that superseded
+  // it, so the current version is supersededById == null; prior versions are
+  // reachable via `supersedes`.
+  supersededById String?
+  supersededBy   FileAttachment?  @relation("FileSupersede", fields: [supersededById], references: [id], onDelete: SetNull)
+  supersedes     FileAttachment[] @relation("FileSupersede")
 
   @@index([dealId])
   @@index([buyerId])

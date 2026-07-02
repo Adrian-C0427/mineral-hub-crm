@@ -146,7 +146,12 @@ dealsRouter.get(
         ...dealInclude,
         stageHistory: { orderBy: { createdAt: "asc" }, include: { changedBy: { select: { name: true } } } },
         offers: { include: { buyer: { select: { id: true, name: true, companyName: true } } }, orderBy: { dateSubmitted: "desc" } },
-        files: { include: { uploadedBy: { select: { name: true } } }, orderBy: { createdAt: "desc" } },
+        // Only current versions; prior (superseded) versions stay reachable via /files/:id/versions.
+        files: {
+          where: { supersededById: null },
+          include: { uploadedBy: { select: { name: true } }, _count: { select: { supersedes: true } } },
+          orderBy: { createdAt: "desc" },
+        },
         buyerActivity: {
           include: {
             buyer: { include: { buyBox: true } },
@@ -222,11 +227,14 @@ dealsRouter.get(
       files: deal.files.map((f) => ({
         id: f.id,
         category: f.category,
+        folder: f.folder,
         filename: f.filename,
         mimeType: f.mimeType,
         sizeBytes: f.sizeBytes,
         uploadedBy: f.uploadedBy?.name ?? null,
         createdAt: f.createdAt,
+        updatedAt: f.updatedAt,
+        versionCount: f._count.supersedes,
       })),
       buyerActivity: activity,
       metrics: { buyersContacted, interested, offers: offerCount, highOffer },
