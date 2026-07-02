@@ -14,6 +14,7 @@
     "prisma:migrate:dev": "prisma migrate dev",
     "bootstrap:admin": "tsx src/scripts/bootstrapAdmin.ts",
     "research:sample": "tsx src/scripts/seedResearchSample.ts",
+    "wells:sample": "tsx src/scripts/seedWellsSample.ts",
     "test": "vitest run"
   },
   "dependencies": {

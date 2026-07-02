@@ -62,6 +62,22 @@ export const env = {
     SIGNED_URL_TTL_SECONDS: parseInt(process.env.S3_SIGNED_URL_TTL_SECONDS ?? "300", 10),
   },
   MAX_UPLOAD_BYTES: parseInt(process.env.MAX_UPLOAD_BYTES ?? String(25 * 1024 * 1024), 10),
+  // Public URL of the frontend SPA. Used to build password-reset links and the
+  // OAuth post-login redirect. Defaults to the first configured CORS origin.
+  APP_URL: (process.env.APP_URL ?? (process.env.CORS_ORIGINS ?? "http://localhost:5173").split(",")[0]).trim().replace(/\/$/, ""),
+  // Public URL of THIS API service (for OAuth redirect_uri registration).
+  API_URL: (process.env.API_URL ?? "http://localhost:4000").trim().replace(/\/$/, ""),
+  PASSWORD_RESET_TTL_MINUTES: parseInt(process.env.PASSWORD_RESET_TTL_MINUTES ?? "60", 10),
+  // OAuth / SSO providers. Each is inert until its client id + secret are set.
+  OAUTH: {
+    GOOGLE: { CLIENT_ID: process.env.GOOGLE_CLIENT_ID ?? "", CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET ?? "" },
+    MICROSOFT: {
+      CLIENT_ID: process.env.MICROSOFT_CLIENT_ID ?? "",
+      CLIENT_SECRET: process.env.MICROSOFT_CLIENT_SECRET ?? "",
+      // Directory (tenant) id, or "common" for multi-tenant + personal accounts.
+      TENANT: process.env.MICROSOFT_TENANT ?? "common",
+    },
+  },
   // Outbound email (SMTP). Feature is inert until HOST/USER/PASS are set.
   SMTP: {
     HOST: process.env.SMTP_HOST ?? "",

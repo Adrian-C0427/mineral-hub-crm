@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
-  LayoutDashboard, Briefcase, Workflow, Users, Map as MapIcon, BarChart3, Telescope,
+  LayoutDashboard, Briefcase, Workflow, Users, Map as MapIcon, BarChart3, Telescope, TrendingDown,
   Receipt, Building2, Settings as SettingsIcon, ChevronRight, ChevronDown, LogOut,
   type LucideIcon,
 } from "lucide-react";
@@ -31,6 +31,7 @@ const NAV: NavItem[] = [
   { label: "Buyers", icon: Users, to: "/buyers", perm: "viewBuyers" },
   { label: "Map", icon: MapIcon, to: "/map", perm: "viewMap" },
   { label: "Research", icon: Telescope, to: "/research", perm: "viewResearch" },
+  { label: "Well Analysis", icon: TrendingDown, to: "/valuation", perm: "viewResearch" },
   { label: "Reports", icon: BarChart3, to: "/reports", perm: "viewReports" },
   { label: "Expenses", icon: Receipt, to: "/expenses", perm: "manageExpenses" },
   { label: "Organization", icon: Building2, to: "/organization", perm: "orgSection" },

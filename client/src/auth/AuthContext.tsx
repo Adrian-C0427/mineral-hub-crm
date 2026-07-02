@@ -25,11 +25,17 @@ export interface RegisterPayload {
   joinToken?: string;
 }
 
+/** login() resolves to this: either signed in, or a 2FA challenge is required. */
+export type LoginResult = { status: "ok" } | { status: "twoFactorRequired" };
+
 interface AuthState {
   user: CurrentUser | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  /** Pass totpCode to complete a 2FA challenge. Returns whether 2FA is needed. */
+  login: (email: string, password: string, totpCode?: string) => Promise<LoginResult>;
   register: (payload: RegisterPayload) => Promise<void>;
+  /** Adopt a session token obtained out-of-band (OAuth redirect). */
+  loginWithToken: (token: string) => Promise<void>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
   isOwner: boolean;
@@ -55,10 +61,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const r = await api.post<{ token: string; user: CurrentUser }>("/auth/login", { email, password });
+  const login = async (email: string, password: string, totpCode?: string): Promise<LoginResult> => {
+    const r = await api.post<{ token?: string; twoFactorRequired?: boolean }>("/auth/login", { email, password, ...(totpCode ? { totpCode } : {}) });
+    if (r.twoFactorRequired || !r.token) return { status: "twoFactorRequired" };
     setAuthToken(r.token);
     // Fetch the full profile (incl. organization) after authenticating.
+    await refresh();
+    return { status: "ok" };
+  };
+
+  const loginWithToken = async (token: string) => {
+    setAuthToken(token);
     await refresh();
   };
 
@@ -85,7 +98,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider
       value={{
-        user, loading, login, register, logout, refresh,
+        user, loading, login, register, loginWithToken, logout, refresh,
         isOwner: user?.role === "OWNER",
         isOrgOwner: user?.orgRole === "OWNER",
         can,

@@ -3,6 +3,8 @@ import { useAuth } from "./auth/AuthContext";
 import { Spinner } from "./components/ui";
 import { Sidebar } from "./components/Sidebar";
 import { Login } from "./pages/Login";
+import { ResetPassword } from "./pages/ResetPassword";
+import { OAuthCallback } from "./pages/OAuthCallback";
 import { Dashboard } from "./pages/Dashboard";
 import { Pipeline } from "./pages/Pipeline";
 import { Deals } from "./pages/Deals";
@@ -19,6 +21,8 @@ const MapView = lazy(() => import("./pages/MapView").then((m) => ({ default: m.M
 const Expenses = lazy(() => import("./pages/Expenses").then((m) => ({ default: m.Expenses })));
 const Reports = lazy(() => import("./pages/Reports").then((m) => ({ default: m.Reports })));
 const Research = lazy(() => import("./pages/Research").then((m) => ({ default: m.Research })));
+// Well valuation shares the recharts/jsPDF bundle profile; load on demand too.
+const Valuation = lazy(() => import("./pages/Valuation").then((m) => ({ default: m.Valuation })));
 
 /** Redirect to Dashboard if the user lacks the required permission. */
 function Guard({ perm, children }: { perm: string; children: ReactNode }) {
@@ -30,7 +34,16 @@ export function App() {
   const { user, loading } = useAuth();
 
   if (loading) return <Spinner label="Loading Mineral Hub…" />;
-  if (!user) return <Login />;
+  if (!user) {
+    // Public routes reachable while signed out (emailed reset link, OAuth return).
+    return (
+      <Routes>
+        <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/auth/callback" element={<OAuthCallback />} />
+        <Route path="*" element={<Login />} />
+      </Routes>
+    );
+  }
 
   return (
     <div className="app-shell with-sidebar">
@@ -48,6 +61,7 @@ export function App() {
           <Route path="/buyers/:id" element={<Guard perm="viewBuyers"><BuyerProfile /></Guard>} />
           <Route path="/reports" element={<Guard perm="viewReports"><Suspense fallback={<Spinner label="Loading reports…" />}><Reports /></Suspense></Guard>} />
           <Route path="/research" element={<Guard perm="viewResearch"><Suspense fallback={<Spinner label="Loading research…" />}><Research /></Suspense></Guard>} />
+          <Route path="/valuation" element={<Guard perm="viewResearch"><Suspense fallback={<Spinner label="Loading well analysis…" />}><Valuation /></Suspense></Guard>} />
           <Route path="/expenses" element={<Guard perm="manageExpenses"><Suspense fallback={<Spinner label="Loading expenses…" />}><Expenses /></Suspense></Guard>} />
           <Route path="/map" element={<Guard perm="viewMap"><Suspense fallback={<Spinner label="Loading map…" />}><MapView /></Suspense></Guard>} />
           <Route path="/organization" element={<Organization />} />

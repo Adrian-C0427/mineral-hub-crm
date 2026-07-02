@@ -127,6 +127,8 @@ model Organization {
   researchDocuments ResearchDocument[]
   researchPermits   ResearchPermit[]
   researchIngests   ResearchIngestRun[]
+  researchWells     ResearchWell[]
+  wellAnalyses      WellAnalysis[]
 }
 
 enum IntegrationStatus {
@@ -222,11 +224,21 @@ model User {
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   orgRole        OrgRole?
 
+  // Two-factor auth (TOTP). Secret is base32; recovery codes are stored hashed.
+  // NOTE: totpSecret is stored plaintext here — encrypt at rest before this
+  // holds real accounts (see auth follow-ups).
+  totpSecret        String?
+  totpEnabled       Boolean  @default(false)
+  totpRecoveryCodes String[] @default([])
+
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   // Last authenticated request (throttled). Powers "last activity" in the
   // member management view.
   lastActiveAt DateTime?
+
+  passwordResetTokens PasswordResetToken[]
+  oauthAccounts       OAuthAccount[]
 
   ownedDeals         Deal[]              @relation("DealRelationshipOwner")
   buyerOwnerships    BuyerOwner[]
@@ -239,6 +251,34 @@ model User {
   expenses           Expense[]
 
   @@index([organizationId])
+}
+
+// Single-use, time-limited password reset token. Only the SHA-256 hash of the
+// token is stored; the raw token lives only in the emailed link.
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// A linked external identity (Google, Microsoft) for OAuth/SSO sign-in.
+model OAuthAccount {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider          String // "google" | "microsoft"
+  providerAccountId String // stable subject id from the provider
+  email             String?
+  createdAt         DateTime @default(now())
+
+  @@unique([provider, providerAccountId])
+  @@index([userId])
 }
 
 // ---------------------------------------------------------------------------
@@ -633,6 +673,7 @@ enum WellTrajectory {
 enum ResearchIngestKind {
   DOCUMENTS
   PERMITS
+  PRODUCTION
 }
 
 enum ResearchIngestStatus {
@@ -731,6 +772,99 @@ model ResearchPermit {
   @@index([organizationId, state, county, activityDate])
   @@index([organizationId, operatorNorm])
   @@index([organizationId, activityDate])
+}
+
+enum WellStatus {
+  PRODUCING
+  SHUT_IN
+  PLUGGED
+  INACTIVE
+  UNKNOWN
+}
+
+// A producing (or historically producing) well used by the Well Production
+// Analysis & Valuation tool. Kept separate from ResearchPermit: permits track
+// pre-drill lifecycle events, wells carry the production stream we value.
+model ResearchWell {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  apiNumber String? // 10/14-digit API; primary dedupe key when present
+  name      String // well name + number, e.g. "SMITH UNIT 1H"
+  operator  String?
+  leaseName String?
+  fieldName String?
+  formation String?
+
+  state  String
+  county String
+
+  status     WellStatus     @default(UNKNOWN)
+  trajectory WellTrajectory @default(UNKNOWN)
+  wellType   String? // "OIL" | "GAS" | mixed descriptors as reported
+
+  spudDate      DateTime?
+  firstProdDate DateTime?
+
+  abstractId String?
+  survey     String?
+  trs        String?
+  latitude   Float?
+  longitude  Float?
+
+  source    String  @default("manual")
+  sourceRef String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  production WellProductionMonth[]
+
+  @@unique([organizationId, apiNumber])
+  @@index([organizationId, state, county])
+  @@index([organizationId, name])
+}
+
+// One month of reported production for a well. Volumes are month totals.
+model WellProductionMonth {
+  id     String       @id @default(cuid())
+  wellId String
+  well   ResearchWell @relation(fields: [wellId], references: [id], onDelete: Cascade)
+
+  month DateTime // first day of the month, UTC midnight
+
+  oilBbl   Float @default(0)
+  gasMcf   Float @default(0)
+  nglBbl   Float @default(0)
+  waterBbl Float @default(0)
+  daysOn   Int?
+
+  source String @default("manual")
+
+  @@unique([wellId, month])
+  @@index([wellId, month])
+}
+
+// A saved valuation run: the user's assumptions plus a snapshot of computed
+// results so past analyses stay stable even as production data grows.
+model WellAnalysis {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name    String
+  wellIds String[]
+
+  assumptions Json // ValuationAssumptions (domain/valuation.ts)
+  results     Json? // ValuationResult snapshot from the last run
+  notes       String?
+
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([organizationId, updatedAt])
 }
 
 // Provenance for every import (CSV upload today; automated connectors later).
