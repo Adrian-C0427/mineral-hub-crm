@@ -508,6 +508,17 @@ model Buyer {
   // Normalized company name for dedup (lowercased/trimmed/punct-stripped).
   normalizedCompany String
 
+  // Known alternate spellings/aliases (e.g. discovered during research imports),
+  // used to strengthen duplicate detection and shown on the profile.
+  aliases String[] @default([])
+  // Provenance: "research" marks a profile created/enriched from public-record
+  // research so it can be flagged for manual completion. null = user-created.
+  source String?
+  // Research-derived enrichment that doesn't map to structured fields (counties/
+  // states of activity, abstracts, common transaction types, counts, first/last
+  // seen). Appended additively — never overwrites user-entered data.
+  researchSummary Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

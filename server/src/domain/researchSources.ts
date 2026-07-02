@@ -27,8 +27,8 @@ export const DOCUMENT_FIELDS: ResearchField[] = [
   { key: "volume", label: "Volume" },
   { key: "page", label: "Page" },
   { key: "county", label: "County" },
+  { key: "state", label: "State" },
   { key: "abstractId", label: "Abstract" },
-  { key: "survey", label: "Survey" },
   { key: "legalDescription", label: "Legal Description" },
 ];
 
@@ -36,6 +36,7 @@ export const DOCUMENT_FIELDS: ResearchField[] = [
 export const PERMIT_FIELDS: ResearchField[] = [
   { key: "operator", label: "Operator", required: true },
   { key: "county", label: "County" },
+  { key: "state", label: "State" },
   { key: "apiNumber", label: "API Number" },
   { key: "permitNumber", label: "Permit Number" },
   { key: "leaseName", label: "Lease Name" },
@@ -50,7 +51,6 @@ export const PERMIT_FIELDS: ResearchField[] = [
   { key: "field", label: "Field" },
   { key: "totalDepth", label: "Total Depth" },
   { key: "abstractId", label: "Abstract" },
-  { key: "survey", label: "Survey" },
   { key: "latitude", label: "Latitude" },
   { key: "longitude", label: "Longitude" },
 ];
@@ -78,8 +78,8 @@ export const CSV_DOCUMENTS: ResearchSource = {
     volume: ["bookvolumepage", "volume", "vol", "book"],
     page: ["page", "pg"],
     county: ["county", "countyname"],
+    state: ["state", "st", "statecode", "statename", "stateabbr", "stateabbreviation", "province"],
     abstractId: ["abstract", "abstractno", "abstractnumber", "abst"],
-    survey: ["survey", "surveyname", "originalsurvey"],
     legalDescription: ["legaldescription", "legal", "description", "propertydescription", "brieflegal", "briefiegal"],
   },
 };
@@ -89,6 +89,7 @@ export const CSV_PERMITS: ResearchSource = {
   aliases: {
     operator: ["operator", "operatorname", "operatornamenumber", "company", "companyname"],
     county: ["county", "countyname"],
+    state: ["state", "st", "statecode", "statename", "stateabbr", "stateabbreviation", "province"],
     apiNumber: ["apinumber", "apino", "api", "apiuniqueno", "api10", "api14"],
     permitNumber: ["permitnumber", "permitno", "statuspermitno", "permit"],
     leaseName: ["leasename", "lease"],
@@ -103,7 +104,6 @@ export const CSV_PERMITS: ResearchSource = {
     field: ["field", "fieldname"],
     totalDepth: ["totaldepth", "td", "depthtotal", "permitteddepth"],
     abstractId: ["abstract", "abst", "abstractno"],
-    survey: ["survey", "surveyname"],
     latitude: ["latitude", "lat", "surfacelatitude", "surfacelat", "lat83"],
     longitude: ["longitude", "long", "lon", "surfacelongitude", "surfacelong", "long83"],
   },

@@ -4,7 +4,7 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, Banner } from "../components/ui";
+import { Spinner, Banner, Modal } from "../components/ui";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { ResearchImport } from "../components/ResearchImport";
@@ -37,7 +37,7 @@ interface Summary {
   docTypeBreakdown: { docType: string; count: number }[];
 }
 interface GeoRow {
-  state: string; county: string | null; abstractId: string | null; survey: string | null;
+  state: string; county: string | null; abstractId: string | null;
   transactions: number; leases: number; permits: number; total: number; previous: number;
   absoluteChange: number; pctChange: number | null; direction: string; zScore: number | null; isHotspot: boolean;
 }
@@ -51,7 +51,7 @@ interface Signal {
   metrics: Record<string, number | null>;
 }
 interface FilterOpts {
-  states: string[]; counties: { state: string; county: string }[]; docTypes: string[]; sources: string[];
+  states: string[]; counties: { state: string; county: string }[]; docTypes: string[];
   buyers: { value: string; label: string }[]; sellers: { value: string; label: string }[]; operators: { value: string; label: string }[];
 }
 interface DocRecord {
@@ -108,9 +108,8 @@ interface Filters {
   buyers: string[];
   sellers: string[];
   operators: string[];
-  source: string;
 }
-const EMPTY_FILTERS: Filters = { state: "", counties: [], docTypes: [], buyers: [], sellers: [], operators: [], source: "" };
+const EMPTY_FILTERS: Filters = { state: "", counties: [], docTypes: [], buyers: [], sellers: [], operators: [] };
 
 type Tab = "overview" | "geography" | "rankings" | "opportunities" | "records" | "data";
 
@@ -139,7 +138,6 @@ export function Research() {
     for (const b of filters.buyers) q.append("buyer", b);
     for (const s of filters.sellers) q.append("seller", s);
     for (const o of filters.operators) q.append("operator", o);
-    if (filters.source) q.set("source", filters.source);
     return q.toString();
   }, [range.from, range.to, compare, filters]);
 
@@ -158,7 +156,7 @@ export function Research() {
 
   const activeFilterCount =
     (filters.state ? 1 : 0) + filters.counties.length + filters.docTypes.length +
-    filters.buyers.length + filters.sellers.length + filters.operators.length + (filters.source ? 1 : 0);
+    filters.buyers.length + filters.sellers.length + filters.operators.length;
 
   const drillToRecords = useCallback((patch: Partial<Filters>) => {
     setFilters((f) => ({ ...f, ...patch }));
@@ -246,12 +244,6 @@ export function Research() {
                 />
               </div>
             ))}
-            <div className="field" style={{ marginBottom: 0 }}><label>Source</label>
-              <select value={filters.source} onChange={(e) => setFilters((f) => ({ ...f, source: e.target.value }))}>
-                <option value="">All sources</option>
-                {opts.sources.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
           </div>
         )}
       </div>
@@ -394,7 +386,7 @@ function GeographyTab({ qs, filters, onDrill, onToggleCounty }: {
   onDrill: (patch: Partial<Filters>) => void;
   onToggleCounty: (county: string) => void;
 }) {
-  const [level, setLevel] = useState<"county" | "abstract" | "survey" | "state">("county");
+  const [level, setLevel] = useState<"county" | "abstract" | "state">("county");
   const [metric, setMetric] = useState<"activity" | "change">("activity");
   const [data, setData] = useState<{ level: string; rows: GeoRow[] } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -413,11 +405,10 @@ function GeographyTab({ qs, filters, onDrill, onToggleCounty }: {
   const geoName = (r: GeoRow) =>
     level === "state" ? r.state
       : level === "county" ? `${r.county}, ${r.state}`
-        : level === "abstract" ? `${r.abstractId} (${r.county} Co)`
-          : `${r.survey} (${r.county} Co)`;
+        : `${r.abstractId} (${r.county} Co)`;
 
   const columns: Column<GeoRow>[] = [
-    { key: "name", header: level === "state" ? "State" : level === "county" ? "County" : level === "abstract" ? "Abstract" : "Survey", value: geoName, render: (r) => <>{geoName(r)} {r.isHotspot && <span className="badge" style={{ background: "rgba(239,68,68,0.15)", color: "#ef4444" }}>HOTSPOT</span>}</> },
+    { key: "name", header: level === "state" ? "State" : level === "county" ? "County" : "Abstract", value: geoName, render: (r) => <>{geoName(r)} {r.isHotspot && <span className="badge" style={{ background: "rgba(239,68,68,0.15)", color: "#ef4444" }}>HOTSPOT</span>}</> },
     { key: "transactions", header: "Transactions", value: (r) => r.transactions, align: "right" },
     { key: "leases", header: "Leases", value: (r) => r.leases, align: "right" },
     { key: "permits", header: "Permits", value: (r) => r.permits, align: "right" },
@@ -455,10 +446,10 @@ function GeographyTab({ qs, filters, onDrill, onToggleCounty }: {
 
       <div className="panel">
         <div className="panel-title">
-          <h3 style={{ margin: 0 }}>Activity by {level === "state" ? "State" : level === "county" ? "County" : level === "abstract" ? "Abstract" : "Survey"}</h3>
+          <h3 style={{ margin: 0 }}>Activity by {level === "state" ? "State" : level === "county" ? "County" : "Abstract"}</h3>
           <div className="row" style={{ gap: 8 }}>
             <div className="chip-row">
-              {(["state", "county", "abstract", "survey"] as const).map((l) => (
+              {(["state", "county", "abstract"] as const).map((l) => (
                 <span key={l} className={`chip ${level === l ? "active" : ""}`} onClick={() => setLevel(l)}>{l[0].toUpperCase() + l.slice(1)}</span>
               ))}
             </div>
@@ -473,7 +464,7 @@ function GeographyTab({ qs, filters, onDrill, onToggleCounty }: {
           <SortableTable
             columns={columns}
             rows={data.rows}
-            rowKey={(r) => `${r.state}|${r.county}|${r.abstractId}|${r.survey}`}
+            rowKey={(r) => `${r.state}|${r.county}|${r.abstractId}`}
             defaultSort={{ key: "total", dir: "desc" }}
             onRowClick={(r) => onDrill({ state: r.state, counties: r.county ? [r.county] : [] })}
           />
@@ -487,18 +478,65 @@ function GeographyTab({ qs, filters, onDrill, onToggleCounty }: {
 // Rankings
 // ---------------------------------------------------------------------------
 
+interface PreviewItem {
+  key: string;
+  outcome: "new" | "exact" | "possible";
+  proposal: { companyName: string; aliases: string[]; counties: string[]; states: string[]; abstracts: string[]; transactionTypes: string[]; transactionCount: number; firstSeen: string | null; lastSeen: string | null };
+  confidence: number | null;
+  existing: null | { id: string; companyName: string; counties: string[]; states: string[]; aliases: string[] };
+  mergePreview: null | { addCounties: string[]; addStates: string[]; addAliases: string[] };
+}
+type Decision = { key: string; action: "create" | "merge" | "skip"; mergeIntoBuyerId?: string };
+
 function RankingsTab({ qs, opts, onDrill }: { qs: string; opts: FilterOpts | null; onDrill: (patch: Partial<Filters>) => void }) {
   const [role, setRole] = useState<"buyers" | "sellers" | "operators">("buyers");
   const [data, setData] = useState<{ role: string; rows: EntityRow[] } | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [adding, setAdding] = useState(false);
+  const [review, setReview] = useState<{ auto: Decision[]; possibles: PreviewItem[] } | null>(null);
+  const [result, setResult] = useState<{ created: number; merged: number; skipped: number } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
   useEffect(() => {
-    setLoading(true);
+    setLoading(true); setSelected(new Set()); setResult(null); setErr(null);
     api.get<{ role: string; rows: EntityRow[] }>(`/research/entities?role=${role}&${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
   }, [qs, role]);
 
   const ROLE_LABEL = { buyers: "Most Active Buyers", sellers: "Most Active Sellers", operators: "Most Active Operators" } as const;
+  const isBuyers = role === "buyers";
+  const rows = data?.rows ?? [];
+  const allSelected = rows.length > 0 && selected.size === rows.length;
+  const toggle = (k: string) => setSelected((p) => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
+  const toggleAll = () => setSelected((p) => (p.size === rows.length ? new Set() : new Set(rows.map((r) => r.key))));
+
+  async function commitDecisions(decisions: Decision[]) {
+    const r = await api.post<{ created: number; merged: number; skipped: number }>("/research/buyers/commit", { decisions });
+    setResult(r); setSelected(new Set()); setReview(null);
+  }
+  async function addToBuyers() {
+    if (selected.size === 0) return;
+    setAdding(true); setErr(null);
+    try {
+      const { items } = await api.post<{ items: PreviewItem[] }>("/research/buyers/preview", { keys: [...selected] });
+      const auto: Decision[] = items.filter((i) => i.outcome !== "possible").map((i) => ({
+        key: i.key, action: i.outcome === "exact" ? "merge" : "create", mergeIntoBuyerId: i.existing?.id,
+      }));
+      const possibles = items.filter((i) => i.outcome === "possible");
+      if (possibles.length === 0) await commitDecisions(auto);
+      else setReview({ auto, possibles });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Could not prepare buyers");
+    } finally {
+      setAdding(false);
+    }
+  }
 
   const columns: Column<EntityRow>[] = [
+    ...(isBuyers ? ([{
+      key: "sel", header: "", value: () => "", width: "1%",
+      render: (r: EntityRow) => <input type="checkbox" checked={selected.has(r.key)} onClick={(e) => e.stopPropagation()} onChange={() => toggle(r.key)} />,
+    }] as Column<EntityRow>[]) : []),
     { key: "name", header: "Name", value: (r) => r.name, render: (r) => <>{r.name} {r.newEntrant && <span className="badge" style={{ background: "rgba(34,197,94,0.15)", color: "#22c55e" }}>NEW</span>}</> },
     { key: "count", header: role === "operators" ? "Permits" : "Records", value: (r) => r.count, align: "right" },
     { key: "previous", header: "Prior", value: (r) => r.previous, align: "right" },
@@ -512,7 +550,7 @@ function RankingsTab({ qs, opts, onDrill }: { qs: string; opts: FilterOpts | nul
     { key: "counties", header: "Counties", value: (r) => r.counties.length, render: (r) => r.counties.join(", ") || "—" },
   ];
 
-  const top = (data?.rows ?? []).slice(0, 10);
+  const top = rows.slice(0, 10);
 
   return (
     <>
@@ -526,7 +564,7 @@ function RankingsTab({ qs, opts, onDrill }: { qs: string; opts: FilterOpts | nul
                   <span key={r} className={`chip ${role === r ? "active" : ""}`} onClick={() => setRole(r)}>{r[0].toUpperCase() + r.slice(1)}</span>
                 ))}
               </div>
-              <button className="small" disabled={!data?.rows.length} onClick={() => data && downloadCsv(
+              <button className="small" disabled={!rows.length} onClick={() => data && downloadCsv(
                 `research-${role}.csv`,
                 ["Name", "Count", "Prior", "Change %", "Counties", "New Entrant"],
                 data.rows.map((r) => [r.name, r.count, r.previous, r.pctChange == null ? "" : Math.round(r.pctChange * 100), r.counties.join("; "), r.newEntrant ? "YES" : ""]),
@@ -545,11 +583,32 @@ function RankingsTab({ qs, opts, onDrill }: { qs: string; opts: FilterOpts | nul
           )}
         </div>
       </div>
+
       <div className="panel">
-        {loading && !data ? <Spinner /> : data && data.rows.length > 0 ? (
+        {/* Selection + bulk actions — turn active buyers into CRM Buyer profiles. */}
+        {isBuyers && rows.length > 0 && (
+          <div className="row" style={{ gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
+            <label style={{ fontSize: 13, textTransform: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <input type="checkbox" checked={allSelected} onChange={toggleAll} /> Select all
+            </label>
+            <span className="muted" style={{ fontSize: 13 }}>{selected.size} selected</span>
+            <button className="small primary" disabled={selected.size === 0 || adding} onClick={addToBuyers}>
+              {adding ? "Preparing…" : `Add to Buyers${selected.size ? ` (${selected.size})` : ""}`}
+            </button>
+            {selected.size > 0 && <button className="small" onClick={() => setSelected(new Set())}>Clear</button>}
+          </div>
+        )}
+        {err && <Banner kind="error">{err}</Banner>}
+        {result && (
+          <Banner kind="info">
+            Added to Buyers — <strong>{result.created}</strong> created, <strong>{result.merged}</strong> enriched
+            {result.skipped > 0 && <>, {result.skipped} skipped</>}. New profiles are tagged “Research Imported”.
+          </Banner>
+        )}
+        {loading && !data ? <Spinner /> : rows.length > 0 ? (
           <SortableTable
             columns={columns}
-            rows={data.rows}
+            rows={data!.rows}
             rowKey={(r) => r.key}
             defaultSort={{ key: "count", dir: "desc" }}
             onRowClick={(r) => onDrill(role === "buyers" ? { buyers: [r.key] } : role === "sellers" ? { sellers: [r.key] } : { operators: [r.key] })}
@@ -557,7 +616,83 @@ function RankingsTab({ qs, opts, onDrill }: { qs: string; opts: FilterOpts | nul
         ) : null}
       </div>
       {opts && <p className="muted" style={{ fontSize: 12 }}>Names are grouped after normalizing punctuation and legal suffixes (LLC/LP/Inc), so filings under slightly different spellings roll up together.</p>}
+
+      {review && (
+        <AddToBuyersReview
+          auto={review.auto}
+          possibles={review.possibles}
+          onCancel={() => setReview(null)}
+          onConfirm={(reviewedDecisions) => commitDecisions([...review.auto, ...reviewedDecisions])}
+        />
+      )}
     </>
+  );
+}
+
+/** Review screen for possible-duplicate buyers: merge / create new / skip each. */
+function AddToBuyersReview({ auto, possibles, onCancel, onConfirm }: {
+  auto: Decision[]; possibles: PreviewItem[];
+  onCancel: () => void; onConfirm: (decisions: Decision[]) => void | Promise<void>;
+}) {
+  const [choices, setChoices] = useState<Record<string, "merge" | "create" | "skip">>(
+    Object.fromEntries(possibles.map((p) => [p.key, "merge" as const])),
+  );
+  const [busy, setBusy] = useState(false);
+
+  async function confirm() {
+    setBusy(true);
+    const decisions: Decision[] = possibles.map((p) => ({
+      key: p.key, action: choices[p.key], mergeIntoBuyerId: choices[p.key] === "merge" ? p.existing?.id : undefined,
+    }));
+    await onConfirm(decisions);
+    setBusy(false);
+  }
+
+  return (
+    <Modal title="Review possible duplicate buyers" onClose={onCancel} wide>
+      <p className="muted" style={{ marginTop: 0 }}>
+        {auto.length > 0 && <>{auto.length} buyer(s) will be added automatically (new or exact matches). </>}
+        The following look similar to existing buyers — choose how to handle each.
+      </p>
+      {possibles.map((p) => (
+        <div key={p.key} className="panel" style={{ background: "var(--panel-2)" }}>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
+            <div style={{ minWidth: 240, flex: 1 }}>
+              <strong>{p.proposal.companyName}</strong>
+              {p.confidence != null && <span className="chip-mini" style={{ marginLeft: 8 }}>{Math.round(p.confidence * 100)}% match</span>}
+              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                Imported: {p.proposal.transactionCount} txns · {p.proposal.counties.join(", ") || "—"} · {p.proposal.states.join(", ") || "—"}
+              </div>
+              {p.existing && (
+                <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                  Existing “{p.existing.companyName}”: {p.existing.counties.join(", ") || "no counties"} · {p.existing.states.join(", ") || "no states"}
+                </div>
+              )}
+              {p.mergePreview && (p.mergePreview.addCounties.length + p.mergePreview.addStates.length + p.mergePreview.addAliases.length > 0) && (
+                <div style={{ fontSize: 12, marginTop: 4, color: "#22c55e" }}>
+                  Merge would add: {[
+                    p.mergePreview.addCounties.length ? `${p.mergePreview.addCounties.length} counties` : "",
+                    p.mergePreview.addStates.length ? `${p.mergePreview.addStates.length} states` : "",
+                    p.mergePreview.addAliases.length ? `${p.mergePreview.addAliases.length} aliases` : "",
+                  ].filter(Boolean).join(", ")}
+                </div>
+              )}
+            </div>
+            <div className="chip-row">
+              {(["merge", "create", "skip"] as const).map((c) => (
+                <span key={c} className={`chip ${choices[p.key] === c ? "active" : ""}`} onClick={() => setChoices((s) => ({ ...s, [p.key]: c }))}>
+                  {c === "merge" ? "Merge with existing" : c === "create" ? "Create new" : "Skip"}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
+      ))}
+      <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
+        <button className="small" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button className="small primary" onClick={confirm} disabled={busy}>{busy ? "Applying…" : "Confirm & add"}</button>
+      </div>
+    </Modal>
   );
 }
 
@@ -644,8 +779,8 @@ function RecordsTab({ qs }: { qs: string }) {
     if (kind === "documents") {
       const d = await api.get<Paged<DocRecord>>(`/research/documents?${qs}&page=1&pageSize=1000`);
       downloadCsv("research-documents.csv",
-        ["Recording Date", "Type", "Class", "Grantor", "Grantee", "Instrument #", "State", "County", "Abstract", "Survey", "Source"],
-        d.rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.docClass, r.grantor, r.grantee, r.instrumentNumber, r.state, r.county, r.abstractId, r.survey, r.source]));
+        ["Recording Date", "Type", "Class", "Grantor", "Grantee", "Instrument #", "State", "County", "Abstract"],
+        d.rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.docClass, r.grantor, r.grantee, r.instrumentNumber, r.state, r.county, r.abstractId]));
     } else {
       const d = await api.get<Paged<PermitRecord>>(`/research/permits?${qs}&page=1&pageSize=1000`);
       downloadCsv("research-permits.csv",

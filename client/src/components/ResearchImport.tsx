@@ -51,6 +51,8 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
   const [filename, setFilename] = useState("");
   const [analysis, setAnalysis] = useState<AnalyzeResp | null>(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
+  const [assignState, setAssignState] = useState("");
+  const [assignCounty, setAssignCounty] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<CommitResp | null>(null);
@@ -63,6 +65,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
 
   function reset() {
     setCsv(null); setFilename(""); setAnalysis(null); setMapping({}); setResult(null); setError("");
+    setAssignState(""); setAssignCounty("");
     if (fileRef.current) fileRef.current.value = "";
   }
 
@@ -89,6 +92,8 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
     try {
       const r = await api.post<CommitResp>("/research/ingest/commit", {
         category, csv, mapping, filename: filename || undefined,
+        assignedState: assignState.trim() || undefined,
+        assignedCounty: assignCounty.trim() || undefined,
       });
       setResult(r);
       setAnalysis(null);
@@ -117,7 +122,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
         <p className="muted" style={{ marginTop: 0 }}>
           Upload a CSV of recorded deeds or leases (or a drilling-permit export). Rows are classified,
           normalized and de-duplicated automatically; non-mineral instruments (liens, deeds of trust, easements) are skipped.
-          County is read from the file where present, otherwise the configured county is used.
+          State and County come from the file's columns where present; if your file doesn't include them, assign them below before importing.
         </p>
         <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
           <div className="field" style={{ marginBottom: 0, minWidth: 180 }}><label>Data Type</label>
@@ -156,8 +161,34 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
             {requiredMissing.length > 0 && (
               <Banner kind="warn">Required: {requiredMissing.map((f) => f.label).join(", ")}</Banner>
             )}
+
+            {/* Assign State/County for the whole file when the columns aren't mapped. */}
+            {(!mapping.state || !mapping.county) && (
+              <div style={{ marginTop: 12 }}>
+                <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+                  {(!mapping.state && !mapping.county) ? "This file has no State or County column — assign them for every row:"
+                    : !mapping.state ? "No State column mapped — assign the State for this file:"
+                      : "No County column mapped — assign the County for this file:"}
+                </div>
+                <div className="row" style={{ gap: 8 }}>
+                  {!mapping.state && (
+                    <div className="field" style={{ marginBottom: 0, width: 110 }}><label>State *</label>
+                      <input value={assignState} maxLength={2} onChange={(e) => setAssignState(e.target.value.toUpperCase())} placeholder="TX" />
+                    </div>
+                  )}
+                  {!mapping.county && (
+                    <div className="field" style={{ marginBottom: 0, minWidth: 180 }}><label>County *</label>
+                      <input value={assignCounty} onChange={(e) => setAssignCounty(e.target.value)} placeholder="e.g. Leon" />
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div style={{ marginTop: 10 }}>
-              <button className="primary" disabled={busy || requiredMissing.length > 0} onClick={onCommit}>
+              <button className="primary"
+                disabled={busy || requiredMissing.length > 0 || (!mapping.state && !assignState.trim()) || (!mapping.county && !assignCounty.trim())}
+                onClick={onCommit}>
                 Import {analysis.rowCount.toLocaleString()} rows as {CATEGORY_LABEL[category]}
               </button>
             </div>
