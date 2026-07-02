@@ -11,6 +11,11 @@ import {
   surgeSeverity, trend, type Trend,
 } from "../domain/research.js";
 import { fieldsFor, guessMapping, sourceFor } from "../domain/researchSources.js";
+import {
+  buildResearchBuyer, classifyMatch, mergePlan, summaryFor,
+  type ExistingBuyerLite, type ResearchDocLite,
+} from "../domain/researchBuyers.js";
+import { normalizeCompany } from "../serializers.js";
 
 /**
  * Research & Market Intelligence API.
@@ -49,10 +54,8 @@ interface ResearchFilters {
   sellers: string[];  // grantorNorm keys
   operators: string[]; // operatorNorm keys
   abstractId?: string;
-  survey?: string;
   statuses: string[];
   trajectories: string[];
-  source?: string;
 }
 
 interface Window { from: Date; to: Date } // [from, to] inclusive days
@@ -67,10 +70,8 @@ function parseFilters(q: Record<string, unknown>): ResearchFilters {
     sellers: arr(q.seller),
     operators: arr(q.operator),
     abstractId: q.abstractId ? String(q.abstractId) : undefined,
-    survey: q.survey ? String(q.survey) : undefined,
     statuses: arr(q.permitStatus),
     trajectories: arr(q.trajectory),
-    source: q.source ? String(q.source) : undefined,
   };
 }
 
@@ -116,8 +117,6 @@ function docWhere(org: string, f: ResearchFilters, win?: Window): Prisma.Researc
   if (f.buyers.length) w.granteeNorm = { in: f.buyers };
   if (f.sellers.length) w.grantorNorm = { in: f.sellers };
   if (f.abstractId) w.abstractId = f.abstractId;
-  if (f.survey) w.survey = { contains: f.survey, mode: "insensitive" };
-  if (f.source) w.source = f.source;
   return w;
 }
 
@@ -128,10 +127,8 @@ function permitWhere(org: string, f: ResearchFilters, win?: Window): Prisma.Rese
   if (f.counties.length) w.county = { in: f.counties };
   if (f.operators.length) w.operatorNorm = { in: f.operators };
   if (f.abstractId) w.abstractId = f.abstractId;
-  if (f.survey) w.survey = { contains: f.survey, mode: "insensitive" };
   if (f.statuses.length) w.status = { in: f.statuses as ResearchPermitStatus[] };
   if (f.trajectories.length) w.trajectory = { in: f.trajectories as WellTrajectory[] };
-  if (f.source) w.source = f.source;
   return w;
 }
 
@@ -167,11 +164,10 @@ researchRouter.get(
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
-    const [states, counties, docTypes, sources, buyers, sellers, operators, permitSources] = await Promise.all([
+    const [states, counties, docTypes, buyers, sellers, operators, permitGeo] = await Promise.all([
       prisma.researchDocument.groupBy({ by: ["state"], where: { organizationId: org } }),
       prisma.researchDocument.groupBy({ by: ["state", "county"], where: { organizationId: org } }),
       prisma.researchDocument.groupBy({ by: ["docType"], where: { organizationId: org } }),
-      prisma.researchDocument.groupBy({ by: ["source"], where: { organizationId: org } }),
       prisma.researchDocument.groupBy({
         by: ["granteeNorm", "grantee"], where: { organizationId: org, granteeNorm: { not: null } },
         _count: true, orderBy: { _count: { granteeNorm: "desc" } }, take: 500,
@@ -184,18 +180,17 @@ researchRouter.get(
         by: ["operatorNorm", "operator"], where: { organizationId: org },
         _count: true, orderBy: { _count: { operatorNorm: "desc" } }, take: 500,
       }),
-      prisma.researchPermit.groupBy({ by: ["state", "county", "source"], where: { organizationId: org } }),
+      prisma.researchPermit.groupBy({ by: ["state", "county"], where: { organizationId: org } }),
     ]);
 
     // Merge doc + permit geographies; dedupe entity display names per norm key.
     const stateSet = new Set<string>(states.map((s) => s.state));
     const countySet = new Map<string, { state: string; county: string }>();
     for (const c of counties) countySet.set(`${c.state}|${c.county}`, { state: c.state, county: c.county });
-    for (const p of permitSources) {
+    for (const p of permitGeo) {
       stateSet.add(p.state);
       countySet.set(`${p.state}|${p.county}`, { state: p.state, county: p.county });
     }
-    const sourceSet = new Set<string>([...sources.map((s) => s.source), ...permitSources.map((p) => p.source)]);
 
     const entityOptions = (rows: { norm: string | null; raw: string | null }[]) => {
       const seen = new Map<string, string>();
@@ -207,7 +202,6 @@ researchRouter.get(
       states: [...stateSet].sort(),
       counties: [...countySet.values()].sort((a, b) => a.county.localeCompare(b.county)),
       docTypes: docTypes.map((d) => d.docType).sort(),
-      sources: [...sourceSet].sort(),
       buyers: entityOptions(buyers.map((b) => ({ norm: b.granteeNorm, raw: b.grantee }))),
       sellers: entityOptions(sellers.map((s) => ({ norm: s.grantorNorm, raw: s.grantor }))),
       operators: entityOptions(operators.map((o) => ({ norm: o.operatorNorm, raw: o.operator }))),
@@ -285,13 +279,12 @@ researchRouter.get(
 // Geography — per state/county/abstract/survey aggregation + hotspots
 // ---------------------------------------------------------------------------
 
-type GeoLevel = "state" | "county" | "abstract" | "survey";
+type GeoLevel = "state" | "county" | "abstract";
 
-function geoKeyOf(level: GeoLevel, row: { state: string; county: string; abstractId: string | null; survey: string | null }): string | null {
+function geoKeyOf(level: GeoLevel, row: { state: string; county: string; abstractId: string | null }): string | null {
   if (level === "state") return row.state;
   if (level === "county") return `${row.state}|${row.county}`;
-  if (level === "abstract") return row.abstractId ? `${row.state}|${row.county}|${row.abstractId}` : null;
-  return row.survey ? `${row.state}|${row.county}|${row.survey}` : null;
+  return row.abstractId ? `${row.state}|${row.county}|${row.abstractId}` : null;
 }
 
 researchRouter.get(
@@ -301,7 +294,7 @@ researchRouter.get(
     const org = orgId(req);
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
-    const level = (["state", "county", "abstract", "survey"] as GeoLevel[]).includes(req.query.level as GeoLevel)
+    const level = (["state", "county", "abstract"] as GeoLevel[]).includes(req.query.level as GeoLevel)
       ? (req.query.level as GeoLevel) : "county";
 
     // One load spanning the 6 history windows + compare + current.
@@ -311,26 +304,25 @@ researchRouter.get(
     const cmp = hist[hist.length - 1]; // window immediately before = comparison period
 
     interface GeoAgg {
-      state: string; county: string | null; abstractId: string | null; survey: string | null;
+      state: string; county: string | null; abstractId: string | null;
       transactions: number; leases: number; permits: number;
       prevTotal: number; history: number[];
     }
     const map = new Map<string, GeoAgg>();
-    const get = (key: string, row: { state: string; county: string; abstractId: string | null; survey: string | null }): GeoAgg => {
+    const get = (key: string, row: { state: string; county: string; abstractId: string | null }): GeoAgg => {
       let a = map.get(key);
       if (!a) {
         a = {
           state: row.state,
           county: level === "state" ? null : row.county,
           abstractId: level === "abstract" ? row.abstractId : null,
-          survey: level === "survey" ? row.survey : null,
           transactions: 0, leases: 0, permits: 0, prevTotal: 0, history: hist.map(() => 0),
         };
         map.set(key, a);
       }
       return a;
     };
-    const bump = (row: { state: string; county: string; abstractId: string | null; survey: string | null }, date: Date, kind: "transactions" | "leases" | "permits") => {
+    const bump = (row: { state: string; county: string; abstractId: string | null }, date: Date, kind: "transactions" | "leases" | "permits") => {
       const key = geoKeyOf(level, row);
       if (!key) return;
       const a = get(key, row);
@@ -347,7 +339,7 @@ researchRouter.get(
         const t = trend(total, a.prevTotal);
         const hs = detectHotspot(total, a.history);
         return {
-          state: a.state, county: a.county, abstractId: a.abstractId, survey: a.survey,
+          state: a.state, county: a.county, abstractId: a.abstractId,
           transactions: a.transactions, leases: a.leases, permits: a.permits, total,
           previous: a.prevTotal, absoluteChange: t.absoluteChange, pctChange: t.pctChange,
           direction: t.direction, zScore: hs.zScore == null ? null : Math.round(hs.zScore * 100) / 100,
@@ -424,6 +416,165 @@ researchRouter.get(
       .slice(0, 200);
 
     res.json({ role, rows });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Add to Buyers — turn active research buyers into CRM Buyer profiles
+// ---------------------------------------------------------------------------
+
+const RESEARCH_TAG = "Research Imported";
+
+const DOC_LITE_SELECT = {
+  grantee: true, granteeNorm: true, state: true, county: true,
+  abstractId: true, docType: true, recordingDate: true,
+} as const;
+
+/** Load all-time research docs for the given grantee keys, grouped by key. */
+async function docsByGrantee(org: string, keys: string[]): Promise<Map<string, ResearchDocLite[]>> {
+  const docs = await prisma.researchDocument.findMany({
+    where: { organizationId: org, granteeNorm: { in: keys } },
+    select: DOC_LITE_SELECT,
+  });
+  const byKey = new Map<string, ResearchDocLite[]>();
+  for (const d of docs) {
+    if (!d.granteeNorm) continue;
+    const list = byKey.get(d.granteeNorm) ?? [];
+    list.push({ grantee: d.grantee, granteeNorm: d.granteeNorm, state: d.state, county: d.county, abstractId: d.abstractId, docType: d.docType, recordingDate: d.recordingDate });
+    byKey.set(d.granteeNorm, list);
+  }
+  return byKey;
+}
+
+// Preview: classify each selected buyer as new / exact / possible and show the
+// additive changes a merge would make, so the client can auto-apply new/exact
+// and surface possible duplicates for review.
+researchRouter.post(
+  "/buyers/preview",
+  requirePermission("viewResearch"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const { keys } = z.object({ keys: z.array(z.string()).min(1).max(500) }).parse(req.body);
+    const byKey = await docsByGrantee(org, keys);
+    const buyers = await prisma.buyer.findMany({
+      where: { organizationId: org },
+      select: { id: true, companyName: true, normalizedCompany: true, aliases: true, source: true, researchSummary: true, buyBox: { select: { counties: true, states: true } } },
+    });
+    const existingLite: ExistingBuyerLite[] = buyers.map((b) => ({ id: b.id, companyName: b.companyName, normalizedCompany: b.normalizedCompany, aliases: b.aliases }));
+
+    const items = keys.map((key) => {
+      const proposal = buildResearchBuyer(byKey.get(key) ?? []);
+      if (!proposal) return null;
+      const match = classifyMatch(proposal, existingLite);
+      const base = {
+        key, outcome: match.outcome,
+        proposal: {
+          companyName: proposal.companyName, aliases: proposal.aliases,
+          counties: proposal.counties, states: proposal.states, abstracts: proposal.abstracts,
+          transactionTypes: proposal.transactionTypes, transactionCount: proposal.transactionCount,
+          firstSeen: proposal.firstSeen, lastSeen: proposal.lastSeen,
+        },
+        confidence: null as number | null,
+        existing: null as null | { id: string; companyName: string; counties: string[]; states: string[]; aliases: string[] },
+        mergePreview: null as null | { addCounties: string[]; addStates: string[]; addAliases: string[] },
+      };
+      if (match.outcome !== "new") {
+        const eb = buyers.find((b) => b.id === match.buyerId)!;
+        const plan = mergePlan(
+          { aliases: eb.aliases, source: eb.source, researchSummary: (eb.researchSummary as never) ?? null, buyBoxCounties: eb.buyBox?.counties ?? [], buyBoxStates: eb.buyBox?.states ?? [] },
+          proposal,
+        );
+        base.existing = { id: eb.id, companyName: eb.companyName, counties: eb.buyBox?.counties ?? [], states: eb.buyBox?.states ?? [], aliases: eb.aliases };
+        base.mergePreview = { addCounties: plan.addCounties, addStates: plan.addStates, addAliases: plan.addAliases };
+        if (match.outcome === "possible") base.confidence = match.confidence;
+      }
+      return base;
+    }).filter((x): x is NonNullable<typeof x> => x != null);
+
+    res.json({ items });
+  }),
+);
+
+// Commit: apply the user's decisions — create new profiles, additively merge
+// into existing ones, or skip. Every create/merge is recorded in ActivityLog.
+researchRouter.post(
+  "/buyers/commit",
+  requirePermission("createBuyers"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const { decisions } = z.object({
+      decisions: z.array(z.object({
+        key: z.string(),
+        action: z.enum(["create", "merge", "skip"]),
+        mergeIntoBuyerId: z.string().optional(),
+      })).min(1).max(500),
+    }).parse(req.body);
+
+    const byKey = await docsByGrantee(org, decisions.map((d) => d.key));
+    // Ensure the "Research Imported" tag exists (global tag catalog).
+    const tag = await prisma.buyerTag.upsert({ where: { name: RESEARCH_TAG }, create: { name: RESEARCH_TAG }, update: {} });
+
+    let created = 0, merged = 0, skipped = 0;
+    for (const dec of decisions) {
+      const proposal = dec.action === "skip" ? null : buildResearchBuyer(byKey.get(dec.key) ?? []);
+      if (dec.action === "skip" || !proposal) { skipped++; continue; }
+
+      if (dec.action === "create") {
+        const buyer = await prisma.buyer.create({
+          data: {
+            organizationId: org,
+            name: proposal.companyName,
+            companyName: proposal.companyName,
+            normalizedCompany: normalizeCompany(proposal.companyName),
+            aliases: proposal.aliases,
+            source: "research",
+            researchSummary: summaryFor(proposal) as unknown as Prisma.InputJsonValue,
+            buyBox: { create: { counties: proposal.counties, states: proposal.states, basins: [], formations: [], assetTypes: [] } },
+            tags: { create: { tagId: tag.id } },
+          },
+        });
+        await prisma.activityLog.create({
+          data: {
+            organizationId: org, eventType: "BUYER_RESEARCH_IMPORT", buyerId: buyer.id, actorUserId: req.user!.id,
+            summary: `Buyer created from research: ${proposal.companyName} — ${proposal.transactionCount} transaction(s) across ${proposal.counties.join(", ") || "—"}`,
+          },
+        });
+        created++;
+      } else if (dec.action === "merge" && dec.mergeIntoBuyerId) {
+        const eb = await prisma.buyer.findFirst({ where: { id: dec.mergeIntoBuyerId, organizationId: org }, include: { buyBox: true } });
+        if (!eb) { skipped++; continue; }
+        const plan = mergePlan(
+          { aliases: eb.aliases, source: eb.source, researchSummary: (eb.researchSummary as never) ?? null, buyBoxCounties: eb.buyBox?.counties ?? [], buyBoxStates: eb.buyBox?.states ?? [] },
+          proposal,
+        );
+        await prisma.$transaction(async (tx) => {
+          await tx.buyer.update({
+            where: { id: eb.id },
+            data: {
+              aliases: [...eb.aliases, ...plan.addAliases],
+              ...(plan.markResearch ? { source: "research" } : {}),
+              researchSummary: plan.summary as unknown as Prisma.InputJsonValue,
+            },
+          });
+          if (eb.buyBox) {
+            await tx.buyBoxCriteria.update({ where: { buyerId: eb.id }, data: { counties: [...eb.buyBox.counties, ...plan.addCounties], states: [...eb.buyBox.states, ...plan.addStates] } });
+          } else {
+            await tx.buyBoxCriteria.create({ data: { buyerId: eb.id, counties: plan.addCounties, states: plan.addStates, basins: [], formations: [], assetTypes: [] } });
+          }
+          await tx.activityLog.create({
+            data: {
+              organizationId: org, eventType: "BUYER_RESEARCH_MERGE", buyerId: eb.id, actorUserId: req.user!.id,
+              summary: `Enriched ${eb.companyName} from research: +${plan.addCounties.length} counties, +${plan.addStates.length} states, +${plan.addAliases.length} aliases`,
+            },
+          });
+        });
+        merged++;
+      } else {
+        skipped++;
+      }
+    }
+
+    res.json({ created, merged, skipped });
   }),
 );
 
@@ -632,14 +783,20 @@ researchRouter.get(
 // ---------------------------------------------------------------------------
 
 /**
- * Import geography defaults. State/county are no longer entered by hand in the
- * import UI: a per-row "County" column (when the file has one) wins, otherwise
- * imports resolve to the platform's current scope — Leon County, Texas. This is
- * the single place to re-scope; multi-county datasets carry their own County
- * column and a state column can be added here the same way.
+ * Import geography is never hardcoded. Each row's State and County come from the
+ * mapped columns when present; when a file lacks them, the UI collects an
+ * assigned State/County for the whole file and passes them as a fallback. A row
+ * that resolves to neither is skipped. This lets the module scale beyond any one
+ * county without manual correction.
  */
-const DEFAULT_IMPORT_STATE = "TX";
-const DEFAULT_IMPORT_COUNTY = "Leon";
+function normState(s: string): string {
+  return s.trim().toUpperCase();
+}
+function titleCounty(s: string): string {
+  // Store county consistently ("Leon"), stripping a trailing "County" suffix.
+  const t = s.trim().replace(/\s+county$/i, "").trim();
+  return t.replace(/\w\S*/g, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase());
+}
 
 type ImportCategory = "deeds" | "leases" | "permits";
 
@@ -713,6 +870,9 @@ const commitSchema = z.object({
   csv: z.string().min(1),
   mapping: z.record(z.string(), z.string()),
   filename: z.string().optional(),
+  // Fallback State/County the user assigns when the file has no such columns.
+  assignedState: z.string().trim().min(1).optional(),
+  assignedCounty: z.string().trim().min(1).optional(),
 });
 
 const CHUNK = 500;
@@ -722,9 +882,10 @@ researchRouter.post(
   requirePermission("manageResearchData"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
-    const { category, csv, mapping, filename } = commitSchema.parse(req.body);
+    const { category, csv, mapping, filename, assignedState, assignedCounty } = commitSchema.parse(req.body);
     const { kind, source, docClass: wantClass } = resolveCategory(category);
-    const state = DEFAULT_IMPORT_STATE;
+    const fallbackState = assignedState ? normState(assignedState) : null;
+    const fallbackCounty = assignedCounty ? titleCounty(assignedCounty) : null;
     const { rows } = parseCsv(csv);
     const get = (row: Record<string, string>, field: string): string => {
       const header = mapping[field];
@@ -740,12 +901,12 @@ researchRouter.post(
     const skip = (reason: string) => { skipped++; skippedReasons.set(reason, (skippedReasons.get(reason) ?? 0) + 1); };
 
     if (kind === "DOCUMENTS") {
-      // Pre-load existing instrument numbers for dedupe (org+state scope).
+      // Pre-load existing instrument numbers for dedupe (org scope; keyed by state+county).
       const existing = new Set(
         (await prisma.researchDocument.findMany({
-          where: { organizationId: org, state, instrumentNumber: { not: null } },
-          select: { instrumentNumber: true, county: true },
-        })).map((r) => `${r.county}|${r.instrumentNumber}`),
+          where: { organizationId: org, instrumentNumber: { not: null } },
+          select: { instrumentNumber: true, county: true, state: true },
+        })).map((r) => `${r.state}|${r.county}|${r.instrumentNumber}`),
       );
       const batch: Prisma.ResearchDocumentCreateManyInput[] = [];
       for (const row of rows) {
@@ -759,22 +920,25 @@ researchRouter.post(
         }
         const recordingDate = parseRecordDate(get(row, "recordingDate"));
         if (!recordingDate) { failed++; continue; }
-        const rowCounty = get(row, "county") || DEFAULT_IMPORT_COUNTY;
+        // Geography from mapped columns, else the file-level assigned fallback.
+        const rowState = get(row, "state") ? normState(get(row, "state")) : fallbackState;
+        const rowCounty = get(row, "county") ? titleCounty(get(row, "county")) : fallbackCounty;
+        if (!rowState || !rowCounty) { skip("Missing county/state (assign one for this file)"); continue; }
         const instrumentNumber = get(row, "instrumentNumber") || null;
         if (instrumentNumber) {
-          const dedupeKey = `${rowCounty}|${instrumentNumber}`;
+          const dedupeKey = `${rowState}|${rowCounty}|${instrumentNumber}`;
           if (existing.has(dedupeKey)) { skip("Duplicate instrument number"); continue; }
           existing.add(dedupeKey);
         }
         const grantor = get(row, "grantor") || null;
         const grantee = get(row, "grantee") || null;
         batch.push({
-          organizationId: org, state, county: rowCounty,
+          organizationId: org, state: rowState, county: rowCounty,
           docTypeRaw, docType: cls.docType, docClass: cls.docClass,
           instrumentNumber, volume: get(row, "volume") || null, page: get(row, "page") || null,
           recordingDate,
           grantor, grantee, grantorNorm: normalizeEntity(grantor), granteeNorm: normalizeEntity(grantee),
-          abstractId: get(row, "abstractId") || null, survey: get(row, "survey") || null,
+          abstractId: get(row, "abstractId") || null,
           legalDescription: get(row, "legalDescription") || null,
           source,
         });
@@ -786,15 +950,17 @@ researchRouter.post(
     } else {
       const existing = new Set(
         (await prisma.researchPermit.findMany({
-          where: { organizationId: org, state },
-          select: { apiNumber: true, permitNumber: true, county: true },
-        })).map((r) => `${r.county}|${r.apiNumber ?? ""}|${r.permitNumber ?? ""}`),
+          where: { organizationId: org },
+          select: { apiNumber: true, permitNumber: true, county: true, state: true },
+        })).map((r) => `${r.state}|${r.county}|${r.apiNumber ?? ""}|${r.permitNumber ?? ""}`),
       );
       const batch: Prisma.ResearchPermitCreateManyInput[] = [];
       for (const row of rows) {
         const operator = get(row, "operator");
         if (!operator) { failed++; continue; }
-        const rowCounty = get(row, "county") || DEFAULT_IMPORT_COUNTY;
+        const rowState = get(row, "state") ? normState(get(row, "state")) : fallbackState;
+        const rowCounty = get(row, "county") ? titleCounty(get(row, "county")) : fallbackCounty;
+        if (!rowState || !rowCounty) { skip("Missing county/state (assign one for this file)"); continue; }
         const filedDate = parseRecordDate(get(row, "filedDate"));
         const approvedDate = parseRecordDate(get(row, "approvedDate"));
         const spudDate = parseRecordDate(get(row, "spudDate"));
@@ -804,19 +970,19 @@ researchRouter.post(
         const apiNumber = get(row, "apiNumber") || null;
         const permitNumber = get(row, "permitNumber") || null;
         if (apiNumber || permitNumber) {
-          const key = `${rowCounty}|${apiNumber ?? ""}|${permitNumber ?? ""}`;
+          const key = `${rowState}|${rowCounty}|${apiNumber ?? ""}|${permitNumber ?? ""}`;
           if (existing.has(key)) { skip("Duplicate API/permit number"); continue; }
           existing.add(key);
         }
         batch.push({
-          organizationId: org, state, county: rowCounty,
+          organizationId: org, state: rowState, county: rowCounty,
           apiNumber, permitNumber, operator, operatorNorm: normalizeEntity(operator) ?? operator.toUpperCase(),
           leaseName: get(row, "leaseName") || null, wellName: get(row, "wellName") || null,
           status: classifyPermitStatus(get(row, "status")), trajectory: classifyTrajectory(get(row, "trajectory")),
           activityDate, filedDate, approvedDate, spudDate, completionDate,
           formation: get(row, "formation") || null, field: get(row, "field") || null,
           totalDepth: numOf(get(row, "totalDepth")),
-          abstractId: get(row, "abstractId") || null, survey: get(row, "survey") || null,
+          abstractId: get(row, "abstractId") || null,
           latitude: numOf(get(row, "latitude")), longitude: numOf(get(row, "longitude")),
           source,
         });
@@ -829,7 +995,7 @@ researchRouter.post(
 
     const run = await prisma.researchIngestRun.create({
       data: {
-        organizationId: org, kind, source, state, county: DEFAULT_IMPORT_COUNTY, filename: filename ?? null,
+        organizationId: org, kind, source, state: fallbackState, county: fallbackCounty, filename: filename ?? null,
         rowsTotal: rows.length, rowsImported: imported, rowsSkipped: skipped, rowsFailed: failed,
         status: "COMPLETED", createdByUserId: req.user!.id,
       },
