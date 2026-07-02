@@ -41,7 +41,7 @@ interface FilterOpts {
   buyers: { id: string; name: string }[]; users: { id: string; name: string }[]; stages: string[];
 }
 
-type Period = "THIS_MONTH" | "LAST_MONTH" | "THIS_QUARTER" | "THIS_YEAR" | "LAST_YEAR" | "CUSTOM";
+type Period = "THIS_MONTH" | "LAST_MONTH" | "THIS_QUARTER" | "LAST_QUARTER" | "THIS_YEAR" | "LAST_YEAR" | "CUSTOM";
 type Compare = "NONE" | "PREV_PERIOD" | "PREV_YEAR";
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -54,6 +54,7 @@ function rangeFor(period: Period, custom: { from: string; to: string }): { from:
     case "THIS_MONTH": return { from: iso(new Date(Date.UTC(y, m, 1))), to: iso(new Date(Date.UTC(y, m + 1, 0))) };
     case "LAST_MONTH": return { from: iso(new Date(Date.UTC(y, m - 1, 1))), to: iso(new Date(Date.UTC(y, m, 0))) };
     case "THIS_QUARTER": { const q = Math.floor(m / 3) * 3; return { from: iso(new Date(Date.UTC(y, q, 1))), to: iso(new Date(Date.UTC(y, q + 3, 0))) }; }
+    case "LAST_QUARTER": { const q = Math.floor(m / 3) * 3 - 3; return { from: iso(new Date(Date.UTC(y, q, 1))), to: iso(new Date(Date.UTC(y, q + 3, 0))) }; }
     case "THIS_YEAR": return { from: iso(new Date(Date.UTC(y, 0, 1))), to: iso(new Date(Date.UTC(y, 11, 31))) };
     case "LAST_YEAR": return { from: iso(new Date(Date.UTC(y - 1, 0, 1))), to: iso(new Date(Date.UTC(y - 1, 11, 31))) };
     default: return { from: custom.from, to: custom.to };
@@ -84,6 +85,7 @@ export function Reports() {
   const [custom, setCustom] = useState({ from: "", to: "" });
   const [compare, setCompare] = useState<Compare>("NONE");
   const [filters, setFilters] = useState<Record<string, string[]>>(EMPTY_FILTERS);
+  const [showFilters, setShowFilters] = useState(false);
   const [opts, setOpts] = useState<FilterOpts | null>(null);
   const [data, setData] = useState<Analytics | null>(null);
   const [deals, setDeals] = useState<DealSummary[]>([]);
@@ -130,7 +132,7 @@ export function Reports() {
 
   const CHIPS: [Period, string][] = [
     ["THIS_MONTH", "This Month"], ["LAST_MONTH", "Last Month"], ["THIS_QUARTER", "This Quarter"],
-    ["THIS_YEAR", "This Year"], ["LAST_YEAR", "Last Year"], ["CUSTOM", "Custom"],
+    ["LAST_QUARTER", "Last Quarter"], ["THIS_YEAR", "This Year"], ["LAST_YEAR", "Last Year"], ["CUSTOM", "Custom"],
   ];
 
   const k = data?.kpis;
@@ -153,7 +155,16 @@ export function Reports() {
             <div className="field" style={{ marginBottom: 0 }}><label>To</label><input type="date" value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} /></div>
           </div>
         )}
-        <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
+        {/* Advanced filters collapse by default — only date presets show up front. */}
+        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+          <button className="small" onClick={() => setShowFilters((s) => !s)}>
+            {showFilters ? "▾" : "▸"} Filters{activeFilterChips.length > 0 ? ` (${activeFilterChips.length})` : ""}
+          </button>
+          {compare !== "NONE" && <span className="muted" style={{ fontSize: 12 }}>Comparison on</span>}
+          {activeFilterChips.length > 0 && <button className="small" onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>}
+        </div>
+        {showFilters && (
+        <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end", marginTop: 10 }}>
           <div className="field" style={{ marginBottom: 0 }}><label>Compare to</label>
             <select value={compare} onChange={(e) => setCompare(e.target.value as Compare)}>
               <option value="NONE">No comparison</option>
@@ -188,8 +199,8 @@ export function Reports() {
               </div>
             </>
           )}
-          {activeFilterChips.length > 0 && <button className="small" style={{ alignSelf: "flex-end" }} onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>}
         </div>
+        )}
       </div>
 
       {loading && !data ? <Spinner label="Building analytics…" /> : !data || !k ? <Banner kind="info">No data.</Banner> : (
@@ -282,37 +293,6 @@ export function Reports() {
               <h3>Most Active Basins</h3>
               <BreakdownBars data={data.breakdowns.basins} color={CHART_COLORS[5]} onClick={(name) => drillByDeal(`Basin: ${name}`, (dd) => dd.basins.includes(name))} />
             </div>
-          </div>
-
-          {/* --- Per-user productivity --- */}
-          <div className="panel">
-            <h3>User Productivity</h3>
-            {data.breakdowns.perUser.length === 0 ? <p className="muted">No activity in this period.</p> : (
-              <>
-                <ResponsiveContainer width="100%" height={Math.max(160, data.breakdowns.perUser.length * 44)}>
-                  <BarChart data={data.breakdowns.perUser} layout="vertical" margin={{ left: 20 }}>
-                    <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-                    <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
-                    <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={120} />
-                    <Tooltip />
-                    <Legend />
-                    <Bar dataKey="created" name="Deals created" fill={CHART_COLORS[0]} radius={[0, 3, 3, 0]} />
-                    <Bar dataKey="closed" name="Deals closed" fill={CHART_COLORS[1]} radius={[0, 3, 3, 0]} />
-                    <Bar dataKey="activity" name="Buyer touches" fill={CHART_COLORS[3]} radius={[0, 3, 3, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-                <div className="table-scroll" style={{ marginTop: 12 }}>
-                  <table className="data-table">
-                    <thead><tr><th>Team member</th><th className="right">Created</th><th className="right">Closed</th><th className="right">Buyer touches</th></tr></thead>
-                    <tbody>
-                      {data.breakdowns.perUser.map((u) => (
-                        <tr key={u.userId}><td>{u.name}</td><td className="right">{u.created}</td><td className="right">{u.closed}</td><td className="right">{u.activity}</td></tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
           </div>
         </div>
       )}

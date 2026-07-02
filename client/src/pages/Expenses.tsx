@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
-  LineChart, Line, PieChart, Pie, Cell,
+  PieChart, Pie, Cell,
 } from "recharts";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -9,7 +9,7 @@ import { MetricCard, Spinner, Banner, Modal } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { money, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
-import { CHART_COLORS, COLOR_EXPENSE, COLOR_REIMBURSED, monthLabel } from "../lib/charts";
+import { CHART_COLORS, COLOR_EXPENSE, monthLabel } from "../lib/charts";
 import type { UserLite } from "../types";
 
 interface Category { id: string; name: string; active: boolean }
@@ -154,23 +154,6 @@ export function Expenses() {
                   <Tooltip formatter={(v: number) => money(v)} />
                   <Bar dataKey="expenses" name="Expenses" fill={COLOR_EXPENSE} radius={[3, 3, 0, 0]} />
                 </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-
-          <div className="panel">
-            <h3>Reimbursement Trend</h3>
-            {dash.byMonth.length === 0 ? <p className="muted">No data.</p> : (
-              <ResponsiveContainer width="100%" height={220}>
-                <LineChart data={dash.byMonth.map((m) => ({ ...m, label: monthLabel(m.month) }))}>
-                  <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                  <YAxis tickFormatter={(v) => money(v)} tick={{ fontSize: 11 }} width={70} />
-                  <Tooltip formatter={(v: number) => money(v)} />
-                  <Legend />
-                  <Line type="monotone" dataKey="expenses" name="Expenses" stroke={COLOR_EXPENSE} strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="reimbursed" name="Reimbursed" stroke={COLOR_REIMBURSED} strokeWidth={2} dot={false} />
-                </LineChart>
               </ResponsiveContainer>
             )}
           </div>
