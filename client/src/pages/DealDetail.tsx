@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, lazy, Suspense } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -16,6 +16,8 @@ import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASS
 import { money, num, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import type { BuyerActivityRow, DealSummary, MatchRec, UserLite } from "../types";
+// MapLibre is heavy; only load it when a deal detail page is viewed.
+const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
 
 interface DealDetailData extends DealSummary {
   operator: string | null;
@@ -96,6 +98,12 @@ export function DealDetail() {
       <div className="grid-2">
         <CharacteristicsCard deal={deal} onSaved={refreshAll} />
         <ContractTimelineCard deal={deal} onSaved={loadDeal} />
+      </div>
+
+      {/* Embedded, isolated map showing only this deal's extent */}
+      <div className="panel">
+        <div className="section-head"><h3>Location</h3><span className="muted">This deal's abstracts and geographic extent</span></div>
+        <Suspense fallback={<Spinner label="Loading map…" />}><DealMap abstractIds={deal.abstractIds} /></Suspense>
       </div>
 
       <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>

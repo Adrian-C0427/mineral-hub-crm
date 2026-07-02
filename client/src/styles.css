@@ -162,6 +162,14 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .link-btn { background: none; border: none; color: var(--accent); padding: 0 4px; font-size: 12px; cursor: pointer; }
 .match-selected { outline: 2px solid var(--accent); }
 
+/* Embedded deal map */
+.deal-map { display: flex; flex-direction: column; }
+.dm-toolbar { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; }
+.dm-chk { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-dim); }
+.dm-canvas { position: relative; height: 380px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+.dm-info { position: absolute; top: 10px; right: 10px; max-width: 240px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+.dm-empty { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; padding: 24px; color: var(--text-dim); font-size: 13px; background: var(--panel-2); }
+
 /* Integrations hub */
 .integration-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .integration-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; background: var(--panel-2); display: flex; flex-direction: column; }
