@@ -1,14 +1,23 @@
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
+import crypto from "node:crypto";
+import jwt from "jsonwebtoken";
 import { prisma } from "../db.js";
 import { verifyPassword, hashPassword } from "../auth/password.js";
 import { signSession, setSessionCookie, clearSessionCookie } from "../auth/session.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
-import { LOGIN_RATE_LIMIT } from "../config.js";
+import { LOGIN_RATE_LIMIT, env, isProd, emailConfigured } from "../config.js";
 import { createOrganization, resolveJoinToken, consumeInvite } from "../services/org.js";
 import { normalizePhone } from "../domain/phone.js";
+import { sendEmail } from "../services/email.js";
+import {
+  generateSecret, verifyTotp, otpauthUri, generateRecoveryCodes, hashRecoveryCode,
+} from "../domain/totp.js";
+import {
+  getProvider, enabledProviders, buildAuthorizeUrl, exchangeCode, fetchProfile,
+} from "../services/oauth.js";
 
 export const authRouter = Router();
 
@@ -20,16 +29,39 @@ const loginLimiter = rateLimit({
   message: { error: "Too many login attempts. Try again later." },
 });
 
+/** Issue a session (cookie + bearer token) and the compact user summary. */
+function issueSession(res: import("express").Response, user: { id: string; name: string; email: string; role: "OWNER" | "ASSOCIATE"; orgRole: string | null }) {
+  const token = signSession({ userId: user.id, role: user.role });
+  setSessionCookie(res, token);
+  return { token, user: { id: user.id, name: user.name, email: user.email, role: user.role, orgRole: user.orgRole } };
+}
+
+/** Verify a submitted 2FA value against the user's TOTP secret or recovery codes. */
+async function verifySecondFactor(user: { id: string; totpSecret: string | null; totpRecoveryCodes: string[] }, code: string): Promise<boolean> {
+  if (user.totpSecret && verifyTotp(user.totpSecret, code)) return true;
+  // Recovery code: single-use — consume it on success.
+  const hash = hashRecoveryCode(code);
+  if (user.totpRecoveryCodes.includes(hash)) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { totpRecoveryCodes: user.totpRecoveryCodes.filter((h) => h !== hash) },
+    });
+    return true;
+  }
+  return false;
+}
+
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+  totpCode: z.string().trim().optional(),
 });
 
 authRouter.post(
   "/login",
   loginLimiter,
   asyncHandler(async (req, res) => {
-    const { email, password } = loginSchema.parse(req.body);
+    const { email, password, totpCode } = loginSchema.parse(req.body);
     const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
 
     // Constant-ish response — don't reveal whether the email exists.
@@ -43,10 +75,20 @@ authRouter.post(
       return;
     }
 
-    const token = signSession({ userId: user.id, role: user.role });
-    setSessionCookie(res, token);
-    // Also return the token so the SPA can use Authorization: Bearer (cross-site safe).
-    res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+    // Second factor step-up: password is correct, but 2FA is on.
+    if (user.totpEnabled) {
+      if (!totpCode) {
+        res.json({ twoFactorRequired: true });
+        return;
+      }
+      const passed = await verifySecondFactor(user, totpCode);
+      if (!passed) {
+        res.status(401).json({ error: "Invalid verification code", twoFactorRequired: true });
+        return;
+      }
+    }
+
+    res.json(issueSession(res, user));
   }),
 );
 
@@ -194,3 +236,288 @@ authRouter.patch(
     res.json({ user });
   }),
 );
+
+// ===========================================================================
+// Password reset (forgot → emailed link → reset)
+// ===========================================================================
+
+const RESET_TTL_MS = env.PASSWORD_RESET_TTL_MINUTES * 60 * 1000;
+const sha256 = (s: string) => crypto.createHash("sha256").update(s).digest("hex");
+
+const forgotLimiter = rateLimit({
+  windowMs: LOGIN_RATE_LIMIT.WINDOW_MS,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many reset requests. Try again later." },
+});
+
+authRouter.post(
+  "/password/forgot",
+  forgotLimiter,
+  asyncHandler(async (req, res) => {
+    const { email } = z.object({ email: z.string().email() }).parse(req.body);
+    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+
+    // Always respond 200 with the same shape — never reveal whether the email exists.
+    const response: { ok: true; devResetUrl?: string } = { ok: true };
+
+    if (user && user.status === "ACTIVE") {
+      const rawToken = crypto.randomBytes(32).toString("base64url");
+      await prisma.passwordResetToken.create({
+        data: { userId: user.id, tokenHash: sha256(rawToken), expiresAt: new Date(Date.now() + RESET_TTL_MS) },
+      });
+      const resetUrl = `${env.APP_URL}/reset-password?token=${rawToken}`;
+
+      if (emailConfigured()) {
+        await sendEmail({
+          to: user.email,
+          subject: "Reset your Mineral Hub password",
+          html: `<p>Hi ${escapeHtml(user.firstName ?? user.name)},</p>
+<p>We received a request to reset your Mineral Hub password. This link expires in ${env.PASSWORD_RESET_TTL_MINUTES} minutes:</p>
+<p><a href="${resetUrl}">Reset your password</a></p>
+<p>If you didn't request this, you can safely ignore this email — your password won't change.</p>`,
+        }).catch((e) => { console.error("Password reset email failed:", e instanceof Error ? e.message : e); });
+      } else if (!isProd) {
+        // Dev convenience: no SMTP configured, so hand the link back directly.
+        response.devResetUrl = resetUrl;
+        console.log(`[password reset] ${user.email} → ${resetUrl}`);
+      }
+    }
+
+    res.json(response);
+  }),
+);
+
+authRouter.post(
+  "/password/reset",
+  asyncHandler(async (req, res) => {
+    const { token, password } = z
+      .object({ token: z.string().min(1), password: z.string().min(8, "Password must be at least 8 characters") })
+      .parse(req.body);
+
+    const row = await prisma.passwordResetToken.findUnique({ where: { tokenHash: sha256(token) } });
+    if (!row || row.usedAt || row.expiresAt < new Date()) {
+      throw new HttpError(400, "This reset link is invalid or has expired. Request a new one.");
+    }
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: row.userId }, data: { passwordHash: await hashPassword(password) } }),
+      prisma.passwordResetToken.update({ where: { id: row.id }, data: { usedAt: new Date() } }),
+      // Invalidate any other outstanding tokens for this user.
+      prisma.passwordResetToken.updateMany({
+        where: { userId: row.userId, usedAt: null, id: { not: row.id } },
+        data: { usedAt: new Date() },
+      }),
+    ]);
+    res.json({ ok: true });
+  }),
+);
+
+// ===========================================================================
+// Two-factor authentication (TOTP)
+// ===========================================================================
+
+authRouter.get(
+  "/2fa/status",
+  requireAuth,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { totpEnabled: true, totpRecoveryCodes: true } });
+    res.json({ enabled: user?.totpEnabled ?? false, recoveryCodesRemaining: user?.totpRecoveryCodes.length ?? 0 });
+  }),
+);
+
+// Begin enrollment: generate a secret and return the provisioning URI. Not yet
+// active — the user must confirm a code via /2fa/enable.
+authRouter.post(
+  "/2fa/setup",
+  requireAuth,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { email: true, totpEnabled: true } });
+    if (user?.totpEnabled) throw new HttpError(400, "Two-factor authentication is already enabled. Disable it first to re-enroll.");
+    const secret = generateSecret();
+    await prisma.user.update({ where: { id: req.user!.id }, data: { totpSecret: secret } });
+    res.json({ secret, otpauthUri: otpauthUri(secret, user!.email, "Mineral Hub") });
+  }),
+);
+
+// Confirm the first code and turn 2FA on; returns one-time recovery codes.
+authRouter.post(
+  "/2fa/enable",
+  requireAuth,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { code } = z.object({ code: z.string().trim().min(1) }).parse(req.body);
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { totpSecret: true, totpEnabled: true } });
+    if (user?.totpEnabled) throw new HttpError(400, "Two-factor authentication is already enabled.");
+    if (!user?.totpSecret) throw new HttpError(400, "Start setup first (no pending secret).");
+    if (!verifyTotp(user.totpSecret, code)) throw new HttpError(400, "That code is incorrect or expired. Try the current code from your authenticator app.");
+
+    const { codes, hashes } = generateRecoveryCodes();
+    await prisma.user.update({ where: { id: req.user!.id }, data: { totpEnabled: true, totpRecoveryCodes: hashes } });
+    res.json({ enabled: true, recoveryCodes: codes });
+  }),
+);
+
+// Turn 2FA off (requires a current code or a recovery code to prove possession).
+authRouter.post(
+  "/2fa/disable",
+  requireAuth,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { code } = z.object({ code: z.string().trim().min(1) }).parse(req.body);
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { id: true, totpSecret: true, totpEnabled: true, totpRecoveryCodes: true } });
+    if (!user?.totpEnabled) throw new HttpError(400, "Two-factor authentication is not enabled.");
+    const ok = await verifySecondFactor(user, code);
+    if (!ok) throw new HttpError(400, "Verification failed. Enter a current code or a recovery code.");
+    await prisma.user.update({ where: { id: req.user!.id }, data: { totpEnabled: false, totpSecret: null, totpRecoveryCodes: [] } });
+    res.json({ enabled: false });
+  }),
+);
+
+// Regenerate recovery codes (invalidates the old set).
+authRouter.post(
+  "/2fa/recovery-codes",
+  requireAuth,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { code } = z.object({ code: z.string().trim().min(1) }).parse(req.body);
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { id: true, totpSecret: true, totpEnabled: true, totpRecoveryCodes: true } });
+    if (!user?.totpEnabled) throw new HttpError(400, "Two-factor authentication is not enabled.");
+    if (!user.totpSecret || !verifyTotp(user.totpSecret, code)) throw new HttpError(400, "Enter a current code from your authenticator app.");
+    const { codes, hashes } = generateRecoveryCodes();
+    await prisma.user.update({ where: { id: req.user!.id }, data: { totpRecoveryCodes: hashes } });
+    res.json({ recoveryCodes: codes });
+  }),
+);
+
+// ===========================================================================
+// OAuth / SSO (Google, Microsoft)
+// ===========================================================================
+
+/** Providers with credentials configured — the client renders a button per entry. */
+authRouter.get("/oauth/providers", (_req, res) => {
+  res.json({ providers: enabledProviders() });
+});
+
+// Step 1: redirect the browser to the provider's consent screen. A signed,
+// short-lived state token guards against CSRF and pins the join token (if any).
+authRouter.get(
+  "/oauth/:provider/start",
+  asyncHandler(async (req, res) => {
+    const provider = getProvider(req.params.provider);
+    if (!provider) throw new HttpError(404, "That sign-in provider isn't configured.");
+    const joinToken = typeof req.query.joinToken === "string" ? req.query.joinToken : undefined;
+    const state = jwt.sign({ p: provider.key, joinToken }, env.JWT_SECRET, { expiresIn: "10m" });
+    res.redirect(buildAuthorizeUrl(provider, state));
+  }),
+);
+
+// Step 2: provider redirects back here with a code. Exchange it, resolve/create
+// the user, then bounce to the SPA with a session token in the URL fragment.
+authRouter.get(
+  "/oauth/:provider/callback",
+  asyncHandler(async (req, res) => {
+    const fail = (msg: string) => res.redirect(`${env.APP_URL}/login?oauthError=${encodeURIComponent(msg)}`);
+    const provider = getProvider(req.params.provider);
+    if (!provider) return fail("Sign-in provider not configured");
+    const code = typeof req.query.code === "string" ? req.query.code : null;
+    const state = typeof req.query.state === "string" ? req.query.state : null;
+    if (req.query.error) return fail(String(req.query.error));
+    if (!code || !state) return fail("Missing authorization code");
+
+    let joinToken: string | undefined;
+    try {
+      const decoded = jwt.verify(state, env.JWT_SECRET) as { p: string; joinToken?: string };
+      if (decoded.p !== provider.key) return fail("Invalid sign-in state");
+      joinToken = decoded.joinToken;
+    } catch {
+      return fail("Sign-in session expired, please try again");
+    }
+
+    let profile;
+    try {
+      const accessToken = await exchangeCode(provider, code);
+      profile = await fetchProfile(provider, accessToken);
+    } catch (e) {
+      return fail(e instanceof Error ? e.message : "Sign-in failed");
+    }
+    if (!profile.email || !profile.emailVerified) return fail("Your provider account has no verified email");
+
+    // Resolve the user: existing OAuth link → existing email → brand-new account.
+    const linked = await prisma.oAuthAccount.findUnique({
+      where: { provider_providerAccountId: { provider: provider.key, providerAccountId: profile.providerAccountId } },
+      include: { user: true },
+    });
+    let user = linked?.user ?? null;
+
+    if (!user) {
+      const byEmail = await prisma.user.findUnique({ where: { email: profile.email } });
+      if (byEmail) {
+        user = byEmail;
+        await prisma.oAuthAccount.create({ data: { userId: byEmail.id, provider: provider.key, providerAccountId: profile.providerAccountId, email: profile.email } });
+      } else {
+        const join = joinToken ? await resolveJoinToken(joinToken).catch(() => null) : null;
+        user = await prisma.$transaction(async (tx) => {
+          let organizationId: string;
+          let orgRole: "OWNER" | "MEMBER";
+          if (join) {
+            organizationId = join.organizationId;
+            orgRole = "MEMBER";
+            await consumeInvite(join.inviteCodeId, tx);
+          } else {
+            const org = await createOrganization(`${profile.name ?? profile.email}'s Workspace`, tx);
+            organizationId = org.id;
+            orgRole = "OWNER";
+          }
+          const created = await tx.user.create({
+            data: {
+              name: profile.name ?? profile.email!,
+              email: profile.email!,
+              // No password login for SSO-provisioned accounts until they set one via reset.
+              passwordHash: await hashPassword(crypto.randomBytes(32).toString("hex")),
+              role: "OWNER",
+              organizationId,
+              orgRole,
+            },
+          });
+          await tx.oAuthAccount.create({ data: { userId: created.id, provider: provider.key, providerAccountId: profile.providerAccountId, email: profile.email } });
+          return created;
+        });
+      }
+    }
+
+    if (user.status !== "ACTIVE") return fail("This account is not active");
+
+    // SSO satisfies primary auth; if the user also has TOTP on, they still
+    // complete it — issue a short-lived pre-auth token the SPA exchanges.
+    if (user.totpEnabled) {
+      const pre = jwt.sign({ uid: user.id, twofa: true }, env.JWT_SECRET, { expiresIn: "5m" });
+      return res.redirect(`${env.APP_URL}/auth/callback#twofa=${pre}`);
+    }
+    const { token } = issueSession(res, user);
+    res.redirect(`${env.APP_URL}/auth/callback#token=${token}`);
+  }),
+);
+
+// Complete an OAuth login that required a second factor.
+authRouter.post(
+  "/oauth/2fa",
+  loginLimiter,
+  asyncHandler(async (req, res) => {
+    const { preAuthToken, totpCode } = z.object({ preAuthToken: z.string().min(1), totpCode: z.string().trim().min(1) }).parse(req.body);
+    let uid: string;
+    try {
+      const decoded = jwt.verify(preAuthToken, env.JWT_SECRET) as { uid: string; twofa?: boolean };
+      if (!decoded.twofa || !decoded.uid) throw new Error("bad token");
+      uid = decoded.uid;
+    } catch {
+      throw new HttpError(401, "Your sign-in session expired. Please sign in again.");
+    }
+    const user = await prisma.user.findUnique({ where: { id: uid } });
+    if (!user || user.status !== "ACTIVE" || !user.totpEnabled) throw new HttpError(401, "Sign-in failed.");
+    const ok = await verifySecondFactor(user, totpCode);
+    if (!ok) throw new HttpError(401, "Invalid verification code");
+    res.json(issueSession(res, user));
+  }),
+);
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+}

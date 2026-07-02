@@ -3,6 +3,7 @@ import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Banner } from "../components/ui";
 import { PhoneInput } from "../components/PhoneInput";
+import { TwoFactorSettings } from "../components/TwoFactorSettings";
 
 /** General settings — account/profile now; structured for more sections later. */
 export function SettingsGeneral() {
@@ -71,6 +72,8 @@ export function SettingsGeneral() {
           <button className="primary" disabled={busy} style={{ marginTop: 8 }}>{busy ? "Saving…" : "Save changes"}</button>
         </form>
       </div>
+
+      <TwoFactorSettings />
 
       {/* Forthcoming general settings — laid out so each can be enabled in place. */}
       <SoonPanel title="Notification Preferences" desc="Choose which deal, buyer, and reminder notifications you receive and how (email / in-app)." />
