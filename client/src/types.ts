@@ -48,6 +48,39 @@ export interface DealSummary {
   selectedOfferId: string | null;
   relationshipOwner: { id: string; name: string } | null;
   estimatedClosingCosts: number | null;
+  // Record discriminator + owned-asset fields (null/undefined for opportunities).
+  recordType: RecordType;
+  assetMode: AssetMode | null;
+  acquisitionDate: string | null;
+  purchasePrice: number | null;
+  currentValue: number | null;
+  bookValue: number | null;
+  ownershipStatus: string | null;
+  ownershipType: string | null;
+  workingInterest: number | null;
+  netRevenueInterest: number | null;
+  surveys: string[];
+  wells: string[];
+  producingStatus: string | null;
+  royaltyIncomeAnnual: number | null;
+  leaseStatus: string | null;
+  leaseInfo: string | null;
+  divisionOrdersNote: string | null;
+  taxInfo: string | null;
+  roiSinceAcquisition: number | null;
+  unrealizedGainLoss: number | null;
+}
+
+export type RecordType = "OPPORTUNITY" | "OWNED_ASSET";
+export type AssetMode = "HOLD" | "SELL";
+
+export interface RevenueEntry {
+  id: string;
+  month: string;
+  amount: number;
+  kind: string;
+  operator: string | null;
+  note: string | null;
 }
 
 export interface BuyBox {
@@ -90,3 +123,37 @@ export interface BuyerActivityRow {
 }
 
 export interface UserLite { id: string; name: string; email?: string; role?: string; }
+
+export type SellerType = "INDIVIDUAL" | "TRUST" | "LLC" | "CORPORATION" | "ESTATE" | "PARTNERSHIP" | "OTHER";
+
+export interface Seller {
+  id: string;
+  isPrimary: boolean;
+  ownershipPercent: number | null;
+  firstName: string | null;
+  middleName: string | null;
+  lastName: string | null;
+  companyName: string | null;
+  trustName: string | null;
+  sellerType: SellerType;
+  primaryPhone: string | null;
+  secondaryPhone: string | null;
+  email: string | null;
+  preferredContactMethod: string | null;
+  mailingAddress: string | null;
+  mailingCity: string | null;
+  mailingState: string | null;
+  mailingZip: string | null;
+  physicalAddress: string | null;
+  physicalCity: string | null;
+  physicalState: string | null;
+  physicalZip: string | null;
+  internalNotes: string | null;
+  preferredCommunicationNotes: string | null;
+  /** Only present when the caller holds viewSellerTaxId; otherwise hasTaxId flags existence. */
+  taxId?: string | null;
+  hasTaxId: boolean;
+  assignedTeamMember: { id: string; name: string } | null;
+  dateAdded: string;
+  updatedAt: string;
+}

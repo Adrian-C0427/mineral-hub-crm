@@ -45,6 +45,32 @@ enum Stage {
   DEAD
 }
 
+// A Deal is either an acquisition OPPORTUNITY (default) or an OWNED_ASSET the
+// company already holds. Owned assets reuse the entire Deal machinery (buyer
+// matching, offers, activity, email, documents, map, pipeline) — the mineral-
+// assets module is a filtered view over the same table, so nothing is duplicated.
+enum RecordType {
+  OPPORTUNITY
+  OWNED_ASSET
+}
+
+// Operational mode for an OWNED_ASSET: HOLD (portfolio management) or SELL
+// (actively marketed — behaves like an active deal while staying an owned asset).
+enum AssetMode {
+  HOLD
+  SELL
+}
+
+enum SellerType {
+  INDIVIDUAL
+  TRUST
+  LLC
+  CORPORATION
+  ESTATE
+  PARTNERSHIP
+  OTHER
+}
+
 enum RelationshipStatus {
   HOT
   WARM
@@ -249,6 +275,7 @@ model User {
   uploadedFiles      FileAttachment[]
   activityLogs       ActivityLog[]
   expenses           Expense[]
+  sellerAssignments  DealSeller[]        @relation("SellerAssignments")
 
   @@index([organizationId])
 }
@@ -290,7 +317,14 @@ model Deal {
   organizationId String?
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name           String
+  // Legacy free-text seller names. Structured seller records live in DealSeller.
   sellerNames    String[]
+
+  // Opportunity vs. owned asset (see RecordType). Owned assets additionally
+  // carry the ownership/financial fields below and an AssetMode.
+  recordType RecordType @default(OPPORTUNITY)
+  assetMode  AssetMode?
+
   // Deal characteristics support multiple selections (state stays single).
   counties       String[]
   state          String?
@@ -330,19 +364,110 @@ model Deal {
   estimatedClosingCosts Float?
   notes                 String?
 
+  // --- Owned-asset fields (used when recordType = OWNED_ASSET) -------------
+  // Ownership
+  acquisitionDate    DateTime?
+  purchasePrice      Float? // what we paid to acquire the asset
+  currentValue       Float? // current estimated market value
+  bookValue          Float? // carrying/book value
+  ownershipStatus    String? // e.g. "Active", "Encumbered", "Leased"
+  ownershipType      String? // e.g. "Mineral", "Royalty", "ORRI", "Working Interest"
+  workingInterest    Float? // fraction 0–1
+  netRevenueInterest Float? // fraction 0–1
+  // Property (counties/abstractIds/basins/formations/operator/nra/acreageNma reused)
+  surveys         String[]
+  wells           String[] // well names / API numbers on the asset
+  producingStatus String? // e.g. "Producing", "Shut-in", "Non-producing"
+  // Financial
+  royaltyIncomeAnnual Float? // estimated annual royalty income
+  leaseStatus         String?
+  leaseInfo           String?
+  divisionOrdersNote  String?
+  taxInfo             String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  stageHistory  DealStageHistory[]
-  buyerActivity DealBuyerActivity[]
-  buyerMessages DealBuyerMessage[]
-  offers        Offer[]             @relation("DealOffers")
-  files         FileAttachment[]
-  activityLogs  ActivityLog[]
+  stageHistory   DealStageHistory[]
+  buyerActivity  DealBuyerActivity[]
+  buyerMessages  DealBuyerMessage[]
+  offers         Offer[]             @relation("DealOffers")
+  files          FileAttachment[]
+  activityLogs   ActivityLog[]
+  sellers        DealSeller[]
+  revenueEntries AssetRevenueEntry[]
 
   @@index([stage])
   @@index([selectedBuyerId])
   @@index([organizationId])
+  @@index([organizationId, recordType])
+}
+
+// A structured seller/owner on a deal. Modeled as hasMany so a deal can grow to
+// multiple owners, heirs, trusts and additional contacts without a schema change.
+model DealSeller {
+  id     String @id @default(cuid())
+  dealId String
+  deal   Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  isPrimary        Boolean @default(false)
+  ownershipPercent Float? // this owner's share (for future multi-owner splits)
+
+  // Personal
+  firstName   String?
+  middleName  String?
+  lastName    String?
+  companyName String?
+  trustName   String?
+  sellerType  SellerType @default(INDIVIDUAL)
+
+  // Contact
+  primaryPhone           String?
+  secondaryPhone         String?
+  email                  String?
+  preferredContactMethod String? // "Phone" | "Email" | "Mail" | "Text"
+
+  // Mailing address
+  mailingAddress String?
+  mailingCity    String?
+  mailingState   String?
+  mailingZip     String?
+
+  // Physical address
+  physicalAddress String?
+  physicalCity    String?
+  physicalState   String?
+  physicalZip     String?
+
+  // Additional
+  internalNotes               String?
+  taxId                       String? // sensitive — API only returns it with viewSellerTaxId
+  preferredCommunicationNotes String?
+
+  assignedTeamMemberId String?
+  assignedTeamMember   User?   @relation("SellerAssignments", fields: [assignedTeamMemberId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([dealId])
+}
+
+// A month of realized revenue on an owned asset (royalty, lease bonus, etc.).
+model AssetRevenueEntry {
+  id     String @id @default(cuid())
+  dealId String
+  deal   Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  month    DateTime // first day of the month, UTC
+  amount   Float
+  kind     String  @default("ROYALTY") // ROYALTY | LEASE_BONUS | OTHER
+  operator String?
+  note     String?
+
+  createdAt DateTime @default(now())
+
+  @@index([dealId, month])
 }
 
 model DealStageHistory {
@@ -541,7 +666,10 @@ model FileAttachment {
   deal             Deal?        @relation(fields: [dealId], references: [id], onDelete: Cascade)
   buyerId          String?
   buyer            Buyer?       @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  // Legacy fixed category, kept for back-compat. The folder-based document
+  // manager uses `folder` (a free string) so new folders need no schema change.
   category         FileCategory @default(OTHER)
+  folder           String       @default("Other")
   filename         String
   mimeType         String
   sizeBytes        Int
@@ -549,6 +677,15 @@ model FileAttachment {
   uploadedByUserId String?
   uploadedBy       User?        @relation(fields: [uploadedByUserId], references: [id], onDelete: SetNull)
   createdAt        DateTime     @default(now())
+  // @default(now()) backfills existing rows; @updatedAt maintains it thereafter.
+  updatedAt        DateTime     @default(now()) @updatedAt
+
+  // Replace-with-history: a replaced file points at the record that superseded
+  // it, so the current version is supersededById == null; prior versions are
+  // reachable via `supersedes`.
+  supersededById String?
+  supersededBy   FileAttachment?  @relation("FileSupersede", fields: [supersededById], references: [id], onDelete: SetNull)
+  supersedes     FileAttachment[] @relation("FileSupersede")
 
   @@index([dealId])
   @@index([buyerId])
