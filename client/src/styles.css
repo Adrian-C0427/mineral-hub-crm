@@ -426,6 +426,27 @@ tr.row-base td { background: var(--panel-2); font-weight: 600; }
 .transition-zone.closed.drop-target { border-color: var(--green); color: var(--green); background: color-mix(in srgb, var(--green) 8%, transparent); }
 .transition-zone.dead.drop-target { border-color: var(--red); color: var(--red); background: color-mix(in srgb, var(--red) 8%, transparent); }
 
+/* --- Seller Details --- */
+.seller-list { display: flex; flex-direction: column; gap: 12px; }
+.seller-card { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel-2); padding: 14px 16px; }
+.seller-card-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 10px; flex-wrap: wrap; }
+.seller-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 18px; }
+@media (max-width: 720px) { .seller-grid { grid-template-columns: 1fr; } }
+.seller-form-group { border-top: 1px solid var(--border); padding-top: 12px; margin-top: 12px; }
+.seller-form-group:first-child { border-top: none; padding-top: 0; margin-top: 0; }
+
+/* --- Mineral Assets --- */
+.asset-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+.owned-badge { background: color-mix(in srgb, var(--amber) 20%, transparent); color: var(--amber); border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent); }
+.opp-badge { background: color-mix(in srgb, var(--accent) 18%, transparent); color: #93c5fd; border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent); }
+.deal-card.owned-asset { border-left-color: var(--amber); }
+.deal-card.owned-asset::after { content: "OWNED"; position: absolute; top: 8px; right: 10px; font-size: 9px; font-weight: 700; letter-spacing: 0.05em; color: var(--amber); }
+.deal-card { position: relative; }
+.pill-filter { display: inline-flex; border: 1px solid var(--border); border-radius: 100px; overflow: hidden; }
+.pill-filter button { border: none; border-radius: 0; background: var(--panel); padding: 6px 14px; font-size: 13px; color: var(--text-dim); }
+.pill-filter button.active { background: var(--accent); color: #fff; }
+
 /* Range sliders (heat-map appearance controls) — opt out of the text-input
    border/padding so the track renders cleanly. */
 input[type="range"] { -webkit-appearance: none; appearance: none; height: 4px; padding: 0; border: none; background: var(--border); border-radius: 3px; cursor: pointer; accent-color: var(--accent); }
+input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); cursor: pointer; }

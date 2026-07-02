@@ -42,6 +42,38 @@ function toDate(v: unknown): Date | null | undefined {
 
 const dealInclude = { selectedBuyer: true, relationshipOwner: true } as const;
 
+/** Owned-asset fields shared by create/update. All optional/nullable. */
+const assetFields = {
+  recordType: z.enum(["OPPORTUNITY", "OWNED_ASSET"]).optional(),
+  assetMode: z.enum(["HOLD", "SELL"]).nullish(),
+  acquisitionDate: dateField,
+  purchasePrice: z.number().nullish(),
+  currentValue: z.number().nullish(),
+  bookValue: z.number().nullish(),
+  ownershipStatus: z.string().nullish(),
+  ownershipType: z.string().nullish(),
+  workingInterest: z.number().nullish(),
+  netRevenueInterest: z.number().nullish(),
+  surveys: z.array(z.string()).optional(),
+  wells: z.array(z.string()).optional(),
+  producingStatus: z.string().nullish(),
+  royaltyIncomeAnnual: z.number().nullish(),
+  leaseStatus: z.string().nullish(),
+  leaseInfo: z.string().nullish(),
+  divisionOrdersNote: z.string().nullish(),
+  taxInfo: z.string().nullish(),
+};
+// Scalar asset keys copied straight into a Prisma patch (arrays/scalars only).
+const ASSET_SCALAR_KEYS = [
+  "recordType", "assetMode", "purchasePrice", "currentValue", "bookValue",
+  "ownershipStatus", "ownershipType", "workingInterest", "netRevenueInterest",
+  "surveys", "wells", "producingStatus", "royaltyIncomeAnnual", "leaseStatus",
+  "leaseInfo", "divisionOrdersNote", "taxInfo",
+] as const;
+
+const hasPerm = (req: AuthedRequest, perm: string) =>
+  req.user!.orgRole === "OWNER" || req.user!.permissions.includes(perm as never);
+
 // --------------------------------------------------------------------------
 // List
 // --------------------------------------------------------------------------
@@ -49,8 +81,13 @@ dealsRouter.get(
   "/",
   requirePermission("viewDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
+    // ?recordType=OPPORTUNITY (default) | OWNED_ASSET | ALL. Keeps the Deals
+    // pages opportunity-only; Mineral Assets and the Pipeline request what they need.
+    const rt = String(req.query.recordType ?? "OPPORTUNITY").toUpperCase();
+    const where = { organizationId: orgId(req) } as Record<string, unknown>;
+    if (rt === "OPPORTUNITY" || rt === "OWNED_ASSET") where.recordType = rt;
     const deals = await prisma.deal.findMany({
-      where: { organizationId: orgId(req) },
+      where,
       include: { ...dealInclude, offers: { select: { amount: true } } },
       orderBy: { createdAt: "desc" },
     });
@@ -80,6 +117,7 @@ const createSchema = z.object({
   estimatedClosingCosts: z.number().nullish(),
   relationshipOwnerId: z.string().nullish(),
   notes: z.string().nullish(),
+  ...assetFields,
 });
 
 dealsRouter.post(
@@ -87,12 +125,16 @@ dealsRouter.post(
   requirePermission("createDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = createSchema.parse(req.body);
+    const isAsset = data.recordType === "OWNED_ASSET";
     const deal = await prisma.$transaction(async (tx) => {
       const created = await tx.deal.create({
         data: {
           organizationId: orgId(req),
           name: data.name,
           sellerNames: data.sellerNames ?? [],
+          recordType: data.recordType ?? "OPPORTUNITY",
+          // Owned assets default to HOLD; opportunities have no asset mode.
+          assetMode: isAsset ? (data.assetMode ?? "HOLD") : null,
           counties: data.counties ?? [],
           state: data.state ?? null,
           acreageNma: data.acreageNma ?? null,
@@ -109,8 +151,27 @@ dealsRouter.post(
           estimatedClosingCosts: data.estimatedClosingCosts ?? null,
           relationshipOwnerId: data.relationshipOwnerId ?? req.user!.id,
           notes: data.notes ?? null,
-          stage: "UNDER_CONTRACT",
+          // Owned assets skip the acquisition pipeline — park them in CLOSING so
+          // they don't clutter the acquisition board unless marked for sale.
+          stage: isAsset ? "CLOSING" : "UNDER_CONTRACT",
           currentStageEnteredAt: new Date(),
+          // Ownership/property/financial fields
+          acquisitionDate: toDate(data.acquisitionDate) ?? null,
+          purchasePrice: data.purchasePrice ?? null,
+          currentValue: data.currentValue ?? null,
+          bookValue: data.bookValue ?? null,
+          ownershipStatus: data.ownershipStatus ?? null,
+          ownershipType: data.ownershipType ?? null,
+          workingInterest: data.workingInterest ?? null,
+          netRevenueInterest: data.netRevenueInterest ?? null,
+          surveys: data.surveys ?? [],
+          wells: data.wells ?? [],
+          producingStatus: data.producingStatus ?? null,
+          royaltyIncomeAnnual: data.royaltyIncomeAnnual ?? null,
+          leaseStatus: data.leaseStatus ?? null,
+          leaseInfo: data.leaseInfo ?? null,
+          divisionOrdersNote: data.divisionOrdersNote ?? null,
+          taxInfo: data.taxInfo ?? null,
         },
         include: dealInclude,
       });
@@ -160,9 +221,12 @@ dealsRouter.get(
             messages: { orderBy: { occurredAt: "desc" }, include: { createdBy: { select: { name: true } } } },
           },
         },
+        sellers: { include: { assignedTeamMember: { select: { id: true, name: true } } }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+        revenueEntries: { orderBy: { month: "asc" } },
       },
     });
     if (!deal) throw new HttpError(404, "Deal not found");
+    const canSeeTaxId = hasPerm(req, "viewSellerTaxId");
 
     const now = new Date();
     // Buyer activity rows with live match %.
@@ -237,10 +301,46 @@ dealsRouter.get(
         versionCount: f._count.supersedes,
       })),
       buyerActivity: activity,
+      sellers: deal.sellers.map((s) => serializeSeller(s, canSeeTaxId)),
+      revenueEntries: deal.revenueEntries.map((r) => ({
+        id: r.id, month: r.month, amount: r.amount, kind: r.kind, operator: r.operator, note: r.note,
+      })),
+      canViewTaxId: canSeeTaxId,
       metrics: { buyersContacted, interested, offers: offerCount, highOffer },
     });
   }),
 );
+
+// Seller serialization — taxId is only included for callers with viewSellerTaxId.
+function serializeSeller(
+  s: {
+    id: string; isPrimary: boolean; ownershipPercent: number | null;
+    firstName: string | null; middleName: string | null; lastName: string | null;
+    companyName: string | null; trustName: string | null; sellerType: string;
+    primaryPhone: string | null; secondaryPhone: string | null; email: string | null; preferredContactMethod: string | null;
+    mailingAddress: string | null; mailingCity: string | null; mailingState: string | null; mailingZip: string | null;
+    physicalAddress: string | null; physicalCity: string | null; physicalState: string | null; physicalZip: string | null;
+    internalNotes: string | null; taxId: string | null; preferredCommunicationNotes: string | null;
+    assignedTeamMemberId: string | null; assignedTeamMember: { id: string; name: string } | null;
+    createdAt: Date; updatedAt: Date;
+  },
+  includeTaxId: boolean,
+) {
+  return {
+    id: s.id, isPrimary: s.isPrimary, ownershipPercent: s.ownershipPercent,
+    firstName: s.firstName, middleName: s.middleName, lastName: s.lastName,
+    companyName: s.companyName, trustName: s.trustName, sellerType: s.sellerType,
+    primaryPhone: s.primaryPhone, secondaryPhone: s.secondaryPhone, email: s.email, preferredContactMethod: s.preferredContactMethod,
+    mailingAddress: s.mailingAddress, mailingCity: s.mailingCity, mailingState: s.mailingState, mailingZip: s.mailingZip,
+    physicalAddress: s.physicalAddress, physicalCity: s.physicalCity, physicalState: s.physicalState, physicalZip: s.physicalZip,
+    internalNotes: s.internalNotes, preferredCommunicationNotes: s.preferredCommunicationNotes,
+    // Sensitive: present only for permitted callers; a boolean flags its existence otherwise.
+    taxId: includeTaxId ? s.taxId : undefined,
+    hasTaxId: s.taxId != null,
+    assignedTeamMember: s.assignedTeamMember ? { id: s.assignedTeamMember.id, name: s.assignedTeamMember.name } : null,
+    dateAdded: s.createdAt, updatedAt: s.updatedAt,
+  };
+}
 
 // --------------------------------------------------------------------------
 // Send the deal to selected buyers by email (CRM-side, SMTP). Each send logs a
@@ -393,6 +493,7 @@ const updateSchema = z.object({
   estimatedClosingCosts: z.number().nullish(),
   relationshipOwnerId: z.string().nullish(),
   notes: z.string().nullish(),
+  ...assetFields,
 });
 
 dealsRouter.patch(
@@ -401,10 +502,10 @@ dealsRouter.patch(
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = updateSchema.parse(req.body);
     const patch: Record<string, unknown> = {};
-    for (const k of ["name", "sellerNames", "counties", "state", "acreageNma", "nra", "abstractIds", "operator", "askPrice", "ourPrice", "assetTypes", "basins", "formations", "estimatedClosingCosts", "relationshipOwnerId", "notes"] as const) {
+    for (const k of ["name", "sellerNames", "counties", "state", "acreageNma", "nra", "abstractIds", "operator", "askPrice", "ourPrice", "assetTypes", "basins", "formations", "estimatedClosingCosts", "relationshipOwnerId", "notes", ...ASSET_SCALAR_KEYS] as const) {
       if (k in data) patch[k] = (data as Record<string, unknown>)[k];
     }
-    for (const k of ["dateUnderContract", "originalClosingDate", "findBuyerByDateOverride", "finalClosingDateOverride"] as const) {
+    for (const k of ["dateUnderContract", "originalClosingDate", "findBuyerByDateOverride", "finalClosingDateOverride", "acquisitionDate"] as const) {
       if (k in data) patch[k] = toDate((data as Record<string, unknown>)[k]);
     }
     const existing = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
@@ -668,6 +769,205 @@ dealsRouter.delete(
   asyncHandler(async (req: AuthedRequest, res) => {
     const result = await prisma.deal.deleteMany({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (result.count === 0) throw new HttpError(404, "Deal not found");
+    res.json({ ok: true });
+  }),
+);
+
+// ==========================================================================
+// Seller details (structured owners on a deal) — hasMany, expandable
+// ==========================================================================
+const sellerSchema = z.object({
+  isPrimary: z.boolean().optional(),
+  ownershipPercent: z.number().min(0).max(100).nullish(),
+  firstName: z.string().trim().max(120).nullish(),
+  middleName: z.string().trim().max(120).nullish(),
+  lastName: z.string().trim().max(120).nullish(),
+  companyName: z.string().trim().max(200).nullish(),
+  trustName: z.string().trim().max(200).nullish(),
+  sellerType: z.enum(["INDIVIDUAL", "TRUST", "LLC", "CORPORATION", "ESTATE", "PARTNERSHIP", "OTHER"]).optional(),
+  primaryPhone: z.string().trim().max(40).nullish(),
+  secondaryPhone: z.string().trim().max(40).nullish(),
+  email: z.string().trim().max(200).nullish(),
+  preferredContactMethod: z.string().trim().max(40).nullish(),
+  mailingAddress: z.string().trim().max(300).nullish(),
+  mailingCity: z.string().trim().max(120).nullish(),
+  mailingState: z.string().trim().max(40).nullish(),
+  mailingZip: z.string().trim().max(20).nullish(),
+  physicalAddress: z.string().trim().max(300).nullish(),
+  physicalCity: z.string().trim().max(120).nullish(),
+  physicalState: z.string().trim().max(40).nullish(),
+  physicalZip: z.string().trim().max(20).nullish(),
+  internalNotes: z.string().trim().max(5000).nullish(),
+  taxId: z.string().trim().max(40).nullish(),
+  preferredCommunicationNotes: z.string().trim().max(2000).nullish(),
+  assignedTeamMemberId: z.string().nullish(),
+});
+
+const sellerInclude = { assignedTeamMember: { select: { id: true, name: true } } } as const;
+
+async function ownDealOr404(req: AuthedRequest): Promise<string> {
+  const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true } });
+  if (!deal) throw new HttpError(404, "Deal not found");
+  return deal.id;
+}
+
+// taxId is only writable by callers who can view it (keeps the field consistent
+// with its read gate).
+function stripTaxIdIfNeeded(req: AuthedRequest, data: Record<string, unknown>) {
+  if ("taxId" in data && !hasPerm(req, "viewSellerTaxId")) delete data.taxId;
+  return data;
+}
+
+dealsRouter.post(
+  "/:id/sellers",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const dealId = await ownDealOr404(req);
+    const data = stripTaxIdIfNeeded(req, sellerSchema.parse(req.body));
+    if (data.assignedTeamMemberId) {
+      const u = await prisma.user.findFirst({ where: { id: data.assignedTeamMemberId as string, organizationId: orgId(req) } });
+      if (!u) throw new HttpError(400, "Assigned team member is not in your organization");
+    }
+    // First seller on a deal becomes primary automatically.
+    const count = await prisma.dealSeller.count({ where: { dealId } });
+    const seller = await prisma.dealSeller.create({
+      data: { ...(data as object), dealId, isPrimary: (data.isPrimary as boolean) ?? count === 0 },
+      include: sellerInclude,
+    });
+    res.status(201).json(serializeSeller(seller, hasPerm(req, "viewSellerTaxId")));
+  }),
+);
+
+dealsRouter.patch(
+  "/:id/sellers/:sellerId",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const dealId = await ownDealOr404(req);
+    const existing = await prisma.dealSeller.findFirst({ where: { id: req.params.sellerId, dealId } });
+    if (!existing) throw new HttpError(404, "Seller not found");
+    const data = stripTaxIdIfNeeded(req, sellerSchema.partial().parse(req.body));
+    if (data.assignedTeamMemberId) {
+      const u = await prisma.user.findFirst({ where: { id: data.assignedTeamMemberId as string, organizationId: orgId(req) } });
+      if (!u) throw new HttpError(400, "Assigned team member is not in your organization");
+    }
+    const seller = await prisma.dealSeller.update({ where: { id: existing.id }, data: data as object, include: sellerInclude });
+    // Enforce a single primary per deal.
+    if (data.isPrimary === true) {
+      await prisma.dealSeller.updateMany({ where: { dealId, id: { not: seller.id }, isPrimary: true }, data: { isPrimary: false } });
+    }
+    res.json(serializeSeller(seller, hasPerm(req, "viewSellerTaxId")));
+  }),
+);
+
+dealsRouter.delete(
+  "/:id/sellers/:sellerId",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const dealId = await ownDealOr404(req);
+    const result = await prisma.dealSeller.deleteMany({ where: { id: req.params.sellerId, dealId } });
+    if (result.count === 0) throw new HttpError(404, "Seller not found");
+    res.json({ ok: true });
+  }),
+);
+
+// ==========================================================================
+// Convert opportunity ↔ owned asset, and set the asset's HOLD/SELL mode
+// ==========================================================================
+const convertSchema = z.object({
+  recordType: z.enum(["OPPORTUNITY", "OWNED_ASSET"]),
+  assetMode: z.enum(["HOLD", "SELL"]).optional(),
+});
+
+dealsRouter.post(
+  "/:id/convert",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { recordType, assetMode } = convertSchema.parse(req.body);
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
+    if (!deal) throw new HttpError(404, "Deal not found");
+    const toAsset = recordType === "OWNED_ASSET";
+    const updated = await prisma.deal.update({
+      where: { id: deal.id },
+      data: {
+        recordType,
+        assetMode: toAsset ? (assetMode ?? deal.assetMode ?? "HOLD") : null,
+        // Park a HOLD asset off the acquisition board; SELL / opportunity go active.
+        stage: toAsset && (assetMode ?? "HOLD") === "HOLD" ? "CLOSING" : deal.stage,
+      },
+      include: dealInclude,
+    });
+    await logActivity({
+      eventType: "DEAL_CONVERTED",
+      summary: `${req.user!.name} ${toAsset ? "converted to owned asset" : "reverted to opportunity"}: "${updated.name}"`,
+      organizationId: orgId(req), actorUserId: req.user!.id, dealId: updated.id,
+    });
+    res.json(serializeDeal(updated));
+  }),
+);
+
+// Set an owned asset's operational mode. SELL puts it on the marketing board
+// (SENT_TO_BUYERS if it was parked); HOLD parks it back in CLOSING.
+dealsRouter.post(
+  "/:id/asset-mode",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { assetMode } = z.object({ assetMode: z.enum(["HOLD", "SELL"]) }).parse(req.body);
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
+    if (!deal) throw new HttpError(404, "Deal not found");
+    if (deal.recordType !== "OWNED_ASSET") throw new HttpError(400, "Only owned assets have a HOLD/SELL mode");
+    const stage =
+      assetMode === "SELL" && (deal.stage === "CLOSING" || deal.stage === "CLOSED")
+        ? "SENT_TO_BUYERS"
+        : assetMode === "HOLD"
+          ? "CLOSING"
+          : deal.stage;
+    const updated = await prisma.deal.update({
+      where: { id: deal.id },
+      data: { assetMode, stage, currentStageEnteredAt: stage !== deal.stage ? new Date() : deal.currentStageEnteredAt },
+      include: dealInclude,
+    });
+    res.json(serializeDeal(updated));
+  }),
+);
+
+// ==========================================================================
+// Asset revenue history (royalty / lease-bonus entries) for owned assets
+// ==========================================================================
+const revenueSchema = z.object({
+  month: z.string().regex(/^\d{4}-\d{2}$/, "Use YYYY-MM"),
+  amount: z.number(),
+  kind: z.enum(["ROYALTY", "LEASE_BONUS", "OTHER"]).default("ROYALTY"),
+  operator: z.string().trim().max(200).nullish(),
+  note: z.string().trim().max(1000).nullish(),
+});
+
+dealsRouter.post(
+  "/:id/revenue",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const dealId = await ownDealOr404(req);
+    const data = revenueSchema.parse(req.body);
+    const entry = await prisma.assetRevenueEntry.create({
+      data: {
+        dealId,
+        month: new Date(`${data.month}-01T00:00:00Z`),
+        amount: data.amount,
+        kind: data.kind,
+        operator: data.operator ?? null,
+        note: data.note ?? null,
+      },
+    });
+    res.status(201).json({ id: entry.id, month: entry.month, amount: entry.amount, kind: entry.kind, operator: entry.operator, note: entry.note });
+  }),
+);
+
+dealsRouter.delete(
+  "/:id/revenue/:entryId",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const dealId = await ownDealOr404(req);
+    const result = await prisma.assetRevenueEntry.deleteMany({ where: { id: req.params.entryId, dealId } });
+    if (result.count === 0) throw new HttpError(404, "Revenue entry not found");
     res.json({ ok: true });
   }),
 );

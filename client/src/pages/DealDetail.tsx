@@ -17,7 +17,8 @@ import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASS
 import { operatorsForCounties } from "../lib/operators";
 import { money, num, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
-import type { BuyerActivityRow, DealSummary, MatchRec, UserLite } from "../types";
+import { SellerDetails } from "../components/SellerDetails";
+import type { BuyerActivityRow, DealSummary, MatchRec, Seller, UserLite } from "../types";
 // MapLibre is heavy; only load it when a deal detail page is viewed.
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
 
@@ -29,6 +30,8 @@ interface DealDetailData extends DealSummary {
   buyerActivity: BuyerActivityRow[];
   offers: { id: string; buyer: { id: string; name: string }; amount: number; status: string; conditions: string | null; expirationDate: string | null; dateSubmitted: string }[];
   files: DocFile[];
+  sellers: Seller[];
+  canViewTaxId: boolean;
   metrics: { buyersContacted: number; interested: number; offers: number; highOffer: number | null };
 }
 
@@ -108,6 +111,15 @@ export function DealDetail() {
         <CharacteristicsCard deal={deal} onSaved={refreshAll} />
         <ContractTimelineCard deal={deal} onSaved={loadDeal} />
       </div>
+
+      <SellerDetails
+        dealId={deal.id}
+        sellers={deal.sellers ?? []}
+        users={users}
+        canEdit={can("editDeals")}
+        canViewTaxId={deal.canViewTaxId}
+        onChanged={loadDeal}
+      />
 
       {/* Embedded, isolated map showing only this deal's extent */}
       <div className="panel">

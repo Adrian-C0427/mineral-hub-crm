@@ -17,6 +17,7 @@ export type OrgRole = "OWNER" | "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER";
 /** Canonical, assignable permissions. Keys are stable identifiers. */
 export const PERMISSIONS = [
   "viewDeals", "createDeals", "editDeals", "deleteDeals",
+  "viewSellerTaxId",
   "viewBuyers", "createBuyers", "editBuyers", "deleteBuyers",
   "viewReports", "exportReports",
   "manageExpenses", "approveExpenses",
@@ -35,6 +36,7 @@ export const PERMISSION_META: Record<Permission, { label: string; group: string 
   createDeals: { label: "Create Deals", group: "Deals" },
   editDeals: { label: "Edit Deals", group: "Deals" },
   deleteDeals: { label: "Delete Deals", group: "Deals" },
+  viewSellerTaxId: { label: "View Seller Tax/Entity IDs", group: "Deals" },
   viewBuyers: { label: "View Buyers", group: "Buyers" },
   createBuyers: { label: "Create Buyers", group: "Buyers" },
   editBuyers: { label: "Edit Buyers", group: "Buyers" },
@@ -81,7 +83,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<OrgRole, Permission[]> = {
   // Everything except the owner-only actions above.
   ADMIN: ALL,
   MANAGER: [
-    "viewDeals", "createDeals", "editDeals",
+    "viewDeals", "createDeals", "editDeals", "viewSellerTaxId",
     "viewBuyers", "createBuyers", "editBuyers",
     "viewReports", "exportReports",
     "manageExpenses", "approveExpenses",

@@ -22,10 +22,43 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
   // pre-Our-Price deals so historical profit stays correct.
   const costBasis = deal.ourPrice ?? deal.askPrice;
   const profitEst = bestOffer != null ? netProfit(bestOffer, costBasis, deal.estimatedClosingCosts) : null;
+
+  // Owned-asset economics (null for opportunities / when inputs are missing).
+  const roiSinceAcquisition =
+    deal.purchasePrice && deal.purchasePrice !== 0 && deal.currentValue != null
+      ? ((deal.currentValue - deal.purchasePrice) / deal.purchasePrice) * 100
+      : null;
+  const gainBasis = deal.bookValue ?? deal.purchasePrice;
+  const unrealizedGainLoss =
+    deal.currentValue != null && gainBasis != null ? deal.currentValue - gainBasis : null;
+
   return {
     id: deal.id,
     name: deal.name,
     sellerNames: deal.sellerNames,
+    recordType: deal.recordType,
+    assetMode: deal.assetMode,
+    // Owned-asset: ownership
+    acquisitionDate: deal.acquisitionDate,
+    purchasePrice: deal.purchasePrice,
+    currentValue: deal.currentValue,
+    bookValue: deal.bookValue,
+    ownershipStatus: deal.ownershipStatus,
+    ownershipType: deal.ownershipType,
+    workingInterest: deal.workingInterest,
+    netRevenueInterest: deal.netRevenueInterest,
+    // Owned-asset: property
+    surveys: deal.surveys,
+    wells: deal.wells,
+    producingStatus: deal.producingStatus,
+    // Owned-asset: financial
+    royaltyIncomeAnnual: deal.royaltyIncomeAnnual,
+    leaseStatus: deal.leaseStatus,
+    leaseInfo: deal.leaseInfo,
+    divisionOrdersNote: deal.divisionOrdersNote,
+    taxInfo: deal.taxInfo,
+    roiSinceAcquisition,
+    unrealizedGainLoss,
     counties: deal.counties,
     state: deal.state,
     acreageNma: deal.acreageNma,
