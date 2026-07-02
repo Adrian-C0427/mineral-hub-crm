@@ -16,3 +16,4 @@ prisma/*.db
 *.ebc
 *.ebc.gz
 documents_20260702*/
+tools/rrc/work/
