@@ -249,6 +249,36 @@ export function MapView() {
     if (fAbstracts.length) cl.push(["in", ["get", "abstract"], ["literal", fAbstracts]]);
     if (fSurveys.length) cl.push(["in", ["get", "survey"], ["literal", fSurveys]]);
     map.setFilter("wells", cl.length ? (["all", ...cl] as maplibregl.FilterSpecification) : null);
+
+    // A wellbore (lateral) is never an independent entity: it is shown only for
+    // wells that survive the SAME filters. We resolve the set of visible well
+    // ids and constrain the laterals to those (linked via surfaceId = well fid),
+    // so wells and laterals always update together and no orphan can remain.
+    if (map.getLayer("wellbores")) {
+      if (!cl.length) {
+        map.setFilter("wellbores", null); // no filters → every well visible → every lateral allowed
+      } else {
+        const pass = (p: Record<string, unknown>) =>
+          (!fWellTypes.length || fWellTypes.includes(p.type as string)) &&
+          (!fWellStatuses.length || fWellStatuses.includes(p.status as string)) &&
+          (!fOperators.length || fOperators.includes(p.operator as string)) &&
+          (!fAbstracts.length || fAbstracts.includes(p.abstract as string)) &&
+          (!fSurveys.length || fSurveys.includes(p.survey as string));
+        const visibleFids = (wellsFC.current?.features ?? [])
+          .filter((f) => pass(f.properties as Record<string, unknown>))
+          .map((f) => (f.properties as { fid: number }).fid);
+        map.setFilter("wellbores", ["in", ["get", "surfaceId"], ["literal", visibleFids]] as maplibregl.FilterSpecification);
+
+        // Also drop the selection highlight if its parent well was filtered out.
+        if (map.getLayer("wellbores-sel")) {
+          const selF = map.getFilter("wellbores-sel") as unknown[] | undefined;
+          const selFid = Array.isArray(selF) ? (selF[2] as number) : -1;
+          if (selFid !== -1 && !visibleFids.includes(selFid)) {
+            map.setFilter("wellbores-sel", ["==", ["get", "surfaceId"], -1]);
+          }
+        }
+      }
+    }
   }
 
   function loadDeals() { const qs = new URLSearchParams(); qs.set("status", statusFilter); api.get<MapDeal[]>(`/map/deals?${qs.toString()}`).then(setDeals); }
@@ -324,7 +354,7 @@ export function MapView() {
             <Chk label="Abstract numbers" on={layers.absNums} onChange={() => toggle("absNums")} />
             <Chk label="Survey names" on={layers.surveyNames} onChange={() => toggle("surveyNames")} />
             <Chk label="Active deals" on={layers.deals} onChange={() => toggle("deals")} />
-            <Chk label="Well status" on={layers.wells} onChange={() => toggle("wells")} />
+            <Chk label="Wells" on={layers.wells} onChange={() => toggle("wells")} />
             <Chk label="Wellbores (laterals)" on={layers.wellbores} onChange={() => toggle("wellbores")} />
           </div>
         </div>
