@@ -425,3 +425,7 @@ tr.row-base td { background: var(--panel-2); font-weight: 600; }
 .transition-zone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 18px 14px; display: flex; flex-direction: column; align-items: center; gap: 4px; font-weight: 600; color: var(--text-dim); flex: 1; justify-content: center; text-align: center; }
 .transition-zone.closed.drop-target { border-color: var(--green); color: var(--green); background: color-mix(in srgb, var(--green) 8%, transparent); }
 .transition-zone.dead.drop-target { border-color: var(--red); color: var(--red); background: color-mix(in srgb, var(--red) 8%, transparent); }
+
+/* Range sliders (heat-map appearance controls) — opt out of the text-input
+   border/padding so the track renders cleanly. */
+input[type="range"] { -webkit-appearance: none; appearance: none; height: 4px; padding: 0; border: none; background: var(--border); border-radius: 3px; cursor: pointer; accent-color: var(--accent); }
