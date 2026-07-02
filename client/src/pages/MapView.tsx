@@ -7,6 +7,11 @@ import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION } from "../lib/counties";
 import { Spinner, StageBadge, PriorityBadge } from "../components/ui";
 import { money, num } from "../lib/format";
+import {
+  extractWells, wellsPerLease, buildPoints, latestMonth, periodWindow, metricGeojson,
+  summarize, rankings, detectHotspots, boe,
+  type HeatWell, type HeatPoint, type HeatPeriod, type AreaSummary, type Rankings, type Hotspot,
+} from "../lib/heatmap";
 
 interface MapDeal {
   id: string; abstractIds: string[]; name: string; stage: string;
@@ -20,9 +25,22 @@ type GeoFeature = { type: "Feature"; id?: number; properties: Record<string, unk
 type SelAbstract = { kind: "abstract"; id: string; abstract: string; survey: string; county: string };
 type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; operator: string | null; leaseName: string | null; leaseNo: string | null; field: string | null; oilGas: string | null; district: string | null; cumOil: number | null; cumGas: number | null; lastProd: string | null; formations: string | null };
 type SelWell = { kind: "well" } & WellProps;
-type Selected = SelAbstract | SelWell | null;
+type SelHotspot = { kind: "hotspot"; summary: AreaSummary; periodLabel: string };
+type Selected = SelAbstract | SelWell | SelHotspot | null;
 
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
+
+const EMPTY_FC = { type: "FeatureCollection", features: [] } as unknown as GeoJSON.FeatureCollection;
+// Oil ramp runs warm (amber → red); gas ramp runs cool (indigo → violet) so the
+// two heat layers stay distinguishable when both are on and overlapping.
+const HEAT_OIL_COLOR = ["interpolate", ["linear"], ["heatmap-density"],
+  0, "rgba(0,0,0,0)", 0.15, "#fde68a", 0.4, "#f59e0b", 0.65, "#ea580c", 0.85, "#dc2626", 1, "#7f1d1d"] as unknown as maplibregl.ExpressionSpecification;
+const HEAT_GAS_COLOR = ["interpolate", ["linear"], ["heatmap-density"],
+  0, "rgba(0,0,0,0)", 0.15, "#c7d2fe", 0.4, "#818cf8", 0.65, "#6d28d9", 0.85, "#4c1d95", 1, "#2e1065"] as unknown as maplibregl.ExpressionSpecification;
+const HEAT_STOPS: [number, string][] = [[0, "#eef2ff"], [0.2, "#fde68a"], [0.45, "#f59e0b"], [0.7, "#ea580c"], [1, "#7f1d1d"]];
+
+interface HeatState { oil: boolean; gas: boolean; intensity: number; radius: number; opacity: number; min: number; max: number; period: HeatPeriod; from: string; to: string; topProducers: boolean; hotspots: boolean }
+const DEFAULT_HEAT: HeatState = { oil: false, gas: false, intensity: 1, radius: 32, opacity: 0.85, min: 0, max: 0, period: "12m", from: "", to: "", topProducers: false, hotspots: true };
 
 // Wells are colored by RRC status.
 const STATUS_COLOR = [
@@ -65,6 +83,10 @@ export function MapView() {
   const selWellRef = useRef<number | null>(null);
   const abstractsFC = useRef<FC | null>(null);
   const wellsFC = useRef<FC | null>(null);
+  const heatWells = useRef<HeatWell[]>([]);
+  const perLease = useRef<Map<string, number>>(new Map());
+  const heatPointsRef = useRef<HeatPoint[]>([]);
+  const periodLabelRef = useRef("");
 
   const [deals, setDeals] = useState<MapDeal[] | null>(null);
   const [selected, setSelected] = useState<Selected>(null);
@@ -80,9 +102,20 @@ export function MapView() {
   const [fWellTypes, setFWellTypes] = useState<string[]>([]);
   const [fWellStatuses, setFWellStatuses] = useState<string[]>([]);
   const [fOperators, setFOperators] = useState<string[]>([]);
+  const [fFormations, setFFormations] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [prod, setProd] = useState<Record<string, [number, number, number][]>>({});
   const [meta, setMeta] = useState<{ counties: string[]; surveys: string[]; abstracts: string[]; wellTypes: string[]; wellStatuses: string[]; operators: string[] }>({ counties: [], surveys: [], abstracts: [], wellTypes: [], wellStatuses: [], operators: [] });
+
+  // --- Production heat map ---
+  const [showHeat, setShowHeat] = useState(false);
+  const [heat, setHeat] = useState<HeatState>(DEFAULT_HEAT);
+  const heatRef = useRef(heat); heatRef.current = heat;
+  const [rank, setRank] = useState<Rankings | null>(null);
+  const [hotspots, setHotspots] = useState<Hotspot[]>([]);
+  const [heatReady, setHeatReady] = useState(false);
+  const setHeatK = <K extends keyof HeatState>(k: K, v: HeatState[K]) => setHeat((p) => ({ ...p, [k]: v }));
+  const heatActive = heat.oil || heat.gas;
 
   const dealsByAbstract = useMemo(() => {
     const m = new Map<string, MapDeal[]>();
@@ -98,12 +131,14 @@ export function MapView() {
     const abs = (abstractsFC.current?.features ?? []).filter((f) => inC(f.properties.county));
     const wel = (wellsFC.current?.features ?? []).filter((f) => inC(f.properties.county));
     const uniq = (arr: unknown[]) => [...new Set(arr.filter(Boolean) as string[])];
+    const forms = wel.flatMap((f) => Array.isArray(f.properties.formations) ? (f.properties.formations as string[]) : []);
     return {
       surveys: uniq(abs.map((f) => f.properties.survey)).sort(),
       abstracts: uniq(abs.map((f) => f.properties.abstract)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
       operators: uniq(wel.map((f) => f.properties.operator)).sort(),
       wellTypes: uniq(wel.map((f) => f.properties.type)).sort(),
       wellStatuses: uniq(wel.map((f) => f.properties.status)).sort(),
+      formations: uniq(forms).sort(),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fCounties, meta]);
@@ -130,6 +165,8 @@ export function MapView() {
       const welFC: FC = { type: "FeatureCollection", features: welParts.flatMap((p) => p.features) } as FC;
       const boreFC: FC = { type: "FeatureCollection", features: boreParts.flatMap((p) => p.features) } as FC;
       abstractsFC.current = absFC; wellsFC.current = welFC;
+      heatWells.current = extractWells(welFC.features);
+      perLease.current = wellsPerLease(heatWells.current);
       const uniq = (arr: (string | null | undefined)[]) => [...new Set(arr.filter(Boolean) as string[])];
       setMeta({
         counties: uniq(absFC.features.map((f) => f.properties.county as string)).sort(),
@@ -143,6 +180,23 @@ export function MapView() {
       map.addSource("abstracts", { type: "geojson", data: absFC as unknown as GeoJSON.FeatureCollection, promoteId: "id" });
       map.addSource("wells", { type: "geojson", data: welFC as unknown as GeoJSON.FeatureCollection, promoteId: "fid" });
       map.addSource("wellbores", { type: "geojson", data: boreFC as unknown as GeoJSON.FeatureCollection, promoteId: "fid" });
+
+      // Production heat map (bottom of the stack, above the basemap): weight `w` is
+      // pre-normalized to [0,1] per current extent, so the gradient rescales as you
+      // zoom. Two independent sources so oil and gas toggle and blend separately.
+      map.addSource("heat-oil", { type: "geojson", data: EMPTY_FC });
+      map.addSource("heat-gas", { type: "geojson", data: EMPTY_FC });
+      const heatLayer = (id: string, color: maplibregl.ExpressionSpecification): maplibregl.HeatmapLayerSpecification => ({
+        id, type: "heatmap", source: id, layout: { visibility: "none" }, paint: {
+          "heatmap-weight": ["get", "w"],
+          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 8, 1, 15, 1.4],
+          "heatmap-color": color,
+          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 8, 16, 12, 32, 15, 58],
+          "heatmap-opacity": 0.85,
+        },
+      });
+      map.addLayer(heatLayer("heat-oil", HEAT_OIL_COLOR));
+      map.addLayer(heatLayer("heat-gas", HEAT_GAS_COLOR));
 
       map.addLayer({ id: "abstracts-fill", type: "fill", source: "abstracts", paint: {
         "fill-color": ["case", ["boolean", ["feature-state", "selected"], false], "#f59e0b", ["boolean", ["feature-state", "active"], false], "#ef4444", "#3b82f6"],
@@ -170,6 +224,19 @@ export function MapView() {
         "text-size": 11, "text-offset": [0, 1.1], "text-max-width": 8, "text-padding": 2, "text-allow-overlap": false, "text-optional": true },
         paint: { "text-color": "#334155", "text-halo-color": "#ffffff", "text-halo-width": 1.3 } });
 
+      // Top-producer overlay (on top): the highest-BOE wells in view, sized by output.
+      map.addSource("heat-top", { type: "geojson", data: EMPTY_FC });
+      map.addLayer({ id: "heat-top", type: "circle", source: "heat-top", layout: { visibility: "none" }, paint: {
+        "circle-radius": ["interpolate", ["linear"], ["get", "rank"], 0, 12, 14, 5],
+        "circle-color": "#facc15", "circle-stroke-color": "#78350f", "circle-stroke-width": 2, "circle-opacity": 0.9 } });
+      // Hotspot markers (on top): concentrated cells within the current extent.
+      map.addSource("heat-hotspots", { type: "geojson", data: EMPTY_FC });
+      map.addLayer({ id: "heat-hotspots-ring", type: "circle", source: "heat-hotspots", layout: { visibility: "none" }, paint: {
+        "circle-radius": 16, "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#dc2626", "circle-stroke-width": 2.5 } });
+      map.addLayer({ id: "heat-hotspots-label", type: "symbol", source: "heat-hotspots", layout: { visibility: "none",
+        "text-field": ["get", "label"], "text-font": ["Noto Sans Regular"], "text-size": 11, "text-offset": [0, -1.6], "text-anchor": "bottom", "text-allow-overlap": true },
+        paint: { "text-color": "#7f1d1d", "text-halo-color": "#ffffff", "text-halo-width": 1.6 } });
+
       map.on("click", (e) => {
         // Precise well selection: gather wells under a small tolerance box.
         const t = 6;
@@ -181,6 +248,15 @@ export function MapView() {
         const wells = [...seen.values()];
         if (wells.length === 1) { selectWell(wells[0]); return; }
         if (wells.length > 1) { clearSelection(); setChoices(wells); return; }
+        // When a heat layer is on, a click summarizes the production points under
+        // the cursor (contributing wells, oil/gas totals, top operators/wells…).
+        if (heatRef.current.oil || heatRef.current.gas) {
+          const near = heatPointsRef.current.filter((p) => {
+            const sp = map.project([p.lon, p.lat]);
+            return Math.hypot(sp.x - e.point.x, sp.y - e.point.y) <= 48;
+          });
+          if (near.length) { clearSelection(); setSelected({ kind: "hotspot", summary: summarize(near), periodLabel: periodLabelRef.current }); return; }
+        }
         // Otherwise an abstract (toggle).
         const feats = map.queryRenderedFeatures(e.point, { layers: ["abstracts-fill"] });
         if (feats.length === 0) { clearSelection(); return; }
@@ -192,9 +268,12 @@ export function MapView() {
       map.on("mouseleave", "wells", () => (map.getCanvas().style.cursor = ""));
       map.on("mouseenter", "abstracts-fill", () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", "abstracts-fill", () => (map.getCanvas().style.cursor = ""));
+      // Re-scale the heat gradient to whatever is now on screen after a pan/zoom.
+      map.on("moveend", () => { if (heatRef.current.oil || heatRef.current.gas) pushHeat(); });
 
       styleReady.current = true;
       applyHighlight(); applyLayerVisibility(); applyAbstractFilter(); applyWellFilter();
+      setHeatReady(true); // lets the heat effect run its first compute with a fresh closure
     });
     return () => { map.remove(); mapRef.current = null; styleReady.current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -311,6 +390,75 @@ export function MapView() {
     }
   }
 
+  // Recompute the period-attributed production points from current filters, then
+  // render. Called whenever the data, period, or filters change.
+  function recomputeHeat() {
+    const h = heatRef.current;
+    const spec = periodWindow(h.period, latestMonth(prod), h.from, h.to);
+    periodLabelRef.current = spec.label;
+    heatPointsRef.current = buildPoints(heatWells.current, perLease.current, prod as never, spec,
+      { counties: fCounties, operators: fOperators, wellTypes: fWellTypes, wellStatuses: fWellStatuses, formations: fFormations });
+    setRank(heatPointsRef.current.length ? rankings(heatPointsRef.current) : null);
+    pushHeat();
+  }
+
+  // Render current points into the heat sources + overlays, normalizing weights to
+  // the max within the current viewport so the gradient is meaningful at any zoom.
+  function pushHeat() {
+    const map = mapRef.current; if (!map || !styleReady.current) return;
+    const h = heatRef.current;
+    const pts = heatPointsRef.current;
+    const b = map.getBounds();
+    const bounds: [number, number, number, number] = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
+    const inView = pts.filter((p) => p.lon >= bounds[0] && p.lon <= bounds[2] && p.lat >= bounds[1] && p.lat <= bounds[3]);
+    const basis = inView.length ? inView : pts;
+    const normOil = Math.max(1, ...basis.map((p) => p.oil));
+    const normGas = Math.max(1, ...basis.map((p) => p.gas));
+    (map.getSource("heat-oil") as maplibregl.GeoJSONSource | undefined)?.setData(metricGeojson(pts, "oil", h.min, h.max, normOil) as unknown as GeoJSON.FeatureCollection);
+    (map.getSource("heat-gas") as maplibregl.GeoJSONSource | undefined)?.setData(metricGeojson(pts, "gas", h.min, h.max, normGas) as unknown as GeoJSON.FeatureCollection);
+
+    // Top-producer overlay: highest-BOE wells in view.
+    const top = [...inView].sort((a, b2) => boe(b2.oil, b2.gas) - boe(a.oil, a.gas)).slice(0, 15);
+    (map.getSource("heat-top") as maplibregl.GeoJSONSource | undefined)?.setData({
+      type: "FeatureCollection",
+      features: top.map((p, i) => ({ type: "Feature", properties: { rank: i }, geometry: { type: "Point", coordinates: [p.lon, p.lat] } })),
+    } as unknown as GeoJSON.FeatureCollection);
+
+    // Hotspot detection within the current extent.
+    const hs = h.hotspots ? detectHotspots(pts, bounds) : [];
+    setHotspots(hs);
+    (map.getSource("heat-hotspots") as maplibregl.GeoJSONSource | undefined)?.setData({
+      type: "FeatureCollection",
+      features: hs.map((s) => ({ type: "Feature", properties: { label: `${s.wells} wells · ${num(Math.round(boe(s.oil, s.gas)))} BOE` }, geometry: { type: "Point", coordinates: [s.lon, s.lat] } })),
+    } as unknown as GeoJSON.FeatureCollection);
+
+    applyHeatPaint();
+  }
+
+  function applyHeatPaint() {
+    const map = mapRef.current; if (!map || !styleReady.current) return;
+    const h = heatRef.current;
+    const rad = (base: number): maplibregl.ExpressionSpecification => ["interpolate", ["linear"], ["zoom"], 8, base * 0.5, 12, base, 15, base * 1.8] as unknown as maplibregl.ExpressionSpecification;
+    for (const id of ["heat-oil", "heat-gas"]) {
+      if (!map.getLayer(id)) continue;
+      map.setPaintProperty(id, "heatmap-radius", rad(h.radius));
+      map.setPaintProperty(id, "heatmap-intensity", ["interpolate", ["linear"], ["zoom"], 8, h.intensity, 15, h.intensity * 1.4] as unknown as maplibregl.ExpressionSpecification);
+      map.setPaintProperty(id, "heatmap-opacity", h.opacity);
+    }
+    applyHeatVisibility();
+  }
+
+  function applyHeatVisibility() {
+    const map = mapRef.current; if (!map || !styleReady.current) return;
+    const h = heatRef.current;
+    const vis = (id: string, on: boolean) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
+    vis("heat-oil", h.oil); vis("heat-gas", h.gas);
+    const anyHeat = h.oil || h.gas;
+    vis("heat-top", anyHeat && h.topProducers);
+    vis("heat-hotspots-ring", anyHeat && h.hotspots);
+    vis("heat-hotspots-label", anyHeat && h.hotspots);
+  }
+
   function loadDeals() { const qs = new URLSearchParams(); qs.set("status", statusFilter); api.get<MapDeal[]>(`/map/deals?${qs.toString()}`).then(setDeals); }
   useEffect(loadDeals, [statusFilter]);
   useEffect(() => {
@@ -324,6 +472,12 @@ export function MapView() {
   useEffect(applyLayerVisibility, [layers]);
   useEffect(applyAbstractFilter, [fCounties, fSurveys, fAbstracts]);
   useEffect(applyWellFilter, [fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses, fOperators]);
+  // Rebuild heat points whenever the data, filters, period, or thresholds change.
+  useEffect(() => { if (heatReady) recomputeHeat(); /* eslint-disable-next-line */ },
+    [heatReady, prod, fCounties, fOperators, fWellTypes, fWellStatuses, fFormations, heat.period, heat.from, heat.to, heat.min, heat.max, heat.oil, heat.gas, heat.hotspots]);
+  // Cheap paint/visibility tweaks don't need a recompute.
+  useEffect(() => { applyHeatPaint(); /* eslint-disable-next-line */ }, [heat.intensity, heat.radius, heat.opacity]);
+  useEffect(() => { applyHeatVisibility(); /* eslint-disable-next-line */ }, [heat.topProducers, heat.oil, heat.gas, heat.hotspots]);
 
   const results = useMemo(() => {
     const q = query.trim().toLowerCase(); if (!q) return [] as { kind: "abstract" | "well"; key: string; label: string; sub: string }[];
@@ -364,8 +518,9 @@ export function MapView() {
           )}
         </div>
         <div className="spacer" />
-        <button onClick={() => { setShowFilters((s) => !s); setShowLayers(false); }}>Filters ▾</button>
-        <button onClick={() => { setShowLayers((s) => !s); setShowFilters(false); }}>Layers ▾</button>
+        <button onClick={() => { setShowFilters((s) => !s); setShowLayers(false); setShowHeat(false); }}>Filters ▾</button>
+        <button onClick={() => { setShowLayers((s) => !s); setShowFilters(false); setShowHeat(false); }}>Layers ▾</button>
+        <button className={heatActive ? "primary" : ""} onClick={() => { setShowHeat((s) => !s); setShowFilters(false); setShowLayers(false); }}>Heat map ▾</button>
       </div>
 
       {showFilters && (
@@ -379,6 +534,7 @@ export function MapView() {
             <div className="field"><label>Well type</label><SearchableMultiSelect options={scoped.wellTypes} value={fWellTypes} onChange={setFWellTypes} placeholder="Well types…" /></div>
             <div className="field"><label>Well status</label><SearchableMultiSelect options={scoped.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} placeholder="Well statuses…" /></div>
             <div className="field"><label>Operator ({scoped.operators.length})</label><SearchableMultiSelect options={scoped.operators} value={fOperators} onChange={setFOperators} placeholder="Operators…" /></div>
+            <div className="field"><label>Formation ({scoped.formations.length})</label><SearchableMultiSelect options={scoped.formations} value={fFormations} onChange={setFFormations} placeholder="Formations…" /></div>
           </div>
         </div>
       )}
@@ -396,6 +552,64 @@ export function MapView() {
         </div>
       )}
 
+      {showHeat && (
+        <div className="panel" style={{ marginBottom: 12 }}>
+          <div className="dd-grid" style={{ alignItems: "start" }}>
+            <div>
+              <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>Layers</div>
+              <div className="row" style={{ gap: 16, flexWrap: "wrap" }}>
+                <Chk label="Oil production" on={heat.oil} onChange={() => setHeatK("oil", !heat.oil)} />
+                <Chk label="Gas production" on={heat.gas} onChange={() => setHeatK("gas", !heat.gas)} />
+              </div>
+              <div className="row" style={{ gap: 16, flexWrap: "wrap", marginTop: 8 }}>
+                <Chk label="Top producers" on={heat.topProducers} onChange={() => setHeatK("topProducers", !heat.topProducers)} />
+                <Chk label="Hotspot labels" on={heat.hotspots} onChange={() => setHeatK("hotspots", !heat.hotspots)} />
+              </div>
+              <div className="field" style={{ marginTop: 10 }}>
+                <label>Production period</label>
+                <select value={heat.period} onChange={(e) => setHeatK("period", e.target.value as HeatPeriod)}>
+                  <option value="current">Current month</option>
+                  <option value="3m">Last 3 months</option>
+                  <option value="6m">Last 6 months</option>
+                  <option value="12m">Last 12 months</option>
+                  <option value="3y">Last 3 years</option>
+                  <option value="ytd">Year to date</option>
+                  <option value="custom">Custom range</option>
+                </select>
+              </div>
+              {heat.period === "custom" && (
+                <div className="row" style={{ gap: 8 }}>
+                  <div className="field" style={{ flex: 1 }}><label>From</label><input type="month" value={heat.from} onChange={(e) => setHeatK("from", e.target.value)} /></div>
+                  <div className="field" style={{ flex: 1 }}><label>To</label><input type="month" value={heat.to} onChange={(e) => setHeatK("to", e.target.value)} /></div>
+                </div>
+              )}
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>Appearance</div>
+              <Slider label="Intensity" min={0.2} max={3} step={0.1} value={heat.intensity} onChange={(v) => setHeatK("intensity", v)} />
+              <Slider label="Radius" min={8} max={80} step={1} value={heat.radius} onChange={(v) => setHeatK("radius", v)} suffix="px" />
+              <Slider label="Opacity" min={0.1} max={1} step={0.05} value={heat.opacity} onChange={(v) => setHeatK("opacity", v)} />
+            </div>
+            <div>
+              <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>Production thresholds (per well, period)</div>
+              <div className="field"><label>Minimum</label><input type="number" value={heat.min || ""} onChange={(e) => setHeatK("min", Number(e.target.value) || 0)} placeholder="0 (no minimum)" /></div>
+              <div className="field"><label>Maximum</label><input type="number" value={heat.max || ""} onChange={(e) => setHeatK("max", Number(e.target.value) || 0)} placeholder="0 (no maximum)" /></div>
+              <p className="muted" style={{ fontSize: 11, margin: 0 }}>Oil in bbl, gas in mcf. Wells outside the range drop from the heat.</p>
+            </div>
+          </div>
+          {rank && (heat.oil || heat.gas) && (
+            <div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
+              <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>Production ranking · {periodLabelRef.current}</div>
+              <div className="dd-grid">
+                <RankList title="Top counties" rows={rank.counties} />
+                <RankList title="Top operators" rows={rank.operators} />
+                <RankList title="Top formations" rows={rank.formations} />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="row" style={{ marginBottom: 8 }}>
         <span className="muted">{deals == null ? "…" : `${deals.length} deal${deals.length === 1 ? "" : "s"} · ${abstractCount} highlighted · ${wellsFC.current?.features.length ?? 0} wells`}</span>
       </div>
@@ -405,9 +619,24 @@ export function MapView() {
         {!deals && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}><Spinner label="Loading map…" /></div>}
 
         <div style={{ position: "absolute", left: 12, bottom: 26, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px", fontSize: 12 }}>
-          <Legend color="#22c55e" label="Producing" /><Legend color="#f59e0b" label="Shut-in" /><Legend color="#6b7280" label="Plugged" />
-          <Legend color="#3b82f6" label="Permitted" /><Legend color="#78350f" label="Dry hole" /><Legend color="#7c3aed" label="Injection/Disposal" />
-          {layers.wellbores && <Legend color="#0f766e" label="Wellbore (lateral)" line />}
+          {heatActive ? (
+            <div style={{ minWidth: 160 }}>
+              <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 4 }}>Production intensity · {periodLabelRef.current}</div>
+              <div style={{ height: 10, borderRadius: 5, background: `linear-gradient(90deg, ${HEAT_STOPS.map(([s, c]) => `${c} ${s * 100}%`).join(", ")})` }} />
+              <div className="row" style={{ justifyContent: "space-between", fontSize: 11 }}><span>Low</span><span>High</span></div>
+              <div className="row" style={{ gap: 12, marginTop: 4 }}>
+                {heat.oil && <span className="row" style={{ gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#dc2626" }} />Oil</span>}
+                {heat.gas && <span className="row" style={{ gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#6d28d9" }} />Gas</span>}
+                {heat.topProducers && <span className="row" style={{ gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#facc15", border: "1.5px solid #78350f" }} />Top well</span>}
+              </div>
+            </div>
+          ) : (
+            <>
+              <Legend color="#22c55e" label="Producing" /><Legend color="#f59e0b" label="Shut-in" /><Legend color="#6b7280" label="Plugged" />
+              <Legend color="#3b82f6" label="Permitted" /><Legend color="#78350f" label="Dry hole" /><Legend color="#7c3aed" label="Injection/Disposal" />
+              {layers.wellbores && <Legend color="#0f766e" label="Wellbore (lateral)" line />}
+            </>
+          )}
         </div>
 
         {/* Overlap chooser */}
@@ -464,6 +693,42 @@ export function MapView() {
                 })()}
                 <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Operator, lease, field, and lease production/trend are from RRC records (lease-level; oil is reported per lease). Formation shows where a recent W-2 was filed.</p>
               </>
+            ) : selected.kind === "hotspot" ? (
+              <>
+                <div className="section-head"><div><h3 style={{ margin: 0 }}>Production summary</h3><div className="muted" style={{ fontSize: 12 }}>{selected.summary.wells} contributing well{selected.summary.wells === 1 ? "" : "s"} · {selected.periodLabel}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
+                <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                  <KV k="Total oil (bbl)" v={num(Math.round(selected.summary.oil))} /><KV k="Total gas (MCF)" v={num(Math.round(selected.summary.gas))} />
+                  <KV k="Avg oil / well" v={num(Math.round(selected.summary.avgOil))} /><KV k="Avg gas / well" v={num(Math.round(selected.summary.avgGas))} />
+                </div>
+                {selected.summary.topOperators.length > 0 && (
+                  <>
+                    <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 10 }}>Top operators</div>
+                    {selected.summary.topOperators.map((o) => (
+                      <div key={o.name} className="row" style={{ justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.name}</span>
+                        <span className="muted" style={{ whiteSpace: "nowrap" }}>{num(Math.round(boe(o.oil, o.gas)))} BOE · {o.wells}w</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {selected.summary.topWells.length > 0 && (
+                  <>
+                    <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 10 }}>Top-producing wells</div>
+                    {selected.summary.topWells.map((w, i) => (
+                      <div key={i} className="row" style={{ justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}>
+                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.leaseName || w.api || "Well"}{w.operator ? ` · ${w.operator}` : ""}</span>
+                        <span className="muted" style={{ whiteSpace: "nowrap" }}>{num(Math.round(boe(w.oil, w.gas)))} BOE</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+                <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 10 }}>
+                  <KV k="Counties" v={selected.summary.counties.join(", ")} />
+                  <KV k="Abstracts" v={selected.summary.abstracts.slice(0, 8).join(", ")} />
+                </div>
+                {selected.summary.surveys.length > 0 && <div className="kv" style={{ marginTop: 6 }}><span className="k">Surveys</span><span className="v wrap">{selected.summary.surveys.slice(0, 8).join(", ")}</span></div>}
+                <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Totals attribute each lease's production evenly across its wells. BOE = oil + gas/6. Click elsewhere to summarize another area.</p>
+              </>
             ) : (
               <>
                 <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.abstract}</h3><div className="muted" style={{ fontSize: 12 }}>{[selected.survey, selected.county ? `${selected.county} County` : ""].filter(Boolean).join(" · ")}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
@@ -490,6 +755,27 @@ function Chk({ label, on, onChange }: { label: string; on: boolean; onChange: ()
 }
 function Legend({ color, label, line }: { color: string; label: string; line?: boolean }) {
   return <div className="row" style={{ gap: 8, marginTop: 4 }}><span style={{ width: 12, height: line ? 3 : 12, background: color, opacity: 0.9, borderRadius: line ? 0 : "50%", display: "inline-block" }} /> {label}</div>;
+}
+function Slider({ label, min, max, step, value, onChange, suffix }: { label: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void; suffix?: string }) {
+  return (
+    <div className="field" style={{ marginBottom: 10 }}>
+      <label style={{ display: "flex", justifyContent: "space-between" }}><span>{label}</span><span className="muted" style={{ textTransform: "none" }}>{value}{suffix ?? ""}</span></label>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} style={{ width: "100%", padding: 0 }} />
+    </div>
+  );
+}
+function RankList({ title, rows }: { title: string; rows: { name: string; oil: number; gas: number; wells: number }[] }) {
+  return (
+    <div className="field" style={{ marginBottom: 0 }}>
+      <label>{title}</label>
+      {rows.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>—</div> : rows.map((r) => (
+        <div key={r.name} className="row" style={{ justifyContent: "space-between", fontSize: 13, padding: "2px 0" }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name || "(unknown)"}</span>
+          <span className="muted" style={{ whiteSpace: "nowrap" }}>{num(Math.round(boe(r.oil, r.gas)))}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 function ProductionChart({ series, kind }: { series: [number, number, number][]; kind: "oil" | "gas" }) {
   const pts = series.slice(-36);
