@@ -21,36 +21,22 @@ const TRANSITIONS: { stage: Stage; label: string; hint: string }[] = [
   { stage: "DEAD", label: "Dead", hint: "→ Archived Deals" },
 ];
 
-type RecordFilter = "ALL" | "OPPORTUNITY" | "OWNED_ASSET";
-
 export function Pipeline() {
   const [deals, setDeals] = useState<DealSummary[] | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropCol, setDropCol] = useState<Stage | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [pending, setPending] = useState<{ deal: DealSummary; toStage: Stage } | null>(null);
-  const [filter, setFilter] = useState<RecordFilter>("ALL");
   const nav = useNavigate();
 
-  // Load opportunities AND owned assets; the board shows opportunities plus
-  // owned assets that are actively being marketed (assetMode === "SELL").
-  function load() { api.get<DealSummary[]>("/deals?recordType=ALL").then(setDeals); }
+  // The pipeline is the acquisition board — opportunities only. Owned mineral
+  // assets are managed in their own module and never appear here.
+  function load() { api.get<DealSummary[]>("/deals?recordType=OPPORTUNITY").then(setDeals); }
   useEffect(load, []);
 
   if (!deals) return <Spinner />;
 
-  const boardDeals = deals.filter((d) => {
-    const onBoard = d.recordType === "OPPORTUNITY" || (d.recordType === "OWNED_ASSET" && d.assetMode === "SELL");
-    if (!onBoard) return false;
-    if (filter === "OPPORTUNITY") return d.recordType === "OPPORTUNITY";
-    if (filter === "OWNED_ASSET") return d.recordType === "OWNED_ASSET";
-    return true;
-  });
-  const counts = {
-    all: deals.filter((d) => d.recordType === "OPPORTUNITY" || (d.recordType === "OWNED_ASSET" && d.assetMode === "SELL")).length,
-    opp: deals.filter((d) => d.recordType === "OPPORTUNITY").length,
-    owned: deals.filter((d) => d.recordType === "OWNED_ASSET" && d.assetMode === "SELL").length,
-  };
+  const boardDeals = deals;
 
   function onDrop(col: Stage) {
     setDropCol(null);
@@ -65,11 +51,6 @@ export function Pipeline() {
       <div className="page-header">
         <div className="row">
           <h1 style={{ marginBottom: 0 }}>Pipeline</h1>
-          <div className="pill-filter">
-            <button className={filter === "ALL" ? "active" : ""} onClick={() => setFilter("ALL")}>Both ({counts.all})</button>
-            <button className={filter === "OPPORTUNITY" ? "active" : ""} onClick={() => setFilter("OPPORTUNITY")}>Opportunities ({counts.opp})</button>
-            <button className={filter === "OWNED_ASSET" ? "active" : ""} onClick={() => setFilter("OWNED_ASSET")}>Owned Assets ({counts.owned})</button>
-          </div>
         </div>
         <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>
       </div>
@@ -91,7 +72,7 @@ export function Pipeline() {
               </div>
               <div className="kanban-col-body">
                 {colDeals.map((d) => (
-                  <Card key={d.id} deal={d} onDragStart={() => setDragId(d.id)} onClick={() => nav(d.recordType === "OWNED_ASSET" ? `/assets/${d.id}` : `/deals/${d.id}`)} />
+                  <Card key={d.id} deal={d} onDragStart={() => setDragId(d.id)} onClick={() => nav(`/deals/${d.id}`)} />
                 ))}
               </div>
             </div>
@@ -131,10 +112,9 @@ export function Pipeline() {
 function Card({ deal, onDragStart, onClick }: { deal: DealSummary; onDragStart: () => void; onClick: () => void }) {
   const isClosing = deal.stage === "CLOSING";
   const isDead = deal.stage === "DEAD";
-  const isOwned = deal.recordType === "OWNED_ASSET";
   return (
     <div
-      className={`deal-card prio-${deal.priority.toLowerCase()} ${isDead ? "dead" : ""} ${isOwned ? "owned-asset" : ""}`}
+      className={`deal-card prio-${deal.priority.toLowerCase()} ${isDead ? "dead" : ""}`}
       draggable
       onDragStart={onDragStart}
       onClick={onClick}

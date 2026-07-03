@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Briefcase, Workflow, Users, Map as MapIcon, BarChart3, Telescope, TrendingDown,
-  Gem, Receipt, Building2, Settings as SettingsIcon, ChevronRight, ChevronDown, LogOut,
+  Layers, Receipt, Building2, Settings as SettingsIcon, ChevronRight, ChevronDown, LogOut,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
@@ -27,7 +27,7 @@ const NAV: NavItem[] = [
       { label: "Archived Deals", icon: Briefcase, to: "/deals/archived" },
     ],
   },
-  { label: "Mineral Assets", icon: Gem, to: "/assets", perm: "viewDeals" },
+  { label: "Mineral Assets", icon: Layers, to: "/assets", perm: "viewDeals" },
   { label: "Pipeline", icon: Workflow, to: "/pipeline", perm: "viewDeals" },
   { label: "Buyers", icon: Users, to: "/buyers", perm: "viewBuyers" },
   { label: "Map", icon: MapIcon, to: "/map", perm: "viewMap" },
