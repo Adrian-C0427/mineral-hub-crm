@@ -1,4 +1,5 @@
 import express from "express";
+import compression from "compression";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import helmet from "helmet";
@@ -32,6 +33,12 @@ export function createApp() {
   // Security headers. crossOriginResourcePolicy is relaxed because the SPA is
   // served from a different Railway subdomain than the API.
   app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+  // Vector tiles (protobuf) compress ~70%; JSON responses benefit too. The
+  // default filter skips application/x-protobuf, so include it explicitly.
+  app.use(compression({
+    filter: (req, res) =>
+      /protobuf/.test(String(res.getHeader("Content-Type") ?? "")) || compression.filter(req, res),
+  }));
 
   // CORS locked to the frontend origin(s); credentials required for the cookie.
   app.use(
