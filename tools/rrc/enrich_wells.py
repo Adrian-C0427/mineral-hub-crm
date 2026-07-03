@@ -63,7 +63,11 @@ def main() -> None:
     prod = {}
     for cty in args.counties:
         wells_by_county[cty] = json.load(open(os.path.join(args.data_dir, f"{cty}-wells.geojson")))
-        prod.update(json.load(open(os.path.join(args.data_dir, f"{cty}-production.json"))))
+        # Production assets exist only for PDQ-enriched counties (phase B5 adds
+        # the rest); counties without one still enrich from the bulk sources.
+        ppath = os.path.join(args.data_dir, f"{cty}-production.json")
+        if os.path.exists(ppath):
+            prod.update(json.load(open(ppath)))
 
     # Passes repeat until nothing changes: each pass rebuilds the sibling
     # dictionary, so wells enriched in pass N seed lease-mates in pass N+1.

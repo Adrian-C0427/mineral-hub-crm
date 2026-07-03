@@ -65,10 +65,45 @@ these are RRC codes, not FIPS).
 - Wells with no API number at all (blank `api8`, ~875 in Freestone / ~440 in
   Leon, mostly pre-1960s dry holes) cannot be joined to anything.
 
+## Phase B (2026-07): PostGIS is now the destination
+
+Raw RRC files live in `~/rrc-data` (NEVER inside the repo — see the
+gitignore). The full 12-county pipeline (outputs land in `work12/`,
+gitignored):
+
+```sh
+cd tools/rrc && mkdir -p work12/data
+C="001 005 073 161 225 289 293 313 365 395 405 419"   # RRC county codes
+
+python3 extract_dbf900.py ~/rrc-data/dbf900.ebc work12/dbf900_extract.txt --counties $C
+python3 parse_dbf900.py work12/dbf900_extract.txt work12/dbf900_parsed.json
+python3 parse_daf802.py ~/rrc-data/documents_20260702-4/daf802.txt work12/daf802 --counties $C
+python3 parse_daf802_full.py ~/rrc-data/documents_20260702-4/daf802.txt work12/daf802_full.json --counties $C
+python3 parse_gse10.py ~/rrc-data/documents_20260702-2/gse10.ebc work12/gse10_ops.json
+# per county: shapefile bundle -> raw wells/wellbores geojson (NAD83)
+python3 build_wells.py ~/rrc-data/documents_20260703/Shp365.zip 365 "Panola" work12/data   # … x12
+python3 enrich_wells.py --data-dir work12/data --work-dir work12 --counties leon freestone … shelby
+python3 parse_completions.py work12/completions.json --counties $C \
+    --zip-dirs ~/rrc-data/documents_20260702-3 ~/rrc-data/documents_20260703-3
+
+cd ../../server   # then load Neon/PostGIS:
+npx tsx src/scripts/importRrcRef.ts         # B1 rrc.fields + rrc.operators (statewide)
+npx tsx src/scripts/importRrcWells.ts       # B2 rrc.wells + rrc.wellbores (+ abstract spatial join)
+npx tsx src/scripts/importRrcRegulatory.ts  # B3/B4 rrc.permits + rrc.completions
+```
+
+The map serves wells/wellbores as extra layers in the cadastral vector tiles
+(`/api/gis/tiles`), gated to z≥9/z≥10; detail/search/filters come from
+`/api/gis/wells/*` and `/api/gis/options`.
+
+`build_wells.py` notes: surface points use the dbf NAD83 attrs (shp geometry
+is NAD27); laterals are shp polylines shifted per line by the surface well's
+NAD83−NAD27 delta; BOTTOM_ID keys laterals (multi-lateral surfaces exist);
+the SYMNUM→symbol/type/status map was recovered empirically from the enriched
+Leon/Freestone data.
+
 ## Not yet used
 
-`wlf607.ebc` (well filing ledger) and the daily W-2/G-1 completion-packet
-zips (`documents_*/{district}/trackingNo_*/packetData_*.dat`, `{`-delimited)
-were part of the same RRC drop but aren't consumed by this pipeline yet. The
-completion packets contain casing/perforation/formation detail per filing if
-deeper well data is ever needed.
+`wlf100.ebc`/`wlf607.ebc` (well status test files) aren't consumed yet; the
+completion packets also carry casing/perforation detail beyond what
+parse_completions.py extracts.

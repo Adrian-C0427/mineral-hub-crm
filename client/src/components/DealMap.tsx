@@ -3,11 +3,8 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { collectCoords, bboxOfPoints, convexHull } from "../lib/geo";
 import { num } from "../lib/format";
-import { COUNTIES_WITH_WELLS } from "../lib/counties";
 import { api, API_BASE } from "../api/client";
 
-const WELLS_URLS = COUNTIES_WITH_WELLS.map((k) => `/data/${k}-wells.geojson`);
-const WELLBORES_URLS = COUNTIES_WITH_WELLS.map((k) => `/data/${k}-wellbores.geojson`);
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
 // Reference abstract boundaries stream as vector tiles from PostGIS (same
 // source the main map uses); the deal's own footprint is fetched by id.
@@ -61,7 +58,7 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
         : { type: "FeatureCollection", features: [] };
       const dealFeats = dealFC.features;
 
-      map.addSource("abstracts", { type: "vector", tiles: [ABSTRACT_TILES], minzoom: 7, maxzoom: 14, promoteId: { abstracts: "id" } });
+      map.addSource("abstracts", { type: "vector", tiles: [ABSTRACT_TILES], minzoom: 7, maxzoom: 14, promoteId: { abstracts: "id", wells: "fid" } });
       map.addSource("deal", { type: "geojson", data: dealFC as unknown as GeoJSON.FeatureCollection, promoteId: "id" });
 
       // Clean outer boundary = convex hull of all deal-abstract vertices.
@@ -106,22 +103,17 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Lazy-load heavy layers only when first enabled (perf: no statewide load up front).
-  async function ensureWells() {
+  // Wells/laterals come from the same vector-tile source as the abstracts
+  // (rrc.wells in PostGIS) — available in every imported county, no downloads.
+  function ensureWells() {
     const map = mapRef.current!; if (wellsLoaded.current) return; wellsLoaded.current = true;
-    const parts = await Promise.all(WELLS_URLS.map((u) => fetch(u).then((r) => r.json()).catch(() => ({ features: [] }))));
-    const data = { type: "FeatureCollection", features: parts.flatMap((p: { features: unknown[] }) => p.features) };
-    map.addSource("wells", { type: "geojson", data: data as unknown as GeoJSON.FeatureCollection, promoteId: "fid" });
-    map.addLayer({ id: "wells", type: "circle", source: "wells", paint: {
+    map.addLayer({ id: "wells", type: "circle", source: "abstracts", "source-layer": "wells", minzoom: 9, paint: {
       "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 2.3, 14, 5], "circle-color": STATUS_COLOR,
       "circle-stroke-width": 0.6, "circle-stroke-color": "#fff", "circle-opacity": 0.9 } });
   }
-  async function ensureBores() {
+  function ensureBores() {
     const map = mapRef.current!; if (boresLoaded.current) return; boresLoaded.current = true;
-    const parts = await Promise.all(WELLBORES_URLS.map((u) => fetch(u).then((r) => r.json()).catch(() => ({ features: [] }))));
-    const data = { type: "FeatureCollection", features: parts.flatMap((p: { features: unknown[] }) => p.features) };
-    map.addSource("wellbores", { type: "geojson", data: data as unknown as GeoJSON.FeatureCollection, promoteId: "fid" });
-    map.addLayer({ id: "wellbores", type: "line", source: "wellbores", paint: {
+    map.addLayer({ id: "wellbores", type: "line", source: "abstracts", "source-layer": "wellbores", minzoom: 10, paint: {
       "line-color": ["match", ["get", "wellboreType"], "Directional", "#9333ea", "#0f766e"], "line-width": 1.5, "line-opacity": 0.8 } });
   }
 
@@ -130,10 +122,8 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
     const L = layersRef.current;
     const vis = (id: string, on: boolean) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
     vis("abstracts-line", L.boundaries); vis("abstracts-num", L.numbers); vis("abstracts-survey", L.surveys);
-    (async () => {
-      if (L.wells) { await ensureWells(); vis("wells", true); } else vis("wells", false);
-      if (L.wellbores) { await ensureBores(); vis("wellbores", true); } else vis("wellbores", false);
-    })();
+    if (L.wells) { ensureWells(); vis("wells", true); } else vis("wells", false);
+    if (L.wellbores) { ensureBores(); vis("wellbores", true); } else vis("wellbores", false);
   }
   useEffect(applyVis, [layers]);
 
