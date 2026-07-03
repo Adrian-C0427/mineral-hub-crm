@@ -22,6 +22,11 @@ import { validateSecret, validateEnvProvider, envConfigured } from "../services/
 import { encryptSecret, secretHint } from "../services/secrets.js";
 import { syncIntegration, checkIntegration, configOf } from "../services/integrationSync.js";
 import { logActivity } from "../services/activityLog.js";
+import { env } from "../config.js";
+import {
+  isOAuthProvider, oauthConfigured, buildAuthorizeUrl, signState, verifyState,
+  exchangeCode, persistBundle,
+} from "../services/integrationOAuth.js";
 
 export const integrationsRouter = Router();
 integrationsRouter.use(requireAuth, requireOrg, requirePermission("manageApiIntegrations"));
@@ -44,6 +49,12 @@ function publicConfig(row: Integration | null): Record<string, unknown> {
 
 function serialize(def: (typeof INTEGRATION_CATALOG)[number], row: Integration | null) {
   const cfg = row ? configOf(row) : {};
+  // `configured` tells the client whether the provider can be connected at all:
+  // env providers need their env vars; oauth providers need client credentials;
+  // apikey/webhook are always connectable.
+  const configured = def.implementation === "env" ? envConfigured(def.key)
+    : def.implementation === "oauth" ? oauthConfigured(def.key)
+    : def.implementation !== "planned";
   return {
     ...def,
     // Env-configured providers report their real runtime status; stored rows
@@ -51,6 +62,7 @@ function serialize(def: (typeof INTEGRATION_CATALOG)[number], row: Integration |
     status: def.implementation === "env"
       ? (envConfigured(def.key) ? "CONNECTED" : "NOT_CONNECTED")
       : (row?.status ?? "NOT_CONNECTED"),
+    configured,
     config: publicConfig(row),
     secretMask: cfg._hint ?? null,
     connectedAt: row?.connectedAt ?? null,
@@ -94,6 +106,9 @@ integrationsRouter.post(
 
     if (def.implementation === "env") {
       throw new HttpError(400, `${def.name} is configured with environment variables on the API service, not from this page.`);
+    }
+    if (def.implementation === "oauth") {
+      throw new HttpError(400, `${def.name} connects via OAuth. Start the authorization at GET /api/integrations/${def.key}/oauth/start.`);
     }
     if (def.implementation === "planned") {
       throw new HttpError(400, `${def.name} requires an OAuth app registration before it can be enabled${def.setupUrl ? ` (${def.setupUrl})` : ""}. See docs/integrations-audit.md.`);
@@ -219,5 +234,77 @@ integrationsRouter.post(
     }
     const result = await syncIntegration(row, req.user?.id ?? null);
     res.json(result);
+  }),
+);
+
+// --- OAuth authorization flow -------------------------------------------------
+
+// Begin authorization: returns the provider URL the browser should navigate to.
+// Org/user context rides in a signed, short-lived state token (verified by the
+// public callback), so no session cookie is needed at the callback.
+integrationsRouter.get(
+  "/:provider/oauth/start",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const def = requireDef(req.params.provider);
+    if (def.implementation !== "oauth") throw new HttpError(400, `${def.name} does not use OAuth.`);
+    if (!oauthConfigured(def.key)) {
+      throw new HttpError(400, `${def.name} isn't configured on the server yet (its OAuth client id/secret are unset).`);
+    }
+    const state = signState({ orgId: orgId(req), userId: req.user!.id, provider: def.key });
+    res.json({ url: buildAuthorizeUrl(def.key, state) });
+  }),
+);
+
+/**
+ * Public OAuth callback router — NO session auth (the provider redirects the
+ * browser here without our cookie). Trust is established by the signed state.
+ * Mounted before the authed router so it handles only this exact path.
+ */
+export const integrationsOAuthCallbackRouter = Router();
+integrationsOAuthCallbackRouter.get(
+  "/:provider/oauth/callback",
+  asyncHandler(async (req, res) => {
+    const provider = req.params.provider;
+    const back = (params: Record<string, string>) =>
+      res.redirect(`${env.APP_URL}/settings/integrations?${new URLSearchParams(params).toString()}`);
+
+    const code = typeof req.query.code === "string" ? req.query.code : "";
+    const stateToken = typeof req.query.state === "string" ? req.query.state : "";
+    if (req.query.error) return back({ error: String(req.query.error), provider });
+    if (!code || !stateToken) return back({ error: "Missing authorization code or state.", provider });
+
+    let state: { orgId: string; userId: string; provider: string };
+    try {
+      state = verifyState(stateToken);
+    } catch {
+      return back({ error: "Authorization link expired or was tampered with. Try again.", provider });
+    }
+    if (state.provider !== provider || !isOAuthProvider(provider)) {
+      return back({ error: "Provider mismatch in authorization callback.", provider });
+    }
+
+    try {
+      const bundle = await exchangeCode(provider, code);
+      const existing = await prisma.integration.findUnique({
+        where: { organizationId_provider: { organizationId: state.orgId, provider } },
+      });
+      const row = existing ?? await prisma.integration.create({
+        data: { organizationId: state.orgId, provider, status: "NOT_CONNECTED" },
+      });
+      await persistBundle(row, bundle);
+      await prisma.integration.update({
+        where: { id: row.id },
+        data: { status: "CONNECTED", connectedAt: new Date(), lastSyncAt: new Date(), lastError: null },
+      });
+      const def = providerByKey(provider);
+      await logActivity({
+        eventType: "integration.connected",
+        summary: `Integration ${def?.name ?? provider} connected (OAuth)`,
+        organizationId: state.orgId, actorUserId: state.userId,
+      });
+      return back({ connected: provider });
+    } catch (e) {
+      return back({ error: e instanceof Error ? e.message : "Token exchange failed.", provider });
+    }
   }),
 );

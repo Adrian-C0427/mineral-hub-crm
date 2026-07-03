@@ -13,12 +13,13 @@ import { fmtDate } from "../lib/format";
 // presentation (icons, ordering) is decided here.
 
 type Auth = "apikey" | "webhook" | "oauth" | "env";
-type Impl = "live" | "env" | "planned";
+type Impl = "live" | "env" | "oauth" | "planned";
 
 interface Provider {
   key: string; name: string; category: string; auth: Auth; implementation: Impl;
   description: string; secretLabel?: string; secretHint?: string; setupUrl?: string; syncable?: boolean;
   status: "CONNECTED" | "NOT_CONNECTED" | "ERROR";
+  configured: boolean;
   config: { schedule?: string; notes?: string };
   secretMask: string | null;
   connectedAt: string | null; lastSyncAt: string | null; lastError: string | null;
@@ -48,6 +49,23 @@ export function Integrations() {
       .catch((e) => setErr(e instanceof ApiError ? e.message : "Failed to load integrations"));
   }
   useEffect(load, []);
+
+  // Surface the outcome of an OAuth round-trip (provider redirected back here).
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    if (q.get("connected")) setFlash(`${q.get("connected")} connected.`);
+    else if (q.get("error")) setErr(decodeURIComponent(q.get("error")!));
+    if (q.get("connected") || q.get("error")) window.history.replaceState({}, "", window.location.pathname);
+  }, []);
+
+  // Begin an OAuth authorization: fetch the provider URL, then hand the browser off.
+  async function startOAuth(p: Provider) {
+    setBusyKey(p.key); setErr(null);
+    try {
+      const { url } = await api.get<{ url: string }>(`/integrations/${p.key}/oauth/start`);
+      window.location.href = url;
+    } catch (e) { setErr(e instanceof ApiError ? e.message : "Could not start authorization"); setBusyKey(null); }
+  }
 
   const categories = useMemo(() => {
     const m = new Map<string, Provider[]>();
@@ -102,6 +120,7 @@ export function Integrations() {
                   busy={busyKey === p.key}
                   result={testResult[p.key]}
                   onConnect={() => setConnecting(p)}
+                  onOAuth={() => startOAuth(p)}
                   onDisconnect={() => setDisconnecting(p)}
                   onConfigure={() => setConfiguring(p)}
                   onTest={() => run(p, "test")}
@@ -142,12 +161,15 @@ export function Integrations() {
   );
 }
 
-function IntegrationCard({ p, busy, result, onConnect, onDisconnect, onConfigure, onTest, onSync }: {
+function IntegrationCard({ p, busy, result, onConnect, onOAuth, onDisconnect, onConfigure, onTest, onSync }: {
   p: Provider; busy: boolean; result?: { ok: boolean; message: string };
-  onConnect: () => void; onDisconnect: () => void; onConfigure: () => void; onTest: () => void; onSync: () => void;
+  onConnect: () => void; onOAuth: () => void; onDisconnect: () => void; onConfigure: () => void; onTest: () => void; onSync: () => void;
 }) {
   const connected = p.status === "CONNECTED";
   const errored = p.status === "ERROR";
+  // An OAuth (or planned) provider that isn't configured on the server can't be
+  // connected yet — it needs an app registration + server credentials.
+  const needsSetup = p.implementation === "planned" || (p.implementation === "oauth" && !p.configured);
   return (
     <div className="integration-card">
       <div className="integration-head">
@@ -156,7 +178,7 @@ function IntegrationCard({ p, busy, result, onConnect, onDisconnect, onConfigure
           <div className="integration-name">{p.name}</div>
           <span className="chip-mini">{AUTH_LABEL[p.auth]}</span>
           <span className={`badge ${connected ? "resp-offer" : errored ? "resp-no" : "resp-pending"}`} style={{ marginLeft: 6 }}>
-            {connected ? "Connected" : errored ? "Error" : p.implementation === "planned" ? "Setup required" : "Not connected"}
+            {connected ? "Connected" : errored ? "Error" : needsSetup ? "Setup required" : "Not connected"}
           </span>
         </div>
       </div>
@@ -168,7 +190,7 @@ function IntegrationCard({ p, busy, result, onConnect, onDisconnect, onConfigure
       {result && <p className={result.ok ? "muted" : "error-text"} style={{ fontSize: 12 }}>{result.message}</p>}
 
       <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-        {p.implementation === "planned" ? (
+        {needsSetup ? (
           p.setupUrl && <a className="chip-mini" href={p.setupUrl} target="_blank" rel="noreferrer">Setup guide ↗</a>
         ) : p.implementation === "env" ? (
           <button className="small" disabled={busy} onClick={onTest}>{busy ? "Testing…" : "Test connection"}</button>
@@ -176,12 +198,16 @@ function IntegrationCard({ p, busy, result, onConnect, onDisconnect, onConfigure
           <>
             <button className="small" disabled={busy} onClick={onTest}>{busy ? "Working…" : "Test"}</button>
             {p.syncable && <button className="small" disabled={busy} onClick={onSync}>Sync now</button>}
-            <button className="small" onClick={onConfigure}>Configure</button>
-            <button className="small" onClick={onConnect}>Replace key</button>
+            {p.implementation !== "oauth" && <button className="small" onClick={onConfigure}>Configure</button>}
+            <button className="small" onClick={p.implementation === "oauth" ? onOAuth : onConnect}>
+              {p.implementation === "oauth" ? "Reconnect" : "Replace key"}
+            </button>
             <button className="small danger" onClick={onDisconnect}>Disconnect</button>
           </>
         ) : (
-          <button className="small primary" onClick={onConnect}>Connect</button>
+          <button className="small primary" disabled={busy} onClick={p.implementation === "oauth" ? onOAuth : onConnect}>
+            {busy ? "Starting…" : p.implementation === "oauth" ? "Connect with OAuth" : "Connect"}
+          </button>
         )}
       </div>
     </div>

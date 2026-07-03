@@ -17,6 +17,7 @@ import { logActivity } from "./activityLog.js";
 import { providerByKey } from "../domain/integrationCatalog.js";
 import { decryptSecret } from "./secrets.js";
 import { validateSecret, validateEnvProvider, type ValidationResult } from "./integrationProviders.js";
+import { isOAuthProvider, getFreshAccessToken } from "./integrationOAuth.js";
 
 export interface IntegrationConfig {
   schedule?: "manual" | "hourly" | "daily";
@@ -35,6 +36,15 @@ export async function checkIntegration(row: Integration): Promise<ValidationResu
   const def = providerByKey(row.provider);
   if (!def) return { ok: false, message: "Unknown provider." };
   if (def.implementation === "env") return validateEnvProvider(row.provider);
+  // OAuth: "valid" = we can obtain a fresh access token (refreshing if needed).
+  if (isOAuthProvider(row.provider)) {
+    try {
+      await getFreshAccessToken(row);
+      return { ok: true, message: `${def.name} authorization is valid.` };
+    } catch (e) {
+      return { ok: false, message: e instanceof Error ? e.message : "OAuth token check failed." };
+    }
+  }
   const cfg = configOf(row);
   if (!cfg._secret) return { ok: false, message: "No credential stored. Reconnect this integration." };
   let secret: string;
