@@ -197,7 +197,16 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .integration-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .integration-card { border: 1px solid var(--border); border-radius: var(--radius); padding: 12px; background: var(--panel-2); display: flex; flex-direction: column; }
 .integration-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
-.integration-logo { width: 34px; height: 34px; flex: 0 0 34px; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 700; font-size: 12px; display: flex; align-items: center; justify-content: center; }
+/* Uniform logo chip: a light tile so each brand's own colors read cleanly on
+   the dark UI. Brand logos (img) sit centered; generic providers show a themed
+   glyph or initials. Same footprint for every card = a consistent, tidy grid. */
+.integration-logo {
+  width: 38px; height: 38px; flex: 0 0 38px; border-radius: 9px;
+  background: #fff; border: 1px solid var(--border);
+  color: var(--accent); font-weight: 700; font-size: 13px;
+  display: flex; align-items: center; justify-content: center; overflow: hidden;
+}
+.integration-logo img { width: 24px; height: 24px; object-fit: contain; display: block; }
 .integration-name { font-weight: 600; }
 .integration-desc { font-size: 13px; color: var(--text-dim); margin: 0 0 10px; flex: 1; }
 .chip-mini { font-size: 11px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; }

@@ -22,6 +22,7 @@ import { emailTemplatesRouter } from "./routes/emailTemplates.js";
 import { integrationsRouter, integrationsOAuthCallbackRouter } from "./routes/integrations.js";
 import { researchRouter } from "./routes/research.js";
 import { wellsRouter } from "./routes/wells.js";
+import { aiRouter } from "./routes/ai.js";
 
 export function createApp() {
   const app = express();
@@ -68,6 +69,7 @@ export function createApp() {
   app.use("/api/integrations", integrationsRouter);
   app.use("/api/research", researchRouter);
   app.use("/api/wells", wellsRouter);
+  app.use("/api/ai", aiRouter);
 
   app.use(notFound);
   // Sentry captures errors before our own handler formats the response.
