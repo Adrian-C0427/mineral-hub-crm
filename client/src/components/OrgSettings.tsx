@@ -75,9 +75,14 @@ function OrgTab({ org, canEdit, onSaved, onJoined, onError }: { org: OrgInfo; ca
     catch (e) { setConfirmingName(false); onError(e); }
     finally { setSavingName(false); }
   }
-  async function join(e: React.FormEvent) {
-    e.preventDefault();
-    try { await api.post("/auth/join", { token: joinToken.trim() }); setJoinToken(""); onJoined(); } catch (e2) { onError(e2); }
+  // Joining another org moves the user out of THIS workspace — always confirm.
+  const [confirmingJoin, setConfirmingJoin] = useState(false);
+  const [joining, setJoining] = useState(false);
+  async function join() {
+    setJoining(true);
+    try { await api.post("/auth/join", { token: joinToken.trim() }); setJoinToken(""); setConfirmingJoin(false); onJoined(); }
+    catch (e2) { setConfirmingJoin(false); onError(e2); }
+    finally { setJoining(false); }
   }
   function copy(text: string) { navigator.clipboard?.writeText(text); }
 
@@ -102,15 +107,35 @@ function OrgTab({ org, canEdit, onSaved, onJoined, onError }: { org: OrgInfo; ca
         <div className="kv"><span className="k">Your role</span><span className="v">{ROLE_LABEL[org.yourRole ?? ""] ?? "—"}</span></div>
         <div className="kv"><span className="k">Members</span><span className="v">{org.memberCount}</span></div>
       </div>
-      <form onSubmit={join} className="row" style={{ marginBottom: 8, alignItems: "flex-end" }}>
-        <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-          <label>Join a team (Team ID or invite code)</label>
-          <input value={joinToken} onChange={(e) => setJoinToken(e.target.value)} placeholder="Enter a code to join another company" />
-        </div>
-        <button className="primary" disabled={!joinToken.trim()}>Join</button>
-      </form>
-      <p className="muted" style={{ fontSize: 12 }}>Joining another organization moves you into its shared workspace.</p>
+      {/* Deliberately tucked away: switching companies is rare and moves the
+          user out of this workspace, so it should never be one Enter away. */}
+      <details style={{ marginTop: 4 }}>
+        <summary className="muted" style={{ cursor: "pointer", fontSize: 13 }}>Join a different company…</summary>
+        <form
+          onSubmit={(e) => { e.preventDefault(); if (joinToken.trim()) setConfirmingJoin(true); }}
+          className="row"
+          style={{ margin: "10px 0 4px", alignItems: "flex-end" }}
+        >
+          <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+            <label>Team ID or invite code</label>
+            <input value={joinToken} onChange={(e) => setJoinToken(e.target.value)} placeholder="e.g. TEAM-XXXXXX" />
+          </div>
+          <button className="small" disabled={!joinToken.trim()}>Join…</button>
+        </form>
+        <p className="muted" style={{ fontSize: 12 }}>Joining another organization moves you out of {org.name} and into their shared workspace.</p>
+      </details>
       {confirmingName && <ConfirmChanges busy={savingName} onCancel={() => setConfirmingName(false)} onConfirm={saveName} />}
+      {confirmingJoin && (
+        <ConfirmDialog
+          title="Switch to another company?"
+          message={<>You're about to leave <strong>{org.name}</strong> and join the workspace for code <code>{joinToken.trim()}</code>. You'll lose access to this company's deals, buyers, and settings unless you're re-invited. Continue?</>}
+          confirmLabel="Leave & join"
+          danger
+          busy={joining}
+          onCancel={() => setConfirmingJoin(false)}
+          onConfirm={join}
+        />
+      )}
     </>
   );
 }

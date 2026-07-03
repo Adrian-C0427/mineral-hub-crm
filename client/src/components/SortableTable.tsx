@@ -83,7 +83,8 @@ export function SortableTable<T>({
 
   return (
     <div className="table-scroll">
-      <table className="data-table">
+      {/* lead-sticky pins the identifying column(s) while wide tables scroll. */}
+      <table className={`data-table lead-sticky${selection ? " has-sel" : ""}`}>
         <thead>
           <tr>
             {selection && (() => {

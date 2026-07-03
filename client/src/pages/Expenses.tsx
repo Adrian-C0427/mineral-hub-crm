@@ -130,6 +130,12 @@ export function Expenses() {
 
       {err && <Banner kind="error">{err}</Banner>}
 
+      {dash && dash.totals.count === 0 && (
+        <Banner kind="info">
+          No expenses recorded yet — use <strong>+ Add expense</strong> to start tracking company spend and reimbursements.
+        </Banner>
+      )}
+
       {/* KPIs */}
       {dash && (
         <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>

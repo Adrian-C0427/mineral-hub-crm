@@ -29,8 +29,13 @@ export function Login() {
   const [devResetUrl, setDevResetUrl] = useState<string | null>(null);
 
   const [providers, setProviders] = useState<Provider[]>([]);
+  // Whether the server allows creating a brand-new workspace without an invite.
+  // Defaults true so the field only tightens up once the policy is known.
+  const [publicSignup, setPublicSignup] = useState(true);
   useEffect(() => {
-    api.get<{ providers: Provider[] }>("/auth/oauth/providers").then((r) => setProviders(r.providers)).catch(() => {});
+    api.get<{ providers: Provider[]; publicSignup?: boolean }>("/auth/oauth/providers")
+      .then((r) => { setProviders(r.providers); setPublicSignup(r.publicSignup !== false); })
+      .catch(() => {});
   }, []);
 
   function switchMode(next: Mode) {
@@ -166,8 +171,18 @@ export function Login() {
 
             {mode === "register" && (
               <div className="field">
-                <label>Team ID or invite code (optional)</label>
-                <input value={joinToken} onChange={(e) => setJoinToken(e.target.value)} placeholder="Join an existing company" />
+                <label>Team ID or invite code{publicSignup ? " (optional)" : ""}</label>
+                <input
+                  value={joinToken}
+                  onChange={(e) => setJoinToken(e.target.value)}
+                  placeholder={publicSignup ? "Join an existing company" : "e.g. TEAM-XXXXXX or an invite code"}
+                  required={!publicSignup}
+                />
+                {!publicSignup && (
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    Sign-up is invite-only — ask your administrator for your company's Team ID or an invite code.
+                  </span>
+                )}
               </div>
             )}
 

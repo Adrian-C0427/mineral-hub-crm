@@ -123,6 +123,12 @@ authRouter.post(
     // Resolve the join token up front so an invalid code fails before we create anything.
     const join = data.joinToken ? await resolveJoinToken(data.joinToken) : null;
 
+    // Invite-only signup (default): without a valid code, brand-new workspaces
+    // can't be self-provisioned. Flip ALLOW_PUBLIC_SIGNUP=true to open it up.
+    if (!join && !env.ALLOW_PUBLIC_SIGNUP) {
+      throw new HttpError(403, "Sign-up requires a Team ID or invite code. Ask your administrator for an invite.");
+    }
+
     const user = await prisma.$transaction(async (tx) => {
       let organizationId: string;
       let orgRole: "OWNER" | "MEMBER";
@@ -419,9 +425,10 @@ authRouter.post(
 // OAuth / SSO (Google, Microsoft)
 // ===========================================================================
 
-/** Providers with credentials configured — the client renders a button per entry. */
+/** Providers with credentials configured — the client renders a button per entry.
+ *  Also carries the signup policy so the login page can require an invite code. */
 authRouter.get("/oauth/providers", (_req, res) => {
-  res.json({ providers: enabledProviders() });
+  res.json({ providers: enabledProviders(), publicSignup: env.ALLOW_PUBLIC_SIGNUP });
 });
 
 // Step 1: redirect the browser to the provider's consent screen. A signed,
@@ -482,6 +489,11 @@ authRouter.get(
         await prisma.oAuthAccount.create({ data: { userId: byEmail.id, provider: provider.key, providerAccountId: profile.providerAccountId, email: profile.email } });
       } else {
         const join = joinToken ? await resolveJoinToken(joinToken).catch(() => null) : null;
+        // Same invite-only policy as /register: SSO must not be a side door for
+        // self-provisioning a brand-new workspace.
+        if (!join && !env.ALLOW_PUBLIC_SIGNUP) {
+          return fail("Sign-up requires a Team ID or invite code. Enter your code under Create an account, or ask your administrator for an invite.");
+        }
         user = await prisma.$transaction(async (tx) => {
           let organizationId: string;
           let orgRole: "OWNER" | "MEMBER";

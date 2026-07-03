@@ -218,11 +218,16 @@ export function Reports() {
               <p style={{ margin: "10px 0 0", fontSize: 12 }}><strong>Filters:</strong> {activeFilterChips.join(" · ")}</p>
             )}
             <p style={{ marginBottom: 0, marginTop: 10 }}>
-              <strong>Executive summary.</strong> Over this period the team closed <strong>{num(k.dealsClosed)}</strong> deal(s)
+              <strong>Executive summary.</strong> Over this period the team closed <strong>{num(k.dealsClosed)}</strong> {k.dealsClosed === 1 ? "deal" : "deals"}{" "}
               generating <strong>{money(k.revenue)}</strong> in revenue and <strong>{money(k.netProfit)}</strong> net profit,
-              added <strong>{num(k.dealsAdded)}</strong> new deal(s), and maintained a <strong>{pct(k.winRate)}</strong> win rate.
+              added <strong>{num(k.dealsAdded)}</strong> new {k.dealsAdded === 1 ? "deal" : "deals"}, and maintained a <strong>{pct(k.winRate)}</strong> win rate.
               Total company expenses were <strong>{money(k.expenses)}</strong> with <strong>{money(k.reimbursementsOutstanding)}</strong> outstanding in reimbursements.
             </p>
+            {k.totalDeals === 0 && (
+              <Banner kind="info">
+                No deal activity in this period yet — these metrics fill in automatically as deals are added and closed. Try a wider date range, or start from the Pipeline.
+              </Banner>
+            )}
           </div>
 
           {/* --- KPI grid --- */}

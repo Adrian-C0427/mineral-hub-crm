@@ -13,29 +13,32 @@ interface NavItem {
   to?: string;
   end?: boolean;
   perm?: string;
+  /** One-line purpose, shown as a hover tooltip — several pages look like
+   *  "analytics", so each spells out which question it answers. */
+  desc?: string;
   children?: NavItem[];
 }
 
 // Config-driven so new modules are added here without touching layout code.
 const NAV: NavItem[] = [
-  { label: "Dashboard", icon: LayoutDashboard, to: "/", end: true },
+  { label: "Dashboard", icon: LayoutDashboard, to: "/", end: true, desc: "Today's acquisition snapshot — active deals, profit, follow-ups" },
   {
-    label: "Deals", icon: Briefcase, perm: "viewDeals",
+    label: "Deals", icon: Briefcase, perm: "viewDeals", desc: "Acquisition opportunities you're working",
     children: [
       { label: "Active Deals", icon: Briefcase, to: "/deals/active" },
       { label: "Closed Deals", icon: Briefcase, to: "/deals/closed" },
       { label: "Archived Deals", icon: Briefcase, to: "/deals/archived" },
     ],
   },
-  { label: "Mineral Assets", icon: Layers, to: "/assets", perm: "viewDeals" },
-  { label: "Pipeline", icon: Workflow, to: "/pipeline", perm: "viewDeals" },
-  { label: "Buyers", icon: Users, to: "/buyers", perm: "viewBuyers" },
-  { label: "Map", icon: MapIcon, to: "/map", perm: "viewMap" },
-  { label: "Research", icon: Telescope, to: "/research", perm: "viewResearch" },
-  { label: "Well Analysis", icon: TrendingDown, to: "/valuation", perm: "viewResearch" },
-  { label: "Reports", icon: BarChart3, to: "/reports", perm: "viewReports" },
-  { label: "Expenses", icon: Receipt, to: "/expenses", perm: "manageExpenses" },
-  { label: "Organization", icon: Building2, to: "/organization", perm: "orgSection" },
+  { label: "Mineral Assets", icon: Layers, to: "/assets", perm: "viewDeals", desc: "Your owned mineral & royalty portfolio" },
+  { label: "Pipeline", icon: Workflow, to: "/pipeline", perm: "viewDeals", desc: "Drag deals through the acquisition stages" },
+  { label: "Buyers", icon: Users, to: "/buyers", perm: "viewBuyers", desc: "Buyer list, buy boxes, and relationships" },
+  { label: "Map", icon: MapIcon, to: "/map", perm: "viewMap", desc: "Wells, abstracts, and deals on the Texas map" },
+  { label: "Research", icon: Telescope, to: "/research", perm: "viewResearch", desc: "Market intelligence — county transactions, permits, operators" },
+  { label: "Well Analysis", icon: TrendingDown, to: "/valuation", perm: "viewResearch", desc: "Value specific wells — decline curves, forecasts, offer prices" },
+  { label: "Reports", icon: BarChart3, to: "/reports", perm: "viewReports", desc: "Your business performance — closed deals, profit, win rate" },
+  { label: "Expenses", icon: Receipt, to: "/expenses", perm: "manageExpenses", desc: "Company spend and reimbursements" },
+  { label: "Organization", icon: Building2, to: "/organization", perm: "orgSection", desc: "Company, members, roles & permissions" },
   {
     label: "Settings", icon: SettingsIcon,
     children: [
@@ -51,9 +54,22 @@ export function Sidebar() {
   const { user, logout, can } = useAuth();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState<boolean>(() => {
-    try { return localStorage.getItem("mh_sidebar_collapsed") === "1"; } catch { return false; }
+    try {
+      if (window.matchMedia("(max-width: 760px)").matches) return true; // small screens start as the icon rail
+      return localStorage.getItem("mh_sidebar_collapsed") === "1";
+    } catch { return false; }
   });
   const toggleCollapsed = () => setCollapsed((c) => { const n = !c; try { localStorage.setItem("mh_sidebar_collapsed", n ? "1" : "0"); } catch { /* ignore */ } return n; });
+
+  // Auto-collapse to the icon rail whenever the viewport shrinks below tablet
+  // width (rotation, window resize). Expanding manually stays possible — this
+  // only fires on the wide→narrow transition, it never fights the user.
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 760px)");
+    const onChange = (e: MediaQueryListEvent) => { if (e.matches) setCollapsed(true); };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
 
   // "orgSection" is a virtual permission: visible if the user can manage members OR roles.
   const allowed = (item: NavItem): boolean => {
@@ -95,7 +111,7 @@ function SidebarItem({ item, collapsed, allowed, pathname }: { item: NavItem; co
 
   if (!hasChildren) {
     return (
-      <NavLink to={item.to!} end={item.end} className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`} title={collapsed ? item.label : undefined}>
+      <NavLink to={item.to!} end={item.end} className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`} title={collapsed ? item.label : item.desc}>
         <span className="sidebar-icon"><Icon size={18} /></span>
         {!collapsed && <span className="sidebar-label">{item.label}</span>}
       </NavLink>
@@ -104,7 +120,7 @@ function SidebarItem({ item, collapsed, allowed, pathname }: { item: NavItem; co
 
   return (
     <div className={`sidebar-group ${within ? "within" : ""}`}>
-      <div className="sidebar-link group-head" onClick={() => setOpen((o) => !o)} title={collapsed ? item.label : undefined}>
+      <div className="sidebar-link group-head" onClick={() => setOpen((o) => !o)} title={collapsed ? item.label : item.desc}>
         <span className="sidebar-icon"><Icon size={18} /></span>
         {!collapsed && <><span className="sidebar-label">{item.label}</span><span className="group-caret">{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span></>}
       </div>

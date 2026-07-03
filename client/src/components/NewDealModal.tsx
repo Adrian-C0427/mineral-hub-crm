@@ -3,7 +3,7 @@ import { Modal } from "./ui";
 import { api, ApiError } from "../api/client";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
 import { AbstractMultiPicker } from "./AbstractPicker";
-import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
+import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, US_STATE_OPTIONS } from "../lib/options";
 import type { DealSummary } from "../types";
 
 export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCreated: (d: DealSummary) => void }) {
@@ -20,7 +20,7 @@ export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCr
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setF((p) => ({ ...p, [k]: e.target.value }));
   const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
 
@@ -67,7 +67,12 @@ export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCr
       <p className="muted" style={{ marginTop: 0 }}>New deals are created directly into <strong>Under Contract</strong>. Find Buyer By and Final Closing dates auto-calculate from the anchor dates.</p>
       <div className="field"><label>Deal name *</label><input value={f.name} onChange={set("name")} autoFocus /></div>
       <div className="dd-grid">
-        <div className="field"><label>State</label><input value={f.state} onChange={set("state")} /></div>
+        <div className="field"><label>State</label>
+          <select value={f.state} onChange={set("state")}>
+            <option value="">Select…</option>
+            {US_STATE_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+        </div>
         <div className="field"><label>County</label><SearchableMultiSelect options={TEXAS_COUNTY_OPTIONS} value={counties} onChange={setCounties} placeholder="Search counties…" /></div>
         <div className="field"><label>Asset Type</label><SearchableMultiSelect options={ASSET_TYPE_OPTIONS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
         <div className="field"><label>Basin</label><SearchableMultiSelect options={TEXAS_BASIN_OPTIONS} value={basins} onChange={setBasins} placeholder="Search basins…" /></div>

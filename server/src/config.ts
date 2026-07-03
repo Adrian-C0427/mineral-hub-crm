@@ -58,6 +58,10 @@ export const env = {
   // Set true in production (cross-subdomain Railway services require SameSite=None; Secure).
   COOKIE_CROSS_SITE: (process.env.COOKIE_CROSS_SITE ?? (process.env.NODE_ENV === "production" ? "true" : "false")) === "true",
   SESSION_TTL_HOURS: parseInt(process.env.SESSION_TTL_HOURS ?? "168", 10),
+  // Signup policy. When false (the default), creating a BRAND-NEW workspace via
+  // the register form or SSO is blocked — new users must present a valid Team ID
+  // or invite code. Existing-user sign-in and invite-code joins are unaffected.
+  ALLOW_PUBLIC_SIGNUP: process.env.ALLOW_PUBLIC_SIGNUP === "true",
   S3: {
     REGION: process.env.S3_REGION ?? "us-east-1",
     BUCKET: process.env.S3_BUCKET ?? "",
