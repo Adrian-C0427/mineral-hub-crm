@@ -17,6 +17,7 @@ export function DealAiAssistant({ dealId, buyers }: { dealId: string; buyers: Bu
   const [buyerId, setBuyerId] = useState<string>(options[0]?.id ?? "");
   const [instructions, setInstructions] = useState("");
   const [result, setResult] = useState<string | null>(null);
+  const [sandbox, setSandbox] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -25,12 +26,12 @@ export function DealAiAssistant({ dealId, buyers }: { dealId: string; buyers: Bu
     setBusy(true); setError(null); setResult(null); setCopied(false);
     try {
       if (mode === "summary") {
-        const r = await api.post<{ text: string }>(`/ai/deals/${dealId}/summary`, {});
-        setResult(r.text);
+        const r = await api.post<{ text: string; sandbox?: boolean }>(`/ai/deals/${dealId}/summary`, {});
+        setResult(r.text); setSandbox(!!r.sandbox);
       } else {
         if (!buyerId) { setError("Pick a buyer to draft an email to."); setBusy(false); return; }
-        const r = await api.post<{ text: string }>(`/ai/deals/${dealId}/draft-email`, { buyerId, instructions: instructions.trim() || undefined });
-        setResult(r.text);
+        const r = await api.post<{ text: string; sandbox?: boolean }>(`/ai/deals/${dealId}/draft-email`, { buyerId, instructions: instructions.trim() || undefined });
+        setResult(r.text); setSandbox(!!r.sandbox);
       }
     } catch (e) {
       setError(e instanceof ApiError ? e.message : "Request failed.");
@@ -81,11 +82,18 @@ export function DealAiAssistant({ dealId, buyers }: { dealId: string; buyers: Bu
       {result && (
         <div style={{ marginTop: 12 }}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-            <span className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em" }}>{mode === "summary" ? "Summary" : "Draft"}</span>
+            <span className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+              {mode === "summary" ? "Summary" : "Draft"}
+              {sandbox && <span className="badge resp-pending" style={{ marginLeft: 8 }}>Sandbox preview</span>}
+            </span>
             <button className="small" onClick={copy}>{copied ? "Copied ✓" : "Copy"}</button>
           </div>
           <div style={{ whiteSpace: "pre-wrap", background: "var(--panel-2)", border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", fontSize: 14, lineHeight: 1.5 }}>{result}</div>
-          <p className="muted" style={{ fontSize: 11, marginTop: 6 }}>AI-generated from this deal's data — review before sending. Uses your organization's connected Claude key.</p>
+          <p className="muted" style={{ fontSize: 11, marginTop: 6 }}>
+            {sandbox
+              ? "Sandbox preview — canned output generated from this deal's data, not a real Claude call. Set AI_SANDBOX=false and connect Claude for live AI."
+              : "AI-generated from this deal's data — review before sending. Uses your organization's connected Claude key."}
+          </p>
         </div>
       )}
     </div>

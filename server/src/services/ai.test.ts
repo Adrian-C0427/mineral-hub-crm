@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dealFacts, type DealContext } from "./ai.js";
+import { dealFacts, sandboxSummary, sandboxDraft, type DealContext } from "./ai.js";
 
 const base: DealContext = {
   name: "Reagan County Royalties", stage: "SENT_TO_BUYERS", recordType: "OPPORTUNITY",
@@ -38,5 +38,27 @@ describe("dealFacts", () => {
   it("labels owned assets distinctly from opportunities", () => {
     expect(dealFacts({ ...base, recordType: "OWNED_ASSET" })).toContain("Type: Owned mineral asset");
     expect(dealFacts(base)).toContain("Type: Acquisition opportunity");
+  });
+});
+
+describe("sandbox generators (no-key preview)", () => {
+  it("summary reads coherently from real fields, no invented data", () => {
+    const s = sandboxSummary(base);
+    expect(s).toContain("Reagan County Royalties");
+    expect(s).toContain("TX");
+    expect(s).toContain("$450,000");
+    expect(s).toContain("sent to buyers");
+    // sparse deal: no price → says pricing not set, never a fake number
+    const sparse = sandboxSummary({ ...base, askPrice: null, ourPrice: null });
+    expect(sparse).toContain("Pricing to buyers has not been set");
+    expect(sparse).not.toContain("$");
+  });
+
+  it("draft produces a subject + greeting tailored to the buyer", () => {
+    const d = sandboxDraft(base, { name: "Jane Doe", companyName: "Acme Minerals", focus: "Permian, Royalty" });
+    expect(d.startsWith("Subject:")).toBe(true);
+    expect(d).toContain("Hi Jane");
+    expect(d).toContain("Permian");
+    expect(d).toContain("$450,000");
   });
 });

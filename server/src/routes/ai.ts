@@ -12,7 +12,7 @@ import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal } from "../serializers.js";
 import { logActivity } from "../services/activityLog.js";
-import { summarizeDeal, draftOutreach, type DealContext } from "../services/ai.js";
+import { summarizeDeal, draftOutreach, aiSandbox, type DealContext } from "../services/ai.js";
 
 export const aiRouter = Router();
 aiRouter.use(requireAuth, requireOrg, requirePermission("viewDeals"));
@@ -56,7 +56,7 @@ aiRouter.post(
       eventType: "ai.deal_summary", summary: `AI summary generated for deal "${name}"`,
       organizationId: orgId(req), actorUserId: req.user?.id ?? null, dealId: req.params.id,
     });
-    res.json({ text: summary });
+    res.json({ text: summary, sandbox: aiSandbox() });
   }),
 );
 
@@ -81,6 +81,6 @@ aiRouter.post(
       eventType: "ai.draft_email", summary: `AI outreach drafted for "${buyer.companyName}" on deal "${name}"`,
       organizationId: orgId(req), actorUserId: req.user?.id ?? null, dealId: req.params.id, buyerId,
     });
-    res.json({ text: draft });
+    res.json({ text: draft, sandbox: aiSandbox() });
   }),
 );

@@ -15,8 +15,17 @@ import { decryptSecret } from "./secrets.js";
 import { money } from "../domain/format.js";
 
 const num = (n: number) => n.toLocaleString("en-US");
+const article = (w: string) => (/^[aeiou]/i.test(w) ? "an" : "a");
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-4-8";
+
+/**
+ * Sandbox mode (AI_SANDBOX=true) lets you exercise the feature end-to-end
+ * without a connected Claude key or any API spend. It returns realistic output
+ * templated from the deal's real data, and the routes flag responses as
+ * sandbox so the UI badges them as previews (not real AI output).
+ */
+export const aiSandbox = (): boolean => process.env.AI_SANDBOX === "true" || process.env.AI_SANDBOX === "1";
 
 /** Resolve + decrypt the org's connected Claude API key, or a clear 4xx. */
 async function orgClient(organizationId: string): Promise<Anthropic> {
@@ -127,7 +136,51 @@ const DRAFT_SYSTEM =
   "Use ONLY the facts provided — never invent figures. Do not fabricate a price if none is given; instead invite the buyer to discuss terms. " +
   "Return only the email body (a short subject line on the first line prefixed 'Subject:', then the body). No commentary.";
 
+/** Realistic templated summary from real deal data — used in sandbox mode. */
+export function sandboxSummary(d: DealContext): string {
+  const geo = [...new Set([...(d.states ?? []), d.state].filter(Boolean))].join(", ") || "an undisclosed area";
+  const county = d.counties.length ? ` (${d.counties.slice(0, 3).join(", ")}${d.counties.length > 3 ? "…" : ""})` : "";
+  const kind = d.recordType === "OWNED_ASSET" ? "owned mineral asset" : "acquisition opportunity";
+  const asset = d.assetTypes.length ? d.assetTypes.join("/").toLowerCase() : "mineral";
+  const size = d.acreageNma != null ? `${num(d.acreageNma)} net mineral acres${d.nra != null ? ` / ${num(d.nra)} NRA` : ""}` : (d.nra != null ? `${num(d.nra)} NRA` : "an undisclosed position");
+  const econ = d.askPrice != null
+    ? `Asking ${money(d.askPrice)}${d.ourPrice != null ? ` against a ${money(d.ourPrice)} cost basis` : ""}.`
+    : "Pricing to buyers has not been set yet.";
+  const stage = d.stage.replace(/_/g, " ").toLowerCase();
+  const next = d.selectedBuyer ? `A buyer (${d.selectedBuyer.name}) is selected; focus is on closing.`
+    : d.stage === "SENT_TO_BUYERS" || d.stage === "NEGOTIATING" ? "Awaiting buyer responses — chase outstanding outreach."
+    : "Next step: line up qualified buyers before the find-buyer-by date.";
+  return [
+    `${d.name} is ${article(kind)} ${kind} — ${article(asset)} ${asset} position in ${geo}${county}.`,
+    d.operator ? `Operated by ${d.operator}.` : "",
+    `The position is ${size}. ${econ}`,
+    `It's currently in the ${stage} stage. ${next}`,
+  ].filter(Boolean).join(" ");
+}
+
+/** Realistic templated outreach email from real data — used in sandbox mode. */
+export function sandboxDraft(d: DealContext, buyer: BuyerContext, instructions?: string): string {
+  const geo = [...new Set([...(d.states ?? []), d.state].filter(Boolean))].join(", ") || "a target area";
+  const asset = d.assetTypes.length ? d.assetTypes.join("/").toLowerCase() : "mineral";
+  const size = d.acreageNma != null ? `${num(d.acreageNma)} NMA` : (d.nra != null ? `${num(d.nra)} NRA` : "a scaled position");
+  const match = buyer.focus ? ` It lines up with your focus (${buyer.focus.split(",").slice(0, 3).map((s) => s.trim()).join(", ")}).` : "";
+  const price = d.askPrice != null ? ` We're asking ${money(d.askPrice)}.` : " Happy to talk terms.";
+  const extra = instructions ? ` ${instructions.trim()}` : "";
+  return [
+    `Subject: ${d.name} — ${asset} package in ${geo}`,
+    ``,
+    `Hi ${buyer.name.split(" ")[0] || buyer.name},`,
+    ``,
+    `We have a ${asset} package, ${d.name}, in ${geo}${d.counties.length ? ` (${d.counties.slice(0, 2).join(", ")})` : ""} — ${size}${d.operator ? `, operated by ${d.operator}` : ""}.${match}${price}${extra}`,
+    ``,
+    `Would it be worth a quick look? I can send the full package with maps and title.`,
+    ``,
+    `Best regards,`,
+  ].join("\n");
+}
+
 export async function summarizeDeal(organizationId: string, deal: DealContext): Promise<string> {
+  if (aiSandbox()) return sandboxSummary(deal);
   const client = await orgClient(organizationId);
   const user = `Summarize this deal in 4–6 sentences for an internal team. Cover what it is, where, the economics we know, the current stage, and the most important next step or gap.\n\nDEAL FACTS:\n${dealFacts(deal)}`;
   return complete(client, SUMMARY_SYSTEM, user, 700);
@@ -139,6 +192,7 @@ export async function draftOutreach(
   buyer: BuyerContext,
   instructions?: string,
 ): Promise<string> {
+  if (aiSandbox()) return sandboxDraft(deal, buyer, instructions);
   const client = await orgClient(organizationId);
   const user = [
     `Draft an outreach email to a prospective buyer about this deal.`,
