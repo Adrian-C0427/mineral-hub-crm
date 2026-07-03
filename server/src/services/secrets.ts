@@ -2,24 +2,29 @@
  * Encryption-at-rest for integration credentials (AES-256-GCM).
  *
  * Key sourcing: INTEGRATION_SECRET_KEY (32+ chars, set on the Railway service)
- * is preferred. When unset, a key is derived from JWT_SECRET via scrypt so
- * encrypted secrets work out of the box — but rotating JWT_SECRET then also
- * invalidates stored credentials, so production should set the dedicated var
- * (see docs/integrations-audit.md → Secrets management).
+ * is the dedicated key. In production it is REQUIRED (assertProductionSecrets()
+ * refuses to boot without it) and JWT_SECRET is never used — so rotating
+ * session signing can't orphan stored credentials. In development only, if the
+ * dedicated key is unset we fall back to a JWT_SECRET-derived key so local runs
+ * work out of the box (see docs/integrations-audit.md → Secrets management).
  *
  * Ciphertext format: "v1:<iv b64>:<authTag b64>:<ciphertext b64>". Secrets are
  * decrypted only server-side at call time; API responses carry a masked hint
  * (last 4 characters), never the plaintext.
  */
 import crypto from "node:crypto";
-import { env } from "../config.js";
+import { env, isProd } from "../config.js";
 
 let cachedKey: Buffer | null = null;
 
 function key(): Buffer {
   if (!cachedKey) {
-    const source = process.env.INTEGRATION_SECRET_KEY || env.JWT_SECRET;
-    // scrypt gives us a uniform 32-byte key from either source.
+    const dedicated = env.INTEGRATION_SECRET_KEY;
+    // Prod is guaranteed a dedicated key by assertProductionSecrets(); dev may
+    // derive from JWT_SECRET for convenience but never in production.
+    const source = dedicated || (isProd ? "" : env.JWT_SECRET);
+    if (!source) throw new Error("INTEGRATION_SECRET_KEY is required to encrypt integration credentials.");
+    // scrypt gives us a uniform 32-byte key from the source.
     cachedKey = crypto.scryptSync(source, "mineral-hub-integrations-v1", 32);
   }
   return cachedKey;

@@ -11,6 +11,7 @@
  *    to ActivityLog with the acting user.
  */
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import type { Integration } from "@prisma/client";
@@ -24,6 +25,17 @@ import { logActivity } from "../services/activityLog.js";
 
 export const integrationsRouter = Router();
 integrationsRouter.use(requireAuth, requireOrg, requirePermission("manageApiIntegrations"));
+
+// connect/test/sync trigger outbound requests to third parties — cap how fast an
+// admin (or a stolen admin session) can fire them. Read routes are unaffected.
+const actionLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 40,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many integration actions. Try again in a few minutes." },
+});
+integrationsRouter.use((req, res, next) => (req.method === "POST" ? actionLimiter(req, res, next) : next()));
 
 function publicConfig(row: Integration | null): Record<string, unknown> {
   const cfg = (row?.config ?? {}) as Record<string, unknown>;
