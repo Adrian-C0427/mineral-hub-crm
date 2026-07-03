@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Mail, Bot, Map as MapIcon, HardDrive, Calendar, Calculator, Megaphone, ShieldCheck,
-  type LucideIcon,
+  Users, Cloud, Hash, type LucideIcon,
 } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import { Spinner, Banner, Modal, ConfirmChanges, ConfirmDialog } from "../components/ui";
@@ -32,6 +32,56 @@ const CATEGORY_ICON: Record<string, LucideIcon> = {
 };
 
 const AUTH_LABEL: Record<Auth, string> = { oauth: "OAuth 2.0", apikey: "API key", webhook: "Webhook", env: "Built-in" };
+
+// Official brand marks via Simple Icons (SVG, served from its CDN). Rendered on
+// a light tile so each brand's own color reads cleanly on the dark UI. Providers
+// without a brand slug fall back to a category glyph or initials. If a slug 404s
+// (brand not in the set), the <img> onError also falls back — so wrong guesses
+// degrade gracefully rather than breaking the card.
+// Brands with an official mark in Simple Icons (served from its CDN, rendered in
+// the brand's own color on a light tile). The Microsoft family + Slack are NOT
+// here — Simple Icons removed them for trademark reasons — so they use a
+// brand-matched glyph below instead (a clean, recognizable alternative).
+const LOGO_SLUG: Record<string, string> = {
+  gmail: "gmail", claude: "claude", openai: "openai", gemini: "googlegemini", perplexity: "perplexity",
+  mapbox: "mapbox", googlemaps: "googlemaps", arcgis: "arcgis",
+  googledrive: "googledrive", dropbox: "dropbox", box: "box",
+  calendly: "calendly", googlecalendar: "googlecalendar",
+  quickbooks: "quickbooks", xero: "xero", hubspot: "hubspot", mailchimp: "mailchimp",
+  salesforce: "salesforce", googlesignin: "google", okta: "okta",
+};
+// Brand-matched glyphs for providers without a usable Simple Icons mark: the
+// glyph echoes the provider's identity (Slack's mark IS a hash; Outlook = mail;
+// Teams = people; OneDrive = cloud) and is tinted with the brand color.
+const LOGO_ICON: Record<string, LucideIcon> = {
+  smtp: Mail, storage: HardDrive,
+  outlook: Mail, outlookcalendar: Calendar, onedrive: Cloud, entra: ShieldCheck,
+  teams: Users, slack: Hash,
+};
+const BRAND_COLOR: Record<string, string> = {
+  outlook: "#0078D4", outlookcalendar: "#0078D4", onedrive: "#0078D4", entra: "#0078D4",
+  teams: "#6264A7", slack: "#611F69", storage: "#569A31",
+};
+
+function IntegrationLogo({ p }: { p: Provider }) {
+  const [failed, setFailed] = useState(false);
+  const slug = LOGO_SLUG[p.key];
+  const initials = p.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase();
+  if (slug && !failed) {
+    return (
+      <span className="integration-logo brand" title={p.name}>
+        <img src={`https://cdn.simpleicons.org/${slug}`} alt="" width={24} height={24} loading="lazy" onError={() => setFailed(true)} />
+      </span>
+    );
+  }
+  const Icon = LOGO_ICON[p.key];
+  const color = BRAND_COLOR[p.key];
+  return (
+    <span className="integration-logo" title={p.name} style={color ? { color } : undefined}>
+      {Icon ? <Icon size={20} /> : initials}
+    </span>
+  );
+}
 
 export function Integrations() {
   const [providers, setProviders] = useState<Provider[] | null>(null);
@@ -173,7 +223,7 @@ function IntegrationCard({ p, busy, result, onConnect, onOAuth, onDisconnect, on
   return (
     <div className="integration-card">
       <div className="integration-head">
-        <span className="integration-logo">{p.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase()}</span>
+        <IntegrationLogo p={p} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="integration-name">{p.name}</div>
           <span className="chip-mini">{AUTH_LABEL[p.auth]}</span>
