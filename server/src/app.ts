@@ -1,6 +1,9 @@
 import express from "express";
 import cookieParser from "cookie-parser";
 import cors from "cors";
+import helmet from "helmet";
+import * as Sentry from "@sentry/node";
+import { sentryEnabled } from "./instrument.js";
 import { env } from "./config.js";
 import { attachUser } from "./middleware/auth.js";
 import { errorHandler, notFound } from "./middleware/errors.js";
@@ -23,6 +26,10 @@ import { wellsRouter } from "./routes/wells.js";
 export function createApp() {
   const app = express();
   app.set("trust proxy", 1); // Railway terminates TLS at a proxy
+
+  // Security headers. crossOriginResourcePolicy is relaxed because the SPA is
+  // served from a different Railway subdomain than the API.
+  app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 
   // CORS locked to the frontend origin(s); credentials required for the cookie.
   app.use(
@@ -61,6 +68,8 @@ export function createApp() {
   app.use("/api/wells", wellsRouter);
 
   app.use(notFound);
+  // Sentry captures errors before our own handler formats the response.
+  if (sentryEnabled) Sentry.setupExpressErrorHandler(app);
   app.use(errorHandler);
   return app;
 }

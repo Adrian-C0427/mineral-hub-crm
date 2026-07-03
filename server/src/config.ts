@@ -37,11 +37,18 @@ function required(name: string, fallback?: string): string {
   return v;
 }
 
+/** Sentinel default for JWT_SECRET — production must override it. */
+export const INSECURE_JWT_DEFAULT = "dev-insecure-change-me";
+
 export const env = {
   NODE_ENV: process.env.NODE_ENV ?? "development",
   PORT: parseInt(process.env.PORT ?? "4000", 10),
   DATABASE_URL: required("DATABASE_URL", "postgresql://localhost:5432/mineralhub"),
-  JWT_SECRET: required("JWT_SECRET", "dev-insecure-change-me"),
+  JWT_SECRET: required("JWT_SECRET", INSECURE_JWT_DEFAULT),
+  // Dedicated key for encrypting integration credentials at rest (AES-256-GCM).
+  // Kept separate from JWT_SECRET so rotating session signing never orphans
+  // stored credentials. Required in production; dev derives from JWT_SECRET.
+  INTEGRATION_SECRET_KEY: process.env.INTEGRATION_SECRET_KEY ?? "",
   // Comma-separated list of allowed browser origins (the frontend service URL).
   CORS_ORIGINS: (process.env.CORS_ORIGINS ?? "http://localhost:5173")
     .split(",")
@@ -88,9 +95,33 @@ export const env = {
     FROM: process.env.SMTP_FROM ?? process.env.SMTP_USER ?? "",
     SECURE: process.env.SMTP_SECURE === "true", // true for port 465
   },
+  // Error monitoring. Inert until a DSN is set; enabled per-service.
+  SENTRY: {
+    DSN: process.env.SENTRY_DSN ?? "",
+    TRACES_SAMPLE_RATE: parseFloat(process.env.SENTRY_TRACES_SAMPLE_RATE ?? "0.1"),
+  },
 };
 
 export const isProd = env.NODE_ENV === "production";
 
 /** Email sending is available only when SMTP is configured. */
 export const emailConfigured = (): boolean => Boolean(env.SMTP.HOST && env.SMTP.USER && env.SMTP.PASS);
+
+/**
+ * Fail-closed check for secrets that MUST be real in production. Called at
+ * boot (index.ts) so a misconfigured deploy crashes loudly instead of silently
+ * signing sessions and encrypting credentials with a repo-public key.
+ */
+export function assertProductionSecrets(): void {
+  if (!isProd) return;
+  const problems: string[] = [];
+  if (!env.JWT_SECRET || env.JWT_SECRET === INSECURE_JWT_DEFAULT || env.JWT_SECRET.length < 32) {
+    problems.push("JWT_SECRET must be set to a random string of at least 32 characters.");
+  }
+  if (!env.INTEGRATION_SECRET_KEY || env.INTEGRATION_SECRET_KEY.length < 32) {
+    problems.push("INTEGRATION_SECRET_KEY must be set to a random string of at least 32 characters (separate from JWT_SECRET).");
+  }
+  if (problems.length) {
+    throw new Error(`Refusing to start in production with insecure configuration:\n  - ${problems.join("\n  - ")}`);
+  }
+}

@@ -1,8 +1,13 @@
+// Sentry must initialize before Express/route modules load — keep this first.
+import "./instrument.js";
 import { createApp } from "./app.js";
-import { env } from "./config.js";
+import { env, assertProductionSecrets } from "./config.js";
 import { ensureUsersHaveOrganizations } from "./services/org.js";
 import { backfillBuyerStatus } from "./services/backfill.js";
 import { startIntegrationScheduler } from "./services/integrationSync.js";
+
+// Fail closed: in production, refuse to boot with default/missing secret keys.
+assertProductionSecrets();
 
 const app = createApp();
 
