@@ -227,9 +227,9 @@ export function MapView() {
       map.addLayer({ id: "abstracts-line", type: "line", source: "abstracts", "source-layer": "abstracts", minzoom: 9, paint: {
         "line-color": ["case", sel, "#b45309", "#000000"] as unknown as maplibregl.ExpressionSpecification,
         "line-width": ["interpolate", ["linear"], ["zoom"],
-          9, ["case", sel, 3, 0.7],
-          12, ["case", sel, 3, 1],
-          14, ["case", sel, 3, 1.3]] as unknown as maplibregl.ExpressionSpecification,
+          9, ["case", sel, 3, 0.35],
+          12, ["case", sel, 3, 0.5],
+          14, ["case", sel, 3, 0.65]] as unknown as maplibregl.ExpressionSpecification,
         "line-opacity": ["case", sel, 1, 0.6] as unknown as maplibregl.ExpressionSpecification } });
       // County boundaries — drawn above, slightly heavier and more opaque than
       // the abstract mesh so the administrative level stays distinct.
