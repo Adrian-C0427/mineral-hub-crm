@@ -256,7 +256,7 @@ function RolesTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
   const [data, setData] = useState<RolesResponse | null>(null);
   const [draft, setDraft] = useState<Record<string, Set<string>>>({});
   const [saving, setSaving] = useState(false);
-  const [confirmRole, setConfirmRole] = useState<OrgRole | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   function load() {
     api.get<RolesResponse>("/org/roles").then((r) => {
@@ -282,14 +282,37 @@ function RolesTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
     });
   }
 
-  async function saveRole(role: OrgRole) {
-    setSaving(true);
-    try { await api.patch(`/org/roles/${role}`, { permissions: [...(draft[role] ?? [])] }); onFlash(`${ROLE_LABEL[role]} permissions saved.`); load(); }
-    catch (e) { onError(e); } finally { setSaving(false); setConfirmRole(null); }
+  // Roles whose draft differs from what's currently saved.
+  function changedRoles(): OrgRole[] {
+    if (!data) return [];
+    return ASSIGNABLE.filter((r) => {
+      const base = new Set(data.roles.find((x) => x.role === r)?.permissions ?? []);
+      const cur = draft[r] ?? new Set<string>();
+      if (base.size !== cur.size) return true;
+      for (const k of cur) if (!base.has(k)) return true;
+      return false;
+    });
   }
-  async function resetRole(role: OrgRole) {
-    if (!confirm(`Reset ${ROLE_LABEL[role]} to default permissions?`)) return;
-    try { await api.del(`/org/roles/${role}`); onFlash(`${ROLE_LABEL[role]} reset to defaults.`); load(); } catch (e) { onError(e); }
+  const dirty = changedRoles().length > 0;
+
+  // One Save commits every modified role at once.
+  async function saveAll() {
+    setSaving(true);
+    try {
+      for (const role of changedRoles()) {
+        await api.patch(`/org/roles/${role}`, { permissions: [...(draft[role] ?? [])] });
+      }
+      onFlash("Permissions saved.");
+      load();
+    } catch (e) { onError(e); }
+    finally { setSaving(false); setConfirming(false); }
+  }
+  // Reset discards unsaved edits and restores the last-saved configuration.
+  function resetAll() {
+    if (!data) return;
+    const d: Record<string, Set<string>> = {};
+    for (const role of data.roles) d[role.role] = new Set(role.permissions);
+    setDraft(d);
   }
 
   if (!data) return <p className="muted">Loading roles…</p>;
@@ -329,15 +352,12 @@ function RolesTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
           </tbody>
         </table>
       </div>
-      <div className="row" style={{ flexWrap: "wrap", gap: 8, marginTop: 12 }}>
-        {ASSIGNABLE.map((r) => (
-          <span key={r} className="row" style={{ gap: 4 }}>
-            <button className="small primary" disabled={saving} onClick={() => setConfirmRole(r)}>Save {ROLE_LABEL[r]}</button>
-            <button className="small" disabled={saving} onClick={() => resetRole(r)}>Reset</button>
-          </span>
-        ))}
+      <div className="row" style={{ gap: 8, marginTop: 12 }}>
+        <button className="primary" disabled={saving || !dirty} onClick={() => setConfirming(true)}>Save</button>
+        <button disabled={saving || !dirty} onClick={resetAll}>Reset</button>
+        {dirty && <span className="muted" style={{ fontSize: 13 }}>Unsaved changes</span>}
       </div>
-      {confirmRole && <ConfirmChanges busy={saving} onCancel={() => setConfirmRole(null)} onConfirm={() => saveRole(confirmRole)} />}
+      {confirming && <ConfirmChanges busy={saving} onCancel={() => setConfirming(false)} onConfirm={saveAll} />}
     </>
   );
 }
