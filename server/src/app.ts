@@ -19,7 +19,7 @@ import { orgRouter } from "./routes/org.js";
 import { mapRouter } from "./routes/map.js";
 import { expensesRouter } from "./routes/expenses.js";
 import { emailTemplatesRouter } from "./routes/emailTemplates.js";
-import { integrationsRouter } from "./routes/integrations.js";
+import { integrationsRouter, integrationsOAuthCallbackRouter } from "./routes/integrations.js";
 import { researchRouter } from "./routes/research.js";
 import { wellsRouter } from "./routes/wells.js";
 
@@ -63,6 +63,8 @@ export function createApp() {
   app.use("/api/map", mapRouter);
   app.use("/api/expenses", expensesRouter);
   app.use("/api/email-templates", emailTemplatesRouter);
+  // Public OAuth callback (no session) must be matched before the authed router.
+  app.use("/api/integrations", integrationsOAuthCallbackRouter);
   app.use("/api/integrations", integrationsRouter);
   app.use("/api/research", researchRouter);
   app.use("/api/wells", wellsRouter);

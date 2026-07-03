@@ -16,13 +16,14 @@
  *                against the provider's API right now.
  *  - "env"     — built-in service configured via environment variables on the
  *                API host (Railway); status reflects the real runtime config.
- *  - "planned" — officially supported and on the roadmap, but the OAuth app /
- *                client credentials haven't been provisioned yet. Connect is
- *                intentionally disabled instead of pretending.
+ *  - "oauth"   — connect runs the integration OAuth flow (services/
+ *                integrationOAuth.ts); connectable once the provider's client
+ *                credentials are set, otherwise shown as "Setup required".
+ *  - "planned" — officially supported but not yet wired; connect is disabled.
  */
 
 export type IntegrationAuth = "apikey" | "webhook" | "oauth" | "env";
-export type ImplementationStatus = "live" | "env" | "planned";
+export type ImplementationStatus = "live" | "env" | "oauth" | "planned";
 
 export interface ProviderDef {
   key: string;
@@ -48,12 +49,12 @@ export const INTEGRATION_CATALOG: ProviderDef[] = [
     description: "Outbound deal emails through your mail server. Configured with SMTP_* environment variables on the API service; status reflects the live configuration.",
   },
   {
-    key: "outlook", name: "Microsoft Outlook / 365", category: "Email & Communication", auth: "oauth", implementation: "planned",
+    key: "outlook", name: "Microsoft Outlook / 365", category: "Email & Communication", auth: "oauth", implementation: "oauth",
     description: "Send deal emails and sync replies via Microsoft Graph. Requires an Entra ID app registration (Mail.Send / Mail.Read) — the same registration used for Microsoft sign-in.",
     setupUrl: "https://portal.azure.com",
   },
   {
-    key: "gmail", name: "Gmail / Google Workspace", category: "Email & Communication", auth: "oauth", implementation: "planned",
+    key: "gmail", name: "Gmail / Google Workspace", category: "Email & Communication", auth: "oauth", implementation: "oauth",
     description: "Send and receive deal emails through the Gmail API. Requires a Google Cloud OAuth client with gmail.send scope — the same client used for Google sign-in.",
     setupUrl: "https://console.cloud.google.com/apis/credentials",
   },
@@ -115,22 +116,22 @@ export const INTEGRATION_CATALOG: ProviderDef[] = [
     description: "Deal and buyer file attachments in S3-compatible object storage (AWS S3, Cloudflare R2, Backblaze B2). Configured with S3_* environment variables on the API service; uploads/downloads use short-lived signed URLs.",
   },
   {
-    key: "googledrive", name: "Google Drive", category: "Storage & Documents", auth: "oauth", implementation: "planned",
+    key: "googledrive", name: "Google Drive", category: "Storage & Documents", auth: "oauth", implementation: "oauth",
     description: "Attach deal documents from Google Drive. Requires the Google OAuth client plus drive.file scope.",
     setupUrl: "https://console.cloud.google.com/apis/credentials",
   },
   {
-    key: "onedrive", name: "Microsoft OneDrive", category: "Storage & Documents", auth: "oauth", implementation: "planned",
+    key: "onedrive", name: "Microsoft OneDrive", category: "Storage & Documents", auth: "oauth", implementation: "oauth",
     description: "Attach documents from OneDrive via Microsoft Graph (Files.Read). Uses the same Entra ID app registration as Microsoft sign-in.",
     setupUrl: "https://portal.azure.com",
   },
   {
-    key: "dropbox", name: "Dropbox", category: "Storage & Documents", auth: "oauth", implementation: "planned",
+    key: "dropbox", name: "Dropbox", category: "Storage & Documents", auth: "oauth", implementation: "oauth",
     description: "Attach documents from Dropbox. Requires a Dropbox App Console OAuth app.",
     setupUrl: "https://www.dropbox.com/developers/apps",
   },
   {
-    key: "box", name: "Box", category: "Storage & Documents", auth: "oauth", implementation: "planned",
+    key: "box", name: "Box", category: "Storage & Documents", auth: "oauth", implementation: "oauth",
     description: "Attach documents from Box. Requires a Box developer OAuth app.",
     setupUrl: "https://app.box.com/developers/console",
   },
@@ -142,24 +143,24 @@ export const INTEGRATION_CATALOG: ProviderDef[] = [
     secretLabel: "Personal access token", setupUrl: "https://calendly.com/integrations/api_webhooks", syncable: true,
   },
   {
-    key: "googlecalendar", name: "Google Calendar", category: "Productivity", auth: "oauth", implementation: "planned",
+    key: "googlecalendar", name: "Google Calendar", category: "Productivity", auth: "oauth", implementation: "oauth",
     description: "Sync closing dates and follow-ups to Google Calendar (calendar.events scope on the Google OAuth client).",
     setupUrl: "https://console.cloud.google.com/apis/credentials",
   },
   {
-    key: "outlookcalendar", name: "Outlook Calendar", category: "Productivity", auth: "oauth", implementation: "planned",
+    key: "outlookcalendar", name: "Outlook Calendar", category: "Productivity", auth: "oauth", implementation: "oauth",
     description: "Sync deadlines and follow-ups via Microsoft Graph (Calendars.ReadWrite).",
     setupUrl: "https://portal.azure.com",
   },
 
   // --- Accounting & Finance ---
   {
-    key: "quickbooks", name: "QuickBooks Online", category: "Accounting & Finance", auth: "oauth", implementation: "planned",
+    key: "quickbooks", name: "QuickBooks Online", category: "Accounting & Finance", auth: "oauth", implementation: "oauth",
     description: "Sync expenses and revenue with QuickBooks Online. Requires an Intuit developer app (OAuth 2.0 + refresh tokens).",
     setupUrl: "https://developer.intuit.com",
   },
   {
-    key: "xero", name: "Xero", category: "Accounting & Finance", auth: "oauth", implementation: "planned",
+    key: "xero", name: "Xero", category: "Accounting & Finance", auth: "oauth", implementation: "oauth",
     description: "Sync expenses and revenue with Xero. Requires a Xero developer app (OAuth 2.0).",
     setupUrl: "https://developer.xero.com/app/manage",
   },
@@ -176,7 +177,7 @@ export const INTEGRATION_CATALOG: ProviderDef[] = [
     secretLabel: "Mailchimp API key", secretHint: "…-us14 (datacenter suffix required)", setupUrl: "https://admin.mailchimp.com/account/api/", syncable: true,
   },
   {
-    key: "salesforce", name: "Salesforce", category: "CRM & Marketing", auth: "oauth", implementation: "planned",
+    key: "salesforce", name: "Salesforce", category: "CRM & Marketing", auth: "oauth", implementation: "oauth",
     description: "Sync buyers and deals with Salesforce. Requires a Salesforce connected app (OAuth 2.0).",
     setupUrl: "https://developer.salesforce.com",
   },
@@ -191,7 +192,7 @@ export const INTEGRATION_CATALOG: ProviderDef[] = [
     description: "Single sign-on with Microsoft Entra ID (OpenID Connect). Configured with MICROSOFT_CLIENT_ID / MICROSOFT_CLIENT_SECRET on the API service; status reflects the live configuration.",
   },
   {
-    key: "okta", name: "Okta", category: "Authentication", auth: "oauth", implementation: "planned",
+    key: "okta", name: "Okta", category: "Authentication", auth: "oauth", implementation: "oauth",
     description: "Single sign-on with Okta (OpenID Connect). Fits the existing OIDC provider registry — enabling it is an Okta app registration plus one provider entry.",
     setupUrl: "https://developer.okta.com",
   },

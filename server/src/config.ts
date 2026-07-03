@@ -76,6 +76,8 @@ export const env = {
   API_URL: (process.env.API_URL ?? "http://localhost:4000").trim().replace(/\/$/, ""),
   PASSWORD_RESET_TTL_MINUTES: parseInt(process.env.PASSWORD_RESET_TTL_MINUTES ?? "60", 10),
   // OAuth / SSO providers. Each is inert until its client id + secret are set.
+  // Google + Microsoft creds are shared between sign-in and their integration
+  // features (Gmail/Calendar/Drive, Outlook/Calendar/OneDrive).
   OAUTH: {
     GOOGLE: { CLIENT_ID: process.env.GOOGLE_CLIENT_ID ?? "", CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET ?? "" },
     MICROSOFT: {
@@ -84,6 +86,13 @@ export const env = {
       // Directory (tenant) id, or "common" for multi-tenant + personal accounts.
       TENANT: process.env.MICROSOFT_TENANT ?? "common",
     },
+    // Integration-only OAuth apps (each inert until its client id + secret are set).
+    DROPBOX: { CLIENT_ID: process.env.DROPBOX_CLIENT_ID ?? "", CLIENT_SECRET: process.env.DROPBOX_CLIENT_SECRET ?? "" },
+    BOX: { CLIENT_ID: process.env.BOX_CLIENT_ID ?? "", CLIENT_SECRET: process.env.BOX_CLIENT_SECRET ?? "" },
+    QUICKBOOKS: { CLIENT_ID: process.env.QUICKBOOKS_CLIENT_ID ?? "", CLIENT_SECRET: process.env.QUICKBOOKS_CLIENT_SECRET ?? "" },
+    XERO: { CLIENT_ID: process.env.XERO_CLIENT_ID ?? "", CLIENT_SECRET: process.env.XERO_CLIENT_SECRET ?? "" },
+    SALESFORCE: { CLIENT_ID: process.env.SALESFORCE_CLIENT_ID ?? "", CLIENT_SECRET: process.env.SALESFORCE_CLIENT_SECRET ?? "" },
+    OKTA: { CLIENT_ID: process.env.OKTA_CLIENT_ID ?? "", CLIENT_SECRET: process.env.OKTA_CLIENT_SECRET ?? "", DOMAIN: process.env.OKTA_DOMAIN ?? "" },
   },
   // Outbound email (SMTP). Feature is inert until HOST/USER/PASS are set.
   SMTP: {
