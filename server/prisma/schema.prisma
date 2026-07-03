@@ -243,6 +243,8 @@ model User {
   phone        String?
   email        String     @unique
   passwordHash String
+  // Set when an owner resets this user's password; forces a change at next login.
+  mustChangePassword Boolean @default(false)
   role         Role       @default(ASSOCIATE)
   status       UserStatus @default(ACTIVE)
 
@@ -276,6 +278,7 @@ model User {
   activityLogs       ActivityLog[]
   expenses           Expense[]
   sellerAssignments  DealSeller[]        @relation("SellerAssignments")
+  assignedDeals      Deal[]              @relation("DealAssignees")
 
   @@index([organizationId])
 }
@@ -327,7 +330,10 @@ model Deal {
 
   // Deal characteristics support multiple selections (state stays single).
   counties       String[]
+  // Primary state (kept for buyer matching / map back-compat) = states[0].
   state          String?
+  // Multi-state selection (primary geographic filter). state stays synced to states[0].
+  states         String[]
   acreageNma     Float?
   nra            Float?
   // Survey/abstracts this deal sits in (e.g. TX-289653). Links to map boundaries.
@@ -396,6 +402,9 @@ model Deal {
   activityLogs   ActivityLog[]
   sellers        DealSeller[]
   revenueEntries AssetRevenueEntry[]
+  // Team members assigned to this deal/asset (multi-assignee). relationshipOwner
+  // is retained as the originating/primary owner for existing metrics & reports.
+  assignees      User[]              @relation("DealAssignees")
 
   @@index([stage])
   @@index([selectedBuyerId])

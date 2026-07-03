@@ -12,7 +12,6 @@ interface Props {
   initial?: {
     status?: BuyerStatus;
     assignedTeamMemberId?: string | null;
-    responseReceived?: boolean;
     notes?: string | null;
     dateSent?: string | null;
     nextFollowUpDate?: string | null;
@@ -34,7 +33,6 @@ const STATUSES: { v: BuyerStatus; label: string }[] = [
 export function LogContactModal({ dealId, buyerId, buyerName, users, initial, onClose, onLogged }: Props) {
   const [status, setStatus] = useState<BuyerStatus>(initial?.status ?? "CONTACTED");
   const [assignee, setAssignee] = useState(initial?.assignedTeamMemberId ?? "");
-  const [responseReceived, setResponseReceived] = useState(initial?.responseReceived ?? false);
   // Editing an existing contact must preserve its dates — only a brand-new
   // contact defaults dateSent to today. Otherwise every status tweak would
   // rewrite the original send date and wipe the pending follow-up.
@@ -43,7 +41,6 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, initial, on
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [amount, setAmount] = useState("");
   const [conditions, setConditions] = useState("");
-  const [expiration, setExpiration] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -58,16 +55,14 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, initial, on
           dealId, buyerId,
           amount: Number(amount),
           conditions: conditions || null,
-          expirationDate: expiration || null,
         });
       }
-      // Always persist the rest of the form (assignee, response received,
-      // dates, notes) — previously the offer branch silently discarded them.
-      // An offer implies a response was received.
+      // Persist the rest of the form (assignee, dates, notes). A recorded offer
+      // implies a response was received; otherwise we leave responseReceived as-is.
       await api.post(`/deals/${dealId}/activity`, {
         buyerId,
         status,
-        responseReceived: status === "OFFER_RECEIVED" && amount.trim() ? true : responseReceived,
+        ...(status === "OFFER_RECEIVED" && amount.trim() ? { responseReceived: true } : {}),
         assignedTeamMemberId: assignee || null,
         dateSent: dateSent || null,
         nextFollowUpDate: nextFollowUp || null,
@@ -98,27 +93,18 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, initial, on
           {STATUSES.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
         </select>
       </div>
-      <div className="grid-2">
-        <div className="field">
-          <label>Assigned team member</label>
-          <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
-            <option value="">Unassigned</option>
-            {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
-        </div>
-        <div className="field">
-          <label>Response</label>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, textTransform: "none", fontSize: 14 }}>
-            <input type="checkbox" checked={responseReceived} onChange={(e) => setResponseReceived(e.target.checked)} /> Response received
-          </label>
-        </div>
+      <div className="field">
+        <label>Assigned team member</label>
+        <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
+          <option value="">Unassigned</option>
+          {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+        </select>
       </div>
       {status === "OFFER_RECEIVED" && (
         <>
           <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Enter an amount to record a formal offer, or leave blank to just set the status.</p>
           <div className="field"><label>Offer amount</label><input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
           <div className="field"><label>Conditions</label><textarea rows={2} value={conditions} onChange={(e) => setConditions(e.target.value)} /></div>
-          <div className="field"><label>Expiration date</label><input type="date" value={expiration} onChange={(e) => setExpiration(e.target.value)} /></div>
         </>
       )}
       <div className="grid-2">

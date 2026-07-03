@@ -4,9 +4,11 @@ import { api } from "../api/client";
 import { Banner, PriorityBadge, StageBadge, Spinner } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { NewDealModal } from "../components/NewDealModal";
+import { useRowSelection, BulkActionsBar } from "../components/bulk";
 import { money, num, fmtDate } from "../lib/format";
+import { downloadCsv } from "../lib/csv";
 import { useAuth } from "../auth/AuthContext";
-import type { DealSummary } from "../types";
+import type { DealSummary, UserLite } from "../types";
 
 type Filter = "ALL" | "HIGH" | "NO_BUYER";
 type Scope = "all" | "active" | "closed" | "archived";
@@ -26,10 +28,12 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
   const [deals, setDeals] = useState<DealSummary[] | null>(null);
   const [filter, setFilter] = useState<Filter>("ALL");
   const [showNew, setShowNew] = useState(false);
+  const [users, setUsers] = useState<UserLite[]>([]);
+  const sel = useRowSelection();
   const nav = useNavigate();
 
   function load() { api.get<DealSummary[]>("/deals").then(setDeals); }
-  useEffect(load, []);
+  useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
 
   const scoped = useMemo(() => (deals ?? []).filter((d) => inScope(d, scope)), [deals, scope]);
   const overdue = useMemo(() => scoped.filter((d) => d.isOverdue), [scoped]);
@@ -87,6 +91,24 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
         rowClassName={(d) => (d.isOverdue ? "row-overdue" : undefined)}
         defaultSort={{ key: "priority", dir: "asc" }}
         empty="No deals match this filter."
+        selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
+      />
+
+      <BulkActionsBar
+        selectedIds={[...sel.selected]}
+        onClear={sel.clear}
+        onDone={load}
+        users={users}
+        itemLabel="deal"
+        deleteUrl={can("deleteDeals") ? "/deals/bulk-delete" : undefined}
+        assign={can("editDeals") ? { url: "/deals/bulk-assign", key: "assigneeIds" } : undefined}
+        archiveUrl={can("editDeals") ? "/deals/bulk-archive" : undefined}
+        onExport={() => {
+          const rows = filtered.filter((d) => sel.selected.has(d.id));
+          downloadCsv(`deals-${new Date().toISOString().slice(0, 10)}.csv`,
+            ["Deal", "Priority", "Stage", "NMA", "Profit Est.", "Under Contract", "Find Buyer By", "Current Buyer", "Owner"],
+            rows.map((d) => [d.name, d.priority, d.stage, d.acreageNma ?? "", d.profitEst ?? "", d.dateUnderContract ?? "", d.findBuyerByDate ?? "", d.selectedBuyer?.name ?? "", d.relationshipOwner?.name ?? ""]));
+        }}
       />
 
       {showNew && (

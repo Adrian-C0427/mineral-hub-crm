@@ -122,6 +122,7 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
   // Role/status changes commit only after an explicit confirmation.
   const [pendingRole, setPendingRole] = useState<{ m: Member; orgRole: OrgRole } | null>(null);
   const [pendingStatus, setPendingStatus] = useState<Member | null>(null);
+  const [resetting, setResetting] = useState<Member | null>(null);
 
   function load() {
     if (can("manageMembers")) api.get<Member[]>("/org/members").then(setMembers).catch(() => {});
@@ -181,7 +182,8 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
                       <td className="right">
                         {!isSelf && m.orgRole !== "OWNER" && (
                           <>
-                            <button className="small" onClick={() => setPendingStatus(m)}>{m.status === "ACTIVE" ? "Deactivate" : "Activate"}</button>
+                            {isOrgOwner && <button className="small" onClick={() => setResetting(m)}>Reset password</button>}
+                            <button className="small" style={{ marginLeft: 6 }} onClick={() => setPendingStatus(m)}>{m.status === "ACTIVE" ? "Deactivate" : "Activate"}</button>
                             {can("inviteRemoveUsers") && <button className="small danger" style={{ marginLeft: 6 }} onClick={() => removeMember(m)}>Remove</button>}
                           </>
                         )}
@@ -248,7 +250,66 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
           onConfirm={() => toggleStatus(pendingStatus)}
         />
       )}
+      {resetting && (
+        <ResetPasswordModal member={resetting} onClose={() => setResetting(null)} onDone={(msg) => { setResetting(null); onFlash(msg); }} onError={onError} />
+      )}
     </>
+  );
+}
+
+function ResetPasswordModal({ member, onClose, onDone, onError }: { member: Member; onClose: () => void; onDone: (msg: string) => void; onError: (e: unknown) => void }) {
+  const [mode, setMode] = useState<"temp" | "manual">("temp");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [temp, setTemp] = useState<string | null>(null);
+
+  async function run() {
+    setError(null);
+    if (mode === "manual") {
+      if (password.length < 8) { setError("Password must be at least 8 characters."); return; }
+      if (password !== confirm) { setError("Passwords don't match."); return; }
+    }
+    setBusy(true);
+    try {
+      const r = await api.post<{ temporaryPassword?: string }>(`/users/${member.id}/reset-password`, mode === "temp" ? { mode } : { mode, password });
+      if (r.temporaryPassword) setTemp(r.temporaryPassword);
+      else onDone(`${member.name}'s password was reset. They must change it at next login.`);
+    } catch (e) { onError(e); setError(e instanceof ApiError ? e.message : "Reset failed"); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <ConfirmDialog
+      title={`Reset password — ${member.name}`}
+      message={temp ? (
+        <div>
+          <p style={{ marginTop: 0 }}>Temporary password created. Share it securely with <strong>{member.name}</strong>; they'll be required to change it at next login.</p>
+          <div className="twofa-secret"><code>{temp}</code><button className="small" onClick={() => navigator.clipboard?.writeText(temp).catch(() => {})}>Copy</button></div>
+        </div>
+      ) : (
+        <div>
+          <div className="row" style={{ gap: 14, marginBottom: 10 }}>
+            <label className="row" style={{ gap: 6, textTransform: "none" }}><input type="radio" checked={mode === "temp"} onChange={() => setMode("temp")} /> Generate temporary password</label>
+            <label className="row" style={{ gap: 6, textTransform: "none" }}><input type="radio" checked={mode === "manual"} onChange={() => setMode("manual")} /> Set password manually</label>
+          </div>
+          {mode === "manual" && (
+            <div className="grid-2">
+              <div className="field"><label>New password</label><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Min 8 characters" /></div>
+              <div className="field"><label>Confirm</label><input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} /></div>
+            </div>
+          )}
+          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>{member.name} will be required to set a new password at next login.</p>
+          {error && <div className="error-text">{error}</div>}
+        </div>
+      )}
+      confirmLabel={temp ? "Done" : "Reset password"}
+      danger={!temp}
+      busy={busy}
+      onCancel={temp ? () => onDone(`${member.name}'s password was reset.`) : onClose}
+      onConfirm={temp ? () => onDone(`${member.name}'s password was reset.`) : run}
+    />
   );
 }
 
@@ -256,7 +317,7 @@ function RolesTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
   const [data, setData] = useState<RolesResponse | null>(null);
   const [draft, setDraft] = useState<Record<string, Set<string>>>({});
   const [saving, setSaving] = useState(false);
-  const [confirmRole, setConfirmRole] = useState<OrgRole | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   function load() {
     api.get<RolesResponse>("/org/roles").then((r) => {
@@ -282,14 +343,37 @@ function RolesTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
     });
   }
 
-  async function saveRole(role: OrgRole) {
-    setSaving(true);
-    try { await api.patch(`/org/roles/${role}`, { permissions: [...(draft[role] ?? [])] }); onFlash(`${ROLE_LABEL[role]} permissions saved.`); load(); }
-    catch (e) { onError(e); } finally { setSaving(false); setConfirmRole(null); }
+  // Roles whose draft differs from what's currently saved.
+  function changedRoles(): OrgRole[] {
+    if (!data) return [];
+    return ASSIGNABLE.filter((r) => {
+      const base = new Set(data.roles.find((x) => x.role === r)?.permissions ?? []);
+      const cur = draft[r] ?? new Set<string>();
+      if (base.size !== cur.size) return true;
+      for (const k of cur) if (!base.has(k)) return true;
+      return false;
+    });
   }
-  async function resetRole(role: OrgRole) {
-    if (!confirm(`Reset ${ROLE_LABEL[role]} to default permissions?`)) return;
-    try { await api.del(`/org/roles/${role}`); onFlash(`${ROLE_LABEL[role]} reset to defaults.`); load(); } catch (e) { onError(e); }
+  const dirty = changedRoles().length > 0;
+
+  // One Save commits every modified role at once.
+  async function saveAll() {
+    setSaving(true);
+    try {
+      for (const role of changedRoles()) {
+        await api.patch(`/org/roles/${role}`, { permissions: [...(draft[role] ?? [])] });
+      }
+      onFlash("Permissions saved.");
+      load();
+    } catch (e) { onError(e); }
+    finally { setSaving(false); setConfirming(false); }
+  }
+  // Reset discards unsaved edits and restores the last-saved configuration.
+  function resetAll() {
+    if (!data) return;
+    const d: Record<string, Set<string>> = {};
+    for (const role of data.roles) d[role.role] = new Set(role.permissions);
+    setDraft(d);
   }
 
   if (!data) return <p className="muted">Loading roles…</p>;
@@ -329,15 +413,12 @@ function RolesTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
           </tbody>
         </table>
       </div>
-      <div className="row" style={{ flexWrap: "wrap", gap: 8, marginTop: 12 }}>
-        {ASSIGNABLE.map((r) => (
-          <span key={r} className="row" style={{ gap: 4 }}>
-            <button className="small primary" disabled={saving} onClick={() => setConfirmRole(r)}>Save {ROLE_LABEL[r]}</button>
-            <button className="small" disabled={saving} onClick={() => resetRole(r)}>Reset</button>
-          </span>
-        ))}
+      <div className="row" style={{ gap: 8, marginTop: 12 }}>
+        <button className="primary" disabled={saving || !dirty} onClick={() => setConfirming(true)}>Save</button>
+        <button disabled={saving || !dirty} onClick={resetAll}>Reset</button>
+        {dirty && <span className="muted" style={{ fontSize: 13 }}>Unsaved changes</span>}
       </div>
-      {confirmRole && <ConfirmChanges busy={saving} onCancel={() => setConfirmRole(null)} onConfirm={() => saveRole(confirmRole)} />}
+      {confirming && <ConfirmChanges busy={saving} onCancel={() => setConfirming(false)} onConfirm={saveAll} />}
     </>
   );
 }

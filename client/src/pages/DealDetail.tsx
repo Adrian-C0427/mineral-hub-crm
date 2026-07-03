@@ -4,7 +4,7 @@ import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import {
   Spinner, PriorityBadge, StageBadge, MetricCard,
-  MatchPercentBadge, MatchBar, Banner,
+  MatchPercentBadge, MatchBar, Banner, ConfirmDelete,
 } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { StageChangeModal } from "../components/StageChangeModal";
@@ -13,11 +13,12 @@ import { BuyerActivitySection } from "../components/BuyerActivitySection";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { AbstractMultiPicker, useAbstractLabels } from "../components/AbstractPicker";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
-import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
+import { US_STATE_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, countiesForStates } from "../lib/options";
 import { operatorsForCounties } from "../lib/operators";
 import { money, num, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { SellerDetails } from "../components/SellerDetails";
+import { AssigneePicker } from "../components/AssigneePicker";
 import type { BuyerActivityRow, DealSummary, MatchRec, Seller, UserLite } from "../types";
 // MapLibre is heavy; only load it when a deal detail page is viewed.
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
@@ -44,7 +45,7 @@ interface DocFile {
 // can grow (or become org-configurable) without any schema/route change.
 const DOC_FOLDERS = ["Seller PSA", "Wholesale PSA", "Check Stubs", "Division Orders", "Deeds", "Title", "Other"];
 
-interface EditTarget { id: string; name: string; initial?: { status?: BuyerActivityRow["status"]; assignedTeamMemberId?: string | null; responseReceived?: boolean; notes?: string | null; dateSent?: string | null; nextFollowUpDate?: string | null } }
+interface EditTarget { id: string; name: string; initial?: { status?: BuyerActivityRow["status"]; assignedTeamMemberId?: string | null; notes?: string | null; dateSent?: string | null; nextFollowUpDate?: string | null } }
 
 export function DealDetail() {
   const { id } = useParams<{ id: string }>();
@@ -57,6 +58,7 @@ export function DealDetail() {
   const [logBuyer, setLogBuyer] = useState<EditTarget | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showEmail, setShowEmail] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const loadDeal = useCallback(() => api.get<DealDetailData>(`/deals/${id}`).then(setDeal), [id]);
   const loadMatches = useCallback(() => api.get<MatchRec[]>(`/deals/${id}/matches`).then(setMatches), [id]);
@@ -100,7 +102,7 @@ export function DealDetail() {
           <span className="muted">{deal.daysInStage}d in stage</span>
         </div>
         <div className="row">
-          {can("deleteDeals") && <button className="danger" onClick={async () => { if (confirm("Hard-delete this deal?")) { await api.del(`/deals/${id}`); nav("/deals"); } }}>Delete</button>}
+          {can("deleteDeals") && <button className="danger" onClick={() => setConfirmDelete(true)}>Delete</button>}
           <button className="primary" onClick={() => setShowStage(true)}>Move Stage</button>
         </div>
       </div>
@@ -112,12 +114,13 @@ export function DealDetail() {
         <ContractTimelineCard deal={deal} onSaved={loadDeal} />
       </div>
 
+      <AssigneesCard deal={deal} users={users} canEdit={can("editDeals")} onSaved={loadDeal} />
+
       <SellerDetails
         dealId={deal.id}
         sellers={deal.sellers ?? []}
         users={users}
         canEdit={can("editDeals")}
-        canViewTaxId={deal.canViewTaxId}
         onChanged={loadDeal}
       />
 
@@ -179,7 +182,7 @@ export function DealDetail() {
           dealId={deal.id}
           rows={deal.buyerActivity}
           onChanged={refreshAll}
-          onEdit={(r) => setLogBuyer({ id: r.buyerId, name: r.buyerName, initial: { status: r.status, assignedTeamMemberId: r.assignedTeamMember?.id ?? null, responseReceived: r.responseReceived, notes: r.notes, dateSent: r.dateSent, nextFollowUpDate: r.nextFollowUpDate } })}
+          onEdit={(r) => setLogBuyer({ id: r.buyerId, name: r.buyerName, initial: { status: r.status, assignedTeamMemberId: r.assignedTeamMember?.id ?? null, notes: r.notes, dateSent: r.dateSent, nextFollowUpDate: r.nextFollowUpDate } })}
         />
       </div>
 
@@ -257,6 +260,34 @@ export function DealDetail() {
           onSent={() => { setSelected(new Set()); refreshAll(); }}
         />
       )}
+      {confirmDelete && (
+        <ConfirmDelete
+          itemLabel="deal"
+          name={deal.name}
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={async () => { await api.del(`/deals/${id}`); nav("/deals"); }}
+        />
+      )}
+    </div>
+  );
+}
+
+function AssigneesCard({ deal, users, canEdit, onSaved }: { deal: DealDetailData; users: UserLite[]; canEdit: boolean; onSaved: () => void }) {
+  const ids = (deal.assignees ?? []).map((a) => a.id);
+  async function save(next: string[]) {
+    await api.patch(`/deals/${deal.id}`, { assigneeIds: next });
+    onSaved();
+  }
+  return (
+    <div className="panel">
+      <div className="section-head"><h3 style={{ margin: 0 }}>Assigned Team Members</h3></div>
+      {canEdit ? (
+        <AssigneePicker users={users} value={ids} onChange={save} />
+      ) : (
+        <div className="row" style={{ gap: 6 }}>
+          {ids.length === 0 ? <span className="muted">Unassigned</span> : (deal.assignees ?? []).map((a) => <span key={a.id} className="badge resp-pending">{a.name}</span>)}
+        </div>
+      )}
     </div>
   );
 }
@@ -265,7 +296,8 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState(deal);
   const abstractLabel = useAbstractLabels(deal.abstractIds);
-  useEffect(() => setF(deal), [deal]);
+  // Seed the multi-state field from a legacy single `state` when needed.
+  useEffect(() => setF({ ...deal, states: deal.states?.length ? deal.states : (deal.state ? [deal.state] : []) }), [deal]);
 
   // Operator suggestions come from the deal's counties (same source as the Map
   // page), recomputed whenever the selected counties change.
@@ -283,7 +315,7 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
 
   async function save() {
     await api.patch(`/deals/${deal.id}`, {
-      state: f.state, counties: f.counties, basins: f.basins, formations: f.formations,
+      states: f.states, counties: f.counties, basins: f.basins, formations: f.formations,
       assetTypes: f.assetTypes, acreageNma: f.acreageNma, nra: f.nra, abstractIds: f.abstractIds, askPrice: f.askPrice, ourPrice: f.ourPrice, operator: f.operator,
     });
     setEdit(false);
@@ -299,15 +331,15 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
       </div>
       {!edit ? (
         <div className="dd-grid">
-          <KV k="State" v={deal.state} /><KV k="County" v={deal.counties.join(", ")} /><KV k="Basin" v={deal.basins.join(", ")} />
+          <KV k="State" v={(deal.states?.length ? deal.states : (deal.state ? [deal.state] : [])).join(", ")} /><KV k="County" v={deal.counties.join(", ")} /><KV k="Basin" v={deal.basins.join(", ")} />
           <KV k="Formation" v={deal.formations.join(", ")} /><KV k="Asset Type" v={deal.assetTypes.join(", ")} /><KV k="NMA" v={num(deal.acreageNma)} />
           <KV k="NRA" v={num(deal.nra)} /><KV k="Our Price" v={money(deal.ourPrice)} /><KV k="Ask Price (to buyers)" v={money(deal.askPrice)} /><KV k="Operator" v={deal.operator} />
           <KV k="Abstract (Leon Co.)" v={abstractLabel} />
         </div>
       ) : (
         <div className="dd-grid">
-          <Fld l="State"><input value={f.state ?? ""} onChange={set("state")} /></Fld>
-          <Fld l="County"><SearchableMultiSelect options={TEXAS_COUNTY_OPTIONS} value={f.counties} onChange={setArr("counties")} placeholder="Search counties…" /></Fld>
+          <Fld l="State"><SearchableMultiSelect options={US_STATE_OPTIONS} value={f.states ?? []} onChange={setArr("states")} placeholder="Select states…" /></Fld>
+          <Fld l="County"><SearchableMultiSelect options={countiesForStates(f.states ?? [])} value={f.counties} onChange={setArr("counties")} placeholder={(f.states ?? []).length ? "Search counties…" : "Select a state first"} /></Fld>
           <Fld l="Basin"><SearchableMultiSelect options={TEXAS_BASIN_OPTIONS} value={f.basins} onChange={setArr("basins")} placeholder="Search basins…" /></Fld>
           <Fld l="Formation"><SearchableMultiSelect options={TEXAS_FORMATION_OPTIONS} value={f.formations} onChange={setArr("formations")} placeholder="Search formations…" /></Fld>
           <Fld l="Asset Type"><SearchableMultiSelect options={ASSET_TYPE_OPTIONS} value={f.assetTypes} onChange={setArr("assetTypes")} placeholder="Search asset types…" /></Fld>
@@ -335,11 +367,13 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
 
 function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved: () => void }) {
   const [edit, setEdit] = useState(false);
+  const [duc, setDuc] = useState("");
   const [fbb, setFbb] = useState("");
   const [oc, setOc] = useState("");
   const [fc, setFc] = useState("");
 
   function startEdit() {
+    setDuc(toInputDate(deal.dateUnderContract));
     setFbb(toInputDate(deal.findBuyerByDate));
     setOc(toInputDate(deal.originalClosingDate));
     setFc(toInputDate(deal.finalClosingDate));
@@ -348,7 +382,8 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
 
   async function save() {
     const patch: Record<string, unknown> = {};
-    // Only send changed fields. FBB/FC become overrides; OC is direct.
+    // Only send changed fields. FBB/FC become overrides; DUC/OC are direct.
+    if (duc !== toInputDate(deal.dateUnderContract)) patch.dateUnderContract = duc || null;
     if (fbb !== toInputDate(deal.findBuyerByDate)) patch.findBuyerByDateOverride = fbb || null;
     if (oc !== toInputDate(deal.originalClosingDate)) patch.originalClosingDate = oc || null;
     if (fc !== toInputDate(deal.finalClosingDate)) patch.finalClosingDateOverride = fc || null;
@@ -390,7 +425,7 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
         </div>
       ) : (
         <div className="dd-grid">
-          <KV k="Under Contract (read-only)" v={fmtDate(deal.dateUnderContract)} />
+          <Fld l="Under Contract"><input type="date" value={duc} onChange={(e) => setDuc(e.target.value)} /></Fld>
           <Fld l="Find Buyer By"><input type="date" value={fbb} onChange={(e) => setFbb(e.target.value)} /></Fld>
           <Fld l="Orig. Closing"><input type="date" value={oc} onChange={(e) => setOc(e.target.value)} /></Fld>
           <Fld l="Final Closing"><input type="date" value={fc} onChange={(e) => setFc(e.target.value)} /></Fld>

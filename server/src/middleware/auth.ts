@@ -16,6 +16,7 @@ export interface AuthedRequest extends Request {
     organizationId: string | null;
     orgRole: OrgRole | null;
     permissions: Permission[];
+    mustChangePassword: boolean;
   };
 }
 
@@ -58,6 +59,7 @@ export async function attachUser(req: AuthedRequest, _res: Response, next: NextF
           organizationId: user.organizationId,
           orgRole: user.orgRole as OrgRole | null,
           permissions,
+          mustChangePassword: user.mustChangePassword,
         };
 
         // Throttled last-activity update (fire-and-forget).

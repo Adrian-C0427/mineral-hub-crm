@@ -1,15 +1,15 @@
 import { useState } from "react";
 import { api } from "../api/client";
-import { Modal, Banner } from "./ui";
+import { Modal, Banner, ConfirmDelete } from "./ui";
+import { PhoneInput } from "./PhoneInput";
+import { formatPhone } from "../lib/phone";
 import { fmtDate } from "../lib/format";
 import type { Seller, SellerType, UserLite } from "../types";
 
 /**
  * Seller Details — structured owner/seller records on a deal, kept separate from
  * deal characteristics. Supports multiple owners (heirs, trusts, entities); each
- * carries personal, contact, mailing, physical and additional info. The Tax /
- * Entity ID is sensitive: it's only shown/editable to callers with the
- * viewSellerTaxId permission (the API mirrors this gate).
+ * carries personal, contact, physical and mailing info.
  */
 
 const SELLER_TYPES: SellerType[] = ["INDIVIDUAL", "TRUST", "LLC", "CORPORATION", "ESTATE", "PARTNERSHIP", "OTHER"];
@@ -21,19 +21,20 @@ function sellerDisplayName(s: Seller): string {
   return s.companyName || s.trustName || person || "Unnamed seller";
 }
 
-export function SellerDetails({ dealId, sellers, users, canEdit, canViewTaxId, onChanged }: {
+export function SellerDetails({ dealId, sellers, users, canEdit, onChanged }: {
   dealId: string;
   sellers: Seller[];
   users: UserLite[];
   canEdit: boolean;
-  canViewTaxId: boolean;
   onChanged: () => void;
 }) {
   const [editing, setEditing] = useState<Seller | "new" | null>(null);
+  const [removing, setRemoving] = useState<Seller | null>(null);
 
-  async function remove(s: Seller) {
-    if (!window.confirm(`Remove ${sellerDisplayName(s)} from this deal?`)) return;
-    await api.del(`/deals/${dealId}/sellers/${s.id}`);
+  async function remove() {
+    if (!removing) return;
+    await api.del(`/deals/${dealId}/sellers/${removing.id}`);
+    setRemoving(null);
     onChanged();
   }
 
@@ -50,7 +51,7 @@ export function SellerDetails({ dealId, sellers, users, canEdit, canViewTaxId, o
       ) : (
         <div className="seller-list">
           {sellers.map((s) => (
-            <SellerCard key={s.id} s={s} canEdit={canEdit} canViewTaxId={canViewTaxId} onEdit={() => setEditing(s)} onRemove={() => remove(s)} />
+            <SellerCard key={s.id} s={s} canEdit={canEdit} onEdit={() => setEditing(s)} onRemove={() => setRemoving(s)} />
           ))}
         </div>
       )}
@@ -60,26 +61,27 @@ export function SellerDetails({ dealId, sellers, users, canEdit, canViewTaxId, o
           dealId={dealId}
           seller={editing === "new" ? null : editing}
           users={users}
-          canViewTaxId={canViewTaxId}
           onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); onChanged(); }}
         />
+      )}
+      {removing && (
+        <ConfirmDelete itemLabel="seller" name={sellerDisplayName(removing)} onCancel={() => setRemoving(null)} onConfirm={remove} />
       )}
     </div>
   );
 }
 
-function SellerCard({ s, canEdit, canViewTaxId, onEdit, onRemove }: { s: Seller; canEdit: boolean; canViewTaxId: boolean; onEdit: () => void; onRemove: () => void }) {
-  const mailing = [s.mailingAddress, s.mailingCity, [s.mailingState, s.mailingZip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+function SellerCard({ s, canEdit, onEdit, onRemove }: { s: Seller; canEdit: boolean; onEdit: () => void; onRemove: () => void }) {
   const physical = [s.physicalAddress, s.physicalCity, [s.physicalState, s.physicalZip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  const mailing = [s.mailingAddress, s.mailingCity, [s.mailingState, s.mailingZip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
+  const sameAddr = physical && mailing && physical === mailing;
   return (
     <div className="seller-card">
       <div className="seller-card-head">
         <div className="row" style={{ gap: 8 }}>
           <strong>{sellerDisplayName(s)}</strong>
-          {s.isPrimary && <span className="badge resp-offer">Primary</span>}
           <span className="badge resp-pending">{prettyType(s.sellerType)}</span>
-          {s.ownershipPercent != null && <span className="muted">{s.ownershipPercent}%</span>}
         </div>
         {canEdit && (
           <div className="row" style={{ gap: 6 }}>
@@ -89,18 +91,13 @@ function SellerCard({ s, canEdit, canViewTaxId, onEdit, onRemove }: { s: Seller;
         )}
       </div>
       <div className="seller-grid">
-        <KV k="Primary phone" v={s.primaryPhone} />
-        <KV k="Secondary phone" v={s.secondaryPhone} />
+        <KV k="Primary phone" v={s.primaryPhone ? formatPhone(s.primaryPhone) : null} />
         <KV k="Email" v={s.email} />
         <KV k="Preferred contact" v={s.preferredContactMethod} />
-        <KV k="Mailing address" v={mailing} />
-        <KV k="Physical address" v={physical} />
         <KV k="Assigned to" v={s.assignedTeamMember?.name} />
+        <KV k="Physical address" v={physical} />
+        <KV k="Mailing address" v={sameAddr ? "Same as physical" : mailing} />
         <KV k="Date added" v={fmtDate(s.dateAdded)} />
-        {(canViewTaxId || s.hasTaxId) && (
-          <KV k="Tax / Entity ID" v={canViewTaxId ? (s.taxId || "—") : (s.hasTaxId ? "•••••• (restricted)" : "—")} />
-        )}
-        {s.preferredCommunicationNotes && <KV k="Communication notes" v={s.preferredCommunicationNotes} wide />}
         {s.internalNotes && <KV k="Internal notes" v={s.internalNotes} wide />}
       </div>
     </div>
@@ -117,72 +114,94 @@ function KV({ k, v, wide }: { k: string; v: React.ReactNode; wide?: boolean }) {
 }
 
 interface FormState {
-  isPrimary: boolean;
   sellerType: SellerType;
-  ownershipPercent: string;
   firstName: string; middleName: string; lastName: string; companyName: string; trustName: string;
-  primaryPhone: string; secondaryPhone: string; email: string; preferredContactMethod: string;
-  mailingAddress: string; mailingCity: string; mailingState: string; mailingZip: string;
+  primaryPhone: string; email: string; preferredContactMethod: string;
   physicalAddress: string; physicalCity: string; physicalState: string; physicalZip: string;
-  internalNotes: string; taxId: string; preferredCommunicationNotes: string; assignedTeamMemberId: string;
+  mailingAddress: string; mailingCity: string; mailingState: string; mailingZip: string;
+  internalNotes: string; assignedTeamMemberId: string;
 }
-type StringFieldKey = Exclude<keyof FormState, "isPrimary" | "sellerType">;
+type TextKey = Exclude<keyof FormState, "sellerType">;
 
-function SellerFormModal({ dealId, seller, users, canViewTaxId, onClose, onSaved }: {
+function addrEqual(f: FormState): boolean {
+  return f.mailingAddress === f.physicalAddress && f.mailingCity === f.physicalCity
+    && f.mailingState === f.physicalState && f.mailingZip === f.physicalZip;
+}
+
+function SellerFormModal({ dealId, seller, users, onClose, onSaved }: {
   dealId: string;
   seller: Seller | null;
   users: UserLite[];
-  canViewTaxId: boolean;
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [f, setF] = useState<FormState>(() => ({
-    isPrimary: seller?.isPrimary ?? false,
     sellerType: seller?.sellerType ?? "INDIVIDUAL",
-    ownershipPercent: seller?.ownershipPercent != null ? String(seller.ownershipPercent) : "",
     firstName: seller?.firstName ?? "",
     middleName: seller?.middleName ?? "",
     lastName: seller?.lastName ?? "",
     companyName: seller?.companyName ?? "",
     trustName: seller?.trustName ?? "",
     primaryPhone: seller?.primaryPhone ?? "",
-    secondaryPhone: seller?.secondaryPhone ?? "",
     email: seller?.email ?? "",
     preferredContactMethod: seller?.preferredContactMethod ?? "",
-    mailingAddress: seller?.mailingAddress ?? "",
-    mailingCity: seller?.mailingCity ?? "",
-    mailingState: seller?.mailingState ?? "",
-    mailingZip: seller?.mailingZip ?? "",
     physicalAddress: seller?.physicalAddress ?? "",
     physicalCity: seller?.physicalCity ?? "",
     physicalState: seller?.physicalState ?? "",
     physicalZip: seller?.physicalZip ?? "",
+    mailingAddress: seller?.mailingAddress ?? "",
+    mailingCity: seller?.mailingCity ?? "",
+    mailingState: seller?.mailingState ?? "",
+    mailingZip: seller?.mailingZip ?? "",
     internalNotes: seller?.internalNotes ?? "",
-    taxId: seller?.taxId ?? "",
-    preferredCommunicationNotes: seller?.preferredCommunicationNotes ?? "",
     assignedTeamMemberId: seller?.assignedTeamMember?.id ?? "",
   }));
+  // Mailing == physical (default true for a brand-new seller so the common case
+  // needs no extra typing; for an existing seller, reflect what's stored —
+  // treating an empty mailing address as "same as physical").
+  const [sameAsPhysical, setSameAsPhysical] = useState<boolean>(() => {
+    if (!seller) return true;
+    const noMailing = !seller.mailingAddress && !seller.mailingCity && !seller.mailingState && !seller.mailingZip;
+    return noMailing || addrEqual({
+      physicalAddress: seller.physicalAddress ?? "", physicalCity: seller.physicalCity ?? "", physicalState: seller.physicalState ?? "", physicalZip: seller.physicalZip ?? "",
+      mailingAddress: seller.mailingAddress ?? "", mailingCity: seller.mailingCity ?? "", mailingState: seller.mailingState ?? "", mailingZip: seller.mailingZip ?? "",
+    } as FormState);
+  });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const set = (k: StringFieldKey | "sellerType") => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF((p) => ({ ...p, [k]: e.target.value }));
+
+  const set = (k: TextKey | "sellerType") => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF((p) => ({ ...p, [k]: e.target.value }));
+  // Physical-address edits mirror into mailing while "same as physical" is on.
+  const setPhysical = (k: "physicalAddress" | "physicalCity" | "physicalState" | "physicalZip") => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setF((p) => {
+      const next = { ...p, [k]: e.target.value };
+      if (sameAsPhysical) {
+        next.mailingAddress = next.physicalAddress; next.mailingCity = next.physicalCity;
+        next.mailingState = next.physicalState; next.mailingZip = next.physicalZip;
+      }
+      return next;
+    });
+  function toggleSame(checked: boolean) {
+    setSameAsPhysical(checked);
+    if (checked) setF((p) => ({ ...p, mailingAddress: p.physicalAddress, mailingCity: p.physicalCity, mailingState: p.physicalState, mailingZip: p.physicalZip }));
+  }
 
   async function save() {
     setBusy(true); setError(null);
     const s = (v: string) => (v.trim() === "" ? null : v.trim());
+    const mail = sameAsPhysical
+      ? { mailingAddress: s(f.physicalAddress), mailingCity: s(f.physicalCity), mailingState: s(f.physicalState), mailingZip: s(f.physicalZip) }
+      : { mailingAddress: s(f.mailingAddress), mailingCity: s(f.mailingCity), mailingState: s(f.mailingState), mailingZip: s(f.mailingZip) };
     const body: Record<string, unknown> = {
-      isPrimary: f.isPrimary,
       sellerType: f.sellerType,
-      ownershipPercent: f.ownershipPercent.trim() === "" ? null : Number(f.ownershipPercent),
       firstName: s(f.firstName), middleName: s(f.middleName), lastName: s(f.lastName),
       companyName: s(f.companyName), trustName: s(f.trustName),
-      primaryPhone: s(f.primaryPhone), secondaryPhone: s(f.secondaryPhone), email: s(f.email),
-      preferredContactMethod: s(f.preferredContactMethod),
-      mailingAddress: s(f.mailingAddress), mailingCity: s(f.mailingCity), mailingState: s(f.mailingState), mailingZip: s(f.mailingZip),
+      primaryPhone: s(f.primaryPhone), email: s(f.email), preferredContactMethod: s(f.preferredContactMethod),
       physicalAddress: s(f.physicalAddress), physicalCity: s(f.physicalCity), physicalState: s(f.physicalState), physicalZip: s(f.physicalZip),
-      internalNotes: s(f.internalNotes), preferredCommunicationNotes: s(f.preferredCommunicationNotes),
+      ...mail,
+      internalNotes: s(f.internalNotes),
       assignedTeamMemberId: f.assignedTeamMemberId || null,
     };
-    if (canViewTaxId) body.taxId = s(f.taxId);
     try {
       if (seller) await api.patch(`/deals/${dealId}/sellers/${seller.id}`, body);
       else await api.post(`/deals/${dealId}/sellers`, body);
@@ -218,9 +237,8 @@ function SellerFormModal({ dealId, seller, users, canViewTaxId, onClose, onSaved
       </FormGroup>
 
       <FormGroup title="Contact information">
-        <div className="grid-2">
-          <Fld l="Primary phone"><input value={f.primaryPhone} onChange={set("primaryPhone")} /></Fld>
-          <Fld l="Secondary phone"><input value={f.secondaryPhone} onChange={set("secondaryPhone")} /></Fld>
+        <div className="grid-3">
+          <Fld l="Primary phone"><PhoneInput value={f.primaryPhone} onChange={(v) => setF((p) => ({ ...p, primaryPhone: v }))} /></Fld>
           <Fld l="Email address"><input type="email" value={f.email} onChange={set("email")} /></Fld>
           <Fld l="Preferred contact method">
             <select value={f.preferredContactMethod} onChange={set("preferredContactMethod")}>
@@ -230,43 +248,40 @@ function SellerFormModal({ dealId, seller, users, canViewTaxId, onClose, onSaved
         </div>
       </FormGroup>
 
-      <FormGroup title="Mailing address">
+      <FormGroup title="Physical address">
         <div className="grid-2">
-          <Fld l="Mailing address" wide><input value={f.mailingAddress} onChange={set("mailingAddress")} /></Fld>
-          <Fld l="City"><input value={f.mailingCity} onChange={set("mailingCity")} /></Fld>
+          <Fld l="Street address" wide><input value={f.physicalAddress} onChange={setPhysical("physicalAddress")} /></Fld>
+          <Fld l="City"><input value={f.physicalCity} onChange={setPhysical("physicalCity")} /></Fld>
           <div className="grid-2">
-            <Fld l="State"><input value={f.mailingState} onChange={set("mailingState")} /></Fld>
-            <Fld l="ZIP"><input value={f.mailingZip} onChange={set("mailingZip")} /></Fld>
+            <Fld l="State"><input value={f.physicalState} onChange={setPhysical("physicalState")} /></Fld>
+            <Fld l="ZIP"><input value={f.physicalZip} onChange={setPhysical("physicalZip")} /></Fld>
           </div>
         </div>
       </FormGroup>
 
-      <FormGroup title="Physical address">
-        <div className="grid-2">
-          <Fld l="Street address" wide><input value={f.physicalAddress} onChange={set("physicalAddress")} /></Fld>
-          <Fld l="City"><input value={f.physicalCity} onChange={set("physicalCity")} /></Fld>
+      <FormGroup title="Mailing address">
+        <label className="row" style={{ textTransform: "none", gap: 6, marginBottom: sameAsPhysical ? 0 : 10 }}>
+          <input type="checkbox" checked={sameAsPhysical} onChange={(e) => toggleSame(e.target.checked)} /> Mailing address is the same as physical address
+        </label>
+        {!sameAsPhysical && (
           <div className="grid-2">
-            <Fld l="State"><input value={f.physicalState} onChange={set("physicalState")} /></Fld>
-            <Fld l="ZIP"><input value={f.physicalZip} onChange={set("physicalZip")} /></Fld>
+            <Fld l="Street address" wide><input value={f.mailingAddress} onChange={set("mailingAddress")} /></Fld>
+            <Fld l="City"><input value={f.mailingCity} onChange={set("mailingCity")} /></Fld>
+            <div className="grid-2">
+              <Fld l="State"><input value={f.mailingState} onChange={set("mailingState")} /></Fld>
+              <Fld l="ZIP"><input value={f.mailingZip} onChange={set("mailingZip")} /></Fld>
+            </div>
           </div>
-        </div>
+        )}
       </FormGroup>
 
       <FormGroup title="Additional information">
         <div className="grid-2">
-          <Fld l="Ownership %"><input type="number" value={f.ownershipPercent} onChange={set("ownershipPercent")} placeholder="e.g. 50" /></Fld>
           <Fld l="Assigned team member">
             <select value={f.assignedTeamMemberId} onChange={set("assignedTeamMemberId")}>
               <option value="">Unassigned</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
             </select>
           </Fld>
-          {canViewTaxId && <Fld l="Tax ID / Entity ID"><input value={f.taxId} onChange={set("taxId")} placeholder="Sensitive — permission-restricted" /></Fld>}
-          <Fld l="Primary owner">
-            <label className="row" style={{ textTransform: "none", gap: 6 }}>
-              <input type="checkbox" checked={f.isPrimary} onChange={(e) => setF((p) => ({ ...p, isPrimary: e.target.checked }))} /> Mark as the primary seller
-            </label>
-          </Fld>
-          <Fld l="Preferred communication notes" wide><textarea rows={2} value={f.preferredCommunicationNotes} onChange={set("preferredCommunicationNotes")} /></Fld>
           <Fld l="Internal notes" wide><textarea rows={3} value={f.internalNotes} onChange={set("internalNotes")} /></Fld>
         </div>
       </FormGroup>

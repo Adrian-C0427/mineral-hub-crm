@@ -240,6 +240,31 @@ authRouter.patch(
   }),
 );
 
+// Self-service password change: verify the current password, then set a new one.
+// Clears any mustChangePassword flag (used after an owner-issued reset).
+const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1),
+  newPassword: z.string().min(8, "Password must be at least 8 characters"),
+});
+
+authRouter.post(
+  "/change-password",
+  requireAuth,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!user) throw new HttpError(404, "Account not found");
+    if (!(await verifyPassword(currentPassword, user.passwordHash))) {
+      throw new HttpError(400, "Your current password is incorrect");
+    }
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: await hashPassword(newPassword), mustChangePassword: false },
+    });
+    res.json({ ok: true });
+  }),
+);
+
 // ===========================================================================
 // Password reset (forgot → emailed link → reset)
 // ===========================================================================

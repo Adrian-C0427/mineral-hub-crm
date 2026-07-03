@@ -14,6 +14,7 @@ export interface CurrentUser {
   orgRole: OrgRole | null;
   permissions: string[];
   organization: { id: string; name: string; teamId: string } | null;
+  mustChangePassword?: boolean;
 }
 
 export interface RegisterPayload {

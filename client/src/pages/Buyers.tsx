@@ -4,8 +4,11 @@ import { api, ApiError } from "../api/client";
 import { RelationshipDot, Spinner, Banner } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { NewBuyerModal } from "../components/NewBuyerModal";
+import { useRowSelection, BulkActionsBar } from "../components/bulk";
 import { pct } from "../lib/format";
+import { downloadCsv } from "../lib/csv";
 import { useAuth } from "../auth/AuthContext";
+import type { UserLite } from "../types";
 
 interface BuyerRow {
   id: string;
@@ -22,10 +25,12 @@ export function Buyers() {
   const [buyers, setBuyers] = useState<BuyerRow[] | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  const [users, setUsers] = useState<UserLite[]>([]);
+  const sel = useRowSelection();
   const nav = useNavigate();
 
   function load() { api.get<BuyerRow[]>("/buyers").then(setBuyers); }
-  useEffect(load, []);
+  useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
   if (!buyers) return <Spinner />;
 
   const columns: Column<BuyerRow>[] = [
@@ -55,6 +60,23 @@ export function Buyers() {
         onRowClick={(b) => nav(`/buyers/${b.id}`)}
         defaultSort={{ key: "buyer", dir: "asc" }}
         empty="No buyers yet. Import a CSV or add one manually."
+        selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
+      />
+
+      <BulkActionsBar
+        selectedIds={[...sel.selected]}
+        onClear={sel.clear}
+        onDone={load}
+        users={users}
+        itemLabel="buyer"
+        deleteUrl={can("deleteBuyers") ? "/buyers/bulk-delete" : undefined}
+        assign={can("editBuyers") ? { url: "/buyers/bulk-assign", key: "ownerIds" } : undefined}
+        onExport={() => {
+          const rows = buyers.filter((b) => sel.selected.has(b.id));
+          downloadCsv(`buyers-${new Date().toISOString().slice(0, 10)}.csv`,
+            ["Buyer", "Company", "Focus Area", "Relationship", "Close %", "Closed Deals"],
+            rows.map((b) => [b.name, b.companyName, b.focusArea, b.relationshipStatus, b.closeRate, b.closedDeals]));
+        }}
       />
 
       {showImport && <ImportWizard onDone={() => { load(); }} />}

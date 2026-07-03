@@ -255,6 +255,33 @@ buyersRouter.delete(
   }),
 );
 
+// Bulk actions (mirror the deals router).
+buyersRouter.post(
+  "/bulk-delete",
+  requirePermission("deleteBuyers"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { ids } = z.object({ ids: z.array(z.string()).min(1).max(500) }).parse(req.body);
+    const result = await prisma.buyer.deleteMany({ where: { id: { in: ids }, organizationId: orgId(req) } });
+    res.json({ deleted: result.count });
+  }),
+);
+
+buyersRouter.post(
+  "/bulk-assign",
+  requirePermission("editBuyers"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { ids, ownerIds } = z.object({ ids: z.array(z.string()).min(1).max(500), ownerIds: z.array(z.string()) }).parse(req.body);
+    const org = orgId(req);
+    if (ownerIds.length) {
+      const valid = await prisma.user.count({ where: { id: { in: ownerIds }, organizationId: org } });
+      if (valid !== new Set(ownerIds).size) throw new HttpError(400, "One or more owners are not in your organization");
+    }
+    const owned = await prisma.buyer.findMany({ where: { id: { in: ids }, organizationId: org }, select: { id: true } });
+    for (const b of owned) await prisma.$transaction((tx) => syncOwners(tx, b.id, ownerIds));
+    res.json({ updated: owned.length });
+  }),
+);
+
 async function syncOwners(tx: any, buyerId: string, userIds: string[]) {
   await tx.buyerOwner.deleteMany({ where: { buyerId } });
   if (userIds.length) {
