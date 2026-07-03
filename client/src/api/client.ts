@@ -1,6 +1,8 @@
 // Single API client. Uses VITE_API_BASE in production (cross-origin Railway
 // services) and the Vite dev proxy otherwise. Always sends the session cookie.
 const BASE = (import.meta.env.VITE_API_BASE as string | undefined)?.replace(/\/$/, "") || "";
+/** Absolute-URL base for non-fetch consumers (e.g. MapLibre tile templates). */
+export const API_BASE = BASE;
 
 // Bearer token auth. The web and API run on different *sites* (up.railway.app is a
 // public suffix), so cookies are treated as third-party and blocked by browsers.

@@ -18,3 +18,11 @@ prisma/*.db
 *.ebc.gz
 documents_20260702*/
 tools/rrc/work/
+
+# GIS pipeline scratch: abstract GeoJSON is fetched (tools/otls/fetch_abstracts.py)
+# then imported into PostGIS (server/src/scripts/importGis.ts); never committed.
+client/public/data/*-abstracts.geojson
+client/public/data/*-abstracts-index.json
+
+# Raw RRC bulk downloads (imported into PostGIS by the phase-B pipeline; never committed)
+data/rrc/
