@@ -217,23 +217,26 @@ export function MapView() {
         "fill-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 0.55, ["boolean", ["feature-state", "active"], false], 0.45, 0.05] } });
       // Abstract boundaries — solid black, full opacity, heavy enough to read
       // instantly against any basemap at every supported zoom.
+      // Abstract boundaries: thin black lines, in sync with wells + abstract
+      // numbers (all appear at z9). Slightly thinner and lighter than the
+      // county lines so the two read as different hierarchy levels.
       // NOTE: zoom-driven expressions must be TOP-LEVEL in a paint property —
       // nesting ["interpolate", …, ["zoom"], …] inside ["case", …] is invalid
       // and silently kills the whole layer. Zoom outside, selection inside.
       const sel = ["boolean", ["feature-state", "selected"], false];
-      map.addLayer({ id: "abstracts-line", type: "line", source: "abstracts", "source-layer": "abstracts", minzoom: MIN_ABSTRACT_ZOOM, paint: {
+      map.addLayer({ id: "abstracts-line", type: "line", source: "abstracts", "source-layer": "abstracts", minzoom: 9, paint: {
         "line-color": ["case", sel, "#b45309", "#000000"] as unknown as maplibregl.ExpressionSpecification,
         "line-width": ["interpolate", ["linear"], ["zoom"],
-          8, ["case", sel, 4, 1.5],
-          11, ["case", sel, 4, 2],
-          14, ["case", sel, 4, 2.8]] as unknown as maplibregl.ExpressionSpecification,
-        "line-opacity": 1 } });
-      // County boundaries — unchanged simple style, drawn above so they stay
-      // visible as a reference without competing with the abstracts.
+          9, ["case", sel, 3, 0.7],
+          12, ["case", sel, 3, 1],
+          14, ["case", sel, 3, 1.3]] as unknown as maplibregl.ExpressionSpecification,
+        "line-opacity": ["case", sel, 1, 0.6] as unknown as maplibregl.ExpressionSpecification } });
+      // County boundaries — drawn above, slightly heavier and more opaque than
+      // the abstract mesh so the administrative level stays distinct.
       map.addLayer({ id: "county-bounds", type: "line", source: "abstracts", "source-layer": "counties", paint: {
         "line-color": "#64748b",
-        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.6, 9, 1.4],
-        "line-opacity": 0.7 } });
+        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.6, 9, 1.4, 13, 2],
+        "line-opacity": 0.75 } });
       // Wellbore laterals (surface -> bottom hole)
       map.addLayer({ id: "wellbores", type: "line", source: "abstracts", "source-layer": "wellbores", minzoom: 10, layout: { "line-cap": "round" }, paint: {
         "line-color": ["match", ["get", "wellboreType"], "Horizontal", "#0f766e", "Directional", "#9333ea", "#0f766e"],
