@@ -180,7 +180,8 @@ export function MapView() {
       // they become legible. promoteId maps each layer's key property to its
       // feature id so feature-state works and persists across tile loads.
       map.addSource("abstracts", { type: "vector", tiles: [ABSTRACT_TILES], minzoom: 0, maxzoom: 14, promoteId: { abstracts: "id", wells: "fid", wellbores: "fid" } });
-      map.addLayer({ id: "county-bounds", type: "line", source: "abstracts", "source-layer": "counties", paint: { "line-color": "#64748b", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.6, 9, 1.4], "line-opacity": 0.7 } });
+      // (County boundary layers are added after the abstract layers so they
+      // draw on top — administrative boundaries stay visible at every zoom.)
       // County names own the statewide view, then hand off to abstract numbers
       // (z9+). Label points are DB-derived (ST_PointOnSurface — always inside
       // the polygon). text-optional lets crowded areas drop labels instead of
@@ -214,14 +215,27 @@ export function MapView() {
       map.addLayer({ id: "abstracts-fill", type: "fill", source: "abstracts", "source-layer": "abstracts", minzoom: MIN_ABSTRACT_ZOOM, paint: {
         "fill-color": ["case", ["boolean", ["feature-state", "selected"], false], "#f59e0b", ["boolean", ["feature-state", "active"], false], "#ef4444", "#3b82f6"],
         "fill-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 0.55, ["boolean", ["feature-state", "active"], false], 0.45, 0.05] } });
-      // Abstract boundaries: black, high-opacity — immediately legible against
-      // any basemap; width steps up with zoom so detail views stay crisp
-      // without overwhelming the county view.
+      // Abstract boundaries — the primary cadastral layer: solid black, full
+      // opacity, weight stepping up with zoom so parcels are immediately
+      // identifiable without clutter.
       map.addLayer({ id: "abstracts-line", type: "line", source: "abstracts", "source-layer": "abstracts", minzoom: MIN_ABSTRACT_ZOOM, paint: {
         "line-color": ["case", ["boolean", ["feature-state", "selected"], false], "#b45309", "#000000"],
-        "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 3,
-          ["interpolate", ["linear"], ["zoom"], 8, 0.8, 11, 1.2, 14, 1.8] as unknown as number],
-        "line-opacity": 0.9 } });
+        "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 3.5,
+          ["interpolate", ["linear"], ["zoom"], 8, 1, 11, 1.5, 14, 2.2] as unknown as number],
+        "line-opacity": 1 } });
+      // County boundaries — the highest-level reference, ALWAYS visible and
+      // visually distinct from the abstract mesh: a white casing lifts the
+      // line off the black cadastre, and the dashed slate line reads as an
+      // administrative boundary at every zoom.
+      map.addLayer({ id: "county-bounds-casing", type: "line", source: "abstracts", "source-layer": "counties", layout: { "line-cap": "round", "line-join": "round" }, paint: {
+        "line-color": "#ffffff",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 2.4, 9, 4, 13, 6],
+        "line-opacity": 0.85 } });
+      map.addLayer({ id: "county-bounds", type: "line", source: "abstracts", "source-layer": "counties", layout: { "line-join": "round" }, paint: {
+        "line-color": "#334155",
+        "line-dasharray": [3, 2],
+        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 1.2, 9, 2, 13, 3],
+        "line-opacity": 0.95 } });
       // Wellbore laterals (surface -> bottom hole)
       map.addLayer({ id: "wellbores", type: "line", source: "abstracts", "source-layer": "wellbores", minzoom: 10, layout: { "line-cap": "round" }, paint: {
         "line-color": ["match", ["get", "wellboreType"], "Horizontal", "#0f766e", "Directional", "#9333ea", "#0f766e"],
