@@ -58,7 +58,7 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
         : { type: "FeatureCollection", features: [] };
       const dealFeats = dealFC.features;
 
-      map.addSource("abstracts", { type: "vector", tiles: [ABSTRACT_TILES], minzoom: 7, maxzoom: 14, promoteId: { abstracts: "id", wells: "fid" } });
+      map.addSource("abstracts", { type: "vector", tiles: [ABSTRACT_TILES], minzoom: 8, maxzoom: 14, promoteId: { abstracts: "id", wells: "fid" } });
       map.addSource("deal", { type: "geojson", data: dealFC as unknown as GeoJSON.FeatureCollection, promoteId: "id" });
 
       // Clean outer boundary = convex hull of all deal-abstract vertices.

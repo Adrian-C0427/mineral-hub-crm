@@ -31,9 +31,11 @@ type SelHotspot = { kind: "hotspot"; summary: AreaSummary; periodLabel: string }
 type Selected = SelAbstract | SelWell | SelHotspot | null;
 
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
-// Below this zoom the whole state is in view; only county outlines show until
-// the user zooms in. Abstract number labels start at zoom 9, so 7 gives a lead.
-const MIN_ABSTRACT_ZOOM = 7;
+// Below this zoom the whole state is in view; county boundaries + names carry
+// the map until abstract detail starts streaming. Statewide, a z7 tile would
+// hold 15-20k abstracts (~2 MB), so the cadastral floor is z8 — abstract
+// number labels start at z9, survey names at z12.5.
+const MIN_ABSTRACT_ZOOM = 8;
 // Cadastral abstracts stream as vector tiles from PostGIS (ST_AsMVT on the API);
 // the client never downloads county GeoJSON — cost is per-viewport at any scale.
 // MapLibre requires absolute tile URLs, so fall back to the page origin in dev
@@ -183,6 +185,16 @@ export function MapView() {
       // stays visible at every zoom; abstract detail streams in per viewport.
       map.addSource("counties", { type: "geojson", data: txCounties as unknown as GeoJSON.FeatureCollection });
       map.addLayer({ id: "county-bounds", type: "line", source: "counties", paint: { "line-color": "#94a3b8", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.4, 9, 1.2], "line-opacity": 0.5 } });
+      // County names own the statewide view, then hand off to abstract numbers
+      // (z9+). text-optional lets crowded metros drop labels instead of
+      // overlapping; size scales up as counties get room.
+      map.addLayer({ id: "county-names", type: "symbol", source: "counties", maxzoom: 10, layout: {
+        "text-field": ["get", "name"], "text-font": ["Noto Sans Regular"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 4, 9, 6, 12, 9, 16],
+        "text-transform": "uppercase", "text-letter-spacing": 0.08,
+        "text-padding": 4, "text-allow-overlap": false, "text-optional": true },
+        paint: { "text-color": "#475569", "text-halo-color": "#ffffff", "text-halo-width": 1.5,
+          "text-opacity": ["interpolate", ["linear"], ["zoom"], 8.5, 0.9, 10, 0.4] } });
 
       // Vector tiles from PostGIS: one multi-layer source carries abstracts,
       // wells, and wellbore laterals (rrc.wells/rrc.wellbores). promoteId maps
@@ -212,7 +224,10 @@ export function MapView() {
         "fill-color": ["case", ["boolean", ["feature-state", "selected"], false], "#f59e0b", ["boolean", ["feature-state", "active"], false], "#ef4444", "#3b82f6"],
         "fill-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 0.55, ["boolean", ["feature-state", "active"], false], 0.45, 0.05] } });
       map.addLayer({ id: "abstracts-line", type: "line", source: "abstracts", "source-layer": "abstracts", paint: {
-        "line-color": ["case", ["boolean", ["feature-state", "selected"], false], "#b45309", "#64748b"], "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 3, 0.5] } });
+        "line-color": ["case", ["boolean", ["feature-state", "selected"], false], "#b45309", "#64748b"],
+        "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 3,
+          ["interpolate", ["linear"], ["zoom"], 8, 0.6, 12, 1.1] as unknown as number],
+        "line-opacity": 0.85 } });
       // Wellbore laterals (surface -> bottom hole)
       map.addLayer({ id: "wellbores", type: "line", source: "abstracts", "source-layer": "wellbores", minzoom: 10, layout: { "line-cap": "round" }, paint: {
         "line-color": ["match", ["get", "wellboreType"], "Horizontal", "#0f766e", "Directional", "#9333ea", "#0f766e"],

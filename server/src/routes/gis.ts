@@ -20,8 +20,11 @@ import { requireAuth, requireOrg, requirePermission } from "../middleware/auth.j
 
 const TILE_EXTENT = 4096;
 const TILE_BUFFER = 64;
-/** Below this zoom a tile would span several counties' worth of polygons. */
-const TILE_MIN_ZOOM = 6;
+/** Below this zoom a tile would span several counties' worth of polygons —
+ * statewide, a z7 tile carries 15–20k abstracts (~2 MB), which is too slow to
+ * generate and pointless to render. County boundaries + names carry the
+ * statewide view; abstract detail starts at z8. */
+const TILE_MIN_ZOOM = 8;
 const TILE_MAX_ZOOM = 22;
 /** Well points/laterals only render usefully once zoomed in; gating them here
  * keeps low-zoom tiles slim (a dense county can hold 10k+ wells). */
