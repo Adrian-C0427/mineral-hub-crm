@@ -18,13 +18,16 @@ dashboardRouter.get(
     const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
     const org = orgId(req);
 
+    // The dashboard reports exclusively on acquisition opportunities. Owned
+    // mineral assets (recordType OWNED_ASSET) are managed in their own module
+    // and never counted in the acquisition pipeline metrics below.
     const [allActive, closedDeals, activeOffers] = await Promise.all([
-      prisma.deal.findMany({ where: { stage: { in: [...ACTIVE_STAGES] }, organizationId: org }, include: { ...dealInclude, offers: true } }),
+      prisma.deal.findMany({ where: { stage: { in: [...ACTIVE_STAGES] }, recordType: "OPPORTUNITY", organizationId: org }, include: { ...dealInclude, offers: true } }),
       prisma.deal.findMany({
-        where: { stage: "CLOSED", organizationId: org },
+        where: { stage: "CLOSED", recordType: "OPPORTUNITY", organizationId: org },
         include: { ...dealInclude, selectedOffer: true, stageHistory: { where: { toStage: "CLOSED" }, orderBy: { createdAt: "desc" }, take: 1 } },
       }),
-      prisma.offer.count({ where: { status: "ACTIVE", deal: { organizationId: org } } }),
+      prisma.offer.count({ where: { status: "ACTIVE", deal: { organizationId: org, recordType: "OPPORTUNITY" } } }),
     ]);
 
     // Metrics row
@@ -59,7 +62,7 @@ dashboardRouter.get(
 
     // Upcoming follow-ups (from buyer activity nextFollowUpDate)
     const followUps = await prisma.dealBuyerActivity.findMany({
-      where: { nextFollowUpDate: { gte: now }, deal: { organizationId: org } },
+      where: { nextFollowUpDate: { gte: now }, deal: { organizationId: org, recordType: "OPPORTUNITY" } },
       orderBy: { nextFollowUpDate: "asc" },
       take: 10,
       include: { buyer: { select: { name: true } }, deal: { select: { name: true } } },

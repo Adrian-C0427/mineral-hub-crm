@@ -403,7 +403,7 @@ function WellPicker({ selected, setSelected }: { selected: WellRow[]; setSelecte
           <input
             className="msel-input"
             value={q}
-            placeholder={selected.length === 0 ? "Search wells by name, API number, operator or lease…" : ""}
+            placeholder={selected.length === 0 ? "Search by well/lease name, API, operator, county, formation, status…" : ""}
             onChange={(e) => { setQ(e.target.value); setOpen(true); }}
             onFocus={() => setOpen(true)}
           />
@@ -488,23 +488,6 @@ function AssumptionsForm({ a, onChange }: { a: Assumptions; onChange: (a: Assump
             <NumField label="Gas ($/mcf)" value={a.gasPrice} onChange={(v) => set("gasPrice", v ?? 0)} step={0.1} />
             <NumField label="NGL ($/bbl)" value={a.nglPrice} onChange={(v) => set("nglPrice", v ?? 0)} step={1} />
             <NumField label="Price escalation" value={a.priceEscalationPct} onChange={(v) => set("priceEscalationPct", v ?? 0)} step={0.5} suffix="%/yr" />
-          </div>
-        </div>
-        <div className="assumption-group">
-          <div className="assumption-group-title">Ownership interest</div>
-          <div className="assumption-grid">
-            <NumField label="Net revenue interest" value={round4(a.nri * 100)} onChange={(v) => set("nri", (v ?? 0) / 100)} step={0.5} suffix="%" hint="Share of revenue you would receive" />
-            <NumField label="Working interest" value={round4(a.workingInterest * 100)} onChange={(v) => set("workingInterest", (v ?? 0) / 100)} step={1} suffix="%" hint="Share of costs you would bear (0 for royalty-only)" />
-          </div>
-        </div>
-        <div className="assumption-group">
-          <div className="assumption-group-title">Costs &amp; taxes</div>
-          <div className="assumption-grid">
-            <NumField label="Operating cost" value={a.opexPerMonth} onChange={(v) => set("opexPerMonth", v ?? 0)} step={100} prefix="$" suffix="/mo" hint="Gross lease operating expense; multiplied by working interest" />
-            <NumField label="Opex escalation" value={a.opexEscalationPct} onChange={(v) => set("opexEscalationPct", v ?? 0)} step={0.5} suffix="%/yr" />
-            <NumField label="Severance (oil/NGL)" value={a.sevTaxOilPct} onChange={(v) => set("sevTaxOilPct", v ?? 0)} step={0.1} suffix="%" />
-            <NumField label="Severance (gas)" value={a.sevTaxGasPct} onChange={(v) => set("sevTaxGasPct", v ?? 0)} step={0.1} suffix="%" />
-            <NumField label="Ad valorem" value={a.adValoremPct} onChange={(v) => set("adValoremPct", v ?? 0)} step={0.1} suffix="%" />
           </div>
         </div>
         <div className="assumption-group">
@@ -871,8 +854,7 @@ function CashFlowTab({ r }: { r: ValuationResult }) {
     <div>
       <div className="metrics-row">
         <MetricCard label="Gross revenue" value={fmtMoneyC(e.grossRevenueTotal)} hint="8/8ths, life of forecast" />
-        <MetricCard label="Net revenue" value={fmtMoneyC(e.netRevenueTotal)} hint={`To your ${(r.assumptions.nri * 100).toFixed(1)}% NRI`} />
-        <MetricCard label="Net cash flow" value={fmtMoneyC(e.netCashFlowTotal)} hint={`After ${fmtMoneyC(e.totalTaxes)} taxes, ${fmtMoneyC(e.totalOpex)} opex`} />
+        <MetricCard label="Net cash flow" value={fmtMoneyC(e.netCashFlowTotal)} hint="Undiscounted, life of forecast" />
         <MetricCard label={`PV @ ${r.assumptions.discountRatePct}%`} value={fmtMoneyC(e.presentValue)} hint={`PV10 ${fmtMoneyC(e.pv10)}`} />
         <MetricCard label="Avg cash flow (yr 1)" value={`${fmtMoneyC(e.monthlyCashFlowFirstYearAvg)}/mo`} />
       </div>
@@ -915,14 +897,12 @@ function CashFlowTab({ r }: { r: ValuationResult }) {
       <div className="panel">
         <div className="panel-title"><h3>Annual Cash Flow Detail <FcTag /></h3></div>
         <div className="table-scroll"><table className="data-table">
-          <thead><tr><th>Year</th><th className="right">Gross Revenue</th><th className="right">Taxes</th><th className="right">Opex</th><th className="right">Net Cash Flow</th><th className="right">Cumulative</th></tr></thead>
+          <thead><tr><th>Year</th><th className="right">Gross Revenue</th><th className="right">Net Cash Flow</th><th className="right">Cumulative</th></tr></thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.year}>
                 <td>{row.year}</td>
                 <td className="right">{money(row.grossRevenue)}</td>
-                <td className="right">{money(row.taxes)}</td>
-                <td className="right">{money(row.opex)}</td>
                 <td className="right">{money(row.netCashFlow)}</td>
                 <td className="right">{money(row.cumNetCashFlow)}</td>
               </tr>
@@ -1143,11 +1123,6 @@ function FullReport({ analysis, analysisName }: { analysis: AnalyzeResponse; ana
           <div className="kv"><span className="k">Gas price</span><span className="v">${a.gasPrice.toFixed(2)}/mcf</span></div>
           <div className="kv"><span className="k">NGL price</span><span className="v">{money(a.nglPrice)}/bbl</span></div>
           <div className="kv"><span className="k">Price escalation</span><span className="v">{a.priceEscalationPct}%/yr</span></div>
-          <div className="kv"><span className="k">Net revenue interest</span><span className="v">{(a.nri * 100).toFixed(2)}%</span></div>
-          <div className="kv"><span className="k">Working interest</span><span className="v">{(a.workingInterest * 100).toFixed(2)}%</span></div>
-          <div className="kv"><span className="k">Operating cost</span><span className="v">{money(a.opexPerMonth)}/mo</span></div>
-          <div className="kv"><span className="k">Severance oil / gas</span><span className="v">{a.sevTaxOilPct}% / {a.sevTaxGasPct}%</span></div>
-          <div className="kv"><span className="k">Ad valorem</span><span className="v">{a.adValoremPct}%</span></div>
           <div className="kv"><span className="k">Discount rate</span><span className="v">{a.discountRatePct}%</span></div>
           <div className="kv"><span className="k">Asking price</span><span className="v">{a.askingPrice > 0 ? money(a.askingPrice) : "—"}</span></div>
           <div className="kv"><span className="k">Closing costs</span><span className="v">{a.closingCosts > 0 ? money(a.closingCosts) : "—"}</span></div>
