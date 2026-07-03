@@ -13,8 +13,10 @@ Field ABSTRACT_N = zero-padded 3-digit county FIPS + abstract number, so
 is the survey name; ABSTRACT_L is the label (e.g. "A-653").
 
 Usage:
-  python3 tools/otls/fetch_abstracts.py <key> "<County Name>" <fips3>
-  e.g. python3 tools/otls/fetch_abstracts.py anderson "Anderson" 001
+  python3 tools/otls/fetch_abstracts.py <key> "<County Name>" <fips3> [out_dir]
+  e.g. python3 tools/otls/fetch_abstracts.py anderson "Anderson" 001 ~/rrc-data/otls
+  (out_dir defaults to client/public/data; use ~/rrc-data/otls to keep bulk
+  output outside the iCloud-synced repo)
 
 Matches the format of the hand-verified Leon/Freestone assets (coords rounded to
 6 dp; id = "TX-" + ABSTRACT_N).
@@ -86,10 +88,11 @@ def round_coords(node):
 
 
 def main():
-    if len(sys.argv) != 4:
+    if len(sys.argv) not in (4, 5):
         print(__doc__)
         sys.exit(1)
     key, name, fips = sys.argv[1], sys.argv[2], sys.argv[3]
+    out_dir = os.path.expanduser(sys.argv[4]) if len(sys.argv) == 5 else OUT_DIR
     assert len(fips) == 3 and fips.isdigit(), "fips must be a 3-digit string"
 
     features, index, seen = [], [], set()
@@ -130,9 +133,9 @@ def main():
             return 0
     index.sort(key=lambda r: absnum(r["abstract"]))
 
-    os.makedirs(OUT_DIR, exist_ok=True)
-    gj_path = os.path.join(OUT_DIR, f"{key}-abstracts.geojson")
-    idx_path = os.path.join(OUT_DIR, f"{key}-abstracts-index.json")
+    os.makedirs(out_dir, exist_ok=True)
+    gj_path = os.path.join(out_dir, f"{key}-abstracts.geojson")
+    idx_path = os.path.join(out_dir, f"{key}-abstracts-index.json")
     with open(gj_path, "w") as fh:
         json.dump({"type": "FeatureCollection", "features": features}, fh, separators=(",", ":"))
     with open(idx_path, "w") as fh:

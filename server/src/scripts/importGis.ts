@@ -21,7 +21,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { prisma } from "../db.js";
 
-const DATA_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../client/public/data");
+const dirArg = process.argv.indexOf("--data-dir");
+const DATA_DIR = dirArg > -1
+  ? path.resolve(process.argv[dirArg + 1].replace(/^~/, process.env.HOME ?? "~"))
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../client/public/data");
 
 interface GJFeature {
   type: "Feature";
@@ -129,23 +132,30 @@ async function main(): Promise<void> {
   console.log("DDL: extensions, gis schema, tables, indexes…");
   await ddl();
 
-  console.log("Importing tx-counties.geojson…");
-  const nCounties = await importCounties();
-  console.log(`  counties: ${nCounties}`);
+  if (fs.existsSync(path.join(DATA_DIR, "tx-counties.geojson"))) {
+    console.log("Importing tx-counties.geojson…");
+    const nCounties = await importCounties();
+    console.log(`  counties: ${nCounties}`);
+  }
 
   const files = fs.readdirSync(DATA_DIR).filter((f) => f.endsWith("-abstracts.geojson")).sort();
   let total = 0;
+  const importedCounties: string[] = [];
   for (const f of files) {
     const { county, count } = await importAbstracts(f);
     total += count;
+    importedCounties.push(county);
     console.log(`  ${county}: ${count} abstracts (${f})`);
   }
 
-  // Validation: DB totals vs file totals, geometry validity.
-  const [{ n: dbAbstracts }] = await prisma.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*)::bigint AS n FROM gis.abstracts`);
-  const [{ n: dbCounties }] = await prisma.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*)::bigint AS n FROM gis.counties`);
+  // Validation scoped to THIS run's counties (the data dir may hold a subset —
+  // e.g. the statewide backfill ran against ~/rrc-data/otls without the
+  // original 12 counties' files).
+  const [{ n: dbAbstracts }] = await prisma.$queryRawUnsafe<{ n: bigint }[]>(
+    `SELECT count(*)::bigint AS n FROM gis.abstracts WHERE county = ANY($1::text[])`, importedCounties);
+  const [{ n: dbTotal }] = await prisma.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*)::bigint AS n FROM gis.abstracts`);
   const [{ n: invalid }] = await prisma.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*)::bigint AS n FROM gis.abstracts WHERE NOT ST_IsValid(geom)`);
-  console.log(`DB: ${dbCounties} counties, ${dbAbstracts} abstracts (files: ${total}), invalid geometries: ${invalid}`);
+  console.log(`DB: ${dbAbstracts} abstracts for this run's ${importedCounties.length} counties (files: ${total}); ${dbTotal} total; invalid geometries: ${invalid}`);
   if (Number(dbAbstracts) !== total) throw new Error("DB abstract count does not match source files");
   if (Number(invalid) !== 0) throw new Error("invalid geometries present after ST_MakeValid");
 }
