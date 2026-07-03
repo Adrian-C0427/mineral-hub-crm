@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { prettyStage, prettyEnum } from "../lib/format";
 
 export function PriorityBadge({ priority }: { priority: "HIGH" | "MEDIUM" | "LOW" }) {
@@ -127,6 +127,66 @@ export function ConfirmDialog({
           <button onClick={onCancel} disabled={busy}>{cancelLabel}</button>
           <button className={danger ? "danger" : "primary"} onClick={onConfirm} disabled={busy}>
             {busy ? "Saving…" : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Standard destructive-delete confirmation used everywhere records can be
+ * permanently deleted. States how many records will be removed and requires the
+ * user to type DELETE before the button enables. `count` drives the pluralized
+ * message; pass `itemLabel` (e.g. "deal", "buyer") for clearer copy.
+ */
+export function ConfirmDelete({
+  count = 1,
+  itemLabel = "record",
+  name,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  count?: number;
+  itemLabel?: string;
+  /** Optional single-record name to show in the prompt. */
+  name?: string;
+  busy?: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const [typed, setTyped] = useState("");
+  const plural = count === 1 ? itemLabel : `${itemLabel}s`;
+  const armed = typed.trim().toUpperCase() === "DELETE";
+  return (
+    <div className="modal-overlay" onClick={onCancel}>
+      <div className="modal" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header">
+          <h3>Confirm deletion</h3>
+          <button className="icon-btn" onClick={onCancel} aria-label="Close">×</button>
+        </div>
+        <div className="modal-body">
+          <p style={{ marginTop: 0 }}>
+            This will permanently delete{" "}
+            {count === 1 && name ? <strong>{name}</strong> : <strong>{count.toLocaleString()} {plural}</strong>}
+            . This action cannot be undone.
+          </p>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label>Type <strong>DELETE</strong> to confirm</label>
+            <input
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              placeholder="DELETE"
+              autoFocus
+              onKeyDown={(e) => { if (e.key === "Enter" && armed && !busy) onConfirm(); }}
+            />
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button onClick={onCancel} disabled={busy}>Cancel</button>
+          <button className="danger" onClick={onConfirm} disabled={!armed || busy}>
+            {busy ? "Deleting…" : `Delete ${count === 1 ? itemLabel : `${count} ${plural}`}`}
           </button>
         </div>
       </div>
