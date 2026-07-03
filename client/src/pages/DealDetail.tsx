@@ -19,6 +19,7 @@ import { money, num, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { SellerDetails } from "../components/SellerDetails";
 import { AssigneePicker } from "../components/AssigneePicker";
+import { DealAiAssistant } from "../components/DealAiAssistant";
 import type { BuyerActivityRow, DealSummary, MatchRec, Seller, UserLite } from "../types";
 // MapLibre is heavy; only load it when a deal detail page is viewed.
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
@@ -115,6 +116,15 @@ export function DealDetail() {
       </div>
 
       <AssigneesCard deal={deal} users={users} canEdit={can("editDeals")} onSaved={loadDeal} />
+
+      <DealAiAssistant
+        dealId={deal.id}
+        buyers={[
+          ...(deal.selectedBuyer ? [{ id: deal.selectedBuyer.id, name: deal.selectedBuyer.name, company: deal.selectedBuyer.companyName }] : []),
+          ...deal.buyerActivity.map((a) => ({ id: a.buyerId, name: a.buyerName, company: a.companyName })),
+          ...(matches ?? []).map((m) => ({ id: m.buyerId, name: m.buyerName, company: m.companyName })),
+        ]}
+      />
 
       <SellerDetails
         dealId={deal.id}
