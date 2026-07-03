@@ -9,7 +9,7 @@ export type DealWithRels = Prisma.DealGetPayload<{
     selectedBuyer: true;
     relationshipOwner: true;
   };
-}> & { offers?: { amount: number }[] };
+}> & { offers?: { amount: number }[]; assignees?: { id: string; name: string }[] };
 
 export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
   const dates = resolveDealDates(deal);
@@ -100,6 +100,7 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     relationshipOwner: deal.relationshipOwner
       ? { id: deal.relationshipOwner.id, name: deal.relationshipOwner.name }
       : null,
+    assignees: deal.assignees ?? [],
     priority,
     profitEst,
     isOverdue: isOverdue({ ...deal, selectedBuyerId: deal.selectedBuyerId }, now),

@@ -278,6 +278,7 @@ model User {
   activityLogs       ActivityLog[]
   expenses           Expense[]
   sellerAssignments  DealSeller[]        @relation("SellerAssignments")
+  assignedDeals      Deal[]              @relation("DealAssignees")
 
   @@index([organizationId])
 }
@@ -398,6 +399,9 @@ model Deal {
   activityLogs   ActivityLog[]
   sellers        DealSeller[]
   revenueEntries AssetRevenueEntry[]
+  // Team members assigned to this deal/asset (multi-assignee). relationshipOwner
+  // is retained as the originating/primary owner for existing metrics & reports.
+  assignees      User[]              @relation("DealAssignees")
 
   @@index([stage])
   @@index([selectedBuyerId])

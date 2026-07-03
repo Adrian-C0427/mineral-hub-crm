@@ -10,6 +10,7 @@ import { BuyerActivitySection } from "../components/BuyerActivitySection";
 import { LogContactModal } from "../components/LogContactModal";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
+import { AssigneePicker } from "../components/AssigneePicker";
 import { AbstractMultiPicker } from "../components/AbstractPicker";
 import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS } from "../lib/options";
 import { monthLabel } from "../lib/charts";
@@ -95,7 +96,7 @@ export function MineralAssetDetail() {
       </div>
 
       {tab === "hold" ? (
-        <HoldTab asset={asset} canEdit={canEdit} onChanged={load} />
+        <HoldTab asset={asset} users={users} canEdit={canEdit} onChanged={load} />
       ) : (
         <SellTab asset={asset} matches={matches} users={users} canEdit={canEdit} onChanged={refresh} onSetSell={() => setMode("SELL")} />
       )}
@@ -107,12 +108,22 @@ export function MineralAssetDetail() {
 // Hold tab — ownership, financials, property, revenue, map, sellers, docs
 // ---------------------------------------------------------------------------
 
-function HoldTab({ asset, canEdit, onChanged }: { asset: AssetDetail; canEdit: boolean; onChanged: () => void }) {
+function HoldTab({ asset, users, canEdit, onChanged }: { asset: AssetDetail; users: UserLite[]; canEdit: boolean; onChanged: () => void }) {
+  async function saveAssignees(ids: string[]) { await api.patch(`/deals/${asset.id}`, { assigneeIds: ids }); onChanged(); }
   return (
     <div>
       <div className="grid-2">
         <OwnershipCard asset={asset} canEdit={canEdit} onSaved={onChanged} />
         <PropertyCard asset={asset} canEdit={canEdit} onSaved={onChanged} />
+      </div>
+
+      <div className="panel">
+        <div className="section-head"><h3 style={{ margin: 0 }}>Assigned Team Members</h3></div>
+        {canEdit ? (
+          <AssigneePicker users={users} value={(asset.assignees ?? []).map((a) => a.id)} onChange={saveAssignees} />
+        ) : (
+          <div className="row" style={{ gap: 6 }}>{(asset.assignees ?? []).length === 0 ? <span className="muted">Unassigned</span> : asset.assignees.map((a) => <span key={a.id} className="badge resp-pending">{a.name}</span>)}</div>
+        )}
       </div>
 
       <FinancialsCard asset={asset} canEdit={canEdit} onSaved={onChanged} />

@@ -40,7 +40,16 @@ function toDate(v: unknown): Date | null | undefined {
   return new Date(v as string);
 }
 
-const dealInclude = { selectedBuyer: true, relationshipOwner: true } as const;
+const dealInclude = { selectedBuyer: true, relationshipOwner: true, assignees: { select: { id: true, name: true } } } as const;
+
+/** Validate that every id is a user in the caller's org; returns the clean list. */
+async function validateOrgUsers(org: string, ids: string[]): Promise<string[]> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return [];
+  const found = await prisma.user.findMany({ where: { id: { in: unique }, organizationId: org }, select: { id: true } });
+  if (found.length !== unique.length) throw new HttpError(400, "One or more assignees are not in your organization");
+  return found.map((u) => u.id);
+}
 
 /** Owned-asset fields shared by create/update. All optional/nullable. */
 const assetFields = {
@@ -116,6 +125,7 @@ const createSchema = z.object({
   originalClosingDate: dateField,
   estimatedClosingCosts: z.number().nullish(),
   relationshipOwnerId: z.string().nullish(),
+  assigneeIds: z.array(z.string()).optional(),
   notes: z.string().nullish(),
   ...assetFields,
 });
@@ -126,6 +136,7 @@ dealsRouter.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = createSchema.parse(req.body);
     const isAsset = data.recordType === "OWNED_ASSET";
+    const assigneeIds = data.assigneeIds ? await validateOrgUsers(orgId(req), data.assigneeIds) : [];
     const deal = await prisma.$transaction(async (tx) => {
       const created = await tx.deal.create({
         data: {
@@ -150,6 +161,7 @@ dealsRouter.post(
           originalClosingDate: toDate(data.originalClosingDate) ?? null,
           estimatedClosingCosts: data.estimatedClosingCosts ?? null,
           relationshipOwnerId: data.relationshipOwnerId ?? req.user!.id,
+          assignees: assigneeIds.length ? { connect: assigneeIds.map((id) => ({ id })) } : undefined,
           notes: data.notes ?? null,
           // Owned assets skip the acquisition pipeline — park them in CLOSING so
           // they don't clutter the acquisition board unless marked for sale.
@@ -492,6 +504,7 @@ const updateSchema = z.object({
   finalClosingDateOverride: dateField,
   estimatedClosingCosts: z.number().nullish(),
   relationshipOwnerId: z.string().nullish(),
+  assigneeIds: z.array(z.string()).optional(),
   notes: z.string().nullish(),
   ...assetFields,
 });
@@ -510,6 +523,10 @@ dealsRouter.patch(
     }
     const existing = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!existing) throw new HttpError(404, "Deal not found");
+    if (data.assigneeIds !== undefined) {
+      const ids = await validateOrgUsers(orgId(req), data.assigneeIds);
+      patch.assignees = { set: ids.map((id) => ({ id })) };
+    }
     const deal = await prisma.deal.update({ where: { id: req.params.id }, data: patch, include: dealInclude });
     res.json(serializeDeal(deal));
   }),

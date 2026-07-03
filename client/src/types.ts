@@ -47,6 +47,7 @@ export interface DealSummary {
   selectedBuyer: { id: string; name: string; companyName: string } | null;
   selectedOfferId: string | null;
   relationshipOwner: { id: string; name: string } | null;
+  assignees: { id: string; name: string }[];
   estimatedClosingCosts: number | null;
   // Record discriminator + owned-asset fields (null/undefined for opportunities).
   recordType: RecordType;

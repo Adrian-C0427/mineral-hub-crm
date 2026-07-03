@@ -18,6 +18,7 @@ import { operatorsForCounties } from "../lib/operators";
 import { money, num, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { SellerDetails } from "../components/SellerDetails";
+import { AssigneePicker } from "../components/AssigneePicker";
 import type { BuyerActivityRow, DealSummary, MatchRec, Seller, UserLite } from "../types";
 // MapLibre is heavy; only load it when a deal detail page is viewed.
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
@@ -112,6 +113,8 @@ export function DealDetail() {
         <CharacteristicsCard deal={deal} onSaved={refreshAll} />
         <ContractTimelineCard deal={deal} onSaved={loadDeal} />
       </div>
+
+      <AssigneesCard deal={deal} users={users} canEdit={can("editDeals")} onSaved={loadDeal} />
 
       <SellerDetails
         dealId={deal.id}
@@ -264,6 +267,26 @@ export function DealDetail() {
           onCancel={() => setConfirmDelete(false)}
           onConfirm={async () => { await api.del(`/deals/${id}`); nav("/deals"); }}
         />
+      )}
+    </div>
+  );
+}
+
+function AssigneesCard({ deal, users, canEdit, onSaved }: { deal: DealDetailData; users: UserLite[]; canEdit: boolean; onSaved: () => void }) {
+  const ids = (deal.assignees ?? []).map((a) => a.id);
+  async function save(next: string[]) {
+    await api.patch(`/deals/${deal.id}`, { assigneeIds: next });
+    onSaved();
+  }
+  return (
+    <div className="panel">
+      <div className="section-head"><h3 style={{ margin: 0 }}>Assigned Team Members</h3></div>
+      {canEdit ? (
+        <AssigneePicker users={users} value={ids} onChange={save} />
+      ) : (
+        <div className="row" style={{ gap: 6 }}>
+          {ids.length === 0 ? <span className="muted">Unassigned</span> : (deal.assignees ?? []).map((a) => <span key={a.id} className="badge resp-pending">{a.name}</span>)}
+        </div>
       )}
     </div>
   );
