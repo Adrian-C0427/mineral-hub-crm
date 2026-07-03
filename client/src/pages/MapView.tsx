@@ -29,6 +29,10 @@ type SelHotspot = { kind: "hotspot"; summary: AreaSummary; periodLabel: string }
 type Selected = SelAbstract | SelWell | SelHotspot | null;
 
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
+// Below this zoom the whole state is in view; loading every county's abstracts
+// would defeat the purpose, so we show only county outlines until the user zooms
+// in. Abstract number labels start at zoom 9, so 7 gives a comfortable lead.
+const MIN_ABSTRACT_ZOOM = 7;
 
 const EMPTY_FC = { type: "FeatureCollection", features: [] } as unknown as GeoJSON.FeatureCollection;
 // Oil ramp runs warm (amber → red); gas ramp runs cool (indigo → violet) so the
@@ -83,6 +87,13 @@ export function MapView() {
   const selWellRef = useRef<number | null>(null);
   const abstractsFC = useRef<FC | null>(null);
   const wellsFC = useRef<FC | null>(null);
+  // Viewport-based lazy loading: county abstracts are fetched only when their
+  // bounding box enters the view (at/above MIN_ABSTRACT_ZOOM). This keeps the map
+  // fast as the statewide dataset grows toward 254 counties — we never download
+  // or render more than the visible extent needs.
+  const loadedCounties = useRef<Set<string>>(new Set());
+  const loadingCounties = useRef<Set<string>>(new Set());
+  const countyBBox = useRef<Map<string, [number, number, number, number]>>(new Map());
   const heatWells = useRef<HeatWell[]>([]);
   const perLease = useRef<Map<string, number>>(new Map());
   const heatPointsRef = useRef<HeatPoint[]>([]);
@@ -150,34 +161,45 @@ export function MapView() {
     mapRef.current = map;
 
     map.on("load", async () => {
-      // Multi-county: merge every implemented county's abstracts into one source;
-      // load wells/wellbores for the counties that have them.
-      const absParts = await Promise.all(
-        COUNTIES.map((c) => fetch(`/data/${c.key}-abstracts.geojson`).then((r) => r.json()).catch(() => ({ features: [] }))),
-      );
-      const welParts = await Promise.all(
-        COUNTIES_WITH_WELLS.map((k) => fetch(`/data/${k}-wells.geojson`).then((r) => r.json()).catch(() => ({ features: [] }))),
-      );
-      const boreParts = await Promise.all(
-        COUNTIES_WITH_WELLS.map((k) => fetch(`/data/${k}-wellbores.geojson`).then((r) => r.json()).catch(() => ({ features: [] }))),
-      );
-      const absFC: FC = { type: "FeatureCollection", features: absParts.flatMap((p) => p.features) } as FC;
-      const welFC: FC = { type: "FeatureCollection", features: welParts.flatMap((p) => p.features) } as FC;
-      const boreFC: FC = { type: "FeatureCollection", features: boreParts.flatMap((p) => p.features) } as FC;
-      abstractsFC.current = absFC; wellsFC.current = welFC;
+      // Abstracts load lazily per viewport (see ensureCounties/syncViewport); the
+      // source starts empty. Wells/wellbores are only implemented for a couple of
+      // counties (phase 2), so those stay eager and small.
+      const [txCounties, welParts, boreParts] = await Promise.all([
+        fetch(`/data/tx-counties.geojson`).then((r) => r.json()).catch(() => ({ features: [] })),
+        Promise.all(COUNTIES_WITH_WELLS.map((k) => fetch(`/data/${k}-wells.geojson`).then((r) => r.json()).catch(() => ({ features: [] })))),
+        Promise.all(COUNTIES_WITH_WELLS.map((k) => fetch(`/data/${k}-wellbores.geojson`).then((r) => r.json()).catch(() => ({ features: [] })))),
+      ]);
+      const welFC: FC = { type: "FeatureCollection", features: welParts.flatMap((p: FC) => p.features) } as FC;
+      const boreFC: FC = { type: "FeatureCollection", features: boreParts.flatMap((p: FC) => p.features) } as FC;
+      abstractsFC.current = { type: "FeatureCollection", features: [] };
+      wellsFC.current = welFC;
       heatWells.current = extractWells(welFC.features);
       perLease.current = wellsPerLease(heatWells.current);
+
+      // Precompute each implemented county's bbox from the statewide boundary file
+      // (tx-counties fips = "48" + our 3-digit county fips) so the viewport loader
+      // knows which counties to fetch as they scroll into view.
+      const bboxByFips = new Map<string, [number, number, number, number]>();
+      for (const f of (txCounties.features ?? []) as GeoFeature[]) bboxByFips.set(String(f.properties.fips), bboxOf(f.geometry));
+      for (const c of COUNTIES) { const bb = bboxByFips.get(`48${c.fips}`); if (bb) countyBBox.current.set(c.key, bb); }
+
       const uniq = (arr: (string | null | undefined)[]) => [...new Set(arr.filter(Boolean) as string[])];
+      // County filter/search list is the full registry (searchable even before a
+      // county's abstracts are loaded); survey/abstract lists fill in as counties load.
       setMeta({
-        counties: uniq(absFC.features.map((f) => f.properties.county as string)).sort(),
-        surveys: uniq(absFC.features.map((f) => f.properties.survey as string)).sort(),
-        abstracts: uniq(absFC.features.map((f) => f.properties.abstract as string)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+        counties: COUNTIES.map((c) => c.name).sort(),
+        surveys: [], abstracts: [],
         wellTypes: uniq(welFC.features.map((f) => f.properties.type as string)).sort(),
         wellStatuses: uniq(welFC.features.map((f) => f.properties.status as string)).sort(),
         operators: uniq(welFC.features.map((f) => f.properties.operator as string)).sort(),
       });
 
-      map.addSource("abstracts", { type: "geojson", data: absFC as unknown as GeoJSON.FeatureCollection, promoteId: "id" });
+      // Statewide county outlines (cheap, always on) — the cadastral frame that
+      // stays visible at every zoom; abstract detail streams in per viewport.
+      map.addSource("counties", { type: "geojson", data: txCounties as unknown as GeoJSON.FeatureCollection });
+      map.addLayer({ id: "county-bounds", type: "line", source: "counties", paint: { "line-color": "#94a3b8", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.4, 9, 1.2], "line-opacity": 0.5 } });
+
+      map.addSource("abstracts", { type: "geojson", data: EMPTY_FC, promoteId: "id" });
       map.addSource("wells", { type: "geojson", data: welFC as unknown as GeoJSON.FeatureCollection, promoteId: "fid" });
       map.addSource("wellbores", { type: "geojson", data: boreFC as unknown as GeoJSON.FeatureCollection, promoteId: "fid" });
 
@@ -268,12 +290,14 @@ export function MapView() {
       map.on("mouseleave", "wells", () => (map.getCanvas().style.cursor = ""));
       map.on("mouseenter", "abstracts-fill", () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", "abstracts-fill", () => (map.getCanvas().style.cursor = ""));
-      // Re-scale the heat gradient to whatever is now on screen after a pan/zoom.
-      map.on("moveend", () => { if (heatRef.current.oil || heatRef.current.gas) pushHeat(); });
+      // On pan/zoom: stream in any newly-visible counties' abstracts, and re-scale
+      // the heat gradient to the current extent.
+      map.on("moveend", () => { syncViewport(); if (heatRef.current.oil || heatRef.current.gas) pushHeat(); });
 
       styleReady.current = true;
-      applyHighlight(); applyLayerVisibility(); applyAbstractFilter(); applyWellFilter();
+      applyLayerVisibility(); applyAbstractFilter(); applyWellFilter();
       setHeatReady(true); // lets the heat effect run its first compute with a fresh closure
+      syncViewport(); // load whatever counties the initial viewport covers
     });
     return () => { map.remove(); mapRef.current = null; styleReady.current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -320,6 +344,64 @@ export function MapView() {
     selectWell(toWellProps(feat.properties));
     const [lon, lat] = feat.geometry.coordinates as number[];
     map.flyTo({ center: [lon, lat], zoom: Math.max(map.getZoom(), 13), duration: 800 });
+  }
+
+  // --- Viewport-based lazy loading of county abstracts ---------------------
+
+  // setData() resets feature-state, so re-apply deal highlights + the current
+  // selection after every abstracts refresh.
+  function reapplyAbstractStates() {
+    const map = mapRef.current; if (!map) return;
+    applyHighlight();
+    if (selAbstractRef.current) map.setFeatureState({ source: "abstracts", id: selAbstractRef.current }, { selected: true });
+  }
+
+  // Fetch the given counties' abstracts (skipping any already loaded/in-flight),
+  // merge them into the shared source, and refresh the survey/abstract filter lists.
+  async function ensureCounties(keys: string[]): Promise<void> {
+    const map = mapRef.current; if (!map) return;
+    const todo = keys.filter((k) => !loadedCounties.current.has(k) && !loadingCounties.current.has(k) && COUNTIES.some((c) => c.key === k));
+    if (!todo.length) return;
+    todo.forEach((k) => loadingCounties.current.add(k));
+    const parts = await Promise.all(todo.map((k) =>
+      fetch(`/data/${k}-abstracts.geojson`).then((r) => r.json()).catch(() => ({ features: [] })),
+    ));
+    const fc = abstractsFC.current ?? { type: "FeatureCollection", features: [] };
+    todo.forEach((k, i) => { fc.features.push(...(parts[i].features ?? [])); loadedCounties.current.add(k); loadingCounties.current.delete(k); });
+    abstractsFC.current = fc;
+    if (!mapRef.current) return; // unmounted while fetching
+    (map.getSource("abstracts") as maplibregl.GeoJSONSource | undefined)?.setData(fc as unknown as GeoJSON.FeatureCollection);
+    const uniq = (arr: (string | null | undefined)[]) => [...new Set(arr.filter(Boolean) as string[])];
+    setMeta((m) => ({
+      ...m,
+      surveys: uniq(fc.features.map((f) => f.properties.survey as string)).sort(),
+      abstracts: uniq(fc.features.map((f) => f.properties.abstract as string)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+    }));
+    reapplyAbstractStates();
+  }
+
+  // Load every implemented county whose bbox intersects the current viewport —
+  // but only once zoomed in past the statewide overview.
+  function syncViewport(): void {
+    const map = mapRef.current; if (!map) return;
+    if (map.getZoom() < MIN_ABSTRACT_ZOOM) return;
+    const b = map.getBounds();
+    const w = b.getWest(), s = b.getSouth(), e = b.getEast(), n = b.getNorth();
+    const need: string[] = [];
+    for (const c of COUNTIES) {
+      if (loadedCounties.current.has(c.key)) continue;
+      const bb = countyBBox.current.get(c.key); if (!bb) continue;
+      if (bb[0] <= e && bb[2] >= w && bb[1] <= n && bb[3] >= s) need.push(c.key);
+    }
+    if (need.length) void ensureCounties(need);
+  }
+
+  // Search/filter can target a county that isn't loaded yet: fetch it, then frame it.
+  function goToCounty(key: string): void {
+    const map = mapRef.current; if (!map) return;
+    const bb = countyBBox.current.get(key);
+    void ensureCounties([key]);
+    if (bb) map.fitBounds([[bb[0], bb[1]], [bb[2], bb[3]]], { padding: 40, maxZoom: 12, duration: 800 });
   }
 
   function applyHighlight() {
@@ -470,6 +552,14 @@ export function MapView() {
   }, []);
   useEffect(applyHighlight, [dealsByAbstract]);
   useEffect(applyLayerVisibility, [layers]);
+  // Filtering by a county loads its abstracts even if it's off-screen, so the
+  // filter always reflects real data (not just what the viewport happened to show).
+  useEffect(() => {
+    if (!styleReady.current || fCounties.length === 0) return;
+    const keys = COUNTIES.filter((c) => fCounties.includes(c.name)).map((c) => c.key);
+    void ensureCounties(keys);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fCounties]);
   useEffect(applyAbstractFilter, [fCounties, fSurveys, fAbstracts]);
   useEffect(applyWellFilter, [fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses, fOperators]);
   // Rebuild heat points whenever the data, filters, period, or thresholds change.
@@ -480,8 +570,13 @@ export function MapView() {
   useEffect(() => { applyHeatVisibility(); /* eslint-disable-next-line */ }, [heat.topProducers, heat.oil, heat.gas, heat.hotspots]);
 
   const results = useMemo(() => {
-    const q = query.trim().toLowerCase(); if (!q) return [] as { kind: "abstract" | "well"; key: string; label: string; sub: string }[];
-    const out: { kind: "abstract" | "well"; key: string; label: string; sub: string }[] = [];
+    type R = { kind: "abstract" | "well" | "county"; key: string; label: string; sub: string };
+    const q = query.trim().toLowerCase(); if (!q) return [] as R[];
+    const out: R[] = [];
+    // Counties are searchable even before their abstracts load (they fetch on select).
+    for (const c of COUNTIES) {
+      if (c.name.toLowerCase().includes(q)) { out.push({ kind: "county", key: c.key, label: `${c.name} County`, sub: "Go to county" }); if (out.length >= 4) break; }
+    }
     for (const f of abstractsFC.current?.features ?? []) {
       const ab = (f.properties.abstract as string) || ""; const sv = (f.properties.survey as string) || "";
       if (ab.toLowerCase().includes(q) || sv.toLowerCase().includes(q)) { out.push({ kind: "abstract", key: f.properties.id as string, label: ab, sub: sv }); if (out.length >= 6) break; }
@@ -502,7 +597,7 @@ export function MapView() {
 
   return (
     <div className="page" style={{ maxWidth: 1400 }}>
-      <div className="page-header"><div className="row"><h1 style={{ marginBottom: 0 }}>Map</h1><span className="muted">Leon County, TX · proof of concept</span></div></div>
+      <div className="page-header"><div className="row"><h1 style={{ marginBottom: 0 }}>Map</h1><span className="muted">Texas · {COUNTIES.length} counties · abstracts load as you zoom in</span></div></div>
 
       <div className="row" style={{ marginBottom: 12, gap: 10, position: "relative" }}>
         <div style={{ position: "relative", flex: 1, maxWidth: 440 }}>
@@ -510,7 +605,7 @@ export function MapView() {
           {results.length > 0 && (
             <div className="msel-menu" style={{ top: "100%" }}>
               {results.map((r) => (
-                <div className="msel-opt" key={r.kind + r.key} onClick={() => { r.kind === "abstract" ? selectAbstractById(r.key) : selectWellByFid(Number(r.key)); setQuery(""); }}>
+                <div className="msel-opt" key={r.kind + r.key} onClick={() => { r.kind === "abstract" ? selectAbstractById(r.key) : r.kind === "county" ? goToCounty(r.key) : selectWellByFid(Number(r.key)); setQuery(""); }}>
                   <strong>{r.label}</strong> <span className="muted">· {r.sub}</span>
                 </div>
               ))}
