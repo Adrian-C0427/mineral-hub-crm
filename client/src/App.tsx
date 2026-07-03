@@ -5,6 +5,7 @@ import { Sidebar } from "./components/Sidebar";
 import { Login } from "./pages/Login";
 import { ResetPassword } from "./pages/ResetPassword";
 import { OAuthCallback } from "./pages/OAuthCallback";
+import { ChangePasswordForm } from "./components/ChangePasswordForm";
 import { Dashboard } from "./pages/Dashboard";
 import { Pipeline } from "./pages/Pipeline";
 import { Deals } from "./pages/Deals";
@@ -33,6 +34,25 @@ function Guard({ perm, children }: { perm: string; children: ReactNode }) {
   return can(perm) ? <>{children}</> : <Navigate to="/" replace />;
 }
 
+/** Blocking screen shown when the account is flagged mustChangePassword. */
+function ForcePasswordChange() {
+  const { user, logout, refresh } = useAuth();
+  return (
+    <div className="login-wrap">
+      <div className="login-card" style={{ width: 420 }}>
+        <div className="brand" style={{ fontSize: 22, marginBottom: 4 }}>Mineral Hub<span className="dot">.</span></div>
+        <p className="muted" style={{ marginTop: 0 }}>
+          Your password was reset by an administrator. Please set a new password to continue.
+        </p>
+        <ChangePasswordForm compact onChanged={() => refresh()} />
+        <p className="muted" style={{ textAlign: "center", marginTop: 14, marginBottom: 0 }}>
+          Signed in as {user?.email} · <a href="#" onClick={(e) => { e.preventDefault(); logout(); }}>Sign out</a>
+        </p>
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   const { user, loading } = useAuth();
 
@@ -47,6 +67,9 @@ export function App() {
       </Routes>
     );
   }
+
+  // After an owner-issued reset, the user must set a new password before using the app.
+  if (user.mustChangePassword) return <ForcePasswordChange />;
 
   return (
     <div className="app-shell with-sidebar">

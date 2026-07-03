@@ -4,6 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 import { Banner, ConfirmChanges } from "../components/ui";
 import { PhoneInput } from "../components/PhoneInput";
 import { TwoFactorSettings } from "../components/TwoFactorSettings";
+import { ChangePasswordForm } from "../components/ChangePasswordForm";
 
 /** General settings — account/profile now; structured for more sections later. */
 export function SettingsGeneral() {
@@ -79,6 +80,12 @@ export function SettingsGeneral() {
           <button className="primary" disabled={busy} style={{ marginTop: 8 }}>{busy ? "Saving…" : "Save changes"}</button>
         </form>
         {confirming && <ConfirmChanges onCancel={() => setConfirming(false)} onConfirm={save} />}
+      </div>
+
+      <div className="panel">
+        <h3>Change Password</h3>
+        <p className="muted" style={{ marginTop: 0 }}>Update your password. You'll need your current password to confirm.</p>
+        <ChangePasswordForm />
       </div>
 
       <TwoFactorSettings />

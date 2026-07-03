@@ -243,6 +243,8 @@ model User {
   phone        String?
   email        String     @unique
   passwordHash String
+  // Set when an owner resets this user's password; forces a change at next login.
+  mustChangePassword Boolean @default(false)
   role         Role       @default(ASSOCIATE)
   status       UserStatus @default(ACTIVE)
 

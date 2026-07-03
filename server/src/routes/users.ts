@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { hashPassword } from "../auth/password.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
+import crypto from "node:crypto";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { normalizePhone } from "../domain/phone.js";
 
@@ -106,6 +107,47 @@ usersRouter.patch(
       select: { id: true, name: true, email: true, role: true, status: true },
     });
     res.json(user);
+  }),
+);
+
+/**
+ * Owner-only password reset for another user. Either generates a temporary
+ * password or sets one the owner supplies; the affected user must change it at
+ * next login (mustChangePassword). Returns the temporary password once so the
+ * owner can relay it.
+ */
+const resetPasswordSchema = z
+  .object({
+    mode: z.enum(["temp", "manual"]),
+    password: z.string().min(8, "Password must be at least 8 characters").optional(),
+  })
+  .refine((d) => d.mode === "temp" || (d.password && d.password.length >= 8), {
+    message: "A new password (min 8 characters) is required for manual mode",
+    path: ["password"],
+  });
+
+/** Readable temporary password, e.g. "Mineral-7f3a92". */
+function generateTempPassword(): string {
+  return `Mineral-${crypto.randomBytes(4).toString("hex")}`;
+}
+
+usersRouter.post(
+  "/:id/reset-password",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    // Available only to the organization owner.
+    if (req.user!.orgRole !== "OWNER") throw new HttpError(403, "Only the organization owner can reset another user's password");
+    const { mode, password } = resetPasswordSchema.parse(req.body);
+    const target = await prisma.user.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
+    if (!target) throw new HttpError(404, "User not found in your organization");
+    if (target.id === req.user!.id) throw new HttpError(400, "Use your account settings to change your own password");
+
+    const temporaryPassword = mode === "temp" ? generateTempPassword() : password!;
+    await prisma.user.update({
+      where: { id: target.id },
+      data: { passwordHash: await hashPassword(temporaryPassword), mustChangePassword: true },
+    });
+    // Only echo a generated temp password; never echo an owner-supplied one back.
+    res.json({ ok: true, ...(mode === "temp" ? { temporaryPassword } : {}) });
   }),
 );
 
