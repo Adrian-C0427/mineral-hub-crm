@@ -23,6 +23,10 @@ const TILE_BUFFER = 64;
 /** Below this zoom a tile would span several counties' worth of polygons. */
 const TILE_MIN_ZOOM = 6;
 const TILE_MAX_ZOOM = 22;
+/** Well points/laterals only render usefully once zoomed in; gating them here
+ * keeps low-zoom tiles slim (a dense county can hold 10k+ wells). */
+const WELLS_MIN_ZOOM = 9;
+const BORES_MIN_ZOOM = 10;
 
 // Tiny insertion-order LRU. Cadastral data changes only on re-import, so a
 // process-lifetime cache is safe; Railway redeploys (and imports precede
@@ -54,19 +58,38 @@ gisTilesRouter.get(
     const hit = tileCache.get(key);
     if (hit) return res.send(hit);
 
-    // Bbox filter runs against the 4326 GIST index; only intersecting rows get
-    // transformed/clipped. ST_AsMVTGeom quantizes to the tile grid, so payload
-    // size tracks the viewport, not the table.
+    // Bbox filter runs against the 4326 GIST indexes; only intersecting rows
+    // get transformed/clipped. ST_AsMVTGeom quantizes to the tile grid, so
+    // payload size tracks the viewport, not the tables. An MVT is a protobuf
+    // whose layers are independent messages, so concatenating per-layer
+    // ST_AsMVT buffers yields one multi-layer tile. Wellbore rows join their
+    // surface well's attributes so the client can apply identical filter
+    // expressions to both layers.
     const rows = await prisma.$queryRawUnsafe<{ tile: Buffer | null }[]>(
       `WITH bounds AS (SELECT ST_TileEnvelope($1::int, $2::int, $3::int) AS env),
-       mvtgeom AS (
-         SELECT ST_AsMVTGeom(ST_Transform(a.geom, 3857), bounds.env, ${TILE_EXTENT}, ${TILE_BUFFER}, true) AS geom,
+       wanted AS (SELECT ST_Transform(ST_Expand(env, 4000), 4326) AS box, env FROM bounds),
+       abs_mvt AS (
+         SELECT ST_AsMVTGeom(ST_Transform(a.geom, 3857), w.env, ${TILE_EXTENT}, ${TILE_BUFFER}, true) AS geom,
                 a.id, a.county, a.abstract, a.survey, a.area_m2 AS area
-           FROM gis.abstracts a, bounds
-          WHERE a.geom && ST_Transform(ST_Expand(bounds.env, 4000), 4326)
+           FROM gis.abstracts a, wanted w WHERE a.geom && w.box
+       ),
+       well_mvt AS (
+         SELECT ST_AsMVTGeom(ST_Transform(wl.geom, 3857), w.env, ${TILE_EXTENT}, ${TILE_BUFFER}, true) AS geom,
+                wl.fid, wl.api8, wl.well_no AS "wellNo", wl.symbol, wl.type, wl.status,
+                wl.county, wl.operator, wl.abstract, wl.survey
+           FROM rrc.wells wl, wanted w WHERE wl.geom && w.box
+       ),
+       bore_mvt AS (
+         SELECT ST_AsMVTGeom(ST_Transform(b.geom, 3857), w.env, ${TILE_EXTENT}, ${TILE_BUFFER}, true) AS geom,
+                b.fid, b.surface_fid AS "surfaceId", b.wellbore_type AS "wellboreType",
+                sw.type, sw.status, sw.county, sw.operator, sw.abstract, sw.survey
+           FROM rrc.wellbores b
+           LEFT JOIN rrc.wells sw ON sw.fid = b.surface_fid, wanted w
+          WHERE b.geom && w.box
        )
-       SELECT ST_AsMVT(mvtgeom, 'abstracts', ${TILE_EXTENT}, 'geom') AS tile
-         FROM mvtgeom WHERE geom IS NOT NULL`,
+       SELECT coalesce((SELECT ST_AsMVT(abs_mvt, 'abstracts', ${TILE_EXTENT}, 'geom') FROM abs_mvt WHERE geom IS NOT NULL), ''::bytea)
+           || CASE WHEN $1::int >= ${WELLS_MIN_ZOOM} THEN coalesce((SELECT ST_AsMVT(well_mvt, 'wells', ${TILE_EXTENT}, 'geom') FROM well_mvt WHERE geom IS NOT NULL), ''::bytea) ELSE ''::bytea END
+           || CASE WHEN $1::int >= ${BORES_MIN_ZOOM} THEN coalesce((SELECT ST_AsMVT(bore_mvt, 'wellbores', ${TILE_EXTENT}, 'geom') FROM bore_mvt WHERE geom IS NOT NULL), ''::bytea) ELSE ''::bytea END AS tile`,
       z, x, y,
     );
     const tile = rows[0]?.tile;
@@ -102,6 +125,62 @@ gisRouter.get(
   }),
 );
 
+/** Well search: API number, well name/lease, or operator (rrc.wells). */
+gisRouter.get(
+  "/wells/search",
+  asyncHandler(async (req, res) => {
+    const { q } = searchSchema.parse(req.query);
+    const rows = await prisma.$queryRawUnsafe<
+      { fid: number; api8: string | null; wellNo: string | null; leaseName: string | null; operator: string | null; type: string | null; county: string; lon: number; lat: number }[]
+    >(
+      `SELECT fid, api8, well_no AS "wellNo", lease_name AS "leaseName", operator, type, county,
+              ST_X(geom) AS lon, ST_Y(geom) AS lat
+         FROM rrc.wells
+        WHERE api8 LIKE '%' || $1 || '%' OR api10 LIKE '%' || $1 || '%'
+           OR lease_name ILIKE '%' || $1 || '%' OR operator ILIKE '%' || $1 || '%'
+           OR well_no = upper($1)
+        ORDER BY county, lease_name NULLS LAST
+        LIMIT 20`,
+      q,
+    );
+    res.json(rows);
+  }),
+);
+
+/** Full well detail for the map panel, including permits and completions. */
+gisRouter.get(
+  "/wells/:fid",
+  asyncHandler(async (req, res) => {
+    const fid = Number(req.params.fid);
+    if (!Number.isInteger(fid)) return res.status(400).json({ error: "invalid fid" });
+    const rows = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+      `SELECT fid, api8, api10 AS api, well_no AS "wellNo", well_id AS "wellId", symbol, type, status,
+              county, district, lease_no AS "leaseNo", lease_name AS "leaseName",
+              operator, operator_no AS "operatorNo", field_no AS "fieldNo", field_name AS field,
+              oil_gas AS "oilGas", formations, spud_date AS "spudDate", plug_date AS "plugDate",
+              cum_oil AS "cumOil", cum_gas AS "cumGas", last_prod AS "lastProd",
+              abstract, survey, abstract_id AS "abstractId",
+              ST_X(geom) AS lon, ST_Y(geom) AS lat
+         FROM rrc.wells WHERE fid = $1`,
+      fid,
+    );
+    if (!rows.length) return res.status(404).json({ error: "well not found" });
+    const well = rows[0];
+    const [permits, completions] = await Promise.all([
+      prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+        `SELECT status_no AS "statusNo", permit_date AS "permitDate", operator, lease_name AS "leaseName", well_no AS "wellNo"
+           FROM rrc.permits WHERE api8 = $1 ORDER BY permit_date DESC NULLS LAST LIMIT 12`,
+        String(well.api8 ?? "")),
+      prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+        `SELECT tracking_no AS "trackingNo", filing_type AS "filingType", status,
+                filed_date AS "filedDate", completion_date AS "completionDate", field_name AS "fieldName"
+           FROM rrc.completions WHERE api8 = $1 ORDER BY filed_date DESC NULLS LAST LIMIT 12`,
+        String(well.api8 ?? "")),
+    ]);
+    res.json({ ...well, permits, completions });
+  }),
+);
+
 const optionsSchema = z.object({ counties: z.string().optional() });
 
 /**
@@ -125,9 +204,24 @@ gisRouter.get(
       `SELECT DISTINCT abstract AS v FROM gis.abstracts WHERE ${scope} abstract IS NOT NULL ORDER BY v`,
       ...params,
     );
+    // Well-derived filter option lists from rrc.wells, same county scoping.
+    const wScope = names.length ? `WHERE county = ANY($1::text[])` : "";
+    const wellAgg = await prisma.$queryRawUnsafe<{ types: string[]; statuses: string[]; operators: string[]; n: number }[]>(
+      `SELECT array_agg(DISTINCT type) FILTER (WHERE type IS NOT NULL) AS types,
+              array_agg(DISTINCT status) FILTER (WHERE status IS NOT NULL) AS statuses,
+              array_agg(DISTINCT operator) FILTER (WHERE operator IS NOT NULL) AS operators,
+              count(*)::int AS n
+         FROM rrc.wells ${wScope}`,
+      ...params,
+    );
+    const w = wellAgg[0];
     res.json({
       surveys: surveys.map((r) => r.v),
       abstracts: abstracts.map((r) => r.v).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+      wellTypes: (w?.types ?? []).sort(),
+      wellStatuses: (w?.statuses ?? []).sort(),
+      operators: (w?.operators ?? []).sort(),
+      wellCount: w?.n ?? 0,
     });
   }),
 );

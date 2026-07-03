@@ -26,3 +26,4 @@ client/public/data/*-abstracts-index.json
 
 # Raw RRC bulk downloads (imported into PostGIS by the phase-B pipeline; never committed)
 data/rrc/
+tools/rrc/work*/
