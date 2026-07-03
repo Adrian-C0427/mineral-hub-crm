@@ -23,3 +23,6 @@ tools/rrc/work/
 # then imported into PostGIS (server/src/scripts/importGis.ts); never committed.
 client/public/data/*-abstracts.geojson
 client/public/data/*-abstracts-index.json
+
+# Raw RRC bulk downloads (imported into PostGIS by the phase-B pipeline; never committed)
+data/rrc/
