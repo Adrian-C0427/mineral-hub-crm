@@ -20,12 +20,13 @@ import { requireAuth, requireOrg, requirePermission } from "../middleware/auth.j
 
 const TILE_EXTENT = 4096;
 const TILE_BUFFER = 64;
-/** Below this zoom a tile would span several counties' worth of polygons —
- * statewide, a z7 tile carries 15–20k abstracts (~2 MB), which is too slow to
- * generate and pointless to render. County boundaries + names carry the
- * statewide view; abstract detail starts at z8. */
-const TILE_MIN_ZOOM = 8;
+/** County boundaries (full-resolution TIGER) serve at every zoom; denser
+ * layers gate in as their content becomes legible. Statewide, a z7 tile would
+ * carry 15–20k abstracts (~2 MB) — too slow to generate and pointless to
+ * render — so abstract detail starts at z8. */
+const TILE_MIN_ZOOM = 0;
 const TILE_MAX_ZOOM = 22;
+const ABSTRACTS_MIN_ZOOM = 8;
 /** Well points/laterals only render usefully once zoomed in; gating them here
  * keeps low-zoom tiles slim (a dense county can hold 10k+ wells). */
 const WELLS_MIN_ZOOM = 9;
@@ -71,6 +72,11 @@ gisTilesRouter.get(
     const rows = await prisma.$queryRawUnsafe<{ tile: Buffer | null }[]>(
       `WITH bounds AS (SELECT ST_TileEnvelope($1::int, $2::int, $3::int) AS env),
        wanted AS (SELECT ST_Transform(ST_Expand(env, 4000), 4326) AS box, env FROM bounds),
+       cty_mvt AS (
+         SELECT ST_AsMVTGeom(ST_Transform(c.geom, 3857), w.env, ${TILE_EXTENT}, ${TILE_BUFFER}, true) AS geom,
+                c.fips, c.name
+           FROM gis.counties c, wanted w WHERE c.geom && w.box
+       ),
        abs_mvt AS (
          SELECT ST_AsMVTGeom(ST_Transform(a.geom, 3857), w.env, ${TILE_EXTENT}, ${TILE_BUFFER}, true) AS geom,
                 a.id, a.county, a.abstract, a.survey, a.area_m2 AS area
@@ -90,7 +96,8 @@ gisTilesRouter.get(
            LEFT JOIN rrc.wells sw ON sw.fid = b.surface_fid, wanted w
           WHERE b.geom && w.box
        )
-       SELECT coalesce((SELECT ST_AsMVT(abs_mvt, 'abstracts', ${TILE_EXTENT}, 'geom') FROM abs_mvt WHERE geom IS NOT NULL), ''::bytea)
+       SELECT coalesce((SELECT ST_AsMVT(cty_mvt, 'counties', ${TILE_EXTENT}, 'geom') FROM cty_mvt WHERE geom IS NOT NULL), ''::bytea)
+           || CASE WHEN $1::int >= ${ABSTRACTS_MIN_ZOOM} THEN coalesce((SELECT ST_AsMVT(abs_mvt, 'abstracts', ${TILE_EXTENT}, 'geom') FROM abs_mvt WHERE geom IS NOT NULL), ''::bytea) ELSE ''::bytea END
            || CASE WHEN $1::int >= ${WELLS_MIN_ZOOM} THEN coalesce((SELECT ST_AsMVT(well_mvt, 'wells', ${TILE_EXTENT}, 'geom') FROM well_mvt WHERE geom IS NOT NULL), ''::bytea) ELSE ''::bytea END
            || CASE WHEN $1::int >= ${BORES_MIN_ZOOM} THEN coalesce((SELECT ST_AsMVT(bore_mvt, 'wellbores', ${TILE_EXTENT}, 'geom') FROM bore_mvt WHERE geom IS NOT NULL), ''::bytea) ELSE ''::bytea END AS tile`,
       z, x, y,
