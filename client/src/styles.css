@@ -450,3 +450,7 @@ tr.row-base td { background: var(--panel-2); font-weight: 600; }
    border/padding so the track renders cleanly. */
 input[type="range"] { -webkit-appearance: none; appearance: none; height: 4px; padding: 0; border: none; background: var(--border); border-radius: 3px; cursor: pointer; accent-color: var(--accent); }
 input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); cursor: pointer; }
+
+/* --- Bulk actions --- */
+.bulk-bar { position: sticky; bottom: 16px; z-index: 20; display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius); padding: 10px 16px; margin-top: 14px; box-shadow: var(--shadow); }
+tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transparent); }

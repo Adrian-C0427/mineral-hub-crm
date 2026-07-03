@@ -5,9 +5,11 @@ import { useAuth } from "../auth/AuthContext";
 import { Spinner, MetricCard, Modal, Banner } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
+import { useRowSelection, BulkActionsBar } from "../components/bulk";
 import { TEXAS_COUNTY_OPTIONS } from "../lib/options";
+import { downloadCsv } from "../lib/csv";
 import { money, num, fmtDate } from "../lib/format";
-import type { DealSummary } from "../types";
+import type { DealSummary, UserLite } from "../types";
 
 /**
  * Mineral Assets — the company's permanent portfolio of owned mineral interests
@@ -27,9 +29,18 @@ export function MineralAssets() {
   const nav = useNavigate();
   const [assets, setAssets] = useState<DealSummary[] | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const [users, setUsers] = useState<UserLite[]>([]);
+  const sel = useRowSelection();
 
   const load = () => api.get<DealSummary[]>("/deals?recordType=OWNED_ASSET").then(setAssets);
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
+
+  function exportSelected() {
+    const rows = (assets ?? []).filter((a) => sel.selected.has(a.id));
+    downloadCsv(`mineral-assets-${new Date().toISOString().slice(0, 10)}.csv`,
+      ["Asset", "State", "Counties", "Ownership", "Producing", "NRA", "Purchase Price", "Current Value", "ROI %"],
+      rows.map((a) => [a.name, a.state ?? "", a.counties.join("; "), a.ownershipType ?? "", a.producingStatus ?? "", a.nra ?? "", a.purchasePrice ?? "", a.currentValue ?? "", a.roiSinceAcquisition?.toFixed(1) ?? ""]));
+  }
 
   const totals = useMemo(() => {
     const rows = assets ?? [];
@@ -88,9 +99,21 @@ export function MineralAssets() {
             rowKey={(d) => d.id}
             onRowClick={(d) => nav(`/assets/${d.id}`)}
             defaultSort={{ key: "currentValue", dir: "desc" }}
+            selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
           />
         )}
       </div>
+
+      <BulkActionsBar
+        selectedIds={[...sel.selected]}
+        onClear={sel.clear}
+        onDone={load}
+        users={users}
+        itemLabel="asset"
+        deleteUrl={can("deleteDeals") ? "/deals/bulk-delete" : undefined}
+        assign={can("editDeals") ? { url: "/deals/bulk-assign", key: "assigneeIds" } : undefined}
+        onExport={exportSelected}
+      />
 
       {showNew && <NewAssetModal onClose={() => setShowNew(false)} onCreated={(d) => { setShowNew(false); nav(`/assets/${d.id}`); }} />}
     </div>

@@ -989,6 +989,53 @@ dealsRouter.delete(
   }),
 );
 
+// ==========================================================================
+// Bulk actions (Deals + Mineral Assets share this router)
+// ==========================================================================
+dealsRouter.post(
+  "/bulk-delete",
+  requirePermission("deleteDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { ids } = z.object({ ids: z.array(z.string()).min(1).max(500) }).parse(req.body);
+    const result = await prisma.deal.deleteMany({ where: { id: { in: ids }, organizationId: orgId(req) } });
+    res.json({ deleted: result.count });
+  }),
+);
+
+dealsRouter.post(
+  "/bulk-assign",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { ids, assigneeIds } = z.object({ ids: z.array(z.string()).min(1).max(500), assigneeIds: z.array(z.string()) }).parse(req.body);
+    const org = orgId(req);
+    const valid = await validateOrgUsers(org, assigneeIds);
+    const owned = await prisma.deal.findMany({ where: { id: { in: ids }, organizationId: org }, select: { id: true } });
+    for (const d of owned) {
+      await prisma.deal.update({ where: { id: d.id }, data: { assignees: { set: valid.map((id) => ({ id })) } } });
+    }
+    res.json({ updated: owned.length });
+  }),
+);
+
+// Bulk archive → move to DEAD (the "Archived Deals" bucket), recording history.
+dealsRouter.post(
+  "/bulk-archive",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { ids } = z.object({ ids: z.array(z.string()).min(1).max(500) }).parse(req.body);
+    const org = orgId(req);
+    const owned = await prisma.deal.findMany({ where: { id: { in: ids }, organizationId: org, stage: { not: "DEAD" } }, select: { id: true, stage: true } });
+    const now = new Date();
+    for (const d of owned) {
+      await prisma.$transaction([
+        prisma.deal.update({ where: { id: d.id }, data: { stage: "DEAD", currentStageEnteredAt: now, deadReason: "Bulk archived" } }),
+        prisma.dealStageHistory.create({ data: { dealId: d.id, fromStage: d.stage, toStage: "DEAD", changedByUserId: req.user!.id, deadReason: "Bulk archived" } }),
+      ]);
+    }
+    res.json({ archived: owned.length });
+  }),
+);
+
 async function reload(id: string) {
   const d = await prisma.deal.findUniqueOrThrow({ where: { id }, include: dealInclude });
   return d;

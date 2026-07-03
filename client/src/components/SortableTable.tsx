@@ -25,6 +25,12 @@ interface Props<T> {
   defaultCompare?: (a: T, b: T) => number;
   rowClassName?: (row: T) => string | undefined;
   empty?: ReactNode;
+  /** Enables a leading checkbox column with select-all for bulk actions. */
+  selection?: {
+    selected: Set<string>;
+    onToggle: (id: string) => void;
+    onToggleAll: (ids: string[]) => void;
+  };
 }
 
 function compareValues(a: unknown, b: unknown, type: SortType): number {
@@ -47,6 +53,7 @@ export function SortableTable<T>({
   defaultCompare,
   rowClassName,
   empty,
+  selection,
 }: Props<T>) {
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(defaultSort ?? null);
 
@@ -79,6 +86,15 @@ export function SortableTable<T>({
       <table className="data-table">
         <thead>
           <tr>
+            {selection && (() => {
+              const ids = sorted.map(rowKey);
+              const allSelected = ids.length > 0 && ids.every((id) => selection.selected.has(id));
+              return (
+                <th className="center" style={{ width: 36 }}>
+                  <input type="checkbox" checked={allSelected} onChange={() => selection.onToggleAll(ids)} aria-label="Select all" />
+                </th>
+              );
+            })()}
             {columns.map((c) => {
               const active = sort?.key === c.key;
               return (
@@ -100,24 +116,31 @@ export function SortableTable<T>({
         <tbody>
           {sorted.length === 0 ? (
             <tr>
-              <td colSpan={columns.length} className="empty-cell">
+              <td colSpan={columns.length + (selection ? 1 : 0)} className="empty-cell">
                 {empty ?? "No records."}
               </td>
             </tr>
           ) : (
-            sorted.map((row) => (
+            sorted.map((row) => {
+              const id = rowKey(row);
+              return (
               <tr
-                key={rowKey(row)}
+                key={id}
                 onClick={onRowClick ? () => onRowClick(row) : undefined}
-                className={`${onRowClick ? "clickable" : ""} ${rowClassName?.(row) ?? ""}`}
+                className={`${onRowClick ? "clickable" : ""} ${rowClassName?.(row) ?? ""} ${selection?.selected.has(id) ? "row-selected" : ""}`}
               >
+                {selection && (
+                  <td className="center" onClick={(e) => e.stopPropagation()}>
+                    <input type="checkbox" checked={selection.selected.has(id)} onChange={() => selection.onToggle(id)} aria-label="Select row" />
+                  </td>
+                )}
                 {columns.map((c) => (
                   <td key={c.key} className={c.align ?? "left"}>
                     {c.render ? c.render(row) : displayDefault(c.value(row))}
                   </td>
                 ))}
               </tr>
-            ))
+            );})
           )}
         </tbody>
       </table>
