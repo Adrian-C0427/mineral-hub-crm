@@ -3,11 +3,15 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { collectCoords, bboxOfPoints, convexHull } from "../lib/geo";
 import { num } from "../lib/format";
-import { COUNTIES, COUNTIES_WITH_WELLS } from "../lib/counties";
+import { COUNTIES_WITH_WELLS } from "../lib/counties";
+import { api, API_BASE } from "../api/client";
 
 const WELLS_URLS = COUNTIES_WITH_WELLS.map((k) => `/data/${k}-wells.geojson`);
 const WELLBORES_URLS = COUNTIES_WITH_WELLS.map((k) => `/data/${k}-wellbores.geojson`);
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
+// Reference abstract boundaries stream as vector tiles from PostGIS (same
+// source the main map uses); the deal's own footprint is fetched by id.
+const ABSTRACT_TILES = `${API_BASE || window.location.origin}/api/gis/tiles/{z}/{x}/{y}.pbf`;
 
 const STATUS_COLOR = [
   "match", ["get", "status"],
@@ -49,14 +53,16 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
     mapRef.current = map;
 
     map.on("load", async () => {
-      const parts = await Promise.all(
-        COUNTIES.map((c) => fetch(`/data/${c.key}-abstracts.geojson`).then((r) => r.json()).catch(() => ({ features: [] }))),
-      );
-      const abs: FC = { type: "FeatureCollection", features: parts.flatMap((p) => p.features) };
-      const dealFeats = abs.features.filter((f) => idSet.has(f.properties.id as string));
+      // Only the deal's own abstracts need real geometry (fill/hull/zoom-to-fit);
+      // reference boundaries around them come in as vector tiles.
+      const ids = [...idSet];
+      const dealFC: FC = ids.length
+        ? await api.get<FC>(`/gis/features?ids=${encodeURIComponent(ids.join(","))}`).catch(() => ({ type: "FeatureCollection", features: [] } as FC))
+        : { type: "FeatureCollection", features: [] };
+      const dealFeats = dealFC.features;
 
-      map.addSource("abstracts", { type: "geojson", data: abs as unknown as GeoJSON.FeatureCollection, promoteId: "id" });
-      map.addSource("deal", { type: "geojson", data: { type: "FeatureCollection", features: dealFeats } as unknown as GeoJSON.FeatureCollection, promoteId: "id" });
+      map.addSource("abstracts", { type: "vector", tiles: [ABSTRACT_TILES], minzoom: 7, maxzoom: 14, promoteId: { abstracts: "id" } });
+      map.addSource("deal", { type: "geojson", data: dealFC as unknown as GeoJSON.FeatureCollection, promoteId: "id" });
 
       // Clean outer boundary = convex hull of all deal-abstract vertices.
       const pts = dealFeats.flatMap((f) => collectCoords(f.geometry));
@@ -64,17 +70,17 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
       map.addSource("deal-outline", { type: "geojson", data: { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [hull] } } as unknown as GeoJSON.Feature });
 
       // Reference abstract boundaries (toggleable).
-      map.addLayer({ id: "abstracts-line", type: "line", source: "abstracts", paint: { "line-color": "#94a3b8", "line-width": 0.5 } });
+      map.addLayer({ id: "abstracts-line", type: "line", source: "abstracts", "source-layer": "abstracts", paint: { "line-color": "#94a3b8", "line-width": 0.5 } });
       // The deal itself — highlighted fill + line (always shown).
       map.addLayer({ id: "deal-fill", type: "fill", source: "deal", paint: { "fill-color": "#f59e0b", "fill-opacity": 0.28 } });
       map.addLayer({ id: "deal-line", type: "line", source: "deal", paint: { "line-color": "#b45309", "line-width": 1.5 } });
       // Clean boundary around the whole deal.
       map.addLayer({ id: "deal-outline-line", type: "line", source: "deal-outline", paint: { "line-color": "#0f172a", "line-width": 2, "line-dasharray": [2, 1.5] } });
       // Labels (real glyphs; zoom-based, collision-free).
-      map.addLayer({ id: "abstracts-num", type: "symbol", source: "abstracts", minzoom: 9, layout: {
+      map.addLayer({ id: "abstracts-num", type: "symbol", source: "abstracts", "source-layer": "abstracts", minzoom: 9, layout: {
         "symbol-sort-key": ["*", -1, ["get", "area"]], "text-field": ["get", "abstract"], "text-font": ["Noto Sans Regular"],
         "text-size": ["interpolate", ["linear"], ["zoom"], 9, 10, 14, 13], "text-allow-overlap": false }, paint: { "text-color": "#0f172a", "text-halo-color": "#fff", "text-halo-width": 1.4 } });
-      map.addLayer({ id: "abstracts-survey", type: "symbol", source: "abstracts", minzoom: 12.5, layout: {
+      map.addLayer({ id: "abstracts-survey", type: "symbol", source: "abstracts", "source-layer": "abstracts", minzoom: 12.5, layout: {
         "symbol-sort-key": ["*", -1, ["get", "area"]], "text-field": ["get", "survey"], "text-font": ["Noto Sans Regular"],
         "text-size": 11, "text-offset": [0, 1.1], "text-allow-overlap": false }, paint: { "text-color": "#334155", "text-halo-color": "#fff", "text-halo-width": 1.3 } });
 

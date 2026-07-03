@@ -23,6 +23,7 @@ import { integrationsRouter, integrationsOAuthCallbackRouter } from "./routes/in
 import { researchRouter } from "./routes/research.js";
 import { wellsRouter } from "./routes/wells.js";
 import { aiRouter } from "./routes/ai.js";
+import { gisRouter, gisTilesRouter } from "./routes/gis.js";
 
 export function createApp() {
   const app = express();
@@ -70,6 +71,10 @@ export function createApp() {
   app.use("/api/research", researchRouter);
   app.use("/api/wells", wellsRouter);
   app.use("/api/ai", aiRouter);
+  // Public cadastral vector tiles (MapLibre fetches carry no auth header);
+  // must be mounted before the authed /api/gis router.
+  app.use("/api/gis/tiles", gisTilesRouter);
+  app.use("/api/gis", gisRouter);
 
   app.use(notFound);
   // Sentry captures errors before our own handler formats the response.
