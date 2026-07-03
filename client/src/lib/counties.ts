@@ -6,6 +6,12 @@ export interface CountyDef { key: string; name: string; fips: string }
 export const COUNTIES: CountyDef[] = [
   { key: "leon", name: "Leon", fips: "289" },
   { key: "freestone", name: "Freestone", fips: "161" },
+  // Batch 1 (2026-07-03): the contiguous block of counties bordering Leon/Freestone.
+  { key: "anderson", name: "Anderson", fips: "001" },
+  { key: "houston", name: "Houston", fips: "225" },
+  { key: "madison", name: "Madison", fips: "313" },
+  { key: "robertson", name: "Robertson", fips: "395" },
+  { key: "limestone", name: "Limestone", fips: "293" },
 ];
 
 /** County keys that currently have well/wellbore GIS layers available. */
