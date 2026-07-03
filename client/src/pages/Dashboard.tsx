@@ -21,10 +21,27 @@ export function Dashboard() {
   if (!d) return <Spinner />;
 
   const maxProfit = Math.max(1, ...d.profitByMonth.map((m) => m.profit));
+  // Brand-new workspace: no active deals and nothing closed yet. Guide the
+  // first steps instead of presenting a wall of zeros.
+  const firstRun = d.metrics.activeDeals === 0 && d.metrics.closedProfitYtd === 0 && d.recentActivity.length === 0;
 
   return (
     <div className="page">
       <div className="page-header"><h1>Dashboard</h1></div>
+
+      {firstRun && (
+        <div className="panel">
+          <div className="panel-title"><h3>Get started</h3></div>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Welcome to Mineral Hub! These metrics fill in as you work — here's where most teams begin:
+          </p>
+          <div className="row">
+            <Link to="/deals/active" className="primary" style={{ padding: "8px 14px", borderRadius: 8 }}>1 · Create your first deal</Link>
+            <Link to="/buyers" style={{ padding: "8px 14px", border: "1px solid var(--border)", borderRadius: 8 }}>2 · Add or import buyers</Link>
+            <Link to="/valuation" style={{ padding: "8px 14px", border: "1px solid var(--border)", borderRadius: 8 }}>3 · Import well production data</Link>
+          </div>
+        </div>
+      )}
 
       <div className="metrics-row">
         <MetricCard label="Active Deals" value={d.metrics.activeDeals} />

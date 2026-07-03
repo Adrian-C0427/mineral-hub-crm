@@ -68,8 +68,12 @@ function IntegrationLogo({ p }: { p: Provider }) {
   const slug = LOGO_SLUG[p.key];
   const initials = p.name.replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase();
   if (slug && !failed) {
+    // Initials sit behind the brand mark so a blocked/offline CDN (corporate
+    // proxy, ad-blocker, outage) degrades to a readable badge instead of a
+    // blank tile — the image covers them once it loads.
     return (
       <span className="integration-logo brand" title={p.name}>
+        <span className="integration-logo-fallback" aria-hidden="true">{initials}</span>
         <img src={`https://cdn.simpleicons.org/${slug}`} alt="" width={24} height={24} loading="lazy" onError={() => setFailed(true)} />
       </span>
     );
@@ -227,7 +231,16 @@ function IntegrationCard({ p, busy, result, onConnect, onOAuth, onDisconnect, on
         <div style={{ flex: 1, minWidth: 0 }}>
           <div className="integration-name">{p.name}</div>
           <span className="chip-mini">{AUTH_LABEL[p.auth]}</span>
-          <span className={`badge ${connected ? "resp-offer" : errored ? "resp-no" : "resp-pending"}`} style={{ marginLeft: 6 }}>
+          <span
+            className={`badge ${connected ? "resp-offer" : errored ? "resp-no" : "resp-pending"}`}
+            style={{ marginLeft: 6 }}
+            title={
+              connected ? "Connected and validated — data can flow."
+                : errored ? "Connected previously but the last check failed — reconnect or re-validate."
+                : needsSetup ? "Needs a one-time server-side setup (OAuth app registration or API config) before it can be connected."
+                : "Ready to connect — add a credential to start. Nothing is flowing yet."
+            }
+          >
             {connected ? "Connected" : errored ? "Error" : needsSetup ? "Setup required" : "Not connected"}
           </span>
         </div>

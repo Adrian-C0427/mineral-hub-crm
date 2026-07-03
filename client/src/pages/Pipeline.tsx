@@ -27,6 +27,9 @@ export function Pipeline() {
   const [dropCol, setDropCol] = useState<Stage | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [pending, setPending] = useState<{ deal: DealSummary; toStage: Stage } | null>(null);
+  // Explicit per-card move (no drag needed): opens the stage modal on the
+  // deal's current stage so any destination — including Closed/Dead — is a click away.
+  const [moving, setMoving] = useState<DealSummary | null>(null);
   const nav = useNavigate();
 
   // The pipeline is the acquisition board — opportunities only. Owned mineral
@@ -55,6 +58,24 @@ export function Pipeline() {
         <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>
       </div>
 
+      {/* Transition targets live ABOVE the board so they're always on-screen
+          (the board scrolls horizontally). Dropping a card here — or using a
+          card's ⋯ button — prompts the Closed/Archive confirmation. */}
+      <div className="transition-bar">
+        {TRANSITIONS.map((t) => (
+          <div
+            key={t.stage}
+            className={`transition-zone ${t.stage === "DEAD" ? "dead" : "closed"} ${dropCol === t.stage ? "drop-target" : ""}`}
+            onDragOver={(e) => { e.preventDefault(); setDropCol(t.stage); }}
+            onDragLeave={() => setDropCol((c) => (c === t.stage ? null : c))}
+            onDrop={() => onDrop(t.stage)}
+          >
+            <span>{t.label}</span>
+            <span className="muted" style={{ fontSize: 11 }}>{t.hint}</span>
+          </div>
+        ))}
+      </div>
+
       <div className="kanban">
         {COLUMNS.map((col) => {
           const colDeals = boardDeals.filter((d) => d.stage === col);
@@ -72,28 +93,12 @@ export function Pipeline() {
               </div>
               <div className="kanban-col-body">
                 {colDeals.map((d) => (
-                  <Card key={d.id} deal={d} onDragStart={() => setDragId(d.id)} onClick={() => nav(`/deals/${d.id}`)} />
+                  <Card key={d.id} deal={d} onDragStart={() => setDragId(d.id)} onClick={() => nav(`/deals/${d.id}`)} onMove={() => setMoving(d)} />
                 ))}
               </div>
             </div>
           );
         })}
-
-        {/* Transition targets: dropping here prompts the Closed/Archive confirmation. */}
-        <div className="kanban-col kanban-transitions">
-          {TRANSITIONS.map((t) => (
-            <div
-              key={t.stage}
-              className={`transition-zone ${t.stage === "DEAD" ? "dead" : "closed"} ${dropCol === t.stage ? "drop-target" : ""}`}
-              onDragOver={(e) => { e.preventDefault(); setDropCol(t.stage); }}
-              onDragLeave={() => setDropCol((c) => (c === t.stage ? null : c))}
-              onDrop={() => onDrop(t.stage)}
-            >
-              <span>{t.label}</span>
-              <span className="muted" style={{ fontSize: 11 }}>{t.hint}</span>
-            </div>
-          ))}
-        </div>
       </div>
 
       {showNew && <NewDealModal onClose={() => setShowNew(false)} onCreated={(d) => { setShowNew(false); nav(`/deals/${d.id}`); }} />}
@@ -105,11 +110,18 @@ export function Pipeline() {
           onChanged={() => { setPending(null); load(); }}
         />
       )}
+      {moving && (
+        <StageChangeModal
+          deal={moving}
+          onClose={() => setMoving(null)}
+          onChanged={() => { setMoving(null); load(); }}
+        />
+      )}
     </div>
   );
 }
 
-function Card({ deal, onDragStart, onClick }: { deal: DealSummary; onDragStart: () => void; onClick: () => void }) {
+function Card({ deal, onDragStart, onClick, onMove }: { deal: DealSummary; onDragStart: () => void; onClick: () => void; onMove: () => void }) {
   const isClosing = deal.stage === "CLOSING";
   const isDead = deal.stage === "DEAD";
   return (
@@ -119,10 +131,16 @@ function Card({ deal, onDragStart, onClick }: { deal: DealSummary; onDragStart: 
       onDragStart={onDragStart}
       onClick={onClick}
     >
+      <button
+        className="dc-move"
+        title="Move to another stage"
+        aria-label={`Move ${deal.name} to another stage`}
+        onClick={(e) => { e.stopPropagation(); onMove(); }}
+      >⋯</button>
       <div className="dc-name">{deal.name}</div>
       <div className="dc-meta">
         <span>{[deal.counties.join(", "), deal.state].filter(Boolean).join(", ") || "—"}</span>
-        <span>{num(deal.nra)} NRA</span>
+        {deal.nra != null && <span>{num(deal.nra)} NRA</span>}
       </div>
       <div className="dc-meta" style={{ marginTop: 4 }}>
         <span className={`badge priority-${deal.priority.toLowerCase()}`}>{deal.priority[0] + deal.priority.slice(1).toLowerCase()}</span>

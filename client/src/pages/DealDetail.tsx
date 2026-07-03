@@ -134,10 +134,18 @@ export function DealDetail() {
         onChanged={loadDeal}
       />
 
-      {/* Embedded, isolated map showing only this deal's extent */}
+      {/* Embedded, isolated map showing only this deal's extent. Without any
+          abstracts there is nothing to draw, so a compact empty state replaces
+          the map instead of a large blank canvas. */}
       <div className="panel">
         <div className="section-head"><h3>Location</h3><span className="muted">This deal's abstracts and geographic extent</span></div>
-        <Suspense fallback={<Spinner label="Loading map…" />}><DealMap abstractIds={deal.abstractIds} /></Suspense>
+        {deal.abstractIds.length > 0 ? (
+          <Suspense fallback={<Spinner label="Loading map…" />}><DealMap abstractIds={deal.abstractIds} /></Suspense>
+        ) : (
+          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+            No abstracts linked yet — add them under <strong>Deal characteristics → Edit → Abstract</strong> and the map will draw this deal's extent.
+          </p>
+        )}
       </div>
 
       <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
@@ -344,7 +352,8 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
           <KV k="State" v={(deal.states?.length ? deal.states : (deal.state ? [deal.state] : [])).join(", ")} /><KV k="County" v={deal.counties.join(", ")} /><KV k="Basin" v={deal.basins.join(", ")} />
           <KV k="Formation" v={deal.formations.join(", ")} /><KV k="Asset Type" v={deal.assetTypes.join(", ")} /><KV k="NMA" v={num(deal.acreageNma)} />
           <KV k="NRA" v={num(deal.nra)} /><KV k="Our Price" v={money(deal.ourPrice)} /><KV k="Ask Price (to buyers)" v={money(deal.askPrice)} /><KV k="Operator" v={deal.operator} />
-          <KV k="Abstract (Leon Co.)" v={abstractLabel} />
+          {/* Label the abstract with its county only when unambiguous. */}
+          <KV k={deal.counties.length === 1 ? `Abstract (${deal.counties[0]} Co.)` : "Abstract"} v={abstractLabel} />
         </div>
       ) : (
         <div className="dd-grid">
