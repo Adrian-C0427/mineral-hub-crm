@@ -80,12 +80,6 @@ function styleWithGlyphs(): maplibregl.StyleSpecification {
     layers: [{ id: "osm", type: "raster", source: "osm" }],
   };
 }
-function bboxOf(geom: { type: string; coordinates: unknown }): [number, number, number, number] {
-  let a = 180, b = 90, c = -180, d = -90;
-  const w = (x: unknown) => { if (Array.isArray(x) && typeof x[0] === "number") { const [px, py] = x as number[]; if (px < a) a = px; if (py < b) b = py; if (px > c) c = px; if (py > d) d = py; } else if (Array.isArray(x)) x.forEach(w); };
-  w(geom.coordinates); return [a, b, c, d];
-}
-
 export function MapView() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -94,7 +88,7 @@ export function MapView() {
   const selAbstractRef = useRef<string | null>(null);
   const selWellRef = useRef<number | null>(null);
   const wellsFC = useRef<FC | null>(null);
-  // County bboxes (from tx-counties.geojson) power "go to county" framing.
+  // County bboxes (from county-labels.geojson) power "go to county" framing.
   const countyBBox = useRef<Map<string, [number, number, number, number]>>(new Map());
   const heatWells = useRef<HeatWell[]>([]);
   const perLease = useRef<Map<string, number>>(new Map());
@@ -159,11 +153,11 @@ export function MapView() {
     mapRef.current = map;
 
     map.on("load", async () => {
-      // Abstracts are vector tiles (see ABSTRACT_TILES) — nothing to download here.
-      // Wells/wellbores are only implemented for a couple of counties (phase B moves
-      // them to PostGIS too), so those stay as small eager GeoJSON for now.
-      const [txCounties, welParts, boreParts] = await Promise.all([
-        fetch(`/data/tx-counties.geojson`).then((r) => r.json()).catch(() => ({ features: [] })),
+      // Cadastral geometry (counties + abstracts) streams as vector tiles; the
+      // only statics are county label points (tiny, DB-derived) and the
+      // heat-map wells for the two production counties (phase B5 removes).
+      const [countyLabels, welParts, boreParts] = await Promise.all([
+        fetch(`/data/county-labels.geojson`).then((r) => r.json()).catch(() => ({ features: [] })),
         Promise.all(COUNTIES_WITH_WELLS.map((k) => fetch(`/data/${k}-wells.geojson`).then((r) => r.json()).catch(() => ({ features: [] })))),
         Promise.all(COUNTIES_WITH_WELLS.map((k) => fetch(`/data/${k}-wellbores.geojson`).then((r) => r.json()).catch(() => ({ features: [] })))),
       ]);
@@ -173,35 +167,32 @@ export function MapView() {
       heatWells.current = extractWells(welFC.features);
       perLease.current = wellsPerLease(heatWells.current);
 
-      // County bboxes from the statewide boundary file (tx-counties fips = "48" +
-      // our 3-digit county fips) for search → "go to county" framing.
+      // County bboxes (from the DB-derived label file; fips = "48" + our
+      // 3-digit code) for search → "go to county" framing.
       const bboxByFips = new Map<string, [number, number, number, number]>();
-      for (const f of (txCounties.features ?? []) as GeoFeature[]) bboxByFips.set(String(f.properties.fips), bboxOf(f.geometry));
+      for (const f of (countyLabels.features ?? []) as GeoFeature[]) bboxByFips.set(String(f.properties.fips), f.properties.bbox as [number, number, number, number]);
       for (const c of COUNTIES) { const bb = bboxByFips.get(`48${c.fips}`); if (bb) countyBBox.current.set(c.key, bb); }
 
       setMeta({ counties: COUNTIES.map((c) => c.name).sort() });
 
-      // Statewide county outlines (cheap, always on) — the cadastral frame that
-      // stays visible at every zoom; abstract detail streams in per viewport.
-      map.addSource("counties", { type: "geojson", data: txCounties as unknown as GeoJSON.FeatureCollection });
-      map.addLayer({ id: "county-bounds", type: "line", source: "counties", paint: { "line-color": "#94a3b8", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.4, 9, 1.2], "line-opacity": 0.5 } });
+      // Vector tiles from PostGIS: counties (full-resolution TIGER legal
+      // boundaries) at every zoom, plus abstracts/wells/wellbores gating in as
+      // they become legible. promoteId maps each layer's key property to its
+      // feature id so feature-state works and persists across tile loads.
+      map.addSource("abstracts", { type: "vector", tiles: [ABSTRACT_TILES], minzoom: 0, maxzoom: 14, promoteId: { abstracts: "id", wells: "fid", wellbores: "fid" } });
+      map.addLayer({ id: "county-bounds", type: "line", source: "abstracts", "source-layer": "counties", paint: { "line-color": "#64748b", "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.6, 9, 1.4], "line-opacity": 0.7 } });
       // County names own the statewide view, then hand off to abstract numbers
-      // (z9+). text-optional lets crowded metros drop labels instead of
+      // (z9+). Label points are DB-derived (ST_PointOnSurface — always inside
+      // the polygon). text-optional lets crowded areas drop labels instead of
       // overlapping; size scales up as counties get room.
-      map.addLayer({ id: "county-names", type: "symbol", source: "counties", maxzoom: 10, layout: {
+      map.addSource("county-labels", { type: "geojson", data: countyLabels as unknown as GeoJSON.FeatureCollection });
+      map.addLayer({ id: "county-names", type: "symbol", source: "county-labels", maxzoom: 10, layout: {
         "text-field": ["get", "name"], "text-font": ["Noto Sans Regular"],
         "text-size": ["interpolate", ["linear"], ["zoom"], 4, 9, 6, 12, 9, 16],
         "text-transform": "uppercase", "text-letter-spacing": 0.08,
         "text-padding": 4, "text-allow-overlap": false, "text-optional": true },
         paint: { "text-color": "#475569", "text-halo-color": "#ffffff", "text-halo-width": 1.5,
           "text-opacity": ["interpolate", ["linear"], ["zoom"], 8.5, 0.9, 10, 0.4] } });
-
-      // Vector tiles from PostGIS: one multi-layer source carries abstracts,
-      // wells, and wellbore laterals (rrc.wells/rrc.wellbores). promoteId maps
-      // each layer's key property to its feature id so feature-state
-      // (selection/deal highlight) works exactly as on GeoJSON sources — and
-      // persists across tile loads.
-      map.addSource("abstracts", { type: "vector", tiles: [ABSTRACT_TILES], minzoom: MIN_ABSTRACT_ZOOM, maxzoom: 14, promoteId: { abstracts: "id", wells: "fid", wellbores: "fid" } });
 
       // Production heat map (bottom of the stack, above the basemap): weight `w` is
       // pre-normalized to [0,1] per current extent, so the gradient rescales as you
@@ -220,14 +211,17 @@ export function MapView() {
       map.addLayer(heatLayer("heat-oil", HEAT_OIL_COLOR));
       map.addLayer(heatLayer("heat-gas", HEAT_GAS_COLOR));
 
-      map.addLayer({ id: "abstracts-fill", type: "fill", source: "abstracts", "source-layer": "abstracts", paint: {
+      map.addLayer({ id: "abstracts-fill", type: "fill", source: "abstracts", "source-layer": "abstracts", minzoom: MIN_ABSTRACT_ZOOM, paint: {
         "fill-color": ["case", ["boolean", ["feature-state", "selected"], false], "#f59e0b", ["boolean", ["feature-state", "active"], false], "#ef4444", "#3b82f6"],
         "fill-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 0.55, ["boolean", ["feature-state", "active"], false], 0.45, 0.05] } });
-      map.addLayer({ id: "abstracts-line", type: "line", source: "abstracts", "source-layer": "abstracts", paint: {
-        "line-color": ["case", ["boolean", ["feature-state", "selected"], false], "#b45309", "#64748b"],
+      // Abstract boundaries: black, high-opacity — immediately legible against
+      // any basemap; width steps up with zoom so detail views stay crisp
+      // without overwhelming the county view.
+      map.addLayer({ id: "abstracts-line", type: "line", source: "abstracts", "source-layer": "abstracts", minzoom: MIN_ABSTRACT_ZOOM, paint: {
+        "line-color": ["case", ["boolean", ["feature-state", "selected"], false], "#b45309", "#000000"],
         "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 3,
-          ["interpolate", ["linear"], ["zoom"], 8, 0.6, 12, 1.1] as unknown as number],
-        "line-opacity": 0.85 } });
+          ["interpolate", ["linear"], ["zoom"], 8, 0.8, 11, 1.2, 14, 1.8] as unknown as number],
+        "line-opacity": 0.9 } });
       // Wellbore laterals (surface -> bottom hole)
       map.addLayer({ id: "wellbores", type: "line", source: "abstracts", "source-layer": "wellbores", minzoom: 10, layout: { "line-cap": "round" }, paint: {
         "line-color": ["match", ["get", "wellboreType"], "Horizontal", "#0f766e", "Directional", "#9333ea", "#0f766e"],
