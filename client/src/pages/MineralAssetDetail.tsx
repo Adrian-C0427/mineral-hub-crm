@@ -12,7 +12,7 @@ import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { AssigneePicker } from "../components/AssigneePicker";
 import { AbstractMultiPicker } from "../components/AbstractPicker";
-import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS } from "../lib/options";
+import { US_STATE_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, countiesForStates } from "../lib/options";
 import { monthLabel } from "../lib/charts";
 import { money, num, fmtDate, toInputDate } from "../lib/format";
 import { OWNERSHIP_TYPES, OWNERSHIP_STATUSES, PRODUCING_STATUSES } from "./MineralAssets";
@@ -217,7 +217,7 @@ function PropertyCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit
 
   async function save() {
     await api.patch(`/deals/${asset.id}`, {
-      counties: f.counties, state: f.state, basins: f.basins, formations: f.formations,
+      counties: f.counties, states: f.states ?? [], basins: f.basins, formations: f.formations,
       operator: f.operator, abstractIds: f.abstractIds, surveys: f.surveys, wells: f.wells,
       producingStatus: f.producingStatus, notes: f.notes,
     });
@@ -228,7 +228,7 @@ function PropertyCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit
     <EditCard title="Property" canEdit={canEdit} editing={edit} onEdit={() => setEdit(true)} onCancel={() => { setF(asset); setEdit(false); }} onSave={save}>
       {!edit ? (
         <div className="dd-grid">
-          <KV k="State" v={asset.state} />
+          <KV k="State" v={(asset.states?.length ? asset.states : (asset.state ? [asset.state] : [])).join(", ")} />
           <KV k="Counties" v={asset.counties.join(", ")} />
           <KV k="Producing Status" v={asset.producingStatus} />
           <KV k="Basins" v={asset.basins.join(", ")} />
@@ -241,8 +241,8 @@ function PropertyCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit
         </div>
       ) : (
         <div className="dd-grid">
-          <Fld l="State"><input value={f.state ?? ""} onChange={(e) => setF({ ...f, state: e.target.value })} /></Fld>
-          <Fld l="Counties"><SearchableMultiSelect options={TEXAS_COUNTY_OPTIONS} value={f.counties} onChange={(v) => setF({ ...f, counties: v })} /></Fld>
+          <Fld l="State"><SearchableMultiSelect options={US_STATE_OPTIONS} value={f.states?.length ? f.states : (f.state ? [f.state] : [])} onChange={(v) => setF({ ...f, states: v })} placeholder="Select states…" /></Fld>
+          <Fld l="Counties"><SearchableMultiSelect options={countiesForStates(f.states?.length ? f.states : (f.state ? [f.state] : []))} value={f.counties} onChange={(v) => setF({ ...f, counties: v })} placeholder="Search counties…" /></Fld>
           <Fld l="Producing Status"><select value={f.producingStatus ?? ""} onChange={(e) => setF({ ...f, producingStatus: e.target.value })}><option value="">—</option>{PRODUCING_STATUSES.map((t) => <option key={t}>{t}</option>)}</select></Fld>
           <Fld l="Basins"><SearchableMultiSelect options={TEXAS_BASIN_OPTIONS} value={f.basins} onChange={(v) => setF({ ...f, basins: v })} /></Fld>
           <Fld l="Formations"><SearchableMultiSelect options={TEXAS_FORMATION_OPTIONS} value={f.formations} onChange={(v) => setF({ ...f, formations: v })} /></Fld>

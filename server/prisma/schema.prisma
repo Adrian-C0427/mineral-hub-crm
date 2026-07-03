@@ -330,7 +330,10 @@ model Deal {
 
   // Deal characteristics support multiple selections (state stays single).
   counties       String[]
+  // Primary state (kept for buyer matching / map back-compat) = states[0].
   state          String?
+  // Multi-state selection (primary geographic filter). state stays synced to states[0].
+  states         String[]
   acreageNma     Float?
   nra            Float?
   // Survey/abstracts this deal sits in (e.g. TX-289653). Links to map boundaries.

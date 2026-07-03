@@ -23,6 +23,7 @@ export interface DealSummary {
   name: string;
   counties: string[];
   state: string | null;
+  states: string[];
   acreageNma: number | null;
   nra: number | null;
   abstractIds: string[];

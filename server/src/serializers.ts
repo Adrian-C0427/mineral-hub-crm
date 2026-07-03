@@ -61,6 +61,7 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     unrealizedGainLoss,
     counties: deal.counties,
     state: deal.state,
+    states: deal.states ?? [],
     acreageNma: deal.acreageNma,
     nra: deal.nra,
     abstractIds: deal.abstractIds,

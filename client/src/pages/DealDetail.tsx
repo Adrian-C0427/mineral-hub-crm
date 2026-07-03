@@ -13,7 +13,7 @@ import { BuyerActivitySection } from "../components/BuyerActivitySection";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { AbstractMultiPicker, useAbstractLabels } from "../components/AbstractPicker";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
-import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
+import { US_STATE_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, countiesForStates } from "../lib/options";
 import { operatorsForCounties } from "../lib/operators";
 import { money, num, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
@@ -296,7 +296,8 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState(deal);
   const abstractLabel = useAbstractLabels(deal.abstractIds);
-  useEffect(() => setF(deal), [deal]);
+  // Seed the multi-state field from a legacy single `state` when needed.
+  useEffect(() => setF({ ...deal, states: deal.states?.length ? deal.states : (deal.state ? [deal.state] : []) }), [deal]);
 
   // Operator suggestions come from the deal's counties (same source as the Map
   // page), recomputed whenever the selected counties change.
@@ -314,7 +315,7 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
 
   async function save() {
     await api.patch(`/deals/${deal.id}`, {
-      state: f.state, counties: f.counties, basins: f.basins, formations: f.formations,
+      states: f.states, counties: f.counties, basins: f.basins, formations: f.formations,
       assetTypes: f.assetTypes, acreageNma: f.acreageNma, nra: f.nra, abstractIds: f.abstractIds, askPrice: f.askPrice, ourPrice: f.ourPrice, operator: f.operator,
     });
     setEdit(false);
@@ -330,15 +331,15 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
       </div>
       {!edit ? (
         <div className="dd-grid">
-          <KV k="State" v={deal.state} /><KV k="County" v={deal.counties.join(", ")} /><KV k="Basin" v={deal.basins.join(", ")} />
+          <KV k="State" v={(deal.states?.length ? deal.states : (deal.state ? [deal.state] : [])).join(", ")} /><KV k="County" v={deal.counties.join(", ")} /><KV k="Basin" v={deal.basins.join(", ")} />
           <KV k="Formation" v={deal.formations.join(", ")} /><KV k="Asset Type" v={deal.assetTypes.join(", ")} /><KV k="NMA" v={num(deal.acreageNma)} />
           <KV k="NRA" v={num(deal.nra)} /><KV k="Our Price" v={money(deal.ourPrice)} /><KV k="Ask Price (to buyers)" v={money(deal.askPrice)} /><KV k="Operator" v={deal.operator} />
           <KV k="Abstract (Leon Co.)" v={abstractLabel} />
         </div>
       ) : (
         <div className="dd-grid">
-          <Fld l="State"><input value={f.state ?? ""} onChange={set("state")} /></Fld>
-          <Fld l="County"><SearchableMultiSelect options={TEXAS_COUNTY_OPTIONS} value={f.counties} onChange={setArr("counties")} placeholder="Search counties…" /></Fld>
+          <Fld l="State"><SearchableMultiSelect options={US_STATE_OPTIONS} value={f.states ?? []} onChange={setArr("states")} placeholder="Select states…" /></Fld>
+          <Fld l="County"><SearchableMultiSelect options={countiesForStates(f.states ?? [])} value={f.counties} onChange={setArr("counties")} placeholder={(f.states ?? []).length ? "Search counties…" : "Select a state first"} /></Fld>
           <Fld l="Basin"><SearchableMultiSelect options={TEXAS_BASIN_OPTIONS} value={f.basins} onChange={setArr("basins")} placeholder="Search basins…" /></Fld>
           <Fld l="Formation"><SearchableMultiSelect options={TEXAS_FORMATION_OPTIONS} value={f.formations} onChange={setArr("formations")} placeholder="Search formations…" /></Fld>
           <Fld l="Asset Type"><SearchableMultiSelect options={ASSET_TYPE_OPTIONS} value={f.assetTypes} onChange={setArr("assetTypes")} placeholder="Search asset types…" /></Fld>

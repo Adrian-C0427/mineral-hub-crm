@@ -112,6 +112,7 @@ const createSchema = z.object({
   sellerNames: z.array(z.string()).optional(),
   counties: z.array(z.string()).optional(),
   state: z.string().nullish(),
+  states: z.array(z.string()).optional(),
   acreageNma: z.number().nullish(),
   nra: z.number().nullish(),
   abstractIds: z.array(z.string()).optional(),
@@ -147,7 +148,8 @@ dealsRouter.post(
           // Owned assets default to HOLD; opportunities have no asset mode.
           assetMode: isAsset ? (data.assetMode ?? "HOLD") : null,
           counties: data.counties ?? [],
-          state: data.state ?? null,
+          states: data.states ?? (data.state ? [data.state] : []),
+          state: data.states?.[0] ?? data.state ?? null,
           acreageNma: data.acreageNma ?? null,
           nra: data.nra ?? null,
           abstractIds: data.abstractIds ?? [],
@@ -489,6 +491,7 @@ const updateSchema = z.object({
   sellerNames: z.array(z.string()).optional(),
   counties: z.array(z.string()).optional(),
   state: z.string().nullish(),
+  states: z.array(z.string()).optional(),
   acreageNma: z.number().nullish(),
   nra: z.number().nullish(),
   abstractIds: z.array(z.string()).optional(),
@@ -515,7 +518,7 @@ dealsRouter.patch(
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = updateSchema.parse(req.body);
     const patch: Record<string, unknown> = {};
-    for (const k of ["name", "sellerNames", "counties", "state", "acreageNma", "nra", "abstractIds", "operator", "askPrice", "ourPrice", "assetTypes", "basins", "formations", "estimatedClosingCosts", "relationshipOwnerId", "notes", ...ASSET_SCALAR_KEYS] as const) {
+    for (const k of ["name", "sellerNames", "counties", "state", "states", "acreageNma", "nra", "abstractIds", "operator", "askPrice", "ourPrice", "assetTypes", "basins", "formations", "estimatedClosingCosts", "relationshipOwnerId", "notes", ...ASSET_SCALAR_KEYS] as const) {
       if (k in data) patch[k] = (data as Record<string, unknown>)[k];
     }
     for (const k of ["dateUnderContract", "originalClosingDate", "findBuyerByDateOverride", "finalClosingDateOverride", "acquisitionDate"] as const) {
@@ -527,6 +530,8 @@ dealsRouter.patch(
       const ids = await validateOrgUsers(orgId(req), data.assigneeIds);
       patch.assignees = { set: ids.map((id) => ({ id })) };
     }
+    // Keep the single `state` synced to the first selected state (matching/map).
+    if (data.states !== undefined) patch.state = data.states[0] ?? null;
     const deal = await prisma.deal.update({ where: { id: req.params.id }, data: patch, include: dealInclude });
     res.json(serializeDeal(deal));
   }),

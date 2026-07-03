@@ -2,6 +2,14 @@
 
 export const ASSET_TYPE_OPTIONS = ["RI", "ORRI", "NPRI", "WI", "MI"] as const;
 
+// All U.S. states + DC (2-letter codes; consistent with existing stored values).
+export const US_STATE_OPTIONS = [
+  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL",
+  "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE",
+  "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD",
+  "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+] as const;
+
 // Common / recognized Texas producing basins.
 export const TEXAS_BASIN_OPTIONS = [
   "Permian Basin",
@@ -95,3 +103,20 @@ export const TEXAS_COUNTY_OPTIONS: string[] = [
   "Yoakum", "Young",
   "Zapata", "Zavala",
 ];
+
+/**
+ * Counties available per state. Populated for states the app has data for
+ * (Texas today); other states resolve to an empty list until their county data
+ * is added. Drives the State → County dependency in the geographic hierarchy.
+ */
+export const STATE_COUNTIES: Record<string, readonly string[]> = {
+  TX: TEXAS_COUNTY_OPTIONS,
+};
+
+/** Union of counties for the selected states (sorted, de-duplicated). */
+export function countiesForStates(states: string[]): string[] {
+  if (!states.length) return [...TEXAS_COUNTY_OPTIONS]; // default before a state is picked
+  const out = new Set<string>();
+  for (const s of states) for (const c of STATE_COUNTIES[s] ?? []) out.add(c);
+  return [...out].sort();
+}
