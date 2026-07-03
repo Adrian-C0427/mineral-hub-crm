@@ -217,10 +217,16 @@ export function MapView() {
         "fill-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 0.55, ["boolean", ["feature-state", "active"], false], 0.45, 0.05] } });
       // Abstract boundaries — solid black, full opacity, heavy enough to read
       // instantly against any basemap at every supported zoom.
+      // NOTE: zoom-driven expressions must be TOP-LEVEL in a paint property —
+      // nesting ["interpolate", …, ["zoom"], …] inside ["case", …] is invalid
+      // and silently kills the whole layer. Zoom outside, selection inside.
+      const sel = ["boolean", ["feature-state", "selected"], false];
       map.addLayer({ id: "abstracts-line", type: "line", source: "abstracts", "source-layer": "abstracts", minzoom: MIN_ABSTRACT_ZOOM, paint: {
-        "line-color": ["case", ["boolean", ["feature-state", "selected"], false], "#b45309", "#000000"],
-        "line-width": ["case", ["boolean", ["feature-state", "selected"], false], 4,
-          ["interpolate", ["linear"], ["zoom"], 8, 1.5, 11, 2, 14, 2.8] as unknown as number],
+        "line-color": ["case", sel, "#b45309", "#000000"] as unknown as maplibregl.ExpressionSpecification,
+        "line-width": ["interpolate", ["linear"], ["zoom"],
+          8, ["case", sel, 4, 1.5],
+          11, ["case", sel, 4, 2],
+          14, ["case", sel, 4, 2.8]] as unknown as maplibregl.ExpressionSpecification,
         "line-opacity": 1 } });
       // County boundaries — unchanged simple style, drawn above so they stay
       // visible as a reference without competing with the abstracts.
