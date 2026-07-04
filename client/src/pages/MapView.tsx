@@ -2,9 +2,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Link } from "react-router-dom";
-import { api, API_BASE } from "../api/client";
+import { api } from "../api/client";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION } from "../lib/counties";
+import { addCadastralLayers, styleWithGlyphs } from "../lib/mapLayers";
 import { Spinner, StageBadge, PriorityBadge } from "../components/ui";
 import { money, num } from "../lib/format";
 import {
@@ -31,16 +32,6 @@ type SelHotspot = { kind: "hotspot"; summary: AreaSummary; periodLabel: string }
 type Selected = SelAbstract | SelWell | SelHotspot | null;
 
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
-// Below this zoom the whole state is in view; county boundaries + names carry
-// the map until abstract detail starts streaming. Statewide, a z7 tile would
-// hold 15-20k abstracts (~2 MB), so the cadastral floor is z8 — abstract
-// number labels start at z9, survey names at z12.5.
-const MIN_ABSTRACT_ZOOM = 8;
-// Cadastral abstracts stream as vector tiles from PostGIS (ST_AsMVT on the API);
-// the client never downloads county GeoJSON — cost is per-viewport at any scale.
-// MapLibre requires absolute tile URLs, so fall back to the page origin in dev
-// (the Vite proxy forwards /api to the local API server).
-const ABSTRACT_TILES = `${API_BASE || window.location.origin}/api/gis/tiles/{z}/{x}/{y}.pbf`;
 
 const EMPTY_FC = { type: "FeatureCollection", features: [] } as unknown as GeoJSON.FeatureCollection;
 // Oil ramp runs warm (amber → red); gas ramp runs cool (indigo → violet) so the
@@ -54,32 +45,12 @@ const HEAT_STOPS: [number, string][] = [[0, "#eef2ff"], [0.2, "#fde68a"], [0.45,
 interface HeatState { oil: boolean; gas: boolean; intensity: number; radius: number; opacity: number; min: number; max: number; period: HeatPeriod; from: string; to: string; topProducers: boolean; hotspots: boolean }
 const DEFAULT_HEAT: HeatState = { oil: false, gas: false, intensity: 1, radius: 32, opacity: 0.85, min: 0, max: 0, period: "12m", from: "", to: "", topProducers: false, hotspots: true };
 
-// Wells are colored by RRC status.
-const STATUS_COLOR = [
-  "match", ["get", "status"],
-  "Producing", "#22c55e", "Shut-In", "#f59e0b", "Plugged", "#6b7280", "Permitted", "#3b82f6",
-  "Dry Hole", "#78350f", "Active", "#7c3aed", "Canceled/Abandoned", "#9ca3af", "Surface location", "#0ea5e9",
-  "#64748b",
-] as unknown as maplibregl.ExpressionSpecification;
-
 const STATUS_OPTIONS = [
   ["ACTIVE", "Active deals"], ["ALL", "All linked deals"], ["UNDER_CONTRACT", "Under Contract"],
   ["PREPARING_PACKAGE", "Preparing Package"], ["SENT_TO_BUYERS", "Sent to Buyers"], ["NEGOTIATING", "Negotiating"],
   ["CLOSING", "Closing"], ["CLOSED", "Closed"], ["DEAD", "Dead"],
 ] as const;
 
-function styleWithGlyphs(): maplibregl.StyleSpecification {
-  return {
-    version: 8,
-    // Self-hosted SDF glyphs for the label layers (client/public/fonts). The
-    // previous files were an empty fontstack (0 glyphs) — an HTML error page
-    // saved as .pbf — so on-map labels never rendered. Replaced with real
-    // "Noto Sans Regular" glyph ranges.
-    glyphs: `${window.location.origin}/fonts/{fontstack}/{range}.pbf`,
-    sources: { osm: { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap contributors" } },
-    layers: [{ id: "osm", type: "raster", source: "osm" }],
-  };
-}
 export function MapView() {
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -175,29 +146,13 @@ export function MapView() {
 
       setMeta({ counties: COUNTIES.map((c) => c.name).sort() });
 
-      // Vector tiles from PostGIS: counties (full-resolution TIGER legal
-      // boundaries) at every zoom, plus abstracts/wells/wellbores gating in as
-      // they become legible. promoteId maps each layer's key property to its
-      // feature id so feature-state works and persists across tile loads.
-      map.addSource("abstracts", { type: "vector", tiles: [ABSTRACT_TILES], minzoom: 0, maxzoom: 14, promoteId: { abstracts: "id", wells: "fid", wellbores: "fid" } });
-      // (County boundary layers are added after the abstract layers so they
-      // draw on top — administrative boundaries stay visible at every zoom.)
-      // County names own the statewide view, then hand off to abstract numbers
-      // (z9+). Label points are DB-derived (ST_PointOnSurface — always inside
-      // the polygon). text-optional lets crowded areas drop labels instead of
-      // overlapping; size scales up as counties get room.
-      map.addSource("county-labels", { type: "geojson", data: countyLabels as unknown as GeoJSON.FeatureCollection });
-      map.addLayer({ id: "county-names", type: "symbol", source: "county-labels", maxzoom: 10, layout: {
-        "text-field": ["get", "name"], "text-font": ["Noto Sans Regular"],
-        "text-size": ["interpolate", ["linear"], ["zoom"], 4, 9, 6, 12, 9, 16],
-        "text-transform": "uppercase", "text-letter-spacing": 0.08,
-        "text-padding": 4, "text-allow-overlap": false, "text-optional": true },
-        paint: { "text-color": "#475569", "text-halo-color": "#ffffff", "text-halo-width": 1.5,
-          "text-opacity": ["interpolate", ["linear"], ["zoom"], 8.5, 0.9, 10, 0.4] } });
+      // Shared cadastral source + layer stack (counties, abstracts, wells,
+      // wellbores, labels) — identical to the deal map via lib/mapLayers.
+      addCadastralLayers(map, countyLabels as unknown as GeoJSON.FeatureCollection);
 
-      // Production heat map (bottom of the stack, above the basemap): weight `w` is
-      // pre-normalized to [0,1] per current extent, so the gradient rescales as you
-      // zoom. Two independent sources so oil and gas toggle and blend separately.
+      // Production heat map — inserted below the cadastral fill so parcels and
+      // labels stay readable over it. Weight `w` is pre-normalized to [0,1] per
+      // extent so the gradient rescales with zoom; oil/gas are separate sources.
       map.addSource("heat-oil", { type: "geojson", data: EMPTY_FC });
       map.addSource("heat-gas", { type: "geojson", data: EMPTY_FC });
       const heatLayer = (id: string, color: maplibregl.ExpressionSpecification): maplibregl.HeatmapLayerSpecification => ({
@@ -209,54 +164,8 @@ export function MapView() {
           "heatmap-opacity": 0.85,
         },
       });
-      map.addLayer(heatLayer("heat-oil", HEAT_OIL_COLOR));
-      map.addLayer(heatLayer("heat-gas", HEAT_GAS_COLOR));
-
-      map.addLayer({ id: "abstracts-fill", type: "fill", source: "abstracts", "source-layer": "abstracts", minzoom: MIN_ABSTRACT_ZOOM, paint: {
-        "fill-color": ["case", ["boolean", ["feature-state", "selected"], false], "#f59e0b", ["boolean", ["feature-state", "active"], false], "#ef4444", "#3b82f6"],
-        "fill-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 0.55, ["boolean", ["feature-state", "active"], false], 0.45, 0.05] } });
-      // Abstract boundaries — solid black, full opacity, heavy enough to read
-      // instantly against any basemap at every supported zoom.
-      // Abstract boundaries: thin black lines, in sync with wells + abstract
-      // numbers (all appear at z9). Slightly thinner and lighter than the
-      // county lines so the two read as different hierarchy levels.
-      // NOTE: zoom-driven expressions must be TOP-LEVEL in a paint property —
-      // nesting ["interpolate", …, ["zoom"], …] inside ["case", …] is invalid
-      // and silently kills the whole layer. Zoom outside, selection inside.
-      const sel = ["boolean", ["feature-state", "selected"], false];
-      map.addLayer({ id: "abstracts-line", type: "line", source: "abstracts", "source-layer": "abstracts", minzoom: 9, paint: {
-        "line-color": ["case", sel, "#b45309", "#6b7280"] as unknown as maplibregl.ExpressionSpecification,
-        "line-width": ["interpolate", ["linear"], ["zoom"],
-          9, ["case", sel, 3, 0.35],
-          12, ["case", sel, 3, 0.5],
-          14, ["case", sel, 3, 0.65]] as unknown as maplibregl.ExpressionSpecification,
-        "line-opacity": ["case", sel, 1, 0.6] as unknown as maplibregl.ExpressionSpecification } });
-      // County boundaries — drawn above, slightly heavier and more opaque than
-      // the abstract mesh so the administrative level stays distinct.
-      map.addLayer({ id: "county-bounds", type: "line", source: "abstracts", "source-layer": "counties", paint: {
-        "line-color": "#64748b",
-        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.45, 9, 1.05, 13, 1.5],
-        "line-opacity": 0.6 } });
-      // Wellbore laterals (surface -> bottom hole)
-      map.addLayer({ id: "wellbores", type: "line", source: "abstracts", "source-layer": "wellbores", minzoom: 10, layout: { "line-cap": "round" }, paint: {
-        "line-color": ["match", ["get", "wellboreType"], "Horizontal", "#0f766e", "Directional", "#9333ea", "#0f766e"],
-        "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1, 15, 2.5], "line-opacity": 0.8 } });
-      map.addLayer({ id: "wellbores-sel", type: "line", source: "abstracts", "source-layer": "wellbores", minzoom: 10, filter: ["==", ["get", "surfaceId"], -1], paint: { "line-color": "#111827", "line-width": 3 } });
-      // Surface wells — colored by RRC status; selection via feature-state (unique fid)
-      map.addLayer({ id: "wells", type: "circle", source: "abstracts", "source-layer": "wells", minzoom: 9, paint: {
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 2.3, 12, 3.6, 15, 6],
-        "circle-color": STATUS_COLOR,
-        "circle-stroke-width": ["case", ["boolean", ["feature-state", "selected"], false], 3, 0.6],
-        "circle-stroke-color": ["case", ["boolean", ["feature-state", "selected"], false], "#111827", "#ffffff"],
-        "circle-opacity": 0.9 } });
-      map.addLayer({ id: "abstracts-num", type: "symbol", source: "abstracts", "source-layer": "abstracts", minzoom: 9, layout: {
-        "symbol-sort-key": ["*", -1, ["get", "area"]], "text-field": ["get", "abstract"], "text-font": ["Noto Sans Regular"],
-        "text-size": ["interpolate", ["linear"], ["zoom"], 9, 10, 14, 13], "text-padding": 2, "text-allow-overlap": false, "text-optional": true },
-        paint: { "text-color": "#0f172a", "text-halo-color": "#ffffff", "text-halo-width": 1.4 } });
-      map.addLayer({ id: "abstracts-survey", type: "symbol", source: "abstracts", "source-layer": "abstracts", minzoom: 12.5, layout: {
-        "symbol-sort-key": ["*", -1, ["get", "area"]], "text-field": ["get", "survey"], "text-font": ["Noto Sans Regular"],
-        "text-size": 11, "text-offset": [0, 1.1], "text-max-width": 8, "text-padding": 2, "text-allow-overlap": false, "text-optional": true },
-        paint: { "text-color": "#334155", "text-halo-color": "#ffffff", "text-halo-width": 1.3 } });
+      map.addLayer(heatLayer("heat-oil", HEAT_OIL_COLOR), "abstracts-fill");
+      map.addLayer(heatLayer("heat-gas", HEAT_GAS_COLOR), "abstracts-fill");
 
       // Top-producer overlay (on top): the highest-BOE wells in view, sized by output.
       map.addSource("heat-top", { type: "geojson", data: EMPTY_FC });
