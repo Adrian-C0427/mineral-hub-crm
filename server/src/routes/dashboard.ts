@@ -18,16 +18,17 @@ dashboardRouter.get(
     const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
     const org = orgId(req);
 
-    // The dashboard reports exclusively on acquisition opportunities. Owned
-    // mineral assets (recordType OWNED_ASSET) are managed in their own module
-    // and never counted in the acquisition pipeline metrics below.
+    // The dashboard reports on the acquisition pipeline: opportunities plus any
+    // owned asset actively marketed for sale (assetMode SELL). HOLD assets stay
+    // in their own module and are never counted here.
+    const IN_PIPELINE = { OR: [{ recordType: "OPPORTUNITY" as const }, { recordType: "OWNED_ASSET" as const, assetMode: "SELL" as const }] };
     const [allActive, closedDeals, activeOffers] = await Promise.all([
-      prisma.deal.findMany({ where: { stage: { in: [...ACTIVE_STAGES] }, recordType: "OPPORTUNITY", organizationId: org }, include: { ...dealInclude, offers: true } }),
+      prisma.deal.findMany({ where: { stage: { in: [...ACTIVE_STAGES] }, organizationId: org, ...IN_PIPELINE }, include: { ...dealInclude, offers: true } }),
       prisma.deal.findMany({
-        where: { stage: "CLOSED", recordType: "OPPORTUNITY", organizationId: org },
+        where: { stage: "CLOSED", organizationId: org, ...IN_PIPELINE },
         include: { ...dealInclude, selectedOffer: true, stageHistory: { where: { toStage: "CLOSED" }, orderBy: { createdAt: "desc" }, take: 1 } },
       }),
-      prisma.offer.count({ where: { status: "ACTIVE", deal: { organizationId: org, recordType: "OPPORTUNITY" } } }),
+      prisma.offer.count({ where: { status: "ACTIVE", deal: { organizationId: org, ...IN_PIPELINE } } }),
     ]);
 
     // Metrics row

@@ -4,7 +4,8 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, Banner, Modal } from "../components/ui";
+import { Spinner, Banner, Modal, ConfirmDelete } from "../components/ui";
+import { useRowSelection, BulkBar } from "../components/bulk";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { ResearchImport } from "../components/ResearchImport";
@@ -759,20 +760,48 @@ function OpportunitiesTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
 // ---------------------------------------------------------------------------
 
 function RecordsTab({ qs }: { qs: string }) {
+  const { can } = useAuth();
+  const canManage = can("manageResearchData");
   const [kind, setKind] = useState<"documents" | "permits">("documents");
   const [page, setPage] = useState(1);
+  const [archived, setArchived] = useState(false);
   const [docs, setDocs] = useState<Paged<DocRecord> | null>(null);
   const [permits, setPermits] = useState<Paged<PermitRecord> | null>(null);
   const [loading, setLoading] = useState(true);
+  const sel = useRowSelection();
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
   const pageSize = 50;
 
-  useEffect(() => { setPage(1); }, [qs, kind]);
+  useEffect(() => { setPage(1); sel.clear(); }, [qs, kind, archived]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setLoading(true);
-    const url = `/research/${kind}?${qs}&page=${page}&pageSize=${pageSize}`;
+    const url = `/research/${kind}?${qs}&page=${page}&pageSize=${pageSize}${archived ? "&archived=true" : ""}`;
     if (kind === "documents") api.get<Paged<DocRecord>>(url).then(setDocs).catch(() => setDocs(null)).finally(() => setLoading(false));
     else api.get<Paged<PermitRecord>>(url).then(setPermits).catch(() => setPermits(null)).finally(() => setLoading(false));
-  }, [qs, kind, page]);
+  }, [qs, kind, page, archived, reloadKey]);
+
+  async function bulk(action: "delete" | "archive" | "unarchive") {
+    setBusy(true);
+    try {
+      await api.post("/research/records/bulk", { kind: kind.toUpperCase(), ids: [...sel.selected], action });
+      sel.clear(); setConfirmDel(false); setReloadKey((k) => k + 1);
+    } finally { setBusy(false); }
+  }
+  function exportSelected() {
+    if (kind === "documents") {
+      const rows = (docs?.rows ?? []).filter((r) => sel.selected.has(r.id));
+      downloadCsv("research-documents-selected.csv",
+        ["Recording Date", "Type", "Class", "Grantor", "Grantee", "Instrument #", "State", "County", "Abstract"],
+        rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.docClass, r.grantor, r.grantee, r.instrumentNumber, r.state, r.county, r.abstractId]));
+    } else {
+      const rows = (permits?.rows ?? []).filter((r) => sel.selected.has(r.id));
+      downloadCsv("research-permits-selected.csv",
+        ["Date", "Operator", "Lease", "Well", "API #", "Permit #", "Status", "Trajectory", "State", "County", "Formation", "Source"],
+        rows.map((r) => [r.activityDate.slice(0, 10), r.operator, r.leaseName, r.wellName, r.apiNumber, r.permitNumber, r.status, r.trajectory, r.state, r.county, r.formation, r.source]));
+    }
+  }
 
   async function exportAll() {
     // Export up to 2000 most-recent matching rows.
@@ -820,15 +849,25 @@ function RecordsTab({ qs }: { qs: string }) {
           <span className={`chip ${kind === "permits" ? "active" : ""}`} onClick={() => setKind("permits")}>Drilling Permits</span>
         </div>
         <div className="row" style={{ gap: 8, alignItems: "center" }}>
-          {active && <span className="muted" style={{ fontSize: 12 }}>{num(active.total)} records</span>}
+          {active && <span className="muted" style={{ fontSize: 12 }}>{num(active.total)} {archived ? "archived " : ""}records</span>}
+          {canManage && <label className="dm-chk" style={{ fontSize: 12 }}><input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} /> Show archived</label>}
           <button className="small" onClick={exportAll} disabled={!active?.total}>Export CSV</button>
         </div>
       </div>
+      {canManage && sel.selected.size > 0 && (
+        <BulkBar count={sel.selected.size} onClear={sel.clear}>
+          <button className="small" onClick={exportSelected}>Export</button>
+          {archived
+            ? <button className="small" onClick={() => bulk("unarchive")} disabled={busy}>Unarchive</button>
+            : <button className="small" onClick={() => bulk("archive")} disabled={busy}>Archive</button>}
+          <button className="small danger" onClick={() => setConfirmDel(true)} disabled={busy}>Delete</button>
+        </BulkBar>
+      )}
       {loading && !active ? <Spinner /> : !active || active.total === 0 ? <p className="muted">No matching records.</p> : (
         <>
           {kind === "documents"
-            ? <SortableTable columns={docColumns} rows={docs!.rows} rowKey={(r) => r.id} />
-            : <SortableTable columns={permitColumns} rows={permits!.rows} rowKey={(r) => r.id} />}
+            ? <SortableTable columns={docColumns} rows={docs!.rows} rowKey={(r) => r.id} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />
+            : <SortableTable columns={permitColumns} rows={permits!.rows} rowKey={(r) => r.id} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />}
           {totalPages > 1 && (
             <div className="row" style={{ gap: 8, alignItems: "center", justifyContent: "flex-end", marginTop: 10 }}>
               <button className="small" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Prev</button>
@@ -837,6 +876,9 @@ function RecordsTab({ qs }: { qs: string }) {
             </div>
           )}
         </>
+      )}
+      {confirmDel && (
+        <ConfirmDelete count={sel.selected.size} itemLabel="record" busy={busy} onCancel={() => setConfirmDel(false)} onConfirm={() => bulk("delete")} />
       )}
     </div>
   );

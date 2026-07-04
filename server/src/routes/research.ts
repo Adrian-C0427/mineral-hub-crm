@@ -748,7 +748,8 @@ researchRouter.get(
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
     const { page, pageSize } = pageSchema.parse(req.query);
-    const where = docWhere(org, f, win);
+    // Archived records are hidden by default; ?archived=true shows only them.
+    const where = { ...docWhere(org, f, win), archivedAt: req.query.archived === "true" ? { not: null } : null };
     const [total, rows] = await Promise.all([
       prisma.researchDocument.count({ where }),
       prisma.researchDocument.findMany({
@@ -767,7 +768,7 @@ researchRouter.get(
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
     const { page, pageSize } = pageSchema.parse(req.query);
-    const where = permitWhere(org, f, win);
+    const where = { ...permitWhere(org, f, win), archivedAt: req.query.archived === "true" ? { not: null } : null };
     const [total, rows] = await Promise.all([
       prisma.researchPermit.count({ where }),
       prisma.researchPermit.findMany({
@@ -900,6 +901,16 @@ researchRouter.post(
     const skippedReasons = new Map<string, number>();
     const skip = (reason: string) => { skipped++; skippedReasons.set(reason, (skippedReasons.get(reason) ?? 0) + 1); };
 
+    // Create the import batch first so every row it produces can be stamped with
+    // its ingestRunId — that FK is what lets a single import be deleted later
+    // without disturbing other data.
+    const run = await prisma.researchIngestRun.create({
+      data: {
+        organizationId: org, kind, source, state: fallbackState, county: fallbackCounty, filename: filename ?? null,
+        rowsTotal: rows.length, status: "COMPLETED", createdByUserId: req.user!.id,
+      },
+    });
+
     if (kind === "DOCUMENTS") {
       // Pre-load existing instrument numbers for dedupe (org scope; keyed by state+county).
       const existing = new Set(
@@ -940,7 +951,7 @@ researchRouter.post(
           grantor, grantee, grantorNorm: normalizeEntity(grantor), granteeNorm: normalizeEntity(grantee),
           abstractId: get(row, "abstractId") || null,
           legalDescription: get(row, "legalDescription") || null,
-          source,
+          source, ingestRunId: run.id,
         });
       }
       for (let i = 0; i < batch.length; i += CHUNK) {
@@ -984,7 +995,7 @@ researchRouter.post(
           totalDepth: numOf(get(row, "totalDepth")),
           abstractId: get(row, "abstractId") || null,
           latitude: numOf(get(row, "latitude")), longitude: numOf(get(row, "longitude")),
-          source,
+          source, ingestRunId: run.id,
         });
       }
       for (let i = 0; i < batch.length; i += CHUNK) {
@@ -993,12 +1004,9 @@ researchRouter.post(
       }
     }
 
-    const run = await prisma.researchIngestRun.create({
-      data: {
-        organizationId: org, kind, source, state: fallbackState, county: fallbackCounty, filename: filename ?? null,
-        rowsTotal: rows.length, rowsImported: imported, rowsSkipped: skipped, rowsFailed: failed,
-        status: "COMPLETED", createdByUserId: req.user!.id,
-      },
+    await prisma.researchIngestRun.update({
+      where: { id: run.id },
+      data: { rowsImported: imported, rowsSkipped: skipped, rowsFailed: failed },
     });
 
     res.json({
@@ -1047,5 +1055,51 @@ researchRouter.delete(
     if (!kind || kind === "DOCUMENTS") documents = (await prisma.researchDocument.deleteMany({ where: scope })).count;
     if (!kind || kind === "PERMITS") permits = (await prisma.researchPermit.deleteMany({ where: scope })).count;
     res.json({ documents, permits });
+  }),
+);
+
+// Delete one or more imports (ingest runs) AND only the records they created —
+// other imports are untouched (records carry ingestRunId). #44.
+researchRouter.post(
+  "/ingest/runs/delete",
+  requirePermission("manageResearchData"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const { ids } = z.object({ ids: z.array(z.string()).min(1) }).parse(req.body);
+    const runs = await prisma.researchIngestRun.findMany({ where: { id: { in: ids }, organizationId: org }, select: { id: true } });
+    const runIds = runs.map((r) => r.id);
+    if (!runIds.length) return res.json({ runs: 0, documents: 0, permits: 0 });
+    const scope = { organizationId: org, ingestRunId: { in: runIds } };
+    const [documents, permits] = await prisma.$transaction([
+      prisma.researchDocument.deleteMany({ where: scope }),
+      prisma.researchPermit.deleteMany({ where: scope }),
+    ]);
+    await prisma.researchIngestRun.deleteMany({ where: { id: { in: runIds }, organizationId: org } });
+    res.json({ runs: runIds.length, documents: documents.count, permits: permits.count });
+  }),
+);
+
+// Records bulk actions (#43): delete / archive / unarchive selected records.
+const bulkSchema = z.object({
+  kind: z.enum(["DOCUMENTS", "PERMITS"]),
+  ids: z.array(z.string()).min(1),
+  action: z.enum(["delete", "archive", "unarchive"]),
+});
+researchRouter.post(
+  "/records/bulk",
+  requirePermission("manageResearchData"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const { kind, ids, action } = bulkSchema.parse(req.body);
+    const where = { id: { in: ids }, organizationId: org };
+    const model = kind === "DOCUMENTS" ? prisma.researchDocument : prisma.researchPermit;
+    let count = 0;
+    if (action === "delete") {
+      count = (await (model as typeof prisma.researchDocument).deleteMany({ where })).count;
+    } else {
+      const archivedAt = action === "archive" ? new Date() : null;
+      count = (await (model as typeof prisma.researchDocument).updateMany({ where, data: { archivedAt } })).count;
+    }
+    res.json({ count });
   }),
 );

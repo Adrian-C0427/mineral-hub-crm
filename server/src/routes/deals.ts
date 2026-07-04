@@ -90,11 +90,19 @@ dealsRouter.get(
   "/",
   requirePermission("viewDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    // ?recordType=OPPORTUNITY (default) | OWNED_ASSET | ALL. Keeps the Deals
-    // pages opportunity-only; Mineral Assets and the Pipeline request what they need.
+    // ?recordType=OPPORTUNITY (default) | OWNED_ASSET | ALL.
+    // Asset sale lifecycle: an owned asset marked SELL is actively marketed, so
+    // it also behaves as an opportunity (Deals / Pipeline / Dashboard). A HOLD
+    // asset stays only in the Mineral Assets module. Once a sale CLOSES the
+    // record leaves the assets module (it's now a Closed Deal).
     const rt = String(req.query.recordType ?? "OPPORTUNITY").toUpperCase();
     const where = { organizationId: orgId(req) } as Record<string, unknown>;
-    if (rt === "OPPORTUNITY" || rt === "OWNED_ASSET") where.recordType = rt;
+    if (rt === "OPPORTUNITY") {
+      where.OR = [{ recordType: "OPPORTUNITY" }, { recordType: "OWNED_ASSET", assetMode: "SELL" }];
+    } else if (rt === "OWNED_ASSET") {
+      where.recordType = "OWNED_ASSET";
+      where.stage = { not: "CLOSED" }; // sold assets move to Closed Deals, not the portfolio
+    }
     const deals = await prisma.deal.findMany({
       where,
       include: { ...dealInclude, offers: { select: { amount: true } } },

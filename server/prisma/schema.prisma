@@ -876,6 +876,14 @@ model ResearchDocument {
   source    String  @default("manual") // adapter key (see domain/researchSources.ts)
   sourceRef String? // row id / document URL at the source
 
+  // Links each record to the import batch (ResearchIngestRun) that created it,
+  // so a single import can be deleted without touching other data. Null for
+  // records created before batch tracking or by the sample seeder.
+  ingestRunId String?
+  // Soft-archive (Records bulk "Archive"): hidden from the default list but
+  // retained; distinct from deletion.
+  archivedAt DateTime?
+
   createdAt DateTime @default(now())
 
   @@index([organizationId, state, county, recordingDate])
@@ -883,6 +891,7 @@ model ResearchDocument {
   @@index([organizationId, granteeNorm])
   @@index([organizationId, grantorNorm])
   @@index([organizationId, abstractId])
+  @@index([organizationId, ingestRunId])
 }
 
 // A drilling permit / well lifecycle record (TX RRC W-1 and equivalents).
@@ -924,11 +933,15 @@ model ResearchPermit {
   source    String  @default("manual")
   sourceRef String?
 
+  ingestRunId String?
+  archivedAt  DateTime?
+
   createdAt DateTime @default(now())
 
   @@index([organizationId, state, county, activityDate])
   @@index([organizationId, operatorNorm])
   @@index([organizationId, activityDate])
+  @@index([organizationId, ingestRunId])
 }
 
 enum WellStatus {
