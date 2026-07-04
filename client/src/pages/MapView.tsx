@@ -225,7 +225,7 @@ export function MapView() {
       // and silently kills the whole layer. Zoom outside, selection inside.
       const sel = ["boolean", ["feature-state", "selected"], false];
       map.addLayer({ id: "abstracts-line", type: "line", source: "abstracts", "source-layer": "abstracts", minzoom: 9, paint: {
-        "line-color": ["case", sel, "#b45309", "#000000"] as unknown as maplibregl.ExpressionSpecification,
+        "line-color": ["case", sel, "#b45309", "#6b7280"] as unknown as maplibregl.ExpressionSpecification,
         "line-width": ["interpolate", ["linear"], ["zoom"],
           9, ["case", sel, 3, 0.35],
           12, ["case", sel, 3, 0.5],
@@ -235,8 +235,8 @@ export function MapView() {
       // the abstract mesh so the administrative level stays distinct.
       map.addLayer({ id: "county-bounds", type: "line", source: "abstracts", "source-layer": "counties", paint: {
         "line-color": "#64748b",
-        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.6, 9, 1.4, 13, 2],
-        "line-opacity": 0.75 } });
+        "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.45, 9, 1.05, 13, 1.5],
+        "line-opacity": 0.6 } });
       // Wellbore laterals (surface -> bottom hole)
       map.addLayer({ id: "wellbores", type: "line", source: "abstracts", "source-layer": "wellbores", minzoom: 10, layout: { "line-cap": "round" }, paint: {
         "line-color": ["match", ["get", "wellboreType"], "Horizontal", "#0f766e", "Directional", "#9333ea", "#0f766e"],
