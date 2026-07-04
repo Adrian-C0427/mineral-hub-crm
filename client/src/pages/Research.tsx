@@ -11,7 +11,7 @@ import { ResearchImport } from "../components/ResearchImport";
 import { ResearchChoropleth, type CountyStat } from "../components/ResearchChoropleth";
 import { downloadCsv } from "../lib/csv";
 import { fmtDate, num, prettyEnum } from "../lib/format";
-import { CHART_COLORS } from "../lib/charts";
+import { CHART_COLORS, chartTooltip } from "../lib/charts";
 import { exportElementToPdf } from "../lib/pdf";
 
 /**
@@ -317,7 +317,7 @@ function OverviewTab({ qs }: { qs: string }) {
               <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
               <XAxis dataKey="label" tick={{ fontSize: 11 }} minTickGap={24} />
               <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-              <Tooltip />
+              <Tooltip {...chartTooltip} />
               <Legend />
               <Bar dataKey="transactions" name="Transactions" stackId="a" fill={CHART_COLORS[0]} />
               <Bar dataKey="leases" name="Leases" stackId="a" fill={CHART_COLORS[1]} />
@@ -333,7 +333,7 @@ function OverviewTab({ qs }: { qs: string }) {
               <BarChart data={data.docTypeBreakdown.map((d) => ({ name: prettyEnum(d.docType), count: d.count }))} layout="vertical" margin={{ left: 60 }}>
                 <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
                 <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11 }} />
-                <Tooltip />
+                <Tooltip {...chartTooltip} />
                 <Bar dataKey="count" name="Documents" fill={CHART_COLORS[0]} radius={[0, 3, 3, 0]} />
               </BarChart>
             </ResponsiveContainer>
@@ -350,7 +350,7 @@ function OverviewTab({ qs }: { qs: string }) {
               <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
               <XAxis dataKey="name" tick={{ fontSize: 11 }} />
               <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-              <Tooltip />
+              <Tooltip {...chartTooltip} />
               <Legend />
               <Bar dataKey="Prior" fill={CHART_COLORS[6]} radius={[3, 3, 0, 0]} />
               <Bar dataKey="Current" fill={CHART_COLORS[0]} radius={[3, 3, 0, 0]} />
@@ -576,7 +576,7 @@ function RankingsTab({ qs, opts, onDrill }: { qs: string; opts: FilterOpts | nul
               <BarChart data={top} layout="vertical" margin={{ left: 80 }}>
                 <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
                 <YAxis type="category" dataKey="name" width={200} tick={{ fontSize: 11 }} />
-                <Tooltip />
+                <Tooltip {...chartTooltip} />
                 <Bar dataKey="count" name={role === "operators" ? "Permits" : "Records"} fill={CHART_COLORS[role === "buyers" ? 0 : role === "sellers" ? 4 : 3]} radius={[0, 3, 3, 0]} />
               </BarChart>
             </ResponsiveContainer>

@@ -13,7 +13,7 @@ import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { AssigneePicker } from "../components/AssigneePicker";
 import { AbstractMultiPicker } from "../components/AbstractPicker";
 import { US_STATE_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, countiesForStates } from "../lib/options";
-import { monthLabel } from "../lib/charts";
+import { monthLabel, chartTooltip } from "../lib/charts";
 import { money, num, fmtDate, toInputDate } from "../lib/format";
 import { OWNERSHIP_TYPES, OWNERSHIP_STATUSES, PRODUCING_STATUSES } from "./MineralAssets";
 import type { BuyerActivityRow, DealSummary, MatchRec, RevenueEntry, Seller, UserLite } from "../types";
@@ -309,7 +309,7 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
                 <XAxis dataKey="month" tickFormatter={monthLabel} tick={{ fontSize: 11 }} minTickGap={20} />
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => (v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${v}`)} width={54} />
-                <Tooltip contentStyle={{ backgroundColor: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 }} labelFormatter={monthLabel} formatter={(v: number) => money(v)} />
+                <Tooltip {...chartTooltip} labelFormatter={monthLabel} formatter={(v: number) => money(v)} />
                 <Bar dataKey="amount" name="Revenue" isAnimationActive={false}>
                   {chartData.map((d, i) => <Cell key={i} fill={d.kind === "LEASE_BONUS" ? "#f59e0b" : REV_COLOR} />)}
                 </Bar>

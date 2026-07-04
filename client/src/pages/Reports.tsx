@@ -10,7 +10,7 @@ import { Spinner, Banner, Modal } from "../components/ui";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { money, pct, num, fmtDate, prettyStage } from "../lib/format";
-import { CHART_COLORS, COLOR_REVENUE, COLOR_PROFIT, COLOR_FORECAST, monthLabel } from "../lib/charts";
+import { CHART_COLORS, COLOR_REVENUE, COLOR_PROFIT, COLOR_FORECAST, monthLabel, chartTooltip } from "../lib/charts";
 import { exportElementToPdf } from "../lib/pdf";
 import type { DealSummary } from "../types";
 
@@ -218,11 +218,16 @@ export function Reports() {
               <p style={{ margin: "10px 0 0", fontSize: 12 }}><strong>Filters:</strong> {activeFilterChips.join(" · ")}</p>
             )}
             <p style={{ marginBottom: 0, marginTop: 10 }}>
-              <strong>Executive summary.</strong> Over this period the team closed <strong>{num(k.dealsClosed)}</strong> deal(s)
+              <strong>Executive summary.</strong> Over this period the team closed <strong>{num(k.dealsClosed)}</strong> {k.dealsClosed === 1 ? "deal" : "deals"}{" "}
               generating <strong>{money(k.revenue)}</strong> in revenue and <strong>{money(k.netProfit)}</strong> net profit,
-              added <strong>{num(k.dealsAdded)}</strong> new deal(s), and maintained a <strong>{pct(k.winRate)}</strong> win rate.
+              added <strong>{num(k.dealsAdded)}</strong> new {k.dealsAdded === 1 ? "deal" : "deals"}, and maintained a <strong>{pct(k.winRate)}</strong> win rate.
               Total company expenses were <strong>{money(k.expenses)}</strong> with <strong>{money(k.reimbursementsOutstanding)}</strong> outstanding in reimbursements.
             </p>
+            {k.totalDeals === 0 && (
+              <Banner kind="info">
+                No deal activity in this period yet — these metrics fill in automatically as deals are added and closed. Try a wider date range, or start from the Pipeline.
+              </Banner>
+            )}
           </div>
 
           {/* --- KPI grid --- */}
@@ -258,7 +263,7 @@ export function Reports() {
                   <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                   <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                  <Tooltip />
+                  <Tooltip {...chartTooltip} />
                   <Legend />
                   <Bar dataKey="dealsAdded" name="Added" fill={CHART_COLORS[0]} radius={[3, 3, 0, 0]} />
                   <Bar dataKey="dealsClosed" name="Closed" fill={CHART_COLORS[1]} radius={[3, 3, 0, 0]} />
@@ -276,7 +281,7 @@ export function Reports() {
                       onClick={(e: { name?: string }) => e?.name && drillByDeal(`Asset type: ${e.name}`, (dd) => dd.assetTypes.includes(e.name!))}>
                       {data.breakdowns.assetTypes.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} style={{ cursor: "pointer" }} />)}
                     </Pie>
-                    <Tooltip />
+                    <Tooltip {...chartTooltip} />
                   </PieChart>
                 </ResponsiveContainer>
               )}
@@ -339,7 +344,7 @@ function TrendChart({ series }: { series: MonthPoint[] }) {
         <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
         <XAxis dataKey="label" tick={{ fontSize: 11 }} />
         <YAxis tickFormatter={(v) => money(v)} tick={{ fontSize: 11 }} width={70} />
-        <Tooltip formatter={(v: number) => money(v)} />
+        <Tooltip {...chartTooltip} formatter={(v: number) => money(v)} />
         <Legend />
         <Line type="monotone" dataKey="revenue" name="Revenue" stroke={COLOR_REVENUE} strokeWidth={2} dot={false} connectNulls />
         <Line type="monotone" dataKey="netProfit" name="Net Profit" stroke={COLOR_PROFIT} strokeWidth={2} dot={false} connectNulls />
@@ -358,7 +363,7 @@ function BreakdownBars({ data, color = CHART_COLORS[0], onClick }: { data: { nam
         <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
         <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
         <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={110} />
-        <Tooltip />
+        <Tooltip {...chartTooltip} />
         <Bar dataKey="count" name="Deals" fill={color} radius={[0, 3, 3, 0]} cursor="pointer"
           onClick={(e: { name?: string }) => e?.name && onClick?.(e.name)} />
       </BarChart>

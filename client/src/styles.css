@@ -48,6 +48,11 @@ button:hover { background: var(--border); }
 button:disabled { opacity: 0.5; cursor: not-allowed; }
 button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 button.primary:hover { background: var(--accent-hover); }
+/* Links styled as primary buttons (e.g. dashboard getting-started CTAs). */
+a.primary { background: var(--accent); border: 1px solid var(--accent); color: #fff; display: inline-flex; align-items: center; font-weight: 500; }
+a.primary:hover { background: var(--accent-hover); text-decoration: none; }
+/* Disabled primary reads as clearly inactive (muted grey, not accent blue). */
+button.primary:disabled, button.primary:disabled:hover { background: var(--panel-2); border-color: var(--border); color: var(--text-dim); }
 button.danger { background: transparent; border-color: var(--red); color: var(--red); }
 button.danger:hover { background: rgba(239, 68, 68, 0.12); }
 button.small { padding: 4px 10px; font-size: 13px; }
@@ -125,12 +130,9 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .sidebar.collapsed .sidebar-group:hover .sidebar-sub.flyout { display: flex; }
 .flyout-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); padding: 4px 10px 6px; }
 
-/* Compact icon-only sidebar on narrow screens (same as manual collapse) */
-@media (max-width: 760px) {
-  .sidebar { width: 56px; flex-basis: 56px; }
-  .sidebar .sidebar-label, .sidebar .group-caret, .sidebar-user { display: none; }
-  .sidebar-brand .brand { font-size: 0; }
-}
+/* Narrow screens: the Sidebar component auto-collapses itself to the icon
+   rail via matchMedia; the responsive content-reflow rules live at the END of
+   this file so they win the cascade over the base grid definitions. */
 
 .page { max-width: 1280px; margin: 0 auto; padding: 24px; }
 .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; gap: 16px; }
@@ -172,6 +174,10 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .timeline-kind { font-size: 12px; font-weight: 600; }
 .link-btn { background: none; border: none; color: var(--accent); padding: 0 4px; font-size: 12px; cursor: pointer; }
 .match-selected { outline: 2px solid var(--accent); }
+/* Per-field copy-to-clipboard: icon fades in on hover of the key/value row. */
+.kv-copy-btn { opacity: 0; background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 12px; margin-left: 5px; padding: 0 2px; line-height: 1; transition: opacity .12s, color .12s; }
+.kv-copy:hover .kv-copy-btn { opacity: 1; }
+.kv-copy-btn:hover { color: var(--accent); background: none; }
 
 /* Embedded deal map */
 .deal-map { display: flex; flex-direction: column; }
@@ -206,7 +212,12 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
   color: var(--accent); font-weight: 700; font-size: 13px;
   display: flex; align-items: center; justify-content: center; overflow: hidden;
 }
+.integration-logo { position: relative; }
 .integration-logo img { width: 24px; height: 24px; object-fit: contain; display: block; }
+/* Brand-mark tiles: the image sits over an initials fallback so a blocked or
+   offline CDN degrades to readable initials instead of a blank white tile. */
+.integration-logo.brand img { position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%); }
+.integration-logo-fallback { color: #64748b; font-weight: 700; font-size: 13px; }
 .integration-name { font-weight: 600; }
 .integration-desc { font-size: 13px; color: var(--text-dim); margin: 0 0 10px; flex: 1; }
 .chip-mini { font-size: 11px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; }
@@ -239,6 +250,12 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
    border-collapse: separate, generous padding so headers/data never overlap,
    wrap the table in an overflow-x container. */
 .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+/* Always-visible slim scrollbar = the cue that more columns exist off-screen. */
+.table-scroll, .kanban { scrollbar-width: thin; scrollbar-color: var(--text-dim) transparent; }
+.table-scroll::-webkit-scrollbar, .kanban::-webkit-scrollbar { height: 8px; }
+.table-scroll::-webkit-scrollbar-track, .kanban::-webkit-scrollbar-track { background: transparent; }
+.table-scroll::-webkit-scrollbar-thumb, .kanban::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.table-scroll::-webkit-scrollbar-thumb:hover, .kanban::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
 table.data-table {
   border-collapse: separate;
   border-spacing: 0;
@@ -271,6 +288,19 @@ table.data-table {
 .data-table tbody tr.clickable { cursor: pointer; }
 .data-table tbody tr.clickable:hover { background: var(--panel-2); }
 .data-table tbody tr:last-child td { border-bottom: none; }
+
+/* Sticky lead column (SortableTable): the identifying column stays pinned
+   while the rest of a wide table scrolls beneath it. With a selection
+   checkbox column, that column is pinned too and gets a fixed width so the
+   second column's `left` offset is deterministic. */
+.data-table.lead-sticky th:nth-child(1), .data-table.lead-sticky td:nth-child(1) { position: sticky; left: 0; z-index: 3; background: var(--panel); }
+.data-table.lead-sticky.has-sel th:nth-child(1), .data-table.lead-sticky.has-sel td:nth-child(1) { width: 44px; min-width: 44px; max-width: 44px; padding-left: 10px; padding-right: 10px; }
+.data-table.lead-sticky.has-sel th:nth-child(2), .data-table.lead-sticky.has-sel td:nth-child(2) { position: sticky; left: 44px; z-index: 3; background: var(--panel); }
+.data-table.lead-sticky thead th:nth-child(1), .data-table.lead-sticky.has-sel thead th:nth-child(2) { z-index: 4; background: var(--panel-2); }
+.data-table.lead-sticky tbody tr.clickable:hover td:nth-child(1),
+.data-table.lead-sticky.has-sel tbody tr.clickable:hover td:nth-child(2) { background: var(--panel-2); }
+.data-table.lead-sticky tbody tr.row-selected td:nth-child(1),
+.data-table.lead-sticky.has-sel tbody tr.row-selected td:nth-child(2) { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
 .data-table td { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
 .data-table td .wrap { white-space: normal; }
 .empty-cell { text-align: center; color: var(--text-dim); padding: 32px; }
@@ -429,11 +459,18 @@ tr.row-base td { background: var(--panel-2); font-weight: 600; }
 .gear-link:hover { color: var(--text); background: var(--panel-2); text-decoration:none; }
 
 /* Pipeline transition targets (Closed / Dead) — drop zones, not columns.
-   Dropping a deal here opens the Closed/Archive confirmation. */
-.kanban-transitions { background: transparent; border: none; min-width: 180px; width: 180px; gap: 14px; max-height: none; }
-.transition-zone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 18px 14px; display: flex; flex-direction: column; align-items: center; gap: 4px; font-weight: 600; color: var(--text-dim); flex: 1; justify-content: center; text-align: center; }
+   Rendered as a full-width bar ABOVE the board so they're always on-screen
+   (the board itself scrolls horizontally). Dropping here opens the
+   Closed/Archive confirmation. */
+.transition-bar { display: flex; gap: 12px; margin-bottom: 12px; }
+.transition-zone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 10px 14px; display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--text-dim); flex: 1; justify-content: center; text-align: center; }
 .transition-zone.closed.drop-target { border-color: var(--green); color: var(--green); background: color-mix(in srgb, var(--green) 8%, transparent); }
 .transition-zone.dead.drop-target { border-color: var(--red); color: var(--red); background: color-mix(in srgb, var(--red) 8%, transparent); }
+
+/* Per-card "move" affordance — the explicit alternative to drag & drop. */
+.dc-move { position: absolute; top: 6px; right: 8px; border: none; background: transparent; color: var(--text-dim); font-size: 15px; line-height: 1; padding: 2px 6px; border-radius: 5px; opacity: 0; }
+.deal-card:hover .dc-move { opacity: 1; }
+.dc-move:hover { background: var(--panel); color: var(--text); }
 
 /* --- Seller Details --- */
 .seller-list { display: flex; flex-direction: column; gap: 12px; }
@@ -463,3 +500,23 @@ input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance
 /* --- Bulk actions --- */
 .bulk-bar { position: sticky; bottom: 16px; z-index: 20; display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius); padding: 10px 16px; margin-top: 14px; box-shadow: var(--shadow); }
 tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+/* ===========================================================================
+   Responsive content reflow — kept LAST so these breakpoints win the cascade
+   over the base grid definitions above. !important beats per-page inline
+   gridTemplateColumns overrides (Reports/Expenses/DealDetail metric rows).
+   The sidebar handles itself (auto-collapses via matchMedia in React).
+   =========================================================================== */
+@media (max-width: 1100px) {
+  .metrics-row { grid-template-columns: repeat(3, 1fr) !important; }
+}
+@media (max-width: 760px) {
+  .page { padding: 14px; }
+  .page-header { flex-wrap: wrap; }
+  .metrics-row { grid-template-columns: repeat(2, 1fr) !important; }
+  .dd-grid { grid-template-columns: 1fr 1fr; }
+  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+}
+@media (max-width: 460px) {
+  .dd-grid { grid-template-columns: 1fr; }
+}

@@ -72,8 +72,14 @@ export function BuyerProfile() {
   const setD = (patch: Partial<BuyerProfileData>) => setDraft((d) => (d ? { ...d, ...patch } : d));
   const setBox = (k: keyof BuyBox, v: unknown) => setDraft((d) => (d ? { ...d, buyBox: { ...d.buyBox, [k]: v } } : d));
 
+  // Return to the Buyers list. Prefer browser back so its filters/sort/scroll
+  // survive (the list keeps that state in memory); fall back to /buyers on a
+  // deep link with no in-app history.
+  const backToBuyers = () => { if (window.history.length > 1) nav(-1); else nav("/buyers"); };
+
   return (
     <div className="page">
+      <button className="link-btn" onClick={backToBuyers} style={{ marginBottom: 10 }}>← Back to Buyers</button>
       <div className="page-header">
         <div className="row">
           <h1 style={{ marginBottom: 0 }}>{view.name}</h1>

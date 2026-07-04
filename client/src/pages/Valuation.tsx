@@ -8,7 +8,7 @@ import { useAuth } from "../auth/AuthContext";
 import { Banner, MetricCard, Modal, Spinner } from "../components/ui";
 import { WellImport } from "../components/WellImport";
 import { money, num, prettyEnum } from "../lib/format";
-import { monthLabel } from "../lib/charts";
+import { monthLabel, chartTooltip } from "../lib/charts";
 import { exportElementToPdf } from "../lib/pdf";
 
 /**
@@ -173,6 +173,19 @@ export function Valuation() {
 
   useEffect(() => {
     api.get<Assumptions>("/wells/assumptions/defaults").then(setAssumptions).catch(() => {});
+  }, []);
+
+  // Deep-link from the map's well panel ("Open in Well Analysis"): ?well=<API#>.
+  // Auto-selects the matching analysis well so the user lands ready to run,
+  // without re-searching. (A map well only matches if it's in the analysis
+  // dataset; otherwise the workspace opens for a manual pick.)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const w = params.get("well");
+    if (!w) return;
+    api.get<Paged<WellRow>>(`/wells?q=${encodeURIComponent(w)}&pageSize=1`)
+      .then((r) => { if (r.rows[0]) { setSelected([r.rows[0]]); setPageTab("workspace"); } })
+      .catch(() => {});
   }, []);
 
   const runAnalysis = useCallback(async (wells: WellRow[], a: Assumptions) => {
@@ -403,7 +416,7 @@ function WellPicker({ selected, setSelected }: { selected: WellRow[]; setSelecte
           <input
             className="msel-input"
             value={q}
-            placeholder={selected.length === 0 ? "Search wells by name, API number, operator or lease…" : ""}
+            placeholder={selected.length === 0 ? "Search by well/lease name, API, operator, county, formation, status…" : ""}
             onChange={(e) => { setQ(e.target.value); setOpen(true); }}
             onFocus={() => setOpen(true)}
           />
@@ -488,23 +501,6 @@ function AssumptionsForm({ a, onChange }: { a: Assumptions; onChange: (a: Assump
             <NumField label="Gas ($/mcf)" value={a.gasPrice} onChange={(v) => set("gasPrice", v ?? 0)} step={0.1} />
             <NumField label="NGL ($/bbl)" value={a.nglPrice} onChange={(v) => set("nglPrice", v ?? 0)} step={1} />
             <NumField label="Price escalation" value={a.priceEscalationPct} onChange={(v) => set("priceEscalationPct", v ?? 0)} step={0.5} suffix="%/yr" />
-          </div>
-        </div>
-        <div className="assumption-group">
-          <div className="assumption-group-title">Ownership interest</div>
-          <div className="assumption-grid">
-            <NumField label="Net revenue interest" value={round4(a.nri * 100)} onChange={(v) => set("nri", (v ?? 0) / 100)} step={0.5} suffix="%" hint="Share of revenue you would receive" />
-            <NumField label="Working interest" value={round4(a.workingInterest * 100)} onChange={(v) => set("workingInterest", (v ?? 0) / 100)} step={1} suffix="%" hint="Share of costs you would bear (0 for royalty-only)" />
-          </div>
-        </div>
-        <div className="assumption-group">
-          <div className="assumption-group-title">Costs &amp; taxes</div>
-          <div className="assumption-grid">
-            <NumField label="Operating cost" value={a.opexPerMonth} onChange={(v) => set("opexPerMonth", v ?? 0)} step={100} prefix="$" suffix="/mo" hint="Gross lease operating expense; multiplied by working interest" />
-            <NumField label="Opex escalation" value={a.opexEscalationPct} onChange={(v) => set("opexEscalationPct", v ?? 0)} step={0.5} suffix="%/yr" />
-            <NumField label="Severance (oil/NGL)" value={a.sevTaxOilPct} onChange={(v) => set("sevTaxOilPct", v ?? 0)} step={0.1} suffix="%" />
-            <NumField label="Severance (gas)" value={a.sevTaxGasPct} onChange={(v) => set("sevTaxGasPct", v ?? 0)} step={0.1} suffix="%" />
-            <NumField label="Ad valorem" value={a.adValoremPct} onChange={(v) => set("adValoremPct", v ?? 0)} step={0.1} suffix="%" />
           </div>
         </div>
         <div className="assumption-group">
@@ -661,7 +657,6 @@ function annualCash(r: ValuationResult): AnnualCashRow[] {
   return [...by.values()];
 }
 
-const chartTooltipStyle = { backgroundColor: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 } as const;
 
 // --- Production tab ---------------------------------------------------------
 
@@ -694,7 +689,7 @@ function ProductionTab({ r }: { r: ValuationResult }) {
               <XAxis dataKey="month" tickFormatter={monthLabel} tick={{ fontSize: 11 }} minTickGap={28} />
               <YAxis yAxisId="l" tick={{ fontSize: 11 }} label={{ value: "bbl / month", angle: -90, position: "insideLeft", fontSize: 11 }} />
               <YAxis yAxisId="r" orientation="right" tick={{ fontSize: 11 }} label={{ value: "mcf / month", angle: 90, position: "insideRight", fontSize: 11 }} />
-              <Tooltip contentStyle={chartTooltipStyle} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
+              <Tooltip {...chartTooltip} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
               <Legend />
               <Line yAxisId="l" dataKey="oilBbl" name="Oil (bbl)" stroke={COLOR_OIL} dot={false} strokeWidth={2} isAnimationActive={false} />
               <Line yAxisId="r" dataKey="gasMcf" name="Gas (mcf)" stroke={COLOR_GAS} dot={false} strokeWidth={2} isAnimationActive={false} />
@@ -709,7 +704,7 @@ function ProductionTab({ r }: { r: ValuationResult }) {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="month" tickFormatter={monthLabel} tick={{ fontSize: 11 }} minTickGap={28} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => v >= 1000 ? `${Math.round(v / 1000)}k` : String(v)} />
-              <Tooltip contentStyle={chartTooltipStyle} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
+              <Tooltip {...chartTooltip} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
               <Line dataKey="cumBoe" name="Cumulative BOE" stroke={COLOR_CUM} dot={false} strokeWidth={2} isAnimationActive={false} />
             </ComposedChart>
           </ResponsiveContainer>
@@ -816,7 +811,7 @@ function ForecastTab({ r }: { r: ValuationResult }) {
               yAxisId="r" orientation="right" tick={{ fontSize: 11 }} scale={logScale ? "log" : "auto"} domain={logScale ? ["auto", "auto"] : [0, "auto"]}
               allowDataOverflow label={{ value: "mcf / month", angle: 90, position: "insideRight", fontSize: 11 }}
             />
-            <Tooltip contentStyle={chartTooltipStyle} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
+            <Tooltip {...chartTooltip} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
             <Legend />
             <Line yAxisId="l" dataKey="histOil" name="Oil (actual)" stroke={COLOR_OIL} dot={false} strokeWidth={2} isAnimationActive={false} />
             <Line yAxisId="l" dataKey="fcOil" name="Oil (forecast)" stroke={COLOR_OIL} dot={false} strokeWidth={2} strokeDasharray="6 4" isAnimationActive={false} />
@@ -838,7 +833,7 @@ function ForecastTab({ r }: { r: ValuationResult }) {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="month" tickFormatter={monthLabel} tick={{ fontSize: 11 }} minTickGap={28} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => v >= 1000 ? `${Math.round(v / 1000)}k` : String(v)} />
-              <Tooltip contentStyle={chartTooltipStyle} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
+              <Tooltip {...chartTooltip} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
               <Line dataKey="cumBoe" name="Cumulative (actual)" stroke={COLOR_CUM} dot={false} strokeWidth={2} isAnimationActive={false} />
               <Line dataKey="fcCumBoe" name="Cumulative (forecast)" stroke={COLOR_CUM} dot={false} strokeWidth={2} strokeDasharray="6 4" isAnimationActive={false} />
             </ComposedChart>
@@ -871,8 +866,7 @@ function CashFlowTab({ r }: { r: ValuationResult }) {
     <div>
       <div className="metrics-row">
         <MetricCard label="Gross revenue" value={fmtMoneyC(e.grossRevenueTotal)} hint="8/8ths, life of forecast" />
-        <MetricCard label="Net revenue" value={fmtMoneyC(e.netRevenueTotal)} hint={`To your ${(r.assumptions.nri * 100).toFixed(1)}% NRI`} />
-        <MetricCard label="Net cash flow" value={fmtMoneyC(e.netCashFlowTotal)} hint={`After ${fmtMoneyC(e.totalTaxes)} taxes, ${fmtMoneyC(e.totalOpex)} opex`} />
+        <MetricCard label="Net cash flow" value={fmtMoneyC(e.netCashFlowTotal)} hint="Undiscounted, life of forecast" />
         <MetricCard label={`PV @ ${r.assumptions.discountRatePct}%`} value={fmtMoneyC(e.presentValue)} hint={`PV10 ${fmtMoneyC(e.pv10)}`} />
         <MetricCard label="Avg cash flow (yr 1)" value={`${fmtMoneyC(e.monthlyCashFlowFirstYearAvg)}/mo`} />
       </div>
@@ -885,7 +879,7 @@ function CashFlowTab({ r }: { r: ValuationResult }) {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="year" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(val: number) => fmtMoneyC(val)} width={70} />
-              <Tooltip contentStyle={chartTooltipStyle} formatter={(val: number) => money(val)} />
+              <Tooltip {...chartTooltip} formatter={(val: number) => money(val)} />
               <Legend />
               <Bar dataKey="netCashFlow" name="Net cash flow" fill={COLOR_CASH} isAnimationActive={false} />
               <Line dataKey="cumNetCashFlow" name="Cumulative" stroke={COLOR_CUM} dot={false} strokeWidth={2} isAnimationActive={false} />
@@ -901,7 +895,7 @@ function CashFlowTab({ r }: { r: ValuationResult }) {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="year" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(val: number) => fmtMoneyC(val)} width={70} />
-              <Tooltip contentStyle={chartTooltipStyle} formatter={(val: number) => money(val)} />
+              <Tooltip {...chartTooltip} formatter={(val: number) => money(val)} />
               <Legend />
               <Bar dataKey="oilRevenue" name="Oil" stackId="rev" fill={COLOR_OIL} isAnimationActive={false} />
               <Bar dataKey="gasRevenue" name="Gas" stackId="rev" fill={COLOR_GAS} isAnimationActive={false} />
@@ -915,14 +909,12 @@ function CashFlowTab({ r }: { r: ValuationResult }) {
       <div className="panel">
         <div className="panel-title"><h3>Annual Cash Flow Detail <FcTag /></h3></div>
         <div className="table-scroll"><table className="data-table">
-          <thead><tr><th>Year</th><th className="right">Gross Revenue</th><th className="right">Taxes</th><th className="right">Opex</th><th className="right">Net Cash Flow</th><th className="right">Cumulative</th></tr></thead>
+          <thead><tr><th>Year</th><th className="right">Gross Revenue</th><th className="right">Net Cash Flow</th><th className="right">Cumulative</th></tr></thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.year}>
                 <td>{row.year}</td>
                 <td className="right">{money(row.grossRevenue)}</td>
-                <td className="right">{money(row.taxes)}</td>
-                <td className="right">{money(row.opex)}</td>
                 <td className="right">{money(row.netCashFlow)}</td>
                 <td className="right">{money(row.cumNetCashFlow)}</td>
               </tr>
@@ -1027,7 +1019,7 @@ function SensitivityTab({ r }: { r: ValuationResult }) {
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
             <XAxis dataKey="label" tick={{ fontSize: 11 }} />
             <YAxis tick={{ fontSize: 11 }} tickFormatter={(val: number) => fmtMoneyC(val)} width={70} />
-            <Tooltip contentStyle={chartTooltipStyle} formatter={(val: number) => money(val)} />
+            <Tooltip {...chartTooltip} formatter={(val: number) => money(val)} />
             <ReferenceLine y={0} stroke="var(--text-dim)" />
             <Bar dataKey="npv" name="NPV" isAnimationActive={false}>
               {r.sensitivity.map((s, i) => <Cell key={i} fill={s.npv >= 0 ? COLOR_OIL : COLOR_GAS} />)}
@@ -1143,11 +1135,6 @@ function FullReport({ analysis, analysisName }: { analysis: AnalyzeResponse; ana
           <div className="kv"><span className="k">Gas price</span><span className="v">${a.gasPrice.toFixed(2)}/mcf</span></div>
           <div className="kv"><span className="k">NGL price</span><span className="v">{money(a.nglPrice)}/bbl</span></div>
           <div className="kv"><span className="k">Price escalation</span><span className="v">{a.priceEscalationPct}%/yr</span></div>
-          <div className="kv"><span className="k">Net revenue interest</span><span className="v">{(a.nri * 100).toFixed(2)}%</span></div>
-          <div className="kv"><span className="k">Working interest</span><span className="v">{(a.workingInterest * 100).toFixed(2)}%</span></div>
-          <div className="kv"><span className="k">Operating cost</span><span className="v">{money(a.opexPerMonth)}/mo</span></div>
-          <div className="kv"><span className="k">Severance oil / gas</span><span className="v">{a.sevTaxOilPct}% / {a.sevTaxGasPct}%</span></div>
-          <div className="kv"><span className="k">Ad valorem</span><span className="v">{a.adValoremPct}%</span></div>
           <div className="kv"><span className="k">Discount rate</span><span className="v">{a.discountRatePct}%</span></div>
           <div className="kv"><span className="k">Asking price</span><span className="v">{a.askingPrice > 0 ? money(a.askingPrice) : "—"}</span></div>
           <div className="kv"><span className="k">Closing costs</span><span className="v">{a.closingCosts > 0 ? money(a.closingCosts) : "—"}</span></div>

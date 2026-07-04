@@ -132,10 +132,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
               <option value="permits">Drilling Permits</option>
             </select>
           </div>
-          <div className="field" style={{ marginBottom: 0, width: 110 }}><label>Format</label>
-            <input value="CSV" disabled readOnly />
-          </div>
-          <div className="field" style={{ marginBottom: 0 }}><label>CSV file</label>
+          <div className="field" style={{ marginBottom: 0 }}><label>CSV file <span className="muted" style={{ fontWeight: 400, textTransform: "none" }}>· Supported file type: CSV</span></label>
             <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
           </div>
           <button className="small" onClick={downloadTemplate}>Download template</button>
