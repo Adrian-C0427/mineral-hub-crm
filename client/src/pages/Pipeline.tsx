@@ -21,36 +21,25 @@ const TRANSITIONS: { stage: Stage; label: string; hint: string }[] = [
   { stage: "DEAD", label: "Dead", hint: "→ Archived Deals" },
 ];
 
-type RecordFilter = "ALL" | "OPPORTUNITY" | "OWNED_ASSET";
-
 export function Pipeline() {
   const [deals, setDeals] = useState<DealSummary[] | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
   const [dropCol, setDropCol] = useState<Stage | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [pending, setPending] = useState<{ deal: DealSummary; toStage: Stage } | null>(null);
-  const [filter, setFilter] = useState<RecordFilter>("ALL");
+  // Explicit per-card move (no drag needed): opens the stage modal on the
+  // deal's current stage so any destination — including Closed/Dead — is a click away.
+  const [moving, setMoving] = useState<DealSummary | null>(null);
   const nav = useNavigate();
 
-  // Load opportunities AND owned assets; the board shows opportunities plus
-  // owned assets that are actively being marketed (assetMode === "SELL").
-  function load() { api.get<DealSummary[]>("/deals?recordType=ALL").then(setDeals); }
+  // The pipeline is the acquisition board — opportunities only. Owned mineral
+  // assets are managed in their own module and never appear here.
+  function load() { api.get<DealSummary[]>("/deals?recordType=OPPORTUNITY").then(setDeals); }
   useEffect(load, []);
 
   if (!deals) return <Spinner />;
 
-  const boardDeals = deals.filter((d) => {
-    const onBoard = d.recordType === "OPPORTUNITY" || (d.recordType === "OWNED_ASSET" && d.assetMode === "SELL");
-    if (!onBoard) return false;
-    if (filter === "OPPORTUNITY") return d.recordType === "OPPORTUNITY";
-    if (filter === "OWNED_ASSET") return d.recordType === "OWNED_ASSET";
-    return true;
-  });
-  const counts = {
-    all: deals.filter((d) => d.recordType === "OPPORTUNITY" || (d.recordType === "OWNED_ASSET" && d.assetMode === "SELL")).length,
-    opp: deals.filter((d) => d.recordType === "OPPORTUNITY").length,
-    owned: deals.filter((d) => d.recordType === "OWNED_ASSET" && d.assetMode === "SELL").length,
-  };
+  const boardDeals = deals;
 
   function onDrop(col: Stage) {
     setDropCol(null);
@@ -65,13 +54,26 @@ export function Pipeline() {
       <div className="page-header">
         <div className="row">
           <h1 style={{ marginBottom: 0 }}>Pipeline</h1>
-          <div className="pill-filter">
-            <button className={filter === "ALL" ? "active" : ""} onClick={() => setFilter("ALL")}>Both ({counts.all})</button>
-            <button className={filter === "OPPORTUNITY" ? "active" : ""} onClick={() => setFilter("OPPORTUNITY")}>Opportunities ({counts.opp})</button>
-            <button className={filter === "OWNED_ASSET" ? "active" : ""} onClick={() => setFilter("OWNED_ASSET")}>Owned Assets ({counts.owned})</button>
-          </div>
         </div>
         <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>
+      </div>
+
+      {/* Transition targets live ABOVE the board so they're always on-screen
+          (the board scrolls horizontally). Dropping a card here — or using a
+          card's ⋯ button — prompts the Closed/Archive confirmation. */}
+      <div className="transition-bar">
+        {TRANSITIONS.map((t) => (
+          <div
+            key={t.stage}
+            className={`transition-zone ${t.stage === "DEAD" ? "dead" : "closed"} ${dropCol === t.stage ? "drop-target" : ""}`}
+            onDragOver={(e) => { e.preventDefault(); setDropCol(t.stage); }}
+            onDragLeave={() => setDropCol((c) => (c === t.stage ? null : c))}
+            onDrop={() => onDrop(t.stage)}
+          >
+            <span>{t.label}</span>
+            <span className="muted" style={{ fontSize: 11 }}>{t.hint}</span>
+          </div>
+        ))}
       </div>
 
       <div className="kanban">
@@ -91,28 +93,12 @@ export function Pipeline() {
               </div>
               <div className="kanban-col-body">
                 {colDeals.map((d) => (
-                  <Card key={d.id} deal={d} onDragStart={() => setDragId(d.id)} onClick={() => nav(d.recordType === "OWNED_ASSET" ? `/assets/${d.id}` : `/deals/${d.id}`)} />
+                  <Card key={d.id} deal={d} onDragStart={() => setDragId(d.id)} onClick={() => nav(`/deals/${d.id}`)} onMove={() => setMoving(d)} />
                 ))}
               </div>
             </div>
           );
         })}
-
-        {/* Transition targets: dropping here prompts the Closed/Archive confirmation. */}
-        <div className="kanban-col kanban-transitions">
-          {TRANSITIONS.map((t) => (
-            <div
-              key={t.stage}
-              className={`transition-zone ${t.stage === "DEAD" ? "dead" : "closed"} ${dropCol === t.stage ? "drop-target" : ""}`}
-              onDragOver={(e) => { e.preventDefault(); setDropCol(t.stage); }}
-              onDragLeave={() => setDropCol((c) => (c === t.stage ? null : c))}
-              onDrop={() => onDrop(t.stage)}
-            >
-              <span>{t.label}</span>
-              <span className="muted" style={{ fontSize: 11 }}>{t.hint}</span>
-            </div>
-          ))}
-        </div>
       </div>
 
       {showNew && <NewDealModal onClose={() => setShowNew(false)} onCreated={(d) => { setShowNew(false); nav(`/deals/${d.id}`); }} />}
@@ -124,25 +110,37 @@ export function Pipeline() {
           onChanged={() => { setPending(null); load(); }}
         />
       )}
+      {moving && (
+        <StageChangeModal
+          deal={moving}
+          onClose={() => setMoving(null)}
+          onChanged={() => { setMoving(null); load(); }}
+        />
+      )}
     </div>
   );
 }
 
-function Card({ deal, onDragStart, onClick }: { deal: DealSummary; onDragStart: () => void; onClick: () => void }) {
+function Card({ deal, onDragStart, onClick, onMove }: { deal: DealSummary; onDragStart: () => void; onClick: () => void; onMove: () => void }) {
   const isClosing = deal.stage === "CLOSING";
   const isDead = deal.stage === "DEAD";
-  const isOwned = deal.recordType === "OWNED_ASSET";
   return (
     <div
-      className={`deal-card prio-${deal.priority.toLowerCase()} ${isDead ? "dead" : ""} ${isOwned ? "owned-asset" : ""}`}
+      className={`deal-card prio-${deal.priority.toLowerCase()} ${isDead ? "dead" : ""}`}
       draggable
       onDragStart={onDragStart}
       onClick={onClick}
     >
+      <button
+        className="dc-move"
+        title="Move to another stage"
+        aria-label={`Move ${deal.name} to another stage`}
+        onClick={(e) => { e.stopPropagation(); onMove(); }}
+      >⋯</button>
       <div className="dc-name">{deal.name}</div>
       <div className="dc-meta">
         <span>{[deal.counties.join(", "), deal.state].filter(Boolean).join(", ") || "—"}</span>
-        <span>{num(deal.nra)} NRA</span>
+        {deal.nra != null && <span>{num(deal.nra)} NRA</span>}
       </div>
       <div className="dc-meta" style={{ marginTop: 4 }}>
         <span className={`badge priority-${deal.priority.toLowerCase()}`}>{deal.priority[0] + deal.priority.slice(1).toLowerCase()}</span>

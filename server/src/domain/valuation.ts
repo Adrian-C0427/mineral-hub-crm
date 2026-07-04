@@ -77,13 +77,19 @@ export const DEFAULT_ASSUMPTIONS: ValuationAssumptions = {
   gasPrice: 3.0,
   nglPrice: 25,
   priceEscalationPct: 0,
+  // Ownership, operating cost and tax inputs were removed from the Well
+  // Analysis UI: the tool evaluates full-stream (8/8ths) acquisition economics
+  // and does not track ownership accounting or taxes. These defaults make the
+  // engine compute on gross revenue (NRI 100%, no working-interest costs, no
+  // opex, no severance/ad-valorem tax) while the fields remain in the schema
+  // for backward compatibility with previously saved analyses.
   nri: 1,
   workingInterest: 0,
   opexPerMonth: 0,
   opexEscalationPct: 0,
-  sevTaxOilPct: 4.6, // TX defaults; user-adjustable
-  sevTaxGasPct: 7.5,
-  adValoremPct: 2.0,
+  sevTaxOilPct: 0,
+  sevTaxGasPct: 0,
+  adValoremPct: 0,
   askingPrice: 0,
   closingCosts: 0,
   discountRatePct: 10,
@@ -812,7 +818,6 @@ export function runValuation(rows: MonthVolumes[], input?: Partial<ValuationAssu
   if (!fits.gas && production.gas.cumulative > 0) warnings.push("Not enough post-peak gas data to fit a decline curve — gas is excluded from the forecast.");
   if (forecast.endReason === "MAX_MONTHS") warnings.push(`Forecast capped at ${a.maxForecastMonths} months before reaching the economic limit.`);
   if (a.askingPrice > 0 && valuation.maxPurchasePrice < a.askingPrice) warnings.push("Asking price exceeds the maximum purchase price that meets your return targets.");
-  if (a.workingInterest > 0 && a.opexPerMonth === 0) warnings.push("Working interest is set but operating costs are $0 — cash flows are likely overstated.");
   if (production.anomalies.some((x) => x.kind === "DOWNTIME")) warnings.push("History contains zero-production months; verify whether these are shut-ins or reporting gaps.");
 
   return {

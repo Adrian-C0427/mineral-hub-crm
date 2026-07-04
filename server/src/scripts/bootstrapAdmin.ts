@@ -1,6 +1,7 @@
 /**
- * CLI: bootstrap the single Owner user. There is NO UI signup flow (no one is
- * logged in on first run). Ships with an otherwise empty database — no seed data.
+ * CLI: bootstrap the first Owner user on an empty database. UI signup is
+ * invite-only by default (ALLOW_PUBLIC_SIGNUP=false), so this script is how the
+ * initial workspace comes to exist; everyone else joins via invite code.
  *
  * Usage:
  *   ADMIN_NAME="Jane" ADMIN_EMAIL="jane@co.com" ADMIN_PASSWORD="..." npm run bootstrap:admin

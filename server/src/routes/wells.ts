@@ -144,6 +144,38 @@ async function productionSummaries(wellIds: string[]): Promise<Map<string, WellS
 // Wells: search / list / CRUD
 // ---------------------------------------------------------------------------
 
+/**
+ * Free-text well search across every indexed attribute stored on the well.
+ * Partial, case-insensitive matches on all text columns (name, identifiers,
+ * operator, lease/field/formation, geography, survey/abstract, well type),
+ * plus enum matching so terms like "horizontal" or "shut in" hit the
+ * trajectory/status columns. Returns an OR array for the Prisma `where`.
+ */
+function buildWellSearch(q: string): Prisma.ResearchWellWhereInput[] {
+  const like = { contains: q, mode: "insensitive" as const };
+  const or: Prisma.ResearchWellWhereInput[] = [
+    { name: like },
+    { apiNumber: like },
+    { operator: like },
+    { leaseName: like },
+    { fieldName: like },
+    { formation: like },
+    { county: like },
+    { state: like },
+    { survey: like },
+    { abstractId: like },
+    { wellType: like },
+  ];
+  const term = q.trim().toUpperCase().replace(/[\s_-]+/g, "");
+  if (term) {
+    const statuses = WELL_STATUSES.filter((s) => s.replace(/_/g, "").includes(term));
+    if (statuses.length) or.push({ status: { in: statuses as WellStatus[] } });
+    const trajectories = (["VERTICAL", "HORIZONTAL", "DIRECTIONAL", "UNKNOWN"] as const).filter((t) => t.includes(term));
+    if (trajectories.length) or.push({ trajectory: { in: trajectories as WellTrajectory[] } });
+  }
+  return or;
+}
+
 const listSchema = z.object({
   q: z.string().optional(),
   ids: z.string().optional(), // comma-separated (rehydrating saved analyses)
@@ -164,15 +196,7 @@ wellsRouter.get(
     if (state) where.state = state;
     if (county) where.county = county;
     if (operator) where.operator = { contains: operator, mode: "insensitive" };
-    if (q) {
-      where.OR = [
-        { name: { contains: q, mode: "insensitive" } },
-        { apiNumber: { contains: q, mode: "insensitive" } },
-        { operator: { contains: q, mode: "insensitive" } },
-        { leaseName: { contains: q, mode: "insensitive" } },
-        { fieldName: { contains: q, mode: "insensitive" } },
-      ];
-    }
+    if (q) where.OR = buildWellSearch(q);
     const [total, rows] = await Promise.all([
       prisma.researchWell.count({ where }),
       prisma.researchWell.findMany({ where, orderBy: [{ name: "asc" }], skip: (page - 1) * pageSize, take: pageSize }),

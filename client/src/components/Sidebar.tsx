@@ -165,6 +165,7 @@ function SidebarItem({ item, collapsed, allowed, pathname }: { item: NavItem; co
   return (
     <div className={`sidebar-group ${within ? "within" : ""}`}>
       <div className="sidebar-link group-head" onClick={() => setOpen((o) => !o)} title={item.desc}>
+
         <span className="sidebar-icon"><Icon size={18} /></span>
         <span className="sidebar-label">{item.label}</span><span className="group-caret">{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
       </div>
