@@ -119,15 +119,16 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .sidebar.collapsed .sidebar-link { justify-content: center; padding: 9px 0; }
 .app-main { flex: 1; min-width: 0; overflow-x: hidden; }
 
-/* Collapsed groups: reveal children as a hover flyout so navigation stays
-   fully functional with icons only. */
-.sidebar.collapsed .sidebar-group { position: relative; }
-.sidebar.collapsed .sidebar-sub.flyout {
-  display: none; position: absolute; left: 100%; top: 0; margin: 0; z-index: 100;
+/* Collapsed groups: children appear in a fixed-position flyout (hover or
+   click) so navigation stays fully functional with icons only. Fixed
+   positioning escapes the nav's overflow:auto, which previously clipped it. */
+.sidebar-flyout {
+  position: fixed; z-index: 200; display: flex; flex-direction: column;
   min-width: 190px; background: var(--panel); border: 1px solid var(--border);
   border-radius: 8px; padding: 6px; box-shadow: 0 6px 24px rgba(0,0,0,0.35);
 }
-.sidebar.collapsed .sidebar-group:hover .sidebar-sub.flyout { display: flex; }
+.sidebar.collapsed .group-head { width: 100%; background: none; border: none; cursor: pointer; }
+.sidebar.collapsed .group-head.active { color: var(--accent); }
 .flyout-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); padding: 4px 10px 6px; }
 
 /* Narrow screens: the Sidebar component auto-collapses itself to the icon

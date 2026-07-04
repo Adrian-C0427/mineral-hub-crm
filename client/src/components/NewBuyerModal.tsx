@@ -3,7 +3,7 @@ import { Modal } from "./ui";
 import { api, ApiError } from "../api/client";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
 import { PhoneInput } from "./PhoneInput";
-import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
+import { US_STATE_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, countiesForStates } from "../lib/options";
 
 /**
  * Standardized New Buyer template — the buyer counterpart of NewDealModal.
@@ -12,12 +12,13 @@ import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASS
  */
 export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
   const [f, setF] = useState({
-    companyName: "", name: "", contactName: "", email: "", phone: "",
-    website: "", mailingAddress: "", states: "",
+    companyName: "", contactName: "", email: "", phone: "",
+    website: "", mailingAddress: "",
     minAcreage: "", maxAcreage: "", minPrice: "", maxPrice: "",
     nextFollowUpDate: "", notes: "",
   });
   const [relationshipStatus, setRelationshipStatus] = useState<"HOT" | "WARM" | "COLD">("WARM");
+  const [states, setStates] = useState<string[]>([]);
   const [counties, setCounties] = useState<string[]>([]);
   const [basins, setBasins] = useState<string[]>([]);
   const [formations, setFormations] = useState<string[]>([]);
@@ -36,7 +37,7 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
     try {
       const { id } = await api.post<{ id: string }>("/buyers", {
         companyName: f.companyName.trim(),
-        name: f.name.trim() || f.companyName.trim(),
+        name: f.companyName.trim(),
         contactName: f.contactName.trim() || null,
         email: f.email.trim() || null,
         phone: f.phone.trim() || null,
@@ -46,7 +47,7 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
         nextFollowUpDate: f.nextFollowUpDate || null,
         notes: f.notes || null,
         buyBox: {
-          states: f.states ? f.states.split(",").map((s) => s.trim()).filter(Boolean) : [],
+          states,
           counties, basins, formations, assetTypes,
           minAcreage: numOrNull(f.minAcreage),
           maxAcreage: numOrNull(f.maxAcreage),
@@ -77,7 +78,6 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
       <p className="muted" style={{ marginTop: 0 }}>New buyers start as <strong>Warm</strong> unless set otherwise. The buy box drives deal matching — fill in what you know; everything except the company name can be added later.</p>
       <div className="field"><label>Company name *</label><input value={f.companyName} onChange={set("companyName")} autoFocus /></div>
       <div className="dd-grid">
-        <div className="field"><label>Display name</label><input value={f.name} onChange={set("name")} placeholder="Defaults to company name" /></div>
         <div className="field"><label>Contact name</label><input value={f.contactName} onChange={set("contactName")} /></div>
         <div className="field"><label>Email</label><input type="email" value={f.email} onChange={set("email")} /></div>
         <div className="field"><label>Phone</label><PhoneInput value={f.phone} onChange={(v) => setF((p) => ({ ...p, phone: v }))} /></div>
@@ -93,8 +93,8 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
 
       <div className="section-head" style={{ marginTop: 6 }}><h3 style={{ margin: 0 }}>Buy box</h3></div>
       <div className="dd-grid">
-        <div className="field"><label>States (comma-sep)</label><input value={f.states} onChange={set("states")} placeholder="TX, OK" /></div>
-        <div className="field"><label>Counties</label><SearchableMultiSelect options={TEXAS_COUNTY_OPTIONS} value={counties} onChange={setCounties} placeholder="Search counties…" /></div>
+        <div className="field"><label>States</label><SearchableMultiSelect options={US_STATE_OPTIONS} value={states} onChange={(v) => { setStates(v); setCounties(counties.filter((c) => countiesForStates(v).includes(c))); }} placeholder="Select states…" /></div>
+        <div className="field"><label>Counties</label><SearchableMultiSelect options={countiesForStates(states)} value={counties} onChange={setCounties} placeholder={states.length ? "Search counties…" : "Select a state first"} /></div>
         <div className="field"><label>Basins</label><SearchableMultiSelect options={TEXAS_BASIN_OPTIONS} value={basins} onChange={setBasins} placeholder="Search basins…" /></div>
         <div className="field"><label>Formations</label><SearchableMultiSelect options={TEXAS_FORMATION_OPTIONS} value={formations} onChange={setFormations} placeholder="Search formations…" /></div>
         <div className="field"><label>Asset types</label><SearchableMultiSelect options={ASSET_TYPE_OPTIONS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
