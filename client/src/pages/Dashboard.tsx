@@ -11,7 +11,7 @@ interface DashboardData {
   upcomingFollowUps: { dealId: string; buyerName: string; dealName: string; date: string | null }[];
   recentActivity: { id: string; summary: string; createdAt: string }[];
   topBuyers: { id: string; name: string; companyName: string; volume: number }[];
-  profitByMonth: { month: string; profit: number }[];
+  profitByMonth: { month: string; profit: number; projected: number }[];
 }
 
 export function Dashboard() {
@@ -20,11 +20,28 @@ export function Dashboard() {
   useEffect(() => { api.get<DashboardData>("/dashboard").then(setD); }, []);
   if (!d) return <Spinner />;
 
-  const maxProfit = Math.max(1, ...d.profitByMonth.map((m) => m.profit));
+  const maxProfit = Math.max(1, ...d.profitByMonth.map((m) => Math.max(m.profit, m.projected)));
+  // Brand-new workspace: no active deals and nothing closed yet. Guide the
+  // first steps instead of presenting a wall of zeros.
+  const firstRun = d.metrics.activeDeals === 0 && d.metrics.closedProfitYtd === 0 && d.recentActivity.length === 0;
 
   return (
     <div className="page">
       <div className="page-header"><h1>Dashboard</h1></div>
+
+      {firstRun && (
+        <div className="panel">
+          <div className="panel-title"><h3>Get started</h3></div>
+          <p className="muted" style={{ marginTop: 0 }}>
+            Welcome to Mineral Hub! These metrics fill in as you work — here's where most teams begin:
+          </p>
+          <div className="row">
+            <Link to="/deals/active" className="primary" style={{ padding: "8px 14px", borderRadius: 8 }}>1 · Create your first deal</Link>
+            <Link to="/buyers" style={{ padding: "8px 14px", border: "1px solid var(--border)", borderRadius: 8 }}>2 · Add or import buyers</Link>
+            <Link to="/valuation" style={{ padding: "8px 14px", border: "1px solid var(--border)", borderRadius: 8 }}>3 · Import well production data</Link>
+          </div>
+        </div>
+      )}
 
       <div className="metrics-row">
         <MetricCard label="Active Deals" value={d.metrics.activeDeals} />
@@ -89,11 +106,20 @@ export function Dashboard() {
       </div>
 
       <div className="panel">
-        <div className="panel-title"><h3>Profit by month</h3></div>
+        <div className="panel-title">
+          <h3>Profit by month</h3>
+          <div className="row" style={{ gap: 14, fontSize: 12 }}>
+            <span className="row" style={{ gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "var(--green)" }} /> Realized</span>
+            <span className="row" style={{ gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "var(--accent)", opacity: 0.6 }} /> Projected</span>
+          </div>
+        </div>
         <div className="bar-chart">
           {d.profitByMonth.map((m) => (
-            <div className="bar-col" key={m.month} title={money(m.profit)}>
-              <div className="bar" style={{ height: `${(m.profit / maxProfit) * 100}%` }} />
+            <div className="bar-col" key={m.month} title={`Realized ${money(m.profit)} · Projected ${money(m.projected)}`}>
+              <div className="bar-pair">
+                <div className="bar" style={{ height: `${(m.profit / maxProfit) * 100}%` }} />
+                <div className="bar bar-projected" style={{ height: `${(m.projected / maxProfit) * 100}%` }} />
+              </div>
               <div className="bar-label">{m.month}</div>
             </div>
           ))}

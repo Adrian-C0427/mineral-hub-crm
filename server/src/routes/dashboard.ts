@@ -18,13 +18,16 @@ dashboardRouter.get(
     const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
     const org = orgId(req);
 
+    // The dashboard reports exclusively on acquisition opportunities. Owned
+    // mineral assets (recordType OWNED_ASSET) are managed in their own module
+    // and never counted in the acquisition pipeline metrics below.
     const [allActive, closedDeals, activeOffers] = await Promise.all([
-      prisma.deal.findMany({ where: { stage: { in: [...ACTIVE_STAGES] }, organizationId: org }, include: { ...dealInclude, offers: true } }),
+      prisma.deal.findMany({ where: { stage: { in: [...ACTIVE_STAGES] }, recordType: "OPPORTUNITY", organizationId: org }, include: { ...dealInclude, offers: true } }),
       prisma.deal.findMany({
-        where: { stage: "CLOSED", organizationId: org },
+        where: { stage: "CLOSED", recordType: "OPPORTUNITY", organizationId: org },
         include: { ...dealInclude, selectedOffer: true, stageHistory: { where: { toStage: "CLOSED" }, orderBy: { createdAt: "desc" }, take: 1 } },
       }),
-      prisma.offer.count({ where: { status: "ACTIVE", deal: { organizationId: org } } }),
+      prisma.offer.count({ where: { status: "ACTIVE", deal: { organizationId: org, recordType: "OPPORTUNITY" } } }),
     ]);
 
     // Metrics row
@@ -59,7 +62,7 @@ dashboardRouter.get(
 
     // Upcoming follow-ups (from buyer activity nextFollowUpDate)
     const followUps = await prisma.dealBuyerActivity.findMany({
-      where: { nextFollowUpDate: { gte: now }, deal: { organizationId: org } },
+      where: { nextFollowUpDate: { gte: now }, deal: { organizationId: org, recordType: "OPPORTUNITY" } },
       orderBy: { nextFollowUpDate: "asc" },
       take: 10,
       include: { buyer: { select: { name: true } }, deal: { select: { name: true } } },
@@ -90,8 +93,27 @@ dashboardRouter.get(
       const profit = d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : 0;
       monthly.set(m, (monthly.get(m) ?? 0) + profit);
     }
+    // Projected profit by month: active deals with an accepted buyer offer
+    // (selectedOfferId) and an anticipated closing date, bucketed into the
+    // month they're expected to close (current year). Lets users compare
+    // realized profit against expected future profit on the same axis.
+    const monthlyProjected = new Map<number, number>();
+    for (const d of allActive) {
+      if (!d.selectedOfferId) continue;
+      const s = serializeDeal(d, now);
+      if (!s.finalClosingDate) continue;
+      const close = new Date(s.finalClosingDate);
+      if (close.getUTCFullYear() !== now.getUTCFullYear()) continue;
+      const selOffer = d.offers.find((o) => o.id === d.selectedOfferId);
+      const best = d.offers.reduce<number | null>((m, o) => (m == null || o.amount > m ? o.amount : m), null);
+      const amount = selOffer?.amount ?? best;
+      if (amount == null) continue;
+      const profit = netProfit(amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts);
+      const m = close.getUTCMonth();
+      monthlyProjected.set(m, (monthlyProjected.get(m) ?? 0) + profit);
+    }
     const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const profitByMonth = monthNames.map((label, i) => ({ month: label, profit: monthly.get(i) ?? 0 }));
+    const profitByMonth = monthNames.map((label, i) => ({ month: label, profit: monthly.get(i) ?? 0, projected: monthlyProjected.get(i) ?? 0 }));
 
     res.json({
       metrics: {
