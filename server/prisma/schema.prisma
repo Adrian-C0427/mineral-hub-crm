@@ -136,6 +136,11 @@ model Organization {
   name      String
   // Shareable, human-friendly Team ID. Acts as an always-valid reusable join key.
   teamId    String   @unique
+  // Company branding: data-URL logos (PNG/SVG/JPG/WebP, size-capped). fullLogo =
+  // expanded sidebar + report/PDF headers; compactLogo = collapsed sidebar icon.
+  // Null → fall back to the default Mineral Hub / MH branding.
+  fullLogo    String?
+  compactLogo String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

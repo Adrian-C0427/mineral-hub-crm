@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
+import QRCode from "qrcode";
 import { api, ApiError } from "../api/client";
 import { Banner, ConfirmDialog } from "./ui";
 
 /**
- * Two-factor (TOTP) management for the account settings page: enroll (secret +
- * manual key), confirm a code to enable, view/copy one-time recovery codes,
- * regenerate them, and disable. QR rendering is intentionally omitted (no extra
- * dependency) — every authenticator app supports manual key entry.
+ * Two-factor (TOTP) management for the account settings page: enroll (scan a QR
+ * code or enter the key manually), confirm a code to enable, view/copy one-time
+ * recovery codes, regenerate them, and disable.
  */
 
 interface Status { enabled: boolean; recoveryCodesRemaining: number }
@@ -19,8 +19,15 @@ export function TwoFactorSettings() {
 
   // Enrollment state
   const [setup, setSetup] = useState<SetupResp | null>(null);
+  const [qr, setQr] = useState<string | null>(null);
   const [enableCode, setEnableCode] = useState("");
   const [recoveryCodes, setRecoveryCodes] = useState<string[] | null>(null);
+
+  // Render the otpauth URI to a scannable QR image whenever setup starts.
+  useEffect(() => {
+    if (!setup) { setQr(null); return; }
+    QRCode.toDataURL(setup.otpauthUri, { width: 200, margin: 1 }).then(setQr).catch(() => setQr(null));
+  }, [setup]);
 
   // Disable / regenerate state
   const [manageCode, setManageCode] = useState("");
@@ -100,7 +107,9 @@ export function TwoFactorSettings() {
         <div>
           <ol className="twofa-steps">
             <li>
-              In your authenticator app, add an account and enter this key manually:
+              Scan this QR code with your authenticator app (Google Authenticator, Authy, 1Password, etc.):
+              {qr && <div style={{ margin: "10px 0" }}><img src={qr} alt="Two-factor QR code" width={200} height={200} style={{ background: "#fff", borderRadius: 8, padding: 8 }} /></div>}
+              <div className="muted" style={{ fontSize: 12 }}>Can’t scan? Enter this key manually instead:</div>
               <div className="twofa-secret">
                 <code>{setup.secret.replace(/(.{4})/g, "$1 ").trim()}</code>
                 <button className="small" onClick={() => navigator.clipboard?.writeText(setup.secret).catch(() => {})}>Copy</button>
