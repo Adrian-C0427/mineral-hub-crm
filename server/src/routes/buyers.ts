@@ -58,6 +58,7 @@ buyersRouter.get(
           id: b.id,
           name: b.name,
           companyName: b.companyName,
+          contactName: b.contactName,
           focusArea: focusArea(b.buyBox),
           relationshipStatus: b.relationshipStatus,
           closeRate: cr.rate,
@@ -149,7 +150,9 @@ const buyBoxSchema = z.object({
 });
 
 const upsertSchema = z.object({
-  name: z.string().min(1),
+  // Display name is retired from the UI — `name` mirrors companyName (kept as a
+  // column for legacy references). Optional in the payload; derived server-side.
+  name: z.string().min(1).optional(),
   companyName: z.string().min(1),
   contactName: z.string().nullish(),
   email: z.string().email().nullish().or(z.literal("")),
@@ -179,7 +182,7 @@ buyersRouter.post(
       const created = await tx.buyer.create({
         data: {
           organizationId: orgId(req),
-          name: data.name,
+          name: data.name ?? data.companyName,
           companyName: data.companyName,
           normalizedCompany: normalizeCompany(data.companyName),
           contactName: data.contactName ?? null,
@@ -218,6 +221,7 @@ buyersRouter.patch(
       if (data.companyName !== undefined) {
         patch.companyName = data.companyName;
         patch.normalizedCompany = normalizeCompany(data.companyName);
+        if (data.name === undefined) patch.name = data.companyName; // keep name mirroring company
       }
       if (data.contactName !== undefined) patch.contactName = data.contactName;
       if (data.email !== undefined) patch.email = data.email ? data.email.toLowerCase() : null;

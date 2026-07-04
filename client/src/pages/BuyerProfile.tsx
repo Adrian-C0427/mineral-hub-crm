@@ -4,7 +4,7 @@ import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, RelationshipDot, Banner, StageBadge, StatusBadge } from "../components/ui";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
-import { TEXAS_COUNTY_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
+import { US_STATE_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, countiesForStates } from "../lib/options";
 import { money, pct, fmtDate, toInputDate } from "../lib/format";
 import { formatPhone } from "../lib/phone";
 import { PhoneInput } from "../components/PhoneInput";
@@ -72,12 +72,18 @@ export function BuyerProfile() {
   const setD = (patch: Partial<BuyerProfileData>) => setDraft((d) => (d ? { ...d, ...patch } : d));
   const setBox = (k: keyof BuyBox, v: unknown) => setDraft((d) => (d ? { ...d, buyBox: { ...d.buyBox, [k]: v } } : d));
 
+  // Return to the Buyers list. Prefer browser back so its filters/sort/scroll
+  // survive (the list keeps that state in memory); fall back to /buyers on a
+  // deep link with no in-app history.
+  const backToBuyers = () => { if (window.history.length > 1) nav(-1); else nav("/buyers"); };
+
   return (
     <div className="page">
+      <button className="link-btn" onClick={backToBuyers} style={{ marginBottom: 10 }}>← Back to Buyers</button>
       <div className="page-header">
         <div className="row">
-          <h1 style={{ marginBottom: 0 }}>{view.name}</h1>
-          <span className="muted">{view.companyName}</span>
+          <h1 style={{ marginBottom: 0 }}>{view.companyName}</h1>
+          {view.contactName && <span className="muted">{view.contactName}</span>}
           <RelationshipDot status={view.relationshipStatus} />
         </div>
         <div className="row">
@@ -99,9 +105,9 @@ export function BuyerProfile() {
           <h3>Contact Info</h3>
           {edit ? (
             <>
-              <Row><Fld l="Name"><input value={view.name} onChange={(e) => setD({ name: e.target.value })} /></Fld><Fld l="Company"><input value={view.companyName} onChange={(e) => setD({ companyName: e.target.value })} /></Fld></Row>
-              <Row><Fld l="Contact name"><input value={view.contactName ?? ""} onChange={(e) => setD({ contactName: e.target.value })} /></Fld><Fld l="Email"><input value={view.email ?? ""} onChange={(e) => setD({ email: e.target.value })} /></Fld></Row>
-              <Row><Fld l="Phone"><PhoneInput value={view.phone ?? ""} onChange={(v) => setD({ phone: v })} /></Fld><Fld l="Website"><input value={view.website ?? ""} onChange={(e) => setD({ website: e.target.value })} /></Fld></Row>
+              <Row><Fld l="Company"><input value={view.companyName} onChange={(e) => setD({ companyName: e.target.value })} /></Fld><Fld l="Contact name"><input value={view.contactName ?? ""} onChange={(e) => setD({ contactName: e.target.value })} /></Fld></Row>
+              <Row><Fld l="Email"><input value={view.email ?? ""} onChange={(e) => setD({ email: e.target.value })} /></Fld><Fld l="Phone"><PhoneInput value={view.phone ?? ""} onChange={(v) => setD({ phone: v })} /></Fld></Row>
+              <Fld l="Website"><input value={view.website ?? ""} onChange={(e) => setD({ website: e.target.value })} /></Fld>
               <Fld l="Mailing address"><input value={view.mailingAddress ?? ""} onChange={(e) => setD({ mailingAddress: e.target.value })} /></Fld>
               <Fld l="Relationship owner(s)">
                 <select multiple value={view.owners.map((o) => o.id)} onChange={(e) => {
@@ -127,10 +133,10 @@ export function BuyerProfile() {
           {edit ? (
             <>
               <Fld l="states">
-                <input value={view.buyBox.states.join(", ")} onChange={(e) => setBox("states", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} placeholder="comma-separated" />
+                <SearchableMultiSelect options={US_STATE_OPTIONS} value={view.buyBox.states} onChange={(v) => setBox("states", v)} placeholder="Select states…" />
               </Fld>
               <Fld l="counties">
-                <SearchableMultiSelect options={TEXAS_COUNTY_OPTIONS} value={view.buyBox.counties} onChange={(v) => setBox("counties", v)} placeholder="Search counties…" />
+                <SearchableMultiSelect options={countiesForStates(view.buyBox.states)} value={view.buyBox.counties} onChange={(v) => setBox("counties", v)} placeholder={view.buyBox.states.length ? "Search counties…" : "Select a state first"} />
               </Fld>
               <Fld l="basins">
                 <SearchableMultiSelect options={TEXAS_BASIN_OPTIONS} value={view.buyBox.basins} onChange={(v) => setBox("basins", v)} placeholder="Search basins…" />

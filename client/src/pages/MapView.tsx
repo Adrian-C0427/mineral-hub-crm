@@ -676,6 +676,10 @@ export function MapView() {
                     ))}
                   </>
                 )}
+                <Link className="primary" to={`/valuation?well=${encodeURIComponent(selected.api || selected.api8 || "")}`}
+                  style={{ display: "flex", justifyContent: "center", marginTop: 12, padding: "8px 12px", borderRadius: 8 }}>
+                  Open in Well Analysis →
+                </Link>
                 <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Operator, lease, field, dates, permits, and completions are from RRC records (lease-level; oil is reported per lease). Formation shows where a W-2 was filed.</p>
               </>
             ) : selected.kind === "hotspot" ? (
@@ -778,5 +782,16 @@ function ProductionChart({ series, kind }: { series: [number, number, number][];
   );
 }
 function KV({ k, v }: { k: string; v: React.ReactNode }) {
-  return <div className="kv"><span className="k">{k}</span><span className="v">{v || "—"}</span></div>;
+  const [copied, setCopied] = useState(false);
+  const text = typeof v === "string" || typeof v === "number" ? String(v) : null;
+  const canCopy = text != null && text !== "" && text !== "—";
+  const doCopy = () => { if (!text) return; navigator.clipboard?.writeText(text).then(() => { setCopied(true); setTimeout(() => setCopied(false), 1200); }).catch(() => {}); };
+  return (
+    <div className="kv kv-copy">
+      <span className="k">{k}</span>
+      <span className="v">{v || "—"}
+        {canCopy && <button type="button" className="kv-copy-btn" title={copied ? "Copied" : "Copy"} onClick={doCopy}>{copied ? "✓" : "⧉"}</button>}
+      </span>
+    </div>
+  );
 }

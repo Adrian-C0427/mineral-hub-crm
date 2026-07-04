@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, getAuthToken } from "../api/client";
-import { Banner, Spinner } from "./ui";
+import { Banner, Spinner, ConfirmDelete } from "./ui";
 import { downloadCsv } from "../lib/csv";
 import { fmtDate } from "../lib/format";
 
@@ -58,6 +58,9 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
   const [result, setResult] = useState<CommitResp | null>(null);
   const [runs, setRuns] = useState<IngestRun[]>([]);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [selectedRuns, setSelectedRuns] = useState<Set<string>>(new Set());
+  const [confirmRuns, setConfirmRuns] = useState(false);
+  const [deletingRuns, setDeletingRuns] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadRuns = () => api.get<IngestRun[]>("/research/ingest/runs").then(setRuns).catch(() => {});
@@ -132,10 +135,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
               <option value="permits">Drilling Permits</option>
             </select>
           </div>
-          <div className="field" style={{ marginBottom: 0, width: 110 }}><label>Format</label>
-            <input value="CSV" disabled readOnly />
-          </div>
-          <div className="field" style={{ marginBottom: 0 }}><label>CSV file</label>
+          <div className="field" style={{ marginBottom: 0 }}><label>CSV file <span className="muted" style={{ fontWeight: 400, textTransform: "none" }}>· Supported file type: CSV</span></label>
             <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
           </div>
           <button className="small" onClick={downloadTemplate}>Download template</button>
@@ -205,13 +205,24 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
       </div>
 
       <div className="panel">
-        <h3>Import History</h3>
+        <div className="section-head"><h3 style={{ margin: 0 }}>Import History</h3>
+          {selectedRuns.size > 0 && (
+            <button className="small danger" onClick={() => setConfirmRuns(true)} disabled={deletingRuns}>
+              Delete {selectedRuns.size} import{selectedRuns.size === 1 ? "" : "s"}…
+            </button>
+          )}
+        </div>
+        <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Deleting an import removes only the records that file created; all other imports stay intact.</p>
         {runs.length === 0 ? <p className="muted">No imports yet.</p> : (
           <div className="table-scroll"><table className="data-table">
-            <thead><tr><th>Date</th><th>Type</th><th>Geography</th><th>File</th><th>Imported</th><th>Skipped</th><th>Failed</th></tr></thead>
+            <thead><tr>
+              <th style={{ width: 28 }}><input type="checkbox" checked={runs.length > 0 && runs.every((r) => selectedRuns.has(r.id))} onChange={(e) => setSelectedRuns(e.target.checked ? new Set(runs.map((r) => r.id)) : new Set())} /></th>
+              <th>Date</th><th>Type</th><th>Geography</th><th>File</th><th>Imported</th><th>Skipped</th><th>Failed</th>
+            </tr></thead>
             <tbody>
               {runs.map((r) => (
                 <tr key={r.id}>
+                  <td><input type="checkbox" checked={selectedRuns.has(r.id)} onChange={() => setSelectedRuns((p) => { const n = new Set(p); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n; })} /></td>
                   <td>{fmtDate(r.createdAt)}</td>
                   <td>{runTypeLabel(r.source)}</td>
                   <td>{[r.county, r.state].filter(Boolean).join(", ") || "—"}</td>
@@ -223,6 +234,17 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
               ))}
             </tbody>
           </table></div>
+        )}
+        {confirmRuns && (
+          <ConfirmDelete count={selectedRuns.size} itemLabel="import" busy={deletingRuns}
+            onCancel={() => setConfirmRuns(false)}
+            onConfirm={async () => {
+              setDeletingRuns(true);
+              try {
+                await api.post("/research/ingest/runs/delete", { ids: [...selectedRuns] });
+                setSelectedRuns(new Set()); setConfirmRuns(false); loadRuns(); onDataChanged();
+              } finally { setDeletingRuns(false); }
+            }} />
         )}
       </div>
 

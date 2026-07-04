@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Briefcase, Workflow, Users, Map as MapIcon, BarChart3, Telescope, TrendingDown,
@@ -109,6 +109,26 @@ function SidebarItem({ item, collapsed, allowed, pathname }: { item: NavItem; co
   const [open, setOpen] = useState(within);
   useEffect(() => { if (within) setOpen(true); }, [within]);
 
+  // Collapsed flyout: positioned with fixed coords measured from the group, so
+  // it escapes the nav's overflow:auto clipping (the bug that made collapsed
+  // submenus unreachable). Opens on hover or click; closes on leave / outside
+  // click / Escape / navigation.
+  const groupRef = useRef<HTMLDivElement>(null);
+  const [flyout, setFlyout] = useState<{ top: number; left: number } | null>(null);
+  const closeTimer = useRef<number | null>(null);
+  const openFlyout = () => {
+    if (closeTimer.current) { window.clearTimeout(closeTimer.current); closeTimer.current = null; }
+    const r = groupRef.current?.getBoundingClientRect();
+    if (r) setFlyout({ top: r.top, left: r.right + 6 });
+  };
+  const scheduleClose = () => { closeTimer.current = window.setTimeout(() => setFlyout(null), 140); };
+  useEffect(() => {
+    if (!flyout) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setFlyout(null); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [flyout]);
+
   if (!hasChildren) {
     return (
       <NavLink to={item.to!} end={item.end} className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`} title={collapsed ? item.label : item.desc}>
@@ -118,15 +138,38 @@ function SidebarItem({ item, collapsed, allowed, pathname }: { item: NavItem; co
     );
   }
 
+  if (collapsed) {
+    return (
+      <div className={`sidebar-group ${within ? "within" : ""}`} ref={groupRef}
+        onMouseEnter={openFlyout} onMouseLeave={scheduleClose}>
+        <button type="button" className={`sidebar-link group-head ${within ? "active" : ""}`} title={item.label}
+          onClick={() => (flyout ? setFlyout(null) : openFlyout())}>
+          <span className="sidebar-icon"><Icon size={18} /></span>
+        </button>
+        {flyout && (
+          <div className="sidebar-flyout" style={{ top: flyout.top, left: flyout.left }}
+            onMouseEnter={openFlyout} onMouseLeave={scheduleClose}>
+            <div className="flyout-head">{item.label}</div>
+            {children.map((c) => (
+              <NavLink key={c.label} to={c.to!} onClick={() => setFlyout(null)}
+                className={({ isActive }) => `sidebar-sublink ${isActive ? "active" : ""}`}>
+                {c.label}
+              </NavLink>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className={`sidebar-group ${within ? "within" : ""}`}>
-      <div className="sidebar-link group-head" onClick={() => setOpen((o) => !o)} title={collapsed ? item.label : item.desc}>
+      <div className="sidebar-link group-head" onClick={() => setOpen((o) => !o)} title={item.desc}>
+
         <span className="sidebar-icon"><Icon size={18} /></span>
-        {!collapsed && <><span className="sidebar-label">{item.label}</span><span className="group-caret">{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span></>}
+        <span className="sidebar-label">{item.label}</span><span className="group-caret">{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
       </div>
-      {/* Expanded: inline sub (shown when open). Collapsed: hover flyout (CSS). */}
-      <div className={`sidebar-sub ${collapsed ? "flyout" : ""}`} style={!collapsed && !open ? { display: "none" } : undefined}>
-        {collapsed && <div className="flyout-head">{item.label}</div>}
+      <div className="sidebar-sub" style={!open ? { display: "none" } : undefined}>
         {children.map((c) => (
           <NavLink key={c.label} to={c.to!} className={({ isActive }) => `sidebar-sublink ${isActive ? "active" : ""}`}>
             {c.label}

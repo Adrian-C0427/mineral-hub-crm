@@ -8,7 +8,7 @@ import { useAuth } from "../auth/AuthContext";
 import { Banner, MetricCard, Modal, Spinner } from "../components/ui";
 import { WellImport } from "../components/WellImport";
 import { money, num, prettyEnum } from "../lib/format";
-import { monthLabel } from "../lib/charts";
+import { monthLabel, chartTooltip } from "../lib/charts";
 import { exportElementToPdf } from "../lib/pdf";
 
 /**
@@ -173,6 +173,19 @@ export function Valuation() {
 
   useEffect(() => {
     api.get<Assumptions>("/wells/assumptions/defaults").then(setAssumptions).catch(() => {});
+  }, []);
+
+  // Deep-link from the map's well panel ("Open in Well Analysis"): ?well=<API#>.
+  // Auto-selects the matching analysis well so the user lands ready to run,
+  // without re-searching. (A map well only matches if it's in the analysis
+  // dataset; otherwise the workspace opens for a manual pick.)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const w = params.get("well");
+    if (!w) return;
+    api.get<Paged<WellRow>>(`/wells?q=${encodeURIComponent(w)}&pageSize=1`)
+      .then((r) => { if (r.rows[0]) { setSelected([r.rows[0]]); setPageTab("workspace"); } })
+      .catch(() => {});
   }, []);
 
   const runAnalysis = useCallback(async (wells: WellRow[], a: Assumptions) => {
@@ -644,7 +657,6 @@ function annualCash(r: ValuationResult): AnnualCashRow[] {
   return [...by.values()];
 }
 
-const chartTooltipStyle = { backgroundColor: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, fontSize: 12 } as const;
 
 // --- Production tab ---------------------------------------------------------
 
@@ -677,7 +689,7 @@ function ProductionTab({ r }: { r: ValuationResult }) {
               <XAxis dataKey="month" tickFormatter={monthLabel} tick={{ fontSize: 11 }} minTickGap={28} />
               <YAxis yAxisId="l" tick={{ fontSize: 11 }} label={{ value: "bbl / month", angle: -90, position: "insideLeft", fontSize: 11 }} />
               <YAxis yAxisId="r" orientation="right" tick={{ fontSize: 11 }} label={{ value: "mcf / month", angle: 90, position: "insideRight", fontSize: 11 }} />
-              <Tooltip contentStyle={chartTooltipStyle} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
+              <Tooltip {...chartTooltip} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
               <Legend />
               <Line yAxisId="l" dataKey="oilBbl" name="Oil (bbl)" stroke={COLOR_OIL} dot={false} strokeWidth={2} isAnimationActive={false} />
               <Line yAxisId="r" dataKey="gasMcf" name="Gas (mcf)" stroke={COLOR_GAS} dot={false} strokeWidth={2} isAnimationActive={false} />
@@ -692,7 +704,7 @@ function ProductionTab({ r }: { r: ValuationResult }) {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="month" tickFormatter={monthLabel} tick={{ fontSize: 11 }} minTickGap={28} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => v >= 1000 ? `${Math.round(v / 1000)}k` : String(v)} />
-              <Tooltip contentStyle={chartTooltipStyle} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
+              <Tooltip {...chartTooltip} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
               <Line dataKey="cumBoe" name="Cumulative BOE" stroke={COLOR_CUM} dot={false} strokeWidth={2} isAnimationActive={false} />
             </ComposedChart>
           </ResponsiveContainer>
@@ -799,7 +811,7 @@ function ForecastTab({ r }: { r: ValuationResult }) {
               yAxisId="r" orientation="right" tick={{ fontSize: 11 }} scale={logScale ? "log" : "auto"} domain={logScale ? ["auto", "auto"] : [0, "auto"]}
               allowDataOverflow label={{ value: "mcf / month", angle: 90, position: "insideRight", fontSize: 11 }}
             />
-            <Tooltip contentStyle={chartTooltipStyle} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
+            <Tooltip {...chartTooltip} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
             <Legend />
             <Line yAxisId="l" dataKey="histOil" name="Oil (actual)" stroke={COLOR_OIL} dot={false} strokeWidth={2} isAnimationActive={false} />
             <Line yAxisId="l" dataKey="fcOil" name="Oil (forecast)" stroke={COLOR_OIL} dot={false} strokeWidth={2} strokeDasharray="6 4" isAnimationActive={false} />
@@ -821,7 +833,7 @@ function ForecastTab({ r }: { r: ValuationResult }) {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="month" tickFormatter={monthLabel} tick={{ fontSize: 11 }} minTickGap={28} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => v >= 1000 ? `${Math.round(v / 1000)}k` : String(v)} />
-              <Tooltip contentStyle={chartTooltipStyle} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
+              <Tooltip {...chartTooltip} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
               <Line dataKey="cumBoe" name="Cumulative (actual)" stroke={COLOR_CUM} dot={false} strokeWidth={2} isAnimationActive={false} />
               <Line dataKey="fcCumBoe" name="Cumulative (forecast)" stroke={COLOR_CUM} dot={false} strokeWidth={2} strokeDasharray="6 4" isAnimationActive={false} />
             </ComposedChart>
@@ -867,7 +879,7 @@ function CashFlowTab({ r }: { r: ValuationResult }) {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="year" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(val: number) => fmtMoneyC(val)} width={70} />
-              <Tooltip contentStyle={chartTooltipStyle} formatter={(val: number) => money(val)} />
+              <Tooltip {...chartTooltip} formatter={(val: number) => money(val)} />
               <Legend />
               <Bar dataKey="netCashFlow" name="Net cash flow" fill={COLOR_CASH} isAnimationActive={false} />
               <Line dataKey="cumNetCashFlow" name="Cumulative" stroke={COLOR_CUM} dot={false} strokeWidth={2} isAnimationActive={false} />
@@ -883,7 +895,7 @@ function CashFlowTab({ r }: { r: ValuationResult }) {
               <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
               <XAxis dataKey="year" tick={{ fontSize: 11 }} />
               <YAxis tick={{ fontSize: 11 }} tickFormatter={(val: number) => fmtMoneyC(val)} width={70} />
-              <Tooltip contentStyle={chartTooltipStyle} formatter={(val: number) => money(val)} />
+              <Tooltip {...chartTooltip} formatter={(val: number) => money(val)} />
               <Legend />
               <Bar dataKey="oilRevenue" name="Oil" stackId="rev" fill={COLOR_OIL} isAnimationActive={false} />
               <Bar dataKey="gasRevenue" name="Gas" stackId="rev" fill={COLOR_GAS} isAnimationActive={false} />
@@ -1007,7 +1019,7 @@ function SensitivityTab({ r }: { r: ValuationResult }) {
             <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
             <XAxis dataKey="label" tick={{ fontSize: 11 }} />
             <YAxis tick={{ fontSize: 11 }} tickFormatter={(val: number) => fmtMoneyC(val)} width={70} />
-            <Tooltip contentStyle={chartTooltipStyle} formatter={(val: number) => money(val)} />
+            <Tooltip {...chartTooltip} formatter={(val: number) => money(val)} />
             <ReferenceLine y={0} stroke="var(--text-dim)" />
             <Bar dataKey="npv" name="NPV" isAnimationActive={false}>
               {r.sensitivity.map((s, i) => <Cell key={i} fill={s.npv >= 0 ? COLOR_OIL : COLOR_GAS} />)}

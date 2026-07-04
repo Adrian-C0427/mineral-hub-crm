@@ -9,7 +9,7 @@ import { MetricCard, Spinner, Banner, Modal } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { money, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
-import { CHART_COLORS, COLOR_EXPENSE, monthLabel } from "../lib/charts";
+import { CHART_COLORS, COLOR_EXPENSE, monthLabel, chartTooltip } from "../lib/charts";
 import type { UserLite } from "../types";
 
 interface Category { id: string; name: string; active: boolean }
@@ -157,7 +157,7 @@ export function Expenses() {
                   <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                   <YAxis tickFormatter={(v) => money(v)} tick={{ fontSize: 11 }} width={70} />
-                  <Tooltip formatter={(v: number) => money(v)} />
+                  <Tooltip {...chartTooltip} formatter={(v: number) => money(v)} />
                   <Bar dataKey="expenses" name="Expenses" fill={COLOR_EXPENSE} radius={[3, 3, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -172,7 +172,7 @@ export function Expenses() {
                   <Pie data={dash.byCategory} dataKey="amount" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={(e) => e.name}>
                     {dash.byCategory.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
                   </Pie>
-                  <Tooltip formatter={(v: number) => money(v)} />
+                  <Tooltip {...chartTooltip} formatter={(v: number) => money(v)} />
                 </PieChart>
               </ResponsiveContainer>
             )}
@@ -186,7 +186,7 @@ export function Expenses() {
                   <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
                   <XAxis type="number" tickFormatter={(v) => money(v)} tick={{ fontSize: 11 }} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={110} />
-                  <Tooltip formatter={(v: number) => money(v)} />
+                  <Tooltip {...chartTooltip} formatter={(v: number) => money(v)} />
                   <Legend />
                   <Bar dataKey="total" name="Total" fill={CHART_COLORS[0]} radius={[0, 3, 3, 0]} />
                   <Bar dataKey="outstanding" name="Outstanding" fill={CHART_COLORS[2]} radius={[0, 3, 3, 0]} />

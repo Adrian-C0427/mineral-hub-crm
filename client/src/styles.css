@@ -119,15 +119,16 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .sidebar.collapsed .sidebar-link { justify-content: center; padding: 9px 0; }
 .app-main { flex: 1; min-width: 0; overflow-x: hidden; }
 
-/* Collapsed groups: reveal children as a hover flyout so navigation stays
-   fully functional with icons only. */
-.sidebar.collapsed .sidebar-group { position: relative; }
-.sidebar.collapsed .sidebar-sub.flyout {
-  display: none; position: absolute; left: 100%; top: 0; margin: 0; z-index: 100;
+/* Collapsed groups: children appear in a fixed-position flyout (hover or
+   click) so navigation stays fully functional with icons only. Fixed
+   positioning escapes the nav's overflow:auto, which previously clipped it. */
+.sidebar-flyout {
+  position: fixed; z-index: 200; display: flex; flex-direction: column;
   min-width: 190px; background: var(--panel); border: 1px solid var(--border);
   border-radius: 8px; padding: 6px; box-shadow: 0 6px 24px rgba(0,0,0,0.35);
 }
-.sidebar.collapsed .sidebar-group:hover .sidebar-sub.flyout { display: flex; }
+.sidebar.collapsed .group-head { width: 100%; background: none; border: none; cursor: pointer; }
+.sidebar.collapsed .group-head.active { color: var(--accent); }
 .flyout-head { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); padding: 4px 10px 6px; }
 
 /* Narrow screens: the Sidebar component auto-collapses itself to the icon
@@ -174,6 +175,10 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .timeline-kind { font-size: 12px; font-weight: 600; }
 .link-btn { background: none; border: none; color: var(--accent); padding: 0 4px; font-size: 12px; cursor: pointer; }
 .match-selected { outline: 2px solid var(--accent); }
+/* Per-field copy-to-clipboard: icon fades in on hover of the key/value row. */
+.kv-copy-btn { opacity: 0; background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 12px; margin-left: 5px; padding: 0 2px; line-height: 1; transition: opacity .12s, color .12s; }
+.kv-copy:hover .kv-copy-btn { opacity: 1; }
+.kv-copy-btn:hover { color: var(--accent); background: none; }
 
 /* Embedded deal map */
 .deal-map { display: flex; flex-direction: column; }
@@ -413,7 +418,9 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .list-row:last-child { border-bottom: none; }
 .bar-chart { display:flex; align-items:flex-end; gap: 6px; height: 160px; padding-top: 10px; }
 .bar-col { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height: 100%; gap: 4px; }
-.bar { width: 70%; background: var(--accent); border-radius: 4px 4px 0 0; min-height: 2px; }
+.bar-pair { display:flex; align-items:flex-end; justify-content:center; gap: 2px; width: 100%; height: 100%; }
+.bar { width: 34%; background: var(--green); border-radius: 3px 3px 0 0; min-height: 2px; }
+.bar-projected { background: var(--accent); opacity: 0.6; }
 .bar-label { font-size: 10px; color: var(--text-dim); }
 .error-text { color: var(--red); font-size: 13px; margin-top: 8px; }
 .progress { height: 8px; background: var(--bg); border-radius: 100px; overflow: hidden; margin: 10px 0; }

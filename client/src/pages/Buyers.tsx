@@ -14,6 +14,7 @@ interface BuyerRow {
   id: string;
   name: string;
   companyName: string;
+  contactName: string | null;
   focusArea: string;
   relationshipStatus: "HOT" | "WARM" | "COLD";
   closeRate: number;
@@ -35,7 +36,7 @@ export function Buyers() {
 
   const columns: Column<BuyerRow>[] = [
     { key: "buyer", header: "Buyer", type: "text", value: (b) => b.companyName,
-      render: (b) => <div><strong>{b.name}</strong><div className="muted" style={{ fontSize: 12 }}>{b.companyName}</div></div> },
+      render: (b) => <div><strong>{b.companyName}</strong>{b.contactName && <div className="muted" style={{ fontSize: 12 }}>{b.contactName}</div>}</div> },
     { key: "focus", header: "Focus Area", type: "text", value: (b) => b.focusArea },
     { key: "rel", header: "Relationship", type: "text", value: (b) => ({ HOT: 0, WARM: 1, COLD: 2 }[b.relationshipStatus]),
       render: (b) => <RelationshipDot status={b.relationshipStatus} /> },
@@ -74,8 +75,8 @@ export function Buyers() {
         onExport={() => {
           const rows = buyers.filter((b) => sel.selected.has(b.id));
           downloadCsv(`buyers-${new Date().toISOString().slice(0, 10)}.csv`,
-            ["Buyer", "Company", "Focus Area", "Relationship", "Close %", "Closed Deals"],
-            rows.map((b) => [b.name, b.companyName, b.focusArea, b.relationshipStatus, b.closeRate, b.closedDeals]));
+            ["Company", "Contact", "Focus Area", "Relationship", "Close %", "Closed Deals"],
+            rows.map((b) => [b.companyName, b.contactName ?? "", b.focusArea, b.relationshipStatus, b.closeRate, b.closedDeals]));
         }}
       />
 

@@ -1,3 +1,26 @@
+import type { CSSProperties } from "react";
+
+/**
+ * Shared recharts <Tooltip> props for a polished, theme-aware, jitter-free
+ * tooltip across every chart. isAnimationActive:false stops the position
+ * interpolation that makes recharts tooltips flicker/lag behind the cursor;
+ * allowEscapeViewBox:false keeps them inside the viewport; the panel/text CSS
+ * vars guarantee contrast in both light and dark themes (the old default white
+ * background made series text unreadable). Spread as `<Tooltip {...chartTooltip} />`.
+ */
+export const chartTooltip = {
+  contentStyle: {
+    background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8,
+    boxShadow: "var(--shadow)", fontSize: 12, color: "var(--text)", padding: "8px 11px",
+  } as CSSProperties,
+  itemStyle: { color: "var(--text)", padding: "1px 0" } as CSSProperties,
+  labelStyle: { color: "var(--text-dim)", fontWeight: 600, marginBottom: 4 } as CSSProperties,
+  wrapperStyle: { outline: "none", zIndex: 50 } as CSSProperties,
+  isAnimationActive: false as const,
+  allowEscapeViewBox: { x: false, y: false },
+  cursor: { fill: "rgba(148,163,184,0.14)", stroke: "rgba(148,163,184,0.5)" },
+};
+
 /** Shared chart palette so Expenses and Reports look consistent. */
 export const CHART_COLORS = [
   "#3b82f6", // blue

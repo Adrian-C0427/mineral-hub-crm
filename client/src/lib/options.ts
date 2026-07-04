@@ -1,4 +1,5 @@
 // Option lists for searchable multi-select buy-box fields.
+import { US_STATE_COUNTIES } from "./usCounties";
 
 export const ASSET_TYPE_OPTIONS = ["RI", "ORRI", "NPRI", "WI", "MI"] as const;
 
@@ -109,13 +110,18 @@ export const TEXAS_COUNTY_OPTIONS: string[] = [
  * (Texas today); other states resolve to an empty list until their county data
  * is added. Drives the State → County dependency in the geographic hierarchy.
  */
+// Nationwide state -> county lists (US Census TIGER, all 50 states + DC). TX
+// keeps its curated list (drives the map's abstract hierarchy); every other
+// state comes from the generated dataset.
 export const STATE_COUNTIES: Record<string, readonly string[]> = {
+  ...US_STATE_COUNTIES,
   TX: TEXAS_COUNTY_OPTIONS,
 };
 
-/** Union of counties for the selected states (sorted, de-duplicated). */
+/** Union of counties for the selected states (sorted, de-duplicated). Empty
+ * until at least one state is chosen — prevents invalid county selections. */
 export function countiesForStates(states: string[]): string[] {
-  if (!states.length) return [...TEXAS_COUNTY_OPTIONS]; // default before a state is picked
+  if (!states.length) return [];
   const out = new Set<string>();
   for (const s of states) for (const c of STATE_COUNTIES[s] ?? []) out.add(c);
   return [...out].sort();
