@@ -3,41 +3,27 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { collectCoords, bboxOfPoints, convexHull } from "../lib/geo";
 import { num } from "../lib/format";
-import { api, API_BASE } from "../api/client";
+import { api } from "../api/client";
+import { addCadastralLayers, styleWithGlyphs } from "../lib/mapLayers";
 
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
-// Reference abstract boundaries stream as vector tiles from PostGIS (same
-// source the main map uses); the deal's own footprint is fetched by id.
-const ABSTRACT_TILES = `${API_BASE || window.location.origin}/api/gis/tiles/{z}/{x}/{y}.pbf`;
-
-const STATUS_COLOR = [
-  "match", ["get", "status"],
-  "Producing", "#22c55e", "Shut-In", "#f59e0b", "Plugged", "#6b7280", "Permitted", "#3b82f6",
-  "Dry Hole", "#78350f", "Active", "#7c3aed", "Canceled/Abandoned", "#9ca3af", "Surface location", "#0ea5e9",
-  "#64748b",
-] as unknown as maplibregl.ExpressionSpecification;
-
-function style(): maplibregl.StyleSpecification {
-  return {
-    version: 8,
-    glyphs: `${window.location.origin}/fonts/{fontstack}/{range}.pbf`,
-    sources: { osm: { type: "raster", tiles: ["https://tile.openstreetmap.org/{z}/{x}/{y}.png"], tileSize: 256, attribution: "© OpenStreetMap" } },
-    layers: [{ id: "osm", type: "raster", source: "osm" }],
-  };
-}
 
 type FC = { type: "FeatureCollection"; features: { type: "Feature"; id?: string | number; properties: Record<string, unknown>; geometry: { type: string; coordinates: unknown } }[] };
 type Sel = { kind: "abstract"; abstract: string; survey: string; county: string } | { kind: "well"; api: string; wellNo: string; operator: string; leaseName: string; status: string; type: string } | null;
 
-const DEFAULT_LAYERS = { boundaries: true, numbers: true, surveys: true, wells: false, wellbores: false };
+// Same layer set the main map exposes (minus the always-on county boundaries /
+// names); no filters, no heat map — just the layer toggles.
+const DEFAULT_LAYERS = { boundaries: true, numbers: true, surveys: true, wells: true, wellbores: true };
 
-/** Compact, isolated map showing only the current deal's abstracts. */
+/**
+ * Compact per-deal map. Renders the identical cadastral stack as the main map
+ * (lib/mapLayers) — county boundaries + names, abstracts, wells, laterals,
+ * labels — with the deal's own abstracts highlighted on top. No filters/heat.
+ */
 export function DealMap({ abstractIds }: { abstractIds: string[] }) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const ready = useRef(false);
-  const wellsLoaded = useRef(false);
-  const boresLoaded = useRef(false);
   const [layers, setLayers] = useState(DEFAULT_LAYERS);
   const layersRef = useRef(layers); layersRef.current = layers;
   const [selected, setSelected] = useState<Sel>(null);
@@ -45,41 +31,34 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
 
   useEffect(() => {
     if (mapRef.current || !container.current) return;
-    const map = new maplibregl.Map({ container: container.current, style: style(), center: LEON_CENTER, zoom: 9 });
+    const map = new maplibregl.Map({ container: container.current, style: styleWithGlyphs(), center: LEON_CENTER, zoom: 9 });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
     mapRef.current = map;
 
     map.on("load", async () => {
-      // Only the deal's own abstracts need real geometry (fill/hull/zoom-to-fit);
-      // reference boundaries around them come in as vector tiles.
+      // County label points (shared layer stack) + this deal's own abstract
+      // geometry (fill / hull / zoom-to-fit). Everything else streams as tiles.
       const ids = [...idSet];
-      const dealFC: FC = ids.length
-        ? await api.get<FC>(`/gis/features?ids=${encodeURIComponent(ids.join(","))}`).catch(() => ({ type: "FeatureCollection", features: [] } as FC))
-        : { type: "FeatureCollection", features: [] };
+      const [countyLabels, dealFC] = await Promise.all([
+        fetch(`/data/county-labels.geojson`).then((r) => r.json()).catch(() => ({ type: "FeatureCollection", features: [] })),
+        ids.length
+          ? api.get<FC>(`/gis/features?ids=${encodeURIComponent(ids.join(","))}`).catch(() => ({ type: "FeatureCollection", features: [] } as FC))
+          : Promise.resolve({ type: "FeatureCollection", features: [] } as FC),
+      ]);
       const dealFeats = dealFC.features;
 
-      map.addSource("abstracts", { type: "vector", tiles: [ABSTRACT_TILES], minzoom: 8, maxzoom: 14, promoteId: { abstracts: "id", wells: "fid" } });
-      map.addSource("deal", { type: "geojson", data: dealFC as unknown as GeoJSON.FeatureCollection, promoteId: "id" });
+      // Identical cadastral source + layers as the main map.
+      addCadastralLayers(map, countyLabels as unknown as GeoJSON.FeatureCollection);
 
-      // Clean outer boundary = convex hull of all deal-abstract vertices.
+      // This deal's abstracts, highlighted on top of the base cadastre (drawn
+      // below wells/labels via beforeId).
+      map.addSource("deal", { type: "geojson", data: dealFC as unknown as GeoJSON.FeatureCollection, promoteId: "id" });
       const pts = dealFeats.flatMap((f) => collectCoords(f.geometry));
       const hull = convexHull(pts);
       map.addSource("deal-outline", { type: "geojson", data: { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [hull] } } as unknown as GeoJSON.Feature });
-
-      // Reference abstract boundaries (toggleable).
-      map.addLayer({ id: "abstracts-line", type: "line", source: "abstracts", "source-layer": "abstracts", paint: { "line-color": "#94a3b8", "line-width": 0.5 } });
-      // The deal itself — highlighted fill + line (always shown).
-      map.addLayer({ id: "deal-fill", type: "fill", source: "deal", paint: { "fill-color": "#f59e0b", "fill-opacity": 0.28 } });
-      map.addLayer({ id: "deal-line", type: "line", source: "deal", paint: { "line-color": "#b45309", "line-width": 1.5 } });
-      // Clean boundary around the whole deal.
-      map.addLayer({ id: "deal-outline-line", type: "line", source: "deal-outline", paint: { "line-color": "#0f172a", "line-width": 2, "line-dasharray": [2, 1.5] } });
-      // Labels (real glyphs; zoom-based, collision-free).
-      map.addLayer({ id: "abstracts-num", type: "symbol", source: "abstracts", "source-layer": "abstracts", minzoom: 9, layout: {
-        "symbol-sort-key": ["*", -1, ["get", "area"]], "text-field": ["get", "abstract"], "text-font": ["Noto Sans Regular"],
-        "text-size": ["interpolate", ["linear"], ["zoom"], 9, 10, 14, 13], "text-allow-overlap": false }, paint: { "text-color": "#0f172a", "text-halo-color": "#fff", "text-halo-width": 1.4 } });
-      map.addLayer({ id: "abstracts-survey", type: "symbol", source: "abstracts", "source-layer": "abstracts", minzoom: 12.5, layout: {
-        "symbol-sort-key": ["*", -1, ["get", "area"]], "text-field": ["get", "survey"], "text-font": ["Noto Sans Regular"],
-        "text-size": 11, "text-offset": [0, 1.1], "text-allow-overlap": false }, paint: { "text-color": "#334155", "text-halo-color": "#fff", "text-halo-width": 1.3 } });
+      map.addLayer({ id: "deal-fill", type: "fill", source: "deal", paint: { "fill-color": "#f59e0b", "fill-opacity": 0.3 } }, "wellbores");
+      map.addLayer({ id: "deal-line", type: "line", source: "deal", paint: { "line-color": "#b45309", "line-width": 1.5 } }, "wellbores");
+      map.addLayer({ id: "deal-outline-line", type: "line", source: "deal-outline", paint: { "line-color": "#0f172a", "line-width": 2, "line-dasharray": [2, 1.5] } }, "wellbores");
 
       ready.current = true;
       applyVis();
@@ -92,9 +71,9 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
       map.on("click", (ev) => {
         if (layersRef.current.wells) {
           const wh = map.queryRenderedFeatures([[ev.point.x - 5, ev.point.y - 5], [ev.point.x + 5, ev.point.y + 5]], { layers: map.getLayer("wells") ? ["wells"] : [] });
-          if (wh.length) { const p = wh[0].properties as Record<string, unknown>; setSelected({ kind: "well", api: String(p.api ?? ""), wellNo: String(p.wellNo ?? ""), operator: String(p.operator ?? ""), leaseName: String(p.leaseName ?? ""), status: String(p.status ?? ""), type: String(p.type ?? "") }); return; }
+          if (wh.length) { const p = wh[0].properties as Record<string, unknown>; setSelected({ kind: "well", api: String(p.api8 ?? p.api ?? ""), wellNo: String(p.wellNo ?? ""), operator: String(p.operator ?? ""), leaseName: String(p.leaseName ?? ""), status: String(p.status ?? ""), type: String(p.type ?? "") }); return; }
         }
-        const ah = map.queryRenderedFeatures(ev.point, { layers: ["deal-fill", "abstracts-line"] });
+        const ah = map.queryRenderedFeatures(ev.point, { layers: ["deal-fill", "abstracts-fill"].filter((l) => map.getLayer(l)) });
         if (ah.length) { const p = ah[0].properties as Record<string, unknown>; setSelected({ kind: "abstract", abstract: String(p.abstract ?? ""), survey: String(p.survey ?? ""), county: String(p.county ?? "") }); }
         else setSelected(null);
       });
@@ -103,27 +82,13 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Wells/laterals come from the same vector-tile source as the abstracts
-  // (rrc.wells in PostGIS) — available in every imported county, no downloads.
-  function ensureWells() {
-    const map = mapRef.current!; if (wellsLoaded.current) return; wellsLoaded.current = true;
-    map.addLayer({ id: "wells", type: "circle", source: "abstracts", "source-layer": "wells", minzoom: 9, paint: {
-      "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 2.3, 14, 5], "circle-color": STATUS_COLOR,
-      "circle-stroke-width": 0.6, "circle-stroke-color": "#fff", "circle-opacity": 0.9 } });
-  }
-  function ensureBores() {
-    const map = mapRef.current!; if (boresLoaded.current) return; boresLoaded.current = true;
-    map.addLayer({ id: "wellbores", type: "line", source: "abstracts", "source-layer": "wellbores", minzoom: 10, paint: {
-      "line-color": ["match", ["get", "wellboreType"], "Directional", "#9333ea", "#0f766e"], "line-width": 1.5, "line-opacity": 0.8 } });
-  }
-
   function applyVis() {
     const map = mapRef.current; if (!map || !ready.current) return;
     const L = layersRef.current;
     const vis = (id: string, on: boolean) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
-    vis("abstracts-line", L.boundaries); vis("abstracts-num", L.numbers); vis("abstracts-survey", L.surveys);
-    if (L.wells) { ensureWells(); vis("wells", true); } else vis("wells", false);
-    if (L.wellbores) { ensureBores(); vis("wellbores", true); } else vis("wellbores", false);
+    vis("abstracts-fill", L.boundaries); vis("abstracts-line", L.boundaries);
+    vis("abstracts-num", L.numbers); vis("abstracts-survey", L.surveys);
+    vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores);
   }
   useEffect(applyVis, [layers]);
 
