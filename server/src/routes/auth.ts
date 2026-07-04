@@ -180,7 +180,7 @@ authRouter.get(
     const org = req.user!.organizationId
       ? await prisma.organization.findUnique({
           where: { id: req.user!.organizationId },
-          select: { id: true, name: true, teamId: true },
+          select: { id: true, name: true, teamId: true, fullLogo: true, compactLogo: true },
         })
       : null;
     res.json({ user: { ...req.user, organization: org } });

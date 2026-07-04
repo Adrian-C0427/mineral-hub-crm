@@ -80,7 +80,12 @@ export function Sidebar() {
   return (
     <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
       <div className="sidebar-brand">
-        <span className="brand">{collapsed ? "MH" : <>Mineral Hub<span className="dot">.</span></>}</span>
+        {(() => {
+          const org = user?.organization;
+          const logo = collapsed ? org?.compactLogo : org?.fullLogo;
+          if (logo) return <img className={`sidebar-logo ${collapsed ? "compact" : ""}`} src={logo} alt={org?.name ?? "Company logo"} />;
+          return <span className="brand">{collapsed ? "MH" : <>Mineral Hub<span className="dot">.</span></>}</span>;
+        })()}
         <button className="icon-btn sidebar-toggle" onClick={toggleCollapsed} title={collapsed ? "Expand" : "Collapse"} aria-label="Toggle sidebar">
           {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} style={{ transform: "rotate(90deg)" }} />}
         </button>

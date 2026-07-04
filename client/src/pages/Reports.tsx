@@ -80,7 +80,7 @@ const EMPTY_FILTERS: Record<string, string[]> = { counties: [], basins: [], form
 
 export function Reports() {
   const nav = useNavigate();
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const [period, setPeriod] = useState<Period>("THIS_YEAR");
   const [custom, setCustom] = useState({ from: "", to: "" });
   const [compare, setCompare] = useState<Compare>("NONE");
@@ -207,7 +207,9 @@ export function Reports() {
         <div ref={reportRef} className="report-capture">
           {/* --- Report header (captured in PDF) --- */}
           <div className="report-header panel">
-            <div className="brand" style={{ fontSize: 20 }}>Mineral Hub<span className="dot">.</span></div>
+            {user?.organization?.fullLogo
+              ? <img src={user.organization.fullLogo} alt={user.organization.name} style={{ maxHeight: 44, maxWidth: 220, objectFit: "contain", display: "block" }} />
+              : <div className="brand" style={{ fontSize: 20 }}>Mineral Hub<span className="dot">.</span></div>}
             <h2 style={{ margin: "6px 0 2px" }}>Business Performance Report</h2>
             <p className="muted" style={{ margin: 0 }}>
               Period: {fmtDate(range.from)} – {fmtDate(range.to)}
