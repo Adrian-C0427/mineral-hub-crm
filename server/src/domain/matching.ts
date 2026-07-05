@@ -48,6 +48,8 @@ export interface CriterionResult {
   label: string;
   weight: number;
   matched: boolean;
+  /** Whether the buyer actually constrained this criterion (vs "accepts any"). */
+  specified: boolean;
   detail: string;
 }
 
@@ -58,6 +60,11 @@ export interface MatchResult {
   criteria: CriterionResult[];
   matching: CriterionResult[];
   nonMatching: CriterionResult[];
+  /** How many criteria the buyer's box actually specifies (0–7). A high
+   *  matchPercent against a sparse box is weak evidence — the UI shows this
+   *  count so "100%" can't masquerade as a thoroughly-vetted fit. */
+  criteriaSpecified: number;
+  criteriaSpecifiedMatched: number;
 }
 
 function norm(s: string): string {
@@ -108,21 +115,23 @@ export function computeMatch(deal: DealForMatch, box: BuyBoxForMatch): MatchResu
   const push = (
     key: keyof typeof MATCH_WEIGHTS,
     label: string,
+    specified: boolean,
     r: { matched: boolean; detail: string },
   ) => {
-    criteria.push({ key, label, weight: MATCH_WEIGHTS[key], matched: r.matched, detail: r.detail });
+    criteria.push({ key, label, weight: MATCH_WEIGHTS[key], matched: r.matched, specified, detail: r.detail });
   };
 
-  push("state", "State", setMatch(deal.state, box.states));
-  push("county", "County", multiMatch(deal.counties, box.counties));
-  push("basin", "Basin", multiMatch(deal.basins, box.basins));
-  push("formation", "Formation", multiMatch(deal.formations, box.formations));
-  push("assetType", "Asset Type", multiMatch(deal.assetTypes, box.assetTypes));
-  push("acreage", "Acreage", rangeMatch(deal.acreageNma, box.minAcreage, box.maxAcreage));
-  push("price", "Price", rangeMatch(deal.askPrice, box.minPrice, box.maxPrice));
+  push("state", "State", box.states.length > 0, setMatch(deal.state, box.states));
+  push("county", "County", box.counties.length > 0, multiMatch(deal.counties, box.counties));
+  push("basin", "Basin", box.basins.length > 0, multiMatch(deal.basins, box.basins));
+  push("formation", "Formation", box.formations.length > 0, multiMatch(deal.formations, box.formations));
+  push("assetType", "Asset Type", box.assetTypes.length > 0, multiMatch(deal.assetTypes, box.assetTypes));
+  push("acreage", "Acreage", box.minAcreage != null || box.maxAcreage != null, rangeMatch(deal.acreageNma, box.minAcreage, box.maxAcreage));
+  push("price", "Price", box.minPrice != null || box.maxPrice != null, rangeMatch(deal.askPrice, box.minPrice, box.maxPrice));
 
   const matchedWeight = criteria.filter((c) => c.matched).reduce((sum, c) => sum + c.weight, 0);
   const matchPercent = Math.round((matchedWeight / MATCH_TOTAL_WEIGHT) * 100);
+  const specified = criteria.filter((c) => c.specified);
 
   return {
     matchPercent,
@@ -130,5 +139,7 @@ export function computeMatch(deal: DealForMatch, box: BuyBoxForMatch): MatchResu
     criteria,
     matching: criteria.filter((c) => c.matched),
     nonMatching: criteria.filter((c) => !c.matched),
+    criteriaSpecified: specified.length,
+    criteriaSpecifiedMatched: specified.filter((c) => c.matched).length,
   };
 }

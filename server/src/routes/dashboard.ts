@@ -69,8 +69,13 @@ dashboardRouter.get(
       include: { buyer: { select: { name: true } }, deal: { select: { name: true } } },
     });
 
-    // Recent activity feed
-    const recent = await prisma.activityLog.findMany({ where: { organizationId: org }, orderBy: { createdAt: "desc" }, take: 15 });
+    // Recent activity feed — business events only. Integration plumbing events
+    // (connect/disconnect/test) stay in the audit log but would be noise here.
+    const recent = await prisma.activityLog.findMany({
+      where: { organizationId: org, NOT: { eventType: { startsWith: "integration." } } },
+      orderBy: { createdAt: "desc" },
+      take: 15,
+    });
 
     // Top buyers YTD by closed volume
     const topBuyersMap = new Map<string, { name: string; companyName: string; volume: number }>();

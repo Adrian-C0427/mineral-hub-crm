@@ -40,8 +40,9 @@ export function Buyers() {
     { key: "focus", header: "Focus Area", type: "text", value: (b) => b.focusArea },
     { key: "rel", header: "Relationship", type: "text", value: (b) => ({ HOT: 0, WARM: 1, COLD: 2 }[b.relationshipStatus]),
       render: (b) => <RelationshipDot status={b.relationshipStatus} /> },
-    { key: "close", header: "Close %", type: "number", align: "right", value: (b) => b.closeRate, render: (b) => pct(b.closeRate) },
-    { key: "deals", header: "Deals", type: "number", align: "right", value: (b) => b.closedDeals },
+    // New buyers show "—" rather than a discouraging 0% / 0 until they have history.
+    { key: "close", header: "Close %", type: "number", align: "right", value: (b) => b.closeRate, render: (b) => (b.closedDeals > 0 ? pct(b.closeRate) : "—") },
+    { key: "deals", header: "Deals", type: "number", align: "right", value: (b) => b.closedDeals, render: (b) => (b.closedDeals > 0 ? String(b.closedDeals) : "—") },
   ];
 
   return (

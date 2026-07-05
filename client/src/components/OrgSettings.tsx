@@ -480,11 +480,10 @@ function OwnerTab({ onFlash, onError, onTransferred }: { onFlash: (m: string) =>
         <button className="danger" disabled={!target} onClick={transfer}>Transfer ownership</button>
       </div>
 
-      <div className="section-head"><h3 style={{ margin: 0 }}>Billing & subscription</h3></div>
-      <p className="muted" style={{ marginTop: 0 }}>Billing management isn't configured yet. This owner-only area is reserved for subscription and payment settings.</p>
-
-      <div className="section-head" style={{ marginTop: 12 }}><h3 style={{ margin: 0 }}>Security & authentication</h3></div>
-      <p className="muted" style={{ marginTop: 0 }}>Organization-wide security and account-recovery settings will appear here. Reserved for the Owner.</p>
+      {/* Single line instead of two placeholder sections. */}
+      <p className="muted" style={{ fontSize: 12, marginTop: 16 }}>
+        Coming soon (owner-only): billing &amp; subscription · organization-wide security settings
+      </p>
     </>
   );
 }

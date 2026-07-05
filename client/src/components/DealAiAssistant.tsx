@@ -72,8 +72,10 @@ export function DealAiAssistant({ dealId, buyers }: { dealId: string; buyers: Bu
         </>
       )}
 
+      {/* The mode chips above already say WHAT gets generated — repeating the
+          mode name here read as two competing controls. */}
       <button className="primary" disabled={busy || (mode === "draft" && options.length === 0)} onClick={run}>
-        {busy ? "Generating…" : mode === "summary" ? "Summarize" : "Draft email"}
+        {busy ? "Generating…" : "Generate"}
       </button>
 
       {error && <div className="error-text" style={{ marginTop: 10 }}>{error}</div>}

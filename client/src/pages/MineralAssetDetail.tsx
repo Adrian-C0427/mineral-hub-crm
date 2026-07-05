@@ -5,7 +5,7 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, MetricCard, Banner, MatchPercentBadge, MatchBar, Modal } from "../components/ui";
+import { Spinner, MetricCard, Banner, MatchPercentBadge, MatchBar, Modal, ConfirmDialog } from "../components/ui";
 import { BuyerActivitySection } from "../components/BuyerActivitySection";
 import { LogContactModal } from "../components/LogContactModal";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
@@ -42,6 +42,9 @@ export function MineralAssetDetail() {
   const [matches, setMatches] = useState<MatchRec[] | null>(null);
   const [users, setUsers] = useState<UserLite[]>([]);
   const [tab, setTab] = useState<"hold" | "sell">("hold");
+  // Reverting to an opportunity is a workflow reversal — always confirmed.
+  const [confirmingRevert, setConfirmingRevert] = useState(false);
+  const [reverting, setReverting] = useState(false);
 
   const load = useCallback(() => api.get<AssetDetail>(`/deals/${id}`).then((d) => { setAsset(d); setTab(d.assetMode === "SELL" ? "sell" : "hold"); }), [id]);
   const loadMatches = useCallback(() => api.get<MatchRec[]>(`/deals/${id}/matches`).then(setMatches), [id]);
@@ -61,9 +64,13 @@ export function MineralAssetDetail() {
     refresh();
   }
   async function revertToOpportunity() {
-    if (!window.confirm("Convert this owned asset back into an acquisition opportunity?")) return;
-    await api.post(`/deals/${id}/convert`, { recordType: "OPPORTUNITY" });
-    nav("/deals");
+    setReverting(true);
+    try {
+      await api.post(`/deals/${id}/convert`, { recordType: "OPPORTUNITY" });
+      nav("/deals");
+    } finally {
+      setReverting(false);
+    }
   }
 
   return (
@@ -78,9 +85,29 @@ export function MineralAssetDetail() {
         <div className="row">
           {canEdit && asset.assetMode !== "SELL" && <button className="primary" onClick={() => setMode("SELL")}>Mark for Sale</button>}
           {canEdit && asset.assetMode === "SELL" && <button onClick={() => setMode("HOLD")}>Move to Hold</button>}
-          {canEdit && <button onClick={revertToOpportunity}>Revert to Opportunity</button>}
+          {/* Deliberately small/muted: reversing the asset workflow is rare and
+              shouldn't visually compete with Mark for Sale. */}
+          {canEdit && <button className="small" style={{ color: "var(--text-dim)" }} onClick={() => setConfirmingRevert(true)}>Revert to Opportunity…</button>}
         </div>
       </div>
+
+      {confirmingRevert && (
+        <ConfirmDialog
+          title="Revert to acquisition opportunity?"
+          message={
+            <>
+              <p style={{ marginTop: 0 }}><strong>{asset.name}</strong> will move out of Mineral Assets and back into the Deals pipeline as an acquisition opportunity.</p>
+              <p style={{ marginBottom: 0 }}>
+                Nothing is deleted: purchase price, revenue entries, and valuation history stay on the record (hidden while it's an opportunity) and return if you convert it back to an owned asset.
+              </p>
+            </>
+          }
+          confirmLabel="Revert to Opportunity"
+          busy={reverting}
+          onCancel={() => setConfirmingRevert(false)}
+          onConfirm={revertToOpportunity}
+        />
+      )}
 
       <div className="metrics-row">
         <MetricCard label="Current Value" value={money(asset.currentValue)} hint={asset.bookValue != null ? `Book ${money(asset.bookValue)}` : undefined} />

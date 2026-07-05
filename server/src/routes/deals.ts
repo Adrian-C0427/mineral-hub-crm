@@ -478,6 +478,8 @@ dealsRouter.get(
           matchPercent: match.matchPercent,
           matching: match.matching,
           nonMatching: match.nonMatching,
+          criteriaSpecified: match.criteriaSpecified,
+          criteriaSpecifiedMatched: match.criteriaSpecifiedMatched,
           owners: b.owners.map((o) => o.user.name),
           previousDealsClosed: closedCount,
           lastContactDate: lastContact,
@@ -486,7 +488,9 @@ dealsRouter.get(
       }),
     );
 
-    recs.sort((a, b) => b.matchPercent - a.matchPercent);
+    // Equal percentages: the better-specified buy box ranks first — 100% of 5
+    // criteria is stronger evidence than 100% of an empty box.
+    recs.sort((a, b) => b.matchPercent - a.matchPercent || b.criteriaSpecified - a.criteriaSpecified);
     res.json(recs.map((r, i) => ({ rank: i + 1, ...r })));
   }),
 );
