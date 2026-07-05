@@ -5,6 +5,7 @@ import { Banner, ConfirmChanges } from "../components/ui";
 import { PhoneInput } from "../components/PhoneInput";
 import { TwoFactorSettings } from "../components/TwoFactorSettings";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
+import { CompanyBranding } from "../components/CompanyBranding";
 
 /** General settings — account/profile now; structured for more sections later. */
 export function SettingsGeneral() {
@@ -89,6 +90,8 @@ export function SettingsGeneral() {
       </div>
 
       <TwoFactorSettings />
+
+      <CompanyBranding />
 
       {/* One line instead of a stack of placeholder panels — empty promise
           sections add scroll and make the finished ones feel less finished. */}

@@ -13,7 +13,7 @@ export interface CurrentUser {
   phone: string | null;
   orgRole: OrgRole | null;
   permissions: string[];
-  organization: { id: string; name: string; teamId: string } | null;
+  organization: { id: string; name: string; teamId: string; fullLogo?: string | null; compactLogo?: string | null } | null;
   mustChangePassword?: boolean;
 }
 

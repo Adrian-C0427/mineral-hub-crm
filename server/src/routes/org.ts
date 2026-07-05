@@ -19,10 +19,38 @@ orgRouter.get(
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = await prisma.organization.findUnique({
       where: { id: orgId(req) },
-      select: { id: true, name: true, teamId: true, createdAt: true },
+      select: { id: true, name: true, teamId: true, createdAt: true, fullLogo: true, compactLogo: true },
     });
     const memberCount = await prisma.user.count({ where: { organizationId: orgId(req) } });
     res.json({ ...org, memberCount, yourRole: req.user!.orgRole, yourPermissions: req.user!.permissions });
+  }),
+);
+
+// --- Company branding (logos) ---
+// Logos are stored as data URLs (no object storage configured). Validate the
+// declared MIME type and cap the encoded size so the org profile stays small.
+const LOGO_MAX_BYTES = 512 * 1024; // ~512 KB decoded
+const LOGO_MIME = /^data:image\/(png|svg\+xml|jpeg|jpg|webp);base64,/;
+const logoField = z.string().refine(
+  (s) => LOGO_MIME.test(s) && (s.length * 3) / 4 <= LOGO_MAX_BYTES,
+  "Logo must be a PNG, SVG, JPG, or WebP under 512 KB",
+).nullable();
+
+orgRouter.patch(
+  "/branding",
+  requirePermission("manageOrgSettings"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    // Each field is optional; provide a value to set, null to revert to default.
+    const body = z.object({ fullLogo: logoField.optional(), compactLogo: logoField.optional() }).parse(req.body);
+    const data: { fullLogo?: string | null; compactLogo?: string | null } = {};
+    if (body.fullLogo !== undefined) data.fullLogo = body.fullLogo;
+    if (body.compactLogo !== undefined) data.compactLogo = body.compactLogo;
+    const org = await prisma.organization.update({
+      where: { id: orgId(req) },
+      data,
+      select: { id: true, name: true, teamId: true, fullLogo: true, compactLogo: true },
+    });
+    res.json(org);
   }),
 );
 
