@@ -113,17 +113,24 @@ export function Dashboard() {
             <span className="row" style={{ gap: 5 }}><span style={{ width: 10, height: 10, borderRadius: 2, background: "var(--accent)", opacity: 0.6 }} /> Projected</span>
           </div>
         </div>
-        <div className="bar-chart">
-          {d.profitByMonth.map((m) => (
-            <div className="bar-col" key={m.month} title={`Realized ${money(m.profit)} · Projected ${money(m.projected)}`}>
-              <div className="bar-pair">
-                <div className="bar" style={{ height: `${(m.profit / maxProfit) * 100}%` }} />
-                <div className="bar bar-projected" style={{ height: `${(m.projected / maxProfit) * 100}%` }} />
+        {d.profitByMonth.every((m) => m.profit === 0 && m.projected === 0) ? (
+          // All-zero year: identical baseline slivers would read as (flat) data.
+          <p className="muted" style={{ margin: "8px 0 0" }}>
+            No closed or projected profit this year yet — bars appear as deals close or get an accepted offer with a closing date.
+          </p>
+        ) : (
+          <div className="bar-chart">
+            {d.profitByMonth.map((m) => (
+              <div className="bar-col" key={m.month} title={`Realized ${money(m.profit)} · Projected ${money(m.projected)}`}>
+                <div className="bar-pair">
+                  <div className="bar" style={{ height: `${(m.profit / maxProfit) * 100}%` }} />
+                  <div className="bar bar-projected" style={{ height: `${(m.projected / maxProfit) * 100}%` }} />
+                </div>
+                <div className="bar-label">{m.month}</div>
               </div>
-              <div className="bar-label">{m.month}</div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

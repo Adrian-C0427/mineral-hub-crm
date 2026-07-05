@@ -218,7 +218,11 @@ const accountSchema = z.object({
   lastName: z.string().trim().min(1, "Last name is required"),
   phone: z.string().trim().min(1, "Phone number is required").transform(normalizePhone),
   email: z.string().email(),
-  password: z.string().min(8, "Password must be at least 8 characters"),
+  /** CURRENT password — identity confirmation only. Changing the password goes
+   *  exclusively through POST /auth/change-password (verifies old, sets new).
+   *  This endpoint must never overwrite the hash: silently re-hashing whatever
+   *  was typed here turned typos into surprise password changes. */
+  password: z.string().min(1, "Your current password is required to save changes"),
 });
 
 authRouter.patch(
@@ -227,6 +231,14 @@ authRouter.patch(
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = accountSchema.parse(req.body);
     const email = data.email.toLowerCase();
+
+    // Verify identity with the CURRENT password before touching the profile.
+    const existing = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!existing) throw new HttpError(404, "Account not found");
+    if (!(await verifyPassword(data.password, existing.passwordHash))) {
+      throw new HttpError(403, "Your current password is incorrect. (To change your password, use the Change Password section.)");
+    }
+
     const clash = await prisma.user.findFirst({ where: { email, NOT: { id: req.user!.id } } });
     if (clash) throw new HttpError(409, "Another account already uses that email");
 
@@ -238,7 +250,7 @@ authRouter.patch(
         phone: data.phone,
         email,
         name: `${data.firstName} ${data.lastName}`,
-        passwordHash: await hashPassword(data.password),
+        // NOTE: no passwordHash here — profile saves never change the password.
       },
       select: { id: true, name: true, email: true, role: true, firstName: true, lastName: true, phone: true },
     });

@@ -100,6 +100,9 @@ export interface MatchRec {
   matchPercent: number;
   matching: MatchCriterion[];
   nonMatching: MatchCriterion[];
+  /** How many buy-box criteria this buyer actually specified / matched. */
+  criteriaSpecified: number;
+  criteriaSpecifiedMatched: number;
   owners: string[];
   previousDealsClosed: number;
   lastContactDate: string | null;

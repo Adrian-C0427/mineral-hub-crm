@@ -33,6 +33,14 @@ interface BuyerProfileData {
 
 const ARRAY_KEYS: (keyof BuyBox)[] = ["states", "counties", "basins", "formations", "assetTypes"];
 
+/** Human range: both bounds → "a – b", one bound → "500+ " / "up to 500", none → "Any". */
+function fmtRange(min: number | null, max: number | null, fmt: (n: number) => string): string {
+  if (min != null && max != null) return `${fmt(min)} – ${fmt(max)}`;
+  if (min != null) return `${fmt(min)}+`;
+  if (max != null) return `up to ${fmt(max)}`;
+  return "Any";
+}
+
 export function BuyerProfile() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
@@ -153,8 +161,8 @@ export function BuyerProfile() {
           ) : (
             <div className="dd-grid">
               {ARRAY_KEYS.map((k) => <KV key={k} k={k} v={(view.buyBox[k] as string[]).join(", ")} />)}
-              <KV k="Acreage" v={`${view.buyBox.minAcreage ?? "−∞"} – ${view.buyBox.maxAcreage ?? "∞"}`} />
-              <KV k="Price" v={`${money(view.buyBox.minPrice)} – ${money(view.buyBox.maxPrice)}`} />
+              <KV k="Acreage" v={fmtRange(view.buyBox.minAcreage, view.buyBox.maxAcreage, (n) => n.toLocaleString("en-US"))} />
+              <KV k="Price" v={fmtRange(view.buyBox.minPrice, view.buyBox.maxPrice, (n) => money(n))} />
             </div>
           )}
         </div>
@@ -164,7 +172,7 @@ export function BuyerProfile() {
       <div className="panel">
         <h3>Relationship & Tracking</h3>
         <div className="dd-grid">
-          <KV k="Close rate (computed)" v={`${pct(view.closeRate)} · ${view.closedDeals} closed`} />
+          <KV k="Close rate (computed)" v={view.closedDeals > 0 ? `${pct(view.closeRate)} · ${view.closedDeals} closed` : "No closed deals yet"} />
           {edit ? (
             <>
               <Fld l="Status"><select value={view.relationshipStatus} onChange={(e) => setD({ relationshipStatus: e.target.value as Relationship })}><option>HOT</option><option>WARM</option><option>COLD</option></select></Fld>

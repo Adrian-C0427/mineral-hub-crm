@@ -31,8 +31,8 @@ export function SettingsGeneral() {
     e.preventDefault();
     setError(null);
     setOk(false);
-    if (!f.firstName.trim() || !f.lastName.trim() || !f.phone.trim() || !f.email.trim() || f.password.length < 8) {
-      setError("All fields are required, and the password must be at least 8 characters.");
+    if (!f.firstName.trim() || !f.lastName.trim() || !f.phone.trim() || !f.email.trim() || !f.password) {
+      setError("All fields are required — enter your current password to confirm the changes.");
       return;
     }
     setConfirming(true);
@@ -66,7 +66,7 @@ export function SettingsGeneral() {
       {/* Account & Security (live) */}
       <div className="panel">
         <h3>Account & Security</h3>
-        <p className="muted" style={{ marginTop: 0 }}>Your profile and sign-in details. Confirm your password to save changes.</p>
+        <p className="muted" style={{ marginTop: 0 }}>Your profile and sign-in details. Enter your current password to confirm any changes — this never changes your password.</p>
         <form onSubmit={requestSave}>
           <div className="grid-2">
             <div className="field"><label>First name</label><input value={f.firstName} onChange={set("firstName")} /></div>
@@ -74,7 +74,7 @@ export function SettingsGeneral() {
           </div>
           <div className="field"><label>Phone number</label><PhoneInput value={f.phone} onChange={(v) => { setF((p) => ({ ...p, phone: v })); setOk(false); }} /></div>
           <div className="field"><label>Email address</label><input type="email" value={f.email} onChange={set("email")} /></div>
-          <div className="field"><label>Password</label><input type="password" value={f.password} onChange={set("password")} placeholder="Enter a new or current password (min 8 chars)" /></div>
+          <div className="field"><label>Current password</label><input type="password" value={f.password} onChange={set("password")} autoComplete="current-password" placeholder="Required to confirm changes" /></div>
           {error && <div className="error-text">{error}</div>}
           {ok && <Banner kind="info">Account updated.</Banner>}
           <button className="primary" disabled={busy} style={{ marginTop: 8 }}>{busy ? "Saving…" : "Save changes"}</button>
@@ -90,19 +90,11 @@ export function SettingsGeneral() {
 
       <TwoFactorSettings />
 
-      {/* Forthcoming general settings — laid out so each can be enabled in place. */}
-      <SoonPanel title="Notification Preferences" desc="Choose which deal, buyer, and reminder notifications you receive and how (email / in-app)." />
-      <SoonPanel title="Appearance" desc="Switch between light and dark mode and set display density." />
-      <SoonPanel title="Default Application Preferences" desc="Set your default landing page, date range, and other per-user defaults." />
-    </div>
-  );
-}
-
-function SoonPanel({ title, desc }: { title: string; desc: string }) {
-  return (
-    <div className="panel" style={{ opacity: 0.75 }}>
-      <div className="section-head"><h3 style={{ margin: 0 }}>{title}</h3><span className="badge resp-pending">Coming soon</span></div>
-      <p className="muted" style={{ marginBottom: 0 }}>{desc}</p>
+      {/* One line instead of a stack of placeholder panels — empty promise
+          sections add scroll and make the finished ones feel less finished. */}
+      <p className="muted" style={{ fontSize: 12, textAlign: "center" }}>
+        Coming soon: notification preferences · light/dark appearance · per-user defaults
+      </p>
     </div>
   );
 }

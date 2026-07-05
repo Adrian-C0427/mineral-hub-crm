@@ -230,6 +230,14 @@ export function DealDetail() {
                       Contact person is available on the Buyer Profile. */}
                   <Link to={`/buyers/${m.buyerId}`} className="match-name" title={m.companyName || m.buyerName}>{m.companyName || m.buyerName}</Link>
                   <MatchPercentBadge value={m.matchPercent} />
+                  {/* Coverage context: "100%" against a sparse buy box is weak
+                      evidence, so say how many criteria were actually compared. */}
+                  <span className="muted" style={{ fontSize: 11, whiteSpace: "nowrap" }}
+                    title="How many buy-box criteria this buyer has set, and how many this deal matches">
+                    {m.criteriaSpecified > 0
+                      ? `${m.criteriaSpecifiedMatched}/${m.criteriaSpecified} criteria`
+                      : "no buy box set"}
+                  </span>
                 </div>
                 <MatchBar value={m.matchPercent} />
                 <div>
@@ -420,6 +428,7 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
   const start = deal.dateUnderContract ? new Date(deal.dateUnderContract).getTime() : null;
   const end = deal.finalClosingDate ? new Date(deal.finalClosingDate).getTime() : null;
   const pctDone = start && end && end > start ? Math.min(100, Math.max(0, ((Date.now() - start) / (end - start)) * 100)) : 0;
+  const noDates = !deal.dateUnderContract && !deal.findBuyerByDate && !deal.originalClosingDate && !deal.finalClosingDate;
 
   return (
     <div className="panel">
@@ -428,8 +437,16 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
         {edit ? <div className="row"><button className="small" onClick={() => setEdit(false)}>Cancel</button><button className="small primary" onClick={save}>Save</button></div>
           : <button className="small" onClick={startEdit}>Edit dates</button>}
       </div>
-      <div className="progress"><div className="progress-fill" style={{ width: `${pctDone}%` }} /></div>
+      {/* Without any dates, a bare progress track reads as broken — show a hint instead. */}
+      {noDates && !edit ? (
+        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+          No dates yet — <strong>Edit dates</strong> and set the Under Contract date; Find Buyer By and Final Closing auto-calculate from it.
+        </p>
+      ) : (
+        <div className="progress"><div className="progress-fill" style={{ width: `${pctDone}%` }} /></div>
+      )}
       {!edit ? (
+        noDates ? null : (
         <div className="dd-grid">
           <KV k="Under Contract" v={fmtDate(deal.dateUnderContract)} />
           <div className="kv">
@@ -442,6 +459,7 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
             <span className="v">{fmtDate(deal.finalClosingDate)} {deal.finalClosingIsOverridden && <button className="small" onClick={() => revert("fc")}>Revert to auto</button>}</span>
           </div>
         </div>
+        )
       ) : (
         <div className="dd-grid">
           <Fld l="Under Contract"><input type="date" value={duc} onChange={(e) => setDuc(e.target.value)} /></Fld>
