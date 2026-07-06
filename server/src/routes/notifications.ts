@@ -12,7 +12,10 @@ export const notificationsRouter = Router();
 notificationsRouter.use(requireAuth, requireOrg);
 
 function visibleWhere(req: AuthedRequest) {
-  const admin = req.user!.role === "OWNER";
+  // Gate on the RBAC field (orgRole), NOT the legacy per-account `role` — that
+  // field was historically OWNER for every workspace creator and stays OWNER
+  // even after a demotion, so it must never grant admin-level visibility.
+  const admin = req.user!.orgRole === "OWNER";
   return {
     organizationId: orgId(req),
     OR: admin ? [{ userId: req.user!.id }, { userId: null }] : [{ userId: req.user!.id }],

@@ -3,7 +3,7 @@ import { z } from "zod";
 import { parse } from "csv-parse/sync";
 import type { Prisma, ResearchDocClass, ResearchDocType, ResearchPermitStatus, WellTrajectory } from "@prisma/client";
 import { prisma } from "../db.js";
-import { asyncHandler } from "../middleware/errors.js";
+import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import {
   autoGranularity, bucketKey, bucketRange, classifyDocType, classifyPermitStatus,
@@ -1105,6 +1105,9 @@ const deleteSchema = z.object({
   source: z.string().optional(),
   state: z.string().optional(),
   county: z.string().optional(),
+  // Required to wipe the org's ENTIRE research set (no source/state/county
+  // filter). Guards against an accidental "delete everything" call.
+  confirmDeleteAll: z.boolean().optional(),
 });
 
 // Bulk-remove imported research data (e.g. clear a bad import or the sample set).
@@ -1113,7 +1116,12 @@ researchRouter.delete(
   requirePermission("manageResearchData"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
-    const { kind, source, state, county } = deleteSchema.parse(req.body ?? {});
+    const { kind, source, state, county, confirmDeleteAll } = deleteSchema.parse(req.body ?? {});
+    // No filter at all = delete every research row in the org. Require an
+    // explicit confirmation flag so this can't happen by accident.
+    if (!source && !state && !county && !confirmDeleteAll) {
+      throw new HttpError(400, "Refusing to delete all research data without a source/state/county filter or confirmDeleteAll=true");
+    }
     const scope = {
       organizationId: org,
       ...(source ? { source } : {}),

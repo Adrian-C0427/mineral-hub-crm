@@ -47,7 +47,14 @@ offersRouter.post(
         },
       });
       if (data.parentOfferId) {
-        await tx.offer.update({ where: { id: data.parentOfferId }, data: { status: "COUNTERED" } });
+        // The parent must be an offer on THIS (org-scoped) deal — never trust a
+        // caller-supplied id to point at another org's offer (IDOR write).
+        const parent = await tx.offer.findFirst({
+          where: { id: data.parentOfferId, dealId: data.dealId },
+          select: { id: true },
+        });
+        if (!parent) throw new HttpError(404, "Parent offer not found on this deal");
+        await tx.offer.update({ where: { id: parent.id }, data: { status: "COUNTERED" } });
       }
       await tx.dealBuyerActivity.upsert({
         where: { dealId_buyerId: { dealId: data.dealId, buyerId: data.buyerId } },
