@@ -407,6 +407,7 @@ model Deal {
   activityLogs   ActivityLog[]
   sellers        DealSeller[]
   revenueEntries AssetRevenueEntry[]
+  tracts         TractDescription[]
   // Team members assigned to this deal/asset (multi-assignee). relationshipOwner
   // is retained as the originating/primary owner for existing metrics & reports.
   assignees      User[]              @relation("DealAssignees")
@@ -415,6 +416,33 @@ model Deal {
   @@index([selectedBuyerId])
   @@index([organizationId])
   @@index([organizationId, recordType])
+}
+
+// A legal tract description on a deal. The raw text is authoritative; `parse`
+// caches the machine reading of it (calls, refs, closure, warnings) and
+// `geometry` the anchored GeoJSON polygon, both recomputed server-side whenever
+// text or anchor change. Parsing is state-modular (see domain/tracts/) — TX
+// metes-and-bounds first, other states plug into the registry later.
+model TractDescription {
+  id     String @id @default(cuid())
+  dealId String
+  deal   Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  name  String // "Tract 1", "160-acre Home Place", …
+  text  String // legal description as pasted from the instrument
+  state String @default("TX") // which parser grammar applies
+
+  parse    Json? // ParsedTract: calls, refs, closure, computed acres, warnings
+  geometry Json? // GeoJSON Feature (Polygon) once anchored; null until then
+  // POB anchor: { lon, lat, source: "abstract" | "manual", abstractId? }.
+  // "abstract" = auto-suggested from a parsed abstract reference; "manual" =
+  // user placed/dragged the POB on the map (never overwritten by re-parse).
+  anchor Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([dealId])
 }
 
 // A structured seller/owner on a deal. Modeled as hasMany so a deal can grow to
