@@ -6,7 +6,6 @@ import {
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { MetricCard, Spinner, Banner, Modal } from "../components/ui";
-import { SortableTable, type Column } from "../components/SortableTable";
 import { money, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { CHART_COLORS, COLOR_EXPENSE, monthLabel, chartTooltip } from "../lib/charts";
@@ -74,9 +73,6 @@ export function Expenses() {
   function toggle(id: string) {
     setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   }
-  function toggleAll() {
-    setSelected((prev) => (prev.size === expenses.length ? new Set() : new Set(expenses.map((e) => e.id))));
-  }
 
   async function bulk(action: string, categoryId?: string) {
     if (selected.size === 0) return;
@@ -98,23 +94,6 @@ export function Expenses() {
       ]),
     );
   }
-
-  const columns: Column<Expense>[] = [
-    {
-      key: "sel", header: "", value: () => "",
-      render: (e) => <input type="checkbox" checked={selected.has(e.id)} onClick={(ev) => ev.stopPropagation()} onChange={() => toggle(e.id)} />,
-      width: "34px",
-    },
-    { key: "date", header: "Date", type: "date", value: (e) => e.date, render: (e) => fmtDate(e.date) },
-    { key: "user", header: "User", type: "text", value: (e) => e.userName ?? "" },
-    { key: "category", header: "Category", type: "text", value: (e) => e.categoryName ?? "", render: (e) => e.categoryName ?? "—" },
-    { key: "amount", header: "Amount", type: "number", align: "right", value: (e) => e.amount, render: (e) => money(e.amount) },
-    {
-      key: "reimbursed", header: "Reimbursed", type: "text", value: (e) => (e.reimbursed ? "Yes" : "No"),
-      render: (e) => <span className={`badge ${e.reimbursed ? "resp-offer" : "resp-pending"}`}>{e.reimbursed ? "Reimbursed" : "Outstanding"}</span>,
-    },
-    { key: "notes", header: "Notes", type: "text", value: (e) => e.notes ?? "", render: (e) => e.notes || "—" },
-  ];
 
   if (loading && !dash) return <Spinner label="Loading expenses…" />;
 
@@ -215,61 +194,19 @@ export function Expenses() {
         </div>
       )}
 
-      {/* Filters */}
-      <div className="panel">
-        <div className="section-head"><h3 style={{ margin: 0 }}>All expenses</h3></div>
-        <div className="row" style={{ flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
-          <div className="field" style={{ marginBottom: 0 }}><label>From</label><input type="date" value={filters.from} onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))} /></div>
-          <div className="field" style={{ marginBottom: 0 }}><label>To</label><input type="date" value={filters.to} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} /></div>
-          <div className="field" style={{ marginBottom: 0 }}><label>User</label>
-            <select value={filters.userId} onChange={(e) => setFilters((f) => ({ ...f, userId: e.target.value }))}>
-              <option value="">All</option>
-              {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-            </select>
-          </div>
-          <div className="field" style={{ marginBottom: 0 }}><label>Category</label>
-            <select value={filters.categoryId} onChange={(e) => setFilters((f) => ({ ...f, categoryId: e.target.value }))}>
-              <option value="">All</option>
-              {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-          <div className="field" style={{ marginBottom: 0 }}><label>Status</label>
-            <select value={filters.reimbursed} onChange={(e) => setFilters((f) => ({ ...f, reimbursed: e.target.value }))}>
-              <option value="">All</option>
-              <option value="false">Outstanding</option>
-              <option value="true">Reimbursed</option>
-            </select>
-          </div>
-          {(filters.from || filters.to || filters.userId || filters.categoryId || filters.reimbursed) && (
-            <button className="small" style={{ alignSelf: "flex-end" }} onClick={() => setFilters({ from: "", to: "", userId: "", categoryId: "", reimbursed: "" })}>Clear</button>
-          )}
-        </div>
-
-        {/* Bulk action bar */}
-        <div className="row" style={{ flexWrap: "wrap", gap: 8, marginBottom: 8, alignItems: "center" }}>
-          <label style={{ fontSize: 13 }}>
-            <input type="checkbox" checked={expenses.length > 0 && selected.size === expenses.length} onChange={toggleAll} /> Select all
-          </label>
-          <span className="muted" style={{ fontSize: 13 }}>{selected.size} selected</span>
-          <button className="small" disabled={selected.size === 0} onClick={() => bulk("reimburse")}>Mark reimbursed</button>
-          <button className="small" disabled={selected.size === 0} onClick={() => bulk("unreimburse")}>Mark not reimbursed</button>
-          <select className="small" disabled={selected.size === 0} defaultValue="" onChange={(e) => { if (e.target.value) { bulk("setCategory", e.target.value); e.target.value = ""; } }}>
-            <option value="">Change category…</option>
-            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <button className="small" onClick={exportSelected}>Export {selected.size > 0 ? "selected" : "all"} (CSV)</button>
-          <button className="small danger" disabled={selected.size === 0} onClick={() => bulk("delete")}>Delete</button>
-        </div>
-
-        <SortableTable
-          columns={columns}
-          rows={expenses}
-          rowKey={(e) => e.id}
-          onRowClick={(e) => { setEditing(e); setShowForm(true); }}
-          defaultSort={{ key: "date", dir: "desc" }}
-          empty="No expenses match these filters."
-        />
-      </div>
+      <AllExpenses
+        expenses={expenses}
+        categories={categories}
+        users={users}
+        filters={filters}
+        setFilters={setFilters}
+        selected={selected}
+        toggle={toggle}
+        setSelected={setSelected}
+        bulk={bulk}
+        exportSelected={exportSelected}
+        onEdit={(e) => { setEditing(e); setShowForm(true); }}
+      />
 
       {showForm && (
         <ExpenseForm
@@ -284,6 +221,298 @@ export function Expenses() {
         <CategoryManager categories={categories} onClose={() => setShowCats(false)} onChanged={load} />
       )}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// All Expenses — month-grouped ledger with search, presets, column control,
+// bulk actions, and running totals that track the active filters.
+// ---------------------------------------------------------------------------
+
+type Filters = { from: string; to: string; userId: string; categoryId: string; reimbursed: string };
+type Preset = { name: string; filters: Filters; q: string };
+
+const ALL_COLUMNS = [
+  ["date", "Date"], ["user", "User"], ["category", "Category"], ["amount", "Amount"],
+  ["status", "Status"], ["reimbursementDate", "Reimbursed on"], ["notes", "Notes"],
+] as const;
+type ColKey = (typeof ALL_COLUMNS)[number][0];
+const DEFAULT_COLS: ColKey[] = ["date", "user", "category", "amount", "status", "notes"];
+const COLS_KEY = "mh_exp_cols";
+const PRESETS_KEY = "mh_exp_presets";
+const MONTHS_PAGE = 6;
+
+function loadJson<T>(key: string, fallback: T): T {
+  try { const s = localStorage.getItem(key); return s ? (JSON.parse(s) as T) : fallback; } catch { return fallback; }
+}
+
+function AllExpenses({
+  expenses, categories, users, filters, setFilters, selected, toggle, setSelected, bulk, exportSelected, onEdit,
+}: {
+  expenses: Expense[];
+  categories: Category[];
+  users: UserLite[];
+  filters: Filters;
+  setFilters: React.Dispatch<React.SetStateAction<Filters>>;
+  selected: Set<string>;
+  toggle: (id: string) => void;
+  setSelected: React.Dispatch<React.SetStateAction<Set<string>>>;
+  bulk: (action: string, categoryId?: string) => void;
+  exportSelected: () => void;
+  onEdit: (e: Expense) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [cols, setCols] = useState<ColKey[]>(() => loadJson<ColKey[]>(COLS_KEY, DEFAULT_COLS));
+  const [presets, setPresets] = useState<Preset[]>(() => loadJson<Preset[]>(PRESETS_KEY, []));
+  const [showCols, setShowCols] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [monthsShown, setMonthsShown] = useState(MONTHS_PAGE);
+  const [sort, setSort] = useState<{ key: ColKey; dir: "asc" | "desc" }>({ key: "date", dir: "desc" });
+
+  const filtersActive = Boolean(q || filters.from || filters.to || filters.userId || filters.categoryId || filters.reimbursed);
+
+  // Free-text search over user, category, notes, and amount — client-side so it
+  // feels instant on top of the server-side structural filters.
+  const visible = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return expenses;
+    return expenses.filter((e) =>
+      (e.userName ?? "").toLowerCase().includes(needle) ||
+      (e.categoryName ?? "").toLowerCase().includes(needle) ||
+      (e.notes ?? "").toLowerCase().includes(needle) ||
+      String(e.amount).includes(needle));
+  }, [expenses, q]);
+
+  // Running totals follow whatever is currently visible (filters + search).
+  const totals = useMemo(() => {
+    let total = 0, reimbursed = 0;
+    for (const e of visible) { total += e.amount; if (e.reimbursed) reimbursed += e.amount; }
+    return { total, reimbursed, outstanding: total - reimbursed, count: visible.length };
+  }, [visible]);
+
+  // Group by month (yyyy-mm), newest month first; sort rows inside each group.
+  const groups = useMemo(() => {
+    const dir = sort.dir === "asc" ? 1 : -1;
+    const cmp = (a: Expense, b: Expense): number => {
+      switch (sort.key) {
+        case "amount": return (a.amount - b.amount) * dir;
+        case "user": return (a.userName ?? "").localeCompare(b.userName ?? "") * dir;
+        case "category": return (a.categoryName ?? "").localeCompare(b.categoryName ?? "") * dir;
+        case "status": return (Number(a.reimbursed) - Number(b.reimbursed)) * dir;
+        case "notes": return (a.notes ?? "").localeCompare(b.notes ?? "") * dir;
+        default: return (new Date(a.date).getTime() - new Date(b.date).getTime()) * dir;
+      }
+    };
+    const m = new Map<string, Expense[]>();
+    for (const e of visible) {
+      const k = e.date.slice(0, 7);
+      (m.get(k) ?? m.set(k, []).get(k)!).push(e);
+    }
+    return [...m.entries()]
+      .sort((a, b) => b[0].localeCompare(a[0]))
+      .map(([month, rows]) => ({ month, rows: rows.sort(cmp), subtotal: rows.reduce((s, e) => s + e.amount, 0) }));
+  }, [visible, sort]);
+
+  const shownGroups = groups.slice(0, monthsShown);
+  const shownIds = shownGroups.flatMap((g) => g.rows.map((e) => e.id));
+  const allShownSelected = shownIds.length > 0 && shownIds.every((id) => selected.has(id));
+
+  function saveCols(next: ColKey[]) { setCols(next); try { localStorage.setItem(COLS_KEY, JSON.stringify(next)); } catch { /* ignore */ } }
+  function savePresets(next: Preset[]) { setPresets(next); try { localStorage.setItem(PRESETS_KEY, JSON.stringify(next)); } catch { /* ignore */ } }
+  function savePreset() {
+    const name = prompt("Preset name:")?.trim();
+    if (!name) return;
+    savePresets([...presets.filter((p) => p.name !== name), { name, filters, q }]);
+  }
+  function applyPreset(name: string) {
+    const p = presets.find((x) => x.name === name);
+    if (p) { setFilters(p.filters); setQ(p.q); }
+  }
+
+  const monthTitle = (ym: string) =>
+    new Date(`${ym}-15T00:00:00`).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const has = (k: ColKey) => cols.includes(k);
+  const onSort = (key: ColKey) =>
+    setSort((p) => (p.key === key ? { key, dir: p.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "date" ? "desc" : "asc" }));
+  const sortInd = (key: ColKey) => (sort.key === key ? (sort.dir === "asc" ? " ▲" : " ▼") : "");
+
+  return (
+    <div className="panel">
+      <div className="section-head" style={{ flexWrap: "wrap", gap: 8 }}>
+        <h3 style={{ margin: 0 }}>All expenses</h3>
+        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+          <input
+            type="search" placeholder="Search user, category, notes, amount…" value={q}
+            onChange={(e) => setQ(e.target.value)} style={{ width: 240 }} aria-label="Search expenses"
+          />
+          <select value="" style={{ width: "auto" }} onChange={(e) => { if (e.target.value) applyPreset(e.target.value); }} title="Apply a saved filter preset">
+            <option value="">Presets…</option>
+            {presets.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
+          </select>
+          <button className="small" onClick={savePreset} disabled={!filtersActive} title="Save the current filters as a preset">Save preset</button>
+          <div style={{ position: "relative" }}>
+            <button className="small" onClick={() => setShowCols((s) => !s)}>Columns ▾</button>
+            {showCols && (
+              <div className="dropdown-card" style={{ right: 0 }}>
+                {ALL_COLUMNS.map(([k, label]) => (
+                  <label key={k} className="dropdown-item">
+                    <input
+                      type="checkbox" checked={has(k)}
+                      onChange={() => saveCols(has(k) ? cols.filter((c) => c !== k) : [...cols, k])}
+                    /> {label}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Structural filters (server-side) */}
+      <div className="row exp-filters" style={{ flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+        <div className="field" style={{ marginBottom: 0 }}><label>From</label><input type="date" value={filters.from} onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))} /></div>
+        <div className="field" style={{ marginBottom: 0 }}><label>To</label><input type="date" value={filters.to} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} /></div>
+        <div className="field" style={{ marginBottom: 0 }}><label>User</label>
+          <select value={filters.userId} onChange={(e) => setFilters((f) => ({ ...f, userId: e.target.value }))}>
+            <option value="">All</option>
+            {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>
+        </div>
+        <div className="field" style={{ marginBottom: 0 }}><label>Category</label>
+          <select value={filters.categoryId} onChange={(e) => setFilters((f) => ({ ...f, categoryId: e.target.value }))}>
+            <option value="">All</option>
+            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </div>
+        <div className="field" style={{ marginBottom: 0 }}><label>Status</label>
+          <select value={filters.reimbursed} onChange={(e) => setFilters((f) => ({ ...f, reimbursed: e.target.value }))}>
+            <option value="">All</option>
+            <option value="false">Outstanding</option>
+            <option value="true">Reimbursed</option>
+          </select>
+        </div>
+        {filtersActive && (
+          <button className="small" style={{ alignSelf: "flex-end" }} onClick={() => { setFilters({ from: "", to: "", userId: "", categoryId: "", reimbursed: "" }); setQ(""); }}>Clear all</button>
+        )}
+      </div>
+
+      {/* Running totals for the current view */}
+      <div className="exp-totals">
+        <span><span className="muted">Showing</span> <strong>{totals.count}</strong> <span className="muted">expenses</span></span>
+        <span><span className="muted">Total</span> <strong>{money(totals.total)}</strong></span>
+        <span className="ok"><span className="muted">Reimbursed</span> <strong>{money(totals.reimbursed)}</strong></span>
+        <span className="warn"><span className="muted">Outstanding</span> <strong>{money(totals.outstanding)}</strong></span>
+      </div>
+
+      {/* Bulk action bar */}
+      <div className="row" style={{ flexWrap: "wrap", gap: 8, marginBottom: 8, alignItems: "center" }}>
+        <span className="muted" style={{ fontSize: 13 }}>{selected.size} selected</span>
+        <button className="small" disabled={selected.size === 0} onClick={() => bulk("reimburse")}>Mark reimbursed</button>
+        <button className="small" disabled={selected.size === 0} onClick={() => bulk("unreimburse")}>Mark not reimbursed</button>
+        <select className="small" disabled={selected.size === 0} defaultValue="" onChange={(e) => { if (e.target.value) { bulk("setCategory", e.target.value); e.target.value = ""; } }}>
+          <option value="">Change category…</option>
+          {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+        </select>
+        <button className="small" onClick={exportSelected}>Export {selected.size > 0 ? "selected" : "all"} (CSV)</button>
+        <button className="small danger" disabled={selected.size === 0} onClick={() => bulk("delete")}>Delete</button>
+      </div>
+
+      <div className="table-scroll exp-scroll">
+        <table className="data-table exp-table">
+          <thead>
+            <tr>
+              <th className="center" style={{ width: 36 }}>
+                <input
+                  type="checkbox" checked={allShownSelected} aria-label="Select all"
+                  onChange={() => setSelected(allShownSelected ? new Set() : new Set(shownIds))}
+                />
+              </th>
+              {has("date") && <th className="sortable" onClick={() => onSort("date")}>Date{sortInd("date")}</th>}
+              {has("user") && <th className="sortable" onClick={() => onSort("user")}>User{sortInd("user")}</th>}
+              {has("category") && <th className="sortable" onClick={() => onSort("category")}>Category{sortInd("category")}</th>}
+              {has("amount") && <th className="sortable right" onClick={() => onSort("amount")}>Amount{sortInd("amount")}</th>}
+              {has("status") && <th className="sortable" onClick={() => onSort("status")}>Status{sortInd("status")}</th>}
+              {has("reimbursementDate") && <th>Reimbursed on</th>}
+              {has("notes") && <th className="sortable" onClick={() => onSort("notes")}>Notes{sortInd("notes")}</th>}
+            </tr>
+          </thead>
+          <tbody>
+            {shownGroups.length === 0 && (
+              <tr><td colSpan={cols.length + 1} className="empty-cell">No expenses match these filters.</td></tr>
+            )}
+            {shownGroups.map((g) => (
+              <ExpMonthGroup
+                key={g.month}
+                title={monthTitle(g.month)}
+                group={g}
+                cols={cols}
+                colSpan={cols.length + 1}
+                collapsed={collapsed.has(g.month)}
+                onToggleCollapse={() => setCollapsed((p) => { const n = new Set(p); n.has(g.month) ? n.delete(g.month) : n.add(g.month); return n; })}
+                selected={selected}
+                toggle={toggle}
+                onEdit={onEdit}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {groups.length > monthsShown && (
+        <div className="row" style={{ justifyContent: "center", marginTop: 10 }}>
+          <button className="small" onClick={() => setMonthsShown((n) => n + MONTHS_PAGE)}>
+            Show {Math.min(MONTHS_PAGE, groups.length - monthsShown)} more month{groups.length - monthsShown > 1 ? "s" : ""}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ExpMonthGroup({
+  title, group, cols, colSpan, collapsed, onToggleCollapse, selected, toggle, onEdit,
+}: {
+  title: string;
+  group: { month: string; rows: Expense[]; subtotal: number };
+  cols: ColKey[];
+  colSpan: number;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  selected: Set<string>;
+  toggle: (id: string) => void;
+  onEdit: (e: Expense) => void;
+}) {
+  const has = (k: ColKey) => cols.includes(k);
+  return (
+    <>
+      <tr className="exp-month-row clickable" onClick={onToggleCollapse}>
+        <td colSpan={colSpan}>
+          <span className="exp-month-caret">{collapsed ? "▸" : "▾"}</span>
+          <strong>{title}</strong>
+          <span className="muted" style={{ marginLeft: 8 }}>{group.rows.length} expense{group.rows.length === 1 ? "" : "s"}</span>
+          <span className="exp-month-subtotal">{money(group.subtotal)}</span>
+        </td>
+      </tr>
+      {!collapsed && group.rows.map((e) => (
+        <tr
+          key={e.id}
+          className={`clickable ${e.reimbursed ? "exp-row-reimbursed" : "exp-row-outstanding"} ${selected.has(e.id) ? "row-selected" : ""}`}
+          onClick={() => onEdit(e)}
+        >
+          <td className="center" onClick={(ev) => ev.stopPropagation()}>
+            <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggle(e.id)} aria-label="Select row" />
+          </td>
+          {has("date") && <td>{fmtDate(e.date)}</td>}
+          {has("user") && <td>{e.userName ?? "—"}</td>}
+          {has("category") && <td>{e.categoryName ?? "—"}</td>}
+          {has("amount") && <td className="right">{money(e.amount)}</td>}
+          {has("status") && (
+            <td><span className={`badge ${e.reimbursed ? "resp-offer" : "resp-pending"}`}>{e.reimbursed ? "Reimbursed" : "Outstanding"}</span></td>
+          )}
+          {has("reimbursementDate") && <td>{e.reimbursementDate ? fmtDate(e.reimbursementDate) : "—"}</td>}
+          {has("notes") && <td className="exp-notes">{e.notes || "—"}</td>}
+        </tr>
+      ))}
+    </>
   );
 }
 

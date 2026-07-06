@@ -535,3 +535,78 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 @media (max-width: 460px) {
   .dd-grid { grid-template-columns: 1fr; }
 }
+
+/* --- Expenses ledger (All Expenses redesign) --- */
+.exp-scroll { max-height: 560px; overflow-y: auto; }
+.exp-table thead th { position: sticky; top: 0; z-index: 2; background: var(--panel); box-shadow: 0 1px 0 var(--border); }
+.exp-totals { display: flex; flex-wrap: wrap; gap: 18px; align-items: baseline; padding: 10px 12px; margin-bottom: 10px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: color-mix(in srgb, var(--accent) 4%, var(--panel)); font-size: 14px; }
+.exp-totals .ok strong { color: var(--ok, #22c55e); }
+.exp-totals .warn strong { color: var(--warn, #f59e0b); }
+.exp-month-row td { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); font-size: 13px; padding: 8px 12px;
+  border-top: 1px solid var(--border); position: relative; }
+.exp-month-caret { display: inline-block; width: 16px; color: var(--text-dim); }
+.exp-month-subtotal { float: right; font-weight: 600; }
+.exp-row-outstanding td:first-child { box-shadow: inset 3px 0 0 var(--warn, #f59e0b); }
+.exp-row-reimbursed td { color: var(--text-dim); }
+.exp-row-reimbursed td .badge { opacity: 0.9; }
+.exp-notes { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dropdown-card { position: absolute; top: calc(100% + 4px); z-index: 30; min-width: 180px; padding: 6px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+.dropdown-item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 6px; font-size: 13px; cursor: pointer; }
+.dropdown-item:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+/* --- Map unified search --- */
+.map-search-menu { max-height: 420px; overflow-y: auto; }
+.map-search-group { padding: 7px 10px 3px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-dim); border-top: 1px solid var(--border); }
+.map-search-menu > div:first-child .map-search-group, .map-search-group:first-child { border-top: none; }
+.map-search-kind { float: right; font-size: 11px; color: var(--text-dim); }
+
+/* --- Heat map hover tooltip --- */
+.heat-tip { position: absolute; z-index: 20; pointer-events: none; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 6px 18px rgba(0,0,0,0.35); max-width: 220px; }
+
+/* ===========================================================================
+   Mobile & touch refinements (kept last so they win the cascade).
+   =========================================================================== */
+@media (max-width: 760px) {
+  /* Typography scales down a notch; headers stay compact. */
+  h1 { font-size: 22px; }
+  h3 { font-size: 15px; }
+  .page-header { margin-bottom: 12px; }
+  .panel { padding: 14px; }
+
+  /* Touch targets: comfortable 40px+ interactive elements. */
+  button, .small, select, input[type="date"], input[type="month"] { min-height: 40px; }
+  .icon-btn { min-width: 40px; min-height: 40px; }
+  .sidebar-link { padding: 11px 10px; }
+  input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; }
+
+  /* iOS zooms any input under 16px on focus — keep form text at 16px. */
+  input, select, textarea { font-size: 16px; }
+
+  /* Modals become near-full-screen sheets. */
+  .modal-overlay { padding: 8px; align-items: flex-end; }
+  .modal, .modal-wide { width: 100%; max-height: 94dvh; border-radius: 12px 12px 0 0; }
+
+  /* Tables: horizontal momentum scroll + slightly denser cells. */
+  .table-scroll { -webkit-overflow-scrolling: touch; }
+  .data-table th, .data-table td { padding: 8px 10px; font-size: 13px; }
+  .exp-notes { max-width: 160px; }
+  .exp-totals { gap: 10px; font-size: 13px; padding: 8px 10px; }
+
+  /* Map page: search + action buttons stack; dropdown uses the viewport. */
+  .map-search-menu { max-height: 55dvh; }
+  .msel-menu { left: 0; right: 0; }
+  .heat-tip { display: none; } /* hover has no meaning on touch; tap summarizes */
+
+  /* Charts stay usable: recharts containers already fluid; kill overflow. */
+  .chart-grid .panel { overflow: hidden; }
+}
+@media (max-width: 460px) {
+  .metrics-row { grid-template-columns: 1fr 1fr !important; }
+  .page { padding: 10px; }
+  .page-header h1 { font-size: 20px; }
+  .exp-filters .field { flex: 1 1 45%; }
+}

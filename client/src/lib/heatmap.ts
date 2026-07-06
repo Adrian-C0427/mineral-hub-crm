@@ -13,7 +13,7 @@
 
 export type ProdMap = Record<string, [number, number, number][]>; // key -> [YYYYMM, oil bbl, gas mcf][]
 
-export type HeatPeriod = "current" | "3m" | "6m" | "12m" | "3y" | "ytd" | "custom";
+export type HeatPeriod = "current" | "3m" | "6m" | "12m" | "3y" | "ytd" | "all" | "custom";
 
 export interface HeatWell {
   fid: number;
@@ -93,6 +93,8 @@ export function periodWindow(period: HeatPeriod, latest: number, customFrom?: st
     case "12m": from = back(11); label = "Last 12 months"; break;
     case "3y": from = back(35); label = "Last 3 years"; break;
     case "ytd": from = Math.floor(latest / 100) * 100 + 1; label = "Year to date"; break;
+    // Cumulative: every reported month in the dataset counts.
+    case "all": from = 190001; label = "Cumulative (all history)"; break;
     case "custom": {
       from = parse(customFrom) || latest;
       to = parse(customto) || latest;
