@@ -20,7 +20,6 @@ import { downloadCsv } from "../lib/csv";
 import { SellerDetails } from "../components/SellerDetails";
 import { DealPortalPanel } from "../components/DealPortalPanel";
 import { AssigneePicker } from "../components/AssigneePicker";
-import { DealAiAssistant } from "../components/DealAiAssistant";
 import type { BuyerActivityRow, DealSummary, MatchRec, Seller, UserLite } from "../types";
 // MapLibre is heavy; only load it when a deal detail page is viewed.
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
@@ -119,15 +118,6 @@ export function DealDetail() {
 
       <AssigneesCard deal={deal} users={users} canEdit={can("editDeals")} onSaved={loadDeal} />
 
-      <DealAiAssistant
-        dealId={deal.id}
-        buyers={[
-          ...(deal.selectedBuyer ? [{ id: deal.selectedBuyer.id, name: deal.selectedBuyer.name, company: deal.selectedBuyer.companyName }] : []),
-          ...deal.buyerActivity.map((a) => ({ id: a.buyerId, name: a.buyerName, company: a.companyName })),
-          ...(matches ?? []).map((m) => ({ id: m.buyerId, name: m.buyerName, company: m.companyName })),
-        ]}
-      />
-
       <SellerDetails
         dealId={deal.id}
         sellers={deal.sellers ?? []}
@@ -154,7 +144,7 @@ export function DealDetail() {
 
       {/* Legal tract descriptions → parsed calls → mapped polygons + exports. */}
       <Suspense fallback={<Spinner label="Loading tract descriptions…" />}>
-        <TractSection dealId={deal.id} dealName={deal.name} canEdit={can("editDeals")} />
+        <TractSection dealId={deal.id} dealName={deal.name} canEdit={can("editDeals")} abstractIds={deal.abstractIds} />
       </Suspense>
 
       <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
