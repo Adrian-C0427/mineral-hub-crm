@@ -273,6 +273,49 @@ gisRouter.get(
   }),
 );
 
+/**
+ * Lease-level monthly production for a county (B5: rrc.production, from the
+ * PDQ dump). Response matches the shape of the old static
+ * /data/{county}-production.json assets so the heat-map pipeline and the
+ * well-panel chart consume it unchanged:
+ *   { "OG|district|leaseNo": [[yyyymm, oil_bbl, gas_mcf], ...], ... }
+ * Oil includes condensate; gas includes casinghead. Months with no reported
+ * volume are simply absent (zeros are dropped at import).
+ */
+const productionSchema = z.object({
+  county: z.string().trim().min(1).max(40),
+  months: z.coerce.number().int().min(1).max(1200).default(120),
+});
+gisRouter.get(
+  "/production",
+  asyncHandler(async (req, res) => {
+    const { county, months } = productionSchema.parse(req.query);
+    // Anchor the window to the latest reported month, not the calendar —
+    // RRC production lags 2–4 months.
+    const latest = await prisma.$queryRawUnsafe<{ mx: number | null }[]>(
+      `SELECT max(cycle_ym)::int AS mx FROM rrc.production WHERE county = $1`, county);
+    const mx = latest[0]?.mx;
+    if (!mx) return res.json({});
+    const y = Math.floor(mx / 100), m = mx % 100;
+    const total = y * 12 + (m - 1) - (months - 1);
+    const from = Math.floor(total / 12) * 100 + (total % 12) + 1;
+    const rows = await prisma.$queryRawUnsafe<
+      { key: string; ym: number; oil: number; gas: number }[]
+    >(
+      `SELECT og_code || '|' || district || '|' || lease_no AS key, cycle_ym AS ym,
+              sum(oil_bbl + cond_bbl)::int AS oil, sum(gas_mcf + csgd_mcf)::int AS gas
+         FROM rrc.production
+        WHERE county = $1 AND cycle_ym >= $2
+        GROUP BY 1, 2 ORDER BY 1, 2`,
+      county, from,
+    );
+    const out: Record<string, [number, number, number][]> = {};
+    for (const r of rows) (out[r.key] ??= []).push([r.ym, r.oil, r.gas]);
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.json(out);
+  }),
+);
+
 /** Bounding box + feature detail for one abstract (used to frame selections). */
 gisRouter.get(
   "/abstracts/:id",

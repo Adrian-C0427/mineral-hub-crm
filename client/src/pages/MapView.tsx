@@ -400,10 +400,21 @@ export function MapView() {
   function loadDeals() { const qs = new URLSearchParams(); qs.set("status", statusFilter); api.get<MapDeal[]>(`/map/deals?${qs.toString()}`).then(setDeals); }
   useEffect(loadDeals, [statusFilter]);
   useEffect(() => {
-    // Merge every county's monthly-production asset. Keys are og|district|leaseNo
-    // and RRC lease numbers are unique within a district, so counties don't collide.
+    // Merge every county's monthly production. Keys are og|district|leaseNo and
+    // RRC lease numbers are unique within a district, so counties don't collide.
+    // B5: counties imported into rrc.production come from the API (10-year
+    // window); the rest still ship as static per-county JSON assets.
+    const cap = (k: string) => k.charAt(0).toUpperCase() + k.slice(1);
     Promise.all(
-      COUNTIES_WITH_PRODUCTION.map((k) => fetch(`/data/${k}-production.json`).then((r) => r.json()).catch(() => ({}))),
+      COUNTIES_WITH_PRODUCTION.map(async (k) => {
+        try {
+          const fromApi = await api.get<Record<string, [number, number, number][]>>(
+            `/gis/production?county=${encodeURIComponent(cap(k))}`,
+          );
+          if (Object.keys(fromApi).length) return fromApi;
+        } catch { /* fall back to the static asset */ }
+        return fetch(`/data/${k}-production.json`).then((r) => r.json()).catch(() => ({}));
+      }),
     ).then((parts) => setProd(Object.assign({}, ...parts))).catch(() => {});
   }, []);
   useEffect(applyHighlight, [dealsByAbstract]);
