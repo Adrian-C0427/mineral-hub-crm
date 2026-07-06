@@ -36,14 +36,14 @@ export function PortalAdmin() {
         <div><h1>Buyer Portal</h1><span className="muted">Your public offering marketplace</span></div>
         <div className="row" style={{ gap: 8 }}>
           {marketplaceUrl && settings?.portalEnabled && <a className="btn-primary-link" href={marketplaceUrl} target="_blank" rel="noreferrer">Open marketplace ↗</a>}
-          {can("manageOrgSettings") && <Link to="/settings/organization?tab=portal"><button className="small">Portal settings</button></Link>}
+          {can("manageOrgSettings") && <Link to="/settings/portal"><button className="small">Portal settings</button></Link>}
         </div>
       </div>
 
       {settings && !settings.portalEnabled && (
         <Banner kind="info">
           The portal is currently <strong>disabled</strong>. Enable it and set a URL under{" "}
-          <Link to="/settings/organization?tab=portal">Portal settings</Link> to make published offerings publicly visible.
+          <Link to="/settings/portal">Portal settings</Link> to make published offerings publicly visible.
         </Banner>
       )}
 

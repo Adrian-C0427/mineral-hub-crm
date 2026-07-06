@@ -15,6 +15,7 @@ import { BuyerProfile } from "./pages/BuyerProfile";
 import { Suspense, lazy, type ReactNode } from "react";
 import { SettingsGeneral } from "./pages/SettingsGeneral";
 import { Organization } from "./pages/Organization";
+import { SettingsPortal } from "./pages/SettingsPortal";
 const Integrations = lazy(() => import("./pages/Integrations").then((m) => ({ default: m.Integrations })));
 // MapLibre is heavy (~300KB gzip); load it only when the Map route is visited.
 const MapView = lazy(() => import("./pages/MapView").then((m) => ({ default: m.MapView })));
@@ -115,6 +116,7 @@ export function App() {
           <Route path="/portal-admin" element={<Guard perm="manageOrgSettings"><Suspense fallback={<Spinner label="Loading…" />}><PortalAdmin /></Suspense></Guard>} />
           <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
           <Route path="/settings/general" element={<SettingsGeneral />} />
+          <Route path="/settings/portal" element={<Guard perm="manageOrgSettings"><SettingsPortal /></Guard>} />
           <Route path="/settings/integrations" element={<Guard perm="manageApiIntegrations"><Suspense fallback={<Spinner label="Loading integrations…" />}><Integrations /></Suspense></Guard>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

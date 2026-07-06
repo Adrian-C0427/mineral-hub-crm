@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requireOrgOwner, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
@@ -97,6 +98,153 @@ orgRouter.patch(
       if (String(e).includes("portalSlug")) throw new HttpError(409, "That portal URL is already taken");
       throw e;
     }
+  }),
+);
+
+// --- Buyer Portal contacts (multi-contact) ----------------------------------
+// Optional headshot, same data-URL rules as the org logos but smaller.
+const PHOTO_MAX_BYTES = 512 * 1024;
+const photoField = z.string().refine(
+  (s) => LOGO_MIME.test(s) && (s.length * 3) / 4 <= PHOTO_MAX_BYTES,
+  "Photo must be a PNG, JPG, or WebP under 512 KB",
+).nullable();
+
+const contactSelect = {
+  id: true, name: true, title: true, email: true, phone: true,
+  department: true, photo: true, isPrimary: true, published: true, sortOrder: true,
+} as const;
+
+const contactOrder: Prisma.PortalContactOrderByWithRelationInput[] = [{ isPrimary: "desc" }, { sortOrder: "asc" }, { createdAt: "asc" }];
+
+/**
+ * One-time migration of the legacy single-contact org fields into a first
+ * PortalContact row, so existing orgs keep their published contact when the
+ * multi-contact UI first loads. Idempotent: only fires when the org has no
+ * contacts yet and at least one legacy field is populated.
+ */
+async function backfillPortalContacts(organizationId: string): Promise<void> {
+  const count = await prisma.portalContact.count({ where: { organizationId } });
+  if (count > 0) return;
+  const org = await prisma.organization.findUnique({
+    where: { id: organizationId },
+    select: { portalContactName: true, portalContactEmail: true, portalContactPhone: true, portalOfficeLocation: true },
+  });
+  if (!org) return;
+  const name = org.portalContactName?.trim();
+  if (!name && !org.portalContactEmail && !org.portalContactPhone) return;
+  await prisma.portalContact.create({
+    data: {
+      organizationId,
+      name: name || "Primary Contact",
+      email: org.portalContactEmail,
+      phone: org.portalContactPhone,
+      department: org.portalOfficeLocation, // office location → department, closest existing field
+      isPrimary: true, published: true, sortOrder: 0,
+    },
+  });
+}
+
+orgRouter.get(
+  "/portal-contacts",
+  requirePermission("manageOrgSettings"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    await backfillPortalContacts(orgId(req));
+    const contacts = await prisma.portalContact.findMany({
+      where: { organizationId: orgId(req) }, orderBy: contactOrder, select: contactSelect,
+    });
+    res.json(contacts);
+  }),
+);
+
+const contactBodySchema = z.object({
+  name: z.string().trim().min(1, "Name is required").max(120),
+  title: z.string().trim().max(120).nullish(),
+  email: z.string().trim().email().max(200).nullish().or(z.literal("").transform(() => null)),
+  phone: z.string().trim().max(40).nullish(),
+  department: z.string().trim().max(120).nullish(),
+  photo: photoField.optional(),
+  isPrimary: z.boolean().optional(),
+  published: z.boolean().optional(),
+});
+
+orgRouter.post(
+  "/portal-contacts",
+  requirePermission("manageOrgSettings"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const body = contactBodySchema.parse(req.body);
+    const org = orgId(req);
+    const agg = await prisma.portalContact.aggregate({ where: { organizationId: org }, _max: { sortOrder: true }, _count: true });
+    const isPrimary = body.isPrimary ?? agg._count === 0; // first contact is primary by default
+    const contact = await prisma.$transaction(async (tx) => {
+      if (isPrimary) await tx.portalContact.updateMany({ where: { organizationId: org }, data: { isPrimary: false } });
+      return tx.portalContact.create({
+        data: {
+          organizationId: org,
+          name: body.name, title: body.title ?? null, email: body.email ?? null,
+          phone: body.phone ?? null, department: body.department ?? null, photo: body.photo ?? null,
+          isPrimary, published: body.published ?? true,
+          sortOrder: (agg._max.sortOrder ?? -1) + 1,
+        },
+        select: contactSelect,
+      });
+    });
+    res.status(201).json(contact);
+  }),
+);
+
+orgRouter.patch(
+  "/portal-contacts/:id",
+  requirePermission("manageOrgSettings"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const body = contactBodySchema.partial().parse(req.body);
+    const org = orgId(req);
+    const existing = await prisma.portalContact.findFirst({ where: { id: req.params.id, organizationId: org }, select: { id: true } });
+    if (!existing) throw new HttpError(404, "Contact not found");
+    const data: Record<string, unknown> = {};
+    for (const k of ["name", "title", "email", "phone", "department", "photo", "published"] as const) {
+      if (body[k] !== undefined) data[k] = body[k];
+    }
+    const contact = await prisma.$transaction(async (tx) => {
+      // Promoting to primary demotes the current primary; you cannot un-set the
+      // only primary from here (designate another one instead).
+      if (body.isPrimary === true) await tx.portalContact.updateMany({ where: { organizationId: org, id: { not: existing.id } }, data: { isPrimary: false } });
+      if (body.isPrimary !== undefined) data.isPrimary = body.isPrimary;
+      return tx.portalContact.update({ where: { id: existing.id }, data, select: contactSelect });
+    });
+    res.json(contact);
+  }),
+);
+
+orgRouter.delete(
+  "/portal-contacts/:id",
+  requirePermission("manageOrgSettings"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const existing = await prisma.portalContact.findFirst({ where: { id: req.params.id, organizationId: org } });
+    if (!existing) throw new HttpError(404, "Contact not found");
+    await prisma.portalContact.delete({ where: { id: existing.id } });
+    // If we removed the primary, promote the next contact so one always leads.
+    if (existing.isPrimary) {
+      const next = await prisma.portalContact.findFirst({ where: { organizationId: org }, orderBy: contactOrder, select: { id: true } });
+      if (next) await prisma.portalContact.update({ where: { id: next.id }, data: { isPrimary: true } });
+    }
+    res.json({ ok: true });
+  }),
+);
+
+// Persist a new display order (array of contact ids, top to bottom).
+orgRouter.post(
+  "/portal-contacts/reorder",
+  requirePermission("manageOrgSettings"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { ids } = z.object({ ids: z.array(z.string()).max(200) }).parse(req.body);
+    const org = orgId(req);
+    const owned = await prisma.portalContact.findMany({ where: { organizationId: org }, select: { id: true } });
+    const ownedIds = new Set(owned.map((c) => c.id));
+    if (!ids.every((id) => ownedIds.has(id))) throw new HttpError(400, "Unknown contact in ordering");
+    await prisma.$transaction(ids.map((id, i) => prisma.portalContact.update({ where: { id }, data: { sortOrder: i } })));
+    const contacts = await prisma.portalContact.findMany({ where: { organizationId: org }, orderBy: contactOrder, select: contactSelect });
+    res.json(contacts);
   }),
 );
 

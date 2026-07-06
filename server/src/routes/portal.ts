@@ -50,20 +50,55 @@ function publicDeal(d: {
   };
 }
 
-function publicOrg(o: {
-  name: string; fullLogo: string | null; compactLogo: string | null; portalSlug: string | null;
+interface OrgLike {
+  id: string; name: string; fullLogo: string | null; compactLogo: string | null; portalSlug: string | null;
   portalContactName: string | null; portalContactEmail: string | null;
   portalContactPhone: string | null; portalOfficeLocation: string | null;
-}) {
+}
+
+export interface PublicContact {
+  id: string; name: string; title: string | null; email: string | null;
+  phone: string | null; department: string | null; photo: string | null; isPrimary: boolean;
+}
+
+/**
+ * The org's published portal contacts, ordered primary-first. Falls back to a
+ * single synthesized contact from the legacy org fields for orgs that haven't
+ * been migrated into the PortalContact table yet, so no portal loses its
+ * contact section mid-rollout.
+ */
+async function publicContacts(o: OrgLike): Promise<PublicContact[]> {
+  const rows = await prisma.portalContact.findMany({
+    where: { organizationId: o.id, published: true },
+    orderBy: [{ isPrimary: "desc" }, { sortOrder: "asc" }, { createdAt: "asc" }],
+    select: { id: true, name: true, title: true, email: true, phone: true, department: true, photo: true, isPrimary: true },
+  });
+  if (rows.length) return rows;
+  if (o.portalContactName || o.portalContactEmail || o.portalContactPhone) {
+    return [{
+      id: "legacy", name: o.portalContactName || o.name, title: null,
+      email: o.portalContactEmail, phone: o.portalContactPhone,
+      department: o.portalOfficeLocation, photo: null, isPrimary: true,
+    }];
+  }
+  return [];
+}
+
+/** Org branding + contacts payload. `contact*` legacy fields kept for back-compat. */
+async function orgPayload(o: OrgLike) {
+  const contacts = await publicContacts(o);
+  const primary = contacts.find((c) => c.isPrimary) ?? contacts[0] ?? null;
   return {
     name: o.name,
     slug: o.portalSlug,
     fullLogo: o.fullLogo,
     compactLogo: o.compactLogo,
-    contactName: o.portalContactName,
-    contactEmail: o.portalContactEmail,
-    contactPhone: o.portalContactPhone,
-    officeLocation: o.portalOfficeLocation,
+    contacts,
+    // Legacy single-contact fields mirror the primary contact.
+    contactName: primary?.name ?? null,
+    contactEmail: primary?.email ?? null,
+    contactPhone: primary?.phone ?? null,
+    officeLocation: primary?.department ?? o.portalOfficeLocation,
   };
 }
 
@@ -83,7 +118,7 @@ portalRouter.get(
       orderBy: [{ portalFeatured: "desc" }, { updatedAt: "desc" }],
     });
     res.setHeader("Cache-Control", "public, max-age=60");
-    res.json({ org: publicOrg(org), deals: deals.map(publicDeal) });
+    res.json({ org: await orgPayload(org), deals: deals.map(publicDeal) });
   }),
 );
 
@@ -138,7 +173,7 @@ portalRouter.get(
         )
       : [];
     res.json({
-      org: publicOrg(deal.organization),
+      org: await orgPayload(deal.organization),
       deal: publicDeal(deal),
       abstracts,
       documents: deal.files,
