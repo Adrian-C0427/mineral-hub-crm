@@ -3,6 +3,7 @@ import compression from "compression";
 import cookieParser from "cookie-parser";
 import cors from "cors";
 import helmet from "helmet";
+import { ZodError } from "zod";
 import * as Sentry from "@sentry/node";
 import { sentryEnabled } from "./instrument.js";
 import { env } from "./config.js";
@@ -95,7 +96,17 @@ export function createApp() {
 
   app.use(notFound);
   // Sentry captures errors before our own handler formats the response.
-  if (sentryEnabled) Sentry.setupExpressErrorHandler(app);
+  // ZodError carries no statusCode, so Sentry's default filter would report it
+  // as a 500-class fault even though errorHandler answers it with a 400.
+  if (sentryEnabled) {
+    Sentry.setupExpressErrorHandler(app, {
+      shouldHandleError(err) {
+        if (err instanceof ZodError) return false;
+        const status = Number((err as { status?: number; statusCode?: number }).status ?? (err as { statusCode?: number }).statusCode ?? 500);
+        return status >= 500;
+      },
+    });
+  }
   app.use(errorHandler);
   return app;
 }
