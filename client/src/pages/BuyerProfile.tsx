@@ -4,7 +4,8 @@ import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, RelationshipDot, Banner, StageBadge, StatusBadge } from "../components/ui";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
-import { US_STATE_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, countiesForStates } from "../lib/options";
+import { GeoFields } from "../components/GeoFields";
+import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
 import { money, pct, fmtDate, toInputDate } from "../lib/format";
 import { formatPhone } from "../lib/phone";
 import { PhoneInput } from "../components/PhoneInput";
@@ -140,20 +141,19 @@ export function BuyerProfile() {
           <h3>Buy Box & Criteria</h3>
           {edit ? (
             <>
-              <Fld l="states">
-                <SearchableMultiSelect options={US_STATE_OPTIONS} value={view.buyBox.states} onChange={(v) => setBox("states", v)} placeholder="Select states…" />
-              </Fld>
-              <Fld l="counties">
-                <SearchableMultiSelect options={countiesForStates(view.buyBox.states)} value={view.buyBox.counties} onChange={(v) => setBox("counties", v)} placeholder={view.buyBox.states.length ? "Search counties…" : "Select a state first"} />
-              </Fld>
+              <GeoFields
+                states={view.buyBox.states} onStatesChange={(v) => setBox("states", v)}
+                counties={view.buyBox.counties} onCountiesChange={(v) => setBox("counties", v)}
+                labels={{ state: "states", county: "counties" }}
+              />
               <Fld l="basins">
-                <SearchableMultiSelect options={TEXAS_BASIN_OPTIONS} value={view.buyBox.basins} onChange={(v) => setBox("basins", v)} placeholder="Search basins…" />
+                <SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={view.buyBox.basins} onChange={(v) => setBox("basins", v)} placeholder="Search basins…" />
               </Fld>
               <Fld l="formations">
-                <SearchableMultiSelect options={TEXAS_FORMATION_OPTIONS} value={view.buyBox.formations} onChange={(v) => setBox("formations", v)} placeholder="Search formations…" />
+                <SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={view.buyBox.formations} onChange={(v) => setBox("formations", v)} placeholder="Search formations…" />
               </Fld>
               <Fld l="asset types">
-                <SearchableMultiSelect options={ASSET_TYPE_OPTIONS} value={view.buyBox.assetTypes} onChange={(v) => setBox("assetTypes", v)} placeholder="Search asset types…" />
+                <SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} value={view.buyBox.assetTypes} onChange={(v) => setBox("assetTypes", v)} placeholder="Search asset types…" />
               </Fld>
               <Row><Fld l="Min acreage"><input type="number" value={view.buyBox.minAcreage ?? ""} onChange={(e) => setBox("minAcreage", e.target.value === "" ? null : Number(e.target.value))} /></Fld><Fld l="Max acreage"><input type="number" value={view.buyBox.maxAcreage ?? ""} onChange={(e) => setBox("maxAcreage", e.target.value === "" ? null : Number(e.target.value))} /></Fld></Row>
               <Row><Fld l="Min price"><input type="number" value={view.buyBox.minPrice ?? ""} onChange={(e) => setBox("minPrice", e.target.value === "" ? null : Number(e.target.value))} /></Fld><Fld l="Max price"><input type="number" value={view.buyBox.maxPrice ?? ""} onChange={(e) => setBox("maxPrice", e.target.value === "" ? null : Number(e.target.value))} /></Fld></Row>

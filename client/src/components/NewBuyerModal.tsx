@@ -3,7 +3,8 @@ import { Modal } from "./ui";
 import { api, ApiError } from "../api/client";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
 import { PhoneInput } from "./PhoneInput";
-import { US_STATE_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, countiesForStates } from "../lib/options";
+import { GeoFields } from "./GeoFields";
+import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
 
 /**
  * Standardized New Buyer template — the buyer counterpart of NewDealModal.
@@ -93,11 +94,14 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
 
       <div className="section-head" style={{ marginTop: 6 }}><h3 style={{ margin: 0 }}>Buy box</h3></div>
       <div className="dd-grid">
-        <div className="field"><label>States</label><SearchableMultiSelect options={US_STATE_OPTIONS} value={states} onChange={(v) => { setStates(v); setCounties(counties.filter((c) => countiesForStates(v).includes(c))); }} placeholder="Select states…" /></div>
-        <div className="field"><label>Counties</label><SearchableMultiSelect options={countiesForStates(states)} value={counties} onChange={setCounties} placeholder={states.length ? "Search counties…" : "Select a state first"} /></div>
-        <div className="field"><label>Basins</label><SearchableMultiSelect options={TEXAS_BASIN_OPTIONS} value={basins} onChange={setBasins} placeholder="Search basins…" /></div>
-        <div className="field"><label>Formations</label><SearchableMultiSelect options={TEXAS_FORMATION_OPTIONS} value={formations} onChange={setFormations} placeholder="Search formations…" /></div>
-        <div className="field"><label>Asset types</label><SearchableMultiSelect options={ASSET_TYPE_OPTIONS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
+        <GeoFields
+          states={states} onStatesChange={setStates}
+          counties={counties} onCountiesChange={setCounties}
+          labels={{ state: "States", county: "Counties" }}
+        />
+        <div className="field"><label>Basins</label><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={basins} onChange={setBasins} placeholder="Search basins…" /></div>
+        <div className="field"><label>Formations</label><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={formations} onChange={setFormations} placeholder="Search formations…" /></div>
+        <div className="field"><label>Asset types</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
         <div className="field"><label>Min acreage</label><input type="number" value={f.minAcreage} onChange={set("minAcreage")} /></div>
         <div className="field"><label>Max acreage</label><input type="number" value={f.maxAcreage} onChange={set("maxAcreage")} /></div>
         <div className="field"><label>Min price</label><input type="number" value={f.minPrice} onChange={set("minPrice")} /></div>

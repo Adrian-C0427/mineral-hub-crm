@@ -442,9 +442,21 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .bar-chart { display:flex; align-items:flex-end; gap: 6px; height: 160px; padding-top: 10px; }
 .bar-col { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height: 100%; gap: 4px; }
 .bar-pair { display:flex; align-items:flex-end; justify-content:center; gap: 2px; width: 100%; height: 100%; }
+/* Stacked bar: projected sits on top of realized as one cumulative column. */
+.bar-stack { display:flex; flex-direction: column; justify-content:flex-end; align-items:center; width: 60%; height: 100%; }
+.bar-stack .bar { width: 100%; border-radius: 0; }
+.bar-stack .bar-projected { border-radius: 3px 3px 0 0; }
 .bar { width: 34%; background: var(--green); border-radius: 3px 3px 0 0; min-height: 2px; }
 .bar-projected { background: var(--accent); opacity: 0.6; }
 .bar-label { font-size: 10px; color: var(--text-dim); }
+
+/* Active-deals-by-stage: horizontal count bars, one per pipeline stage. */
+.stage-counts { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; }
+.stage-count-row { display: grid; grid-template-columns: 150px 1fr 32px; align-items: center; gap: 10px; padding: 6px 4px; border-radius: 6px; color: inherit; }
+.stage-count-row:hover { background: var(--panel-2); text-decoration: none; }
+.stage-count-bar { height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
+.stage-count-fill { display: block; height: 100%; background: var(--accent); border-radius: 4px; min-width: 2px; }
+.stage-count-num { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
 .error-text { color: var(--red); font-size: 13px; margin-top: 8px; }
 .progress { height: 8px; background: var(--bg); border-radius: 100px; overflow: hidden; margin: 10px 0; }
 .progress-fill { height: 100%; background: var(--accent); }

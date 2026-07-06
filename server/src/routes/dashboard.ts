@@ -53,13 +53,13 @@ dashboardRouter.get(
       .map((d) => serializeDeal(d, now))
       .filter((d) => d.isOverdue);
 
-    // Active deals by stage — name, stage, profit est. (NO priority badges here)
-    const byStage = allActive.map((d) => {
-      const s = serializeDeal(d, now);
-      const best = d.offers.reduce<number | null>((m, o) => (m == null || o.amount > m ? o.amount : m), null);
-      const profitEst = best != null ? netProfit(best, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : null;
-      return { id: s.id, name: s.name, stage: s.stage, profitEst };
-    });
+    // Active deals by stage — now a high-level count per pipeline stage rather
+    // than per-deal rows. Every active stage is present (0 when empty) so the
+    // dashboard shows the full pipeline distribution at a glance; drill-down
+    // lives on the Pipeline / Deals pages.
+    const stageCountMap = new Map<string, number>(ACTIVE_STAGES.map((s) => [s, 0]));
+    for (const d of allActive) stageCountMap.set(d.stage, (stageCountMap.get(d.stage) ?? 0) + 1);
+    const stageCounts = ACTIVE_STAGES.map((stage) => ({ stage, count: stageCountMap.get(stage) ?? 0 }));
 
     // Upcoming follow-ups (from buyer activity nextFollowUpDate)
     const followUps = await prisma.dealBuyerActivity.findMany({
@@ -130,7 +130,7 @@ dashboardRouter.get(
         offersPending: activeOffers,
       },
       overdue: overdue.map((d) => ({ id: d.id, name: d.name, findBuyerByDate: d.findBuyerByDate })),
-      activeByStage: byStage,
+      stageCounts,
       upcomingFollowUps: followUps.map((f) => ({
         dealId: f.dealId,
         buyerName: f.buyer.name,

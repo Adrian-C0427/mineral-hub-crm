@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { num } from "../../lib/format";
-import { US_STATE_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, countiesForStates } from "../../lib/options";
+import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../../lib/options";
 import { SearchableMultiSelect } from "../../components/SearchableMultiSelect";
+import { GeoFields } from "../../components/GeoFields";
 import { PortalMap } from "./PortalMap";
 import { PortalShell } from "./PortalOffering";
 import { portalGet, portalPost, type FC, type PortalDeal, type PortalOrg } from "./portalApi";
@@ -94,8 +95,14 @@ export function PortalMarketplace() {
       {/* Filters */}
       <div className="panel">
         <div className="dd-grid">
-          <div className="field"><label>State</label><SearchableMultiSelect options={options.states.length ? options.states : [...US_STATE_OPTIONS]} value={fStates} onChange={setFStates} placeholder="Any state" /></div>
-          <div className="field"><label>County</label><SearchableMultiSelect options={options.counties} value={fCounties} onChange={setFCounties} placeholder="Any county" /></div>
+          {/* Marketplace filters scope to what's actually published (data-driven
+              options), routed through the same component for consistent UX. */}
+          <GeoFields
+            states={fStates} onStatesChange={setFStates}
+            counties={fCounties} onCountiesChange={setFCounties}
+            countyOptions={options.counties.length ? options.counties : undefined}
+            labels={{ state: "State", county: "County" }}
+          />
           <div className="field"><label>Basin</label><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={fBasins} onChange={setFBasins} placeholder="Any basin" /></div>
           <div className="field"><label>Formation</label><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={fFormations} onChange={setFFormations} placeholder="Any formation" /></div>
           <div className="field"><label>Asset type</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} value={fAssetTypes} onChange={setFAssetTypes} placeholder="Any type" /></div>
@@ -189,7 +196,6 @@ function LeadCapture({ orgSlug }: { orgSlug: string }) {
   const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const set = <K extends keyof typeof f>(k: K) => (v: (typeof f)[K]) => setF((p) => ({ ...p, [k]: v }));
-  const countyOptions = useMemo(() => countiesForStates(f.states), [f.states]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -240,8 +246,11 @@ function LeadCapture({ orgSlug }: { orgSlug: string }) {
         </div>
         <div className="muted portal-lead-section">Your buy box</div>
         <div className="dd-grid">
-          <div className="field"><label>States</label><SearchableMultiSelect options={[...US_STATE_OPTIONS]} value={f.states} onChange={set("states")} placeholder="Any" /></div>
-          <div className="field"><label>Counties</label><SearchableMultiSelect options={countyOptions} value={f.counties} onChange={set("counties")} placeholder={f.states.length ? "Any" : "Pick states first"} /></div>
+          <GeoFields
+            states={f.states} onStatesChange={set("states")}
+            counties={f.counties} onCountiesChange={set("counties")}
+            labels={{ state: "States", county: "Counties" }}
+          />
           <div className="field"><label>Basins</label><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={f.basins} onChange={set("basins")} placeholder="Any" /></div>
           <div className="field"><label>Formations</label><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={f.formations} onChange={set("formations")} placeholder="Any" /></div>
           <div className="field"><label>Asset types</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} value={f.assetTypes} onChange={set("assetTypes")} placeholder="Any" /></div>
