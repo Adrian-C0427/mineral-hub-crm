@@ -319,9 +319,10 @@ model User {
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   orgRole        OrgRole?
 
-  // Two-factor auth (TOTP). Secret is base32; recovery codes are stored hashed.
-  // NOTE: totpSecret is stored plaintext here — encrypt at rest before this
-  // holds real accounts (see auth follow-ups).
+  // Two-factor auth (TOTP). Recovery codes are stored hashed. totpSecret is
+  // encrypted at rest (AES-256-GCM via services/secrets, "v1:" prefix); rows
+  // enrolled before the encryption hardening may still hold base32 plaintext
+  // and are accepted + re-encrypted on the next enrollment.
   totpSecret        String?
   totpEnabled       Boolean  @default(false)
   totpRecoveryCodes String[] @default([])

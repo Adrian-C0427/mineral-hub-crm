@@ -3,12 +3,15 @@ import { z } from "zod";
 import { parse } from "csv-parse/sync";
 import { prisma } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
-import { requireAuth, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { normalizeCompany } from "../serializers.js";
 import { normalizePhoneNullable } from "../domain/phone.js";
 
 export const importRouter = Router();
-importRouter.use(requireAuth, requireOrg);
+// The whole flow exists to create buyer records, so every step (including the
+// read-only analyze/preview) is gated on createBuyers — a read-only viewer has
+// no business feeding CSVs through the importer.
+importRouter.use(requireAuth, requireOrg, requirePermission("createBuyers"));
 
 // Target buyer fields the importer understands. companyName is required to proceed.
 export const IMPORT_FIELDS = [

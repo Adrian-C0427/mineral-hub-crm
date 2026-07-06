@@ -102,10 +102,13 @@ orgRouter.patch(
 );
 
 // --- Buyer Portal contacts (multi-contact) ----------------------------------
-// Optional headshot, same data-URL rules as the org logos but smaller.
+// Optional headshot. Raster formats ONLY — unlike the logos, contact photos are
+// served on the public portal, and SVG (markup that can carry scripts) has no
+// business as a headshot format. Matches the client-side picker.
 const PHOTO_MAX_BYTES = 512 * 1024;
+const PHOTO_MIME = /^data:image\/(png|jpeg|jpg|webp);base64,/;
 const photoField = z.string().refine(
-  (s) => LOGO_MIME.test(s) && (s.length * 3) / 4 <= PHOTO_MAX_BYTES,
+  (s) => PHOTO_MIME.test(s) && (s.length * 3) / 4 <= PHOTO_MAX_BYTES,
   "Photo must be a PNG, JPG, or WebP under 512 KB",
 ).nullable();
 

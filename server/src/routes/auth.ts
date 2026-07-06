@@ -18,6 +18,7 @@ import {
 import {
   getProvider, enabledProviders, buildAuthorizeUrl, exchangeCode, fetchProfile,
 } from "../services/oauth.js";
+import { encryptSecret, decryptSecret } from "../services/secrets.js";
 
 export const authRouter = Router();
 
@@ -36,9 +37,19 @@ function issueSession(res: import("express").Response, user: { id: string; name:
   return { token, user: { id: user.id, name: user.name, email: user.email, role: user.role, orgRole: user.orgRole } };
 }
 
+// TOTP secrets are encrypted at rest with the integrations key (AES-256-GCM,
+// services/secrets). Rows enrolled before this hardening hold base32 plaintext
+// (which never contains ":"), so the "v1:" ciphertext prefix disambiguates —
+// legacy enrollments keep verifying and are re-encrypted on their next enroll.
+const sealTotpSecret = (secret: string): string => encryptSecret(secret);
+function revealTotpSecret(stored: string): string {
+  if (!stored.startsWith("v1:")) return stored; // legacy plaintext row
+  try { return decryptSecret(stored); } catch { return stored; }
+}
+
 /** Verify a submitted 2FA value against the user's TOTP secret or recovery codes. */
 async function verifySecondFactor(user: { id: string; totpSecret: string | null; totpRecoveryCodes: string[] }, code: string): Promise<boolean> {
-  if (user.totpSecret && verifyTotp(user.totpSecret, code)) return true;
+  if (user.totpSecret && verifyTotp(revealTotpSecret(user.totpSecret), code)) return true;
   // Recovery code: single-use — consume it on success.
   const hash = hashRecoveryCode(code);
   if (user.totpRecoveryCodes.includes(hash)) {
@@ -381,7 +392,7 @@ authRouter.post(
     const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { email: true, totpEnabled: true } });
     if (user?.totpEnabled) throw new HttpError(400, "Two-factor authentication is already enabled. Disable it first to re-enroll.");
     const secret = generateSecret();
-    await prisma.user.update({ where: { id: req.user!.id }, data: { totpSecret: secret } });
+    await prisma.user.update({ where: { id: req.user!.id }, data: { totpSecret: sealTotpSecret(secret) } });
     res.json({ secret, otpauthUri: otpauthUri(secret, user!.email, "Mineral Hub") });
   }),
 );
@@ -395,7 +406,7 @@ authRouter.post(
     const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { totpSecret: true, totpEnabled: true } });
     if (user?.totpEnabled) throw new HttpError(400, "Two-factor authentication is already enabled.");
     if (!user?.totpSecret) throw new HttpError(400, "Start setup first (no pending secret).");
-    if (!verifyTotp(user.totpSecret, code)) throw new HttpError(400, "That code is incorrect or expired. Try the current code from your authenticator app.");
+    if (!verifyTotp(revealTotpSecret(user.totpSecret), code)) throw new HttpError(400, "That code is incorrect or expired. Try the current code from your authenticator app.");
 
     const { codes, hashes } = generateRecoveryCodes();
     await prisma.user.update({ where: { id: req.user!.id }, data: { totpEnabled: true, totpRecoveryCodes: hashes } });
@@ -426,7 +437,7 @@ authRouter.post(
     const { code } = z.object({ code: z.string().trim().min(1) }).parse(req.body);
     const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { id: true, totpSecret: true, totpEnabled: true, totpRecoveryCodes: true } });
     if (!user?.totpEnabled) throw new HttpError(400, "Two-factor authentication is not enabled.");
-    if (!user.totpSecret || !verifyTotp(user.totpSecret, code)) throw new HttpError(400, "Enter a current code from your authenticator app.");
+    if (!user.totpSecret || !verifyTotp(revealTotpSecret(user.totpSecret), code)) throw new HttpError(400, "Enter a current code from your authenticator app.");
     const { codes, hashes } = generateRecoveryCodes();
     await prisma.user.update({ where: { id: req.user!.id }, data: { totpRecoveryCodes: hashes } });
     res.json({ recoveryCodes: codes });
