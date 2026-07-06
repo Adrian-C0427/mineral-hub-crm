@@ -23,6 +23,7 @@ import { DealAiAssistant } from "../components/DealAiAssistant";
 import type { BuyerActivityRow, DealSummary, MatchRec, Seller, UserLite } from "../types";
 // MapLibre is heavy; only load it when a deal detail page is viewed.
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
+const TractSection = lazy(() => import("../components/TractSection").then((m) => ({ default: m.TractSection })));
 
 interface DealDetailData extends DealSummary {
   operator: string | null;
@@ -147,6 +148,11 @@ export function DealDetail() {
           </p>
         )}
       </div>
+
+      {/* Legal tract descriptions → parsed calls → mapped polygons + exports. */}
+      <Suspense fallback={<Spinner label="Loading tract descriptions…" />}>
+        <TractSection dealId={deal.id} dealName={deal.name} canEdit={can("editDeals")} />
+      </Suspense>
 
       <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
         <MetricCard label="Buyers Contacted" value={deal.metrics.buyersContacted} />
