@@ -610,3 +610,46 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
   .page-header h1 { font-size: 20px; }
   .exp-filters .field { flex: 1 1 45%; }
 }
+
+/* ===========================================================================
+   Buyer Offering Portal — public marketplace + offering pages
+   =========================================================================== */
+.portal-shell { min-height: 100vh; display: flex; flex-direction: column; }
+.portal-header { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 14px 28px; border-bottom: 1px solid var(--border); background: var(--panel); position: sticky; top: 0; z-index: 40; }
+.portal-main { flex: 1; width: 100%; max-width: 1180px; margin: 0 auto; padding: 24px 20px 40px; display: flex; flex-direction: column; gap: 16px; }
+.portal-footer { text-align: center; padding: 18px; border-top: 1px solid var(--border); font-size: 12px; }
+.portal-hero { display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; }
+.portal-hero-facts { display: flex; gap: 20px; flex-wrap: wrap; align-items: flex-start; }
+.portal-fact { text-align: center; min-width: 110px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
+.portal-fact-v { font-size: 20px; font-weight: 700; }
+.portal-fact-l { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin-top: 2px; }
+.portal-grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 16px; align-items: start; }
+.portal-kv-row { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 14px; }
+.portal-kv-row:last-child { border-bottom: none; }
+.portal-doc { display: flex; justify-content: space-between; gap: 10px; padding: 10px 12px; margin-bottom: 6px;
+  border: 1px solid var(--border); border-radius: 8px; color: var(--text); }
+.portal-doc:hover { background: var(--panel-2); text-decoration: none; }
+.portal-contact-line { margin: 4px 0; }
+.btn-primary-link, .btn-ghost-link { display: inline-flex; align-items: center; padding: 9px 16px; border-radius: 8px;
+  font-weight: 600; font-size: 14px; text-decoration: none !important; }
+.btn-primary-link { background: var(--accent); color: #fff; }
+.btn-primary-link:hover { filter: brightness(1.1); }
+.btn-ghost-link { border: 1px solid var(--border); color: var(--text); }
+.btn-ghost-link:hover { background: var(--panel-2); }
+.portal-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px; }
+.portal-card { position: relative; display: flex; flex-direction: column; }
+.portal-card:hover { border-color: var(--accent); }
+.portal-card-facts { display: flex; gap: 12px; flex-wrap: wrap; margin: 10px 0 4px; font-size: 13px; }
+.portal-card-summary { font-size: 13px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.portal-card-cta { margin-top: auto; color: var(--accent); font-weight: 600; font-size: 14px; }
+.portal-lead { border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.portal-lead-section { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; margin: 14px 0 8px; }
+.portal-map-reset { position: absolute; top: 10px; right: 10px; z-index: 5; }
+.portal-map-layers { position: absolute; left: 10px; bottom: 10px; z-index: 5; display: flex; gap: 10px; flex-wrap: wrap;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 12px; max-width: calc(100% - 20px); }
+.portal-map-layers label { display: flex; align-items: center; gap: 5px; white-space: nowrap; cursor: pointer; }
+.portal-map-hover { position: absolute; top: 10px; left: 52px; z-index: 5; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 6px; padding: 5px 10px; font-size: 12px; pointer-events: none; }
+@media (max-width: 900px) { .portal-grid { grid-template-columns: 1fr; } }

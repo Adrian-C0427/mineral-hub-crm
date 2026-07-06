@@ -12,6 +12,7 @@ import { logActivity } from "../services/activityLog.js";
 import { effectiveStatus, ENGAGED_STATUSES, BUYER_STATUSES } from "../domain/buyerStatus.js";
 import { sendEmail, personalize, toHtmlBody } from "../services/email.js";
 import { money as fmtMoney } from "../domain/format.js";
+import { newPortalSlug } from "./portal.js";
 
 export const dealsRouter = Router();
 // All deal routes require membership in an organization and are scoped to it.
@@ -523,6 +524,52 @@ const updateSchema = z.object({
   notes: z.string().nullish(),
   ...assetFields,
 });
+
+// --- Buyer Offering Portal controls ----------------------------------------
+// Publish state, visibility, featured flag, and buyer-facing summary. The
+// share slug is generated once on first publish and never rotates (shared
+// links keep working); it stays valid-but-inactive while unpublished.
+dealsRouter.get(
+  "/:id/portal",
+  requirePermission("viewDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const deal = await prisma.deal.findFirst({
+      where: { id: req.params.id, organizationId: orgId(req) },
+      select: { id: true, publishedToPortal: true, portalSlug: true, portalVisibility: true, portalFeatured: true, portalSummary: true,
+        files: { where: { supersededById: null }, select: { id: true, filename: true, folder: true, visibleToBuyers: true } } },
+    });
+    if (!deal) throw new HttpError(404, "Deal not found");
+    res.json(deal);
+  }),
+);
+
+dealsRouter.patch(
+  "/:id/portal",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const body = z.object({
+      published: z.boolean().optional(),
+      visibility: z.enum(["PUBLIC", "LINK_ONLY"]).optional(),
+      featured: z.boolean().optional(),
+      summary: z.string().trim().max(4000).nullish(),
+    }).parse(req.body);
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true, portalSlug: true } });
+    if (!deal) throw new HttpError(404, "Deal not found");
+    const patch: Record<string, unknown> = {};
+    if (body.published !== undefined) {
+      patch.publishedToPortal = body.published;
+      if (body.published && !deal.portalSlug) patch.portalSlug = newPortalSlug();
+    }
+    if (body.visibility !== undefined) patch.portalVisibility = body.visibility;
+    if (body.featured !== undefined) patch.portalFeatured = body.featured;
+    if (body.summary !== undefined) patch.portalSummary = body.summary;
+    const updated = await prisma.deal.update({
+      where: { id: deal.id }, data: patch,
+      select: { id: true, publishedToPortal: true, portalSlug: true, portalVisibility: true, portalFeatured: true, portalSummary: true },
+    });
+    res.json(updated);
+  }),
+);
 
 dealsRouter.patch(
   "/:id",

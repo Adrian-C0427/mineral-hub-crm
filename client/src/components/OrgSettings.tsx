@@ -14,7 +14,7 @@ interface RolesResponse { roles: RoleRow[]; permissions: { key: string; label: s
 const ROLE_LABEL: Record<string, string> = { OWNER: "Owner", ADMIN: "Administrator", MANAGER: "Manager", MEMBER: "Standard User", VIEWER: "Read-Only Viewer" };
 const ASSIGNABLE: OrgRole[] = ["ADMIN", "MANAGER", "MEMBER", "VIEWER"];
 
-type Tab = "org" | "users" | "roles" | "owner";
+type Tab = "org" | "users" | "roles" | "owner" | "portal";
 
 export function OrgSettings({ initialTab }: { initialTab?: Tab } = {}) {
   const { user, refresh, can, isOrgOwner } = useAuth();
@@ -40,6 +40,7 @@ export function OrgSettings({ initialTab }: { initialTab?: Tab } = {}) {
         <button className={`tab ${tab === "org" ? "active" : ""}`} onClick={() => setTab("org")}>Organization</button>
         {showUsers && <button className={`tab ${tab === "users" ? "active" : ""}`} onClick={() => setTab("users")}>Users</button>}
         {showRoles && <button className={`tab ${tab === "roles" ? "active" : ""}`} onClick={() => setTab("roles")}>Roles & Permissions</button>}
+        {can("manageOrgSettings") && <button className={`tab ${tab === "portal" ? "active" : ""}`} onClick={() => setTab("portal")}>Buyer Portal</button>}
         {showOwner && <button className={`tab ${tab === "owner" ? "active" : ""}`} onClick={() => setTab("owner")}>Owner controls</button>}
       </div>
 
@@ -50,6 +51,7 @@ export function OrgSettings({ initialTab }: { initialTab?: Tab } = {}) {
       {tab === "users" && showUsers && <UsersTab onFlash={flash} onError={fail} />}
       {tab === "roles" && showRoles && <RolesTab onFlash={flash} onError={fail} />}
       {tab === "owner" && showOwner && <OwnerTab onFlash={flash} onError={fail} onTransferred={() => { refresh(); loadOrg(); }} />}
+      {tab === "portal" && can("manageOrgSettings") && <PortalSettingsTab onFlash={flash} onError={fail} />}
     </div>
   );
 }
@@ -485,5 +487,79 @@ function OwnerTab({ onFlash, onError, onTransferred }: { onFlash: (m: string) =>
         Coming soon (owner-only): billing &amp; subscription · organization-wide security settings
       </p>
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Buyer Portal settings — enable/disable, marketplace URL, contact info.
+// ---------------------------------------------------------------------------
+interface PortalSettings {
+  portalSlug: string | null; portalEnabled: boolean; portalContactName: string | null;
+  portalContactEmail: string | null; portalContactPhone: string | null; portalOfficeLocation: string | null;
+}
+
+function PortalSettingsTab({ onFlash, onError }: { onFlash: (m: string) => void; onError: (e: unknown) => void }) {
+  const [s, setS] = useState<PortalSettings | null>(null);
+  const [f, setF] = useState({ enabled: false, slug: "", contactName: "", contactEmail: "", contactPhone: "", officeLocation: "" });
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.get<PortalSettings>("/org/portal-settings").then((d) => {
+      setS(d);
+      setF({
+        enabled: d.portalEnabled, slug: d.portalSlug ?? "",
+        contactName: d.portalContactName ?? "", contactEmail: d.portalContactEmail ?? "",
+        contactPhone: d.portalContactPhone ?? "", officeLocation: d.portalOfficeLocation ?? "",
+      });
+    }).catch(onError);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (f.enabled && !f.slug.trim()) { onError(new ApiError(400, "Set a portal URL before enabling the portal.")); return; }
+    setBusy(true);
+    try {
+      const d = await api.patch<PortalSettings>("/org/portal-settings", {
+        enabled: f.enabled,
+        ...(f.slug.trim() ? { slug: f.slug.trim().toLowerCase() } : {}),
+        contactName: f.contactName || null,
+        contactEmail: f.contactEmail || null,
+        contactPhone: f.contactPhone || null,
+        officeLocation: f.officeLocation || null,
+      });
+      setS(d);
+      onFlash("Portal settings saved.");
+    } catch (e2) { onError(e2); }
+    finally { setBusy(false); }
+  }
+
+  if (!s) return <p className="muted">Loading…</p>;
+  const url = f.slug ? `${window.location.origin}/portal/${f.slug.trim().toLowerCase()}` : null;
+
+  return (
+    <form onSubmit={save} style={{ maxWidth: 640 }}>
+      <p className="muted" style={{ marginTop: 0 }}>
+        The Buyer Offering Portal is your public marketplace: published deals appear at your portal URL, and buyers can browse,
+        filter, view offering pages, and submit their acquisition criteria (which creates buyer leads in the CRM).
+      </p>
+      <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+        <input type="checkbox" checked={f.enabled} onChange={(e) => setF((p) => ({ ...p, enabled: e.target.checked }))} />
+        <strong>Portal enabled</strong>
+      </label>
+      <div className="field">
+        <label>Portal URL</label>
+        <input value={f.slug} onChange={(e) => setF((p) => ({ ...p, slug: e.target.value }))} placeholder="your-company" />
+        {url && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{url}</div>}
+      </div>
+      <div className="grid-2">
+        <div className="field"><label>Primary contact name</label><input value={f.contactName} onChange={(e) => setF((p) => ({ ...p, contactName: e.target.value }))} /></div>
+        <div className="field"><label>Contact email</label><input type="email" value={f.contactEmail} onChange={(e) => setF((p) => ({ ...p, contactEmail: e.target.value }))} /></div>
+        <div className="field"><label>Contact phone</label><input value={f.contactPhone} onChange={(e) => setF((p) => ({ ...p, contactPhone: e.target.value }))} /></div>
+        <div className="field"><label>Office location (optional)</label><input value={f.officeLocation} onChange={(e) => setF((p) => ({ ...p, officeLocation: e.target.value }))} /></div>
+      </div>
+      <p className="muted" style={{ fontSize: 12 }}>Branding (logo) comes from Settings → Company Branding. Deals are published individually from each deal page.</p>
+      <button className="primary" disabled={busy}>{busy ? "Saving…" : "Save portal settings"}</button>
+    </form>
   );
 }

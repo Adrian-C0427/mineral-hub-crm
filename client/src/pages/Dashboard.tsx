@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { MetricCard, Banner, StageBadge, Spinner } from "../components/ui";
 import { money, fmtDate, prettyStage } from "../lib/format";
+import { NotificationsPanel } from "../components/NotificationsPanel";
 
 interface DashboardData {
   metrics: { activeDeals: number; projectedProfit: number; closedProfitYtd: number; avgDealSize: number; offersPending: number };
@@ -28,6 +29,8 @@ export function Dashboard() {
   return (
     <div className="page">
       <div className="page-header"><h1>Dashboard</h1></div>
+
+      <NotificationsPanel />
 
       {firstRun && (
         <div className="panel">

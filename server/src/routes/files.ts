@@ -89,10 +89,12 @@ filesRouter.get(
   }),
 );
 
-// Rename and/or move a file between folders.
+// Rename, move between folders, and/or toggle buyer-portal visibility.
 const patchSchema = z.object({
   filename: z.string().trim().min(1).max(255).optional(),
   folder: z.string().trim().min(1).max(80).optional(),
+  // Approve/revoke this document for the deal's public offering page.
+  visibleToBuyers: z.boolean().optional(),
 });
 filesRouter.patch(
   "/:id",
@@ -100,12 +102,16 @@ filesRouter.patch(
     const file = await prisma.fileAttachment.findFirst({ where: fileOrgWhere(req.params.id, orgId(req)) });
     if (!file) throw new HttpError(404, "File not found");
     const patch = patchSchema.parse(req.body);
-    if (patch.filename === undefined && patch.folder === undefined) throw new HttpError(400, "Nothing to update");
+    if (patch.filename === undefined && patch.folder === undefined && patch.visibleToBuyers === undefined) throw new HttpError(400, "Nothing to update");
     const updated = await prisma.fileAttachment.update({
       where: { id: file.id },
-      data: { ...(patch.filename !== undefined ? { filename: patch.filename } : {}), ...(patch.folder !== undefined ? { folder: patch.folder } : {}) },
+      data: {
+        ...(patch.filename !== undefined ? { filename: patch.filename } : {}),
+        ...(patch.folder !== undefined ? { folder: patch.folder } : {}),
+        ...(patch.visibleToBuyers !== undefined ? { visibleToBuyers: patch.visibleToBuyers } : {}),
+      },
     });
-    res.json({ id: updated.id, filename: updated.filename, folder: updated.folder });
+    res.json({ id: updated.id, filename: updated.filename, folder: updated.folder, visibleToBuyers: updated.visibleToBuyers });
   }),
 );
 
