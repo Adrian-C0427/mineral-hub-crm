@@ -35,20 +35,20 @@ const NAV: NavItem[] = [
   { label: "Buyers", icon: Users, to: "/buyers", perm: "viewBuyers", desc: "Buyer list, buy boxes, and relationships" },
   { label: "Map", icon: MapIcon, to: "/map", perm: "viewMap", desc: "Wells, abstracts, and deals on the Texas map" },
   { label: "Research", icon: Telescope, to: "/research", perm: "viewResearch", desc: "Market intelligence — county transactions, permits, operators" },
-  { label: "Well Analysis", icon: TrendingDown, to: "/valuation", perm: "viewResearch", desc: "Value specific wells — decline curves, forecasts, offer prices" },
+  { label: "Well Analysis", icon: TrendingDown, to: "/valuation", perm: "viewWellAnalysis", desc: "Value specific wells — decline curves, forecasts, offer prices" },
   { label: "Reports", icon: BarChart3, to: "/reports", perm: "viewReports", desc: "Your business performance — closed deals, profit, win rate" },
   { label: "Expenses", icon: Receipt, to: "/expenses", perm: "manageExpenses", desc: "Company spend and reimbursements" },
   // Buyer Portal is operational-only (the offerings marketplace); its
   // configuration lives under Settings → Buyer Portal, so viewing settings
   // never lights up this item.
-  { label: "Buyer Portal", icon: Store, to: "/portal-admin", perm: "manageOrgSettings", desc: "Your public offering marketplace" },
+  { label: "Buyer Portal", icon: Store, to: "/portal-admin", perm: "publishOfferings", desc: "Your public offering marketplace" },
   {
     label: "Settings", icon: SettingsIcon,
     children: [
       { label: "General", icon: SettingsIcon, to: "/settings/general" },
       // Organization now lives under Settings (company, members, roles, owner).
       { label: "Organization", icon: SettingsIcon, to: "/settings/organization", perm: "orgSection" },
-      { label: "Buyer Portal", icon: Store, to: "/settings/portal", perm: "manageOrgSettings" },
+      { label: "Buyer Portal", icon: Store, to: "/settings/portal", perm: "managePortal" },
       { label: "Integrations", icon: SettingsIcon, to: "/settings/integrations", perm: "manageApiIntegrations" },
     ],
   },
@@ -77,9 +77,10 @@ export function Sidebar() {
     return () => mq.removeEventListener("change", onChange);
   }, []);
 
-  // "orgSection" is a virtual permission: visible if the user can manage members OR roles.
+  // "orgSection" is a virtual permission: visible to anyone who can manage
+  // members or the org's settings (Roles & Permissions is owner-only within).
   const allowed = (item: NavItem): boolean => {
-    if (item.perm === "orgSection") return can("manageMembers") || can("manageRoles");
+    if (item.perm === "orgSection") return can("manageMembers") || can("manageOrgSettings");
     return !item.perm || can(item.perm);
   };
 

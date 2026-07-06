@@ -105,7 +105,7 @@ export function App() {
           <Route path="/buyers/:id" element={<Guard perm="viewBuyers"><BuyerProfile /></Guard>} />
           <Route path="/reports" element={<Guard perm="viewReports"><Suspense fallback={<Spinner label="Loading reports…" />}><Reports /></Suspense></Guard>} />
           <Route path="/research" element={<Guard perm="viewResearch"><Suspense fallback={<Spinner label="Loading research…" />}><Research /></Suspense></Guard>} />
-          <Route path="/valuation" element={<Guard perm="viewResearch"><Suspense fallback={<Spinner label="Loading well analysis…" />}><Valuation /></Suspense></Guard>} />
+          <Route path="/valuation" element={<Guard perm="viewWellAnalysis"><Suspense fallback={<Spinner label="Loading well analysis…" />}><Valuation /></Suspense></Guard>} />
           <Route path="/assets" element={<Guard perm="viewDeals"><Suspense fallback={<Spinner label="Loading mineral assets…" />}><MineralAssets /></Suspense></Guard>} />
           <Route path="/assets/:id" element={<Guard perm="viewDeals"><Suspense fallback={<Spinner label="Loading asset…" />}><MineralAssetDetail /></Suspense></Guard>} />
           <Route path="/expenses" element={<Guard perm="manageExpenses"><Suspense fallback={<Spinner label="Loading expenses…" />}><Expenses /></Suspense></Guard>} />
@@ -113,10 +113,10 @@ export function App() {
           {/* Organization moved under Settings; keep the old path as a redirect. */}
           <Route path="/organization" element={<Navigate to="/settings/organization" replace />} />
           <Route path="/settings/organization" element={<Organization />} />
-          <Route path="/portal-admin" element={<Guard perm="manageOrgSettings"><Suspense fallback={<Spinner label="Loading…" />}><PortalAdmin /></Suspense></Guard>} />
+          <Route path="/portal-admin" element={<Guard perm="publishOfferings"><Suspense fallback={<Spinner label="Loading…" />}><PortalAdmin /></Suspense></Guard>} />
           <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
           <Route path="/settings/general" element={<SettingsGeneral />} />
-          <Route path="/settings/portal" element={<Guard perm="manageOrgSettings"><SettingsPortal /></Guard>} />
+          <Route path="/settings/portal" element={<Guard perm="managePortal"><SettingsPortal /></Guard>} />
           <Route path="/settings/integrations" element={<Guard perm="manageApiIntegrations"><Suspense fallback={<Spinner label="Loading integrations…" />}><Integrations /></Suspense></Guard>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

@@ -3,7 +3,7 @@ import multer from "multer";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { env } from "../config.js";
 import { buildKey, putObject, getDownloadUrl, deleteObject, isAllowedMime, sniffMime, s3Configured } from "../services/s3.js";
 
@@ -23,6 +23,7 @@ const metaSchema = z.object({
 
 filesRouter.post(
   "/",
+  requirePermission("manageDocuments"),
   upload.single("file"),
   asyncHandler(async (req: AuthedRequest, res) => {
     if (!s3Configured()) throw new HttpError(503, "File storage is not configured (set S3_* env vars)");
@@ -98,6 +99,7 @@ const patchSchema = z.object({
 });
 filesRouter.patch(
   "/:id",
+  requirePermission("manageDocuments"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const file = await prisma.fileAttachment.findFirst({ where: fileOrgWhere(req.params.id, orgId(req)) });
     if (!file) throw new HttpError(404, "File not found");
@@ -120,6 +122,7 @@ filesRouter.patch(
 // back to it via supersedes.
 filesRouter.post(
   "/:id/replace",
+  requirePermission("manageDocuments"),
   upload.single("file"),
   asyncHandler(async (req: AuthedRequest, res) => {
     if (!s3Configured()) throw new HttpError(503, "File storage is not configured (set S3_* env vars)");
@@ -183,6 +186,7 @@ filesRouter.get(
 
 filesRouter.delete(
   "/:id",
+  requirePermission("manageDocuments"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const file = await prisma.fileAttachment.findFirst({ where: fileOrgWhere(req.params.id, orgId(req)) });
     if (!file) throw new HttpError(404, "File not found");

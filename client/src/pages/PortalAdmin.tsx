@@ -23,7 +23,7 @@ export function PortalAdmin() {
 
   useEffect(() => {
     api.get<Offering[]>("/deals/portal/offerings").then(setOfferings).catch(() => setOfferings([]));
-    if (can("manageOrgSettings")) api.get<PortalSettings>("/org/portal-settings").then(setSettings).catch(() => {});
+    if (can("managePortal")) api.get<PortalSettings>("/org/portal-settings").then(setSettings).catch(() => {});
   }, [can]);
 
   if (!offerings) return <Spinner label="Loading portal…" />;
@@ -36,7 +36,7 @@ export function PortalAdmin() {
         <div><h1>Buyer Portal</h1><span className="muted">Your public offering marketplace</span></div>
         <div className="row" style={{ gap: 8 }}>
           {marketplaceUrl && settings?.portalEnabled && <a className="btn-primary-link" href={marketplaceUrl} target="_blank" rel="noreferrer">Open marketplace ↗</a>}
-          {can("manageOrgSettings") && <Link to="/settings/portal"><button className="small">Portal settings</button></Link>}
+          {can("managePortal") && <Link to="/settings/portal"><button className="small">Portal settings</button></Link>}
         </div>
       </div>
 

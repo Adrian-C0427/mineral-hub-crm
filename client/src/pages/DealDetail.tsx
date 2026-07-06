@@ -258,7 +258,7 @@ export function DealDetail() {
       </div>
 
       {/* Documents */}
-      <DocumentsSection dealId={deal.id} files={deal.files} onChanged={loadDeal} canEdit={can("editDeals")} canDelete={can("deleteDeals")} />
+      <DocumentsSection dealId={deal.id} files={deal.files} onChanged={loadDeal} canEdit={can("manageDocuments")} canDelete={can("manageDocuments")} />
 
       {showStage && (
         <StageChangeModal
