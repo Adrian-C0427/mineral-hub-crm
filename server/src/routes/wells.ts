@@ -115,29 +115,131 @@ function serializeWell(w: {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Production is read LIVE from the centralized well database — never copied.
+//
+// A well imported from the B5 pipeline (source "rrc") carries a `sourceRef`
+// (the rrc.wells fid). Its production comes straight from rrc.production at
+// read time, so the Map, Well Analysis, Research and any future module all see
+// the same rows and a subsequent B5 import is reflected instantly with no sync
+// step. Manually entered / CSV-imported wells keep using WellProductionMonth.
+// ---------------------------------------------------------------------------
+
+const ymStr = (ym: number): string => `${Math.floor(ym / 100)}-${String(ym % 100).padStart(2, "0")}`;
+
+type ProdWell = { id: string; source: string; sourceRef: string | null; apiNumber: string | null };
+
+/**
+ * Live lease-allocated production for a set of rrc-linked wells, keyed by
+ * well id. Texas reports at the lease level, so a lease's series is split
+ * evenly across the lease's wells (identical allocation to the map heat
+ * layer). One round-trip resolves every well's lease; a second pulls all the
+ * production rows.
+ */
+async function rrcVolumesByWell(wells: ProdWell[]): Promise<Map<string, MonthVolumes[]>> {
+  const out = new Map<string, MonthVolumes[]>();
+  const rrc = wells.filter((w) => w.source === "rrc" && (w.sourceRef || w.apiNumber));
+  if (!rrc.length) return out;
+
+  // Resolve each well's rrc lease (lease_no/district/oil_gas) by fid or API.
+  const fids = rrc.map((w) => w.sourceRef).filter(Boolean) as string[];
+  const apis = rrc.filter((w) => !w.sourceRef && w.apiNumber).map((w) => (w.apiNumber ?? "").replace(/\D/g, ""));
+  const leaseRows = await prisma.$queryRawUnsafe<{ fid: number; api8: string | null; api10: string | null; lease_no: string | null; district: string | null; oil_gas: string | null }[]>(
+    `SELECT fid, api8, api10, lease_no, district, oil_gas FROM rrc.wells
+      WHERE fid = ANY($1::int[]) OR api8 = ANY($2::text[]) OR api10 = ANY($2::text[])`,
+    fids.map(Number), apis,
+  );
+
+  // Distinct (og,district,lease) tuples → one production query for all.
+  const leaseKey = (og: string, d: string, l: string) => `${og}|${d}|${l}`;
+  const leases = new Map<string, { og: string; district: string; leaseNo: string }>();
+  const wellLease = new Map<string, string>(); // well.id → leaseKey
+  const shareOf = new Map<string, number>();    // leaseKey → sibling count (oil only)
+
+  for (const w of rrc) {
+    const row = w.sourceRef
+      ? leaseRows.find((r) => String(r.fid) === w.sourceRef)
+      : leaseRows.find((r) => r.api8 === (w.apiNumber ?? "").replace(/\D/g, "") || r.api10 === (w.apiNumber ?? "").replace(/\D/g, ""));
+    if (!row?.lease_no || !row.district) continue;
+    const og = row.oil_gas === "Gas" ? "G" : "O";
+    const key = leaseKey(og, row.district, row.lease_no);
+    leases.set(key, { og, district: row.district, leaseNo: row.lease_no });
+    wellLease.set(w.id, key);
+  }
+  if (!leases.size) return out;
+
+  const leaseList = [...leases.values()];
+  const [prodRows, siblingRows] = await Promise.all([
+    prisma.$queryRawUnsafe<{ og: string; district: string; lease_no: string; ym: number; oil: number; gas: number }[]>(
+      `SELECT og_code AS og, district, lease_no, cycle_ym AS ym,
+              sum(oil_bbl + cond_bbl)::float AS oil, sum(gas_mcf + csgd_mcf)::float AS gas
+         FROM rrc.production
+        WHERE (og_code, district, lease_no) IN (${leaseList.map((_, i) => `($${i * 3 + 1},$${i * 3 + 2},$${i * 3 + 3})`).join(",")})
+        GROUP BY og_code, district, lease_no, cycle_ym ORDER BY cycle_ym`,
+      ...leaseList.flatMap((l) => [l.og, l.district, l.leaseNo]),
+    ),
+    // Oil leases split among their wells; gas leases are per-well (share = 1).
+    prisma.$queryRawUnsafe<{ district: string; lease_no: string; oil_gas: string; n: bigint }[]>(
+      `SELECT district, lease_no, oil_gas, count(*)::bigint AS n FROM rrc.wells
+        WHERE (district, lease_no) IN (${leaseList.map((_, i) => `($${i * 2 + 1},$${i * 2 + 2})`).join(",")})
+        GROUP BY district, lease_no, oil_gas`,
+      ...leaseList.flatMap((l) => [l.district, l.leaseNo]),
+    ),
+  ]);
+  for (const l of leaseList) {
+    const sib = siblingRows.find((s) => s.district === l.district && s.lease_no === l.leaseNo && (s.oil_gas === "Gas") === (l.og === "G"));
+    shareOf.set(leaseKey(l.og, l.district, l.leaseNo), l.og === "G" ? 1 : Math.max(1, Number(sib?.n ?? 1n)));
+  }
+
+  // Group production rows by leaseKey.
+  const byLease = new Map<string, MonthVolumes[]>();
+  for (const r of prodRows) {
+    const key = leaseKey(r.og, r.district, r.lease_no);
+    const share = shareOf.get(key) ?? 1;
+    (byLease.get(key) ?? byLease.set(key, []).get(key)!).push({
+      month: ymStr(r.ym), oilBbl: r.oil / share, gasMcf: r.gas / share, nglBbl: 0, waterBbl: 0,
+    });
+  }
+  for (const [wellId, key] of wellLease) out.set(wellId, byLease.get(key) ?? []);
+  return out;
+}
+
+function summaryOf(volumes: MonthVolumes[]): WellSummary {
+  if (!volumes.length) return { firstMonth: null, lastMonth: null, months: 0, cumOilBbl: 0, cumGasMcf: 0, cumNglBbl: 0 };
+  const months = volumes.map((v) => v.month).sort();
+  return {
+    firstMonth: months[0], lastMonth: months[months.length - 1], months: volumes.length,
+    cumOilBbl: volumes.reduce((s, v) => s + v.oilBbl, 0),
+    cumGasMcf: volumes.reduce((s, v) => s + v.gasMcf, 0),
+    cumNglBbl: volumes.reduce((s, v) => s + v.nglBbl, 0),
+  };
+}
+
 async function productionSummaries(wellIds: string[]): Promise<Map<string, WellSummary>> {
   if (!wellIds.length) return new Map();
+  const wells = await prisma.researchWell.findMany({ where: { id: { in: wellIds } }, select: { id: true, source: true, sourceRef: true, apiNumber: true } });
+  const rrcVols = await rrcVolumesByWell(wells);
+  // Manual / CSV production (everything that isn't an rrc live read).
   const groups = await prisma.wellProductionMonth.groupBy({
     by: ["wellId"],
-    where: { wellId: { in: wellIds } },
-    _min: { month: true },
-    _max: { month: true },
-    _count: true,
+    where: { wellId: { in: wellIds }, NOT: { source: "rrc" } },
+    _min: { month: true }, _max: { month: true }, _count: true,
     _sum: { oilBbl: true, gasMcf: true, nglBbl: true },
   });
-  return new Map(
-    groups.map((g) => [
-      g.wellId,
-      {
-        firstMonth: g._min.month ? dateToYm(g._min.month) : null,
-        lastMonth: g._max.month ? dateToYm(g._max.month) : null,
-        months: g._count,
-        cumOilBbl: g._sum.oilBbl ?? 0,
-        cumGasMcf: g._sum.gasMcf ?? 0,
-        cumNglBbl: g._sum.nglBbl ?? 0,
-      },
-    ]),
-  );
+  const manual = new Map(groups.map((g) => [g.wellId, g]));
+
+  const result = new Map<string, WellSummary>();
+  for (const w of wells) {
+    const live = rrcVols.get(w.id);
+    if (live && live.length) { result.set(w.id, summaryOf(live)); continue; }
+    const g = manual.get(w.id);
+    if (g) result.set(w.id, {
+      firstMonth: g._min.month ? dateToYm(g._min.month) : null,
+      lastMonth: g._max.month ? dateToYm(g._max.month) : null,
+      months: g._count, cumOilBbl: g._sum.oilBbl ?? 0, cumGasMcf: g._sum.gasMcf ?? 0, cumNglBbl: g._sum.nglBbl ?? 0,
+    });
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -310,40 +412,16 @@ wellsRouter.post(
       ? await prisma.researchWell.update({ where: { id: existing.id }, data })
       : await prisma.researchWell.create({ data: { ...data, organizationId: org, apiNumber: api } });
 
-    // Production: Texas reports at LEASE level, so allocate the lease series
-    // evenly across the lease's wells (same allocation as the map heat layer).
-    let synced = 0;
-    if (w.lease_no && w.district) {
-      const og = w.oil_gas === "Gas" ? "G" : "O";
-      const [series, siblings] = await Promise.all([
-        prisma.$queryRawUnsafe<{ ym: number; oil: number; gas: number }[]>(
-          `SELECT cycle_ym AS ym, sum(oil_bbl + cond_bbl)::float AS oil, sum(gas_mcf + csgd_mcf)::float AS gas
-             FROM rrc.production WHERE og_code = $1 AND district = $2 AND lease_no = $3
-            GROUP BY cycle_ym ORDER BY cycle_ym`, og, w.district, w.lease_no),
-        prisma.$queryRawUnsafe<{ n: bigint }[]>(
-          `SELECT count(*)::bigint AS n FROM rrc.wells
-            WHERE lease_no = $1 AND district = $2 AND oil_gas = $3`, w.lease_no, w.district, w.oil_gas ?? ""),
-      ]);
-      // Gas leases are per-well; oil leases split among the lease's wells.
-      const share = og === "G" ? 1 : Math.max(1, Number(siblings[0]?.n ?? 1n));
-      await prisma.wellProductionMonth.deleteMany({ where: { wellId: well.id, source: "rrc" } });
-      if (series.length) {
-        const ymStr = (ym: number) => `${Math.floor(ym / 100)}-${String(ym % 100).padStart(2, "0")}`;
-        await prisma.wellProductionMonth.createMany({
-          data: series.map((s) => ({
-            wellId: well.id,
-            month: ymToDate(ymStr(s.ym)),
-            oilBbl: s.oil / share,
-            gasMcf: s.gas / share,
-            source: "rrc",
-          })),
-          skipDuplicates: true,
-        });
-        synced = series.length;
-        if (!well.firstProdDate) {
-          await prisma.researchWell.update({ where: { id: well.id }, data: { firstProdDate: ymToDate(ymStr(series[0].ym)) } });
-        }
-      }
+    // Production is NOT copied — it's read live from rrc.production wherever it's
+    // needed (single source of truth). Purge any stale copies from earlier
+    // versions so nothing is double-counted, and stamp firstProdDate from the
+    // live series for the well card.
+    await prisma.wellProductionMonth.deleteMany({ where: { wellId: well.id, source: "rrc" } });
+    const liveVols = (await rrcVolumesByWell([{ id: well.id, source: "rrc", sourceRef: String(w.fid), apiNumber: api }])).get(well.id) ?? [];
+    const synced = liveVols.length;
+    if (synced && !well.firstProdDate) {
+      const first = liveVols.map((v) => v.month).sort()[0];
+      await prisma.researchWell.update({ where: { id: well.id }, data: { firstProdDate: ymToDate(first) } });
     }
 
     // Permit history rides along so the workspace can show it without a
@@ -494,13 +572,17 @@ const analyzeSchema = z.object({
 async function loadMergedProduction(org: string, wellIds: string[]) {
   const wells = await prisma.researchWell.findMany({ where: { id: { in: wellIds }, organizationId: org } });
   if (wells.length !== wellIds.length) return null;
+  // Live production from the centralized rrc dataset (single source of truth)…
+  const rrcVols = await rrcVolumesByWell(wells);
+  // …plus any manually entered / CSV production (never double-counted with rrc).
   const rows = await prisma.wellProductionMonth.findMany({
-    where: { wellId: { in: wells.map((w) => w.id) } },
+    where: { wellId: { in: wells.map((w) => w.id) }, NOT: { source: "rrc" } },
     orderBy: { month: "asc" },
   });
-  const volumes: MonthVolumes[] = rows.map((r) => ({
-    month: dateToYm(r.month), oilBbl: r.oilBbl, gasMcf: r.gasMcf, nglBbl: r.nglBbl, waterBbl: r.waterBbl,
-  }));
+  const volumes: MonthVolumes[] = [
+    ...[...rrcVols.values()].flat(),
+    ...rows.map((r) => ({ month: dateToYm(r.month), oilBbl: r.oilBbl, gasMcf: r.gasMcf, nglBbl: r.nglBbl, waterBbl: r.waterBbl })),
+  ];
   return { wells, volumes };
 }
 
