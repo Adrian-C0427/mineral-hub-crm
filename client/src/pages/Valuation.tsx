@@ -175,21 +175,23 @@ export function Valuation() {
     api.get<Assumptions>("/wells/assumptions/defaults").then(setAssumptions).catch(() => {});
   }, []);
 
-  // Deep-link from the map's well panel ("Open in Well Analysis"): ?well=<API#>.
-  // Auto-selects the matching analysis well so the user lands ready to run,
-  // without re-searching. (A map well only matches if it's in the analysis
-  // dataset; otherwise the workspace opens for a manual pick.)
+  // Deep-link from the map's well panel ("Open in Well Analysis"):
+  // ?fid=<rrc well id>&well=<API#>. The well is linked into the centralized
+  // dataset and its production is read live from rrc.production, so the user
+  // lands ready to run with the full history — no manual search or re-import.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const fid = params.get("fid");
     const w = params.get("well");
-    if (!w) return;
-    // Try the org's analysis wells first; if the well only exists in the
-    // imported RRC data (B5 pipeline), auto-import it — attributes, full
-    // production history, operator, and permits all populate without any
-    // manual search. Re-importing also refreshes production to the latest.
+    if (!fid && !w) return;
     (async () => {
       try {
-        const found = await api.get<Paged<WellRow>>(`/wells?q=${encodeURIComponent(w)}&pageSize=1`);
+        // fid is exact — upsert-link the rrc well so analyze reads it live.
+        if (fid) {
+          const imported = await api.post<{ well: WellRow }>(`/wells/import-rrc`, { fid: Number(fid) });
+          setSelected([imported.well]); setPageTab("workspace"); return;
+        }
+        const found = await api.get<Paged<WellRow>>(`/wells?q=${encodeURIComponent(w!)}&pageSize=1`);
         if (found.rows[0]?.production?.months) { setSelected([found.rows[0]]); setPageTab("workspace"); return; }
         const imported = await api.post<{ well: WellRow }>(`/wells/import-rrc`, { api: w });
         setSelected([imported.well]);

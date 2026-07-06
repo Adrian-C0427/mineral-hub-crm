@@ -811,7 +811,9 @@ export function MapView() {
                     ))}
                   </>
                 )}
-                <Link className="primary" to={`/valuation?well=${encodeURIComponent(selected.api || selected.api8 || "")}`}
+                {/* fid resolves the exact rrc well (production is read live from
+                    the centralized dataset); the API label is a readable fallback. */}
+                <Link className="primary" to={`/valuation?fid=${selected.fid}&well=${encodeURIComponent(selected.api || selected.api8 || "")}`}
                   style={{ display: "flex", justifyContent: "center", marginTop: 12, padding: "8px 12px", borderRadius: 8 }}>
                   Open in Well Analysis →
                 </Link>
