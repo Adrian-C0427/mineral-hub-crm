@@ -223,6 +223,160 @@ wellsRouter.get(
   }),
 );
 
+// ---------------------------------------------------------------------------
+// RRC bridge — every well imported through the B5/GIS pipeline (rrc.wells +
+// rrc.production) is available in Well Analysis automatically. Search runs
+// live against the rrc schema; opening a well upserts it as a ResearchWell
+// (source "rrc") and re-syncs its production ON EVERY OPEN, so a subsequent
+// B5 import is reflected immediately with no manual synchronization step.
+// ---------------------------------------------------------------------------
+
+interface RrcWellRow {
+  fid: number; api8: string | null; api10: string | null; well_no: string | null;
+  lease_no: string | null; lease_name: string | null; operator: string | null;
+  county: string; district: string | null; oil_gas: string | null; type: string | null;
+  status: string | null; field_name: string | null; formations: string[] | null;
+  spud_date: Date | null; abstract: string | null; survey: string | null;
+  lon: number | null; lat: number | null;
+}
+
+wellsRouter.get(
+  "/rrc-search",
+  requirePermission("viewResearch"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { q } = z.object({ q: z.string().trim().min(2).max(120) }).parse(req.query);
+    const rows = await prisma.$queryRawUnsafe<(RrcWellRow & { has_prod: boolean })[]>(
+      `SELECT w.fid, w.api8, w.api10, w.well_no, w.lease_no, w.lease_name, w.operator, w.county,
+              w.district, w.oil_gas, w.type, w.status,
+              EXISTS (SELECT 1 FROM rrc.production p
+                       WHERE p.lease_no = w.lease_no AND p.district = w.district
+                         AND p.og_code = CASE WHEN w.oil_gas = 'Gas' THEN 'G' ELSE 'O' END) AS has_prod
+         FROM rrc.wells w
+        WHERE w.api8 LIKE '%' || $1 || '%' OR w.api10 LIKE '%' || $1 || '%'
+           OR w.lease_name ILIKE '%' || $1 || '%' OR w.operator ILIKE '%' || $1 || '%'
+        ORDER BY has_prod DESC, similarity(coalesce(w.lease_name, ''), $1) DESC, w.county
+        LIMIT 15`,
+      q,
+    );
+    res.json(rows.map((w) => ({
+      fid: w.fid, api: w.api10 ?? w.api8, name: `${w.lease_name ?? "Well"}${w.well_no ? ` #${w.well_no}` : ""}`,
+      operator: w.operator, county: w.county, type: w.type, status: w.status, hasProduction: w.has_prod,
+    })));
+  }),
+);
+
+wellsRouter.post(
+  "/import-rrc",
+  requirePermission("viewResearch"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const body = z.object({ fid: z.number().int().optional(), api: z.string().trim().max(20).optional() })
+      .refine((b) => b.fid !== undefined || b.api, "fid or api required").parse(req.body);
+    const org = orgId(req);
+    const rows = await prisma.$queryRawUnsafe<RrcWellRow[]>(
+      `SELECT fid, api8, api10, well_no, lease_no, lease_name, operator, county, district, oil_gas,
+              type, status, field_name, formations, spud_date, abstract, survey,
+              ST_X(geom) AS lon, ST_Y(geom) AS lat
+         FROM rrc.wells WHERE ${body.fid !== undefined ? "fid = $1" : "(api8 = $1 OR api10 = $1)"} LIMIT 1`,
+      body.fid !== undefined ? body.fid : body.api!.replace(/-/g, ""),
+    );
+    const w = rows[0];
+    if (!w) return res.status(404).json({ error: "Well not found in the imported RRC data" });
+
+    const api = w.api10 ?? w.api8;
+    const name = `${w.lease_name ?? "WELL"}${w.well_no ? ` #${w.well_no}` : ""}`.toUpperCase();
+    const data = {
+      name,
+      operator: w.operator,
+      leaseName: w.lease_name,
+      fieldName: w.field_name,
+      formation: w.formations?.[0] ?? null,
+      state: "TX",
+      county: w.county,
+      status: classifyWellStatus(w.status ?? ""),
+      trajectory: classifyTrajectory(/HORIZ|\dH\b/i.test(`${w.type ?? ""} ${w.well_no ?? ""}`) ? "H" : ""),
+      wellType: w.oil_gas ?? w.type,
+      spudDate: w.spud_date,
+      abstractId: w.abstract,
+      survey: w.survey,
+      latitude: w.lat,
+      longitude: w.lon,
+      source: "rrc",
+      sourceRef: String(w.fid),
+    };
+    const existing = await prisma.researchWell.findFirst({
+      where: { organizationId: org, OR: [{ source: "rrc", sourceRef: String(w.fid) }, ...(api ? [{ apiNumber: api }] : [])] },
+    });
+    const well = existing
+      ? await prisma.researchWell.update({ where: { id: existing.id }, data })
+      : await prisma.researchWell.create({ data: { ...data, organizationId: org, apiNumber: api } });
+
+    // Production: Texas reports at LEASE level, so allocate the lease series
+    // evenly across the lease's wells (same allocation as the map heat layer).
+    let synced = 0;
+    if (w.lease_no && w.district) {
+      const og = w.oil_gas === "Gas" ? "G" : "O";
+      const [series, siblings] = await Promise.all([
+        prisma.$queryRawUnsafe<{ ym: number; oil: number; gas: number }[]>(
+          `SELECT cycle_ym AS ym, sum(oil_bbl + cond_bbl)::float AS oil, sum(gas_mcf + csgd_mcf)::float AS gas
+             FROM rrc.production WHERE og_code = $1 AND district = $2 AND lease_no = $3
+            GROUP BY cycle_ym ORDER BY cycle_ym`, og, w.district, w.lease_no),
+        prisma.$queryRawUnsafe<{ n: bigint }[]>(
+          `SELECT count(*)::bigint AS n FROM rrc.wells
+            WHERE lease_no = $1 AND district = $2 AND oil_gas = $3`, w.lease_no, w.district, w.oil_gas ?? ""),
+      ]);
+      // Gas leases are per-well; oil leases split among the lease's wells.
+      const share = og === "G" ? 1 : Math.max(1, Number(siblings[0]?.n ?? 1n));
+      await prisma.wellProductionMonth.deleteMany({ where: { wellId: well.id, source: "rrc" } });
+      if (series.length) {
+        const ymStr = (ym: number) => `${Math.floor(ym / 100)}-${String(ym % 100).padStart(2, "0")}`;
+        await prisma.wellProductionMonth.createMany({
+          data: series.map((s) => ({
+            wellId: well.id,
+            month: ymToDate(ymStr(s.ym)),
+            oilBbl: s.oil / share,
+            gasMcf: s.gas / share,
+            source: "rrc",
+          })),
+          skipDuplicates: true,
+        });
+        synced = series.length;
+        if (!well.firstProdDate) {
+          await prisma.researchWell.update({ where: { id: well.id }, data: { firstProdDate: ymToDate(ymStr(series[0].ym)) } });
+        }
+      }
+    }
+
+    // Permit history rides along so the workspace can show it without a
+    // second lookup (rrc.permits is keyed by 8-digit state API).
+    const permits = w.api8
+      ? await prisma.$queryRawUnsafe<{ statusNo: string; permitDate: Date | null; operator: string | null; leaseName: string | null; wellNo: string | null }[]>(
+          `SELECT status_no AS "statusNo", permit_date AS "permitDate", operator, lease_name AS "leaseName", well_no AS "wellNo"
+             FROM rrc.permits WHERE api8 = $1 ORDER BY permit_date DESC NULLS LAST LIMIT 10`, w.api8)
+      : [];
+
+    const summaries = await productionSummaries([well.id]);
+    const fresh = await prisma.researchWell.findUniqueOrThrow({ where: { id: well.id } });
+    res.json({ well: serializeWell(fresh, summaries.get(well.id)), monthsSynced: synced, permits });
+  }),
+);
+
+// Permit history for an analysis well (live from rrc.permits, keyed by the
+// 8-digit state API — apiNumber may carry the "42" prefix).
+wellsRouter.get(
+  "/:id/permits",
+  requirePermission("viewResearch"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const well = await prisma.researchWell.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { apiNumber: true } });
+    if (!well?.apiNumber) return res.json([]);
+    const api8 = well.apiNumber.replace(/\D/g, "").replace(/^42/, "").slice(0, 8);
+    if (api8.length < 8) return res.json([]);
+    const permits = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+      `SELECT status_no AS "statusNo", permit_date AS "permitDate", operator, lease_name AS "leaseName", well_no AS "wellNo"
+         FROM rrc.permits WHERE api8 = $1 ORDER BY permit_date DESC NULLS LAST LIMIT 10`, api8);
+    res.json(permits);
+  }),
+);
+
 const wellBodySchema = z.object({
   apiNumber: z.string().trim().max(20).optional().nullable(),
   name: z.string().trim().min(1).max(200),

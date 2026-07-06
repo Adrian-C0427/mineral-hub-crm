@@ -72,6 +72,8 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     basins: deal.basins,
     formations: deal.formations,
     stage: deal.stage,
+    publishedToPortal: deal.publishedToPortal ?? false,
+    portalSlug: deal.portalSlug ?? null,
     currentStageEnteredAt: deal.currentStageEnteredAt,
     daysInStage: Math.max(
       0,

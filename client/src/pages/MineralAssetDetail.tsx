@@ -9,6 +9,7 @@ import { Spinner, MetricCard, Banner, MatchPercentBadge, MatchBar, Modal, Confir
 import { BuyerActivitySection } from "../components/BuyerActivitySection";
 import { LogContactModal } from "../components/LogContactModal";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
+import { DealPortalPanel } from "../components/DealPortalPanel";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { AbstractMultiPicker } from "../components/AbstractPicker";
 import { US_STATE_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, countiesForStates } from "../lib/options";
@@ -480,6 +481,8 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
   const [showEmail, setShowEmail] = useState(false);
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState(asset);
+  const [acceptOffer, setAcceptOffer] = useState<{ id: string; buyer: string; amount: number } | null>(null);
+  const [acceptBusy, setAcceptBusy] = useState(false);
   useEffect(() => setF(asset), [asset]);
 
   async function savePricing() {
@@ -534,13 +537,22 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
         <div className="panel">
           <h3>Offers</h3>
           <div className="table-scroll"><table className="data-table">
-            <thead><tr><th>Buyer</th><th className="right">Amount</th><th>Status</th><th>Expires</th></tr></thead>
+            <thead><tr><th>Buyer</th><th className="right">Amount</th><th>Status</th><th>Expires</th><th></th></tr></thead>
             <tbody>{asset.offers.map((o) => (
-              <tr key={o.id}><td>{o.buyer.name}</td><td className="right">{money(o.amount)}</td><td>{o.status}</td><td>{fmtDate(o.expirationDate)}</td></tr>
+              <tr key={o.id}>
+                <td>{o.buyer.name}</td><td className="right">{money(o.amount)}</td><td>{o.status}</td><td>{fmtDate(o.expirationDate)}</td>
+                <td className="right">
+                  {asset.selectedOfferId === o.id ? <span className="badge resp-offer">Accepted</span> :
+                    canEdit && <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button>}
+                </td>
+              </tr>
             ))}</tbody>
           </table></div>
         </div>
       )}
+
+      {/* Offering page publishing — identical to a standard deal. */}
+      <DealPortalPanel dealId={asset.id} />
 
       <div className="panel">
         <div className="section-head"><h3>Buyer Activity</h3><span className="muted">Status, notes and communication history for this asset's marketing</span></div>
@@ -582,8 +594,43 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
         )}
       </div>
 
+      {/* Location map + documents — identical to a standard deal. */}
+      <div className="panel">
+        <div className="section-head"><h3>Location</h3><span className="muted">This asset's abstracts and geographic extent</span></div>
+        {asset.abstractIds.length === 0
+          ? <p className="muted" style={{ marginBottom: 0 }}>No abstracts linked yet — add them to see the property on the map.</p>
+          : <Suspense fallback={<Spinner label="Loading map…" />}><DealMap abstractIds={asset.abstractIds} /></Suspense>}
+      </div>
+      <DocumentsPanel assetId={asset.id} files={asset.files} canDelete={canEdit} onChanged={onChanged} />
+
       {logBuyer && <LogContactModal dealId={asset.id} buyerId={logBuyer.id} buyerName={logBuyer.name} users={users} onClose={() => setLogBuyer(null)} onLogged={() => { setLogBuyer(null); onChanged(); }} />}
       {showEmail && <SendDealEmailModal dealId={asset.id} dealName={asset.name} buyerIds={[...selected]} onClose={() => setShowEmail(false)} onSent={() => { setSelected(new Set()); setShowEmail(false); onChanged(); }} />}
+      {acceptOffer && (
+        <ConfirmDialog
+          title="Accept this offer?"
+          confirmLabel={acceptBusy ? "Accepting…" : "Accept"}
+          busy={acceptBusy}
+          onCancel={() => setAcceptOffer(null)}
+          onConfirm={async () => {
+            setAcceptBusy(true);
+            try { await api.post(`/deals/${asset.id}/accept-offer`, { offerId: acceptOffer.id }); setAcceptOffer(null); onChanged(); }
+            finally { setAcceptBusy(false); }
+          }}
+          message={
+            <>
+              <p style={{ marginTop: 0 }}>Accepting <strong>{acceptOffer.buyer}</strong>'s offer of <strong>{money(acceptOffer.amount)}</strong> will:</p>
+              <ul style={{ margin: "0 0 8px", paddingLeft: 18 }}>
+                <li>Mark this buyer's offer as <strong>accepted</strong>.</li>
+                <li>Move the asset sale into the <strong>Closing</strong> process.</li>
+                {asset.publishedToPortal
+                  ? <li>Remove the offering from the <strong>public Buyer Portal</strong>.</li>
+                  : <li>Keep the offering off the public portal.</li>}
+              </ul>
+              <p className="muted" style={{ marginBottom: 0 }}>All buyer activity and communications are preserved for auditing.</p>
+            </>
+          }
+        />
+      )}
     </div>
   );
 }

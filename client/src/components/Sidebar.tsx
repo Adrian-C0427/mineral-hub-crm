@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Briefcase, Workflow, Users, Map as MapIcon, BarChart3, Telescope, TrendingDown,
-  Layers, Receipt, Building2, Settings as SettingsIcon, ChevronRight, ChevronDown, LogOut,
+  Layers, Receipt, Store, Settings as SettingsIcon, ChevronRight, ChevronDown, LogOut,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
@@ -38,11 +38,20 @@ const NAV: NavItem[] = [
   { label: "Well Analysis", icon: TrendingDown, to: "/valuation", perm: "viewResearch", desc: "Value specific wells — decline curves, forecasts, offer prices" },
   { label: "Reports", icon: BarChart3, to: "/reports", perm: "viewReports", desc: "Your business performance — closed deals, profit, win rate" },
   { label: "Expenses", icon: Receipt, to: "/expenses", perm: "manageExpenses", desc: "Company spend and reimbursements" },
-  { label: "Organization", icon: Building2, to: "/organization", perm: "orgSection", desc: "Company, members, roles & permissions" },
+  {
+    // Collapsed by default (like every group) — expand for portal management.
+    label: "Buyer Portal", icon: Store, perm: "manageOrgSettings", desc: "Your public offering marketplace",
+    children: [
+      { label: "Offerings", icon: Store, to: "/portal-admin" },
+      { label: "Portal Settings", icon: SettingsIcon, to: "/settings/organization?tab=portal" },
+    ],
+  },
   {
     label: "Settings", icon: SettingsIcon,
     children: [
       { label: "General", icon: SettingsIcon, to: "/settings/general" },
+      // Organization now lives under Settings (company, members, roles, owner).
+      { label: "Organization", icon: SettingsIcon, to: "/settings/organization", perm: "orgSection" },
       { label: "Integrations", icon: SettingsIcon, to: "/settings/integrations", perm: "manageApiIntegrations" },
     ],
   },

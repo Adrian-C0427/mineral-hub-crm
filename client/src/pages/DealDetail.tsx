@@ -4,7 +4,7 @@ import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import {
   Spinner, PriorityBadge, StageBadge, MetricCard,
-  MatchPercentBadge, MatchBar, Banner, ConfirmDelete,
+  MatchPercentBadge, MatchBar, Banner, ConfirmDelete, ConfirmDialog,
 } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { StageChangeModal } from "../components/StageChangeModal";
@@ -61,6 +61,8 @@ export function DealDetail() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showEmail, setShowEmail] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [acceptOffer, setAcceptOffer] = useState<{ id: string; buyer: string; amount: number } | null>(null);
+  const [acceptBusy, setAcceptBusy] = useState(false);
 
   const loadDeal = useCallback(() => api.get<DealDetailData>(`/deals/${id}`).then(setDeal), [id]);
   const loadMatches = useCallback(() => api.get<MatchRec[]>(`/deals/${id}/matches`).then(setMatches), [id]);
@@ -182,7 +184,7 @@ export function DealDetail() {
                     <td>{o.conditions ?? "—"}</td>
                     <td className="right">
                       {deal.selectedOfferId === o.id ? <span className="badge resp-offer">Accepted</span> :
-                        <button className="small" onClick={async () => { await api.post(`/deals/${id}/accept-offer`, { offerId: o.id }); refreshAll(); }}>Accept</button>}
+                        <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button>}
                     </td>
                   </tr>
                 ))}
@@ -263,6 +265,34 @@ export function DealDetail() {
           hasUnresolvedActivity={hasUnresolved}
           onClose={() => setShowStage(false)}
           onChanged={() => { setShowStage(false); refreshAll(); }}
+        />
+      )}
+      {acceptOffer && (
+        <ConfirmDialog
+          title="Accept this offer?"
+          confirmLabel={acceptBusy ? "Accepting…" : "Accept"}
+          busy={acceptBusy}
+          onCancel={() => setAcceptOffer(null)}
+          onConfirm={async () => {
+            setAcceptBusy(true);
+            try { await api.post(`/deals/${id}/accept-offer`, { offerId: acceptOffer.id }); setAcceptOffer(null); refreshAll(); }
+            finally { setAcceptBusy(false); }
+          }}
+          message={
+            <>
+              <p style={{ marginTop: 0 }}>
+                Accepting <strong>{acceptOffer.buyer}</strong>'s offer of <strong>{money(acceptOffer.amount)}</strong> will:
+              </p>
+              <ul style={{ margin: "0 0 8px", paddingLeft: 18 }}>
+                <li>Mark this buyer's offer as <strong>accepted</strong>.</li>
+                <li>Move the deal into the <strong>Closing</strong> process.</li>
+                {deal.publishedToPortal
+                  ? <li>Remove the opportunity from the <strong>public Buyer Portal</strong> so it's no longer marketed to other buyers.</li>
+                  : <li>Keep the opportunity off the public portal.</li>}
+              </ul>
+              <p className="muted" style={{ marginBottom: 0 }}>All buyer activity and communications are preserved for auditing.</p>
+            </>
+          }
         />
       )}
       {logBuyer && (

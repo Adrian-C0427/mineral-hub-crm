@@ -33,6 +33,8 @@ export interface DealSummary {
   basins: string[];
   formations: string[];
   stage: Stage;
+  publishedToPortal?: boolean;
+  portalSlug?: string | null;
   daysInStage: number;
   priority: Priority;
   profitEst: number | null;
