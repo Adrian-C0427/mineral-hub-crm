@@ -118,11 +118,29 @@ export function PortalOffering() {
           {/* Contact */}
           <div className="panel portal-contact">
             <h3>Interested in this opportunity?</h3>
-            {org.contactName && <div className="portal-contact-line"><strong>{org.contactName}</strong></div>}
-            <div className="portal-contact-line">{org.name}</div>
-            {org.contactPhone && <div className="portal-contact-line"><a href={`tel:${org.contactPhone}`}>{org.contactPhone}</a></div>}
-            {org.contactEmail && <div className="portal-contact-line"><a href={mailto ?? "#"}>{org.contactEmail}</a></div>}
-            {org.officeLocation && <div className="portal-contact-line muted">{org.officeLocation}</div>}
+            <div className="portal-contact-line" style={{ marginBottom: 10 }}>{org.name}</div>
+            {org.contacts.length > 0 ? (
+              <div className="portal-contact-cards">
+                {org.contacts.map((c) => {
+                  const cMail = c.email ? `mailto:${c.email}?subject=${mailSubject}` : null;
+                  return (
+                    <div key={c.id} className="portal-contact-card">
+                      <div className="pcc-avatar">
+                        {c.photo ? <img src={c.photo} alt={c.name} /> : <span>{c.name.split(/\s+/).map((w) => w[0]).slice(0, 2).join("").toUpperCase()}</span>}
+                      </div>
+                      <div className="pcc-body">
+                        <div><strong>{c.name}</strong>{c.isPrimary && org.contacts.length > 1 && <span className="badge" style={{ marginLeft: 6 }}>Primary</span>}</div>
+                        {(c.title || c.department) && <div className="muted" style={{ fontSize: 13 }}>{[c.title, c.department].filter(Boolean).join(" · ")}</div>}
+                        {c.phone && <div className="portal-contact-line"><a href={`tel:${c.phone}`}>{c.phone}</a></div>}
+                        {c.email && <div className="portal-contact-line"><a href={cMail ?? "#"}>{c.email}</a></div>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              org.officeLocation && <div className="portal-contact-line muted">{org.officeLocation}</div>
+            )}
             <div className="row" style={{ marginTop: 14, gap: 8, flexWrap: "wrap" }}>
               {mailto && <a className="btn-primary-link" href={mailto}>Contact Us</a>}
               {mailto && <a className="btn-ghost-link" href={`${mailto}&body=${encodeURIComponent("Please send additional information about this opportunity.")}`}>Request More Info</a>}

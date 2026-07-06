@@ -144,7 +144,9 @@ model Organization {
 
   // --- Buyer Offering Portal (public marketplace) ---------------------------
   // portalSlug is the public URL key (/portal/:slug). Null → portal disabled
-  // for the org. Contact fields power the offering-page contact section.
+  // for the org. The legacy single-contact fields below are retained for
+  // back-compat and lazily migrated into the first PortalContact row; new
+  // contacts live in the PortalContact table (multi-contact, see below).
   portalSlug           String?  @unique
   portalEnabled        Boolean  @default(false)
   portalContactName    String?
@@ -172,6 +174,30 @@ model Organization {
   researchWells     ResearchWell[]
   wellAnalyses      WellAnalysis[]
   notifications     Notification[]
+  portalContacts    PortalContact[]
+}
+
+// A publishable contact card shown on the Buyer Offering Portal. An org can
+// have any number; only `published` ones appear publicly, ordered by
+// `sortOrder` with the single `isPrimary` contact first. `photo` is an optional
+// data-URL headshot (size-capped like the org logos).
+model PortalContact {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  title          String?
+  email          String?
+  phone          String?
+  department     String?
+  photo          String? // data URL, optional headshot
+  isPrimary      Boolean      @default(false)
+  published      Boolean      @default(true)
+  sortOrder      Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId])
 }
 
 // Public visibility of a published offering: PUBLIC appears in the marketplace;

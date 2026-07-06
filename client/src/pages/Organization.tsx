@@ -1,12 +1,15 @@
-import { useSearchParams } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { OrgSettings } from "../components/OrgSettings";
 
-type Tab = "org" | "users" | "roles" | "owner" | "portal";
+type Tab = "org" | "users" | "roles" | "owner";
 
 /** Organization management page (Team Members, Roles & Permissions, Owner controls). */
 export function Organization() {
   const [params] = useSearchParams();
-  const tab = (params.get("tab") as Tab) || "org";
+  const raw = params.get("tab");
+  // Portal settings moved to Settings → Buyer Portal; keep old links working.
+  if (raw === "portal") return <Navigate to="/settings/portal" replace />;
+  const tab = (raw as Tab) || "org";
   return (
     <div className="page" style={{ maxWidth: 900 }}>
       <div className="page-header"><h1>Organization</h1></div>

@@ -2,8 +2,14 @@
 // VITE_API_BASE the app client uses so dev proxy and Railway both work.
 import { API_BASE } from "../../api/client";
 
+export interface PortalContact {
+  id: string; name: string; title: string | null; email: string | null;
+  phone: string | null; department: string | null; photo: string | null; isPrimary: boolean;
+}
 export interface PortalOrg {
   name: string; slug: string | null; fullLogo: string | null; compactLogo: string | null;
+  contacts: PortalContact[];
+  // Legacy single-contact mirror of the primary contact (kept for back-compat).
   contactName: string | null; contactEmail: string | null; contactPhone: string | null; officeLocation: string | null;
 }
 export interface PortalDeal {

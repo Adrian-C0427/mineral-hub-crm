@@ -38,20 +38,17 @@ const NAV: NavItem[] = [
   { label: "Well Analysis", icon: TrendingDown, to: "/valuation", perm: "viewResearch", desc: "Value specific wells — decline curves, forecasts, offer prices" },
   { label: "Reports", icon: BarChart3, to: "/reports", perm: "viewReports", desc: "Your business performance — closed deals, profit, win rate" },
   { label: "Expenses", icon: Receipt, to: "/expenses", perm: "manageExpenses", desc: "Company spend and reimbursements" },
-  {
-    // Collapsed by default (like every group) — expand for portal management.
-    label: "Buyer Portal", icon: Store, perm: "manageOrgSettings", desc: "Your public offering marketplace",
-    children: [
-      { label: "Offerings", icon: Store, to: "/portal-admin" },
-      { label: "Portal Settings", icon: SettingsIcon, to: "/settings/organization?tab=portal" },
-    ],
-  },
+  // Buyer Portal is operational-only (the offerings marketplace); its
+  // configuration lives under Settings → Buyer Portal, so viewing settings
+  // never lights up this item.
+  { label: "Buyer Portal", icon: Store, to: "/portal-admin", perm: "manageOrgSettings", desc: "Your public offering marketplace" },
   {
     label: "Settings", icon: SettingsIcon,
     children: [
       { label: "General", icon: SettingsIcon, to: "/settings/general" },
       // Organization now lives under Settings (company, members, roles, owner).
       { label: "Organization", icon: SettingsIcon, to: "/settings/organization", perm: "orgSection" },
+      { label: "Buyer Portal", icon: Store, to: "/settings/portal", perm: "manageOrgSettings" },
       { label: "Integrations", icon: SettingsIcon, to: "/settings/integrations", perm: "manageApiIntegrations" },
     ],
   },

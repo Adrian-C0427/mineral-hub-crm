@@ -95,9 +95,17 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
   transition: width 0.15s, flex-basis 0.15s;
 }
 .sidebar.collapsed { width: 60px; flex-basis: 60px; }
-.sidebar-brand { display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 14px; border-bottom: 1px solid var(--border); }
-.sidebar-toggle { font-size: 16px; }
-.sidebar-nav { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 2px; }
+/* Brand header: logo is the focal point (left, roomy), the collapse control is
+   a small, unobtrusive chevron pinned to the right. */
+.sidebar-brand { display: flex; align-items: center; gap: 8px; height: 60px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--border); }
+.sidebar-brand .brand, .sidebar-brand .sidebar-logo { margin-right: auto; }
+.sidebar-toggle {
+  flex: 0 0 auto; width: 24px; height: 24px; min-width: 0; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px; color: var(--text-dim); background: transparent;
+}
+.sidebar-toggle:hover { background: var(--panel-2); color: var(--text); }
+.sidebar-nav { flex: 1; overflow-y: auto; padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; }
 .sidebar-link {
   display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 7px;
   color: var(--text-dim); font-weight: 500; cursor: pointer; user-select: none;
@@ -115,7 +123,10 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .sidebar-footer { border-top: 1px solid var(--border); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
 .sidebar-footer .small { display: flex; align-items: center; justify-content: center; gap: 6px; }
 .sidebar-user { font-size: 13px; color: var(--text); line-height: 1.35; }
-.sidebar.collapsed .sidebar-brand { justify-content: center; padding: 0 6px; }
+/* Collapsed rail: stack the compact logo above a centered toggle so both read
+   as intentional rather than crammed onto one 60px row. */
+.sidebar.collapsed .sidebar-brand { flex-direction: column; gap: 6px; height: auto; padding: 10px 0 8px; }
+.sidebar.collapsed .sidebar-brand .brand, .sidebar.collapsed .sidebar-brand .sidebar-logo { margin-right: 0; }
 .sidebar.collapsed .sidebar-link { justify-content: center; padding: 9px 0; }
 .app-main { flex: 1; min-width: 0; overflow-x: hidden; }
 
@@ -179,8 +190,8 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .kv-copy-btn { opacity: 0; background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 12px; margin-left: 5px; padding: 0 2px; line-height: 1; transition: opacity .12s, color .12s; }
 .kv-copy:hover .kv-copy-btn { opacity: 1; }
 /* Company branding logos in the sidebar. */
-.sidebar-logo { max-height: 32px; max-width: 150px; object-fit: contain; display: block; }
-.sidebar-logo.compact { max-height: 30px; max-width: 36px; }
+.sidebar-logo { max-height: 36px; max-width: 156px; object-fit: contain; object-position: left center; display: block; }
+.sidebar-logo.compact { max-height: 34px; max-width: 40px; object-position: center; }
 /* Company Branding settings — drag-and-drop logo slots. */
 .logo-drop { display: grid; place-items: center; min-height: 96px; padding: 12px; border: 1.5px dashed var(--border); border-radius: 8px; background: var(--panel-2); cursor: pointer; transition: border-color .12s, background .12s; text-align: center; }
 .logo-drop:hover { border-color: var(--accent); }
@@ -632,6 +643,31 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
   border: 1px solid var(--border); border-radius: 8px; color: var(--text); }
 .portal-doc:hover { background: var(--panel-2); text-decoration: none; }
 .portal-contact-line { margin: 4px 0; }
+/* Public offering page: published contact cards */
+.portal-contact-cards { display: flex; flex-direction: column; gap: 12px; }
+.portal-contact-card { display: flex; gap: 12px; align-items: flex-start; }
+.pcc-avatar { flex: 0 0 auto; width: 46px; height: 46px; border-radius: 50%; overflow: hidden; background: var(--panel-2);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 15px; color: var(--text-dim); }
+.pcc-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.pcc-body { min-width: 0; }
+
+/* Settings → Buyer Portal: contact manager list */
+.portal-contact-list { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.portal-contact-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.pcr-order { display: flex; flex-direction: column; gap: 2px; }
+.pcr-order .icon-btn { font-size: 11px; line-height: 1; padding: 2px 4px; min-width: 0; }
+.pcr-order .icon-btn:disabled { opacity: 0.3; cursor: default; }
+.pcr-avatar { flex: 0 0 auto; width: 42px; height: 42px; border-radius: 50%; overflow: hidden; background: var(--panel-2);
+  display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; color: var(--text-dim); }
+.pcr-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.pcr-avatar-lg { width: 64px; height: 64px; font-size: 20px; }
+.pcr-body { flex: 1; min-width: 0; }
+.pcr-actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 640px) {
+  .portal-contact-row { flex-wrap: wrap; }
+  .pcr-actions { width: 100%; justify-content: flex-start; }
+}
 .btn-primary-link, .btn-ghost-link { display: inline-flex; align-items: center; padding: 9px 16px; border-radius: 8px;
   font-weight: 600; font-size: 14px; text-decoration: none !important; }
 .btn-primary-link { background: var(--accent); color: #fff; }
