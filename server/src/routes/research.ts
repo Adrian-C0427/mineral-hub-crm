@@ -144,13 +144,65 @@ async function loadDocs(org: string, f: ResearchFilters, win: Window): Promise<D
 }
 
 async function loadPermits(org: string, f: ResearchFilters, win: Window): Promise<PermitRow[]> {
-  return prisma.researchPermit.findMany({
-    where: permitWhere(org, f, win),
-    select: {
-      activityDate: true, state: true, county: true, operator: true, operatorNorm: true,
-      status: true, trajectory: true, abstractId: true, survey: true,
-    },
-  });
+  const [orgRows, rrcRows] = await Promise.all([
+    prisma.researchPermit.findMany({
+      where: permitWhere(org, f, win),
+      select: {
+        activityDate: true, state: true, county: true, operator: true, operatorNorm: true,
+        status: true, trajectory: true, abstractId: true, survey: true, apiNumber: true,
+      },
+    }),
+    loadRrcPermits(f, win),
+  ]);
+  // The platform's imported RRC drilling permits (B3, rrc.permits) participate
+  // in every research analytic automatically — no manual Research-page import.
+  // Dedupe by 8-digit API so a CSV-imported permit isn't double counted.
+  const seen = new Set(orgRows.map((r) => (r.apiNumber ?? "").replace(/\D/g, "").replace(/^42/, "").slice(0, 8)).filter((s) => s.length === 8));
+  return [
+    ...orgRows.map(({ apiNumber: _a, ...r }) => r),
+    ...rrcRows.filter((r) => !r.api8 || !seen.has(r.api8)).map(({ api8: _b, ...r }) => r),
+  ];
+}
+
+interface RrcPermitRow extends PermitRow { api8: string | null }
+
+/**
+ * RRC drilling permits already in the database (B3 import) surfaced as research
+ * rows. Live query — a fresh permit import shows up in Research immediately.
+ * Trajectory is inferred from the well number ("...H" = horizontal), covering
+ * the horizontal-permit analytics without a separate dataset.
+ */
+async function loadRrcPermits(f: ResearchFilters, win: Window): Promise<RrcPermitRow[]> {
+  if (f.state && f.state !== "TX") return [];
+  // Permit-status filter maps only to APPROVED for issued RRC permits.
+  if (f.statuses.length && !f.statuses.includes("APPROVED")) return [];
+  const conds: string[] = [`p.permit_date >= $1`, `p.permit_date <= $2`];
+  const params: unknown[] = [win.from, win.to];
+  if (f.counties.length) { params.push(f.counties); conds.push(`p.county = ANY($${params.length}::text[])`); }
+  try {
+    const rows = await prisma.$queryRawUnsafe<{ permitDate: Date; county: string; operator: string | null; api8: string | null; wellNo: string | null; abstract: string | null; survey: string | null }[]>(
+      `SELECT p.permit_date AS "permitDate", p.county, p.operator, p.api8, p.well_no AS "wellNo",
+              w.abstract, w.survey
+         FROM rrc.permits p
+         LEFT JOIN rrc.wells w ON w.api8 = p.api8
+        WHERE ${conds.join(" AND ")}`,
+      ...params,
+    );
+    const out: RrcPermitRow[] = [];
+    for (const r of rows) {
+      const operatorNorm = normalizeEntity(r.operator) ?? "";
+      if (f.operators.length && !f.operators.includes(operatorNorm)) continue;
+      const trajectory: WellTrajectory = /H[A-Z]?$/.test((r.wellNo ?? "").trim().toUpperCase()) ? "HORIZONTAL" : "UNKNOWN";
+      if (f.trajectories.length && !f.trajectories.includes(trajectory)) continue;
+      out.push({
+        activityDate: r.permitDate, state: "TX", county: r.county,
+        operator: r.operator ?? "Unknown", operatorNorm,
+        status: "APPROVED" as ResearchPermitStatus, trajectory,
+        abstractId: r.abstract, survey: r.survey, api8: r.api8,
+      });
+    }
+    return out;
+  } catch { return []; } // rrc schema absent (fresh install) → org data only
 }
 
 const within = (d: Date, w: Window) => d.getTime() >= w.from.getTime() && d.getTime() < w.to.getTime() + DAY;
@@ -183,6 +235,19 @@ researchRouter.get(
       prisma.researchPermit.groupBy({ by: ["state", "county"], where: { organizationId: org } }),
     ]);
 
+    // Imported RRC permits (B3) contribute their counties + operators to the
+    // filter lists so the whole platform dataset is filterable, not just files
+    // imported through the Research page.
+    let rrcGeo: { county: string }[] = [];
+    let rrcOps: { operatorNorm: string; operator: string }[] = [];
+    try {
+      [rrcGeo, rrcOps] = await Promise.all([
+        prisma.$queryRawUnsafe<{ county: string }[]>(`SELECT DISTINCT county FROM rrc.permits WHERE county IS NOT NULL`),
+        prisma.$queryRawUnsafe<{ operator: string }[]>(`SELECT operator, count(*) n FROM rrc.permits WHERE operator IS NOT NULL GROUP BY operator ORDER BY n DESC LIMIT 500`)
+          .then((rows) => rows.map((r) => ({ operator: r.operator, operatorNorm: normalizeEntity(r.operator) ?? "" })).filter((r) => r.operatorNorm)),
+      ]);
+    } catch { /* rrc schema absent */ }
+
     // Merge doc + permit geographies; dedupe entity display names per norm key.
     const stateSet = new Set<string>(states.map((s) => s.state));
     const countySet = new Map<string, { state: string; county: string }>();
@@ -191,6 +256,7 @@ researchRouter.get(
       stateSet.add(p.state);
       countySet.set(`${p.state}|${p.county}`, { state: p.state, county: p.county });
     }
+    for (const g of rrcGeo) { stateSet.add("TX"); countySet.set(`TX|${g.county}`, { state: "TX", county: g.county }); }
 
     const entityOptions = (rows: { norm: string | null; raw: string | null }[]) => {
       const seen = new Map<string, string>();
@@ -204,7 +270,10 @@ researchRouter.get(
       docTypes: docTypes.map((d) => d.docType).sort(),
       buyers: entityOptions(buyers.map((b) => ({ norm: b.granteeNorm, raw: b.grantee }))),
       sellers: entityOptions(sellers.map((s) => ({ norm: s.grantorNorm, raw: s.grantor }))),
-      operators: entityOptions(operators.map((o) => ({ norm: o.operatorNorm, raw: o.operator }))),
+      operators: entityOptions([
+        ...operators.map((o) => ({ norm: o.operatorNorm, raw: o.operator })),
+        ...rrcOps.map((o) => ({ norm: o.operatorNorm, raw: o.operator })),
+      ]),
     });
   }),
 );

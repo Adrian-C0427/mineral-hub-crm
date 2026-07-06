@@ -1,7 +1,7 @@
 import { useSearchParams } from "react-router-dom";
 import { OrgSettings } from "../components/OrgSettings";
 
-type Tab = "org" | "users" | "roles" | "owner";
+type Tab = "org" | "users" | "roles" | "owner" | "portal";
 
 /** Organization management page (Team Members, Roles & Permissions, Owner controls). */
 export function Organization() {

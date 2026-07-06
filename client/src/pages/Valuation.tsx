@@ -183,9 +183,21 @@ export function Valuation() {
     const params = new URLSearchParams(window.location.search);
     const w = params.get("well");
     if (!w) return;
-    api.get<Paged<WellRow>>(`/wells?q=${encodeURIComponent(w)}&pageSize=1`)
-      .then((r) => { if (r.rows[0]) { setSelected([r.rows[0]]); setPageTab("workspace"); } })
-      .catch(() => {});
+    // Try the org's analysis wells first; if the well only exists in the
+    // imported RRC data (B5 pipeline), auto-import it — attributes, full
+    // production history, operator, and permits all populate without any
+    // manual search. Re-importing also refreshes production to the latest.
+    (async () => {
+      try {
+        const found = await api.get<Paged<WellRow>>(`/wells?q=${encodeURIComponent(w)}&pageSize=1`);
+        if (found.rows[0]?.production?.months) { setSelected([found.rows[0]]); setPageTab("workspace"); return; }
+        const imported = await api.post<{ well: WellRow }>(`/wells/import-rrc`, { api: w });
+        setSelected([imported.well]);
+        setPageTab("workspace");
+      } catch {
+        // Not in the org list or the RRC data — leave the workspace open.
+      }
+    })();
   }, []);
 
   const runAnalysis = useCallback(async (wells: WellRow[], a: Assumptions) => {
@@ -343,6 +355,7 @@ function Workspace(props: {
         {setupOpen && (
           <>
             <WellPicker selected={selected} setSelected={setSelected} />
+            <SelectedWellPermits wells={selected} />
             <AssumptionsForm a={assumptions} onChange={setAssumptions} />
             <div className="row" style={{ marginTop: 14 }}>
               <button className="primary" disabled={running || selected.length === 0} onClick={onRun}>
@@ -372,24 +385,49 @@ function Workspace(props: {
 
 // --- Well picker -----------------------------------------------------------
 
+interface RrcCandidate { fid: number; api: string | null; name: string; operator: string | null; county: string; type: string | null; status: string | null; hasProduction: boolean }
+
 function WellPicker({ selected, setSelected }: { selected: WellRow[]; setSelected: (w: WellRow[]) => void }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<WellRow[]>([]);
+  const [rrc, setRrc] = useState<RrcCandidate[]>([]);
   const [total, setTotal] = useState(0);
   const [searching, setSearching] = useState(false);
+  const [importing, setImporting] = useState<number | null>(null);
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const t = setTimeout(() => {
       setSearching(true);
-      api.get<Paged<WellRow>>(`/wells?q=${encodeURIComponent(q)}&pageSize=8`)
-        .then((r) => { setResults(r.rows); setTotal(r.total); })
+      // Search the org's analysis wells AND the imported RRC dataset (all
+      // counties from the B5 pipeline) in one pass — every imported well is
+      // reachable here without any separate import step.
+      Promise.all([
+        api.get<Paged<WellRow>>(`/wells?q=${encodeURIComponent(q)}&pageSize=8`),
+        q.trim().length >= 2 ? api.get<RrcCandidate[]>(`/wells/rrc-search?q=${encodeURIComponent(q)}`).catch(() => [] as RrcCandidate[]) : Promise.resolve([] as RrcCandidate[]),
+      ])
+        .then(([r, rr]) => {
+          setResults(r.rows); setTotal(r.total);
+          // Hide RRC candidates already present as org analysis wells.
+          const apis = new Set(r.rows.map((x) => (x.apiNumber ?? "").replace(/\D/g, "")));
+          setRrc(rr.filter((c) => !c.api || !apis.has(c.api.replace(/\D/g, ""))));
+        })
         .catch(() => {})
         .finally(() => setSearching(false));
     }, 250);
     return () => clearTimeout(t);
   }, [q]);
+
+  async function addRrc(c: RrcCandidate) {
+    setImporting(c.fid);
+    try {
+      const d = await api.post<{ well: WellRow }>(`/wells/import-rrc`, { fid: c.fid });
+      if (!selected.some((s) => s.id === d.well.id)) setSelected([...selected, d.well]);
+      setQ("");
+    } catch { /* surfaced by empty state */ }
+    finally { setImporting(null); }
+  }
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
@@ -424,7 +462,7 @@ function WellPicker({ selected, setSelected }: { selected: WellRow[]; setSelecte
         {open && (
           <div className="msel-menu">
             {searching && <div className="msel-empty">Searching…</div>}
-            {!searching && addable.length === 0 && <div className="msel-empty">{total === 0 ? "No wells found. Import production data under Well Data & Imports." : "All matching wells already selected."}</div>}
+            {!searching && addable.length === 0 && rrc.length === 0 && <div className="msel-empty">{total === 0 ? "No wells found in your list or the imported RRC data." : "All matching wells already selected."}</div>}
             {!searching && addable.map((w) => (
               <div className="msel-opt" key={w.id} onClick={() => { setSelected([...selected, w]); setQ(""); }}>
                 <strong>{w.name}</strong>{w.apiNumber && <span className="muted"> · API {w.apiNumber}</span>}
@@ -435,9 +473,57 @@ function WellPicker({ selected, setSelected }: { selected: WellRow[]; setSelecte
                 </div>
               </div>
             ))}
+            {!searching && rrc.length > 0 && (
+              <>
+                <div className="msel-empty" style={{ padding: "6px 10px", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                  From imported RRC data · auto-syncs on open
+                </div>
+                {rrc.map((c) => (
+                  <div className="msel-opt" key={c.fid} onClick={() => void addRrc(c)}>
+                    <strong>{c.name}</strong>{c.api && <span className="muted"> · API {c.api}</span>}
+                    <div className="muted" style={{ fontSize: 12 }}>
+                      {c.operator ?? "Unknown operator"} · {c.county} Co, TX · {c.type ?? "—"}
+                      {c.hasProduction ? " · production history available" : " · no production on file"}
+                      {importing === c.fid && " · importing…"}
+                    </div>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// --- Permit history for the selected wells (live from rrc.permits) ----------
+
+interface PermitRow { statusNo: string; permitDate: string | null; operator: string | null; leaseName: string | null; wellNo: string | null }
+
+function SelectedWellPermits({ wells }: { wells: WellRow[] }) {
+  const [permits, setPermits] = useState<{ well: string; rows: PermitRow[] }[]>([]);
+  useEffect(() => {
+    let live = true;
+    // Only worth fetching for a small selection — permit context is per-well.
+    const targets = wells.filter((w) => w.apiNumber).slice(0, 3);
+    if (!targets.length) { setPermits([]); return; }
+    Promise.all(targets.map((w) => api.get<PermitRow[]>(`/wells/${w.id}/permits`).then((rows) => ({ well: w.name, rows })).catch(() => ({ well: w.name, rows: [] as PermitRow[] }))))
+      .then((all) => { if (live) setPermits(all.filter((p) => p.rows.length)); });
+    return () => { live = false; };
+  }, [wells]);
+  if (!permits.length) return null;
+  return (
+    <div style={{ margin: "0 0 14px" }}>
+      <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 4 }}>Permit history (RRC W-1)</div>
+      {permits.map((p) => (
+        <div key={p.well} style={{ fontSize: 13, marginBottom: 4 }}>
+          <strong>{p.well}</strong>
+          {p.rows.slice(0, 4).map((r) => (
+            <span key={r.statusNo} className="muted"> · {r.permitDate ? new Date(r.permitDate).toLocaleDateString() : "—"} {r.operator ?? ""} (#{r.statusNo})</span>
+          ))}
+        </div>
+      ))}
     </div>
   );
 }

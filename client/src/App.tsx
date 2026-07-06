@@ -30,6 +30,7 @@ const MineralAssetDetail = lazy(() => import("./pages/MineralAssetDetail").then(
 // Buyer Offering Portal — public pages (no auth); pulls in MapLibre lazily.
 const PortalMarketplace = lazy(() => import("./pages/portal/PortalMarketplace").then((m) => ({ default: m.PortalMarketplace })));
 const PortalOffering = lazy(() => import("./pages/portal/PortalOffering").then((m) => ({ default: m.PortalOffering })));
+const PortalAdmin = lazy(() => import("./pages/PortalAdmin").then((m) => ({ default: m.PortalAdmin })));
 
 /** Redirect to Dashboard if the user lacks the required permission. */
 function Guard({ perm, children }: { perm: string; children: ReactNode }) {
@@ -108,7 +109,10 @@ export function App() {
           <Route path="/assets/:id" element={<Guard perm="viewDeals"><Suspense fallback={<Spinner label="Loading asset…" />}><MineralAssetDetail /></Suspense></Guard>} />
           <Route path="/expenses" element={<Guard perm="manageExpenses"><Suspense fallback={<Spinner label="Loading expenses…" />}><Expenses /></Suspense></Guard>} />
           <Route path="/map" element={<Guard perm="viewMap"><Suspense fallback={<Spinner label="Loading map…" />}><MapView /></Suspense></Guard>} />
-          <Route path="/organization" element={<Organization />} />
+          {/* Organization moved under Settings; keep the old path as a redirect. */}
+          <Route path="/organization" element={<Navigate to="/settings/organization" replace />} />
+          <Route path="/settings/organization" element={<Organization />} />
+          <Route path="/portal-admin" element={<Guard perm="manageOrgSettings"><Suspense fallback={<Spinner label="Loading…" />}><PortalAdmin /></Suspense></Guard>} />
           <Route path="/settings" element={<Navigate to="/settings/general" replace />} />
           <Route path="/settings/general" element={<SettingsGeneral />} />
           <Route path="/settings/integrations" element={<Guard perm="manageApiIntegrations"><Suspense fallback={<Spinner label="Loading integrations…" />}><Integrations /></Suspense></Guard>} />

@@ -529,6 +529,24 @@ const updateSchema = z.object({
 // Publish state, visibility, featured flag, and buyer-facing summary. The
 // share slug is generated once on first publish and never rotates (shared
 // links keep working); it stays valid-but-inactive while unpublished.
+// All of the org's portal offerings (published + unpublished-but-slugged) for
+// the Buyer Portal admin page.
+dealsRouter.get(
+  "/portal/offerings",
+  requirePermission("viewDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const rows = await prisma.deal.findMany({
+      where: { organizationId: orgId(req), OR: [{ publishedToPortal: true }, { portalSlug: { not: null } }] },
+      select: {
+        id: true, name: true, stage: true, counties: true, states: true, nra: true,
+        publishedToPortal: true, portalSlug: true, portalVisibility: true, portalFeatured: true, updatedAt: true,
+      },
+      orderBy: [{ publishedToPortal: "desc" }, { portalFeatured: "desc" }, { updatedAt: "desc" }],
+    });
+    res.json(rows);
+  }),
+);
+
 dealsRouter.get(
   "/:id/portal",
   requirePermission("viewDeals"),
@@ -627,6 +645,8 @@ dealsRouter.post(
           stage: toStage,
           currentStageEnteredAt: new Date(),
           deadReason: toStage === "DEAD" ? deadReason!.trim() : deal.deadReason,
+          // A dead deal is off the market — unpublish it from the buyer portal.
+          ...(toStage === "DEAD" ? { publishedToPortal: false } : {}),
         },
         include: dealInclude,
       });
@@ -817,17 +837,33 @@ dealsRouter.post(
     const offer = await prisma.offer.findUnique({ where: { id: offerId } });
     if (!offer || offer.dealId !== req.params.id) throw new HttpError(404, "Offer not found on this deal");
 
+    // Accepting moves the deal into the closing process and pulls the offering
+    // from the public portal so it's no longer marketed to other buyers. Buyer
+    // activity and communications are untouched (kept for auditing). Stage only
+    // advances forward — never regress a deal already at/after CLOSING.
+    const advanceToClosing = STAGES.indexOf(deal.stage) < STAGES.indexOf("CLOSING") && deal.stage !== "DEAD";
+    const wasPublished = deal.publishedToPortal;
     const updated = await prisma.$transaction(async (tx) => {
       await tx.offer.update({ where: { id: offerId }, data: { status: "ACCEPTED" } });
       const u = await tx.deal.update({
         where: { id: req.params.id },
-        data: { selectedBuyerId: offer.buyerId, selectedOfferId: offerId },
+        data: {
+          selectedBuyerId: offer.buyerId,
+          selectedOfferId: offerId,
+          publishedToPortal: false,
+          ...(advanceToClosing ? { stage: "CLOSING", currentStageEnteredAt: new Date() } : {}),
+        },
         include: dealInclude,
       });
+      if (advanceToClosing) {
+        await tx.dealStageHistory.create({
+          data: { dealId: deal.id, fromStage: deal.stage, toStage: "CLOSING", changedByUserId: req.user!.id },
+        });
+      }
       await logActivity(
         {
           eventType: "OFFER_ACCEPTED",
-          summary: `${req.user!.name} accepted an offer on "${u.name}"`,
+          summary: `${req.user!.name} accepted an offer on "${u.name}"${advanceToClosing ? " — moved to Closing" : ""}${wasPublished ? " and unpublished the offering" : ""}`,
           organizationId: orgId(req),
           actorUserId: req.user!.id,
           dealId: u.id,
