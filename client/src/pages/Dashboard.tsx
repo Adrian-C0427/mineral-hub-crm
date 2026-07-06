@@ -8,7 +8,7 @@ import { NotificationsPanel } from "../components/NotificationsPanel";
 interface DashboardData {
   metrics: { activeDeals: number; projectedProfit: number; closedProfitYtd: number; avgDealSize: number; offersPending: number };
   overdue: { id: string; name: string; findBuyerByDate: string | null }[];
-  activeByStage: { id: string; name: string; stage: string; profitEst: number | null }[];
+  stageCounts: { stage: string; count: number }[];
   upcomingFollowUps: { dealId: string; buyerName: string; dealName: string; date: string | null }[];
   recentActivity: { id: string; summary: string; createdAt: string }[];
   topBuyers: { id: string; name: string; companyName: string; volume: number }[];
@@ -21,7 +21,9 @@ export function Dashboard() {
   useEffect(() => { api.get<DashboardData>("/dashboard").then(setD); }, []);
   if (!d) return <Spinner />;
 
-  const maxProfit = Math.max(1, ...d.profitByMonth.map((m) => Math.max(m.profit, m.projected)));
+  // Stacked chart: each bar's height is realized + projected, so the y-scale is
+  // the largest combined monthly total.
+  const maxProfit = Math.max(1, ...d.profitByMonth.map((m) => m.profit + m.projected));
   // Brand-new workspace: no active deals and nothing closed yet. Guide the
   // first steps instead of presenting a wall of zeros.
   const firstRun = d.metrics.activeDeals === 0 && d.metrics.closedProfitYtd === 0 && d.recentActivity.length === 0;
@@ -65,16 +67,21 @@ export function Dashboard() {
 
       <div className="grid-2">
         <div className="panel">
-          <div className="panel-title"><h3>Active deals by stage</h3></div>
-          {d.activeByStage.length === 0 ? <p className="muted">No active deals.</p> : d.activeByStage.map((x) => (
-            <div className="list-row" key={x.id}>
-              <Link to={`/deals/${x.id}`}>{x.name}</Link>
-              <div className="row">
-                <StageBadge stage={x.stage} />
-                <span className="muted">{money(x.profitEst)}</span>
-              </div>
+          <div className="panel-title">
+            <h3>Active deals by stage</h3>
+            <Link to="/pipeline" className="muted" style={{ fontSize: 12 }}>View pipeline →</Link>
+          </div>
+          {d.stageCounts.every((s) => s.count === 0) ? <p className="muted">No active deals.</p> : (
+            <div className="stage-counts">
+              {(() => { const maxCount = Math.max(1, ...d.stageCounts.map((s) => s.count)); return d.stageCounts.map((s) => (
+                <Link className="stage-count-row" key={s.stage} to={`/pipeline?stage=${s.stage}`}>
+                  <span className="stage-count-label"><StageBadge stage={s.stage} /></span>
+                  <span className="stage-count-bar"><span className="stage-count-fill" style={{ width: `${(s.count / maxCount) * 100}%` }} /></span>
+                  <span className="stage-count-num">{s.count}</span>
+                </Link>
+              )); })()}
             </div>
-          ))}
+          )}
         </div>
 
         <div className="panel">
@@ -124,10 +131,15 @@ export function Dashboard() {
         ) : (
           <div className="bar-chart">
             {d.profitByMonth.map((m) => (
-              <div className="bar-col" key={m.month} title={`Realized ${money(m.profit)} · Projected ${money(m.projected)}`}>
-                <div className="bar-pair">
-                  <div className="bar" style={{ height: `${(m.profit / maxProfit) * 100}%` }} />
+              <div
+                className="bar-col"
+                key={m.month}
+                title={`${m.month}\nRealized: ${money(m.profit)}\nProjected: ${money(m.projected)}\nTotal: ${money(m.profit + m.projected)}`}
+              >
+                {/* Single stacked bar: realized at the base, projected on top. */}
+                <div className="bar-stack">
                   <div className="bar bar-projected" style={{ height: `${(m.projected / maxProfit) * 100}%` }} />
+                  <div className="bar" style={{ height: `${(m.profit / maxProfit) * 100}%` }} />
                 </div>
                 <div className="bar-label">{m.month}</div>
               </div>

@@ -11,9 +11,10 @@ import { StageChangeModal } from "../components/StageChangeModal";
 import { LogContactModal } from "../components/LogContactModal";
 import { BuyerActivitySection } from "../components/BuyerActivitySection";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
-import { AbstractMultiPicker, useAbstractLabels } from "../components/AbstractPicker";
+import { useAbstractLabels } from "../components/AbstractPicker";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
-import { US_STATE_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, countiesForStates } from "../lib/options";
+import { GeoFields } from "../components/GeoFields";
+import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
 import { operatorsForCounties } from "../lib/operators";
 import { money, num, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
@@ -394,11 +395,14 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
         </div>
       ) : (
         <div className="dd-grid">
-          <Fld l="State"><SearchableMultiSelect options={US_STATE_OPTIONS} value={f.states ?? []} onChange={setArr("states")} placeholder="Select states…" /></Fld>
-          <Fld l="County"><SearchableMultiSelect options={countiesForStates(f.states ?? [])} value={f.counties} onChange={setArr("counties")} placeholder={(f.states ?? []).length ? "Search counties…" : "Select a state first"} /></Fld>
-          <Fld l="Basin"><SearchableMultiSelect options={TEXAS_BASIN_OPTIONS} value={f.basins} onChange={setArr("basins")} placeholder="Search basins…" /></Fld>
-          <Fld l="Formation"><SearchableMultiSelect options={TEXAS_FORMATION_OPTIONS} value={f.formations} onChange={setArr("formations")} placeholder="Search formations…" /></Fld>
-          <Fld l="Asset Type"><SearchableMultiSelect options={ASSET_TYPE_OPTIONS} value={f.assetTypes} onChange={setArr("assetTypes")} placeholder="Search asset types…" /></Fld>
+          <GeoFields
+            states={f.states ?? []} onStatesChange={setArr("states")}
+            counties={f.counties} onCountiesChange={setArr("counties")}
+            abstractIds={f.abstractIds} onAbstractsChange={setArr("abstractIds")}
+          />
+          <Fld l="Basin"><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={f.basins} onChange={setArr("basins")} placeholder="Search basins…" /></Fld>
+          <Fld l="Formation"><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={f.formations} onChange={setArr("formations")} placeholder="Search formations…" /></Fld>
+          <Fld l="Asset Type"><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} value={f.assetTypes} onChange={setArr("assetTypes")} placeholder="Search asset types…" /></Fld>
           <Fld l="NMA"><input type="number" value={f.acreageNma ?? ""} onChange={setNum("acreageNma")} /></Fld>
           <Fld l="NRA"><input type="number" value={f.nra ?? ""} onChange={setNum("nra")} /></Fld>
           <Fld l="Our Price"><input type="number" value={f.ourPrice ?? ""} onChange={setNum("ourPrice")} /></Fld>
@@ -414,7 +418,6 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
               {operatorOptions.map((o) => <option key={o} value={o} />)}
             </datalist>
           </Fld>
-          <Fld l="Abstract"><AbstractMultiPicker value={f.abstractIds} counties={f.counties} onChange={setArr("abstractIds")} /></Fld>
         </div>
       )}
     </div>

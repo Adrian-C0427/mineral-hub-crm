@@ -11,8 +11,8 @@ import { LogContactModal } from "../components/LogContactModal";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { DealPortalPanel } from "../components/DealPortalPanel";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
-import { AbstractMultiPicker } from "../components/AbstractPicker";
-import { US_STATE_OPTIONS, TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, countiesForStates } from "../lib/options";
+import { GeoFields } from "../components/GeoFields";
+import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS } from "../lib/options";
 import { monthLabel, chartTooltip } from "../lib/charts";
 import { money, num, fmtDate, toInputDate } from "../lib/format";
 import { OWNERSHIP_TYPES, OWNERSHIP_STATUSES, PRODUCING_STATUSES } from "./MineralAssets";
@@ -258,14 +258,17 @@ function PropertyCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit
         </div>
       ) : (
         <div className="dd-grid">
-          <Fld l="State"><SearchableMultiSelect options={US_STATE_OPTIONS} value={f.states?.length ? f.states : (f.state ? [f.state] : [])} onChange={(v) => setF({ ...f, states: v })} placeholder="Select states…" /></Fld>
-          <Fld l="Counties"><SearchableMultiSelect options={countiesForStates(f.states?.length ? f.states : (f.state ? [f.state] : []))} value={f.counties} onChange={(v) => setF({ ...f, counties: v })} placeholder="Search counties…" /></Fld>
+          <GeoFields
+            states={f.states?.length ? f.states : (f.state ? [f.state] : [])} onStatesChange={(v) => setF({ ...f, states: v })}
+            counties={f.counties} onCountiesChange={(v) => setF({ ...f, counties: v })}
+            abstractIds={f.abstractIds} onAbstractsChange={(v) => setF({ ...f, abstractIds: v })}
+            labels={{ county: "Counties", abstract: "Abstracts" }}
+          />
           <Fld l="Producing Status"><select value={f.producingStatus ?? ""} onChange={(e) => setF({ ...f, producingStatus: e.target.value })}><option value="">—</option>{PRODUCING_STATUSES.map((t) => <option key={t}>{t}</option>)}</select></Fld>
-          <Fld l="Basins"><SearchableMultiSelect options={TEXAS_BASIN_OPTIONS} value={f.basins} onChange={(v) => setF({ ...f, basins: v })} /></Fld>
-          <Fld l="Formations"><SearchableMultiSelect options={TEXAS_FORMATION_OPTIONS} value={f.formations} onChange={(v) => setF({ ...f, formations: v })} /></Fld>
+          <Fld l="Basins"><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={f.basins} onChange={(v) => setF({ ...f, basins: v })} /></Fld>
+          <Fld l="Formations"><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={f.formations} onChange={(v) => setF({ ...f, formations: v })} /></Fld>
           <Fld l="Operator"><input value={f.operator ?? ""} onChange={(e) => setF({ ...f, operator: e.target.value })} /></Fld>
           <Fld l="Surveys"><SearchableMultiSelect options={[]} value={f.surveys ?? []} onChange={(v) => setF({ ...f, surveys: v })} placeholder="Type a survey, Enter" /></Fld>
-          <Fld l="Abstracts"><AbstractMultiPicker value={f.abstractIds} counties={f.counties} onChange={(v) => setF({ ...f, abstractIds: v })} /></Fld>
           <Fld l="Wells"><SearchableMultiSelect options={[]} value={f.wells ?? []} onChange={(v) => setF({ ...f, wells: v })} placeholder="Type a well name/API, Enter" /></Fld>
           <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}><label>Property Notes</label><textarea rows={3} value={f.notes ?? ""} onChange={(e) => setF({ ...f, notes: e.target.value })} /></div>
         </div>
