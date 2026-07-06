@@ -701,3 +701,6 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .portal-map-hover { position: absolute; top: 10px; left: 52px; z-index: 5; background: var(--panel); border: 1px solid var(--border);
   border-radius: 6px; padding: 5px 10px; font-size: 12px; pointer-events: none; }
 @media (max-width: 900px) { .portal-grid { grid-template-columns: 1fr; } }
+
+/* Compact lead CTA banner (marketplace) */
+.portal-lead-cta { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }

@@ -3,6 +3,9 @@ import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Banner } from "./ui";
 
+type SectionKey = "contact" | "company" | "description" | "documents" | "map" | "wells" | "tracts" | "production" | "attachments" | "notes" | "askPrice";
+type Sections = Record<SectionKey, boolean>;
+
 interface PortalState {
   id: string;
   publishedToPortal: boolean;
@@ -10,8 +13,20 @@ interface PortalState {
   portalVisibility: "PUBLIC" | "LINK_ONLY";
   portalFeatured: boolean;
   portalSummary: string | null;
+  portalSections: Sections;
+  portalAskPrice: number | null;
+  askPrice: number | null;
   files?: { id: string; filename: string; folder: string; visibleToBuyers: boolean }[];
 }
+
+// Ordered for display; labels are buyer-facing section names.
+const SECTION_LABELS: [SectionKey, string][] = [
+  ["contact", "Contact information"], ["company", "Company information"],
+  ["description", "Deal description"], ["askPrice", "Asking price"],
+  ["map", "Map"], ["wells", "Wells"], ["tracts", "Tracts"],
+  ["production", "Production information"], ["documents", "Documents"],
+  ["attachments", "Attachments"], ["notes", "Notes"],
+];
 
 /**
  * "Buyer Portal" admin panel on the deal page: publish/unpublish, public vs
@@ -22,6 +37,7 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
   const { can } = useAuth();
   const [p, setP] = useState<PortalState | null>(null);
   const [summary, setSummary] = useState("");
+  const [askOverride, setAskOverride] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   // Publish controls need publishOfferings; buyer-visibility of a document is a
@@ -29,7 +45,7 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
   const canEdit = can("publishOfferings");
   const canDocs = can("manageDocuments");
 
-  const load = () => api.get<PortalState>(`/deals/${dealId}/portal`).then((d) => { setP(d); setSummary(d.portalSummary ?? ""); }).catch(() => {});
+  const load = () => api.get<PortalState>(`/deals/${dealId}/portal`).then((d) => { setP(d); setSummary(d.portalSummary ?? ""); setAskOverride(d.portalAskPrice != null ? String(d.portalAskPrice) : ""); }).catch(() => {});
   useEffect(() => { void load(); /* eslint-disable-next-line */ }, [dealId]);
 
   async function patch(body: Record<string, unknown>) {
@@ -94,6 +110,39 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
         <label>Buyer-facing summary (shown on the offering page)</label>
         <textarea rows={3} disabled={!canEdit} value={summary} onChange={(e) => setSummary(e.target.value)} onBlur={() => summary !== (p.portalSummary ?? "") && patch({ summary })} placeholder="Describe the opportunity for buyers…" />
       </div>
+
+      {/* Per-deal section visibility — saved only on this deal. */}
+      <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", margin: "10px 0 6px" }}>
+        Sections shown on this listing
+      </div>
+      <div className="row" style={{ gap: 14, flexWrap: "wrap" }}>
+        {SECTION_LABELS.map(([key, label]) => (
+          <label key={key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+            <input
+              type="checkbox" disabled={!canEdit}
+              checked={p.portalSections[key]}
+              onChange={(e) => { const sections = { ...p.portalSections, [key]: e.target.checked }; setP((prev) => prev ? { ...prev, portalSections: sections } : prev); patch({ sections: { [key]: e.target.checked } }); }}
+            />
+            {label}
+          </label>
+        ))}
+      </div>
+
+      {/* Asking price — defaults to the deal's Ask Price; overridable for the
+          listing only (never changes the deal). */}
+      {p.portalSections.askPrice && (
+        <div className="field" style={{ marginTop: 12, maxWidth: 320 }}>
+          <label>Published asking price</label>
+          <input
+            type="number" min="0" disabled={!canEdit}
+            value={askOverride}
+            placeholder={p.askPrice != null ? `Deal ask: $${p.askPrice.toLocaleString()}` : "No deal ask price set"}
+            onChange={(e) => setAskOverride(e.target.value)}
+            onBlur={() => { const v = askOverride.trim() === "" ? null : Number(askOverride); if (v !== p.portalAskPrice) { setP((prev) => prev ? { ...prev, portalAskPrice: v } : prev); patch({ askPrice: v }); } }}
+          />
+          <span className="muted" style={{ fontSize: 12 }}>Leave blank to use the deal's Ask Price ({p.askPrice != null ? `$${p.askPrice.toLocaleString()}` : "not set"}). This override doesn't change the deal.</span>
+        </div>
+      )}
 
       {(p.files?.length ?? 0) > 0 && (
         <>

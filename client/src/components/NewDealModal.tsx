@@ -3,12 +3,12 @@ import { Modal } from "./ui";
 import { api, ApiError } from "../api/client";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
 import { GeoFields } from "./GeoFields";
-import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
+import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
 import type { DealSummary } from "../types";
 
 export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCreated: (d: DealSummary) => void }) {
   const [f, setF] = useState({
-    name: "", operator: "", sellerNames: "",
+    name: "", operator: "",
     acreageNma: "", nra: "", askPrice: "", ourPrice: "", estimatedClosingCosts: "",
     dateUnderContract: "", originalClosingDate: "", notes: "",
   });
@@ -25,8 +25,19 @@ export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCr
     setF((p) => ({ ...p, [k]: e.target.value }));
   const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
 
+  // Required before a deal can be created (matches the server-side check).
+  const missing: string[] = [];
+  if (!f.name.trim()) missing.push("Deal name");
+  if (!states.length) missing.push("State");
+  if (!counties.length) missing.push("County");
+  if (!abstractIds.length) missing.push("Abstract");
+  if (f.nra.trim() === "") missing.push("NRA");
+  if (!assetTypes.length) missing.push("Asset Type");
+  if (f.ourPrice.trim() === "") missing.push("Our Price");
+  if (!f.dateUnderContract) missing.push("Date Under Contract");
+
   async function submit() {
-    if (!f.name.trim()) { setError("Deal name is required"); return; }
+    if (missing.length) { setError(`Required: ${missing.join(", ")}`); return; }
     setBusy(true);
     setError(null);
     try {
@@ -40,7 +51,9 @@ export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCr
         askPrice: numOrNull(f.askPrice),
         ourPrice: numOrNull(f.ourPrice),
         estimatedClosingCosts: numOrNull(f.estimatedClosingCosts),
-        sellerNames: f.sellerNames ? f.sellerNames.split(",").map((s) => s.trim()).filter(Boolean) : [],
+        // Seller info is captured in the structured Seller Details section on the
+        // deal page (the single source of truth) — not here.
+        sellerNames: [],
         dateUnderContract: f.dateUnderContract || null,
         originalClosingDate: f.originalClosingDate || null,
         notes: f.notes || null,
@@ -65,27 +78,30 @@ export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCr
         </>
       }
     >
-      <p className="muted" style={{ marginTop: 0 }}>New deals are created directly into <strong>Under Contract</strong>. Find Buyer By and Final Closing dates auto-calculate from the anchor dates.</p>
-      <div className="field"><label>Deal name *</label><input value={f.name} onChange={set("name")} autoFocus /></div>
+      <p className="muted" style={{ marginTop: 0 }}>
+        New deals start in <strong>Under Contract</strong>. Fields marked <span style={{ color: "var(--red)" }}>*</span> are required.
+        Add sellers afterward in the deal's <strong>Seller Details</strong> section.
+      </p>
+      <div className="field"><label>Deal name <span style={{ color: "var(--red)" }}>*</span></label><input value={f.name} onChange={set("name")} autoFocus /></div>
       <div className="dd-grid">
         <GeoFields
           states={states} onStatesChange={setStates}
           counties={counties} onCountiesChange={setCounties}
           abstractIds={abstractIds} onAbstractsChange={setAbstractIds}
+          labels={{ state: "State *", county: "County *", abstract: "Abstract *" }}
         />
-        <div className="field"><label>Asset Type</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
-        <div className="field"><label>Basin</label><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={basins} onChange={setBasins} placeholder="Search basins…" /></div>
-        <div className="field"><label>Formation</label><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={formations} onChange={setFormations} placeholder="Search formations…" /></div>
+        <div className="field"><label>Asset Type <span style={{ color: "var(--red)" }}>*</span></label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
+        <div className="field"><label>NRA <span style={{ color: "var(--red)" }}>*</span></label><input type="number" value={f.nra} onChange={set("nra")} /></div>
+        <div className="field"><label>Our Price (acquisition cost) <span style={{ color: "var(--red)" }}>*</span></label><input type="number" value={f.ourPrice} onChange={set("ourPrice")} /></div>
+        <div className="field"><label>Date Under Contract <span style={{ color: "var(--red)" }}>*</span></label><input type="date" value={f.dateUnderContract} onChange={set("dateUnderContract")} /></div>
+        <div className="field"><label>Basin</label><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(counties))} value={basins} onChange={setBasins} placeholder={counties.length ? "Suggested for your counties first…" : "Search basins…"} /></div>
+        <div className="field"><label>Formation</label><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(counties))} value={formations} onChange={setFormations} placeholder={counties.length ? "Suggested for your counties first…" : "Search formations…"} /></div>
         <div className="field"><label>Operator</label><input value={f.operator} onChange={set("operator")} /></div>
         <div className="field"><label>NMA</label><input type="number" value={f.acreageNma} onChange={set("acreageNma")} /></div>
-        <div className="field"><label>NRA</label><input type="number" value={f.nra} onChange={set("nra")} /></div>
-        <div className="field"><label>Our Price (acquisition cost)</label><input type="number" value={f.ourPrice} onChange={set("ourPrice")} /></div>
         <div className="field"><label>Ask Price (to buyers)</label><input type="number" value={f.askPrice} onChange={set("askPrice")} /></div>
         <div className="field"><label>Est. Closing Costs</label><input type="number" value={f.estimatedClosingCosts} onChange={set("estimatedClosingCosts")} /></div>
-        <div className="field"><label>Date Under Contract</label><input type="date" value={f.dateUnderContract} onChange={set("dateUnderContract")} /></div>
         <div className="field"><label>Original Closing Date</label><input type="date" value={f.originalClosingDate} onChange={set("originalClosingDate")} /></div>
       </div>
-      <div className="field"><label>Seller Names (comma-sep)</label><input value={f.sellerNames} onChange={set("sellerNames")} /></div>
       <div className="field"><label>Notes</label><textarea rows={3} value={f.notes} onChange={set("notes")} /></div>
       {error && <div className="error-text">{error}</div>}
     </Modal>
