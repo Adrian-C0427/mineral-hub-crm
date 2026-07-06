@@ -15,6 +15,10 @@ export interface CurrentUser {
   permissions: string[];
   organization: { id: string; name: string; teamId: string; fullLogo?: string | null; compactLogo?: string | null } | null;
   mustChangePassword?: boolean;
+  /** Persisted UI theme, or null when the user hasn't explicitly chosen one.
+   *  The client only adopts a non-null value, so it never clobbers the local
+   *  theme with a default. */
+  themePreference?: "dark" | "light" | null;
 }
 
 export interface RegisterPayload {

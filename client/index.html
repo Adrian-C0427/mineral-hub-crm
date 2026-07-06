@@ -4,6 +4,19 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Mineral Hub CRM</title>
+    <!-- Apply the saved theme before first paint so there's no dark→light flash.
+         The server profile is the cross-device source of truth (reconciled after
+         login); localStorage mirrors it for instant application on load. -->
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem("mh-theme");
+          if (t !== "light" && t !== "dark") t = "dark";
+          document.documentElement.dataset.theme = t;
+          document.documentElement.style.colorScheme = t;
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

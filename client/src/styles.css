@@ -1,3 +1,4 @@
+/* Dark is the default theme (data-theme unset or "dark"). */
 :root {
   --bg: #0f1419;
   --panel: #1a2129;
@@ -13,7 +14,55 @@
   --gray: #6b7280;
   --radius: 8px;
   --shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  color-scheme: dark;
 }
+
+/* ===========================================================================
+   Light theme — a purpose-built palette (not an inversion). White cards on a
+   soft neutral canvas, near-black slate text, and slightly deeper accent hues
+   that hold contrast on white. Every token below has a light-tuned value so
+   the whole app, driven by these variables, reads correctly in light mode.
+   =========================================================================== */
+:root[data-theme="light"] {
+  --bg: #f4f6f9;        /* app canvas — soft cool gray */
+  --panel: #ffffff;     /* cards / surfaces */
+  --panel-2: #eef1f5;   /* elevated rows, hovers, table headers */
+  --border: #d7dee6;
+  --text: #1a2129;      /* near-black slate — strong contrast on white */
+  --text-dim: #5b6875;  /* secondary text — passes AA on white */
+  --accent: #2563eb;    /* deeper blue reads better on light surfaces */
+  --accent-hover: #1d4ed8;
+  --green: #16a34a;
+  --amber: #b45309;
+  --red: #dc2626;
+  --gray: #6b7280;
+  --shadow: 0 4px 16px rgba(15, 23, 42, 0.10);
+  color-scheme: light;
+}
+
+/* Status badges / pills / banners are pastel-on-tint, tuned for dark surfaces.
+   In light mode the pale text washes out, so each gets a darker foreground on a
+   lighter tint — designed for the theme, not inverted. */
+:root[data-theme="light"] .priority-high { background: rgba(220,38,38,0.10); color: #b91c1c; }
+:root[data-theme="light"] .priority-medium { background: rgba(180,83,9,0.12); color: #92400e; }
+:root[data-theme="light"] .priority-low { background: rgba(22,163,74,0.12); color: #15803d; }
+:root[data-theme="light"] .stage-under_contract { background: rgba(37,99,235,0.10); color: #1d4ed8; }
+:root[data-theme="light"] .stage-preparing_package { background: rgba(139,92,246,0.12); color: #6d28d9; }
+:root[data-theme="light"] .stage-sent_to_buyers { background: rgba(6,182,212,0.12); color: #0e7490; }
+:root[data-theme="light"] .stage-negotiating { background: rgba(180,83,9,0.12); color: #92400e; }
+:root[data-theme="light"] .stage-closing { background: rgba(22,163,74,0.12); color: #15803d; }
+:root[data-theme="light"] .stage-closed { background: rgba(22,163,74,0.16); color: #166534; }
+:root[data-theme="light"] .stage-dead { background: rgba(100,116,139,0.16); color: #475569; }
+:root[data-theme="light"] .resp-offer { background: rgba(22,163,74,0.12); color: #15803d; }
+:root[data-theme="light"] .resp-interested { background: rgba(37,99,235,0.10); color: #1d4ed8; }
+:root[data-theme="light"] .resp-pending { background: rgba(100,116,139,0.14); color: #475569; }
+:root[data-theme="light"] .resp-no,
+:root[data-theme="light"] .resp-passed { background: rgba(107,114,128,0.14); color: #4b5563; }
+:root[data-theme="light"] .crit-yes { background: rgba(22,163,74,0.12); color: #15803d; }
+:root[data-theme="light"] .crit-no { background: rgba(220,38,38,0.10); color: #b91c1c; }
+:root[data-theme="light"] .banner-warn { background: rgba(180,83,9,0.08); border-color: rgba(180,83,9,0.30); color: #92400e; }
+:root[data-theme="light"] .banner-error { background: rgba(220,38,38,0.07); border-color: rgba(220,38,38,0.30); color: #b91c1c; }
+:root[data-theme="light"] .banner-info { background: rgba(37,99,235,0.07); border-color: rgba(37,99,235,0.30); color: #1d4ed8; }
 
 * { box-sizing: border-box; }
 
@@ -387,6 +436,32 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .banner-warn { background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.4); color: #fcd34d; }
 .banner-error { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.4); color: #fca5a5; }
 .banner-info { background: rgba(59,130,246,0.12); border: 1px solid rgba(59,130,246,0.4); color: #93c5fd; }
+
+/* --- Appearance theme picker --- */
+.theme-picker { display: flex; gap: 12px; flex-wrap: wrap; }
+.theme-option {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+  flex: 1 1 200px; min-width: 180px; text-align: left;
+  padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2);
+}
+.theme-option:hover { border-color: var(--text-dim); background: var(--panel-2); }
+.theme-option.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+.theme-option-label { font-weight: 600; color: var(--text); }
+.theme-check { color: var(--accent); }
+/* Miniature app preview so each choice is recognizable at a glance. */
+.theme-swatch { width: 100%; height: 54px; border-radius: 7px; overflow: hidden; border: 1px solid var(--border); display: flex; }
+.theme-swatch .tsw-bar { width: 26%; height: 100%; }
+.theme-swatch .tsw-body { flex: 1; padding: 8px; display: flex; flex-direction: column; gap: 5px; }
+.theme-swatch .tsw-line { height: 6px; border-radius: 3px; width: 100%; }
+.theme-swatch .tsw-line.short { width: 55%; }
+.theme-swatch-light { background: #ffffff; }
+.theme-swatch-light .tsw-bar { background: #eef1f5; border-right: 1px solid #d7dee6; }
+.theme-swatch-light .tsw-line { background: #d7dee6; }
+.theme-swatch-light .tsw-line.short { background: #2563eb; }
+.theme-swatch-dark { background: #1a2129; }
+.theme-swatch-dark .tsw-bar { background: #0f1419; border-right: 1px solid #2d3742; }
+.theme-swatch-dark .tsw-line { background: #2d3742; }
+.theme-swatch-dark .tsw-line.short { background: #3b82f6; }
 
 /* --- Modal --- */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index: 100; padding: 20px; }
