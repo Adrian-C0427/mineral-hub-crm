@@ -4,7 +4,10 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
-import { anchorPolygon, parseTract, type ParsedTract } from "../domain/tractParser.js";
+import rateLimit from "express-rate-limit";
+import { anchorPolygon, parseTract, tractFromAiExtraction, type AiExtraction, type ParsedTract } from "../domain/tractParser.js";
+import { extractTractCalls } from "../services/ai.js";
+import { logActivity } from "../services/activityLog.js";
 
 /**
  * Tract descriptions on a deal (/api/deals/:id/tracts). The raw legal text is
@@ -146,6 +149,87 @@ tractsRouter.patch(
       },
     });
     res.json(serialize(tract));
+  }),
+);
+
+// Loose shape guard for Claude's extraction — invalid pieces are dropped, not
+// fatal, so one malformed call doesn't discard an otherwise good reading.
+const aiCallSchema = z.object({
+  raw: z.string().default(""),
+  curve: z.boolean().optional(),
+  bearing: z.object({ ns: z.enum(["N", "S"]), deg: z.number(), min: z.number().optional(), sec: z.number().optional(), ew: z.enum(["E", "W"]) }).nullish(),
+  distance: z.object({ value: z.number(), unit: z.string() }).nullish(),
+  note: z.string().nullish(),
+});
+const aiExtractionSchema = z.object({
+  pobText: z.string().nullish(),
+  calls: z.array(z.unknown()).default([]),
+  refs: z.object({
+    abstracts: z.array(z.string()).optional(), surveys: z.array(z.string()).optional(),
+    county: z.string().nullish(), statedAcres: z.number().nullish(),
+    sections: z.array(z.string()).optional(), blocks: z.array(z.string()).optional(),
+    lots: z.array(z.string()).optional(), quarters: z.array(z.string()).optional(),
+  }).optional(),
+  ambiguities: z.array(z.object({ text: z.string().default(""), issue: z.string() })).optional(),
+  assumptions: z.array(z.string()).optional(),
+  confidence: z.number().optional(),
+});
+
+// Claude extraction spends the org's Anthropic budget — cap like /api/ai.
+const aiLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false,
+  message: { error: "Too many AI requests. Wait a few minutes and try again." },
+});
+
+/**
+ * Generate Tract Map: Claude extracts the calls/refs from the saved legal
+ * description; geometry, closure and acreage are then computed by the same
+ * deterministic engine as the rules parser. A manual POB placement survives;
+ * otherwise the abstract-derived anchor is refreshed from the AI's references.
+ */
+tractsRouter.post(
+  "/:id/tracts/:tractId/generate",
+  requirePermission("editDeals"),
+  aiLimiter,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const dealId = await ownDealOr404(req);
+    const tract = await prisma.tractDescription.findFirst({ where: { id: req.params.tractId, dealId } });
+    if (!tract) throw new HttpError(404, "Tract not found");
+
+    const rawExtraction = await extractTractCalls(orgId(req)!, tract.text, tract.state);
+    const shaped = aiExtractionSchema.safeParse(rawExtraction);
+    if (!shaped.success) throw new HttpError(502, "Claude's extraction didn't match the expected structure. Try again.");
+    const callResults = shaped.data.calls.map((c) => aiCallSchema.safeParse(c));
+    const extraction: AiExtraction = {
+      ...shaped.data,
+      pobText: shaped.data.pobText ?? null,
+      calls: callResults.filter((r) => r.success).map((r) => (r as { data: AiExtraction["calls"][number] }).data),
+      refs: shaped.data.refs as AiExtraction["refs"],
+    };
+    const dropped = callResults.length - extraction.calls.length;
+    const parsed = tractFromAiExtraction(extraction, tract.state, tract.text);
+    if (dropped > 0) parsed.warnings.unshift(`${dropped} extracted call(s) were malformed and skipped.`);
+
+    let anchor = (tract.anchor as { lon: number; lat: number; source: "abstract" | "manual" } | null) ?? null;
+    if (anchor?.source !== "manual") {
+      const deal = await prisma.deal.findUniqueOrThrow({ where: { id: dealId }, select: { counties: true } });
+      anchor = (await suggestAnchor(parsed, deal.counties)) ?? anchor;
+    }
+    const geometry = withGeometry(parsed, anchor, tract.name);
+    const updated = await prisma.tractDescription.update({
+      where: { id: tract.id },
+      data: {
+        parse: parsed as unknown as Prisma.InputJsonValue,
+        anchor: anchor ? (anchor as unknown as Prisma.InputJsonValue) : Prisma.JsonNull,
+        geometry: geometry ? (geometry as unknown as Prisma.InputJsonValue) : Prisma.JsonNull,
+      },
+    });
+    await logActivity({
+      eventType: "ai.tract_parse",
+      summary: `AI tract map generated for "${tract.name}" (${parsed.ok ? `${parsed.calls.length} calls, ${parsed.computedAcres ?? "?"} ac` : "no polygon"}${parsed.confidence != null ? `, confidence ${parsed.confidence}%` : ""})`,
+      organizationId: orgId(req), actorUserId: req.user?.id ?? null, dealId,
+    });
+    res.json(serialize(updated));
   }),
 );
 

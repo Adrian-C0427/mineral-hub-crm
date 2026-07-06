@@ -67,6 +67,13 @@ export interface ParsedTract {
   /** Clause texts the parser recognized as boundary language but couldn't
    *  turn into geometry — the "requires review" list. */
   unresolved: string[];
+  /** How this reading was produced: deterministic rules or Claude extraction
+   *  (geometry math is always deterministic either way). */
+  source: "rules" | "ai";
+  /** Model-reported confidence 0–100 for AI readings; null for rules. */
+  confidence: number | null;
+  /** Interpretive assumptions the AI made (each is a review prompt). */
+  assumptions: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -163,6 +170,63 @@ export function polygonAcres(points: [number, number][]): number {
 
 const DEG = Math.PI / 180;
 
+/**
+ * Shared back half of every parse path: walk the resolvable calls into local
+ * points, judge closure, compute acreage, and emit the standard warnings.
+ * Rules parsing and AI extraction differ only in how `calls` were produced —
+ * the geometry math is always this deterministic code, never model output.
+ */
+function assembleTract(args: {
+  pobText: string | null;
+  calls: TractCall[];
+  refs: TractRefs;
+  warnings: string[];
+  unresolved: string[];
+  source: "rules" | "ai";
+  confidence: number | null;
+  assumptions: string[];
+}): ParsedTract {
+  const { pobText, calls, refs, warnings, unresolved, source, confidence, assumptions } = args;
+  const points: [number, number][] = [[0, 0]];
+  let x = 0, y = 0;
+  for (const c of calls) {
+    if (c.azimuth === null || c.distanceFt === null) continue;
+    x += c.distanceFt * Math.sin(c.azimuth * DEG);
+    y += c.distanceFt * Math.cos(c.azimuth * DEG);
+    points.push([x, y]);
+  }
+
+  let closure: TractClosure | null = null;
+  if (points.length >= 3) {
+    const [lx, ly] = points[points.length - 1];
+    const gap = Math.hypot(lx, ly);
+    let perim = 0;
+    for (let i = 1; i < points.length; i++) perim += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
+    const closes = gap <= Math.max(1, perim / 200);
+    closure = { closes, gapFt: Math.round(gap * 100) / 100, precision: gap > 0.01 ? Math.round(perim / gap) : 1_000_000 };
+    if (!closes) warnings.push(`Boundary does not close: ${closure.gapFt.toLocaleString()} ft gap back to the POB (precision 1:${closure.precision}). A call may be missing or misread.`);
+    if (closes && gap < perim / 10000 && points.length > 3) points.pop(); // final call landed on the POB
+  }
+
+  const ok = points.length >= 3;
+  if (!ok) {
+    if (calls.length === 0 && (refs.lots.length || refs.blocks.length || refs.sections.length)) {
+      warnings.push("No metes-and-bounds calls found — this reads as a lot/block or section reference. Plat/section geometry cannot be reconstructed automatically; review and map manually.");
+    } else if (calls.length === 0) {
+      warnings.push("No boundary calls (“THENCE…”) found in this description.");
+    } else {
+      warnings.push("Fewer than 3 resolvable calls — not enough to form a polygon.");
+    }
+  }
+  const computedAcres = ok ? Math.round(polygonAcres(points) * 1000) / 1000 : null;
+  if (ok && refs.statedAcres && computedAcres) {
+    const diff = Math.abs(computedAcres - refs.statedAcres) / refs.statedAcres;
+    if (diff > 0.05) warnings.push(`Computed acreage (${computedAcres.toLocaleString()} ac) differs from the stated ${refs.statedAcres.toLocaleString()} ac by ${(diff * 100).toFixed(1)}% — check the flagged calls.`);
+  }
+
+  return { ok, pobText, calls, points, refs, closure, computedAcres, warnings, unresolved, source, confidence, assumptions };
+}
+
 function parseTexas(text: string): ParsedTract {
   const clean = text.replace(/\s+/g, " ").trim();
   const warnings: string[] = [];
@@ -176,8 +240,7 @@ function parseTexas(text: string): ParsedTract {
   // Boundary calls: everything between successive THENCE keywords.
   const clauses = clean.split(/\bTHENCE\b/i).slice(1).map((c) => c.replace(/^[\s,:;]+/, "").trim()).filter(Boolean);
   const calls: TractCall[] = [];
-  const points: [number, number][] = [[0, 0]];
-  let x = 0, y = 0, seq = 0;
+  let seq = 0;
 
   for (const clause of clauses) {
     seq += 1;
@@ -194,57 +257,29 @@ function parseTexas(text: string): ParsedTract {
         bearing = parseBearing(chord[1]) ?? bearing;
         dist = parseDistance(chord[1]) ?? dist;
         if (bearing && dist) issue = "Curve approximated by its long chord.";
+      } else if (bearing && dist) {
+        issue = "Curve without an explicit long chord — its stated bearing/distance used as the chord.";
       }
       if (!bearing || !dist) issue = "Curve call without a resolvable long chord — segment skipped.";
     } else if (!bearing && !dist) issue = "No bearing or distance recognized in this call.";
     else if (!bearing) issue = "Distance found but the bearing could not be read.";
     else if (!dist) issue = "Bearing found but the distance could not be read.";
 
+    // Calls missing either component are excluded from the walk entirely
+    // (assembleTract skips null azimuth/distance) and flagged for review.
+    if (!bearing || !dist) unresolved.push(short);
     calls.push({
       seq, raw: short,
       azimuth: bearing?.azimuth ?? null, bearing: bearing?.display ?? null,
       distanceFt: dist ? Math.round(dist.feet * 100) / 100 : null, distanceRaw: dist?.raw ?? null,
       curve: isCurve, issue,
     });
-    if (issue && !(isCurve && bearing && dist)) { unresolved.push(short); continue; }
-    if (!bearing || !dist) { unresolved.push(short); continue; }
-    x += dist.feet * Math.sin(bearing.azimuth * DEG);
-    y += dist.feet * Math.cos(bearing.azimuth * DEG);
-    points.push([x, y]);
   }
 
-  // Drop the implicit closing point if the final call returns (near) to POB —
-  // the ring closes via first==last downstream, we keep vertices unique here.
-  let closure: TractClosure | null = null;
-  if (points.length >= 3) {
-    const [lx, ly] = points[points.length - 1];
-    const gap = Math.hypot(lx, ly);
-    let perim = 0;
-    for (let i = 1; i < points.length; i++) perim += Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
-    const closes = gap <= Math.max(1, perim / 200);
-    closure = { closes, gapFt: Math.round(gap * 100) / 100, precision: gap > 0.01 ? Math.round(perim / gap) : 1_000_000 };
-    if (!closes) warnings.push(`Boundary does not close: ${closure.gapFt.toLocaleString()} ft gap back to the POB (precision 1:${closure.precision}). A call may be missing or misread.`);
-    if (gap <= Math.max(1, perim / 200) && gap < perim / 10000 && points.length > 3) points.pop(); // final call landed on the POB
-  }
-
-  const refs = extractRefs(clean, "TX");
-  const ok = points.length >= 3;
-  if (!ok) {
-    if (clauses.length === 0 && (refs.lots.length || refs.blocks.length || refs.sections.length)) {
-      warnings.push("No metes-and-bounds calls found — this reads as a lot/block or section reference. Plat/section geometry cannot be reconstructed automatically; review and map manually.");
-    } else if (clauses.length === 0) {
-      warnings.push("No boundary calls (“THENCE…”) found in this description.");
-    } else {
-      warnings.push("Fewer than 3 resolvable calls — not enough to form a polygon.");
-    }
-  }
-  const computedAcres = ok ? Math.round(polygonAcres(points) * 1000) / 1000 : null;
-  if (ok && refs.statedAcres && computedAcres) {
-    const diff = Math.abs(computedAcres - refs.statedAcres) / refs.statedAcres;
-    if (diff > 0.05) warnings.push(`Computed acreage (${computedAcres.toLocaleString()} ac) differs from the stated ${refs.statedAcres.toLocaleString()} ac by ${(diff * 100).toFixed(1)}% — check the flagged calls.`);
-  }
-
-  return { ok, pobText, calls, points, refs, closure, computedAcres, warnings, unresolved };
+  return assembleTract({
+    pobText, calls, refs: extractRefs(clean, "TX"), warnings, unresolved,
+    source: "rules", confidence: null, assumptions: [],
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -260,6 +295,90 @@ export function parseTract(text: string, state = "TX"): ParsedTract {
   }
   parsed.refs.state = state.toUpperCase();
   return parsed;
+}
+
+// ---------------------------------------------------------------------------
+// AI extraction path: Claude reads the description into this structured form;
+// everything geometric (azimuths, feet, points, closure, acreage) is still
+// computed here — model arithmetic is never trusted.
+
+export interface AiExtraction {
+  pobText: string | null;
+  calls: {
+    raw: string;
+    curve?: boolean;
+    bearing: { ns: "N" | "S"; deg: number; min?: number; sec?: number; ew: "E" | "W" } | null;
+    distance: { value: number; unit: string } | null;
+    note?: string | null;
+  }[];
+  refs?: Partial<Omit<TractRefs, "state">>;
+  ambiguities?: { text: string; issue: string }[];
+  assumptions?: string[];
+  confidence?: number;
+}
+
+/** Quadrant components → azimuth + display string (shared with the AI path). */
+export function quadrantToAzimuth(b: { ns: "N" | "S"; deg: number; min?: number; sec?: number; ew: "E" | "W" }): { azimuth: number; display: string } | null {
+  const deg = b.deg + (b.min ?? 0) / 60 + (b.sec ?? 0) / 3600;
+  if (!isFinite(deg) || deg < 0 || deg > 90.000001) return null;
+  let az: number;
+  if (b.ns === "N" && b.ew === "E") az = deg;
+  else if (b.ns === "S" && b.ew === "E") az = 180 - deg;
+  else if (b.ns === "S" && b.ew === "W") az = 180 + deg;
+  else az = 360 - deg;
+  const mm = b.min ? `${String(Math.trunc(b.min)).padStart(2, "0")}'` : "";
+  const ss = b.sec ? `${String(Math.trunc(b.sec)).padStart(2, "0")}"` : "";
+  return { azimuth: ((az % 360) + 360) % 360, display: `${b.ns} ${b.deg}°${mm}${ss} ${b.ew}` };
+}
+
+/** Build a ParsedTract from a Claude extraction, deterministically. */
+export function tractFromAiExtraction(ai: AiExtraction, state: string, originalText: string): ParsedTract {
+  const warnings: string[] = [];
+  const unresolved: string[] = [];
+  const calls: TractCall[] = [];
+  let seq = 0;
+  for (const c of ai.calls ?? []) {
+    seq += 1;
+    const short = (c.raw ?? "").length > 160 ? c.raw.slice(0, 157) + "…" : (c.raw ?? "");
+    const b = c.bearing ? quadrantToAzimuth(c.bearing) : null;
+    const unit = (c.distance?.unit ?? "").toLowerCase().replace(/\.$/, "");
+    const per = c.distance ? FT_PER[unit] ?? (unit ? undefined : 1) : undefined;
+    const feet = c.distance && per && c.distance.value > 0 ? c.distance.value * per : null;
+    let issue: string | null = c.note?.trim() || null;
+    if (!b && c.bearing) issue = issue ?? "Extracted bearing was outside the 0–90° quadrant range.";
+    if (!b && !c.bearing) issue = issue ?? "No bearing could be determined for this call.";
+    if (feet === null && c.distance) issue = issue ?? `Unrecognized distance unit “${c.distance.unit}”.`;
+    if (feet === null && !c.distance) issue = issue ?? "No distance could be determined for this call.";
+    if (!b || feet === null) unresolved.push(short || issue || `Call ${seq}`);
+    calls.push({
+      seq, raw: short, azimuth: b?.azimuth ?? null, bearing: b?.display ?? null,
+      distanceFt: feet !== null ? Math.round(feet * 100) / 100 : null,
+      distanceRaw: c.distance ? `${c.distance.value} ${c.distance.unit}` : null,
+      curve: Boolean(c.curve), issue,
+    });
+  }
+  for (const a of ai.ambiguities ?? []) {
+    warnings.push(`${a.issue}${a.text ? ` — “${a.text.slice(0, 140)}”` : ""}`);
+  }
+  // AI refs are advisory; the deterministic regex pass fills anything missed.
+  const regexRefs = extractRefs(originalText.replace(/\s+/g, " ").trim(), state.toUpperCase());
+  const mergeList = (a?: string[], b?: string[]) => [...new Set([...(a ?? []), ...(b ?? [])])];
+  const refs: TractRefs = {
+    abstracts: mergeList(ai.refs?.abstracts, regexRefs.abstracts),
+    surveys: mergeList(ai.refs?.surveys?.map((s) => s.toUpperCase()), regexRefs.surveys),
+    county: ai.refs?.county ?? regexRefs.county,
+    state: state.toUpperCase(),
+    statedAcres: ai.refs?.statedAcres ?? regexRefs.statedAcres,
+    sections: mergeList(ai.refs?.sections, regexRefs.sections),
+    blocks: mergeList(ai.refs?.blocks, regexRefs.blocks),
+    lots: mergeList(ai.refs?.lots, regexRefs.lots),
+    quarters: mergeList(ai.refs?.quarters, regexRefs.quarters),
+  };
+  const confidence = typeof ai.confidence === "number" ? Math.max(0, Math.min(100, Math.round(ai.confidence))) : null;
+  return assembleTract({
+    pobText: ai.pobText ?? null, calls, refs, warnings, unresolved,
+    source: "ai", confidence, assumptions: (ai.assumptions ?? []).filter((s) => typeof s === "string" && s.trim()).slice(0, 20),
+  });
 }
 
 // ---------------------------------------------------------------------------

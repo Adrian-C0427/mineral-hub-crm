@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorPolygon, parseBearing, parseDistance, parseTract, polygonAcres } from "./tractParser.js";
+import { anchorPolygon, parseBearing, parseDistance, parseTract, polygonAcres, quadrantToAzimuth, tractFromAiExtraction, type AiExtraction } from "./tractParser.js";
 
 // A clean 1000×1000 ft square: 1,000,000 sq ft ≈ 22.957 acres.
 const SQUARE = `
@@ -99,6 +99,60 @@ describe("parseTract (TX metes and bounds)", () => {
     expect(p.ok).toBe(true);
     expect(p.warnings[0]).toMatch(/No OK-specific parser/);
     expect(p.refs.state).toBe("OK");
+  });
+});
+
+describe("tractFromAiExtraction", () => {
+  const square: AiExtraction = {
+    pobText: "BEGINNING at an iron rod",
+    calls: [
+      { raw: "THENCE N 0 E 1000 ft", bearing: { ns: "N", deg: 0, ew: "E" }, distance: { value: 1000, unit: "feet" } },
+      { raw: "THENCE N 90 E 360 varas", bearing: { ns: "N", deg: 90, ew: "E" }, distance: { value: 360, unit: "varas" } },
+      { raw: "THENCE S 0 E 1000 ft", bearing: { ns: "S", deg: 0, ew: "E" }, distance: { value: 1000, unit: "feet" } },
+      { raw: "THENCE S 90 W 1000 ft", bearing: { ns: "S", deg: 90, ew: "W" }, distance: { value: 1000, unit: "feet" } },
+    ],
+    refs: { statedAcres: 22.96 },
+    assumptions: ["Read 'vrs' as Texas varas."],
+    ambiguities: [{ text: "the meanders of the creek", issue: "East line follows a creek; straight chord assumed" }],
+    confidence: 84,
+  };
+
+  it("assembles geometry deterministically from an AI extraction", () => {
+    const p = tractFromAiExtraction(square, "TX", "Abstract No. 123, Leon County, Texas");
+    expect(p.ok).toBe(true);
+    expect(p.source).toBe("ai");
+    expect(p.confidence).toBe(84);
+    expect(p.computedAcres).toBeCloseTo(22.957, 1); // 360 varas = 1000 ft
+    expect(p.closure!.closes).toBe(true);
+    expect(p.assumptions).toHaveLength(1);
+    expect(p.warnings.some((w) => /creek/.test(w))).toBe(true);
+  });
+
+  it("backfills refs from the deterministic regex pass over the original text", () => {
+    const p = tractFromAiExtraction(square, "TX", "Abstract No. 123, Leon County, Texas");
+    expect(p.refs.abstracts).toContain("A-123");
+    expect(p.refs.county).toBe("Leon");
+    expect(p.refs.statedAcres).toBeCloseTo(22.96);
+  });
+
+  it("flags calls the model could not resolve instead of guessing", () => {
+    const p = tractFromAiExtraction({
+      pobText: null,
+      calls: [
+        { raw: "curve without chord", curve: true, bearing: null, distance: null, note: "Arc of 312 ft, no chord given" },
+        { raw: "N 45 E 100 ft", bearing: { ns: "N", deg: 45, ew: "E" }, distance: { value: 100, unit: "feet" } },
+      ],
+    }, "TX", "some text");
+    expect(p.ok).toBe(false);
+    expect(p.unresolved.length).toBe(1);
+    expect(p.calls[0].issue).toMatch(/Arc of 312/);
+  });
+
+  it("clamps confidence and rejects out-of-quadrant bearings", () => {
+    expect(quadrantToAzimuth({ ns: "N", deg: 120, ew: "E" })).toBeNull();
+    expect(quadrantToAzimuth({ ns: "S", deg: 45, min: 30, ew: "W" })!.azimuth).toBeCloseTo(225.5);
+    const p = tractFromAiExtraction({ pobText: null, calls: [], confidence: 300 }, "TX", "x");
+    expect(p.confidence).toBe(100);
   });
 });
 

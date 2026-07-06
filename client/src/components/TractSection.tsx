@@ -22,6 +22,7 @@ interface ParsedTract {
   refs: { abstracts: string[]; surveys: string[]; county: string | null; state: string; statedAcres: number | null; sections: string[]; blocks: string[]; lots: string[]; quarters: string[] };
   closure: { closes: boolean; gapFt: number; precision: number } | null;
   computedAcres: number | null; warnings: string[]; unresolved: string[];
+  source?: "rules" | "ai"; confidence?: number | null; assumptions?: string[];
 }
 interface Tract {
   id: string; name: string; text: string; state: string;
@@ -46,8 +47,8 @@ function segmentsOf(t: Tract): TractSegment[] {
   // points[0] is the POB; each subsequent point came from the next resolvable call.
   let pi = 0;
   for (const c of t.parse.calls) {
-    const contributed = c.azimuth !== null && c.distanceFt !== null && (!c.curve || /long chord/i.test(c.issue ?? ""));
-    if (!contributed) continue;
+    // Mirrors the server walk: any call with both components contributes.
+    if (c.azimuth === null || c.distanceFt === null) continue;
     if (pi >= pts.length) break;
     const from = toLL(pts[pi]);
     // The final call may close the ring exactly (its endpoint was deduped by
@@ -59,13 +60,14 @@ function segmentsOf(t: Tract): TractSegment[] {
   return segs;
 }
 
-export function TractSection({ dealId, dealName, canEdit }: { dealId: string; dealName: string; canEdit: boolean }) {
+export function TractSection({ dealId, dealName, canEdit, abstractIds = [] }: { dealId: string; dealName: string; canEdit: boolean; abstractIds?: string[] }) {
   const { user } = useAuth();
   const [tracts, setTracts] = useState<Tract[] | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editing, setEditing] = useState<{ tract: Tract | null } | null>(null); // null tract = new
   const [deleting, setDeleting] = useState<Tract | null>(null);
   const [placingFor, setPlacingFor] = useState<string | null>(null);
+  const [generating, setGenerating] = useState<string | null>(null); // tract id being AI-processed
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const mapHandle = useRef<maplibregl.Map | null>(null);
@@ -94,6 +96,14 @@ export function TractSection({ dealId, dealName, canEdit }: { dealId: string; de
     try { await api.patch(`/deals/${dealId}/tracts/${placingFor}`, { anchor: { lon, lat } }); await load(); }
     catch (e) { setErr((e as Error).message); }
     finally { setBusy(false); }
+  }
+
+  /** Generate Tract Map: Claude extracts the calls; geometry stays deterministic. */
+  async function generate(tractId: string) {
+    setGenerating(tractId); setErr(null);
+    try { await api.post(`/deals/${dealId}/tracts/${tractId}/generate`); await load(); setSelectedId(tractId); }
+    catch (e) { setErr((e as Error).message); }
+    finally { setGenerating(null); }
   }
 
   async function doExport() {
@@ -132,12 +142,14 @@ export function TractSection({ dealId, dealName, canEdit }: { dealId: string; de
       {tracts.length > 0 && (
         <TractMap
           tracts={features} selectedId={selectedId}
+          abstractIds={abstractIds}
           placingPob={placingFor !== null}
           onPobPlaced={placePob}
           onSelect={setSelectedId}
           onReady={(m) => { mapHandle.current = m; }}
         />
       )}
+      {generating && <Banner kind="info">Claude is reading the legal description and extracting the boundary calls… geometry, closure and acreage are then computed deterministically.</Banner>}
 
       {tracts.length === 0 ? (
         <p className="muted" style={{ margin: 0, fontSize: 13 }}>
@@ -161,6 +173,12 @@ export function TractSection({ dealId, dealName, canEdit }: { dealId: string; de
                     {issues > 0 && <span className="badge" style={{ marginLeft: 6, background: "rgba(245,158,11,.15)", color: "#b45309" }}>{issues} to review</span>}
                   </td>
                   <td onClick={(e) => e.stopPropagation()} style={{ textAlign: "right" }}>
+                    {canEdit && (
+                      <button className="primary small" disabled={busy || generating !== null} onClick={() => generate(t.id)}
+                        title="Claude re-reads the legal description; geometry is computed deterministically from its extraction">
+                        {generating === t.id ? "Processing…" : "Generate Tract Map"}
+                      </button>
+                    )}{" "}
                     {canEdit && <button className="small" disabled={busy} onClick={() => setPlacingFor(placingFor === t.id ? null : t.id)}>{placingFor === t.id ? "Cancel POB" : "Place POB"}</button>}{" "}
                     {canEdit && <button className="small" onClick={() => setEditing({ tract: t })}>Edit</button>}{" "}
                     {canEdit && <button className="small danger" onClick={() => setDeleting(t)}>Remove</button>}
@@ -227,6 +245,9 @@ function ValidationPanel({ tract }: { tract: Tract }) {
     <div style={{ marginTop: 12, border: "1px solid var(--border, #e2e8f0)", borderRadius: 8, padding: 12 }}>
       <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
         <strong>{tract.name} — parse detail</strong>
+        {p.source === "ai"
+          ? <span className="badge" title="Claude extracted the calls; all geometry was computed deterministically">AI-parsed{p.confidence != null ? ` · ${p.confidence}% confidence` : ""}</span>
+          : <span className="badge" style={{ opacity: 0.75 }} title="Deterministic rules parse — use Generate Tract Map for the Claude reading">Rule-based parse</span>}
         {p.closure && (p.closure.closes
           ? <span className="muted" style={{ fontSize: 13 }}>Closes (precision 1:{p.closure.precision.toLocaleString()})</span>
           : <span style={{ fontSize: 13, color: "#dc2626" }}>Open boundary — {p.closure.gapFt.toLocaleString()} ft back to POB</span>)}
@@ -235,6 +256,12 @@ function ValidationPanel({ tract }: { tract: Tract }) {
       </div>
       {p.pobText && <p className="muted" style={{ fontSize: 12, margin: "8px 0 0" }}><strong>POB:</strong> {p.pobText}</p>}
       {p.warnings.map((w, i) => <Banner key={i} kind="warn">{w}</Banner>)}
+      {(p.assumptions?.length ?? 0) > 0 && (
+        <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+          <strong>AI assumptions (verify these):</strong>
+          <ul style={{ margin: "4px 0 0 18px" }}>{p.assumptions!.map((a, i) => <li key={i}>{a}</li>)}</ul>
+        </div>
+      )}
       {p.calls.length > 0 && (
         <table className="table" style={{ marginTop: 8, fontSize: 13 }}>
           <thead><tr><th>#</th><th>Bearing</th><th>Distance</th><th>Reads as</th></tr></thead>

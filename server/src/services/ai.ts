@@ -133,6 +133,39 @@ export async function summarizeDeal(organizationId: string, deal: DealContext): 
   return complete(client, SUMMARY_SYSTEM, user, 700);
 }
 
+// --- Tract-description extraction -------------------------------------------
+
+const TRACT_SYSTEM =
+  "You are an expert land surveyor and title analyst reading legal land descriptions (initially Texas metes-and-bounds; other state formats may appear). " +
+  "Extract the boundary calls and references into STRICT JSON. Do NOT compute coordinates, areas, or closure — extraction only. " +
+  "Never invent calls, bearings, or distances that are not in the text. If something is ambiguous, incomplete, or conflicting, list it under ambiguities and lower your confidence. " +
+  "Record every interpretive choice you make (e.g. reading an abbreviation, resolving 'same course as the previous call') under assumptions. " +
+  "Return ONLY a JSON object — no markdown fences, no commentary — with this exact shape:\n" +
+  `{"pobText": string|null, "calls": [{"raw": string, "curve": boolean, "bearing": {"ns":"N"|"S","deg":number,"min":number,"sec":number,"ew":"E"|"W"}|null, "distance": {"value":number,"unit":"feet"|"varas"|"chains"|"rods"|"meters"}|null, "note": string|null}], "refs": {"abstracts":["A-123"],"surveys":[string],"county":string|null,"statedAcres":number|null,"sections":[string],"blocks":[string],"lots":[string],"quarters":[string]}, "ambiguities": [{"text": string, "issue": string}], "assumptions": [string], "confidence": number}\n` +
+  "Rules: calls appear in boundary-walk order. For a curve, use its long chord as bearing+distance and set curve=true (note the radius/arc in note); if no chord is given, set bearing/distance null and explain in note. " +
+  "For 'continuing on the same course', repeat the prior bearing. pobText is the BEGINNING clause verbatim. confidence is 0–100 for the extraction as a whole.";
+
+/**
+ * Claude reads a legal description into structured calls/refs. The caller
+ * turns this into geometry deterministically (domain/tractParser) — the model
+ * never does coordinate math.
+ */
+export async function extractTractCalls(organizationId: string, text: string, state: string): Promise<unknown> {
+  const client = await orgClient(organizationId);
+  const user = `STATE: ${state.toUpperCase()}\n\nLEGAL DESCRIPTION:\n${text}`;
+  const raw = await complete(client, TRACT_SYSTEM, user, 8000);
+  // Tolerate stray fences or prose around the object.
+  const jsonText = raw.replace(/^```(?:json)?/m, "").replace(/```\s*$/m, "").trim();
+  const start = jsonText.indexOf("{");
+  const end = jsonText.lastIndexOf("}");
+  if (start < 0 || end <= start) throw new HttpError(502, "Claude returned an unreadable extraction. Try again.");
+  try {
+    return JSON.parse(jsonText.slice(start, end + 1)) as unknown;
+  } catch {
+    throw new HttpError(502, "Claude returned malformed JSON for this description. Try again.");
+  }
+}
+
 export async function draftOutreach(
   organizationId: string,
   deal: DealContext,

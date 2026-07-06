@@ -3,6 +3,7 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { collectCoords, bboxOfPoints } from "../lib/geo";
 import { addCadastralLayers, styleWithGlyphs } from "../lib/mapLayers";
+import { api } from "../api/client";
 
 const TEXAS_CENTER: [number, number] = [-97.5, 31.0];
 
@@ -24,8 +25,9 @@ export interface TractMapFeature {
   segments: TractSegment[];
 }
 
-// Same layer set as the main map / DealMap so the experience is familiar.
-const DEFAULT_LAYERS = { boundaries: true, numbers: true, surveys: true, wells: false, wellbores: false };
+// Same layer set as the main map / DealMap so the experience is familiar,
+// plus this deal's own abstract footprint as an optional overlay.
+const DEFAULT_LAYERS = { boundaries: true, numbers: true, surveys: true, wells: false, wellbores: false, dealAbstracts: false };
 
 /**
  * Deal-isolated tract map: the shared cadastral stack (lib/mapLayers) with this
@@ -34,9 +36,11 @@ const DEFAULT_LAYERS = { boundaries: true, numbers: true, surveys: true, wells: 
  * mode turns the next map click into a new anchor for the active tract.
  * Rendered with preserveDrawingBuffer so exports can read the canvas.
  */
-export function TractMap({ tracts, selectedId, placingPob, onPobPlaced, onSelect, onReady }: {
+export function TractMap({ tracts, selectedId, abstractIds = [], placingPob, onPobPlaced, onSelect, onReady }: {
   tracts: TractMapFeature[];
   selectedId: string | null;
+  /** The deal's linked abstracts — optional "Deal abstracts" context overlay. */
+  abstractIds?: string[];
   placingPob: boolean;
   onPobPlaced: (lon: number, lat: number) => void;
   onSelect: (id: string) => void;
@@ -88,6 +92,16 @@ export function TractMap({ tracts, selectedId, placingPob, onPobPlaced, onSelect
       const countyLabels = await fetch(`/data/county-labels.geojson`).then((r) => r.json())
         .catch(() => ({ type: "FeatureCollection", features: [] }));
       addCadastralLayers(map, countyLabels as GeoJSON.FeatureCollection);
+
+      // Deal-boundary context: the abstracts linked to this deal, amber like
+      // DealMap, hidden until the "Deal abstracts" toggle is switched on.
+      const dealFC = abstractIds.length
+        ? await api.get<GeoJSON.FeatureCollection>(`/gis/features?ids=${encodeURIComponent(abstractIds.join(","))}`)
+            .catch(() => ({ type: "FeatureCollection", features: [] } as GeoJSON.FeatureCollection))
+        : ({ type: "FeatureCollection", features: [] } as GeoJSON.FeatureCollection);
+      map.addSource("deal-abstracts", { type: "geojson", data: dealFC });
+      map.addLayer({ id: "deal-abs-fill", type: "fill", source: "deal-abstracts", layout: { visibility: "none" }, paint: { "fill-color": "#f59e0b", "fill-opacity": 0.18 } });
+      map.addLayer({ id: "deal-abs-line", type: "line", source: "deal-abstracts", layout: { visibility: "none" }, paint: { "line-color": "#b45309", "line-width": 1.5, "line-dasharray": [2, 1.5] } });
 
       const src = buildSources();
       map.addSource("tracts", { type: "geojson", data: src.polys });
@@ -170,6 +184,7 @@ export function TractMap({ tracts, selectedId, placingPob, onPobPlaced, onSelect
     vis("abstracts-fill", L.boundaries); vis("abstracts-line", L.boundaries);
     vis("abstracts-num", L.numbers); vis("abstracts-survey", L.surveys);
     vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores);
+    vis("deal-abs-fill", L.dealAbstracts); vis("deal-abs-line", L.dealAbstracts);
   }
   useEffect(applyVis, [layers]);
 
@@ -185,7 +200,9 @@ export function TractMap({ tracts, selectedId, placingPob, onPobPlaced, onSelect
         <span className="dm-toolbar-label">Layers</span>
         <Chk k="boundaries" label="Boundaries" /><Chk k="numbers" label="Abstract #" /><Chk k="surveys" label="Survey names" />
         <Chk k="wells" label="Wells" /><Chk k="wellbores" label="Wellbores" />
-        {placingPob && <span className="muted" style={{ marginLeft: "auto", fontSize: 12 }}>Click the map to place the Point of Beginning</span>}
+        {abstractIds.length > 0 && <Chk k="dealAbstracts" label="Deal abstracts" />}
+        <button className="small" style={{ marginLeft: "auto" }} onClick={() => { fitted.current = false; fitToTracts(true); }} title="Zoom back to the full tract extent">Reset view</button>
+        {placingPob && <span className="muted" style={{ fontSize: 12 }}>Click the map to place the Point of Beginning</span>}
       </div>
       <div className="dm-canvas">
         <div ref={container} style={{ position: "absolute", inset: 0 }} />
