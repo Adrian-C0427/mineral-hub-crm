@@ -54,6 +54,52 @@ orgRouter.patch(
   }),
 );
 
+// --- Buyer Offering Portal settings -----------------------------------------
+const portalSettingsSelect = {
+  portalSlug: true, portalEnabled: true, portalContactName: true,
+  portalContactEmail: true, portalContactPhone: true, portalOfficeLocation: true,
+} as const;
+
+orgRouter.get(
+  "/portal-settings",
+  requirePermission("manageOrgSettings"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = await prisma.organization.findUnique({ where: { id: orgId(req) }, select: portalSettingsSelect });
+    res.json(org);
+  }),
+);
+
+orgRouter.patch(
+  "/portal-settings",
+  requirePermission("manageOrgSettings"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const body = z.object({
+      enabled: z.boolean().optional(),
+      // URL key for the public marketplace (/portal/:slug). Lowercase, url-safe.
+      slug: z.string().trim().toLowerCase().regex(/^[a-z0-9-]{3,60}$/, "3-60 chars: letters, numbers, dashes").optional(),
+      contactName: z.string().trim().max(120).nullish(),
+      contactEmail: z.string().trim().email().max(200).nullish().or(z.literal("").transform(() => null)),
+      contactPhone: z.string().trim().max(40).nullish(),
+      officeLocation: z.string().trim().max(200).nullish(),
+    }).parse(req.body);
+    const data: Record<string, unknown> = {};
+    if (body.enabled !== undefined) data.portalEnabled = body.enabled;
+    if (body.slug !== undefined) data.portalSlug = body.slug;
+    if (body.contactName !== undefined) data.portalContactName = body.contactName;
+    if (body.contactEmail !== undefined) data.portalContactEmail = body.contactEmail;
+    if (body.contactPhone !== undefined) data.portalContactPhone = body.contactPhone;
+    if (body.officeLocation !== undefined) data.portalOfficeLocation = body.officeLocation;
+    try {
+      const org = await prisma.organization.update({ where: { id: orgId(req) }, data, select: portalSettingsSelect });
+      res.json(org);
+    } catch (e) {
+      // Unique violation on portalSlug — another org already claimed it.
+      if (String(e).includes("portalSlug")) throw new HttpError(409, "That portal URL is already taken");
+      throw e;
+    }
+  }),
+);
+
 // Edit organization info (name).
 orgRouter.patch(
   "/",

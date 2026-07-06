@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 import { Spinner } from "./components/ui";
 import { Sidebar } from "./components/Sidebar";
@@ -27,6 +27,9 @@ const Valuation = lazy(() => import("./pages/Valuation").then((m) => ({ default:
 // Mineral Assets (portfolio) — the detail view pulls in recharts + MapLibre.
 const MineralAssets = lazy(() => import("./pages/MineralAssets").then((m) => ({ default: m.MineralAssets })));
 const MineralAssetDetail = lazy(() => import("./pages/MineralAssetDetail").then((m) => ({ default: m.MineralAssetDetail })));
+// Buyer Offering Portal — public pages (no auth); pulls in MapLibre lazily.
+const PortalMarketplace = lazy(() => import("./pages/portal/PortalMarketplace").then((m) => ({ default: m.PortalMarketplace })));
+const PortalOffering = lazy(() => import("./pages/portal/PortalOffering").then((m) => ({ default: m.PortalOffering })));
 
 /** Redirect to Dashboard if the user lacks the required permission. */
 function Guard({ perm, children }: { perm: string; children: ReactNode }) {
@@ -55,6 +58,19 @@ function ForcePasswordChange() {
 
 export function App() {
   const { user, loading } = useAuth();
+  const { pathname } = useLocation();
+
+  // Buyer Offering Portal is public: reachable signed-in or out, no CRM chrome.
+  if (pathname.startsWith("/portal/") || pathname.startsWith("/offer/")) {
+    return (
+      <Suspense fallback={<Spinner label="Loading…" />}>
+        <Routes>
+          <Route path="/portal/:orgSlug" element={<PortalMarketplace />} />
+          <Route path="/offer/:slug" element={<PortalOffering />} />
+        </Routes>
+      </Suspense>
+    );
+  }
 
   if (loading) return <Spinner label="Loading Mineral Hub…" />;
   if (!user) {

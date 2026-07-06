@@ -1,0 +1,327 @@
+import { Router } from "express";
+import { z } from "zod";
+import { randomBytes } from "node:crypto";
+import { prisma } from "../db.js";
+import { asyncHandler, HttpError } from "../middleware/errors.js";
+import { normalizeCompany } from "../serializers.js";
+import { getDownloadUrl, s3Configured } from "../services/s3.js";
+
+/**
+ * Buyer Offering Portal — the PUBLIC (unauthenticated) API.
+ *
+ * Everything served here is buyer-safe by construction: the serializer below
+ * whitelists fields, so internal data (pricing, notes, sellers, offers,
+ * margins) can never leak by accident. Deals appear only while
+ * `publishedToPortal` is true; PUBLIC deals list in the marketplace,
+ * LINK_ONLY deals resolve solely through their unguessable share slug.
+ * Documents require an explicit `visibleToBuyers` approval per file.
+ */
+
+export const portalRouter = Router();
+
+export const newPortalSlug = (): string => randomBytes(12).toString("base64url");
+
+/** Buyer-safe projection of a deal. The ONLY shape the portal ever returns. */
+function publicDeal(d: {
+  name: string; portalSlug: string | null; portalSummary: string | null; portalFeatured: boolean;
+  counties: string[]; states: string[]; state: string | null; abstractIds: string[];
+  basins: string[]; formations: string[]; assetTypes: string[]; surveys: string[];
+  nra: number | null; acreageNma: number | null; operator: string | null;
+  wells: string[]; producingStatus: string | null; updatedAt: Date;
+}) {
+  return {
+    slug: d.portalSlug,
+    name: d.name,
+    summary: d.portalSummary,
+    featured: d.portalFeatured,
+    counties: d.counties,
+    states: d.states.length ? d.states : d.state ? [d.state] : [],
+    abstractIds: d.abstractIds,
+    basins: d.basins,
+    formations: d.formations,
+    assetTypes: d.assetTypes,
+    surveys: d.surveys,
+    nra: d.nra,
+    acreageNma: d.acreageNma,
+    operator: d.operator,
+    wells: d.wells,
+    producingStatus: d.producingStatus,
+    listedAt: d.updatedAt,
+  };
+}
+
+function publicOrg(o: {
+  name: string; fullLogo: string | null; compactLogo: string | null; portalSlug: string | null;
+  portalContactName: string | null; portalContactEmail: string | null;
+  portalContactPhone: string | null; portalOfficeLocation: string | null;
+}) {
+  return {
+    name: o.name,
+    slug: o.portalSlug,
+    fullLogo: o.fullLogo,
+    compactLogo: o.compactLogo,
+    contactName: o.portalContactName,
+    contactEmail: o.portalContactEmail,
+    contactPhone: o.portalContactPhone,
+    officeLocation: o.portalOfficeLocation,
+  };
+}
+
+async function orgBySlug(slug: string) {
+  const org = await prisma.organization.findUnique({ where: { portalSlug: slug } });
+  if (!org || !org.portalEnabled) throw new HttpError(404, "Portal not found");
+  return org;
+}
+
+/** Marketplace: the org's published PUBLIC offerings + branding/contact. */
+portalRouter.get(
+  "/:orgSlug",
+  asyncHandler(async (req, res) => {
+    const org = await orgBySlug(String(req.params.orgSlug));
+    const deals = await prisma.deal.findMany({
+      where: { organizationId: org.id, publishedToPortal: true, portalVisibility: "PUBLIC" },
+      orderBy: [{ portalFeatured: "desc" }, { updatedAt: "desc" }],
+    });
+    res.setHeader("Cache-Control", "public, max-age=60");
+    res.json({ org: publicOrg(org), deals: deals.map(publicDeal) });
+  }),
+);
+
+/** Marketplace map: every published PUBLIC offering's abstract footprints. */
+portalRouter.get(
+  "/:orgSlug/features",
+  asyncHandler(async (req, res) => {
+    const org = await orgBySlug(String(req.params.orgSlug));
+    const deals = await prisma.deal.findMany({
+      where: { organizationId: org.id, publishedToPortal: true, portalVisibility: "PUBLIC" },
+      select: { portalSlug: true, name: true, abstractIds: true },
+    });
+    const byAbstract = new Map<string, { slug: string | null; name: string }>();
+    for (const d of deals) for (const id of d.abstractIds) byAbstract.set(id, { slug: d.portalSlug, name: d.name });
+    const ids = [...byAbstract.keys()].slice(0, 2000);
+    if (!ids.length) return res.json({ type: "FeatureCollection", features: [] });
+    const rows = await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string; geom: string }[]>(
+      `SELECT id, abstract, survey, county, ST_AsGeoJSON(geom, 6) AS geom FROM gis.abstracts WHERE id = ANY($1::text[])`,
+      ids,
+    );
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.json({
+      type: "FeatureCollection",
+      features: rows.map((r) => ({
+        type: "Feature",
+        properties: { id: r.id, abstract: r.abstract, survey: r.survey, county: r.county, ...byAbstract.get(r.id) },
+        geometry: JSON.parse(r.geom) as unknown,
+      })),
+    });
+  }),
+);
+
+/** One offering by its share slug (works for PUBLIC and LINK_ONLY). */
+portalRouter.get(
+  "/offering/:slug",
+  asyncHandler(async (req, res) => {
+    const deal = await prisma.deal.findUnique({
+      where: { portalSlug: String(req.params.slug) },
+      include: {
+        organization: true,
+        files: { where: { visibleToBuyers: true, supersededById: null }, select: { id: true, filename: true, mimeType: true, sizeBytes: true, folder: true } },
+      },
+    });
+    if (!deal || !deal.publishedToPortal || !deal.organization?.portalEnabled) {
+      throw new HttpError(404, "Offering not found");
+    }
+    // Abstract/survey labels for the info grid (numbers alone mean little).
+    const abstracts = deal.abstractIds.length
+      ? await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string }[]>(
+          `SELECT id, abstract, survey, county FROM gis.abstracts WHERE id = ANY($1::text[])`,
+          deal.abstractIds.slice(0, 500),
+        )
+      : [];
+    res.json({
+      org: publicOrg(deal.organization),
+      deal: publicDeal(deal),
+      abstracts,
+      documents: deal.files,
+    });
+  }),
+);
+
+/** Offering footprint geometry (auto-fit + highlight on the deal map). */
+portalRouter.get(
+  "/offering/:slug/features",
+  asyncHandler(async (req, res) => {
+    const deal = await prisma.deal.findUnique({
+      where: { portalSlug: String(req.params.slug) },
+      select: { publishedToPortal: true, abstractIds: true, organization: { select: { portalEnabled: true } } },
+    });
+    if (!deal || !deal.publishedToPortal || !deal.organization?.portalEnabled) throw new HttpError(404, "Offering not found");
+    if (!deal.abstractIds.length) return res.json({ type: "FeatureCollection", features: [] });
+    const rows = await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string; geom: string }[]>(
+      `SELECT id, abstract, survey, county, ST_AsGeoJSON(geom, 6) AS geom FROM gis.abstracts WHERE id = ANY($1::text[])`,
+      deal.abstractIds.slice(0, 500),
+    );
+    res.setHeader("Cache-Control", "public, max-age=300");
+    res.json({
+      type: "FeatureCollection",
+      features: rows.map((r) => ({
+        type: "Feature",
+        properties: { id: r.id, abstract: r.abstract, survey: r.survey, county: r.county },
+        geometry: JSON.parse(r.geom) as unknown,
+      })),
+    });
+  }),
+);
+
+/** Buyer-approved document download (presigned URL, same as the CRM flow). */
+portalRouter.get(
+  "/offering/:slug/files/:fileId/download",
+  asyncHandler(async (req, res) => {
+    if (!s3Configured()) throw new HttpError(503, "Document downloads are temporarily unavailable");
+    const file = await prisma.fileAttachment.findUnique({
+      where: { id: String(req.params.fileId) },
+      include: { deal: { select: { portalSlug: true, publishedToPortal: true } } },
+    });
+    if (!file || !file.visibleToBuyers || !file.deal || file.deal.portalSlug !== req.params.slug || !file.deal.publishedToPortal) {
+      throw new HttpError(404, "Document not found");
+    }
+    const url = await getDownloadUrl(file.s3Key, file.filename, req.query.inline === "1");
+    res.json({ url });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Lead capture — "Don't see what you're looking for?"
+// ---------------------------------------------------------------------------
+
+// Cheap in-memory rate limit: the endpoint is unauthenticated and writes to
+// the CRM, so cap submissions per IP. Resets on process restart (fine — this
+// guards against scripts, not determined attackers).
+const leadHits = new Map<string, { n: number; t: number }>();
+function leadRateLimited(ip: string): boolean {
+  const now = Date.now();
+  const h = leadHits.get(ip);
+  if (!h || now - h.t > 60 * 60 * 1000) { leadHits.set(ip, { n: 1, t: now }); return false; }
+  h.n++;
+  return h.n > 10;
+}
+
+const leadSchema = z.object({
+  companyName: z.string().trim().min(1).max(160),
+  contactName: z.string().trim().min(1).max(120),
+  email: z.string().trim().email().max(200),
+  phone: z.string().trim().max(40).optional().default(""),
+  preferredContact: z.enum(["email", "phone", "either"]).optional().default("either"),
+  buyBox: z.object({
+    states: z.array(z.string().trim().max(40)).max(50).default([]),
+    counties: z.array(z.string().trim().max(60)).max(200).default([]),
+    basins: z.array(z.string().trim().max(80)).max(50).default([]),
+    formations: z.array(z.string().trim().max(80)).max(50).default([]),
+    assetTypes: z.array(z.string().trim().max(60)).max(20).default([]),
+    minAcreage: z.number().nonnegative().optional().nullable(),
+    maxAcreage: z.number().nonnegative().optional().nullable(),
+    minPrice: z.number().nonnegative().optional().nullable(),
+    maxPrice: z.number().nonnegative().optional().nullable(),
+  }).default({}),
+  // Free-text preferences that don't map to structured buy-box fields
+  // (NRA range, abstracts, surveys, operator/well-status preferences, notes).
+  additionalCriteria: z.string().trim().max(4000).optional().default(""),
+});
+
+portalRouter.post(
+  "/:orgSlug/leads",
+  asyncHandler(async (req, res) => {
+    const org = await orgBySlug(String(req.params.orgSlug));
+    const ip = req.ip ?? "unknown";
+    if (leadRateLimited(ip)) throw new HttpError(429, "Too many submissions — please try again later");
+    const lead = leadSchema.parse(req.body);
+    const email = lead.email.toLowerCase();
+    const normCompany = normalizeCompany(lead.companyName);
+    const now = new Date();
+
+    const criteriaNote = [
+      `— Portal submission ${now.toISOString().slice(0, 10)} —`,
+      `Preferred contact: ${lead.preferredContact}`,
+      lead.additionalCriteria ? `Additional criteria: ${lead.additionalCriteria}` : null,
+    ].filter(Boolean).join("\n");
+
+    // Dedupe: exact email match merges; company-only match flags for review.
+    const existing = await prisma.buyer.findFirst({
+      where: { organizationId: org.id, email: { equals: email, mode: "insensitive" } },
+    });
+    const companyMatch = existing
+      ? null
+      : await prisma.buyer.findFirst({ where: { organizationId: org.id, normalizedCompany: normCompany } });
+
+    let buyerId: string;
+    let outcome: "created" | "merged" | "flagged";
+    if (existing) {
+      // Merge: fill blanks only — never overwrite user-entered data.
+      await prisma.buyer.update({
+        where: { id: existing.id },
+        data: {
+          contactName: existing.contactName || lead.contactName,
+          phone: existing.phone || lead.phone || null,
+          portalSubmittedAt: now,
+          notes: [existing.notes, criteriaNote].filter(Boolean).join("\n\n"),
+        },
+      });
+      // Buy box: fill only empty criteria lists/limits.
+      const bb = await prisma.buyBoxCriteria.findUnique({ where: { buyerId: existing.id } });
+      if (!bb) {
+        await prisma.buyBoxCriteria.create({ data: { buyerId: existing.id, ...lead.buyBox } });
+      } else {
+        await prisma.buyBoxCriteria.update({
+          where: { buyerId: existing.id },
+          data: {
+            states: bb.states.length ? bb.states : lead.buyBox.states,
+            counties: bb.counties.length ? bb.counties : lead.buyBox.counties,
+            basins: bb.basins.length ? bb.basins : lead.buyBox.basins,
+            formations: bb.formations.length ? bb.formations : lead.buyBox.formations,
+            assetTypes: bb.assetTypes.length ? bb.assetTypes : lead.buyBox.assetTypes,
+            minAcreage: bb.minAcreage ?? lead.buyBox.minAcreage,
+            maxAcreage: bb.maxAcreage ?? lead.buyBox.maxAcreage,
+            minPrice: bb.minPrice ?? lead.buyBox.minPrice,
+            maxPrice: bb.maxPrice ?? lead.buyBox.maxPrice,
+          },
+        });
+      }
+      buyerId = existing.id;
+      outcome = "merged";
+    } else {
+      const created = await prisma.buyer.create({
+        data: {
+          organizationId: org.id,
+          name: lead.companyName,
+          companyName: lead.companyName,
+          contactName: lead.contactName,
+          email,
+          phone: lead.phone || null,
+          normalizedCompany: normCompany,
+          source: "portal",
+          portalSubmittedAt: now,
+          // Same company name but a different email → can't confirm identity;
+          // flag the new profile for a human duplicate check.
+          duplicateReview: Boolean(companyMatch),
+          notes: criteriaNote,
+          buyBox: { create: lead.buyBox },
+        },
+      });
+      buyerId = created.id;
+      outcome = companyMatch ? "flagged" : "created";
+    }
+
+    // Internal notification → assigned owners, else org admins see it (userId null).
+    const owners = await prisma.buyerOwner.findMany({ where: { buyerId }, select: { userId: true } });
+    const interest = [...lead.buyBox.states, ...lead.buyBox.counties, ...lead.buyBox.basins].slice(0, 6).join(", ") || "—";
+    const title = `Portal lead: ${lead.contactName} (${lead.companyName})`;
+    const body = `Submitted ${now.toLocaleDateString("en-US")} · Areas of interest: ${interest}${outcome === "flagged" ? " · POSSIBLE DUPLICATE — review" : outcome === "merged" ? " · merged into existing profile" : ""}`;
+    const targets: (string | null)[] = owners.length ? owners.map((o) => o.userId) : [null];
+    await prisma.notification.createMany({
+      data: targets.map((userId) => ({
+        organizationId: org.id, userId, type: "portal_lead", title, body, link: `/buyers/${buyerId}`,
+      })),
+    });
+
+    res.status(201).json({ ok: true });
+  }),
+);

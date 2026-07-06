@@ -141,6 +141,17 @@ model Organization {
   // Null → fall back to the default Mineral Hub / MH branding.
   fullLogo    String?
   compactLogo String?
+
+  // --- Buyer Offering Portal (public marketplace) ---------------------------
+  // portalSlug is the public URL key (/portal/:slug). Null → portal disabled
+  // for the org. Contact fields power the offering-page contact section.
+  portalSlug           String?  @unique
+  portalEnabled        Boolean  @default(false)
+  portalContactName    String?
+  portalContactEmail   String?
+  portalContactPhone   String?
+  portalOfficeLocation String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -160,6 +171,31 @@ model Organization {
   researchIngests   ResearchIngestRun[]
   researchWells     ResearchWell[]
   wellAnalyses      WellAnalysis[]
+  notifications     Notification[]
+}
+
+// Public visibility of a published offering: PUBLIC appears in the marketplace;
+// LINK_ONLY is reachable only via its unguessable share slug.
+enum PortalVisibility {
+  PUBLIC
+  LINK_ONLY
+}
+
+// Lightweight in-app notification (portal leads today; general-purpose shape).
+model Notification {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Targeted user; null = visible to any org admin/owner.
+  userId         String?
+  type           String // e.g. "portal_lead"
+  title          String
+  body           String?
+  link           String? // in-app path, e.g. /buyers/:id
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([organizationId, readAt])
 }
 
 enum IntegrationStatus {
@@ -375,6 +411,16 @@ model Deal {
   estimatedClosingCosts Float?
   notes                 String?
 
+  // --- Buyer Offering Portal -------------------------------------------------
+  // Published deals appear on the public portal. portalSlug is an unguessable
+  // share token (also the offering URL for LINK_ONLY deals). portalSummary is
+  // the buyer-facing description — internal notes/pricing are never exposed.
+  publishedToPortal Boolean          @default(false)
+  portalSlug        String?          @unique
+  portalVisibility  PortalVisibility @default(LINK_ONLY)
+  portalFeatured    Boolean          @default(false)
+  portalSummary     String?
+
   // --- Owned-asset fields (used when recordType = OWNED_ASSET) -------------
   // Ownership
   acquisitionDate    DateTime?
@@ -416,6 +462,7 @@ model Deal {
   @@index([selectedBuyerId])
   @@index([organizationId])
   @@index([organizationId, recordType])
+  @@index([organizationId, publishedToPortal])
 }
 
 // A legal tract description on a deal. The raw text is authoritative; `parse`
@@ -560,6 +607,11 @@ model Buyer {
   // states of activity, abstracts, common transaction types, counts, first/last
   // seen). Appended additively — never overwrites user-entered data.
   researchSummary Json?
+
+  // Buyer Offering Portal lead capture: when the profile was created/updated by
+  // a portal submission, and whether a fuzzy match needs a human duplicate check.
+  portalSubmittedAt DateTime?
+  duplicateReview   Boolean   @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -727,6 +779,9 @@ model FileAttachment {
   mimeType         String
   sizeBytes        Int
   s3Key            String
+  // Approved for buyers: shows up (and is downloadable) on the deal's public
+  // offering page while the deal is published. Default private.
+  visibleToBuyers  Boolean      @default(false)
   uploadedByUserId String?
   uploadedBy       User?        @relation(fields: [uploadedByUserId], references: [id], onDelete: SetNull)
   createdAt        DateTime     @default(now())

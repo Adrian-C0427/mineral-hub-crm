@@ -26,6 +26,8 @@ import { researchRouter } from "./routes/research.js";
 import { wellsRouter } from "./routes/wells.js";
 import { aiRouter } from "./routes/ai.js";
 import { gisRouter, gisTilesRouter } from "./routes/gis.js";
+import { portalRouter } from "./routes/portal.js";
+import { notificationsRouter } from "./routes/notifications.js";
 
 export function createApp() {
   const app = express();
@@ -82,6 +84,10 @@ export function createApp() {
   app.use("/api/research", researchRouter);
   app.use("/api/wells", wellsRouter);
   app.use("/api/ai", aiRouter);
+  app.use("/api/notifications", notificationsRouter);
+  // Buyer Offering Portal: public, unauthenticated — serves only whitelisted,
+  // explicitly published data (see routes/portal.ts).
+  app.use("/api/portal", portalRouter);
   // Public cadastral vector tiles (MapLibre fetches carry no auth header);
   // must be mounted before the authed /api/gis router.
   app.use("/api/gis/tiles", gisTilesRouter);

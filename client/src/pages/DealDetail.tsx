@@ -18,6 +18,7 @@ import { operatorsForCounties } from "../lib/operators";
 import { money, num, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { SellerDetails } from "../components/SellerDetails";
+import { DealPortalPanel } from "../components/DealPortalPanel";
 import { AssigneePicker } from "../components/AssigneePicker";
 import { DealAiAssistant } from "../components/DealAiAssistant";
 import type { BuyerActivityRow, DealSummary, MatchRec, Seller, UserLite } from "../types";
@@ -134,6 +135,8 @@ export function DealDetail() {
         canEdit={can("editDeals")}
         onChanged={loadDeal}
       />
+
+      <DealPortalPanel dealId={deal.id} />
 
       {/* Embedded, isolated map showing only this deal's extent. Without any
           abstracts there is nothing to draw, so a compact empty state replaces
