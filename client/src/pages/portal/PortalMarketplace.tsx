@@ -25,7 +25,6 @@ export function PortalMarketplace() {
   const [features, setFeatures] = useState<FC>(EMPTY_FC);
   const [error, setError] = useState<string | null>(null);
 
-  const [q, setQ] = useState("");
   const [view, setView] = useState<"cards" | "list">("cards");
   const [sort, setSort] = useState<SortKey>("featured");
   const [fStates, setFStates] = useState<string[]>([]);
@@ -55,10 +54,8 @@ export function PortalMarketplace() {
   }, [deals]);
 
   const filtered = useMemo(() => {
-    const needle = q.trim().toLowerCase();
     const min = Number(nraMin) || 0, max = Number(nraMax) || Infinity;
     const hit = (d: PortalDeal) =>
-      (!needle || [d.name, d.summary ?? "", d.operator ?? "", ...d.counties, ...d.basins, ...d.formations].join(" ").toLowerCase().includes(needle)) &&
       (!fStates.length || d.states.some((s) => fStates.includes(s))) &&
       (!fCounties.length || d.counties.some((c) => fCounties.includes(c))) &&
       (!fBasins.length || d.basins.some((b) => fBasins.includes(b))) &&
@@ -74,7 +71,7 @@ export function PortalMarketplace() {
       name: (a, b) => a.name.localeCompare(b.name),
     };
     return rows.sort(cmp[sort]);
-  }, [deals, q, fStates, fCounties, fBasins, fFormations, fAssetTypes, fOperators, nraMin, nraMax, sort]);
+  }, [deals, fStates, fCounties, fBasins, fFormations, fAssetTypes, fOperators, nraMin, nraMax, sort]);
 
   if (error) return <PortalShell><div className="panel" style={{ textAlign: "center", padding: 48 }}><h2>Portal unavailable</h2><p className="muted">{error}</p></div></PortalShell>;
 
@@ -83,13 +80,8 @@ export function PortalMarketplace() {
       <div className="portal-hero panel" style={{ alignItems: "center" }}>
         <div>
           <h1 style={{ margin: "0 0 6px" }}>Available Mineral Opportunities</h1>
-          <p className="muted" style={{ margin: 0 }}>{deals.length} active offering{deals.length === 1 ? "" : "s"} · Browse, filter, and reach out — we move fast.</p>
+          <p className="muted" style={{ margin: 0 }}>{deals.length} active offering{deals.length === 1 ? "" : "s"} · Filter to narrow the list, then reach out — we move fast.</p>
         </div>
-        <input
-          type="search" value={q} onChange={(e) => setQ(e.target.value)}
-          placeholder="Search by name, county, basin, formation, operator…"
-          style={{ maxWidth: 380, width: "100%" }} aria-label="Search opportunities"
-        />
       </div>
 
       {/* Filters */}
@@ -194,13 +186,22 @@ function LeadCapture({ orgSlug }: { orgSlug: string }) {
   });
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
+  const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const set = <K extends keyof typeof f>(k: K) => (v: (typeof f)[K]) => setF((p) => ({ ...p, [k]: v }));
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    if (!f.companyName.trim() || !f.contactName.trim() || !f.email.trim()) { setError("Company, contact name, and email are required."); return; }
+    // Required: company, contact, email, phone, and at least one state + county.
+    const need: string[] = [];
+    if (!f.companyName.trim()) need.push("Company name");
+    if (!f.contactName.trim()) need.push("Contact name");
+    if (!f.email.trim()) need.push("Email");
+    if (!f.phone.trim()) need.push("Phone");
+    if (!f.states.length) need.push("State(s) of interest");
+    if (!f.counties.length) need.push("County(ies) of interest");
+    if (need.length) { setError(`Required: ${need.join(", ")}`); return; }
     setBusy(true);
     try {
       await portalPost(`/${encodeURIComponent(orgSlug)}/leads`, {
@@ -227,17 +228,34 @@ function LeadCapture({ orgSlug }: { orgSlug: string }) {
     );
   }
 
+  // Compact by default: a CTA banner; the full form opens on click.
+  if (!open) {
+    return (
+      <div className="panel portal-lead portal-lead-cta">
+        <div>
+          <h3 style={{ margin: "0 0 4px" }}>Don't see an opportunity that fits your needs?</h3>
+          <p className="muted" style={{ margin: 0 }}>Tell us your buy box — when a matching deal surfaces, you'll be the first call.</p>
+        </div>
+        <button className="primary" onClick={() => setOpen(true)}>Submit Your Buy Box</button>
+      </div>
+    );
+  }
+
+  const star = <span style={{ color: "var(--accent)" }}>*</span>;
   return (
     <div className="panel portal-lead">
-      <h2 style={{ marginTop: 0 }}>Don't See an Opportunity That Fits Your Needs?</h2>
-      <p className="muted">Tell us what you're looking for. We source new mineral and royalty opportunities every week — when something matches your buy box, you'll be the first call.</p>
+      <div className="section-head">
+        <h2 style={{ margin: 0 }}>Tell Us What You're Looking For</h2>
+        <button className="small" onClick={() => setOpen(false)}>Close</button>
+      </div>
+      <p className="muted">We source new mineral and royalty opportunities every week — when something matches your buy box, you'll be the first call.</p>
       <form onSubmit={submit}>
         <div className="muted portal-lead-section">Contact information</div>
         <div className="dd-grid">
-          <div className="field"><label>Company name *</label><input value={f.companyName} onChange={(e) => set("companyName")(e.target.value)} /></div>
-          <div className="field"><label>Contact name *</label><input value={f.contactName} onChange={(e) => set("contactName")(e.target.value)} /></div>
-          <div className="field"><label>Email *</label><input type="email" value={f.email} onChange={(e) => set("email")(e.target.value)} /></div>
-          <div className="field"><label>Phone</label><input value={f.phone} onChange={(e) => set("phone")(e.target.value)} /></div>
+          <div className="field"><label>Company name {star}</label><input value={f.companyName} onChange={(e) => set("companyName")(e.target.value)} /></div>
+          <div className="field"><label>Contact name {star}</label><input value={f.contactName} onChange={(e) => set("contactName")(e.target.value)} /></div>
+          <div className="field"><label>Email {star}</label><input type="email" value={f.email} onChange={(e) => set("email")(e.target.value)} /></div>
+          <div className="field"><label>Phone {star}</label><input value={f.phone} onChange={(e) => set("phone")(e.target.value)} /></div>
           <div className="field"><label>Preferred contact</label>
             <select value={f.preferredContact} onChange={(e) => set("preferredContact")(e.target.value as typeof f.preferredContact)}>
               <option value="either">Either</option><option value="email">Email</option><option value="phone">Phone</option>
@@ -249,7 +267,7 @@ function LeadCapture({ orgSlug }: { orgSlug: string }) {
           <GeoFields
             states={f.states} onStatesChange={set("states")}
             counties={f.counties} onCountiesChange={set("counties")}
-            labels={{ state: "States", county: "Counties" }}
+            labels={{ state: "States *", county: "Counties *" }}
           />
           <div className="field"><label>Basins</label><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={f.basins} onChange={set("basins")} placeholder="Any" /></div>
           <div className="field"><label>Formations</label><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={f.formations} onChange={set("formations")} placeholder="Any" /></div>

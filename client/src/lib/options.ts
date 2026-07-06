@@ -11,52 +11,116 @@ export const US_STATE_OPTIONS = [
   "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
 ] as const;
 
-// Common / recognized Texas producing basins.
+// Recognized Texas producing basins / structural provinces (comprehensive).
 export const TEXAS_BASIN_OPTIONS = [
   "Permian Basin",
   "Delaware Basin",
   "Midland Basin",
-  "Fort Worth Basin",
-  "Anadarko Basin",
-  "Maverick Basin",
-  "East Texas Basin",
-  "Gulf Coast Basin",
+  "Central Basin Platform",
+  "Northwest Shelf",
+  "Eastern Shelf",
+  "Ozona Arch",
   "Val Verde Basin",
   "Marfa Basin",
+  "Marathon Fold Belt",
   "Palo Duro Basin",
-  "Bend Arch",
+  "Dalhart Basin",
+  "Anadarko Basin",
   "Hardeman Basin",
+  "Bend Arch",
+  "Fort Worth Basin",
+  "East Texas Basin",
+  "North Texas (Muenster Arch)",
+  "Sabine Uplift",
+  "Ark-La-Tex",
+  "Gulf Coast Basin",
+  "Maverick Basin",
+  "Rio Grande Embayment",
+  "Burgos Basin",
+  "San Marcos Arch",
+  "Llano Uplift",
 ];
 
-// Common / recognized Texas formations.
+// Recognized Texas formations / producing intervals (comprehensive, roughly
+// grouped by province: Permian, Fort Worth/Bend, East TX/Gulf Coast, etc.).
 export const TEXAS_FORMATION_OPTIONS = [
-  "Wolfcamp",
-  "Spraberry",
-  "Bone Spring",
-  "Eagle Ford",
-  "Barnett",
-  "Austin Chalk",
-  "Haynesville",
-  "Woodbine",
-  "Cline",
-  "Strawn",
-  "Canyon",
-  "Atoka",
-  "Ellenburger",
-  "Clearfork",
-  "San Andres",
-  "Yates",
-  "Devonian",
-  "Mississippian",
-  "Bend Conglomerate",
-  "Granite Wash",
-  "Cotton Valley",
-  "Travis Peak",
-  "Buda",
-  "Glorieta",
-  "Queen",
-  "Grayburg",
+  // Permian (Delaware / Midland)
+  "Wolfcamp", "Spraberry", "Dean", "Bone Spring", "Avalon", "Brushy Canyon",
+  "Cherry Canyon", "Bell Canyon", "Cline", "Clearfork", "San Andres", "Grayburg",
+  "Yates", "Seven Rivers", "Queen", "Glorieta", "Leonard", "Strawn", "Atoka",
+  "Morrow", "Fusselman", "Devonian", "Mississippian", "Ellenburger", "Barnett (Permian)",
+  "Wichita-Albany",
+  // Fort Worth / Bend Arch
+  "Barnett", "Marble Falls", "Bend Conglomerate", "Caddo", "Conglomerate",
+  // Anadarko / Panhandle
+  "Granite Wash", "Cleveland", "Tonkawa", "Council Grove", "Brown Dolomite",
+  "Red Cave", "Hugoton",
+  // East Texas / North Louisiana
+  "Haynesville", "Bossier", "Cotton Valley", "Travis Peak", "Pettet", "Rodessa",
+  "James Lime", "Sligo", "Pettit", "Woodbine", "Sub-Clarksville", "Paluxy", "Buda",
+  "Georgetown", "Edwards",
+  // Gulf Coast / South Texas
+  "Eagle Ford", "Austin Chalk", "Buda (Gulf Coast)", "Olmos", "San Miguel",
+  "Escondido", "Wilcox", "Vicksburg", "Frio", "Yegua", "Jackson", "Queen City",
+  "Tom Green", "Miocene",
+  // Miscellaneous / statewide
+  "Canyon", "Strawn (North TX)", "Gardner", "Palo Pinto", "Smithwick",
 ];
+
+// ---------------------------------------------------------------------------
+// Geographic relationships: which basins/formations are valid in a county.
+// County-level mapping (Abstract-level associations are the long-term goal;
+// county is the practical fallback). Used to SUGGEST valid basins/formations
+// from the selected geography — selections outside the map are still allowed,
+// so partial coverage never blocks data entry.
+// ---------------------------------------------------------------------------
+
+// County → basins. Broad regional assignment covering the main plays.
+const PERMIAN_DELAWARE = ["Reeves", "Loving", "Ward", "Winkler", "Pecos", "Culberson", "Jeff Davis"];
+const PERMIAN_MIDLAND = ["Midland", "Martin", "Howard", "Glasscock", "Reagan", "Upton", "Andrews", "Ector", "Crane", "Dawson", "Borden", "Sterling", "Irion", "Regan"];
+const FORT_WORTH = ["Tarrant", "Johnson", "Wise", "Denton", "Parker", "Hood", "Somervell", "Erath", "Palo Pinto", "Jack", "Montague"];
+const EAST_TEXAS = ["Leon", "Freestone", "Anderson", "Angelina", "Cherokee", "Houston", "Limestone", "Madison", "Panola", "Robertson", "San Augustine", "Shelby", "Nacogdoches", "Rusk", "Gregg", "Harrison", "Smith", "Henderson", "Navarro"];
+const EAGLE_FORD = ["Karnes", "DeWitt", "Gonzales", "La Salle", "McMullen", "Dimmit", "Webb", "Atascosa", "Live Oak", "Frio", "Wilson", "Maverick", "Zavala"];
+const ANADARKO_PANHANDLE = ["Hemphill", "Roberts", "Ochiltree", "Lipscomb", "Wheeler", "Hutchinson", "Gray", "Moore", "Potter"];
+
+function invert(map: Record<string, string[]>): Record<string, string[]> {
+  const out: Record<string, string[]> = {};
+  for (const [value, counties] of Object.entries(map)) for (const c of counties) (out[c] ??= []).push(value);
+  return out;
+}
+
+const BASIN_COUNTIES: Record<string, string[]> = {
+  "Delaware Basin": PERMIAN_DELAWARE, "Permian Basin": [...PERMIAN_DELAWARE, ...PERMIAN_MIDLAND],
+  "Midland Basin": PERMIAN_MIDLAND, "Fort Worth Basin": FORT_WORTH,
+  "East Texas Basin": EAST_TEXAS, "Maverick Basin": ["Maverick", "Dimmit", "Zavala", "La Salle", "Webb"],
+  "Gulf Coast Basin": EAGLE_FORD, "Anadarko Basin": ANADARKO_PANHANDLE,
+};
+const FORMATION_COUNTIES: Record<string, string[]> = {
+  "Wolfcamp": [...PERMIAN_DELAWARE, ...PERMIAN_MIDLAND], "Spraberry": PERMIAN_MIDLAND,
+  "Bone Spring": PERMIAN_DELAWARE, "Wolfcamp (Delaware)": PERMIAN_DELAWARE,
+  "Barnett": FORT_WORTH, "Bend Conglomerate": FORT_WORTH, "Marble Falls": FORT_WORTH,
+  "Haynesville": EAST_TEXAS, "Bossier": EAST_TEXAS, "Cotton Valley": EAST_TEXAS,
+  "Travis Peak": EAST_TEXAS, "Woodbine": EAST_TEXAS, "Rodessa": EAST_TEXAS,
+  "Eagle Ford": EAGLE_FORD, "Austin Chalk": [...EAGLE_FORD, ...EAST_TEXAS], "Buda": EAGLE_FORD,
+  "Granite Wash": ANADARKO_PANHANDLE, "Cleveland": ANADARKO_PANHANDLE,
+};
+
+const COUNTY_BASINS = invert(BASIN_COUNTIES);
+const COUNTY_FORMATIONS = invert(FORMATION_COUNTIES);
+
+/** Basins geographically associated with the selected counties (sorted, unique).
+ *  Empty when no counties are selected or none have a mapping. */
+export function basinsForCounties(counties: string[]): string[] {
+  const out = new Set<string>();
+  for (const c of counties) for (const b of COUNTY_BASINS[c] ?? []) out.add(b);
+  return [...out].sort();
+}
+/** Formations geographically associated with the selected counties. */
+export function formationsForCounties(counties: string[]): string[] {
+  const out = new Set<string>();
+  for (const c of counties) for (const f of COUNTY_FORMATIONS[c] ?? []) out.add(f);
+  return [...out].sort();
+}
 
 // All 254 Texas counties, alphabetical.
 export const TEXAS_COUNTY_OPTIONS: string[] = [
@@ -125,4 +189,15 @@ export function countiesForStates(states: string[]): string[] {
   const out = new Set<string>();
   for (const s of states) for (const c of STATE_COUNTIES[s] ?? []) out.add(c);
   return [...out].sort();
+}
+
+/** Reorder `all` so geographically-suggested options come first (deduped),
+ *  keeping the rest available. Lets forms surface valid basins/formations for
+ *  the selected geography without hiding anything. */
+export function suggestFirst(all: readonly string[], suggested: string[]): string[] {
+  if (!suggested.length) return [...all];
+  const set = new Set(suggested);
+  const head = suggested.filter((s) => all.includes(s));
+  const tail = all.filter((o) => !set.has(o));
+  return [...head, ...tail];
 }

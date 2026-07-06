@@ -14,7 +14,7 @@ import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { useAbstractLabels } from "../components/AbstractPicker";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
-import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
+import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
 import { operatorsForCounties } from "../lib/operators";
 import { money, num, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
@@ -400,8 +400,8 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
             counties={f.counties} onCountiesChange={setArr("counties")}
             abstractIds={f.abstractIds} onAbstractsChange={setArr("abstractIds")}
           />
-          <Fld l="Basin"><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={f.basins} onChange={setArr("basins")} placeholder="Search basins…" /></Fld>
-          <Fld l="Formation"><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={f.formations} onChange={setArr("formations")} placeholder="Search formations…" /></Fld>
+          <Fld l="Basin"><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(f.counties))} value={f.basins} onChange={setArr("basins")} placeholder="Search basins…" /></Fld>
+          <Fld l="Formation"><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(f.counties))} value={f.formations} onChange={setArr("formations")} placeholder="Search formations…" /></Fld>
           <Fld l="Asset Type"><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} value={f.assetTypes} onChange={setArr("assetTypes")} placeholder="Search asset types…" /></Fld>
           <Fld l="NMA"><input type="number" value={f.acreageNma ?? ""} onChange={setNum("acreageNma")} /></Fld>
           <Fld l="NRA"><input type="number" value={f.nra ?? ""} onChange={setNum("nra")} /></Fld>

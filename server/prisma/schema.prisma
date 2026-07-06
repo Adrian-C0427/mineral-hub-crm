@@ -446,6 +446,14 @@ model Deal {
   portalVisibility  PortalVisibility @default(LINK_ONLY)
   portalFeatured    Boolean          @default(false)
   portalSummary     String?
+  // Per-deal publishing config: which sections show on THIS listing (contact,
+  // company, description, documents, map, wells, tracts, production,
+  // attachments, notes, askPrice). Null → sensible defaults. Never affects
+  // other deals.
+  portalSections    Json?
+  // Buyer-facing asking price override. Null → use the deal's askPrice; set to
+  // publish a different figure without changing the underlying deal.
+  portalAskPrice    Float?
 
   // --- Owned-asset fields (used when recordType = OWNED_ASSET) -------------
   // Ownership

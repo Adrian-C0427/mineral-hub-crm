@@ -146,6 +146,22 @@ dealsRouter.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = createSchema.parse(req.body);
     const isAsset = data.recordType === "OWNED_ASSET";
+    // Required fields for a new acquisition opportunity (owned assets follow the
+    // asset flow and are exempt). Mirrors the Create Deal form's client checks.
+    if (!isAsset) {
+      const states = data.states ?? (data.state ? [data.state] : []);
+      const req_: [boolean, string][] = [
+        [states.length > 0, "State"],
+        [(data.counties ?? []).length > 0, "County"],
+        [(data.abstractIds ?? []).length > 0, "Abstract"],
+        [data.nra != null, "NRA"],
+        [(data.assetTypes ?? []).length > 0, "Asset Type"],
+        [data.ourPrice != null, "Our Price"],
+        [data.dateUnderContract != null, "Date Under Contract"],
+      ];
+      const missing = req_.filter(([ok]) => !ok).map(([, name]) => name);
+      if (missing.length) throw new HttpError(400, `Missing required fields: ${missing.join(", ")}`);
+    }
     const assigneeIds = data.assigneeIds ? await validateOrgUsers(orgId(req), data.assigneeIds) : [];
     const deal = await prisma.$transaction(async (tx) => {
       const created = await tx.deal.create({
@@ -553,13 +569,32 @@ dealsRouter.get(
   asyncHandler(async (req: AuthedRequest, res) => {
     const deal = await prisma.deal.findFirst({
       where: { id: req.params.id, organizationId: orgId(req) },
-      select: { id: true, publishedToPortal: true, portalSlug: true, portalVisibility: true, portalFeatured: true, portalSummary: true,
+      select: { id: true, publishedToPortal: true, portalSlug: true, portalVisibility: true, portalFeatured: true,
+        portalSummary: true, portalSections: true, portalAskPrice: true, askPrice: true,
         files: { where: { supersededById: null }, select: { id: true, filename: true, folder: true, visibleToBuyers: true } } },
     });
     if (!deal) throw new HttpError(404, "Deal not found");
-    res.json(deal);
+    res.json({ ...deal, portalSections: normalizeSections(deal.portalSections) });
   }),
 );
+
+// Which sections a published offering can expose. All default ON except notes
+// (internal by nature — opt-in). `askPrice` shows the buyer-facing figure.
+const PORTAL_SECTION_KEYS = [
+  "contact", "company", "description", "documents", "map", "wells",
+  "tracts", "production", "attachments", "notes", "askPrice",
+] as const;
+type PortalSectionKey = (typeof PORTAL_SECTION_KEYS)[number];
+const DEFAULT_SECTIONS: Record<PortalSectionKey, boolean> = {
+  contact: true, company: true, description: true, documents: true, map: true,
+  wells: true, tracts: true, production: true, attachments: true, notes: false, askPrice: true,
+};
+function normalizeSections(raw: unknown): Record<PortalSectionKey, boolean> {
+  const obj = (raw && typeof raw === "object") ? raw as Record<string, unknown> : {};
+  const out = { ...DEFAULT_SECTIONS };
+  for (const k of PORTAL_SECTION_KEYS) if (typeof obj[k] === "boolean") out[k] = obj[k] as boolean;
+  return out;
+}
 
 dealsRouter.patch(
   "/:id/portal",
@@ -570,8 +605,12 @@ dealsRouter.patch(
       visibility: z.enum(["PUBLIC", "LINK_ONLY"]).optional(),
       featured: z.boolean().optional(),
       summary: z.string().trim().max(4000).nullish(),
+      // Per-deal section toggles (partial merge) — never touches other deals.
+      sections: z.record(z.string(), z.boolean()).optional(),
+      // Buyer-facing asking-price override; null clears it (falls back to askPrice).
+      askPrice: z.number().nonnegative().nullish(),
     }).parse(req.body);
-    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true, portalSlug: true } });
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true, portalSlug: true, portalSections: true } });
     if (!deal) throw new HttpError(404, "Deal not found");
     const patch: Record<string, unknown> = {};
     if (body.published !== undefined) {
@@ -581,11 +620,18 @@ dealsRouter.patch(
     if (body.visibility !== undefined) patch.portalVisibility = body.visibility;
     if (body.featured !== undefined) patch.portalFeatured = body.featured;
     if (body.summary !== undefined) patch.portalSummary = body.summary;
+    if (body.askPrice !== undefined) patch.portalAskPrice = body.askPrice;
+    if (body.sections) {
+      const merged = { ...normalizeSections(deal.portalSections) };
+      for (const k of PORTAL_SECTION_KEYS) if (typeof body.sections[k] === "boolean") merged[k] = body.sections[k];
+      patch.portalSections = merged;
+    }
     const updated = await prisma.deal.update({
       where: { id: deal.id }, data: patch,
-      select: { id: true, publishedToPortal: true, portalSlug: true, portalVisibility: true, portalFeatured: true, portalSummary: true },
+      select: { id: true, publishedToPortal: true, portalSlug: true, portalVisibility: true, portalFeatured: true,
+        portalSummary: true, portalSections: true, portalAskPrice: true, askPrice: true },
     });
-    res.json(updated);
+    res.json({ ...updated, portalSections: normalizeSections(updated.portalSections) });
   }),
 );
 

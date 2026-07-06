@@ -21,19 +21,44 @@ export const portalRouter = Router();
 
 export const newPortalSlug = (): string => randomBytes(12).toString("base64url");
 
-/** Buyer-safe projection of a deal. The ONLY shape the portal ever returns. */
+// Per-deal publishable sections. Defaults match the CRM's DEFAULT_SECTIONS.
+const PORTAL_SECTION_KEYS = [
+  "contact", "company", "description", "documents", "map", "wells",
+  "tracts", "production", "attachments", "notes", "askPrice",
+] as const;
+type PortalSectionKey = (typeof PORTAL_SECTION_KEYS)[number];
+const DEFAULT_SECTIONS: Record<PortalSectionKey, boolean> = {
+  contact: true, company: true, description: true, documents: true, map: true,
+  wells: true, tracts: true, production: true, attachments: true, notes: false, askPrice: true,
+};
+function dealSections(raw: unknown): Record<PortalSectionKey, boolean> {
+  const obj = (raw && typeof raw === "object") ? raw as Record<string, unknown> : {};
+  const out = { ...DEFAULT_SECTIONS };
+  for (const k of PORTAL_SECTION_KEYS) if (typeof obj[k] === "boolean") out[k] = obj[k] as boolean;
+  return out;
+}
+
+/**
+ * Buyer-safe projection of a deal. The ONLY shape the portal ever returns.
+ * Per-deal section toggles decide which content appears; anything toggled off
+ * is omitted here (never sent to the browser), so a hidden section can't leak.
+ * `askPrice` uses the deal's buyer-facing override, else the deal askPrice.
+ */
 function publicDeal(d: {
   name: string; portalSlug: string | null; portalSummary: string | null; portalFeatured: boolean;
   counties: string[]; states: string[]; state: string | null; abstractIds: string[];
   basins: string[]; formations: string[]; assetTypes: string[]; surveys: string[];
   nra: number | null; acreageNma: number | null; operator: string | null;
   wells: string[]; producingStatus: string | null; updatedAt: Date;
+  portalSections?: unknown; portalAskPrice?: number | null; askPrice?: number | null; notes?: string | null;
 }) {
+  const s = dealSections(d.portalSections);
   return {
     slug: d.portalSlug,
     name: d.name,
-    summary: d.portalSummary,
+    summary: s.description ? d.portalSummary : null,
     featured: d.portalFeatured,
+    sections: s,
     counties: d.counties,
     states: d.states.length ? d.states : d.state ? [d.state] : [],
     abstractIds: d.abstractIds,
@@ -44,8 +69,10 @@ function publicDeal(d: {
     nra: d.nra,
     acreageNma: d.acreageNma,
     operator: d.operator,
-    wells: d.wells,
-    producingStatus: d.producingStatus,
+    wells: s.wells ? d.wells : [],
+    producingStatus: s.production ? d.producingStatus : null,
+    askPrice: s.askPrice ? (d.portalAskPrice ?? d.askPrice ?? null) : null,
+    notes: s.notes ? (d.notes ?? null) : null,
     listedAt: d.updatedAt,
   };
 }
@@ -165,6 +192,7 @@ portalRouter.get(
     if (!deal || !deal.publishedToPortal || !deal.organization?.portalEnabled) {
       throw new HttpError(404, "Offering not found");
     }
+    const sections = dealSections(deal.portalSections);
     // Abstract/survey labels for the info grid (numbers alone mean little).
     const abstracts = deal.abstractIds.length
       ? await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string }[]>(
@@ -172,11 +200,14 @@ portalRouter.get(
           deal.abstractIds.slice(0, 500),
         )
       : [];
+    // Contacts are only exposed when this deal publishes its contact section.
+    const org = await orgPayload(deal.organization);
     res.json({
-      org: await orgPayload(deal.organization),
+      org: sections.contact ? org : { ...org, contacts: [], contactName: null, contactEmail: null, contactPhone: null, officeLocation: null },
       deal: publicDeal(deal),
       abstracts,
-      documents: deal.files,
+      // Documents/attachments are approved per file AND gated per deal.
+      documents: (sections.documents || sections.attachments) ? deal.files : [],
     });
   }),
 );
