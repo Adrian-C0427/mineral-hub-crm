@@ -33,6 +33,27 @@ type Selected = SelAbstract | SelWell | SelHotspot | null;
 
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
 
+// --- Unified map search (server-ranked, /gis/suggest) ---
+type BBox = [number, number, number, number];
+interface Suggest {
+  counties: { label: string; bbox: BBox }[];
+  abstracts: { id: string; label: string; sub: string }[];
+  wells: { fid: number; label: string; sub: string }[];
+  operators: { name: string; sub: string; bbox: BBox | null }[];
+  fields: { name: string; sub: string; bbox: BBox | null }[];
+  formations: { name: string; sub: string; bbox: BBox | null }[];
+  deals: { id: string; label: string; sub: string; abstractIds: string[] }[];
+  assets: { id: string; label: string; sub: string; abstractIds: string[] }[];
+}
+/** A recent selection — enough payload to replay the action without re-searching. */
+interface Recent { t: keyof Suggest; label: string; sub: string; p: Record<string, unknown> }
+const RECENTS_KEY = "mh_map_recents";
+const GROUP_LABELS: Record<keyof Suggest, string> = {
+  counties: "Counties", abstracts: "Abstracts & surveys", wells: "Wells & leases",
+  operators: "Operators", fields: "Fields", formations: "Formations",
+  deals: "Deals", assets: "Mineral assets",
+};
+
 const EMPTY_FC = { type: "FeatureCollection", features: [] } as unknown as GeoJSON.FeatureCollection;
 // Oil ramp runs warm (amber → red); gas ramp runs cool (indigo → violet) so the
 // two heat layers stay distinguishable when both are on and overlapping.
@@ -87,8 +108,11 @@ export function MapView() {
   // Survey/abstract filter options come from the GIS API (PostGIS), scoped to the
   // selected counties — no abstract data needs to be downloaded to filter it.
   const [gisOptions, setGisOptions] = useState<{ surveys: string[]; abstracts: string[]; wellTypes: string[]; wellStatuses: string[]; operators: string[]; wellCount: number }>({ surveys: [], abstracts: [], wellTypes: [], wellStatuses: [], operators: [], wellCount: 0 });
-  const [absResults, setAbsResults] = useState<{ id: string; abstract: string | null; survey: string | null; county: string }[]>([]);
-  const [wellResults, setWellResults] = useState<{ fid: number; api8: string | null; wellNo: string | null; leaseName: string | null; operator: string | null; type: string | null; county: string }[]>([]);
+  const [sug, setSug] = useState<Suggest | null>(null);
+  const [searchFocus, setSearchFocus] = useState(false);
+  const [recents, setRecents] = useState<Recent[]>(() => {
+    try { return JSON.parse(sessionStorage.getItem(RECENTS_KEY) ?? "[]") as Recent[]; } catch { return []; }
+  });
 
   // --- Production heat map ---
   const [showHeat, setShowHeat] = useState(false);
@@ -96,6 +120,10 @@ export function MapView() {
   const heatRef = useRef(heat); heatRef.current = heat;
   const [rank, setRank] = useState<Rankings | null>(null);
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
+  // Numeric scale behind the legend gradient (max per-well value in view).
+  const [heatScale, setHeatScale] = useState<{ oil: number; gas: number }>({ oil: 0, gas: 0 });
+  // Hover summary of the production points near the cursor.
+  const [heatHover, setHeatHover] = useState<{ x: number; y: number; wells: number; oil: number; gas: number } | null>(null);
   const [heatReady, setHeatReady] = useState(false);
   const setHeatK = <K extends keyof HeatState>(k: K, v: HeatState[K]) => setHeat((p) => ({ ...p, [k]: v }));
   const heatActive = heat.oil || heat.gas;
@@ -209,6 +237,25 @@ export function MapView() {
       });
       map.on("mouseenter", "wells", () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", "wells", () => (map.getCanvas().style.cursor = ""));
+      // Heat hover tooltip: summarize the production points under the cursor.
+      // rAF-throttled so dense counties stay smooth while panning.
+      let hoverPending = false;
+      map.on("mousemove", (e) => {
+        if (!(heatRef.current.oil || heatRef.current.gas) || hoverPending) return;
+        hoverPending = true;
+        requestAnimationFrame(() => {
+          hoverPending = false;
+          const pts = heatPointsRef.current;
+          if (!pts.length) { setHeatHover(null); return; }
+          let wells = 0, oil = 0, gas = 0;
+          for (const p of pts) {
+            const sp = map.project([p.lon, p.lat]);
+            if (Math.hypot(sp.x - e.point.x, sp.y - e.point.y) <= 40) { wells++; oil += p.oil; gas += p.gas; }
+          }
+          setHeatHover(wells ? { x: e.point.x, y: e.point.y, wells, oil, gas } : null);
+        });
+      });
+      map.getCanvas().addEventListener("mouseleave", () => setHeatHover(null));
       map.on("mouseenter", "abstracts-fill", () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", "abstracts-fill", () => (map.getCanvas().style.cursor = ""));
       // On pan/zoom: re-scale the heat gradient to the current extent. (Abstract
@@ -352,6 +399,7 @@ export function MapView() {
     const basis = inView.length ? inView : pts;
     const normOil = Math.max(1, ...basis.map((p) => p.oil));
     const normGas = Math.max(1, ...basis.map((p) => p.gas));
+    setHeatScale({ oil: normOil > 1 ? normOil : 0, gas: normGas > 1 ? normGas : 0 });
     (map.getSource("heat-oil") as maplibregl.GeoJSONSource | undefined)?.setData(metricGeojson(pts, "oil", h.min, h.max, normOil) as unknown as GeoJSON.FeatureCollection);
     (map.getSource("heat-gas") as maplibregl.GeoJSONSource | undefined)?.setData(metricGeojson(pts, "gas", h.min, h.max, normGas) as unknown as GeoJSON.FeatureCollection);
 
@@ -428,14 +476,13 @@ export function MapView() {
       .catch(() => setGisOptions({ surveys: [], abstracts: [], wellTypes: [], wellStatuses: [], operators: [], wellCount: 0 }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fCounties]);
-  // Debounced abstract/survey + well search against the GIS API.
+  // Debounced unified search — one round-trip covers every entity type.
   useEffect(() => {
     const q = query.trim();
-    if (q.length < 2) { setAbsResults([]); setWellResults([]); return; }
+    if (q.length < 2) { setSug(null); return; }
     const t = setTimeout(() => {
-      api.get<typeof absResults>(`/gis/search?q=${encodeURIComponent(q)}`).then(setAbsResults).catch(() => setAbsResults([]));
-      api.get<typeof wellResults>(`/gis/wells/search?q=${encodeURIComponent(q)}`).then(setWellResults).catch(() => setWellResults([]));
-    }, 250);
+      api.get<Suggest>(`/gis/suggest?q=${encodeURIComponent(q)}`).then(setSug).catch(() => setSug(null));
+    }, 200);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
@@ -448,26 +495,61 @@ export function MapView() {
   useEffect(() => { applyHeatPaint(); /* eslint-disable-next-line */ }, [heat.intensity, heat.radius, heat.opacity]);
   useEffect(() => { applyHeatVisibility(); /* eslint-disable-next-line */ }, [heat.topProducers, heat.oil, heat.gas, heat.hotspots]);
 
+  function fitBbox(bbox: BBox | null | undefined): void {
+    const map = mapRef.current; if (!map || !bbox) return;
+    map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 60, maxZoom: 13, duration: 800 });
+  }
+  // Frame a deal/asset by the union bbox of its abstracts' geometry.
+  async function zoomToAbstracts(ids: string[]): Promise<void> {
+    const map = mapRef.current; if (!map || !ids.length) return;
+    try {
+      const fc = await api.get<FC>(`/gis/features?ids=${encodeURIComponent(ids.join(","))}`);
+      let minx = 180, miny = 90, maxx = -180, maxy = -90;
+      const walk = (c: unknown): void => {
+        if (Array.isArray(c) && typeof c[0] === "number") {
+          const [x, y] = c as number[];
+          if (x < minx) minx = x; if (x > maxx) maxx = x; if (y < miny) miny = y; if (y > maxy) maxy = y;
+        } else if (Array.isArray(c)) c.forEach(walk);
+      };
+      for (const f of fc.features) walk(f.geometry.coordinates);
+      if (minx <= maxx) fitBbox([minx, miny, maxx, maxy]);
+    } catch { /* footprint unavailable */ }
+  }
+  function pushRecent(r: Recent): void {
+    setRecents((prev) => {
+      const next = [r, ...prev.filter((x) => !(x.t === r.t && x.label === r.label))].slice(0, 8);
+      try { sessionStorage.setItem(RECENTS_KEY, JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  }
+  /** One dispatcher for both live results and recents. */
+  function runSearchAction(t: keyof Suggest, label: string, sub: string, p: Record<string, unknown>): void {
+    switch (t) {
+      case "counties": fitBbox(p.bbox as BBox); break;
+      case "abstracts": void selectAbstractById(String(p.id)); break;
+      case "wells": void openWell(Number(p.fid), true); break;
+      case "operators": setFOperators((prev) => (prev.includes(String(p.name)) ? prev : [...prev, String(p.name)])); fitBbox(p.bbox as BBox | null); break;
+      case "formations": setFFormations((prev) => (prev.includes(String(p.name)) ? prev : [...prev, String(p.name)])); fitBbox(p.bbox as BBox | null); break;
+      case "fields": fitBbox(p.bbox as BBox | null); break;
+      case "deals": case "assets": void zoomToAbstracts((p.abstractIds as string[]) ?? []); break;
+    }
+    pushRecent({ t, label, sub, p });
+    setQuery(""); setSug(null); setSearchFocus(false);
+  }
+  // Grouped, server-ranked results flattened for rendering.
   const results = useMemo(() => {
-    type R = { kind: "abstract" | "well" | "county"; key: string; label: string; sub: string };
-    const q = query.trim().toLowerCase(); if (!q) return [] as R[];
-    const out: R[] = [];
-    for (const c of COUNTIES) {
-      if (c.name.toLowerCase().includes(q)) { out.push({ kind: "county", key: c.key, label: `${c.name} County`, sub: "Go to county" }); if (out.length >= 4) break; }
-    }
-    // Abstract/survey matches come from the GIS API (every imported county is
-    // searchable regardless of what tiles are loaded).
-    for (const a of absResults.slice(0, 6)) {
-      out.push({ kind: "abstract", key: a.id, label: a.abstract ?? a.id, sub: [a.survey, a.county ? `${a.county} County` : null].filter(Boolean).join(" · ") });
-    }
-    // Wells from the GIS API (all imported counties, no download needed).
-    for (const w of wellResults.slice(0, 10)) {
-      out.push({ kind: "well", key: String(w.fid), label: `Well ${w.api8 ?? ""}${w.wellNo ? ` #${w.wellNo}` : ""}`, sub: [w.operator, w.leaseName, w.type, w.county ? `${w.county} County` : null].filter(Boolean).join(" · ") });
-      if (out.length >= 16) break;
-    }
+    if (!sug) return [] as { t: keyof Suggest; label: string; sub: string; p: Record<string, unknown> }[];
+    const out: { t: keyof Suggest; label: string; sub: string; p: Record<string, unknown> }[] = [];
+    for (const c of sug.counties) out.push({ t: "counties", label: c.label, sub: "Go to county", p: { bbox: c.bbox } });
+    for (const a of sug.abstracts) out.push({ t: "abstracts", label: a.label, sub: a.sub, p: { id: a.id } });
+    for (const w of sug.wells) out.push({ t: "wells", label: w.label, sub: w.sub, p: { fid: w.fid } });
+    for (const o of sug.operators) out.push({ t: "operators", label: o.name, sub: o.sub, p: { name: o.name, bbox: o.bbox } });
+    for (const f of sug.fields) out.push({ t: "fields", label: f.name, sub: f.sub, p: { bbox: f.bbox } });
+    for (const f of sug.formations) out.push({ t: "formations", label: f.name, sub: f.sub, p: { name: f.name, bbox: f.bbox } });
+    for (const d of sug.deals) out.push({ t: "deals", label: d.label, sub: d.sub, p: { abstractIds: d.abstractIds } });
+    for (const d of sug.assets) out.push({ t: "assets", label: d.label, sub: d.sub, p: { abstractIds: d.abstractIds } });
     return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query, absResults, wellResults]);
+  }, [sug]);
 
   const panelDeals = selected?.kind === "abstract" ? dealsByAbstract.get(selected.id) ?? [] : [];
   const abstractCount = dealsByAbstract.size;
@@ -478,15 +560,42 @@ export function MapView() {
       <div className="page-header"><div className="row"><h1 style={{ marginBottom: 0 }}>Map</h1><span className="muted">Texas · {COUNTIES.length} counties · abstracts stream as you pan &amp; zoom</span></div></div>
 
       <div className="row" style={{ marginBottom: 12, gap: 10, position: "relative" }}>
-        <div style={{ position: "relative", flex: 1, maxWidth: 440 }}>
-          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search API #, well #, abstract #, survey…" />
-          {results.length > 0 && (
-            <div className="msel-menu" style={{ top: "100%" }}>
-              {results.map((r) => (
-                <div className="msel-opt" key={r.kind + r.key} onClick={() => { if (r.kind === "abstract") void selectAbstractById(r.key); else if (r.kind === "county") goToCounty(r.key); else void openWell(Number(r.key), true); setQuery(""); }}>
-                  <strong>{r.label}</strong> <span className="muted">· {r.sub}</span>
+        <div style={{ position: "relative", flex: 1, maxWidth: 480 }}>
+          <input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onFocus={() => setSearchFocus(true)}
+            onClick={() => setSearchFocus(true)}
+            onBlur={() => setTimeout(() => setSearchFocus(false), 150)}
+            placeholder="Search wells, API #, abstracts, operators, fields, deals…"
+            aria-label="Search the map"
+          />
+          {searchFocus && query.trim().length < 2 && recents.length > 0 && (
+            <div className="msel-menu map-search-menu" style={{ top: "100%" }}>
+              <div className="map-search-group">Recent searches</div>
+              {recents.map((r, i) => (
+                <div className="msel-opt" key={`${r.t}-${r.label}-${i}`} onMouseDown={() => runSearchAction(r.t, r.label, r.sub, r.p)}>
+                  <strong>{r.label}</strong> {r.sub && <span className="muted">· {r.sub}</span>}
+                  <span className="map-search-kind">{GROUP_LABELS[r.t]}</span>
                 </div>
               ))}
+            </div>
+          )}
+          {query.trim().length >= 2 && results.length > 0 && (
+            <div className="msel-menu map-search-menu" style={{ top: "100%" }}>
+              {results.map((r, i) => (
+                <div key={`${r.t}-${r.label}-${i}`}>
+                  {(i === 0 || results[i - 1].t !== r.t) && <div className="map-search-group">{GROUP_LABELS[r.t]}</div>}
+                  <div className="msel-opt" onMouseDown={() => runSearchAction(r.t, r.label, r.sub, r.p)}>
+                    <strong>{r.label}</strong> {r.sub && <span className="muted">· {r.sub}</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {query.trim().length >= 2 && sug && results.length === 0 && (
+            <div className="msel-menu map-search-menu" style={{ top: "100%" }}>
+              <div className="msel-opt muted">No matches for “{query.trim()}”</div>
             </div>
           )}
         </div>
@@ -547,6 +656,7 @@ export function MapView() {
                   <option value="12m">Last 12 months</option>
                   <option value="3y">Last 3 years</option>
                   <option value="ytd">Year to date</option>
+                  <option value="all">Cumulative (all history)</option>
                   <option value="custom">Custom range</option>
                 </select>
               </div>
@@ -587,7 +697,8 @@ export function MapView() {
         <span className="muted">{deals == null ? "…" : `${deals.length} deal${deals.length === 1 ? "" : "s"} · ${abstractCount} highlighted · ${num(gisOptions.wellCount)} wells`}</span>
       </div>
 
-      <div style={{ position: "relative", height: "calc(100vh - 250px)", minHeight: 460, borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
+      {/* dvh tracks the real visible viewport on mobile (URL bar collapse). */}
+      <div style={{ position: "relative", height: "calc(100dvh - 250px)", minHeight: 320, borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
         <div ref={mapContainer} style={{ position: "absolute", inset: 0 }} />
         {!deals && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}><Spinner label="Loading map…" /></div>}
 
@@ -596,7 +707,10 @@ export function MapView() {
             <div style={{ minWidth: 160 }}>
               <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 4 }}>Production intensity · {periodLabelRef.current}</div>
               <div style={{ height: 10, borderRadius: 5, background: `linear-gradient(90deg, ${HEAT_STOPS.map(([s, c]) => `${c} ${s * 100}%`).join(", ")})` }} />
-              <div className="row" style={{ justifyContent: "space-between", fontSize: 11 }}><span>Low</span><span>High</span></div>
+              <div className="row" style={{ justifyContent: "space-between", fontSize: 11 }}><span>0</span><span>Peak in view</span></div>
+              {/* Numeric range represented by the ramp, per active metric. */}
+              {heat.oil && heatScale.oil > 0 && <div className="muted" style={{ fontSize: 11 }}>Oil: 0 – {num(Math.round(heatScale.oil))} bbl / well</div>}
+              {heat.gas && heatScale.gas > 0 && <div className="muted" style={{ fontSize: 11 }}>Gas: 0 – {num(Math.round(heatScale.gas))} MCF / well</div>}
               <div className="row" style={{ gap: 12, marginTop: 4 }}>
                 {heat.oil && <span className="row" style={{ gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#dc2626" }} />Oil</span>}
                 {heat.gas && <span className="row" style={{ gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#6d28d9" }} />Gas</span>}
@@ -611,6 +725,16 @@ export function MapView() {
             </>
           )}
         </div>
+
+        {/* Heat hover tooltip — what the colors under the cursor represent. */}
+        {heatActive && heatHover && (
+          <div className="heat-tip" style={{ left: heatHover.x + 14, top: heatHover.y + 14 }}>
+            <div><strong>{heatHover.wells}</strong> producing well{heatHover.wells === 1 ? "" : "s"} nearby</div>
+            {heat.oil && <div>Oil: <strong>{num(Math.round(heatHover.oil))}</strong> bbl</div>}
+            {heat.gas && <div>Gas: <strong>{num(Math.round(heatHover.gas))}</strong> MCF</div>}
+            <div className="muted" style={{ fontSize: 10 }}>{periodLabelRef.current} · click for full breakdown</div>
+          </div>
+        )}
 
         {/* Overlap chooser */}
         {choices && (

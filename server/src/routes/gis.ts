@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requirePermission } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 
 /**
  * GIS Phase A (see docs/architecture/0003-gis-scale-architecture.md).
@@ -113,6 +113,100 @@ export const gisRouter = Router();
 gisRouter.use(requireAuth, requireOrg, requirePermission("viewMap"));
 
 const searchSchema = z.object({ q: z.string().trim().min(1).max(120) });
+
+/**
+ * Unified map search: one query, every entity the map knows about — counties,
+ * abstracts, surveys, wells (API #, well #, lease name/number), operators,
+ * fields, formations, basins, and the org's deals & mineral assets. Each group
+ * is ranked by trigram similarity and capped; the client interleaves groups.
+ * Result rows carry an `action` payload the client uses to zoom/highlight or
+ * apply a filter.
+ */
+/** "BOX(minx miny,maxx maxy)" → [minx, miny, maxx, maxy] (or null). */
+function parseExtent(ext: string | null): [number, number, number, number] | null {
+  const m = ext?.match(/^BOX\(([-\d.]+) ([-\d.]+),([-\d.]+) ([-\d.]+)\)$/);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])] : null;
+}
+
+gisRouter.get(
+  "/suggest",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { q } = searchSchema.parse(req.query);
+    const like = `%${q}%`;
+
+    const [counties, abstracts, wells, operators, fields, formations, deals] = await Promise.all([
+      // Counties, with bbox so the client can frame them without local data.
+      prisma.$queryRawUnsafe<{ name: string; minx: number; miny: number; maxx: number; maxy: number }[]>(
+        `SELECT name, ST_XMin(geom) minx, ST_YMin(geom) miny, ST_XMax(geom) maxx, ST_YMax(geom) maxy
+           FROM gis.counties WHERE name ILIKE $1
+          ORDER BY similarity(name, $2) DESC, name LIMIT 4`, like, q),
+      // Abstract number OR survey name (both live on gis.abstracts).
+      prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string; score: number }[]>(
+        `SELECT id, abstract, survey, county,
+                GREATEST(similarity(coalesce(abstract,''), $2), similarity(coalesce(survey,''), $2)) AS score
+           FROM gis.abstracts
+          WHERE abstract ILIKE $1 OR survey ILIKE $1
+          ORDER BY score DESC, county, abstract LIMIT 6`, like, q),
+      // Wells: API number, well number, lease name, RRC lease number.
+      prisma.$queryRawUnsafe<{ fid: number; api8: string | null; wellNo: string | null; leaseName: string | null; leaseNo: string | null; operator: string | null; type: string | null; county: string; score: number }[]>(
+        `SELECT fid, api8, well_no AS "wellNo", lease_name AS "leaseName", lease_no AS "leaseNo",
+                operator, type, county,
+                GREATEST(similarity(coalesce(api8,''), $2), similarity(coalesce(lease_name,''), $2),
+                         similarity(coalesce(lease_no,''), $2)) AS score
+           FROM rrc.wells
+          WHERE api8 LIKE $1 OR api10 LIKE $1 OR lease_name ILIKE $1 OR lease_no LIKE $1 OR well_no = upper($2)
+          ORDER BY score DESC, county, lease_name NULLS LAST LIMIT 8`, like, q),
+      // Operators — resolve to a map filter + zoom to their wells' extent.
+      prisma.$queryRawUnsafe<{ name: string; n: number; ext: string | null }[]>(
+        `SELECT operator AS name, count(*)::int AS n, ST_Extent(geom)::text AS ext FROM rrc.wells
+          WHERE operator ILIKE $1 GROUP BY operator
+          ORDER BY similarity(operator, $2) DESC, n DESC LIMIT 4`, like, q),
+      // Fields (RRC reservoir proxy) — zoom to the field's well extent.
+      prisma.$queryRawUnsafe<{ name: string; n: number; ext: string | null }[]>(
+        `SELECT field_name AS name, count(*)::int AS n, ST_Extent(geom)::text AS ext FROM rrc.wells
+          WHERE field_name ILIKE $1 GROUP BY field_name
+          ORDER BY similarity(field_name, $2) DESC, n DESC LIMIT 4`, like, q),
+      // Formations (from W-2/G-1 completion filings on wells).
+      prisma.$queryRawUnsafe<{ name: string; n: number; ext: string | null }[]>(
+        `SELECT f AS name, count(*)::int AS n, ST_Extent(geom)::text AS ext
+           FROM rrc.wells, unnest(formations) AS f
+          WHERE f ILIKE $1 GROUP BY f
+          ORDER BY similarity(f, $2) DESC, n DESC LIMIT 4`, like, q),
+      // The org's deals and mineral assets, matched on name or basin. Basin
+      // itself has no geometry — matching deals stand in for it.
+      prisma.deal.findMany({
+        where: {
+          organizationId: orgId(req),
+          OR: [{ name: { contains: q, mode: "insensitive" } }, { basins: { has: q } }],
+        },
+        select: { id: true, name: true, recordType: true, stage: true, counties: true, abstractIds: true, basins: true },
+        orderBy: { updatedAt: "desc" },
+        take: 6,
+      }),
+    ]);
+
+    res.json({
+      counties: counties.map((c) => ({ label: `${c.name} County`, bbox: [c.minx, c.miny, c.maxx, c.maxy] })),
+      abstracts: abstracts.map((a) => ({ id: a.id, label: a.abstract ?? a.id, sub: [a.survey, `${a.county} County`].filter(Boolean).join(" · ") })),
+      wells: wells.map((w) => ({
+        fid: w.fid,
+        label: `${w.leaseName ?? "Well"}${w.wellNo ? ` #${w.wellNo}` : ""}`,
+        sub: [w.api8 ? `API ${w.api8}` : null, w.leaseNo ? `Lease ${w.leaseNo}` : null, w.operator, `${w.county} County`].filter(Boolean).join(" · "),
+      })),
+      operators: operators.map((o) => ({ name: o.name, sub: `${o.n} wells · filters the map`, bbox: parseExtent(o.ext) })),
+      fields: fields.map((f) => ({ name: f.name, sub: `${f.n} wells`, bbox: parseExtent(f.ext) })),
+      formations: formations.map((f) => ({ name: f.name, sub: `${f.n} wells · filters the map`, bbox: parseExtent(f.ext) })),
+      deals: deals.filter((d) => d.recordType !== "OWNED_ASSET").map((d) => ({
+        id: d.id, label: d.name, abstractIds: d.abstractIds,
+        sub: [d.stage, d.counties.join(", "), d.basins.join(", ")].filter(Boolean).join(" · "),
+      })),
+      assets: deals.filter((d) => d.recordType === "OWNED_ASSET").map((d) => ({
+        id: d.id, label: d.name, abstractIds: d.abstractIds,
+        sub: [d.counties.join(", "), d.basins.join(", ")].filter(Boolean).join(" · "),
+      })),
+    });
+  }),
+);
 
 /** Abstract/survey search across every imported county (trigram-indexed). */
 gisRouter.get(
