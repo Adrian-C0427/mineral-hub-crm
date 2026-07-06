@@ -37,7 +37,18 @@ export async function attachUser(req: AuthedRequest, _res: Response, next: NextF
   if (token) {
     const session = verifySession(token);
     if (session) {
-      const user = await prisma.user.findUnique({ where: { id: session.userId } });
+      // Explicit select: fetch only what req.user needs. This keeps secrets
+      // (passwordHash, totpSecret) out of every request AND means a column added
+      // to the schema but not yet pushed to the DB (e.g. themePreference) can't
+      // break auth on the whole app.
+      const user = await prisma.user.findUnique({
+        where: { id: session.userId },
+        select: {
+          id: true, role: true, name: true, email: true, firstName: true, lastName: true,
+          phone: true, organizationId: true, orgRole: true, mustChangePassword: true,
+          status: true, lastActiveAt: true,
+        },
+      });
       if (user && user.status === "ACTIVE") {
         // Effective permissions = role defaults merged with any org override.
         let permissions: Permission[] = [];

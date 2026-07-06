@@ -327,6 +327,13 @@ model User {
   totpEnabled       Boolean  @default(false)
   totpRecoveryCodes String[] @default([])
 
+  // Per-user UI theme ("dark" | "light"), or null when the user hasn't chosen.
+  // Nullable-with-no-default is deliberate: the client only adopts the server
+  // value when it's a REAL choice, so an unset/unavailable column never
+  // overrides the device's local theme. Read defensively so a database that
+  // hasn't had `prisma db push` run yet still logs users in.
+  themePreference   String?
+
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   // Last authenticated request (throttled). Powers "last activity" in the

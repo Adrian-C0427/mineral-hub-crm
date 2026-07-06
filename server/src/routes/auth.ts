@@ -184,17 +184,58 @@ authRouter.post("/logout", (_req, res) => {
   res.json({ ok: true });
 });
 
+// Valid UI themes. Kept here so the preferences route and any future default
+// logic share one source of truth.
+const THEMES = ["dark", "light"] as const;
+type Theme = (typeof THEMES)[number];
+
+/**
+ * The user's EXPLICITLY chosen theme, or null when unset/unavailable. Null (not
+ * a default) is important: the client only adopts a non-null value, so an unset
+ * choice — or a DB that predates the column — never overrides the local theme.
+ */
+async function readTheme(userId: string): Promise<Theme | null> {
+  try {
+    const row = await prisma.user.findUnique({ where: { id: userId }, select: { themePreference: true } });
+    return row?.themePreference === "light" || row?.themePreference === "dark" ? row.themePreference : null;
+  } catch {
+    return null; // column not pushed yet — never break /me
+  }
+}
+
 authRouter.get(
   "/me",
   requireAuth,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const org = req.user!.organizationId
-      ? await prisma.organization.findUnique({
-          where: { id: req.user!.organizationId },
-          select: { id: true, name: true, teamId: true, fullLogo: true, compactLogo: true },
-        })
-      : null;
-    res.json({ user: { ...req.user, organization: org } });
+    const [org, themePreference] = await Promise.all([
+      req.user!.organizationId
+        ? prisma.organization.findUnique({
+            where: { id: req.user!.organizationId },
+            select: { id: true, name: true, teamId: true, fullLogo: true, compactLogo: true },
+          })
+        : Promise.resolve(null),
+      readTheme(req.user!.id),
+    ]);
+    res.json({ user: { ...req.user, organization: org, themePreference } });
+  }),
+);
+
+// Lightweight per-user preferences (theme today). No password step-up — this is
+// a low-risk personalization, unlike the identity fields in PATCH /me. Best
+// effort: if the column hasn't been pushed yet, report persisted:false so the
+// client keeps its local copy instead of erroring.
+authRouter.patch(
+  "/preferences",
+  requireAuth,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { theme } = z.object({ theme: z.enum(THEMES) }).parse(req.body);
+    let persisted = true;
+    try {
+      await prisma.user.update({ where: { id: req.user!.id }, data: { themePreference: theme } });
+    } catch {
+      persisted = false;
+    }
+    res.json({ theme, persisted });
   }),
 );
 
