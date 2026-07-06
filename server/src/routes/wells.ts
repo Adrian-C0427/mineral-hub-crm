@@ -290,7 +290,7 @@ const listSchema = z.object({
 
 wellsRouter.get(
   "/",
-  requirePermission("viewResearch"),
+  requirePermission("viewWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const { q, ids, state, county, operator, page, pageSize } = listSchema.parse(req.query);
     const where: Prisma.ResearchWellWhereInput = { organizationId: orgId(req) };
@@ -310,7 +310,7 @@ wellsRouter.get(
 
 wellsRouter.get(
   "/filters",
-  requirePermission("viewResearch"),
+  requirePermission("viewWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
     const [geo, operators] = await Promise.all([
@@ -344,7 +344,7 @@ interface RrcWellRow {
 
 wellsRouter.get(
   "/rrc-search",
-  requirePermission("viewResearch"),
+  requirePermission("viewWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const { q } = z.object({ q: z.string().trim().min(2).max(120) }).parse(req.query);
     const rows = await prisma.$queryRawUnsafe<(RrcWellRow & { has_prod: boolean })[]>(
@@ -369,7 +369,7 @@ wellsRouter.get(
 
 wellsRouter.post(
   "/import-rrc",
-  requirePermission("viewResearch"),
+  requirePermission("viewWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const body = z.object({ fid: z.number().int().optional(), api: z.string().trim().max(20).optional() })
       .refine((b) => b.fid !== undefined || b.api, "fid or api required").parse(req.body);
@@ -442,7 +442,7 @@ wellsRouter.post(
 // 8-digit state API — apiNumber may carry the "42" prefix).
 wellsRouter.get(
   "/:id/permits",
-  requirePermission("viewResearch"),
+  requirePermission("viewWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const well = await prisma.researchWell.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { apiNumber: true } });
     if (!well?.apiNumber) return res.json([]);
@@ -475,7 +475,7 @@ const wellBodySchema = z.object({
 
 wellsRouter.post(
   "/",
-  requirePermission("manageResearchData"),
+  requirePermission("manageWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const body = wellBodySchema.parse(req.body);
     const well = await prisma.researchWell.create({
@@ -487,7 +487,7 @@ wellsRouter.post(
 
 wellsRouter.patch(
   "/:id",
-  requirePermission("manageResearchData"),
+  requirePermission("manageWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const body = wellBodySchema.partial().parse(req.body);
     const existing = await prisma.researchWell.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
@@ -499,7 +499,7 @@ wellsRouter.patch(
 
 wellsRouter.delete(
   "/:id",
-  requirePermission("manageResearchData"),
+  requirePermission("manageWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const existing = await prisma.researchWell.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!existing) { res.status(404).json({ error: "Well not found" }); return; }
@@ -510,7 +510,7 @@ wellsRouter.delete(
 
 wellsRouter.get(
   "/:id/production",
-  requirePermission("viewResearch"),
+  requirePermission("viewWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const well = await prisma.researchWell.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!well) { res.status(404).json({ error: "Well not found" }); return; }
@@ -588,7 +588,7 @@ async function loadMergedProduction(org: string, wellIds: string[]) {
 
 wellsRouter.post(
   "/analyze",
-  requirePermission("viewResearch"),
+  requirePermission("viewWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const { wellIds, assumptions } = analyzeSchema.parse(req.body);
     const loaded = await loadMergedProduction(orgId(req), wellIds);
@@ -602,7 +602,7 @@ wellsRouter.post(
 /** Default assumptions (for the client to pre-fill the form). */
 wellsRouter.get(
   "/assumptions/defaults",
-  requirePermission("viewResearch"),
+  requirePermission("viewWellAnalysis"),
   asyncHandler(async (_req, res) => {
     res.json(normalizeAssumptions({}));
   }),
@@ -622,7 +622,7 @@ const analysisBodySchema = z.object({
 
 wellsRouter.get(
   "/analyses",
-  requirePermission("viewResearch"),
+  requirePermission("viewWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const rows = await prisma.wellAnalysis.findMany({
       where: { organizationId: orgId(req) },
@@ -663,7 +663,7 @@ wellsRouter.get(
 
 wellsRouter.post(
   "/analyses",
-  requirePermission("viewResearch"),
+  requirePermission("viewWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const body = analysisBodySchema.parse(req.body);
     const row = await prisma.wellAnalysis.create({
@@ -683,7 +683,7 @@ wellsRouter.post(
 
 wellsRouter.get(
   "/analyses/:id",
-  requirePermission("viewResearch"),
+  requirePermission("viewWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const row = await prisma.wellAnalysis.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!row) { res.status(404).json({ error: "Analysis not found" }); return; }
@@ -702,7 +702,7 @@ wellsRouter.get(
 
 wellsRouter.patch(
   "/analyses/:id",
-  requirePermission("viewResearch"),
+  requirePermission("viewWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const body = analysisBodySchema.partial().parse(req.body);
     const existing = await prisma.wellAnalysis.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
@@ -723,7 +723,7 @@ wellsRouter.patch(
 
 wellsRouter.delete(
   "/analyses/:id",
-  requirePermission("viewResearch"),
+  requirePermission("viewWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const existing = await prisma.wellAnalysis.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!existing) { res.status(404).json({ error: "Analysis not found" }); return; }
@@ -803,7 +803,7 @@ const importAnalyzeSchema = z.object({ csv: z.string().min(1) });
 
 wellsRouter.post(
   "/import/analyze",
-  requirePermission("manageResearchData"),
+  requirePermission("manageWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const { csv } = importAnalyzeSchema.parse(req.body);
     const { headers, rows } = parseCsv(csv);
@@ -829,7 +829,7 @@ const CHUNK = 500;
 
 wellsRouter.post(
   "/import/commit",
-  requirePermission("manageResearchData"),
+  requirePermission("manageWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
     const { csv, mapping, state, county, filename } = importCommitSchema.parse(req.body);

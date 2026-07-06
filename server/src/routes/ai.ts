@@ -15,7 +15,7 @@ import { logActivity } from "../services/activityLog.js";
 import { summarizeDeal, draftOutreach, type DealContext } from "../services/ai.js";
 
 export const aiRouter = Router();
-aiRouter.use(requireAuth, requireOrg, requirePermission("viewDeals"));
+aiRouter.use(requireAuth, requireOrg, requirePermission("useAiFeatures"));
 
 // AI calls cost money and hit provider rate limits — cap per user/IP.
 aiRouter.use(rateLimit({

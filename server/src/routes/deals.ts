@@ -563,7 +563,7 @@ dealsRouter.get(
 
 dealsRouter.patch(
   "/:id/portal",
-  requirePermission("editDeals"),
+  requirePermission("publishOfferings"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const body = z.object({
       published: z.boolean().optional(),

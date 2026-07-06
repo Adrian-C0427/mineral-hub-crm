@@ -155,7 +155,7 @@ type ResultTab = "production" | "forecast" | "cashflow" | "valuation" | "sensiti
 
 export function Valuation() {
   const { can } = useAuth();
-  const canManage = can("manageResearchData");
+  const canManage = can("manageWellAnalysis");
   const [pageTab, setPageTab] = useState<PageTab>("workspace");
 
   // Workspace state

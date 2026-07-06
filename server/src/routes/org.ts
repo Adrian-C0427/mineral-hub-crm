@@ -63,7 +63,7 @@ const portalSettingsSelect = {
 
 orgRouter.get(
   "/portal-settings",
-  requirePermission("manageOrgSettings"),
+  requirePermission("managePortal"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = await prisma.organization.findUnique({ where: { id: orgId(req) }, select: portalSettingsSelect });
     res.json(org);
@@ -72,7 +72,7 @@ orgRouter.get(
 
 orgRouter.patch(
   "/portal-settings",
-  requirePermission("manageOrgSettings"),
+  requirePermission("managePortal"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const body = z.object({
       enabled: z.boolean().optional(),
@@ -146,7 +146,7 @@ async function backfillPortalContacts(organizationId: string): Promise<void> {
 
 orgRouter.get(
   "/portal-contacts",
-  requirePermission("manageOrgSettings"),
+  requirePermission("managePortal"),
   asyncHandler(async (req: AuthedRequest, res) => {
     await backfillPortalContacts(orgId(req));
     const contacts = await prisma.portalContact.findMany({
@@ -169,7 +169,7 @@ const contactBodySchema = z.object({
 
 orgRouter.post(
   "/portal-contacts",
-  requirePermission("manageOrgSettings"),
+  requirePermission("managePortal"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const body = contactBodySchema.parse(req.body);
     const org = orgId(req);
@@ -194,7 +194,7 @@ orgRouter.post(
 
 orgRouter.patch(
   "/portal-contacts/:id",
-  requirePermission("manageOrgSettings"),
+  requirePermission("managePortal"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const body = contactBodySchema.partial().parse(req.body);
     const org = orgId(req);
@@ -217,7 +217,7 @@ orgRouter.patch(
 
 orgRouter.delete(
   "/portal-contacts/:id",
-  requirePermission("manageOrgSettings"),
+  requirePermission("managePortal"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
     const existing = await prisma.portalContact.findFirst({ where: { id: req.params.id, organizationId: org } });
@@ -235,7 +235,7 @@ orgRouter.delete(
 // Persist a new display order (array of contact ids, top to bottom).
 orgRouter.post(
   "/portal-contacts/reorder",
-  requirePermission("manageOrgSettings"),
+  requirePermission("managePortal"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const { ids } = z.object({ ids: z.array(z.string()).max(200) }).parse(req.body);
     const org = orgId(req);
@@ -278,7 +278,9 @@ orgRouter.get(
 );
 
 const memberPatchSchema = z.object({
-  orgRole: z.enum(["ADMIN", "MANAGER", "MEMBER", "VIEWER"]).optional(),
+  // MANAGER is retired — no longer assignable (existing MANAGER users are
+  // reassigned to one of these by the owner).
+  orgRole: z.enum(["ADMIN", "MEMBER", "VIEWER"]).optional(),
   status: z.enum(["ACTIVE", "DISABLED"]).optional(),
 });
 
@@ -339,7 +341,7 @@ orgRouter.delete(
 // --- Roles & permissions ---
 orgRouter.get(
   "/roles",
-  requirePermission("manageRoles"),
+  requireOrgOwner,
   asyncHandler(async (req: AuthedRequest, res) => {
     const overrides = await prisma.rolePermissions.findMany({ where: { organizationId: orgId(req) } });
     const overrideMap = new Map(overrides.map((o) => [o.role, o.permissions]));
@@ -377,7 +379,7 @@ function assertCanEditRole(req: AuthedRequest, role: OrgRole): void {
 
 orgRouter.patch(
   "/roles/:role",
-  requirePermission("manageRoles"),
+  requireOrgOwner,
   asyncHandler(async (req: AuthedRequest, res) => {
     const role = req.params.role as OrgRole;
     if (!ASSIGNABLE_ROLES.includes(role)) throw new HttpError(400, "That role cannot be customized");
@@ -398,7 +400,7 @@ orgRouter.patch(
 // Reset a role to its code-defined defaults (removes the override row).
 orgRouter.delete(
   "/roles/:role",
-  requirePermission("manageRoles"),
+  requireOrgOwner,
   asyncHandler(async (req: AuthedRequest, res) => {
     const role = req.params.role as OrgRole;
     if (!ASSIGNABLE_ROLES.includes(role)) throw new HttpError(400, "That role cannot be customized");

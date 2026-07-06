@@ -11,8 +11,9 @@ interface Invite { id: string; code: string; reusable: boolean; active: boolean;
 interface RoleRow { role: OrgRole; permissions: string[]; defaults: string[]; editable: boolean; customized: boolean }
 interface RolesResponse { roles: RoleRow[]; permissions: { key: string; label: string; group: string }[]; ownerOnlyActions: string[] }
 
-const ROLE_LABEL: Record<string, string> = { OWNER: "Owner", ADMIN: "Administrator", MANAGER: "Manager", MEMBER: "Standard User", VIEWER: "Read-Only Viewer" };
-const ASSIGNABLE: OrgRole[] = ["ADMIN", "MANAGER", "MEMBER", "VIEWER"];
+// MANAGER is a retired role, kept here only to label users not yet reassigned.
+const ROLE_LABEL: Record<string, string> = { OWNER: "Owner", ADMIN: "Administrator", MANAGER: "Manager (legacy)", MEMBER: "Standard User", VIEWER: "Read-Only Viewer" };
+const ASSIGNABLE: OrgRole[] = ["ADMIN", "MEMBER", "VIEWER"];
 
 type Tab = "org" | "users" | "roles" | "owner";
 
@@ -28,7 +29,8 @@ export function OrgSettings({ initialTab }: { initialTab?: Tab } = {}) {
   useEffect(() => { loadOrg(); }, [user?.orgRole]);
 
   const showUsers = can("manageMembers") || can("inviteRemoveUsers");
-  const showRoles = can("manageRoles");
+  // Roles & Permissions is now owner-only.
+  const showRoles = isOrgOwner;
   const showOwner = isOrgOwner;
 
   const flash = (m: string) => { setMsg(m); setErr(null); };
@@ -172,16 +174,26 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
   async function revokeInvite(i: Invite) { if (confirm(`Revoke invite ${i.code}?`)) { await api.del(`/org/invites/${i.id}`); load(); } }
   function copy(text: string) { navigator.clipboard?.writeText(text); onFlash(`Copied ${text}`); }
 
-  // Owner can assign any role; a non-owner manager can't create admins/owners.
+  // Owner can assign any assignable role; a non-owner can't create admins.
+  // A user still on the retired MANAGER role keeps it shown as their current
+  // value (so the select isn't blank) until reassigned to one of the new roles.
   const roleOptions = (m: Member): OrgRole[] => {
-    const base: OrgRole[] = isOrgOwner ? ["ADMIN", "MANAGER", "MEMBER", "VIEWER"] : ["MANAGER", "MEMBER", "VIEWER"];
+    const base: OrgRole[] = isOrgOwner ? ["ADMIN", "MEMBER", "VIEWER"] : ["MEMBER", "VIEWER"];
     return m.orgRole && m.orgRole !== "OWNER" && !base.includes(m.orgRole) ? [m.orgRole, ...base] : base;
   };
+  const legacyCount = members.filter((m) => m.orgRole === "MANAGER").length;
 
   return (
     <>
       {can("manageMembers") && (
         <>
+          {legacyCount > 0 && (
+            <Banner kind="warn">
+              {legacyCount === 1 ? "One team member is" : `${legacyCount} team members are`} still on the retired
+              <strong> Manager</strong> role. Reassign {legacyCount === 1 ? "them" : "each"} to Administrator, Standard User,
+              or Read-Only Viewer below. Until then they have Standard-User access.
+            </Banner>
+          )}
           <div className="section-head"><h3 style={{ margin: 0 }}>Team members</h3></div>
           <div className="table-scroll">
             <table className="data-table">
@@ -201,6 +213,7 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
                             {roleOptions(m).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
                           </select>
                         )}
+                        {m.orgRole === "MANAGER" && <span className="badge" style={{ marginLeft: 6, background: "rgba(245,158,11,.15)", color: "#b45309" }}>reassign</span>}
                       </td>
                       <td><span className={`badge ${m.status === "ACTIVE" ? "resp-offer" : "resp-no"}`}>{m.status === "ACTIVE" ? "Active" : "Disabled"}</span></td>
                       <td>{m.lastActiveAt ? fmtDate(m.lastActiveAt) : "—"}</td>

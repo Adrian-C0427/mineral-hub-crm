@@ -24,7 +24,10 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
   const [summary, setSummary] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const canEdit = can("editDeals");
+  // Publish controls need publishOfferings; buyer-visibility of a document is a
+  // document action (manageDocuments) — mirrors the server gates.
+  const canEdit = can("publishOfferings");
+  const canDocs = can("manageDocuments");
 
   const load = () => api.get<PortalState>(`/deals/${dealId}/portal`).then((d) => { setP(d); setSummary(d.portalSummary ?? ""); }).catch(() => {});
   useEffect(() => { void load(); /* eslint-disable-next-line */ }, [dealId]);
@@ -97,7 +100,7 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
           <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", margin: "10px 0 6px" }}>Documents visible to buyers</div>
           {p.files!.map((f) => (
             <label key={f.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 14 }}>
-              <input type="checkbox" disabled={!canEdit} checked={f.visibleToBuyers} onChange={(e) => toggleDoc(f.id, e.target.checked)} />
+              <input type="checkbox" disabled={!canDocs} checked={f.visibleToBuyers} onChange={(e) => toggleDoc(f.id, e.target.checked)} />
               {f.filename} <span className="muted" style={{ fontSize: 12 }}>· {f.folder}</span>
             </label>
           ))}
