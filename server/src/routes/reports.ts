@@ -22,6 +22,7 @@ async function closedAtMap(dealIds: string[]): Promise<Map<string, Date>> {
   const hist = await prisma.dealStageHistory.findMany({
     where: { dealId: { in: dealIds }, toStage: "CLOSED" },
     orderBy: { createdAt: "desc" },
+    select: { dealId: true, createdAt: true },
   });
   const map = new Map<string, Date>();
   for (const h of hist) if (!map.has(h.dealId)) map.set(h.dealId, h.createdAt);
@@ -111,7 +112,13 @@ async function loadAnalyticsDeals(organizationId: string): Promise<AnalyticsDeal
     where: { organizationId, recordType: "OPPORTUNITY" },
     include: {
       selectedOffer: { select: { amount: true } },
-      stageHistory: { orderBy: { createdAt: "asc" }, select: { toStage: true, fromStage: true, changedByUserId: true, createdAt: true } },
+      // Analytics only reads three event kinds (creation, CLOSED, DEAD) — no
+      // need to ship every intermediate stage move for every deal.
+      stageHistory: {
+        where: { OR: [{ fromStage: null }, { toStage: { in: ["CLOSED", "DEAD"] } }] },
+        orderBy: { createdAt: "asc" },
+        select: { toStage: true, fromStage: true, changedByUserId: true, createdAt: true },
+      },
     },
   });
   return deals.map((d) => {
