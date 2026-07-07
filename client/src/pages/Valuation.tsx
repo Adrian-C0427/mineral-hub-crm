@@ -275,7 +275,7 @@ export function Valuation() {
               <button className="small" disabled={exporting} onClick={onExportPdf}>{exporting ? "Exporting…" : "Export PDF"}</button>
             </>
           )}
-          <button className="primary small" onClick={newAnalysis}>New analysis</button>
+          <button className="primary small" onClick={newAnalysis}>+ New analysis</button>
         </div>
       </div>
 
@@ -346,16 +346,16 @@ function Workspace(props: {
 
   return (
     <div>
-      <div className="panel">
-        <div className="panel-title" style={{ cursor: "pointer" }} onClick={() => setSetupOpen((o) => !o)}>
-          <h3 style={{ margin: 0 }}>
-            1 · Wells &amp; Assumptions
-            {openAnalysisName && <span className="muted" style={{ fontWeight: 400 }}> — {openAnalysisName}</span>}
-          </h3>
-          <span className="muted">{setupOpen ? "Hide ▲" : `${selected.length} wells selected · show ▼`}</span>
+      <div className="panel va-step">
+        <div className="va-step-head" onClick={() => setSetupOpen((o) => !o)}>
+          <div className="va-step-title">
+            <span className="va-step-num">1</span>
+            <span>Wells &amp; Assumptions{openAnalysisName && <span className="muted" style={{ fontWeight: 400 }}> — {openAnalysisName}</span>}</span>
+          </div>
+          <span className="va-step-toggle">{setupOpen ? "Hide" : `${selected.length} wells selected · Show`} <span className={`va-chev ${setupOpen ? "" : "down"}`}>⌃</span></span>
         </div>
         {setupOpen && (
-          <>
+          <div className="va-body">
             <WellPicker selected={selected} setSelected={setSelected} />
             <SelectedWellPermits wells={selected} />
             <AssumptionsForm a={assumptions} onChange={setAssumptions} />
@@ -366,7 +366,7 @@ function Workspace(props: {
               {selected.length === 0 && <span className="muted">Select at least one well to run.</span>}
               {hasResult && <span className="muted">Adjust any assumption and re-run to see the impact immediately.</span>}
             </div>
-          </>
+          </div>
         )}
       </div>
 
@@ -444,7 +444,7 @@ function WellPicker({ selected, setSelected }: { selected: WellRow[]; setSelecte
 
   return (
     <div className="field" style={{ marginBottom: 14 }}>
-      <label>Wells to analyze</label>
+      <label className="va-microlabel">Wells to analyze</label>
       <div className="msel" ref={boxRef}>
         <div className="msel-box" onClick={() => setOpen(true)}>
           {selected.map((w) => (
@@ -544,10 +544,10 @@ function NumField({ label, value, onChange, step = 1, prefix, suffix, width = 15
   hint?: string;
 }) {
   return (
-    <div className="field" style={{ marginBottom: 0, width }}>
+    <div className="va-num" style={{ width }}>
       <label title={hint}>{label}</label>
-      <div className="row" style={{ gap: 4, flexWrap: "nowrap" }}>
-        {prefix && <span className="muted">{prefix}</span>}
+      <div className="va-num-box">
+        {prefix && <span className="va-num-affix va-num-prefix">{prefix}</span>}
         <input
           type="number"
           step={step}
@@ -559,9 +559,8 @@ function NumField({ label, value, onChange, step = 1, prefix, suffix, width = 15
             const n = Number(s);
             if (Number.isFinite(n)) onChange(n);
           }}
-          style={{ width: "100%" }}
         />
-        {suffix && <span className="muted">{suffix}</span>}
+        {suffix && <span className="va-num-affix va-num-suffix">{suffix}</span>}
       </div>
     </div>
   );
@@ -583,7 +582,7 @@ function AssumptionsForm({ a, onChange }: { a: Assumptions; onChange: (a: Assump
     <div>
       <div className="assumption-groups">
         <div className="assumption-group">
-          <div className="assumption-group-title">Commodity prices</div>
+          <div className="assumption-group-title"><span className="va-dot" style={{ background: "#22c55e" }} />Commodity prices</div>
           <div className="assumption-grid">
             <NumField label="Oil ($/bbl)" value={a.oilPrice} onChange={(v) => set("oilPrice", v ?? 0)} step={1} />
             <NumField label="Gas ($/mcf)" value={a.gasPrice} onChange={(v) => set("gasPrice", v ?? 0)} step={0.1} />
@@ -592,14 +591,14 @@ function AssumptionsForm({ a, onChange }: { a: Assumptions; onChange: (a: Assump
           </div>
         </div>
         <div className="assumption-group">
-          <div className="assumption-group-title">Acquisition</div>
+          <div className="assumption-group-title"><span className="va-dot" style={{ background: "#3b82f6" }} />Acquisition</div>
           <div className="assumption-grid">
             <NumField label="Asking price" value={a.askingPrice} onChange={(v) => set("askingPrice", v ?? 0)} step={1000} prefix="$" />
             <NumField label="Closing costs" value={a.closingCosts} onChange={(v) => set("closingCosts", v ?? 0)} step={500} prefix="$" />
           </div>
         </div>
         <div className="assumption-group">
-          <div className="assumption-group-title">Return targets</div>
+          <div className="assumption-group-title"><span className="va-dot" style={{ background: "#f59e0b" }} />Return targets</div>
           <div className="assumption-grid">
             <NumField label="Discount rate" value={a.discountRatePct} onChange={(v) => set("discountRatePct", v ?? 10)} step={0.5} suffix="%" />
             <NumField label="Target ROI" value={a.targetRoiPct} onChange={(v) => set("targetRoiPct", v)} step={5} suffix="%" allowNull hint="Total return on investment over the property's life (blank = no constraint)" />
@@ -644,14 +643,18 @@ function Results({ analysis, tab, setTab, reportRef, analysisName }: {
 
   return (
     <div>
-      <div className="panel">
-        <div className="panel-title">
-          <h3 style={{ margin: 0 }}>2 · Results</h3>
+      <div className="panel va-step">
+        <div className="va-step-head" style={{ cursor: "default" }}>
+          <div className="va-step-title">
+            <span className="va-step-num">2</span>
+            <span>Results</span>
+          </div>
           <span className="muted">
             Run {new Date(r.runAt).toLocaleString()} · forecast <ConfBadge c={r.forecast.confidence} />
           </span>
         </div>
 
+        <div className="va-body">
         {r.warnings.length > 0 && (
           <Banner kind="warn">
             <ul style={{ margin: 0, paddingLeft: 18 }}>{r.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
@@ -673,6 +676,7 @@ function Results({ analysis, tab, setTab, reportRef, analysisName }: {
           <button className={`tab ${tab === "valuation" ? "active" : ""}`} onClick={() => setTab("valuation")}>Valuation &amp; Offer</button>
           <button className={`tab ${tab === "sensitivity" ? "active" : ""}`} onClick={() => setTab("sensitivity")}>Sensitivity</button>
           <button className={`tab ${tab === "report" ? "active" : ""}`} onClick={() => setTab("report")}>Full Report</button>
+        </div>
         </div>
       </div>
 
