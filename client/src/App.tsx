@@ -32,6 +32,8 @@ const MineralAssetDetail = lazy(() => import("./pages/MineralAssetDetail").then(
 const PortalMarketplace = lazy(() => import("./pages/portal/PortalMarketplace").then((m) => ({ default: m.PortalMarketplace })));
 const PortalOffering = lazy(() => import("./pages/portal/PortalOffering").then((m) => ({ default: m.PortalOffering })));
 const PortalAdmin = lazy(() => import("./pages/PortalAdmin").then((m) => ({ default: m.PortalAdmin })));
+// Public marketing site (signed-out "/"); heavy visuals stay out of the app bundle.
+const Landing = lazy(() => import("./pages/Landing").then((m) => ({ default: m.Landing })));
 
 /** Redirect to Dashboard if the user lacks the required permission. */
 function Guard({ perm, children }: { perm: string; children: ReactNode }) {
@@ -76,13 +78,18 @@ export function App() {
 
   if (loading) return <Spinner label="Loading Mineral Hub…" />;
   if (!user) {
-    // Public routes reachable while signed out (emailed reset link, OAuth return).
+    // Signed-out: "/" is the marketing site; deep links (e.g. /deals) still land
+    // on the login form, and sign-up remains invite-code-gated on the Login page.
     return (
-      <Routes>
-        <Route path="/reset-password" element={<ResetPassword />} />
-        <Route path="/auth/callback" element={<OAuthCallback />} />
-        <Route path="*" element={<Login />} />
-      </Routes>
+      <Suspense fallback={<Spinner label="Loading…" />}>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+          <Route path="/auth/callback" element={<OAuthCallback />} />
+          <Route path="*" element={<Login />} />
+        </Routes>
+      </Suspense>
     );
   }
 
