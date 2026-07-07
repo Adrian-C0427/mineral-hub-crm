@@ -50,12 +50,12 @@ export const INTEGRATION_CATALOG: ProviderDef[] = [
   },
   {
     key: "outlook", name: "Microsoft Outlook / 365", category: "Email & Communication", auth: "oauth", implementation: "oauth",
-    description: "Send deal emails and sync replies via Microsoft Graph. Requires an Entra ID app registration (Mail.Send / Mail.Read) — the same registration used for Microsoft sign-in.",
+    description: "Send deal emails and sync inbound buyer replies via Microsoft Graph — replies from known buyer emails land on the deal timeline and raise a notification. Requires an Entra ID app registration (Mail.Send / Mail.Read) — the same registration used for Microsoft sign-in.",
     setupUrl: "https://portal.azure.com",
   },
   {
     key: "gmail", name: "Gmail / Google Workspace", category: "Email & Communication", auth: "oauth", implementation: "oauth",
-    description: "Send and receive deal emails through the Gmail API. Requires a Google Cloud OAuth client with gmail.send scope — the same client used for Google sign-in.",
+    description: "Send and receive deal emails through the Gmail API — inbound replies from known buyer emails land on the deal timeline and raise a notification. Requires a Google Cloud OAuth client with gmail.send + gmail.readonly scopes (same client as Google sign-in). Accounts connected before inbound sync must reconnect once to grant read access.",
     setupUrl: "https://console.cloud.google.com/apis/credentials",
   },
   {

@@ -21,6 +21,7 @@ import { INTEGRATION_CATALOG, providerByKey } from "../domain/integrationCatalog
 import { validateSecret, validateEnvProvider, envConfigured } from "../services/integrationProviders.js";
 import { encryptSecret, secretHint } from "../services/secrets.js";
 import { syncIntegration, checkIntegration, configOf } from "../services/integrationSync.js";
+import { isInboundEmailProvider } from "../services/emailInboundSync.js";
 import { logActivity } from "../services/activityLog.js";
 import { env } from "../config.js";
 import {
@@ -292,6 +293,15 @@ integrationsOAuthCallbackRouter.get(
         data: { organizationId: state.orgId, provider, status: "NOT_CONNECTED" },
       });
       await persistBundle(row, bundle);
+      // Mailbox integrations default to hourly so inbound replies flow in
+      // without the user knowing to pick a schedule (still changeable).
+      if (isInboundEmailProvider(provider)) {
+        const fresh = await prisma.integration.findUnique({ where: { id: row.id }, select: { config: true } });
+        const cfg = (fresh?.config ?? {}) as Record<string, unknown>;
+        if (!cfg.schedule) {
+          await prisma.integration.update({ where: { id: row.id }, data: { config: { ...cfg, schedule: "hourly" } as never } });
+        }
+      }
       await prisma.integration.update({
         where: { id: row.id },
         data: { status: "CONNECTED", connectedAt: new Date(), lastSyncAt: new Date(), lastError: null },
