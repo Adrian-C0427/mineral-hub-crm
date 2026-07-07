@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { API_BASE } from "../../api/client";
 import { num } from "../../lib/format";
 import { PortalMap } from "./PortalMap";
-import { portalGet, type FC, type PortalAbstract, type PortalDeal, type PortalDocument, type PortalOrg } from "./portalApi";
+import { portalGet, portalPost, type FC, type PortalAbstract, type PortalDeal, type PortalDocument, type PortalImage, type PortalOrg, type PortalProduction } from "./portalApi";
 
 const EMPTY_FC: FC = { type: "FeatureCollection", features: [] };
 
@@ -14,7 +14,7 @@ const EMPTY_FC: FC = { type: "FeatureCollection", features: [] };
  */
 export function PortalOffering() {
   const { slug = "" } = useParams();
-  const [data, setData] = useState<{ org: PortalOrg; deal: PortalDeal; abstracts: PortalAbstract[]; documents: PortalDocument[] } | null>(null);
+  const [data, setData] = useState<{ org: PortalOrg; deal: PortalDeal; abstracts: PortalAbstract[]; documents: PortalDocument[]; images: PortalImage[]; production: PortalProduction | null } | null>(null);
   const [features, setFeatures] = useState<FC>(EMPTY_FC);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,7 +25,7 @@ export function PortalOffering() {
 
   if (error) return <PortalShell><div className="panel" style={{ textAlign: "center", padding: 48 }}><h2>Offering unavailable</h2><p className="muted">{error}</p></div></PortalShell>;
   if (!data) return <PortalShell><p className="muted" style={{ textAlign: "center", padding: 48 }}>Loading offering…</p></PortalShell>;
-  const { org, deal, abstracts, documents } = data;
+  const { org, deal, abstracts, documents, images, production } = data;
 
   const mailSubject = encodeURIComponent(`Inquiry: ${deal.name}`);
   const mailto = org.contactEmail ? `mailto:${org.contactEmail}?subject=${mailSubject}` : null;
@@ -50,6 +50,38 @@ export function PortalOffering() {
           {deal.operator && <Fact label="Operator" value={deal.operator} />}
         </div>
       </div>
+
+      {/* Photos */}
+      {images.length > 0 && (
+        <div className="panel">
+          <div className="section-head"><h3 style={{ margin: 0 }}>Photos</h3><span className="muted">Click to open full size</span></div>
+          <div className="portal-gallery">
+            {images.map((img) => (
+              <a key={img.id} href={img.url} target="_blank" rel="noreferrer" title={img.filename}>
+                <img src={img.url} alt={img.filename} loading="lazy" />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Production summary */}
+      {show("production") && production && (
+        <div className="panel">
+          <div className="section-head">
+            <h3 style={{ margin: 0 }}>Production Summary</h3>
+            <span className="muted">Reported volumes across {production.wellsMatched} well{production.wellsMatched === 1 ? "" : "s"} · {production.firstMonth ?? "?"} → {production.lastMonth}</span>
+          </div>
+          <div className="portal-prod">
+            <ProdStat v={`${num(production.cumOilBbl)}`} l="Cumulative oil (bbl)" />
+            <ProdStat v={`${num(production.cumGasMcf)}`} l="Cumulative gas (mcf)" />
+            <ProdStat v={`${num(production.cumBoe)}`} l="Cumulative BOE" />
+            <ProdStat v={`${num(production.last12OilBbl)}`} l="Last 12mo oil (bbl)" />
+            <ProdStat v={`${num(production.last12GasMcf)}`} l="Last 12mo gas (mcf)" />
+            <ProdStat v={`${production.months}`} l="Months of history" />
+          </div>
+        </div>
+      )}
 
       {/* Map */}
       {show("map") && (
@@ -165,6 +197,9 @@ export function PortalOffering() {
         </div>
       </div>
 
+      {/* Submit an offer — a buyer can make an offer directly on this offering. */}
+      <SubmitOffer slug={slug} dealName={deal.name} />
+
       {org.slug && (
         <p className="muted" style={{ textAlign: "center" }}>
           <Link to={`/portal/${org.slug}`}>← Browse all available opportunities</Link>
@@ -174,8 +209,95 @@ export function PortalOffering() {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Submit an offer
+// ---------------------------------------------------------------------------
+
+function SubmitOffer({ slug, dealName }: { slug: string; dealName: string }) {
+  const [f, setF] = useState({ companyName: "", contactName: "", email: "", phone: "", amount: "", conditions: "", expiresOn: "", message: "" });
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const set = (k: keyof typeof f) => (v: string) => setF((p) => ({ ...p, [k]: v }));
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+    const need: string[] = [];
+    if (!f.companyName.trim()) need.push("Company name");
+    if (!f.contactName.trim()) need.push("Contact name");
+    if (!f.email.trim()) need.push("Email");
+    const amount = Number(f.amount);
+    if (!f.amount.trim() || !isFinite(amount) || amount <= 0) need.push("Offer amount");
+    if (need.length) { setErr(`Required: ${need.join(", ")}`); return; }
+    setBusy(true);
+    try {
+      await portalPost(`/offering/${encodeURIComponent(slug)}/offers`, {
+        companyName: f.companyName, contactName: f.contactName, email: f.email, phone: f.phone,
+        amount, conditions: f.conditions, expiresOn: f.expiresOn || null, message: f.message,
+      });
+      setDone(true);
+    } catch (e2) { setErr(e2 instanceof Error ? e2.message : "Submission failed"); }
+    finally { setBusy(false); }
+  }
+
+  if (done) {
+    return (
+      <div className="panel portal-lead" style={{ textAlign: "center", padding: 40 }}>
+        <h2 style={{ marginTop: 0 }}>Offer received — thank you.</h2>
+        <p className="muted" style={{ marginBottom: 0 }}>Our team has been notified and will follow up shortly to discuss terms on <strong>{dealName}</strong>.</p>
+      </div>
+    );
+  }
+
+  if (!open) {
+    return (
+      <div className="panel portal-lead portal-lead-cta">
+        <div>
+          <h3 style={{ margin: "0 0 4px" }}>Ready to make an offer on {dealName}?</h3>
+          <p className="muted" style={{ margin: 0 }}>Submit your number and terms — it goes straight to our acquisition team.</p>
+        </div>
+        <button className="primary" onClick={() => setOpen(true)}>Submit an Offer</button>
+      </div>
+    );
+  }
+
+  const star = <span style={{ color: "var(--accent)" }}>*</span>;
+  return (
+    <div className="panel portal-lead">
+      <div className="section-head">
+        <h2 style={{ margin: 0 }}>Submit an Offer</h2>
+        <button className="small" onClick={() => setOpen(false)}>Close</button>
+      </div>
+      <p className="muted">An offer is non-binding and simply opens the conversation. Our team reviews every submission and responds promptly.</p>
+      <form onSubmit={submit}>
+        <div className="muted portal-lead-section">Your offer</div>
+        <div className="dd-grid">
+          <div className="field"><label>Offer amount ($) {star}</label><input type="number" min="0" step="1000" value={f.amount} onChange={(e) => set("amount")(e.target.value)} placeholder="e.g. 250000" /></div>
+          <div className="field"><label>Offer expires (optional)</label><input type="date" value={f.expiresOn} onChange={(e) => set("expiresOn")(e.target.value)} /></div>
+          <div className="field" style={{ gridColumn: "1 / -1" }}><label>Terms / conditions (optional)</label><input value={f.conditions} onChange={(e) => set("conditions")(e.target.value)} placeholder="e.g. subject to title review; 30-day close" /></div>
+        </div>
+        <div className="muted portal-lead-section">Contact information</div>
+        <div className="dd-grid">
+          <div className="field"><label>Company name {star}</label><input value={f.companyName} onChange={(e) => set("companyName")(e.target.value)} /></div>
+          <div className="field"><label>Contact name {star}</label><input value={f.contactName} onChange={(e) => set("contactName")(e.target.value)} /></div>
+          <div className="field"><label>Email {star}</label><input type="email" value={f.email} onChange={(e) => set("email")(e.target.value)} /></div>
+          <div className="field"><label>Phone</label><input value={f.phone} onChange={(e) => set("phone")(e.target.value)} /></div>
+        </div>
+        <div className="field"><label>Message (optional)</label><textarea rows={3} value={f.message} onChange={(e) => set("message")(e.target.value)} placeholder="Anything our team should know about your offer" /></div>
+        {err && <div className="error-text">{err}</div>}
+        <button className="primary" disabled={busy} style={{ marginTop: 8 }}>{busy ? "Submitting…" : "Submit offer"}</button>
+      </form>
+    </div>
+  );
+}
+
 function Fact({ label, value }: { label: string; value: string }) {
   return <div className="portal-fact"><div className="portal-fact-v">{value}</div><div className="portal-fact-l">{label}</div></div>;
+}
+function ProdStat({ v, l }: { v: string; l: string }) {
+  return <div className="portal-prod-stat"><div className="portal-prod-v">{v}</div><div className="portal-prod-l">{l}</div></div>;
 }
 function KV({ k, v }: { k: string; v: string }) {
   if (!v) return null;

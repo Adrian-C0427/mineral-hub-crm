@@ -12,6 +12,22 @@ const EMPTY_FC: FC = { type: "FeatureCollection", features: [] };
 
 type SortKey = "featured" | "newest" | "nra" | "name";
 
+// A snapshot of every filter control — persisted locally so a buyer's last
+// search restores on return, and named presets can be saved/reapplied. The
+// portal is unauthenticated, so this lives in the browser (per org), not on the
+// server.
+interface FilterSnapshot {
+  states: string[]; counties: string[]; basins: string[]; formations: string[];
+  assetTypes: string[]; operators: string[]; nraMin: string; nraMax: string; sort: SortKey;
+}
+interface SavedSearch { name: string; f: FilterSnapshot }
+const lastKey = (org: string) => `mh-portal-filters:${org}`;
+const savedKey = (org: string) => `mh-portal-saved:${org}`;
+function loadJson<T>(key: string, fallback: T): T {
+  try { const raw = localStorage.getItem(key); return raw ? (JSON.parse(raw) as T) : fallback; } catch { return fallback; }
+}
+function saveJson(key: string, value: unknown) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage off */ } }
+
 /**
  * Public marketplace — every published PUBLIC offering for the org, with
  * search, multi-select filters, card/list views, an overview map, and the
@@ -35,13 +51,45 @@ export function PortalMarketplace() {
   const [fOperators, setFOperators] = useState<string[]>([]);
   const [nraMin, setNraMin] = useState("");
   const [nraMax, setNraMax] = useState("");
+  const [saved, setSaved] = useState<SavedSearch[]>([]);
+  const [presetName, setPresetName] = useState("");
+
+  const snapshot = useMemo<FilterSnapshot>(() => ({
+    states: fStates, counties: fCounties, basins: fBasins, formations: fFormations,
+    assetTypes: fAssetTypes, operators: fOperators, nraMin, nraMax, sort,
+  }), [fStates, fCounties, fBasins, fFormations, fAssetTypes, fOperators, nraMin, nraMax, sort]);
+
+  function applySnapshot(f: Partial<FilterSnapshot>) {
+    setFStates(f.states ?? []); setFCounties(f.counties ?? []); setFBasins(f.basins ?? []);
+    setFFormations(f.formations ?? []); setFAssetTypes(f.assetTypes ?? []); setFOperators(f.operators ?? []);
+    setNraMin(f.nraMin ?? ""); setNraMax(f.nraMax ?? ""); setSort(f.sort ?? "featured");
+  }
+  const hasFilters = fStates.length || fCounties.length || fBasins.length || fFormations.length || fAssetTypes.length || fOperators.length || nraMin || nraMax;
 
   useEffect(() => {
     portalGet<{ org: PortalOrg; deals: PortalDeal[] }>(`/${encodeURIComponent(orgSlug)}`)
       .then((d) => { setOrg(d.org); setDeals(d.deals); })
       .catch((e) => setError(e.message));
     portalGet<FC>(`/${encodeURIComponent(orgSlug)}/features`).then(setFeatures).catch(() => {});
+    // Restore this buyer's saved searches + last-used filters for this org.
+    setSaved(loadJson<SavedSearch[]>(savedKey(orgSlug), []));
+    applySnapshot(loadJson<Partial<FilterSnapshot>>(lastKey(orgSlug), {}));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgSlug]);
+
+  // Persist the current filters as "last used" so a return visit restores them.
+  useEffect(() => { if (orgSlug) saveJson(lastKey(orgSlug), snapshot); }, [orgSlug, snapshot]);
+
+  function saveCurrent() {
+    const name = presetName.trim();
+    if (!name || !hasFilters) return;
+    const next = [...saved.filter((s) => s.name !== name), { name, f: snapshot }];
+    setSaved(next); saveJson(savedKey(orgSlug), next); setPresetName("");
+  }
+  function deleteSaved(name: string) {
+    const next = saved.filter((s) => s.name !== name);
+    setSaved(next); saveJson(savedKey(orgSlug), next);
+  }
 
   // Filter option lists derive from the live listings so they never dangle.
   const options = useMemo(() => {
@@ -86,6 +134,27 @@ export function PortalMarketplace() {
 
       {/* Filters */}
       <div className="panel">
+        {/* Saved searches — reapply a named filter set, or save the current one. */}
+        <div className="portal-saved">
+          <span className="muted" style={{ fontSize: 13 }}>Saved searches:</span>
+          {saved.length === 0 && <span className="muted" style={{ fontSize: 13 }}>none yet</span>}
+          {saved.map((s) => (
+            <span key={s.name} className="portal-saved-chip">
+              <button type="button" className="portal-saved-apply" onClick={() => applySnapshot(s.f)}>{s.name}</button>
+              <button type="button" className="portal-saved-del" title="Delete" onClick={() => deleteSaved(s.name)}>×</button>
+            </span>
+          ))}
+          <span className="spacer" />
+          <input
+            value={presetName}
+            onChange={(e) => setPresetName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveCurrent(); } }}
+            placeholder="Name this search"
+            style={{ width: 160 }}
+          />
+          <button type="button" className="small" disabled={!presetName.trim() || !hasFilters} onClick={saveCurrent}>Save</button>
+          {hasFilters ? <button type="button" className="small" onClick={() => applySnapshot({})}>Clear</button> : null}
+        </div>
         <div className="dd-grid">
           {/* Marketplace filters scope to what's actually published (data-driven
               options), routed through the same component for consistent UX. */}

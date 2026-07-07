@@ -5,6 +5,7 @@ import { env, assertProductionSecrets } from "./config.js";
 import { ensureUsersHaveOrganizations } from "./services/org.js";
 import { backfillBuyerStatus } from "./services/backfill.js";
 import { startIntegrationScheduler } from "./services/integrationSync.js";
+import { startPortalReminderScheduler } from "./services/portalReminders.js";
 
 // Fail closed: in production, refuse to boot with default/missing secret keys.
 assertProductionSecrets();
@@ -13,6 +14,9 @@ const app = createApp();
 
 // Background re-validation of connected integrations on their configured schedule.
 startIntegrationScheduler();
+
+// Periodic reminder digest of unactioned buyer-portal offers/leads.
+startPortalReminderScheduler();
 
 // Idempotent backfill so every existing user has an organization (multi-tenancy).
 ensureUsersHaveOrganizations().catch((e) =>

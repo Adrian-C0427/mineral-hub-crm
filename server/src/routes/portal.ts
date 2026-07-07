@@ -178,6 +178,55 @@ portalRouter.get(
   }),
 );
 
+const isImage = (mime: string) => mime.startsWith("image/");
+
+/**
+ * Buyer-safe production summary for an offering: match the deal's well
+ * names/API numbers to the org's imported wells and aggregate reported
+ * volumes. Returns VOLUMES ONLY (no prices/economics) — the portal never
+ * exposes internal analysis. Null when the section is off or nothing matches.
+ */
+async function productionSummary(organizationId: string, wells: string[]) {
+  if (!wells.length) return null;
+  const or: import("@prisma/client").Prisma.ResearchWellWhereInput[] = [];
+  for (const w of wells.slice(0, 60)) {
+    const digits = w.replace(/\D/g, "");
+    if (digits.length >= 8) or.push({ apiNumber: { contains: digits.slice(0, 10) } });
+    if (w.trim()) or.push({ name: { equals: w.trim(), mode: "insensitive" } });
+  }
+  if (!or.length) return null;
+  const matched = await prisma.researchWell.findMany({ where: { organizationId, OR: or }, select: { id: true } });
+  const wellIds = matched.map((m) => m.id);
+  if (!wellIds.length) return null;
+
+  const agg = await prisma.wellProductionMonth.aggregate({
+    where: { wellId: { in: wellIds } },
+    _sum: { oilBbl: true, gasMcf: true, nglBbl: true },
+    _min: { month: true }, _max: { month: true }, _count: true,
+  });
+  if (!agg._count || !agg._max.month) return null;
+
+  // Trailing 12 months from the latest reported month.
+  const cutoff = new Date(agg._max.month); cutoff.setUTCMonth(cutoff.getUTCMonth() - 11);
+  const last12 = await prisma.wellProductionMonth.aggregate({
+    where: { wellId: { in: wellIds }, month: { gte: cutoff } },
+    _sum: { oilBbl: true, gasMcf: true },
+  });
+
+  const oil = agg._sum.oilBbl ?? 0, gas = agg._sum.gasMcf ?? 0, ngl = agg._sum.nglBbl ?? 0;
+  return {
+    wellsMatched: wellIds.length,
+    months: agg._count,
+    firstMonth: agg._min.month ? agg._min.month.toISOString().slice(0, 7) : null,
+    lastMonth: agg._max.month.toISOString().slice(0, 7),
+    cumOilBbl: Math.round(oil),
+    cumGasMcf: Math.round(gas),
+    cumBoe: Math.round(oil + ngl + gas / 6),
+    last12OilBbl: Math.round(last12._sum.oilBbl ?? 0),
+    last12GasMcf: Math.round(last12._sum.gasMcf ?? 0),
+  };
+}
+
 /** One offering by its share slug (works for PUBLIC and LINK_ONLY). */
 portalRouter.get(
   "/offering/:slug",
@@ -186,7 +235,7 @@ portalRouter.get(
       where: { portalSlug: String(req.params.slug) },
       include: {
         organization: true,
-        files: { where: { visibleToBuyers: true, supersededById: null }, select: { id: true, filename: true, mimeType: true, sizeBytes: true, folder: true } },
+        files: { where: { visibleToBuyers: true, supersededById: null }, select: { id: true, filename: true, mimeType: true, sizeBytes: true, folder: true, s3Key: true } },
       },
     });
     if (!deal || !deal.publishedToPortal || !deal.organization?.portalEnabled) {
@@ -202,12 +251,25 @@ portalRouter.get(
       : [];
     // Contacts are only exposed when this deal publishes its contact section.
     const org = await orgPayload(deal.organization);
+
+    // Split buyer-visible files: images become a presigned gallery, the rest are documents.
+    const filesVisible = (sections.documents || sections.attachments) ? deal.files : [];
+    const imageFiles = filesVisible.filter((f) => isImage(f.mimeType));
+    const documents = filesVisible.filter((f) => !isImage(f.mimeType))
+      .map(({ id, filename, mimeType, sizeBytes, folder }) => ({ id, filename, mimeType, sizeBytes, folder }));
+    const images = s3Configured()
+      ? await Promise.all(imageFiles.map(async (f) => ({ id: f.id, filename: f.filename, url: await getDownloadUrl(f.s3Key, f.filename, true).catch(() => null) })))
+      : [];
+
+    const production = sections.production && deal.organizationId ? await productionSummary(deal.organizationId, deal.wells) : null;
+
     res.json({
       org: sections.contact ? org : { ...org, contacts: [], contactName: null, contactEmail: null, contactPhone: null, officeLocation: null },
       deal: publicDeal(deal),
       abstracts,
-      // Documents/attachments are approved per file AND gated per deal.
-      documents: (sections.documents || sections.attachments) ? deal.files : [],
+      documents,
+      images: images.filter((i) => i.url),
+      production,
     });
   }),
 );
@@ -386,6 +448,89 @@ portalRouter.post(
       data: targets.map((userId) => ({
         organizationId: org.id, userId, type: "portal_lead", title, body, link: `/buyers/${buyerId}`,
       })),
+    });
+
+    res.status(201).json({ ok: true });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Submit an offer — a buyer offers on a specific published offering
+// ---------------------------------------------------------------------------
+
+const offerSchema = z.object({
+  companyName: z.string().trim().min(1).max(160),
+  contactName: z.string().trim().min(1).max(120),
+  email: z.string().trim().email().max(200),
+  phone: z.string().trim().max(40).optional().default(""),
+  amount: z.number().positive().max(1e12),
+  conditions: z.string().trim().max(2000).optional().default(""),
+  // Optional buyer-set expiration for the offer (ISO date).
+  expiresOn: z.string().trim().optional().nullable(),
+  message: z.string().trim().max(4000).optional().default(""),
+});
+
+portalRouter.post(
+  "/offering/:slug/offers",
+  asyncHandler(async (req, res) => {
+    const ip = req.ip ?? "unknown";
+    if (leadRateLimited(ip)) throw new HttpError(429, "Too many submissions — please try again later");
+
+    const deal = await prisma.deal.findUnique({
+      where: { portalSlug: String(req.params.slug) },
+      select: { id: true, name: true, organizationId: true, publishedToPortal: true, relationshipOwnerId: true, organization: { select: { portalEnabled: true } } },
+    });
+    if (!deal || !deal.publishedToPortal || !deal.organization?.portalEnabled || !deal.organizationId) {
+      throw new HttpError(404, "Offering not found");
+    }
+
+    const body = offerSchema.parse(req.body);
+    const email = body.email.toLowerCase();
+    const now = new Date();
+    const expirationDate = body.expiresOn ? new Date(body.expiresOn) : null;
+    if (expirationDate && isNaN(expirationDate.getTime())) throw new HttpError(400, "Invalid expiration date");
+
+    // Resolve the buyer the same way leads do: exact-email match merges (filling
+    // blanks only), otherwise create a new portal-sourced profile.
+    const existing = await prisma.buyer.findFirst({
+      where: { organizationId: deal.organizationId, email: { equals: email, mode: "insensitive" } },
+    });
+    let buyerId: string;
+    if (existing) {
+      await prisma.buyer.update({
+        where: { id: existing.id },
+        data: { contactName: existing.contactName || body.contactName, phone: existing.phone || body.phone || null, portalSubmittedAt: now },
+      });
+      buyerId = existing.id;
+    } else {
+      const created = await prisma.buyer.create({
+        data: {
+          organizationId: deal.organizationId,
+          name: body.companyName, companyName: body.companyName, contactName: body.contactName,
+          email, phone: body.phone || null, normalizedCompany: normalizeCompany(body.companyName),
+          source: "portal", portalSubmittedAt: now,
+        },
+      });
+      buyerId = created.id;
+    }
+
+    await prisma.offer.create({
+      data: {
+        dealId: deal.id, buyerId, amount: body.amount, status: "ACTIVE",
+        conditions: body.conditions || null, expirationDate,
+        // Mark provenance in the note so the CRM shows where it came from.
+        notes: `Submitted via buyer portal on ${now.toLocaleDateString("en-US")}.${body.message ? `\n\n${body.message}` : ""}`,
+      },
+    });
+
+    // Notify the deal's owner (else the org broadly) so an offer never sits unseen.
+    const title = `Portal offer: ${body.companyName} on "${deal.name}"`;
+    const bodyText = `$${Math.round(body.amount).toLocaleString("en-US")} offer from ${body.contactName}${body.conditions ? ` · terms: ${body.conditions.slice(0, 80)}` : ""}`;
+    await prisma.notification.create({
+      data: {
+        organizationId: deal.organizationId, userId: deal.relationshipOwnerId ?? null,
+        type: "portal_offer", title, body: bodyText, link: `/deals/${deal.id}`,
+      },
     });
 
     res.status(201).json({ ok: true });
