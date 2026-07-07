@@ -152,8 +152,9 @@ dealsRouter.post(
       const states = data.states ?? (data.state ? [data.state] : []);
       const req_: [boolean, string][] = [
         [states.length > 0, "State"],
+        // Abstract is intentionally NOT required: cadastral coverage only exists
+        // for GIS-imported counties, and deals elsewhere must still be creatable.
         [(data.counties ?? []).length > 0, "County"],
-        [(data.abstractIds ?? []).length > 0, "Abstract"],
         [data.nra != null, "NRA"],
         [(data.assetTypes ?? []).length > 0, "Asset Type"],
         [data.ourPrice != null, "Our Price"],

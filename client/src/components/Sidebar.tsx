@@ -6,6 +6,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
+import { NotificationsBell } from "./NotificationsBell";
 
 interface NavItem {
   label: string;
@@ -105,6 +106,7 @@ export function Sidebar() {
       </nav>
 
       <div className="sidebar-footer">
+        <NotificationsBell collapsed={collapsed} />
         {!collapsed && <div className="sidebar-user">{user?.name}<br /><span className="muted">{user?.orgRole ? ROLE_LABEL[user.orgRole] ?? user.orgRole : ""}</span></div>}
         <button className="small" onClick={() => logout()} title="Sign out">{collapsed ? <LogOut size={16} /> : "Sign out"}</button>
       </div>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { Banner, PriorityBadge, StageBadge, Spinner } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
@@ -27,10 +27,13 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
   const { can } = useAuth();
   const [deals, setDeals] = useState<DealSummary[] | null>(null);
   const [filter, setFilter] = useState<Filter>("ALL");
-  const [showNew, setShowNew] = useState(false);
+  // ?new=1 (Dashboard "Create your first deal") opens the modal on arrival.
+  const [params, setParams] = useSearchParams();
+  const [showNew, setShowNew] = useState(params.get("new") === "1");
   const [users, setUsers] = useState<UserLite[]>([]);
   const sel = useRowSelection();
   const nav = useNavigate();
+  const closeNew = () => { setShowNew(false); if (params.get("new")) setParams({}, { replace: true }); };
 
   function load() { api.get<DealSummary[]>("/deals").then(setDeals); }
   useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
@@ -88,9 +91,14 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
         rows={filtered}
         rowKey={(d) => d.id}
         onRowClick={(d) => nav(`/deals/${d.id}`)}
+        rowHref={(d) => `/deals/${d.id}`}
         rowClassName={(d) => (d.isOverdue ? "row-overdue" : undefined)}
         defaultSort={{ key: "priority", dir: "asc" }}
-        empty="No deals match this filter."
+        empty={scoped.length === 0
+          ? (scope === "active" || scope === "all"
+            ? (can("createDeals") ? "No deals yet — click “+ New Deal” to create your first one." : "No deals yet.")
+            : `No ${scope} deals yet.`)
+          : "No deals match this filter."}
         selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
       />
 
@@ -112,7 +120,7 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
       />
 
       {showNew && (
-        <NewDealModal onClose={() => setShowNew(false)} onCreated={(d) => { setShowNew(false); nav(`/deals/${d.id}`); }} />
+        <NewDealModal onClose={closeNew} onCreated={(d) => { closeNew(); nav(`/deals/${d.id}`); }} />
       )}
     </div>
   );

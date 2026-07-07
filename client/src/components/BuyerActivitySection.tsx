@@ -21,12 +21,15 @@ const LOGGABLE: { v: CommKind; label: string }[] = [
 ];
 
 export function BuyerActivitySection({
-  dealId, rows, onChanged, onEdit,
+  dealId, rows, onChanged, onEdit, onRecordOffer,
 }: {
   dealId: string;
   rows: BuyerActivityRow[];
   onChanged: () => void;
   onEdit: (row: BuyerActivityRow) => void;
+  /** Opens the update modal pre-set to Offer Received — a discoverable path to
+   *  recording an offer instead of hiding it behind the status dropdown. */
+  onRecordOffer?: (row: BuyerActivityRow) => void;
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const sorted = [...rows].sort(
@@ -44,12 +47,15 @@ export function BuyerActivitySection({
             <div className="ba-head" onClick={() => setOpen(isOpen ? null : r.id)}>
               <span className="ba-caret">{isOpen ? "▾" : "▸"}</span>
               <Link to={`/buyers/${r.buyerId}`} onClick={(e) => e.stopPropagation()} style={{ fontWeight: 600 }}>{r.buyerName}</Link>
-              <span className="muted">· {r.companyName}</span>
+              {r.companyName && r.companyName !== r.buyerName && <span className="muted">· {r.companyName}</span>}
               <span className="spacer" />
               <MatchPercentBadge value={r.matchPercent} />
               <StatusBadge status={r.status} />
               {r.offerAmount != null && <span className="muted">{money(r.offerAmount)}</span>}
               <span className="muted" style={{ fontSize: 12 }}>{fmtDate(r.lastActivityDate)}</span>
+              {onRecordOffer && r.status !== "PASSED" && r.status !== "CLOSED" && (
+                <button className="small" onClick={(e) => { e.stopPropagation(); onRecordOffer(r); }}>Record offer</button>
+              )}
               <button className="small" onClick={(e) => { e.stopPropagation(); onEdit(r); }}>Update</button>
             </div>
             {isOpen && (

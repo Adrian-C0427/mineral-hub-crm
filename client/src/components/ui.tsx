@@ -2,7 +2,15 @@ import { useState, type ReactNode } from "react";
 import { prettyStage, prettyEnum } from "../lib/format";
 
 export function PriorityBadge({ priority }: { priority: "HIGH" | "MEDIUM" | "LOW" }) {
-  return <span className={`badge priority-${priority.toLowerCase()}`}>{prettyEnum(priority)}</span>;
+  // Priority is computed, not user-set — the tooltip explains why it changes on its own.
+  return (
+    <span
+      className={`badge priority-${priority.toLowerCase()}`}
+      title="Priority is computed automatically from deadline proximity and deal stage — e.g. it relaxes once a buyer is selected and the deal moves to closing."
+    >
+      {prettyEnum(priority)}
+    </span>
+  );
 }
 
 export function StageBadge({ stage }: { stage: string }) {

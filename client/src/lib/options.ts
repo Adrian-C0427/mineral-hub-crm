@@ -3,6 +3,16 @@ import { US_STATE_COUNTIES } from "./usCounties";
 
 export const ASSET_TYPE_OPTIONS = ["RI", "ORRI", "NPRI", "WI", "MI"] as const;
 
+// Display labels: the industry acronyms stay as stored values, but pickers show
+// the expansion so newer team members aren't guessing what NPRI means.
+export const ASSET_TYPE_LABELS: Record<string, string> = {
+  RI: "Royalty Interest (RI)",
+  ORRI: "Overriding Royalty Interest (ORRI)",
+  NPRI: "Non-Participating Royalty Interest (NPRI)",
+  WI: "Working Interest (WI)",
+  MI: "Mineral Interest (MI)",
+};
+
 // All U.S. states + DC (2-letter codes; consistent with existing stored values).
 export const US_STATE_OPTIONS = [
   "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI", "ID", "IL",
@@ -10,6 +20,22 @@ export const US_STATE_OPTIONS = [
   "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD",
   "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
 ] as const;
+
+// Full state names for picker display + search — typing "Texas" must find TX.
+const STATE_NAME: Record<string, string> = {
+  AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado",
+  CT: "Connecticut", DE: "Delaware", DC: "District of Columbia", FL: "Florida", GA: "Georgia",
+  HI: "Hawaii", ID: "Idaho", IL: "Illinois", IN: "Indiana", IA: "Iowa", KS: "Kansas", KY: "Kentucky",
+  LA: "Louisiana", ME: "Maine", MD: "Maryland", MA: "Massachusetts", MI: "Michigan", MN: "Minnesota",
+  MS: "Mississippi", MO: "Missouri", MT: "Montana", NE: "Nebraska", NV: "Nevada", NH: "New Hampshire",
+  NJ: "New Jersey", NM: "New Mexico", NY: "New York", NC: "North Carolina", ND: "North Dakota",
+  OH: "Ohio", OK: "Oklahoma", OR: "Oregon", PA: "Pennsylvania", RI: "Rhode Island", SC: "South Carolina",
+  SD: "South Dakota", TN: "Tennessee", TX: "Texas", UT: "Utah", VT: "Vermont", VA: "Virginia",
+  WA: "Washington", WV: "West Virginia", WI: "Wisconsin", WY: "Wyoming",
+};
+export const US_STATE_LABELS: Record<string, string> = Object.fromEntries(
+  Object.entries(STATE_NAME).map(([code, name]) => [code, `${name} (${code})`]),
+);
 
 // Recognized Texas producing basins / structural provinces (comprehensive).
 export const TEXAS_BASIN_OPTIONS = [

@@ -5,7 +5,7 @@ import { useAuth } from "../auth/AuthContext";
 import { Spinner, RelationshipDot, Banner, StageBadge, StatusBadge } from "../components/ui";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
-import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
+import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
 import { money, pct, fmtDate, toInputDate } from "../lib/format";
 import { formatPhone } from "../lib/phone";
 import { PhoneInput } from "../components/PhoneInput";
@@ -153,14 +153,15 @@ export function BuyerProfile() {
                 <SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={view.buyBox.formations} onChange={(v) => setBox("formations", v)} placeholder="Search formations…" />
               </Fld>
               <Fld l="asset types">
-                <SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} value={view.buyBox.assetTypes} onChange={(v) => setBox("assetTypes", v)} placeholder="Search asset types…" />
+                <SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={view.buyBox.assetTypes} onChange={(v) => setBox("assetTypes", v)} placeholder="Search asset types…" />
               </Fld>
               <Row><Fld l="Min acreage"><input type="number" value={view.buyBox.minAcreage ?? ""} onChange={(e) => setBox("minAcreage", e.target.value === "" ? null : Number(e.target.value))} /></Fld><Fld l="Max acreage"><input type="number" value={view.buyBox.maxAcreage ?? ""} onChange={(e) => setBox("maxAcreage", e.target.value === "" ? null : Number(e.target.value))} /></Fld></Row>
               <Row><Fld l="Min price"><input type="number" value={view.buyBox.minPrice ?? ""} onChange={(e) => setBox("minPrice", e.target.value === "" ? null : Number(e.target.value))} /></Fld><Fld l="Max price"><input type="number" value={view.buyBox.maxPrice ?? ""} onChange={(e) => setBox("maxPrice", e.target.value === "" ? null : Number(e.target.value))} /></Fld></Row>
             </>
           ) : (
             <div className="dd-grid">
-              {ARRAY_KEYS.map((k) => <KV key={k} k={k} v={(view.buyBox[k] as string[]).join(", ")} />)}
+              {/* Friendly display names — the raw key rendered "ASSETTYPES". */}
+              {ARRAY_KEYS.map((k) => <KV key={k} k={k === "assetTypes" ? "Asset types" : k} v={(view.buyBox[k] as string[]).join(", ")} />)}
               <KV k="Acreage" v={fmtRange(view.buyBox.minAcreage, view.buyBox.maxAcreage, (n) => n.toLocaleString("en-US"))} />
               <KV k="Price" v={fmtRange(view.buyBox.minPrice, view.buyBox.maxPrice, (n) => money(n))} />
             </div>
