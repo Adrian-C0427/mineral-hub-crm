@@ -38,13 +38,16 @@ export async function sendEmail(params: SendParams): Promise<void> {
 }
 
 /**
- * Fill {{token}} placeholders. Unknown tokens are left as-is. Values are
- * HTML-escaped since the body is sent as HTML.
+ * Fill {{token}} placeholders with PLAIN values. Unknown tokens are left
+ * as-is. Escaping is NOT done here — it happens exactly once, at HTML
+ * conversion time (renderEmailBody). Escaping in both places double-encoded
+ * values ("A&B" arrived as "A&amp;B") and put HTML entities into plain-text
+ * subjects.
  */
 export function personalize(template: string, tokens: Record<string, string | number | null | undefined>): string {
   return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, key: string) => {
     const v = tokens[key];
-    return v == null ? match : escapeHtml(String(v));
+    return v == null ? match : String(v);
   });
 }
 
@@ -52,9 +55,21 @@ function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
 
-/** Wrap a (possibly plain-text) body in minimal HTML, converting newlines. */
-export function toHtmlBody(body: string): string {
-  // If it already looks like HTML, pass through; otherwise convert newlines.
-  if (/<[a-z][\s\S]*>/i.test(body)) return body;
-  return body.split("\n").map((line) => escapeHtml(line)).join("<br>");
+/**
+ * Personalize a body template and produce the HTML to send, escaping exactly
+ * once. HTML-vs-plain is decided on the TEMPLATE (before substitution) so a
+ * token value containing "<" can't flip a plain-text email into raw HTML.
+ */
+export function renderEmailBody(template: string, tokens: Record<string, string | number | null | undefined>): string {
+  if (/<[a-z][\s\S]*>/i.test(template)) {
+    // HTML template: substitute escaped values so buyer-provided strings
+    // can't inject markup; the template's own tags pass through.
+    return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (match, key: string) => {
+      const v = tokens[key];
+      return v == null ? match : escapeHtml(String(v));
+    });
+  }
+  // Plain-text template: substitute plain, escape the whole thing once,
+  // convert newlines.
+  return personalize(template, tokens).split("\n").map((line) => escapeHtml(line)).join("<br>");
 }

@@ -48,7 +48,10 @@ const NAV: NavItem[] = [
     children: [
       { label: "General", icon: SettingsIcon, to: "/settings/general" },
       // Organization now lives under Settings (company, members, roles, owner).
-      { label: "Organization", icon: SettingsIcon, to: "/settings/organization", perm: "orgSection" },
+      // Visible to EVERY member: the page itself scopes what each role can do,
+      // and it's the only home of org info + "Join a different company" —
+      // hiding it made that section unreachable for members/viewers.
+      { label: "Organization", icon: SettingsIcon, to: "/settings/organization" },
       { label: "Buyer Portal", icon: Store, to: "/settings/portal", perm: "managePortal" },
       { label: "Integrations", icon: SettingsIcon, to: "/settings/integrations", perm: "manageApiIntegrations" },
     ],
@@ -78,12 +81,7 @@ export function Sidebar() {
     return () => mq.removeEventListener("change", onChange);
   }, []);
 
-  // "orgSection" is a virtual permission: visible to anyone who can manage
-  // members or the org's settings (Roles & Permissions is owner-only within).
-  const allowed = (item: NavItem): boolean => {
-    if (item.perm === "orgSection") return can("manageMembers") || can("manageOrgSettings");
-    return !item.perm || can(item.perm);
-  };
+  const allowed = (item: NavItem): boolean => !item.perm || can(item.perm);
 
   return (
     <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
