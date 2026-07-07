@@ -50,7 +50,7 @@ frontend origin so cookie auth works cross-origin.
 cd server
 cp .env.example .env          # fill in DATABASE_URL, JWT_SECRET, S3_* (optional)
 npm install
-npx prisma db push            # create tables in an empty DB
+npx prisma migrate deploy     # create tables in an empty DB (applies prisma/migrations)
 npm run bootstrap:admin       # create the single Owner user (interactive)
 npm run dev                   # http://localhost:4000
 ```
@@ -103,4 +103,23 @@ with the prod `DATABASE_URL`):
 ADMIN_NAME="You" ADMIN_EMAIL="you@co.com" ADMIN_PASSWORD="<strong>" npm run bootstrap:admin
 ```
 
-The schema is applied automatically on each API start via `prisma db push`.
+### Database migrations
+
+The schema is applied on each API start via `node scripts/migrate-deploy.mjs`,
+which runs `prisma migrate deploy` (forward-only, never destructive). A database
+that predates migration history (built by the old `prisma db push` flow) is
+baselined automatically on its first deploy: the `0_init` migration is marked
+as already applied, then any newer migrations run.
+
+**Changing the schema:** edit `prisma/schema.prisma`, then generate a migration
+instead of pushing:
+
+```bash
+cd server
+npx prisma migrate dev --name describe_your_change   # against your dev DATABASE_URL
+```
+
+Commit the generated folder under `prisma/migrations/` — production applies it
+on the next deploy. Never use `db push` against production; it bypasses history
+and can silently drop data on destructive changes (this bit us once converting
+scalars to arrays).
