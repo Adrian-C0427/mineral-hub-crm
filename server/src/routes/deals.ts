@@ -885,8 +885,10 @@ dealsRouter.post(
     const { offerId } = acceptSchema.parse(req.body);
     const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!deal) throw new HttpError(404, "Deal not found");
-    const offer = await prisma.offer.findUnique({ where: { id: offerId } });
-    if (!offer || offer.dealId !== req.params.id) throw new HttpError(404, "Offer not found on this deal");
+    // Scope the offer lookup to this (already org-verified) deal so a
+    // caller-supplied offerId can't reach another org's offer.
+    const offer = await prisma.offer.findFirst({ where: { id: offerId, dealId: deal.id } });
+    if (!offer) throw new HttpError(404, "Offer not found on this deal");
 
     // Accepting moves the deal into the closing process and pulls the offering
     // from the public portal so it's no longer marketed to other buyers. Buyer
