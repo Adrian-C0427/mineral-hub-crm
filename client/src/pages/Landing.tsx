@@ -1,9 +1,12 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { Briefcase, ChevronRight, Store, TrendingUp } from "lucide-react";
+import { ResearchChoropleth, type CountyStat } from "../components/ResearchChoropleth";
 import "../landing.css";
 
-// MapLibre is heavy; the live GIS demo mounts only when scrolled into view.
+// MapLibre is heavy; the live map demos mount only when needed.
 const LandingMap = lazy(() => import("./LandingMap"));
+const TractMapDemo = lazy(() => import("./TractMapDemo"));
 
 const CONTACT_EMAIL = "adrian@aamjsolutions.com";
 const waitlistHref = (email: string) =>
@@ -87,6 +90,7 @@ export function Landing() {
       <MatchDemo />
       <TractDemo />
       <MapSection />
+      <ResearchDemo />
       <ValuationDemo />
       <FeatureTrio />
       <FinalCta />
@@ -147,6 +151,7 @@ function Nav() {
         <a href="#pipeline" onClick={go("pipeline")}>Pipeline</a>
         <a href="#buyers" onClick={go("buyers")}>Buyers</a>
         <a href="#mapping" onClick={go("mapping")}>Mapping</a>
+        <a href="#research" onClick={go("research")}>Research</a>
         <a href="#valuation" onClick={go("valuation")}>Valuation</a>
       </div>
       <div className="lp-nav-cta">
@@ -281,7 +286,7 @@ function PipelineDemo({ deals, onChange }: { deals: DemoDeal[]; onChange: (d: De
             onDrop={() => { if (dragId) moveTo(dragId, s.key); setDragId(null); setOver(null); }}
           >
             <div className="lp-col-head">
-              <span style={{ color: STAGE_COLOR[s.key] }}>●</span> {s.label}
+              <span className="lp-stage-dot" style={{ background: STAGE_COLOR[s.key] }} /> {s.label}
               <span className="lp-col-n">{deals.filter((d) => d.stage === s.key).length}</span>
             </div>
             {deals.filter((d) => d.stage === s.key).map((d) => (
@@ -289,7 +294,7 @@ function PipelineDemo({ deals, onChange }: { deals: DemoDeal[]; onChange: (d: De
                 <div className="lp-card-top">
                   <strong>{d.name}</strong>
                   {s.key !== "CLOSING" && (
-                    <button aria-label={`Advance ${d.name}`} title="Advance stage" onClick={() => advance(d)}>▸</button>
+                    <button aria-label={`Advance ${d.name}`} title="Advance stage" onClick={() => advance(d)}><ChevronRight size={13} /></button>
                   )}
                 </div>
                 <div className="lp-card-meta">{d.county} Co. · {d.nra} NRA</div>
@@ -424,46 +429,121 @@ function TractDemo() {
     setResult({ calls, pts, acres, gapFt });
   }
 
-  const svg = useMemo(() => {
-    if (!result || result.pts.length < 3) return null;
-    const xs = result.pts.map((p) => p[0]), ys = result.pts.map((p) => p[1]);
-    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
-    const w = Math.max(1, maxX - minX), h = Math.max(1, maxY - minY), pad = Math.max(w, h) * 0.12;
-    const path = result.pts.map(([px, py], i) => `${i === 0 ? "M" : "L"}${px},${-py}`).join(" ") + " Z";
-    return { path, viewBox: `${minX - pad} ${-(maxY + pad)} ${w + pad * 2} ${h + pad * 2}` };
-  }, [result]);
+  const ok = result != null && result.calls.length >= 3;
 
   return (
     <section className="lp-section">
       <div className="lp-section-head rv">
         <div className="lp-try">TRY IT — paste any Texas legal description</div>
-        <h2>From "THENCE N 45° E…" to a drawn tract in one click.</h2>
-        <p>Mineral Hub parses metes-and-bounds calls, checks that the boundary closes, computes acreage, and anchors the polygon to the survey abstract on the county map. Try it on the sample — or edit the calls and watch it re-draw.</p>
+        <h2>From "THENCE N 45° E…" to a mapped tract in one click.</h2>
+        <p>Mineral Hub parses metes-and-bounds calls, checks that the boundary closes, computes acreage, and anchors the polygon to the survey abstract on the real county map — the same cadastral stack your deals live on. Edit the calls and re-parse to watch it move.</p>
       </div>
       <div className="lp-tract rv">
         <div className="lp-tract-left">
           <textarea value={text} onChange={(e) => setText(e.target.value)} rows={9} spellCheck={false} aria-label="Legal description" />
           <button className="lp-btn" onClick={run}>Parse legal description</button>
-        </div>
-        <div className="lp-tract-right">
-          {!result ? (
-            <div className="lp-tract-empty">The parsed tract draws here.</div>
-          ) : result.calls.length < 3 ? (
-            <div className="lp-tract-empty">Couldn't find at least 3 bearing-distance calls — check the format (e.g. “THENCE N 45°00' E 1000 feet”).</div>
-          ) : (
-            <>
-              <svg viewBox={svg!.viewBox} className="lp-tract-svg" aria-label="Parsed tract polygon">
-                <path d={svg!.path} className="lp-tract-path" />
-              </svg>
-              <div className="lp-verdict">
-                <span className="ok">✓ {result.calls.length} calls parsed</span>
-                <span>{result.acres.toFixed(2)} acres</span>
-                <span className={result.gapFt < 1 ? "ok" : "warn"}>
-                  {result.gapFt < 1 ? "boundary closes" : `closure gap ${result.gapFt.toFixed(1)} ft`}
-                </span>
-              </div>
-            </>
+          {ok && (
+            <div className="lp-verdict">
+              <span className="ok">✓ {result!.calls.length} calls parsed</span>
+              <span>{result!.acres.toFixed(2)} acres</span>
+              <span className={result!.gapFt < 1 ? "ok" : "warn"}>
+                {result!.gapFt < 1 ? "boundary closes" : `closure gap ${result!.gapFt.toFixed(1)} ft`}
+              </span>
+            </div>
           )}
+          {result && !ok && (
+            <div className="lp-verdict"><span className="warn">Couldn't find at least 3 bearing-distance calls — e.g. “THENCE N 45°00' E 1000 feet”.</span></div>
+          )}
+        </div>
+        <div className="lp-tract-map">
+          {ok ? (
+            <Suspense fallback={<div className="lp-tract-empty">Loading county map…</div>}>
+              <TractMapDemo ring={result!.pts} />
+            </Suspense>
+          ) : (
+            <div className="lp-tract-empty">Parse the description — the tract draws on the live Leon County survey map, over real abstracts and wells.</div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/* ----------------------------- research (demo) ----------------------------- */
+
+interface CountyRow { county: string; tx: number; prev: number; hotspot?: boolean }
+const RESEARCH_ROWS: CountyRow[] = [
+  { county: "Leon", tx: 412, prev: 268, hotspot: true },
+  { county: "Freestone", tx: 366, prev: 301 },
+  { county: "Robertson", tx: 254, prev: 259 },
+  { county: "Midland", tx: 838, prev: 790 },
+  { county: "Reeves", tx: 761, prev: 502, hotspot: true },
+  { county: "Martin", tx: 495, prev: 462 },
+  { county: "Howard", tx: 441, prev: 517 },
+  { county: "Loving", tx: 233, prev: 148 },
+  { county: "Karnes", tx: 322, prev: 356 },
+  { county: "Webb", tx: 289, prev: 244 },
+  { county: "Panola", tx: 176, prev: 118 },
+  { county: "Upton", tx: 208, prev: 0 },
+];
+
+function ResearchDemo() {
+  const [metric, setMetric] = useState<"activity" | "change">("activity");
+  const [selected, setSelected] = useState<string[]>(["Leon"]);
+
+  const stats: CountyStat[] = useMemo(() => RESEARCH_ROWS.map((r) => ({
+    county: r.county,
+    total: r.tx,
+    pctChange: r.prev === 0 ? null : (r.tx - r.prev) / r.prev,
+    isHotspot: !!r.hotspot,
+  })), []);
+
+  const ranked = useMemo(() => [...RESEARCH_ROWS].sort((a, b) =>
+    metric === "activity"
+      ? b.tx - a.tx
+      : ((b.prev ? (b.tx - b.prev) / b.prev : 9) - (a.prev ? (a.tx - a.prev) / a.prev : 9)),
+  ).slice(0, 6), [metric]);
+
+  const toggle = (county: string) =>
+    setSelected((p) => (p.includes(county) ? p.filter((c) => c !== county) : [...p, county]));
+
+  return (
+    <section className="lp-section" id="research">
+      <div className="lp-section-head rv">
+        <div className="lp-try">TRY IT — the actual Research module</div>
+        <h2>See where the market is moving before you drive there.</h2>
+        <p>County recording indexes, lease assignments, and permits roll up into an activity map with hotspot detection. This is the real choropleth from the app, on sample data — switch metrics, hover any county, click to select.</p>
+      </div>
+      <div className="lp-research rv">
+        <div className="lp-research-map">
+          <div className="lp-chips" style={{ marginBottom: 10 }}>
+            <button className={metric === "activity" ? "on" : ""} onClick={() => setMetric("activity")}>Activity volume</button>
+            <button className={metric === "change" ? "on" : ""} onClick={() => setMetric("change")}>Momentum vs prior period</button>
+          </div>
+          <ResearchChoropleth stats={stats} metric={metric} selected={selected} onSelect={toggle} />
+          <div className="lp-legend">
+            <span><i className="sw blue" /> more activity</span>
+            <span><i className="sw green" /> accelerating</span>
+            <span><i className="sw red-o" /> hotspot</span>
+            <span><i className="sw sel" /> selected</span>
+          </div>
+        </div>
+        <div className="lp-research-rank">
+          <div className="lp-rank-h">{metric === "activity" ? "Most active counties" : "Fastest-moving counties"}</div>
+          {ranked.map((r, i) => {
+            const pct = r.prev ? Math.round(((r.tx - r.prev) / r.prev) * 100) : null;
+            return (
+              <button key={r.county} className={`lp-rank-row ${selected.includes(r.county) ? "sel" : ""}`} onClick={() => toggle(r.county)}>
+                <span className="lp-rank">#{i + 1}</span>
+                <span className="lp-rank-name">{r.county}{r.hotspot && <em> hotspot</em>}</span>
+                <span className="lp-rank-val">{r.tx.toLocaleString()} rec.</span>
+                <span className={`lp-rank-pct ${pct == null || pct >= 0 ? "up" : "down"}`}>
+                  {pct == null ? "new" : `${pct >= 0 ? "+" : ""}${pct}%`}
+                </span>
+              </button>
+            );
+          })}
+          <p className="lp-rank-note">Clicked counties highlight on the map — in the app this filters records, top buyers, and opportunity scores to your selection.</p>
         </div>
       </div>
     </section>
@@ -569,9 +649,9 @@ function FeatureTrio() {
   return (
     <section className="lp-section">
       <div className="lp-trio rv">
-        <div><div className="lp-ico">⛏</div><h3>Built for the deal flow</h3><p>From signed PSA to funded closing — every stage, document, seller, and dollar in one place. Offers, e-mail outreach, and follow-up alerts included.</p></div>
-        <div><div className="lp-ico">🤝</div><h3>Your own buyer portal</h3><p>Publish offerings to a branded public marketplace. Buyers browse, filter the map, and submit their buy box — leads land in your CRM with a notification.</p></div>
-        <div><div className="lp-ico">📈</div><h3>Profit, not activity</h3><p>Realized vs. projected profit per deal and per month, win rate, county rankings, and PDF reports. The numbers that actually matter.</p></div>
+        <div><div className="lp-ico"><Briefcase size={22} strokeWidth={1.8} /></div><h3>Built for the deal flow</h3><p>From signed PSA to funded closing — every stage, document, seller, and dollar in one place. Offers, e-mail outreach, and follow-up alerts included.</p></div>
+        <div><div className="lp-ico"><Store size={22} strokeWidth={1.8} /></div><h3>Your own buyer portal</h3><p>Publish offerings to a branded public marketplace. Buyers browse, filter the map, and submit their buy box — leads land in your CRM with a notification.</p></div>
+        <div><div className="lp-ico"><TrendingUp size={22} strokeWidth={1.8} /></div><h3>Profit, not activity</h3><p>Realized vs. projected profit per deal and per month, win rate, county rankings, and PDF reports. The numbers that actually matter.</p></div>
       </div>
     </section>
   );
