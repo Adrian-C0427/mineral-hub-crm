@@ -21,7 +21,7 @@ const LOGGABLE: { v: CommKind; label: string }[] = [
 ];
 
 export function BuyerActivitySection({
-  dealId, rows, onChanged, onEdit, onRecordOffer,
+  dealId, rows, onChanged, onEdit, onRecordOffer, canEdit = true,
 }: {
   dealId: string;
   rows: BuyerActivityRow[];
@@ -30,6 +30,9 @@ export function BuyerActivitySection({
   /** Opens the update modal pre-set to Offer Received — a discoverable path to
    *  recording an offer instead of hiding it behind the status dropdown. */
   onRecordOffer?: (row: BuyerActivityRow) => void;
+  /** False for read-only users: hides Update and the inline log form (whose
+   *  POSTs would just 403). */
+  canEdit?: boolean;
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const sorted = [...rows].sort(
@@ -56,7 +59,7 @@ export function BuyerActivitySection({
               {onRecordOffer && r.status !== "PASSED" && r.status !== "CLOSED" && (
                 <button className="small" onClick={(e) => { e.stopPropagation(); onRecordOffer(r); }}>Record offer</button>
               )}
-              <button className="small" onClick={(e) => { e.stopPropagation(); onEdit(r); }}>Update</button>
+              {canEdit && <button className="small" onClick={(e) => { e.stopPropagation(); onEdit(r); }}>Update</button>}
             </div>
             {isOpen && (
               <div className="ba-body">
@@ -66,7 +69,7 @@ export function BuyerActivitySection({
                   <div className="kv"><span className="k">Next follow-up</span><span className="v">{fmtDate(r.nextFollowUpDate)}</span></div>
                   <div className="kv"><span className="k">Notes</span><span className="v">{r.notes || "—"}</span></div>
                 </div>
-                <LogEntryForm dealId={dealId} buyerId={r.buyerId} onLogged={onChanged} />
+                {canEdit && <LogEntryForm dealId={dealId} buyerId={r.buyerId} onLogged={onChanged} />}
                 <Timeline entries={r.timeline} />
               </div>
             )}

@@ -10,7 +10,7 @@ import { STALE_CONTACT_DAYS } from "../config.js";
 import { daysUntil } from "../domain/dates.js";
 import { logActivity } from "../services/activityLog.js";
 import { effectiveStatus, ENGAGED_STATUSES, BUYER_STATUSES } from "../domain/buyerStatus.js";
-import { sendEmail, personalize, toHtmlBody } from "../services/email.js";
+import { sendEmail, personalize, renderEmailBody } from "../services/email.js";
 import { money as fmtMoney } from "../domain/format.js";
 import { newPortalSlug } from "./portal.js";
 
@@ -415,10 +415,12 @@ dealsRouter.post(
         county: deal.counties.join(", "), askPrice: deal.askPrice != null ? fmtMoney(deal.askPrice) : "",
         sender: req.user!.name,
       };
+      // Subject stays plain text; the body is escaped exactly once inside
+      // renderEmailBody (fixes double-encoded "&amp;" in delivered emails).
       const finalSubject = personalize(subject, tokens);
-      const finalBody = personalize(body, tokens);
+      const finalBody = renderEmailBody(body, tokens);
       try {
-        await sendEmail({ to: b.email, subject: finalSubject, html: toHtmlBody(finalBody), replyTo: req.user!.email });
+        await sendEmail({ to: b.email, subject: finalSubject, html: finalBody, replyTo: req.user!.email });
       } catch (e) {
         // First failure (e.g. SMTP not configured) aborts with a clear error.
         if (sent.length === 0) throw e;

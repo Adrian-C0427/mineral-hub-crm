@@ -76,7 +76,10 @@ export function DealDetail() {
   if (!deal) return <Spinner />;
 
   const refreshAll = () => { loadDeal(); loadMatches(); };
-  const hasUnresolved = deal.buyerActivity.some((a) => a.status === "CONTACTED");
+  // "Awaiting a response" means contacted AND no response yet — a buyer who
+  // replied (responseReceived) isn't pending even if their status is still
+  // Contacted.
+  const hasUnresolved = deal.buyerActivity.some((a) => a.status === "CONTACTED" && !a.responseReceived);
 
   const toggleMatch = (buyerId: string) =>
     setSelected((prev) => { const n = new Set(prev); n.has(buyerId) ? n.delete(buyerId) : n.add(buyerId); return n; });
@@ -108,7 +111,7 @@ export function DealDetail() {
         </div>
         <div className="row">
           {can("deleteDeals") && <button className="danger" onClick={() => setConfirmDelete(true)}>Delete</button>}
-          <button className="primary" onClick={() => setShowStage(true)}>Move Stage</button>
+          {can("editDeals") && <button className="primary" onClick={() => setShowStage(true)}>Move Stage</button>}
         </div>
       </div>
 
@@ -185,7 +188,7 @@ export function DealDetail() {
                     <td>{o.conditions ?? "—"}</td>
                     <td className="right">
                       {deal.selectedOfferId === o.id ? <span className="badge resp-offer">Accepted</span> :
-                        <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button>}
+                        can("editDeals") ? <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button> : null}
                     </td>
                   </tr>
                 ))}
@@ -202,6 +205,7 @@ export function DealDetail() {
           dealId={deal.id}
           rows={deal.buyerActivity}
           onChanged={refreshAll}
+          canEdit={can("editDeals")}
           onEdit={(r) => setLogBuyer({ id: r.buyerId, name: r.buyerName, initial: { status: r.status, assignedTeamMemberId: r.assignedTeamMember?.id ?? null, notes: r.notes, dateSent: r.dateSent, nextFollowUpDate: r.nextFollowUpDate } })}
           onRecordOffer={can("editDeals") ? (r) => setLogBuyer({ id: r.buyerId, name: r.buyerName, initial: { status: "OFFER_RECEIVED", assignedTeamMemberId: r.assignedTeamMember?.id ?? null, notes: r.notes, dateSent: r.dateSent, nextFollowUpDate: r.nextFollowUpDate } }) : undefined}
         />

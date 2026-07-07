@@ -78,6 +78,23 @@ function compareRange(mode: Compare, from: string, to: string): { from: string; 
 
 const EMPTY_FILTERS: Record<string, string[]> = { counties: [], basins: [], formations: [], assetTypes: [], operators: [], stages: [], buyers: [], users: [] };
 
+/** id→label map for pickers; duplicate names get a numeric suffix so two
+ *  "John Smith"s remain distinguishable. */
+function idLabels(items: { id: string; name: string }[]): Record<string, string> {
+  const counts = new Map<string, number>();
+  for (const it of items) counts.set(it.name, (counts.get(it.name) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  const out: Record<string, string> = {};
+  for (const it of items) {
+    if ((counts.get(it.name) ?? 0) > 1) {
+      const n = (seen.get(it.name) ?? 0) + 1;
+      seen.set(it.name, n);
+      out[it.id] = `${it.name} (${n})`;
+    } else out[it.id] = it.name;
+  }
+  return out;
+}
+
 export function Reports() {
   const nav = useNavigate();
   const { can, user } = useAuth();
@@ -189,13 +206,16 @@ export function Reports() {
           ))}
           {opts && (
             <>
+              {/* ID-based selection with display labels — the old name→id
+                  round-trip picked the wrong record when two buyers/users
+                  shared a name. */}
               <div className="field" style={{ marginBottom: 0, minWidth: 190, flex: 1 }}><label>Buyers</label>
-                <SearchableMultiSelect options={opts.buyers.map((b) => b.name)} value={filters.buyers.map((id) => opts.buyers.find((b) => b.id === id)?.name ?? id)}
-                  onChange={(names) => setFilters((f) => ({ ...f, buyers: names.map((n) => opts.buyers.find((b) => b.name === n)?.id ?? n) }))} placeholder="Filter buyers…" />
+                <SearchableMultiSelect options={opts.buyers.map((b) => b.id)} labels={idLabels(opts.buyers)}
+                  value={filters.buyers} onChange={(ids) => setFilters((f) => ({ ...f, buyers: ids }))} placeholder="Filter buyers…" />
               </div>
               <div className="field" style={{ marginBottom: 0, minWidth: 190, flex: 1 }}><label>Team members</label>
-                <SearchableMultiSelect options={opts.users.map((u) => u.name)} value={filters.users.map((id) => opts.users.find((u) => u.id === id)?.name ?? id)}
-                  onChange={(names) => setFilters((f) => ({ ...f, users: names.map((n) => opts.users.find((u) => u.name === n)?.id ?? n) }))} placeholder="Filter team…" />
+                <SearchableMultiSelect options={opts.users.map((u) => u.id)} labels={idLabels(opts.users)}
+                  value={filters.users} onChange={(ids) => setFilters((f) => ({ ...f, users: ids }))} placeholder="Filter team…" />
               </div>
             </>
           )}
