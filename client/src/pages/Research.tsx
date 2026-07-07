@@ -99,6 +99,24 @@ function compareParams(mode: Compare, from: string, to: string): { compareFrom?:
 
 const fmtPct = (p: number | null): string => (p == null ? "new" : `${p >= 0 ? "+" : ""}${Math.round(p * 100)}%`);
 
+/** "Apr 9 – Jul 7, 2026" (year shown on the end date only when requested). */
+function fmtRangeLabel(from: string, to: string, withYear = true): string {
+  const d = (s: string) => new Date(`${s}T00:00:00Z`);
+  const md = (s: string) => d(s).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+  return `${md(from)} – ${md(to)}${withYear ? `, ${d(to).getUTCFullYear()}` : ""}`;
+}
+
+/** The comparison window shown next to the range (mirrors the server default). */
+function compareRangeFor(mode: Compare, from: string, to: string): { from: string; to: string } | null {
+  if (!from || !to) return null;
+  const cp = compareParams(mode, from, to);
+  if (cp.compareFrom && cp.compareTo) return { from: cp.compareFrom, to: cp.compareTo };
+  const f = new Date(`${from}T00:00:00Z`).getTime();
+  const t = new Date(`${to}T00:00:00Z`).getTime();
+  const len = t - f + DAY;
+  return { from: iso(new Date(f - len)), to: iso(new Date(f - DAY)) };
+}
+
 // ---------------------------------------------------------------------------
 // Filters
 // ---------------------------------------------------------------------------
@@ -197,9 +215,19 @@ export function Research() {
   }, []);
 
   const CHIPS: [Period, string][] = [
-    ["LAST_30D", "Last 30 Days"], ["LAST_90D", "Last 90 Days"], ["LAST_6M", "Last 6 Months"],
-    ["LAST_12M", "Last 12 Months"], ["THIS_YEAR", "This Year"], ["CUSTOM", "Custom"],
+    ["LAST_30D", "30D"], ["LAST_90D", "90D"], ["LAST_6M", "6M"],
+    ["LAST_12M", "12M"], ["THIS_YEAR", "YTD"], ["CUSTOM", "Custom"],
   ];
+  const cmpRange = compareRangeFor(compare, range.from, range.to);
+  const rangeDays = range.from && range.to
+    ? Math.round((new Date(`${range.to}T00:00:00Z`).getTime() - new Date(`${range.from}T00:00:00Z`).getTime()) / DAY) + 1
+    : 0;
+  const compareHint = compare === "PREV_YEAR"
+    ? "The comparison period is the same date range one year earlier"
+    : `The comparison period is the ${rangeDays} days immediately before your selected range`;
+  // Show the year on the compare range only when it differs from the current range's year.
+  const cmpWithYear = cmpRange != null && range.to !== "" &&
+    new Date(`${cmpRange.to}T00:00:00Z`).getUTCFullYear() !== new Date(`${range.to}T00:00:00Z`).getUTCFullYear();
   const TABS: [Tab, string][] = [
     ["overview", "Overview"], ["geography", "Geography"], ["rankings", "Rankings"],
     ["relationships", "Relationships"], ["opportunities", "Opportunities"], ["records", "Records"],
@@ -217,22 +245,44 @@ export function Research() {
 
       {/* --- Period + filter controls --- */}
       <div className="panel">
-        <div className="chip-row" style={{ marginBottom: 10 }}>
-          {CHIPS.map(([p, label]) => <span key={p} className={`chip ${period === p ? "active" : ""}`} onClick={() => setPeriod(p)}>{label}</span>)}
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+          <div className="seg-control">
+            {CHIPS.map(([p, label]) => (
+              <span key={p} className={`seg ${period === p ? "active" : ""}`} onClick={() => setPeriod(p)}>
+                {p === "CUSTOM" && (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
+                  </svg>
+                )}
+                {label}
+              </span>
+            ))}
+          </div>
+          {range.from && range.to ? (
+            <div className="row" style={{ gap: 10, alignItems: "center", fontSize: 12.5 }}>
+              <span style={{ fontWeight: 600 }}>{fmtRangeLabel(range.from, range.to)}</span>
+              {cmpRange && (
+                <>
+                  <span className="muted" style={{ opacity: 0.7 }}>vs</span>
+                  <span className="muted">{fmtRangeLabel(cmpRange.from, cmpRange.to, cmpWithYear)}</span>
+                  <span className="q-hint" title={compareHint}>?</span>
+                </>
+              )}
+            </div>
+          ) : (
+            <span className="muted" style={{ fontSize: 12.5 }}>Select a custom date range</span>
+          )}
         </div>
         {period === "CUSTOM" && (
-          <div className="row" style={{ marginBottom: 10 }}>
+          <div className="row" style={{ marginTop: 10 }}>
             <div className="field" style={{ marginBottom: 0 }}><label>From</label><input type="date" value={custom.from} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} /></div>
             <div className="field" style={{ marginBottom: 0 }}><label>To</label><input type="date" value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} /></div>
           </div>
         )}
-        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+        <div className="row" style={{ gap: 8, alignItems: "center", marginTop: 10 }}>
           <button className="small" onClick={() => setShowFilters((s) => !s)}>
             {showFilters ? "▾" : "▸"} Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
           </button>
-          <span className="muted" style={{ fontSize: 12 }}>
-            {fmtDate(range.from)} – {fmtDate(range.to)} vs {compare === "PREV_YEAR" ? "same period last year" : "previous period"}
-          </span>
           {activeFilterCount > 0 && <button className="small" onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>}
         </div>
         {showFilters && opts && (
