@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend, BarChart,
 } from "recharts";
@@ -10,6 +10,7 @@ import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { ResearchImport } from "../components/ResearchImport";
 import { ResearchChoropleth, type CountyStat } from "../components/ResearchChoropleth";
+import { NetworkGraph, CLASS_COLORS, type GraphNode, type GraphEdge } from "../components/NetworkGraph";
 import { downloadCsv } from "../lib/csv";
 import { fmtDate, num, prettyEnum } from "../lib/format";
 import { CHART_COLORS, chartTooltip } from "../lib/charts";
@@ -112,7 +113,39 @@ interface Filters {
 }
 const EMPTY_FILTERS: Filters = { state: "", counties: [], docTypes: [], buyers: [], sellers: [], operators: [] };
 
-type Tab = "overview" | "geography" | "rankings" | "opportunities" | "records" | "data";
+type Tab = "overview" | "geography" | "rankings" | "relationships" | "opportunities" | "records" | "data";
+
+// ---------------------------------------------------------------------------
+// Relationship-intelligence API types
+// ---------------------------------------------------------------------------
+
+interface RelRow {
+  grantorNorm: string; grantor: string; granteeNorm: string; grantee: string;
+  count: number; transactions: number; counties: string[]; abstracts: string[];
+  firstDate: string | null; lastDate: string | null;
+}
+interface CoBuyerRow { members: { norm: string; name: string }[]; count: number; counties: string[] }
+interface ChainNode { norm: string; name: string; klass: string }
+interface ChainHop { fromNorm: string; from: string; toNorm: string; to: string; count: number }
+interface ChainRow {
+  path: string; feeders: string[]; midTier: string[]; terminus: string | null;
+  length: number; strength: number; totalCount: number; counties: string[];
+  firstDate: string | null; lastDate: string | null; nodes: ChainNode[]; hops: ChainHop[];
+}
+interface ClassRow {
+  norm: string; name: string; acquisitions: number; dispositions: number;
+  distinctGrantors: number; distinctGrantees: number; klass: string; classLabel: string;
+}
+interface RelationshipsData {
+  totals: { transactions: number; relationships: number; entities: number; partnerships: number; chains: number };
+  relationships: RelRow[];
+  coBuyers: CoBuyerRow[];
+  chainTable: ChainRow[];
+  graph: { nodes: GraphNode[]; edges: GraphEdge[] };
+  classifications: ClassRow[];
+  classLabels: Record<string, string>;
+}
+type TxSelector = { grantorNorm?: string; granteeNorm?: string; members?: string[]; path?: string[]; entityNorm?: string };
 
 export function Research() {
   const { can } = useAuth();
@@ -170,7 +203,7 @@ export function Research() {
   ];
   const TABS: [Tab, string][] = [
     ["overview", "Overview"], ["geography", "Geography"], ["rankings", "Rankings"],
-    ["opportunities", "Opportunities"], ["records", "Records"],
+    ["relationships", "Relationships"], ["opportunities", "Opportunities"], ["records", "Records"],
     ...(canManage ? ([["data", "Data & Imports"]] as [Tab, string][]) : []),
   ];
 
@@ -266,6 +299,7 @@ export function Research() {
         {tab === "geography" && <GeographyTab qs={qs} filters={filters} onDrill={drillToRecords} onToggleCounty={(county) =>
           setFilters((f) => ({ ...f, counties: f.counties.includes(county) ? f.counties.filter((c) => c !== county) : [...f.counties, county] }))} />}
         {tab === "rankings" && <RankingsTab qs={qs} opts={opts} onDrill={drillToRecords} />}
+        {tab === "relationships" && <RelationshipsTab qs={qs} onDrill={drillToRecords} />}
         {tab === "opportunities" && <OpportunitiesTab qs={qs} onDrill={drillToRecords} />}
         {tab === "records" && <RecordsTab qs={qs} />}
         {tab === "data" && canManage && <ResearchImport onDataChanged={loadOpts} />}
@@ -693,6 +727,253 @@ function AddToBuyersReview({ auto, possibles, onCancel, onConfirm }: {
         <button className="small" onClick={onCancel} disabled={busy}>Cancel</button>
         <button className="small primary" onClick={confirm} disabled={busy}>{busy ? "Applying…" : "Confirm & add"}</button>
       </div>
+    </Modal>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Relationships — grantor→grantee graph, co-buyers, chains, classifications
+// ---------------------------------------------------------------------------
+
+function ClassBadge({ klass, label }: { klass: string; label: string }) {
+  const c = CLASS_COLORS[klass] ?? "#64748b";
+  return <span className="badge" style={{ background: `${c}26`, color: c }}>{label}</span>;
+}
+
+type RelView = "graph" | "relationships" | "cobuyers" | "chains" | "classes";
+
+function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partial<Filters>) => void }) {
+  const [data, setData] = useState<RelationshipsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [view, setView] = useState<RelView>("graph");
+  const [tx, setTx] = useState<{ title: string; selector: TxSelector } | null>(null);
+  const [expanded, setExpanded] = useState<number | null>(null);
+
+  useEffect(() => {
+    setLoading(true);
+    api.get<RelationshipsData>(`/research/relationships?${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
+  }, [qs]);
+
+  if (loading && !data) return <Spinner label="Mapping the acquisition network…" />;
+  if (!data) return <Banner kind="info">Could not load relationship analysis.</Banner>;
+  if (data.totals.transactions === 0) {
+    return <Banner kind="info">No ownership-transfer records in this period. Relationship analysis needs deed/assignment transactions with both a grantor and grantee — widen the date range or import deed data.</Banner>;
+  }
+
+  const labelOf = (k: string) => data.classLabels[k] ?? k;
+  const VIEWS: [RelView, string][] = [
+    ["graph", "Network Graph"], ["relationships", `Relationships (${data.totals.relationships})`],
+    ["cobuyers", `Co-Buyers (${data.totals.partnerships})`], ["chains", `Acquisition Chains (${data.totals.chains})`],
+    ["classes", `Classifications (${data.totals.entities})`],
+  ];
+
+  return (
+    <>
+      <div className="metrics-row" style={{ gridTemplateColumns: "repeat(5,1fr)" }}>
+        <MiniKpi label="Transactions" value={data.totals.transactions} />
+        <MiniKpi label="Relationships" value={data.totals.relationships} />
+        <MiniKpi label="Entities" value={data.totals.entities} />
+        <MiniKpi label="Co-Buyer Groups" value={data.totals.partnerships} />
+        <MiniKpi label="Chains" value={data.totals.chains} />
+      </div>
+
+      <div className="tab-row" style={{ marginTop: 4 }}>
+        {VIEWS.map(([v, l]) => <button key={v} className={`tab ${view === v ? "active" : ""}`} onClick={() => setView(v)}>{l}</button>)}
+      </div>
+
+      {view === "graph" && (
+        <div className="panel">
+          <h3 style={{ marginTop: 0 }}>Ownership Network <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(node size = activity · edge thickness = transaction volume · click a node or edge to drill in)</span></h3>
+          <NetworkGraph
+            nodes={data.graph.nodes} edges={data.graph.edges} height={520}
+            onNodeClick={(n) => setTx({ title: `All transactions involving ${n.name}`, selector: { entityNorm: n.norm } })}
+            onEdgeClick={(e, from, to) => setTx({ title: `${from.name} → ${to.name}`, selector: { grantorNorm: e.fromNorm, granteeNorm: e.toNorm } })}
+          />
+        </div>
+      )}
+
+      {view === "relationships" && (
+        <div className="panel">
+          <div className="panel-title">
+            <h3 style={{ margin: 0 }}>Grantor → Grantee Relationships</h3>
+            <button className="small" onClick={() => downloadCsv("research-relationships.csv",
+              ["Grantor", "Grantee", "Transactions", "Counties", "First", "Last"],
+              data.relationships.map((r) => [r.grantor, r.grantee, r.count, r.counties.join("; "), r.firstDate, r.lastDate]))}>Export CSV</button>
+          </div>
+          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Repeated transfers between the same two parties are rolled up into a single relationship with a transaction count. Click a row for the underlying deeds.</p>
+          <SortableTable
+            columns={[
+              { key: "grantor", header: "Grantor (Seller)", value: (r: RelRow) => r.grantor, render: (r: RelRow) => <strong>{r.grantor}</strong> },
+              { key: "arrow", header: "", value: () => "", width: "1%", render: () => <span className="muted">→</span> },
+              { key: "grantee", header: "Grantee (Buyer)", value: (r: RelRow) => r.grantee, render: (r: RelRow) => <strong>{r.grantee}</strong> },
+              { key: "count", header: "Transactions", value: (r: RelRow) => r.count, align: "right" as const },
+              { key: "counties", header: "Counties", value: (r: RelRow) => r.counties.length, render: (r: RelRow) => r.counties.join(", ") || "—" },
+              { key: "lastDate", header: "Latest", value: (r: RelRow) => r.lastDate ?? "", render: (r: RelRow) => fmtDate(r.lastDate), type: "date" as const },
+            ]}
+            rows={data.relationships}
+            rowKey={(r) => `${r.grantorNorm}→${r.granteeNorm}`}
+            defaultSort={{ key: "count", dir: "desc" }}
+            onRowClick={(r) => setTx({ title: `${r.grantor} → ${r.grantee}: ${r.count} transaction${r.count === 1 ? "" : "s"}`, selector: { grantorNorm: r.grantorNorm, granteeNorm: r.granteeNorm } })}
+          />
+        </div>
+      )}
+
+      {view === "cobuyers" && (
+        <div className="panel">
+          <h3 style={{ marginTop: 0 }}>Co-Buyer Partnerships</h3>
+          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Entities that acquired together on the same recorded instrument, ranked by how often they partner. Click to view the shared transactions.</p>
+          {data.coBuyers.length === 0 ? <p className="muted">No repeat co-buying detected. This needs multiple grantees sharing an instrument number.</p> : (
+            <div className="rel-list">
+              {data.coBuyers.map((p, i) => (
+                <button key={i} className="rel-card" onClick={() => setTx({ title: `Co-buyers: ${p.members.map((m) => m.name).join(", ")}`, selector: { members: p.members.map((m) => m.norm) } })}>
+                  <div className="row" style={{ gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+                    {p.members.map((m, j) => (
+                      <span key={m.norm} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <span className="badge resp-pending">{m.name}</span>
+                        {j < p.members.length - 1 && <span className="muted">＋</span>}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="row" style={{ gap: 10, marginTop: 6 }}>
+                    <span className="rel-count">{p.count} shared transaction{p.count === 1 ? "" : "s"}</span>
+                    {p.counties.length > 0 && <span className="muted" style={{ fontSize: 12 }}>{p.counties.join(", ")}</span>}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {view === "chains" && (
+        <div className="panel">
+          <h3 style={{ marginTop: 0 }}>Acquisition Chains</h3>
+          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>How interests move through multiple entities. Each row is a complete path; click to expand hops, counties, and supporting transactions.</p>
+          {data.chainTable.length === 0 ? <p className="muted">No multi-hop acquisition paths detected in this period.</p> : (
+            <div className="table-scroll">
+              <table className="data-table">
+                <thead><tr><th>Platform / Chain</th><th>Feeder Entities</th><th>Aggregator / Mid-Tier</th><th>End Terminus</th><th className="right">Strength</th></tr></thead>
+                <tbody>
+                  {data.chainTable.map((c, i) => (
+                    <Fragment key={i}>
+                      <tr className="clickable" onClick={() => setExpanded(expanded === i ? null : i)}>
+                        <td><strong>{c.path}</strong><div className="muted" style={{ fontSize: 11 }}>{c.length} hops · {c.totalCount} transactions</div></td>
+                        <td>{c.feeders.join(", ") || "—"}</td>
+                        <td>{c.midTier.join(", ") || "—"}</td>
+                        <td>{c.terminus ?? "—"}</td>
+                        <td className="right">{c.strength}</td>
+                      </tr>
+                      {expanded === i && (
+                        <tr>
+                          <td colSpan={5} style={{ background: "var(--panel-2)" }}>
+                            <div className="chain-detail">
+                              <div className="row" style={{ gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+                                {c.nodes.map((n, j) => (
+                                  <span key={n.norm} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                                    <ClassBadge klass={n.klass} label={n.name} />
+                                    {j < c.nodes.length - 1 && (
+                                      <span className="muted" title={`${c.hops[j]?.count} transactions`}>—{c.hops[j]?.count}→</span>
+                                    )}
+                                  </span>
+                                ))}
+                              </div>
+                              <div className="muted" style={{ fontSize: 12 }}>
+                                {c.counties.length > 0 && <>Counties: {c.counties.join(", ")} · </>}
+                                {c.firstDate && c.lastDate && <>{fmtDate(c.firstDate)} – {fmtDate(c.lastDate)}</>}
+                              </div>
+                              <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                                <button className="small" onClick={() => setTx({ title: `Chain: ${c.path}`, selector: { path: c.nodes.map((n) => n.norm) } })}>View supporting transactions →</button>
+                                {c.terminus && <button className="small" onClick={() => onDrill({ counties: c.counties })}>Filter records to these counties →</button>}
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {view === "classes" && (
+        <div className="panel">
+          <div className="panel-title">
+            <h3 style={{ margin: 0 }}>Entity Classification</h3>
+            <button className="small" onClick={() => downloadCsv("research-entity-classes.csv",
+              ["Entity", "Class", "Acquired", "Sold", "Distinct Grantors", "Distinct Grantees"],
+              data.classifications.map((r) => [r.name, r.classLabel, r.acquisitions, r.dispositions, r.distinctGrantors, r.distinctGrantees]))}>Export CSV</button>
+          </div>
+          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Entities labelled by acquisition behaviour from their in/out transaction flow.</p>
+          <SortableTable
+            columns={[
+              { key: "name", header: "Entity", value: (r: ClassRow) => r.name, render: (r: ClassRow) => <strong>{r.name}</strong> },
+              { key: "klass", header: "Class", value: (r: ClassRow) => r.classLabel, render: (r: ClassRow) => <ClassBadge klass={r.klass} label={r.classLabel} /> },
+              { key: "acquisitions", header: "Acquired", value: (r: ClassRow) => r.acquisitions, align: "right" as const },
+              { key: "dispositions", header: "Sold", value: (r: ClassRow) => r.dispositions, align: "right" as const },
+              { key: "distinctGrantors", header: "From", value: (r: ClassRow) => r.distinctGrantors, align: "right" as const, render: (r: ClassRow) => <span title="distinct grantors">{r.distinctGrantors}</span> },
+              { key: "distinctGrantees", header: "To", value: (r: ClassRow) => r.distinctGrantees, align: "right" as const, render: (r: ClassRow) => <span title="distinct grantees">{r.distinctGrantees}</span> },
+            ]}
+            rows={data.classifications}
+            rowKey={(r) => r.norm}
+            defaultSort={{ key: "acquisitions", dir: "desc" }}
+            onRowClick={(r) => setTx({ title: `All transactions involving ${r.name}`, selector: { entityNorm: r.norm } })}
+          />
+        </div>
+      )}
+
+      {tx && <TxDrillModal qs={qs} title={tx.title} selector={tx.selector} onClose={() => setTx(null)} onDrillRecords={onDrill} />}
+    </>
+  );
+}
+
+function MiniKpi({ label, value }: { label: string; value: number }) {
+  return <div className="metric-card"><div className="metric-label">{label}</div><div className="metric-value">{num(value)}</div></div>;
+}
+
+/** Supporting-transactions drill-in for a relationship / co-buyer set / chain. */
+function TxDrillModal({ qs, title, selector, onClose }: {
+  qs: string; title: string; selector: TxSelector;
+  onClose: () => void; onDrillRecords: (patch: Partial<Filters>) => void;
+}) {
+  const [rows, setRows] = useState<DocRecord[] | null>(null);
+  useEffect(() => {
+    api.post<{ rows: DocRecord[] }>(`/research/relationships/transactions?${qs}`, selector)
+      .then((d) => setRows(d.rows)).catch(() => setRows([]));
+  }, [qs, selector]);
+
+  return (
+    <Modal title={title} onClose={onClose} wide>
+      {!rows ? <Spinner /> : rows.length === 0 ? <p className="muted">No supporting transactions in the current filters.</p> : (
+        <>
+          <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
+            <span className="muted" style={{ fontSize: 13 }}>{rows.length} transaction{rows.length === 1 ? "" : "s"}</span>
+            <button className="small" onClick={() => downloadCsv("relationship-transactions.csv",
+              ["Recorded", "Type", "Grantor", "Grantee", "County", "Abstract", "Instrument #"],
+              rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.grantor, r.grantee, `${r.county}, ${r.state}`, r.abstractId, r.instrumentNumber]))}>Export CSV</button>
+          </div>
+          <div className="table-scroll" style={{ maxHeight: 420 }}>
+            <table className="data-table">
+              <thead><tr><th>Recorded</th><th>Type</th><th>Grantor</th><th>Grantee</th><th>County</th><th>Abstract</th><th>Instr #</th></tr></thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.id}>
+                    <td>{fmtDate(r.recordingDate)}</td>
+                    <td title={r.docTypeRaw}>{prettyEnum(r.docType)}</td>
+                    <td>{r.grantor ?? "—"}</td>
+                    <td>{r.grantee ?? "—"}</td>
+                    <td>{r.county}, {r.state}</td>
+                    <td>{r.abstractId ?? "—"}</td>
+                    <td>{r.instrumentNumber ?? "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </Modal>
   );
 }
