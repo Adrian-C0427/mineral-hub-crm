@@ -860,13 +860,15 @@ dealsRouter.post(
     // Only buyers in this org.
     const buyers = await prisma.buyer.findMany({ where: { id: { in: buyerIds }, organizationId: orgId(req) }, select: { id: true } });
     const now = new Date();
-    for (const b of buyers) {
-      await prisma.dealBuyerActivity.upsert({
+    // One batched transaction instead of a sequential await per buyer — bulk
+    // marking 50 buyers was 50 round-trips.
+    await prisma.$transaction(buyers.map((b) =>
+      prisma.dealBuyerActivity.upsert({
         where: { dealId_buyerId: { dealId: deal.id, buyerId: b.id } },
         create: { dealId: deal.id, buyerId: b.id, status: "CONTACTED", dateSent: now, lastActivityDate: now, sentByUserId: req.user!.id },
         update: { lastActivityDate: now },
-      });
-    }
+      }),
+    ));
     res.json({ ok: true, count: buyers.length });
   }),
 );

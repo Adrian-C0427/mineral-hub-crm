@@ -5,6 +5,7 @@ import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requireOrgOwner, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { generateInviteCode } from "../services/org.js";
+import { invalidateRoleCache } from "../services/rolePermCache.js";
 import {
   ASSIGNABLE_ROLES, ALL_ROLES, DEFAULT_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_META,
   OWNER_ONLY_ACTIONS, resolvePermissions, type OrgRole,
@@ -396,6 +397,7 @@ orgRouter.patch(
       create: { organizationId: orgId(req), role, permissions: clean },
       update: { permissions: clean },
     });
+    invalidateRoleCache(orgId(req)); // attachUser caches overrides
     res.json({ role: saved.role, permissions: saved.permissions });
   }),
 );
@@ -409,6 +411,7 @@ orgRouter.delete(
     if (!ASSIGNABLE_ROLES.includes(role)) throw new HttpError(400, "That role cannot be customized");
     assertCanEditRole(req, role);
     await prisma.rolePermissions.deleteMany({ where: { organizationId: orgId(req), role } });
+    invalidateRoleCache(orgId(req)); // attachUser caches overrides
     res.json({ ok: true, role, permissions: DEFAULT_ROLE_PERMISSIONS[role] });
   }),
 );

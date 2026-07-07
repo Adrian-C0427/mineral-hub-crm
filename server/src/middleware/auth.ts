@@ -3,6 +3,7 @@ import { env } from "../config.js";
 import { verifySession } from "../auth/session.js";
 import { prisma } from "../db.js";
 import { resolvePermissions, type OrgRole, type Permission } from "../domain/permissions.js";
+import { getRoleOverride } from "../services/rolePermCache.js";
 
 export interface AuthedRequest extends Request {
   user?: {
@@ -53,11 +54,10 @@ export async function attachUser(req: AuthedRequest, _res: Response, next: NextF
         // Effective permissions = role defaults merged with any org override.
         let permissions: Permission[] = [];
         if (user.organizationId && user.orgRole) {
-          const override = await prisma.rolePermissions.findUnique({
-            where: { organizationId_role: { organizationId: user.organizationId, role: user.orgRole } },
-            select: { permissions: true },
-          });
-          permissions = resolvePermissions(user.orgRole as OrgRole, override?.permissions ?? null);
+          // Cached (60s TTL, invalidated on matrix writes) — spares one DB
+          // round-trip per authenticated request.
+          const override = await getRoleOverride(user.organizationId, user.orgRole);
+          permissions = resolvePermissions(user.orgRole as OrgRole, override);
         }
         req.user = {
           id: user.id,

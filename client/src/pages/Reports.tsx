@@ -105,7 +105,9 @@ export function Reports() {
   const [showFilters, setShowFilters] = useState(false);
   const [opts, setOpts] = useState<FilterOpts | null>(null);
   const [data, setData] = useState<Analytics | null>(null);
-  const [deals, setDeals] = useState<DealSummary[]>([]);
+  // Deals load lazily on the first KPI drill-down — most report views never
+  // drill, so the page no longer eagerly pulls the whole deal list.
+  const dealsRef = useRef<DealSummary[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [drill, setDrill] = useState<{ title: string; rows: DealSummary[] } | null>(null);
@@ -116,17 +118,21 @@ export function Reports() {
 
   useEffect(() => {
     api.get<FilterOpts>("/reports/filters").then(setOpts).catch(() => {});
-    api.get<DealSummary[]>("/deals").then(setDeals).catch(() => {});
   }, []);
 
   useEffect(() => {
     if (!range.from || !range.to) return;
     setLoading(true);
-    const qs = new URLSearchParams();
-    qs.set("from", range.from); qs.set("to", range.to);
-    if (cmp) { qs.set("compareFrom", cmp.from); qs.set("compareTo", cmp.to); }
-    for (const [key, vals] of Object.entries(filters)) for (const v of vals) qs.append(key, v);
-    api.get<Analytics>(`/reports/analytics?${qs.toString()}`).then(setData).finally(() => setLoading(false));
+    // Debounced: rapid filter clicks (each multi-select pick fires this
+    // effect) coalesce into one analytics request instead of a burst.
+    const t = window.setTimeout(() => {
+      const qs = new URLSearchParams();
+      qs.set("from", range.from); qs.set("to", range.to);
+      if (cmp) { qs.set("compareFrom", cmp.from); qs.set("compareTo", cmp.to); }
+      for (const [key, vals] of Object.entries(filters)) for (const v of vals) qs.append(key, v);
+      api.get<Analytics>(`/reports/analytics?${qs.toString()}`).then(setData).finally(() => setLoading(false));
+    }, 300);
+    return () => window.clearTimeout(t);
   }, [range.from, range.to, cmp?.from, cmp?.to, filters]);
 
   async function onExport() {
@@ -143,8 +149,11 @@ export function Reports() {
     }),
   );
 
-  function drillByDeal(title: string, pred: (d: DealSummary) => boolean) {
-    setDrill({ title, rows: deals.filter(pred) });
+  async function drillByDeal(title: string, pred: (d: DealSummary) => boolean) {
+    if (!dealsRef.current) {
+      dealsRef.current = await api.get<DealSummary[]>("/deals").catch(() => [] as DealSummary[]);
+    }
+    setDrill({ title, rows: dealsRef.current.filter(pred) });
   }
 
   const CHIPS: [Period, string][] = [
