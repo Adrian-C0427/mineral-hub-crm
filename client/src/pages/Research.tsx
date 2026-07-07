@@ -10,7 +10,7 @@ import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { ResearchImport } from "../components/ResearchImport";
 import { ResearchChoropleth, type CountyStat } from "../components/ResearchChoropleth";
-import { NetworkGraph, CLASS_COLORS, type GraphNode, type GraphEdge } from "../components/NetworkGraph";
+import { CLASS_COLORS } from "../components/NetworkGraph";
 import { downloadCsv } from "../lib/csv";
 import { fmtDate, num, prettyEnum } from "../lib/format";
 import { CHART_COLORS, chartTooltip } from "../lib/charts";
@@ -141,7 +141,6 @@ interface RelationshipsData {
   relationships: RelRow[];
   coBuyers: CoBuyerRow[];
   chainTable: ChainRow[];
-  graph: { nodes: GraphNode[]; edges: GraphEdge[] };
   classifications: ClassRow[];
   classLabels: Record<string, string>;
 }
@@ -740,14 +739,30 @@ function ClassBadge({ klass, label }: { klass: string; label: string }) {
   return <span className="badge" style={{ background: `${c}26`, color: c }}>{label}</span>;
 }
 
-type RelView = "graph" | "relationships" | "cobuyers" | "chains" | "classes";
+type RelView = "relationships" | "cobuyers" | "chains" | "entities";
+
+/** Plain-language meaning of each behavioural class (shown as chips + tooltips). */
+const CLASS_DESC: Record<string, string> = {
+  TERMINAL_HOLD: "Acquires repeatedly and never resells — a long-term holder",
+  AGGREGATOR: "Buys from many sources, then consolidates into one or two buyers",
+  DISTRIBUTOR: "Buys and resells recurrently across counterparties — an intermediary",
+  FEEDER: "Consistently sells into one or two downstream buyers",
+  PASS_THROUGH: "Buys and sells, but at low volume",
+  SELLER: "Only appears as a grantor (seller) in the data",
+  ONE_TIME_BUYER: "A single recorded acquisition, nothing resold",
+  UNCLASSIFIED: "Not enough activity to classify",
+};
 
 function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partial<Filters>) => void }) {
   const [data, setData] = useState<RelationshipsData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<RelView>("graph");
+  const [view, setView] = useState<RelView>("relationships");
   const [tx, setTx] = useState<{ title: string; selector: TxSelector } | null>(null);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [q, setQ] = useState("");
+  const [repeatOnly, setRepeatOnly] = useState(false);
+  const [classFilter, setClassFilter] = useState<string | null>(null);
+  const [entity, setEntity] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -761,10 +776,30 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
   }
 
   const labelOf = (k: string) => data.classLabels[k] ?? k;
+
+  // Search + view-specific filters (all applied client-side to the loaded set).
+  const ql = q.trim().toUpperCase();
+  const matches = (...names: (string | null)[]) => !ql || names.some((n) => (n ?? "").toUpperCase().includes(ql));
+  const rels = data.relationships.filter((r) => matches(r.grantor, r.grantee) && (!repeatOnly || r.count >= 2));
+  const coBuyers = data.coBuyers.filter((p) => matches(...p.members.map((m) => m.name)));
+  const chains = data.chainTable.filter((c) => matches(c.path));
+  const entities = data.classifications.filter((r) => matches(r.name) && (!classFilter || r.klass === classFilter));
+
+  // Class counts drive the filter chips on the Entities view.
+  const classCounts = new Map<string, number>();
+  for (const c of data.classifications) classCounts.set(c.klass, (classCounts.get(c.klass) ?? 0) + 1);
+
+  // Headline insights — one-line answers before digging into the tables.
+  const topRel = data.relationships[0];
+  const topHold = data.classifications.find((c) => c.klass === "TERMINAL_HOLD");
+  const topMid = data.classifications.find((c) => c.klass === "AGGREGATOR" || c.klass === "DISTRIBUTOR" || c.klass === "FEEDER");
+  const deepChain = [...data.chainTable].sort((a, b) => b.length - a.length || b.totalCount - a.totalCount)[0];
+
   const VIEWS: [RelView, string][] = [
-    ["graph", "Network Graph"], ["relationships", `Relationships (${data.totals.relationships})`],
-    ["cobuyers", `Co-Buyers (${data.totals.partnerships})`], ["chains", `Acquisition Chains (${data.totals.chains})`],
-    ["classes", `Classifications (${data.totals.entities})`],
+    ["relationships", `Relationships (${data.totals.relationships})`],
+    ["cobuyers", `Co-Buyers (${data.totals.partnerships})`],
+    ["chains", `Acquisition Chains (${data.totals.chains})`],
+    ["entities", `Entities (${data.totals.entities})`],
   ];
 
   return (
@@ -777,44 +812,84 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
         <MiniKpi label="Chains" value={data.totals.chains} />
       </div>
 
-      <div className="tab-row" style={{ marginTop: 4 }}>
-        {VIEWS.map(([v, l]) => <button key={v} className={`tab ${view === v ? "active" : ""}`} onClick={() => setView(v)}>{l}</button>)}
-      </div>
-
-      {view === "graph" && (
-        <div className="panel">
-          <h3 style={{ marginTop: 0 }}>Ownership Network <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(node size = activity · edge thickness = transaction volume · click a node or edge to drill in)</span></h3>
-          <NetworkGraph
-            nodes={data.graph.nodes} edges={data.graph.edges} height={520}
-            onNodeClick={(n) => setTx({ title: `All transactions involving ${n.name}`, selector: { entityNorm: n.norm } })}
-            onEdgeClick={(e, from, to) => setTx({ title: `${from.name} → ${to.name}`, selector: { grantorNorm: e.fromNorm, granteeNorm: e.toNorm } })}
-          />
+      {/* Headline insights — the fastest read on who is driving this market. */}
+      {(topRel || topHold || topMid || deepChain) != null && (
+        <div className="rel-insights">
+          {topRel && (
+            <button className="rel-insight" onClick={() => setTx({ title: `${topRel.grantor} → ${topRel.grantee}`, selector: { grantorNorm: topRel.grantorNorm, granteeNorm: topRel.granteeNorm } })}>
+              <div className="rel-insight-l">Most Active Relationship</div>
+              <div className="rel-insight-v">{topRel.grantor} → {topRel.grantee}</div>
+              <div className="muted" style={{ fontSize: 12 }}>{topRel.count} transaction{topRel.count === 1 ? "" : "s"}</div>
+            </button>
+          )}
+          {topHold && (
+            <button className="rel-insight" onClick={() => setEntity(topHold.norm)}>
+              <div className="rel-insight-l">Largest Terminal Holder</div>
+              <div className="rel-insight-v">{topHold.name}</div>
+              <div className="muted" style={{ fontSize: 12 }}>{topHold.acquisitions} acquisitions · nothing resold</div>
+            </button>
+          )}
+          {topMid && (
+            <button className="rel-insight" onClick={() => setEntity(topMid.norm)}>
+              <div className="rel-insight-l">Top Intermediary</div>
+              <div className="rel-insight-v">{topMid.name}</div>
+              <div className="muted" style={{ fontSize: 12 }}>{labelOf(topMid.klass)} · bought {topMid.acquisitions} / sold {topMid.dispositions}</div>
+            </button>
+          )}
+          {deepChain && (
+            <button className="rel-insight" onClick={() => setView("chains")}>
+              <div className="rel-insight-l">Deepest Acquisition Chain</div>
+              <div className="rel-insight-v">{deepChain.path}</div>
+              <div className="muted" style={{ fontSize: 12 }}>{deepChain.length} hops · {deepChain.totalCount} transactions</div>
+            </button>
+          )}
         </div>
       )}
+
+      <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <div className="tab-row" style={{ margin: 0, flex: 1, minWidth: 260 }}>
+          {VIEWS.map(([v, l]) => <button key={v} className={`tab ${view === v ? "active" : ""}`} onClick={() => setView(v)}>{l}</button>)}
+        </div>
+        <input
+          style={{ width: 230 }}
+          placeholder="Search entities…"
+          aria-label="Search entities"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+      </div>
 
       {view === "relationships" && (
         <div className="panel">
           <div className="panel-title">
             <h3 style={{ margin: 0 }}>Grantor → Grantee Relationships</h3>
-            <button className="small" onClick={() => downloadCsv("research-relationships.csv",
-              ["Grantor", "Grantee", "Transactions", "Counties", "First", "Last"],
-              data.relationships.map((r) => [r.grantor, r.grantee, r.count, r.counties.join("; "), r.firstDate, r.lastDate]))}>Export CSV</button>
+            <div className="row" style={{ gap: 10, alignItems: "center" }}>
+              <label className="dm-chk" style={{ fontSize: 12 }}>
+                <input type="checkbox" checked={repeatOnly} onChange={(e) => setRepeatOnly(e.target.checked)} /> Repeat relationships only (2+)
+              </label>
+              <button className="small" onClick={() => downloadCsv("research-relationships.csv",
+                ["Grantor", "Grantee", "Transactions", "Counties", "First", "Last"],
+                rels.map((r) => [r.grantor, r.grantee, r.count, r.counties.join("; "), r.firstDate, r.lastDate]))}>Export CSV</button>
+            </div>
           </div>
-          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Repeated transfers between the same two parties are rolled up into a single relationship with a transaction count. Click a row for the underlying deeds.</p>
-          <SortableTable
-            columns={[
-              { key: "grantor", header: "Grantor (Seller)", value: (r: RelRow) => r.grantor, render: (r: RelRow) => <strong>{r.grantor}</strong> },
-              { key: "arrow", header: "", value: () => "", width: "1%", render: () => <span className="muted">→</span> },
-              { key: "grantee", header: "Grantee (Buyer)", value: (r: RelRow) => r.grantee, render: (r: RelRow) => <strong>{r.grantee}</strong> },
-              { key: "count", header: "Transactions", value: (r: RelRow) => r.count, align: "right" as const },
-              { key: "counties", header: "Counties", value: (r: RelRow) => r.counties.length, render: (r: RelRow) => r.counties.join(", ") || "—" },
-              { key: "lastDate", header: "Latest", value: (r: RelRow) => r.lastDate ?? "", render: (r: RelRow) => fmtDate(r.lastDate), type: "date" as const },
-            ]}
-            rows={data.relationships}
-            rowKey={(r) => `${r.grantorNorm}→${r.granteeNorm}`}
-            defaultSort={{ key: "count", dir: "desc" }}
-            onRowClick={(r) => setTx({ title: `${r.grantor} → ${r.grantee}: ${r.count} transaction${r.count === 1 ? "" : "s"}`, selector: { grantorNorm: r.grantorNorm, granteeNorm: r.granteeNorm } })}
-          />
+          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Repeated transfers between the same two parties roll up into one relationship with a transaction count. Click a row for the underlying deeds, or an entity name for its full dossier.</p>
+          {rels.length === 0 ? <p className="muted">No relationships match{q ? ` “${q}”` : ""}{repeatOnly ? " with 2+ transactions" : ""}.</p> : (
+            <SortableTable
+              columns={[
+                { key: "grantor", header: "Grantor (Seller)", value: (r: RelRow) => r.grantor, render: (r: RelRow) => <span className="rel-ent" onClick={(e) => { e.stopPropagation(); setEntity(r.grantorNorm); }}>{r.grantor}</span> },
+                { key: "arrow", header: "", value: () => "", width: "1%", render: () => <span className="muted">→</span> },
+                { key: "grantee", header: "Grantee (Buyer)", value: (r: RelRow) => r.grantee, render: (r: RelRow) => <span className="rel-ent" onClick={(e) => { e.stopPropagation(); setEntity(r.granteeNorm); }}>{r.grantee}</span> },
+                { key: "count", header: "Transactions", value: (r: RelRow) => r.count, align: "right" as const },
+                { key: "counties", header: "Counties", value: (r: RelRow) => r.counties.length, render: (r: RelRow) => r.counties.join(", ") || "—" },
+                { key: "abstracts", header: "Abstracts", value: (r: RelRow) => r.abstracts.length, align: "right" as const, render: (r: RelRow) => r.abstracts.length ? <span title={r.abstracts.join(", ")}>{r.abstracts.length}</span> : "—" },
+                { key: "lastDate", header: "Latest", value: (r: RelRow) => r.lastDate ?? "", render: (r: RelRow) => fmtDate(r.lastDate), type: "date" as const },
+              ]}
+              rows={rels}
+              rowKey={(r) => `${r.grantorNorm}→${r.granteeNorm}`}
+              defaultSort={{ key: "count", dir: "desc" }}
+              onRowClick={(r) => setTx({ title: `${r.grantor} → ${r.grantee}: ${r.count} transaction${r.count === 1 ? "" : "s"}`, selector: { grantorNorm: r.grantorNorm, granteeNorm: r.granteeNorm } })}
+            />
+          )}
         </div>
       )}
 
@@ -822,9 +897,9 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
         <div className="panel">
           <h3 style={{ marginTop: 0 }}>Co-Buyer Partnerships</h3>
           <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Entities that acquired together on the same recorded instrument, ranked by how often they partner. Click to view the shared transactions.</p>
-          {data.coBuyers.length === 0 ? <p className="muted">No repeat co-buying detected. This needs multiple grantees sharing an instrument number.</p> : (
+          {coBuyers.length === 0 ? <p className="muted">No co-buying partnerships {q ? `match “${q}”` : "detected — this needs multiple grantees sharing an instrument number"}.</p> : (
             <div className="rel-list">
-              {data.coBuyers.map((p, i) => (
+              {coBuyers.map((p, i) => (
                 <button key={i} className="rel-card" onClick={() => setTx({ title: `Co-buyers: ${p.members.map((m) => m.name).join(", ")}`, selector: { members: p.members.map((m) => m.norm) } })}>
                   <div className="row" style={{ gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                     {p.members.map((m, j) => (
@@ -849,12 +924,12 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
         <div className="panel">
           <h3 style={{ marginTop: 0 }}>Acquisition Chains</h3>
           <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>How interests move through multiple entities. Each row is a complete path; click to expand hops, counties, and supporting transactions.</p>
-          {data.chainTable.length === 0 ? <p className="muted">No multi-hop acquisition paths detected in this period.</p> : (
+          {chains.length === 0 ? <p className="muted">No multi-hop acquisition paths {q ? `match “${q}”` : "detected in this period"}.</p> : (
             <div className="table-scroll">
               <table className="data-table">
                 <thead><tr><th>Platform / Chain</th><th>Feeder Entities</th><th>Aggregator / Mid-Tier</th><th>End Terminus</th><th className="right">Strength</th></tr></thead>
                 <tbody>
-                  {data.chainTable.map((c, i) => (
+                  {chains.map((c, i) => (
                     <Fragment key={i}>
                       <tr className="clickable" onClick={() => setExpanded(expanded === i ? null : i)}>
                         <td><strong>{c.path}</strong><div className="muted" style={{ fontSize: 11 }}>{c.length} hops · {c.totalCount} transactions</div></td>
@@ -870,7 +945,9 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
                               <div className="row" style={{ gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
                                 {c.nodes.map((n, j) => (
                                   <span key={n.norm} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                                    <ClassBadge klass={n.klass} label={n.name} />
+                                    <span style={{ cursor: "pointer" }} title={`${CLASS_DESC[n.klass] ?? n.klass} — click for dossier`} onClick={() => setEntity(n.norm)}>
+                                      <ClassBadge klass={n.klass} label={n.name} />
+                                    </span>
                                     {j < c.nodes.length - 1 && (
                                       <span className="muted" title={`${c.hops[j]?.count} transactions`}>—{c.hops[j]?.count}→</span>
                                     )}
@@ -898,34 +975,174 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
         </div>
       )}
 
-      {view === "classes" && (
+      {view === "entities" && (
         <div className="panel">
           <div className="panel-title">
-            <h3 style={{ margin: 0 }}>Entity Classification</h3>
+            <h3 style={{ margin: 0 }}>Market Participants</h3>
             <button className="small" onClick={() => downloadCsv("research-entity-classes.csv",
-              ["Entity", "Class", "Acquired", "Sold", "Distinct Grantors", "Distinct Grantees"],
-              data.classifications.map((r) => [r.name, r.classLabel, r.acquisitions, r.dispositions, r.distinctGrantors, r.distinctGrantees]))}>Export CSV</button>
+              ["Entity", "Class", "Acquired", "Sold", "Net", "Distinct Grantors", "Distinct Grantees"],
+              entities.map((r) => [r.name, r.classLabel, r.acquisitions, r.dispositions, r.acquisitions - r.dispositions, r.distinctGrantors, r.distinctGrantees]))}>Export CSV</button>
           </div>
-          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Entities labelled by acquisition behaviour from their in/out transaction flow.</p>
-          <SortableTable
-            columns={[
-              { key: "name", header: "Entity", value: (r: ClassRow) => r.name, render: (r: ClassRow) => <strong>{r.name}</strong> },
-              { key: "klass", header: "Class", value: (r: ClassRow) => r.classLabel, render: (r: ClassRow) => <ClassBadge klass={r.klass} label={r.classLabel} /> },
-              { key: "acquisitions", header: "Acquired", value: (r: ClassRow) => r.acquisitions, align: "right" as const },
-              { key: "dispositions", header: "Sold", value: (r: ClassRow) => r.dispositions, align: "right" as const },
-              { key: "distinctGrantors", header: "From", value: (r: ClassRow) => r.distinctGrantors, align: "right" as const, render: (r: ClassRow) => <span title="distinct grantors">{r.distinctGrantors}</span> },
-              { key: "distinctGrantees", header: "To", value: (r: ClassRow) => r.distinctGrantees, align: "right" as const, render: (r: ClassRow) => <span title="distinct grantees">{r.distinctGrantees}</span> },
-            ]}
-            rows={data.classifications}
-            rowKey={(r) => r.norm}
-            defaultSort={{ key: "acquisitions", dir: "desc" }}
-            onRowClick={(r) => setTx({ title: `All transactions involving ${r.name}`, selector: { entityNorm: r.norm } })}
-          />
+          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Every entity labelled by its acquisition behaviour. Click a class to filter; click an entity for its full dossier.</p>
+          <div className="chip-row" style={{ marginBottom: 10, flexWrap: "wrap" }}>
+            <span className={`chip ${classFilter == null ? "active" : ""}`} onClick={() => setClassFilter(null)}>All ({data.classifications.length})</span>
+            {[...classCounts.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => (
+              <span key={k} className={`chip ${classFilter === k ? "active" : ""}`} onClick={() => setClassFilter(classFilter === k ? null : k)}
+                title={CLASS_DESC[k]} style={{ borderColor: CLASS_COLORS[k] ?? undefined }}>
+                {labelOf(k)} ({n})
+              </span>
+            ))}
+          </div>
+          {classFilter && <p className="muted" style={{ marginTop: 0, fontSize: 12 }}><strong>{labelOf(classFilter)}:</strong> {CLASS_DESC[classFilter] ?? ""}</p>}
+          {entities.length === 0 ? <p className="muted">No entities match.</p> : (
+            <SortableTable
+              columns={[
+                { key: "name", header: "Entity", value: (r: ClassRow) => r.name, render: (r: ClassRow) => <strong>{r.name}</strong> },
+                { key: "klass", header: "Class", value: (r: ClassRow) => r.classLabel, render: (r: ClassRow) => <span title={CLASS_DESC[r.klass]}><ClassBadge klass={r.klass} label={r.classLabel} /></span> },
+                { key: "acquisitions", header: "Acquired", value: (r: ClassRow) => r.acquisitions, align: "right" as const },
+                { key: "dispositions", header: "Sold", value: (r: ClassRow) => r.dispositions, align: "right" as const },
+                {
+                  key: "net", header: "Net Position", value: (r: ClassRow) => r.acquisitions - r.dispositions, align: "right" as const,
+                  render: (r: ClassRow) => { const n = r.acquisitions - r.dispositions; return <span style={{ color: n > 0 ? "#22c55e" : n < 0 ? "#ef4444" : "var(--text-dim)" }}>{n > 0 ? "+" : ""}{n}</span>; },
+                },
+                { key: "distinctGrantors", header: "Sources", value: (r: ClassRow) => r.distinctGrantors, align: "right" as const, render: (r: ClassRow) => <span title="distinct grantors acquired from">{r.distinctGrantors}</span> },
+                { key: "distinctGrantees", header: "Buyers", value: (r: ClassRow) => r.distinctGrantees, align: "right" as const, render: (r: ClassRow) => <span title="distinct grantees sold to">{r.distinctGrantees}</span> },
+              ]}
+              rows={entities}
+              rowKey={(r) => r.norm}
+              defaultSort={{ key: "acquisitions", dir: "desc" }}
+              onRowClick={(r) => setEntity(r.norm)}
+            />
+          )}
         </div>
       )}
 
+      {entity && (
+        <EntityModal
+          norm={entity} data={data}
+          onClose={() => setEntity(null)}
+          onOpenEntity={setEntity}
+          onViewTx={(title, selector) => { setEntity(null); setTx({ title, selector }); }}
+        />
+      )}
       {tx && <TxDrillModal qs={qs} title={tx.title} selector={tx.selector} onClose={() => setTx(null)} onDrillRecords={onDrill} />}
     </>
+  );
+}
+
+/**
+ * Entity dossier — everything the dataset knows about one market participant:
+ * classification, flow stats, who it bought from / sold to, co-buying partners,
+ * chains it appears in, plus drill-in and Add-to-Buyers actions.
+ */
+function EntityModal({ norm, data, onClose, onOpenEntity, onViewTx }: {
+  norm: string; data: RelationshipsData;
+  onClose: () => void;
+  onOpenEntity: (norm: string) => void;
+  onViewTx: (title: string, selector: TxSelector) => void;
+}) {
+  const { can } = useAuth();
+  const [adding, setAdding] = useState(false);
+  const [added, setAdded] = useState<string | null>(null);
+
+  const info = data.classifications.find((c) => c.norm === norm);
+  const bought = data.relationships.filter((r) => r.granteeNorm === norm);
+  const sold = data.relationships.filter((r) => r.grantorNorm === norm);
+  const partners = data.coBuyers.filter((p) => p.members.some((m) => m.norm === norm));
+  const chains = data.chainTable.filter((c) => c.nodes.some((n) => n.norm === norm));
+  const name = info?.name ?? bought[0]?.grantee ?? sold[0]?.grantor ?? norm;
+
+  async function addToBuyers() {
+    setAdding(true);
+    try {
+      const { items } = await api.post<{ items: { outcome: string; existing?: { id: string } }[] }>("/research/buyers/preview", { keys: [norm] });
+      const it = items[0];
+      const decision = it && it.outcome === "exact"
+        ? { key: norm, action: "merge" as const, mergeIntoBuyerId: it.existing?.id }
+        : { key: norm, action: "create" as const };
+      const r = await api.post<{ created: number; merged: number }>("/research/buyers/commit", { decisions: [decision] });
+      setAdded(r.created ? "Buyer profile created" : "Merged into existing buyer");
+    } catch {
+      setAdded("Could not add to Buyers");
+    } finally {
+      setAdding(false);
+    }
+  }
+
+  const Counterparties = ({ title, rows, dir }: { title: string; rows: RelRow[]; dir: "in" | "out" }) => (
+    <div>
+      <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>{title}</div>
+      {rows.length === 0 ? <p className="muted" style={{ margin: 0 }}>None in this period.</p> : (
+        <div className="rel-party-list">
+          {rows.slice(0, 10).map((r) => {
+            const otherNorm = dir === "in" ? r.grantorNorm : r.granteeNorm;
+            const otherName = dir === "in" ? r.grantor : r.grantee;
+            return (
+              <div key={otherNorm} className="rel-party-row">
+                <button className="rel-party-name link" onClick={() => onOpenEntity(otherNorm)} title="Open dossier">{otherName}</button>
+                <span className="rel-party-meta">
+                  <span className="rel-count-mini">{r.count}×</span>
+                  <button className="small" onClick={() => onViewTx(
+                    dir === "in" ? `${otherName} → ${name}` : `${name} → ${otherName}`,
+                    dir === "in" ? { grantorNorm: otherNorm, granteeNorm: norm } : { grantorNorm: norm, granteeNorm: otherNorm },
+                  )}>deeds</button>
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <Modal title={name} onClose={onClose} wide>
+      <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
+        {info && <ClassBadge klass={info.klass} label={info.classLabel} />}
+        <span className="muted" style={{ fontSize: 13 }}>
+          Acquired {info?.acquisitions ?? bought.reduce((s, r) => s + r.count, 0)} · Sold {info?.dispositions ?? sold.reduce((s, r) => s + r.count, 0)}
+        </span>
+      </div>
+      {info && <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>{CLASS_DESC[info.klass]}</p>}
+
+      <div className="rel-columns" style={{ marginTop: 8 }}>
+        <Counterparties title="Bought From" rows={bought} dir="in" />
+        <Counterparties title="Sold To" rows={sold} dir="out" />
+        <div>
+          <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>Co-Buying Partners</div>
+          {partners.length === 0 ? <p className="muted" style={{ margin: 0 }}>None found.</p> : (
+            <div className="rel-party-list">
+              {partners.slice(0, 8).map((p, i) => (
+                <div key={i} className="rel-party-row">
+                  <span style={{ fontSize: 13 }}>{p.members.filter((m) => m.norm !== norm).map((m) => m.name).join(", ")}</span>
+                  <span className="rel-count-mini">{p.count}×</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {chains.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>Appears in Chains</div>
+          {chains.slice(0, 5).map((c, i) => (
+            <div key={i} className="rel-chain" style={{ marginBottom: 6 }}>
+              <span style={{ fontSize: 13 }}>{c.path}</span>
+              <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>{c.length} hops · {c.totalCount} txns</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="row" style={{ gap: 8, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <button className="small" onClick={() => onViewTx(`All transactions involving ${name}`, { entityNorm: norm })}>View all transactions →</button>
+        {can("createBuyers") && !added && (
+          <button className="small primary" disabled={adding} onClick={addToBuyers}>{adding ? "Adding…" : "Add to Buyers"}</button>
+        )}
+        {added && <span className="muted" style={{ fontSize: 12 }}>{added}</span>}
+      </div>
+    </Modal>
   );
 }
 

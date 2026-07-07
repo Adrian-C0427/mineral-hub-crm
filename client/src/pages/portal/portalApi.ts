@@ -24,6 +24,11 @@ export interface PortalDeal {
 }
 export interface PortalAbstract { id: string; abstract: string | null; survey: string | null; county: string }
 export interface PortalDocument { id: string; filename: string; mimeType: string; sizeBytes: number; folder: string }
+export interface PortalImage { id: string; filename: string; url: string }
+export interface PortalProduction {
+  wellsMatched: number; months: number; firstMonth: string | null; lastMonth: string;
+  cumOilBbl: number; cumGasMcf: number; cumBoe: number; last12OilBbl: number; last12GasMcf: number;
+}
 export type FC = { type: "FeatureCollection"; features: { type: "Feature"; id?: string | number; properties: Record<string, unknown>; geometry: { type: string; coordinates: unknown } }[] };
 
 export async function portalGet<T>(path: string): Promise<T> {

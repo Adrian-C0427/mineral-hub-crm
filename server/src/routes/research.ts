@@ -17,7 +17,7 @@ import {
 } from "../domain/researchBuyers.js";
 import {
   aggregateRelationships, coBuyerPartnerships, classifyEntities, buildChains,
-  chainTableRows, buildGraph, ENTITY_CLASS_LABEL, type TxEdge,
+  chainTableRows, ENTITY_CLASS_LABEL, type TxEdge,
 } from "../domain/researchGraph.js";
 import { normalizeCompany } from "../serializers.js";
 
@@ -537,7 +537,6 @@ researchRouter.get(
     const coBuyers = coBuyerPartnerships(edges);
     const chains = buildChains(relationships);
     const table = chainTableRows(chains);
-    const graph = buildGraph(relationships);
     const classMap = classifyEntities(relationships);
     const classifications = [...classMap.values()]
       .map((s) => ({ ...s, classLabel: ENTITY_CLASS_LABEL[s.klass] }))
@@ -560,7 +559,6 @@ researchRouter.get(
         counties: row.chain.counties, firstDate: row.chain.firstDate, lastDate: row.chain.lastDate,
         nodes: row.chain.nodes, hops: row.chain.hops,
       })),
-      graph,
       classifications: classifications.slice(0, 300),
       classLabels: ENTITY_CLASS_LABEL,
     });

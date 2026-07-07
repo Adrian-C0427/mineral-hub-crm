@@ -25,6 +25,7 @@ export const CLASS_COLORS: Record<string, string> = {
   FEEDER: "#ec4899",
   PASS_THROUGH: "#8b5cf6",
   SELLER: "#94a3b8",
+  ONE_TIME_BUYER: "#14b8a6",
   UNCLASSIFIED: "#64748b",
 };
 
@@ -35,6 +36,7 @@ const CLASS_LABEL: Record<string, string> = {
   FEEDER: "Feeder",
   PASS_THROUGH: "Pass-Through",
   SELLER: "Seller",
+  ONE_TIME_BUYER: "One-Time Buyer",
   UNCLASSIFIED: "Unclassified",
 };
 
