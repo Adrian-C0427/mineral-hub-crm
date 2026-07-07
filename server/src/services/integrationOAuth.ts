@@ -70,7 +70,9 @@ function microsoft(key: string, scope: string): OAuthApp {
 function buildRegistry(): Record<string, OAuthApp> {
   const okta = env.OAUTH.OKTA;
   const reg: Record<string, OAuthApp> = {
-    gmail: google("gmail", "https://www.googleapis.com/auth/gmail.send"),
+    // gmail.readonly powers inbound reply sync (emailInboundSync); accounts
+    // connected before it existed must reconnect to grant the extra scope.
+    gmail: google("gmail", "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly"),
     googlecalendar: google("googlecalendar", "https://www.googleapis.com/auth/calendar.events"),
     googledrive: google("googledrive", "https://www.googleapis.com/auth/drive.file"),
     outlook: microsoft("outlook", "https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Mail.Read"),

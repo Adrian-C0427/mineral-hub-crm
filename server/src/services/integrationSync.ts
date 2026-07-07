@@ -18,6 +18,7 @@ import { providerByKey } from "../domain/integrationCatalog.js";
 import { decryptSecret } from "./secrets.js";
 import { validateSecret, validateEnvProvider, type ValidationResult } from "./integrationProviders.js";
 import { isOAuthProvider, getFreshAccessToken } from "./integrationOAuth.js";
+import { isInboundEmailProvider, syncInboundEmail } from "./emailInboundSync.js";
 
 export interface IntegrationConfig {
   schedule?: "manual" | "hourly" | "daily";
@@ -58,7 +59,19 @@ export async function checkIntegration(row: Integration): Promise<ValidationResu
 
 /** Run a sync: validate, stamp lastSyncAt/lastError/status, audit-log the outcome. */
 export async function syncIntegration(row: Integration, actorUserId?: string | null): Promise<ValidationResult> {
-  const result = await checkIntegration(row);
+  let result = await checkIntegration(row);
+  // Data pull layered on the health check: connected mailboxes import inbound
+  // buyer replies (EMAIL_IN timeline entries + notifications).
+  if (result.ok && isInboundEmailProvider(row.provider)) {
+    try {
+      const r = await syncInboundEmail(row);
+      result = { ok: true, message: `${result.message} Scanned ${r.fetched} new message(s); logged ${r.matched} buyer repl${r.matched === 1 ? "y" : "ies"}.` };
+    } catch (e) {
+      // Token is valid but the mailbox pull failed (commonly: connected before
+      // the read scope existed). Surface it as an error so the UI says why.
+      result = { ok: false, message: `Mailbox sync failed: ${e instanceof Error ? e.message : "unknown error"}. If this account was connected before inbound sync existed, disconnect and reconnect to grant read access.` };
+    }
+  }
   await prisma.integration.update({
     where: { id: row.id },
     data: result.ok
