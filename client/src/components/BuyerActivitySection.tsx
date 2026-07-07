@@ -3,11 +3,8 @@ import { Link } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { MatchPercentBadge, StatusBadge } from "./ui";
 import { money, fmtDate } from "../lib/format";
+import { BUYER_STATUS_RANK } from "../lib/buyerStatus";
 import type { BuyerActivityRow, CommKind, TimelineEntry } from "../types";
-
-const STATUS_ORDER: Record<string, number> = {
-  CLOSED: 0, NEGOTIATING: 1, OFFER_RECEIVED: 2, REVIEWING: 3, INTERESTED: 4, CONTACTED: 5, PASSED: 6,
-};
 
 const KIND_LABEL: Record<CommKind, string> = {
   EMAIL_OUT: "✉ Email sent", EMAIL_IN: "✉ Email received", PHONE: "☎ Call",
@@ -36,7 +33,7 @@ export function BuyerActivitySection({
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const sorted = [...rows].sort(
-    (a, b) => (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) || b.matchPercent - a.matchPercent,
+    (a, b) => (BUYER_STATUS_RANK[a.status] - BUYER_STATUS_RANK[b.status]) || b.matchPercent - a.matchPercent,
   );
 
   if (rows.length === 0) return <p className="muted">No buyers contacted yet. Use Match Recommendations below to start outreach.</p>;

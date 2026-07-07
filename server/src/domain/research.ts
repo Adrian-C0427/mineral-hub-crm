@@ -1,3 +1,4 @@
+import { monthKey } from "./dates.js";
 /**
  * Research & Market Intelligence — pure domain logic.
  *
@@ -255,7 +256,7 @@ export function autoGranularity(from: Date, to: Date): Granularity {
 
 /** Stable bucket key (UTC): day → YYYY-MM-DD, week → Monday's date, month → YYYY-MM. */
 export function bucketKey(d: Date, g: Granularity): string {
-  if (g === "month") return d.toISOString().slice(0, 7);
+  if (g === "month") return monthKey(d);
   if (g === "day") return d.toISOString().slice(0, 10);
   const day = d.getUTCDay(); // 0=Sun
   const monday = new Date(d.getTime() - ((day + 6) % 7) * 86400000);

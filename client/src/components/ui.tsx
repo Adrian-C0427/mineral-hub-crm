@@ -25,19 +25,6 @@ export function RelationshipDot({ status }: { status: "HOT" | "WARM" | "COLD" })
   );
 }
 
-const RESPONSE_CLASS: Record<string, string> = {
-  OFFER_MADE: "resp-offer",
-  INTERESTED: "resp-interested",
-  PENDING: "resp-pending",
-  NOT_INTERESTED: "resp-no",
-  PASSED: "resp-passed",
-};
-
-export function ResponseBadge({ status }: { status: string }) {
-  const label = status === "PENDING" ? "Awaiting reply" : prettyEnum(status);
-  return <span className={`badge ${RESPONSE_CLASS[status] ?? ""}`}>{label}</span>;
-}
-
 // New buyer pipeline statuses (BuyerStatus).
 const STATUS_CLASS: Record<string, string> = {
   CLOSED: "resp-offer",

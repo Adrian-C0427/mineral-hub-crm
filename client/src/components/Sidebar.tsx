@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { NotificationsBell } from "./NotificationsBell";
+import { ROLE_LABEL } from "../lib/roles";
 
 interface NavItem {
   label: string;
@@ -57,8 +58,6 @@ const NAV: NavItem[] = [
     ],
   },
 ];
-
-const ROLE_LABEL: Record<string, string> = { OWNER: "Owner", ADMIN: "Administrator", MANAGER: "Manager", MEMBER: "Standard User", VIEWER: "Read-Only Viewer" };
 
 export function Sidebar() {
   const { user, logout, can } = useAuth();

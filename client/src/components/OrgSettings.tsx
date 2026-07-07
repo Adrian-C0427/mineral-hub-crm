@@ -4,6 +4,7 @@ import { useAuth, type OrgRole } from "../auth/AuthContext";
 import { Banner, ConfirmChanges, ConfirmDialog } from "./ui";
 import { fmtDate } from "../lib/format";
 import { formatPhone } from "../lib/phone";
+import { ROLE_LABEL } from "../lib/roles";
 
 interface OrgInfo { id: string; name: string; teamId: string; memberCount: number; yourRole: OrgRole | null; yourPermissions: string[] }
 interface Member { id: string; name: string; email: string; phone: string | null; orgRole: OrgRole | null; status: string; lastActiveAt: string | null }
@@ -12,7 +13,6 @@ interface RoleRow { role: OrgRole; permissions: string[]; defaults: string[]; ed
 interface RolesResponse { roles: RoleRow[]; permissions: { key: string; label: string; group: string }[]; ownerOnlyActions: string[] }
 
 // MANAGER is a retired role, kept here only to label users not yet reassigned.
-const ROLE_LABEL: Record<string, string> = { OWNER: "Owner", ADMIN: "Administrator", MANAGER: "Manager (legacy)", MEMBER: "Standard User", VIEWER: "Read-Only Viewer" };
 const ASSIGNABLE: OrgRole[] = ["ADMIN", "MEMBER", "VIEWER"];
 
 type Tab = "org" | "users" | "roles" | "owner";

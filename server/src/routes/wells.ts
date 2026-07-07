@@ -6,6 +6,7 @@ import { prisma } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { normalizeAssumptions, runValuation, type MonthVolumes } from "../domain/valuation.js";
+import { monthKey } from "../domain/dates.js";
 
 /**
  * Well Production Analysis & Valuation API.
@@ -24,7 +25,7 @@ wellsRouter.use(requireAuth, requireOrg);
 // ---------------------------------------------------------------------------
 
 const ymToDate = (ym: string): Date => new Date(`${ym}-01T00:00:00Z`);
-const dateToYm = (d: Date): string => d.toISOString().slice(0, 7);
+const dateToYm = monthKey;
 
 /** Tolerant month parser: YYYY-MM, YYYY-MM-DD, MM/YYYY, MM/DD/YYYY, "Jan 2024". */
 function parseMonth(s: string): string | null {
