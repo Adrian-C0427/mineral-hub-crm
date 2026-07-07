@@ -58,6 +58,11 @@ export function resolveDealDates(deal: DealDateInputs): ResolvedDealDates {
   };
 }
 
+/** Calendar-month bucket key, e.g. "2026-07" (UTC). */
+export function monthKey(d: Date): string {
+  return d.toISOString().slice(0, 7);
+}
+
 /** Whole calendar days from `from` until `target` (negative = target is in the past). */
 export function daysUntil(target: Date, from: Date = new Date()): number {
   const MS_PER_DAY = 24 * 60 * 60 * 1000;

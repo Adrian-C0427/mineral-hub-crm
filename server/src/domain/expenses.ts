@@ -1,3 +1,5 @@
+import { monthKey } from "./dates.js";
+
 /**
  * Expense dashboard aggregation — pure function so the money math is unit-tested
  * independently of the database/route layer.
@@ -39,7 +41,7 @@ export function aggregateExpenseDashboard(expenses: ExpenseInput[]): ExpenseDash
     total += e.amount;
     const catName = e.categoryName ?? "Uncategorized";
     byCategory.set(catName, (byCategory.get(catName) ?? 0) + e.amount);
-    const ym = e.date.toISOString().slice(0, 7);
+    const ym = monthKey(e.date);
     byMonth.set(ym, (byMonth.get(ym) ?? 0) + e.amount);
 
     const uid = e.userId ?? "unknown";
@@ -48,7 +50,7 @@ export function aggregateExpenseDashboard(expenses: ExpenseInput[]): ExpenseDash
     u.total += e.amount;
     if (e.reimbursed) {
       reimbursed += e.amount;
-      const rym = (e.reimbursementDate ?? e.date).toISOString().slice(0, 7);
+      const rym = monthKey(e.reimbursementDate ?? e.date);
       reimbursedByMonth.set(rym, (reimbursedByMonth.get(rym) ?? 0) + e.amount);
     } else {
       u.outstanding += e.amount;

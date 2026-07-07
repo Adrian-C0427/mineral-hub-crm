@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Modal } from "./ui";
 import { api, ApiError } from "../api/client";
 import { toInputDate } from "../lib/format";
+import { BUYER_STATUS_OPTIONS } from "../lib/buyerStatus";
 import type { BuyerStatus, UserLite } from "../types";
 
 interface Props {
@@ -19,16 +20,6 @@ interface Props {
   onClose: () => void;
   onLogged: () => void;
 }
-
-const STATUSES: { v: BuyerStatus; label: string }[] = [
-  { v: "CONTACTED", label: "Contacted" },
-  { v: "INTERESTED", label: "Interested" },
-  { v: "REVIEWING", label: "Reviewing" },
-  { v: "OFFER_RECEIVED", label: "Offer Received" },
-  { v: "NEGOTIATING", label: "Negotiating" },
-  { v: "PASSED", label: "Passed" },
-  { v: "CLOSED", label: "Closed" },
-];
 
 export function LogContactModal({ dealId, buyerId, buyerName, users, initial, onClose, onLogged }: Props) {
   const [status, setStatus] = useState<BuyerStatus>(initial?.status ?? "CONTACTED");
@@ -90,7 +81,7 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, initial, on
       <div className="field">
         <label>Status</label>
         <select value={status} onChange={(e) => setStatus(e.target.value as BuyerStatus)}>
-          {STATUSES.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
+          {BUYER_STATUS_OPTIONS.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
         </select>
       </div>
       <div className="field">
