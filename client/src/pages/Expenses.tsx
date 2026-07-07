@@ -100,20 +100,21 @@ export function Expenses() {
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Expenses</h1>
+        <div>
+          <h1 style={{ marginBottom: 0 }}>Expenses</h1>
+          <div className="xp-sub">Team spend &amp; reimbursements</div>
+        </div>
         <div className="row">
           <button className="small" onClick={() => setShowCats(true)}>Manage categories</button>
-          <button className="primary" onClick={() => { setEditing(null); setShowForm(true); }}>+ Add expense</button>
+          <button className="small" onClick={exportSelected} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+            Export all (CSV)
+          </button>
+          <button className="primary" onClick={() => { setEditing(null); setShowForm(true); }}>+ New expense</button>
         </div>
       </div>
 
       {err && <Banner kind="error">{err}</Banner>}
-
-      {dash && dash.totals.count === 0 && (
-        <Banner kind="info">
-          No expenses recorded yet — use <strong>+ Add expense</strong> to start tracking company spend and reimbursements.
-        </Banner>
-      )}
 
       {/* KPIs */}
       {dash && (
@@ -127,10 +128,14 @@ export function Expenses() {
 
       {/* Charts */}
       {dash && (
-        <div className="chart-grid">
-          <div className="panel">
+        <div className="xp-charts">
+          <div className="panel xp-chart">
             <h3>Expenses by Month</h3>
-            {dash.byMonth.length === 0 ? <p className="muted">No data.</p> : (
+            {dash.byMonth.length === 0 ? (
+              <ChartEmpty icon={<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>}>
+                No expenses yet — data appears here as you log spend
+              </ChartEmpty>
+            ) : (
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={dash.byMonth.map((m) => ({ ...m, label: monthLabel(m.month) }))}>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
@@ -143,9 +148,13 @@ export function Expenses() {
             )}
           </div>
 
-          <div className="panel">
+          <div className="panel xp-chart">
             <h3>Expenses by Category</h3>
-            {dash.byCategory.length === 0 ? <p className="muted">No data.</p> : (
+            {dash.byCategory.length === 0 ? (
+              <ChartEmpty icon={<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21.21 15.89A10 10 0 118 2.83" /><path d="M22 12A10 10 0 0012 2v10z" /></svg>}>
+                No categories to chart yet
+              </ChartEmpty>
+            ) : (
               <ResponsiveContainer width="100%" height={220}>
                 <PieChart>
                   <Pie data={dash.byCategory} dataKey="amount" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={(e) => e.name}>
@@ -157,9 +166,13 @@ export function Expenses() {
             )}
           </div>
 
-          <div className="panel">
+          <div className="panel xp-chart">
             <h3>Expenses by User</h3>
-            {dash.byUser.length === 0 ? <p className="muted">No data.</p> : (
+            {dash.byUser.length === 0 ? (
+              <ChartEmpty icon={<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87" /></svg>}>
+                No spend recorded by teammates
+              </ChartEmpty>
+            ) : (
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={dash.byUser} layout="vertical" margin={{ left: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
@@ -176,24 +189,6 @@ export function Expenses() {
         </div>
       )}
 
-      {/* Outstanding balance by user */}
-      {dash && dash.outstandingByUser.length > 0 && (
-        <div className="panel">
-          <h3>Outstanding Balance by User</h3>
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead><tr><th>User</th><th className="right">Outstanding</th></tr></thead>
-              <tbody>
-                {dash.outstandingByUser.map((u) => (
-                  <tr key={u.userId}><td>{u.name}</td><td className="right">{money(u.outstanding)}</td></tr>
-                ))}
-                <tr><td><strong>Company total</strong></td><td className="right"><strong>{money(dash.totals.companyOutstanding)}</strong></td></tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
       <AllExpenses
         expenses={expenses}
         categories={categories}
@@ -204,8 +199,8 @@ export function Expenses() {
         toggle={toggle}
         setSelected={setSelected}
         bulk={bulk}
-        exportSelected={exportSelected}
         onEdit={(e) => { setEditing(e); setShowForm(true); }}
+        onNew={() => { setEditing(null); setShowForm(true); }}
       />
 
       {showForm && (
@@ -220,6 +215,16 @@ export function Expenses() {
       {showCats && (
         <CategoryManager categories={categories} onClose={() => setShowCats(false)} onChanged={load} />
       )}
+    </div>
+  );
+}
+
+/** Centered icon + message shown when a chart has no data (per design). */
+function ChartEmpty({ icon, children }: { icon: React.ReactNode; children: React.ReactNode }) {
+  return (
+    <div className="chart-empty">
+      {icon}
+      <span>{children}</span>
     </div>
   );
 }
@@ -247,7 +252,7 @@ function loadJson<T>(key: string, fallback: T): T {
 }
 
 function AllExpenses({
-  expenses, categories, users, filters, setFilters, selected, toggle, setSelected, bulk, exportSelected, onEdit,
+  expenses, categories, users, filters, setFilters, selected, toggle, setSelected, bulk, onEdit, onNew,
 }: {
   expenses: Expense[];
   categories: Category[];
@@ -258,8 +263,8 @@ function AllExpenses({
   toggle: (id: string) => void;
   setSelected: React.Dispatch<React.SetStateAction<Set<string>>>;
   bulk: (action: string, categoryId?: string) => void;
-  exportSelected: () => void;
   onEdit: (e: Expense) => void;
+  onNew: () => void;
 }) {
   const [q, setQ] = useState("");
   const [cols, setCols] = useState<ColKey[]>(() => loadJson<ColKey[]>(COLS_KEY, DEFAULT_COLS));
@@ -337,14 +342,18 @@ function AllExpenses({
   const sortInd = (key: ColKey) => (sort.key === key ? (sort.dir === "asc" ? " ▲" : " ▼") : "");
 
   return (
-    <div className="panel">
-      <div className="section-head" style={{ flexWrap: "wrap", gap: 8 }}>
-        <h3 style={{ margin: 0 }}>All expenses</h3>
-        <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-          <input
-            type="search" placeholder="Search user, category, notes, amount…" value={q}
-            onChange={(e) => setQ(e.target.value)} style={{ width: 240 }} aria-label="Search expenses"
-          />
+    <div className="panel xp-panel">
+      {/* Panel header: title + search + presets + columns */}
+      <div className="xp-head">
+        <h3>All expenses</h3>
+        <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+          <div className="xp-search">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+            <input
+              type="search" placeholder="Search user, category, notes, amount…" value={q}
+              onChange={(e) => setQ(e.target.value)} aria-label="Search expenses"
+            />
+          </div>
           <select value="" style={{ width: "auto" }} onChange={(e) => { if (e.target.value) applyPreset(e.target.value); }} title="Apply a saved filter preset">
             <option value="">Presets…</option>
             {presets.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
@@ -368,23 +377,23 @@ function AllExpenses({
         </div>
       </div>
 
-      {/* Structural filters (server-side) */}
-      <div className="row exp-filters" style={{ flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
-        <div className="field" style={{ marginBottom: 0 }}><label>From</label><input type="date" value={filters.from} onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))} /></div>
-        <div className="field" style={{ marginBottom: 0 }}><label>To</label><input type="date" value={filters.to} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} /></div>
-        <div className="field" style={{ marginBottom: 0 }}><label>User</label>
+      {/* Filter bar: structural filters + inline running totals */}
+      <div className="xp-filterbar">
+        <div className="xp-fld"><div className="xp-lbl">From</div><input type="date" value={filters.from} onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))} /></div>
+        <div className="xp-fld"><div className="xp-lbl">To</div><input type="date" value={filters.to} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} /></div>
+        <div className="xp-fld"><div className="xp-lbl">User</div>
           <select value={filters.userId} onChange={(e) => setFilters((f) => ({ ...f, userId: e.target.value }))}>
             <option value="">All</option>
             {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
           </select>
         </div>
-        <div className="field" style={{ marginBottom: 0 }}><label>Category</label>
+        <div className="xp-fld"><div className="xp-lbl">Category</div>
           <select value={filters.categoryId} onChange={(e) => setFilters((f) => ({ ...f, categoryId: e.target.value }))}>
             <option value="">All</option>
             {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </div>
-        <div className="field" style={{ marginBottom: 0 }}><label>Status</label>
+        <div className="xp-fld"><div className="xp-lbl">Status</div>
           <select value={filters.reimbursed} onChange={(e) => setFilters((f) => ({ ...f, reimbursed: e.target.value }))}>
             <option value="">All</option>
             <option value="false">Outstanding</option>
@@ -394,29 +403,37 @@ function AllExpenses({
         {filtersActive && (
           <button className="small" style={{ alignSelf: "flex-end" }} onClick={() => { setFilters({ from: "", to: "", userId: "", categoryId: "", reimbursed: "" }); setQ(""); }}>Clear all</button>
         )}
-      </div>
-
-      {/* Running totals for the current view */}
-      <div className="exp-totals">
-        <span><span className="muted">Showing</span> <strong>{totals.count}</strong> <span className="muted">expenses</span></span>
-        <span><span className="muted">Total</span> <strong>{money(totals.total)}</strong></span>
-        <span className="ok"><span className="muted">Reimbursed</span> <strong>{money(totals.reimbursed)}</strong></span>
-        <span className="warn"><span className="muted">Outstanding</span> <strong>{money(totals.outstanding)}</strong></span>
+        <div className="xp-summary">
+          <span>Showing <b>{totals.count}</b> expenses</span>
+          <span>Total <b>{money(totals.total)}</b></span>
+          <span className="ok">Reimbursed <b>{money(totals.reimbursed)}</b></span>
+          <span className="warn">Outstanding <b>{money(totals.outstanding)}</b></span>
+        </div>
       </div>
 
       {/* Bulk action bar */}
-      <div className="row" style={{ flexWrap: "wrap", gap: 8, marginBottom: 8, alignItems: "center" }}>
-        <span className="muted" style={{ fontSize: 13 }}>{selected.size} selected</span>
-        <button className="small" disabled={selected.size === 0} onClick={() => bulk("reimburse")}>Mark reimbursed</button>
-        <button className="small" disabled={selected.size === 0} onClick={() => bulk("unreimburse")}>Mark not reimbursed</button>
-        <select className="small" disabled={selected.size === 0} defaultValue="" onChange={(e) => { if (e.target.value) { bulk("setCategory", e.target.value); e.target.value = ""; } }}>
+      <div className="xp-bulkbar">
+        <span className="xp-selcount">{selected.size} selected</span>
+        <span className="xp-vdiv" />
+        <button className="small" disabled={selected.size === 0} onClick={() => bulk("reimburse")}>✓ Mark reimbursed</button>
+        <button className="small" disabled={selected.size === 0} onClick={() => bulk("unreimburse")}>↺ Mark not reimbursed</button>
+        <select className="small" disabled={selected.size === 0} defaultValue="" style={{ width: "auto" }} onChange={(e) => { if (e.target.value) { bulk("setCategory", e.target.value); e.target.value = ""; } }}>
           <option value="">Change category…</option>
           {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
-        <button className="small" onClick={exportSelected}>Export {selected.size > 0 ? "selected" : "all"} (CSV)</button>
-        <button className="small danger" disabled={selected.size === 0} onClick={() => bulk("delete")}>Delete</button>
+        <button className="small danger" style={{ marginLeft: "auto" }} disabled={selected.size === 0} onClick={() => bulk("delete")}>Delete</button>
       </div>
 
+      {visible.length === 0 ? (
+        <div className="xp-empty">
+          <div className="xp-empty-ico">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z" /><line x1="8" y1="8" x2="16" y2="8" /><line x1="8" y1="12" x2="16" y2="12" /><line x1="8" y1="16" x2="12" y2="16" /></svg>
+          </div>
+          <div className="xp-empty-t">No expenses in this range</div>
+          <div style={{ fontSize: 12.5 }}>Log your first expense or widen the date filter above.</div>
+          <button className="primary" style={{ marginTop: 6 }} onClick={onNew}>+ New expense</button>
+        </div>
+      ) : (
       <div className="table-scroll exp-scroll">
         <table className="data-table exp-table">
           <thead>
@@ -437,9 +454,6 @@ function AllExpenses({
             </tr>
           </thead>
           <tbody>
-            {shownGroups.length === 0 && (
-              <tr><td colSpan={cols.length + 1} className="empty-cell">No expenses match these filters.</td></tr>
-            )}
             {shownGroups.map((g) => (
               <ExpMonthGroup
                 key={g.month}
@@ -457,8 +471,9 @@ function AllExpenses({
           </tbody>
         </table>
       </div>
-      {groups.length > monthsShown && (
-        <div className="row" style={{ justifyContent: "center", marginTop: 10 }}>
+      )}
+      {visible.length > 0 && groups.length > monthsShown && (
+        <div className="row" style={{ justifyContent: "center", padding: "10px 20px 16px" }}>
           <button className="small" onClick={() => setMonthsShown((n) => n + MONTHS_PAGE)}>
             Show {Math.min(MONTHS_PAGE, groups.length - monthsShown)} more month{groups.length - monthsShown > 1 ? "s" : ""}
           </button>
