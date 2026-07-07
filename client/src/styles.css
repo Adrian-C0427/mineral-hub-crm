@@ -969,3 +969,35 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
   display: flex; align-items: center; justify-content: center; color: #7fb0ff; }
 .xp-empty-t { font-weight: 700; font-size: 14.5px; color: var(--text); }
 .xp-panel .exp-scroll { margin: 0; }
+
+/* ---------------------------------------------------------------------------
+   Well Analysis & Valuation — numbered step cards, group dots, token inputs
+   --------------------------------------------------------------------------- */
+.va-step { padding: 0; overflow: hidden; }
+.va-step-head { display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 16px 22px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.va-body { padding: 20px 22px; }
+.va-step-title { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 15.5px; }
+.va-step-num { width: 26px; height: 26px; border-radius: 8px; background: rgba(59,130,246,0.16);
+  color: #7fb0ff; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; flex: none; }
+.va-step-toggle { font-size: 12.5px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.va-chev { display: inline-block; transition: transform 0.15s; font-size: 14px; }
+.va-chev.down { transform: rotate(180deg); }
+
+.va-microlabel { font-size: 10.5px; letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--text-dim); font-weight: 700; }
+.va-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; margin-right: 8px; vertical-align: middle; }
+.assumption-group-title { display: flex; align-items: center; }
+
+/* Segmented number/money field: [$][ value ][/unit] */
+.va-num { display: flex; flex-direction: column; }
+.va-num > label { font-size: 11.5px; color: var(--text-dim); font-weight: 600; margin-bottom: 6px; }
+.va-num-box { display: flex; align-items: stretch; background: var(--input-bg, var(--panel));
+  border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
+.va-num-box:focus-within { border-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+.va-num-affix { display: flex; align-items: center; padding: 0 10px; font-size: 11.5px; color: var(--text-dim); white-space: nowrap; }
+.va-num-prefix { border-right: 1px solid var(--border); }
+.va-num-suffix { border-left: 1px solid var(--border); }
+.va-num-box input { flex: 1; min-width: 0; border: none; background: transparent; border-radius: 0;
+  padding: 9px 12px; font: 600 14px 'IBM Plex Mono', ui-monospace, monospace; color: var(--text); }
+.va-num-box input:focus { outline: none; box-shadow: none; }
