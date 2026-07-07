@@ -69,6 +69,14 @@ const money = (n: number) =>
 
 export function Landing() {
   const [deals, setDeals] = useState<DemoDeal[]>(SEED_DEALS);
+  // Recent-activity feed for the hero dashboard; pipeline drags prepend to it.
+  const [events, setEvents] = useState<{ text: string; when: string }[]>([
+    { text: "Morgan emailed \"Twin Oaks ORRI\" to 4 buyers", when: "2h ago" },
+    { text: "Offer received — Basin Peak Minerals · $310,000", when: "5h ago" },
+    { text: "Portal lead: Riley Cole (Basin Peak Minerals)", when: "1d ago" },
+  ]);
+  const logMove = (deal: string, stage: string) =>
+    setEvents((p) => [{ text: `You moved "${deal}" to ${stage}`, when: "just now" }, ...p].slice(0, 4));
 
   useEffect(() => {
     document.title = "Mineral Hub — the CRM built for mineral & royalty deals";
@@ -84,9 +92,9 @@ export function Landing() {
   return (
     <div className="lp">
       <Nav />
-      <Hero deals={deals} />
+      <Hero deals={deals} events={events} />
       <Comparison />
-      <PipelineDemo deals={deals} onChange={setDeals} />
+      <PipelineDemo deals={deals} onChange={setDeals} onMoved={logMove} />
       <MatchDemo />
       <TractDemo />
       <MapSection />
@@ -164,7 +172,18 @@ function Nav() {
 
 /* --------------------------------- hero --------------------------------- */
 
-function Hero({ deals }: { deals: DemoDeal[] }) {
+const TOP_BUYERS = [
+  { name: "Stag Royalty Partners", volume: 468000 },
+  { name: "Basin Peak Minerals", volume: 291000 },
+  { name: "Llano Uplift Holdings", volume: 133000 },
+];
+const FOLLOW_UPS = [
+  { buyer: "Basin Peak Minerals", deal: "Prewitt Estate", when: "Tomorrow" },
+  { buyer: "Brazos Verde Capital", deal: "Hargrove NPRI", when: "Jul 10" },
+  { buyer: "Pine Prairie Royalty", deal: "Barnes A-537", when: "Jul 14" },
+];
+
+function Hero({ deals, events }: { deals: DemoDeal[]; events: { text: string; when: string }[] }) {
   const active = deals.length;
   const projected = deals.reduce((s, d) => s + d.profit, 0);
   const closing = deals.filter((d) => d.stage === "CLOSING").length;
@@ -203,14 +222,46 @@ function Hero({ deals }: { deals: DemoDeal[] }) {
             </div>
           </div>
           <div className="lp-shot-card">
-            <div className="lp-shot-h">Deals by stage</div>
+            <div className="lp-shot-h">Active deals by stage</div>
             <div className="lp-shot-stages">
               {STAGES.map((s, i) => (
-                <div key={s.key} className="lp-shot-stage">
-                  <div style={{ width: `${(byStage[i] / maxStage) * 100}%`, background: STAGE_COLOR[s.key] }} />
+                <div key={s.key} className="lp-shot-stagerow">
+                  <span>{s.label}</span>
+                  <div className="lp-shot-stage"><div style={{ width: `${(byStage[i] / maxStage) * 100}%`, background: STAGE_COLOR[s.key] }} /></div>
+                  <b>{byStage[i]}</b>
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+        {/* Second row — the rest of the real Dashboard: follow-ups, activity, top buyers */}
+        <div className="lp-shot-grid three">
+          <div className="lp-shot-card">
+            <div className="lp-shot-h">Upcoming follow-ups</div>
+            {FOLLOW_UPS.map((f) => (
+              <div key={f.deal} className="lp-shot-row">
+                <span className="lp-shot-ell">{f.buyer} · <i>{f.deal}</i></span>
+                <span className="lp-shot-dim">{f.when}</span>
+              </div>
+            ))}
+          </div>
+          <div className="lp-shot-card">
+            <div className="lp-shot-h">Recent activity</div>
+            {events.slice(0, 3).map((e, i) => (
+              <div key={`${e.text}${i}`} className={`lp-shot-row ${e.when === "just now" ? "new" : ""}`}>
+                <span className="lp-shot-ell">{e.text}</span>
+                <span className="lp-shot-dim">{e.when}</span>
+              </div>
+            ))}
+          </div>
+          <div className="lp-shot-card">
+            <div className="lp-shot-h">Top buyers YTD</div>
+            {TOP_BUYERS.map((b, i) => (
+              <div key={b.name} className="lp-shot-row">
+                <span className="lp-shot-ell">{i + 1}. {b.name}</span>
+                <span className="lp-shot-green">{money(b.volume)}</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
@@ -258,12 +309,16 @@ function Comparison() {
 
 /* ---------------------------- pipeline (demo) ---------------------------- */
 
-function PipelineDemo({ deals, onChange }: { deals: DemoDeal[]; onChange: (d: DemoDeal[]) => void }) {
+function PipelineDemo({ deals, onChange, onMoved }: { deals: DemoDeal[]; onChange: (d: DemoDeal[]) => void; onMoved: (deal: string, stage: string) => void }) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [over, setOver] = useState<Stage | null>(null);
 
-  const moveTo = (id: string, stage: Stage) =>
+  const moveTo = (id: string, stage: Stage) => {
+    const deal = deals.find((d) => d.id === id);
+    if (!deal || deal.stage === stage) return;
     onChange(deals.map((d) => (d.id === id ? { ...d, stage, days: 0, buyer: stage === "CLOSING" && !d.buyer ? "Stag Royalty Partners" : d.buyer } : d)));
+    onMoved(deal.name, STAGES.find((s) => s.key === stage)?.label ?? stage);
+  };
   const advance = (d: DemoDeal) => {
     const i = STAGES.findIndex((s) => s.key === d.stage);
     if (i < STAGES.length - 1) moveTo(d.id, STAGES[i + 1].key);
