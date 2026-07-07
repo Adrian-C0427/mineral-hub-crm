@@ -15,6 +15,10 @@ import {
   buildResearchBuyer, classifyMatch, mergePlan, summaryFor,
   type ExistingBuyerLite, type ResearchDocLite,
 } from "../domain/researchBuyers.js";
+import {
+  aggregateRelationships, coBuyerPartnerships, classifyEntities, buildChains,
+  chainTableRows, buildGraph, ENTITY_CLASS_LABEL, type TxEdge,
+} from "../domain/researchGraph.js";
 import { normalizeCompany } from "../serializers.js";
 
 /**
@@ -489,6 +493,133 @@ researchRouter.get(
 );
 
 // ---------------------------------------------------------------------------
+// Relationship intelligence — grantor→grantee graph, co-buyers, chains, classes
+// ---------------------------------------------------------------------------
+
+/**
+ * Load ownership-transfer edges (one Grantor → Grantee instrument) for the graph
+ * analytics. Only TRANSACTION-class documents with both parties named
+ * participate; `txKey` groups co-grantees recorded on the same instrument.
+ */
+async function loadTxEdges(org: string, f: ResearchFilters, win: Window): Promise<TxEdge[]> {
+  const rows = await prisma.researchDocument.findMany({
+    where: {
+      ...docWhere(org, f, win),
+      docClass: "TRANSACTION",
+      grantorNorm: { not: null },
+      granteeNorm: { not: null },
+      archivedAt: null,
+    },
+    select: {
+      id: true, grantor: true, grantorNorm: true, grantee: true, granteeNorm: true,
+      state: true, county: true, abstractId: true, recordingDate: true, instrumentNumber: true,
+    },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    grantorNorm: r.grantorNorm!, grantor: r.grantor ?? r.grantorNorm!,
+    granteeNorm: r.granteeNorm!, grantee: r.grantee ?? r.granteeNorm!,
+    state: r.state, county: r.county, abstractId: r.abstractId, date: r.recordingDate,
+    txKey: r.instrumentNumber ? `${r.state}|${r.county}|${r.instrumentNumber}` : null,
+  }));
+}
+
+researchRouter.get(
+  "/relationships",
+  requirePermission("viewResearch"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const f = parseFilters(req.query as Record<string, unknown>);
+    const win = parseWindow(req.query as Record<string, unknown>);
+    const edges = await loadTxEdges(org, f, win);
+
+    const relationships = aggregateRelationships(edges);
+    const coBuyers = coBuyerPartnerships(edges);
+    const chains = buildChains(relationships);
+    const table = chainTableRows(chains);
+    const graph = buildGraph(relationships);
+    const classMap = classifyEntities(relationships);
+    const classifications = [...classMap.values()]
+      .map((s) => ({ ...s, classLabel: ENTITY_CLASS_LABEL[s.klass] }))
+      .sort((a, b) => (b.acquisitions + b.dispositions) - (a.acquisitions + a.dispositions));
+
+    res.json({
+      totals: {
+        transactions: edges.length,
+        relationships: relationships.length,
+        entities: classMap.size,
+        partnerships: coBuyers.length,
+        chains: chains.length,
+      },
+      // Strip heavy txIds from the top-level list (drill-in fetches them on demand).
+      relationships: relationships.slice(0, 300).map(({ txIds, ...r }) => ({ ...r, transactions: r.count, _txCount: txIds.length })),
+      coBuyers: coBuyers.slice(0, 100).map(({ txKeys, ...p }) => ({ ...p, _txCount: txKeys.length })),
+      chainTable: table.map((row) => ({
+        path: row.path, feeders: row.feeders, midTier: row.midTier, terminus: row.terminus,
+        length: row.chain.length, strength: row.chain.strength, totalCount: row.chain.totalCount,
+        counties: row.chain.counties, firstDate: row.chain.firstDate, lastDate: row.chain.lastDate,
+        nodes: row.chain.nodes, hops: row.chain.hops,
+      })),
+      graph,
+      classifications: classifications.slice(0, 300),
+      classLabels: ENTITY_CLASS_LABEL,
+    });
+  }),
+);
+
+// Drill-in: supporting transactions for a relationship pair, a co-buyer set,
+// a chain path, or a single entity. Respects the active filters + window.
+const relTxSchema = z.object({
+  grantorNorm: z.string().optional(),
+  granteeNorm: z.string().optional(),
+  members: z.array(z.string()).optional(),   // co-buyer set (all must be grantees on the instrument)
+  path: z.array(z.string()).optional(),      // chain node sequence
+  entityNorm: z.string().optional(),         // any transfer touching this entity
+});
+
+researchRouter.post(
+  "/relationships/transactions",
+  requirePermission("viewResearch"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const f = parseFilters(req.query as Record<string, unknown>);
+    const win = parseWindow(req.query as Record<string, unknown>);
+    const sel = relTxSchema.parse(req.body ?? {});
+    const edges = await loadTxEdges(org, f, win);
+
+    let ids: string[] = [];
+    if (sel.grantorNorm && sel.granteeNorm) {
+      ids = edges.filter((e) => e.grantorNorm === sel.grantorNorm && e.granteeNorm === sel.granteeNorm).map((e) => e.id);
+    } else if (sel.members && sel.members.length >= 2) {
+      const want = new Set(sel.members);
+      const byTx = new Map<string, TxEdge[]>();
+      for (const e of edges) if (e.txKey) (byTx.get(e.txKey) ?? byTx.set(e.txKey, []).get(e.txKey)!).push(e);
+      for (const list of byTx.values()) {
+        const grantees = new Set(list.map((e) => e.granteeNorm));
+        if ([...want].every((m) => grantees.has(m)) && grantees.size === want.size) ids.push(...list.map((e) => e.id));
+      }
+    } else if (sel.path && sel.path.length >= 2) {
+      const hops = new Set<string>();
+      for (let i = 0; i < sel.path.length - 1; i++) hops.add(`${sel.path[i]} ${sel.path[i + 1]}`);
+      ids = edges.filter((e) => hops.has(`${e.grantorNorm} ${e.granteeNorm}`)).map((e) => e.id);
+    } else if (sel.entityNorm) {
+      ids = edges.filter((e) => e.grantorNorm === sel.entityNorm || e.granteeNorm === sel.entityNorm).map((e) => e.id);
+    } else {
+      throw new HttpError(400, "Provide a relationship pair, co-buyer members, chain path, or entity.");
+    }
+
+    const rows = ids.length
+      ? await prisma.researchDocument.findMany({
+          where: { id: { in: ids.slice(0, 1000) }, organizationId: org },
+          orderBy: { recordingDate: "desc" },
+          take: 1000,
+        })
+      : [];
+    res.json({ total: rows.length, rows });
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Add to Buyers — turn active research buyers into CRM Buyer profiles
 // ---------------------------------------------------------------------------
 
@@ -499,7 +630,13 @@ const DOC_LITE_SELECT = {
   abstractId: true, docType: true, recordingDate: true,
 } as const;
 
-/** Load all-time research docs for the given grantee keys, grouped by key. */
+/**
+ * Load all-time research docs for the given entity keys, grouped by key. Keys
+ * are matched as grantees (the buyer role) first; any key with no grantee rows
+ * falls back to its grantor rows (mapped as the entity) so a party that only
+ * appears as a seller in the dataset — e.g. an entity surfaced from the
+ * relationship graph — can still be turned into a CRM buyer.
+ */
 async function docsByGrantee(org: string, keys: string[]): Promise<Map<string, ResearchDocLite[]>> {
   const docs = await prisma.researchDocument.findMany({
     where: { organizationId: org, granteeNorm: { in: keys } },
@@ -511,6 +648,19 @@ async function docsByGrantee(org: string, keys: string[]): Promise<Map<string, R
     const list = byKey.get(d.granteeNorm) ?? [];
     list.push({ grantee: d.grantee, granteeNorm: d.granteeNorm, state: d.state, county: d.county, abstractId: d.abstractId, docType: d.docType, recordingDate: d.recordingDate });
     byKey.set(d.granteeNorm, list);
+  }
+  const missing = keys.filter((k) => !byKey.has(k));
+  if (missing.length) {
+    const grantorDocs = await prisma.researchDocument.findMany({
+      where: { organizationId: org, grantorNorm: { in: missing } },
+      select: { grantor: true, grantorNorm: true, state: true, county: true, abstractId: true, docType: true, recordingDate: true },
+    });
+    for (const d of grantorDocs) {
+      if (!d.grantorNorm) continue;
+      const list = byKey.get(d.grantorNorm) ?? [];
+      list.push({ grantee: d.grantor, granteeNorm: d.grantorNorm, state: d.state, county: d.county, abstractId: d.abstractId, docType: d.docType, recordingDate: d.recordingDate });
+      byKey.set(d.grantorNorm, list);
+    }
   }
   return byKey;
 }

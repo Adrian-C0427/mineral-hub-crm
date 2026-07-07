@@ -7,6 +7,8 @@ import { normalizeCompany } from "../serializers.js";
 import { normalizePhone } from "../domain/phone.js";
 import { effectiveStatus } from "../domain/buyerStatus.js";
 import { closeRate } from "../domain/metrics.js";
+import { normalizeEntity } from "../domain/research.js";
+import { entityNetwork, ENTITY_CLASS_LABEL, type TxEdge } from "../domain/researchGraph.js";
 import { importRouter } from "./import.js";
 
 export const buyersRouter = Router();
@@ -138,6 +140,87 @@ buyersRouter.get(
       closedDeals: cr.closedWon,
       dealsWithOffer: cr.dealsWithOffer,
       dealHistory,
+    });
+  }),
+);
+
+// --------------------------------------------------------------------------
+// Relationship intelligence — the buyer's transaction network derived from all
+// research data (grantors, grantees, co-buyers, chains, classification, graph).
+// --------------------------------------------------------------------------
+
+/** Normalized research-entity keys for a buyer: its company name + all aliases. */
+function buyerEntityKeys(companyName: string, aliases: string[]): string[] {
+  const keys = new Set<string>();
+  for (const raw of [companyName, ...aliases]) {
+    const k = normalizeEntity(raw);
+    if (k) keys.add(k);
+  }
+  return [...keys];
+}
+
+buyersRouter.get(
+  "/:id/relationships",
+  requirePermission("viewBuyers"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const buyer = await prisma.buyer.findFirst({
+      where: { id: req.params.id, organizationId: org },
+      select: { id: true, companyName: true, aliases: true },
+    });
+    if (!buyer) throw new HttpError(404, "Buyer not found");
+
+    const focusNorms = buyerEntityKeys(buyer.companyName, buyer.aliases);
+    if (focusNorms.length === 0) {
+      return res.json({ network: null, reason: "no-entity-key" });
+    }
+
+    // All-time ownership-transfer edges for the org (relationship analysis is not
+    // date-scoped — it always reflects the full transaction history).
+    const rows = await prisma.researchDocument.findMany({
+      where: {
+        organizationId: org, docClass: "TRANSACTION",
+        grantorNorm: { not: null }, granteeNorm: { not: null }, archivedAt: null,
+      },
+      select: {
+        id: true, grantor: true, grantorNorm: true, grantee: true, granteeNorm: true,
+        state: true, county: true, abstractId: true, recordingDate: true, instrumentNumber: true,
+      },
+    });
+    const edges: TxEdge[] = rows.map((r) => ({
+      id: r.id,
+      grantorNorm: r.grantorNorm!, grantor: r.grantor ?? r.grantorNorm!,
+      granteeNorm: r.granteeNorm!, grantee: r.grantee ?? r.granteeNorm!,
+      state: r.state, county: r.county, abstractId: r.abstractId, date: r.recordingDate,
+      txKey: r.instrumentNumber ? `${r.state}|${r.county}|${r.instrumentNumber}` : null,
+    }));
+
+    const network = entityNetwork(edges, focusNorms, buyer.companyName);
+    if (!network) return res.json({ network: null, reason: "no-activity" });
+
+    // Match related entities to existing CRM buyers so the client can link
+    // straight to a profile (or offer to create one). Keyed by entity norm.
+    const allBuyers = await prisma.buyer.findMany({
+      where: { organizationId: org },
+      select: { id: true, companyName: true, aliases: true },
+    });
+    const normToBuyer = new Map<string, string>();
+    for (const b of allBuyers) for (const k of buyerEntityKeys(b.companyName, b.aliases)) if (!normToBuyer.has(k)) normToBuyer.set(k, b.id);
+
+    const annotate = <T extends { norm: string }>(list: T[]) => list.map((x) => ({ ...x, buyerId: normToBuyer.get(x.norm) ?? null }));
+
+    res.json({
+      network: {
+        ...network,
+        classLabels: ENTITY_CLASS_LABEL,
+        topGrantors: annotate(network.topGrantors),
+        topGrantees: annotate(network.topGrantees),
+        coBuyers: annotate(network.coBuyers),
+        graph: {
+          ...network.graph,
+          nodes: network.graph.nodes.map((n) => ({ ...n, buyerId: normToBuyer.get(n.norm) ?? null })),
+        },
+      },
     });
   }),
 );

@@ -5,6 +5,7 @@ import { useAuth } from "../auth/AuthContext";
 import { Spinner, RelationshipDot, Banner, StageBadge, StatusBadge } from "../components/ui";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
+import { BuyerRelationships } from "../components/BuyerRelationships";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
 import { money, pct, fmtDate, toInputDate } from "../lib/format";
 import { formatPhone } from "../lib/phone";
@@ -209,6 +210,9 @@ export function BuyerProfile() {
           </div>
         )}
       </div>
+
+      {/* Relationships — transaction-network intelligence from research data */}
+      {!edit && <BuyerRelationships buyerId={b.id} />}
 
       {/* Deal History — every row clickable */}
       <div className="panel">
