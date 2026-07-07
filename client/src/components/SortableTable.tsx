@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
+import { Link } from "react-router-dom";
 
 export type SortType = "text" | "number" | "date";
 
@@ -19,6 +20,9 @@ interface Props<T> {
   rows: T[];
   rowKey: (row: T) => string;
   onRowClick?: (row: T) => void;
+  /** Route for the row's destination. Renders the first column as a real <Link>
+   *  so cmd/middle-click "open in new tab" works (row click still navigates). */
+  rowHref?: (row: T) => string;
   /** Optional default sort (overridden by user clicks). */
   defaultSort?: { key: string; dir: "asc" | "desc" };
   /** Optional grouping comparator applied before user picks a column. */
@@ -49,6 +53,7 @@ export function SortableTable<T>({
   rows,
   rowKey,
   onRowClick,
+  rowHref,
   defaultSort,
   defaultCompare,
   rowClassName,
@@ -135,11 +140,16 @@ export function SortableTable<T>({
                     <input type="checkbox" checked={selection.selected.has(id)} onChange={() => selection.onToggle(id)} aria-label="Select row" />
                   </td>
                 )}
-                {columns.map((c) => (
-                  <td key={c.key} className={c.align ?? "left"}>
-                    {c.render ? c.render(row) : displayDefault(c.value(row))}
-                  </td>
-                ))}
+                {columns.map((c, ci) => {
+                  const cell = c.render ? c.render(row) : displayDefault(c.value(row));
+                  return (
+                    <td key={c.key} className={c.align ?? "left"}>
+                      {rowHref && ci === 0
+                        ? <Link to={rowHref(row)} className="row-link" onClick={(e) => e.stopPropagation()}>{cell}</Link>
+                        : cell}
+                    </td>
+                  );
+                })}
               </tr>
             );})
           )}

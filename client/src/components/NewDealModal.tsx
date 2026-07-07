@@ -3,7 +3,7 @@ import { Modal } from "./ui";
 import { api, ApiError } from "../api/client";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
 import { GeoFields } from "./GeoFields";
-import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
+import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
 import type { DealSummary } from "../types";
 
 export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCreated: (d: DealSummary) => void }) {
@@ -30,7 +30,6 @@ export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCr
   if (!f.name.trim()) missing.push("Deal name");
   if (!states.length) missing.push("State");
   if (!counties.length) missing.push("County");
-  if (!abstractIds.length) missing.push("Abstract");
   if (f.nra.trim() === "") missing.push("NRA");
   if (!assetTypes.length) missing.push("Asset Type");
   if (f.ourPrice.trim() === "") missing.push("Our Price");
@@ -88,9 +87,9 @@ export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCr
           states={states} onStatesChange={setStates}
           counties={counties} onCountiesChange={setCounties}
           abstractIds={abstractIds} onAbstractsChange={setAbstractIds}
-          labels={{ state: "State *", county: "County *", abstract: "Abstract *" }}
+          labels={{ state: "State *", county: "County *", abstract: "Abstract (optional — add anytime for mapping)" }}
         />
-        <div className="field"><label>Asset Type <span style={{ color: "var(--red)" }}>*</span></label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
+        <div className="field"><label>Asset Type <span style={{ color: "var(--red)" }}>*</span></label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
         <div className="field"><label>NRA <span style={{ color: "var(--red)" }}>*</span></label><input type="number" value={f.nra} onChange={set("nra")} /></div>
         <div className="field"><label>Our Price (acquisition cost) <span style={{ color: "var(--red)" }}>*</span></label><input type="number" value={f.ourPrice} onChange={set("ourPrice")} /></div>
         <div className="field"><label>Date Under Contract <span style={{ color: "var(--red)" }}>*</span></label><input type="date" value={f.dateUnderContract} onChange={set("dateUnderContract")} /></div>

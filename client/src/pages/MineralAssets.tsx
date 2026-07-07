@@ -98,6 +98,7 @@ export function MineralAssets() {
             rows={assets}
             rowKey={(d) => d.id}
             onRowClick={(d) => nav(`/assets/${d.id}`)}
+            rowHref={(d) => `/assets/${d.id}`}
             defaultSort={{ key: "currentValue", dir: "desc" }}
             selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
           />

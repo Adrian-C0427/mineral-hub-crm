@@ -41,7 +41,8 @@ export function Dashboard() {
             Welcome to Mineral Hub! These metrics fill in as you work — here's where most teams begin:
           </p>
           <div className="row">
-            <Link to="/deals/active" className="primary" style={{ padding: "8px 14px", borderRadius: 8 }}>1 · Create your first deal</Link>
+            {/* ?new=1 opens the New Deal modal immediately — one click, not two. */}
+            <Link to="/deals/active?new=1" className="primary" style={{ padding: "8px 14px", borderRadius: 8 }}>1 · Create your first deal</Link>
             <Link to="/buyers" style={{ padding: "8px 14px", border: "1px solid var(--border)", borderRadius: 8 }}>2 · Add or import buyers</Link>
             <Link to="/valuation" style={{ padding: "8px 14px", border: "1px solid var(--border)", borderRadius: 8 }}>3 · Import well production data</Link>
           </div>
@@ -108,7 +109,7 @@ export function Dashboard() {
           <div className="panel-title"><h3>Top buyers YTD</h3></div>
           {d.topBuyers.length === 0 ? <p className="muted">No closed volume yet.</p> : d.topBuyers.map((b, i) => (
             <div className="list-row" key={b.id}>
-              <Link to={`/buyers/${b.id}`}>{i + 1}. {b.name} <span className="muted">· {b.companyName}</span></Link>
+              <Link to={`/buyers/${b.id}`}>{i + 1}. {b.name}{b.companyName && b.companyName !== b.name && <span className="muted"> · {b.companyName}</span>}</Link>
               <span>{money(b.volume)}</span>
             </div>
           ))}

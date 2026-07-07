@@ -1,7 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
 import { AbstractMultiPicker } from "./AbstractPicker";
-import { US_STATE_OPTIONS, countiesForStates } from "../lib/options";
+import { US_STATE_OPTIONS, US_STATE_LABELS, countiesForStates } from "../lib/options";
 
 /**
  * The single, canonical geographic hierarchy used everywhere in the app:
@@ -43,6 +43,8 @@ export function GeoFields({
   labels?: { state?: string; county?: string; abstract?: string };
 }) {
   const availableCounties = countyOptions ?? countiesForStates(states);
+  // Tell the user when a state change silently dropped county selections.
+  const [prunedNote, setPrunedNote] = useState<string | null>(null);
 
   // Cascade pruning: drop any selected county no longer valid for the chosen
   // states (unless the caller supplies its own option list).
@@ -50,9 +52,19 @@ export function GeoFields({
     if (countyOptions) return;
     const valid = new Set(availableCounties);
     const pruned = counties.filter((c) => valid.has(c));
-    if (pruned.length !== counties.length) onCountiesChange(pruned);
+    if (pruned.length !== counties.length) {
+      const dropped = counties.filter((c) => !valid.has(c));
+      setPrunedNote(`Removed ${dropped.join(", ")} — not in the selected state${states.length === 1 ? "" : "s"}.`);
+      onCountiesChange(pruned);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [states.join("|")]);
+  // The notice is transient — clear it a few seconds after it appears.
+  useEffect(() => {
+    if (!prunedNote) return;
+    const t = window.setTimeout(() => setPrunedNote(null), 6000);
+    return () => window.clearTimeout(t);
+  }, [prunedNote]);
 
   return (
     <>
@@ -60,6 +72,7 @@ export function GeoFields({
         <label>{labels?.state ?? "State"}</label>
         <SearchableMultiSelect
           options={[...US_STATE_OPTIONS]}
+          labels={US_STATE_LABELS}
           value={states}
           onChange={disabled ? () => {} : onStatesChange}
           placeholder="Search states…"
@@ -73,6 +86,7 @@ export function GeoFields({
           onChange={disabled ? () => {} : onCountiesChange}
           placeholder={states.length || countyOptions ? "Search counties…" : "Select a state first"}
         />
+        {prunedNote && <span className="muted" style={{ fontSize: 12 }}>{prunedNote}</span>}
       </div>
       {onAbstractsChange && (
         <div className="field">

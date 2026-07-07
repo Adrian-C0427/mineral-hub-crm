@@ -33,6 +33,12 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     res.status(err.status).json({ error: err.message });
     return;
   }
+  // A rejected Origin is a client/config problem, not a server fault — surface
+  // it as 403 with a clear message instead of a misleading "Internal server error".
+  if (err instanceof Error && err.message.startsWith("Origin not allowed by CORS")) {
+    res.status(403).json({ error: "This app's address isn't allowed to call the API (CORS). Check the server's CORS_ORIGINS setting." });
+    return;
+  }
   // Never leak internals; passwords/secrets are never logged.
   console.error("Unhandled error:", err instanceof Error ? err.message : err);
   res.status(500).json({ error: "Internal server error" });
