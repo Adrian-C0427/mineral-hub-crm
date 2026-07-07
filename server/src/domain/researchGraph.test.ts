@@ -105,8 +105,8 @@ describe("classifyEntity", () => {
   it("labels a recurring two-sided mover as a distributor", () => {
     expect(classifyEntity({ acquisitions: 5, dispositions: 5, distinctGrantors: 4, distinctGrantees: 4 })).toBe("DISTRIBUTOR");
   });
-  it("is unclassified below the activity floor", () => {
-    expect(classifyEntity({ acquisitions: 1, dispositions: 0, distinctGrantors: 1, distinctGrantees: 0 })).toBe("UNCLASSIFIED");
+  it("labels a single acquisition with no resale as a one-time buyer", () => {
+    expect(classifyEntity({ acquisitions: 1, dispositions: 0, distinctGrantors: 1, distinctGrantees: 0 })).toBe("ONE_TIME_BUYER");
   });
 });
 
