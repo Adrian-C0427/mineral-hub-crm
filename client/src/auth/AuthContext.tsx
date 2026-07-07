@@ -52,6 +52,17 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | undefined>(undefined);
 
+/** Reset the URL to "/" across an auth boundary. The provider mounts above the
+ *  router, so we go through the history API + popstate (which React Router
+ *  listens for). Without this, signing out strands the login form on a stale
+ *  deep link, and a fresh signup lands wherever the inviter last was. */
+function resetLocation() {
+  if (window.location.pathname !== "/") {
+    window.history.replaceState(null, "", "/");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [loading, setLoading] = useState(true);
@@ -84,12 +95,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const r = await api.post<{ token: string; user: CurrentUser }>("/auth/register", payload);
     setAuthToken(r.token);
     await refresh();
+    resetLocation(); // new members start on the Dashboard, not the inviter's last page
   };
 
   const logout = async () => {
     await api.post("/auth/logout").catch(() => {});
     setAuthToken(null);
     setUser(null);
+    resetLocation(); // back to the marketing site, not a stale in-app URL
   };
 
   const refresh = async () => {

@@ -19,6 +19,9 @@ interface BuyerRow {
   relationshipStatus: "HOT" | "WARM" | "COLD";
   closeRate: number;
   closedDeals: number;
+  source: string | null;
+  portalLead: boolean;
+  duplicateReview: boolean;
 }
 
 export function Buyers() {
@@ -36,7 +39,15 @@ export function Buyers() {
 
   const columns: Column<BuyerRow>[] = [
     { key: "buyer", header: "Buyer", type: "text", value: (b) => b.companyName,
-      render: (b) => <div><strong>{b.companyName}</strong>{b.contactName && <div className="muted" style={{ fontSize: 12 }}>{b.contactName}</div>}</div> },
+      render: (b) => (
+        <div>
+          <strong>{b.companyName}</strong>
+          {/* Provenance at a glance: portal-captured leads and fuzzy-match reviews. */}
+          {b.portalLead && <span className="badge" style={{ marginLeft: 6 }} title="Created or updated by a Buyer Portal submission">Portal lead</span>}
+          {b.duplicateReview && <span className="badge" style={{ marginLeft: 6, background: "var(--red)", color: "#fff" }} title="Possible duplicate of an existing buyer — review and merge if needed">Review</span>}
+          {b.contactName && <div className="muted" style={{ fontSize: 12 }}>{b.contactName}</div>}
+        </div>
+      ) },
     { key: "focus", header: "Focus Area", type: "text", value: (b) => b.focusArea },
     { key: "rel", header: "Relationship", type: "text", value: (b) => ({ HOT: 0, WARM: 1, COLD: 2 }[b.relationshipStatus]),
       render: (b) => <RelationshipDot status={b.relationshipStatus} /> },
@@ -60,6 +71,7 @@ export function Buyers() {
         rows={buyers}
         rowKey={(b) => b.id}
         onRowClick={(b) => nav(`/buyers/${b.id}`)}
+        rowHref={(b) => `/buyers/${b.id}`}
         defaultSort={{ key: "buyer", dir: "asc" }}
         empty="No buyers yet. Import a CSV or add one manually."
         selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { num } from "../../lib/format";
-import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../../lib/options";
+import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../../lib/options";
 import { SearchableMultiSelect } from "../../components/SearchableMultiSelect";
 import { GeoFields } from "../../components/GeoFields";
 import { PortalMap } from "./PortalMap";
@@ -97,7 +97,7 @@ export function PortalMarketplace() {
           />
           <div className="field"><label>Basin</label><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={fBasins} onChange={setFBasins} placeholder="Any basin" /></div>
           <div className="field"><label>Formation</label><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={fFormations} onChange={setFFormations} placeholder="Any formation" /></div>
-          <div className="field"><label>Asset type</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} value={fAssetTypes} onChange={setFAssetTypes} placeholder="Any type" /></div>
+          <div className="field"><label>Asset type</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={fAssetTypes} onChange={setFAssetTypes} placeholder="Any type" /></div>
           <div className="field"><label>Operator</label><SearchableMultiSelect options={options.operators} value={fOperators} onChange={setFOperators} placeholder="Any operator" /></div>
           <div className="field"><label>NRA min</label><input type="number" min="0" value={nraMin} onChange={(e) => setNraMin(e.target.value)} placeholder="0" /></div>
           <div className="field"><label>NRA max</label><input type="number" min="0" value={nraMax} onChange={(e) => setNraMax(e.target.value)} placeholder="No max" /></div>
@@ -271,7 +271,7 @@ function LeadCapture({ orgSlug }: { orgSlug: string }) {
           />
           <div className="field"><label>Basins</label><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={f.basins} onChange={set("basins")} placeholder="Any" /></div>
           <div className="field"><label>Formations</label><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={f.formations} onChange={set("formations")} placeholder="Any" /></div>
-          <div className="field"><label>Asset types</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} value={f.assetTypes} onChange={set("assetTypes")} placeholder="Any" /></div>
+          <div className="field"><label>Asset types</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={f.assetTypes} onChange={set("assetTypes")} placeholder="Any" /></div>
           <div className="field"><label>Min acreage</label><input type="number" min="0" value={f.minAcreage} onChange={(e) => set("minAcreage")(e.target.value)} /></div>
           <div className="field"><label>Max acreage</label><input type="number" min="0" value={f.maxAcreage} onChange={(e) => set("maxAcreage")(e.target.value)} /></div>
           <div className="field"><label>Min deal size ($)</label><input type="number" min="0" value={f.minPrice} onChange={(e) => set("minPrice")(e.target.value)} /></div>

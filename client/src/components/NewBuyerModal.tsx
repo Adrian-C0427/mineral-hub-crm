@@ -4,7 +4,7 @@ import { api, ApiError } from "../api/client";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
 import { PhoneInput } from "./PhoneInput";
 import { GeoFields } from "./GeoFields";
-import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS } from "../lib/options";
+import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
 
 /**
  * Standardized New Buyer template — the buyer counterpart of NewDealModal.
@@ -101,7 +101,7 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
         />
         <div className="field"><label>Basins</label><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={basins} onChange={setBasins} placeholder="Search basins…" /></div>
         <div className="field"><label>Formations</label><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={formations} onChange={setFormations} placeholder="Search formations…" /></div>
-        <div className="field"><label>Asset types</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
+        <div className="field"><label>Asset types</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
         <div className="field"><label>Min acreage</label><input type="number" value={f.minAcreage} onChange={set("minAcreage")} /></div>
         <div className="field"><label>Max acreage</label><input type="number" value={f.maxAcreage} onChange={set("maxAcreage")} /></div>
         <div className="field"><label>Min price</label><input type="number" value={f.minPrice} onChange={set("minPrice")} /></div>

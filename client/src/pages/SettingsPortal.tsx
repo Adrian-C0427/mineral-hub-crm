@@ -220,7 +220,10 @@ function ContactEditor({ contact, onClose, onSaved, onError }: { contact: Portal
     const payload = {
       name: f.name.trim(), title: f.title.trim() || null, email: f.email.trim() || null,
       phone: f.phone.trim() || null, department: f.department.trim() || null,
-      photo: f.photo, published: f.published, isPrimary: f.isPrimary,
+      photo: f.photo, published: f.published,
+      // On create, only send isPrimary when checked — the server auto-promotes
+      // the first contact to primary, and an explicit false would defeat that.
+      ...(contact || f.isPrimary ? { isPrimary: f.isPrimary } : {}),
     };
     try {
       if (contact) await api.patch(`/org/portal-contacts/${contact.id}`, payload);

@@ -10,7 +10,7 @@ import { STALE_CONTACT_DAYS } from "../config.js";
 import { daysUntil } from "../domain/dates.js";
 import { logActivity } from "../services/activityLog.js";
 import { effectiveStatus, ENGAGED_STATUSES, BUYER_STATUSES } from "../domain/buyerStatus.js";
-import { sendEmail, personalize, toHtmlBody } from "../services/email.js";
+import { sendEmail, personalize, renderEmailBody } from "../services/email.js";
 import { money as fmtMoney } from "../domain/format.js";
 import { newPortalSlug } from "./portal.js";
 
@@ -152,8 +152,9 @@ dealsRouter.post(
       const states = data.states ?? (data.state ? [data.state] : []);
       const req_: [boolean, string][] = [
         [states.length > 0, "State"],
+        // Abstract is intentionally NOT required: cadastral coverage only exists
+        // for GIS-imported counties, and deals elsewhere must still be creatable.
         [(data.counties ?? []).length > 0, "County"],
-        [(data.abstractIds ?? []).length > 0, "Abstract"],
         [data.nra != null, "NRA"],
         [(data.assetTypes ?? []).length > 0, "Asset Type"],
         [data.ourPrice != null, "Our Price"],
@@ -414,10 +415,12 @@ dealsRouter.post(
         county: deal.counties.join(", "), askPrice: deal.askPrice != null ? fmtMoney(deal.askPrice) : "",
         sender: req.user!.name,
       };
+      // Subject stays plain text; the body is escaped exactly once inside
+      // renderEmailBody (fixes double-encoded "&amp;" in delivered emails).
       const finalSubject = personalize(subject, tokens);
-      const finalBody = personalize(body, tokens);
+      const finalBody = renderEmailBody(body, tokens);
       try {
-        await sendEmail({ to: b.email, subject: finalSubject, html: toHtmlBody(finalBody), replyTo: req.user!.email });
+        await sendEmail({ to: b.email, subject: finalSubject, html: finalBody, replyTo: req.user!.email });
       } catch (e) {
         // First failure (e.g. SMTP not configured) aborts with a clear error.
         if (sent.length === 0) throw e;
@@ -857,13 +860,15 @@ dealsRouter.post(
     // Only buyers in this org.
     const buyers = await prisma.buyer.findMany({ where: { id: { in: buyerIds }, organizationId: orgId(req) }, select: { id: true } });
     const now = new Date();
-    for (const b of buyers) {
-      await prisma.dealBuyerActivity.upsert({
+    // One batched transaction instead of a sequential await per buyer — bulk
+    // marking 50 buyers was 50 round-trips.
+    await prisma.$transaction(buyers.map((b) =>
+      prisma.dealBuyerActivity.upsert({
         where: { dealId_buyerId: { dealId: deal.id, buyerId: b.id } },
         create: { dealId: deal.id, buyerId: b.id, status: "CONTACTED", dateSent: now, lastActivityDate: now, sentByUserId: req.user!.id },
         update: { lastActivityDate: now },
-      });
-    }
+      }),
+    ));
     res.json({ ok: true, count: buyers.length });
   }),
 );
@@ -880,8 +885,10 @@ dealsRouter.post(
     const { offerId } = acceptSchema.parse(req.body);
     const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!deal) throw new HttpError(404, "Deal not found");
-    const offer = await prisma.offer.findUnique({ where: { id: offerId } });
-    if (!offer || offer.dealId !== req.params.id) throw new HttpError(404, "Offer not found on this deal");
+    // Scope the offer lookup to this (already org-verified) deal so a
+    // caller-supplied offerId can't reach another org's offer.
+    const offer = await prisma.offer.findFirst({ where: { id: offerId, dealId: deal.id } });
+    if (!offer) throw new HttpError(404, "Offer not found on this deal");
 
     // Accepting moves the deal into the closing process and pulls the offering
     // from the public portal so it's no longer marketed to other buyers. Buyer

@@ -64,6 +64,11 @@ buyersRouter.get(
           closeRate: cr.rate,
           closedDeals: cr.closedWon,
           active: b.active,
+          // Provenance flags so portal leads and review-needed profiles are
+          // visually distinguishable in the list.
+          source: b.source,
+          portalLead: b.portalSubmittedAt != null,
+          duplicateReview: b.duplicateReview,
         };
       }),
     );

@@ -5,6 +5,7 @@ import { Spinner } from "../components/ui";
 import { NewDealModal } from "../components/NewDealModal";
 import { StageChangeModal } from "../components/StageChangeModal";
 import { money, num, fmtDate, prettyStage } from "../lib/format";
+import { useAuth } from "../auth/AuthContext";
 import type { DealSummary, Stage } from "../types";
 
 // The Pipeline shows only ACTIVE-lifecycle stages as columns. Closed and Dead
@@ -31,6 +32,11 @@ export function Pipeline() {
   // deal's current stage so any destination — including Closed/Dead — is a click away.
   const [moving, setMoving] = useState<DealSummary | null>(null);
   const nav = useNavigate();
+  const { can } = useAuth();
+  // Viewers can browse the board but not create deals or change stages —
+  // hiding the affordances beats letting them click into a 403.
+  const canCreate = can("createDeals");
+  const canMove = can("editDeals");
 
   // The pipeline is the acquisition board — opportunities only. Owned mineral
   // assets are managed in their own module and never appear here.
@@ -55,13 +61,13 @@ export function Pipeline() {
         <div className="row">
           <h1 style={{ marginBottom: 0 }}>Pipeline</h1>
         </div>
-        <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>
+        {canCreate && <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>}
       </div>
 
       {/* Transition targets live ABOVE the board so they're always on-screen
           (the board scrolls horizontally). Dropping a card here — or using a
           card's ⋯ button — prompts the Closed/Archive confirmation. */}
-      <div className="transition-bar">
+      {canMove && <div className="transition-bar">
         {TRANSITIONS.map((t) => (
           <div
             key={t.stage}
@@ -74,7 +80,7 @@ export function Pipeline() {
             <span className="muted" style={{ fontSize: 11 }}>{t.hint}</span>
           </div>
         ))}
-      </div>
+      </div>}
 
       <div className="kanban">
         {COLUMNS.map((col) => {
@@ -93,7 +99,7 @@ export function Pipeline() {
               </div>
               <div className="kanban-col-body">
                 {colDeals.map((d) => (
-                  <Card key={d.id} deal={d} onDragStart={() => setDragId(d.id)} onClick={() => nav(`/deals/${d.id}`)} onMove={() => setMoving(d)} />
+                  <Card key={d.id} deal={d} canMove={canMove} onDragStart={() => setDragId(d.id)} onClick={() => nav(`/deals/${d.id}`)} onMove={() => setMoving(d)} />
                 ))}
               </div>
             </div>
@@ -121,22 +127,22 @@ export function Pipeline() {
   );
 }
 
-function Card({ deal, onDragStart, onClick, onMove }: { deal: DealSummary; onDragStart: () => void; onClick: () => void; onMove: () => void }) {
+function Card({ deal, canMove, onDragStart, onClick, onMove }: { deal: DealSummary; canMove: boolean; onDragStart: () => void; onClick: () => void; onMove: () => void }) {
   const isClosing = deal.stage === "CLOSING";
   const isDead = deal.stage === "DEAD";
   return (
     <div
       className={`deal-card prio-${deal.priority.toLowerCase()} ${isDead ? "dead" : ""}`}
-      draggable
-      onDragStart={onDragStart}
+      draggable={canMove}
+      onDragStart={canMove ? onDragStart : undefined}
       onClick={onClick}
     >
-      <button
+      {canMove && <button
         className="dc-move"
         title="Move to another stage"
         aria-label={`Move ${deal.name} to another stage`}
         onClick={(e) => { e.stopPropagation(); onMove(); }}
-      >⋯</button>
+      >⋯</button>}
       <div className="dc-name">{deal.name}</div>
       <div className="dc-meta">
         <span>{[deal.counties.join(", "), deal.state].filter(Boolean).join(", ") || "—"}</span>

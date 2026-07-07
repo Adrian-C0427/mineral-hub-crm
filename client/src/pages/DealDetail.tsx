@@ -14,7 +14,7 @@ import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { useAbstractLabels } from "../components/AbstractPicker";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
-import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
+import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
 import { operatorsForCounties } from "../lib/operators";
 import { money, num, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
@@ -76,7 +76,10 @@ export function DealDetail() {
   if (!deal) return <Spinner />;
 
   const refreshAll = () => { loadDeal(); loadMatches(); };
-  const hasUnresolved = deal.buyerActivity.some((a) => a.status === "CONTACTED");
+  // "Awaiting a response" means contacted AND no response yet — a buyer who
+  // replied (responseReceived) isn't pending even if their status is still
+  // Contacted.
+  const hasUnresolved = deal.buyerActivity.some((a) => a.status === "CONTACTED" && !a.responseReceived);
 
   const toggleMatch = (buyerId: string) =>
     setSelected((prev) => { const n = new Set(prev); n.has(buyerId) ? n.delete(buyerId) : n.add(buyerId); return n; });
@@ -108,7 +111,7 @@ export function DealDetail() {
         </div>
         <div className="row">
           {can("deleteDeals") && <button className="danger" onClick={() => setConfirmDelete(true)}>Delete</button>}
-          <button className="primary" onClick={() => setShowStage(true)}>Move Stage</button>
+          {can("editDeals") && <button className="primary" onClick={() => setShowStage(true)}>Move Stage</button>}
         </div>
       </div>
 
@@ -161,7 +164,7 @@ export function DealDetail() {
         <div className="panel">
           <div className="row">
             <strong>Selected buyer:</strong> <Link to={`/buyers/${deal.selectedBuyer.id}`}>{deal.selectedBuyer.name}</Link>
-            <span className="muted">· {deal.selectedBuyer.companyName}</span>
+            {deal.selectedBuyer.companyName && deal.selectedBuyer.companyName !== deal.selectedBuyer.name && <span className="muted">· {deal.selectedBuyer.companyName}</span>}
             <span className="spacer" />
             <strong>Profit est:</strong> <span>{money(deal.profitEst)}</span>
           </div>
@@ -185,7 +188,7 @@ export function DealDetail() {
                     <td>{o.conditions ?? "—"}</td>
                     <td className="right">
                       {deal.selectedOfferId === o.id ? <span className="badge resp-offer">Accepted</span> :
-                        <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button>}
+                        can("editDeals") ? <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button> : null}
                     </td>
                   </tr>
                 ))}
@@ -202,7 +205,9 @@ export function DealDetail() {
           dealId={deal.id}
           rows={deal.buyerActivity}
           onChanged={refreshAll}
+          canEdit={can("editDeals")}
           onEdit={(r) => setLogBuyer({ id: r.buyerId, name: r.buyerName, initial: { status: r.status, assignedTeamMemberId: r.assignedTeamMember?.id ?? null, notes: r.notes, dateSent: r.dateSent, nextFollowUpDate: r.nextFollowUpDate } })}
+          onRecordOffer={can("editDeals") ? (r) => setLogBuyer({ id: r.buyerId, name: r.buyerName, initial: { status: "OFFER_RECEIVED", assignedTeamMemberId: r.assignedTeamMember?.id ?? null, notes: r.notes, dateSent: r.dateSent, nextFollowUpDate: r.nextFollowUpDate } }) : undefined}
         />
       </div>
 
@@ -247,8 +252,9 @@ export function DealDetail() {
                   {m.nonMatching.map((c) => <span key={c.key} className="crit-tag crit-no">{c.label}</span>)}
                 </div>
                 <div className="dc-meta" style={{ marginTop: 8, justifyContent: "space-between" }}>
-                  <span>Owner(s): {m.owners.length ? m.owners.join(", ") : "—"} · {m.previousDealsClosed} closed together · Last contact: {fmtDate(m.lastContactDate)}
-                    {m.stale && <span className="stale-flag"> · stale</span>}</span>
+                  <span>Owner(s): {m.owners.length ? m.owners.join(", ") : "—"} · {m.previousDealsClosed} closed together · Last contact: {m.lastContactDate ? fmtDate(m.lastContactDate) : "never"}
+                    {/* "stale" only makes sense for aged contact — a never-contacted buyer isn't stale. */}
+                    {m.stale && m.lastContactDate && <span className="stale-flag" title="No contact in a while — worth a follow-up"> · stale</span>}</span>
                   {can("editDeals") && <button className="small" onClick={() => setLogBuyer({ id: m.buyerId, name: m.buyerName })}>Log contact</button>}
                 </div>
               </div>
@@ -402,7 +408,7 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
           />
           <Fld l="Basin"><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(f.counties))} value={f.basins} onChange={setArr("basins")} placeholder="Search basins…" /></Fld>
           <Fld l="Formation"><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(f.counties))} value={f.formations} onChange={setArr("formations")} placeholder="Search formations…" /></Fld>
-          <Fld l="Asset Type"><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} value={f.assetTypes} onChange={setArr("assetTypes")} placeholder="Search asset types…" /></Fld>
+          <Fld l="Asset Type"><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={f.assetTypes} onChange={setArr("assetTypes")} placeholder="Search asset types…" /></Fld>
           <Fld l="NMA"><input type="number" value={f.acreageNma ?? ""} onChange={setNum("acreageNma")} /></Fld>
           <Fld l="NRA"><input type="number" value={f.nra ?? ""} onChange={setNum("nra")} /></Fld>
           <Fld l="Our Price"><input type="number" value={f.ourPrice ?? ""} onChange={setNum("ourPrice")} /></Fld>

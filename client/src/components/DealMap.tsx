@@ -28,6 +28,9 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
   const layersRef = useRef(layers); layersRef.current = layers;
   const [selected, setSelected] = useState<Sel>(null);
   const idSet = useMemo(() => new Set(abstractIds), [abstractIds]);
+  // Latest ids for the async map-load handler (the map mounts once, but the
+  // deal's abstracts can be edited while it lives).
+  const idsRef = useRef(abstractIds); idsRef.current = abstractIds;
 
   useEffect(() => {
     if (mapRef.current || !container.current) return;
@@ -38,7 +41,7 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
     map.on("load", async () => {
       // County label points (shared layer stack) + this deal's own abstract
       // geometry (fill / hull / zoom-to-fit). Everything else streams as tiles.
-      const ids = [...idSet];
+      const ids = [...idsRef.current];
       const [countyLabels, dealFC] = await Promise.all([
         fetch(`/data/county-labels.geojson`).then((r) => r.json()).catch(() => ({ type: "FeatureCollection", features: [] })),
         ids.length
@@ -91,6 +94,34 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
     vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores);
   }
   useEffect(applyVis, [layers]);
+
+  // Keep the highlighted deal geometry in sync when abstracts are edited on
+  // the deal page — previously the map only ever showed the mount-time set.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready.current) return;
+    let cancelled = false;
+    (async () => {
+      const ids = [...idSet];
+      const dealFC = ids.length
+        ? await api.get<FC>(`/gis/features?ids=${encodeURIComponent(ids.join(","))}`).catch(() => ({ type: "FeatureCollection", features: [] } as FC))
+        : ({ type: "FeatureCollection", features: [] } as FC);
+      if (cancelled) return;
+      const src = map.getSource("deal") as maplibregl.GeoJSONSource | undefined;
+      const outline = map.getSource("deal-outline") as maplibregl.GeoJSONSource | undefined;
+      if (!src || !outline) return;
+      src.setData(dealFC as unknown as GeoJSON.FeatureCollection);
+      const pts = dealFC.features.flatMap((f) => collectCoords(f.geometry));
+      const hull = convexHull(pts);
+      outline.setData({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [hull] } } as unknown as GeoJSON.Feature);
+      if (pts.length) {
+        const [w, s, e, n] = bboxOfPoints(pts);
+        map.fitBounds([[w, s], [e, n]], { padding: 40, maxZoom: 14 });
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abstractIds.join("|")]);
 
   const toggle = (k: keyof typeof layers) => setLayers((p) => ({ ...p, [k]: !p[k] }));
   const Chk = ({ k, label }: { k: keyof typeof layers; label: string }) => (

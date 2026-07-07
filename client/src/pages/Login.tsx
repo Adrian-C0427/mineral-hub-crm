@@ -198,6 +198,9 @@ export function Login() {
                 <>Already have an account? <a href="#" onClick={(e) => { e.preventDefault(); switchMode("login"); }}>Sign in</a></>
               )}
             </p>
+            <p className="muted" style={{ textAlign: "center", marginTop: 8, marginBottom: 0, fontSize: 12 }}>
+              <a href="/">← Back to site</a>
+            </p>
           </>
         )}
       </form>

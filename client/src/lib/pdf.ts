@@ -1,13 +1,14 @@
-import html2canvas from "html2canvas";
-import { jsPDF } from "jspdf";
-
 /**
  * Render a DOM element to a professional multi-page A4 PDF, faithfully
  * capturing what's on screen. The element should already contain the report
  * header (title, date, period, filters, executive summary), KPIs, charts and
  * tables — this just rasterizes and paginates it.
+ *
+ * html2canvas + jsPDF (~350 KB combined) load on first export, not with the
+ * page chunk — most report views never export.
  */
 export async function exportElementToPdf(el: HTMLElement, filename: string): Promise<void> {
+  const [{ default: html2canvas }, { jsPDF }] = await Promise.all([import("html2canvas"), import("jspdf")]);
   // The app is dark-themed; flip the captured region to dark-on-white so the
   // PDF is readable on paper (see `.report-capture.pdf-light` in styles.css).
   el.classList.add("pdf-light");
