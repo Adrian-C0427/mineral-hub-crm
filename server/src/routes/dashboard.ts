@@ -121,6 +121,42 @@ dashboardRouter.get(
     const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
     const profitByMonth = monthNames.map((label, i) => ({ month: label, profit: monthly.get(i) ?? 0, projected: monthlyProjected.get(i) ?? 0 }));
 
+    // --- KPI trends (sparkline series — real history, never fabricated) ------
+    const weekMs = 7 * 24 * 3600 * 1000;
+    const weekMarks = Array.from({ length: 8 }, (_, i) => new Date(now.getTime() - (7 - i) * weekMs));
+
+    // Active deals over the last 8 weeks: a deal counts as active from creation
+    // until its FIRST Closed/Dead transition. (A re-opened deal approximates as
+    // inactive after that first exit — fine for a trend line.)
+    const pipelineHistory = await prisma.deal.findMany({
+      where: { organizationId: org, ...IN_PIPELINE },
+      select: {
+        createdAt: true,
+        stageHistory: { where: { toStage: { in: ["CLOSED", "DEAD"] } }, orderBy: { createdAt: "asc" }, take: 1, select: { createdAt: true } },
+      },
+    });
+    const activeDealsWeekly = weekMarks.map(
+      (t) => pipelineHistory.filter((d) => d.createdAt <= t && !(d.stageHistory[0] && d.stageHistory[0].createdAt <= t)).length,
+    );
+
+    // Avg deal size as a running average across closes (last 8 points).
+    const closesAsc = closedDeals
+      .filter((d) => d.selectedOffer)
+      .sort((a, b) => (a.stageHistory[0]?.createdAt ?? a.updatedAt).getTime() - (b.stageHistory[0]?.createdAt ?? b.updatedAt).getTime());
+    let closeSum = 0;
+    const avgDealSizeTrend = closesAsc.map((d, i) => { closeSum += d.selectedOffer!.amount; return closeSum / (i + 1); }).slice(-8);
+
+    // Offers RECEIVED per week (pending-status history isn't stored, so the
+    // honest series for the offers card is submission volume).
+    const offersRecent = await prisma.offer.findMany({
+      where: { deal: { organizationId: org, ...IN_PIPELINE }, dateSubmitted: { gte: new Date(now.getTime() - 8 * weekMs) } },
+      select: { dateSubmitted: true },
+    });
+    const offersWeekly = weekMarks.map((t, i) => {
+      const from = i === 0 ? new Date(t.getTime() - weekMs) : weekMarks[i - 1];
+      return offersRecent.filter((o) => o.dateSubmitted > from && o.dateSubmitted <= t).length;
+    });
+
     res.json({
       metrics: {
         activeDeals,
@@ -140,6 +176,7 @@ dashboardRouter.get(
       recentActivity: recent.map((r) => ({ id: r.id, summary: r.summary, eventType: r.eventType, createdAt: r.createdAt, dealId: r.dealId, buyerId: r.buyerId })),
       topBuyers,
       profitByMonth,
+      trends: { activeDealsWeekly, avgDealSize: avgDealSizeTrend, offersWeekly },
     });
   }),
 );

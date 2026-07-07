@@ -518,24 +518,81 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .spinner { padding: 40px; text-align: center; color: var(--text-dim); }
 .list-row { display:flex; justify-content:space-between; align-items:center; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .list-row:last-child { border-bottom: none; }
-.bar-chart { display:flex; align-items:flex-end; gap: 6px; height: 160px; padding-top: 10px; }
-.bar-col { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height: 100%; gap: 4px; }
-.bar-pair { display:flex; align-items:flex-end; justify-content:center; gap: 2px; width: 100%; height: 100%; }
+/* Profit-by-month chart, per the design: paired bars (realized | projected)
+   with 3px rounded tops over a 130px plot area. Bars only render when the
+   month has a value — no baseline slivers. */
+.bar-chart { display:flex; align-items:flex-end; gap: 9px; height: 156px; margin-top: 20px; }
+.bar-col { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height: 100%; gap: 6px; }
+.bar-zone { display:flex; align-items:flex-end; gap: 2px; width: 100%; height: 130px; }
 /* Stacked bar: projected sits on top of realized as one cumulative column. */
-.bar-stack { display:flex; flex-direction: column; justify-content:flex-end; align-items:center; width: 60%; height: 100%; }
-.bar-stack .bar { width: 100%; border-radius: 0; }
-.bar-stack .bar-projected { border-radius: 3px 3px 0 0; }
-.bar { width: 34%; background: var(--green); border-radius: 3px 3px 0 0; min-height: 2px; }
-.bar-projected { background: var(--accent); opacity: 0.6; }
+.bar { flex: 1; background: var(--green); border-radius: 3px 3px 0 0; }
+.bar-projected { background: var(--accent); opacity: 0.55; }
+:root[data-theme="light"] .bar-projected { opacity: 0.45; }
 .bar-label { font-size: 10px; color: var(--text-dim); }
 
-/* Active-deals-by-stage: horizontal count bars, one per pipeline stage. */
-.stage-counts { display: flex; flex-direction: column; gap: 4px; padding-top: 4px; }
-.stage-count-row { display: grid; grid-template-columns: 150px 1fr 32px; align-items: center; gap: 10px; padding: 6px 4px; border-radius: 6px; color: inherit; }
-.stage-count-row:hover { background: var(--panel-2); text-decoration: none; }
-.stage-count-bar { height: 8px; background: var(--panel-2); border-radius: 4px; overflow: hidden; }
-.stage-count-fill { display: block; height: 100%; background: var(--accent); border-radius: 4px; min-width: 2px; }
-.stage-count-num { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
+/* ===========================================================================
+   Dashboard (design-system look, copied from the Claude Design mockup).
+   Scoped to dash-* classes so nothing outside the Dashboard changes.
+   =========================================================================== */
+.dash-title { font-size: 19px; font-weight: 700; margin: 0; }
+.dash-sub { font-size: 12px; color: var(--text-dim); }
+.dash-icon-btn { width: 34px; height: 34px; padding: 0; border-radius: 8px; background: var(--panel); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; color: var(--text-dim); }
+.dash-icon-btn:hover { color: var(--text); background: var(--panel); border-color: var(--text-dim); }
+.dash-h3 { font-size: 14.5px; font-weight: 700; margin: 0; }
+.dash-kpis { margin-bottom: 16px; }
+.dash-kpi-label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
+.dash-kpi-row { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; }
+.dash-kpi-value { font-size: 28px; font-weight: 600; line-height: 1.1; }
+.dash-delta { font-size: 11.5px; font-weight: 600; }
+.dash-delta.up { color: var(--green); }
+.dash-delta.down { color: #ef8f6b; }
+:root[data-theme="light"] .dash-delta.down { color: #c2543a; }
+
+/* Overdue alert — tinted amber strip with a round "!" icon. */
+.dash-alert { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.28); border-radius: 12px; padding: 12px 16px; font-size: 13px; }
+.dash-alert-icon { width: 20px; height: 20px; border-radius: 50%; background: var(--amber); color: #0b0e14; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; flex: none; }
+.dash-alert-text { color: #f4c98a; }
+.dash-alert-text b { color: #fbe3b8; }
+.dash-alert-text a { color: #fff; text-decoration: underline; }
+:root[data-theme="light"] .dash-alert { background: #fdf3e4; border-color: rgba(217,119,6,0.35); }
+:root[data-theme="light"] .dash-alert-icon { color: #fff; }
+:root[data-theme="light"] .dash-alert-text { color: #92510a; }
+:root[data-theme="light"] .dash-alert-text b { color: #7a4308; }
+:root[data-theme="light"] .dash-alert-text a { color: #131722; }
+
+/* Section grids: chart+funnel (1.55fr/1fr), then two equal panels. */
+.dash-main { display: grid; grid-template-columns: 1.55fr 1fr; gap: 16px; margin-bottom: 16px; }
+.dash-duo { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+.dash-main .panel, .dash-duo .panel { margin-bottom: 0; }
+@media (max-width: 900px) { .dash-main, .dash-duo { grid-template-columns: 1fr; } }
+
+.dash-swatch { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.dash-swatch-proj { background: var(--accent); opacity: 0.55; }
+:root[data-theme="light"] .dash-swatch-proj { opacity: 0.45; }
+
+/* Stage funnel: label + count over a slim colored track. */
+.dash-funnel { display: flex; flex-direction: column; gap: 11px; }
+.dash-fun-row { display: block; color: inherit; }
+.dash-fun-row:hover { text-decoration: none; }
+.dash-fun-row:hover .dash-soft { color: var(--text); }
+.dash-fun-head { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 5px; }
+.dash-fun-track { display: block; height: 7px; background: rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden; }
+:root[data-theme="light"] .dash-fun-track { background: rgba(19,23,34,0.07); }
+.dash-fun-fill { display: block; height: 100%; border-radius: 4px; min-width: 2px; }
+
+/* Feed / ranked rows (recent activity, top buyers, follow-ups). */
+.dash-soft { color: #c7cddb; }
+.dash-faintish { color: var(--text-dim); }
+.dash-faint { color: #5b6478; }
+:root[data-theme="light"] .dash-soft { color: #475467; }
+:root[data-theme="light"] .dash-faint { color: #98a2b3; }
+.dash-feed-row { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 12.5px; }
+.dash-rank-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); font-size: 12.5px; }
+:root[data-theme="light"] .dash-feed-row, :root[data-theme="light"] .dash-rank-row { border-bottom-color: rgba(19,23,34,0.06); }
+.dash-feed-row:last-child, .dash-rank-row:last-child { border-bottom: none; }
+.dash-rank-name { flex: 1; color: var(--text); }
+.dash-rank-name:hover { text-decoration: underline; }
+.dash-rank-amt { color: var(--text); font-weight: 600; }
 .error-text { color: var(--red); font-size: 13px; margin-top: 8px; }
 .progress { height: 8px; background: var(--bg); border-radius: 100px; overflow: hidden; margin: 10px 0; }
 .progress-fill { height: 100%; background: var(--accent); }
