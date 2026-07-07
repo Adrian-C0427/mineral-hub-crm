@@ -291,16 +291,16 @@ function Comparison() {
         <div className="lp-compare-col generic">
           <div className="lp-eyebrow gray">Generic CRM</div>
           <span><b className="x">✕</b>"Opportunity" pipelines you rebuild from scratch</span>
-          <span><b className="x">✕</b>Decimal interests jammed into text fields</span>
-          <span><b className="x">✕</b>Buyer lists living in someone's spreadsheet</span>
-          <span><b className="x">✕</b>Deadlines tracked in your head</span>
+          <span><b className="x">✕</b>Your buyer list lives in someone's spreadsheet</span>
+          <span><b className="x">✕</b>A deal's location is one address text box</span>
+          <span><b className="x">✕</b>Valuation happens in a workbook nobody trusts</span>
         </div>
         <div className="lp-compare-col ours">
           <div className="lp-eyebrow blue">Mineral Hub</div>
           <span><b className="ck">✓</b>Mineral deal stages, ready on day one</span>
-          <span><b className="ck">✓</b>NRA, NMA, RI/ORRI/NPRI &amp; $/acre as first-class fields</span>
-          <span><b className="ck">✓</b>A buyer network ranked by real performance</span>
-          <span><b className="ck">✓</b>"Find Buyer By" alerts before deals go stale</span>
+          <span><b className="ck">✓</b>Every buyer matched and ranked against every deal by their buy box</span>
+          <span><b className="ck">✓</b>Every tract drawn on the live county survey map — abstracts, wells, and all</span>
+          <span><b className="ck">✓</b>Decline curves, PV-10, and a defensible offer number built in</span>
         </div>
       </div>
     </section>
