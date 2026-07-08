@@ -21,6 +21,7 @@ import { downloadCsv } from "../lib/csv";
 import { SellerDetails } from "../components/SellerDetails";
 import { DealPortalPanel } from "../components/DealPortalPanel";
 import { AssigneePicker } from "../components/AssigneePicker";
+import { DocumentsSection, DEAL_DOC_FOLDERS, type DocFile } from "../components/DocumentsSection";
 import type { BuyerActivityRow, DealSummary, MatchRec, Seller, UserLite } from "../types";
 // MapLibre is heavy; only load it when a deal detail page is viewed.
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
@@ -38,15 +39,6 @@ interface DealDetailData extends DealSummary {
   canViewTaxId: boolean;
   metrics: { buyersContacted: number; interested: number; offers: number; highOffer: number | null };
 }
-
-interface DocFile {
-  id: string; category: string; folder: string; filename: string; mimeType: string;
-  sizeBytes: number; uploadedBy: string | null; createdAt: string; updatedAt: string; versionCount: number;
-}
-
-// Default document folders. `folder` is a free string server-side, so this list
-// can grow (or become org-configurable) without any schema/route change.
-const DOC_FOLDERS = ["Seller PSA", "Wholesale PSA", "Check Stubs", "Division Orders", "Deeds", "Title", "Other"];
 
 interface EditTarget { id: string; name: string; initial?: { status?: BuyerActivityRow["status"]; assignedTeamMemberId?: string | null; notes?: string | null; dateSent?: string | null; nextFollowUpDate?: string | null } }
 
@@ -121,11 +113,9 @@ export function DealDetail() {
       {deal.stage === "DEAD" && deal.deadReason && <Banner kind="error">Dead: {deal.deadReason}</Banner>}
 
       <div className="dd-top-grid">
-        <CharacteristicsCard deal={deal} onSaved={refreshAll} />
+        <CharacteristicsCard deal={deal} users={users} canEdit={can("editDeals")} onSaved={refreshAll} />
         <ContractTimelineCard deal={deal} onSaved={loadDeal} />
       </div>
-
-      <AssigneesCard deal={deal} users={users} canEdit={can("editDeals")} onSaved={loadDeal} />
 
       <SellerDetails
         dealId={deal.id}
@@ -269,7 +259,7 @@ export function DealDetail() {
       </div>
 
       {/* Documents */}
-      <DocumentsSection dealId={deal.id} files={deal.files} onChanged={loadDeal} canEdit={can("manageDocuments")} canDelete={can("manageDocuments")} />
+      <DocumentsSection ownerType="deal" ownerId={deal.id} files={deal.files} folders={DEAL_DOC_FOLDERS} onChanged={loadDeal} canEdit={can("manageDocuments")} canDelete={can("manageDocuments")} />
 
       {showStage && (
         <StageChangeModal
@@ -339,33 +329,14 @@ export function DealDetail() {
   );
 }
 
-function AssigneesCard({ deal, users, canEdit, onSaved }: { deal: DealDetailData; users: UserLite[]; canEdit: boolean; onSaved: () => void }) {
-  const ids = (deal.assignees ?? []).map((a) => a.id);
-  async function save(next: string[]) {
-    await api.patch(`/deals/${deal.id}`, { assigneeIds: next });
-    onSaved();
-  }
-  return (
-    <div className="panel assignees-card">
-      <div className="section-head" style={{ marginBottom: 10 }}>
-        <h3 style={{ margin: 0 }}>Assigned Team Members</h3>
-        <span className="muted" style={{ fontSize: 12 }}>{ids.length ? `${ids.length} assigned` : "Unassigned"}</span>
-      </div>
-      {canEdit ? (
-        <AssigneePicker users={users} value={ids} onChange={save} />
-      ) : (
-        <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-          {ids.length === 0 ? <span className="muted">Unassigned</span> : (deal.assignees ?? []).map((a) => <span key={a.id} className="badge resp-pending">{a.name}</span>)}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved: () => void }) {
+function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDetailData; users: UserLite[]; canEdit: boolean; onSaved: () => void }) {
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState(deal);
   const abstractLabel = useAbstractLabels(deal.abstractIds);
+  // Assigned team members are a core deal characteristic, so they live in this
+  // card. Assignment saves immediately (independent of the Edit flow above).
+  const assigneeIds = (deal.assignees ?? []).map((a) => a.id);
+  async function saveAssignees(next: string[]) { await api.patch(`/deals/${deal.id}`, { assigneeIds: next }); onSaved(); }
   // Seed the multi-state field from a legacy single `state` when needed.
   useEffect(() => setF({ ...deal, states: deal.states?.length ? deal.states : (deal.state ? [deal.state] : []) }), [deal]);
 
@@ -441,6 +412,21 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
           </Fld>
         </div>
       )}
+
+      {/* Assigned Team Members — a core deal attribute, kept inside this card. */}
+      <div className="ddc-assignees">
+        <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+          <span className="ddx-label">Assigned Team Members</span>
+          <span className="muted" style={{ fontSize: 12 }}>{assigneeIds.length ? `${assigneeIds.length} assigned` : "Unassigned"}</span>
+        </div>
+        {canEdit ? (
+          <AssigneePicker users={users} value={assigneeIds} onChange={saveAssignees} />
+        ) : (
+          <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+            {assigneeIds.length === 0 ? <span className="muted">Unassigned</span> : (deal.assignees ?? []).map((a) => <span key={a.id} className="badge resp-pending">{a.name}</span>)}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -540,134 +526,6 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
   );
 }
 
-/** Human file size and a short type label (from extension, else mime subtype). */
-function humanSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
-function fileType(f: DocFile): string {
-  const ext = f.filename.includes(".") ? f.filename.split(".").pop()!.toUpperCase() : "";
-  if (ext && ext.length <= 5) return ext;
-  return (f.mimeType.split("/")[1] || f.mimeType || "file").toUpperCase();
-}
-const isPreviewable = (f: DocFile) => f.mimeType === "application/pdf" || f.mimeType.startsWith("image/");
-
-function DocumentsSection({ dealId, files, onChanged, canEdit, canDelete }: { dealId: string; files: DocFile[]; onChanged: () => void; canEdit: boolean; canDelete: boolean }) {
-  const [folder, setFolder] = useState(DOC_FOLDERS[0]);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const uploadRef = useRef<HTMLInputElement>(null);
-  const replaceRef = useRef<HTMLInputElement>(null);
-  const replaceId = useRef<string | null>(null);
-
-  // Folders = the defaults, plus any folder already present that isn't a default.
-  const folders = useMemo(() => {
-    const present = new Set(files.map((f) => f.folder || "Other"));
-    return [...DOC_FOLDERS, ...[...present].filter((p) => !DOC_FOLDERS.includes(p)).sort()];
-  }, [files]);
-  const countByFolder = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const f of files) m.set(f.folder || "Other", (m.get(f.folder || "Other") ?? 0) + 1);
-    return m;
-  }, [files]);
-  const inFolder = useMemo(() => files.filter((f) => (f.folder || "Other") === folder), [files, folder]);
-
-  async function run(fn: () => Promise<unknown>) {
-    setBusy(true); setErr(null);
-    try { await fn(); onChanged(); }
-    catch (e) { setErr(e instanceof Error ? e.message : "Something went wrong"); }
-    finally { setBusy(false); }
-  }
-  const upload = (file: File) => run(async () => {
-    const form = new FormData();
-    form.append("file", file); form.append("dealId", dealId); form.append("folder", folder);
-    await api.upload("/files", form);
-  });
-  const replace = (file: File) => run(async () => {
-    const form = new FormData(); form.append("file", file);
-    await api.upload(`/files/${replaceId.current}/replace`, form);
-  });
-  const rename = (f: DocFile) => {
-    const filename = window.prompt("Rename document", f.filename);
-    if (filename && filename.trim() && filename !== f.filename) run(() => api.patch(`/files/${f.id}`, { filename: filename.trim() }));
-  };
-  const move = (f: DocFile, toFolder: string) => { if (toFolder !== f.folder) run(() => api.patch(`/files/${f.id}`, { folder: toFolder })); };
-  const open = async (id: string, inline: boolean) => {
-    const { url } = await api.get<{ url: string }>(`/files/${id}/download${inline ? "?inline=1" : ""}`);
-    window.open(url, "_blank");
-  };
-
-  const columns: Column<DocFile>[] = [
-    {
-      key: "filename", header: "Document Name", value: (f) => f.filename.toLowerCase(),
-      render: (f) => <span title={f.filename}>{f.filename}{f.versionCount > 0 && <span className="chip-mini" style={{ marginLeft: 6 }} title={`${f.versionCount} previous version(s)`}>v{f.versionCount + 1}</span>}</span>,
-    },
-    { key: "createdAt", header: "Date Uploaded", type: "date", value: (f) => f.createdAt, render: (f) => fmtDate(f.createdAt) },
-    { key: "updatedAt", header: "Date Modified", type: "date", value: (f) => f.updatedAt, render: (f) => fmtDate(f.updatedAt) },
-    { key: "uploadedBy", header: "Uploaded By", value: (f) => f.uploadedBy ?? "" , render: (f) => f.uploadedBy ?? "—" },
-    { key: "type", header: "File Type", value: (f) => fileType(f) },
-    { key: "sizeBytes", header: "File Size", align: "right", value: (f) => f.sizeBytes, render: (f) => humanSize(f.sizeBytes) },
-    {
-      key: "actions", header: "", value: () => "", align: "right", width: "1%",
-      render: (f) => (
-        <div className="row" style={{ gap: 4, justifyContent: "flex-end", flexWrap: "nowrap" }}>
-          {isPreviewable(f) && <button className="small" onClick={() => open(f.id, true)}>Preview</button>}
-          <button className="small" onClick={() => open(f.id, false)}>Download</button>
-          {canEdit && <button className="small" onClick={() => rename(f)}>Rename</button>}
-          {canEdit && (
-            <select value={f.folder || "Other"} title="Move to folder" style={{ width: "auto", padding: "4px 6px" }}
-              onChange={(e) => move(f, e.target.value)}>
-              {folders.map((fl) => <option key={fl} value={fl}>{fl === (f.folder || "Other") ? fl : `Move → ${fl}`}</option>)}
-            </select>
-          )}
-          {canEdit && <button className="small" onClick={() => { replaceId.current = f.id; replaceRef.current?.click(); }}>Replace</button>}
-          {canDelete && <button className="small danger" onClick={() => run(() => api.del(`/files/${f.id}`))}>Delete</button>}
-        </div>
-      ),
-    },
-  ];
-
-  return (
-    <div className="panel">
-      <div className="section-head"><h3>Documents</h3><span className="muted">Organized by folder · sortable</span></div>
-
-      <div className="doc-chips">
-        {folders.map((fl) => (
-          <span key={fl} className={`doc-chip ${folder === fl ? "active" : ""}`} onClick={() => setFolder(fl)}>
-            {folder === fl && (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /></svg>
-            )}
-            {fl} <span className="doc-count">{countByFolder.get(fl) ?? 0}</span>
-          </span>
-        ))}
-      </div>
-
-      <div className="row" style={{ margin: "12px 0", justifyContent: "space-between" }}>
-        <strong>{folder}</strong>
-        {canEdit && (
-          <label className="chip" style={{ margin: 0 }}>
-            {busy ? "Working…" : `Upload to ${folder}`}
-            <input ref={uploadRef} type="file" style={{ display: "none" }} disabled={busy}
-              onChange={(e) => { if (e.target.files?.[0]) upload(e.target.files[0]); e.target.value = ""; }} />
-          </label>
-        )}
-      </div>
-
-      {err && <Banner kind="error">{err}</Banner>}
-
-      {inFolder.length === 0 ? (
-        <p className="muted">No documents in {folder}.</p>
-      ) : (
-        <SortableTable columns={columns} rows={inFolder} rowKey={(f) => f.id} defaultSort={{ key: "createdAt", dir: "desc" }} />
-      )}
-
-      {/* Hidden input used by per-row Replace buttons. */}
-      <input ref={replaceRef} type="file" style={{ display: "none" }}
-        onChange={(e) => { if (e.target.files?.[0]) replace(e.target.files[0]); e.target.value = ""; }} />
-    </div>
-  );
-}
 
 /** Match-percent color scale (mirrors the reference: green / amber / red). */
 function pctColor(pct: number): string {
