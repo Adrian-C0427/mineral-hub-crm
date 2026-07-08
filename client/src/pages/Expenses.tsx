@@ -6,7 +6,6 @@ import {
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { MetricCard, Spinner, Banner, Modal } from "../components/ui";
-import { PeriodSegmented } from "../components/PeriodSegmented";
 import { money, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { CHART_COLORS, COLOR_EXPENSE, monthLabel, chartTooltip } from "../lib/charts";
@@ -236,24 +235,6 @@ function ChartEmpty({ icon, children }: { icon: React.ReactNode; children: React
 // ---------------------------------------------------------------------------
 
 type Filters = { from: string; to: string; userId: string; categoryId: string; reimbursed: string };
-
-// Expense period presets (per spec): This Month / Last Month / Last Quarter / YTD / Custom.
-type ExpPeriod = "THIS_MONTH" | "LAST_MONTH" | "LAST_QUARTER" | "YTD" | "CUSTOM";
-const EXPENSE_PERIODS: readonly (readonly [ExpPeriod, string])[] = [
-  ["THIS_MONTH", "This Month"], ["LAST_MONTH", "Last Month"], ["LAST_QUARTER", "Last Quarter"], ["YTD", "YTD"], ["CUSTOM", "Custom"],
-];
-const isoDay = (d: Date) => d.toISOString().slice(0, 10);
-function expenseRange(p: ExpPeriod): { from: string; to: string } {
-  const now = new Date();
-  const y = now.getUTCFullYear(), m = now.getUTCMonth();
-  switch (p) {
-    case "THIS_MONTH": return { from: isoDay(new Date(Date.UTC(y, m, 1))), to: isoDay(new Date(Date.UTC(y, m + 1, 0))) };
-    case "LAST_MONTH": return { from: isoDay(new Date(Date.UTC(y, m - 1, 1))), to: isoDay(new Date(Date.UTC(y, m, 0))) };
-    case "LAST_QUARTER": { const q = Math.floor(m / 3) * 3 - 3; return { from: isoDay(new Date(Date.UTC(y, q, 1))), to: isoDay(new Date(Date.UTC(y, q + 3, 0))) }; }
-    case "YTD": return { from: isoDay(new Date(Date.UTC(y, 0, 1))), to: isoDay(new Date(Date.UTC(y, m + 1, 0))) };
-    default: return { from: "", to: "" };
-  }
-}
 type Preset = { name: string; filters: Filters; q: string };
 
 const ALL_COLUMNS = [
@@ -286,7 +267,6 @@ function AllExpenses({
   onNew: () => void;
 }) {
   const [q, setQ] = useState("");
-  const [expPeriod, setExpPeriod] = useState<ExpPeriod>("CUSTOM");
   const [cols, setCols] = useState<ColKey[]>(() => loadJson<ColKey[]>(COLS_KEY, DEFAULT_COLS));
   const [presets, setPresets] = useState<Preset[]>(() => loadJson<Preset[]>(PRESETS_KEY, []));
   const [showCols, setShowCols] = useState(false);
@@ -397,16 +377,10 @@ function AllExpenses({
         </div>
       </div>
 
-      {/* Period presets: set From/To in one click (Custom leaves them editable) */}
-      <div className="xp-period">
-        <PeriodSegmented options={EXPENSE_PERIODS} value={expPeriod}
-          onChange={(p) => { setExpPeriod(p); if (p !== "CUSTOM") { const r = expenseRange(p); setFilters((f) => ({ ...f, from: r.from, to: r.to })); } }} />
-      </div>
-
       {/* Filter bar: structural filters + inline running totals */}
       <div className="xp-filterbar">
-        <div className="xp-fld"><div className="xp-lbl">From</div><input type="date" value={filters.from} onChange={(e) => { setExpPeriod("CUSTOM"); setFilters((f) => ({ ...f, from: e.target.value })); }} /></div>
-        <div className="xp-fld"><div className="xp-lbl">To</div><input type="date" value={filters.to} onChange={(e) => { setExpPeriod("CUSTOM"); setFilters((f) => ({ ...f, to: e.target.value })); }} /></div>
+        <div className="xp-fld"><div className="xp-lbl">From</div><input type="date" value={filters.from} onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))} /></div>
+        <div className="xp-fld"><div className="xp-lbl">To</div><input type="date" value={filters.to} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} /></div>
         <div className="xp-fld"><div className="xp-lbl">User</div>
           <select value={filters.userId} onChange={(e) => setFilters((f) => ({ ...f, userId: e.target.value }))}>
             <option value="">All</option>
@@ -644,36 +618,64 @@ function ExpenseForm({
 function CategoryManager({ categories, onClose, onChanged }: { categories: Category[]; onClose: () => void; onChanged: () => void }) {
   const [name, setName] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  // Local order so up/down reordering feels instant; persisted on each move.
+  const [order, setOrder] = useState<Category[]>(categories);
+  useEffect(() => { setOrder(categories); }, [categories]);
 
-  async function add(e: React.FormEvent) {
-    e.preventDefault();
+  async function run(fn: () => Promise<unknown>) {
     setErr(null);
-    try { await api.post("/expenses/categories", { name: name.trim() }); setName(""); onChanged(); }
-    catch (e2) { setErr(e2 instanceof ApiError ? e2.message : "Failed"); }
+    try { await fn(); onChanged(); }
+    catch (e2) { setErr(e2 instanceof ApiError ? e2.message : "Something went wrong"); }
   }
-  async function toggleActive(c: Category) { await api.patch(`/expenses/categories/${c.id}`, { active: !c.active }); onChanged(); }
-  async function remove(c: Category) {
-    if (!confirm(`Delete category "${c.name}"? Existing expenses keep their amount but become uncategorized.`)) return;
-    await api.del(`/expenses/categories/${c.id}`); onChanged();
+  const add = (e: React.FormEvent) => { e.preventDefault(); if (name.trim()) run(async () => { await api.post("/expenses/categories", { name: name.trim() }); setName(""); }); };
+  const toggleActive = (c: Category) => run(() => api.patch(`/expenses/categories/${c.id}`, { active: !c.active }));
+  const remove = (c: Category) => { if (confirm(`Delete category "${c.name}"? Existing expenses keep their amount but become uncategorized.`)) run(() => api.del(`/expenses/categories/${c.id}`)); };
+  function saveRename(c: Category) {
+    const n = editName.trim();
+    setEditId(null);
+    if (n && n !== c.name) run(() => api.patch(`/expenses/categories/${c.id}`, { name: n }));
+  }
+  function move(idx: number, dir: -1 | 1) {
+    const next = [...order];
+    const j = idx + dir;
+    if (j < 0 || j >= next.length) return;
+    [next[idx], next[j]] = [next[j], next[idx]];
+    setOrder(next);
+    run(() => api.post("/expenses/categories/reorder", { ids: next.map((c) => c.id) }));
   }
 
   return (
     <Modal title="Expense categories" onClose={onClose} footer={<button className="primary" onClick={onClose}>Done</button>}>
-      <form onSubmit={add} className="row" style={{ alignItems: "flex-end", marginBottom: 10 }}>
+      <form onSubmit={add} className="row" style={{ alignItems: "flex-end", marginBottom: 12 }}>
         <div className="field" style={{ flex: 1, marginBottom: 0 }}><label>New category</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Marketing" /></div>
         <button className="primary" disabled={!name.trim()}>Add</button>
       </form>
       {err && <div className="error-text">{err}</div>}
       <div className="table-scroll">
         <table className="data-table">
-          <thead><tr><th>Name</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th style={{ width: 60 }}>Order</th><th>Name</th><th>Status</th><th></th></tr></thead>
           <tbody>
-            {categories.map((c) => (
+            {order.map((c, i) => (
               <tr key={c.id}>
-                <td>{c.name}</td>
+                <td>
+                  <button className="small" disabled={i === 0} title="Move up" onClick={() => move(i, -1)}>↑</button>
+                  <button className="small" style={{ marginLeft: 4 }} disabled={i === order.length - 1} title="Move down" onClick={() => move(i, 1)}>↓</button>
+                </td>
+                <td>
+                  {editId === c.id ? (
+                    <input autoFocus value={editName} onChange={(e) => setEditName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") saveRename(c); if (e.key === "Escape") setEditId(null); }}
+                      onBlur={() => saveRename(c)} style={{ width: 200 }} />
+                  ) : (
+                    <span className="clickable" title="Click to rename" onClick={() => { setEditId(c.id); setEditName(c.name); }}>{c.name}</span>
+                  )}
+                </td>
                 <td><span className={`badge ${c.active ? "resp-offer" : "resp-no"}`}>{c.active ? "Active" : "Hidden"}</span></td>
                 <td className="right">
-                  <button className="small" onClick={() => toggleActive(c)}>{c.active ? "Hide" : "Show"}</button>
+                  <button className="small" onClick={() => { setEditId(c.id); setEditName(c.name); }}>Rename</button>
+                  <button className="small" style={{ marginLeft: 6 }} onClick={() => toggleActive(c)}>{c.active ? "Hide" : "Show"}</button>
                   <button className="small danger" style={{ marginLeft: 6 }} onClick={() => remove(c)}>Delete</button>
                 </td>
               </tr>
@@ -681,6 +683,7 @@ function CategoryManager({ categories, onClose, onChanged }: { categories: Categ
           </tbody>
         </table>
       </div>
+      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Changes apply immediately to the expense forms.</p>
     </Modal>
   );
 }

@@ -225,29 +225,33 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
    rail via matchMedia; the responsive content-reflow rules live at the END of
    this file so they win the cascade over the base grid definitions. */
 
+/* Consistent app-wide vertical rhythm: every top-level block below the header
+   separates by --block-gap; grids share --grid-gap. Keeping these on tokens (not
+   scattered literals) is what makes spacing feel uniform across every page. */
+:root { --block-gap: 18px; --grid-gap: 16px; }
 .page { max-width: 1280px; margin: 0 auto; padding: 24px; }
-.page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; gap: 16px; }
+.page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--block-gap); gap: 16px; }
 .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .spacer { flex: 1; }
 .muted { color: var(--text-dim); }
-.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--grid-gap); }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--grid-gap); }
 
 /* --- Cards / panels --- */
-.panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; margin-bottom: 18px; }
+.panel { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; margin-bottom: var(--block-gap); }
 /* Light surfaces get a hairline lift; dark stays flat (border only), per design. */
 :root[data-theme="light"] .panel, :root[data-theme="light"] .metric-card { box-shadow: 0 1px 2px rgba(19, 23, 34, 0.05); }
 .panel-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 
 /* --- Metrics --- */
-.metrics-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: 14px; margin-bottom: 20px; }
+.metrics-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--grid-gap); margin-bottom: var(--block-gap); }
 .metric-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; }
 .metric-label { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
 .metric-value { font-size: 24px; font-weight: 700; margin-top: 6px; }
 .metric-hint { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
 
 /* Responsive grid of chart panels (Expenses + Reports dashboards) */
-.chart-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-bottom: 20px; }
+.chart-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--grid-gap); margin-bottom: var(--block-gap); }
 .chart-grid .panel { margin-bottom: 0; }
 @media (max-width: 900px) { .chart-grid { grid-template-columns: 1fr; } }
 
@@ -1031,12 +1035,20 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 
 /* Contract timeline: vertical milestone rail */
 .ctl { display: flex; flex-direction: column; }
+/* A single continuous rail runs through the centre of the dots: each row draws
+   the line full-height behind its dot, so adjacent rows' lines meet seamlessly.
+   The first row starts the line at its dot; the last row ends it at its dot. */
 .ctl-item { display: flex; gap: 14px; }
-.ctl-rail { display: flex; flex-direction: column; align-items: center; }
-.ctl-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--panel-2); border: 2px solid var(--text-dim); flex: none; margin-top: 3px; box-sizing: border-box; }
+.ctl-rail { position: relative; width: 14px; flex: none; }
+.ctl-rail::before { content: ""; position: absolute; left: 50%; top: 0; bottom: 0; width: 2px;
+  transform: translateX(-50%); background: var(--border); }
+.ctl-item:first-child .ctl-rail::before { top: 10px; }
+.ctl-item:last-child .ctl-rail::before { bottom: auto; height: 10px; }
+.ctl-item.done .ctl-rail::before { background: var(--accent); opacity: 0.7; }
+.ctl-dot { position: relative; z-index: 1; display: block; width: 12px; height: 12px; border-radius: 50%;
+  background: var(--panel); border: 2px solid var(--text-dim); margin: 4px auto 0; box-sizing: border-box; }
 .ctl-dot.done { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.18); }
-.ctl-line { width: 2px; flex: 1; background: var(--border); margin: 6px 0 2px; }
-.ctl-body { padding-bottom: 18px; min-width: 0; }
+.ctl-body { padding-bottom: 20px; min-width: 0; }
 .ctl-item:last-child .ctl-body { padding-bottom: 0; }
 .ctl-lbl { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); font-weight: 700; }
 .ctl-lbl.done { color: #7fb0ff; }
@@ -1206,3 +1218,36 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover,
 input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; background: rgba(59,130,246,0.14); }
 :root[data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator,
 :root[data-theme="light"] input[type="month"]::-webkit-calendar-picker-indicator { opacity: 0.75; }
+
+/* Reports/Research controls: single horizontal toolbar (presets left, filters right) */
+.filter-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+/* Pipeline pointer-drag: cursor-following clone, instant feedback, smooth zones */
+.deal-card { transition: box-shadow .12s ease, transform .12s ease, opacity .12s ease, border-color .12s ease; }
+.deal-card.draggable { touch-action: none; }
+.deal-card.drag-source { opacity: .35; }
+.deal-card.drag-clone { cursor: grabbing; box-shadow: 0 12px 28px rgba(0,0,0,.45); transform: rotate(1.5deg) scale(1.02);
+  transition: none; margin: 0; border-color: var(--accent); }
+.kanban.dragging { user-select: none; }
+.kanban.dragging .deal-card:not(.drag-source):hover { border-color: var(--border); }
+.kanban-col { transition: background .12s ease, outline-color .12s ease; }
+.kanban-col.drop-target { background: rgba(59,130,246,.06); }
+.transition-zone { transition: background .12s ease, border-color .12s ease; }
+.transition-zone.drop-target { outline: 2px dashed var(--accent); outline-offset: -3px; }
+.kanban-empty { border: 1px dashed var(--border); border-radius: 8px; padding: 14px; text-align: center;
+  font-size: 12px; color: var(--text-dim); }
+.kanban.dragging .kanban-col.drop-target .kanban-empty { border-color: var(--accent); color: var(--accent); }
+
+/* ---------------------------------------------------------------------------
+   App-wide layout consistency pass — uniform table row height, chart breathing
+   room, form field rhythm, and modal/section spacing on one scale.
+   --------------------------------------------------------------------------- */
+.data-table th, .data-table td { line-height: 1.4; }             /* even row height */
+.data-table tbody tr:last-child td { border-bottom: none; }       /* no dangling rule */
+.panel > .section-head:first-child, .panel > .panel-title:first-child { margin-top: 0; }
+.panel h3 { margin-top: 0; }
+.chart-grid .panel, .dash-main .panel { min-width: 0; }           /* clamp grid overflow */
+/* Recharts containers get consistent whitespace inside their panel */
+.panel .recharts-responsive-container { margin-top: 4px; }
+/* Cross-breakpoint: keep block/grid gaps proportional on smaller screens */
+@media (max-width: 760px) { :root { --block-gap: 14px; --grid-gap: 12px; } }

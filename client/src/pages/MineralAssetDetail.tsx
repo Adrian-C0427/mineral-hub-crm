@@ -393,10 +393,17 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
   );
 }
 
+const MONTHS = [
+  ["01", "January"], ["02", "February"], ["03", "March"], ["04", "April"], ["05", "May"], ["06", "June"],
+  ["07", "July"], ["08", "August"], ["09", "September"], ["10", "October"], ["11", "November"], ["12", "December"],
+] as const;
+
 function AddRevenueModal({ assetId, onClose, onSaved }: { assetId: string; onClose: () => void; onSaved: () => void }) {
-  // Default to the current month so the selector is populated on open (native
-  // month inputs otherwise render blank and the picker is easy to miss).
-  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const now = new Date();
+  const curYear = now.getUTCFullYear();
+  // Named month + a dedicated searchable year (default current), stored as YYYY-MM.
+  const [monthNum, setMonthNum] = useState(String(now.getUTCMonth() + 1).padStart(2, "0"));
+  const [year, setYear] = useState(String(curYear));
   const [amount, setAmount] = useState("");
   const [kind, setKind] = useState("ROYALTY");
   const [operator, setOperator] = useState("");
@@ -404,9 +411,14 @@ function AddRevenueModal({ assetId, onClose, onSaved }: { assetId: string; onClo
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // All applicable years up to and including the current year (most recent first).
+  const years = Array.from({ length: 26 }, (_, i) => String(curYear - i));
+
   async function save() {
-    if (!/^\d{4}-\d{2}$/.test(month)) { setError("Pick a month."); return; }
+    const y = Number(year);
+    if (!Number.isInteger(y) || y < 1900 || y > curYear) { setError(`Enter a valid year (up to ${curYear}).`); return; }
     if (amount.trim() === "") { setError("Enter an amount."); return; }
+    const month = `${year}-${monthNum}`;
     setBusy(true); setError(null);
     try {
       await api.post(`/deals/${assetId}/revenue`, { month, amount: Number(amount), kind, operator: operator.trim() || null, note: note.trim() || null });
@@ -418,7 +430,16 @@ function AddRevenueModal({ assetId, onClose, onSaved }: { assetId: string; onClo
   return (
     <Modal title="Add Revenue Entry" onClose={onClose} footer={<><button className="small" onClick={onClose}>Cancel</button><button className="primary" disabled={busy} onClick={save}>{busy ? "Saving…" : "Add"}</button></>}>
       <div className="grid-2">
-        <div className="field"><label>Month</label><input type="month" value={month} onChange={(e) => setMonth(e.target.value)} /></div>
+        <div className="field"><label>Month</label>
+          <select value={monthNum} onChange={(e) => setMonthNum(e.target.value)}>
+            {MONTHS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
+        </div>
+        <div className="field"><label>Year</label>
+          {/* Searchable: typing filters the year list; free entry validated on save. */}
+          <input list="rev-year-options" value={year} onChange={(e) => setYear(e.target.value)} inputMode="numeric" placeholder="Search year…" />
+          <datalist id="rev-year-options">{years.map((y) => <option key={y} value={y} />)}</datalist>
+        </div>
         <div className="field"><label>Amount</label><input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
         <div className="field"><label>Type</label><select value={kind} onChange={(e) => setKind(e.target.value)}><option value="ROYALTY">Royalty</option><option value="LEASE_BONUS">Lease Bonus</option><option value="OTHER">Other</option></select></div>
         <div className="field"><label>Operator</label><input value={operator} onChange={(e) => setOperator(e.target.value)} /></div>

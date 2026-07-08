@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { Spinner } from "../components/ui";
@@ -22,10 +22,16 @@ const TRANSITIONS: { stage: Stage; label: string; hint: string }[] = [
   { stage: "DEAD", label: "Dead", hint: "→ Archived Deals" },
 ];
 
+// Distance (px) the pointer must travel before a press becomes a drag — below it
+// the gesture is treated as a click (navigate to the deal).
+const DRAG_THRESHOLD = 5;
+
+interface DragState { id: string; w: number; offX: number; offY: number; x: number; y: number; moved: boolean }
+
 export function Pipeline() {
   const [deals, setDeals] = useState<DealSummary[] | null>(null);
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [dropCol, setDropCol] = useState<Stage | null>(null);
+  const [drag, setDrag] = useState<DragState | null>(null);
+  const [overCol, setOverCol] = useState<Stage | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [pending, setPending] = useState<{ deal: DealSummary; toStage: Stage } | null>(null);
   // Explicit per-card move (no drag needed): opens the stage modal on the
@@ -38,26 +44,61 @@ export function Pipeline() {
   const canCreate = can("createDeals");
   const canMove = can("editDeals");
 
+  // Latest state for the window pointer handlers (which are bound once per drag).
+  const dragRef = useRef<DragState | null>(null);
+  const overRef = useRef<Stage | null>(null);
+  dragRef.current = drag;
+  overRef.current = overCol;
+
   // The pipeline is the acquisition board — opportunities only. Owned mineral
   // assets are managed in their own module and never appear here.
   function load() { api.get<DealSummary[]>("/deals?recordType=OPPORTUNITY").then(setDeals); }
   useEffect(load, []);
 
-  if (!deals) return <Spinner />;
+  // ------ pointer-based drag: the card follows the cursor with no native-DnD lag
+  function startDrag(e: React.PointerEvent, deal: DealSummary) {
+    if (!canMove || e.button !== 0) return;
+    if ((e.target as HTMLElement).closest(".dc-move")) return; // the ⋯ menu button
+    const card = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    setDrag({ id: deal.id, w: card.width, offX: e.clientX - card.left, offY: e.clientY - card.top, x: e.clientX, y: e.clientY, moved: false });
 
-  const boardDeals = deals;
-
-  async function onDrop(col: Stage) {
-    setDropCol(null);
-    const deal = deals!.find((d) => d.id === dragId);
-    setDragId(null);
-    if (!deal || deal.stage === col) return;
-    // Moving between normal pipeline stages is immediate — only the terminal
-    // Closed/Dead transitions (with their downstream effects) get a confirmation.
-    if (col === "CLOSED" || col === "DEAD") { setPending({ deal, toStage: col }); return; }
-    await api.post(`/deals/${deal.id}/stage`, { toStage: col });
-    load();
+    const onMove = (ev: PointerEvent) => {
+      const d = dragRef.current;
+      if (!d) return;
+      const moved = d.moved || Math.hypot(ev.clientX - (d.x - 0), ev.clientY - (d.y - 0)) > DRAG_THRESHOLD || Math.abs(ev.clientX - card.left - d.offX) > DRAG_THRESHOLD;
+      // Detect the column/transition under the pointer via a data-stage attribute.
+      const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+      const zone = el?.closest("[data-stage]") as HTMLElement | null;
+      const stage = (zone?.getAttribute("data-stage") as Stage | null) ?? null;
+      overRef.current = stage;
+      setOverCol(stage);
+      setDrag((prev) => (prev ? { ...prev, x: ev.clientX, y: ev.clientY, moved: prev.moved || moved } : prev));
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      const d = dragRef.current;
+      const target = overRef.current;
+      setDrag(null); setOverCol(null);
+      if (!d) return;
+      if (!d.moved) { nav(`/deals/${deal.id}`); return; } // press without drag = open
+      if (target && target !== deal.stage) commitMove(deal, target);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
   }
+
+  async function commitMove(deal: DealSummary, col: Stage) {
+    // Terminal stages carry downstream effects — confirm first (their move runs
+    // through the modal). Normal stage moves are immediate + optimistic.
+    if (col === "CLOSED" || col === "DEAD") { setPending({ deal, toStage: col }); return; }
+    setDeals((prev) => prev?.map((d) => (d.id === deal.id ? { ...d, stage: col } : d)) ?? prev);
+    try { await api.post(`/deals/${deal.id}/stage`, { toStage: col }); load(); }
+    catch { load(); }
+  }
+
+  if (!deals) return <Spinner />;
+  const dragDeal = drag ? deals.find((d) => d.id === drag.id) ?? null : null;
 
   return (
     <div className="page">
@@ -68,17 +109,12 @@ export function Pipeline() {
         {canCreate && <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>}
       </div>
 
-      {/* Transition targets live ABOVE the board so they're always on-screen
-          (the board scrolls horizontally). Dropping a card here — or using a
-          card's ⋯ button — prompts the Closed/Archive confirmation. */}
+      {/* Transition targets live ABOVE the board so they're always on-screen. */}
       {canMove && <div className="transition-bar">
         {TRANSITIONS.map((t) => (
           <div
-            key={t.stage}
-            className={`transition-zone ${t.stage === "DEAD" ? "dead" : "closed"} ${dropCol === t.stage ? "drop-target" : ""}`}
-            onDragOver={(e) => { e.preventDefault(); setDropCol(t.stage); }}
-            onDragLeave={() => setDropCol((c) => (c === t.stage ? null : c))}
-            onDrop={() => onDrop(t.stage)}
+            key={t.stage} data-stage={t.stage}
+            className={`transition-zone ${t.stage === "DEAD" ? "dead" : "closed"} ${drag && overCol === t.stage ? "drop-target" : ""}`}
           >
             <span>{t.label}</span>
             <span className="muted" style={{ fontSize: 11 }}>{t.hint}</span>
@@ -86,16 +122,13 @@ export function Pipeline() {
         ))}
       </div>}
 
-      <div className="kanban">
+      <div className={`kanban ${drag ? "dragging" : ""}`}>
         {COLUMNS.map((col) => {
-          const colDeals = boardDeals.filter((d) => d.stage === col);
+          const colDeals = deals.filter((d) => d.stage === col);
           return (
             <div
-              key={col}
-              className={`kanban-col ${dropCol === col ? "drop-target" : ""}`}
-              onDragOver={(e) => { e.preventDefault(); setDropCol(col); }}
-              onDragLeave={() => setDropCol((c) => (c === col ? null : c))}
-              onDrop={() => onDrop(col)}
+              key={col} data-stage={col}
+              className={`kanban-col ${drag && overCol === col ? "drop-target" : ""}`}
             >
               <div className="kanban-col-head">
                 <span>{prettyStage(col)}</span>
@@ -103,13 +136,22 @@ export function Pipeline() {
               </div>
               <div className="kanban-col-body">
                 {colDeals.map((d) => (
-                  <Card key={d.id} deal={d} canMove={canMove} onDragStart={() => setDragId(d.id)} onClick={() => nav(`/deals/${d.id}`)} onMove={() => setMoving(d)} />
+                  <Card key={d.id} deal={d} canMove={canMove} dragging={drag?.id === d.id && drag.moved}
+                    onPointerDown={(e) => startDrag(e, d)} onMove={() => setMoving(d)} />
                 ))}
+                {colDeals.length === 0 && <div className="kanban-empty">Drop here</div>}
               </div>
             </div>
           );
         })}
       </div>
+
+      {/* Floating clone follows the cursor for a natural, lag-free drag. */}
+      {drag && drag.moved && dragDeal && (
+        <div className="deal-card drag-clone" style={{ position: "fixed", left: drag.x - drag.offX, top: drag.y - drag.offY, width: drag.w, pointerEvents: "none", zIndex: 1000 }}>
+          <CardBody deal={dragDeal} />
+        </div>
+      )}
 
       {showNew && <NewDealModal onClose={() => setShowNew(false)} onCreated={(d) => { setShowNew(false); nav(`/deals/${d.id}`); }} />}
       {pending && (
@@ -131,22 +173,34 @@ export function Pipeline() {
   );
 }
 
-function Card({ deal, canMove, onDragStart, onClick, onMove }: { deal: DealSummary; canMove: boolean; onDragStart: () => void; onClick: () => void; onMove: () => void }) {
-  const isClosing = deal.stage === "CLOSING";
+function Card({ deal, canMove, dragging, onPointerDown, onMove }: {
+  deal: DealSummary; canMove: boolean; dragging: boolean;
+  onPointerDown: (e: React.PointerEvent) => void; onMove: () => void;
+}) {
   const isDead = deal.stage === "DEAD";
   return (
     <div
-      className={`deal-card prio-${deal.priority.toLowerCase()} ${isDead ? "dead" : ""}`}
-      draggable={canMove}
-      onDragStart={canMove ? onDragStart : undefined}
-      onClick={onClick}
+      className={`deal-card prio-${deal.priority.toLowerCase()} ${isDead ? "dead" : ""} ${dragging ? "drag-source" : ""} ${canMove ? "draggable" : ""}`}
+      onPointerDown={canMove ? onPointerDown : undefined}
     >
       {canMove && <button
         className="dc-move"
         title="Move to another stage"
         aria-label={`Move ${deal.name} to another stage`}
         onClick={(e) => { e.stopPropagation(); onMove(); }}
+        onPointerDown={(e) => e.stopPropagation()}
       >⋯</button>}
+      <CardBody deal={deal} />
+    </div>
+  );
+}
+
+/** Card content shared by the board card and the drag clone. */
+function CardBody({ deal }: { deal: DealSummary }) {
+  const isClosing = deal.stage === "CLOSING";
+  const isDead = deal.stage === "DEAD";
+  return (
+    <>
       <div className="dc-name">{deal.name}</div>
       <div className="dc-meta">
         <span>{[deal.counties.join(", "), deal.state].filter(Boolean).join(", ") || "—"}</span>
@@ -168,6 +222,6 @@ function Card({ deal, canMove, onDragStart, onClick, onMove }: { deal: DealSumma
           !isDead && <span>Find buyer by: {fmtDate(deal.findBuyerByDate)}</span>
         )}
       </div>
-    </div>
+    </>
   );
 }

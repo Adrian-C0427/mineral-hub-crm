@@ -173,23 +173,23 @@ export function Reports() {
 
       {/* --- Controls (not captured in PDF) --- */}
       <div className="panel">
-        <div style={{ marginBottom: 10 }}>
+        {/* Single horizontal toolbar: date presets on the left, Filters on the right. */}
+        <div className="filter-toolbar">
           <PeriodSegmented options={CHIPS} value={period} onChange={setPeriod} />
+          <div className="row" style={{ gap: 8, alignItems: "center", marginLeft: "auto" }}>
+            {compare !== "NONE" && <span className="muted" style={{ fontSize: 12 }}>Comparison on</span>}
+            {activeFilterChips.length > 0 && <button className="small" onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>}
+            <button className="small" onClick={() => setShowFilters((s) => !s)}>
+              {showFilters ? "▾" : "▸"} Filters{activeFilterChips.length > 0 ? ` (${activeFilterChips.length})` : ""}
+            </button>
+          </div>
         </div>
         {period === "CUSTOM" && (
-          <div className="row" style={{ marginBottom: 10 }}>
+          <div className="row" style={{ marginTop: 10 }}>
             <div className="field" style={{ marginBottom: 0 }}><label>From</label><input type="date" value={custom.from} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} /></div>
             <div className="field" style={{ marginBottom: 0 }}><label>To</label><input type="date" value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} /></div>
           </div>
         )}
-        {/* Advanced filters collapse by default — only date presets show up front. */}
-        <div className="row" style={{ gap: 8, alignItems: "center" }}>
-          <button className="small" onClick={() => setShowFilters((s) => !s)}>
-            {showFilters ? "▾" : "▸"} Filters{activeFilterChips.length > 0 ? ` (${activeFilterChips.length})` : ""}
-          </button>
-          {compare !== "NONE" && <span className="muted" style={{ fontSize: 12 }}>Comparison on</span>}
-          {activeFilterChips.length > 0 && <button className="small" onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>}
-        </div>
         {showFilters && (
         <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end", marginTop: 10 }}>
           <div className="field" style={{ marginBottom: 0 }}><label>Compare to</label>
