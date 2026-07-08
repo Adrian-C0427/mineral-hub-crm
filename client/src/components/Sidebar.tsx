@@ -1,17 +1,17 @@
 import { useEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
+import { ChevronRight, ChevronDown, LogOut } from "lucide-react";
 import {
-  LayoutDashboard, Briefcase, Workflow, Users, Map as MapIcon, BarChart3, Telescope, TrendingDown,
-  Layers, Receipt, Store, Settings as SettingsIcon, ChevronRight, ChevronDown, LogOut,
-  type LucideIcon,
-} from "lucide-react";
+  DashboardIcon, DealsIcon, AssetsIcon, PipelineIcon, BuyersIcon, MapNavIcon, ResearchIcon,
+  WellAnalysisIcon, ReportsIcon, ExpensesIcon, PortalIcon, SettingsNavIcon, type NavIcon,
+} from "./NavIcons";
 import { useAuth } from "../auth/AuthContext";
 import { NotificationsBell } from "./NotificationsBell";
 import { ROLE_LABEL } from "../lib/roles";
 
 interface NavItem {
   label: string;
-  icon: LucideIcon;
+  icon: NavIcon;
   to?: string;
   end?: boolean;
   perm?: string;
@@ -23,38 +23,38 @@ interface NavItem {
 
 // Config-driven so new modules are added here without touching layout code.
 const NAV: NavItem[] = [
-  { label: "Dashboard", icon: LayoutDashboard, to: "/", end: true, desc: "Today's acquisition snapshot — active deals, profit, follow-ups" },
+  { label: "Dashboard", icon: DashboardIcon, to: "/", end: true, desc: "Today's acquisition snapshot — active deals, profit, follow-ups" },
   {
-    label: "Deals", icon: Briefcase, perm: "viewDeals", desc: "Acquisition opportunities you're working",
+    label: "Deals", icon: DealsIcon, perm: "viewDeals", desc: "Acquisition opportunities you're working",
     children: [
-      { label: "Active Deals", icon: Briefcase, to: "/deals/active" },
-      { label: "Closed Deals", icon: Briefcase, to: "/deals/closed" },
-      { label: "Archived Deals", icon: Briefcase, to: "/deals/archived" },
+      { label: "Active Deals", icon: DealsIcon, to: "/deals/active" },
+      { label: "Closed Deals", icon: DealsIcon, to: "/deals/closed" },
+      { label: "Archived Deals", icon: DealsIcon, to: "/deals/archived" },
     ],
   },
-  { label: "Mineral Assets", icon: Layers, to: "/assets", perm: "viewDeals", desc: "Your owned mineral & royalty portfolio" },
-  { label: "Pipeline", icon: Workflow, to: "/pipeline", perm: "viewDeals", desc: "Drag deals through the acquisition stages" },
-  { label: "Buyers", icon: Users, to: "/buyers", perm: "viewBuyers", desc: "Buyer list, buy boxes, and relationships" },
-  { label: "Map", icon: MapIcon, to: "/map", perm: "viewMap", desc: "Wells, abstracts, and deals on the Texas map" },
-  { label: "Research", icon: Telescope, to: "/research", perm: "viewResearch", desc: "Market intelligence — county transactions, permits, operators" },
-  { label: "Well Analysis", icon: TrendingDown, to: "/valuation", perm: "viewWellAnalysis", desc: "Value specific wells — decline curves, forecasts, offer prices" },
-  { label: "Reports", icon: BarChart3, to: "/reports", perm: "viewReports", desc: "Your business performance — closed deals, profit, win rate" },
-  { label: "Expenses", icon: Receipt, to: "/expenses", perm: "manageExpenses", desc: "Company spend and reimbursements" },
+  { label: "Mineral Assets", icon: AssetsIcon, to: "/assets", perm: "viewDeals", desc: "Your owned mineral & royalty portfolio" },
+  { label: "Pipeline", icon: PipelineIcon, to: "/pipeline", perm: "viewDeals", desc: "Drag deals through the acquisition stages" },
+  { label: "Buyers", icon: BuyersIcon, to: "/buyers", perm: "viewBuyers", desc: "Buyer list, buy boxes, and relationships" },
+  { label: "Map", icon: MapNavIcon, to: "/map", perm: "viewMap", desc: "Wells, abstracts, and deals on the Texas map" },
+  { label: "Research", icon: ResearchIcon, to: "/research", perm: "viewResearch", desc: "Market intelligence — county transactions, permits, operators" },
+  { label: "Well Analysis", icon: WellAnalysisIcon, to: "/valuation", perm: "viewWellAnalysis", desc: "Value specific wells — decline curves, forecasts, offer prices" },
+  { label: "Reports", icon: ReportsIcon, to: "/reports", perm: "viewReports", desc: "Your business performance — closed deals, profit, win rate" },
+  { label: "Expenses", icon: ExpensesIcon, to: "/expenses", perm: "manageExpenses", desc: "Company spend and reimbursements" },
   // Buyer Portal is operational-only (the offerings marketplace); its
   // configuration lives under Settings → Buyer Portal, so viewing settings
   // never lights up this item.
-  { label: "Buyer Portal", icon: Store, to: "/portal-admin", perm: "publishOfferings", desc: "Your public offering marketplace" },
+  { label: "Buyer Portal", icon: PortalIcon, to: "/portal-admin", perm: "publishOfferings", desc: "Your public offering marketplace" },
   {
-    label: "Settings", icon: SettingsIcon,
+    label: "Settings", icon: SettingsNavIcon,
     children: [
-      { label: "General", icon: SettingsIcon, to: "/settings/general" },
+      { label: "General", icon: SettingsNavIcon, to: "/settings/general" },
       // Organization now lives under Settings (company, members, roles, owner).
       // Visible to EVERY member: the page itself scopes what each role can do,
       // and it's the only home of org info + "Join a different company" —
       // hiding it made that section unreachable for members/viewers.
-      { label: "Organization", icon: SettingsIcon, to: "/settings/organization" },
-      { label: "Buyer Portal", icon: Store, to: "/settings/portal", perm: "managePortal" },
-      { label: "Integrations", icon: SettingsIcon, to: "/settings/integrations", perm: "manageApiIntegrations" },
+      { label: "Organization", icon: SettingsNavIcon, to: "/settings/organization" },
+      { label: "Buyer Portal", icon: PortalIcon, to: "/settings/portal", perm: "managePortal" },
+      { label: "Integrations", icon: SettingsNavIcon, to: "/settings/integrations", perm: "manageApiIntegrations" },
     ],
   },
 ];
