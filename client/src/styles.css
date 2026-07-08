@@ -603,6 +603,14 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .dash-main .panel, .dash-duo .panel { margin-bottom: 0; }
 @media (max-width: 900px) { .dash-main, .dash-duo { grid-template-columns: 1fr; } }
 
+/* Customizable widget grid (Dashboard Customize View). */
+.dash-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.dash-grid .dash-w.full { grid-column: 1 / -1; }
+.dash-grid .dash-w.half { grid-column: span 1; min-width: 0; }
+.dash-grid .dash-w > .panel { margin-bottom: 0; min-width: 0; }
+.dash-grid .dash-w > .metrics-row { margin: 0; }
+@media (max-width: 900px) { .dash-grid { grid-template-columns: 1fr; } .dash-grid .dash-w.half { grid-column: 1 / -1; } }
+
 .dash-swatch { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
 .dash-swatch-proj { background: var(--accent); opacity: 0.55; }
 :root[data-theme="light"] .dash-swatch-proj { opacity: 0.45; }
