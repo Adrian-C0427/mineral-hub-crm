@@ -40,11 +40,13 @@ export function SellerDetails({ dealId, sellers, users, canEdit, onChanged }: {
 
   return (
     <div className="panel">
-      <div className="section-head">
-        <h3 style={{ margin: 0 }}>Seller Details</h3>
-        {canEdit && <button className="small primary" onClick={() => setEditing("new")}>+ Add seller</button>}
+      <div className="section-head" style={{ alignItems: "flex-start" }}>
+        <div>
+          <h3 style={{ margin: 0 }}>Seller Details</h3>
+          <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>Owner and contact information for this deal, kept separate from the deal characteristics.</div>
+        </div>
+        {canEdit && <button className="small primary" style={{ whiteSpace: "nowrap" }} onClick={() => setEditing("new")}>+ Add seller</button>}
       </div>
-      <p className="muted" style={{ marginTop: 0 }}>Owner and contact information for this deal, kept separate from the deal characteristics.</p>
 
       {sellers.length === 0 ? (
         <p className="muted">No seller information yet.{canEdit && " Add a seller to record their contact and mailing details."}</p>
@@ -76,15 +78,18 @@ function SellerCard({ s, canEdit, onEdit, onRemove }: { s: Seller; canEdit: bool
   const physical = [s.physicalAddress, s.physicalCity, [s.physicalState, s.physicalZip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
   const mailing = [s.mailingAddress, s.mailingCity, [s.mailingState, s.mailingZip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
   const sameAddr = physical && mailing && physical === mailing;
+  const name = sellerDisplayName(s);
+  const initials = name.split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
   return (
     <div className="seller-card">
       <div className="seller-card-head">
-        <div className="row" style={{ gap: 8 }}>
-          <strong>{sellerDisplayName(s)}</strong>
+        <div className="row" style={{ gap: 10, alignItems: "center" }}>
+          <span className="seller-avatar">{initials}</span>
+          <strong style={{ fontSize: 14.5 }}>{name}</strong>
           <span className="badge resp-pending">{prettyType(s.sellerType)}</span>
         </div>
         {canEdit && (
-          <div className="row" style={{ gap: 6 }}>
+          <div className="row" style={{ gap: 14 }}>
             <button className="link-btn" onClick={onEdit}>Edit</button>
             <button className="link-btn" style={{ color: "var(--red)" }} onClick={onRemove}>Remove</button>
           </div>

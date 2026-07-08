@@ -159,7 +159,7 @@ function buildSvg(map: maplibregl.Map, opts: TractExportOpts): string {
   const headerH = 70;
   const bar = scaleBar(map, 140);
   const parts: string[] = [];
-  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h + headerH + 60}" font-family="Inter, system-ui, sans-serif">`);
+  parts.push(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${w} ${h + headerH + 60}" font-family="Manrope, system-ui, sans-serif">`);
   parts.push(`<rect width="100%" height="100%" fill="#ffffff"/>`);
   parts.push(`<text x="20" y="30" font-size="19" font-weight="bold" fill="#0f172a">${svgEscape(opts.dealName)}</text>`);
   parts.push(`<text x="20" y="52" font-size="13" fill="#475569">Tract Description Map · ${svgEscape(opts.orgName)} · Generated ${new Date().toLocaleDateString()}</text>`);
