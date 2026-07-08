@@ -368,7 +368,12 @@ buyersRouter.post(
       const valid = await prisma.user.count({ where: { id: { in: ownerIds }, organizationId: org } });
       if (valid !== new Set(ownerIds).size) throw new HttpError(400, "One or more owners are not in your organization");
     }
-    const owned = await prisma.buyer.findMany({ where: { id: { in: ids }, organizationId: org }, select: { id: true } });
+    // Reject the whole request if any target buyer is outside the caller's org,
+    // rather than silently assigning a subset — the client should never see a
+    // partial success it can't distinguish from a full one.
+    const uniqueIds = [...new Set(ids)];
+    const owned = await prisma.buyer.findMany({ where: { id: { in: uniqueIds }, organizationId: org }, select: { id: true } });
+    if (owned.length !== uniqueIds.length) throw new HttpError(400, "One or more buyers are not in your organization");
     for (const b of owned) await prisma.$transaction((tx) => syncOwners(tx, b.id, ownerIds));
     res.json({ updated: owned.length });
   }),

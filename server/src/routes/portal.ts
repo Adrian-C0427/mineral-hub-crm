@@ -5,6 +5,7 @@ import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { normalizeCompany } from "../serializers.js";
 import { getDownloadUrl, s3Configured } from "../services/s3.js";
+import { portalRateLimited } from "../services/portalRateLimit.js";
 
 /**
  * Buyer Offering Portal — the PUBLIC (unauthenticated) API.
@@ -321,18 +322,6 @@ portalRouter.get(
 // Lead capture — "Don't see what you're looking for?"
 // ---------------------------------------------------------------------------
 
-// Cheap in-memory rate limit: the endpoint is unauthenticated and writes to
-// the CRM, so cap submissions per IP. Resets on process restart (fine — this
-// guards against scripts, not determined attackers).
-const leadHits = new Map<string, { n: number; t: number }>();
-function leadRateLimited(ip: string): boolean {
-  const now = Date.now();
-  const h = leadHits.get(ip);
-  if (!h || now - h.t > 60 * 60 * 1000) { leadHits.set(ip, { n: 1, t: now }); return false; }
-  h.n++;
-  return h.n > 10;
-}
-
 const leadSchema = z.object({
   companyName: z.string().trim().min(1).max(160),
   contactName: z.string().trim().min(1).max(120),
@@ -360,7 +349,7 @@ portalRouter.post(
   asyncHandler(async (req, res) => {
     const org = await orgBySlug(String(req.params.orgSlug));
     const ip = req.ip ?? "unknown";
-    if (leadRateLimited(ip)) throw new HttpError(429, "Too many submissions — please try again later");
+    if (await portalRateLimited("portal-submit", ip)) throw new HttpError(429, "Too many submissions — please try again later");
     const lead = leadSchema.parse(req.body);
     const email = lead.email.toLowerCase();
     const normCompany = normalizeCompany(lead.companyName);
@@ -474,7 +463,7 @@ portalRouter.post(
   "/offering/:slug/offers",
   asyncHandler(async (req, res) => {
     const ip = req.ip ?? "unknown";
-    if (leadRateLimited(ip)) throw new HttpError(429, "Too many submissions — please try again later");
+    if (await portalRateLimited("portal-submit", ip)) throw new HttpError(429, "Too many submissions — please try again later");
 
     const deal = await prisma.deal.findUnique({
       where: { portalSlug: String(req.params.slug) },
