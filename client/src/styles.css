@@ -1305,6 +1305,16 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
   border-radius: 10px; padding: 10px 12px; box-shadow: var(--shadow); }
 .ml-floating .ml-pills { gap: 6px; }
 
+/* Map page saved presets (Customize View: default layers + camera). */
+.mc-presets { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.mc-presets .ddx-label { display: block; margin-bottom: 8px; }
+.mc-presets-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.mc-preset-chip { display: inline-flex; align-items: center; background: var(--panel-2); border: 1px solid var(--border); border-radius: 100px; overflow: hidden; }
+.mc-preset-apply { border: none; background: none; padding: 4px 10px; cursor: pointer; color: var(--text); font-size: 12.5px; }
+.mc-preset-apply:hover { color: var(--accent); }
+.mc-preset-del { border: none; background: none; padding: 4px 8px 4px 4px; cursor: pointer; color: var(--text-dim); line-height: 1; }
+.mc-preset-del:hover { color: var(--red); }
+
 /* Organization → Users: keep the table readable at any width — cells never wrap
    and the whole table scrolls horizontally inside .table-scroll instead. */
 .users-table { min-width: 720px; }

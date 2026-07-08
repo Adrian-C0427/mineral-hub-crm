@@ -49,6 +49,21 @@ interface Suggest {
 /** A recent selection — enough payload to replay the action without re-searching. */
 interface Recent { t: keyof Suggest; label: string; sub: string; p: Record<string, unknown> }
 const RECENTS_KEY = "mh_map_recents";
+
+// Map view personalization (Customize View): the user's default visible layers,
+// last camera position, and named presets — all remembered locally per browser.
+const MAP_LAYERS_KEY = "mh-map-layers:v1";
+const MAP_VIEW_KEY = "mh-map-view:v1";
+const MAP_PRESETS_KEY = "mh-map-presets:v1";
+type MapLayers = { boundaries: boolean; absNums: boolean; surveyNames: boolean; deals: boolean; wells: boolean; wellbores: boolean };
+const DEFAULT_MAP_LAYERS: MapLayers = { boundaries: true, absNums: true, surveyNames: true, deals: true, wells: true, wellbores: true };
+interface MapCam { center: [number, number]; zoom: number }
+interface MapPreset { name: string; layers: MapLayers; view: MapCam }
+function loadJson<T>(key: string, fallback: T): T {
+  try { const raw = localStorage.getItem(key); return raw ? (JSON.parse(raw) as T) : fallback; } catch { return fallback; }
+}
+function saveJson(key: string, value: unknown) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage off */ } }
+
 const GROUP_LABELS: Record<keyof Suggest, string> = {
   counties: "Counties", abstracts: "Abstracts & surveys", wells: "Wells & leases",
   operators: "Operators", fields: "Fields", formations: "Formations",
@@ -91,8 +106,12 @@ export function MapView() {
   const [deals, setDeals] = useState<MapDeal[] | null>(null);
   const [selected, setSelected] = useState<Selected>(null);
   const [choices, setChoices] = useState<WellProps[] | null>(null); // overlap disambiguation
-  const [layers, setLayers] = useState({ boundaries: true, absNums: true, surveyNames: true, deals: true, wells: true, wellbores: true });
+  const [layers, setLayers] = useState<MapLayers>(() => ({ ...DEFAULT_MAP_LAYERS, ...loadJson<Partial<MapLayers>>(MAP_LAYERS_KEY, {}) }));
   const layersRef = useRef(layers); layersRef.current = layers;
+  useEffect(() => { saveJson(MAP_LAYERS_KEY, layers); }, [layers]);
+  // Saved map presets (default layers + camera), remembered per browser.
+  const [presets, setPresets] = useState<MapPreset[]>(() => loadJson<MapPreset[]>(MAP_PRESETS_KEY, []));
+  const [presetName, setPresetName] = useState("");
   const [showLayers, setShowLayers] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [statusFilter, setStatusFilter] = useState("ACTIVE");
@@ -148,7 +167,9 @@ export function MapView() {
 
   useEffect(() => {
     if (mapRef.current || !mapContainer.current) return;
-    const map = new maplibregl.Map({ container: mapContainer.current, style: styleWithGlyphs(), center: LEON_CENTER, zoom: 10, attributionControl: { compact: true } });
+    // Reopen where the user last left the map (their remembered default view).
+    const savedCam = loadJson<MapCam | null>(MAP_VIEW_KEY, null);
+    const map = new maplibregl.Map({ container: mapContainer.current, style: styleWithGlyphs(), center: savedCam?.center ?? LEON_CENTER, zoom: savedCam?.zoom ?? 10, attributionControl: { compact: true } });
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
     mapRef.current = map;
 
@@ -261,7 +282,12 @@ export function MapView() {
       map.on("mouseleave", "abstracts-fill", () => (map.getCanvas().style.cursor = ""));
       // On pan/zoom: re-scale the heat gradient to the current extent. (Abstract
       // tiles load themselves — MapLibre requests only what the viewport needs.)
-      map.on("moveend", () => { if (heatRef.current.oil || heatRef.current.gas) pushHeat(); });
+      map.on("moveend", () => {
+        if (heatRef.current.oil || heatRef.current.gas) pushHeat();
+        // Remember the camera as the user's default view for next visit.
+        const c = map.getCenter();
+        saveJson(MAP_VIEW_KEY, { center: [c.lng, c.lat] as [number, number], zoom: map.getZoom() });
+      });
 
       styleReady.current = true;
       applyLayerVisibility(); applyAbstractFilter(); applyWellFilter();
@@ -556,6 +582,28 @@ export function MapView() {
   const abstractCount = dealsByAbstract.size;
   const toggle = (k: keyof typeof layers) => setLayers((p) => ({ ...p, [k]: !p[k] }));
 
+  // Saved presets: capture the current layers + camera, reapply, or delete.
+  function saveCurrentPreset() {
+    const m = mapRef.current; const name = presetName.trim();
+    if (!m || !name) return;
+    const c = m.getCenter();
+    const preset: MapPreset = { name, layers: layersRef.current, view: { center: [c.lng, c.lat], zoom: m.getZoom() } };
+    const next = [...presets.filter((p) => p.name !== name), preset];
+    setPresets(next); saveJson(MAP_PRESETS_KEY, next); setPresetName("");
+  }
+  function applyPreset(p: MapPreset) {
+    setLayers({ ...DEFAULT_MAP_LAYERS, ...p.layers });
+    mapRef.current?.jumpTo({ center: p.view.center, zoom: p.view.zoom });
+  }
+  function deletePreset(name: string) {
+    const next = presets.filter((p) => p.name !== name);
+    setPresets(next); saveJson(MAP_PRESETS_KEY, next);
+  }
+  function resetMapView() {
+    setLayers(DEFAULT_MAP_LAYERS);
+    mapRef.current?.jumpTo({ center: LEON_CENTER, zoom: 10 });
+  }
+
   return (
     <div className="page" style={{ maxWidth: 1400 }}>
       <div className="page-header"><div className="row"><h1 style={{ marginBottom: 0 }}>Map</h1><span className="muted">Texas · {COUNTIES.length} counties · abstracts stream as you pan &amp; zoom</span></div></div>
@@ -647,6 +695,27 @@ export function MapView() {
             layers={layers}
             onToggle={(k) => toggle(k as keyof typeof layers)}
           />
+          {/* Saved presets: layer visibility + camera are remembered as your
+              default; save named presets to jump between setups. */}
+          <div className="mc-presets">
+            <span className="ddx-label">Saved views</span>
+            <div className="mc-presets-row">
+              {presets.length === 0 && <span className="muted" style={{ fontSize: 12.5 }}>Your layers &amp; last position are remembered. Save a named preset to switch quickly.</span>}
+              {presets.map((p) => (
+                <span key={p.name} className="mc-preset-chip">
+                  <button type="button" className="mc-preset-apply" onClick={() => applyPreset(p)}>{p.name}</button>
+                  <button type="button" className="mc-preset-del" title="Delete preset" onClick={() => deletePreset(p.name)}>×</button>
+                </span>
+              ))}
+            </div>
+            <div className="row" style={{ gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input value={presetName} onChange={(e) => setPresetName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveCurrentPreset(); } }}
+                placeholder="Name this view" style={{ width: 170 }} />
+              <button type="button" className="small" disabled={!presetName.trim()} onClick={saveCurrentPreset}>Save current view</button>
+              <button type="button" className="small" onClick={resetMapView}>Restore default</button>
+            </div>
+          </div>
         </div>
       )}
 
