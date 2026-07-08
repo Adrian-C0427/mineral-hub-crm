@@ -67,6 +67,7 @@ export function Buyers() {
       </div>
 
       <SortableTable
+        customizeId="buyers-list"
         columns={columns}
         rows={buyers}
         rowKey={(b) => b.id}

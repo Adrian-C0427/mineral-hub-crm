@@ -18,7 +18,8 @@ type LayerState = typeof DEFAULT_LAYERS;
  */
 export function PortalMap({ features, height = 420, onSelect }: {
   features: FC;
-  height?: number;
+  /** Pixel height, or any CSS length (e.g. "100%") to fill a flex container. */
+  height?: number | string;
   /** Marketplace mode: called with the clicked feature's deal slug. */
   onSelect?: (slug: string, name: string) => void;
 }) {
@@ -89,6 +90,16 @@ export function PortalMap({ features, height = 420, onSelect }: {
       map.fitBounds(homeBounds.current, { padding: 50, maxZoom: 13, duration: 400 });
     }
   }, [features]);
+
+  // Keep the canvas sized to its container — the marketplace panel is resizable,
+  // so the map's box changes without a window resize event.
+  useEffect(() => {
+    const el = container.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => mapRef.current?.resize());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(applyVis, [layers]);
 

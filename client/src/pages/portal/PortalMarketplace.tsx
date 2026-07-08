@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { num } from "../../lib/format";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../../lib/options";
@@ -11,6 +11,8 @@ import { portalGet, portalPost, type FC, type PortalDeal, type PortalOrg } from 
 const EMPTY_FC: FC = { type: "FeatureCollection", features: [] };
 
 type SortKey = "featured" | "newest" | "nra" | "name";
+type ListView = "grid" | "table";
+type DockSide = "left" | "right";
 
 // A snapshot of every filter control — persisted locally so a buyer's last
 // search restores on return, and named presets can be saved/reapplied. The
@@ -21,17 +23,26 @@ interface FilterSnapshot {
   assetTypes: string[]; operators: string[]; nraMin: string; nraMax: string; sort: SortKey;
 }
 interface SavedSearch { name: string; f: FilterSnapshot }
+// The buyer's remembered workspace layout — list view, which side the listings
+// panel is docked on, and how wide it is.
+interface LayoutPrefs { view: ListView; side: DockSide; width: number }
+const DEFAULT_LAYOUT: LayoutPrefs = { view: "grid", side: "left", width: 400 };
+const MIN_PANEL = 300;
+const MAX_PANEL = 760;
+
 const lastKey = (org: string) => `mh-portal-filters:${org}`;
 const savedKey = (org: string) => `mh-portal-saved:${org}`;
+const layoutKey = (org: string) => `mh-portal-layout:${org}`;
 function loadJson<T>(key: string, fallback: T): T {
   try { const raw = localStorage.getItem(key); return raw ? (JSON.parse(raw) as T) : fallback; } catch { return fallback; }
 }
 function saveJson(key: string, value: unknown) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage off */ } }
 
 /**
- * Public marketplace — every published PUBLIC offering for the org, with
- * search, multi-select filters, card/list views, an overview map, and the
- * "Don't see what you're looking for?" lead-capture form.
+ * Public marketplace — a premium, map-first browsing experience (Zillow-style,
+ * for mineral interests). The interactive map fills the workspace; a dockable,
+ * resizable listings panel (grid or table) rides alongside it, filters collapse
+ * out of the way, and the buyer's view/dock/size preferences persist per org.
  */
 export function PortalMarketplace() {
   const { orgSlug = "" } = useParams();
@@ -41,7 +52,13 @@ export function PortalMarketplace() {
   const [features, setFeatures] = useState<FC>(EMPTY_FC);
   const [error, setError] = useState<string | null>(null);
 
-  const [view, setView] = useState<"cards" | "list">("cards");
+  // Workspace layout (remembered per org).
+  const [view, setView] = useState<ListView>(DEFAULT_LAYOUT.view);
+  const [side, setSide] = useState<DockSide>(DEFAULT_LAYOUT.side);
+  const [panelWidth, setPanelWidth] = useState<number>(DEFAULT_LAYOUT.width);
+  const [showFilters, setShowFilters] = useState(false);
+  const wsRef = useRef<HTMLDivElement>(null);
+
   const [sort, setSort] = useState<SortKey>("featured");
   const [fStates, setFStates] = useState<string[]>([]);
   const [fCounties, setFCounties] = useState<string[]>([]);
@@ -64,21 +81,43 @@ export function PortalMarketplace() {
     setFFormations(f.formations ?? []); setFAssetTypes(f.assetTypes ?? []); setFOperators(f.operators ?? []);
     setNraMin(f.nraMin ?? ""); setNraMax(f.nraMax ?? ""); setSort(f.sort ?? "featured");
   }
-  const hasFilters = fStates.length || fCounties.length || fBasins.length || fFormations.length || fAssetTypes.length || fOperators.length || nraMin || nraMax;
+  const activeFilterCount =
+    fStates.length + fCounties.length + fBasins.length + fFormations.length +
+    fAssetTypes.length + fOperators.length + (nraMin ? 1 : 0) + (nraMax ? 1 : 0);
+  const hasFilters = activeFilterCount > 0;
 
   useEffect(() => {
     portalGet<{ org: PortalOrg; deals: PortalDeal[] }>(`/${encodeURIComponent(orgSlug)}`)
       .then((d) => { setOrg(d.org); setDeals(d.deals); })
       .catch((e) => setError(e.message));
     portalGet<FC>(`/${encodeURIComponent(orgSlug)}/features`).then(setFeatures).catch(() => {});
-    // Restore this buyer's saved searches + last-used filters for this org.
+    // Restore this buyer's saved searches, last-used filters, and workspace layout.
     setSaved(loadJson<SavedSearch[]>(savedKey(orgSlug), []));
     applySnapshot(loadJson<Partial<FilterSnapshot>>(lastKey(orgSlug), {}));
+    const layout = loadJson<LayoutPrefs>(layoutKey(orgSlug), DEFAULT_LAYOUT);
+    setView(layout.view ?? DEFAULT_LAYOUT.view);
+    setSide(layout.side ?? DEFAULT_LAYOUT.side);
+    setPanelWidth(Math.min(MAX_PANEL, Math.max(MIN_PANEL, layout.width ?? DEFAULT_LAYOUT.width)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orgSlug]);
 
-  // Persist the current filters as "last used" so a return visit restores them.
+  // Persist filters + layout so a return visit restores the whole workspace.
   useEffect(() => { if (orgSlug) saveJson(lastKey(orgSlug), snapshot); }, [orgSlug, snapshot]);
+  useEffect(() => { if (orgSlug) saveJson(layoutKey(orgSlug), { view, side, width: panelWidth }); }, [orgSlug, view, side, panelWidth]);
+
+  // Drag the divider to resize the listings panel (map takes the rest).
+  function startResize(e: React.PointerEvent) {
+    e.preventDefault();
+    const move = (ev: PointerEvent) => {
+      const r = wsRef.current?.getBoundingClientRect();
+      if (!r) return;
+      const raw = side === "left" ? ev.clientX - r.left : r.right - ev.clientX;
+      setPanelWidth(Math.min(MAX_PANEL, Math.max(MIN_PANEL, raw)));
+    };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  }
 
   function saveCurrent() {
     const name = presetName.trim();
@@ -95,7 +134,6 @@ export function PortalMarketplace() {
   const options = useMemo(() => {
     const uniq = (xs: string[]) => [...new Set(xs)].sort();
     return {
-      states: uniq(deals.flatMap((d) => d.states)),
       counties: uniq(deals.flatMap((d) => d.counties)),
       operators: uniq(deals.map((d) => d.operator ?? "").filter(Boolean)),
     };
@@ -125,118 +163,131 @@ export function PortalMarketplace() {
 
   return (
     <PortalShell org={org ?? undefined}>
-      <div className="portal-hero panel" style={{ alignItems: "center" }}>
+      <div className="portal-hero panel mkt-hero">
         <div>
-          <h1 style={{ margin: "0 0 6px" }}>Available Mineral Opportunities</h1>
-          <p className="muted" style={{ margin: 0 }}>{deals.length} active offering{deals.length === 1 ? "" : "s"} · Filter to narrow the list, then reach out — we move fast.</p>
+          <h1 style={{ margin: "0 0 4px" }}>Available Mineral Opportunities</h1>
+          <p className="muted" style={{ margin: 0 }}>{deals.length} active offering{deals.length === 1 ? "" : "s"} · Explore on the map, then reach out — we move fast.</p>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="panel">
-        {/* Saved searches — reapply a named filter set, or save the current one. */}
-        <div className="portal-saved">
-          <span className="muted" style={{ fontSize: 13 }}>Saved searches:</span>
-          {saved.length === 0 && <span className="muted" style={{ fontSize: 13 }}>none yet</span>}
-          {saved.map((s) => (
-            <span key={s.name} className="portal-saved-chip">
-              <button type="button" className="portal-saved-apply" onClick={() => applySnapshot(s.f)}>{s.name}</button>
-              <button type="button" className="portal-saved-del" title="Delete" onClick={() => deleteSaved(s.name)}>×</button>
-            </span>
-          ))}
-          <span className="spacer" />
-          <input
-            value={presetName}
-            onChange={(e) => setPresetName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveCurrent(); } }}
-            placeholder="Name this search"
-            style={{ width: 160 }}
-          />
-          <button type="button" className="small" disabled={!presetName.trim() || !hasFilters} onClick={saveCurrent}>Save</button>
-          {hasFilters ? <button type="button" className="small" onClick={() => applySnapshot({})}>Clear</button> : null}
-        </div>
-        <div className="dd-grid">
-          {/* Marketplace filters scope to what's actually published (data-driven
-              options), routed through the same component for consistent UX. */}
-          <GeoFields
-            states={fStates} onStatesChange={setFStates}
-            counties={fCounties} onCountiesChange={setFCounties}
-            countyOptions={options.counties.length ? options.counties : undefined}
-            labels={{ state: "State", county: "County" }}
-          />
-          <div className="field"><label>Basin</label><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={fBasins} onChange={setFBasins} placeholder="Any basin" /></div>
-          <div className="field"><label>Formation</label><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={fFormations} onChange={setFFormations} placeholder="Any formation" /></div>
-          <div className="field"><label>Asset type</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={fAssetTypes} onChange={setFAssetTypes} placeholder="Any type" /></div>
-          <div className="field"><label>Operator</label><SearchableMultiSelect options={options.operators} value={fOperators} onChange={setFOperators} placeholder="Any operator" /></div>
-          <div className="field"><label>NRA min</label><input type="number" min="0" value={nraMin} onChange={(e) => setNraMin(e.target.value)} placeholder="0" /></div>
-          <div className="field"><label>NRA max</label><input type="number" min="0" value={nraMax} onChange={(e) => setNraMax(e.target.value)} placeholder="No max" /></div>
-        </div>
-        <div className="row" style={{ justifyContent: "space-between", flexWrap: "wrap" }}>
-          <span className="muted">{filtered.length} of {deals.length} opportunities</span>
-          <div className="row" style={{ gap: 8 }}>
-            <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} style={{ width: "auto" }}>
-              <option value="featured">Featured first</option>
-              <option value="newest">Newest</option>
-              <option value="nra">Largest NRA</option>
-              <option value="name">Name A–Z</option>
-            </select>
-            <button className={`small ${view === "cards" ? "primary" : ""}`} onClick={() => setView("cards")}>▦ Cards</button>
-            <button className={`small ${view === "list" ? "primary" : ""}`} onClick={() => setView("list")}>☰ List</button>
+      {/* Collapsible filters + workspace controls (map-first: filters stay out of the way). */}
+      <div className="panel mkt-controls">
+        <div className="mkt-controls-bar">
+          <button className="small" onClick={() => setShowFilters((s) => !s)}>
+            {showFilters ? "▾" : "▸"} Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+          </button>
+          <span className="muted" style={{ fontSize: 13 }}>{filtered.length} of {deals.length} opportunities</span>
+          <span className="spacer" style={{ marginLeft: "auto" }} />
+          <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} style={{ width: "auto" }} aria-label="Sort listings">
+            <option value="featured">Featured first</option>
+            <option value="newest">Newest</option>
+            <option value="nra">Largest NRA</option>
+            <option value="name">Name A–Z</option>
+          </select>
+          <div className="seg-control mkt-seg">
+            <span className={`seg ${view === "grid" ? "active" : ""}`} onClick={() => setView("grid")}>▦ Grid</span>
+            <span className={`seg ${view === "table" ? "active" : ""}`} onClick={() => setView("table")}>☰ Table</span>
           </div>
+          <button className="small" title={`Dock listings ${side === "left" ? "right" : "left"}`} onClick={() => setSide((s) => (s === "left" ? "right" : "left"))}>
+            {side === "left" ? "Dock →" : "← Dock"}
+          </button>
         </div>
-      </div>
 
-      {/* Overview map */}
-      <div className="panel">
-        <div className="section-head"><h3 style={{ margin: 0 }}>Where these opportunities are</h3><span className="muted">Click a highlighted property to open its offering</span></div>
-        <PortalMap features={features} height={380} onSelect={(slug) => navigate(`/offer/${slug}`)} />
-      </div>
-
-      {/* Listings */}
-      {filtered.length === 0 ? (
-        <div className="panel" style={{ textAlign: "center", padding: 40 }}>
-          <p className="muted" style={{ margin: 0 }}>No opportunities match those filters — try broadening, or tell us what you're looking for below.</p>
-        </div>
-      ) : view === "cards" ? (
-        <div className="portal-cards">
-          {filtered.map((d) => (
-            <div key={d.slug} className="panel portal-card clickable" onClick={() => navigate(`/offer/${d.slug}`)}>
-              {d.featured && <span className="badge resp-offer">Featured</span>}
-              <h3 style={{ margin: "6px 0 2px" }}>{d.name}</h3>
-              <div className="muted" style={{ fontSize: 13 }}>{d.counties.map((c) => `${c} County`).join(", ")}{d.states.length ? ` · ${d.states.join(", ")}` : ""}</div>
-              <div className="portal-card-facts">
-                {d.nra != null && <span><strong>{num(d.nra)}</strong> NRA</span>}
-                {d.assetTypes.length > 0 && <span>{d.assetTypes.join("/")}</span>}
-                {d.basins.length > 0 && <span>{d.basins[0]}</span>}
-                {d.operator && <span>{d.operator}</span>}
-              </div>
-              {d.summary && <p className="muted portal-card-summary">{d.summary}</p>}
-              <span className="portal-card-cta">View offering →</span>
+        {showFilters && (
+          <div className="mkt-filters-body">
+            {/* Saved searches — reapply a named filter set, or save the current one. */}
+            <div className="portal-saved">
+              <span className="muted" style={{ fontSize: 13 }}>Saved searches:</span>
+              {saved.length === 0 && <span className="muted" style={{ fontSize: 13 }}>none yet</span>}
+              {saved.map((s) => (
+                <span key={s.name} className="portal-saved-chip">
+                  <button type="button" className="portal-saved-apply" onClick={() => applySnapshot(s.f)}>{s.name}</button>
+                  <button type="button" className="portal-saved-del" title="Delete" onClick={() => deleteSaved(s.name)}>×</button>
+                </span>
+              ))}
+              <span className="spacer" />
+              <input
+                value={presetName}
+                onChange={(e) => setPresetName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveCurrent(); } }}
+                placeholder="Name this search"
+                style={{ width: 160 }}
+              />
+              <button type="button" className="small" disabled={!presetName.trim() || !hasFilters} onClick={saveCurrent}>Save</button>
+              {hasFilters ? <button type="button" className="small" onClick={() => applySnapshot({})}>Clear</button> : null}
             </div>
-          ))}
-        </div>
-      ) : (
-        <div className="panel">
-          <div className="table-scroll">
-            <table className="data-table">
-              <thead><tr><th>Opportunity</th><th>County</th><th>State</th><th className="right">NRA</th><th>Asset</th><th>Basin</th><th>Operator</th></tr></thead>
-              <tbody>
-                {filtered.map((d) => (
-                  <tr key={d.slug} className="clickable" onClick={() => navigate(`/offer/${d.slug}`)}>
-                    <td><strong>{d.name}</strong>{d.featured ? " ★" : ""}</td>
-                    <td>{d.counties.join(", ")}</td>
-                    <td>{d.states.join(", ")}</td>
-                    <td className="right">{d.nra != null ? num(d.nra) : "—"}</td>
-                    <td>{d.assetTypes.join("/") || "—"}</td>
-                    <td>{d.basins.join(", ") || "—"}</td>
-                    <td>{d.operator ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className="filters-grid" style={{ marginTop: 10 }}>
+              {/* Same cascading geographic selector as the CRM; options scope to
+                  what's actually published so nothing dangles. */}
+              <GeoFields
+                states={fStates} onStatesChange={setFStates}
+                counties={fCounties} onCountiesChange={setFCounties}
+                countyOptions={options.counties.length ? options.counties : undefined}
+                labels={{ state: "State", county: "County" }}
+              />
+              <div className="field"><label>Basin</label><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={fBasins} onChange={setFBasins} placeholder="Any basin" /></div>
+              <div className="field"><label>Formation</label><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={fFormations} onChange={setFFormations} placeholder="Any formation" /></div>
+              <div className="field"><label>Asset type</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={fAssetTypes} onChange={setFAssetTypes} placeholder="Any type" /></div>
+              <div className="field"><label>Operator</label><SearchableMultiSelect options={options.operators} value={fOperators} onChange={setFOperators} placeholder="Any operator" /></div>
+              <div className="field"><label>NRA min</label><input type="number" min="0" value={nraMin} onChange={(e) => setNraMin(e.target.value)} placeholder="0" /></div>
+              <div className="field"><label>NRA max</label><input type="number" min="0" value={nraMax} onChange={(e) => setNraMax(e.target.value)} placeholder="No max" /></div>
+            </div>
           </div>
+        )}
+      </div>
+
+      {/* Map-first workspace: dockable, resizable listings panel + big map. */}
+      <div ref={wsRef} className={`mkt-workspace side-${side}`} style={{ "--panel-w": `${panelWidth}px` } as React.CSSProperties}>
+        <div className="mkt-panel">
+          {filtered.length === 0 ? (
+            <div className="mkt-empty">
+              <p className="muted" style={{ margin: 0 }}>No opportunities match those filters — broaden them, or tell us what you're looking for below.</p>
+            </div>
+          ) : view === "grid" ? (
+            <div className="mkt-cards">
+              {filtered.map((d) => (
+                <div key={d.slug} className="panel portal-card clickable" onClick={() => navigate(`/offer/${d.slug}`)}>
+                  {d.featured && <span className="badge resp-offer">Featured</span>}
+                  <h3 style={{ margin: "6px 0 2px" }}>{d.name}</h3>
+                  <div className="muted" style={{ fontSize: 13 }}>{d.counties.map((c) => `${c} County`).join(", ")}{d.states.length ? ` · ${d.states.join(", ")}` : ""}</div>
+                  <div className="portal-card-facts">
+                    {d.nra != null && <span><strong>{num(d.nra)}</strong> NRA</span>}
+                    {d.assetTypes.length > 0 && <span>{d.assetTypes.join("/")}</span>}
+                    {d.basins.length > 0 && <span>{d.basins[0]}</span>}
+                    {d.operator && <span>{d.operator}</span>}
+                  </div>
+                  {d.summary && <p className="muted portal-card-summary">{d.summary}</p>}
+                  <span className="portal-card-cta">View offering →</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="table-scroll mkt-table">
+              <table className="data-table">
+                <thead><tr><th>Opportunity</th><th>County</th><th>State</th><th className="right">NRA</th><th>Asset</th><th>Operator</th></tr></thead>
+                <tbody>
+                  {filtered.map((d) => (
+                    <tr key={d.slug} className="clickable" onClick={() => navigate(`/offer/${d.slug}`)}>
+                      <td><strong>{d.name}</strong>{d.featured ? " ★" : ""}</td>
+                      <td>{d.counties.join(", ")}</td>
+                      <td>{d.states.join(", ")}</td>
+                      <td className="right">{d.nra != null ? num(d.nra) : "—"}</td>
+                      <td>{d.assetTypes.join("/") || "—"}</td>
+                      <td>{d.operator ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
-      )}
+
+        <div className="mkt-resize" onPointerDown={startResize} title="Drag to resize" role="separator" aria-orientation="vertical" />
+
+        <div className="mkt-map">
+          <PortalMap features={features} height="100%" onSelect={(slug) => navigate(`/offer/${slug}`)} />
+        </div>
+      </div>
 
       <LeadCapture orgSlug={orgSlug} />
     </PortalShell>
