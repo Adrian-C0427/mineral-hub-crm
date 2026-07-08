@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner } from "./ui";
-import { NetworkGraph, CLASS_COLORS, type GraphNode, type GraphEdge } from "./NetworkGraph";
+import { CLASS_COLORS, type GraphNode, type GraphEdge } from "./NetworkGraph";
 
 /**
  * Buyer Profile → Relationships section.
@@ -141,7 +141,7 @@ export function BuyerRelationships({ buyerId }: { buyerId: string }) {
                 <div className="row" style={{ gap: 6, flexWrap: "wrap", alignItems: "center" }}>
                   {c.chain.nodes.map((n, j) => (
                     <span key={n.norm} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                      <span className={`badge ${j === c.position ? "" : ""}`} style={{
+                      <span className="badge" style={{
                         background: `${CLASS_COLORS[n.klass] ?? "#64748b"}26`, color: CLASS_COLORS[n.klass] ?? "#64748b",
                         outline: j === c.position ? "2px solid var(--accent)" : "none",
                       }}>{n.name}</span>
@@ -158,15 +158,6 @@ export function BuyerRelationships({ buyerId }: { buyerId: string }) {
           </div>
         </div>
       )}
-
-      <div style={{ marginTop: 14 }}>
-        <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>Relationship Network</div>
-        <NetworkGraph
-          nodes={net.graph.nodes} edges={net.graph.edges} height={380} focusNorm={net.norm} maxNodes={30}
-          emptyLabel="Not enough connections to graph."
-          onNodeClick={(n) => { const nn = n as GraphNode & { buyerId?: string | null }; if (nn.buyerId) nav(`/buyers/${nn.buyerId}`); }}
-        />
-      </div>
     </div>
   );
 }

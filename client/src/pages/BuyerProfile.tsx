@@ -26,7 +26,6 @@ interface BuyerProfileData {
   nextFollowUpDate: string | null;
   notes: string | null;
   owners: { id: string; name: string }[];
-  tags: { id: string; name: string }[];
   buyBox: BuyBox;
   closeRate: number;
   closedDeals: number;
@@ -51,7 +50,6 @@ export function BuyerProfile() {
   const [users, setUsers] = useState<UserLite[]>([]);
   const [edit, setEdit] = useState(false);
   const [draft, setDraft] = useState<BuyerProfileData | null>(null);
-  const [tagInput, setTagInput] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -62,7 +60,7 @@ export function BuyerProfile() {
   const view = edit ? draft! : b;
 
   function startEdit() { setDraft(JSON.parse(JSON.stringify(b))); setEdit(true); setErr(null); }
-  function cancel() { setEdit(false); setDraft(null); setTagInput(""); }
+  function cancel() { setEdit(false); setDraft(null); }
 
   async function save() {
     if (!draft) return;
@@ -72,7 +70,7 @@ export function BuyerProfile() {
         name: draft.name, companyName: draft.companyName, contactName: draft.contactName,
         email: draft.email || null, phone: draft.phone, website: draft.website, mailingAddress: draft.mailingAddress,
         relationshipStatus: draft.relationshipStatus, lastContactDate: draft.lastContactDate, nextFollowUpDate: draft.nextFollowUpDate,
-        notes: draft.notes, ownerIds: draft.owners.map((o) => o.id), tags: draft.tags.map((t) => t.name), buyBox: draft.buyBox,
+        notes: draft.notes, ownerIds: draft.owners.map((o) => o.id), buyBox: draft.buyBox,
       });
       setEdit(false); setDraft(null); load();
     } catch (e) { setErr(e instanceof ApiError ? e.message : "Save failed"); }
@@ -191,24 +189,6 @@ export function BuyerProfile() {
         <Fld l="Notes">
           {edit ? <textarea rows={3} value={view.notes ?? ""} onChange={(e) => setD({ notes: e.target.value })} /> : <div className="wrap">{view.notes || "—"}</div>}
         </Fld>
-      </div>
-
-      {/* Tags */}
-      <div className="panel">
-        <h3>Tags</h3>
-        <div className="chip-row">
-          {view.tags.map((t) => (
-            <span className="tag" key={t.id || t.name}>{t.name}{edit && <button onClick={() => setD({ tags: view.tags.filter((x) => x.name !== t.name) })}>×</button>}</span>
-          ))}
-          {view.tags.length === 0 && !edit && <span className="muted">No tags.</span>}
-        </div>
-        {edit && (
-          <div className="row" style={{ marginTop: 8 }}>
-            <input style={{ width: 200 }} value={tagInput} onChange={(e) => setTagInput(e.target.value)} placeholder="Add tag…"
-              onKeyDown={(e) => { if (e.key === "Enter" && tagInput.trim()) { setD({ tags: [...view.tags, { id: "", name: tagInput.trim() }] }); setTagInput(""); } }} />
-            <button onClick={() => { if (tagInput.trim()) { setD({ tags: [...view.tags, { id: "", name: tagInput.trim() }] }); setTagInput(""); } }}>Add</button>
-          </div>
-        )}
       </div>
 
       {/* Relationships — transaction-network intelligence from research data */}

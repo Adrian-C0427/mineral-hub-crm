@@ -11,11 +11,23 @@ dashboardRouter.use(requireAuth, requireOrg);
 const dealInclude = { selectedBuyer: true, relationshipOwner: true } as const;
 const ACTIVE_STAGES = ["UNDER_CONTRACT", "PREPARING_PACKAGE", "SENT_TO_BUYERS", "NEGOTIATING", "CLOSING"] as const;
 
+/** Global dashboard date window (default YTD). Upper bound is exclusive. */
+function dashboardWindow(period: string | undefined, now: Date): { start: Date; end: Date; label: string } {
+  const y = now.getUTCFullYear(), m = now.getUTCMonth();
+  switch (period) {
+    case "THIS_MONTH": return { start: new Date(Date.UTC(y, m, 1)), end: new Date(Date.UTC(y, m + 1, 1)), label: "This Month" };
+    case "LAST_MONTH": return { start: new Date(Date.UTC(y, m - 1, 1)), end: new Date(Date.UTC(y, m, 1)), label: "Last Month" };
+    case "THIS_QUARTER": { const q = Math.floor(m / 3) * 3; return { start: new Date(Date.UTC(y, q, 1)), end: new Date(Date.UTC(y, q + 3, 1)), label: "This Quarter" }; }
+    default: return { start: new Date(Date.UTC(y, 0, 1)), end: new Date(Date.UTC(y + 1, 0, 1)), label: "YTD" };
+  }
+}
+
 dashboardRouter.get(
   "/",
   asyncHandler(async (req: AuthedRequest, res) => {
     const now = new Date();
-    const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+    const win = dashboardWindow(req.query.period as string | undefined, now);
+    const inWindow = (d: Date) => d.getTime() >= win.start.getTime() && d.getTime() < win.end.getTime();
     const org = orgId(req);
 
     // The dashboard reports on the acquisition pipeline: opportunities plus any
@@ -41,12 +53,16 @@ dashboardRouter.get(
       return sum + netProfit(best, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts);
     }, 0);
 
+    // Closed profit + average size are scoped to the selected dashboard window;
+    // the year-view widgets (Top Buyers, Profit by Month) stay YTD.
+    const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
     const closedYtd = closedDeals.filter((d) => (d.stageHistory[0]?.createdAt ?? d.updatedAt) >= yearStart);
-    const closedProfitYtd = closedYtd.reduce(
+    const closedInWindow = closedDeals.filter((d) => inWindow(d.stageHistory[0]?.createdAt ?? d.updatedAt));
+    const closedProfitYtd = closedInWindow.reduce(
       (sum, d) => sum + (d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : 0),
       0,
     );
-    const avgDealSize = avg(closedDeals.map((d) => d.selectedOffer?.amount).filter((n): n is number => n != null));
+    const avgDealSize = avg(closedInWindow.map((d) => d.selectedOffer?.amount).filter((n): n is number => n != null));
 
     // Overdue alert (active, no buyer, past find-buyer-by)
     const overdue = allActive
@@ -164,6 +180,7 @@ dashboardRouter.get(
         closedProfitYtd,
         avgDealSize,
         offersPending: activeOffers,
+        periodLabel: win.label,
       },
       overdue: overdue.map((d) => ({ id: d.id, name: d.name, findBuyerByDate: d.findBuyerByDate })),
       stageCounts,

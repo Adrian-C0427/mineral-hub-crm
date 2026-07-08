@@ -433,6 +433,8 @@ model Deal {
   originalClosingDate      DateTime?
   findBuyerByDateOverride  DateTime?
   finalClosingDateOverride DateTime?
+  // Auto-set when the deal moves to CLOSED; user-editable afterward.
+  closedDate               DateTime?
 
   selectedBuyerId String?
   selectedBuyer   Buyer?  @relation("SelectedBuyer", fields: [selectedBuyerId], references: [id], onDelete: SetNull)

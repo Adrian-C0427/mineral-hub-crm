@@ -94,6 +94,7 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     // raw override columns (for edit forms)
     findBuyerByDateOverride: deal.findBuyerByDateOverride,
     finalClosingDateOverride: deal.finalClosingDateOverride,
+    closedDate: deal.closedDate,
     selectedBuyerId: deal.selectedBuyerId,
     selectedBuyer: deal.selectedBuyer
       ? { id: deal.selectedBuyer.id, name: deal.selectedBuyer.name, companyName: deal.selectedBuyer.companyName }

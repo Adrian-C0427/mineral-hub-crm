@@ -8,6 +8,7 @@ import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, Banner, Modal } from "../components/ui";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
+import { PeriodSegmented } from "../components/PeriodSegmented";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { money, pct, num, fmtDate, prettyStage } from "../lib/format";
 import { CHART_COLORS, COLOR_REVENUE, COLOR_PROFIT, COLOR_FORECAST, monthLabel, chartTooltip } from "../lib/charts";
@@ -172,8 +173,8 @@ export function Reports() {
 
       {/* --- Controls (not captured in PDF) --- */}
       <div className="panel">
-        <div className="chip-row" style={{ marginBottom: 10 }}>
-          {CHIPS.map(([p, label]) => <span key={p} className={`chip ${period === p ? "active" : ""}`} onClick={() => setPeriod(p)}>{label}</span>)}
+        <div style={{ marginBottom: 10 }}>
+          <PeriodSegmented options={CHIPS} value={period} onChange={setPeriod} />
         </div>
         {period === "CUSTOM" && (
           <div className="row" style={{ marginBottom: 10 }}>

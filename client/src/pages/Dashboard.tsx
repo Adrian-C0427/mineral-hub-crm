@@ -6,10 +6,17 @@ import { Spinner } from "../components/ui";
 import { money, fmtDate, prettyStage } from "../lib/format";
 import { NotificationsPanel } from "../components/NotificationsPanel";
 import { NewDealModal } from "../components/NewDealModal";
+import { PeriodSegmented } from "../components/PeriodSegmented";
 import { useTheme } from "../theme";
 
+// Global dashboard period (default YTD). Drives all period-scoped widgets.
+type DashPeriod = "THIS_MONTH" | "LAST_MONTH" | "THIS_QUARTER" | "YTD";
+const DASH_PERIODS: readonly (readonly [DashPeriod, string])[] = [
+  ["THIS_MONTH", "This Month"], ["LAST_MONTH", "Last Month"], ["THIS_QUARTER", "This Quarter"], ["YTD", "YTD"],
+];
+
 interface DashboardData {
-  metrics: { activeDeals: number; projectedProfit: number; closedProfitYtd: number; avgDealSize: number; offersPending: number };
+  metrics: { activeDeals: number; projectedProfit: number; closedProfitYtd: number; avgDealSize: number; offersPending: number; periodLabel?: string };
   overdue: { id: string; name: string; findBuyerByDate: string | null }[];
   stageCounts: { stage: string; count: number }[];
   upcomingFollowUps: { dealId: string; buyerName: string; dealName: string; date: string | null }[];
@@ -84,10 +91,11 @@ const STAGE_FILL: Record<string, string> = {
 export function Dashboard() {
   const [d, setD] = useState<DashboardData | null>(null);
   const [showNew, setShowNew] = useState(false);
+  const [period, setPeriod] = useState<DashPeriod>("YTD");
   const { theme, toggleTheme } = useTheme();
   const nav = useNavigate();
 
-  useEffect(() => { api.get<DashboardData>("/dashboard").then(setD); }, []);
+  useEffect(() => { api.get<DashboardData>(`/dashboard?period=${period}`).then(setD); }, [period]);
   if (!d) return <Spinner />;
 
   // Paired bars (design): realized and projected render side by side, so the
@@ -117,6 +125,7 @@ export function Dashboard() {
           <span className="dash-sub">Acquisition snapshot · {today}</span>
         </div>
         <div className="row" style={{ gap: 10 }}>
+          <PeriodSegmented options={DASH_PERIODS} value={period} onChange={setPeriod} compact />
           <button className="dash-icon-btn" title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} onClick={toggleTheme}>
             {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
           </button>
@@ -144,7 +153,7 @@ export function Dashboard() {
       <div className="metrics-row dash-kpis">
         <Kpi label="Active Deals" value={d.metrics.activeDeals} delta={activeDelta} series={t?.activeDealsWeekly} spark="var(--accent)" title="Sparkline: active deals per week (8 weeks)" />
         <Kpi label="Projected Profit" value={fmtCompact(d.metrics.projectedProfit)} series={projectedSeries} spark="var(--accent)" title="Sparkline: projected profit by expected closing month" />
-        <Kpi label="Closed YTD" value={fmtCompact(d.metrics.closedProfitYtd)} valueColor="var(--green)" delta={closedDelta} series={realized.slice(0, curMonth + 1)} spark="var(--green)" title="Sparkline: realized profit by month" />
+        <Kpi label={`Closed ${d.metrics.periodLabel ?? "YTD"}`} value={fmtCompact(d.metrics.closedProfitYtd)} valueColor="var(--green)" delta={closedDelta} series={realized.slice(0, curMonth + 1)} spark="var(--green)" title="Sparkline: realized profit by month" />
         <Kpi label="Avg Deal Size" value={fmtCompact(d.metrics.avgDealSize)} delta={avgDelta} series={t?.avgDealSize} spark="var(--text-dim)" title="Sparkline: running average across recent closes" />
         <Kpi label="Offers Pending" value={d.metrics.offersPending} series={t?.offersWeekly} spark="var(--amber)" title="Sparkline: offers received per week (8 weeks)" />
       </div>

@@ -1,5 +1,17 @@
 import { useState, type ReactNode } from "react";
+import { useNavigate } from "react-router-dom";
 import { prettyStage, prettyEnum } from "../lib/format";
+
+/**
+ * Standard back-to-list navigation for detail pages. Prefers browser back (so
+ * the parent list's filters/scroll survive) and falls back to `fallback` on a
+ * deep link with no in-app history.
+ */
+export function BackLink({ label, fallback }: { label: string; fallback: string }) {
+  const nav = useNavigate();
+  const go = () => { if (window.history.length > 1) nav(-1); else nav(fallback); };
+  return <button className="link-btn back-link" onClick={go} style={{ marginBottom: 10 }}>← {label}</button>;
+}
 
 export function PriorityBadge({ priority }: { priority: "HIGH" | "MEDIUM" | "LOW" }) {
   // Priority is computed, not user-set — the tooltip explains why it changes on its own.
@@ -40,11 +52,11 @@ export function StatusBadge({ status }: { status: string }) {
   return <span className={`badge ${STATUS_CLASS[status] ?? ""}`}>{prettyEnum(status)}</span>;
 }
 
-export function MetricCard({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
+export function MetricCard({ label, value, hint, valueColor }: { label: string; value: ReactNode; hint?: string; valueColor?: string }) {
   return (
     <div className="metric-card">
       <div className="metric-label">{label}</div>
-      <div className="metric-value">{value}</div>
+      <div className="metric-value" style={valueColor ? { color: valueColor } : undefined}>{value}</div>
       {hint && <div className="metric-hint">{hint}</div>}
     </div>
   );
