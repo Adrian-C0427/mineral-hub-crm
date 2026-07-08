@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { BellIcon } from "./NavIcons";
+import { Bell } from "lucide-react";
 import { api } from "../api/client";
 import { fmtDate } from "../lib/format";
 
@@ -57,7 +57,7 @@ export function NotificationsBell({ collapsed }: { collapsed: boolean }) {
         title="Notifications"
         aria-label={`Notifications${unread ? ` (${unread} unread)` : ""}`}
       >
-        <BellIcon size={16} />
+        <Bell size={16} />
         {unread > 0 && <span className="notif-badge">{unread > 99 ? "99+" : unread}</span>}
         {!collapsed && <span className="notif-label">Notifications</span>}
       </button>
