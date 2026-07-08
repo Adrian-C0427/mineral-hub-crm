@@ -6,6 +6,7 @@ import { Spinner, RelationshipDot, Banner, StageBadge, StatusBadge } from "../co
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { AssigneePicker } from "../components/AssigneePicker";
 import { GeoFields } from "../components/GeoFields";
+import { StateSelect } from "../components/StateSelect";
 import { BuyerRelationships } from "../components/BuyerRelationships";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
 import { money, pct, fmtDate, toInputDate } from "../lib/format";
@@ -23,6 +24,7 @@ interface BuyerProfileData {
   website: string | null;
   mailingAddress: string | null;
   mailingCity: string | null;
+  mailingState: string | null;
   mailingZip: string | null;
   relationshipStatus: Relationship;
   lastContactDate: string | null;
@@ -72,7 +74,7 @@ export function BuyerProfile() {
       await api.patch(`/buyers/${id}`, {
         name: draft.name, companyName: draft.companyName, contactName: draft.contactName,
         email: draft.email || null, phone: draft.phone, website: draft.website,
-        mailingAddress: draft.mailingAddress, mailingCity: draft.mailingCity, mailingZip: draft.mailingZip,
+        mailingAddress: draft.mailingAddress, mailingCity: draft.mailingCity, mailingState: draft.mailingState, mailingZip: draft.mailingZip,
         relationshipStatus: draft.relationshipStatus, lastContactDate: draft.lastContactDate, nextFollowUpDate: draft.nextFollowUpDate,
         notes: draft.notes, ownerIds: draft.owners.map((o) => o.id), buyBox: draft.buyBox,
       });
@@ -123,6 +125,7 @@ export function BuyerProfile() {
               <Fld l="Mailing address"><input value={view.mailingAddress ?? ""} onChange={(e) => setD({ mailingAddress: e.target.value })} /></Fld>
               <Row>
                 <Fld l="Mailing city"><input value={view.mailingCity ?? ""} onChange={(e) => setD({ mailingCity: e.target.value })} /></Fld>
+                <Fld l="Mailing state"><StateSelect value={view.mailingState ?? ""} onChange={(v) => setD({ mailingState: v })} /></Fld>
                 <Fld l="Mailing ZIP code"><input value={view.mailingZip ?? ""} onChange={(e) => setD({ mailingZip: e.target.value })} /></Fld>
               </Row>
               <Fld l="Relationship owner(s)">
@@ -140,7 +143,7 @@ export function BuyerProfile() {
               <KV k="Contact" v={view.contactName} /><KV k="Email" v={view.email} /><KV k="Phone" v={view.phone ? formatPhone(view.phone) : null} />
               <KV k="Website" v={view.website} />
               <KV k="Address" v={view.mailingAddress} />
-              <KV k="City / ZIP" v={[view.mailingCity, view.mailingZip].filter(Boolean).join(", ")} />
+              <KV k="City / State / ZIP" v={[view.mailingCity, view.mailingState, view.mailingZip].filter(Boolean).join(", ")} />
               <KV k="Owner(s)" v={view.owners.map((o) => o.name).join(", ")} />
             </div>
           )}

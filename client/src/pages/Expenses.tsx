@@ -5,7 +5,7 @@ import {
 } from "recharts";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { MetricCard, Spinner, Banner, Modal } from "../components/ui";
+import { MetricCard, Spinner, Banner, Modal, ConfirmDelete } from "../components/ui";
 import { money, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { CHART_COLORS, COLOR_EXPENSE, monthLabel, chartTooltip } from "../lib/charts";
@@ -42,6 +42,9 @@ export function Expenses() {
 
   // Selection for bulk actions
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Standard delete-confirmation modal state for bulk expense deletion.
+  const [pendingDelete, setPendingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // Modals
   const [editing, setEditing] = useState<Expense | null>(null);
@@ -76,11 +79,21 @@ export function Expenses() {
 
   async function bulk(action: string, categoryId?: string) {
     if (selected.size === 0) return;
-    if (action === "delete" && !confirm(`Delete ${selected.size} expense(s)? This cannot be undone.`)) return;
+    // Deletion routes through the standard confirmation modal (below) rather
+    // than a native confirm(), for a consistent look with the rest of the app.
+    if (action === "delete") { setPendingDelete(true); return; }
     try {
       await api.post("/expenses/bulk", { ids: [...selected], action, categoryId });
       load();
     } catch (e) { setErr(e instanceof ApiError ? e.message : "Bulk action failed"); }
+  }
+  async function confirmBulkDelete() {
+    setDeleting(true);
+    try {
+      await api.post("/expenses/bulk", { ids: [...selected], action: "delete" });
+      setPendingDelete(false); setSelected(new Set()); load();
+    } catch (e) { setErr(e instanceof ApiError ? e.message : "Bulk action failed"); }
+    finally { setDeleting(false); }
   }
 
   function exportSelected() {
@@ -214,6 +227,15 @@ export function Expenses() {
       )}
       {showCats && (
         <CategoryManager categories={categories} onClose={() => setShowCats(false)} onChanged={load} />
+      )}
+      {pendingDelete && (
+        <ConfirmDelete
+          count={selected.size}
+          itemLabel="expense"
+          busy={deleting}
+          onCancel={() => setPendingDelete(false)}
+          onConfirm={confirmBulkDelete}
+        />
       )}
     </div>
   );
@@ -417,10 +439,6 @@ function AllExpenses({
         <span className="xp-vdiv" />
         <button className="small" disabled={selected.size === 0} onClick={() => bulk("reimburse")}>✓ Mark reimbursed</button>
         <button className="small" disabled={selected.size === 0} onClick={() => bulk("unreimburse")}>↺ Mark not reimbursed</button>
-        <select className="small" disabled={selected.size === 0} defaultValue="" style={{ width: "auto" }} onChange={(e) => { if (e.target.value) { bulk("setCategory", e.target.value); e.target.value = ""; } }}>
-          <option value="">Change category…</option>
-          {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-        </select>
         <button className="small danger" style={{ marginLeft: "auto" }} disabled={selected.size === 0} onClick={() => bulk("delete")}>Delete</button>
       </div>
 

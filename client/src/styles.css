@@ -1194,6 +1194,15 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .xp-period { padding: 12px 20px 0; }
 .back-link { display: inline-flex; align-items: center; gap: 4px; }
 
+/* Shared filter panel grid (Research + Reports) — evenly sized, aligned controls
+   that wrap responsively. Every control is a full-width grid cell so labels line
+   up and inputs share one consistent width. */
+.filters-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px 14px; align-items: end; }
+.filters-grid > .field { margin-bottom: 0; min-width: 0; }
+.filters-grid > .field > label { display: block; margin-bottom: 4px; }
+.filters-grid > .field > select,
+.filters-grid > .field > input { width: 100%; }
+
 /* Deal page: Assigned Team Members is a compact card, not a full-width panel. */
 .assignees-card { max-width: 520px; }
 
@@ -1217,8 +1226,14 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
   border-radius: 10px; padding: 10px 12px; box-shadow: var(--shadow); }
 .ml-floating .ml-pills { gap: 6px; }
 
-/* Organization → Users: action buttons spaced out, destructive action set apart. */
-.user-actions { display: inline-flex; align-items: center; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+/* Organization → Users: keep the table readable at any width — cells never wrap
+   and the whole table scrolls horizontally inside .table-scroll instead. */
+.users-table { min-width: 720px; }
+.users-table th, .users-table td { white-space: nowrap; }
+.users-table .users-phone, .users-table td.users-phone { min-width: 130px; }
+/* Action buttons: a single horizontal row, spaced, with the destructive action
+   set apart by a divider. */
+.user-actions { display: inline-flex; align-items: center; gap: 10px; justify-content: flex-end; flex-wrap: nowrap; white-space: nowrap; }
 .user-actions-sep { width: 1px; align-self: stretch; min-height: 20px; background: var(--border); margin: 0 2px; }
 
 /* Expense categories: drag-and-drop reordering rows. */

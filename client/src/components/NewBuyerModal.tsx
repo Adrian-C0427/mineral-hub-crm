@@ -4,6 +4,7 @@ import { api, ApiError } from "../api/client";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
 import { PhoneInput } from "./PhoneInput";
 import { GeoFields } from "./GeoFields";
+import { StateSelect } from "./StateSelect";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
 
 /**
@@ -14,7 +15,7 @@ import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET
 export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
   const [f, setF] = useState({
     companyName: "", contactName: "", email: "", phone: "",
-    website: "", mailingAddress: "",
+    website: "", mailingAddress: "", mailingCity: "", mailingState: "", mailingZip: "",
     minAcreage: "", maxAcreage: "", minPrice: "", maxPrice: "",
     nextFollowUpDate: "", notes: "",
   });
@@ -31,8 +32,14 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
     setF((p) => ({ ...p, [k]: e.target.value }));
   const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
 
+  // Required before a buyer can be created (Company Name, Contact Name, Phone).
+  const missing: string[] = [];
+  if (!f.companyName.trim()) missing.push("Company name");
+  if (!f.contactName.trim()) missing.push("Contact name");
+  if (!f.phone.trim()) missing.push("Phone number");
+
   async function submit() {
-    if (!f.companyName.trim()) { setError("Company name is required"); return; }
+    if (missing.length) { setError(`Required: ${missing.join(", ")}`); return; }
     setBusy(true);
     setError(null);
     try {
@@ -44,6 +51,9 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
         phone: f.phone.trim() || null,
         website: f.website.trim() || null,
         mailingAddress: f.mailingAddress.trim() || null,
+        mailingCity: f.mailingCity.trim() || null,
+        mailingState: f.mailingState || null,
+        mailingZip: f.mailingZip.trim() || null,
         relationshipStatus,
         nextFollowUpDate: f.nextFollowUpDate || null,
         notes: f.notes || null,
@@ -72,16 +82,16 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
       footer={
         <>
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={submit} disabled={busy}>{busy ? "Creating…" : "Create buyer"}</button>
+          <button className="primary" onClick={submit} disabled={busy || missing.length > 0}>{busy ? "Creating…" : "Create buyer"}</button>
         </>
       }
     >
-      <p className="muted" style={{ marginTop: 0 }}>New buyers start as <strong>Warm</strong> unless set otherwise. The buy box drives deal matching — fill in what you know; everything except the company name can be added later.</p>
-      <div className="field"><label>Company name *</label><input value={f.companyName} onChange={set("companyName")} autoFocus /></div>
+      <p className="muted" style={{ marginTop: 0 }}>New buyers start as <strong>Warm</strong> unless set otherwise. Fields marked <span style={{ color: "var(--red)" }}>*</span> are required; the buy box drives deal matching — fill in what you know and add the rest later.</p>
+      <div className="field"><label>Company name <span style={{ color: "var(--red)" }}>*</span></label><input value={f.companyName} onChange={set("companyName")} autoFocus /></div>
       <div className="dd-grid">
-        <div className="field"><label>Contact name</label><input value={f.contactName} onChange={set("contactName")} /></div>
+        <div className="field"><label>Contact name <span style={{ color: "var(--red)" }}>*</span></label><input value={f.contactName} onChange={set("contactName")} /></div>
+        <div className="field"><label>Phone <span style={{ color: "var(--red)" }}>*</span></label><PhoneInput value={f.phone} onChange={(v) => setF((p) => ({ ...p, phone: v }))} /></div>
         <div className="field"><label>Email</label><input type="email" value={f.email} onChange={set("email")} /></div>
-        <div className="field"><label>Phone</label><PhoneInput value={f.phone} onChange={(v) => setF((p) => ({ ...p, phone: v }))} /></div>
         <div className="field"><label>Website</label><input value={f.website} onChange={set("website")} /></div>
         <div className="field"><label>Relationship</label>
           <select value={relationshipStatus} onChange={(e) => setRelationshipStatus(e.target.value as "HOT" | "WARM" | "COLD")}>
@@ -90,7 +100,13 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
         </div>
         <div className="field"><label>Next follow-up</label><input type="date" value={f.nextFollowUpDate} onChange={set("nextFollowUpDate")} /></div>
       </div>
-      <div className="field"><label>Mailing address</label><input value={f.mailingAddress} onChange={set("mailingAddress")} /></div>
+      {/* Structured mailing address — same fields used across the CRM. */}
+      <div className="dd-grid">
+        <div className="field"><label>Mailing address</label><input value={f.mailingAddress} onChange={set("mailingAddress")} /></div>
+        <div className="field"><label>Mailing city</label><input value={f.mailingCity} onChange={set("mailingCity")} /></div>
+        <div className="field"><label>Mailing state</label><StateSelect value={f.mailingState} onChange={(v) => setF((p) => ({ ...p, mailingState: v }))} /></div>
+        <div className="field"><label>Mailing ZIP code</label><input value={f.mailingZip} onChange={set("mailingZip")} /></div>
+      </div>
 
       <div className="section-head" style={{ marginTop: 6 }}><h3 style={{ margin: 0 }}>Buy box</h3></div>
       <div className="dd-grid">

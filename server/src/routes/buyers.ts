@@ -126,6 +126,7 @@ buyersRouter.get(
       website: b.website,
       mailingAddress: b.mailingAddress,
       mailingCity: b.mailingCity,
+      mailingState: b.mailingState,
       mailingZip: b.mailingZip,
       relationshipStatus: b.relationshipStatus,
       lastContactDate: b.lastContactDate,
@@ -251,6 +252,7 @@ const upsertSchema = z.object({
   website: z.string().nullish(),
   mailingAddress: z.string().nullish(),
   mailingCity: z.string().nullish(),
+  mailingState: z.string().nullish(),
   mailingZip: z.string().nullish(),
   relationshipStatus: z.enum(["HOT", "WARM", "COLD"]).optional(),
   lastContactDate: dateField,
@@ -283,6 +285,7 @@ buyersRouter.post(
           website: data.website ?? null,
           mailingAddress: data.mailingAddress ?? null,
           mailingCity: data.mailingCity ?? null,
+          mailingState: data.mailingState ?? null,
           mailingZip: data.mailingZip ?? null,
           relationshipStatus: data.relationshipStatus ?? "WARM",
           lastContactDate: toDate(data.lastContactDate) ?? null,
@@ -323,6 +326,7 @@ buyersRouter.patch(
       if (data.website !== undefined) patch.website = data.website;
       if (data.mailingAddress !== undefined) patch.mailingAddress = data.mailingAddress;
       if (data.mailingCity !== undefined) patch.mailingCity = data.mailingCity;
+      if (data.mailingState !== undefined) patch.mailingState = data.mailingState;
       if (data.mailingZip !== undefined) patch.mailingZip = data.mailingZip;
       if (data.relationshipStatus !== undefined) patch.relationshipStatus = data.relationshipStatus;
       if (data.lastContactDate !== undefined) patch.lastContactDate = toDate(data.lastContactDate);
