@@ -6,6 +6,7 @@ import { api } from "../api/client";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION } from "../lib/counties";
 import { addCadastralLayers, styleWithGlyphs } from "../lib/mapLayers";
+import { MapLayersPanel, PillToggle } from "../components/MapLayersPanel";
 import { Spinner, StageBadge, PriorityBadge } from "../components/ui";
 import { money, num } from "../lib/format";
 import {
@@ -637,15 +638,15 @@ export function MapView() {
 
       {showLayers && (
         <div className="panel mc-panel" style={{ marginBottom: 12 }}>
-          <div className="mc-pills-row">
-            <span className="ddx-label" style={{ marginRight: 8 }}>Map layers</span>
-            {([
-              ["boundaries", "Abstract boundaries"], ["absNums", "Abstract numbers"], ["surveyNames", "Survey names"],
-              ["deals", "Active deals"], ["wells", "Wells"], ["wellbores", "Wellbores (laterals)"],
-            ] as [keyof typeof layers, string][]).map(([key, label]) => (
-              <PillToggle key={key} on={layers[key]} label={label} onClick={() => toggle(key)} />
-            ))}
-          </div>
+          <MapLayersPanel
+            defs={[
+              { key: "boundaries", label: "Abstract boundaries" }, { key: "absNums", label: "Abstract numbers" },
+              { key: "surveyNames", label: "Survey names" }, { key: "deals", label: "Active deals" },
+              { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores (laterals)" },
+            ]}
+            layers={layers}
+            onToggle={(k) => toggle(k as keyof typeof layers)}
+          />
         </div>
       )}
 
@@ -889,18 +890,6 @@ export function MapView() {
   );
 }
 
-/** Reference-style toggle pill: accent-tinted with a checkmark when on, dim
- *  with an empty checkbox square when off. */
-function PillToggle({ on, label, onClick }: { on: boolean; label: string; onClick: () => void }) {
-  return (
-    <button type="button" className={`dpp-sec ${on ? "on" : ""}`} onClick={onClick} aria-pressed={on}>
-      {on
-        ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>
-        : <span className="mc-off-box" />}
-      {label}
-    </button>
-  );
-}
 function Legend({ color, label, line }: { color: string; label: string; line?: boolean }) {
   return <div className="row" style={{ gap: 8, marginTop: 4 }}><span style={{ width: 12, height: line ? 3 : 12, background: color, opacity: 0.9, borderRadius: line ? 0 : "50%", display: "inline-block" }} /> {label}</div>;
 }

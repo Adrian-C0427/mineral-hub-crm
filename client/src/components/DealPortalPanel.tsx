@@ -8,6 +8,9 @@ import { PhoneInput } from "./PhoneInput";
 type SectionKey = "contact" | "company" | "description" | "documents" | "map" | "wells" | "tracts" | "production" | "attachments" | "notes" | "askPrice";
 type Sections = Record<SectionKey, boolean>;
 
+// A per-deal published contact. `id` is a stable key for React + reordering.
+interface DealContact { id: string; name: string; title: string | null; email: string | null; phone: string | null }
+
 interface PortalState {
   id: string;
   publishedToPortal: boolean;
@@ -18,13 +21,13 @@ interface PortalState {
   portalSections: Sections;
   portalAskPrice: number | null;
   askPrice: number | null;
-  // Per-deal published contact — the representative shown on THIS listing.
-  portalContactName: string | null;
-  portalContactTitle: string | null;
-  portalContactEmail: string | null;
-  portalContactPhone: string | null;
+  // Per-deal published contacts — the representatives shown on THIS listing.
+  contacts: DealContact[];
   files?: { id: string; filename: string; folder: string; visibleToBuyers: boolean }[];
 }
+
+const newId = () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `c${Date.now()}${Math.random().toString(36).slice(2, 7)}`);
+const blankContact = (): DealContact => ({ id: newId(), name: "", title: "", email: "", phone: "" });
 
 // Ordered for display; labels are buyer-facing section names.
 const SECTION_LABELS: [SectionKey, string][] = [
@@ -45,8 +48,8 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
   const [p, setP] = useState<PortalState | null>(null);
   const [summary, setSummary] = useState("");
   const [askOverride, setAskOverride] = useState("");
-  // Local draft for the per-deal contact card (persisted on blur).
-  const [contact, setContact] = useState({ name: "", title: "", email: "", phone: "" });
+  // Local draft for the per-deal contacts (persisted on blur / structural change).
+  const [contacts, setContacts] = useState<DealContact[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   // Collapsed by default — the portal controls are a secondary, occasional task,
@@ -59,7 +62,8 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
 
   const load = () => api.get<PortalState>(`/deals/${dealId}/portal`).then((d) => {
     setP(d); setSummary(d.portalSummary ?? ""); setAskOverride(d.portalAskPrice != null ? String(d.portalAskPrice) : "");
-    setContact({ name: d.portalContactName ?? "", title: d.portalContactTitle ?? "", email: d.portalContactEmail ?? "", phone: d.portalContactPhone ?? "" });
+    // Default to one contact so a new deal always shows a contact row to fill in.
+    setContacts(d.contacts.length ? d.contacts : [blankContact()]);
   }).catch(() => {});
   useEffect(() => { void load(); /* eslint-disable-next-line */ }, [dealId]);
 
@@ -69,6 +73,24 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
       const d = await api.patch<PortalState>(`/deals/${dealId}/portal`, body);
       setP((prev) => ({ ...prev!, ...d }));
     } catch (e) { setErr(e instanceof ApiError ? e.message : "Failed to update portal settings"); }
+  }
+
+  // Persist the contact list (drops rows with no data server-side). Reused by
+  // field-blur, add, remove, and reorder so every change saves to this deal only.
+  async function saveContacts(next: DealContact[]) {
+    await patch({ contacts: next.map((c) => ({ id: c.id, name: c.name, title: c.title, email: c.email, phone: c.phone })) });
+  }
+  function updateContact(id: string, field: keyof DealContact, value: string) {
+    setContacts((cs) => cs.map((c) => (c.id === id ? { ...c, [field]: value } : c)));
+  }
+  function addContact() { const next = [...contacts, blankContact()]; setContacts(next); }
+  function removeContact(id: string) { const next = contacts.filter((c) => c.id !== id); const list = next.length ? next : [blankContact()]; setContacts(list); void saveContacts(list); }
+  function moveContact(idx: number, dir: -1 | 1) {
+    const j = idx + dir;
+    if (j < 0 || j >= contacts.length) return;
+    const next = [...contacts];
+    [next[idx], next[j]] = [next[j], next[idx]];
+    setContacts(next); void saveContacts(next);
   }
   async function toggleDoc(fileId: string, visible: boolean) {
     try {
@@ -161,43 +183,55 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
           <textarea rows={3} disabled={!canEdit} value={summary} onChange={(e) => setSummary(e.target.value)} onBlur={() => summary !== (p.portalSummary ?? "") && patch({ summary })} placeholder="Describe the opportunity for buyers…" />
         </div>
 
-        {/* Per-deal contact settings — the point of contact differs per listing,
-            so it is configured on the deal (not globally). Shown on the offering
-            page only when the Contact section below is enabled. */}
+        {/* Per-deal contacts — the point(s) of contact differ per listing, so they
+            are configured on the deal (not globally). All are shown on the
+            offering page when the Contact section below is enabled. */}
         <div style={{ marginBottom: 16 }}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-            <span className="ddx-label">Contact settings</span>
-            <span className="muted" style={{ fontSize: 11.5 }}>{p.portalSections.contact ? "Shown on this listing" : "Enable the Contact section to show"}</span>
+            <span className="ddx-label">Contacts</span>
+            <span className="muted" style={{ fontSize: 11.5 }}>{p.portalSections.contact ? `Shown on this listing (${contacts.length})` : "Enable the Contact section to show"}</span>
           </div>
-          <div className="grid-2">
-            <div className="field" style={{ marginBottom: 8 }}>
-              <label>Contact person</label>
-              <input disabled={!canEdit} value={contact.name}
-                onChange={(e) => setContact((c) => ({ ...c, name: e.target.value }))}
-                onBlur={() => contact.name !== (p.portalContactName ?? "") && patch({ contactName: contact.name })}
-                placeholder="e.g. Jane Doe" />
+          {contacts.map((c, i) => (
+            <div key={c.id} className="dpp-contact">
+              <div className="dpp-contact-head">
+                <span className="muted" style={{ fontSize: 12 }}>{i === 0 ? "Primary contact" : `Contact ${i + 1}`}</span>
+                {canEdit && (
+                  <div className="row" style={{ gap: 4 }}>
+                    <button className="icon-btn" title="Move up" aria-label="Move up" disabled={i === 0} onClick={() => moveContact(i, -1)}>↑</button>
+                    <button className="icon-btn" title="Move down" aria-label="Move down" disabled={i === contacts.length - 1} onClick={() => moveContact(i, 1)}>↓</button>
+                    <button className="icon-btn danger" title="Remove contact" aria-label="Remove contact" onClick={() => removeContact(c.id)}>×</button>
+                  </div>
+                )}
+              </div>
+              <div className="grid-2">
+                <div className="field" style={{ marginBottom: 8 }}>
+                  <label>Contact person</label>
+                  <input disabled={!canEdit} value={c.name}
+                    onChange={(e) => updateContact(c.id, "name", e.target.value)}
+                    onBlur={() => saveContacts(contacts)} placeholder="e.g. Jane Doe" />
+                </div>
+                <div className="field" style={{ marginBottom: 8 }}>
+                  <label>Job title <span className="muted" style={{ textTransform: "none" }}>(optional)</span></label>
+                  <input disabled={!canEdit} value={c.title ?? ""}
+                    onChange={(e) => updateContact(c.id, "title", e.target.value)}
+                    onBlur={() => saveContacts(contacts)} placeholder="e.g. Land Manager" />
+                </div>
+                <div className="field" style={{ marginBottom: 8 }}>
+                  <label>Phone number</label>
+                  <PhoneInput value={c.phone ?? ""} disabled={!canEdit}
+                    onChange={(v) => updateContact(c.id, "phone", v)}
+                    onBlur={() => saveContacts(contacts)} />
+                </div>
+                <div className="field" style={{ marginBottom: 8 }}>
+                  <label>Email address</label>
+                  <input type="email" disabled={!canEdit} value={c.email ?? ""}
+                    onChange={(e) => updateContact(c.id, "email", e.target.value)}
+                    onBlur={() => saveContacts(contacts)} placeholder="name@company.com" />
+                </div>
+              </div>
             </div>
-            <div className="field" style={{ marginBottom: 8 }}>
-              <label>Job title <span className="muted" style={{ textTransform: "none" }}>(optional)</span></label>
-              <input disabled={!canEdit} value={contact.title}
-                onChange={(e) => setContact((c) => ({ ...c, title: e.target.value }))}
-                onBlur={() => contact.title !== (p.portalContactTitle ?? "") && patch({ contactTitle: contact.title })}
-                placeholder="e.g. Land Manager" />
-            </div>
-            <div className="field" style={{ marginBottom: 8 }}>
-              <label>Phone number</label>
-              <PhoneInput value={contact.phone} disabled={!canEdit}
-                onChange={(v) => setContact((c) => ({ ...c, phone: v }))}
-                onBlur={() => contact.phone !== (p.portalContactPhone ?? "") && patch({ contactPhone: contact.phone })} />
-            </div>
-            <div className="field" style={{ marginBottom: 8 }}>
-              <label>Email address</label>
-              <input type="email" disabled={!canEdit} value={contact.email}
-                onChange={(e) => setContact((c) => ({ ...c, email: e.target.value }))}
-                onBlur={() => contact.email !== (p.portalContactEmail ?? "") && patch({ contactEmail: contact.email })}
-                placeholder="name@company.com" />
-            </div>
-          </div>
+          ))}
+          {canEdit && <button className="small" onClick={addContact} style={{ marginTop: 4 }}>+ Add contact</button>}
         </div>
 
         {/* Per-deal section visibility — saved only on this deal. */}

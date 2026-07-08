@@ -346,12 +346,15 @@ function AssigneesCard({ deal, users, canEdit, onSaved }: { deal: DealDetailData
     onSaved();
   }
   return (
-    <div className="panel">
-      <div className="section-head"><h3 style={{ margin: 0 }}>Assigned Team Members</h3></div>
+    <div className="panel assignees-card">
+      <div className="section-head" style={{ marginBottom: 10 }}>
+        <h3 style={{ margin: 0 }}>Assigned Team Members</h3>
+        <span className="muted" style={{ fontSize: 12 }}>{ids.length ? `${ids.length} assigned` : "Unassigned"}</span>
+      </div>
       {canEdit ? (
         <AssigneePicker users={users} value={ids} onChange={save} />
       ) : (
-        <div className="row" style={{ gap: 6 }}>
+        <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
           {ids.length === 0 ? <span className="muted">Unassigned</span> : (deal.assignees ?? []).map((a) => <span key={a.id} className="badge resp-pending">{a.name}</span>)}
         </div>
       )}

@@ -5,6 +5,7 @@ import { collectCoords, bboxOfPoints, convexHull } from "../lib/geo";
 import { num } from "../lib/format";
 import { api } from "../api/client";
 import { addCadastralLayers, styleWithGlyphs } from "../lib/mapLayers";
+import { MapLayersPanel } from "./MapLayersPanel";
 
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
 
@@ -124,17 +125,19 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
   }, [abstractIds.join("|")]);
 
   const toggle = (k: keyof typeof layers) => setLayers((p) => ({ ...p, [k]: !p[k] }));
-  const Chk = ({ k, label }: { k: keyof typeof layers; label: string }) => (
-    <label className="dm-chk"><input type="checkbox" checked={layers[k]} onChange={() => toggle(k)} /> {label}</label>
-  );
 
   return (
     <div className="deal-map">
-      <div className="dm-toolbar">
-        <span className="dm-toolbar-label">Layers</span>
-        <Chk k="boundaries" label="Boundaries" /><Chk k="numbers" label="Abstract #" /><Chk k="surveys" label="Survey names" />
-        <Chk k="wells" label="Wells" /><Chk k="wellbores" label="Wellbores" />
-      </div>
+      <MapLayersPanel
+        variant="bar"
+        defs={[
+          { key: "boundaries", label: "Abstract boundaries" }, { key: "numbers", label: "Abstract numbers" },
+          { key: "surveys", label: "Survey names" }, { key: "wells", label: "Wells" },
+          { key: "wellbores", label: "Wellbores (laterals)" },
+        ]}
+        layers={layers}
+        onToggle={(k) => toggle(k as keyof typeof layers)}
+      />
       <div className="dm-canvas">
         <div ref={container} style={{ position: "absolute", inset: 0 }} />
         {selected && (
