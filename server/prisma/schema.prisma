@@ -1194,3 +1194,21 @@ model ResearchIngestRun {
 
   @@index([organizationId, createdAt])
 }
+
+// ---------------------------------------------------------------------------
+// Public-portal rate limiting
+// ---------------------------------------------------------------------------
+
+// Fixed-window rate-limit counter for the PUBLIC (unauthenticated) buyer-portal
+// submission endpoints (lead + offer capture). Backed by the database rather
+// than a per-process Map so the cap holds across horizontally-scaled instances
+// AND survives restarts/deploys. `key` is `<bucket>:<ip>`; `windowStart` is the
+// hour bucket. Stale rows are swept opportunistically (services/portalRateLimit).
+model PortalRateHit {
+  key         String
+  windowStart DateTime
+  count       Int      @default(0)
+
+  @@id([key, windowStart])
+  @@index([windowStart])
+}
