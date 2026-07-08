@@ -28,6 +28,38 @@ const DRAG_THRESHOLD = 5;
 
 interface DragState { id: string; w: number; offX: number; offY: number; x: number; y: number; moved: boolean }
 
+// ---------------------------------------------------------------------------
+// Customize View — the buyer tailors what deal cards show + how dense they are.
+// Persisted locally (per user/browser) like the rest of the app's view prefs.
+// ---------------------------------------------------------------------------
+type CardField = "location" | "nra" | "priority" | "profit" | "days" | "buyer" | "dates";
+type CardSort = "priority" | "days" | "profit" | "name";
+interface PipelinePrefs { density: "comfortable" | "compact"; fields: Record<CardField, boolean>; sort: CardSort }
+const CARD_FIELDS: [CardField, string][] = [
+  ["location", "Location"], ["nra", "NRA"], ["priority", "Priority"], ["profit", "Est. profit"],
+  ["days", "Days in stage"], ["buyer", "Selected buyer"], ["dates", "Key dates"],
+];
+const DEFAULT_PREFS: PipelinePrefs = {
+  density: "comfortable",
+  fields: { location: true, nra: true, priority: true, profit: true, days: true, buyer: true, dates: true },
+  sort: "priority",
+};
+const PREFS_KEY = "mh-pipeline-view:v1";
+function loadPrefs(): PipelinePrefs {
+  try { const raw = localStorage.getItem(PREFS_KEY); if (raw) { const p = JSON.parse(raw) as PipelinePrefs; return { ...DEFAULT_PREFS, ...p, fields: { ...DEFAULT_PREFS.fields, ...(p.fields ?? {}) } }; } } catch { /* ignore */ }
+  return DEFAULT_PREFS;
+}
+const PRIORITY_RANK: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+function sortDeals(rows: DealSummary[], sort: CardSort): DealSummary[] {
+  const cmp: Record<CardSort, (a: DealSummary, b: DealSummary) => number> = {
+    priority: (a, b) => (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9) || b.daysInStage - a.daysInStage,
+    days: (a, b) => b.daysInStage - a.daysInStage,
+    profit: (a, b) => (b.profitEst ?? 0) - (a.profitEst ?? 0),
+    name: (a, b) => a.name.localeCompare(b.name),
+  };
+  return [...rows].sort(cmp[sort]);
+}
+
 export function Pipeline() {
   const [deals, setDeals] = useState<DealSummary[] | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
@@ -37,6 +69,9 @@ export function Pipeline() {
   // Explicit per-card move (no drag needed): opens the stage modal on the
   // deal's current stage so any destination — including Closed/Dead — is a click away.
   const [moving, setMoving] = useState<DealSummary | null>(null);
+  // Card view preferences (density, visible fields, in-column sort).
+  const [prefs, setPrefs] = useState<PipelinePrefs>(loadPrefs);
+  useEffect(() => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } }, [prefs]);
   const nav = useNavigate();
   const { can } = useAuth();
   // Viewers can browse the board but not create deals or change stages —
@@ -106,7 +141,10 @@ export function Pipeline() {
         <div className="row">
           <h1 style={{ marginBottom: 0 }}>Pipeline</h1>
         </div>
-        {canCreate && <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>}
+        <div className="row" style={{ gap: 8 }}>
+          <PipelineCustomize prefs={prefs} onChange={setPrefs} />
+          {canCreate && <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>}
+        </div>
       </div>
 
       {/* Transition targets live ABOVE the board so they're always on-screen. */}
@@ -122,9 +160,9 @@ export function Pipeline() {
         ))}
       </div>}
 
-      <div className={`kanban ${drag ? "dragging" : ""}`}>
+      <div className={`kanban ${prefs.density === "compact" ? "compact" : ""} ${drag ? "dragging" : ""}`}>
         {COLUMNS.map((col) => {
-          const colDeals = deals.filter((d) => d.stage === col);
+          const colDeals = sortDeals(deals.filter((d) => d.stage === col), prefs.sort);
           return (
             <div
               key={col} data-stage={col}
@@ -136,7 +174,7 @@ export function Pipeline() {
               </div>
               <div className="kanban-col-body">
                 {colDeals.map((d) => (
-                  <Card key={d.id} deal={d} canMove={canMove} dragging={drag?.id === d.id && drag.moved}
+                  <Card key={d.id} deal={d} canMove={canMove} fields={prefs.fields} dragging={drag?.id === d.id && drag.moved}
                     onPointerDown={(e) => startDrag(e, d)} onMove={() => setMoving(d)} />
                 ))}
                 {colDeals.length === 0 && <div className="kanban-empty">Drop here</div>}
@@ -149,7 +187,7 @@ export function Pipeline() {
       {/* Floating clone follows the cursor for a natural, lag-free drag. */}
       {drag && drag.moved && dragDeal && (
         <div className="deal-card drag-clone" style={{ position: "fixed", left: drag.x - drag.offX, top: drag.y - drag.offY, width: drag.w, pointerEvents: "none", zIndex: 1000 }}>
-          <CardBody deal={dragDeal} />
+          <CardBody deal={dragDeal} fields={prefs.fields} />
         </div>
       )}
 
@@ -174,8 +212,8 @@ export function Pipeline() {
   );
 }
 
-function Card({ deal, canMove, dragging, onPointerDown, onMove }: {
-  deal: DealSummary; canMove: boolean; dragging: boolean;
+function Card({ deal, canMove, fields, dragging, onPointerDown, onMove }: {
+  deal: DealSummary; canMove: boolean; fields: Record<CardField, boolean>; dragging: boolean;
   onPointerDown: (e: React.PointerEvent) => void; onMove: () => void;
 }) {
   const isDead = deal.stage === "DEAD";
@@ -191,38 +229,101 @@ function Card({ deal, canMove, dragging, onPointerDown, onMove }: {
         onClick={(e) => { e.stopPropagation(); onMove(); }}
         onPointerDown={(e) => e.stopPropagation()}
       >⋯</button>}
-      <CardBody deal={deal} />
+      <CardBody deal={deal} fields={fields} />
     </div>
   );
 }
 
-/** Card content shared by the board card and the drag clone. */
-function CardBody({ deal }: { deal: DealSummary }) {
+/** Card content shared by the board card and the drag clone. Which facts appear
+ *  is driven by the user's Customize View field preferences. */
+function CardBody({ deal, fields }: { deal: DealSummary; fields: Record<CardField, boolean> }) {
   const isClosing = deal.stage === "CLOSING";
   const isDead = deal.stage === "DEAD";
+  const showLoc = fields.location, showNra = fields.nra && deal.nra != null;
+  const row2 = fields.priority || fields.profit || fields.days;
   return (
     <>
       <div className="dc-name">{deal.name}</div>
-      <div className="dc-meta">
-        <span>{[deal.counties.join(", "), deal.state].filter(Boolean).join(", ") || "—"}</span>
-        {deal.nra != null && <span>{num(deal.nra)} NRA</span>}
-      </div>
-      <div className="dc-meta" style={{ marginTop: 4 }}>
-        <span className={`badge priority-${deal.priority.toLowerCase()}`}>{deal.priority[0] + deal.priority.slice(1).toLowerCase()}</span>
-        <span>{money(deal.profitEst)}</span>
-        <span>{deal.daysInStage}d in stage</span>
-      </div>
-      {isClosing && deal.selectedBuyer && <div className="dc-buyer">→ {deal.selectedBuyer.name}</div>}
-      <div className="dc-meta" style={{ marginTop: 4 }}>
-        {isClosing ? (
-          <>
-            <span>Orig: {fmtDate(deal.originalClosingDate)}</span>
-            <span>Final: {fmtDate(deal.finalClosingDate)}</span>
-          </>
-        ) : (
-          !isDead && <span>Find buyer by: {fmtDate(deal.findBuyerByDate)}</span>
-        )}
-      </div>
+      {(showLoc || showNra) && (
+        <div className="dc-meta">
+          {showLoc && <span>{[deal.counties.join(", "), deal.state].filter(Boolean).join(", ") || "—"}</span>}
+          {showNra && <span>{num(deal.nra!)} NRA</span>}
+        </div>
+      )}
+      {row2 && (
+        <div className="dc-meta" style={{ marginTop: 4 }}>
+          {fields.priority && <span className={`badge priority-${deal.priority.toLowerCase()}`}>{deal.priority[0] + deal.priority.slice(1).toLowerCase()}</span>}
+          {fields.profit && <span>{money(deal.profitEst)}</span>}
+          {fields.days && <span>{deal.daysInStage}d in stage</span>}
+        </div>
+      )}
+      {fields.buyer && isClosing && deal.selectedBuyer && <div className="dc-buyer">→ {deal.selectedBuyer.name}</div>}
+      {fields.dates && (
+        <div className="dc-meta" style={{ marginTop: 4 }}>
+          {isClosing ? (
+            <>
+              <span>Orig: {fmtDate(deal.originalClosingDate)}</span>
+              <span>Final: {fmtDate(deal.finalClosingDate)}</span>
+            </>
+          ) : (
+            !isDead && <span>Find buyer by: {fmtDate(deal.findBuyerByDate)}</span>
+          )}
+        </div>
+      )}
     </>
+  );
+}
+
+/** Customize View popover for the Pipeline board (density, fields, sort). */
+function PipelineCustomize({ prefs, onChange }: { prefs: PipelinePrefs; onChange: (p: PipelinePrefs) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+  const toggleField = (k: CardField) => onChange({ ...prefs, fields: { ...prefs.fields, [k]: !prefs.fields[k] } });
+
+  return (
+    <div className="cv-wrap" ref={ref}>
+      <button type="button" className={`small cv-btn ${open ? "active" : ""}`} onClick={() => setOpen((o) => !o)} title="Customize the board">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
+        Customize View
+      </button>
+      {open && (
+        <div className="cv-menu" role="dialog" aria-label="Customize board">
+          <div className="cv-head"><strong>Card density</strong></div>
+          <div className="cv-seg" style={{ padding: "8px 12px" }}>
+            <div className="seg-control" style={{ width: "100%" }}>
+              <span className={`seg ${prefs.density === "comfortable" ? "active" : ""}`} onClick={() => onChange({ ...prefs, density: "comfortable" })}>Comfortable</span>
+              <span className={`seg ${prefs.density === "compact" ? "active" : ""}`} onClick={() => onChange({ ...prefs, density: "compact" })}>Compact</span>
+            </div>
+          </div>
+          <div className="cv-head" style={{ borderTop: "1px solid var(--border)" }}><strong>Card fields</strong></div>
+          <div className="cv-list">
+            {CARD_FIELDS.map(([k, label]) => (
+              <label key={k} className="cv-row cv-check" style={{ justifyContent: "flex-start" }}>
+                <input type="checkbox" checked={prefs.fields[k]} onChange={() => toggleField(k)} /> <span>{label}</span>
+              </label>
+            ))}
+          </div>
+          <div className="cv-head" style={{ borderTop: "1px solid var(--border)" }}><strong>Sort within a stage</strong></div>
+          <div style={{ padding: "8px 12px" }}>
+            <select value={prefs.sort} onChange={(e) => onChange({ ...prefs, sort: e.target.value as CardSort })} style={{ width: "100%" }}>
+              <option value="priority">Priority</option>
+              <option value="days">Days in stage</option>
+              <option value="profit">Est. profit</option>
+              <option value="name">Name A–Z</option>
+            </select>
+          </div>
+          <div className="cv-foot">
+            <button type="button" className="small" onClick={() => onChange(DEFAULT_PREFS)}>Restore default</button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
