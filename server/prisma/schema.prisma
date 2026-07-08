@@ -645,6 +645,7 @@ model Buyer {
   website            String?
   mailingAddress     String?
   mailingCity        String?
+  mailingState       String?
   mailingZip         String?
   relationshipStatus RelationshipStatus @default(WARM)
   lastContactDate    DateTime?

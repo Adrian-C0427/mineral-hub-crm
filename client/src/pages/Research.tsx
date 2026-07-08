@@ -221,12 +221,6 @@ export function Research() {
     ["LAST_12M", "12M"], ["THIS_YEAR", "YTD"], ["CUSTOM", "Custom"],
   ];
   const cmpRange = compareRangeFor(compare, range.from, range.to);
-  const rangeDays = range.from && range.to
-    ? Math.round((new Date(`${range.to}T00:00:00Z`).getTime() - new Date(`${range.from}T00:00:00Z`).getTime()) / DAY) + 1
-    : 0;
-  const compareHint = compare === "PREV_YEAR"
-    ? "The comparison period is the same date range one year earlier"
-    : `The comparison period is the ${rangeDays} days immediately before your selected range`;
   // Show the year on the compare range only when it differs from the current range's year.
   const cmpWithYear = cmpRange != null && range.to !== "" &&
     new Date(`${cmpRange.to}T00:00:00Z`).getUTCFullYear() !== new Date(`${range.to}T00:00:00Z`).getUTCFullYear();
@@ -268,7 +262,6 @@ export function Research() {
                   <>
                     <span className="muted" style={{ opacity: 0.7 }}>vs</span>
                     <span className="muted">{fmtRangeLabel(cmpRange.from, cmpRange.to, cmpWithYear)}</span>
-                    <span className="q-hint" title={compareHint}>?</span>
                   </>
                 )}
               </div>
@@ -288,7 +281,7 @@ export function Research() {
           </div>
         )}
         {showFilters && opts && (
-          <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end", marginTop: 10 }}>
+          <div className="filters-grid" style={{ marginTop: 10 }}>
             <div className="field" style={{ marginBottom: 0 }}><label>Compare to</label>
               <select value={compare} onChange={(e) => setCompare(e.target.value as Compare)}>
                 <option value="NONE">No comparison</option>

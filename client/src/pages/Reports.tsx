@@ -192,7 +192,7 @@ export function Reports() {
           </div>
         )}
         {showFilters && (
-        <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end", marginTop: 10 }}>
+        <div className="filters-grid" style={{ marginTop: 10 }}>
           <div className="field" style={{ marginBottom: 0 }}><label>Compare to</label>
             <select value={compare} onChange={(e) => setCompare(e.target.value as Compare)}>
               <option value="NONE">No comparison</option>

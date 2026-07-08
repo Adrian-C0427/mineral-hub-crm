@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, getAuthToken } from "../api/client";
+import { api } from "../api/client";
 import { Banner, Spinner, ConfirmDelete } from "./ui";
 import { downloadCsv } from "../lib/csv";
 import { fmtDate } from "../lib/format";
@@ -57,7 +57,6 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
   const [error, setError] = useState("");
   const [result, setResult] = useState<CommitResp | null>(null);
   const [runs, setRuns] = useState<IngestRun[]>([]);
-  const [confirmDelete, setConfirmDelete] = useState(false);
   const [selectedRuns, setSelectedRuns] = useState<Set<string>>(new Set());
   const [confirmRuns, setConfirmRuns] = useState(false);
   const [deletingRuns, setDeletingRuns] = useState(false);
@@ -247,67 +246,6 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
             }} />
         )}
       </div>
-
-      <div className="panel">
-        <h3>Remove Data</h3>
-        <p className="muted" style={{ marginTop: 0 }}>Clear imported research data for this organization (e.g. to redo a bad import or remove the sample dataset).</p>
-        {!confirmDelete ? (
-          <button className="small danger" onClick={() => setConfirmDelete(true)}>Delete research data…</button>
-        ) : (
-          <DeleteForm onDone={() => { setConfirmDelete(false); loadRuns(); onDataChanged(); }} onCancel={() => setConfirmDelete(false)} />
-        )}
-      </div>
-    </div>
-  );
-}
-
-function DeleteForm({ onDone, onCancel }: { onDone: () => void; onCancel: () => void }) {
-  const [kind, setKind] = useState("");
-  const [source, setSource] = useState("");
-  const [state, setState] = useState("");
-  const [county, setCounty] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-
-  async function run() {
-    setBusy(true); setError("");
-    try {
-      // DELETE with a JSON body (the shared api.del helper doesn't take one).
-      const token = getAuthToken();
-      const res = await fetch(`${api.base}/api/research/data`, {
-        method: "DELETE",
-        credentials: "include",
-        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-        body: JSON.stringify({
-          ...(kind ? { kind } : {}), ...(source ? { source } : {}),
-          ...(state ? { state } : {}), ...(county ? { county } : {}),
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error((data as { error?: string }).error || res.statusText);
-      onDone();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div>
-      <div className="row" style={{ flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
-        <div className="field" style={{ marginBottom: 0 }}><label>Kind</label>
-          <select value={kind} onChange={(e) => setKind(e.target.value)}>
-            <option value="">All</option><option value="DOCUMENTS">Recordings</option><option value="PERMITS">Permits</option>
-          </select>
-        </div>
-        <div className="field" style={{ marginBottom: 0 }}><label>Source</label><input value={source} onChange={(e) => setSource(e.target.value)} placeholder="e.g. sample (blank = all)" /></div>
-        <div className="field" style={{ marginBottom: 0, width: 90 }}><label>State</label><input value={state} maxLength={2} onChange={(e) => setState(e.target.value.toUpperCase())} placeholder="All" /></div>
-        <div className="field" style={{ marginBottom: 0 }}><label>County</label><input value={county} onChange={(e) => setCounty(e.target.value)} placeholder="All" /></div>
-        <button className="danger" disabled={busy} onClick={run}>{busy ? "Deleting…" : "Delete matching data"}</button>
-        <button className="small" onClick={onCancel}>Cancel</button>
-      </div>
-      {error && <Banner kind="error">{error}</Banner>}
     </div>
   );
 }

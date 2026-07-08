@@ -196,8 +196,8 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
           )}
           <div className="section-head"><h3 style={{ margin: 0 }}>Team members</h3></div>
           <div className="table-scroll">
-            <table className="data-table">
-              <thead><tr><th>Name</th><th>Email</th><th>Phone</th><th>Role</th><th>Status</th><th>Last active</th><th></th></tr></thead>
+            <table className="data-table users-table">
+              <thead><tr><th>Name</th><th>Email</th><th className="users-phone">Phone</th><th>Role</th><th>Status</th><th>Last active</th><th></th></tr></thead>
               <tbody>
                 {members.map((m) => {
                   const isSelf = m.id === user?.id;

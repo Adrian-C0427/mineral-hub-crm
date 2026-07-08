@@ -30,6 +30,7 @@ export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCr
   if (!f.name.trim()) missing.push("Deal name");
   if (!states.length) missing.push("State");
   if (!counties.length) missing.push("County");
+  if (!abstractIds.length) missing.push("Abstract");
   if (f.nra.trim() === "") missing.push("NRA");
   if (!assetTypes.length) missing.push("Asset Type");
   if (f.ourPrice.trim() === "") missing.push("Our Price");
@@ -73,7 +74,7 @@ export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCr
       footer={
         <>
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={submit} disabled={busy}>{busy ? "Creating…" : "Create deal"}</button>
+          <button className="primary" onClick={submit} disabled={busy || missing.length > 0}>{busy ? "Creating…" : "Create deal"}</button>
         </>
       }
     >
@@ -87,7 +88,7 @@ export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCr
           states={states} onStatesChange={setStates}
           counties={counties} onCountiesChange={setCounties}
           abstractIds={abstractIds} onAbstractsChange={setAbstractIds}
-          labels={{ state: "State *", county: "County *", abstract: "Abstract (optional — add anytime for mapping)" }}
+          labels={{ state: "State *", county: "County *", abstract: "Abstract *" }}
         />
         <div className="field"><label>Asset Type <span style={{ color: "var(--red)" }}>*</span></label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
         <div className="field"><label>NRA <span style={{ color: "var(--red)" }}>*</span></label><input type="number" value={f.nra} onChange={set("nra")} /></div>
