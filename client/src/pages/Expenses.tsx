@@ -620,9 +620,12 @@ function CategoryManager({ categories, onClose, onChanged }: { categories: Categ
   const [err, setErr] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
-  // Local order so up/down reordering feels instant; persisted on each move.
+  // Local order so drag reordering feels instant; persisted on each drop.
   const [order, setOrder] = useState<Category[]>(categories);
   useEffect(() => { setOrder(categories); }, [categories]);
+  // Drag-and-drop reordering state: the row being dragged and the current drop target.
+  const [dragIdx, setDragIdx] = useState<number | null>(null);
+  const [overIdx, setOverIdx] = useState<number | null>(null);
 
   async function run(fn: () => Promise<unknown>) {
     setErr(null);
@@ -637,13 +640,18 @@ function CategoryManager({ categories, onClose, onChanged }: { categories: Categ
     setEditId(null);
     if (n && n !== c.name) run(() => api.patch(`/expenses/categories/${c.id}`, { name: n }));
   }
-  function move(idx: number, dir: -1 | 1) {
+  /** Move a category from one position to another (drag & drop) and persist. */
+  function commitReorder(from: number, to: number) {
+    if (from === to || from < 0 || to < 0 || from >= order.length || to >= order.length) return;
     const next = [...order];
-    const j = idx + dir;
-    if (j < 0 || j >= next.length) return;
-    [next[idx], next[j]] = [next[j], next[idx]];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
     setOrder(next);
     run(() => api.post("/expenses/categories/reorder", { ids: next.map((c) => c.id) }));
+  }
+  function onDrop(target: number) {
+    if (dragIdx != null) commitReorder(dragIdx, target);
+    setDragIdx(null); setOverIdx(null);
   }
 
   return (
@@ -655,13 +663,20 @@ function CategoryManager({ categories, onClose, onChanged }: { categories: Categ
       {err && <div className="error-text">{err}</div>}
       <div className="table-scroll">
         <table className="data-table">
-          <thead><tr><th style={{ width: 60 }}>Order</th><th>Name</th><th>Status</th><th></th></tr></thead>
+          <thead><tr><th style={{ width: 44 }}></th><th>Name</th><th>Status</th><th></th></tr></thead>
           <tbody>
             {order.map((c, i) => (
-              <tr key={c.id}>
+              <tr
+                key={c.id}
+                draggable
+                onDragStart={(e) => { setDragIdx(i); e.dataTransfer.effectAllowed = "move"; }}
+                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (overIdx !== i) setOverIdx(i); }}
+                onDrop={(e) => { e.preventDefault(); onDrop(i); }}
+                onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}
+                className={`cat-row ${dragIdx === i ? "dragging" : ""} ${overIdx === i && dragIdx !== null && dragIdx !== i ? "drop-over" : ""}`}
+              >
                 <td>
-                  <button className="small" disabled={i === 0} title="Move up" onClick={() => move(i, -1)}>↑</button>
-                  <button className="small" style={{ marginLeft: 4 }} disabled={i === order.length - 1} title="Move down" onClick={() => move(i, 1)}>↓</button>
+                  <span className="cat-drag" title="Drag to reorder" aria-label="Drag to reorder" style={{ cursor: "grab", userSelect: "none", color: "var(--text-dim)" }}>⠿</span>
                 </td>
                 <td>
                   {editId === c.id ? (
@@ -683,7 +698,7 @@ function CategoryManager({ categories, onClose, onChanged }: { categories: Categ
           </tbody>
         </table>
       </div>
-      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Changes apply immediately to the expense forms.</p>
+      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Drag rows by the handle to reorder. Changes apply immediately to the expense forms.</p>
     </Modal>
   );
 }

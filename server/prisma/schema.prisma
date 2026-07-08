@@ -464,6 +464,13 @@ model Deal {
   // Buyer-facing asking price override. Null → use the deal's askPrice; set to
   // publish a different figure without changing the underlying deal.
   portalAskPrice    Float?
+  // Per-deal published contact (the representative shown on THIS listing). The
+  // right point of contact differs per opportunity, so contact info lives on the
+  // deal — not globally. Null fields fall back to the org's portal contacts.
+  portalContactName  String?
+  portalContactTitle String?
+  portalContactEmail String?
+  portalContactPhone String?
 
   // --- Owned-asset fields (used when recordType = OWNED_ASSET) -------------
   // Ownership
@@ -632,6 +639,8 @@ model Buyer {
   phone              String?
   website            String?
   mailingAddress     String?
+  mailingCity        String?
+  mailingZip         String?
   relationshipStatus RelationshipStatus @default(WARM)
   lastContactDate    DateTime?
   nextFollowUpDate   DateTime?

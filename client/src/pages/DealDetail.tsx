@@ -480,15 +480,6 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
   const isClosed = deal.stage === "CLOSED";
   const noDates = !deal.dateUnderContract && !deal.findBuyerByDate && !deal.originalClosingDate && !deal.finalClosingDate && !deal.closedDate;
 
-  // Completion of the contract period: start (Under Contract) → target (Closed
-  // date if set, else Final Closing) against today. Closed deals read 100%.
-  const start = deal.dateUnderContract ? new Date(deal.dateUnderContract).getTime() : null;
-  const target = (deal.closedDate ?? deal.finalClosingDate) ? new Date(deal.closedDate ?? deal.finalClosingDate!).getTime() : null;
-  const progressPct = isClosed ? 100
-    : start != null && target != null && target > start
-      ? Math.min(100, Math.max(0, ((Date.now() - start) / (target - start)) * 100))
-      : 0;
-
   // Vertical milestone timeline: filled glowing dot = milestone date reached;
   // hollow dot = upcoming. Closed Date appears once the deal is closed/has a date.
   const milestones: { label: string; date: string | null; overridden?: boolean; revertKey?: "fbb" | "fc" }[] = [
@@ -506,15 +497,6 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
         {edit ? <div className="row"><button className="small" onClick={() => setEdit(false)}>Cancel</button><button className="small primary" onClick={save}>Save</button></div>
           : <button className="small" onClick={startEdit}>Edit dates</button>}
       </div>
-      {!noDates && !edit && (
-        <div className="ctl-progress" title={isClosed ? "Closed" : `${Math.round(progressPct)}% through the contract period`}>
-          <div className="ctl-progress-head">
-            <span>{isClosed ? "Contract complete" : "Contract progress"}</span>
-            <span className="ctl-progress-pct">{Math.round(progressPct)}%</span>
-          </div>
-          <div className="ctl-progress-track"><span className="ctl-progress-fill" style={{ width: `${progressPct}%` }} /></div>
-        </div>
-      )}
       {noDates && !edit && (
         <p className="muted" style={{ margin: 0, fontSize: 13 }}>
           No dates yet — <strong>Edit dates</strong> and set the Under Contract date; Find Buyer By and Final Closing auto-calculate from it.

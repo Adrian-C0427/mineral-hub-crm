@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Banner } from "./ui";
+import { Toggle } from "./Toggle";
+import { PhoneInput } from "./PhoneInput";
 
 type SectionKey = "contact" | "company" | "description" | "documents" | "map" | "wells" | "tracts" | "production" | "attachments" | "notes" | "askPrice";
 type Sections = Record<SectionKey, boolean>;
@@ -16,6 +18,11 @@ interface PortalState {
   portalSections: Sections;
   portalAskPrice: number | null;
   askPrice: number | null;
+  // Per-deal published contact — the representative shown on THIS listing.
+  portalContactName: string | null;
+  portalContactTitle: string | null;
+  portalContactEmail: string | null;
+  portalContactPhone: string | null;
   files?: { id: string; filename: string; folder: string; visibleToBuyers: boolean }[];
 }
 
@@ -38,6 +45,8 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
   const [p, setP] = useState<PortalState | null>(null);
   const [summary, setSummary] = useState("");
   const [askOverride, setAskOverride] = useState("");
+  // Local draft for the per-deal contact card (persisted on blur).
+  const [contact, setContact] = useState({ name: "", title: "", email: "", phone: "" });
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   // Collapsed by default — the portal controls are a secondary, occasional task,
@@ -48,7 +57,10 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
   const canEdit = can("publishOfferings");
   const canDocs = can("manageDocuments");
 
-  const load = () => api.get<PortalState>(`/deals/${dealId}/portal`).then((d) => { setP(d); setSummary(d.portalSummary ?? ""); setAskOverride(d.portalAskPrice != null ? String(d.portalAskPrice) : ""); }).catch(() => {});
+  const load = () => api.get<PortalState>(`/deals/${dealId}/portal`).then((d) => {
+    setP(d); setSummary(d.portalSummary ?? ""); setAskOverride(d.portalAskPrice != null ? String(d.portalAskPrice) : "");
+    setContact({ name: d.portalContactName ?? "", title: d.portalContactTitle ?? "", email: d.portalContactEmail ?? "", phone: d.portalContactPhone ?? "" });
+  }).catch(() => {});
   useEffect(() => { void load(); /* eslint-disable-next-line */ }, [dealId]);
 
   async function patch(body: Record<string, unknown>) {
@@ -80,9 +92,6 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((o) => !o); } }}
       >
         <div className="dpp-title">
-          <span className="dpp-globe">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 014 10 15.3 15.3 0 01-4 10 15.3 15.3 0 01-4-10 15.3 15.3 0 014-10z" /></svg>
-          </span>
           <div>
             <h3 style={{ margin: 0 }}>Buyer Portal</h3>
             <div className="dpp-sub">Only buyer-safe fields are shown — pricing, notes, sellers, and internal activity never appear.</div>
@@ -152,6 +161,45 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
           <textarea rows={3} disabled={!canEdit} value={summary} onChange={(e) => setSummary(e.target.value)} onBlur={() => summary !== (p.portalSummary ?? "") && patch({ summary })} placeholder="Describe the opportunity for buyers…" />
         </div>
 
+        {/* Per-deal contact settings — the point of contact differs per listing,
+            so it is configured on the deal (not globally). Shown on the offering
+            page only when the Contact section below is enabled. */}
+        <div style={{ marginBottom: 16 }}>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+            <span className="ddx-label">Contact settings</span>
+            <span className="muted" style={{ fontSize: 11.5 }}>{p.portalSections.contact ? "Shown on this listing" : "Enable the Contact section to show"}</span>
+          </div>
+          <div className="grid-2">
+            <div className="field" style={{ marginBottom: 8 }}>
+              <label>Contact person</label>
+              <input disabled={!canEdit} value={contact.name}
+                onChange={(e) => setContact((c) => ({ ...c, name: e.target.value }))}
+                onBlur={() => contact.name !== (p.portalContactName ?? "") && patch({ contactName: contact.name })}
+                placeholder="e.g. Jane Doe" />
+            </div>
+            <div className="field" style={{ marginBottom: 8 }}>
+              <label>Job title <span className="muted" style={{ textTransform: "none" }}>(optional)</span></label>
+              <input disabled={!canEdit} value={contact.title}
+                onChange={(e) => setContact((c) => ({ ...c, title: e.target.value }))}
+                onBlur={() => contact.title !== (p.portalContactTitle ?? "") && patch({ contactTitle: contact.title })}
+                placeholder="e.g. Land Manager" />
+            </div>
+            <div className="field" style={{ marginBottom: 8 }}>
+              <label>Phone number</label>
+              <PhoneInput value={contact.phone} disabled={!canEdit}
+                onChange={(v) => setContact((c) => ({ ...c, phone: v }))}
+                onBlur={() => contact.phone !== (p.portalContactPhone ?? "") && patch({ contactPhone: contact.phone })} />
+            </div>
+            <div className="field" style={{ marginBottom: 8 }}>
+              <label>Email address</label>
+              <input type="email" disabled={!canEdit} value={contact.email}
+                onChange={(e) => setContact((c) => ({ ...c, email: e.target.value }))}
+                onBlur={() => contact.email !== (p.portalContactEmail ?? "") && patch({ contactEmail: contact.email })}
+                placeholder="name@company.com" />
+            </div>
+          </div>
+        </div>
+
         {/* Per-deal section visibility — saved only on this deal. */}
         <div style={{ marginBottom: 16 }}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
@@ -206,19 +254,5 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
       </>
       )}
     </div>
-  );
-}
-
-/** Reference-style toggle switch (38×22 pill with a sliding knob). */
-function Toggle({ checked, disabled, onChange }: { checked: boolean; disabled?: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <span
-      className={`tgl ${checked ? "on" : ""} ${disabled ? "dis" : ""}`}
-      role="switch" aria-checked={checked} tabIndex={disabled ? -1 : 0}
-      onClick={() => !disabled && onChange(!checked)}
-      onKeyDown={(e) => { if (!disabled && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onChange(!checked); } }}
-    >
-      <span className="tgl-knob" />
-    </span>
   );
 }

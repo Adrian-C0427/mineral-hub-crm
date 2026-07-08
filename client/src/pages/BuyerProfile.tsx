@@ -4,6 +4,7 @@ import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, RelationshipDot, Banner, StageBadge, StatusBadge } from "../components/ui";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
+import { AssigneePicker } from "../components/AssigneePicker";
 import { GeoFields } from "../components/GeoFields";
 import { BuyerRelationships } from "../components/BuyerRelationships";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
@@ -21,6 +22,8 @@ interface BuyerProfileData {
   phone: string | null;
   website: string | null;
   mailingAddress: string | null;
+  mailingCity: string | null;
+  mailingZip: string | null;
   relationshipStatus: Relationship;
   lastContactDate: string | null;
   nextFollowUpDate: string | null;
@@ -68,7 +71,8 @@ export function BuyerProfile() {
     try {
       await api.patch(`/buyers/${id}`, {
         name: draft.name, companyName: draft.companyName, contactName: draft.contactName,
-        email: draft.email || null, phone: draft.phone, website: draft.website, mailingAddress: draft.mailingAddress,
+        email: draft.email || null, phone: draft.phone, website: draft.website,
+        mailingAddress: draft.mailingAddress, mailingCity: draft.mailingCity, mailingZip: draft.mailingZip,
         relationshipStatus: draft.relationshipStatus, lastContactDate: draft.lastContactDate, nextFollowUpDate: draft.nextFollowUpDate,
         notes: draft.notes, ownerIds: draft.owners.map((o) => o.id), buyBox: draft.buyBox,
       });
@@ -117,19 +121,26 @@ export function BuyerProfile() {
               <Row><Fld l="Email"><input value={view.email ?? ""} onChange={(e) => setD({ email: e.target.value })} /></Fld><Fld l="Phone"><PhoneInput value={view.phone ?? ""} onChange={(v) => setD({ phone: v })} /></Fld></Row>
               <Fld l="Website"><input value={view.website ?? ""} onChange={(e) => setD({ website: e.target.value })} /></Fld>
               <Fld l="Mailing address"><input value={view.mailingAddress ?? ""} onChange={(e) => setD({ mailingAddress: e.target.value })} /></Fld>
+              <Row>
+                <Fld l="Mailing city"><input value={view.mailingCity ?? ""} onChange={(e) => setD({ mailingCity: e.target.value })} /></Fld>
+                <Fld l="Mailing ZIP code"><input value={view.mailingZip ?? ""} onChange={(e) => setD({ mailingZip: e.target.value })} /></Fld>
+              </Row>
               <Fld l="Relationship owner(s)">
-                <select multiple value={view.owners.map((o) => o.id)} onChange={(e) => {
-                  const ids = Array.from(e.target.selectedOptions).map((o) => o.value);
-                  setD({ owners: users.filter((u) => ids.includes(u.id)).map((u) => ({ id: u.id, name: u.name })) });
-                }}>
-                  {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-                </select>
+                {/* Shared user-assignment component — identical to Deals/Assets. */}
+                <AssigneePicker
+                  users={users}
+                  value={view.owners.map((o) => o.id)}
+                  onChange={(ids) => setD({ owners: users.filter((u) => ids.includes(u.id)).map((u) => ({ id: u.id, name: u.name })) })}
+                  placeholder="Assign relationship owner(s)…"
+                />
               </Fld>
             </>
           ) : (
             <div className="dd-grid">
               <KV k="Contact" v={view.contactName} /><KV k="Email" v={view.email} /><KV k="Phone" v={view.phone ? formatPhone(view.phone) : null} />
-              <KV k="Website" v={view.website} /><KV k="Address" v={view.mailingAddress} />
+              <KV k="Website" v={view.website} />
+              <KV k="Address" v={view.mailingAddress} />
+              <KV k="City / ZIP" v={[view.mailingCity, view.mailingZip].filter(Boolean).join(", ")} />
               <KV k="Owner(s)" v={view.owners.map((o) => o.name).join(", ")} />
             </div>
           )}

@@ -1194,12 +1194,16 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .xp-period { padding: 12px 20px 0; }
 .back-link { display: inline-flex; align-items: center; gap: 4px; }
 
-/* Contract timeline progress bar (Deal Detail) */
-.ctl-progress { margin-bottom: 16px; }
-.ctl-progress-head { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-dim); font-weight: 600; margin-bottom: 6px; }
-.ctl-progress-pct { color: var(--accent); font-variant-numeric: tabular-nums; }
-.ctl-progress-track { height: 6px; background: var(--panel-2); border-radius: 100px; overflow: hidden; }
-.ctl-progress-fill { display: block; height: 100%; border-radius: 100px; background: linear-gradient(90deg, var(--accent), #22c55e); transition: width 0.3s; }
+/* Organization → Users: action buttons spaced out, destructive action set apart. */
+.user-actions { display: inline-flex; align-items: center; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+.user-actions-sep { width: 1px; align-self: stretch; min-height: 20px; background: var(--border); margin: 0 2px; }
+
+/* Expense categories: drag-and-drop reordering rows. */
+.cat-row { cursor: default; transition: background 0.12s, opacity 0.12s; }
+.cat-row.dragging { opacity: 0.5; }
+.cat-row.drop-over td { box-shadow: inset 0 2px 0 var(--accent); }
+.cat-drag { display: inline-block; padding: 2px 6px; font-size: 15px; line-height: 1; }
+.cat-drag:active { cursor: grabbing; }
 
 /* ---------------------------------------------------------------------------
    Layering: panels that host popovers must not clip them, and menus float above

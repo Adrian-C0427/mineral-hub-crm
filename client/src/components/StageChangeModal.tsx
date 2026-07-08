@@ -13,6 +13,10 @@ interface Props {
   deal: DealSummary;
   /** Pre-selected destination (e.g. from a drag-drop). */
   initialStage?: Stage;
+  /** Skip the stage-picker step and go straight to a single confirmation for a
+   *  terminal move (Closed/Dead) — used when the destination is already chosen
+   *  by dragging a pipeline card onto the Closed/Dead zone. */
+  directTerminal?: boolean;
   /** Soft-warning flag: are there unresolved (pending) buyer activities? */
   hasUnresolvedActivity?: boolean;
   onClose: () => void;
@@ -25,7 +29,7 @@ const DEAD_REASONS = [
   "Title issues", "Competitive purchase", "Other",
 ] as const;
 
-export function StageChangeModal({ deal, initialStage, hasUnresolvedActivity, onClose, onChanged }: Props) {
+export function StageChangeModal({ deal, initialStage, directTerminal, hasUnresolvedActivity, onClose, onChanged }: Props) {
   const [toStage, setToStage] = useState<Stage>(initialStage ?? deal.stage);
   const [deadCategory, setDeadCategory] = useState<string>("");
   const [deadNotes, setDeadNotes] = useState("");
@@ -36,20 +40,34 @@ export function StageChangeModal({ deal, initialStage, hasUnresolvedActivity, on
     : [deadCategory, deadNotes.trim()].filter(Boolean).join(" — ");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  // Closed/Dead are transition points out of the active Pipeline — they get an
-  // explicit second-step confirmation spelling out the consequence.
-  const [confirming, setConfirming] = useState(false);
   const isTerminal = toStage === "CLOSED" || toStage === "DEAD";
+  // Closed/Dead are transition points out of the active Pipeline — they get an
+  // explicit confirmation spelling out the consequence. When dragged straight
+  // onto a Closed/Dead zone the destination is already chosen, so we open on
+  // that single confirmation (no intermediate stage picker).
+  const [confirming, setConfirming] = useState(Boolean(directTerminal && isTerminal));
+
+  /** Validate the loss reason (Dead only) before committing. */
+  function deadReasonError(): string | null {
+    if (toStage !== "DEAD") return null;
+    if (!deadCategory) return "Select a reason this opportunity was lost.";
+    if (deadCategory === "Other" && !deadNotes.trim()) return "Add a note describing the reason.";
+    return null;
+  }
 
   function requestMove() {
-    if (toStage === "DEAD" && !deadCategory) { setError("Select a reason this opportunity was lost."); return; }
-    if (toStage === "DEAD" && deadCategory === "Other" && !deadNotes.trim()) { setError("Add a note describing the reason."); return; }
+    const de = deadReasonError();
+    if (de) { setError(de); return; }
     setError(null);
     if (isTerminal) { setConfirming(true); return; }
     void commit();
   }
 
   async function commit() {
+    // Guard here too so the single-step (directTerminal) Dead confirmation,
+    // which collects the reason inside the confirm dialog, stays validated.
+    const de = deadReasonError();
+    if (de) { setError(de); return; }
     setBusy(true);
     setError(null);
     try {
@@ -68,13 +86,16 @@ export function StageChangeModal({ deal, initialStage, hasUnresolvedActivity, on
 
   if (confirming) {
     const closed = toStage === "CLOSED";
+    // Cancel returns to the picker in the two-step flow, or closes entirely when
+    // opened directly on the confirmation (drag-to-terminal).
+    const cancel = directTerminal ? onClose : () => setConfirming(false);
     return (
       <Modal
         title={closed ? "Move Deal to Closed?" : "Archive Deal?"}
-        onClose={() => setConfirming(false)}
+        onClose={cancel}
         footer={
           <>
-            <button onClick={() => setConfirming(false)} disabled={busy}>Cancel</button>
+            <button onClick={cancel} disabled={busy}>Cancel</button>
             <button className={closed ? "primary" : "danger"} onClick={commit} disabled={busy}>
               {busy ? "Moving…" : closed ? "Move Deal" : "Archive Deal"}
             </button>
@@ -82,19 +103,44 @@ export function StageChangeModal({ deal, initialStage, hasUnresolvedActivity, on
         }
       >
         <p style={{ marginTop: 0 }}>
-          This action will remove the opportunity from the active Pipeline and move the
-          associated deal to <strong>{closed ? "Closed Deals" : "Archived Deals"}</strong>.
+          Move <strong>{deal.name}</strong> to <strong>{closed ? "Closed" : "Dead"}</strong>? This
+          removes the opportunity from the active Pipeline and moves the associated deal to{" "}
+          <strong>{closed ? "Closed Deals" : "Archived Deals"}</strong>.
         </p>
-        {!closed && (
-          <ul style={{ margin: "0 0 10px", paddingLeft: 18 }}>
-            <li>Loss reason <strong>{deadReason}</strong> is saved to the deal history with your name and the date.</li>
-            {deal.publishedToPortal && <li>The offering will be <strong>unpublished from the Buyer Portal</strong>.</li>}
-          </ul>
+        {/* Loss reason is captured here for the single-step (drag) flow; in the
+            two-step flow it was already chosen on the picker and shows read-only. */}
+        {toStage === "DEAD" && (
+          directTerminal ? (
+            <>
+              <div className="field">
+                <label>Reason lost (required)</label>
+                <select value={deadCategory} onChange={(e) => setDeadCategory(e.target.value)}>
+                  <option value="">Select a reason…</option>
+                  {DEAD_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                </select>
+              </div>
+              {deadCategory && (
+                <div className="field">
+                  <label>{deadCategory === "Other" ? "Details (required)" : "Additional notes (optional)"}</label>
+                  <textarea rows={2} value={deadNotes} onChange={(e) => setDeadNotes(e.target.value)} placeholder="Add context for future loss analysis…" />
+                </div>
+              )}
+            </>
+          ) : (
+            <ul style={{ margin: "0 0 10px", paddingLeft: 18 }}>
+              <li>Loss reason <strong>{deadReason}</strong> is saved to the deal history with your name and the date.</li>
+              {deal.publishedToPortal && <li>The offering will be <strong>unpublished from the Buyer Portal</strong>.</li>}
+            </ul>
+          )
+        )}
+        {toStage === "DEAD" && directTerminal && deal.publishedToPortal && (
+          <p style={{ margin: "0 0 10px", color: "var(--red)" }}>The offering will be <strong>unpublished from the Buyer Portal</strong>.</p>
         )}
         <p className="muted" style={{ marginBottom: 0 }}>
           Nothing is deleted — all deal information, documents, buyer activity, emails, notes,
           and history stay with the deal, and dashboards and reports update automatically.
         </p>
+        {error && <div className="error-text">{error}</div>}
       </Modal>
     );
   }

@@ -8,6 +8,7 @@ export interface AnalyticsDeal {
   id: string;
   createdAt: Date;
   stage: string;
+  states: string[];
   counties: string[];
   basins: string[];
   formations: string[];

@@ -134,6 +134,7 @@ async function loadAnalyticsDeals(organizationId: string): Promise<AnalyticsDeal
       id: d.id,
       createdAt: d.createdAt,
       stage: d.stage,
+      states: d.states.length ? d.states : d.state ? [d.state] : [],
       counties: d.counties,
       basins: d.basins,
       formations: d.formations,
@@ -169,6 +170,7 @@ reportsRouter.get(
         : null;
 
     const filters = {
+      states: arrParam(q.states),
       counties: arrParam(q.counties),
       basins: arrParam(q.basins),
       formations: arrParam(q.formations),
@@ -193,6 +195,7 @@ reportsRouter.get(
     // Apply deal-characteristic filters in memory (org deal volumes are small).
     const deals = allDeals.filter(
       (d) =>
+        intersects(d.states, filters.states) &&
         intersects(d.counties, filters.counties) &&
         intersects(d.basins, filters.basins) &&
         intersects(d.formations, filters.formations) &&

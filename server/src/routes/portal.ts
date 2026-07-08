@@ -251,7 +251,24 @@ portalRouter.get(
         )
       : [];
     // Contacts are only exposed when this deal publishes its contact section.
-    const org = await orgPayload(deal.organization);
+    // Contact info is configured PER DEAL: when this deal sets its own portal
+    // contact, that representative is shown; otherwise fall back to the org's
+    // portal contacts so existing listings never lose a point of contact.
+    const orgBase = await orgPayload(deal.organization);
+    const hasDealContact = Boolean(deal.portalContactName || deal.portalContactEmail || deal.portalContactPhone);
+    const org = hasDealContact
+      ? {
+          ...orgBase,
+          contacts: [{
+            id: "deal", name: deal.portalContactName || deal.organization.name,
+            title: deal.portalContactTitle ?? null, email: deal.portalContactEmail ?? null,
+            phone: deal.portalContactPhone ?? null, department: null, photo: null, isPrimary: true,
+          }],
+          contactName: deal.portalContactName || deal.organization.name,
+          contactEmail: deal.portalContactEmail ?? null,
+          contactPhone: deal.portalContactPhone ?? null,
+        }
+      : orgBase;
 
     // Split buyer-visible files: images become a presigned gallery, the rest are documents.
     const filesVisible = (sections.documents || sections.attachments) ? deal.files : [];

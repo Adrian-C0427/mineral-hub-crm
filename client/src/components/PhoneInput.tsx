@@ -10,12 +10,16 @@ import { formatPhoneAsYouType, normalizePhone } from "../lib/phone";
 export function PhoneInput({
   value,
   onChange,
+  onBlur,
+  disabled,
   placeholder = "(903) 555-1234",
   required,
   id,
 }: {
   value: string | null | undefined;
   onChange: (canonical: string) => void;
+  onBlur?: () => void;
+  disabled?: boolean;
   placeholder?: string;
   required?: boolean;
   id?: string;
@@ -27,9 +31,11 @@ export function PhoneInput({
       inputMode="tel"
       autoComplete="tel"
       required={required}
+      disabled={disabled}
       value={formatPhoneAsYouType(value ?? "")}
       placeholder={placeholder}
       onChange={(e) => onChange(normalizePhone(e.target.value))}
+      onBlur={onBlur}
     />
   );
 }

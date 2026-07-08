@@ -219,11 +219,13 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
                       <td>{m.lastActiveAt ? fmtDate(m.lastActiveAt) : "—"}</td>
                       <td className="right">
                         {!isSelf && m.orgRole !== "OWNER" && (
-                          <>
+                          <div className="user-actions">
                             {isOrgOwner && <button className="small" onClick={() => setResetting(m)}>Reset password</button>}
-                            <button className="small" style={{ marginLeft: 6 }} onClick={() => setPendingStatus(m)}>{m.status === "ACTIVE" ? "Deactivate" : "Activate"}</button>
-                            {can("inviteRemoveUsers") && <button className="small danger" style={{ marginLeft: 6 }} onClick={() => removeMember(m)}>Remove</button>}
-                          </>
+                            <button className="small" onClick={() => setPendingStatus(m)}>{m.status === "ACTIVE" ? "Deactivate" : "Activate"}</button>
+                            {/* Destructive action set apart by a divider + danger styling. */}
+                            {can("inviteRemoveUsers") && <span className="user-actions-sep" aria-hidden="true" />}
+                            {can("inviteRemoveUsers") && <button className="small danger" onClick={() => removeMember(m)}>Remove</button>}
+                          </div>
                         )}
                       </td>
                     </tr>
