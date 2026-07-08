@@ -1210,6 +1210,38 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 /* Shared Documents section: subtle highlight while dragging files to upload. */
 .doc-section.drag-over { outline: 2px dashed var(--accent); outline-offset: -6px; }
 
+/* ---------------------------------------------------------------------------
+   Buyer Marketplace — map-first workspace (Zillow-style, for minerals).
+   Big map + a dockable, resizable listings panel; filters collapse away.
+   --------------------------------------------------------------------------- */
+.mkt-hero { padding-top: 16px; padding-bottom: 16px; }
+.mkt-controls { padding: 12px 14px; }
+.mkt-controls-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mkt-seg { flex: none; }
+.mkt-filters-body { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+
+.mkt-workspace { display: flex; align-items: stretch; gap: 0; height: min(78vh, 900px); min-height: 460px; margin-bottom: 16px; }
+.mkt-workspace.side-right { flex-direction: row-reverse; }
+.mkt-panel { width: var(--panel-w, 400px); flex: none; overflow-y: auto; overflow-x: hidden; padding-right: 2px; }
+.mkt-map { flex: 1; min-width: 0; border-radius: 12px; overflow: hidden; }
+.mkt-map .portal-map { height: 100% !important; }
+/* Drag handle between panel and map. */
+.mkt-resize { flex: none; width: 10px; cursor: col-resize; align-self: stretch; position: relative; touch-action: none; }
+.mkt-resize::before { content: ""; position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; transform: translateX(-50%); background: var(--border); border-radius: 2px; transition: background 0.15s; }
+.mkt-resize:hover::before { background: var(--accent); width: 3px; }
+
+.mkt-cards { display: flex; flex-direction: column; gap: 12px; }
+.mkt-cards .portal-card { margin: 0; }
+.mkt-empty { padding: 28px 16px; text-align: center; }
+.mkt-table table { font-size: 13px; }
+
+@media (max-width: 860px) {
+  .mkt-workspace, .mkt-workspace.side-right { flex-direction: column; height: auto; }
+  .mkt-panel { width: auto !important; max-height: 52vh; }
+  .mkt-map { height: 360px; }
+  .mkt-resize { display: none; }
+}
+
 /* Tract Descriptions editor: open, well-spaced fields (was cramped). */
 .tract-editor { display: flex; flex-direction: column; gap: 18px; margin-top: 4px; }
 .tract-editor .field { margin-bottom: 0; }
