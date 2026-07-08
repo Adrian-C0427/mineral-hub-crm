@@ -5,7 +5,7 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, MetricCard, Banner, MatchPercentBadge, MatchBar, Modal, ConfirmDialog, BackLink } from "../components/ui";
+import { Spinner, MetricCard, Banner, MatchBar, Modal, ConfirmDialog, BackLink } from "../components/ui";
 import { BuyerActivitySection } from "../components/BuyerActivitySection";
 import { LogContactModal } from "../components/LogContactModal";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
@@ -36,6 +36,8 @@ const REV_COLOR = "#22c55e";
 /** Positive financial values render in the app's success green; negative in red. */
 const posColor = (v: number | null | undefined): string | undefined =>
   v == null || v === 0 ? undefined : v > 0 ? "var(--green)" : "var(--red)";
+/** Match-percent scale (green/amber/red) — mirrors the deal page. */
+const matchColor = (pct: number): string => (pct >= 67 ? "#4ade80" : pct >= 34 ? "#f59e0b" : "#f87171");
 
 export function MineralAssetDetail() {
   const { id } = useParams<{ id: string }>();
@@ -77,7 +79,10 @@ export function MineralAssetDetail() {
   }
 
   return (
-    <div className="page">
+    // `deal-detail` opts equivalent sections (KV grids, match cards, criteria
+    // tags, panels) into the same styling used on the Active Deal page, so an
+    // owned asset looks and behaves like a deal wherever the sections overlap.
+    <div className="page deal-detail">
       <BackLink label="Back to Mineral Assets" fallback="/assets" />
       <div className="page-header">
         <div className="row">
@@ -590,7 +595,12 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
                   {canEdit && <input type="checkbox" checked={selected.has(m.buyerId)} onChange={() => setSelected((p) => { const n = new Set(p); n.has(m.buyerId) ? n.delete(m.buyerId) : n.add(m.buyerId); return n; })} />}
                   <span className="match-rank">#{m.rank}</span>
                   <Link to={`/buyers/${m.buyerId}`} className="match-name">{m.companyName || m.buyerName}</Link>
-                  <MatchPercentBadge value={m.matchPercent} />
+                  <span className="match-right">
+                    <span className="match-pct-num" style={{ color: matchColor(m.matchPercent) }}>{m.matchPercent}%</span>
+                    <span className="muted" style={{ fontSize: 11.5, whiteSpace: "nowrap" }}>
+                      {m.criteriaSpecified > 0 ? `${m.criteriaSpecifiedMatched}/${m.criteriaSpecified} criteria` : "no buy box set"}
+                    </span>
+                  </span>
                 </div>
                 <MatchBar value={m.matchPercent} />
                 <div>
