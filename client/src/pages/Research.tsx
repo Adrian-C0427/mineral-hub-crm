@@ -7,6 +7,7 @@ import { useAuth } from "../auth/AuthContext";
 import { Spinner, Banner, Modal, ConfirmDelete } from "../components/ui";
 import { useRowSelection, BulkBar } from "../components/bulk";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
+import { GeoFields } from "../components/GeoFields";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { ResearchImport } from "../components/ResearchImport";
 import { ResearchChoropleth, type CountyStat } from "../components/ResearchChoropleth";
@@ -73,7 +74,7 @@ interface Paged<T> { total: number; page: number; pageSize: number; rows: T[] }
 // ---------------------------------------------------------------------------
 
 type Period = "LAST_30D" | "LAST_90D" | "LAST_6M" | "LAST_12M" | "THIS_YEAR" | "CUSTOM";
-type Compare = "PREV_PERIOD" | "PREV_YEAR";
+type Compare = "NONE" | "PREV_PERIOD" | "PREV_YEAR";
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const DAY = 86400000;
 
@@ -108,7 +109,7 @@ function fmtRangeLabel(from: string, to: string, withYear = true): string {
 
 /** The comparison window shown next to the range (mirrors the server default). */
 function compareRangeFor(mode: Compare, from: string, to: string): { from: string; to: string } | null {
-  if (!from || !to) return null;
+  if (mode === "NONE" || !from || !to) return null;
   const cp = compareParams(mode, from, to);
   if (cp.compareFrom && cp.compareTo) return { from: cp.compareFrom, to: cp.compareTo };
   const f = new Date(`${from}T00:00:00Z`).getTime();
@@ -122,14 +123,14 @@ function compareRangeFor(mode: Compare, from: string, to: string): { from: strin
 // ---------------------------------------------------------------------------
 
 interface Filters {
-  state: string;
+  states: string[];
   counties: string[];
   docTypes: string[];
   buyers: string[];
   sellers: string[];
   operators: string[];
 }
-const EMPTY_FILTERS: Filters = { state: "", counties: [], docTypes: [], buyers: [], sellers: [], operators: [] };
+const EMPTY_FILTERS: Filters = { states: [], counties: [], docTypes: [], buyers: [], sellers: [], operators: [] };
 
 type Tab = "overview" | "geography" | "rankings" | "relationships" | "opportunities" | "records" | "data";
 
@@ -183,7 +184,7 @@ export function Research() {
     if (range.to) q.set("to", range.to);
     const cp = compareParams(compare, range.from, range.to);
     if (cp.compareFrom && cp.compareTo) { q.set("compareFrom", cp.compareFrom); q.set("compareTo", cp.compareTo); }
-    if (filters.state) q.set("state", filters.state);
+    for (const s of filters.states) q.append("state", s);
     for (const c of filters.counties) q.append("county", c);
     for (const t of filters.docTypes) q.append("docType", t);
     for (const b of filters.buyers) q.append("buyer", b);
@@ -206,8 +207,9 @@ export function Research() {
   }
 
   const activeFilterCount =
-    (filters.state ? 1 : 0) + filters.counties.length + filters.docTypes.length +
+    filters.states.length + filters.counties.length + filters.docTypes.length +
     filters.buyers.length + filters.sellers.length + filters.operators.length;
+  const compareOff = compare === "NONE";
 
   const drillToRecords = useCallback((patch: Partial<Filters>) => {
     setFilters((f) => ({ ...f, ...patch }));
@@ -289,24 +291,18 @@ export function Research() {
           <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end", marginTop: 10 }}>
             <div className="field" style={{ marginBottom: 0 }}><label>Compare to</label>
               <select value={compare} onChange={(e) => setCompare(e.target.value as Compare)}>
+                <option value="NONE">No comparison</option>
                 <option value="PREV_PERIOD">Previous period</option>
                 <option value="PREV_YEAR">Previous year</option>
               </select>
             </div>
-            <div className="field" style={{ marginBottom: 0 }}><label>State</label>
-              <select value={filters.state} onChange={(e) => setFilters((f) => ({ ...f, state: e.target.value, counties: [] }))}>
-                <option value="">All states</option>
-                {opts.states.map((s) => <option key={s} value={s}>{s}</option>)}
-              </select>
-            </div>
-            <div className="field" style={{ marginBottom: 0, minWidth: 190, flex: 1 }}><label>Counties</label>
-              <SearchableMultiSelect
-                options={opts.counties.filter((c) => !filters.state || c.state === filters.state).map((c) => c.county)}
-                value={filters.counties}
-                onChange={(counties) => setFilters((f) => ({ ...f, counties }))}
-                placeholder="Filter counties…"
-              />
-            </div>
+            {/* Shared geographic hierarchy: all 50 states + cascading counties,
+                identical to Buyers/Deals/Reports. Renders State + County fields. */}
+            <GeoFields
+              states={filters.states} onStatesChange={(states) => setFilters((f) => ({ ...f, states }))}
+              counties={filters.counties} onCountiesChange={(counties) => setFilters((f) => ({ ...f, counties }))}
+              labels={{ state: "States", county: "Counties" }}
+            />
             <div className="field" style={{ marginBottom: 0, minWidth: 190, flex: 1 }}><label>Document types</label>
               <SearchableMultiSelect
                 options={opts.docTypes.map(prettyEnum)}
@@ -344,10 +340,10 @@ export function Research() {
       </div>
 
       <div ref={captureRef} className="report-capture">
-        {tab === "overview" && <OverviewTab qs={qs} />}
-        {tab === "geography" && <GeographyTab qs={qs} filters={filters} onDrill={drillToRecords} onToggleCounty={(county) =>
+        {tab === "overview" && <OverviewTab qs={qs} compareOff={compareOff} />}
+        {tab === "geography" && <GeographyTab qs={qs} filters={filters} compareOff={compareOff} onDrill={drillToRecords} onToggleCounty={(county) =>
           setFilters((f) => ({ ...f, counties: f.counties.includes(county) ? f.counties.filter((c) => c !== county) : [...f.counties, county] }))} />}
-        {tab === "rankings" && <RankingsTab qs={qs} opts={opts} onDrill={drillToRecords} />}
+        {tab === "rankings" && <RankingsTab qs={qs} opts={opts} compareOff={compareOff} onDrill={drillToRecords} />}
         {tab === "relationships" && <RelationshipsTab qs={qs} onDrill={drillToRecords} />}
         {tab === "opportunities" && <OpportunitiesTab qs={qs} onDrill={drillToRecords} />}
         {tab === "records" && <RecordsTab qs={qs} />}
@@ -361,7 +357,7 @@ export function Research() {
 // Overview
 // ---------------------------------------------------------------------------
 
-function OverviewTab({ qs }: { qs: string }) {
+function OverviewTab({ qs, compareOff }: { qs: string; compareOff: boolean }) {
   const [data, setData] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   useEffect(() => {
@@ -381,16 +377,18 @@ function OverviewTab({ qs }: { qs: string }) {
   return (
     <>
       <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
-        <TrendKpi label="Mineral Transactions" t={t.transactions} />
-        <TrendKpi label="Leasing Documents" t={t.leases} />
-        <TrendKpi label="Drilling Permits" t={t.permits} />
-        <TrendKpi label="Horizontal Permits" t={t.horizontalPermits} />
-        <TrendKpi label="Active Buyers" t={t.uniqueBuyers} />
-        <TrendKpi label="Active Operators" t={t.uniqueOperators} />
-        <div className="metric-card">
-          <div className="metric-label">Comparison Window</div>
-          <div className="metric-value" style={{ fontSize: 15 }}>{fmtDate(data.compare.from)} – {fmtDate(data.compare.to)}</div>
-        </div>
+        <TrendKpi label="Mineral Transactions" t={t.transactions} compareOff={compareOff} />
+        <TrendKpi label="Leasing Documents" t={t.leases} compareOff={compareOff} />
+        <TrendKpi label="Drilling Permits" t={t.permits} compareOff={compareOff} />
+        <TrendKpi label="Horizontal Permits" t={t.horizontalPermits} compareOff={compareOff} />
+        <TrendKpi label="Active Buyers" t={t.uniqueBuyers} compareOff={compareOff} />
+        <TrendKpi label="Active Operators" t={t.uniqueOperators} compareOff={compareOff} />
+        {!compareOff && (
+          <div className="metric-card">
+            <div className="metric-label">Comparison Window</div>
+            <div className="metric-value" style={{ fontSize: 15 }}>{fmtDate(data.compare.from)} – {fmtDate(data.compare.to)}</div>
+          </div>
+        )}
       </div>
 
       <div className="chart-grid">
@@ -423,6 +421,7 @@ function OverviewTab({ qs }: { qs: string }) {
             </ResponsiveContainer>
           )}
         </div>
+        {!compareOff && (
         <div className="panel">
           <h3>Period vs Prior</h3>
           <ResponsiveContainer width="100%" height={240}>
@@ -441,12 +440,13 @@ function OverviewTab({ qs }: { qs: string }) {
             </BarChart>
           </ResponsiveContainer>
         </div>
+        )}
       </div>
     </>
   );
 }
 
-function TrendKpi({ label, t }: { label: string; t?: TrendT }) {
+function TrendKpi({ label, t, compareOff }: { label: string; t?: TrendT; compareOff?: boolean }) {
   if (!t) return null;
   const color = t.direction === "flat" ? "var(--text-dim)" : t.direction === "up" ? "#22c55e" : "#ef4444";
   const arrow = t.direction === "flat" ? "→" : t.direction === "up" ? "▲" : "▼";
@@ -454,9 +454,11 @@ function TrendKpi({ label, t }: { label: string; t?: TrendT }) {
     <div className="metric-card">
       <div className="metric-label">{label}</div>
       <div className="metric-value">{num(t.current)}</div>
-      <div className="metric-hint" style={{ color }}>
-        {arrow} {fmtPct(t.pctChange)} vs prior ({num(t.previous)})
-      </div>
+      {!compareOff && (
+        <div className="metric-hint" style={{ color }}>
+          {arrow} {fmtPct(t.pctChange)} vs prior ({num(t.previous)})
+        </div>
+      )}
     </div>
   );
 }
@@ -465,8 +467,8 @@ function TrendKpi({ label, t }: { label: string; t?: TrendT }) {
 // Geography
 // ---------------------------------------------------------------------------
 
-function GeographyTab({ qs, filters, onDrill, onToggleCounty }: {
-  qs: string; filters: Filters;
+function GeographyTab({ qs, filters, compareOff, onDrill, onToggleCounty }: {
+  qs: string; filters: Filters; compareOff: boolean;
   onDrill: (patch: Partial<Filters>) => void;
   onToggleCounty: (county: string) => void;
 }) {
@@ -497,11 +499,14 @@ function GeographyTab({ qs, filters, onDrill, onToggleCounty }: {
     { key: "leases", header: "Leases", value: (r) => r.leases, align: "right" },
     { key: "permits", header: "Permits", value: (r) => r.permits, align: "right" },
     { key: "total", header: "Total", value: (r) => r.total, align: "right" },
-    { key: "previous", header: "Prior", value: (r) => r.previous, align: "right" },
-    {
-      key: "pctChange", header: "Change", value: (r) => r.pctChange ?? Number.MAX_SAFE_INTEGER, align: "right",
-      render: (r) => <span style={{ color: r.absoluteChange > 0 ? "#22c55e" : r.absoluteChange < 0 ? "#ef4444" : "var(--text-dim)" }}>{fmtPct(r.pctChange)} ({r.absoluteChange >= 0 ? "+" : ""}{r.absoluteChange})</span>,
-    },
+    // Prior/Change columns are comparative — hidden when comparison is off.
+    ...(compareOff ? [] : ([
+      { key: "previous", header: "Prior", value: (r: GeoRow) => r.previous, align: "right" },
+      {
+        key: "pctChange", header: "Change", value: (r: GeoRow) => r.pctChange ?? Number.MAX_SAFE_INTEGER, align: "right",
+        render: (r: GeoRow) => <span style={{ color: r.absoluteChange > 0 ? "#22c55e" : r.absoluteChange < 0 ? "#ef4444" : "var(--text-dim)" }}>{fmtPct(r.pctChange)} ({r.absoluteChange >= 0 ? "+" : ""}{r.absoluteChange})</span>,
+      },
+    ] as Column<GeoRow>[])),
     { key: "zScore", header: "z", value: (r) => r.zScore, align: "right", render: (r) => (r.zScore == null ? "—" : r.zScore.toFixed(1)) },
   ];
 
@@ -509,7 +514,7 @@ function GeographyTab({ qs, filters, onDrill, onToggleCounty }: {
     () => countyRows.filter((r) => r.state === "TX" && r.county).map((r) => ({ county: r.county!, total: r.total, pctChange: r.pctChange, isHotspot: r.isHotspot })),
     [countyRows],
   );
-  const showMap = countyStats.length > 0 && (!filters.state || filters.state === "TX");
+  const showMap = countyStats.length > 0 && (!filters.states.length || filters.states.includes("TX"));
 
   return (
     <>
@@ -550,7 +555,7 @@ function GeographyTab({ qs, filters, onDrill, onToggleCounty }: {
             rows={data.rows}
             rowKey={(r) => `${r.state}|${r.county}|${r.abstractId}`}
             defaultSort={{ key: "total", dir: "desc" }}
-            onRowClick={(r) => onDrill({ state: r.state, counties: r.county ? [r.county] : [] })}
+            onRowClick={(r) => onDrill({ states: r.state ? [r.state] : [], counties: r.county ? [r.county] : [] })}
           />
         )}
       </div>
@@ -572,7 +577,7 @@ interface PreviewItem {
 }
 type Decision = { key: string; action: "create" | "merge" | "skip"; mergeIntoBuyerId?: string };
 
-function RankingsTab({ qs, opts, onDrill }: { qs: string; opts: FilterOpts | null; onDrill: (patch: Partial<Filters>) => void }) {
+function RankingsTab({ qs, opts, compareOff, onDrill }: { qs: string; opts: FilterOpts | null; compareOff: boolean; onDrill: (patch: Partial<Filters>) => void }) {
   const [role, setRole] = useState<"buyers" | "sellers" | "operators">("buyers");
   const [data, setData] = useState<{ role: string; rows: EntityRow[] } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -623,11 +628,14 @@ function RankingsTab({ qs, opts, onDrill }: { qs: string; opts: FilterOpts | nul
     }] as Column<EntityRow>[]) : []),
     { key: "name", header: "Name", value: (r) => r.name, render: (r) => <>{r.name} {r.newEntrant && <span className="badge" style={{ background: "rgba(34,197,94,0.15)", color: "#22c55e" }}>NEW</span>}</> },
     { key: "count", header: role === "operators" ? "Permits" : "Records", value: (r) => r.count, align: "right" },
-    { key: "previous", header: "Prior", value: (r) => r.previous, align: "right" },
-    {
-      key: "pctChange", header: "Change", value: (r) => r.pctChange ?? Number.MAX_SAFE_INTEGER, align: "right",
-      render: (r) => <span style={{ color: r.absoluteChange > 0 ? "#22c55e" : r.absoluteChange < 0 ? "#ef4444" : "var(--text-dim)" }}>{fmtPct(r.pctChange)}</span>,
-    },
+    // Prior/Change columns are comparative — hidden when comparison is off.
+    ...(compareOff ? [] : ([
+      { key: "previous", header: "Prior", value: (r: EntityRow) => r.previous, align: "right" },
+      {
+        key: "pctChange", header: "Change", value: (r: EntityRow) => r.pctChange ?? Number.MAX_SAFE_INTEGER, align: "right",
+        render: (r: EntityRow) => <span style={{ color: r.absoluteChange > 0 ? "#22c55e" : r.absoluteChange < 0 ? "#ef4444" : "var(--text-dim)" }}>{fmtPct(r.pctChange)}</span>,
+      },
+    ] as Column<EntityRow>[])),
     ...(role === "operators"
       ? ([{ key: "horizontal", header: "Horizontal", value: (r) => r.horizontal, align: "right" }] as Column<EntityRow>[])
       : []),
@@ -1292,7 +1300,7 @@ function OpportunitiesTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
                 <strong>{s.title}</strong>
               </div>
               <p style={{ margin: "6px 0 8px" }}>{s.detail}</p>
-              <button className="small" onClick={() => onDrill({ state: s.state, counties: s.county ? [s.county] : [] })}>
+              <button className="small" onClick={() => onDrill({ states: s.state ? [s.state] : [], counties: s.county ? [s.county] : [] })}>
                 View underlying records →
               </button>
             </div>

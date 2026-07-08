@@ -8,6 +8,7 @@ import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, Banner, Modal } from "../components/ui";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
+import { GeoFields } from "../components/GeoFields";
 import { PeriodSegmented } from "../components/PeriodSegmented";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { money, pct, num, fmtDate, prettyStage } from "../lib/format";
@@ -77,7 +78,7 @@ function compareRange(mode: Compare, from: string, to: string): { from: string; 
   return { from: iso(prevFrom), to: iso(prevTo) };
 }
 
-const EMPTY_FILTERS: Record<string, string[]> = { counties: [], basins: [], formations: [], assetTypes: [], operators: [], stages: [], buyers: [], users: [] };
+const EMPTY_FILTERS: Record<string, string[]> = { states: [], counties: [], basins: [], formations: [], assetTypes: [], operators: [], stages: [], buyers: [], users: [] };
 
 /** id→label map for pickers; duplicate names get a numeric suffix so two
  *  "John Smith"s remain distinguishable. */
@@ -199,8 +200,15 @@ export function Reports() {
               <option value="PREV_YEAR">Previous year</option>
             </select>
           </div>
+          {/* Shared geographic hierarchy: all 50 states + cascading counties,
+              identical to Buyers/Deals/Research. */}
+          <GeoFields
+            states={filters.states} onStatesChange={(states) => setFilters((f) => ({ ...f, states }))}
+            counties={filters.counties} onCountiesChange={(counties) => setFilters((f) => ({ ...f, counties }))}
+            labels={{ state: "States", county: "Counties" }}
+          />
           {opts && ([
-            ["counties", "Counties", opts.counties], ["basins", "Basins", opts.basins],
+            ["basins", "Basins", opts.basins],
             ["formations", "Formations", opts.formations], ["assetTypes", "Asset types", opts.assetTypes],
             ["operators", "Operators", opts.operators], ["stages", "Deal status", opts.stages],
           ] as [string, string, string[]][]).map(([key, label, options]) => (

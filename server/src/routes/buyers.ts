@@ -125,6 +125,8 @@ buyersRouter.get(
       phone: b.phone,
       website: b.website,
       mailingAddress: b.mailingAddress,
+      mailingCity: b.mailingCity,
+      mailingZip: b.mailingZip,
       relationshipStatus: b.relationshipStatus,
       lastContactDate: b.lastContactDate,
       nextFollowUpDate: b.nextFollowUpDate,
@@ -248,6 +250,8 @@ const upsertSchema = z.object({
   phone: z.string().nullish().transform((v) => (v == null ? v : normalizePhone(v))),
   website: z.string().nullish(),
   mailingAddress: z.string().nullish(),
+  mailingCity: z.string().nullish(),
+  mailingZip: z.string().nullish(),
   relationshipStatus: z.enum(["HOT", "WARM", "COLD"]).optional(),
   lastContactDate: dateField,
   nextFollowUpDate: dateField,
@@ -278,6 +282,8 @@ buyersRouter.post(
           phone: data.phone ?? null,
           website: data.website ?? null,
           mailingAddress: data.mailingAddress ?? null,
+          mailingCity: data.mailingCity ?? null,
+          mailingZip: data.mailingZip ?? null,
           relationshipStatus: data.relationshipStatus ?? "WARM",
           lastContactDate: toDate(data.lastContactDate) ?? null,
           nextFollowUpDate: toDate(data.nextFollowUpDate) ?? null,
@@ -316,6 +322,8 @@ buyersRouter.patch(
       if (data.phone !== undefined) patch.phone = data.phone;
       if (data.website !== undefined) patch.website = data.website;
       if (data.mailingAddress !== undefined) patch.mailingAddress = data.mailingAddress;
+      if (data.mailingCity !== undefined) patch.mailingCity = data.mailingCity;
+      if (data.mailingZip !== undefined) patch.mailingZip = data.mailingZip;
       if (data.relationshipStatus !== undefined) patch.relationshipStatus = data.relationshipStatus;
       if (data.lastContactDate !== undefined) patch.lastContactDate = toDate(data.lastContactDate);
       if (data.nextFollowUpDate !== undefined) patch.nextFollowUpDate = toDate(data.nextFollowUpDate);

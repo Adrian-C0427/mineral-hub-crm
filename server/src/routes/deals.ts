@@ -575,6 +575,7 @@ dealsRouter.get(
       where: { id: req.params.id, organizationId: orgId(req) },
       select: { id: true, publishedToPortal: true, portalSlug: true, portalVisibility: true, portalFeatured: true,
         portalSummary: true, portalSections: true, portalAskPrice: true, askPrice: true,
+        portalContactName: true, portalContactTitle: true, portalContactEmail: true, portalContactPhone: true,
         files: { where: { supersededById: null }, select: { id: true, filename: true, folder: true, visibleToBuyers: true } } },
     });
     if (!deal) throw new HttpError(404, "Deal not found");
@@ -613,6 +614,11 @@ dealsRouter.patch(
       sections: z.record(z.string(), z.boolean()).optional(),
       // Buyer-facing asking-price override; null clears it (falls back to askPrice).
       askPrice: z.number().nonnegative().nullish(),
+      // Per-deal published contact (the representative shown on THIS listing).
+      contactName: z.string().trim().max(160).nullish(),
+      contactTitle: z.string().trim().max(120).nullish(),
+      contactEmail: z.string().trim().max(200).nullish(),
+      contactPhone: z.string().trim().max(60).nullish(),
     }).parse(req.body);
     const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true, portalSlug: true, portalSections: true } });
     if (!deal) throw new HttpError(404, "Deal not found");
@@ -625,6 +631,10 @@ dealsRouter.patch(
     if (body.featured !== undefined) patch.portalFeatured = body.featured;
     if (body.summary !== undefined) patch.portalSummary = body.summary;
     if (body.askPrice !== undefined) patch.portalAskPrice = body.askPrice;
+    if (body.contactName !== undefined) patch.portalContactName = body.contactName || null;
+    if (body.contactTitle !== undefined) patch.portalContactTitle = body.contactTitle || null;
+    if (body.contactEmail !== undefined) patch.portalContactEmail = body.contactEmail || null;
+    if (body.contactPhone !== undefined) patch.portalContactPhone = body.contactPhone || null;
     if (body.sections) {
       const merged = { ...normalizeSections(deal.portalSections) };
       for (const k of PORTAL_SECTION_KEYS) if (typeof body.sections[k] === "boolean") merged[k] = body.sections[k];
@@ -633,7 +643,8 @@ dealsRouter.patch(
     const updated = await prisma.deal.update({
       where: { id: deal.id }, data: patch,
       select: { id: true, publishedToPortal: true, portalSlug: true, portalVisibility: true, portalFeatured: true,
-        portalSummary: true, portalSections: true, portalAskPrice: true, askPrice: true },
+        portalSummary: true, portalSections: true, portalAskPrice: true, askPrice: true,
+        portalContactName: true, portalContactTitle: true, portalContactEmail: true, portalContactPhone: true },
     });
     res.json({ ...updated, portalSections: normalizeSections(updated.portalSections) });
   }),

@@ -158,6 +158,7 @@ export function Pipeline() {
         <StageChangeModal
           deal={pending.deal}
           initialStage={pending.toStage}
+          directTerminal
           onClose={() => setPending(null)}
           onChanged={() => { setPending(null); load(); }}
         />

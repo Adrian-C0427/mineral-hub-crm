@@ -50,7 +50,7 @@ function parseDay(s: string | undefined): Date | null {
 }
 
 interface ResearchFilters {
-  state?: string;
+  states: string[];
   counties: string[];
   docClass?: ResearchDocClass;
   docTypes: string[];
@@ -66,7 +66,7 @@ interface Window { from: Date; to: Date } // [from, to] inclusive days
 
 function parseFilters(q: Record<string, unknown>): ResearchFilters {
   return {
-    state: q.state ? String(q.state) : undefined,
+    states: arr(q.state),
     counties: arr(q.county),
     docClass: q.docClass === "TRANSACTION" || q.docClass === "LEASE" ? (q.docClass as ResearchDocClass) : undefined,
     docTypes: arr(q.docType),
@@ -114,7 +114,7 @@ interface PermitRow {
 function docWhere(org: string, f: ResearchFilters, win?: Window): Prisma.ResearchDocumentWhereInput {
   const w: Prisma.ResearchDocumentWhereInput = { organizationId: org };
   if (win) w.recordingDate = { gte: win.from, lt: new Date(win.to.getTime() + DAY) };
-  if (f.state) w.state = f.state;
+  if (f.states.length) w.state = { in: f.states };
   if (f.counties.length) w.county = { in: f.counties };
   if (f.docClass) w.docClass = f.docClass;
   if (f.docTypes.length) w.docType = { in: f.docTypes as ResearchDocType[] };
@@ -127,7 +127,7 @@ function docWhere(org: string, f: ResearchFilters, win?: Window): Prisma.Researc
 function permitWhere(org: string, f: ResearchFilters, win?: Window): Prisma.ResearchPermitWhereInput {
   const w: Prisma.ResearchPermitWhereInput = { organizationId: org };
   if (win) w.activityDate = { gte: win.from, lt: new Date(win.to.getTime() + DAY) };
-  if (f.state) w.state = f.state;
+  if (f.states.length) w.state = { in: f.states };
   if (f.counties.length) w.county = { in: f.counties };
   if (f.operators.length) w.operatorNorm = { in: f.operators };
   if (f.abstractId) w.abstractId = f.abstractId;
@@ -177,7 +177,8 @@ interface RrcPermitRow extends PermitRow { api8: string | null }
  * the horizontal-permit analytics without a separate dataset.
  */
 async function loadRrcPermits(f: ResearchFilters, win: Window): Promise<RrcPermitRow[]> {
-  if (f.state && f.state !== "TX") return [];
+  // RRC permits are Texas-only; skip when a state filter is set that excludes TX.
+  if (f.states.length && !f.states.includes("TX")) return [];
   // Permit-status filter maps only to APPROVED for issued RRC permits.
   if (f.statuses.length && !f.statuses.includes("APPROVED")) return [];
   const conds: string[] = [`p.permit_date >= $1`, `p.permit_date <= $2`];

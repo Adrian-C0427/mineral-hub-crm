@@ -5,7 +5,7 @@ const range: Range = { from: new Date("2026-01-01"), to: new Date("2026-12-31T23
 
 const deal = (o: Partial<AnalyticsDeal>): AnalyticsDeal => ({
   id: "d", createdAt: new Date("2026-02-01"), stage: "CLOSED",
-  counties: [], basins: [], formations: [], assetTypes: [], operator: null,
+  states: [], counties: [], basins: [], formations: [], assetTypes: [], operator: null,
   askPrice: null, ourPrice: null, acceptedAmount: null, estimatedClosingCosts: null,
   relationshipOwnerId: null, selectedBuyerId: null, createdByUserId: null, closedByUserId: null,
   dateUnderContract: null, closedAt: null, deadAt: null, ...o,
