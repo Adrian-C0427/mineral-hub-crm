@@ -523,6 +523,11 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .deal-card .dc-name { font-weight: 600; margin-bottom: 4px; }
 .deal-card .dc-meta { font-size: 12px; color: var(--text-dim); display:flex; flex-wrap:wrap; gap: 8px; }
 .deal-card .dc-buyer { font-size: 12px; color: var(--green); margin-top: 4px; font-weight: 600; }
+/* Compact density (Customize View): tighter cards to fit more per column. */
+.kanban.compact .deal-card { padding: 6px 9px; margin-bottom: 6px; border-radius: 5px; }
+.kanban.compact .deal-card .dc-name { font-size: 13px; margin-bottom: 2px; }
+.kanban.compact .deal-card .dc-meta { font-size: 11px; gap: 6px; }
+.kanban.compact .deal-card .dc-meta[style] { margin-top: 2px !important; }
 
 /* --- Login --- */
 .login-wrap { min-height: 100vh; display:flex; align-items:center; justify-content:center; }
