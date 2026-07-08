@@ -87,6 +87,7 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
       </div>
 
       <SortableTable
+        customizeId="deals-list"
         columns={columns}
         rows={filtered}
         rowKey={(d) => d.id}

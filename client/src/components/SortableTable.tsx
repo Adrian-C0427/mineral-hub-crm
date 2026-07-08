@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 export type SortType = "text" | "number" | "date";
@@ -13,6 +13,8 @@ export interface Column<T> {
   type?: SortType;
   align?: "left" | "right" | "center";
   width?: string;
+  /** When true, the column can't be hidden via Customize View (still reorderable). */
+  required?: boolean;
 }
 
 interface Props<T> {
@@ -35,6 +37,9 @@ interface Props<T> {
     onToggle: (id: string) => void;
     onToggleAll: (ids: string[]) => void;
   };
+  /** Turn on the "Customize View" control: a stable id namespaces the saved
+   *  column layout (visibility + order) in localStorage, per user + table. */
+  customizeId?: string;
 }
 
 function compareValues(a: unknown, b: unknown, type: SortType): number {
@@ -48,6 +53,108 @@ function compareValues(a: unknown, b: unknown, type: SortType): number {
   return String(a).localeCompare(String(b), undefined, { sensitivity: "base", numeric: true });
 }
 
+// ---------------------------------------------------------------------------
+// Customize View — persisted per-table column layout (order + hidden columns).
+// ---------------------------------------------------------------------------
+
+interface ColPrefs { order: string[]; hidden: string[] }
+const colKey = (id: string) => `mh-cols:v1:${id}`;
+function loadColPrefs(id: string): ColPrefs {
+  try { const raw = localStorage.getItem(colKey(id)); if (raw) { const p = JSON.parse(raw) as ColPrefs; return { order: p.order ?? [], hidden: p.hidden ?? [] }; } } catch { /* ignore */ }
+  return { order: [], hidden: [] };
+}
+
+function useColumnPrefs<T>(customizeId: string | undefined, columns: Column<T>[]) {
+  const [prefs, setPrefs] = useState<ColPrefs>(() => (customizeId ? loadColPrefs(customizeId) : { order: [], hidden: [] }));
+  // Reload when the table identity changes (e.g. remounted for another list).
+  useEffect(() => { if (customizeId) setPrefs(loadColPrefs(customizeId)); }, [customizeId]);
+  useEffect(() => { if (customizeId) { try { localStorage.setItem(colKey(customizeId), JSON.stringify(prefs)); } catch { /* ignore */ } } }, [customizeId, prefs]);
+
+  // Apply the saved order (unknown/new columns keep their natural position at the end).
+  const ordered = useMemo(() => {
+    if (!customizeId || prefs.order.length === 0) return columns;
+    const byKey = new Map(columns.map((c) => [c.key, c]));
+    const seen = new Set<string>();
+    const out: Column<T>[] = [];
+    for (const k of prefs.order) { const c = byKey.get(k); if (c) { out.push(c); seen.add(k); } }
+    for (const c of columns) if (!seen.has(c.key)) out.push(c);
+    return out;
+  }, [columns, prefs.order, customizeId]);
+
+  const hidden = new Set(prefs.hidden);
+  const visible = customizeId ? ordered.filter((c) => !hidden.has(c.key)) : columns;
+
+  const toggle = (key: string) => setPrefs((p) => ({ ...p, hidden: p.hidden.includes(key) ? p.hidden.filter((k) => k !== key) : [...p.hidden, key] }));
+  const move = (key: string, dir: -1 | 1) => setPrefs((p) => {
+    const keys = ordered.map((c) => c.key);
+    const i = keys.indexOf(key); const j = i + dir;
+    if (i < 0 || j < 0 || j >= keys.length) return p;
+    [keys[i], keys[j]] = [keys[j], keys[i]];
+    return { ...p, order: keys };
+  });
+  const reset = () => setPrefs({ order: [], hidden: [] });
+  const isDefault = prefs.order.length === 0 && prefs.hidden.length === 0;
+
+  return { ordered, visible, hidden, toggle, move, reset, isDefault };
+}
+
+function ColumnCustomizer<T>({ ordered, hidden, onToggle, onMove, onReset, isDefault }: {
+  ordered: Column<T>[];
+  hidden: Set<string>;
+  onToggle: (key: string) => void;
+  onMove: (key: string, dir: -1 | 1) => void;
+  onReset: () => void;
+  isDefault: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+
+  // Only columns with a header are meaningful to list; empty-header columns
+  // (e.g. row actions) always show and aren't listed.
+  const listed = ordered.filter((c) => c.header.trim() !== "");
+
+  return (
+    <div className="cv-wrap" ref={ref}>
+      <button type="button" className={`small cv-btn ${open ? "active" : ""}`} onClick={() => setOpen((o) => !o)} title="Customize columns">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
+        Customize View
+      </button>
+      {open && (
+        <div className="cv-menu" role="dialog" aria-label="Customize columns">
+          <div className="cv-head"><strong>Columns</strong><span className="muted" style={{ fontSize: 12 }}>Show, hide &amp; reorder</span></div>
+          <div className="cv-list">
+            {listed.map((c, i) => {
+              const on = !hidden.has(c.key);
+              return (
+                <div key={c.key} className="cv-row">
+                  <label className="cv-check">
+                    <input type="checkbox" checked={on} disabled={c.required} onChange={() => onToggle(c.key)} />
+                    <span>{c.header}{c.required ? " *" : ""}</span>
+                  </label>
+                  <span className="cv-move">
+                    <button type="button" className="icon-btn" disabled={i === 0} title="Move up" onClick={() => onMove(c.key, -1)}>↑</button>
+                    <button type="button" className="icon-btn" disabled={i === listed.length - 1} title="Move down" onClick={() => onMove(c.key, 1)}>↓</button>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div className="cv-foot">
+            <button type="button" className="small" disabled={isDefault} onClick={onReset}>Restore default</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function SortableTable<T>({
   columns,
   rows,
@@ -59,8 +166,11 @@ export function SortableTable<T>({
   rowClassName,
   empty,
   selection,
+  customizeId,
 }: Props<T>) {
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(defaultSort ?? null);
+  const { ordered, visible, hidden, toggle, move, reset, isDefault } = useColumnPrefs(customizeId, columns);
+  const cols = visible;
 
   const sorted = useMemo(() => {
     const copy = [...rows];
@@ -86,7 +196,7 @@ export function SortableTable<T>({
     });
   }
 
-  return (
+  const table = (
     <div className="table-scroll">
       {/* lead-sticky pins the identifying column(s) while wide tables scroll. */}
       <table className={`data-table lead-sticky${selection ? " has-sel" : ""}`}>
@@ -101,7 +211,7 @@ export function SortableTable<T>({
                 </th>
               );
             })()}
-            {columns.map((c) => {
+            {cols.map((c) => {
               const active = sort?.key === c.key;
               return (
                 <th
@@ -122,7 +232,7 @@ export function SortableTable<T>({
         <tbody>
           {sorted.length === 0 ? (
             <tr>
-              <td colSpan={columns.length + (selection ? 1 : 0)} className="empty-cell">
+              <td colSpan={cols.length + (selection ? 1 : 0)} className="empty-cell">
                 {empty ?? "No records."}
               </td>
             </tr>
@@ -140,7 +250,7 @@ export function SortableTable<T>({
                     <input type="checkbox" checked={selection.selected.has(id)} onChange={() => selection.onToggle(id)} aria-label="Select row" />
                   </td>
                 )}
-                {columns.map((c, ci) => {
+                {cols.map((c, ci) => {
                   const cell = c.render ? c.render(row) : displayDefault(c.value(row));
                   return (
                     <td key={c.key} className={c.align ?? "left"}>
@@ -155,6 +265,16 @@ export function SortableTable<T>({
           )}
         </tbody>
       </table>
+    </div>
+  );
+
+  if (!customizeId) return table;
+  return (
+    <div className="cv-table">
+      <div className="cv-toolbar">
+        <ColumnCustomizer ordered={ordered} hidden={hidden} onToggle={toggle} onMove={move} onReset={reset} isDefault={isDefault} />
+      </div>
+      {table}
     </div>
   );
 }

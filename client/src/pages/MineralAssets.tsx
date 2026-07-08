@@ -99,6 +99,7 @@ export function MineralAssets() {
           <p className="muted">No mineral assets yet. Add one here, or convert a closed deal into an owned asset from its detail page.</p>
         ) : (
           <SortableTable
+            customizeId="mineral-assets-list"
             columns={columns}
             rows={assets}
             rowKey={(d) => d.id}
