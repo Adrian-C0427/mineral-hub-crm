@@ -40,6 +40,9 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
   const [askOverride, setAskOverride] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // Collapsed by default — the portal controls are a secondary, occasional task,
+  // so the panel stays out of the way until the user expands it.
+  const [open, setOpen] = useState(false);
   // Publish controls need publishOfferings; buyer-visibility of a document is a
   // document action (manageDocuments) — mirrors the server gates.
   const canEdit = can("publishOfferings");
@@ -64,14 +67,30 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
 
   if (!p) return null;
   const shareUrl = p.portalSlug ? `${window.location.origin}/offer/${p.portalSlug}` : null;
+  const visibleCount = SECTION_LABELS.filter(([key]) => p.portalSections[key]).length;
 
   return (
     <div className="panel">
-      <div className="section-head">
-        <h3 style={{ margin: 0 }}>Buyer Portal</h3>
-        <span className={`badge ${p.publishedToPortal ? "resp-offer" : "resp-pending"}`}>{p.publishedToPortal ? (p.portalVisibility === "PUBLIC" ? "Live · Public" : "Live · Link only") : "Not published"}</span>
+      <div
+        className="section-head dpp-head"
+        role="button" tabIndex={0} aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((o) => !o); } }}
+      >
+        <div className="row" style={{ gap: 10, alignItems: "center" }}>
+          <h3 style={{ margin: 0 }}>Buyer Portal</h3>
+          <span className={`badge ${p.publishedToPortal ? "resp-offer" : "resp-pending"}`}>{p.publishedToPortal ? (p.portalVisibility === "PUBLIC" ? "Live · Public" : "Live · Link only") : "Not published"}</span>
+        </div>
+        <span className="dpp-toggle">
+          {!open && <span className="muted" style={{ fontSize: 12 }}>{visibleCount} of {SECTION_LABELS.length} sections shown</span>}
+          <span className="muted" style={{ fontSize: 12.5 }}>{open ? "Collapse" : "Expand"}</span>
+          <span className={`va-chev ${open ? "" : "down"}`}>⌃</span>
+        </span>
       </div>
-      <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+
+      {open && (
+      <>
+      <p className="muted" style={{ marginTop: 8, fontSize: 13 }}>
         Publish this deal to the external offering portal. Only buyer-safe fields are shown — pricing, notes, sellers, and internal activity never appear.
       </p>
       {err && <Banner kind="error">{err}</Banner>}
@@ -113,7 +132,7 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
 
       {/* Per-deal section visibility — saved only on this deal. */}
       <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", margin: "10px 0 6px" }}>
-        Sections shown on this listing
+        Sections shown on this listing <span style={{ textTransform: "none", letterSpacing: 0 }}>· {visibleCount} of {SECTION_LABELS.length} visible</span>
       </div>
       <div className="row" style={{ gap: 14, flexWrap: "wrap" }}>
         {SECTION_LABELS.map(([key, label]) => (
@@ -154,6 +173,8 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
             </label>
           ))}
         </>
+      )}
+      </>
       )}
     </div>
   );

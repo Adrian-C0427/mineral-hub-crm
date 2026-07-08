@@ -1001,3 +1001,8 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .va-num-box input { flex: 1; min-width: 0; border: none; background: transparent; border-radius: 0;
   padding: 9px 12px; font: 600 14px 'IBM Plex Mono', ui-monospace, monospace; color: var(--text); }
 .va-num-box input:focus { outline: none; box-shadow: none; }
+
+/* Collapsible Buyer Portal panel header (Deal Detail) */
+.dpp-head { cursor: pointer; user-select: none; margin-bottom: 0; }
+.dpp-head:hover h3 { color: var(--accent); }
+.dpp-toggle { display: inline-flex; align-items: center; gap: 10px; color: var(--text-dim); }
