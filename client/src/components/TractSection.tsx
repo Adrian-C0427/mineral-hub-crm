@@ -327,13 +327,21 @@ function TractEditor({ dealId, tract, onClose, onSaved }: { dealId: string; trac
         <button className="primary" disabled={busy || !text.trim()} onClick={save}>{tract ? "Save changes" : "Add tract"}</button>
       </>}>
       {err && <Banner kind="error">{err}</Banner>}
-      <label>Tract name<input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Tract 1 — 160-acre Home Place (auto-named if blank)" /></label>
-      <label style={{ marginTop: 8 }}>Legal description
-        <textarea rows={10} value={text} onChange={(e) => setText(e.target.value)}
-          placeholder={"Paste the legal description exactly as written in the deed, lease or title document…\n\nBEGINNING at a 1/2 inch iron rod…\nTHENCE N 45°30' E, 1200.00 feet to a point for corner;\nTHENCE …"} />
-      </label>
+      <div className="tract-editor">
+        <div className="field">
+          <label>Tract name</label>
+          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Tract 1 — 160-acre Home Place" />
+          <span className="muted" style={{ fontSize: 12 }}>Optional — auto-named from the description if left blank.</span>
+        </div>
+        <div className="field">
+          <label>Legal description</label>
+          <textarea rows={12} value={text} onChange={(e) => setText(e.target.value)}
+            placeholder={"Paste the legal description exactly as written in the deed, lease or title document…\n\nBEGINNING at a 1/2 inch iron rod…\nTHENCE N 45°30' E, 1200.00 feet to a point for corner;\nTHENCE …"} />
+          <span className="muted" style={{ fontSize: 12 }}>Paste it exactly as written; boundary calls, closure and acreage are computed when you preview.</span>
+        </div>
+      </div>
       {preview && (
-        <div style={{ marginTop: 10 }}>
+        <div className="tract-preview" style={{ marginTop: 16 }}>
           {preview.ok
             ? <Banner kind="info">Parsed {preview.calls.filter((c) => !c.issue || /long chord/i.test(c.issue)).length} of {preview.calls.length} calls
                 {preview.computedAcres != null ? ` · ${preview.computedAcres.toLocaleString()} acres computed` : ""}

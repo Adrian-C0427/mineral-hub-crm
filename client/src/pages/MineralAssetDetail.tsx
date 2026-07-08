@@ -10,6 +10,7 @@ import { BuyerActivitySection } from "../components/BuyerActivitySection";
 import { LogContactModal } from "../components/LogContactModal";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { DealPortalPanel } from "../components/DealPortalPanel";
+import { DocumentsSection, type DocFile } from "../components/DocumentsSection";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS } from "../lib/options";
@@ -19,12 +20,16 @@ import { OWNERSHIP_TYPES, OWNERSHIP_STATUSES, PRODUCING_STATUSES } from "./Miner
 import type { BuyerActivityRow, DealSummary, MatchRec, RevenueEntry, Seller, UserLite } from "../types";
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
 
+// Mineral-asset document categories (module-specific; the shared DocumentsSection
+// provides the identical Deal-page interface around them).
+const ASSET_DOC_FOLDERS = ["Division Orders", "Deeds", "Leases", "Check Stubs", "Title", "Other"];
+
 interface AssetDetail extends DealSummary {
   operator: string | null;
   notes: string | null;
   buyerActivity: BuyerActivityRow[];
   offers: { id: string; buyer: { id: string; name: string }; amount: number; status: string; conditions: string | null; expirationDate: string | null; dateSubmitted: string }[];
-  files: { id: string; category: string; folder: string; filename: string; sizeBytes: number; createdAt: string }[];
+  files: DocFile[];
   sellers: Seller[];
   revenueEntries: RevenueEntry[];
   canViewTaxId: boolean;
@@ -159,7 +164,7 @@ function HoldTab({ asset, canEdit, onChanged }: { asset: AssetDetail; canEdit: b
         <Suspense fallback={<Spinner label="Loading map…" />}><DealMap abstractIds={asset.abstractIds} /></Suspense>
       </div>
 
-      <DocumentsPanel assetId={asset.id} files={asset.files} canDelete={canEdit} onChanged={onChanged} />
+      <DocumentsSection ownerType="deal" ownerId={asset.id} files={asset.files} folders={ASSET_DOC_FOLDERS} onChanged={onChanged} canEdit={canEdit} canDelete={canEdit} />
     </div>
   );
 }
@@ -450,60 +455,6 @@ function AddRevenueModal({ assetId, onClose, onSaved }: { assetId: string; onClo
   );
 }
 
-function DocumentsPanel({ assetId, files, canDelete, onChanged }: { assetId: string; files: AssetDetail["files"]; canDelete: boolean; onChanged: () => void }) {
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const FOLDERS = ["Division Orders", "Deeds", "Leases", "Check Stubs", "Title", "Other"];
-  const [folder, setFolder] = useState(FOLDERS[0]);
-
-  async function upload(file: File) {
-    setBusy(true); setErr(null);
-    try {
-      const form = new FormData();
-      form.append("file", file); form.append("dealId", assetId); form.append("folder", folder);
-      await api.upload("/files", form);
-      onChanged();
-    } catch (e) { setErr(e instanceof Error ? e.message : "Upload failed"); }
-    finally { setBusy(false); }
-  }
-  async function download(fileId: string) {
-    const { url } = await api.get<{ url: string }>(`/files/${fileId}/download`);
-    window.open(url, "_blank");
-  }
-
-  return (
-    <div className="panel">
-      <div className="section-head"><h3>Documents</h3></div>
-      <div className="row" style={{ marginBottom: 12 }}>
-        <select style={{ width: 170 }} value={folder} onChange={(e) => setFolder(e.target.value)}>{FOLDERS.map((c) => <option key={c}>{c}</option>)}</select>
-        <label className="chip" style={{ margin: 0 }}>{busy ? "Uploading…" : "Upload file"}<input type="file" style={{ display: "none" }} disabled={busy} onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])} /></label>
-      </div>
-      {err && <div className="error-text">{err}</div>}
-      {files.length === 0 ? <p className="muted">No documents yet.</p> : (
-        <div className="table-scroll">
-          <table className="data-table">
-            <thead><tr><th>Folder</th><th>Filename</th><th className="right">Size</th><th>Uploaded</th><th></th></tr></thead>
-            <tbody>
-              {files.map((f) => (
-                <tr key={f.id}>
-                  <td><span className="badge resp-pending">{f.folder}</span></td>
-                  <td>{f.filename}</td>
-                  <td className="right">{(f.sizeBytes / 1024).toFixed(0)} KB</td>
-                  <td>{fmtDate(f.createdAt)}</td>
-                  <td className="right">
-                    <button className="small" onClick={() => download(f.id)}>Download</button>
-                    {canDelete && <button className="small danger" style={{ marginLeft: 6 }} onClick={async () => { await api.del(`/files/${f.id}`); onChanged(); }}>Delete</button>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Sell tab — reuses the deal marketing machinery (matches, activity, offers, email)
 // ---------------------------------------------------------------------------
@@ -641,7 +592,7 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
           ? <p className="muted" style={{ marginBottom: 0 }}>No abstracts linked yet — add them to see the property on the map.</p>
           : <Suspense fallback={<Spinner label="Loading map…" />}><DealMap abstractIds={asset.abstractIds} /></Suspense>}
       </div>
-      <DocumentsPanel assetId={asset.id} files={asset.files} canDelete={canEdit} onChanged={onChanged} />
+      <DocumentsSection ownerType="deal" ownerId={asset.id} files={asset.files} folders={ASSET_DOC_FOLDERS} onChanged={onChanged} canEdit={canEdit} canDelete={canEdit} />
 
       {logBuyer && <LogContactModal dealId={asset.id} buyerId={logBuyer.id} buyerName={logBuyer.name} users={users} onClose={() => setLogBuyer(null)} onLogged={() => { setLogBuyer(null); onChanged(); }} />}
       {showEmail && <SendDealEmailModal dealId={asset.id} dealName={asset.name} buyerIds={[...selected]} onClose={() => setShowEmail(false)} onSent={() => { setSelected(new Set()); setShowEmail(false); onChanged(); }} />}
