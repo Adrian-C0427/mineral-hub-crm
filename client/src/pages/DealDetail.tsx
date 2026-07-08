@@ -4,7 +4,7 @@ import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import {
   Spinner, PriorityBadge, StageBadge, MetricCard,
-  MatchPercentBadge, MatchBar, Banner, ConfirmDelete, ConfirmDialog,
+  MatchBar, Banner, ConfirmDelete, ConfirmDialog,
 } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { StageChangeModal } from "../components/StageChangeModal";
@@ -101,23 +101,26 @@ export function DealDetail() {
   }
 
   return (
-    <div className="page">
+    <div className="page deal-detail">
       <div className="page-header">
         <div className="row">
           <h1 style={{ marginBottom: 0 }}>{deal.name}</h1>
           <PriorityBadge priority={deal.priority} />
           <StageBadge stage={deal.stage} />
-          <span className="muted">{deal.daysInStage}d in stage</span>
+          <span className="muted" style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+            {deal.daysInStage}d in stage
+          </span>
         </div>
         <div className="row">
           {can("deleteDeals") && <button className="danger" onClick={() => setConfirmDelete(true)}>Delete</button>}
-          {can("editDeals") && <button className="primary" onClick={() => setShowStage(true)}>Move Stage</button>}
+          {can("editDeals") && <button className="primary" onClick={() => setShowStage(true)}>Move Stage →</button>}
         </div>
       </div>
 
       {deal.stage === "DEAD" && deal.deadReason && <Banner kind="error">Dead: {deal.deadReason}</Banner>}
 
-      <div className="grid-2">
+      <div className="dd-top-grid">
         <CharacteristicsCard deal={deal} onSaved={refreshAll} />
         <ContractTimelineCard deal={deal} onSaved={loadDeal} />
       </div>
@@ -236,14 +239,16 @@ export function DealDetail() {
                   {/* Company name only — the primary identifier when evaluating matches.
                       Contact person is available on the Buyer Profile. */}
                   <Link to={`/buyers/${m.buyerId}`} className="match-name" title={m.companyName || m.buyerName}>{m.companyName || m.buyerName}</Link>
-                  <MatchPercentBadge value={m.matchPercent} />
-                  {/* Coverage context: "100%" against a sparse buy box is weak
-                      evidence, so say how many criteria were actually compared. */}
-                  <span className="muted" style={{ fontSize: 11, whiteSpace: "nowrap" }}
-                    title="How many buy-box criteria this buyer has set, and how many this deal matches">
-                    {m.criteriaSpecified > 0
-                      ? `${m.criteriaSpecifiedMatched}/${m.criteriaSpecified} criteria`
-                      : "no buy box set"}
+                  <span className="match-right">
+                    <span className="match-pct-num" style={{ color: pctColor(m.matchPercent) }}>{m.matchPercent}%</span>
+                    {/* Coverage context: "100%" against a sparse buy box is weak
+                        evidence, so say how many criteria were actually compared. */}
+                    <span className="muted" style={{ fontSize: 11.5, whiteSpace: "nowrap" }}
+                      title="How many buy-box criteria this buyer has set, and how many this deal matches">
+                      {m.criteriaSpecified > 0
+                        ? `${m.criteriaSpecifiedMatched}/${m.criteriaSpecified} criteria`
+                        : "no buy box set"}
+                    </span>
                   </span>
                 </div>
                 <MatchBar value={m.matchPercent} />
@@ -392,12 +397,19 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
           : <button className="small" onClick={() => setEdit(true)}>Edit</button>}
       </div>
       {!edit ? (
-        <div className="dd-grid">
-          <KV k="State" v={(deal.states?.length ? deal.states : (deal.state ? [deal.state] : [])).join(", ")} /><KV k="County" v={deal.counties.join(", ")} /><KV k="Basin" v={deal.basins.join(", ")} />
-          <KV k="Formation" v={deal.formations.join(", ")} /><KV k="Asset Type" v={deal.assetTypes.join(", ")} /><KV k="NMA" v={num(deal.acreageNma)} />
-          <KV k="NRA" v={num(deal.nra)} /><KV k="Our Price" v={money(deal.ourPrice)} /><KV k="Ask Price (to buyers)" v={money(deal.askPrice)} /><KV k="Operator" v={deal.operator} />
+        <div className="ddc-grid">
+          <DKV k="State" v={(deal.states?.length ? deal.states : (deal.state ? [deal.state] : [])).join(", ") || null} />
+          <DKV k="County" v={deal.counties.join(", ") || null} />
+          <DKV k="Basin" v={deal.basins.join(", ") || null} />
+          <DKV k="Formation" v={deal.formations.join(", ") || null} />
+          <DKV k="Asset Type" v={deal.assetTypes.join(", ") || null} />
+          <DKV k="NMA" v={deal.acreageNma != null ? num(deal.acreageNma) : null} mono />
+          <DKV k="NRA" v={deal.nra != null ? num(deal.nra) : null} mono />
+          <DKV k="Our Price" v={deal.ourPrice != null ? money(deal.ourPrice) : null} mono />
+          <DKV k="Ask Price (to buyers)" v={deal.askPrice != null ? money(deal.askPrice) : null} mono accent />
+          <DKV k="Operator" v={deal.operator} />
           {/* Label the abstract with its county only when unambiguous. */}
-          <KV k={deal.counties.length === 1 ? `Abstract (${deal.counties[0]} Co.)` : "Abstract"} v={abstractLabel} />
+          <DKV k={deal.counties.length === 1 ? `Abstract (${deal.counties[0]} Co.)` : "Abstract"} v={abstractLabel || null} span2 />
         </div>
       ) : (
         <div className="dd-grid">
@@ -462,11 +474,16 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
     onSaved();
   }
 
-  // Progress across the timeline (Under Contract → Final Closing).
-  const start = deal.dateUnderContract ? new Date(deal.dateUnderContract).getTime() : null;
-  const end = deal.finalClosingDate ? new Date(deal.finalClosingDate).getTime() : null;
-  const pctDone = start && end && end > start ? Math.min(100, Math.max(0, ((Date.now() - start) / (end - start)) * 100)) : 0;
   const noDates = !deal.dateUnderContract && !deal.findBuyerByDate && !deal.originalClosingDate && !deal.finalClosingDate;
+
+  // Vertical milestone timeline (per reference): filled glowing dot = milestone
+  // date reached; hollow dot = upcoming.
+  const milestones: { label: string; date: string | null; overridden?: boolean; revertKey?: "fbb" | "fc" }[] = [
+    { label: "Under Contract", date: deal.dateUnderContract },
+    { label: "Find Buyer By", date: deal.findBuyerByDate, overridden: deal.findBuyerByIsOverridden, revertKey: "fbb" },
+    { label: "Orig. Closing", date: deal.originalClosingDate },
+    { label: "Final Closing", date: deal.finalClosingDate, overridden: deal.finalClosingIsOverridden, revertKey: "fc" },
+  ];
 
   return (
     <div className="panel">
@@ -475,27 +492,32 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
         {edit ? <div className="row"><button className="small" onClick={() => setEdit(false)}>Cancel</button><button className="small primary" onClick={save}>Save</button></div>
           : <button className="small" onClick={startEdit}>Edit dates</button>}
       </div>
-      {/* Without any dates, a bare progress track reads as broken — show a hint instead. */}
-      {noDates && !edit ? (
+      {noDates && !edit && (
         <p className="muted" style={{ margin: 0, fontSize: 13 }}>
           No dates yet — <strong>Edit dates</strong> and set the Under Contract date; Find Buyer By and Final Closing auto-calculate from it.
         </p>
-      ) : (
-        <div className="progress"><div className="progress-fill" style={{ width: `${pctDone}%` }} /></div>
       )}
       {!edit ? (
         noDates ? null : (
-        <div className="dd-grid">
-          <KV k="Under Contract" v={fmtDate(deal.dateUnderContract)} />
-          <div className="kv">
-            <span className="k">Find Buyer By {deal.findBuyerByIsOverridden && <em>(overridden)</em>}</span>
-            <span className="v">{fmtDate(deal.findBuyerByDate)} {deal.findBuyerByIsOverridden && <button className="small" onClick={() => revert("fbb")}>Revert to auto</button>}</span>
-          </div>
-          <KV k="Orig. Closing" v={fmtDate(deal.originalClosingDate)} />
-          <div className="kv">
-            <span className="k">Final Closing {deal.finalClosingIsOverridden && <em>(overridden)</em>}</span>
-            <span className="v">{fmtDate(deal.finalClosingDate)} {deal.finalClosingIsOverridden && <button className="small" onClick={() => revert("fc")}>Revert to auto</button>}</span>
-          </div>
+        <div className="ctl">
+          {milestones.map((m, i) => {
+            const done = m.date != null && new Date(m.date).getTime() <= Date.now();
+            return (
+              <div className="ctl-item" key={m.label}>
+                <div className="ctl-rail">
+                  <span className={`ctl-dot ${done ? "done" : ""}`} />
+                  {i < milestones.length - 1 && <span className="ctl-line" />}
+                </div>
+                <div className="ctl-body">
+                  <div className={`ctl-lbl ${done ? "done" : ""}`}>{m.label}{m.overridden && <em style={{ letterSpacing: 0, textTransform: "none" }}> (overridden)</em>}</div>
+                  <div className="ctl-date">
+                    {fmtDate(m.date)}
+                    {m.overridden && m.revertKey && <button className="small" onClick={() => revert(m.revertKey!)}>Revert to auto</button>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
         </div>
         )
       ) : (
@@ -602,10 +624,13 @@ function DocumentsSection({ dealId, files, onChanged, canEdit, canDelete }: { de
     <div className="panel">
       <div className="section-head"><h3>Documents</h3><span className="muted">Organized by folder · sortable</span></div>
 
-      <div className="dm-toolbar" style={{ background: "transparent", border: "none", padding: 0 }}>
+      <div className="doc-chips">
         {folders.map((fl) => (
-          <span key={fl} className={`chip ${folder === fl ? "active" : ""}`} onClick={() => setFolder(fl)}>
-            {fl} <span className="muted" style={{ marginLeft: 4 }}>{countByFolder.get(fl) ?? 0}</span>
+          <span key={fl} className={`doc-chip ${folder === fl ? "active" : ""}`} onClick={() => setFolder(fl)}>
+            {folder === fl && (
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /></svg>
+            )}
+            {fl} <span className="doc-count">{countByFolder.get(fl) ?? 0}</span>
           </span>
         ))}
       </div>
@@ -632,6 +657,23 @@ function DocumentsSection({ dealId, files, onChanged, canEdit, canDelete }: { de
       {/* Hidden input used by per-row Replace buttons. */}
       <input ref={replaceRef} type="file" style={{ display: "none" }}
         onChange={(e) => { if (e.target.files?.[0]) replace(e.target.files[0]); e.target.value = ""; }} />
+    </div>
+  );
+}
+
+/** Match-percent color scale (mirrors the reference: green / amber / red). */
+function pctColor(pct: number): string {
+  return pct >= 67 ? "#4ade80" : pct >= 34 ? "#f59e0b" : "#f87171";
+}
+
+/** Reference-style KV: uppercase micro-label over a semibold value (mono for
+ *  numerics, green accent for the buyer-facing ask price, dimmed em-dash when empty). */
+function DKV({ k, v, mono, accent, span2 }: { k: string; v: React.ReactNode; mono?: boolean; accent?: boolean; span2?: boolean }) {
+  const empty = v == null || v === "";
+  return (
+    <div style={span2 ? { gridColumn: "span 2" } : undefined}>
+      <div className="ddx-label">{k}</div>
+      <div className={`ddx-val${mono && !empty ? " mono" : ""}${accent && !empty ? " pos" : ""}${empty ? " dim" : ""}`}>{empty ? "—" : v}</div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "../api/client";
-import { MatchPercentBadge, StatusBadge } from "./ui";
+import { StatusBadge } from "./ui";
 import { money, fmtDate } from "../lib/format";
 import { BUYER_STATUS_RANK } from "../lib/buyerStatus";
 import type { BuyerActivityRow, CommKind, TimelineEntry } from "../types";
@@ -10,6 +10,9 @@ const KIND_LABEL: Record<CommKind, string> = {
   EMAIL_OUT: "✉ Email sent", EMAIL_IN: "✉ Email received", PHONE: "☎ Call",
   MEETING: "👥 Meeting", NOTE: "📝 Note", NEGOTIATION: "🤝 Negotiation", STATUS_CHANGE: "● Status change",
 };
+
+/** Match-percent color scale (green / amber / red — mirrors the deal page). */
+const baPctColor = (pct: number): string => (pct >= 67 ? "#4ade80" : pct >= 34 ? "#f59e0b" : "#f87171");
 
 const LOGGABLE: { v: CommKind; label: string }[] = [
   { v: "PHONE", label: "Call" }, { v: "MEETING", label: "Meeting" },
@@ -49,10 +52,14 @@ export function BuyerActivitySection({
               <Link to={`/buyers/${r.buyerId}`} onClick={(e) => e.stopPropagation()} style={{ fontWeight: 600 }}>{r.buyerName}</Link>
               {r.companyName && r.companyName !== r.buyerName && <span className="muted">· {r.companyName}</span>}
               <span className="spacer" />
-              <MatchPercentBadge value={r.matchPercent} />
+              {/* Reference-style match meter: 90px bar + mono colored percent. */}
+              <span className="ba-match" title={`${r.matchPercent}% buy-box match`}>
+                <span className="ba-bar"><span style={{ width: `${Math.min(100, Math.max(0, r.matchPercent))}%`, background: baPctColor(r.matchPercent) }} /></span>
+                <span className="ba-pct" style={{ color: baPctColor(r.matchPercent) }}>{r.matchPercent}%</span>
+              </span>
               <StatusBadge status={r.status} />
-              {r.offerAmount != null && <span className="muted">{money(r.offerAmount)}</span>}
-              <span className="muted" style={{ fontSize: 12 }}>{fmtDate(r.lastActivityDate)}</span>
+              {r.offerAmount != null && <span className="ba-amount">{money(r.offerAmount)}</span>}
+              <span className="ba-date">{fmtDate(r.lastActivityDate)}</span>
               {onRecordOffer && r.status !== "PASSED" && r.status !== "CLOSED" && (
                 <button className="small" onClick={(e) => { e.stopPropagation(); onRecordOffer(r); }}>Record offer</button>
               )}
