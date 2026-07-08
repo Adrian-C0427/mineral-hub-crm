@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "
 import { useNavigate } from "react-router-dom";
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
-  BarChart, PieChart, Pie, Cell,
+  BarChart, LineChart, PieChart, Pie, Cell,
 } from "recharts";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -11,6 +11,7 @@ import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
 import { PeriodSegmented } from "../components/PeriodSegmented";
 import { SortableTable, type Column } from "../components/SortableTable";
+import { ChartTypeToggle, useChartType } from "../components/ChartTypeToggle";
 import { money, pct, num, fmtDate, prettyStage } from "../lib/format";
 import { CHART_COLORS, COLOR_REVENUE, COLOR_PROFIT, COLOR_FORECAST, monthLabel, chartTooltip } from "../lib/charts";
 import { exportElementToPdf } from "../lib/pdf";
@@ -139,6 +140,9 @@ export function Reports() {
   // Which KPI metrics are shown + their order (Customize View, saved per user).
   const [metricPrefs, setMetricPrefs] = useState<MetricPrefs>(loadMetricPrefs);
   useEffect(() => { try { localStorage.setItem(METRICS_KEY, JSON.stringify(metricPrefs)); } catch { /* ignore */ } }, [metricPrefs]);
+  // Customize View — per-chart visualization type (saved per user).
+  const [activityType, setActivityType] = useChartType("reports-activity", ["bar", "line"], "bar");
+  const [assetType, setAssetType] = useChartType("reports-asset-types", ["pie", "bar"], "pie");
 
   const range = useMemo(() => rangeFor(period, custom), [period, custom]);
   const cmp = useMemo(() => compareRange(compare, range.from, range.to), [compare, range.from, range.to]);
@@ -334,23 +338,58 @@ export function Reports() {
               <TrendChart series={data.series} />
             </div>
             <div className="panel">
-              <h3>Deals Added vs Closed</h3>
-              <ResponsiveContainer width="100%" height={240}>
-                <BarChart data={data.series.filter((s) => !s.forecast).map((s) => ({ ...s, label: monthLabel(s.month) }))}>
-                  <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                  <Tooltip {...chartTooltip} />
-                  <Legend />
-                  <Bar dataKey="dealsAdded" name="Added" fill={CHART_COLORS[0]} radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="dealsClosed" name="Closed" fill={CHART_COLORS[1]} radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="dealsLost" name="Lost" fill={CHART_COLORS[4]} radius={[3, 3, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
+              <div className="panel-head">
+                <h3>Deals Added vs Closed</h3>
+                <ChartTypeToggle type={activityType} options={["bar", "line"]} onChange={setActivityType} />
+              </div>
+              {(() => {
+                const rows = data.series.filter((s) => !s.forecast).map((s) => ({ ...s, label: monthLabel(s.month) }));
+                const Wrap = activityType === "line" ? LineChart : BarChart;
+                return (
+                  <ResponsiveContainer width="100%" height={240}>
+                    <Wrap data={rows}>
+                      <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                      <XAxis dataKey="label" tick={{ fontSize: 11 }} />
+                      <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                      <Tooltip {...chartTooltip} />
+                      <Legend />
+                      {activityType === "line" ? (
+                        <>
+                          <Line type="monotone" dataKey="dealsAdded" name="Added" stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} />
+                          <Line type="monotone" dataKey="dealsClosed" name="Closed" stroke={CHART_COLORS[1]} strokeWidth={2} dot={false} />
+                          <Line type="monotone" dataKey="dealsLost" name="Lost" stroke={CHART_COLORS[4]} strokeWidth={2} dot={false} />
+                        </>
+                      ) : (
+                        <>
+                          <Bar dataKey="dealsAdded" name="Added" fill={CHART_COLORS[0]} radius={[3, 3, 0, 0]} />
+                          <Bar dataKey="dealsClosed" name="Closed" fill={CHART_COLORS[1]} radius={[3, 3, 0, 0]} />
+                          <Bar dataKey="dealsLost" name="Lost" fill={CHART_COLORS[4]} radius={[3, 3, 0, 0]} />
+                        </>
+                      )}
+                    </Wrap>
+                  </ResponsiveContainer>
+                );
+              })()}
             </div>
             <div className="panel">
-              <h3>Asset Type Breakdown</h3>
-              {data.breakdowns.assetTypes.length === 0 ? <p className="muted">No data.</p> : (
+              <div className="panel-head">
+                <h3>Asset Type Breakdown</h3>
+                {data.breakdowns.assetTypes.length > 0 && <ChartTypeToggle type={assetType} options={["pie", "bar"]} onChange={setAssetType} />}
+              </div>
+              {data.breakdowns.assetTypes.length === 0 ? <p className="muted">No data.</p> : assetType === "bar" ? (
+                <ResponsiveContainer width="100%" height={240}>
+                  <BarChart data={data.breakdowns.assetTypes} layout="vertical" margin={{ left: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
+                    <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+                    <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={110} />
+                    <Tooltip {...chartTooltip} />
+                    <Bar dataKey="count" name="Deals" radius={[0, 3, 3, 0]} cursor="pointer"
+                      onClick={(e: { name?: string }) => e?.name && drillByDeal(`Asset type: ${e.name}`, (dd) => dd.assetTypes.includes(e.name!))}>
+                      {data.breakdowns.assetTypes.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
                 <ResponsiveContainer width="100%" height={240}>
                   <PieChart>
                     <Pie data={data.breakdowns.assetTypes} dataKey="count" nameKey="name" cx="50%" cy="50%" outerRadius={85}

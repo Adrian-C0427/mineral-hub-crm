@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend, BarChart,
+  LineChart, PieChart, Pie, Cell,
 } from "recharts";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -9,6 +10,7 @@ import { useRowSelection, BulkBar } from "../components/bulk";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
 import { SortableTable, type Column } from "../components/SortableTable";
+import { ChartTypeToggle, useChartType } from "../components/ChartTypeToggle";
 import { ResearchImport } from "../components/ResearchImport";
 import { ResearchChoropleth, type CountyStat } from "../components/ResearchChoropleth";
 import { CLASS_COLORS } from "../components/NetworkGraph";
@@ -370,6 +372,9 @@ function OverviewTab({ qs, compareOff }: { qs: string; compareOff: boolean }) {
   const [loading, setLoading] = useState(true);
   const [metricPrefs, setMetricPrefs] = useState<ResMetricPrefs>(loadResMetricPrefs);
   useEffect(() => { try { localStorage.setItem(RES_METRICS_KEY, JSON.stringify(metricPrefs)); } catch { /* ignore */ } }, [metricPrefs]);
+  // Customize View — per-chart visualization type (saved per user).
+  const [trendType, setTrendType] = useChartType("research-activity", ["bar", "line"], "bar");
+  const [docType, setDocType] = useChartType("research-doctypes", ["bar", "pie"], "bar");
   useEffect(() => {
     setLoading(true);
     api.get<Summary>(`/research/summary?${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
@@ -404,7 +409,10 @@ function OverviewTab({ qs, compareOff }: { qs: string; compareOff: boolean }) {
 
       <div className="chart-grid">
         <div className="panel" style={{ gridColumn: "1 / -1" }}>
-          <h3>Activity Trend <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(bars per {data.granularity}; line = rolling average of total)</span></h3>
+          <div className="panel-head">
+            <h3>Activity Trend <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>({trendType === "line" ? "lines" : "bars"} per {data.granularity}; grey line = rolling average of total)</span></h3>
+            <ChartTypeToggle type={trendType} options={["bar", "line"]} onChange={setTrendType} />
+          </div>
           <ResponsiveContainer width="100%" height={280}>
             <ComposedChart data={data.series.map((s) => ({ ...s, label: label(s.key) }))}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
@@ -412,16 +420,38 @@ function OverviewTab({ qs, compareOff }: { qs: string; compareOff: boolean }) {
               <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
               <Tooltip {...chartTooltip} />
               <Legend />
-              <Bar dataKey="transactions" name="Transactions" stackId="a" fill={CHART_COLORS[0]} />
-              <Bar dataKey="leases" name="Leases" stackId="a" fill={CHART_COLORS[1]} />
-              <Bar dataKey="permits" name="Permits" stackId="a" fill={CHART_COLORS[3]} radius={[3, 3, 0, 0]} />
+              {trendType === "line" ? (
+                <>
+                  <Line type="monotone" dataKey="transactions" name="Transactions" stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="leases" name="Leases" stroke={CHART_COLORS[1]} strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="permits" name="Permits" stroke={CHART_COLORS[3]} strokeWidth={2} dot={false} />
+                </>
+              ) : (
+                <>
+                  <Bar dataKey="transactions" name="Transactions" stackId="a" fill={CHART_COLORS[0]} />
+                  <Bar dataKey="leases" name="Leases" stackId="a" fill={CHART_COLORS[1]} />
+                  <Bar dataKey="permits" name="Permits" stackId="a" fill={CHART_COLORS[3]} radius={[3, 3, 0, 0]} />
+                </>
+              )}
               <Line dataKey="rollingAvg" name="Rolling avg" stroke={CHART_COLORS[2]} strokeWidth={2} dot={false} />
             </ComposedChart>
           </ResponsiveContainer>
         </div>
         <div className="panel">
-          <h3>Document Type Breakdown</h3>
-          {data.docTypeBreakdown.length === 0 ? <p className="muted">No documents in this period.</p> : (
+          <div className="panel-head">
+            <h3>Document Type Breakdown</h3>
+            {data.docTypeBreakdown.length > 0 && <ChartTypeToggle type={docType} options={["bar", "pie"]} onChange={setDocType} />}
+          </div>
+          {data.docTypeBreakdown.length === 0 ? <p className="muted">No documents in this period.</p> : docType === "pie" ? (
+            <ResponsiveContainer width="100%" height={Math.max(220, data.docTypeBreakdown.length * 30)}>
+              <PieChart>
+                <Pie data={data.docTypeBreakdown.map((d) => ({ name: prettyEnum(d.docType), count: d.count }))} dataKey="count" nameKey="name" cx="50%" cy="50%" outerRadius={85} label={(e: { name?: string }) => e.name ?? ""}>
+                  {data.docTypeBreakdown.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                </Pie>
+                <Tooltip {...chartTooltip} />
+              </PieChart>
+            </ResponsiveContainer>
+          ) : (
             <ResponsiveContainer width="100%" height={Math.max(160, data.docTypeBreakdown.length * 30)}>
               <BarChart data={data.docTypeBreakdown.map((d) => ({ name: prettyEnum(d.docType), count: d.count }))} layout="vertical" margin={{ left: 60 }}>
                 <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />

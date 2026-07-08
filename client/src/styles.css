@@ -1385,5 +1385,15 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; backg
 .chart-grid .panel, .dash-main .panel { min-width: 0; }           /* clamp grid overflow */
 /* Recharts containers get consistent whitespace inside their panel */
 .panel .recharts-responsive-container { margin-top: 4px; }
+
+/* Chart panel header: title on the left, chart-type toggle on the right */
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.panel-head h3 { margin: 0; min-width: 0; }
+/* Customize View — per-chart visualization type toggle */
+.chart-type-toggle { display: inline-flex; flex-shrink: 0; border: 1px solid var(--border); border-radius: var(--radius-sm, 7px); overflow: hidden; background: var(--panel); }
+.chart-type-toggle button { display: inline-flex; align-items: center; justify-content: center; padding: 4px 8px; border: none; background: transparent; color: var(--text-dim); cursor: pointer; line-height: 0; }
+.chart-type-toggle button + button { border-left: 1px solid var(--border); }
+.chart-type-toggle button:hover { color: var(--text); background: var(--hover, rgba(148,163,184,0.12)); }
+.chart-type-toggle button.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 /* Cross-breakpoint: keep block/grid gaps proportional on smaller screens */
 @media (max-width: 760px) { :root { --block-gap: 14px; --grid-gap: 12px; } }
