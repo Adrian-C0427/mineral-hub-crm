@@ -600,89 +600,102 @@ export function MapView() {
           )}
         </div>
         <div className="spacer" />
-        <button onClick={() => { setShowFilters((s) => !s); setShowLayers(false); setShowHeat(false); }}>Filters ▾</button>
-        <button onClick={() => { setShowLayers((s) => !s); setShowFilters(false); setShowHeat(false); }}>Layers ▾</button>
-        <button className={heatActive ? "primary" : ""} onClick={() => { setShowHeat((s) => !s); setShowFilters(false); setShowLayers(false); }}>Heat map ▾</button>
+        <button className={`mc-btn ${showFilters ? "active" : ""}`} onClick={() => { setShowFilters((s) => !s); setShowLayers(false); setShowHeat(false); }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+          Filters
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
+        </button>
+        <button className={`mc-btn ${showLayers ? "active" : ""}`} onClick={() => { setShowLayers((s) => !s); setShowFilters(false); setShowHeat(false); }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" /></svg>
+          Layers
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
+        </button>
+        <button className={`mc-btn ${showHeat ? "active" : ""} ${heatActive ? "hot" : ""}`} onClick={() => { setShowHeat((s) => !s); setShowFilters(false); setShowLayers(false); }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2c3 4.5 6 7.5 6 11a6 6 0 01-12 0c0-1.5.5-3 1.5-4.5C8.5 10 10.5 7 12 2z" /></svg>
+          Heat map
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
+        </button>
       </div>
 
       {showFilters && (
-        <div className="panel" style={{ marginBottom: 12 }}>
-          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Filters apply to all GIS data on the map (wells, abstracts, surveys) — independent of whether a deal exists. "Deal status" only affects the deal highlight.</p>
-          <div className="dd-grid">
-            <div className="field"><label>Deal status</label><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>{STATUS_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
-            <div className="field"><label>County</label><SearchableMultiSelect options={meta.counties} value={fCounties} onChange={setFCounties} placeholder="Counties…" /></div>
-            <div className="field"><label>Survey</label><SearchableMultiSelect options={gisOptions.surveys} value={fSurveys} onChange={setFSurveys} placeholder="Surveys…" /></div>
-            <div className="field"><label>Abstract</label><SearchableMultiSelect options={gisOptions.abstracts} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstracts…" /></div>
-            <div className="field"><label>Well type</label><SearchableMultiSelect options={gisOptions.wellTypes} value={fWellTypes} onChange={setFWellTypes} placeholder="Well types…" /></div>
-            <div className="field"><label>Well status</label><SearchableMultiSelect options={gisOptions.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} placeholder="Well statuses…" /></div>
-            <div className="field"><label>Operator ({gisOptions.operators.length})</label><SearchableMultiSelect options={gisOptions.operators} value={fOperators} onChange={setFOperators} placeholder="Operators…" /></div>
-            <div className="field"><label>Formation ({scoped.formations.length})</label><SearchableMultiSelect options={scoped.formations} value={fFormations} onChange={setFFormations} placeholder="Formations…" /></div>
+        <div className="panel mc-panel" style={{ marginBottom: 12 }}>
+          <div className="mc-note">
+            Filters apply to all GIS data on the map (wells, abstracts, surveys) — independent of whether a deal exists. <b>"Deal status"</b> only affects the deal highlight.
+          </div>
+          <div className="mc-grid">
+            <div><div className="ddx-label mc-lbl">Deal status</div><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>{STATUS_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
+            <div><div className="ddx-label mc-lbl">County</div><SearchableMultiSelect options={meta.counties} value={fCounties} onChange={setFCounties} placeholder="Counties…" /></div>
+            <div><div className="ddx-label mc-lbl">Survey</div><SearchableMultiSelect options={gisOptions.surveys} value={fSurveys} onChange={setFSurveys} placeholder="Surveys…" /></div>
+            <div><div className="ddx-label mc-lbl">Abstract</div><SearchableMultiSelect options={gisOptions.abstracts} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstracts…" /></div>
+            <div><div className="ddx-label mc-lbl">Well type</div><SearchableMultiSelect options={gisOptions.wellTypes} value={fWellTypes} onChange={setFWellTypes} placeholder="Well types…" /></div>
+            <div><div className="ddx-label mc-lbl">Well status</div><SearchableMultiSelect options={gisOptions.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} placeholder="Well statuses…" /></div>
+            <div><div className="ddx-label mc-lbl">Operator <span className="mc-count">({gisOptions.operators.length})</span></div><SearchableMultiSelect options={gisOptions.operators} value={fOperators} onChange={setFOperators} placeholder="Operators…" /></div>
+            <div><div className="ddx-label mc-lbl">Formation <span className="mc-count">({scoped.formations.length})</span></div><SearchableMultiSelect options={scoped.formations} value={fFormations} onChange={setFFormations} placeholder="Formations…" /></div>
           </div>
         </div>
       )}
 
       {showLayers && (
-        <div className="panel" style={{ marginBottom: 12 }}>
-          <div className="row" style={{ gap: 18, flexWrap: "wrap" }}>
-            <Chk label="Abstract boundaries" on={layers.boundaries} onChange={() => toggle("boundaries")} />
-            <Chk label="Abstract numbers" on={layers.absNums} onChange={() => toggle("absNums")} />
-            <Chk label="Survey names" on={layers.surveyNames} onChange={() => toggle("surveyNames")} />
-            <Chk label="Active deals" on={layers.deals} onChange={() => toggle("deals")} />
-            <Chk label="Wells" on={layers.wells} onChange={() => toggle("wells")} />
-            <Chk label="Wellbores (laterals)" on={layers.wellbores} onChange={() => toggle("wellbores")} />
+        <div className="panel mc-panel" style={{ marginBottom: 12 }}>
+          <div className="mc-pills-row">
+            <span className="ddx-label" style={{ marginRight: 8 }}>Map layers</span>
+            {([
+              ["boundaries", "Abstract boundaries"], ["absNums", "Abstract numbers"], ["surveyNames", "Survey names"],
+              ["deals", "Active deals"], ["wells", "Wells"], ["wellbores", "Wellbores (laterals)"],
+            ] as [keyof typeof layers, string][]).map(([key, label]) => (
+              <PillToggle key={key} on={layers[key]} label={label} onClick={() => toggle(key)} />
+            ))}
           </div>
         </div>
       )}
 
       {showHeat && (
-        <div className="panel" style={{ marginBottom: 12 }}>
-          <div className="dd-grid" style={{ alignItems: "start" }}>
+        <div className="panel mc-panel" style={{ marginBottom: 12 }}>
+          <div className="mc-heat">
             <div>
-              <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>Layers</div>
-              <div className="row" style={{ gap: 16, flexWrap: "wrap" }}>
-                <Chk label="Oil production" on={heat.oil} onChange={() => setHeatK("oil", !heat.oil)} />
-                <Chk label="Gas production" on={heat.gas} onChange={() => setHeatK("gas", !heat.gas)} />
+              <div className="mc-dot-lbl"><span className="va-dot" style={{ background: "#f59e0b" }} /><span className="ddx-label">Layers</span></div>
+              <div className="mc-pills-row" style={{ padding: 0 }}>
+                <PillToggle on={heat.oil} label="Oil production" onClick={() => setHeatK("oil", !heat.oil)} />
+                <PillToggle on={heat.gas} label="Gas production" onClick={() => setHeatK("gas", !heat.gas)} />
+                <PillToggle on={heat.topProducers} label="Top producers" onClick={() => setHeatK("topProducers", !heat.topProducers)} />
+                <PillToggle on={heat.hotspots} label="Hotspot labels" onClick={() => setHeatK("hotspots", !heat.hotspots)} />
               </div>
-              <div className="row" style={{ gap: 16, flexWrap: "wrap", marginTop: 8 }}>
-                <Chk label="Top producers" on={heat.topProducers} onChange={() => setHeatK("topProducers", !heat.topProducers)} />
-                <Chk label="Hotspot labels" on={heat.hotspots} onChange={() => setHeatK("hotspots", !heat.hotspots)} />
-              </div>
-              <div className="field" style={{ marginTop: 10 }}>
-                <label>Production period</label>
-                <select value={heat.period} onChange={(e) => setHeatK("period", e.target.value as HeatPeriod)}>
-                  <option value="current">Current month</option>
-                  <option value="3m">Last 3 months</option>
-                  <option value="6m">Last 6 months</option>
-                  <option value="12m">Last 12 months</option>
-                  <option value="3y">Last 3 years</option>
-                  <option value="ytd">Year to date</option>
-                  <option value="all">Cumulative (all history)</option>
-                  <option value="custom">Custom range</option>
-                </select>
-              </div>
+              <div className="ddx-label mc-lbl" style={{ marginTop: 16 }}>Production period</div>
+              <select value={heat.period} onChange={(e) => setHeatK("period", e.target.value as HeatPeriod)}>
+                <option value="current">Current month</option>
+                <option value="3m">Last 3 months</option>
+                <option value="6m">Last 6 months</option>
+                <option value="12m">Last 12 months</option>
+                <option value="3y">Last 3 years</option>
+                <option value="ytd">Year to date</option>
+                <option value="all">Cumulative (all history)</option>
+                <option value="custom">Custom range</option>
+              </select>
               {heat.period === "custom" && (
-                <div className="row" style={{ gap: 8 }}>
-                  <div className="field" style={{ flex: 1 }}><label>From</label><input type="month" value={heat.from} onChange={(e) => setHeatK("from", e.target.value)} /></div>
-                  <div className="field" style={{ flex: 1 }}><label>To</label><input type="month" value={heat.to} onChange={(e) => setHeatK("to", e.target.value)} /></div>
+                <div className="row" style={{ gap: 8, marginTop: 10 }}>
+                  <div style={{ flex: 1 }}><div className="ddx-label mc-lbl">From</div><input type="month" value={heat.from} onChange={(e) => setHeatK("from", e.target.value)} /></div>
+                  <div style={{ flex: 1 }}><div className="ddx-label mc-lbl">To</div><input type="month" value={heat.to} onChange={(e) => setHeatK("to", e.target.value)} /></div>
                 </div>
               )}
             </div>
-            <div>
-              <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>Appearance</div>
+            <div className="mc-heat-mid">
+              <div className="mc-dot-lbl"><span className="va-dot" style={{ background: "var(--accent)" }} /><span className="ddx-label">Appearance</span></div>
               <Slider label="Intensity" min={0.2} max={3} step={0.1} value={heat.intensity} onChange={(v) => setHeatK("intensity", v)} />
               <Slider label="Radius" min={8} max={80} step={1} value={heat.radius} onChange={(v) => setHeatK("radius", v)} suffix="px" />
               <Slider label="Opacity" min={0.1} max={1} step={0.05} value={heat.opacity} onChange={(v) => setHeatK("opacity", v)} />
             </div>
             <div>
-              <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>Production thresholds (per well, period)</div>
-              <div className="field"><label>Minimum</label><input type="number" value={heat.min || ""} onChange={(e) => setHeatK("min", Number(e.target.value) || 0)} placeholder="0 (no minimum)" /></div>
-              <div className="field"><label>Maximum</label><input type="number" value={heat.max || ""} onChange={(e) => setHeatK("max", Number(e.target.value) || 0)} placeholder="0 (no maximum)" /></div>
-              <p className="muted" style={{ fontSize: 11, margin: 0 }}>Oil in bbl, gas in mcf. Wells outside the range drop from the heat.</p>
+              <div className="mc-dot-lbl"><span className="va-dot" style={{ background: "#22c55e" }} /><span className="ddx-label">Production thresholds</span><span className="muted" style={{ fontSize: 11.5 }}>(per well, period)</span></div>
+              <div className="ddx-label mc-lbl">Minimum</div>
+              <input type="number" value={heat.min || ""} onChange={(e) => setHeatK("min", Number(e.target.value) || 0)} placeholder="no minimum" />
+              <div className="ddx-label mc-lbl" style={{ marginTop: 10 }}>Maximum</div>
+              <input type="number" value={heat.max || ""} onChange={(e) => setHeatK("max", Number(e.target.value) || 0)} placeholder="no maximum" />
+              <p className="muted" style={{ fontSize: 11.5, margin: "8px 0 0" }}>Oil in bbl, gas in mcf. Wells outside the range drop from the heat.</p>
             </div>
           </div>
           {rank && (heat.oil || heat.gas) && (
-            <div style={{ marginTop: 12, borderTop: "1px solid var(--border)", paddingTop: 10 }}>
-              <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>Production ranking · {periodLabelRef.current}</div>
+            <div className="mc-rank">
+              <div className="ddx-label" style={{ marginBottom: 6 }}>Production ranking · {periodLabelRef.current}</div>
               <div className="dd-grid">
                 <RankList title="Top counties" rows={rank.counties} />
                 <RankList title="Top operators" rows={rank.operators} />
@@ -876,17 +889,26 @@ export function MapView() {
   );
 }
 
-function Chk({ label, on, onChange }: { label: string; on: boolean; onChange: () => void }) {
-  return <label style={{ display: "flex", alignItems: "center", gap: 8, textTransform: "none", letterSpacing: 0, margin: 0, cursor: "pointer" }}><input type="checkbox" checked={on} onChange={onChange} style={{ width: "auto" }} /> {label}</label>;
+/** Reference-style toggle pill: accent-tinted with a checkmark when on, dim
+ *  with an empty checkbox square when off. */
+function PillToggle({ on, label, onClick }: { on: boolean; label: string; onClick: () => void }) {
+  return (
+    <button type="button" className={`dpp-sec ${on ? "on" : ""}`} onClick={onClick} aria-pressed={on}>
+      {on
+        ? <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>
+        : <span className="mc-off-box" />}
+      {label}
+    </button>
+  );
 }
 function Legend({ color, label, line }: { color: string; label: string; line?: boolean }) {
   return <div className="row" style={{ gap: 8, marginTop: 4 }}><span style={{ width: 12, height: line ? 3 : 12, background: color, opacity: 0.9, borderRadius: line ? 0 : "50%", display: "inline-block" }} /> {label}</div>;
 }
 function Slider({ label, min, max, step, value, onChange, suffix }: { label: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void; suffix?: string }) {
   return (
-    <div className="field" style={{ marginBottom: 10 }}>
-      <label style={{ display: "flex", justifyContent: "space-between" }}><span>{label}</span><span className="muted" style={{ textTransform: "none" }}>{value}{suffix ?? ""}</span></label>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} style={{ width: "100%", padding: 0 }} />
+    <div className="mc-slider">
+      <div className="mc-slider-head"><span>{label}</span><span className="mc-slider-val">{value}{suffix ?? ""}</span></div>
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
     </div>
   );
 }
