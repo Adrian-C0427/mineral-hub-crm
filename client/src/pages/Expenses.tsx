@@ -6,6 +6,7 @@ import {
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { MetricCard, Spinner, Banner, Modal } from "../components/ui";
+import { PeriodSegmented } from "../components/PeriodSegmented";
 import { money, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { CHART_COLORS, COLOR_EXPENSE, monthLabel, chartTooltip } from "../lib/charts";
@@ -235,6 +236,24 @@ function ChartEmpty({ icon, children }: { icon: React.ReactNode; children: React
 // ---------------------------------------------------------------------------
 
 type Filters = { from: string; to: string; userId: string; categoryId: string; reimbursed: string };
+
+// Expense period presets (per spec): This Month / Last Month / Last Quarter / YTD / Custom.
+type ExpPeriod = "THIS_MONTH" | "LAST_MONTH" | "LAST_QUARTER" | "YTD" | "CUSTOM";
+const EXPENSE_PERIODS: readonly (readonly [ExpPeriod, string])[] = [
+  ["THIS_MONTH", "This Month"], ["LAST_MONTH", "Last Month"], ["LAST_QUARTER", "Last Quarter"], ["YTD", "YTD"], ["CUSTOM", "Custom"],
+];
+const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+function expenseRange(p: ExpPeriod): { from: string; to: string } {
+  const now = new Date();
+  const y = now.getUTCFullYear(), m = now.getUTCMonth();
+  switch (p) {
+    case "THIS_MONTH": return { from: isoDay(new Date(Date.UTC(y, m, 1))), to: isoDay(new Date(Date.UTC(y, m + 1, 0))) };
+    case "LAST_MONTH": return { from: isoDay(new Date(Date.UTC(y, m - 1, 1))), to: isoDay(new Date(Date.UTC(y, m, 0))) };
+    case "LAST_QUARTER": { const q = Math.floor(m / 3) * 3 - 3; return { from: isoDay(new Date(Date.UTC(y, q, 1))), to: isoDay(new Date(Date.UTC(y, q + 3, 0))) }; }
+    case "YTD": return { from: isoDay(new Date(Date.UTC(y, 0, 1))), to: isoDay(new Date(Date.UTC(y, m + 1, 0))) };
+    default: return { from: "", to: "" };
+  }
+}
 type Preset = { name: string; filters: Filters; q: string };
 
 const ALL_COLUMNS = [
@@ -267,6 +286,7 @@ function AllExpenses({
   onNew: () => void;
 }) {
   const [q, setQ] = useState("");
+  const [expPeriod, setExpPeriod] = useState<ExpPeriod>("CUSTOM");
   const [cols, setCols] = useState<ColKey[]>(() => loadJson<ColKey[]>(COLS_KEY, DEFAULT_COLS));
   const [presets, setPresets] = useState<Preset[]>(() => loadJson<Preset[]>(PRESETS_KEY, []));
   const [showCols, setShowCols] = useState(false);
@@ -377,10 +397,16 @@ function AllExpenses({
         </div>
       </div>
 
+      {/* Period presets: set From/To in one click (Custom leaves them editable) */}
+      <div className="xp-period">
+        <PeriodSegmented options={EXPENSE_PERIODS} value={expPeriod}
+          onChange={(p) => { setExpPeriod(p); if (p !== "CUSTOM") { const r = expenseRange(p); setFilters((f) => ({ ...f, from: r.from, to: r.to })); } }} />
+      </div>
+
       {/* Filter bar: structural filters + inline running totals */}
       <div className="xp-filterbar">
-        <div className="xp-fld"><div className="xp-lbl">From</div><input type="date" value={filters.from} onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))} /></div>
-        <div className="xp-fld"><div className="xp-lbl">To</div><input type="date" value={filters.to} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} /></div>
+        <div className="xp-fld"><div className="xp-lbl">From</div><input type="date" value={filters.from} onChange={(e) => { setExpPeriod("CUSTOM"); setFilters((f) => ({ ...f, from: e.target.value })); }} /></div>
+        <div className="xp-fld"><div className="xp-lbl">To</div><input type="date" value={filters.to} onChange={(e) => { setExpPeriod("CUSTOM"); setFilters((f) => ({ ...f, to: e.target.value })); }} /></div>
         <div className="xp-fld"><div className="xp-lbl">User</div>
           <select value={filters.userId} onChange={(e) => setFilters((f) => ({ ...f, userId: e.target.value }))}>
             <option value="">All</option>

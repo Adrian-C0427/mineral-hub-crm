@@ -5,7 +5,7 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, MetricCard, Banner, MatchPercentBadge, MatchBar, Modal, ConfirmDialog } from "../components/ui";
+import { Spinner, MetricCard, Banner, MatchPercentBadge, MatchBar, Modal, ConfirmDialog, BackLink } from "../components/ui";
 import { BuyerActivitySection } from "../components/BuyerActivitySection";
 import { LogContactModal } from "../components/LogContactModal";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
@@ -33,6 +33,9 @@ interface AssetDetail extends DealSummary {
 
 const fmtPct = (v: number | null): string => (v == null ? "—" : `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`);
 const REV_COLOR = "#22c55e";
+/** Positive financial values render in the app's success green; negative in red. */
+const posColor = (v: number | null | undefined): string | undefined =>
+  v == null || v === 0 ? undefined : v > 0 ? "var(--green)" : "var(--red)";
 
 export function MineralAssetDetail() {
   const { id } = useParams<{ id: string }>();
@@ -75,6 +78,7 @@ export function MineralAssetDetail() {
 
   return (
     <div className="page">
+      <BackLink label="Back to Mineral Assets" fallback="/assets" />
       <div className="page-header">
         <div className="row">
           <h1 style={{ marginBottom: 0 }}>{asset.name}</h1>
@@ -112,9 +116,9 @@ export function MineralAssetDetail() {
       <div className="metrics-row">
         <MetricCard label="Current Value" value={money(asset.currentValue)} hint={asset.bookValue != null ? `Book ${money(asset.bookValue)}` : undefined} />
         <MetricCard label="Purchase Price" value={money(asset.purchasePrice)} hint={asset.acquisitionDate ? `Acquired ${fmtDate(asset.acquisitionDate)}` : undefined} />
-        <MetricCard label="ROI Since Acquisition" value={fmtPct(asset.roiSinceAcquisition)} />
-        <MetricCard label="Unrealized Gain / Loss" value={money(asset.unrealizedGainLoss)} />
-        <MetricCard label="Annual Royalty Income" value={money(asset.royaltyIncomeAnnual)} />
+        <MetricCard label="ROI Since Acquisition" value={fmtPct(asset.roiSinceAcquisition)} valueColor={posColor(asset.roiSinceAcquisition)} />
+        <MetricCard label="Unrealized Gain / Loss" value={money(asset.unrealizedGainLoss)} valueColor={posColor(asset.unrealizedGainLoss)} />
+        <MetricCard label="Annual Royalty Income" value={money(asset.royaltyIncomeAnnual)} valueColor={asset.royaltyIncomeAnnual ? "var(--green)" : undefined} />
       </div>
 
       <div className="asset-tabs">
@@ -314,9 +318,9 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
       </div>
 
       <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
-        <MetricCard label="Total Revenue Booked" value={money(totalRevenue)} hint={`${asset.revenueEntries?.length ?? 0} entries`} />
-        <MetricCard label="ROI Since Acquisition" value={fmtPct(asset.roiSinceAcquisition)} />
-        <MetricCard label="Unrealized Gain / Loss" value={money(asset.unrealizedGainLoss)} />
+        <MetricCard label="Total Revenue Booked" value={money(totalRevenue)} hint={`${asset.revenueEntries?.length ?? 0} entries`} valueColor={totalRevenue ? "var(--green)" : undefined} />
+        <MetricCard label="ROI Since Acquisition" value={fmtPct(asset.roiSinceAcquisition)} valueColor={posColor(asset.roiSinceAcquisition)} />
+        <MetricCard label="Unrealized Gain / Loss" value={money(asset.unrealizedGainLoss)} valueColor={posColor(asset.unrealizedGainLoss)} />
         <MetricCard label="Lease Status" value={asset.leaseStatus || "—"} />
       </div>
 
@@ -385,7 +389,9 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
 }
 
 function AddRevenueModal({ assetId, onClose, onSaved }: { assetId: string; onClose: () => void; onSaved: () => void }) {
-  const [month, setMonth] = useState("");
+  // Default to the current month so the selector is populated on open (native
+  // month inputs otherwise render blank and the picker is easy to miss).
+  const [month, setMonth] = useState(() => new Date().toISOString().slice(0, 7));
   const [amount, setAmount] = useState("");
   const [kind, setKind] = useState("ROYALTY");
   const [operator, setOperator] = useState("");

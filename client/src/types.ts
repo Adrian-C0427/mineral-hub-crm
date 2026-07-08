@@ -47,6 +47,7 @@ export interface DealSummary {
   finalClosingIsOverridden: boolean;
   findBuyerByAuto: string | null;
   finalClosingAuto: string | null;
+  closedDate: string | null;
   selectedBuyer: { id: string; name: string; companyName: string } | null;
   selectedOfferId: string | null;
   relationshipOwner: { id: string; name: string } | null;

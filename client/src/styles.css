@@ -1175,3 +1175,34 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .mc-slider-head span:first-child { color: var(--text); font-weight: 600; }
 .mc-slider-val { font-weight: 600; color: #7fb0ff; font-variant-numeric: tabular-nums; }
 .mc-slider input[type="range"] { width: 100%; padding: 0; accent-color: var(--accent); height: 5px; }
+
+/* Shared period control variants */
+.seg-compact { padding: 2px; }
+.seg-compact .seg { padding: 5px 11px; font-size: 12px; }
+.xp-period { padding: 12px 20px 0; }
+.back-link { display: inline-flex; align-items: center; gap: 4px; }
+
+/* Contract timeline progress bar (Deal Detail) */
+.ctl-progress { margin-bottom: 16px; }
+.ctl-progress-head { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-dim); font-weight: 600; margin-bottom: 6px; }
+.ctl-progress-pct { color: var(--accent); font-variant-numeric: tabular-nums; }
+.ctl-progress-track { height: 6px; background: var(--panel-2); border-radius: 100px; overflow: hidden; }
+.ctl-progress-fill { display: block; height: 100%; border-radius: 100px; background: linear-gradient(90deg, var(--accent), #22c55e); transition: width 0.3s; }
+
+/* ---------------------------------------------------------------------------
+   Layering: panels that host popovers must not clip them, and menus float above
+   --------------------------------------------------------------------------- */
+.va-step, .xp-panel, .mc-panel { overflow: visible; }
+.msel-menu, .dropdown-card { z-index: 90; }
+
+/* Standard date field affordance: a visible, accent-tinted calendar icon that
+   opens the native picker — consistent across the app, light and dark. */
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="month"]::-webkit-calendar-picker-indicator {
+  cursor: pointer; opacity: 0.85; padding: 2px; border-radius: 4px;
+  filter: invert(48%) sepia(69%) saturate(2476%) hue-rotate(200deg) brightness(101%) contrast(96%);
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; background: rgba(59,130,246,0.14); }
+:root[data-theme="light"] input[type="date"]::-webkit-calendar-picker-indicator,
+:root[data-theme="light"] input[type="month"]::-webkit-calendar-picker-indicator { opacity: 0.75; }

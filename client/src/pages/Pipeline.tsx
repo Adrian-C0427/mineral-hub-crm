@@ -47,12 +47,16 @@ export function Pipeline() {
 
   const boardDeals = deals;
 
-  function onDrop(col: Stage) {
+  async function onDrop(col: Stage) {
     setDropCol(null);
     const deal = deals!.find((d) => d.id === dragId);
     setDragId(null);
     if (!deal || deal.stage === col) return;
-    setPending({ deal, toStage: col }); // same confirmation as the explicit button
+    // Moving between normal pipeline stages is immediate — only the terminal
+    // Closed/Dead transitions (with their downstream effects) get a confirmation.
+    if (col === "CLOSED" || col === "DEAD") { setPending({ deal, toStage: col }); return; }
+    await api.post(`/deals/${deal.id}/stage`, { toStage: col });
+    load();
   }
 
   return (

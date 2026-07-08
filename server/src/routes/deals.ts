@@ -537,6 +537,7 @@ const updateSchema = z.object({
   originalClosingDate: dateField,
   findBuyerByDateOverride: dateField,
   finalClosingDateOverride: dateField,
+  closedDate: dateField,
   estimatedClosingCosts: z.number().nullish(),
   relationshipOwnerId: z.string().nullish(),
   assigneeIds: z.array(z.string()).optional(),
@@ -647,7 +648,7 @@ dealsRouter.patch(
     for (const k of ["name", "sellerNames", "counties", "state", "states", "acreageNma", "nra", "abstractIds", "operator", "askPrice", "ourPrice", "assetTypes", "basins", "formations", "estimatedClosingCosts", "relationshipOwnerId", "notes", ...ASSET_SCALAR_KEYS] as const) {
       if (k in data) patch[k] = (data as Record<string, unknown>)[k];
     }
-    for (const k of ["dateUnderContract", "originalClosingDate", "findBuyerByDateOverride", "finalClosingDateOverride", "acquisitionDate"] as const) {
+    for (const k of ["dateUnderContract", "originalClosingDate", "findBuyerByDateOverride", "finalClosingDateOverride", "closedDate", "acquisitionDate"] as const) {
       if (k in data) patch[k] = toDate((data as Record<string, unknown>)[k]);
     }
     const existing = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
@@ -687,6 +688,7 @@ dealsRouter.post(
       return;
     }
 
+    const terminal = toStage === "CLOSED" || toStage === "DEAD";
     const updated = await prisma.$transaction(async (tx) => {
       const u = await tx.deal.update({
         where: { id: deal.id },
@@ -694,11 +696,25 @@ dealsRouter.post(
           stage: toStage,
           currentStageEnteredAt: new Date(),
           deadReason: toStage === "DEAD" ? deadReason!.trim() : deal.deadReason,
-          // A dead deal is off the market — unpublish it from the buyer portal.
-          ...(toStage === "DEAD" ? { publishedToPortal: false } : {}),
+          // Auto-stamp the closed date on the first move to CLOSED (editable after).
+          ...(toStage === "CLOSED" && !deal.closedDate ? { closedDate: new Date() } : {}),
+          // A closed or dead deal is off the market — unpublish from the buyer portal.
+          ...(terminal ? { publishedToPortal: false } : {}),
         },
         include: dealInclude,
       });
+      // Closed/Dead deals generate no further timeline activity: clear outstanding
+      // buyer follow-up reminders and mark this deal's pending notifications read.
+      if (terminal) {
+        await tx.dealBuyerActivity.updateMany({
+          where: { dealId: deal.id, nextFollowUpDate: { not: null } },
+          data: { nextFollowUpDate: null },
+        });
+        await tx.notification.updateMany({
+          where: { organizationId: orgId(req), readAt: null, link: { contains: deal.id } },
+          data: { readAt: new Date() },
+        });
+      }
       await tx.dealStageHistory.create({
         data: {
           dealId: deal.id,

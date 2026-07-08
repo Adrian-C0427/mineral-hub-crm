@@ -448,22 +448,25 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
   const [fbb, setFbb] = useState("");
   const [oc, setOc] = useState("");
   const [fc, setFc] = useState("");
+  const [cd, setCd] = useState("");
 
   function startEdit() {
     setDuc(toInputDate(deal.dateUnderContract));
     setFbb(toInputDate(deal.findBuyerByDate));
     setOc(toInputDate(deal.originalClosingDate));
     setFc(toInputDate(deal.finalClosingDate));
+    setCd(toInputDate(deal.closedDate));
     setEdit(true);
   }
 
   async function save() {
     const patch: Record<string, unknown> = {};
-    // Only send changed fields. FBB/FC become overrides; DUC/OC are direct.
+    // Only send changed fields. FBB/FC become overrides; DUC/OC/Closed are direct.
     if (duc !== toInputDate(deal.dateUnderContract)) patch.dateUnderContract = duc || null;
     if (fbb !== toInputDate(deal.findBuyerByDate)) patch.findBuyerByDateOverride = fbb || null;
     if (oc !== toInputDate(deal.originalClosingDate)) patch.originalClosingDate = oc || null;
     if (fc !== toInputDate(deal.finalClosingDate)) patch.finalClosingDateOverride = fc || null;
+    if (cd !== toInputDate(deal.closedDate)) patch.closedDate = cd || null;
     await api.patch(`/deals/${deal.id}`, patch);
     setEdit(false);
     onSaved();
@@ -474,15 +477,26 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
     onSaved();
   }
 
-  const noDates = !deal.dateUnderContract && !deal.findBuyerByDate && !deal.originalClosingDate && !deal.finalClosingDate;
+  const isClosed = deal.stage === "CLOSED";
+  const noDates = !deal.dateUnderContract && !deal.findBuyerByDate && !deal.originalClosingDate && !deal.finalClosingDate && !deal.closedDate;
 
-  // Vertical milestone timeline (per reference): filled glowing dot = milestone
-  // date reached; hollow dot = upcoming.
+  // Completion of the contract period: start (Under Contract) → target (Closed
+  // date if set, else Final Closing) against today. Closed deals read 100%.
+  const start = deal.dateUnderContract ? new Date(deal.dateUnderContract).getTime() : null;
+  const target = (deal.closedDate ?? deal.finalClosingDate) ? new Date(deal.closedDate ?? deal.finalClosingDate!).getTime() : null;
+  const progressPct = isClosed ? 100
+    : start != null && target != null && target > start
+      ? Math.min(100, Math.max(0, ((Date.now() - start) / (target - start)) * 100))
+      : 0;
+
+  // Vertical milestone timeline: filled glowing dot = milestone date reached;
+  // hollow dot = upcoming. Closed Date appears once the deal is closed/has a date.
   const milestones: { label: string; date: string | null; overridden?: boolean; revertKey?: "fbb" | "fc" }[] = [
     { label: "Under Contract", date: deal.dateUnderContract },
     { label: "Find Buyer By", date: deal.findBuyerByDate, overridden: deal.findBuyerByIsOverridden, revertKey: "fbb" },
     { label: "Orig. Closing", date: deal.originalClosingDate },
     { label: "Final Closing", date: deal.finalClosingDate, overridden: deal.finalClosingIsOverridden, revertKey: "fc" },
+    ...(deal.closedDate || isClosed ? [{ label: "Closed", date: deal.closedDate }] : []),
   ];
 
   return (
@@ -492,6 +506,15 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
         {edit ? <div className="row"><button className="small" onClick={() => setEdit(false)}>Cancel</button><button className="small primary" onClick={save}>Save</button></div>
           : <button className="small" onClick={startEdit}>Edit dates</button>}
       </div>
+      {!noDates && !edit && (
+        <div className="ctl-progress" title={isClosed ? "Closed" : `${Math.round(progressPct)}% through the contract period`}>
+          <div className="ctl-progress-head">
+            <span>{isClosed ? "Contract complete" : "Contract progress"}</span>
+            <span className="ctl-progress-pct">{Math.round(progressPct)}%</span>
+          </div>
+          <div className="ctl-progress-track"><span className="ctl-progress-fill" style={{ width: `${progressPct}%` }} /></div>
+        </div>
+      )}
       {noDates && !edit && (
         <p className="muted" style={{ margin: 0, fontSize: 13 }}>
           No dates yet — <strong>Edit dates</strong> and set the Under Contract date; Find Buyer By and Final Closing auto-calculate from it.
@@ -526,6 +549,7 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
           <Fld l="Find Buyer By"><input type="date" value={fbb} onChange={(e) => setFbb(e.target.value)} /></Fld>
           <Fld l="Orig. Closing"><input type="date" value={oc} onChange={(e) => setOc(e.target.value)} /></Fld>
           <Fld l="Final Closing"><input type="date" value={fc} onChange={(e) => setFc(e.target.value)} /></Fld>
+          <Fld l="Closed Date"><input type="date" value={cd} onChange={(e) => setCd(e.target.value)} /></Fld>
         </div>
       )}
     </div>
