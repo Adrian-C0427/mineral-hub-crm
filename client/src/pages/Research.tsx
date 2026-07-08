@@ -132,6 +132,21 @@ interface Filters {
 }
 const EMPTY_FILTERS: Filters = { states: [], counties: [], docTypes: [], buyers: [], sellers: [], operators: [] };
 
+// Customize View — which Overview KPIs show + their order (saved per user).
+type ResMetricId = "transactions" | "leases" | "permits" | "horizontalPermits" | "uniqueBuyers" | "uniqueOperators";
+const RES_METRICS: [ResMetricId, string][] = [
+  ["transactions", "Mineral Transactions"], ["leases", "Leasing Documents"], ["permits", "Drilling Permits"],
+  ["horizontalPermits", "Horizontal Permits"], ["uniqueBuyers", "Active Buyers"], ["uniqueOperators", "Active Operators"],
+];
+const DEFAULT_RES_METRICS: ResMetricId[] = RES_METRICS.map(([id]) => id);
+const RES_METRIC_LABEL: Record<ResMetricId, string> = Object.fromEntries(RES_METRICS) as Record<ResMetricId, string>;
+interface ResMetricPrefs { order: ResMetricId[]; hidden: ResMetricId[] }
+const RES_METRICS_KEY = "mh-research-overview-metrics:v1";
+function loadResMetricPrefs(): ResMetricPrefs {
+  try { const raw = localStorage.getItem(RES_METRICS_KEY); if (raw) { const p = JSON.parse(raw) as Partial<ResMetricPrefs>; return { order: p.order ?? [], hidden: p.hidden ?? [] }; } } catch { /* ignore */ }
+  return { order: [], hidden: [] };
+}
+
 type Tab = "overview" | "geography" | "rankings" | "relationships" | "opportunities" | "records" | "data";
 
 // ---------------------------------------------------------------------------
@@ -353,6 +368,8 @@ export function Research() {
 function OverviewTab({ qs, compareOff }: { qs: string; compareOff: boolean }) {
   const [data, setData] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
+  const [metricPrefs, setMetricPrefs] = useState<ResMetricPrefs>(loadResMetricPrefs);
+  useEffect(() => { try { localStorage.setItem(RES_METRICS_KEY, JSON.stringify(metricPrefs)); } catch { /* ignore */ } }, [metricPrefs]);
   useEffect(() => {
     setLoading(true);
     api.get<Summary>(`/research/summary?${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
@@ -367,15 +384,16 @@ function OverviewTab({ qs, compareOff }: { qs: string; compareOff: boolean }) {
       ? new Date(`${k}-01T00:00:00Z`).toLocaleDateString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" })
       : new Date(`${k}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 
+  const orderedMetrics: ResMetricId[] = [...metricPrefs.order.filter((id) => DEFAULT_RES_METRICS.includes(id)), ...DEFAULT_RES_METRICS.filter((id) => !metricPrefs.order.includes(id))];
+  const visibleMetrics = orderedMetrics.filter((id) => !metricPrefs.hidden.includes(id));
+
   return (
     <>
+      <div className="row" style={{ justifyContent: "flex-end", marginBottom: -6 }}>
+        <ResearchMetricsCustomize prefs={metricPrefs} onChange={setMetricPrefs} />
+      </div>
       <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
-        <TrendKpi label="Mineral Transactions" t={t.transactions} compareOff={compareOff} />
-        <TrendKpi label="Leasing Documents" t={t.leases} compareOff={compareOff} />
-        <TrendKpi label="Drilling Permits" t={t.permits} compareOff={compareOff} />
-        <TrendKpi label="Horizontal Permits" t={t.horizontalPermits} compareOff={compareOff} />
-        <TrendKpi label="Active Buyers" t={t.uniqueBuyers} compareOff={compareOff} />
-        <TrendKpi label="Active Operators" t={t.uniqueOperators} compareOff={compareOff} />
+        {visibleMetrics.map((id) => <TrendKpi key={id} label={RES_METRIC_LABEL[id]} t={t[id]} compareOff={compareOff} />)}
         {!compareOff && (
           <div className="metric-card">
             <div className="metric-label">Comparison Window</div>
@@ -436,6 +454,58 @@ function OverviewTab({ qs, compareOff }: { qs: string; compareOff: boolean }) {
         )}
       </div>
     </>
+  );
+}
+
+/** Customize View popover for the Research Overview KPIs (show/hide + reorder). */
+function ResearchMetricsCustomize({ prefs, onChange }: { prefs: ResMetricPrefs; onChange: (p: ResMetricPrefs) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+  const ordered: ResMetricId[] = [...prefs.order.filter((id) => DEFAULT_RES_METRICS.includes(id)), ...DEFAULT_RES_METRICS.filter((id) => !prefs.order.includes(id))];
+  const toggle = (id: ResMetricId) => onChange({ ...prefs, hidden: prefs.hidden.includes(id) ? prefs.hidden.filter((k) => k !== id) : [...prefs.hidden, id] });
+  const move = (id: ResMetricId, dir: -1 | 1) => {
+    const keys = [...ordered]; const i = keys.indexOf(id); const j = i + dir;
+    if (j < 0 || j >= keys.length) return;
+    [keys[i], keys[j]] = [keys[j], keys[i]];
+    onChange({ ...prefs, order: keys });
+  };
+  const isDefault = prefs.order.length === 0 && prefs.hidden.length === 0;
+  return (
+    <div className="cv-wrap" ref={ref}>
+      <button type="button" className={`small cv-btn ${open ? "active" : ""}`} onClick={() => setOpen((o) => !o)} title="Customize metrics">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
+        Customize View
+      </button>
+      {open && (
+        <div className="cv-menu" role="dialog" aria-label="Customize metrics">
+          <div className="cv-head"><strong>Metrics</strong><span className="muted" style={{ fontSize: 12 }}>Show, hide &amp; reorder</span></div>
+          <div className="cv-list">
+            {ordered.map((id, i) => (
+              <div key={id} className="cv-row">
+                <label className="cv-check">
+                  <input type="checkbox" checked={!prefs.hidden.includes(id)} onChange={() => toggle(id)} />
+                  <span>{RES_METRIC_LABEL[id]}</span>
+                </label>
+                <span className="cv-move">
+                  <button type="button" className="icon-btn" disabled={i === 0} title="Move up" onClick={() => move(id, -1)}>↑</button>
+                  <button type="button" className="icon-btn" disabled={i === ordered.length - 1} title="Move down" onClick={() => move(id, 1)}>↓</button>
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="cv-foot">
+            <button type="button" className="small" disabled={isDefault} onClick={() => onChange({ order: [], hidden: [] })}>Restore default</button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 

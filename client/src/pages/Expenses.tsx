@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
   PieChart, Pie, Cell,
@@ -292,6 +292,14 @@ function AllExpenses({
   const [cols, setCols] = useState<ColKey[]>(() => loadJson<ColKey[]>(COLS_KEY, DEFAULT_COLS));
   const [presets, setPresets] = useState<Preset[]>(() => loadJson<Preset[]>(PRESETS_KEY, []));
   const [showCols, setShowCols] = useState(false);
+  const colsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!showCols) return;
+    const onDoc = (e: MouseEvent) => { if (colsRef.current && !colsRef.current.contains(e.target as Node)) setShowCols(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setShowCols(false); };
+    document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [showCols]);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [monthsShown, setMonthsShown] = useState(MONTHS_PAGE);
   const [sort, setSort] = useState<{ key: ColKey; dir: "asc" | "desc" }>({ key: "date", dir: "desc" });
@@ -381,18 +389,24 @@ function AllExpenses({
             {presets.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
           </select>
           <button className="small" onClick={savePreset} disabled={!filtersActive} title="Save the current filters as a preset">Save preset</button>
-          <div style={{ position: "relative" }}>
-            <button className="small" onClick={() => setShowCols((s) => !s)}>Columns ▾</button>
+          <div className="cv-wrap" ref={colsRef}>
+            <button className={`small cv-btn ${showCols ? "active" : ""}`} onClick={() => setShowCols((s) => !s)} title="Customize columns">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
+              Customize View
+            </button>
             {showCols && (
-              <div className="dropdown-card" style={{ right: 0 }}>
-                {ALL_COLUMNS.map(([k, label]) => (
-                  <label key={k} className="dropdown-item">
-                    <input
-                      type="checkbox" checked={has(k)}
-                      onChange={() => saveCols(has(k) ? cols.filter((c) => c !== k) : [...cols, k])}
-                    /> {label}
-                  </label>
-                ))}
+              <div className="cv-menu" role="dialog" aria-label="Customize columns">
+                <div className="cv-head"><strong>Columns</strong><span className="muted" style={{ fontSize: 12 }}>Show &amp; hide</span></div>
+                <div className="cv-list">
+                  {ALL_COLUMNS.map(([k, label]) => (
+                    <label key={k} className="cv-row cv-check" style={{ justifyContent: "flex-start" }}>
+                      <input type="checkbox" checked={has(k)} onChange={() => saveCols(has(k) ? cols.filter((c) => c !== k) : [...cols, k])} /> <span>{label}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="cv-foot">
+                  <button type="button" className="small" disabled={cols.length === DEFAULT_COLS.length && DEFAULT_COLS.every((c) => cols.includes(c))} onClick={() => saveCols(DEFAULT_COLS)}>Restore default</button>
+                </div>
               </div>
             )}
           </div>
