@@ -44,7 +44,7 @@ expensesRouter.get(
     await ensureCategories(orgId(req));
     const cats = await prisma.expenseCategory.findMany({
       where: { organizationId: orgId(req) },
-      orderBy: { name: "asc" },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
     });
     res.json(cats);
   }),
@@ -92,6 +92,21 @@ expensesRouter.delete(
     if (!cat) throw new HttpError(404, "Category not found");
     // Existing expenses keep their (now dangling) categoryId set to null via FK.
     await prisma.expenseCategory.delete({ where: { id: cat.id } });
+    res.json({ ok: true });
+  }),
+);
+
+// Persist a new category order (client sends the full id list top-to-bottom).
+expensesRouter.post(
+  "/categories/reorder",
+  requirePermission("manageExpenses"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { ids } = z.object({ ids: z.array(z.string()).min(1) }).parse(req.body);
+    const org = orgId(req);
+    const owned = new Set((await prisma.expenseCategory.findMany({ where: { organizationId: org, id: { in: ids } }, select: { id: true } })).map((c) => c.id));
+    await prisma.$transaction(
+      ids.filter((id) => owned.has(id)).map((id, i) => prisma.expenseCategory.update({ where: { id }, data: { sortOrder: i } })),
+    );
     res.json({ ok: true });
   }),
 );

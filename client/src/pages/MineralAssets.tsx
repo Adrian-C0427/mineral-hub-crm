@@ -85,8 +85,13 @@ export function MineralAssets() {
       <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
         <MetricCard label="Assets Owned" value={totals.count} hint={totals.forSale > 0 ? `${totals.forSale} marked for sale` : undefined} />
         <MetricCard label="Portfolio Value" value={money(totals.currentValue)} hint={`Cost basis ${money(totals.purchasePrice)}`} />
-        <MetricCard label="Unrealized Gain" value={money(totals.currentValue - totals.purchasePrice)} hint={totals.purchasePrice > 0 ? fmtPct(((totals.currentValue - totals.purchasePrice) / totals.purchasePrice) * 100) : undefined} />
-        <MetricCard label="Annual Royalty Income" value={money(totals.royalty)} />
+        <MetricCard
+          label="Unrealized Gain"
+          value={money(totals.currentValue - totals.purchasePrice)}
+          hint={totals.purchasePrice > 0 ? fmtPct(((totals.currentValue - totals.purchasePrice) / totals.purchasePrice) * 100) : undefined}
+          valueColor={(() => { const g = totals.currentValue - totals.purchasePrice; return g > 0 ? "var(--green)" : g < 0 ? "var(--red)" : undefined; })()}
+        />
+        <MetricCard label="Annual Royalty Income" value={money(totals.royalty)} valueColor={totals.royalty ? "var(--green)" : undefined} />
       </div>
 
       <div className="panel">

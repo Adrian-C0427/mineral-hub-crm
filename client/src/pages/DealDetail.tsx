@@ -523,13 +523,12 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
       {!edit ? (
         noDates ? null : (
         <div className="ctl">
-          {milestones.map((m, i) => {
+          {milestones.map((m) => {
             const done = m.date != null && new Date(m.date).getTime() <= Date.now();
             return (
-              <div className="ctl-item" key={m.label}>
+              <div className={`ctl-item ${done ? "done" : ""}`} key={m.label}>
                 <div className="ctl-rail">
                   <span className={`ctl-dot ${done ? "done" : ""}`} />
-                  {i < milestones.length - 1 && <span className="ctl-line" />}
                 </div>
                 <div className="ctl-body">
                   <div className={`ctl-lbl ${done ? "done" : ""}`}>{m.label}{m.overridden && <em style={{ letterSpacing: 0, textTransform: "none" }}> (overridden)</em>}</div>

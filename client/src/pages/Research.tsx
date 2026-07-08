@@ -258,20 +258,26 @@ export function Research() {
               </span>
             ))}
           </div>
-          {range.from && range.to ? (
-            <div className="row" style={{ gap: 10, alignItems: "center", fontSize: 12.5 }}>
-              <span style={{ fontWeight: 600 }}>{fmtRangeLabel(range.from, range.to)}</span>
-              {cmpRange && (
-                <>
-                  <span className="muted" style={{ opacity: 0.7 }}>vs</span>
-                  <span className="muted">{fmtRangeLabel(cmpRange.from, cmpRange.to, cmpWithYear)}</span>
-                  <span className="q-hint" title={compareHint}>?</span>
-                </>
-              )}
-            </div>
-          ) : (
-            <span className="muted" style={{ fontSize: 12.5 }}>Select a custom date range</span>
-          )}
+          <div className="row" style={{ gap: 10, alignItems: "center" }}>
+            {range.from && range.to ? (
+              <div className="row" style={{ gap: 10, alignItems: "center", fontSize: 12.5 }}>
+                <span style={{ fontWeight: 600 }}>{fmtRangeLabel(range.from, range.to)}</span>
+                {cmpRange && (
+                  <>
+                    <span className="muted" style={{ opacity: 0.7 }}>vs</span>
+                    <span className="muted">{fmtRangeLabel(cmpRange.from, cmpRange.to, cmpWithYear)}</span>
+                    <span className="q-hint" title={compareHint}>?</span>
+                  </>
+                )}
+              </div>
+            ) : (
+              <span className="muted" style={{ fontSize: 12.5 }}>Select a custom date range</span>
+            )}
+            {activeFilterCount > 0 && <button className="small" onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>}
+            <button className="small" onClick={() => setShowFilters((s) => !s)}>
+              {showFilters ? "▾" : "▸"} Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+            </button>
+          </div>
         </div>
         {period === "CUSTOM" && (
           <div className="row" style={{ marginTop: 10 }}>
@@ -279,12 +285,6 @@ export function Research() {
             <div className="field" style={{ marginBottom: 0 }}><label>To</label><input type="date" value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} /></div>
           </div>
         )}
-        <div className="row" style={{ gap: 8, alignItems: "center", marginTop: 10 }}>
-          <button className="small" onClick={() => setShowFilters((s) => !s)}>
-            {showFilters ? "▾" : "▸"} Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
-          </button>
-          {activeFilterCount > 0 && <button className="small" onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>}
-        </div>
         {showFilters && opts && (
           <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end", marginTop: 10 }}>
             <div className="field" style={{ marginBottom: 0 }}><label>Compare to</label>
