@@ -57,15 +57,16 @@ function compareValues(a: unknown, b: unknown, type: SortType): number {
 // Customize View — persisted per-table column layout (order + hidden columns).
 // ---------------------------------------------------------------------------
 
-interface ColPrefs { order: string[]; hidden: string[] }
+interface ColPrefs { order: string[]; hidden: string[]; widths: Record<string, number> }
 const colKey = (id: string) => `mh-cols:v1:${id}`;
 function loadColPrefs(id: string): ColPrefs {
-  try { const raw = localStorage.getItem(colKey(id)); if (raw) { const p = JSON.parse(raw) as ColPrefs; return { order: p.order ?? [], hidden: p.hidden ?? [] }; } } catch { /* ignore */ }
-  return { order: [], hidden: [] };
+  try { const raw = localStorage.getItem(colKey(id)); if (raw) { const p = JSON.parse(raw) as Partial<ColPrefs>; return { order: p.order ?? [], hidden: p.hidden ?? [], widths: p.widths ?? {} }; } } catch { /* ignore */ }
+  return { order: [], hidden: [], widths: {} };
 }
+const MIN_COL_W = 64;
 
 function useColumnPrefs<T>(customizeId: string | undefined, columns: Column<T>[]) {
-  const [prefs, setPrefs] = useState<ColPrefs>(() => (customizeId ? loadColPrefs(customizeId) : { order: [], hidden: [] }));
+  const [prefs, setPrefs] = useState<ColPrefs>(() => (customizeId ? loadColPrefs(customizeId) : { order: [], hidden: [], widths: {} }));
   // Reload when the table identity changes (e.g. remounted for another list).
   useEffect(() => { if (customizeId) setPrefs(loadColPrefs(customizeId)); }, [customizeId]);
   useEffect(() => { if (customizeId) { try { localStorage.setItem(colKey(customizeId), JSON.stringify(prefs)); } catch { /* ignore */ } } }, [customizeId, prefs]);
@@ -92,10 +93,11 @@ function useColumnPrefs<T>(customizeId: string | undefined, columns: Column<T>[]
     [keys[i], keys[j]] = [keys[j], keys[i]];
     return { ...p, order: keys };
   });
-  const reset = () => setPrefs({ order: [], hidden: [] });
-  const isDefault = prefs.order.length === 0 && prefs.hidden.length === 0;
+  const setWidth = (key: string, w: number) => setPrefs((p) => ({ ...p, widths: { ...p.widths, [key]: Math.max(MIN_COL_W, Math.round(w)) } }));
+  const reset = () => setPrefs({ order: [], hidden: [], widths: {} });
+  const isDefault = prefs.order.length === 0 && prefs.hidden.length === 0 && Object.keys(prefs.widths).length === 0;
 
-  return { ordered, visible, hidden, toggle, move, reset, isDefault };
+  return { ordered, visible, hidden, widths: prefs.widths, toggle, move, setWidth, reset, isDefault };
 }
 
 function ColumnCustomizer<T>({ ordered, hidden, onToggle, onMove, onReset, isDefault }: {
@@ -147,6 +149,7 @@ function ColumnCustomizer<T>({ ordered, hidden, onToggle, onMove, onReset, isDef
             })}
           </div>
           <div className="cv-foot">
+            <span className="cv-hint">Drag a header edge to resize</span>
             <button type="button" className="small" disabled={isDefault} onClick={onReset}>Restore default</button>
           </div>
         </div>
@@ -169,8 +172,20 @@ export function SortableTable<T>({
   customizeId,
 }: Props<T>) {
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(defaultSort ?? null);
-  const { ordered, visible, hidden, toggle, move, reset, isDefault } = useColumnPrefs(customizeId, columns);
+  const { ordered, visible, hidden, widths, toggle, move, setWidth, reset, isDefault } = useColumnPrefs(customizeId, columns);
   const cols = visible;
+
+  // Drag a header's right edge to resize the column (Customize View only).
+  function startResize(e: React.PointerEvent, key: string) {
+    e.preventDefault(); e.stopPropagation();
+    const th = (e.currentTarget as HTMLElement).closest("th");
+    const startX = e.clientX;
+    const startW = th ? th.getBoundingClientRect().width : 120;
+    const onMove = (ev: PointerEvent) => setWidth(key, startW + (ev.clientX - startX));
+    const onUp = () => { window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp); };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  }
 
   const sorted = useMemo(() => {
     const copy = [...rows];
@@ -213,17 +228,27 @@ export function SortableTable<T>({
             })()}
             {cols.map((c) => {
               const active = sort?.key === c.key;
+              const w = widths[c.key];
+              const style = w != null ? { width: w, minWidth: w, maxWidth: w } : (c.width ? { width: c.width } : undefined);
               return (
                 <th
                   key={c.key}
                   onClick={() => onHeaderClick(c.key)}
                   className={`sortable ${c.align ?? "left"} ${active ? "active" : ""}`}
-                  style={c.width ? { width: c.width } : undefined}
+                  style={style}
                 >
                   <span className="th-inner">
                     {c.header}
                     <span className="sort-ind">{active ? (sort!.dir === "asc" ? "▲" : "▼") : "↕"}</span>
                   </span>
+                  {customizeId && (
+                    <span
+                      className="col-resize"
+                      title="Drag to resize"
+                      onPointerDown={(e) => startResize(e, c.key)}
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  )}
                 </th>
               );
             })}
@@ -252,8 +277,9 @@ export function SortableTable<T>({
                 )}
                 {cols.map((c, ci) => {
                   const cell = c.render ? c.render(row) : displayDefault(c.value(row));
+                  const w = widths[c.key];
                   return (
-                    <td key={c.key} className={c.align ?? "left"}>
+                    <td key={c.key} className={c.align ?? "left"} style={w != null ? { width: w, minWidth: w, maxWidth: w } : undefined}>
                       {rowHref && ci === 0
                         ? <Link to={rowHref(row)} className="row-link" onClick={(e) => e.stopPropagation()}>{cell}</Link>
                         : cell}
