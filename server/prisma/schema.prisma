@@ -464,9 +464,14 @@ model Deal {
   // Buyer-facing asking price override. Null → use the deal's askPrice; set to
   // publish a different figure without changing the underlying deal.
   portalAskPrice    Float?
-  // Per-deal published contact (the representative shown on THIS listing). The
+  // Per-deal published contacts (the representatives shown on THIS listing). The
   // right point of contact differs per opportunity, so contact info lives on the
-  // deal — not globally. Null fields fall back to the org's portal contacts.
+  // deal — not globally. `portalContacts` is the source of truth: an ordered JSON
+  // array of { id, name, title, email, phone }. The four scalar fields below are
+  // the legacy single-contact shape, kept in sync with the first contact for
+  // back-compat; when the array is empty the offering falls back to them, then
+  // to the org's portal contacts.
+  portalContacts     Json?
   portalContactName  String?
   portalContactTitle String?
   portalContactEmail String?

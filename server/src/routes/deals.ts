@@ -575,11 +575,16 @@ dealsRouter.get(
       where: { id: req.params.id, organizationId: orgId(req) },
       select: { id: true, publishedToPortal: true, portalSlug: true, portalVisibility: true, portalFeatured: true,
         portalSummary: true, portalSections: true, portalAskPrice: true, askPrice: true,
-        portalContactName: true, portalContactTitle: true, portalContactEmail: true, portalContactPhone: true,
+        portalContacts: true, portalContactName: true, portalContactTitle: true, portalContactEmail: true, portalContactPhone: true,
         files: { where: { supersededById: null }, select: { id: true, filename: true, folder: true, visibleToBuyers: true } } },
     });
     if (!deal) throw new HttpError(404, "Deal not found");
-    res.json({ ...deal, portalSections: normalizeSections(deal.portalSections) });
+    const { portalContacts, portalContactName, portalContactTitle, portalContactEmail, portalContactPhone, ...rest } = deal;
+    res.json({
+      ...rest,
+      portalSections: normalizeSections(rest.portalSections),
+      contacts: normalizeDealContacts(portalContacts, { name: portalContactName, title: portalContactTitle, email: portalContactEmail, phone: portalContactPhone }),
+    });
   }),
 );
 
@@ -601,6 +606,30 @@ function normalizeSections(raw: unknown): Record<PortalSectionKey, boolean> {
   return out;
 }
 
+// Per-deal published contacts. Source of truth is the `portalContacts` JSON
+// array; a legacy single-contact (scalar columns) seeds a one-element array so
+// existing listings keep their contact through the rollout.
+export interface DealPortalContact { id: string; name: string; title: string | null; email: string | null; phone: string | null }
+const cstr = (v: unknown): string => (typeof v === "string" ? v : "");
+const cstrn = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
+export function normalizeDealContacts(
+  raw: unknown,
+  legacy?: { name: string | null; title: string | null; email: string | null; phone: string | null },
+): DealPortalContact[] {
+  if (Array.isArray(raw)) {
+    return raw
+      .map((c, i): DealPortalContact => {
+        const o = (c && typeof c === "object") ? c as Record<string, unknown> : {};
+        return { id: cstrn(o.id) ?? `c${i}`, name: cstr(o.name).trim(), title: cstrn(o.title), email: cstrn(o.email), phone: cstrn(o.phone) };
+      })
+      .filter((c) => c.name || c.email || c.phone);
+  }
+  if (legacy && (legacy.name || legacy.email || legacy.phone)) {
+    return [{ id: "legacy", name: (legacy.name ?? "").trim(), title: legacy.title, email: legacy.email, phone: legacy.phone }];
+  }
+  return [];
+}
+
 dealsRouter.patch(
   "/:id/portal",
   requirePermission("publishOfferings"),
@@ -614,11 +643,15 @@ dealsRouter.patch(
       sections: z.record(z.string(), z.boolean()).optional(),
       // Buyer-facing asking-price override; null clears it (falls back to askPrice).
       askPrice: z.number().nonnegative().nullish(),
-      // Per-deal published contact (the representative shown on THIS listing).
-      contactName: z.string().trim().max(160).nullish(),
-      contactTitle: z.string().trim().max(120).nullish(),
-      contactEmail: z.string().trim().max(200).nullish(),
-      contactPhone: z.string().trim().max(60).nullish(),
+      // Per-deal published contacts (ordered) — the representatives shown on THIS
+      // listing. Replaces the whole list; unique to this deal.
+      contacts: z.array(z.object({
+        id: z.string().optional(),
+        name: z.string().trim().max(160).optional().default(""),
+        title: z.string().trim().max(120).nullish(),
+        email: z.string().trim().max(200).nullish(),
+        phone: z.string().trim().max(60).nullish(),
+      })).max(25).optional(),
     }).parse(req.body);
     const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true, portalSlug: true, portalSections: true } });
     if (!deal) throw new HttpError(404, "Deal not found");
@@ -631,10 +664,16 @@ dealsRouter.patch(
     if (body.featured !== undefined) patch.portalFeatured = body.featured;
     if (body.summary !== undefined) patch.portalSummary = body.summary;
     if (body.askPrice !== undefined) patch.portalAskPrice = body.askPrice;
-    if (body.contactName !== undefined) patch.portalContactName = body.contactName || null;
-    if (body.contactTitle !== undefined) patch.portalContactTitle = body.contactTitle || null;
-    if (body.contactEmail !== undefined) patch.portalContactEmail = body.contactEmail || null;
-    if (body.contactPhone !== undefined) patch.portalContactPhone = body.contactPhone || null;
+    if (body.contacts !== undefined) {
+      const list = normalizeDealContacts(body.contacts);
+      patch.portalContacts = list;
+      // Mirror the primary contact into the legacy scalars for back-compat.
+      const first = list[0] ?? null;
+      patch.portalContactName = first?.name ?? null;
+      patch.portalContactTitle = first?.title ?? null;
+      patch.portalContactEmail = first?.email ?? null;
+      patch.portalContactPhone = first?.phone ?? null;
+    }
     if (body.sections) {
       const merged = { ...normalizeSections(deal.portalSections) };
       for (const k of PORTAL_SECTION_KEYS) if (typeof body.sections[k] === "boolean") merged[k] = body.sections[k];
@@ -644,9 +683,14 @@ dealsRouter.patch(
       where: { id: deal.id }, data: patch,
       select: { id: true, publishedToPortal: true, portalSlug: true, portalVisibility: true, portalFeatured: true,
         portalSummary: true, portalSections: true, portalAskPrice: true, askPrice: true,
-        portalContactName: true, portalContactTitle: true, portalContactEmail: true, portalContactPhone: true },
+        portalContacts: true, portalContactName: true, portalContactTitle: true, portalContactEmail: true, portalContactPhone: true },
     });
-    res.json({ ...updated, portalSections: normalizeSections(updated.portalSections) });
+    const { portalContacts, portalContactName, portalContactTitle, portalContactEmail, portalContactPhone, ...urest } = updated;
+    res.json({
+      ...urest,
+      portalSections: normalizeSections(urest.portalSections),
+      contacts: normalizeDealContacts(portalContacts, { name: portalContactName, title: portalContactTitle, email: portalContactEmail, phone: portalContactPhone }),
+    });
   }),
 );
 

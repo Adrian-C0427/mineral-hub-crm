@@ -112,6 +112,30 @@ async function publicContacts(o: OrgLike): Promise<PublicContact[]> {
   return [];
 }
 
+/**
+ * A deal's own published contacts (all of them, in order). Source of truth is
+ * the `portalContacts` JSON array; falls back to the legacy single-contact
+ * scalar columns so listings created before multi-contact keep their rep.
+ */
+function dealPublicContacts(
+  d: { portalContacts?: unknown; portalContactName?: string | null; portalContactTitle?: string | null; portalContactEmail?: string | null; portalContactPhone?: string | null },
+  orgName: string,
+): PublicContact[] {
+  const s = (v: unknown): string | null => (typeof v === "string" && v.trim() ? v.trim() : null);
+  if (Array.isArray(d.portalContacts)) {
+    return d.portalContacts
+      .map((c, i) => {
+        const o = (c && typeof c === "object") ? c as Record<string, unknown> : {};
+        return { id: s(o.id) ?? `deal-${i}`, name: s(o.name) ?? orgName, title: s(o.title), email: s(o.email), phone: s(o.phone), department: null, photo: null, isPrimary: i === 0 };
+      })
+      .filter((c) => c.name || c.email || c.phone);
+  }
+  if (d.portalContactName || d.portalContactEmail || d.portalContactPhone) {
+    return [{ id: "deal", name: d.portalContactName || orgName, title: d.portalContactTitle ?? null, email: d.portalContactEmail ?? null, phone: d.portalContactPhone ?? null, department: null, photo: null, isPrimary: true }];
+  }
+  return [];
+}
+
 /** Org branding + contacts payload. `contact*` legacy fields kept for back-compat. */
 async function orgPayload(o: OrgLike) {
   const contacts = await publicContacts(o);
@@ -251,22 +275,18 @@ portalRouter.get(
         )
       : [];
     // Contacts are only exposed when this deal publishes its contact section.
-    // Contact info is configured PER DEAL: when this deal sets its own portal
-    // contact, that representative is shown; otherwise fall back to the org's
-    // portal contacts so existing listings never lose a point of contact.
+    // Contact info is configured PER DEAL: this deal's own contacts (all of them)
+    // are shown; otherwise fall back to the org's portal contacts so existing
+    // listings never lose a point of contact.
     const orgBase = await orgPayload(deal.organization);
-    const hasDealContact = Boolean(deal.portalContactName || deal.portalContactEmail || deal.portalContactPhone);
-    const org = hasDealContact
+    const dealContacts = dealPublicContacts(deal, deal.organization.name);
+    const org = dealContacts.length
       ? {
           ...orgBase,
-          contacts: [{
-            id: "deal", name: deal.portalContactName || deal.organization.name,
-            title: deal.portalContactTitle ?? null, email: deal.portalContactEmail ?? null,
-            phone: deal.portalContactPhone ?? null, department: null, photo: null, isPrimary: true,
-          }],
-          contactName: deal.portalContactName || deal.organization.name,
-          contactEmail: deal.portalContactEmail ?? null,
-          contactPhone: deal.portalContactPhone ?? null,
+          contacts: dealContacts,
+          contactName: dealContacts[0].name,
+          contactEmail: dealContacts[0].email,
+          contactPhone: dealContacts[0].phone,
         }
       : orgBase;
 

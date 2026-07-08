@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { Sun, Moon } from "lucide-react";
 import { api } from "../api/client";
 import { Spinner } from "../components/ui";
 import { money, fmtDate, prettyStage } from "../lib/format";
 import { NotificationsPanel } from "../components/NotificationsPanel";
-import { NewDealModal } from "../components/NewDealModal";
 import { PeriodSegmented } from "../components/PeriodSegmented";
 import { useTheme } from "../theme";
 
@@ -90,10 +89,8 @@ const STAGE_FILL: Record<string, string> = {
 
 export function Dashboard() {
   const [d, setD] = useState<DashboardData | null>(null);
-  const [showNew, setShowNew] = useState(false);
   const [period, setPeriod] = useState<DashPeriod>("YTD");
   const { theme, toggleTheme } = useTheme();
-  const nav = useNavigate();
 
   useEffect(() => { api.get<DashboardData>(`/dashboard?period=${period}`).then(setD); }, [period]);
   if (!d) return <Spinner />;
@@ -129,7 +126,6 @@ export function Dashboard() {
           <button className="dash-icon-btn" title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} onClick={toggleTheme}>
             {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
           </button>
-          <button className="primary" onClick={() => setShowNew(true)}>+ New deal</button>
         </div>
       </div>
 
@@ -259,8 +255,6 @@ export function Dashboard() {
           </div>
         ))}
       </div>
-
-      {showNew && <NewDealModal onClose={() => setShowNew(false)} onCreated={(deal) => { setShowNew(false); nav(`/deals/${deal.id}`); }} />}
     </div>
   );
 }

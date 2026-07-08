@@ -3,6 +3,7 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { collectCoords, bboxOfPoints } from "../lib/geo";
 import { addCadastralLayers, styleWithGlyphs } from "../lib/mapLayers";
+import { MapLayersPanel } from "./MapLayersPanel";
 import { api } from "../api/client";
 
 const TEXAS_CENTER: [number, number] = [-97.5, 31.0];
@@ -189,18 +190,22 @@ export function TractMap({ tracts, selectedId, abstractIds = [], placingPob, onP
   useEffect(applyVis, [layers]);
 
   const toggle = (k: keyof typeof layers) => setLayers((p) => ({ ...p, [k]: !p[k] }));
-  const Chk = ({ k, label }: { k: keyof typeof layers; label: string }) => (
-    <label className="dm-chk"><input type="checkbox" checked={layers[k]} onChange={() => toggle(k)} /> {label}</label>
-  );
 
   const mapped = tracts.filter((t) => t.geometry).length;
   return (
     <div className="deal-map">
-      <div className="dm-toolbar">
-        <span className="dm-toolbar-label">Layers</span>
-        <Chk k="boundaries" label="Boundaries" /><Chk k="numbers" label="Abstract #" /><Chk k="surveys" label="Survey names" />
-        <Chk k="wells" label="Wells" /><Chk k="wellbores" label="Wellbores" />
-        {abstractIds.length > 0 && <Chk k="dealAbstracts" label="Deal abstracts" />}
+      <div className="ml-bar" style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        <MapLayersPanel
+          variant="inline"
+          defs={[
+            { key: "boundaries", label: "Abstract boundaries" }, { key: "numbers", label: "Abstract numbers" },
+            { key: "surveys", label: "Survey names" }, { key: "wells", label: "Wells" },
+            { key: "wellbores", label: "Wellbores (laterals)" },
+            ...(abstractIds.length > 0 ? [{ key: "dealAbstracts", label: "Deal abstracts" }] : []),
+          ]}
+          layers={layers}
+          onToggle={(k) => toggle(k as keyof typeof layers)}
+        />
         <button className="small" style={{ marginLeft: "auto" }} onClick={() => { fitted.current = false; fitToTracts(true); }} title="Zoom back to the full tract extent">Reset view</button>
         {placingPob && <span className="muted" style={{ fontSize: 12 }}>Click the map to place the Point of Beginning</span>}
       </div>

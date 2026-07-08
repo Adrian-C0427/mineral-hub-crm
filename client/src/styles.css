@@ -1194,6 +1194,29 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .xp-period { padding: 12px 20px 0; }
 .back-link { display: inline-flex; align-items: center; gap: 4px; }
 
+/* Deal page: Assigned Team Members is a compact card, not a full-width panel. */
+.assignees-card { max-width: 520px; }
+
+/* Deal Buyer Portal: per-deal contact cards (multi-contact editor). */
+.dpp-contact { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; background: var(--panel-2); }
+.dpp-contact-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.dpp-contact-head .icon-btn { width: 24px; height: 24px; line-height: 1; }
+.dpp-contact-head .icon-btn.danger { color: var(--red); }
+.dpp-contact-head .icon-btn:disabled { opacity: 0.35; cursor: default; }
+
+/* Shared map Layers panel (MapLayersPanel) — one design across every map. */
+.ml-layers { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.ml-title { margin: 0; white-space: nowrap; }
+.ml-pills { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; }
+/* "bar": a standalone toolbar card sitting above an embedded canvas. */
+.ml-bar { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 12px; margin-bottom: 8px; }
+/* "floating": a compact overlay pinned to the top-right corner of a map. */
+.ml-floating { position: absolute; top: 10px; right: 10px; z-index: 2; max-width: 240px;
+  flex-direction: column; align-items: stretch; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 12px; box-shadow: var(--shadow); }
+.ml-floating .ml-pills { gap: 6px; }
+
 /* Organization → Users: action buttons spaced out, destructive action set apart. */
 .user-actions { display: inline-flex; align-items: center; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
 .user-actions-sep { width: 1px; align-self: stretch; min-height: 20px; background: var(--border); margin: 0 2px; }

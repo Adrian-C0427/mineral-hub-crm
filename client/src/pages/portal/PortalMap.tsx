@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { addCadastralLayers, styleWithGlyphs } from "../../lib/mapLayers";
+import { MapLayersPanel } from "../../components/MapLayersPanel";
 import { collectCoords, bboxOfPoints } from "../../lib/geo";
 import type { FC } from "./portalApi";
 
@@ -101,11 +102,16 @@ export function PortalMap({ features, height = 420, onSelect }: {
         onClick={() => homeBounds.current && mapRef.current?.fitBounds(homeBounds.current, { padding: 50, maxZoom: 13, duration: 500 })}
         title="Reset view to the property"
       >⌂ Reset view</button>
-      <div className="portal-map-layers">
-        {([["counties", "Counties"], ["boundaries", "Abstracts"], ["numbers", "Abstract #s"], ["surveys", "Survey names"], ["wells", "Wells"], ["wellbores", "Wellbores"]] as const).map(([k, label]) => (
-          <label key={k}><input type="checkbox" checked={layers[k]} onChange={() => toggle(k)} /> {label}</label>
-        ))}
-      </div>
+      <MapLayersPanel
+        variant="floating"
+        defs={[
+          { key: "counties", label: "Counties" }, { key: "boundaries", label: "Abstract boundaries" },
+          { key: "numbers", label: "Abstract numbers" }, { key: "surveys", label: "Survey names" },
+          { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores (laterals)" },
+        ]}
+        layers={layers}
+        onToggle={(k) => toggle(k as keyof LayerState)}
+      />
       {hovered && <div className="portal-map-hover">{hovered}</div>}
     </div>
   );
