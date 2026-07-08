@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
@@ -80,6 +80,28 @@ function compareRange(mode: Compare, from: string, to: string): { from: string; 
 
 const EMPTY_FILTERS: Record<string, string[]> = { states: [], counties: [], basins: [], formations: [], assetTypes: [], operators: [], stages: [], buyers: [], users: [] };
 
+// Customize View — which KPI metrics show, and in what order (saved per user).
+type MetricId =
+  | "revenue" | "netProfit" | "grossProfit" | "expenses" | "dealsClosed" | "dealsAdded"
+  | "dealsLost" | "winRate" | "totalDeals" | "totalDealValue" | "avgDealSize" | "avgTimeToClose"
+  | "activeBuyers" | "newBuyers" | "buyerActivity" | "reimbursementsOutstanding";
+const METRIC_LABELS: Record<MetricId, string> = {
+  revenue: "Revenue (Gross Fees)", netProfit: "Net Profit", grossProfit: "Gross Profit", expenses: "Expenses",
+  dealsClosed: "Deals Closed", dealsAdded: "Deals Added", dealsLost: "Deals Lost", winRate: "Win Rate",
+  totalDeals: "Total Deals", totalDealValue: "Total Deal Value", avgDealSize: "Avg Deal Size", avgTimeToClose: "Avg Time to Close",
+  activeBuyers: "Active Buyers", newBuyers: "New Buyers", buyerActivity: "Buyer Activity", reimbursementsOutstanding: "Reimbursements Outstanding",
+};
+const DEFAULT_METRICS: MetricId[] = [
+  "revenue", "netProfit", "grossProfit", "expenses", "dealsClosed", "dealsAdded", "dealsLost", "winRate",
+  "totalDeals", "totalDealValue", "avgDealSize", "avgTimeToClose", "activeBuyers", "newBuyers", "buyerActivity", "reimbursementsOutstanding",
+];
+interface MetricPrefs { order: MetricId[]; hidden: MetricId[] }
+const METRICS_KEY = "mh-reports-metrics:v1";
+function loadMetricPrefs(): MetricPrefs {
+  try { const raw = localStorage.getItem(METRICS_KEY); if (raw) { const p = JSON.parse(raw) as Partial<MetricPrefs>; return { order: p.order ?? [], hidden: p.hidden ?? [] }; } } catch { /* ignore */ }
+  return { order: [], hidden: [] };
+}
+
 /** id→label map for pickers; duplicate names get a numeric suffix so two
  *  "John Smith"s remain distinguishable. */
 function idLabels(items: { id: string; name: string }[]): Record<string, string> {
@@ -114,6 +136,9 @@ export function Reports() {
   const [exporting, setExporting] = useState(false);
   const [drill, setDrill] = useState<{ title: string; rows: DealSummary[] } | null>(null);
   const reportRef = useRef<HTMLDivElement>(null);
+  // Which KPI metrics are shown + their order (Customize View, saved per user).
+  const [metricPrefs, setMetricPrefs] = useState<MetricPrefs>(loadMetricPrefs);
+  useEffect(() => { try { localStorage.setItem(METRICS_KEY, JSON.stringify(metricPrefs)); } catch { /* ignore */ } }, [metricPrefs]);
 
   const range = useMemo(() => rangeFor(period, custom), [period, custom]);
   const cmp = useMemo(() => compareRange(compare, range.from, range.to), [compare, range.from, range.to]);
@@ -169,7 +194,10 @@ export function Reports() {
     <div className="page">
       <div className="page-header">
         <h1>Reports & Analytics</h1>
-        {can("exportReports") && <button className="primary" onClick={onExport} disabled={exporting || !data}>{exporting ? "Generating…" : "Export PDF"}</button>}
+        <div className="row" style={{ gap: 8 }}>
+          <MetricsCustomize prefs={metricPrefs} onChange={setMetricPrefs} />
+          {can("exportReports") && <button className="primary" onClick={onExport} disabled={exporting || !data}>{exporting ? "Generating…" : "Export PDF"}</button>}
+        </div>
       </div>
 
       {/* --- Controls (not captured in PDF) --- */}
@@ -270,24 +298,33 @@ export function Reports() {
             )}
           </div>
 
-          {/* --- KPI grid --- */}
+          {/* --- KPI grid (Customize View: choose + order the metrics) --- */}
           <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
-            <Kpi label="Revenue (Gross Fees)" value={money(k.revenue)} d={data.deltas?.revenue} onClick={() => drillByDeal("Closed deals", (dd) => dd.stage === "CLOSED")} />
-            <Kpi label="Net Profit" value={money(k.netProfit)} d={data.deltas?.netProfit} />
-            <Kpi label="Gross Profit" value={money(k.grossProfit)} d={data.deltas?.grossProfit} />
-            <Kpi label="Expenses" value={money(k.expenses)} d={data.deltas?.expenses} invert onClick={() => nav("/expenses")} />
-            <Kpi label="Deals Closed" value={num(k.dealsClosed)} d={data.deltas?.dealsClosed} onClick={() => drillByDeal("Closed deals", (dd) => dd.stage === "CLOSED")} />
-            <Kpi label="Deals Added" value={num(k.dealsAdded)} d={data.deltas?.dealsAdded} />
-            <Kpi label="Deals Lost" value={num(k.dealsLost)} d={data.deltas?.dealsLost} invert onClick={() => drillByDeal("Lost (dead) deals", (dd) => dd.stage === "DEAD")} />
-            <Kpi label="Win Rate" value={pct(k.winRate)} d={data.deltas?.winRate} />
-            <Kpi label="Total Deals" value={num(k.totalDeals)} d={data.deltas?.totalDeals} onClick={() => nav("/deals")} />
-            <Kpi label="Total Deal Value" value={money(k.totalDealValue)} d={data.deltas?.totalDealValue} />
-            <Kpi label="Avg Deal Size" value={money(k.avgDealSize)} d={data.deltas?.avgDealSize} />
-            <Kpi label="Avg Time to Close" value={`${Math.round(k.avgTimeToClose)}d`} d={data.deltas?.avgTimeToClose} invert />
-            <Kpi label="Active Buyers" value={num(k.activeBuyers)} d={data.deltas?.activeBuyers} onClick={() => nav("/buyers")} />
-            <Kpi label="New Buyers" value={num(k.newBuyers)} d={data.deltas?.newBuyers} />
-            <Kpi label="Buyer Activity" value={num(k.buyerActivity)} d={data.deltas?.buyerActivity} />
-            <Kpi label="Reimbursements Outstanding" value={money(k.reimbursementsOutstanding)} d={data.deltas?.reimbursementsOutstanding} invert onClick={() => nav("/expenses")} />
+            {(() => {
+              const nodes: Record<MetricId, ReactNode> = {
+                revenue: <Kpi label="Revenue (Gross Fees)" value={money(k.revenue)} d={data.deltas?.revenue} onClick={() => drillByDeal("Closed deals", (dd) => dd.stage === "CLOSED")} />,
+                netProfit: <Kpi label="Net Profit" value={money(k.netProfit)} d={data.deltas?.netProfit} />,
+                grossProfit: <Kpi label="Gross Profit" value={money(k.grossProfit)} d={data.deltas?.grossProfit} />,
+                expenses: <Kpi label="Expenses" value={money(k.expenses)} d={data.deltas?.expenses} invert onClick={() => nav("/expenses")} />,
+                dealsClosed: <Kpi label="Deals Closed" value={num(k.dealsClosed)} d={data.deltas?.dealsClosed} onClick={() => drillByDeal("Closed deals", (dd) => dd.stage === "CLOSED")} />,
+                dealsAdded: <Kpi label="Deals Added" value={num(k.dealsAdded)} d={data.deltas?.dealsAdded} />,
+                dealsLost: <Kpi label="Deals Lost" value={num(k.dealsLost)} d={data.deltas?.dealsLost} invert onClick={() => drillByDeal("Lost (dead) deals", (dd) => dd.stage === "DEAD")} />,
+                winRate: <Kpi label="Win Rate" value={pct(k.winRate)} d={data.deltas?.winRate} />,
+                totalDeals: <Kpi label="Total Deals" value={num(k.totalDeals)} d={data.deltas?.totalDeals} onClick={() => nav("/deals")} />,
+                totalDealValue: <Kpi label="Total Deal Value" value={money(k.totalDealValue)} d={data.deltas?.totalDealValue} />,
+                avgDealSize: <Kpi label="Avg Deal Size" value={money(k.avgDealSize)} d={data.deltas?.avgDealSize} />,
+                avgTimeToClose: <Kpi label="Avg Time to Close" value={`${Math.round(k.avgTimeToClose)}d`} d={data.deltas?.avgTimeToClose} invert />,
+                activeBuyers: <Kpi label="Active Buyers" value={num(k.activeBuyers)} d={data.deltas?.activeBuyers} onClick={() => nav("/buyers")} />,
+                newBuyers: <Kpi label="New Buyers" value={num(k.newBuyers)} d={data.deltas?.newBuyers} />,
+                buyerActivity: <Kpi label="Buyer Activity" value={num(k.buyerActivity)} d={data.deltas?.buyerActivity} />,
+                reimbursementsOutstanding: <Kpi label="Reimbursements Outstanding" value={money(k.reimbursementsOutstanding)} d={data.deltas?.reimbursementsOutstanding} invert onClick={() => nav("/expenses")} />,
+              };
+              const ordered: MetricId[] = [...metricPrefs.order.filter((id) => DEFAULT_METRICS.includes(id)), ...DEFAULT_METRICS.filter((id) => !metricPrefs.order.includes(id))];
+              const visible = ordered.filter((id) => !metricPrefs.hidden.includes(id));
+              return visible.length === 0
+                ? <p className="muted" style={{ gridColumn: "1 / -1", margin: 0 }}>All metrics hidden — use Customize View to bring them back.</p>
+                : visible.map((id) => <Fragment key={id}>{nodes[id]}</Fragment>);
+            })()}
           </div>
 
           {/* --- Trend + breakdowns --- */}
@@ -346,6 +383,60 @@ export function Reports() {
         <Modal title={`${drill.title} (${drill.rows.length})`} onClose={() => setDrill(null)} wide>
           <DrillTable rows={drill.rows} onOpen={(id) => { setDrill(null); nav(`/deals/${id}`); }} />
         </Modal>
+      )}
+    </div>
+  );
+}
+
+/** Customize View popover for the Reports KPI grid (show/hide + reorder metrics). */
+function MetricsCustomize({ prefs, onChange }: { prefs: MetricPrefs; onChange: (p: MetricPrefs) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+
+  const ordered: MetricId[] = [...prefs.order.filter((id) => DEFAULT_METRICS.includes(id)), ...DEFAULT_METRICS.filter((id) => !prefs.order.includes(id))];
+  const toggle = (id: MetricId) => onChange({ ...prefs, hidden: prefs.hidden.includes(id) ? prefs.hidden.filter((k) => k !== id) : [...prefs.hidden, id] });
+  const move = (id: MetricId, dir: -1 | 1) => {
+    const keys = [...ordered]; const i = keys.indexOf(id); const j = i + dir;
+    if (j < 0 || j >= keys.length) return;
+    [keys[i], keys[j]] = [keys[j], keys[i]];
+    onChange({ ...prefs, order: keys });
+  };
+  const isDefault = prefs.order.length === 0 && prefs.hidden.length === 0;
+
+  return (
+    <div className="cv-wrap" ref={ref}>
+      <button type="button" className={`small cv-btn ${open ? "active" : ""}`} onClick={() => setOpen((o) => !o)} title="Customize metrics">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
+        Customize View
+      </button>
+      {open && (
+        <div className="cv-menu" role="dialog" aria-label="Customize metrics">
+          <div className="cv-head"><strong>Metrics</strong><span className="muted" style={{ fontSize: 12 }}>Show, hide &amp; reorder</span></div>
+          <div className="cv-list">
+            {ordered.map((id, i) => (
+              <div key={id} className="cv-row">
+                <label className="cv-check">
+                  <input type="checkbox" checked={!prefs.hidden.includes(id)} onChange={() => toggle(id)} />
+                  <span>{METRIC_LABELS[id]}</span>
+                </label>
+                <span className="cv-move">
+                  <button type="button" className="icon-btn" disabled={i === 0} title="Move up" onClick={() => move(id, -1)}>↑</button>
+                  <button type="button" className="icon-btn" disabled={i === ordered.length - 1} title="Move down" onClick={() => move(id, 1)}>↓</button>
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="cv-foot">
+            <button type="button" className="small" disabled={isDefault} onClick={() => onChange({ order: [], hidden: [] })}>Restore default</button>
+          </div>
+        </div>
       )}
     </div>
   );
