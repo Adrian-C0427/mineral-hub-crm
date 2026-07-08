@@ -57,16 +57,18 @@ function compareValues(a: unknown, b: unknown, type: SortType): number {
 // Customize View — persisted per-table column layout (order + hidden columns).
 // ---------------------------------------------------------------------------
 
-interface ColPrefs { order: string[]; hidden: string[]; widths: Record<string, number> }
+interface ColPrefs { order: string[]; hidden: string[]; widths: Record<string, number>; pinned: string[] }
 const colKey = (id: string) => `mh-cols:v1:${id}`;
 function loadColPrefs(id: string): ColPrefs {
-  try { const raw = localStorage.getItem(colKey(id)); if (raw) { const p = JSON.parse(raw) as Partial<ColPrefs>; return { order: p.order ?? [], hidden: p.hidden ?? [], widths: p.widths ?? {} }; } } catch { /* ignore */ }
-  return { order: [], hidden: [], widths: {} };
+  try { const raw = localStorage.getItem(colKey(id)); if (raw) { const p = JSON.parse(raw) as Partial<ColPrefs>; return { order: p.order ?? [], hidden: p.hidden ?? [], widths: p.widths ?? {}, pinned: p.pinned ?? [] }; } } catch { /* ignore */ }
+  return { order: [], hidden: [], widths: {}, pinned: [] };
 }
 const MIN_COL_W = 64;
+// Pinned columns get a fixed width so their sticky left-offsets are exact.
+const PIN_DEFAULT_W = 160;
 
 function useColumnPrefs<T>(customizeId: string | undefined, columns: Column<T>[]) {
-  const [prefs, setPrefs] = useState<ColPrefs>(() => (customizeId ? loadColPrefs(customizeId) : { order: [], hidden: [], widths: {} }));
+  const [prefs, setPrefs] = useState<ColPrefs>(() => (customizeId ? loadColPrefs(customizeId) : { order: [], hidden: [], widths: {}, pinned: [] }));
   // Reload when the table identity changes (e.g. remounted for another list).
   useEffect(() => { if (customizeId) setPrefs(loadColPrefs(customizeId)); }, [customizeId]);
   useEffect(() => { if (customizeId) { try { localStorage.setItem(colKey(customizeId), JSON.stringify(prefs)); } catch { /* ignore */ } } }, [customizeId, prefs]);
@@ -83,7 +85,13 @@ function useColumnPrefs<T>(customizeId: string | undefined, columns: Column<T>[]
   }, [columns, prefs.order, customizeId]);
 
   const hidden = new Set(prefs.hidden);
-  const visible = customizeId ? ordered.filter((c) => !hidden.has(c.key)) : columns;
+  const orderedVisible = customizeId ? ordered.filter((c) => !hidden.has(c.key)) : columns;
+  // Pinned (visible) columns render first, in pin order; the rest follow.
+  const pinnedKeys = customizeId ? prefs.pinned.filter((k) => orderedVisible.some((c) => c.key === k)) : [];
+  const pinnedSet = new Set(pinnedKeys);
+  const visible = pinnedKeys.length
+    ? [...pinnedKeys.map((k) => orderedVisible.find((c) => c.key === k)!).filter(Boolean), ...orderedVisible.filter((c) => !pinnedSet.has(c.key))]
+    : orderedVisible;
 
   const toggle = (key: string) => setPrefs((p) => ({ ...p, hidden: p.hidden.includes(key) ? p.hidden.filter((k) => k !== key) : [...p.hidden, key] }));
   const move = (key: string, dir: -1 | 1) => setPrefs((p) => {
@@ -94,17 +102,24 @@ function useColumnPrefs<T>(customizeId: string | undefined, columns: Column<T>[]
     return { ...p, order: keys };
   });
   const setWidth = (key: string, w: number) => setPrefs((p) => ({ ...p, widths: { ...p.widths, [key]: Math.max(MIN_COL_W, Math.round(w)) } }));
-  const reset = () => setPrefs({ order: [], hidden: [], widths: {} });
-  const isDefault = prefs.order.length === 0 && prefs.hidden.length === 0 && Object.keys(prefs.widths).length === 0;
+  const togglePin = (key: string) => setPrefs((p) => {
+    if (p.pinned.includes(key)) return { ...p, pinned: p.pinned.filter((k) => k !== key) };
+    // Pin: give the column a fixed width (if none yet) so sticky offsets are exact.
+    return { ...p, pinned: [...p.pinned, key], widths: p.widths[key] != null ? p.widths : { ...p.widths, [key]: PIN_DEFAULT_W } };
+  });
+  const reset = () => setPrefs({ order: [], hidden: [], widths: {}, pinned: [] });
+  const isDefault = prefs.order.length === 0 && prefs.hidden.length === 0 && Object.keys(prefs.widths).length === 0 && prefs.pinned.length === 0;
 
-  return { ordered, visible, hidden, widths: prefs.widths, toggle, move, setWidth, reset, isDefault };
+  return { ordered, visible, hidden, widths: prefs.widths, pinnedKeys, pinnedSet, toggle, move, setWidth, togglePin, reset, isDefault };
 }
 
-function ColumnCustomizer<T>({ ordered, hidden, onToggle, onMove, onReset, isDefault }: {
+function ColumnCustomizer<T>({ ordered, hidden, pinnedSet, onToggle, onMove, onPin, onReset, isDefault }: {
   ordered: Column<T>[];
   hidden: Set<string>;
+  pinnedSet: Set<string>;
   onToggle: (key: string) => void;
   onMove: (key: string, dir: -1 | 1) => void;
+  onPin: (key: string) => void;
   onReset: () => void;
   isDefault: boolean;
 }) {
@@ -130,10 +145,11 @@ function ColumnCustomizer<T>({ ordered, hidden, onToggle, onMove, onReset, isDef
       </button>
       {open && (
         <div className="cv-menu" role="dialog" aria-label="Customize columns">
-          <div className="cv-head"><strong>Columns</strong><span className="muted" style={{ fontSize: 12 }}>Show, hide &amp; reorder</span></div>
+          <div className="cv-head"><strong>Columns</strong><span className="muted" style={{ fontSize: 12 }}>Show, hide, pin &amp; reorder</span></div>
           <div className="cv-list">
             {listed.map((c, i) => {
               const on = !hidden.has(c.key);
+              const pinned = pinnedSet.has(c.key);
               return (
                 <div key={c.key} className="cv-row">
                   <label className="cv-check">
@@ -141,6 +157,9 @@ function ColumnCustomizer<T>({ ordered, hidden, onToggle, onMove, onReset, isDef
                     <span>{c.header}{c.required ? " *" : ""}</span>
                   </label>
                   <span className="cv-move">
+                    <button type="button" className={`icon-btn ${pinned ? "on" : ""}`} title={pinned ? "Unpin column" : "Pin column to the left"} aria-pressed={pinned} onClick={() => onPin(c.key)}>
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill={pinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2"><path d="M12 17v5" /><path d="M9 10.76V4a1 1 0 011-1h4a1 1 0 011 1v6.76a2 2 0 00.55 1.38l1.9 1.9A1 1 0 0117.65 17H6.35a1 1 0 01-.7-1.96l1.9-1.9A2 2 0 009 10.76z" /></svg>
+                    </button>
                     <button type="button" className="icon-btn" disabled={i === 0} title="Move up" onClick={() => onMove(c.key, -1)}>↑</button>
                     <button type="button" className="icon-btn" disabled={i === listed.length - 1} title="Move down" onClick={() => onMove(c.key, 1)}>↓</button>
                   </span>
@@ -172,8 +191,21 @@ export function SortableTable<T>({
   customizeId,
 }: Props<T>) {
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(defaultSort ?? null);
-  const { ordered, visible, hidden, widths, toggle, move, setWidth, reset, isDefault } = useColumnPrefs(customizeId, columns);
+  const { ordered, visible, hidden, widths, pinnedKeys, pinnedSet, toggle, move, setWidth, togglePin, reset, isDefault } = useColumnPrefs(customizeId, columns);
   const cols = visible;
+
+  // Cumulative left offsets for user-pinned columns (they render first). Their
+  // widths are fixed on pin, so the offsets are exact. When any column is pinned
+  // we drive stickiness explicitly instead of the default lead-sticky CSS.
+  const hasPins = pinnedKeys.length > 0;
+  const selW = selection ? 44 : 0;
+  const pinLeft: Record<string, number> = {};
+  {
+    let acc = selW;
+    for (const key of pinnedKeys) { pinLeft[key] = acc; acc += widths[key] ?? PIN_DEFAULT_W; }
+  }
+  const pinStyle = (key: string, head: boolean): React.CSSProperties | undefined =>
+    pinnedSet.has(key) ? { position: "sticky", left: pinLeft[key], zIndex: head ? 4 : 3, background: head ? "var(--panel-2)" : "var(--panel)" } : undefined;
 
   // Drag a header's right edge to resize the column (Customize View only).
   function startResize(e: React.PointerEvent, key: string) {
@@ -213,15 +245,16 @@ export function SortableTable<T>({
 
   const table = (
     <div className="table-scroll">
-      {/* lead-sticky pins the identifying column(s) while wide tables scroll. */}
-      <table className={`data-table lead-sticky${selection ? " has-sel" : ""}`}>
+      {/* lead-sticky pins the identifying column while wide tables scroll; when
+          the user pins columns explicitly, we drive stickiness inline instead. */}
+      <table className={`data-table${hasPins ? "" : " lead-sticky"}${selection ? " has-sel" : ""}`}>
         <thead>
           <tr>
             {selection && (() => {
               const ids = sorted.map(rowKey);
               const allSelected = ids.length > 0 && ids.every((id) => selection.selected.has(id));
               return (
-                <th className="center" style={{ width: 36 }}>
+                <th className="center" style={{ width: 36, ...(hasPins ? { position: "sticky", left: 0, zIndex: 4, background: "var(--panel-2)" } : {}) }}>
                   <input type="checkbox" checked={allSelected} onChange={() => selection.onToggleAll(ids)} aria-label="Select all" />
                 </th>
               );
@@ -229,13 +262,14 @@ export function SortableTable<T>({
             {cols.map((c) => {
               const active = sort?.key === c.key;
               const w = widths[c.key];
-              const style = w != null ? { width: w, minWidth: w, maxWidth: w } : (c.width ? { width: c.width } : undefined);
+              const wStyle = w != null ? { width: w, minWidth: w, maxWidth: w } : (c.width ? { width: c.width } : undefined);
+              const pinned = pinnedSet.has(c.key);
               return (
                 <th
                   key={c.key}
                   onClick={() => onHeaderClick(c.key)}
-                  className={`sortable ${c.align ?? "left"} ${active ? "active" : ""}`}
-                  style={style}
+                  className={`sortable ${c.align ?? "left"} ${active ? "active" : ""} ${pinned ? "cv-pin" : ""} ${pinned && c.key === pinnedKeys[pinnedKeys.length - 1] ? "cv-pin-last" : ""}`}
+                  style={{ ...wStyle, ...pinStyle(c.key, true) }}
                 >
                   <span className="th-inner">
                     {c.header}
@@ -271,15 +305,17 @@ export function SortableTable<T>({
                 className={`${onRowClick ? "clickable" : ""} ${rowClassName?.(row) ?? ""} ${selection?.selected.has(id) ? "row-selected" : ""}`}
               >
                 {selection && (
-                  <td className="center" onClick={(e) => e.stopPropagation()}>
+                  <td className="center" onClick={(e) => e.stopPropagation()} style={hasPins ? { position: "sticky", left: 0, zIndex: 3, background: "var(--panel)" } : undefined}>
                     <input type="checkbox" checked={selection.selected.has(id)} onChange={() => selection.onToggle(id)} aria-label="Select row" />
                   </td>
                 )}
                 {cols.map((c, ci) => {
                   const cell = c.render ? c.render(row) : displayDefault(c.value(row));
                   const w = widths[c.key];
+                  const wStyle = w != null ? { width: w, minWidth: w, maxWidth: w } : undefined;
+                  const pinned = pinnedSet.has(c.key);
                   return (
-                    <td key={c.key} className={c.align ?? "left"} style={w != null ? { width: w, minWidth: w, maxWidth: w } : undefined}>
+                    <td key={c.key} className={`${c.align ?? "left"} ${pinned ? "cv-pin" : ""} ${pinned && c.key === pinnedKeys[pinnedKeys.length - 1] ? "cv-pin-last" : ""}`} style={{ ...wStyle, ...pinStyle(c.key, false) }}>
                       {rowHref && ci === 0
                         ? <Link to={rowHref(row)} className="row-link" onClick={(e) => e.stopPropagation()}>{cell}</Link>
                         : cell}
@@ -298,7 +334,7 @@ export function SortableTable<T>({
   return (
     <div className="cv-table">
       <div className="cv-toolbar">
-        <ColumnCustomizer ordered={ordered} hidden={hidden} onToggle={toggle} onMove={move} onReset={reset} isDefault={isDefault} />
+        <ColumnCustomizer ordered={ordered} hidden={hidden} pinnedSet={pinnedSet} onToggle={toggle} onMove={move} onPin={togglePin} onReset={reset} isDefault={isDefault} />
       </div>
       {table}
     </div>
