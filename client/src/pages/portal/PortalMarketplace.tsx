@@ -20,6 +20,7 @@ type DockSide = "left" | "right";
 // portal is unauthenticated, so this lives in the browser (per org), not on the
 // server.
 interface FilterSnapshot {
+  q: string;
   states: string[]; counties: string[]; basins: string[]; formations: string[];
   assetTypes: string[]; operators: string[]; nraMin: string; nraMax: string; sort: SortKey;
 }
@@ -61,6 +62,7 @@ export function PortalMarketplace() {
   const wsRef = useRef<HTMLDivElement>(null);
 
   const [sort, setSort] = useState<SortKey>("featured");
+  const [q, setQ] = useState("");
   const [fStates, setFStates] = useState<string[]>([]);
   const [fCounties, setFCounties] = useState<string[]>([]);
   const [fBasins, setFBasins] = useState<string[]>([]);
@@ -73,11 +75,12 @@ export function PortalMarketplace() {
   const [presetName, setPresetName] = useState("");
 
   const snapshot = useMemo<FilterSnapshot>(() => ({
-    states: fStates, counties: fCounties, basins: fBasins, formations: fFormations,
+    q, states: fStates, counties: fCounties, basins: fBasins, formations: fFormations,
     assetTypes: fAssetTypes, operators: fOperators, nraMin, nraMax, sort,
-  }), [fStates, fCounties, fBasins, fFormations, fAssetTypes, fOperators, nraMin, nraMax, sort]);
+  }), [q, fStates, fCounties, fBasins, fFormations, fAssetTypes, fOperators, nraMin, nraMax, sort]);
 
   function applySnapshot(f: Partial<FilterSnapshot>) {
+    setQ(f.q ?? "");
     setFStates(f.states ?? []); setFCounties(f.counties ?? []); setFBasins(f.basins ?? []);
     setFFormations(f.formations ?? []); setFAssetTypes(f.assetTypes ?? []); setFOperators(f.operators ?? []);
     setNraMin(f.nraMin ?? ""); setNraMax(f.nraMax ?? ""); setSort(f.sort ?? "featured");
@@ -85,7 +88,7 @@ export function PortalMarketplace() {
   const activeFilterCount =
     fStates.length + fCounties.length + fBasins.length + fFormations.length +
     fAssetTypes.length + fOperators.length + (nraMin ? 1 : 0) + (nraMax ? 1 : 0);
-  const hasFilters = activeFilterCount > 0;
+  const hasFilters = activeFilterCount > 0 || q.trim() !== "";
 
   useEffect(() => {
     portalGet<{ org: PortalOrg; deals: PortalDeal[] }>(`/${encodeURIComponent(orgSlug)}`)
@@ -142,7 +145,19 @@ export function PortalMarketplace() {
 
   const filtered = useMemo(() => {
     const min = Number(nraMin) || 0, max = Number(nraMax) || Infinity;
+    // Global search: every whitespace-separated term must appear somewhere in the
+    // listing's searchable text (name, geography, operator, RRC, asset details…).
+    const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+    const matchesQuery = (d: PortalDeal) => {
+      if (!terms.length) return true;
+      const hay = [
+        d.name, d.summary ?? "", d.operator ?? "", d.rrc ?? "",
+        ...d.counties, ...d.states, ...d.abstractIds, ...d.basins, ...d.formations, ...d.assetTypes,
+      ].join("  ").toLowerCase();
+      return terms.every((t) => hay.includes(t));
+    };
     const hit = (d: PortalDeal) =>
+      matchesQuery(d) &&
       (!fStates.length || d.states.some((s) => fStates.includes(s))) &&
       (!fCounties.length || d.counties.some((c) => fCounties.includes(c))) &&
       (!fBasins.length || d.basins.some((b) => fBasins.includes(b))) &&
@@ -158,7 +173,7 @@ export function PortalMarketplace() {
       name: (a, b) => a.name.localeCompare(b.name),
     };
     return rows.sort(cmp[sort]);
-  }, [deals, fStates, fCounties, fBasins, fFormations, fAssetTypes, fOperators, nraMin, nraMax, sort]);
+  }, [deals, q, fStates, fCounties, fBasins, fFormations, fAssetTypes, fOperators, nraMin, nraMax, sort]);
 
   if (error) return <PortalShell><div className="panel" style={{ textAlign: "center", padding: 48 }}><h2>Portal unavailable</h2><p className="muted">{error}</p></div></PortalShell>;
 
@@ -173,6 +188,17 @@ export function PortalMarketplace() {
 
       {/* Collapsible filters + workspace controls (map-first: filters stay out of the way). */}
       <div className="panel mkt-controls">
+        <div className="mkt-search-row">
+          <svg className="mkt-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+          <input
+            className="mkt-search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Search opportunities — name, county, abstract, operator, basin, formation, RRC…"
+            aria-label="Search opportunities"
+          />
+          {q && <button type="button" className="mkt-search-clear" onClick={() => setQ("")} title="Clear search" aria-label="Clear search">×</button>}
+        </div>
         <div className="mkt-controls-bar">
           <button className="small" onClick={() => setShowFilters((s) => !s)}>
             {showFilters ? "▾" : "▸"} Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}

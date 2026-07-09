@@ -8,7 +8,7 @@ import type { DealSummary } from "../types";
 
 export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCreated: (d: DealSummary) => void }) {
   const [f, setF] = useState({
-    name: "", operator: "",
+    name: "", operator: "", rrc: "",
     acreageNma: "", nra: "", askPrice: "", ourPrice: "", estimatedClosingCosts: "",
     dateUnderContract: "", originalClosingDate: "", notes: "",
   });
@@ -46,6 +46,7 @@ export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCr
         states, state: states[0] ?? null,
         counties, basins, formations, assetTypes, abstractIds,
         operator: f.operator || null,
+        rrc: f.rrc || null,
         acreageNma: numOrNull(f.acreageNma),
         nra: numOrNull(f.nra),
         askPrice: numOrNull(f.askPrice),
@@ -97,6 +98,7 @@ export function NewDealModal({ onClose, onCreated }: { onClose: () => void; onCr
         <div className="field"><label>Basin</label><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(counties))} value={basins} onChange={setBasins} placeholder={counties.length ? "Suggested for your counties first…" : "Search basins…"} /></div>
         <div className="field"><label>Formation</label><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(counties))} value={formations} onChange={setFormations} placeholder={counties.length ? "Suggested for your counties first…" : "Search formations…"} /></div>
         <div className="field"><label>Operator</label><input value={f.operator} onChange={set("operator")} /></div>
+        <div className="field"><label>RRC</label><input value={f.rrc} onChange={set("rrc")} placeholder="RRC lease / district / operator no." /></div>
         <div className="field"><label>NMA</label><input type="number" value={f.acreageNma} onChange={set("acreageNma")} /></div>
         <div className="field"><label>Ask Price (to buyers)</label><input type="number" value={f.askPrice} onChange={set("askPrice")} /></div>
         <div className="field"><label>Est. Closing Costs</label><input type="number" value={f.estimatedClosingCosts} onChange={set("estimatedClosingCosts")} /></div>

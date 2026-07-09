@@ -4,6 +4,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Briefcase, Workflow, Users, Map as MapIcon, BarChart3, Telescope, TrendingDown,
   Layers, Receipt, Store, Settings as SettingsIcon, ChevronRight, ChevronDown, LogOut,
+  PanelLeftClose, PanelLeftOpen,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
@@ -92,8 +93,8 @@ export function Sidebar() {
           if (logo) return <img className={`sidebar-logo ${collapsed ? "compact" : ""}`} src={logo} alt={org?.name ?? "Company logo"} />;
           return <span className="brand">{collapsed ? "MH" : <>Mineral Hub<span className="dot">.</span></>}</span>;
         })()}
-        <button className="icon-btn sidebar-toggle" onClick={toggleCollapsed} title={collapsed ? "Expand" : "Collapse"} aria-label="Toggle sidebar">
-          {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} style={{ transform: "rotate(90deg)" }} />}
+        <button className="sidebar-toggle" onClick={toggleCollapsed} title={collapsed ? "Expand navigation" : "Collapse navigation"} aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}>
+          {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
         </button>
       </div>
 

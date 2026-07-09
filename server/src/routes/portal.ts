@@ -34,7 +34,7 @@ function publicDeal(d: {
   name: string; portalSlug: string | null; portalSummary: string | null; portalFeatured: boolean;
   counties: string[]; states: string[]; state: string | null; abstractIds: string[];
   basins: string[]; formations: string[]; assetTypes: string[]; surveys: string[];
-  nra: number | null; acreageNma: number | null; operator: string | null;
+  nra: number | null; acreageNma: number | null; operator: string | null; rrc?: string | null;
   wells: string[]; producingStatus: string | null; updatedAt: Date;
   portalAskPrice?: number | null; askPrice?: number | null;
 }) {
@@ -53,6 +53,7 @@ function publicDeal(d: {
     nra: d.nra,
     acreageNma: d.acreageNma,
     operator: d.operator,
+    rrc: d.rrc ?? null,
     wells: d.wells,
     producingStatus: d.producingStatus,
     askPrice: d.portalAskPrice ?? d.askPrice ?? null,

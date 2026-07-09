@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Sun, Moon } from "lucide-react";
 import { api } from "../api/client";
@@ -94,11 +94,15 @@ const WIDGET_LABELS: Record<WidgetId, string> = {
   activity: "Recent activity", buyers: "Top buyers", followups: "Upcoming follow-ups",
 };
 const DEFAULT_WIDGETS: WidgetId[] = ["kpis", "profit", "stages", "activity", "buyers", "followups"];
-interface DashPrefs { order: WidgetId[]; hidden: WidgetId[] }
+type WidgetSpan = "full" | "half";
+// Default column span per widget; a user can override any of these (except the
+// KPI row, which always spans full width) in Customize mode.
+const DEFAULT_SPAN: Record<WidgetId, WidgetSpan> = { kpis: "full", profit: "half", stages: "half", activity: "half", buyers: "half", followups: "full" };
+interface DashPrefs { order: WidgetId[]; hidden: WidgetId[]; spans: Partial<Record<WidgetId, WidgetSpan>> }
 const DASH_KEY = "mh-dashboard:v1";
 function loadDashPrefs(): DashPrefs {
-  try { const raw = localStorage.getItem(DASH_KEY); if (raw) { const p = JSON.parse(raw) as Partial<DashPrefs>; return { order: p.order ?? [], hidden: p.hidden ?? [] }; } } catch { /* ignore */ }
-  return { order: [], hidden: [] };
+  try { const raw = localStorage.getItem(DASH_KEY); if (raw) { const p = JSON.parse(raw) as Partial<DashPrefs>; return { order: p.order ?? [], hidden: p.hidden ?? [], spans: p.spans ?? {} }; } } catch { /* ignore */ }
+  return { order: [], hidden: [], spans: {} };
 }
 
 export function Dashboard() {
@@ -106,6 +110,9 @@ export function Dashboard() {
   const [period, setPeriod] = useState<DashPeriod>("YTD");
   const { theme, toggleTheme } = useTheme();
   const [prefs, setPrefs] = useState<DashPrefs>(loadDashPrefs);
+  const [customizing, setCustomizing] = useState(false);
+  const [dragId, setDragId] = useState<WidgetId | null>(null);
+  const [dragOverId, setDragOverId] = useState<WidgetId | null>(null);
   useEffect(() => { try { localStorage.setItem(DASH_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } }, [prefs]);
 
   useEffect(() => { api.get<DashboardData>(`/dashboard?period=${period}`).then(setD); }, [period]);
@@ -237,9 +244,26 @@ export function Dashboard() {
       </div>
     ),
   };
-  const widgetSpan: Record<WidgetId, "full" | "half"> = { kpis: "full", profit: "half", stages: "half", activity: "half", buyers: "half", followups: "full" };
   const orderedIds: WidgetId[] = [...prefs.order.filter((id) => DEFAULT_WIDGETS.includes(id)), ...DEFAULT_WIDGETS.filter((id) => !prefs.order.includes(id))];
   const visibleIds = orderedIds.filter((id) => !prefs.hidden.includes(id));
+  const hiddenIds = orderedIds.filter((id) => prefs.hidden.includes(id));
+  const spanOf = (id: WidgetId): WidgetSpan => prefs.spans[id] ?? DEFAULT_SPAN[id];
+  const isDefaultLayout = prefs.order.length === 0 && prefs.hidden.length === 0 && Object.keys(prefs.spans).length === 0;
+
+  // Customize mode: drag to reorder, resize (full ⇄ half), hide/show. Everything
+  // persists automatically via the prefs effect above; Restore returns to default.
+  const reorder = (dragId: WidgetId, overId: WidgetId) => {
+    if (dragId === overId) return;
+    const keys = [...orderedIds];
+    const from = keys.indexOf(dragId), to = keys.indexOf(overId);
+    if (from < 0 || to < 0) return;
+    keys.splice(from, 1);
+    keys.splice(to, 0, dragId);
+    setPrefs({ ...prefs, order: keys });
+  };
+  const toggleSpan = (id: WidgetId) => setPrefs({ ...prefs, spans: { ...prefs.spans, [id]: spanOf(id) === "full" ? "half" : "full" } });
+  const hideWidget = (id: WidgetId) => setPrefs({ ...prefs, hidden: [...prefs.hidden, id] });
+  const showWidget = (id: WidgetId) => setPrefs({ ...prefs, hidden: prefs.hidden.filter((k) => k !== id) });
 
   return (
     <div className="page">
@@ -250,7 +274,10 @@ export function Dashboard() {
         </div>
         <div className="row" style={{ gap: 10 }}>
           <PeriodSegmented options={DASH_PERIODS} value={period} onChange={setPeriod} compact />
-          <DashboardCustomize prefs={prefs} onChange={setPrefs} />
+          <button type="button" className={`dash-cz-toggle ${customizing ? "active" : ""}`} onClick={() => setCustomizing((c) => !c)} title="Customize dashboard layout">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
+            <span>{customizing ? "Done" : "Customize"}</span>
+          </button>
           <button className="dash-icon-btn" title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} onClick={toggleTheme}>
             {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
           </button>
@@ -276,66 +303,60 @@ export function Dashboard() {
 
       {overdueAlert}
 
-      {visibleIds.length === 0 ? (
-        <div className="panel"><p className="muted" style={{ margin: 0 }}>All widgets are hidden. Use <strong>Customize View</strong> to bring them back.</p></div>
-      ) : (
-        <div className="dash-grid">
-          {visibleIds.map((id) => (
-            <div key={id} className={`dash-w ${widgetSpan[id]}`}>{widgetNodes[id]}</div>
+      {customizing && (
+        <div className="panel dash-cz-banner">
+          <span className="dash-cz-banner-text">
+            <strong>Customizing dashboard</strong> — drag widgets to reorder, resize, or hide. Changes save automatically.
+          </span>
+          <span className="row" style={{ gap: 8, marginLeft: "auto" }}>
+            <button type="button" className="small" disabled={isDefaultLayout} onClick={() => setPrefs({ order: [], hidden: [], spans: {} })}>Restore default</button>
+            <button type="button" className="small primary" onClick={() => setCustomizing(false)}>Done</button>
+          </span>
+        </div>
+      )}
+
+      {customizing && hiddenIds.length > 0 && (
+        <div className="panel dash-cz-tray">
+          <span className="muted" style={{ fontSize: 13 }}>Hidden widgets:</span>
+          {hiddenIds.map((id) => (
+            <button key={id} type="button" className="dash-cz-chip" onClick={() => showWidget(id)}>+ {WIDGET_LABELS[id]}</button>
           ))}
         </div>
       )}
-    </div>
-  );
-}
 
-/** Customize View popover for the Dashboard (show/hide + reorder widgets). */
-function DashboardCustomize({ prefs, onChange }: { prefs: DashPrefs; onChange: (p: DashPrefs) => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
-  }, [open]);
-
-  const ordered: WidgetId[] = [...prefs.order.filter((id) => DEFAULT_WIDGETS.includes(id)), ...DEFAULT_WIDGETS.filter((id) => !prefs.order.includes(id))];
-  const toggle = (id: WidgetId) => onChange({ ...prefs, hidden: prefs.hidden.includes(id) ? prefs.hidden.filter((k) => k !== id) : [...prefs.hidden, id] });
-  const move = (id: WidgetId, dir: -1 | 1) => {
-    const keys = [...ordered]; const i = keys.indexOf(id); const j = i + dir;
-    if (j < 0 || j >= keys.length) return;
-    [keys[i], keys[j]] = [keys[j], keys[i]];
-    onChange({ ...prefs, order: keys });
-  };
-  const isDefault = prefs.order.length === 0 && prefs.hidden.length === 0;
-
-  return (
-    <div className="cv-wrap" ref={ref}>
-      <button type="button" className={`dash-icon-btn cv-btn ${open ? "active" : ""}`} onClick={() => setOpen((o) => !o)} title="Customize dashboard">
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
-      </button>
-      {open && (
-        <div className="cv-menu" role="dialog" aria-label="Customize dashboard">
-          <div className="cv-head"><strong>Widgets</strong><span className="muted" style={{ fontSize: 12 }}>Show, hide &amp; reorder</span></div>
-          <div className="cv-list">
-            {ordered.map((id, i) => (
-              <div key={id} className="cv-row">
-                <label className="cv-check">
-                  <input type="checkbox" checked={!prefs.hidden.includes(id)} onChange={() => toggle(id)} />
-                  <span>{WIDGET_LABELS[id]}</span>
-                </label>
-                <span className="cv-move">
-                  <button type="button" className="icon-btn" disabled={i === 0} title="Move up" onClick={() => move(id, -1)}>↑</button>
-                  <button type="button" className="icon-btn" disabled={i === ordered.length - 1} title="Move down" onClick={() => move(id, 1)}>↓</button>
-                </span>
-              </div>
-            ))}
-          </div>
-          <div className="cv-foot">
-            <button type="button" className="small" disabled={isDefault} onClick={() => onChange({ order: [], hidden: [] })}>Restore default</button>
-          </div>
+      {visibleIds.length === 0 && !customizing ? (
+        <div className="panel"><p className="muted" style={{ margin: 0 }}>All widgets are hidden. Use <strong>Customize</strong> to bring them back.</p></div>
+      ) : (
+        <div className={`dash-grid ${customizing ? "customizing" : ""}`}>
+          {visibleIds.map((id) => (
+            <div
+              key={id}
+              className={`dash-w ${spanOf(id)} ${customizing ? "cz" : ""} ${dragId === id ? "dragging" : ""} ${dragOverId === id ? "drag-over" : ""}`}
+              draggable={customizing}
+              onDragStart={(e) => { if (customizing) { setDragId(id); e.dataTransfer.effectAllowed = "move"; } }}
+              onDragEnd={() => { setDragId(null); setDragOverId(null); }}
+              onDragOver={(e) => { if (customizing && dragId && dragId !== id) { e.preventDefault(); setDragOverId(id); } }}
+              onDrop={(e) => { if (customizing && dragId) { e.preventDefault(); reorder(dragId, id); setDragId(null); setDragOverId(null); } }}
+            >
+              {customizing && (
+                <div className="dash-cz-cover">
+                  <div className="dash-cz-bar">
+                    <span className="dash-cz-handle" aria-hidden="true">⠿</span>
+                    <span className="dash-cz-name">{WIDGET_LABELS[id]}</span>
+                    <span className="dash-cz-actions">
+                      {id !== "kpis" && (
+                        <button type="button" className="dash-cz-btn" onClick={() => toggleSpan(id)} title={spanOf(id) === "full" ? "Make half width" : "Make full width"}>
+                          {spanOf(id) === "full" ? "◧ Half" : "▭ Full"}
+                        </button>
+                      )}
+                      <button type="button" className="dash-cz-btn" onClick={() => hideWidget(id)} title="Hide widget">✕ Hide</button>
+                    </span>
+                  </div>
+                </div>
+              )}
+              {widgetNodes[id]}
+            </div>
+          ))}
         </div>
       )}
     </div>
