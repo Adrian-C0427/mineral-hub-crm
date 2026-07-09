@@ -4,6 +4,7 @@ import { parse } from "csv-parse/sync";
 import { prisma } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { MAX_CSV_CHARS } from "../config.js";
 import { normalizeCompany } from "../serializers.js";
 import { normalizePhoneNullable } from "../domain/phone.js";
 
@@ -104,7 +105,7 @@ function buildBuyer(row: Record<string, string>, mapping: Record<string, string>
 importRouter.post(
   "/analyze",
   asyncHandler(async (req, res) => {
-    const { csv } = z.object({ csv: z.string().min(1) }).parse(req.body);
+    const { csv } = z.object({ csv: z.string().min(1).max(MAX_CSV_CHARS, "CSV file is too large") }).parse(req.body);
     const { headers, rows } = parseCsv(csv);
     res.json({
       headers,
@@ -117,7 +118,7 @@ importRouter.post(
 );
 
 const commitSchema = z.object({
-  csv: z.string().min(1),
+  csv: z.string().min(1).max(MAX_CSV_CHARS, "CSV file is too large"),
   mapping: z.record(z.string(), z.string()),
 });
 

@@ -29,6 +29,13 @@ export const LOGIN_RATE_LIMIT = {
 
 export const BCRYPT_COST = 12;
 
+// Upper bound on a CSV import payload (characters ≈ bytes for ASCII data). The
+// global express.json limit already caps a request at 25 MB; this tighter,
+// schema-level bound rejects oversized imports with a clean 400 before the file
+// is parsed synchronously into memory, so a permitted user can't drive memory
+// pressure by repeatedly submitting near-transport-limit CSVs.
+export const MAX_CSV_CHARS = 15_000_000;
+
 function required(name: string, fallback?: string): string {
   const v = process.env[name] ?? fallback;
   if (v === undefined) {
