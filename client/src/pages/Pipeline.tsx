@@ -27,7 +27,7 @@ const TRANSITIONS: { stage: Stage; label: string; hint: string }[] = [
 // the gesture is treated as a click (navigate to the deal).
 const DRAG_THRESHOLD = 5;
 
-interface DragState { id: string; w: number; offX: number; offY: number; x: number; y: number; moved: boolean }
+interface DragState { id: string; w: number; offX: number; offY: number; moved: boolean }
 
 // ---------------------------------------------------------------------------
 // Customize View — the buyer tailors what deal cards show + how dense they are.
@@ -83,6 +83,10 @@ export function Pipeline() {
   // Latest state for the window pointer handlers (which are bound once per drag).
   const dragRef = useRef<DragState | null>(null);
   const overRef = useRef<Stage | null>(null);
+  // Live pointer position + the floating clone element — updated directly during
+  // a drag so the board doesn't re-render on every pointermove (the lag source).
+  const posRef = useRef({ x: 0, y: 0 });
+  const cloneRef = useRef<HTMLDivElement>(null);
   dragRef.current = drag;
   overRef.current = overCol;
 
@@ -96,23 +100,33 @@ export function Pipeline() {
     if (!canMove || e.button !== 0) return;
     if ((e.target as HTMLElement).closest(".dc-move")) return; // the ⋯ menu button
     const card = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    setDrag({ id: deal.id, w: card.width, offX: e.clientX - card.left, offY: e.clientY - card.top, x: e.clientX, y: e.clientY, moved: false });
+    const offX = e.clientX - card.left, offY = e.clientY - card.top;
+    const start = { x: e.clientX, y: e.clientY };
+    posRef.current = start;
+    setDrag({ id: deal.id, w: card.width, offX, offY, moved: false });
 
     const onMove = (ev: PointerEvent) => {
       const d = dragRef.current;
       if (!d) return;
-      const moved = d.moved || Math.hypot(ev.clientX - (d.x - 0), ev.clientY - (d.y - 0)) > DRAG_THRESHOLD || Math.abs(ev.clientX - card.left - d.offX) > DRAG_THRESHOLD;
-      // Detect the column/transition under the pointer via a data-stage attribute.
-      const el = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
-      const zone = el?.closest("[data-stage]") as HTMLElement | null;
-      const stage = (zone?.getAttribute("data-stage") as Stage | null) ?? null;
-      overRef.current = stage;
-      setOverCol(stage);
-      setDrag((prev) => (prev ? { ...prev, x: ev.clientX, y: ev.clientY, moved: prev.moved || moved } : prev));
+      posRef.current = { x: ev.clientX, y: ev.clientY };
+      // Move the floating clone directly — no React re-render of the board.
+      const el = cloneRef.current;
+      if (el) { el.style.left = `${ev.clientX - d.offX}px`; el.style.top = `${ev.clientY - d.offY}px`; }
+      // Promote press → drag once, past the threshold (one state update, then none).
+      if (!d.moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) > DRAG_THRESHOLD) {
+        document.body.classList.add("pipeline-dragging");
+        setDrag((prev) => (prev ? { ...prev, moved: true } : prev));
+      }
+      // Re-render only when the hovered column/transition actually changes.
+      const under = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
+      const stage = (under?.closest("[data-stage]")?.getAttribute("data-stage") as Stage | null) ?? null;
+      if (stage !== overRef.current) setOverCol(stage);
     };
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      document.body.classList.remove("pipeline-dragging");
+      window.getSelection()?.removeAllRanges(); // clear any stray text selection from the drag
       const d = dragRef.current;
       const target = overRef.current;
       setDrag(null); setOverCol(null);
@@ -185,9 +199,10 @@ export function Pipeline() {
         })}
       </div>
 
-      {/* Floating clone follows the cursor for a natural, lag-free drag. */}
+      {/* Floating clone follows the cursor for a natural, lag-free drag. Its
+          position is updated imperatively (cloneRef) during the drag. */}
       {drag && drag.moved && dragDeal && (
-        <div className="deal-card drag-clone" style={{ position: "fixed", left: drag.x - drag.offX, top: drag.y - drag.offY, width: drag.w, pointerEvents: "none", zIndex: 1000 }}>
+        <div ref={cloneRef} className="deal-card drag-clone" style={{ position: "fixed", left: posRef.current.x - drag.offX, top: posRef.current.y - drag.offY, width: drag.w, pointerEvents: "none", zIndex: 1000 }}>
           <CardBody deal={dragDeal} fields={prefs.fields} />
         </div>
       )}

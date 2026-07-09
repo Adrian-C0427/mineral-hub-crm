@@ -1380,10 +1380,14 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .dpp-contact-head .icon-btn.danger { color: var(--red); }
 .dpp-contact-head .icon-btn:disabled { opacity: 0.35; cursor: default; }
 
-/* Shared map Layers panel (MapLayersPanel) — one design across every map. */
-.ml-layers { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.ml-title { margin: 0; white-space: nowrap; }
-.ml-pills { display: flex; flex-wrap: wrap; gap: 8px; padding: 0; }
+/* Shared map Layers panel (MapLayersPanel) — one design across every map. The
+   title sits above an even pill grid so layer names align, the checkmark/box
+   columns line up, padding is uniform, and rows are evenly spaced. The Map page
+   Heat panel's toggle row (.mc-pills-row) reuses the exact same grid. */
+.ml-layers { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.ml-title { margin: 0 0 2px; white-space: nowrap; }
+.ml-pills, .mc-pills-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 8px; padding: 0; }
+.ml-pills .dpp-sec, .mc-pills-row .dpp-sec { width: 100%; justify-content: flex-start; }
 /* "bar": a standalone toolbar card sitting above an embedded canvas. */
 .ml-bar { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
   padding: 10px 12px; margin-bottom: 8px; }
@@ -1465,6 +1469,10 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; backg
 .deal-card.drag-clone { cursor: grabbing; box-shadow: 0 12px 28px rgba(0,0,0,.45); transform: rotate(1.5deg) scale(1.02);
   transition: none; margin: 0; border-color: var(--accent); }
 .kanban.dragging { user-select: none; }
+/* Suppress text selection across the WHOLE page during a card drag (the drag
+   sweeps over the header/transition bar too) — this removes the page-wide
+   highlight flash on drop. */
+body.pipeline-dragging, body.pipeline-dragging * { user-select: none !important; cursor: grabbing !important; }
 .kanban.dragging .deal-card:not(.drag-source):hover { border-color: var(--border); }
 .kanban-col { transition: background .12s ease, outline-color .12s ease; }
 .kanban-col.drop-target { background: rgba(59,130,246,.06); }

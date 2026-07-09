@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { Select } from "../components/Select";
+import { downloadCsv } from "../lib/csv";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION } from "../lib/counties";
 import { addCadastralLayers, styleWithGlyphs } from "../lib/mapLayers";
 import { MapLayersPanel, PillToggle } from "../components/MapLayersPanel";
@@ -681,6 +682,22 @@ export function MapView() {
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2c3 4.5 6 7.5 6 11a6 6 0 01-12 0c0-1.5.5-3 1.5-4.5C8.5 10 10.5 7 12 2z" /></svg>
           Heat map
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
+        </button>
+        <button
+          className="mc-btn"
+          disabled={!deals?.length}
+          title="Export the deals linked on the map to CSV"
+          onClick={() => downloadCsv(
+            `map-deals-${new Date().toISOString().slice(0, 10)}.csv`,
+            ["Deal", "Stage", "Priority", "State", "Counties", "Operator", "Asset Types", "NRA", "NMA", "Ask Price", "Profit Est.", "Buyer"],
+            (deals ?? []).map((d) => [
+              d.name, d.stage, d.priority, d.state ?? "", d.counties.join("; "), d.operator ?? "",
+              d.assetTypes.join("; "), d.nra ?? "", d.acreageNma ?? "", d.askPrice ?? "", d.profitEst ?? "", d.selectedBuyer?.name ?? "",
+            ]),
+          )}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+          Export
         </button>
       </div>
 
