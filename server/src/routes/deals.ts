@@ -196,22 +196,34 @@ dealsRouter.post(
       if (parent.parentDealId) throw new HttpError(400, "An asset cannot be nested under another asset");
     }
     // Required fields for a new acquisition opportunity (owned assets follow the
-    // asset flow and are exempt). Child assets (parentDealId set) only need a
-    // name — the rest can be filled in later on the asset's own page.
-    if (!isAsset && !data.parentDealId) {
-      const states = data.states ?? (data.state ? [data.state] : []);
+    // asset flow and are exempt). Child assets — created directly (parentDealId)
+    // or in the assets[] batch below — behave exactly like a standalone deal and
+    // require the same fields.
+    const dealRequired = (d: { states?: string[]; state?: string | null; counties?: string[]; nra?: number | null; assetTypes?: string[]; ourPrice?: number | null; dateUnderContract?: unknown; name?: string }): string[] => {
+      const states = d.states ?? (d.state ? [d.state] : []);
       const req_: [boolean, string][] = [
+        [!!d.name?.trim(), "Deal Name"],
         [states.length > 0, "State"],
         // Abstract is intentionally NOT required: cadastral coverage only exists
         // for GIS-imported counties, and deals elsewhere must still be creatable.
-        [(data.counties ?? []).length > 0, "County"],
-        [data.nra != null, "NRA"],
-        [(data.assetTypes ?? []).length > 0, "Asset Type"],
-        [data.ourPrice != null, "Our Price"],
-        [data.dateUnderContract != null, "Date Under Contract"],
+        [(d.counties ?? []).length > 0, "County"],
+        [d.nra != null, "NRA"],
+        [(d.assetTypes ?? []).length > 0, "Asset Type"],
+        [d.ourPrice != null, "Our Price"],
+        [d.dateUnderContract != null, "Date Under Contract"],
       ];
-      const missing = req_.filter(([ok]) => !ok).map(([, name]) => name);
+      return req_.filter(([ok]) => !ok).map(([, name]) => name);
+    };
+    if (!isAsset) {
+      const missing = dealRequired(data);
       if (missing.length) throw new HttpError(400, `Missing required fields: ${missing.join(", ")}`);
+    }
+    // Every additional asset must satisfy the same required-field set.
+    if (data.assets?.length) {
+      data.assets.forEach((a, i) => {
+        const miss = dealRequired(a);
+        if (miss.length) throw new HttpError(400, `Asset ${i + 1} is missing required fields: ${miss.join(", ")}`);
+      });
     }
     const assigneeIds = data.assigneeIds ? await validateOrgUsers(orgId(req), data.assigneeIds) : [];
     const deal = await prisma.$transaction(async (tx) => {

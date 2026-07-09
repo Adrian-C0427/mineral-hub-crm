@@ -1517,6 +1517,12 @@ body.pipeline-dragging, body.pipeline-dragging * { user-select: none !important;
 .nd-asset-del { flex: 0 0 auto; width: 30px; height: 34px; border: 1px solid var(--border); border-radius: 8px;
   background: var(--panel); color: var(--text-dim); font-size: 17px; line-height: 1; cursor: pointer; }
 .nd-asset-del:hover { color: var(--red); border-color: var(--red); }
+/* Additional-asset card = the full deal form, per asset. */
+.nd-asset-card { padding: 14px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2); }
+.nd-asset-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+.nd-asset-timeline { margin-top: 10px; display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.nd-asset-same { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); cursor: pointer; }
+.nd-asset-same input { width: auto; }
 
 .asset-total { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; margin-bottom: 12px;
   padding: 9px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); font-size: 13px; }
