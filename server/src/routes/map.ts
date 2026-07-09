@@ -1,17 +1,19 @@
 import { Router } from "express";
 import { z } from "zod";
-import type { Prisma, Stage } from "@prisma/client";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal } from "../serializers.js";
+import { TERMINAL_STAGE_KEYS } from "../domain/stages.js";
 
 export const mapRouter = Router();
 // viewMap is in every role's defaults; the gate only bites when an org
 // explicitly removes it — which previously only hid the UI, not this data.
 mapRouter.use(requireAuth, requireOrg, requirePermission("viewMap"));
 
-const ACTIVE_STAGES: Stage[] = ["UNDER_CONTRACT", "PREPARING_PACKAGE", "SENT_TO_BUYERS", "NEGOTIATING", "CLOSING"];
+// "Active" = any non-terminal stage (robust to custom stages).
+const ACTIVE_FILTER = { notIn: [...TERMINAL_STAGE_KEYS] };
 
 const filterSchema = z.object({
   status: z.string().optional(), // "ACTIVE" (default) | "ALL" | a specific Stage
@@ -37,9 +39,9 @@ mapRouter.get(
       abstractIds: { isEmpty: false },
     };
     if (f.status && f.status !== "ALL") {
-      where.stage = f.status === "ACTIVE" ? { in: ACTIVE_STAGES } : (f.status as Stage);
+      where.stage = f.status === "ACTIVE" ? ACTIVE_FILTER : f.status;
     } else if (!f.status) {
-      where.stage = { in: ACTIVE_STAGES };
+      where.stage = ACTIVE_FILTER;
     }
     if (f.county) where.counties = { has: f.county };
     if (f.basin) where.basins = { has: f.basin };

@@ -4,12 +4,12 @@ import { asyncHandler } from "../middleware/errors.js";
 import { requireAuth, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal } from "../serializers.js";
 import { netProfit, avg } from "../domain/metrics.js";
+import { ensureStages, TERMINAL_STAGE_KEYS } from "../domain/stages.js";
 
 export const dashboardRouter = Router();
 dashboardRouter.use(requireAuth, requireOrg);
 
 const dealInclude = { selectedBuyer: true, relationshipOwner: true } as const;
-const ACTIVE_STAGES = ["UNDER_CONTRACT", "PREPARING_PACKAGE", "SENT_TO_BUYERS", "NEGOTIATING", "CLOSING"] as const;
 
 /** Global dashboard date window (default YTD). Upper bound is exclusive. */
 function dashboardWindow(period: string | undefined, now: Date): { start: Date; end: Date; label: string } {
@@ -37,8 +37,11 @@ dashboardRouter.get(
     // a package's assets roll up naturally into the totals — no parentDealId
     // filter. Each deal contributes its OWN stored value, so nothing double-counts.
     const IN_PIPELINE = { OR: [{ recordType: "OPPORTUNITY" as const }, { recordType: "OWNED_ASSET" as const, assetMode: "SELL" as const }] };
+    // Active = any non-terminal stage. The stage distribution uses the org's own
+    // ordered active stages (custom pipeline).
+    const activeStageKeys = (await ensureStages(prisma, org)).filter((s) => !s.isTerminal).map((s) => s.key);
     const [allActive, closedDeals, activeOffers] = await Promise.all([
-      prisma.deal.findMany({ where: { stage: { in: [...ACTIVE_STAGES] }, organizationId: org, ...IN_PIPELINE }, include: { ...dealInclude, offers: true } }),
+      prisma.deal.findMany({ where: { stage: { notIn: [...TERMINAL_STAGE_KEYS] }, organizationId: org, ...IN_PIPELINE }, include: { ...dealInclude, offers: true } }),
       prisma.deal.findMany({
         where: { stage: "CLOSED", organizationId: org, ...IN_PIPELINE },
         include: { ...dealInclude, selectedOffer: true, stageHistory: { where: { toStage: "CLOSED" }, orderBy: { createdAt: "desc" }, take: 1 } },
@@ -76,9 +79,9 @@ dashboardRouter.get(
     // than per-deal rows. Every active stage is present (0 when empty) so the
     // dashboard shows the full pipeline distribution at a glance; drill-down
     // lives on the Pipeline / Deals pages.
-    const stageCountMap = new Map<string, number>(ACTIVE_STAGES.map((s) => [s, 0]));
+    const stageCountMap = new Map<string, number>(activeStageKeys.map((s) => [s, 0]));
     for (const d of allActive) stageCountMap.set(d.stage, (stageCountMap.get(d.stage) ?? 0) + 1);
-    const stageCounts = ACTIVE_STAGES.map((stage) => ({ stage, count: stageCountMap.get(stage) ?? 0 }));
+    const stageCounts = activeStageKeys.map((stage) => ({ stage, count: stageCountMap.get(stage) ?? 0 }));
 
     // Upcoming follow-ups (from buyer activity nextFollowUpDate)
     const followUps = await prisma.dealBuyerActivity.findMany({

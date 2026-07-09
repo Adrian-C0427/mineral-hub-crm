@@ -4,6 +4,7 @@ import * as Sentry from "@sentry/react";
 import { BrowserRouter } from "react-router-dom";
 import { AuthProvider } from "./auth/AuthContext";
 import { ThemeProvider } from "./theme";
+import { StagesProvider } from "./stages";
 import { App } from "./App";
 import "./styles.css";
 
@@ -21,7 +22,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <BrowserRouter>
       <AuthProvider>
         <ThemeProvider>
-          <App />
+          <StagesProvider>
+            <App />
+          </StagesProvider>
         </ThemeProvider>
       </AuthProvider>
     </BrowserRouter>

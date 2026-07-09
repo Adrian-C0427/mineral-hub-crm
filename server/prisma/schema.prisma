@@ -35,15 +35,11 @@ enum OrgRole {
   VIEWER
 }
 
-enum Stage {
-  UNDER_CONTRACT
-  PREPARING_PACKAGE
-  SENT_TO_BUYERS
-  NEGOTIATING
-  CLOSING
-  CLOSED
-  DEAD
-}
+// Pipeline stages are now customizable per organization (see PipelineStage).
+// Deal.stage stores the stage *key* (a string). The seven keys below are the
+// built-in defaults; CLOSED and DEAD are permanent terminal stages. Storing the
+// key as a string (not an enum) lets orgs add/remove/rename/reorder stages
+// without a schema change, while every `stage === "CLOSED"` check keeps working.
 
 // A Deal is either an acquisition OPPORTUNITY (default) or an OWNED_ASSET the
 // company already holds. Owned assets reuse the entire Deal machinery (buyer
@@ -167,6 +163,7 @@ model Organization {
   rolePermissions   RolePermissions[]
   buyerMessages     DealBuyerMessage[]
   emailTemplates    EmailTemplate[]
+  pipelineStages    PipelineStage[]
   integrations      Integration[]
   researchDocuments ResearchDocument[]
   researchPermits   ResearchPermit[]
@@ -437,7 +434,7 @@ model Deal {
   basins         String[]
   formations     String[]
 
-  stage                 Stage    @default(UNDER_CONTRACT)
+  stage                 String   @default("UNDER_CONTRACT") // PipelineStage.key
   currentStageEnteredAt DateTime @default(now())
   deadReason            String?
 
@@ -640,14 +637,33 @@ model DealStageHistory {
   id              String   @id @default(cuid())
   dealId          String
   deal            Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  fromStage       Stage?
-  toStage         Stage
+  fromStage       String?
+  toStage         String
   changedByUserId String?
   changedBy       User?    @relation(fields: [changedByUserId], references: [id], onDelete: SetNull)
   deadReason      String?
   createdAt       DateTime @default(now())
 
   @@index([dealId])
+}
+
+// A customizable pipeline stage for an organization. `key` is what a Deal stores
+// in Deal.stage; `label` is the display name (renamable). Terminal stages
+// (CLOSED, DEAD) are seeded with isTerminal=true and cannot be renamed, removed,
+// or reordered — they retain their system behavior. Non-terminal ("active")
+// stages are the board columns and can be added/removed/renamed/reordered.
+model PipelineStage {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  key            String // stored in Deal.stage
+  label          String
+  position       Int
+  isTerminal     Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+
+  @@unique([organizationId, key])
+  @@index([organizationId])
 }
 
 // ---------------------------------------------------------------------------

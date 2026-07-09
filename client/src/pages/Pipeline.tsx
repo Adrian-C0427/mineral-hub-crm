@@ -5,8 +5,10 @@ import { Spinner } from "../components/ui";
 import { Select } from "../components/Select";
 import { NewDealModal } from "../components/NewDealModal";
 import { StageChangeModal } from "../components/StageChangeModal";
-import { money, num, fmtDate, prettyStage } from "../lib/format";
+import { money, num, fmtDate } from "../lib/format";
 import { useAuth } from "../auth/AuthContext";
+import { useStages } from "../stages";
+import { PipelineStagesModal } from "../components/PipelineStagesModal";
 import type { DealSummary, Stage } from "../types";
 
 // The Pipeline shows only ACTIVE-lifecycle stages as columns. Closed and Dead
@@ -14,10 +16,6 @@ import type { DealSummary, Stage } from "../types";
 // TRANSITIONS targets below accept drops (and Move Stage offers them), always
 // behind a confirmation, after which the deal leaves the board for the Closed
 // Deals / Archived Deals subpage.
-const COLUMNS: Stage[] = [
-  "UNDER_CONTRACT", "PREPARING_PACKAGE", "SENT_TO_BUYERS",
-  "NEGOTIATING", "CLOSING",
-];
 const TRANSITIONS: { stage: Stage; label: string; hint: string }[] = [
   { stage: "CLOSED", label: "Closed", hint: "→ Closed Deals" },
   { stage: "DEAD", label: "Dead", hint: "→ Archived Deals" },
@@ -75,10 +73,13 @@ export function Pipeline() {
   useEffect(() => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } }, [prefs]);
   const nav = useNavigate();
   const { can } = useAuth();
+  const { active: activeStages, reload: reloadStages } = useStages();
+  const [showStages, setShowStages] = useState(false);
   // Viewers can browse the board but not create deals or change stages —
   // hiding the affordances beats letting them click into a 403.
   const canCreate = can("createDeals");
   const canMove = can("editDeals");
+  const canCustomizeStages = can("manageOrgSettings");
 
   // Latest state for the window pointer handlers (which are bound once per drag).
   const dragRef = useRef<DragState | null>(null);
@@ -157,6 +158,7 @@ export function Pipeline() {
           <h1 style={{ marginBottom: 0 }}>Pipeline</h1>
         </div>
         <div className="row" style={{ gap: 8 }}>
+          {canCustomizeStages && <button className="small" onClick={() => setShowStages(true)}>Customize stages</button>}
           <PipelineCustomize prefs={prefs} onChange={setPrefs} />
           {canCreate && <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>}
         </div>
@@ -176,7 +178,8 @@ export function Pipeline() {
       </div>}
 
       <div className={`kanban ${prefs.density === "compact" ? "compact" : ""} ${drag ? "dragging" : ""}`}>
-        {COLUMNS.map((col) => {
+        {activeStages.map((stage) => {
+          const col = stage.key;
           const colDeals = sortDeals(deals.filter((d) => d.stage === col), prefs.sort);
           return (
             <div
@@ -184,7 +187,7 @@ export function Pipeline() {
               className={`kanban-col ${drag && overCol === col ? "drop-target" : ""}`}
             >
               <div className="kanban-col-head">
-                <span>{prettyStage(col)}</span>
+                <span>{stage.label}</span>
                 <span className="muted">{colDeals.length}</span>
               </div>
               <div className="kanban-col-body">
@@ -207,6 +210,7 @@ export function Pipeline() {
         </div>
       )}
 
+      {showStages && <PipelineStagesModal onClose={() => setShowStages(false)} onChanged={() => { reloadStages(); load(); }} />}
       {showNew && <NewDealModal onClose={() => setShowNew(false)} onCreated={(d) => { setShowNew(false); nav(`/deals/${d.id}`); }} />}
       {pending && (
         <StageChangeModal

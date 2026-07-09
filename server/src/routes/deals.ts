@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { z } from "zod";
-import type { Stage } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
@@ -13,20 +12,11 @@ import { effectiveStatus, ENGAGED_STATUSES, BUYER_STATUSES } from "../domain/buy
 import { sendEmail, personalize, renderEmailBody } from "../services/email.js";
 import { money as fmtMoney } from "../domain/format.js";
 import { newPortalSlug } from "./portal.js";
+import { ensureStages, firstActiveStageKey } from "../domain/stages.js";
 
 export const dealsRouter = Router();
 // All deal routes require membership in an organization and are scoped to it.
 dealsRouter.use(requireAuth, requireOrg);
-
-const STAGES: Stage[] = [
-  "UNDER_CONTRACT",
-  "PREPARING_PACKAGE",
-  "SENT_TO_BUYERS",
-  "NEGOTIATING",
-  "CLOSING",
-  "CLOSED",
-  "DEAD",
-];
 
 const dateField = z
   .string()
@@ -226,6 +216,10 @@ dealsRouter.post(
       });
     }
     const assigneeIds = data.assigneeIds ? await validateOrgUsers(orgId(req), data.assigneeIds) : [];
+    // New opportunities enter the org's first active pipeline stage (seeds the
+    // org's stages on first use). Owned assets park in CLOSING as before.
+    const firstStage = await firstActiveStageKey(prisma, orgId(req));
+    const initialStage = isAsset ? "CLOSING" : firstStage;
     const deal = await prisma.$transaction(async (tx) => {
       const created = await tx.deal.create({
         data: {
@@ -257,7 +251,7 @@ dealsRouter.post(
           notes: data.notes ?? null,
           // Owned assets skip the acquisition pipeline — park them in CLOSING so
           // they don't clutter the acquisition board unless marked for sale.
-          stage: isAsset ? "CLOSING" : "UNDER_CONTRACT",
+          stage: initialStage,
           currentStageEnteredAt: new Date(),
           // Ownership/property/financial fields
           acquisitionDate: toDate(data.acquisitionDate) ?? null,
@@ -284,7 +278,7 @@ dealsRouter.post(
         include: dealInclude,
       });
       await tx.dealStageHistory.create({
-        data: { dealId: created.id, fromStage: null, toStage: "UNDER_CONTRACT", changedByUserId: req.user!.id },
+        data: { dealId: created.id, fromStage: null, toStage: initialStage, changedByUserId: req.user!.id },
       });
       await logActivity(
         {
@@ -326,12 +320,12 @@ dealsRouter.post(
               estimatedClosingCosts: a.estimatedClosingCosts ?? null,
               relationshipOwnerId: data.relationshipOwnerId ?? req.user!.id,
               notes: a.notes ?? null,
-              stage: "UNDER_CONTRACT",
+              stage: firstStage,
               currentStageEnteredAt: new Date(),
             },
           });
           await tx.dealStageHistory.create({
-            data: { dealId: child.id, fromStage: null, toStage: "UNDER_CONTRACT", changedByUserId: req.user!.id },
+            data: { dealId: child.id, fromStage: null, toStage: firstStage, changedByUserId: req.user!.id },
           });
         }
         await logActivity(
@@ -826,7 +820,7 @@ dealsRouter.patch(
 // Stage change — records history; Dead requires a reason
 // --------------------------------------------------------------------------
 const stageSchema = z.object({
-  toStage: z.enum(STAGES as [Stage, ...Stage[]]),
+  toStage: z.string().min(1),
   deadReason: z.string().optional(),
 });
 
@@ -837,6 +831,9 @@ dealsRouter.post(
     const { toStage, deadReason } = stageSchema.parse(req.body);
     const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!deal) throw new HttpError(404, "Deal not found");
+    // toStage must be one of the org's configured pipeline stages.
+    const stages = await ensureStages(prisma, orgId(req));
+    if (!stages.some((s) => s.key === toStage)) throw new HttpError(400, "Unknown pipeline stage");
 
     if (toStage === "DEAD" && (!deadReason || !deadReason.trim())) {
       throw new HttpError(400, "A reason is required to move a deal to Dead");
@@ -1067,8 +1064,12 @@ dealsRouter.post(
     // Accepting moves the deal into the closing process and pulls the offering
     // from the public portal so it's no longer marketed to other buyers. Buyer
     // activity and communications are untouched (kept for auditing). Stage only
-    // advances forward — never regress a deal already at/after CLOSING.
-    const advanceToClosing = STAGES.indexOf(deal.stage) < STAGES.indexOf("CLOSING") && deal.stage !== "DEAD";
+    // advances forward — never regress a deal already at/after CLOSING (by the
+    // org's own stage order).
+    const stages = await ensureStages(prisma, orgId(req));
+    const closing = stages.find((s) => s.key === "CLOSING");
+    const posOf = (key: string) => stages.find((s) => s.key === key)?.position ?? Number.MAX_SAFE_INTEGER;
+    const advanceToClosing = !!closing && deal.stage !== "DEAD" && deal.stage !== "CLOSED" && posOf(deal.stage) < closing.position;
     const wasPublished = deal.publishedToPortal;
     const updated = await prisma.$transaction(async (tx) => {
       await tx.offer.update({ where: { id: offerId }, data: { status: "ACCEPTED" } });
@@ -1454,6 +1455,6 @@ async function reload(id: string) {
   return d;
 }
 
-function prettyStage(s: Stage): string {
+function prettyStage(s: string): string {
   return s.split("_").map((w) => w[0] + w.slice(1).toLowerCase()).join(" ");
 }
