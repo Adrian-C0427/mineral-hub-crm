@@ -198,22 +198,34 @@ export function Dashboard() {
             <span className="row" style={{ gap: 5 }}><span className="dash-swatch dash-swatch-proj" /> Projected</span>
           </div>
         </div>
-        {d.profitByMonth.every((m) => m.profit === 0 && m.projected === 0) ? (
-          <p className="muted" style={{ margin: "12px 0 0" }}>
-            No closed or projected profit this year yet — bars appear as deals close or get an accepted offer with a closing date.
-          </p>
-        ) : (
-          <div className="bar-chart">
-            {d.profitByMonth.map((m) => (
-              <div className="bar-col" key={m.month} title={`${m.month}\nRealized: ${money(m.profit)}\nProjected: ${money(m.projected)}`}>
+        {/* Always render the full Jan–Dec year for a stable, comparable view.
+            Months with no realized or projected profit show a faint zero
+            placeholder instead of vanishing, so the x-axis spacing is identical
+            across all twelve months regardless of available data. */}
+        <div className="bar-chart">
+          {d.profitByMonth.map((m, i) => {
+            const empty = m.profit === 0 && m.projected === 0;
+            return (
+              <div className={`bar-col ${i === curMonth ? "current" : ""}`} key={m.month} title={`${m.month}\nRealized: ${money(m.profit)}\nProjected: ${money(m.projected)}`}>
                 <div className="bar-zone">
-                  {m.profit > 0 && <div className="bar" style={{ height: `${(m.profit / maxProfit) * 100}%` }} />}
-                  {m.projected > 0 && <div className="bar bar-projected" style={{ height: `${(m.projected / maxProfit) * 100}%` }} />}
+                  {empty ? (
+                    <div className="bar bar-zero" title={`${m.month}: no profit`} />
+                  ) : (
+                    <>
+                      {m.profit > 0 && <div className="bar" style={{ height: `${(m.profit / maxProfit) * 100}%` }} />}
+                      {m.projected > 0 && <div className="bar bar-projected" style={{ height: `${(m.projected / maxProfit) * 100}%` }} />}
+                    </>
+                  )}
                 </div>
                 <div className="bar-label">{m.month}</div>
               </div>
-            ))}
-          </div>
+            );
+          })}
+        </div>
+        {d.profitByMonth.every((m) => m.profit === 0 && m.projected === 0) && (
+          <p className="muted" style={{ margin: "10px 0 0", fontSize: 12 }}>
+            No closed or projected profit yet this year — bars fill in as deals close or get an accepted offer with a closing date.
+          </p>
         )}
       </div>
     ),

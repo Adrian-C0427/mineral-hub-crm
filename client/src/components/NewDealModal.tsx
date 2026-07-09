@@ -34,11 +34,11 @@ function assetMissing(a: AssetRow): string[] {
 }
 
 /**
- * Create a deal — or, when `parentDealId` is passed, add a child asset under an
- * existing seller transaction. Either way the form is the full deal form with
- * the same required fields. During top-level creation the user can also add one
- * or more additional assets (each an identical full deal form) before saving, so
- * a multi-asset seller package is created in a single step.
+ * Create a deal — or, when `parentDealId` is passed, add an additional deal under
+ * an existing seller. Either way the form is the full deal form with the same
+ * required fields. During top-level creation the user can also add one or more
+ * additional deals (each an identical full deal form) before saving, so a
+ * multi-deal seller package is created in a single step.
  */
 export function NewDealModal({ onClose, onCreated, parentDealId }: {
   onClose: () => void;
@@ -87,7 +87,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId }: {
     if (missing.length) { setError(`Required: ${missing.join(", ")}`); return; }
     if (anyAssetIncomplete) {
       const i = assetErrors.findIndex((e) => e.length > 0);
-      setError(`Asset ${i + 1} is missing: ${assetErrors[i].join(", ")}`);
+      setError(`Additional deal ${i + 1} is missing: ${assetErrors[i].join(", ")}`);
       return;
     }
     setBusy(true);
@@ -139,21 +139,21 @@ export function NewDealModal({ onClose, onCreated, parentDealId }: {
   const req = <span style={{ color: "var(--red)" }}>*</span>;
   return (
     <Modal
-      title={asset ? "Add asset" : "New Deal"}
+      title={asset ? "Add Deal" : "New Deal"}
       onClose={onClose}
       wide
       footer={
         <>
           <button onClick={onClose}>Cancel</button>
           <button className="primary" onClick={submit} disabled={busy || missing.length > 0 || anyAssetIncomplete}>
-            {busy ? "Saving…" : asset ? "Add asset" : assets.length ? `Create deal + ${assets.length} asset${assets.length > 1 ? "s" : ""}` : "Create deal"}
+            {busy ? "Saving…" : asset ? "Add Deal" : assets.length ? `Create deal + ${assets.length} more` : "Create deal"}
           </button>
         </>
       }
     >
       {asset ? (
         <p className="muted" style={{ marginTop: 0 }}>
-          This asset is added under the seller transaction — the same full deal form. Fields marked {req} are required.
+          This deal is added under the same seller — the same full deal form. Fields marked {req} are required.
           It's independently marketable.
         </p>
       ) : (
@@ -162,7 +162,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId }: {
           Add sellers afterward in the deal's <strong>Seller Details</strong> section.
         </p>
       )}
-      <div className="field"><label>{asset ? "Asset" : "Deal"} Name {req}</label><input value={f.name} onChange={set("name")} autoFocus /></div>
+      <div className="field"><label>Deal Name {req}</label><input value={f.name} onChange={set("name")} autoFocus /></div>
       <div className="dd-grid">
         <GeoFields
           states={states} onStatesChange={setStates}
@@ -185,17 +185,17 @@ export function NewDealModal({ onClose, onCreated, parentDealId }: {
       </div>
       <div className="field"><label>Notes</label><textarea rows={3} value={f.notes} onChange={set("notes")} /></div>
 
-      {/* Multi-asset seller: additional interests acquired from the same seller.
-          Each is an identical full deal form and becomes an independently-
-          marketable child asset grouped under this seller transaction. */}
+      {/* Additional deals under the same seller. Each is an identical full deal
+          form and becomes an independently-marketable deal grouped under this
+          seller. */}
       {!asset && (
         <div className="nd-assets">
           <div className="nd-assets-head">
             <div>
-              <strong>Additional assets under this seller</strong>
+              <strong>Additional deals under this seller</strong>
               <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>optional — each is a full deal, marketable separately</span>
             </div>
-            <button type="button" className="small" onClick={() => setAssets((r) => [...r, emptyAsset()])}>+ Add asset</button>
+            <button type="button" className="small" onClick={() => setAssets((r) => [...r, emptyAsset()])}>+ Add Deal</button>
           </div>
           {assets.map((a, i) => (
             <AssetCard
@@ -214,17 +214,17 @@ export function NewDealModal({ onClose, onCreated, parentDealId }: {
   );
 }
 
-/** One additional asset — the identical full deal form as a compact card. */
+/** One additional deal — the identical full deal form as a compact card. */
 function AssetCard({ index, a, req, onPatch, onRemove }: {
   index: number; a: AssetRow; req: React.ReactNode; onPatch: (patch: Partial<AssetRow>) => void; onRemove: () => void;
 }) {
   return (
     <div className="nd-asset-card">
       <div className="nd-asset-card-head">
-        <strong>Asset {index + 1}</strong>
-        <button type="button" className="nd-asset-del" title="Remove asset" onClick={onRemove}>×</button>
+        <strong>Deal {index + 1}</strong>
+        <button type="button" className="nd-asset-del" title="Remove deal" onClick={onRemove}>×</button>
       </div>
-      <div className="field"><label>Deal Name {req}</label><input value={a.name} onChange={(e) => onPatch({ name: e.target.value })} placeholder={`Asset ${index + 1}`} /></div>
+      <div className="field"><label>Deal Name {req}</label><input value={a.name} onChange={(e) => onPatch({ name: e.target.value })} placeholder={`Deal ${index + 1}`} /></div>
       <div className="dd-grid">
         <GeoFields
           states={a.states} onStatesChange={(v) => onPatch({ states: v })}

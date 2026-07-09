@@ -132,7 +132,7 @@ export function DealDetail() {
 
       {deal.parent && (
         <Banner kind="info">
-          This is an asset within the <Link to={`/deals/${deal.parent.id}`}><strong>{deal.parent.name}</strong></Link> seller package.
+          This is one of the additional deals under <Link to={`/deals/${deal.parent.id}`}><strong>{deal.parent.name}</strong></Link>.
           {can("editDeals") && <> · <button type="button" className="link-btn" onClick={() => setConfirmSplit(true)}>Split into a standalone deal</button></>}
         </Banner>
       )}
@@ -150,8 +150,8 @@ export function DealDetail() {
         onChanged={loadDeal}
       />
 
-      {/* Multi-asset seller: the individual interests grouped under this deal.
-          Hidden on a child asset (which is itself one of these). */}
+      {/* Additional Deals: the extra deals grouped under this seller. Hidden on a
+          child deal (which is itself one of these). */}
       {!deal.parent && (
         <AssetsSection
           deal={deal}
@@ -396,8 +396,8 @@ export function DealDetail() {
 }
 
 // ---------------------------------------------------------------------------
-// Assets / Tracts — the individual mineral interests grouped under this deal.
-// Each is a full, independently-marketable child deal.
+// Additional Deals — the extra deals grouped under this seller. Each is a full,
+// independently-marketable child deal.
 // ---------------------------------------------------------------------------
 function AssetsSection({ deal, canEdit, canPublish, onAdd, onChanged }: {
   deal: DealDetailData; canEdit: boolean; canPublish: boolean; onAdd: () => void; onChanged: () => void;
@@ -417,22 +417,22 @@ function AssetsSection({ deal, canEdit, canPublish, onAdd, onChanged }: {
       <div className="section-head">
         <div>
           <h3 style={{ margin: 0 }}>Additional Deals{assets.length ? ` (${assets.length})` : ""}</h3>
-          <span className="muted" style={{ fontSize: 12 }}>Individual interests under this seller — each is independently marketable</span>
+          <span className="muted" style={{ fontSize: 12 }}>Add multiple deals under the same seller — each is independently marketable</span>
         </div>
         <div className="row" style={{ gap: 8 }}>
           {canPublish && assets.length > 0 && (
             publishedCount < assets.length
-              ? <button className="small" disabled={busy} onClick={() => publishAll(true)} title="Publish every asset to the buyer portal">Publish all</button>
-              : <button className="small" disabled={busy} onClick={() => publishAll(false)} title="Unpublish every asset">Unpublish all</button>
+              ? <button className="small" disabled={busy} onClick={() => publishAll(true)} title="Publish every deal to the buyer portal">Publish all</button>
+              : <button className="small" disabled={busy} onClick={() => publishAll(false)} title="Unpublish every deal">Unpublish all</button>
           )}
-          {canEdit && <button className="small primary" onClick={onAdd}>+ Add asset</button>}
+          {canEdit && <button className="small primary" onClick={onAdd}>+ Add Deal</button>}
         </div>
       </div>
 
       {assets.length === 0 ? (
         <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-          No separate assets yet. This deal is a single interest — add assets to manage multiple interests from the same
-          seller together (each stays independently marketable).
+          No additional deals yet. Use <strong>+ Add Deal</strong> to manage multiple interests from the same
+          seller together — each stays independently marketable.
         </p>
       ) : (
         <>
