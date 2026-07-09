@@ -414,6 +414,9 @@ model Deal {
   // Survey/abstracts this deal sits in (e.g. TX-289653). Links to map boundaries.
   abstractIds    String[]
   operator       String?
+  // Railroad Commission identifier(s) for this deal/asset — RRC lease, district,
+  // or operator numbers. Free-text (comma-separated for multiple).
+  rrc            String?
   // Ask Price = our asking price to buyers (marketing/list price).
   askPrice       Float?
   // Our Price = our acquisition cost (what the property is under contract for).

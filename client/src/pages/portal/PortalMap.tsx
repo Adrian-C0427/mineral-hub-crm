@@ -115,6 +115,7 @@ export function PortalMap({ features, height = 420, onSelect }: {
       >⌂ Reset view</button>
       <MapLayersPanel
         variant="floating"
+        collapsible
         defs={[
           { key: "counties", label: "Counties" }, { key: "boundaries", label: "Abstract boundaries" },
           { key: "numbers", label: "Abstract numbers" }, { key: "surveys", label: "Survey names" },

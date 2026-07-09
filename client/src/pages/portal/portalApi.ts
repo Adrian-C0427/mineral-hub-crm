@@ -18,7 +18,7 @@ export interface PortalDeal {
   sections?: Record<PortalSectionKey, boolean>;
   counties: string[]; states: string[]; abstractIds: string[]; basins: string[];
   formations: string[]; assetTypes: string[]; surveys: string[];
-  nra: number | null; acreageNma: number | null; operator: string | null;
+  nra: number | null; acreageNma: number | null; operator: string | null; rrc: string | null;
   wells: string[]; producingStatus: string | null;
   askPrice: number | null; notes: string | null; listedAt: string;
 }

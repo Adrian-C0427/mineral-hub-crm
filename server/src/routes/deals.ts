@@ -126,6 +126,7 @@ const createSchema = z.object({
   nra: z.number().nullish(),
   abstractIds: z.array(z.string()).optional(),
   operator: z.string().nullish(),
+  rrc: z.string().nullish(),
   askPrice: z.number().nullish(),
   ourPrice: z.number().nullish(),
   assetTypes: z.array(z.string()).optional(),
@@ -180,6 +181,7 @@ dealsRouter.post(
           nra: data.nra ?? null,
           abstractIds: data.abstractIds ?? [],
           operator: data.operator ?? null,
+          rrc: data.rrc ?? null,
           askPrice: data.askPrice ?? null,
           ourPrice: data.ourPrice ?? null,
           assetTypes: data.assetTypes ?? [],
@@ -528,6 +530,7 @@ const updateSchema = z.object({
   nra: z.number().nullish(),
   abstractIds: z.array(z.string()).optional(),
   operator: z.string().nullish(),
+  rrc: z.string().nullish(),
   askPrice: z.number().nullish(),
   ourPrice: z.number().nullish(),
   assetTypes: z.array(z.string()).optional(),
@@ -700,7 +703,7 @@ dealsRouter.patch(
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = updateSchema.parse(req.body);
     const patch: Record<string, unknown> = {};
-    for (const k of ["name", "sellerNames", "counties", "state", "states", "acreageNma", "nra", "abstractIds", "operator", "askPrice", "ourPrice", "assetTypes", "basins", "formations", "estimatedClosingCosts", "relationshipOwnerId", "notes", ...ASSET_SCALAR_KEYS] as const) {
+    for (const k of ["name", "sellerNames", "counties", "state", "states", "acreageNma", "nra", "abstractIds", "operator", "rrc", "askPrice", "ourPrice", "assetTypes", "basins", "formations", "estimatedClosingCosts", "relationshipOwnerId", "notes", ...ASSET_SCALAR_KEYS] as const) {
       if (k in data) patch[k] = (data as Record<string, unknown>)[k];
     }
     for (const k of ["dateUnderContract", "originalClosingDate", "findBuyerByDateOverride", "finalClosingDateOverride", "closedDate", "acquisitionDate"] as const) {
