@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { Banner, Spinner, ConfirmDelete } from "./ui";
+import { Select } from "./Select";
 import { downloadCsv } from "../lib/csv";
 import { fmtDate } from "../lib/format";
 
@@ -128,11 +129,12 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
         </p>
         <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
           <div className="field" style={{ marginBottom: 0, minWidth: 180 }}><label>Data Type</label>
-            <select value={category} onChange={(e) => { setCategory(e.target.value as Category); reset(); }}>
-              <option value="deeds">Deeds</option>
-              <option value="leases">Leases</option>
-              <option value="permits">Drilling Permits</option>
-            </select>
+            <Select value={category} onChange={(v) => { setCategory(v as Category); reset(); }} ariaLabel="Data type"
+              options={[
+                { value: "deeds", label: "Deeds" },
+                { value: "leases", label: "Leases" },
+                { value: "permits", label: "Drilling Permits" },
+              ]} />
           </div>
           <div className="field" style={{ marginBottom: 0 }}><label>CSV file <span className="muted" style={{ fontWeight: 400, textTransform: "none" }}>· Supported file type: CSV</span></label>
             <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
@@ -150,10 +152,9 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
               {analysis.fields.map((f) => (
                 <div key={f.key} className="field" style={{ marginBottom: 0, minWidth: 200 }}>
                   <label>{f.label}{f.required ? " *" : ""}</label>
-                  <select value={mapping[f.key] ?? ""} onChange={(e) => setMapping((m) => ({ ...m, [f.key]: e.target.value }))}>
-                    <option value="">— not in file —</option>
-                    {analysis.headers.map((h) => <option key={h} value={h}>{h}</option>)}
-                  </select>
+                  <Select value={mapping[f.key] ?? ""} onChange={(v) => setMapping((m) => ({ ...m, [f.key]: v }))}
+                    placeholder="— not in file —" clearable searchable ariaLabel={`Map column for ${f.label}`}
+                    options={analysis.headers.map((h) => ({ value: h, label: h }))} />
                 </div>
               ))}
             </div>

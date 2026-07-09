@@ -29,8 +29,8 @@ export function PortalOffering() {
 
   const mailSubject = encodeURIComponent(`Inquiry: ${deal.name}`);
   const mailto = org.contactEmail ? `mailto:${org.contactEmail}?subject=${mailSubject}` : null;
-  // Per-deal section flags (defaults ON if the server didn't send them).
-  const show = (k: keyof NonNullable<typeof deal.sections>): boolean => deal.sections ? deal.sections[k] !== false : true;
+  // No section configuration: every block renders only when it has data.
+  const hasMap = features.features.length > 0;
 
   return (
     <PortalShell org={org}>
@@ -43,7 +43,7 @@ export function PortalOffering() {
           {deal.summary && <p style={{ marginTop: 12, maxWidth: 720, lineHeight: 1.55 }}>{deal.summary}</p>}
         </div>
         <div className="portal-hero-facts">
-          {deal.askPrice != null && show("askPrice") && <Fact label="Asking Price" value={`$${num(deal.askPrice)}`} />}
+          {deal.askPrice != null && <Fact label="Asking Price" value={`$${num(deal.askPrice)}`} />}
           {deal.nra != null && <Fact label="Net Royalty Acres" value={num(deal.nra)} />}
           {deal.acreageNma != null && <Fact label="Net Mineral Acres" value={num(deal.acreageNma)} />}
           {deal.assetTypes.length > 0 && <Fact label="Asset Type" value={deal.assetTypes.join(", ")} />}
@@ -66,7 +66,7 @@ export function PortalOffering() {
       )}
 
       {/* Production summary */}
-      {show("production") && production && (
+      {production && (
         <div className="panel">
           <div className="section-head">
             <h3 style={{ margin: 0 }}>Production Summary</h3>
@@ -83,8 +83,8 @@ export function PortalOffering() {
         </div>
       )}
 
-      {/* Map */}
-      {show("map") && (
+      {/* Map — shown only when the offering has mappable geometry */}
+      {hasMap && (
         <div className="panel">
           <div className="section-head"><h3 style={{ margin: 0 }}>Property Map</h3><span className="muted">Interactive — zoom, pan, and toggle layers</span></div>
           <PortalMap features={features} height={460} />
@@ -115,7 +115,7 @@ export function PortalOffering() {
               </div>
             </>
           )}
-          {show("wells") && deal.wells.length > 0 && (
+          {deal.wells.length > 0 && (
             <>
               <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", margin: "14px 0 6px" }}>Wells</div>
               <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
@@ -123,20 +123,14 @@ export function PortalOffering() {
               </div>
             </>
           )}
-          {show("notes") && deal.notes && (
-            <>
-              <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", margin: "14px 0 6px" }}>Notes</div>
-              <p style={{ margin: 0, lineHeight: 1.5 }}>{deal.notes}</p>
-            </>
-          )}
         </div>
 
         <div>
-          {/* Documents */}
-          {(show("documents") || show("attachments")) && (
+          {/* Documents — shown only when the offering has approved documents */}
+          {documents.length > 0 && (
           <div className="panel">
             <h3>Documents</h3>
-            {documents.length === 0 ? <p className="muted" style={{ marginBottom: 0 }}>No public documents for this offering.</p> : (
+            {(
               documents.map((d) => (
                 <a
                   key={d.id}
@@ -160,11 +154,11 @@ export function PortalOffering() {
           </div>
           )}
 
-          {/* Contact */}
-          {show("contact") && (
+          {/* Contact — shown when the listing has any point of contact */}
+          {(org.contacts.length > 0 || mailto || org.contactPhone || org.officeLocation) && (
           <div className="panel portal-contact">
             <h3>Interested in this opportunity?</h3>
-            {show("company") && <div className="portal-contact-line" style={{ marginBottom: 10 }}>{org.name}</div>}
+            {org.name && <div className="portal-contact-line" style={{ marginBottom: 10 }}>{org.name}</div>}
             {org.contacts.length > 0 ? (
               <div className="portal-contact-cards">
                 {org.contacts.map((c) => {

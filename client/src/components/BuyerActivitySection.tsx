@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { StatusBadge } from "./ui";
+import { Select } from "./Select";
 import { money, fmtDate } from "../lib/format";
 import { BUYER_STATUS_RANK } from "../lib/buyerStatus";
 import type { BuyerActivityRow, CommKind, TimelineEntry } from "../types";
@@ -103,9 +104,8 @@ function LogEntryForm({ dealId, buyerId, onLogged }: { dealId: string; buyerId: 
 
   return (
     <div className="ba-log">
-      <select value={kind} onChange={(e) => setKind(e.target.value as CommKind)}>
-        {LOGGABLE.map((k) => <option key={k.v} value={k.v}>{k.label}</option>)}
-      </select>
+      <Select value={kind} onChange={(v) => setKind(v as CommKind)} width={150} ariaLabel="Activity type"
+        options={LOGGABLE.map((k) => ({ value: k.v, label: k.label }))} />
       <input value={body} onChange={(e) => setBody(e.target.value)} placeholder="Log a call, meeting, note, or negotiation…" onKeyDown={(e) => { if (e.key === "Enter") save(); }} />
       <button className="small primary" disabled={busy || !body.trim()} onClick={save}>Add</button>
       {err && <span className="error-text">{err}</span>}

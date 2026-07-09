@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Modal } from "./ui";
 import { api, ApiError } from "../api/client";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
+import { Select } from "./Select";
 import { PhoneInput } from "./PhoneInput";
 import { GeoFields } from "./GeoFields";
 import { StateSelect } from "./StateSelect";
@@ -94,9 +95,8 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
         <div className="field"><label>Email</label><input type="email" value={f.email} onChange={set("email")} /></div>
         <div className="field"><label>Website</label><input value={f.website} onChange={set("website")} /></div>
         <div className="field"><label>Relationship</label>
-          <select value={relationshipStatus} onChange={(e) => setRelationshipStatus(e.target.value as "HOT" | "WARM" | "COLD")}>
-            <option value="HOT">Hot</option><option value="WARM">Warm</option><option value="COLD">Cold</option>
-          </select>
+          <Select value={relationshipStatus} onChange={(v) => setRelationshipStatus(v as "HOT" | "WARM" | "COLD")} ariaLabel="Relationship status"
+            options={[{ value: "HOT", label: "Hot" }, { value: "WARM", label: "Warm" }, { value: "COLD", label: "Cold" }]} />
         </div>
         <div className="field"><label>Next follow-up</label><input type="date" value={f.nextFollowUpDate} onChange={set("nextFollowUpDate")} /></div>
       </div>

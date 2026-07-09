@@ -3,6 +3,7 @@ import type maplibregl from "maplibre-gl";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Modal, ConfirmDialog, Spinner, Banner } from "./ui";
+import { Select } from "./Select";
 import { TractMap, type TractMapFeature, type TractSegment } from "./TractMap";
 import { exportTractMap } from "../lib/tractExport";
 
@@ -195,17 +196,14 @@ export function TractSection({ dealId, dealName, canEdit, abstractIds = [] }: { 
       {anyMapped && (
         <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <span className="muted" style={{ fontSize: 13 }}>Export map:</span>
-          <select value={expFormat} onChange={(e) => setExpFormat(e.target.value as typeof expFormat)} style={{ width: "auto" }}>
-            <option value="pdf">PDF</option><option value="png">PNG</option><option value="jpeg">JPEG</option><option value="svg">SVG (vector)</option>
-          </select>
+          <Select value={expFormat} onChange={(v) => setExpFormat(v as typeof expFormat)} width={150} ariaLabel="Export format"
+            options={[{ value: "pdf", label: "PDF" }, { value: "png", label: "PNG" }, { value: "jpeg", label: "JPEG" }, { value: "svg", label: "SVG (vector)" }]} />
           {expFormat === "pdf" && (
             <>
-              <select value={expPage} onChange={(e) => setExpPage(e.target.value as typeof expPage)} style={{ width: "auto" }}>
-                <option value="letter">Letter</option><option value="a4">A4</option>
-              </select>
-              <select value={expOrient} onChange={(e) => setExpOrient(e.target.value as typeof expOrient)} style={{ width: "auto" }}>
-                <option value="landscape">Landscape</option><option value="portrait">Portrait</option>
-              </select>
+              <Select value={expPage} onChange={(v) => setExpPage(v as typeof expPage)} width={120} ariaLabel="Page size"
+                options={[{ value: "letter", label: "Letter" }, { value: "a4", label: "A4" }]} />
+              <Select value={expOrient} onChange={(v) => setExpOrient(v as typeof expOrient)} width={140} ariaLabel="Orientation"
+                options={[{ value: "landscape", label: "Landscape" }, { value: "portrait", label: "Portrait" }]} />
             </>
           )}
           <input placeholder="Optional notes for the export…" value={expNotes} onChange={(e) => setExpNotes(e.target.value)} style={{ flex: 1, minWidth: 180 }} />

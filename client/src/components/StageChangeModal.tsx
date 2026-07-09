@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Modal } from "./ui";
+import { Select } from "./Select";
 import { api, ApiError } from "../api/client";
 import { prettyStage } from "../lib/format";
 import type { DealSummary, Stage } from "../types";
@@ -114,10 +115,8 @@ export function StageChangeModal({ deal, initialStage, directTerminal, hasUnreso
             <>
               <div className="field">
                 <label>Reason lost (required)</label>
-                <select value={deadCategory} onChange={(e) => setDeadCategory(e.target.value)}>
-                  <option value="">Select a reason…</option>
-                  {DEAD_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
-                </select>
+                <Select value={deadCategory} onChange={setDeadCategory} placeholder="Select a reason…" ariaLabel="Reason lost"
+                  options={DEAD_REASONS.map((r) => ({ value: r, label: r }))} />
               </div>
               {deadCategory && (
                 <div className="field">
@@ -163,9 +162,8 @@ export function StageChangeModal({ deal, initialStage, directTerminal, hasUnreso
       </p>
       <div className="field">
         <label>Destination stage</label>
-        <select value={toStage} onChange={(e) => setToStage(e.target.value as Stage)}>
-          {STAGES.map((s) => <option key={s} value={s}>{prettyStage(s)}</option>)}
-        </select>
+        <Select value={toStage} onChange={(v) => setToStage(v as Stage)} ariaLabel="Destination stage"
+          options={STAGES.map((s) => ({ value: s, label: prettyStage(s) }))} />
       </div>
 
       {/* Destination-specific pre-flight checklist */}
@@ -182,10 +180,8 @@ export function StageChangeModal({ deal, initialStage, directTerminal, hasUnreso
         <>
           <div className="field">
             <label>Reason lost (required)</label>
-            <select value={deadCategory} onChange={(e) => setDeadCategory(e.target.value)}>
-              <option value="">Select a reason…</option>
-              {DEAD_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
-            </select>
+            <Select value={deadCategory} onChange={setDeadCategory} placeholder="Select a reason…" ariaLabel="Reason lost"
+              options={DEAD_REASONS.map((r) => ({ value: r, label: r }))} />
           </div>
           {deadCategory && (
             <div className="field">
