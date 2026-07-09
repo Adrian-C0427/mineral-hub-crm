@@ -12,6 +12,7 @@ import { errorHandler, notFound } from "./middleware/errors.js";
 import { authRouter } from "./routes/auth.js";
 import { usersRouter } from "./routes/users.js";
 import { dealsRouter } from "./routes/deals.js";
+import { pipelineStagesRouter } from "./routes/pipelineStages.js";
 import { tractsRouter } from "./routes/tracts.js";
 import { buyersRouter } from "./routes/buyers.js";
 import { offersRouter } from "./routes/offers.js";
@@ -67,6 +68,7 @@ export function createApp() {
   app.use("/api/auth", authRouter);
   app.use("/api/org", orgRouter);
   app.use("/api/users", usersRouter);
+  app.use("/api/pipeline", pipelineStagesRouter);
   app.use("/api/deals", dealsRouter);
   // Tract descriptions live on their own router; Express falls through to it
   // for the /api/deals/:id/tracts* paths the deals router doesn't define.

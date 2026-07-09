@@ -2,13 +2,8 @@ import { useState } from "react";
 import { Modal } from "./ui";
 import { Select } from "./Select";
 import { api, ApiError } from "../api/client";
-import { prettyStage } from "../lib/format";
+import { useStages } from "../stages";
 import type { DealSummary, Stage } from "../types";
-
-const STAGES: Stage[] = [
-  "UNDER_CONTRACT", "PREPARING_PACKAGE", "SENT_TO_BUYERS",
-  "NEGOTIATING", "CLOSING", "CLOSED", "DEAD",
-];
 
 interface Props {
   deal: DealSummary;
@@ -31,6 +26,7 @@ const DEAD_REASONS = [
 ] as const;
 
 export function StageChangeModal({ deal, initialStage, directTerminal, hasUnresolvedActivity, onClose, onChanged }: Props) {
+  const { stages, label: stageLabel } = useStages();
   const [toStage, setToStage] = useState<Stage>(initialStage ?? deal.stage);
   const [deadCategory, setDeadCategory] = useState<string>("");
   const [deadNotes, setDeadNotes] = useState("");
@@ -152,18 +148,18 @@ export function StageChangeModal({ deal, initialStage, directTerminal, hasUnreso
         <>
           <button onClick={onClose}>Cancel</button>
           <button className="primary" onClick={requestMove} disabled={busy || toStage === deal.stage}>
-            {busy ? "Saving…" : `Move to ${prettyStage(toStage)}${isTerminal ? "…" : ""}`}
+            {busy ? "Saving…" : `Move to ${stageLabel(toStage)}${isTerminal ? "…" : ""}`}
           </button>
         </>
       }
     >
       <p className="muted" style={{ marginTop: 0 }}>
-        Currently in <strong>{prettyStage(deal.stage)}</strong>.
+        Currently in <strong>{stageLabel(deal.stage)}</strong>.
       </p>
       <div className="field">
         <label>Destination stage</label>
         <Select value={toStage} onChange={(v) => setToStage(v as Stage)} ariaLabel="Destination stage"
-          options={STAGES.map((s) => ({ value: s, label: prettyStage(s) }))} />
+          options={stages.map((s) => ({ value: s.key, label: s.label }))} />
       </div>
 
       {/* Destination-specific pre-flight checklist */}

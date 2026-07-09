@@ -3,7 +3,8 @@ import { Link } from "react-router-dom";
 import { Sun, Moon } from "lucide-react";
 import { api } from "../api/client";
 import { Spinner } from "../components/ui";
-import { money, fmtDate, prettyStage } from "../lib/format";
+import { money, fmtDate } from "../lib/format";
+import { useStages } from "../stages";
 import { NotificationsPanel } from "../components/NotificationsPanel";
 import { PeriodSegmented } from "../components/PeriodSegmented";
 import { useTheme } from "../theme";
@@ -111,6 +112,7 @@ export function Dashboard() {
   const [d, setD] = useState<DashboardData | null>(null);
   const [period, setPeriod] = useState<DashPeriod>("YTD");
   const { theme, toggleTheme } = useTheme();
+  const { label: stageLabel } = useStages();
   const [prefs, setPrefs] = useState<DashPrefs>(loadDashPrefs);
   const [customizing, setCustomizing] = useState(false);
   const [dragId, setDragId] = useState<WidgetId | null>(null);
@@ -199,7 +201,7 @@ export function Dashboard() {
             {d.stageCounts.map((s) => (
               <Link className="dash-fun-row" key={s.stage} to={`/pipeline?stage=${s.stage}`}>
                 <span className="dash-fun-head">
-                  <span className="dash-soft">{prettyStage(s.stage)}</span>
+                  <span className="dash-soft">{stageLabel(s.stage)}</span>
                   <span className="dash-faintish">{s.count}</span>
                 </span>
                 <span className="dash-fun-track">

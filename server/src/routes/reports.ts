@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { ensureStages } from "../domain/stages.js";
 import { netProfit, grossFee, avg, winRate } from "../domain/metrics.js";
 import {
   computeKpis, delta, buildMonthlySeries, buildBreakdowns,
@@ -239,13 +240,14 @@ reportsRouter.get(
   "/filters",
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
-    const [deals, buyers, users] = await Promise.all([
+    const [deals, buyers, users, orgStages] = await Promise.all([
       prisma.deal.findMany({
         where: { organizationId: org },
         select: { counties: true, basins: true, formations: true, assetTypes: true, operator: true },
       }),
       prisma.buyer.findMany({ where: { organizationId: org }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
       prisma.user.findMany({ where: { organizationId: org }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+      ensureStages(prisma, org),
     ]);
     const uniq = (xs: string[]) => Array.from(new Set(xs.filter(Boolean))).sort();
     res.json({
@@ -256,7 +258,7 @@ reportsRouter.get(
       operators: uniq(deals.map((d) => d.operator ?? "").filter(Boolean)),
       buyers,
       users,
-      stages: ["UNDER_CONTRACT", "PREPARING_PACKAGE", "SENT_TO_BUYERS", "NEGOTIATING", "CLOSING", "CLOSED", "DEAD"],
+      stages: orgStages.map((s) => s.key),
     });
   }),
 );

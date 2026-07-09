@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { prettyStage, prettyEnum } from "../lib/format";
+import { prettyEnum } from "../lib/format";
+import { useStages } from "../stages";
 
 /**
  * Standard back-to-list navigation for detail pages. Prefers browser back (so
@@ -26,7 +27,8 @@ export function PriorityBadge({ priority }: { priority: "HIGH" | "MEDIUM" | "LOW
 }
 
 export function StageBadge({ stage }: { stage: string }) {
-  return <span className={`badge stage-${stage.toLowerCase()}`}>{prettyStage(stage)}</span>;
+  const { label } = useStages();
+  return <span className={`badge stage-${stage.toLowerCase()}`}>{label(stage)}</span>;
 }
 
 export function RelationshipDot({ status }: { status: "HOT" | "WARM" | "COLD" }) {

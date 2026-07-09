@@ -14,6 +14,7 @@ import { PeriodSegmented } from "../components/PeriodSegmented";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { ChartTypeToggle, useChartType } from "../components/ChartTypeToggle";
 import { money, pct, num, fmtDate, prettyStage } from "../lib/format";
+import { useStages } from "../stages";
 import { CHART_COLORS, COLOR_REVENUE, COLOR_PROFIT, COLOR_FORECAST, monthLabel, chartTooltip } from "../lib/charts";
 import { exportElementToPdf } from "../lib/pdf";
 import type { DealSummary } from "../types";
@@ -544,9 +545,10 @@ function BreakdownBars({ data, color = CHART_COLORS[0], onClick }: { data: { nam
 }
 
 function DrillTable({ rows, onOpen }: { rows: DealSummary[]; onOpen: (id: string) => void }) {
+  const { label: stageLabel } = useStages();
   const cols: Column<DealSummary>[] = [
     { key: "name", header: "Deal", type: "text", value: (r) => r.name, render: (r) => <strong>{r.name}</strong> },
-    { key: "stage", header: "Stage", type: "text", value: (r) => r.stage, render: (r) => prettyStage(r.stage) },
+    { key: "stage", header: "Stage", type: "text", value: (r) => r.stage, render: (r) => stageLabel(r.stage) },
     { key: "loc", header: "Counties", type: "text", value: (r) => r.counties.join(", "), render: (r) => r.counties.join(", ") || "—" },
     { key: "ask", header: "Ask", type: "number", align: "right", value: (r) => r.askPrice, render: (r) => money(r.askPrice) },
     { key: "buyer", header: "Buyer", type: "text", value: (r) => r.selectedBuyer?.name ?? "" },

@@ -1537,3 +1537,14 @@ body.pipeline-dragging, body.pipeline-dragging * { user-select: none !important;
 .asset-card-facts { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12.5px; color: var(--text-dim); }
 .asset-card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 12.5px;
   padding-top: 8px; border-top: 1px solid var(--border); }
+
+/* Customize pipeline stages editor (PipelineStagesModal). */
+.stage-editor { display: flex; flex-direction: column; gap: 8px; }
+.stage-row { display: flex; align-items: center; gap: 8px; }
+.stage-row input { flex: 1; }
+.stage-move { display: inline-flex; gap: 2px; }
+.stage-del { flex: 0 0 auto; width: 32px; height: 34px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel); color: var(--text-dim); font-size: 17px; line-height: 1; cursor: pointer; }
+.stage-del:hover:not(:disabled) { color: var(--red); border-color: var(--red); }
+.stage-del:disabled { opacity: 0.4; cursor: not-allowed; }
+.stage-terminal { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
