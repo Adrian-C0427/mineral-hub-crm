@@ -94,11 +94,14 @@ function useColumnPrefs<T>(customizeId: string | undefined, columns: Column<T>[]
     : orderedVisible;
 
   const toggle = (key: string) => setPrefs((p) => ({ ...p, hidden: p.hidden.includes(key) ? p.hidden.filter((k) => k !== key) : [...p.hidden, key] }));
-  const move = (key: string, dir: -1 | 1) => setPrefs((p) => {
+  // Drag-and-drop reorder: move `fromKey` to `toKey`'s position within the full
+  // column order (hidden columns keep their relative slots).
+  const reorder = (fromKey: string, toKey: string) => setPrefs((p) => {
     const keys = ordered.map((c) => c.key);
-    const i = keys.indexOf(key); const j = i + dir;
-    if (i < 0 || j < 0 || j >= keys.length) return p;
-    [keys[i], keys[j]] = [keys[j], keys[i]];
+    const fi = keys.indexOf(fromKey), ti = keys.indexOf(toKey);
+    if (fi < 0 || ti < 0 || fi === ti) return p;
+    keys.splice(fi, 1);
+    keys.splice(ti, 0, fromKey);
     return { ...p, order: keys };
   });
   const setWidth = (key: string, w: number) => setPrefs((p) => ({ ...p, widths: { ...p.widths, [key]: Math.max(MIN_COL_W, Math.round(w)) } }));
@@ -110,20 +113,23 @@ function useColumnPrefs<T>(customizeId: string | undefined, columns: Column<T>[]
   const reset = () => setPrefs({ order: [], hidden: [], widths: {}, pinned: [] });
   const isDefault = prefs.order.length === 0 && prefs.hidden.length === 0 && Object.keys(prefs.widths).length === 0 && prefs.pinned.length === 0;
 
-  return { ordered, visible, hidden, widths: prefs.widths, pinnedKeys, pinnedSet, toggle, move, setWidth, togglePin, reset, isDefault };
+  return { ordered, visible, hidden, widths: prefs.widths, pinnedKeys, pinnedSet, toggle, reorder, setWidth, togglePin, reset, isDefault };
 }
 
-function ColumnCustomizer<T>({ ordered, hidden, pinnedSet, onToggle, onMove, onPin, onReset, isDefault }: {
+function ColumnCustomizer<T>({ ordered, hidden, pinnedSet, onToggle, onReorder, onPin, onReset, isDefault }: {
   ordered: Column<T>[];
   hidden: Set<string>;
   pinnedSet: Set<string>;
   onToggle: (key: string) => void;
-  onMove: (key: string, dir: -1 | 1) => void;
+  onReorder: (fromKey: string, toKey: string) => void;
   onPin: (key: string) => void;
   onReset: () => void;
   isDefault: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  // Drag-and-drop reorder state: the column being dragged and the current target.
+  const [dragKey, setDragKey] = useState<string | null>(null);
+  const [overKey, setOverKey] = useState<string | null>(null);
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -147,11 +153,19 @@ function ColumnCustomizer<T>({ ordered, hidden, pinnedSet, onToggle, onMove, onP
         <div className="cv-menu" role="dialog" aria-label="Customize columns">
           <div className="cv-head"><strong>Columns</strong><span className="muted" style={{ fontSize: 12 }}>Show, hide, pin &amp; reorder</span></div>
           <div className="cv-list">
-            {listed.map((c, i) => {
+            {listed.map((c) => {
               const on = !hidden.has(c.key);
               const pinned = pinnedSet.has(c.key);
               return (
-                <div key={c.key} className="cv-row">
+                <div key={c.key}
+                  className={`cv-row ${dragKey === c.key ? "dragging" : ""} ${overKey === c.key && dragKey && dragKey !== c.key ? "drop-over" : ""}`}
+                  onDragOver={(e) => { if (!dragKey) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (overKey !== c.key) setOverKey(c.key); }}
+                  onDrop={(e) => { e.preventDefault(); if (dragKey) onReorder(dragKey, c.key); setDragKey(null); setOverKey(null); }}
+                >
+                  {/* Only the handle is draggable, so the checkbox stays clickable. */}
+                  <span className="cv-drag" title="Drag to reorder" aria-label="Drag to reorder" draggable
+                    onDragStart={(e) => { setDragKey(c.key); e.dataTransfer.effectAllowed = "move"; }}
+                    onDragEnd={() => { setDragKey(null); setOverKey(null); }}>⠿</span>
                   <label className="cv-check">
                     <input type="checkbox" checked={on} disabled={c.required} onChange={() => onToggle(c.key)} />
                     <span>{c.header}{c.required ? " *" : ""}</span>
@@ -160,8 +174,6 @@ function ColumnCustomizer<T>({ ordered, hidden, pinnedSet, onToggle, onMove, onP
                     <button type="button" className={`icon-btn ${pinned ? "on" : ""}`} title={pinned ? "Unpin column" : "Pin column to the left"} aria-pressed={pinned} onClick={() => onPin(c.key)}>
                       <svg width="13" height="13" viewBox="0 0 24 24" fill={pinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2"><path d="M12 17v5" /><path d="M9 10.76V4a1 1 0 011-1h4a1 1 0 011 1v6.76a2 2 0 00.55 1.38l1.9 1.9A1 1 0 0117.65 17H6.35a1 1 0 01-.7-1.96l1.9-1.9A2 2 0 009 10.76z" /></svg>
                     </button>
-                    <button type="button" className="icon-btn" disabled={i === 0} title="Move up" onClick={() => onMove(c.key, -1)}>↑</button>
-                    <button type="button" className="icon-btn" disabled={i === listed.length - 1} title="Move down" onClick={() => onMove(c.key, 1)}>↓</button>
                   </span>
                 </div>
               );
@@ -191,7 +203,7 @@ export function SortableTable<T>({
   customizeId,
 }: Props<T>) {
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(defaultSort ?? null);
-  const { ordered, visible, hidden, widths, pinnedKeys, pinnedSet, toggle, move, setWidth, togglePin, reset, isDefault } = useColumnPrefs(customizeId, columns);
+  const { ordered, visible, hidden, widths, pinnedKeys, pinnedSet, toggle, reorder, setWidth, togglePin, reset, isDefault } = useColumnPrefs(customizeId, columns);
   const cols = visible;
 
   // Cumulative left offsets for user-pinned columns (they render first). Their
@@ -334,7 +346,7 @@ export function SortableTable<T>({
   return (
     <div className="cv-table">
       <div className="cv-toolbar">
-        <ColumnCustomizer ordered={ordered} hidden={hidden} pinnedSet={pinnedSet} onToggle={toggle} onMove={move} onPin={togglePin} onReset={reset} isDefault={isDefault} />
+        <ColumnCustomizer ordered={ordered} hidden={hidden} pinnedSet={pinnedSet} onToggle={toggle} onReorder={reorder} onPin={togglePin} onReset={reset} isDefault={isDefault} />
       </div>
       {table}
     </div>

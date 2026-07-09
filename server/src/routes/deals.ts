@@ -103,9 +103,14 @@ dealsRouter.get(
       where.recordType = "OWNED_ASSET";
       where.stage = { not: "CLOSED" }; // sold assets move to Closed Deals, not the portfolio
     }
+    // Owned-asset portfolio derives Annual Royalty Income from recorded revenue,
+    // so pull the lightweight revenue scalars only for that listing.
+    const revenueInclude = rt === "OWNED_ASSET"
+      ? { revenueEntries: { select: { month: true, amount: true, kind: true } } }
+      : {};
     const deals = await prisma.deal.findMany({
       where,
-      include: { ...dealInclude, offers: { select: { amount: true } }, _count: { select: { assets: true } }, assets: { select: { nra: true, acreageNma: true, ourPrice: true, askPrice: true } } },
+      include: { ...dealInclude, offers: { select: { amount: true } }, _count: { select: { assets: true } }, assets: { select: { nra: true, acreageNma: true, ourPrice: true, askPrice: true } }, ...revenueInclude },
       orderBy: { createdAt: "desc" },
     });
     res.json(deals.map((d) => serializeDeal(d)));

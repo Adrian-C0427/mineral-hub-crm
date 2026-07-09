@@ -444,10 +444,15 @@ function MetricsCustomize({ prefs, onChange }: { prefs: MetricPrefs; onChange: (
 
   const ordered: MetricId[] = [...prefs.order.filter((id) => DEFAULT_METRICS.includes(id)), ...DEFAULT_METRICS.filter((id) => !prefs.order.includes(id))];
   const toggle = (id: MetricId) => onChange({ ...prefs, hidden: prefs.hidden.includes(id) ? prefs.hidden.filter((k) => k !== id) : [...prefs.hidden, id] });
-  const move = (id: MetricId, dir: -1 | 1) => {
-    const keys = [...ordered]; const i = keys.indexOf(id); const j = i + dir;
-    if (j < 0 || j >= keys.length) return;
-    [keys[i], keys[j]] = [keys[j], keys[i]];
+  // Drag-and-drop reorder (replaces the old ↑/↓ arrows).
+  const [dragId, setDragId] = useState<MetricId | null>(null);
+  const [overId, setOverId] = useState<MetricId | null>(null);
+  const reorder = (from: MetricId, to: MetricId) => {
+    if (from === to) return;
+    const keys = [...ordered];
+    const fi = keys.indexOf(from), ti = keys.indexOf(to);
+    if (fi < 0 || ti < 0) return;
+    keys.splice(fi, 1); keys.splice(ti, 0, from);
     onChange({ ...prefs, order: keys });
   };
   const isDefault = prefs.order.length === 0 && prefs.hidden.length === 0;
@@ -462,16 +467,19 @@ function MetricsCustomize({ prefs, onChange }: { prefs: MetricPrefs; onChange: (
         <div className="cv-menu" role="dialog" aria-label="Customize metrics">
           <div className="cv-head"><strong>Metrics</strong><span className="muted" style={{ fontSize: 12 }}>Show, hide &amp; reorder</span></div>
           <div className="cv-list">
-            {ordered.map((id, i) => (
-              <div key={id} className="cv-row">
+            {ordered.map((id) => (
+              <div key={id}
+                className={`cv-row ${dragId === id ? "dragging" : ""} ${overId === id && dragId && dragId !== id ? "drop-over" : ""}`}
+                onDragOver={(e) => { if (!dragId) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (overId !== id) setOverId(id); }}
+                onDrop={(e) => { e.preventDefault(); if (dragId) reorder(dragId, id); setDragId(null); setOverId(null); }}
+              >
+                <span className="cv-drag" title="Drag to reorder" aria-label="Drag to reorder" draggable
+                  onDragStart={(e) => { setDragId(id); e.dataTransfer.effectAllowed = "move"; }}
+                  onDragEnd={() => { setDragId(null); setOverId(null); }}>⠿</span>
                 <label className="cv-check">
                   <input type="checkbox" checked={!prefs.hidden.includes(id)} onChange={() => toggle(id)} />
                   <span>{METRIC_LABELS[id]}</span>
                 </label>
-                <span className="cv-move">
-                  <button type="button" className="icon-btn" disabled={i === 0} title="Move up" onClick={() => move(id, -1)}>↑</button>
-                  <button type="button" className="icon-btn" disabled={i === ordered.length - 1} title="Move down" onClick={() => move(id, 1)}>↓</button>
-                </span>
               </div>
             ))}
           </div>

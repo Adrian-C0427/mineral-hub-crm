@@ -101,9 +101,17 @@ export function DealDetail() {
     );
   }
 
+  // The Back link names the list this deal belongs to, so it's clear where you
+  // return: Closed → Closed Deals, Dead → Archived Deals, otherwise Active Deals.
+  const backTo = deal.stage === "CLOSED"
+    ? { label: "Back to Closed Deals", fallback: "/deals/closed" }
+    : deal.stage === "DEAD"
+      ? { label: "Back to Archived Deals", fallback: "/deals/archived" }
+      : { label: "Back to Active Deals", fallback: "/deals/active" };
+
   return (
     <div className="page deal-detail">
-      <BackLink label="Back" fallback="/deals/active" />
+      <BackLink label={backTo.label} fallback={backTo.fallback} />
       <div className="page-header">
         <div className="row">
           <h1 style={{ marginBottom: 0 }}>{deal.name}</h1>

@@ -60,8 +60,12 @@ export function Select({
     return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
   }, []);
 
-  // Position the portaled menu under the control; reposition/close on scroll or
-  // resize so it never drifts away from its trigger.
+  // Position the portaled menu under the control, and keep it attached as the
+  // page (or an ancestor) scrolls by repositioning rather than closing.
+  // Crucially, scrolling *inside* the menu — spinning the wheel/trackpad through
+  // a long option list — must NOT move or close it, so scroll events originating
+  // within the menu are ignored. The menu closes only on selection or an outside
+  // click (handled above), matching every other dropdown in the app.
   useLayoutEffect(() => {
     if (!open) { setPos(null); return; }
     const place = () => {
@@ -69,7 +73,10 @@ export function Select({
       if (r) setPos({ top: r.bottom + 4, left: r.left, width: r.width });
     };
     place();
-    const onScroll = () => { setOpen(false); setQuery(""); };
+    const onScroll = (e: Event) => {
+      if (menuRef.current && e.target instanceof Node && menuRef.current.contains(e.target)) return;
+      place();
+    };
     window.addEventListener("resize", place);
     window.addEventListener("scroll", onScroll, true);
     return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", onScroll, true); };

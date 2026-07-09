@@ -720,7 +720,7 @@ export function MapView() {
       )}
 
       {showLayers && (
-        <div className="panel mc-panel" style={{ marginBottom: 12 }}>
+        <div className="panel mc-panel" style={{ marginBottom: 12, padding: "16px 24px" }}>
           <MapLayersPanel
             defs={[
               { key: "boundaries", label: "Abstract boundaries" }, { key: "absNums", label: "Abstract numbers" },
