@@ -126,8 +126,10 @@ async function validateMailchimp(secret: string): Promise<ValidationResult> {
 
 const SLACK_WEBHOOK = /^https:\/\/hooks\.slack\.com\/(services|workflows)\//;
 // Power Automate "when a Teams webhook request is received" URLs live on
-// *.logic.azure.com (or environment-specific *.azure.com hosts).
-const TEAMS_WEBHOOK = /^https:\/\/[^/]+\.azure\.com\//;
+// *.logic.azure.com (e.g. prod-00.westus.logic.azure.com). Anchor to that host
+// family (not any *.azure.com) so a connecting admin can't point the server's
+// outbound webhook at unrelated Azure endpoints (management.azure.com, etc.).
+const TEAMS_WEBHOOK = /^https:\/\/[a-z0-9.-]+\.logic\.azure\.com(:\d+)?\//i;
 
 async function postWebhook(url: string, body: unknown, provider: string): Promise<ValidationResult> {
   const res = await timedFetch(url, {
