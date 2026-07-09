@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, lazy, Suspense } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, Link } from "react-router-dom";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell,
 } from "recharts";
@@ -25,6 +25,10 @@ const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ defaul
 // provides the identical Deal-page interface around them).
 const ASSET_DOC_FOLDERS = ["Division Orders", "Deeds", "Leases", "Check Stubs", "Title", "Other"];
 
+// Current-lease selectors.
+const LEASE_STATUS_OPTIONS = ["Leased", "Held By Production", "Expired", "In Negotiation", "Unleased", "Top Lease", "Shut-in"];
+const ROYALTY_RATE_OPTIONS = ["1/16", "1/8", "3/16", "1/6", "1/5", "1/4"];
+
 interface AssetDetail extends DealSummary {
   operator: string | null;
   notes: string | null;
@@ -48,14 +52,10 @@ const matchColor = (pct: number): string => (pct >= 67 ? "#4ade80" : pct >= 34 ?
 export function MineralAssetDetail() {
   const { id } = useParams<{ id: string }>();
   const { can } = useAuth();
-  const nav = useNavigate();
   const [asset, setAsset] = useState<AssetDetail | null>(null);
   const [matches, setMatches] = useState<MatchRec[] | null>(null);
   const [users, setUsers] = useState<UserLite[]>([]);
   const [tab, setTab] = useState<"hold" | "sell">("hold");
-  // Reverting to an opportunity is a workflow reversal — always confirmed.
-  const [confirmingRevert, setConfirmingRevert] = useState(false);
-  const [reverting, setReverting] = useState(false);
 
   const load = useCallback(() => api.get<AssetDetail>(`/deals/${id}`).then((d) => { setAsset(d); setTab(d.assetMode === "SELL" ? "sell" : "hold"); }), [id]);
   const loadMatches = useCallback(() => api.get<MatchRec[]>(`/deals/${id}/matches`).then(setMatches), [id]);
@@ -74,15 +74,6 @@ export function MineralAssetDetail() {
     await api.post(`/deals/${id}/asset-mode`, { assetMode: mode });
     refresh();
   }
-  async function revertToOpportunity() {
-    setReverting(true);
-    try {
-      await api.post(`/deals/${id}/convert`, { recordType: "OPPORTUNITY" });
-      nav("/deals");
-    } finally {
-      setReverting(false);
-    }
-  }
 
   return (
     // `deal-detail` opts equivalent sections (KV grids, match cards, criteria
@@ -100,32 +91,11 @@ export function MineralAssetDetail() {
         <div className="row">
           {canEdit && asset.assetMode !== "SELL" && <button className="primary" onClick={() => setMode("SELL")}>Mark for Sale</button>}
           {canEdit && asset.assetMode === "SELL" && <button onClick={() => setMode("HOLD")}>Move to Hold</button>}
-          {/* Deliberately small/muted: reversing the asset workflow is rare and
-              shouldn't visually compete with Mark for Sale. */}
-          {canEdit && <button className="small" style={{ color: "var(--text-dim)" }} onClick={() => setConfirmingRevert(true)}>Revert to Opportunity…</button>}
         </div>
       </div>
 
-      {confirmingRevert && (
-        <ConfirmDialog
-          title="Revert to acquisition opportunity?"
-          message={
-            <>
-              <p style={{ marginTop: 0 }}><strong>{asset.name}</strong> will move out of Mineral Assets and back into the Deals pipeline as an acquisition opportunity.</p>
-              <p style={{ marginBottom: 0 }}>
-                Nothing is deleted: purchase price, revenue entries, and valuation history stay on the record (hidden while it's an opportunity) and return if you convert it back to an owned asset.
-              </p>
-            </>
-          }
-          confirmLabel="Revert to Opportunity"
-          busy={reverting}
-          onCancel={() => setConfirmingRevert(false)}
-          onConfirm={revertToOpportunity}
-        />
-      )}
-
       <div className="metrics-row">
-        <MetricCard label="Current Value" value={money(asset.currentValue)} hint={asset.bookValue != null ? `Book ${money(asset.bookValue)}` : undefined} />
+        <MetricCard label="Current Value" value={money(asset.currentValue)} />
         <MetricCard label="Purchase Price" value={money(asset.purchasePrice)} hint={asset.acquisitionDate ? `Acquired ${fmtDate(asset.acquisitionDate)}` : undefined} />
         <MetricCard label="ROI Since Acquisition" value={fmtPct(asset.roiSinceAcquisition)} valueColor={posColor(asset.roiSinceAcquisition)} />
         <MetricCard label="Unrealized Gain / Loss" value={money(asset.unrealizedGainLoss)} valueColor={posColor(asset.unrealizedGainLoss)} />
@@ -193,6 +163,27 @@ function Fld({ l, children }: { l: string; children: React.ReactNode }) {
   return <div className="field" style={{ marginBottom: 0 }}><label>{l}</label>{children}</div>;
 }
 
+// Royalty rate = a common fraction from the preset list, or a custom value via
+// "Other". Stored as a plain string ("1/8", "3/16", or whatever's typed).
+function RoyaltyRateField({ value, onChange }: { value: string | null; onChange: (v: string | null) => void }) {
+  const preset = value != null && value !== "" && ROYALTY_RATE_OPTIONS.includes(value);
+  const [other, setOther] = useState<boolean>(value != null && value !== "" && !preset);
+  const selectValue = other ? "__other__" : preset ? value! : "";
+  return (
+    <>
+      <Select
+        value={selectValue} clearable placeholder="—" ariaLabel="Royalty rate"
+        options={[...ROYALTY_RATE_OPTIONS.map((o) => ({ value: o, label: o })), { value: "__other__", label: "Other (custom)" }]}
+        onChange={(v) => {
+          if (v === "__other__") { setOther(true); onChange(value && !preset ? value : ""); }
+          else { setOther(false); onChange(v === "" ? null : v); }
+        }}
+      />
+      {other && <input style={{ marginTop: 6 }} value={value ?? ""} onChange={(e) => onChange(e.target.value)} placeholder="e.g. 1/3, 0.1875" />}
+    </>
+  );
+}
+
 function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit: boolean; onSaved: () => void }) {
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState(asset);
@@ -202,9 +193,9 @@ function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdi
   async function save() {
     await api.patch(`/deals/${asset.id}`, {
       ownershipType: f.ownershipType, ownershipStatus: f.ownershipStatus,
-      acquisitionDate: f.acquisitionDate || null,
-      purchasePrice: f.purchasePrice, currentValue: f.currentValue, bookValue: f.bookValue,
-      acreageNma: f.acreageNma, nra: f.nra, workingInterest: f.workingInterest, netRevenueInterest: f.netRevenueInterest,
+      acquisitionDate: f.acquisitionDate || null, rrc: f.rrc || null,
+      purchasePrice: f.purchasePrice, currentValue: f.currentValue,
+      acreageNma: f.acreageNma, nra: f.nra, netRevenueInterest: f.netRevenueInterest,
     });
     setEdit(false); onSaved();
   }
@@ -218,10 +209,9 @@ function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdi
           <KV k="Acquisition Date" v={fmtDate(asset.acquisitionDate)} />
           <KV k="Purchase Price" v={money(asset.purchasePrice)} />
           <KV k="Current Value" v={money(asset.currentValue)} />
-          <KV k="Book Value" v={money(asset.bookValue)} />
+          <KV k="RRC" v={asset.rrc} />
           <KV k="NMA" v={num(asset.acreageNma)} />
           <KV k="NRA" v={num(asset.nra)} />
-          <KV k="Working Interest" v={asset.workingInterest != null ? `${(asset.workingInterest * 100).toFixed(2)}%` : "—"} />
           <KV k="Net Revenue Interest" v={asset.netRevenueInterest != null ? `${(asset.netRevenueInterest * 100).toFixed(2)}%` : "—"} />
         </div>
       ) : (
@@ -231,10 +221,9 @@ function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdi
           <Fld l="Acquisition Date"><input type="date" value={toInputDate(f.acquisitionDate)} onChange={(e) => setF({ ...f, acquisitionDate: e.target.value })} /></Fld>
           <Fld l="Purchase Price"><input type="number" value={f.purchasePrice ?? ""} onChange={(e) => setF({ ...f, purchasePrice: numOrNull(e.target.value) })} /></Fld>
           <Fld l="Current Value"><input type="number" value={f.currentValue ?? ""} onChange={(e) => setF({ ...f, currentValue: numOrNull(e.target.value) })} /></Fld>
-          <Fld l="Book Value"><input type="number" value={f.bookValue ?? ""} onChange={(e) => setF({ ...f, bookValue: numOrNull(e.target.value) })} /></Fld>
+          <Fld l="RRC"><input value={f.rrc ?? ""} onChange={(e) => setF({ ...f, rrc: e.target.value })} placeholder="RRC lease / district / operator no." /></Fld>
           <Fld l="NMA"><input type="number" value={f.acreageNma ?? ""} onChange={(e) => setF({ ...f, acreageNma: numOrNull(e.target.value) })} /></Fld>
           <Fld l="NRA"><input type="number" value={f.nra ?? ""} onChange={(e) => setF({ ...f, nra: numOrNull(e.target.value) })} /></Fld>
-          <Fld l="Working Interest (0–1)"><input type="number" step="0.01" value={f.workingInterest ?? ""} onChange={(e) => setF({ ...f, workingInterest: numOrNull(e.target.value) })} /></Fld>
           <Fld l="Net Revenue Interest (0–1)"><input type="number" step="0.01" value={f.netRevenueInterest ?? ""} onChange={(e) => setF({ ...f, netRevenueInterest: numOrNull(e.target.value) })} /></Fld>
         </div>
       )}
@@ -306,8 +295,11 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
 
   async function saveFinancials() {
     await api.patch(`/deals/${asset.id}`, {
-      royaltyIncomeAnnual: f.royaltyIncomeAnnual, leaseStatus: f.leaseStatus, leaseInfo: f.leaseInfo,
-      divisionOrdersNote: f.divisionOrdersNote, taxInfo: f.taxInfo,
+      royaltyIncomeAnnual: f.royaltyIncomeAnnual,
+      leaseStatuses: f.leaseStatuses ?? [],
+      royaltyRate: f.royaltyRate,
+      leaseEffectiveDate: f.leaseEffectiveDate || null,
+      leaseExpirationDate: f.leaseExpirationDate || null,
     });
     setEdit(false); onSaved();
   }
@@ -332,7 +324,7 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
         <MetricCard label="Total Revenue Booked" value={money(totalRevenue)} hint={`${asset.revenueEntries?.length ?? 0} entries`} valueColor={totalRevenue ? "var(--green)" : undefined} />
         <MetricCard label="ROI Since Acquisition" value={fmtPct(asset.roiSinceAcquisition)} valueColor={posColor(asset.roiSinceAcquisition)} />
         <MetricCard label="Unrealized Gain / Loss" value={money(asset.unrealizedGainLoss)} valueColor={posColor(asset.unrealizedGainLoss)} />
-        <MetricCard label="Lease Status" value={asset.leaseStatus || "—"} />
+        <MetricCard label="Lease Status" value={asset.leaseStatuses?.length ? asset.leaseStatuses.join(", ") : "—"} />
       </div>
 
       <div className="chart-grid">
@@ -353,22 +345,22 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
           )}
         </div>
         <div className="panel" style={{ marginBottom: 0 }}>
-          <div className="panel-title"><h3>Lease, Division Orders &amp; Tax</h3></div>
+          <div className="panel-title"><h3>Current Lease</h3></div>
           {!edit ? (
             <div className="dd-grid" style={{ gridTemplateColumns: "1fr" }}>
               <KV k="Estimated Annual Royalty" v={money(asset.royaltyIncomeAnnual)} />
-              <KV k="Lease Status" v={asset.leaseStatus} />
-              <KV k="Lease Information" v={asset.leaseInfo} />
-              <KV k="Division Orders" v={asset.divisionOrdersNote} />
-              <KV k="Tax Information" v={asset.taxInfo} />
+              <KV k="Lease Status" v={asset.leaseStatuses?.length ? asset.leaseStatuses.join(", ") : null} />
+              <KV k="Royalty Rate" v={asset.royaltyRate} />
+              <KV k="Lease Effective Date" v={fmtDate(asset.leaseEffectiveDate)} />
+              <KV k="Lease Expiration Date" v={fmtDate(asset.leaseExpirationDate)} />
             </div>
           ) : (
             <div className="dd-grid" style={{ gridTemplateColumns: "1fr" }}>
               <Fld l="Estimated Annual Royalty"><input type="number" value={f.royaltyIncomeAnnual ?? ""} onChange={(e) => setF({ ...f, royaltyIncomeAnnual: e.target.value === "" ? null : Number(e.target.value) })} /></Fld>
-              <Fld l="Lease Status"><input value={f.leaseStatus ?? ""} onChange={(e) => setF({ ...f, leaseStatus: e.target.value })} /></Fld>
-              <Fld l="Lease Information"><textarea rows={2} value={f.leaseInfo ?? ""} onChange={(e) => setF({ ...f, leaseInfo: e.target.value })} /></Fld>
-              <Fld l="Division Orders"><textarea rows={2} value={f.divisionOrdersNote ?? ""} onChange={(e) => setF({ ...f, divisionOrdersNote: e.target.value })} /></Fld>
-              <Fld l="Tax Information"><textarea rows={2} value={f.taxInfo ?? ""} onChange={(e) => setF({ ...f, taxInfo: e.target.value })} /></Fld>
+              <Fld l="Lease Status"><SearchableMultiSelect options={LEASE_STATUS_OPTIONS} value={f.leaseStatuses ?? []} onChange={(v) => setF({ ...f, leaseStatuses: v })} placeholder="Select lease status…" /></Fld>
+              <Fld l="Royalty Rate"><RoyaltyRateField value={f.royaltyRate} onChange={(v) => setF({ ...f, royaltyRate: v })} /></Fld>
+              <Fld l="Lease Effective Date"><input type="date" value={toInputDate(f.leaseEffectiveDate)} onChange={(e) => setF({ ...f, leaseEffectiveDate: e.target.value })} /></Fld>
+              <Fld l="Lease Expiration Date"><input type="date" value={toInputDate(f.leaseExpirationDate)} onChange={(e) => setF({ ...f, leaseExpirationDate: e.target.value })} /></Fld>
             </div>
           )}
         </div>

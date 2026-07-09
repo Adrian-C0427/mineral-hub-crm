@@ -103,6 +103,10 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     producingStatus: deal.producingStatus,
     // Owned-asset: financial
     royaltyIncomeAnnual: deal.royaltyIncomeAnnual,
+    leaseStatuses: deal.leaseStatuses ?? [],
+    royaltyRate: deal.royaltyRate,
+    leaseEffectiveDate: deal.leaseEffectiveDate,
+    leaseExpirationDate: deal.leaseExpirationDate,
     leaseStatus: deal.leaseStatus,
     leaseInfo: deal.leaseInfo,
     divisionOrdersNote: deal.divisionOrdersNote,

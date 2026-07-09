@@ -507,6 +507,12 @@ model Deal {
   producingStatus String? // e.g. "Producing", "Shut-in", "Non-producing"
   // Financial
   royaltyIncomeAnnual Float? // estimated annual royalty income
+  // Current-lease details (redesigned lease section).
+  leaseStatuses       String[] // multi-select lease statuses (Leased, HBP, Expired, …)
+  royaltyRate         String? // lease royalty fraction (e.g. "1/8", "3/16", custom)
+  leaseEffectiveDate  DateTime?
+  leaseExpirationDate DateTime?
+  // Deprecated (removed from the UI; columns kept to avoid a destructive drop):
   leaseStatus         String?
   leaseInfo           String?
   divisionOrdersNote  String?
