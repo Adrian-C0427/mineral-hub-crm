@@ -6,15 +6,38 @@ import { GeoFields } from "./GeoFields";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
 import type { DealSummary } from "../types";
 
-// A lightweight asset row captured during New Deal creation. Only the name is
-// required; each becomes a full child-asset deal that can be refined later.
-interface AssetRow { name: string; nra: string; ourPrice: string; askPrice: string; operator: string; assetTypes: string[] }
-const emptyAsset = (): AssetRow => ({ name: "", nra: "", ourPrice: "", askPrice: "", operator: "", assetTypes: [] });
+// An additional asset behaves exactly like a standalone deal record — the same
+// fields, dependencies, and required fields. Its contract timeline defaults to
+// the deal's (one timeline); untick "Same timeline" to give it its own.
+interface AssetRow {
+  name: string; states: string[]; counties: string[]; abstractIds: string[];
+  assetTypes: string[]; nra: string; ourPrice: string; askPrice: string;
+  operator: string; rrc: string; acreageNma: string; basins: string[]; formations: string[];
+  sameTimeline: boolean; dateUnderContract: string;
+}
+const emptyAsset = (): AssetRow => ({
+  name: "", states: [], counties: [], abstractIds: [], assetTypes: [], nra: "", ourPrice: "", askPrice: "",
+  operator: "", rrc: "", acreageNma: "", basins: [], formations: [], sameTimeline: true, dateUnderContract: "",
+});
+// Same required set as a standalone deal (Date Under Contract may be shared).
+function assetMissing(a: AssetRow): string[] {
+  const m: string[] = [];
+  if (!a.name.trim()) m.push("Deal Name");
+  if (!a.states.length) m.push("State");
+  if (!a.counties.length) m.push("County");
+  if (!a.abstractIds.length) m.push("Abstract");
+  if (!a.assetTypes.length) m.push("Asset Type");
+  if (a.nra.trim() === "") m.push("NRA");
+  if (a.ourPrice.trim() === "") m.push("Our Price");
+  if (!a.sameTimeline && !a.dateUnderContract) m.push("Date Under Contract");
+  return m;
+}
 
 /**
  * Create a deal — or, when `parentDealId` is passed, add a child asset under an
- * existing seller transaction (only the name is required in that mode). During
- * top-level creation the user can also add one or more assets before saving, so
+ * existing seller transaction. Either way the form is the full deal form with
+ * the same required fields. During top-level creation the user can also add one
+ * or more additional assets (each an identical full deal form) before saving, so
  * a multi-asset seller package is created in a single step.
  */
 export function NewDealModal({ onClose, onCreated, parentDealId }: {
@@ -42,27 +65,31 @@ export function NewDealModal({ onClose, onCreated, parentDealId }: {
     setF((p) => ({ ...p, [k]: e.target.value }));
   const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
 
-  // Required before save. A child asset needs only a name; a top-level deal
-  // mirrors the server-side required-field check.
+  // The primary form uses the full standalone-deal required set (identical in
+  // add-asset mode).
   const missing: string[] = [];
-  if (!f.name.trim()) missing.push(asset ? "Asset name" : "Deal name");
-  if (!asset) {
-    if (!states.length) missing.push("State");
-    if (!counties.length) missing.push("County");
-    if (!abstractIds.length) missing.push("Abstract");
-    if (f.nra.trim() === "") missing.push("NRA");
-    if (!assetTypes.length) missing.push("Asset Type");
-    if (f.ourPrice.trim() === "") missing.push("Our Price");
-    if (!f.dateUnderContract) missing.push("Date Under Contract");
-  }
-  const badAssetRows = assets.length > 0 && assets.some((a) => !a.name.trim());
+  if (!f.name.trim()) missing.push("Deal Name");
+  if (!states.length) missing.push("State");
+  if (!counties.length) missing.push("County");
+  if (!abstractIds.length) missing.push("Abstract");
+  if (!assetTypes.length) missing.push("Asset Type");
+  if (f.nra.trim() === "") missing.push("NRA");
+  if (f.ourPrice.trim() === "") missing.push("Our Price");
+  if (!f.dateUnderContract) missing.push("Date Under Contract");
 
-  const setAsset = (i: number, k: keyof AssetRow, v: string | string[]) =>
-    setAssets((rows) => rows.map((r, idx) => (idx === i ? { ...r, [k]: v } : r)));
+  const assetErrors = assets.map(assetMissing);
+  const anyAssetIncomplete = assetErrors.some((e) => e.length > 0);
+
+  const patchAsset = (i: number, patch: Partial<AssetRow>) =>
+    setAssets((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
   async function submit() {
     if (missing.length) { setError(`Required: ${missing.join(", ")}`); return; }
-    if (badAssetRows) { setError("Every asset needs a name (or remove the empty row)."); return; }
+    if (anyAssetIncomplete) {
+      const i = assetErrors.findIndex((e) => e.length > 0);
+      setError(`Asset ${i + 1} is missing: ${assetErrors[i].join(", ")}`);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -85,16 +112,18 @@ export function NewDealModal({ onClose, onCreated, parentDealId }: {
         notes: f.notes || null,
         // Add-asset mode: attach to the parent package.
         ...(asset ? { parentDealId } : {}),
-        // New-deal mode: additional child assets created alongside this deal.
+        // New-deal mode: additional child assets created alongside this deal —
+        // each a full deal record; timeline defaults to the deal's.
         ...(!asset && assets.length
           ? {
               assets: assets.map((a) => ({
                 name: a.name.trim(),
-                nra: numOrNull(a.nra),
-                ourPrice: numOrNull(a.ourPrice),
-                askPrice: numOrNull(a.askPrice),
-                operator: a.operator || null,
-                assetTypes: a.assetTypes,
+                states: a.states, state: a.states[0] ?? null,
+                counties: a.counties, abstractIds: a.abstractIds,
+                assetTypes: a.assetTypes, basins: a.basins, formations: a.formations,
+                nra: numOrNull(a.nra), ourPrice: numOrNull(a.ourPrice), askPrice: numOrNull(a.askPrice),
+                operator: a.operator || null, rrc: a.rrc || null, acreageNma: numOrNull(a.acreageNma),
+                dateUnderContract: a.sameTimeline ? (f.dateUnderContract || null) : (a.dateUnderContract || null),
               })),
             }
           : {}),
@@ -116,7 +145,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId }: {
       footer={
         <>
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={submit} disabled={busy || missing.length > 0}>
+          <button className="primary" onClick={submit} disabled={busy || missing.length > 0 || anyAssetIncomplete}>
             {busy ? "Saving…" : asset ? "Add asset" : assets.length ? `Create deal + ${assets.length} asset${assets.length > 1 ? "s" : ""}` : "Create deal"}
           </button>
         </>
@@ -124,8 +153,8 @@ export function NewDealModal({ onClose, onCreated, parentDealId }: {
     >
       {asset ? (
         <p className="muted" style={{ marginTop: 0 }}>
-          This asset is added under the seller transaction. Only the <strong>name</strong> is required — fill in the
-          rest here or later on the asset's own page. It's independently marketable.
+          This asset is added under the seller transaction — the same full deal form. Fields marked {req} are required.
+          It's independently marketable.
         </p>
       ) : (
         <p className="muted" style={{ marginTop: 0 }}>
@@ -133,18 +162,18 @@ export function NewDealModal({ onClose, onCreated, parentDealId }: {
           Add sellers afterward in the deal's <strong>Seller Details</strong> section.
         </p>
       )}
-      <div className="field"><label>{asset ? "Asset" : "Deal"} name {req}</label><input value={f.name} onChange={set("name")} autoFocus /></div>
+      <div className="field"><label>{asset ? "Asset" : "Deal"} Name {req}</label><input value={f.name} onChange={set("name")} autoFocus /></div>
       <div className="dd-grid">
         <GeoFields
           states={states} onStatesChange={setStates}
           counties={counties} onCountiesChange={setCounties}
           abstractIds={abstractIds} onAbstractsChange={setAbstractIds}
-          labels={asset ? { state: "State", county: "County", abstract: "Abstract" } : { state: "State *", county: "County *", abstract: "Abstract *" }}
+          labels={{ state: "State *", county: "County *", abstract: "Abstract *" }}
         />
-        <div className="field"><label>Asset Type {asset ? null : req}</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
-        <div className="field"><label>NRA {asset ? null : req}</label><input type="number" value={f.nra} onChange={set("nra")} /></div>
-        <div className="field"><label>Our Price (acquisition cost) {asset ? null : req}</label><input type="number" value={f.ourPrice} onChange={set("ourPrice")} /></div>
-        <div className="field"><label>Date Under Contract {asset ? null : req}</label><input type="date" value={f.dateUnderContract} onChange={set("dateUnderContract")} /></div>
+        <div className="field"><label>Asset Type {req}</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
+        <div className="field"><label>NRA {req}</label><input type="number" value={f.nra} onChange={set("nra")} /></div>
+        <div className="field"><label>Our Price (acquisition cost) {req}</label><input type="number" value={f.ourPrice} onChange={set("ourPrice")} /></div>
+        <div className="field"><label>Date Under Contract {req}</label><input type="date" value={f.dateUnderContract} onChange={set("dateUnderContract")} /></div>
         <div className="field"><label>Basin</label><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(counties))} value={basins} onChange={setBasins} placeholder={counties.length ? "Suggested for your counties first…" : "Search basins…"} /></div>
         <div className="field"><label>Formation</label><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(counties))} value={formations} onChange={setFormations} placeholder={counties.length ? "Suggested for your counties first…" : "Search formations…"} /></div>
         <div className="field"><label>Operator</label><input value={f.operator} onChange={set("operator")} /></div>
@@ -156,30 +185,73 @@ export function NewDealModal({ onClose, onCreated, parentDealId }: {
       </div>
       <div className="field"><label>Notes</label><textarea rows={3} value={f.notes} onChange={set("notes")} /></div>
 
-      {/* Multi-asset seller: add more interests acquired from the same seller.
-          Each becomes an independently-marketable child asset. */}
+      {/* Multi-asset seller: additional interests acquired from the same seller.
+          Each is an identical full deal form and becomes an independently-
+          marketable child asset grouped under this seller transaction. */}
       {!asset && (
         <div className="nd-assets">
           <div className="nd-assets-head">
             <div>
               <strong>Additional assets under this seller</strong>
-              <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>optional — one or more interests marketed separately</span>
+              <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>optional — each is a full deal, marketable separately</span>
             </div>
             <button type="button" className="small" onClick={() => setAssets((r) => [...r, emptyAsset()])}>+ Add asset</button>
           </div>
           {assets.map((a, i) => (
-            <div key={i} className="nd-asset-row">
-              <div className="field" style={{ flex: "2 1 160px" }}><label>Asset name {req}</label><input value={a.name} onChange={(e) => setAsset(i, "name", e.target.value)} placeholder={`Asset ${i + 1}`} /></div>
-              <div className="field" style={{ flex: "1 1 90px" }}><label>NRA</label><input type="number" value={a.nra} onChange={(e) => setAsset(i, "nra", e.target.value)} /></div>
-              <div className="field" style={{ flex: "1 1 100px" }}><label>Our Price</label><input type="number" value={a.ourPrice} onChange={(e) => setAsset(i, "ourPrice", e.target.value)} /></div>
-              <div className="field" style={{ flex: "1 1 100px" }}><label>Ask Price</label><input type="number" value={a.askPrice} onChange={(e) => setAsset(i, "askPrice", e.target.value)} /></div>
-              <div className="field" style={{ flex: "2 1 150px" }}><label>Asset Type</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={a.assetTypes} onChange={(v) => setAsset(i, "assetTypes", v)} placeholder="Any" /></div>
-              <button type="button" className="nd-asset-del" title="Remove asset" onClick={() => setAssets((r) => r.filter((_, idx) => idx !== i))}>×</button>
-            </div>
+            <AssetCard
+              key={i}
+              index={i}
+              a={a}
+              req={req}
+              onPatch={(patch) => patchAsset(i, patch)}
+              onRemove={() => setAssets((r) => r.filter((_, idx) => idx !== i))}
+            />
           ))}
         </div>
       )}
       {error && <div className="error-text">{error}</div>}
     </Modal>
+  );
+}
+
+/** One additional asset — the identical full deal form as a compact card. */
+function AssetCard({ index, a, req, onPatch, onRemove }: {
+  index: number; a: AssetRow; req: React.ReactNode; onPatch: (patch: Partial<AssetRow>) => void; onRemove: () => void;
+}) {
+  return (
+    <div className="nd-asset-card">
+      <div className="nd-asset-card-head">
+        <strong>Asset {index + 1}</strong>
+        <button type="button" className="nd-asset-del" title="Remove asset" onClick={onRemove}>×</button>
+      </div>
+      <div className="field"><label>Deal Name {req}</label><input value={a.name} onChange={(e) => onPatch({ name: e.target.value })} placeholder={`Asset ${index + 1}`} /></div>
+      <div className="dd-grid">
+        <GeoFields
+          states={a.states} onStatesChange={(v) => onPatch({ states: v })}
+          counties={a.counties} onCountiesChange={(v) => onPatch({ counties: v })}
+          abstractIds={a.abstractIds} onAbstractsChange={(v) => onPatch({ abstractIds: v })}
+          labels={{ state: "State *", county: "County *", abstract: "Abstract *" }}
+        />
+        <div className="field"><label>Asset Type {req}</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={a.assetTypes} onChange={(v) => onPatch({ assetTypes: v })} placeholder="Search asset types…" /></div>
+        <div className="field"><label>NRA {req}</label><input type="number" value={a.nra} onChange={(e) => onPatch({ nra: e.target.value })} /></div>
+        <div className="field"><label>Our Price {req}</label><input type="number" value={a.ourPrice} onChange={(e) => onPatch({ ourPrice: e.target.value })} /></div>
+        <div className="field"><label>Basin</label><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(a.counties))} value={a.basins} onChange={(v) => onPatch({ basins: v })} placeholder="Search basins…" /></div>
+        <div className="field"><label>Formation</label><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(a.counties))} value={a.formations} onChange={(v) => onPatch({ formations: v })} placeholder="Search formations…" /></div>
+        <div className="field"><label>Operator</label><input value={a.operator} onChange={(e) => onPatch({ operator: e.target.value })} /></div>
+        <div className="field"><label>RRC</label><input value={a.rrc} onChange={(e) => onPatch({ rrc: e.target.value })} placeholder="RRC lease / district / operator no." /></div>
+        <div className="field"><label>NMA</label><input type="number" value={a.acreageNma} onChange={(e) => onPatch({ acreageNma: e.target.value })} /></div>
+        <div className="field"><label>Ask Price (to buyers)</label><input type="number" value={a.askPrice} onChange={(e) => onPatch({ askPrice: e.target.value })} /></div>
+      </div>
+      {/* Contract timeline: shared with the deal by default; untick for its own. */}
+      <div className="nd-asset-timeline">
+        <label className="nd-asset-same">
+          <input type="checkbox" checked={a.sameTimeline} onChange={(e) => onPatch({ sameTimeline: e.target.checked })} />
+          <span>Same contract timeline as the deal</span>
+        </label>
+        {!a.sameTimeline && (
+          <div className="field" style={{ marginBottom: 0 }}><label>Date Under Contract {req}</label><input type="date" value={a.dateUnderContract} onChange={(e) => onPatch({ dateUnderContract: e.target.value })} /></div>
+        )}
+      </div>
+    </div>
   );
 }
