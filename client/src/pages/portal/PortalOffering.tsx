@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { API_BASE } from "../../api/client";
 import { num } from "../../lib/format";
 import { PortalMap } from "./PortalMap";
-import { portalGet, portalPost, type FC, type PortalAbstract, type PortalDeal, type PortalDocument, type PortalImage, type PortalOrg, type PortalProduction } from "./portalApi";
+import { portalGet, portalPost, type FC, type PortalAbstract, type PortalDeal, type PortalDocument, type PortalImage, type PortalOrg, type PortalPackageAsset, type PortalProduction } from "./portalApi";
 
 const EMPTY_FC: FC = { type: "FeatureCollection", features: [] };
 
@@ -14,7 +14,7 @@ const EMPTY_FC: FC = { type: "FeatureCollection", features: [] };
  */
 export function PortalOffering() {
   const { slug = "" } = useParams();
-  const [data, setData] = useState<{ org: PortalOrg; deal: PortalDeal; abstracts: PortalAbstract[]; documents: PortalDocument[]; images: PortalImage[]; production: PortalProduction | null } | null>(null);
+  const [data, setData] = useState<{ org: PortalOrg; deal: PortalDeal; abstracts: PortalAbstract[]; documents: PortalDocument[]; images: PortalImage[]; production: PortalProduction | null; assets: PortalPackageAsset[] } | null>(null);
   const [features, setFeatures] = useState<FC>(EMPTY_FC);
   const [error, setError] = useState<string | null>(null);
 
@@ -25,7 +25,7 @@ export function PortalOffering() {
 
   if (error) return <PortalShell><div className="panel" style={{ textAlign: "center", padding: 48 }}><h2>Offering unavailable</h2><p className="muted">{error}</p></div></PortalShell>;
   if (!data) return <PortalShell><p className="muted" style={{ textAlign: "center", padding: 48 }}>Loading offering…</p></PortalShell>;
-  const { org, deal, abstracts, documents, images, production } = data;
+  const { org, deal, abstracts, documents, images, production, assets } = data;
 
   const mailSubject = encodeURIComponent(`Inquiry: ${deal.name}`);
   const mailto = org.contactEmail ? `mailto:${org.contactEmail}?subject=${mailSubject}` : null;
@@ -37,7 +37,10 @@ export function PortalOffering() {
       {/* Hero */}
       <div className="portal-hero panel">
         <div>
-          {deal.featured && <span className="badge resp-offer" style={{ marginBottom: 8 }}>Featured opportunity</span>}
+          <div className="row" style={{ gap: 8, marginBottom: 8 }}>
+            {deal.featured && <span className="badge resp-offer">Featured opportunity</span>}
+            {assets.length > 0 && <span className="badge resp-pending">Package · {assets.length} tract{assets.length > 1 ? "s" : ""}</span>}
+          </div>
           <h1 style={{ margin: "4px 0 6px" }}>{deal.name}</h1>
           <div className="muted">{[deal.counties.map((c) => `${c} County`).join(", "), deal.states.join(", ")].filter(Boolean).join(" · ")}</div>
           {deal.summary && <p style={{ marginTop: 12, maxWidth: 720, lineHeight: 1.55 }}>{deal.summary}</p>}
@@ -50,6 +53,29 @@ export function PortalOffering() {
           {deal.operator && <Fact label="Operator" value={deal.operator} />}
         </div>
       </div>
+
+      {/* Bundle contents: the individual tracts included in this package. */}
+      {assets.length > 0 && (
+        <div className="panel">
+          <div className="section-head">
+            <h3 style={{ margin: 0 }}>Assets in this package</h3>
+            <span className="muted">{assets.length} tract{assets.length > 1 ? "s" : ""} offered together — inquire for any or all</span>
+          </div>
+          <div className="portal-assets">
+            {assets.map((a) => (
+              <div key={a.id} className="portal-asset">
+                <div className="portal-asset-name">{a.name}</div>
+                <div className="portal-asset-facts">
+                  {a.counties.length > 0 && <span>{a.counties.join(", ")}{a.states.length ? ` · ${a.states.join(", ")}` : ""}</span>}
+                  {a.nra != null && <span><strong>{num(a.nra)}</strong> NRA</span>}
+                  {a.assetTypes.length > 0 && <span>{a.assetTypes.join("/")}</span>}
+                  {a.operator && <span>{a.operator}</span>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Photos */}
       {images.length > 0 && (

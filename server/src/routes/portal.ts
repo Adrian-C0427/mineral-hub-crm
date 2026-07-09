@@ -37,6 +37,7 @@ function publicDeal(d: {
   nra: number | null; acreageNma: number | null; operator: string | null; rrc?: string | null;
   wells: string[]; producingStatus: string | null; updatedAt: Date;
   portalAskPrice?: number | null; askPrice?: number | null;
+  _count?: { assets?: number };
 }) {
   return {
     slug: d.portalSlug,
@@ -54,6 +55,8 @@ function publicDeal(d: {
     acreageNma: d.acreageNma,
     operator: d.operator,
     rrc: d.rrc ?? null,
+    // Number of child assets — a package published as a single bundle listing.
+    assetCount: d._count?.assets ?? 0,
     wells: d.wells,
     producingStatus: d.producingStatus,
     askPrice: d.portalAskPrice ?? d.askPrice ?? null,
@@ -151,6 +154,7 @@ portalRouter.get(
     const deals = await prisma.deal.findMany({
       where: { organizationId: org.id, publishedToPortal: true, portalVisibility: "PUBLIC" },
       orderBy: [{ portalFeatured: "desc" }, { updatedAt: "desc" }],
+      include: { _count: { select: { assets: true } } },
     });
     res.setHeader("Cache-Control", "public, max-age=60");
     res.json({ org: await orgPayload(org), deals: deals.map(publicDeal) });
@@ -244,6 +248,10 @@ portalRouter.get(
       include: {
         organization: true,
         files: { where: { visibleToBuyers: true, supersededById: null }, select: { id: true, filename: true, mimeType: true, sizeBytes: true, folder: true, s3Key: true } },
+        _count: { select: { assets: true } },
+        // Bundle contents: buyer-safe summaries of the package's child assets
+        // (no pricing — the portal never leaks per-asset economics).
+        assets: { select: { id: true, name: true, counties: true, states: true, state: true, nra: true, assetTypes: true, operator: true }, orderBy: { createdAt: "asc" } },
       },
     });
     if (!deal || !deal.publishedToPortal || !deal.organization?.portalEnabled) {
@@ -285,6 +293,17 @@ portalRouter.get(
     // returns null (and the section hides) when there's nothing to show.
     const production = deal.organizationId ? await productionSummary(deal.organizationId, deal.wells) : null;
 
+    // Bundle: a package's constituent assets (buyer-safe, no pricing).
+    const assets = deal.assets.map((a) => ({
+      id: a.id,
+      name: a.name,
+      counties: a.counties,
+      states: a.states.length ? a.states : a.state ? [a.state] : [],
+      nra: a.nra,
+      assetTypes: a.assetTypes,
+      operator: a.operator,
+    }));
+
     res.json({
       org,
       deal: publicDeal(deal),
@@ -292,6 +311,7 @@ portalRouter.get(
       documents,
       images: images.filter((i) => i.url),
       production,
+      assets,
     });
   }),
 );

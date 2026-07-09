@@ -4,7 +4,7 @@ import type { Stage } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
-import { serializeDeal } from "../serializers.js";
+import { serializeDeal, serializeAssetChild } from "../serializers.js";
 import { computeMatch } from "../domain/matching.js";
 import { STALE_CONTACT_DAYS } from "../config.js";
 import { daysUntil } from "../domain/dates.js";
@@ -108,7 +108,7 @@ dealsRouter.get(
     }
     const deals = await prisma.deal.findMany({
       where,
-      include: { ...dealInclude, offers: { select: { amount: true } }, _count: { select: { assets: true } } },
+      include: { ...dealInclude, offers: { select: { amount: true } }, _count: { select: { assets: true } }, assets: { select: { nra: true, acreageNma: true, ourPrice: true, askPrice: true } } },
       orderBy: { createdAt: "desc" },
     });
     res.json(deals.map((d) => serializeDeal(d)));
@@ -327,7 +327,7 @@ dealsRouter.post(
     // Reload so assetCount reflects any children just created.
     const full = await prisma.deal.findUnique({
       where: { id: deal.id },
-      include: { ...dealInclude, offers: { select: { amount: true } }, _count: { select: { assets: true } } },
+      include: { ...dealInclude, offers: { select: { amount: true } }, _count: { select: { assets: true } }, assets: { select: { nra: true, acreageNma: true, ourPrice: true, askPrice: true } } },
     });
     res.status(201).json(serializeDeal(full ?? deal));
   }),
@@ -413,6 +413,8 @@ dealsRouter.get(
 
     res.json({
       ...serializeDeal(deal, now),
+      // Full child-asset cards for the package's Assets/Tracts section.
+      assets: deal.assets.map(serializeAssetChild),
       stageHistory: deal.stageHistory.map((h) => ({
         id: h.id,
         fromStage: h.fromStage,

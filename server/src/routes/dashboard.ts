@@ -33,9 +33,10 @@ dashboardRouter.get(
     // The dashboard reports on the acquisition pipeline: opportunities plus any
     // owned asset actively marketed for sale (assetMode SELL). HOLD assets stay
     // in their own module and are never counted here.
-    // parentDealId: null excludes child assets — the parent package is the
-    // counted unit, so a package + its assets are never double-counted.
-    const IN_PIPELINE = { parentDealId: null, OR: [{ recordType: "OPPORTUNITY" as const }, { recordType: "OWNED_ASSET" as const, assetMode: "SELL" as const }] };
+    // Child assets are counted individually here (each carries its own value), so
+    // a package's assets roll up naturally into the totals — no parentDealId
+    // filter. Each deal contributes its OWN stored value, so nothing double-counts.
+    const IN_PIPELINE = { OR: [{ recordType: "OPPORTUNITY" as const }, { recordType: "OWNED_ASSET" as const, assetMode: "SELL" as const }] };
     const [allActive, closedDeals, activeOffers] = await Promise.all([
       prisma.deal.findMany({ where: { stage: { in: [...ACTIVE_STAGES] }, organizationId: org, ...IN_PIPELINE }, include: { ...dealInclude, offers: true } }),
       prisma.deal.findMany({
@@ -81,7 +82,7 @@ dashboardRouter.get(
 
     // Upcoming follow-ups (from buyer activity nextFollowUpDate)
     const followUps = await prisma.dealBuyerActivity.findMany({
-      where: { nextFollowUpDate: { gte: now }, deal: { organizationId: org, recordType: "OPPORTUNITY", parentDealId: null } },
+      where: { nextFollowUpDate: { gte: now }, deal: { organizationId: org, recordType: "OPPORTUNITY" } },
       orderBy: { nextFollowUpDate: "asc" },
       take: 10,
       include: { buyer: { select: { name: true } }, deal: { select: { name: true } } },
