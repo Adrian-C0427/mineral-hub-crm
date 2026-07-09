@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Sun, Moon } from "lucide-react";
 import { api } from "../api/client";
@@ -95,17 +95,42 @@ const WIDGET_LABELS: Record<WidgetId, string> = {
   activity: "Recent activity", buyers: "Top buyers", followups: "Upcoming follow-ups",
 };
 const DEFAULT_WIDGETS: WidgetId[] = ["kpis", "profit", "stages", "activity", "buyers", "followups"];
-type WidgetSpan = "full" | "half";
-type WidgetHeight = "auto" | "tall";
-// Default column span per widget; a user can override any of these (except the
-// KPI row, which always spans full width) in Customize mode. Height defaults to
-// "auto" (fit content) and can be enlarged to "tall" per widget.
-const DEFAULT_SPAN: Record<WidgetId, WidgetSpan> = { kpis: "full", profit: "half", stages: "half", activity: "half", buyers: "half", followups: "full" };
-interface DashPrefs { order: WidgetId[]; hidden: WidgetId[]; spans: Partial<Record<WidgetId, WidgetSpan>>; heights: Partial<Record<WidgetId, WidgetHeight>> }
+
+// Freeform sizing model: the dashboard is a GRID_COLS-column grid; each widget
+// spans an integer number of columns (width) and can be given an explicit pixel
+// height. Dragging a widget's corner in Customize mode sets both, snapping width
+// to whole columns and height to a small step — flexible, but always aligned to
+// the grid. Neighbours reflow automatically because it's a CSS grid.
+const GRID_COLS = 4;
+const GRID_GAP = 16;
+const MIN_H = 160;   // never collapse a widget below a usable height
+const MAX_H = 900;   // keep a single widget from dwarfing the page
+const H_STEP = 20;   // snap height to a tidy step
+// Default width in columns (2 of 4 = the old "half"; 4 = the old "full").
+const DEFAULT_COLS: Record<WidgetId, number> = { kpis: 4, profit: 2, stages: 2, activity: 2, buyers: 2, followups: 4 };
+const clampCols = (n: number) => Math.max(1, Math.min(GRID_COLS, Math.round(n)));
+interface DashPrefs { order: WidgetId[]; hidden: WidgetId[]; cols: Partial<Record<WidgetId, number>>; heights: Partial<Record<WidgetId, number>> }
 const DASH_KEY = "mh-dashboard:v1";
 function loadDashPrefs(): DashPrefs {
-  try { const raw = localStorage.getItem(DASH_KEY); if (raw) { const p = JSON.parse(raw) as Partial<DashPrefs>; return { order: p.order ?? [], hidden: p.hidden ?? [], spans: p.spans ?? {}, heights: p.heights ?? {} }; } } catch { /* ignore */ }
-  return { order: [], hidden: [], spans: {}, heights: {} };
+  try {
+    const raw = localStorage.getItem(DASH_KEY);
+    if (raw) {
+      const p = JSON.parse(raw) as Record<string, unknown>;
+      const cols: Partial<Record<WidgetId, number>> = { ...(p.cols as object ?? {}) };
+      // Migrate the retired "full"/"half" span presets → column counts.
+      const spans = p.spans as Record<string, string> | undefined;
+      if (spans) for (const [k, v] of Object.entries(spans)) if (cols[k as WidgetId] == null) cols[k as WidgetId] = v === "full" ? GRID_COLS : 2;
+      // Heights: keep numeric px; migrate the retired "tall" preset → a fixed px.
+      const heights: Partial<Record<WidgetId, number>> = {};
+      const rawH = p.heights as Record<string, unknown> | undefined;
+      if (rawH) for (const [k, v] of Object.entries(rawH)) {
+        if (typeof v === "number") heights[k as WidgetId] = v;
+        else if (v === "tall") heights[k as WidgetId] = 420;
+      }
+      return { order: (p.order as WidgetId[]) ?? [], hidden: (p.hidden as WidgetId[]) ?? [], cols, heights };
+    }
+  } catch { /* ignore */ }
+  return { order: [], hidden: [], cols: {}, heights: {} };
 }
 
 export function Dashboard() {
@@ -117,6 +142,8 @@ export function Dashboard() {
   const [customizing, setCustomizing] = useState(false);
   const [dragId, setDragId] = useState<WidgetId | null>(null);
   const [dragOverId, setDragOverId] = useState<WidgetId | null>(null);
+  const [resizingId, setResizingId] = useState<WidgetId | null>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
   useEffect(() => { try { localStorage.setItem(DASH_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } }, [prefs]);
 
   useEffect(() => { api.get<DashboardData>(`/dashboard?period=${period}`).then(setD); }, [period]);
@@ -251,12 +278,12 @@ export function Dashboard() {
   const orderedIds: WidgetId[] = [...prefs.order.filter((id) => DEFAULT_WIDGETS.includes(id)), ...DEFAULT_WIDGETS.filter((id) => !prefs.order.includes(id))];
   const visibleIds = orderedIds.filter((id) => !prefs.hidden.includes(id));
   const hiddenIds = orderedIds.filter((id) => prefs.hidden.includes(id));
-  const spanOf = (id: WidgetId): WidgetSpan => prefs.spans[id] ?? DEFAULT_SPAN[id];
-  const heightOf = (id: WidgetId): WidgetHeight => prefs.heights[id] ?? "auto";
-  const isDefaultLayout = prefs.order.length === 0 && prefs.hidden.length === 0 && Object.keys(prefs.spans).length === 0 && Object.keys(prefs.heights).length === 0;
+  const colsOf = (id: WidgetId): number => clampCols(prefs.cols[id] ?? DEFAULT_COLS[id]);
+  const heightOf = (id: WidgetId): number | undefined => prefs.heights[id];
+  const isDefaultLayout = prefs.order.length === 0 && prefs.hidden.length === 0 && Object.keys(prefs.cols).length === 0 && Object.keys(prefs.heights).length === 0;
 
-  // Customize mode: drag to reorder, resize (full ⇄ half), hide/show. Everything
-  // persists automatically via the prefs effect above; Restore returns to default.
+  // Customize mode: drag to reorder, drag the corner to resize, hide/show.
+  // Everything persists via the prefs effect above; Restore returns to default.
   const reorder = (dragId: WidgetId, overId: WidgetId) => {
     if (dragId === overId) return;
     const keys = [...orderedIds];
@@ -266,8 +293,36 @@ export function Dashboard() {
     keys.splice(to, 0, dragId);
     setPrefs({ ...prefs, order: keys });
   };
-  const toggleSpan = (id: WidgetId) => setPrefs({ ...prefs, spans: { ...prefs.spans, [id]: spanOf(id) === "full" ? "half" : "full" } });
-  const toggleHeight = (id: WidgetId) => setPrefs({ ...prefs, heights: { ...prefs.heights, [id]: heightOf(id) === "tall" ? "auto" : "tall" } });
+  // Corner-drag freeform resize: width snaps to whole grid columns, height to a
+  // small px step, both clamped. State only updates when the snapped value
+  // actually changes, so neighbours reflow smoothly without a re-render per pixel.
+  const startResize = (e: React.PointerEvent, id: WidgetId) => {
+    e.preventDefault(); e.stopPropagation();
+    const widgetEl = (e.currentTarget as HTMLElement).closest(".dash-w") as HTMLElement | null;
+    const grid = gridRef.current;
+    if (!widgetEl || !grid) return;
+    const colUnit = (grid.clientWidth - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS; // px per column
+    const rect = widgetEl.getBoundingClientRect();
+    const left = rect.left, top = rect.top;
+    const kpis = id === "kpis"; // KPI row width is fixed to full; only its height is free
+    let lastCol = colsOf(id), lastH = heightOf(id) ?? Math.round(rect.height);
+    setResizingId(id);
+    try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    const move = (ev: PointerEvent) => {
+      const col = kpis ? GRID_COLS : clampCols((ev.clientX - left + GRID_GAP) / (colUnit + GRID_GAP));
+      const h = Math.max(MIN_H, Math.min(MAX_H, Math.round((ev.clientY - top) / H_STEP) * H_STEP));
+      if (col === lastCol && h === lastH) return;
+      lastCol = col; lastH = h;
+      setPrefs((p) => ({ ...p, cols: { ...p.cols, [id]: col }, heights: { ...p.heights, [id]: h } }));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      setResizingId(null);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
   const hideWidget = (id: WidgetId) => setPrefs({ ...prefs, hidden: [...prefs.hidden, id] });
   const showWidget = (id: WidgetId) => setPrefs({ ...prefs, hidden: prefs.hidden.filter((k) => k !== id) });
 
@@ -312,10 +367,10 @@ export function Dashboard() {
       {customizing && (
         <div className="panel dash-cz-banner">
           <span className="dash-cz-banner-text">
-            <strong>Customizing dashboard</strong> — drag widgets to reorder, resize, or hide. Changes save automatically.
+            <strong>Customizing dashboard</strong> — drag widgets to reorder, drag a corner to resize, or hide. Changes save automatically.
           </span>
           <span className="row" style={{ gap: 8, marginLeft: "auto" }}>
-            <button type="button" className="small" disabled={isDefaultLayout} onClick={() => setPrefs({ order: [], hidden: [], spans: {}, heights: {} })}>Restore default</button>
+            <button type="button" className="small" disabled={isDefaultLayout} onClick={() => setPrefs({ order: [], hidden: [], cols: {}, heights: {} })}>Restore default</button>
             <button type="button" className="small primary" onClick={() => setCustomizing(false)}>Done</button>
           </span>
         </div>
@@ -333,41 +388,49 @@ export function Dashboard() {
       {visibleIds.length === 0 && !customizing ? (
         <div className="panel"><p className="muted" style={{ margin: 0 }}>All widgets are hidden. Use <strong>Customize</strong> to bring them back.</p></div>
       ) : (
-        <div className={`dash-grid ${customizing ? "customizing" : ""}`}>
-          {visibleIds.map((id) => (
-            <div
-              key={id}
-              className={`dash-w ${spanOf(id)} dash-h-${heightOf(id)} ${customizing ? "cz" : ""} ${dragId === id ? "dragging" : ""} ${dragOverId === id ? "drag-over" : ""}`}
-              draggable={customizing}
-              onDragStart={(e) => { if (customizing) { setDragId(id); e.dataTransfer.effectAllowed = "move"; } }}
-              onDragEnd={() => { setDragId(null); setDragOverId(null); }}
-              onDragOver={(e) => { if (customizing && dragId && dragId !== id) { e.preventDefault(); setDragOverId(id); } }}
-              onDrop={(e) => { if (customizing && dragId) { e.preventDefault(); reorder(dragId, id); setDragId(null); setDragOverId(null); } }}
-            >
-              {customizing && (
-                <div className="dash-cz-cover">
-                  <div className="dash-cz-bar">
-                    <span className="dash-cz-handle" aria-hidden="true">⠿</span>
-                    <span className="dash-cz-name">{WIDGET_LABELS[id]}</span>
-                    <span className="dash-cz-actions">
-                      {id !== "kpis" && (
-                        <button type="button" className="dash-cz-btn" onClick={() => toggleSpan(id)} title={spanOf(id) === "full" ? "Make half width" : "Make full width"}>
-                          {spanOf(id) === "full" ? "◧ Half" : "▭ Full"}
-                        </button>
-                      )}
-                      {id !== "kpis" && (
-                        <button type="button" className="dash-cz-btn" onClick={() => toggleHeight(id)} title={heightOf(id) === "tall" ? "Shrink height" : "Make taller"}>
-                          {heightOf(id) === "tall" ? "▼ Short" : "▲ Tall"}
-                        </button>
-                      )}
-                      <button type="button" className="dash-cz-btn" onClick={() => hideWidget(id)} title="Hide widget">✕ Hide</button>
+        <div ref={gridRef} className={`dash-grid ${customizing ? "customizing" : ""}`}>
+          {visibleIds.map((id) => {
+            const h = heightOf(id);
+            return (
+              <div
+                key={id}
+                className={`dash-w ${h != null ? "has-h" : ""} ${customizing ? "cz" : ""} ${dragId === id ? "dragging" : ""} ${dragOverId === id ? "drag-over" : ""} ${resizingId === id ? "resizing" : ""}`}
+                style={{ "--col-span": colsOf(id), ...(h != null ? { height: h } : {}) } as React.CSSProperties}
+                draggable={customizing && resizingId == null}
+                onDragStart={(e) => {
+                  // A drag that began on the resize grip must not start a reorder.
+                  if ((e.target as HTMLElement).closest(".dash-resize")) { e.preventDefault(); return; }
+                  if (customizing) { setDragId(id); e.dataTransfer.effectAllowed = "move"; }
+                }}
+                onDragEnd={() => { setDragId(null); setDragOverId(null); }}
+                onDragOver={(e) => { if (customizing && dragId && dragId !== id) { e.preventDefault(); setDragOverId(id); } }}
+                onDrop={(e) => { if (customizing && dragId) { e.preventDefault(); reorder(dragId, id); setDragId(null); setDragOverId(null); } }}
+              >
+                {customizing && (
+                  <div className="dash-cz-cover">
+                    <div className="dash-cz-bar">
+                      <span className="dash-cz-handle" aria-hidden="true">⠿</span>
+                      <span className="dash-cz-name">{WIDGET_LABELS[id]}{id !== "kpis" ? ` · ${colsOf(id)}×${h != null ? Math.round(h) + "px" : "auto"}` : ""}</span>
+                      <span className="dash-cz-actions">
+                        <button type="button" className="dash-cz-btn" onClick={() => hideWidget(id)} title="Hide widget">✕ Hide</button>
+                      </span>
+                    </div>
+                    {/* Drag the corner grip to resize: width snaps to columns, height is free. */}
+                    <span
+                      className="dash-resize"
+                      role="slider"
+                      aria-label={`Resize ${WIDGET_LABELS[id]}`}
+                      title="Drag to resize"
+                      onPointerDown={(e) => startResize(e, id)}
+                    >
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M11 4 L4 11 M11 8 L8 11" /></svg>
                     </span>
                   </div>
-                </div>
-              )}
-              {widgetNodes[id]}
-            </div>
-          ))}
+                )}
+                {widgetNodes[id]}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

@@ -217,10 +217,12 @@ export function Research() {
   const hasAnyData = opts != null && (opts.states.length > 0 || opts.counties.length > 0);
   const canManage = can("manageResearchData");
 
+  const [exportErr, setExportErr] = useState<string | null>(null);
   async function onExportPdf() {
     if (!captureRef.current) return;
-    setExporting(true);
+    setExporting(true); setExportErr(null);
     try { await exportElementToPdf(captureRef.current, `market-intel-${range.from}_to_${range.to}.pdf`); }
+    catch (e) { setExportErr(e instanceof Error ? e.message : "PDF export failed — please try again."); }
     finally { setExporting(false); }
   }
 
@@ -256,6 +258,7 @@ export function Research() {
           <button className="primary" onClick={onExportPdf} disabled={exporting}>{exporting ? "Generating…" : "Export PDF"}</button>
         )}
       </div>
+      {exportErr && <Banner kind="error">Couldn't generate the PDF: {exportErr}</Banner>}
 
       {/* --- Period + filter controls --- */}
       <div className="panel">
@@ -396,7 +399,7 @@ function OverviewTab({ qs, compareOff }: { qs: string; compareOff: boolean }) {
 
   return (
     <>
-      <div className="row" style={{ justifyContent: "flex-end", marginBottom: -6 }}>
+      <div className="row" style={{ justifyContent: "flex-end", marginBottom: 10 }}>
         <ResearchMetricsCustomize prefs={metricPrefs} onChange={setMetricPrefs} />
       </div>
       <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>

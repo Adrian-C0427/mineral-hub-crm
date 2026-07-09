@@ -68,6 +68,22 @@ export function Banner({ kind = "warn", children }: { kind?: "warn" | "info" | "
   return <div className={`banner banner-${kind}`}>{children}</div>;
 }
 
+/**
+ * The application's standard "no data yet" empty state: generous padding on all
+ * sides, a comfortable line height, and a constrained, centered column so the
+ * message wraps naturally and stays visually balanced at any width. Use this for
+ * zero-data panels/sections everywhere so empty states read consistently.
+ */
+export function EmptyState({ title, icon, children }: { title?: ReactNode; icon?: ReactNode; children?: ReactNode }) {
+  return (
+    <div className="empty-state">
+      {icon && <div className="empty-state-icon" aria-hidden="true">{icon}</div>}
+      {title && <div className="empty-state-title">{title}</div>}
+      {children && <div className="empty-state-body">{children}</div>}
+    </div>
+  );
+}
+
 export function Modal({
   title,
   children,

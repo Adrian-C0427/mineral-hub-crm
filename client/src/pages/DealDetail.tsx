@@ -416,7 +416,7 @@ function AssetsSection({ deal, canEdit, canPublish, onAdd, onChanged }: {
     <div className="panel">
       <div className="section-head">
         <div>
-          <h3 style={{ margin: 0 }}>Assets / Tracts{assets.length ? ` (${assets.length})` : ""}</h3>
+          <h3 style={{ margin: 0 }}>Additional Deals{assets.length ? ` (${assets.length})` : ""}</h3>
           <span className="muted" style={{ fontSize: 12 }}>Individual interests under this seller — each is independently marketable</span>
         </div>
         <div className="row" style={{ gap: 8 }}>
