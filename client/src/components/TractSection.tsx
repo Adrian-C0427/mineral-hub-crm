@@ -134,9 +134,11 @@ export function TractSection({ dealId, dealName, canEdit, abstractIds = [] }: { 
   return (
     <div className="panel">
       <div className="section-head">
-        <h3>Tract Descriptions</h3>
-        <span className="muted">Paste legal descriptions and see them mapped — calls, closure, acreage</span>
-        {canEdit && <button className="primary small" style={{ marginLeft: "auto" }} onClick={() => setEditing({ tract: null })}>+ Add Tract</button>}
+        <div>
+          <h3 style={{ margin: 0 }}>Tract Descriptions</h3>
+          <span className="muted" style={{ fontSize: 12 }}>Paste legal descriptions and see them mapped — calls, closure, acreage</span>
+        </div>
+        {canEdit && <button className="primary small" onClick={() => setEditing({ tract: null })}>+ Add Tract</button>}
       </div>
       {err && <Banner kind="error">{err}</Banner>}
 

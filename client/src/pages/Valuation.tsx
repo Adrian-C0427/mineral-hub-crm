@@ -169,6 +169,7 @@ export function Valuation() {
   const [openAnalysisName, setOpenAnalysisName] = useState<string>("");
   const [saveOpen, setSaveOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [exportErr, setExportErr] = useState<string | null>(null);
   const reportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -245,7 +246,7 @@ export function Valuation() {
 
   async function onExportPdf() {
     if (!analysis) return;
-    setExporting(true);
+    setExporting(true); setExportErr(null);
     const prevTab = resultTab;
     setResultTab("report");
     // Let the report (and its charts) lay out before rasterizing.
@@ -255,6 +256,8 @@ export function Valuation() {
         const name = openAnalysisName || analysis.wells.map((w) => w.name).join("_").slice(0, 60) || "valuation";
         await exportElementToPdf(reportRef.current, `${name.replace(/[^\w\-]+/g, "-")}-valuation.pdf`);
       }
+    } catch (e) {
+      setExportErr(e instanceof Error ? e.message : "PDF export failed — please try again.");
     } finally {
       setExporting(false);
       setResultTab(prevTab);
@@ -278,6 +281,7 @@ export function Valuation() {
           <button className="primary small" onClick={newAnalysis}>+ New analysis</button>
         </div>
       </div>
+      {exportErr && <Banner kind="error">Couldn't generate the PDF: {exportErr}</Banner>}
 
       <div className="tab-row">
         <button className={`tab ${pageTab === "workspace" ? "active" : ""}`} onClick={() => setPageTab("workspace")}>Analysis Workspace</button>

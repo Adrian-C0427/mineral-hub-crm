@@ -151,6 +151,10 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
   const [pendingRole, setPendingRole] = useState<{ m: Member; orgRole: OrgRole } | null>(null);
   const [pendingStatus, setPendingStatus] = useState<Member | null>(null);
   const [resetting, setResetting] = useState<Member | null>(null);
+  // Destructive actions confirm through the shared ConfirmDialog (not native confirm()).
+  const [removingMember, setRemovingMember] = useState<Member | null>(null);
+  const [revokingInvite, setRevokingInvite] = useState<Invite | null>(null);
+  const [actionBusy, setActionBusy] = useState(false);
 
   function load() {
     if (can("manageMembers")) api.get<Member[]>("/org/members").then(setMembers).catch(() => {});
@@ -167,12 +171,17 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
     finally { setPendingStatus(null); }
   }
   async function removeMember(m: Member) {
-    if (!confirm(`Remove ${m.name} from the organization?`)) return;
-    try { await api.del(`/org/members/${m.id}`); load(); } catch (e) { onError(e); }
+    setActionBusy(true);
+    try { await api.del(`/org/members/${m.id}`); setRemovingMember(null); load(); }
+    catch (e) { onError(e); } finally { setActionBusy(false); }
   }
   async function genInvite(reusable: boolean) { try { await api.post("/org/invites", { reusable }); load(); } catch (e) { onError(e); } }
   async function toggleInvite(i: Invite) { await api.patch(`/org/invites/${i.id}`, { active: !i.active }); load(); }
-  async function revokeInvite(i: Invite) { if (confirm(`Revoke invite ${i.code}?`)) { await api.del(`/org/invites/${i.id}`); load(); } }
+  async function revokeInvite(i: Invite) {
+    setActionBusy(true);
+    try { await api.del(`/org/invites/${i.id}`); setRevokingInvite(null); load(); }
+    catch (e) { onError(e); } finally { setActionBusy(false); }
+  }
   function copy(text: string) { navigator.clipboard?.writeText(text); onFlash(`Copied ${text}`); }
 
   // Owner can assign any assignable role; a non-owner can't create admins.
@@ -225,7 +234,7 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
                             <button className="small" onClick={() => setPendingStatus(m)}>{m.status === "ACTIVE" ? "Deactivate" : "Activate"}</button>
                             {/* Destructive action set apart by a divider + danger styling. */}
                             {can("inviteRemoveUsers") && <span className="user-actions-sep" aria-hidden="true" />}
-                            {can("inviteRemoveUsers") && <button className="small danger" onClick={() => removeMember(m)}>Remove</button>}
+                            {can("inviteRemoveUsers") && <button className="small danger" onClick={() => setRemovingMember(m)}>Remove</button>}
                           </div>
                         )}
                       </td>
@@ -260,7 +269,7 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
                       <td><span className={`badge ${i.active ? "resp-offer" : "resp-no"}`}>{i.active ? "Active" : "Disabled"}</span></td>
                       <td className="right">
                         <button className="small" onClick={() => toggleInvite(i)}>{i.active ? "Disable" : "Enable"}</button>
-                        <button className="small danger" style={{ marginLeft: 6 }} onClick={() => revokeInvite(i)}>Revoke</button>
+                        <button className="small danger" style={{ marginLeft: 6 }} onClick={() => setRevokingInvite(i)}>Revoke</button>
                       </td>
                     </tr>
                   ))}
@@ -293,6 +302,28 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
       )}
       {resetting && (
         <ResetPasswordModal member={resetting} onClose={() => setResetting(null)} onDone={(msg) => { setResetting(null); onFlash(msg); }} onError={onError} />
+      )}
+      {removingMember && (
+        <ConfirmDialog
+          title="Remove member?"
+          message={<>Remove <strong>{removingMember.name}</strong> from the organization? They lose access to this workspace immediately. This can't be undone.</>}
+          confirmLabel="Remove member"
+          danger
+          busy={actionBusy}
+          onCancel={() => setRemovingMember(null)}
+          onConfirm={() => removeMember(removingMember)}
+        />
+      )}
+      {revokingInvite && (
+        <ConfirmDialog
+          title="Revoke invite code?"
+          message={<>Revoke invite code <code>{revokingInvite.code}</code>? It can no longer be used to join this organization. This can't be undone.</>}
+          confirmLabel="Revoke code"
+          danger
+          busy={actionBusy}
+          onCancel={() => setRevokingInvite(null)}
+          onConfirm={() => revokeInvite(revokingInvite)}
+        />
       )}
     </>
   );
@@ -468,15 +499,17 @@ function OwnerTab({ onFlash, onError, onTransferred }: { onFlash: (m: string) =>
   const { user } = useAuth();
   const [members, setMembers] = useState<Member[]>([]);
   const [target, setTarget] = useState("");
+  const [confirmingTransfer, setConfirmingTransfer] = useState(false);
+  const [transferBusy, setTransferBusy] = useState(false);
 
   useEffect(() => { api.get<Member[]>("/org/members").then(setMembers).catch(() => {}); }, []);
 
+  const targetMember = members.find((x) => x.id === target) ?? null;
   async function transfer() {
-    const m = members.find((x) => x.id === target);
-    if (!m) return;
-    if (!confirm(`Transfer ownership to ${m.name}? You will become an Administrator. This cannot be undone by you afterward.`)) return;
-    try { await api.post("/org/transfer-ownership", { userId: target }); onFlash(`Ownership transferred to ${m.name}.`); onTransferred(); }
-    catch (e) { onError(e); }
+    if (!targetMember) return;
+    setTransferBusy(true);
+    try { await api.post("/org/transfer-ownership", { userId: target }); setConfirmingTransfer(false); onFlash(`Ownership transferred to ${targetMember.name}.`); onTransferred(); }
+    catch (e) { onError(e); } finally { setTransferBusy(false); }
   }
 
   const candidates = members.filter((m) => m.id !== user?.id && m.orgRole !== "OWNER");
@@ -491,13 +524,25 @@ function OwnerTab({ onFlash, onError, onTransferred }: { onFlash: (m: string) =>
           <Select value={target} onChange={setTarget} placeholder="Select a member…" clearable searchable ariaLabel="New owner"
             options={candidates.map((m) => ({ value: m.id, label: `${m.name} (${m.email})` }))} />
         </div>
-        <button className="danger" disabled={!target} onClick={transfer}>Transfer ownership</button>
+        <button className="danger" disabled={!target} onClick={() => setConfirmingTransfer(true)}>Transfer ownership</button>
       </div>
 
       {/* Single line instead of two placeholder sections. */}
       <p className="muted" style={{ fontSize: 12, marginTop: 16 }}>
         Coming soon (owner-only): billing &amp; subscription · organization-wide security settings
       </p>
+
+      {confirmingTransfer && targetMember && (
+        <ConfirmDialog
+          title="Transfer ownership?"
+          message={<>Transfer ownership to <strong>{targetMember.name}</strong>? You will become an <strong>Administrator</strong> and can't undo this yourself afterward.</>}
+          confirmLabel="Transfer ownership"
+          danger
+          busy={transferBusy}
+          onCancel={() => setConfirmingTransfer(false)}
+          onConfirm={transfer}
+        />
+      )}
     </>
   );
 }

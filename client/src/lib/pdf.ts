@@ -34,6 +34,12 @@ export async function exportElementToPdf(el: HTMLElement, filename: string): Pro
       useCORS: true,
       backgroundColor: "#ffffff",
       windowWidth: el.scrollWidth,
+      // html2canvas 1.x cannot parse modern CSS color functions (color-mix(),
+      // oklch/oklab, lab/lch, color()). Left untouched it throws mid-capture —
+      // which is exactly the "flash white, no file, no error" failure. Before it
+      // rasterizes, resolve every such value in the CLONE to a concrete color the
+      // parser understands, so the capture always succeeds. See resolveColors().
+      onclone: (doc) => resolveModernColors(doc),
     });
   } finally {
     el.classList.remove("pdf-light");
@@ -97,4 +103,50 @@ export async function exportElementToPdf(el: HTMLElement, filename: string): Pro
   });
 
   pdf.save(filename);
+}
+
+// Color-bearing properties that may carry a modern CSS color function.
+const COLOR_PROPS = [
+  "color", "backgroundColor", "borderTopColor", "borderRightColor", "borderBottomColor",
+  "borderLeftColor", "outlineColor", "fill", "stroke", "textDecorationColor", "caretColor", "columnRuleColor",
+] as const;
+// Functions html2canvas 1.x can't parse. `color(` also covers color(srgb …) etc.
+const UNPARSEABLE = /(color-mix|oklch|oklab|\blab\(|\blch\(|\bcolor\()/i;
+
+/**
+ * Rewrite every unparseable modern color (color-mix/oklch/lab/…) in the cloned
+ * capture document to a concrete color html2canvas can read. The browser resolves
+ * the value for us via a canvas 2d context (which understands these functions on
+ * every current browser); anything that still can't be resolved falls back to a
+ * neutral so a capture is never aborted by a single unsupported color.
+ */
+function resolveModernColors(doc: Document): void {
+  const win = doc.defaultView ?? window;
+  const probe = doc.createElement("canvas").getContext("2d", { willReadFrequently: true });
+  // Rasterize the color to a single pixel and read it back as sRGB bytes. Canvas
+  // accepts color-mix/oklch/oklab/color(srgb …) and rasterizes them all, so this
+  // yields a concrete rgb()/rgba() html2canvas can parse — alpha preserved.
+  const resolve = (value: string): string | null => {
+    if (!probe) return null;
+    probe.clearRect(0, 0, 1, 1);
+    probe.fillStyle = "#000";
+    try { probe.fillStyle = value; } catch { return null; }
+    probe.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = probe.getImageData(0, 0, 1, 1).data;
+    return a === 255 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
+  };
+  const fallback = (prop: string): string =>
+    prop === "color" || prop === "fill" || prop === "stroke" ? "#333333" : "transparent";
+
+  doc.querySelectorAll<HTMLElement>("*").forEach((el) => {
+    const cs = win.getComputedStyle(el);
+    for (const prop of COLOR_PROPS) {
+      const v = cs[prop as keyof CSSStyleDeclaration] as string;
+      if (v && UNPARSEABLE.test(v)) el.style[prop as never] = (resolve(v) ?? fallback(prop)) as never;
+    }
+    // Shadows and gradient backgrounds can embed a color-mix too — neutralize
+    // them rather than risk an unparseable token slipping through.
+    if (UNPARSEABLE.test(cs.boxShadow)) el.style.boxShadow = "none";
+    if (UNPARSEABLE.test(cs.backgroundImage)) el.style.backgroundImage = "none";
+  });
 }

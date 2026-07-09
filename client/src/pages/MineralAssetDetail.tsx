@@ -21,6 +21,7 @@ import { money, num, fmtDate, toInputDate } from "../lib/format";
 import { OWNERSHIP_TYPES, OWNERSHIP_STATUSES, PRODUCING_STATUSES } from "./MineralAssets";
 import type { BuyerActivityRow, DealSummary, MatchRec, RevenueEntry, Seller, UserLite } from "../types";
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
+const TractSection = lazy(() => import("../components/TractSection").then((m) => ({ default: m.TractSection })));
 
 // Mineral-asset document categories (module-specific; the shared DocumentsSection
 // provides the identical Deal-page interface around them).
@@ -135,6 +136,12 @@ function HoldTab({ asset, canEdit, onChanged }: { asset: AssetDetail; canEdit: b
         <div className="section-head"><h3>Location</h3><span className="muted">This asset's abstracts and geographic extent</span></div>
         <Suspense fallback={<Spinner label="Loading map…" />}><DealMap abstractIds={asset.abstractIds} /></Suspense>
       </div>
+
+      {/* Legal tract descriptions → parsed calls → mapped polygons + exports —
+          identical to the Deal page. */}
+      <Suspense fallback={<div className="panel"><Spinner label="Loading tract descriptions…" /></div>}>
+        <TractSection dealId={asset.id} dealName={asset.name} canEdit={canEdit} abstractIds={asset.abstractIds} />
+      </Suspense>
 
       <DocumentsSection ownerType="deal" ownerId={asset.id} files={asset.files} folders={ASSET_DOC_FOLDERS} onChanged={onChanged} canEdit={canEdit} canDelete={canEdit} />
     </div>
@@ -585,6 +592,12 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
           ? <p className="muted" style={{ marginBottom: 0 }}>No abstracts linked yet — add them to see the property on the map.</p>
           : <Suspense fallback={<Spinner label="Loading map…" />}><DealMap abstractIds={asset.abstractIds} /></Suspense>}
       </div>
+
+      {/* Legal tract descriptions — identical to the Deal page and the Hold tab. */}
+      <Suspense fallback={<div className="panel"><Spinner label="Loading tract descriptions…" /></div>}>
+        <TractSection dealId={asset.id} dealName={asset.name} canEdit={canEdit} abstractIds={asset.abstractIds} />
+      </Suspense>
+
       <DocumentsSection ownerType="deal" ownerId={asset.id} files={asset.files} folders={ASSET_DOC_FOLDERS} onChanged={onChanged} canEdit={canEdit} canDelete={canEdit} />
 
       {logBuyer && <LogContactModal dealId={asset.id} buyerId={logBuyer.id} buyerName={logBuyer.name} users={users} onClose={() => setLogBuyer(null)} onLogged={() => { setLogBuyer(null); onChanged(); }} />}

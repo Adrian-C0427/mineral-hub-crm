@@ -482,7 +482,19 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .stale-flag { color: var(--amber); font-size: 12px; }
 
 /* --- Banners --- */
-.banner { border-radius: var(--radius); padding: 12px 16px; margin-bottom: 16px; font-size: 14px; }
+.banner { border-radius: var(--radius); padding: 12px 16px; margin-bottom: 16px; font-size: 14px; line-height: 1.55; }
+
+/* Standard empty state (EmptyState) — the single spacing/design standard for
+   every "no data yet" message. Roomy padding, comfortable line height, and a
+   centered, width-constrained column so text wraps naturally and never feels
+   cramped, at any screen size. */
+.empty-state { display: flex; flex-direction: column; align-items: center; text-align: center;
+  gap: 8px; max-width: 560px; margin: 0 auto; padding: 32px 28px; }
+.empty-state-icon { color: var(--text-dim); opacity: 0.7; margin-bottom: 2px; }
+.empty-state-title { font-size: 15px; font-weight: 650; color: var(--text); line-height: 1.4; }
+.empty-state-body { margin: 0; font-size: 14px; line-height: 1.6; color: var(--text-dim); }
+.empty-state-body a { color: var(--accent); }
+@media (max-width: 560px) { .empty-state { padding: 24px 18px; } }
 .banner-warn { background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.4); color: #fcd34d; }
 .banner-error { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.4); color: #fca5a5; }
 .banner-info { background: rgba(59,130,246,0.12); border: 1px solid rgba(59,130,246,0.4); color: #93c5fd; }
@@ -619,14 +631,27 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 @media (max-width: 900px) { .dash-main, .dash-duo { grid-template-columns: 1fr; } }
 
 /* Customizable widget grid (Dashboard Customize View). */
-.dash-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
-.dash-grid .dash-w.full { grid-column: 1 / -1; }
-.dash-grid .dash-w.half { grid-column: span 1; min-width: 0; }
+.dash-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; align-items: start; }
+/* Freeform width: each widget spans a whole number of grid columns via the
+   --col-span custom property (so the responsive rule below can still override it). */
+.dash-grid .dash-w { grid-column: span var(--col-span, 2); min-width: 0; }
 .dash-grid .dash-w > .panel { margin-bottom: 0; min-width: 0; }
-/* Vertical resize: a "tall" widget gets extra height (Customize mode). */
-.dash-grid .dash-w.dash-h-tall > .panel { min-height: 420px; display: flex; flex-direction: column; }
+/* Freeform height: an explicit px height on the widget; the panel fills it and
+   scrolls if its content is taller, so widgets can be made shorter or taller. */
+.dash-grid .dash-w.has-h { min-height: 0; }
+.dash-grid .dash-w.has-h > .panel { height: 100%; overflow: auto; display: flex; flex-direction: column; }
+.dash-grid .dash-w.has-h > .metrics-row { height: 100%; }
 .dash-grid .dash-w > .metrics-row { margin: 0; }
-@media (max-width: 900px) { .dash-grid { grid-template-columns: 1fr; } .dash-grid .dash-w.half { grid-column: 1 / -1; } }
+@media (max-width: 900px) { .dash-grid { grid-template-columns: 1fr; } .dash-grid .dash-w { grid-column: 1 / -1; } }
+
+/* Corner resize grip (Customize mode) — freeform drag-to-resize handle. */
+.dash-resize { position: absolute; right: 5px; bottom: 5px; z-index: 5; width: 22px; height: 22px;
+  display: inline-flex; align-items: flex-end; justify-content: flex-end; padding: 2px;
+  color: var(--text-dim); background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
+  cursor: nwse-resize; touch-action: none; }
+.dash-resize:hover { color: var(--accent); border-color: var(--accent); }
+.dash-grid.customizing .dash-w.resizing { outline: 2px solid var(--accent); outline-offset: 2px; }
+.dash-grid.customizing .dash-w.resizing .dash-cz-cover { background: rgba(59, 130, 246, 0.06); }
 
 /* Dashboard Customize mode — in-place drag-and-drop, resize, hide/show. */
 .dash-cz-toggle { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px;

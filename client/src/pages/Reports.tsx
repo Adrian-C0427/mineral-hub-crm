@@ -6,7 +6,7 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, Banner, Modal } from "../components/ui";
+import { Spinner, Banner, Modal, EmptyState } from "../components/ui";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { Select } from "../components/Select";
 import { GeoFields } from "../components/GeoFields";
@@ -168,10 +168,12 @@ export function Reports() {
     return () => window.clearTimeout(t);
   }, [range.from, range.to, cmp?.from, cmp?.to, filters]);
 
+  const [exportErr, setExportErr] = useState<string | null>(null);
   async function onExport() {
     if (!reportRef.current) return;
-    setExporting(true);
+    setExporting(true); setExportErr(null);
     try { await exportElementToPdf(reportRef.current, `mineral-hub-report-${range.from}_to_${range.to}.pdf`); }
+    catch (e) { setExportErr(e instanceof Error ? e.message : "PDF export failed — please try again."); }
     finally { setExporting(false); }
   }
 
@@ -205,6 +207,7 @@ export function Reports() {
           {can("exportReports") && <button className="primary" onClick={onExport} disabled={exporting || !data}>{exporting ? "Generating…" : "Export PDF"}</button>}
         </div>
       </div>
+      {exportErr && <Banner kind="error">Couldn't generate the PDF: {exportErr}</Banner>}
 
       {/* --- Controls (not captured in PDF) --- */}
       <div className="panel">
@@ -299,9 +302,9 @@ export function Reports() {
               Total company expenses were <strong>{money(k.expenses)}</strong> with <strong>{money(k.reimbursementsOutstanding)}</strong> outstanding in reimbursements.
             </p>
             {k.totalDeals === 0 && (
-              <Banner kind="info">
-                No deal activity in this period yet — these metrics fill in automatically as deals are added and closed. Try a wider date range, or start from the Pipeline.
-              </Banner>
+              <EmptyState title="No deal activity in this period yet">
+                These metrics fill in automatically as deals are added and closed. Try a wider date range, or start from the Pipeline.
+              </EmptyState>
             )}
           </div>
 
