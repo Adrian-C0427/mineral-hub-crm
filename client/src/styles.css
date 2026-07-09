@@ -1485,3 +1485,26 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; backg
 .chart-type-toggle button.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 /* Cross-breakpoint: keep block/grid gaps proportional on smaller screens */
 @media (max-width: 760px) { :root { --block-gap: 14px; --grid-gap: 12px; } }
+
+/* ---------------------------------------------------------------------------
+   Multi-asset seller — New Deal asset repeater + Assets/Tracts section
+   --------------------------------------------------------------------------- */
+.nd-assets { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.nd-assets-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.nd-asset-row { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; padding: 10px; margin-bottom: 8px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); }
+.nd-asset-row .field { margin: 0; }
+.nd-asset-del { flex: 0 0 auto; width: 30px; height: 34px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--panel); color: var(--text-dim); font-size: 17px; line-height: 1; cursor: pointer; }
+.nd-asset-del:hover { color: var(--red); border-color: var(--red); }
+
+.asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.asset-card { display: flex; flex-direction: column; gap: 8px; padding: 13px 14px; border: 1px solid var(--border);
+  border-radius: var(--radius-lg); background: var(--panel-2); color: var(--text); text-decoration: none;
+  transition: border-color 0.12s ease, transform 0.12s ease; }
+.asset-card:hover { border-color: var(--accent); transform: translateY(-1px); text-decoration: none; }
+.asset-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.asset-card-name { font-weight: 700; font-size: 14px; }
+.asset-card-facts { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12.5px; color: var(--text-dim); }
+.asset-card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 12.5px;
+  padding-top: 8px; border-top: 1px solid var(--border); }

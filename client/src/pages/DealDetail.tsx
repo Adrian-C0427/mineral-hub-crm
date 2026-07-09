@@ -22,7 +22,8 @@ import { SellerDetails } from "../components/SellerDetails";
 import { DealPortalPanel } from "../components/DealPortalPanel";
 import { AssigneePicker } from "../components/AssigneePicker";
 import { DocumentsSection, DEAL_DOC_FOLDERS, type DocFile } from "../components/DocumentsSection";
-import type { BuyerActivityRow, DealSummary, MatchRec, Seller, UserLite } from "../types";
+import type { AssetChild, BuyerActivityRow, DealSummary, MatchRec, Seller, UserLite } from "../types";
+import { NewDealModal } from "../components/NewDealModal";
 // MapLibre is heavy; only load it when a deal detail page is viewed.
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
 const TractSection = lazy(() => import("../components/TractSection").then((m) => ({ default: m.TractSection })));
@@ -39,6 +40,10 @@ interface DealDetailData extends DealSummary {
   sellers: Seller[];
   canViewTaxId: boolean;
   metrics: { buyersContacted: number; interested: number; offers: number; highOffer: number | null };
+  // Multi-asset grouping.
+  parent: { id: string; name: string } | null;
+  assets?: AssetChild[];
+  assetCount?: number;
 }
 
 interface EditTarget { id: string; name: string; initial?: { status?: BuyerActivityRow["status"]; assignedTeamMemberId?: string | null; notes?: string | null; dateSent?: string | null; nextFollowUpDate?: string | null } }
@@ -57,6 +62,9 @@ export function DealDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [acceptOffer, setAcceptOffer] = useState<{ id: string; buyer: string; amount: number } | null>(null);
   const [acceptBusy, setAcceptBusy] = useState(false);
+  const [showAddAsset, setShowAddAsset] = useState(false);
+  const [confirmSplit, setConfirmSplit] = useState(false);
+  const [splitBusy, setSplitBusy] = useState(false);
 
   const loadDeal = useCallback(() => api.get<DealDetailData>(`/deals/${id}`).then(setDeal), [id]);
   const loadMatches = useCallback(() => api.get<MatchRec[]>(`/deals/${id}/matches`).then(setMatches), [id]);
@@ -113,6 +121,13 @@ export function DealDetail() {
 
       {deal.stage === "DEAD" && deal.deadReason && <Banner kind="error">Dead: {deal.deadReason}</Banner>}
 
+      {deal.parent && (
+        <Banner kind="info">
+          This is an asset within the <Link to={`/deals/${deal.parent.id}`}><strong>{deal.parent.name}</strong></Link> seller package.
+          {can("editDeals") && <> · <button type="button" className="link-btn" onClick={() => setConfirmSplit(true)}>Split into a standalone deal</button></>}
+        </Banner>
+      )}
+
       <div className="dd-top-grid">
         <CharacteristicsCard deal={deal} users={users} canEdit={can("editDeals")} onSaved={refreshAll} />
         <ContractTimelineCard deal={deal} onSaved={loadDeal} />
@@ -125,6 +140,18 @@ export function DealDetail() {
         canEdit={can("editDeals")}
         onChanged={loadDeal}
       />
+
+      {/* Multi-asset seller: the individual interests grouped under this deal.
+          Hidden on a child asset (which is itself one of these). */}
+      {!deal.parent && (
+        <AssetsSection
+          deal={deal}
+          canEdit={can("editDeals")}
+          canPublish={can("publishOfferings")}
+          onAdd={() => setShowAddAsset(true)}
+          onChanged={loadDeal}
+        />
+      )}
 
       <DealPortalPanel dealId={deal.id} />
 
@@ -325,6 +352,103 @@ export function DealDetail() {
           onCancel={() => setConfirmDelete(false)}
           onConfirm={async () => { await api.del(`/deals/${id}`); nav("/deals"); }}
         />
+      )}
+
+      {showAddAsset && (
+        <NewDealModal
+          parentDealId={deal.id}
+          onClose={() => setShowAddAsset(false)}
+          onCreated={() => { setShowAddAsset(false); loadDeal(); }}
+        />
+      )}
+
+      {confirmSplit && (
+        <ConfirmDialog
+          title="Split into a standalone deal?"
+          confirmLabel="Split out"
+          busy={splitBusy}
+          message={
+            <>
+              <strong>{deal.name}</strong> will become its own standalone deal, detached from the{" "}
+              <strong>{deal.parent?.name}</strong> package. All of its documents, timeline, buyer activity, offers, and
+              notes are preserved, and the seller information is copied so it stays linked.
+            </>
+          }
+          onCancel={() => setConfirmSplit(false)}
+          onConfirm={async () => {
+            setSplitBusy(true);
+            try { await api.post(`/deals/${deal.id}/split`, {}); setConfirmSplit(false); loadDeal(); }
+            finally { setSplitBusy(false); }
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Assets / Tracts — the individual mineral interests grouped under this deal.
+// Each is a full, independently-marketable child deal.
+// ---------------------------------------------------------------------------
+function AssetsSection({ deal, canEdit, canPublish, onAdd, onChanged }: {
+  deal: DealDetailData; canEdit: boolean; canPublish: boolean; onAdd: () => void; onChanged: () => void;
+}) {
+  const assets = deal.assets ?? [];
+  const [busy, setBusy] = useState(false);
+  const publishedCount = assets.filter((a) => a.publishedToPortal).length;
+
+  async function publishAll(published: boolean) {
+    setBusy(true);
+    try { await api.post(`/deals/${deal.id}/assets/publish`, { published, visibility: "PUBLIC" }); onChanged(); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <div className="panel">
+      <div className="section-head">
+        <div>
+          <h3 style={{ margin: 0 }}>Assets / Tracts{assets.length ? ` (${assets.length})` : ""}</h3>
+          <span className="muted" style={{ fontSize: 12 }}>Individual interests under this seller — each is independently marketable</span>
+        </div>
+        <div className="row" style={{ gap: 8 }}>
+          {canPublish && assets.length > 0 && (
+            publishedCount < assets.length
+              ? <button className="small" disabled={busy} onClick={() => publishAll(true)} title="Publish every asset to the buyer portal">Publish all</button>
+              : <button className="small" disabled={busy} onClick={() => publishAll(false)} title="Unpublish every asset">Unpublish all</button>
+          )}
+          {canEdit && <button className="small primary" onClick={onAdd}>+ Add asset</button>}
+        </div>
+      </div>
+
+      {assets.length === 0 ? (
+        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+          No separate assets yet. This deal is a single interest — add assets to manage multiple interests from the same
+          seller together (each stays independently marketable).
+        </p>
+      ) : (
+        <div className="asset-grid">
+          {assets.map((a) => (
+            <Link key={a.id} to={`/deals/${a.id}`} className="asset-card">
+              <div className="asset-card-head">
+                <span className="asset-card-name">{a.name}</span>
+                <StageBadge stage={a.stage} />
+              </div>
+              <div className="asset-card-facts">
+                {a.counties.length > 0 && <span>{a.counties.join(", ")}{a.states.length ? ` · ${a.states.join(", ")}` : ""}</span>}
+                {a.nra != null && <span><strong>{num(a.nra)}</strong> NRA</span>}
+                {a.assetTypes.length > 0 && <span>{a.assetTypes.join("/")}</span>}
+                {a.operator && <span>{a.operator}</span>}
+                {a.rrc && <span>RRC {a.rrc}</span>}
+              </div>
+              <div className="asset-card-foot">
+                {a.ourPrice != null && <span className="muted">Our {money(a.ourPrice)}</span>}
+                {a.askPrice != null && <span style={{ color: "var(--accent)" }}>Ask {money(a.askPrice)}</span>}
+                {a.publishedToPortal && <span className="badge resp-offer">Published</span>}
+                {a.selectedBuyer && <span className="badge resp-pending">→ {a.selectedBuyer.name}</span>}
+              </div>
+            </Link>
+          ))}
+        </div>
       )}
     </div>
   );

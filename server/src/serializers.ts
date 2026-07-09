@@ -9,7 +9,37 @@ export type DealWithRels = Prisma.DealGetPayload<{
     selectedBuyer: true;
     relationshipOwner: true;
   };
-}> & { offers?: { amount: number }[]; assignees?: { id: string; name: string }[] };
+}> & {
+  offers?: { amount: number }[];
+  assignees?: { id: string; name: string }[];
+  // Multi-asset grouping (optional, populated by list/detail queries).
+  _count?: { assets?: number };
+  parentDeal?: { id: string; name: string } | null;
+  assets?: AssetChild[];
+};
+
+/** A child asset with just the relation needed for its compact summary. */
+export type AssetChild = Prisma.DealGetPayload<{ include: { selectedBuyer: true } }>;
+
+/** Compact summary of a child asset shown within its parent package. */
+export function serializeAssetChild(a: AssetChild) {
+  return {
+    id: a.id,
+    name: a.name,
+    stage: a.stage,
+    counties: a.counties,
+    states: a.states ?? [],
+    assetTypes: a.assetTypes,
+    nra: a.nra,
+    ourPrice: a.ourPrice,
+    askPrice: a.askPrice,
+    operator: a.operator,
+    rrc: a.rrc,
+    publishedToPortal: a.publishedToPortal,
+    portalSlug: a.portalSlug,
+    selectedBuyer: a.selectedBuyer ? { id: a.selectedBuyer.id, name: a.selectedBuyer.name } : null,
+  };
+}
 
 export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
   const dates = resolveDealDates(deal);
@@ -73,6 +103,13 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     basins: deal.basins,
     formations: deal.formations,
     stage: deal.stage,
+    // Multi-asset grouping. `assetCount` is present on list rows; `parent`/`assets`
+    // on the detail. A deal with assets is a "package"; a deal with a parent is a
+    // child "asset". Standalone deals have neither.
+    parentDealId: deal.parentDealId ?? null,
+    parent: deal.parentDeal ? { id: deal.parentDeal.id, name: deal.parentDeal.name } : null,
+    assetCount: deal._count?.assets ?? (deal.assets ? deal.assets.length : undefined),
+    assets: deal.assets ? deal.assets.map(serializeAssetChild) : undefined,
     publishedToPortal: deal.publishedToPortal ?? false,
     portalSlug: deal.portalSlug ?? null,
     currentStageEnteredAt: deal.currentStageEnteredAt,
