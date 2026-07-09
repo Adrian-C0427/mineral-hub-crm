@@ -18,7 +18,28 @@ export type DealWithRels = Prisma.DealGetPayload<{
   _count?: { assets?: number };
   parentDeal?: { id: string; name: string } | null;
   assets?: RollupAsset[];
+  // Recorded revenue statements (optional; loaded on the owned-asset list + detail).
+  // When present, Annual Royalty Income is derived from these actual entries
+  // rather than the stored estimate — the Financials section is the source of truth.
+  revenueEntries?: RevenueRow[];
 };
+
+/** The revenue-entry scalars used to derive Annual Royalty Income. */
+export type RevenueRow = { month: Date; amount: number; kind: string };
+
+/**
+ * Annual Royalty Income derived from recorded revenue: the sum of ROYALTY-kind
+ * statements over the trailing twelve months (the current month and the eleven
+ * before it). Returns null only when no royalty has ever been recorded, so the
+ * asset shows "—" instead of "$0"; once any royalty exists it reflects the last
+ * year of actual income (which may legitimately be $0 if production has lapsed).
+ */
+export function annualRoyaltyIncome(entries: RevenueRow[], now: Date = new Date()): number | null {
+  const royalty = entries.filter((e) => e.kind === "ROYALTY");
+  if (!royalty.length) return null;
+  const cutoff = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1));
+  return royalty.filter((e) => e.month >= cutoff).reduce((s, e) => s + e.amount, 0);
+}
 
 /** The child-asset scalars a package sums into its own displayed figures. */
 export type RollupAsset = { nra: number | null; acreageNma: number | null; ourPrice: number | null; askPrice: number | null };
@@ -82,6 +103,12 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
   const unrealizedGainLoss =
     deal.currentValue != null && gainBasis != null ? deal.currentValue - gainBasis : null;
 
+  // Annual Royalty Income is derived from recorded revenue when the entries are
+  // loaded (owned-asset list + detail); elsewhere it falls back to the stored value.
+  const royaltyIncomeAnnual = deal.revenueEntries
+    ? annualRoyaltyIncome(deal.revenueEntries, now)
+    : deal.royaltyIncomeAnnual;
+
   return {
     id: deal.id,
     name: deal.name,
@@ -102,7 +129,7 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     wells: deal.wells,
     producingStatus: deal.producingStatus,
     // Owned-asset: financial
-    royaltyIncomeAnnual: deal.royaltyIncomeAnnual,
+    royaltyIncomeAnnual,
     leaseStatuses: deal.leaseStatuses ?? [],
     royaltyRate: deal.royaltyRate,
     leaseEffectiveDate: deal.leaseEffectiveDate,

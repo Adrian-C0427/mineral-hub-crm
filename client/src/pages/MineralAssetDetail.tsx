@@ -100,7 +100,7 @@ export function MineralAssetDetail() {
         <MetricCard label="Purchase Price" value={money(asset.purchasePrice)} hint={asset.acquisitionDate ? `Acquired ${fmtDate(asset.acquisitionDate)}` : undefined} />
         <MetricCard label="ROI Since Acquisition" value={fmtPct(asset.roiSinceAcquisition)} valueColor={posColor(asset.roiSinceAcquisition)} />
         <MetricCard label="Unrealized Gain / Loss" value={money(asset.unrealizedGainLoss)} valueColor={posColor(asset.unrealizedGainLoss)} />
-        <MetricCard label="Annual Royalty Income" value={money(asset.royaltyIncomeAnnual)} valueColor={asset.royaltyIncomeAnnual ? "var(--green)" : undefined} />
+        <MetricCard label="Annual Royalty Income" value={money(asset.royaltyIncomeAnnual)} hint="Trailing 12 mo · from revenue" valueColor={asset.royaltyIncomeAnnual ? "var(--green)" : undefined} />
       </div>
 
       <div className="asset-tabs">
@@ -299,7 +299,6 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
 
   async function saveFinancials() {
     await api.patch(`/deals/${asset.id}`, {
-      royaltyIncomeAnnual: f.royaltyIncomeAnnual,
       leaseStatuses: f.leaseStatuses ?? [],
       royaltyRate: f.royaltyRate,
       leaseEffectiveDate: f.leaseEffectiveDate || null,
@@ -352,7 +351,6 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
           <div className="panel-title"><h3>Current Lease</h3></div>
           {!edit ? (
             <div className="dd-grid" style={{ gridTemplateColumns: "1fr" }}>
-              <KV k="Estimated Annual Royalty" v={money(asset.royaltyIncomeAnnual)} />
               <KV k="Lease Status" v={asset.leaseStatuses?.length ? asset.leaseStatuses.join(", ") : null} />
               <KV k="Royalty Rate" v={asset.royaltyRate} />
               <KV k="Lease Effective Date" v={fmtDate(asset.leaseEffectiveDate)} />
@@ -360,7 +358,6 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
             </div>
           ) : (
             <div className="dd-grid" style={{ gridTemplateColumns: "1fr" }}>
-              <Fld l="Estimated Annual Royalty"><input type="number" value={f.royaltyIncomeAnnual ?? ""} onChange={(e) => setF({ ...f, royaltyIncomeAnnual: e.target.value === "" ? null : Number(e.target.value) })} /></Fld>
               <Fld l="Lease Status"><SearchableMultiSelect options={LEASE_STATUS_OPTIONS} value={f.leaseStatuses ?? []} onChange={(v) => setF({ ...f, leaseStatuses: v })} placeholder="Select lease status…" /></Fld>
               <Fld l="Royalty Rate"><RoyaltyRateField value={f.royaltyRate} onChange={(v) => setF({ ...f, royaltyRate: v })} /></Fld>
               <Fld l="Lease Effective Date"><input type="date" value={toInputDate(f.leaseEffectiveDate)} onChange={(e) => setF({ ...f, leaseEffectiveDate: e.target.value })} /></Fld>

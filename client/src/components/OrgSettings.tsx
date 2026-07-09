@@ -218,7 +218,7 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
                       </td>
                       <td><span className={`badge ${m.status === "ACTIVE" ? "resp-offer" : "resp-no"}`}>{m.status === "ACTIVE" ? "Active" : "Disabled"}</span></td>
                       <td>{m.lastActiveAt ? fmtDate(m.lastActiveAt) : "—"}</td>
-                      <td className="right">
+                      <td className="right user-actions-cell">
                         {!isSelf && m.orgRole !== "OWNER" && (
                           <div className="user-actions">
                             {isOrgOwner && <button className="small" onClick={() => setResetting(m)}>Reset password</button>}
