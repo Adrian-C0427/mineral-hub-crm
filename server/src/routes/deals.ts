@@ -217,7 +217,7 @@ dealsRouter.post(
     if (data.assets?.length) {
       data.assets.forEach((a, i) => {
         const miss = dealRequired(a);
-        if (miss.length) throw new HttpError(400, `Asset ${i + 1} is missing required fields: ${miss.join(", ")}`);
+        if (miss.length) throw new HttpError(400, `Additional deal ${i + 1} is missing required fields: ${miss.join(", ")}`);
       });
     }
     const assigneeIds = data.assigneeIds ? await validateOrgUsers(orgId(req), data.assigneeIds) : [];

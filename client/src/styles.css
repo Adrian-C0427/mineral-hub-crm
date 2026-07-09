@@ -592,7 +592,12 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .bar { flex: 1; background: var(--green); border-radius: 3px 3px 0 0; }
 .bar-projected { background: var(--accent); opacity: 0.55; }
 :root[data-theme="light"] .bar-projected { opacity: 0.45; }
+/* Zero placeholder: a faint baseline stub so months with no profit still appear
+   on the chart (keeps all twelve months visible with consistent spacing). */
+.bar-zero { flex: 1; height: 3px; background: var(--border); border-radius: 3px 3px 0 0; opacity: 0.7; }
 .bar-label { font-size: 10px; color: var(--text-dim); }
+/* Highlight the current month's label to orient past vs. future at a glance. */
+.bar-col.current .bar-label { color: var(--accent); font-weight: 700; }
 
 /* ===========================================================================
    Dashboard (design-system look, copied from the Claude Design mockup).
