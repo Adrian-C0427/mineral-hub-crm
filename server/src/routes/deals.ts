@@ -574,7 +574,7 @@ dealsRouter.get(
     const deal = await prisma.deal.findFirst({
       where: { id: req.params.id, organizationId: orgId(req) },
       select: { id: true, publishedToPortal: true, portalSlug: true, portalVisibility: true, portalFeatured: true,
-        portalSummary: true, portalSections: true, portalAskPrice: true, askPrice: true,
+        portalSummary: true, portalAskPrice: true, askPrice: true,
         portalContacts: true, portalContactName: true, portalContactTitle: true, portalContactEmail: true, portalContactPhone: true,
         files: { where: { supersededById: null }, select: { id: true, filename: true, folder: true, visibleToBuyers: true } } },
     });
@@ -582,29 +582,10 @@ dealsRouter.get(
     const { portalContacts, portalContactName, portalContactTitle, portalContactEmail, portalContactPhone, ...rest } = deal;
     res.json({
       ...rest,
-      portalSections: normalizeSections(rest.portalSections),
       contacts: normalizeDealContacts(portalContacts, { name: portalContactName, title: portalContactTitle, email: portalContactEmail, phone: portalContactPhone }),
     });
   }),
 );
-
-// Which sections a published offering can expose. All default ON except notes
-// (internal by nature — opt-in). `askPrice` shows the buyer-facing figure.
-const PORTAL_SECTION_KEYS = [
-  "contact", "company", "description", "documents", "map", "wells",
-  "tracts", "production", "attachments", "notes", "askPrice",
-] as const;
-type PortalSectionKey = (typeof PORTAL_SECTION_KEYS)[number];
-const DEFAULT_SECTIONS: Record<PortalSectionKey, boolean> = {
-  contact: true, company: true, description: true, documents: true, map: true,
-  wells: true, tracts: true, production: true, attachments: true, notes: false, askPrice: true,
-};
-function normalizeSections(raw: unknown): Record<PortalSectionKey, boolean> {
-  const obj = (raw && typeof raw === "object") ? raw as Record<string, unknown> : {};
-  const out = { ...DEFAULT_SECTIONS };
-  for (const k of PORTAL_SECTION_KEYS) if (typeof obj[k] === "boolean") out[k] = obj[k] as boolean;
-  return out;
-}
 
 // Per-deal published contacts. Source of truth is the `portalContacts` JSON
 // array; a legacy single-contact (scalar columns) seeds a one-element array so
@@ -639,8 +620,6 @@ dealsRouter.patch(
       visibility: z.enum(["PUBLIC", "LINK_ONLY"]).optional(),
       featured: z.boolean().optional(),
       summary: z.string().trim().max(4000).nullish(),
-      // Per-deal section toggles (partial merge) — never touches other deals.
-      sections: z.record(z.string(), z.boolean()).optional(),
       // Buyer-facing asking-price override; null clears it (falls back to askPrice).
       askPrice: z.number().nonnegative().nullish(),
       // Per-deal published contacts (ordered) — the representatives shown on THIS
@@ -653,7 +632,7 @@ dealsRouter.patch(
         phone: z.string().trim().max(60).nullish(),
       })).max(25).optional(),
     }).parse(req.body);
-    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true, portalSlug: true, portalSections: true } });
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true, portalSlug: true } });
     if (!deal) throw new HttpError(404, "Deal not found");
     const patch: Record<string, unknown> = {};
     if (body.published !== undefined) {
@@ -674,21 +653,15 @@ dealsRouter.patch(
       patch.portalContactEmail = first?.email ?? null;
       patch.portalContactPhone = first?.phone ?? null;
     }
-    if (body.sections) {
-      const merged = { ...normalizeSections(deal.portalSections) };
-      for (const k of PORTAL_SECTION_KEYS) if (typeof body.sections[k] === "boolean") merged[k] = body.sections[k];
-      patch.portalSections = merged;
-    }
     const updated = await prisma.deal.update({
       where: { id: deal.id }, data: patch,
       select: { id: true, publishedToPortal: true, portalSlug: true, portalVisibility: true, portalFeatured: true,
-        portalSummary: true, portalSections: true, portalAskPrice: true, askPrice: true,
+        portalSummary: true, portalAskPrice: true, askPrice: true,
         portalContacts: true, portalContactName: true, portalContactTitle: true, portalContactEmail: true, portalContactPhone: true },
     });
     const { portalContacts, portalContactName, portalContactTitle, portalContactEmail, portalContactPhone, ...urest } = updated;
     res.json({
       ...urest,
-      portalSections: normalizeSections(urest.portalSections),
       contacts: normalizeDealContacts(portalContacts, { name: portalContactName, title: portalContactTitle, email: portalContactEmail, phone: portalContactPhone }),
     });
   }),

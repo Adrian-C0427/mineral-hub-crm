@@ -4,9 +4,7 @@ import { useAuth } from "../auth/AuthContext";
 import { Banner } from "./ui";
 import { Toggle } from "./Toggle";
 import { PhoneInput } from "./PhoneInput";
-
-type SectionKey = "contact" | "company" | "description" | "documents" | "map" | "wells" | "tracts" | "production" | "attachments" | "notes" | "askPrice";
-type Sections = Record<SectionKey, boolean>;
+import { Select } from "./Select";
 
 // A per-deal published contact. `id` is a stable key for React + reordering.
 interface DealContact { id: string; name: string; title: string | null; email: string | null; phone: string | null }
@@ -18,7 +16,6 @@ interface PortalState {
   portalVisibility: "PUBLIC" | "LINK_ONLY";
   portalFeatured: boolean;
   portalSummary: string | null;
-  portalSections: Sections;
   portalAskPrice: number | null;
   askPrice: number | null;
   // Per-deal published contacts — the representatives shown on THIS listing.
@@ -28,15 +25,6 @@ interface PortalState {
 
 const newId = () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `c${Date.now()}${Math.random().toString(36).slice(2, 7)}`);
 const blankContact = (): DealContact => ({ id: newId(), name: "", title: "", email: "", phone: "" });
-
-// Ordered for display; labels are buyer-facing section names.
-const SECTION_LABELS: [SectionKey, string][] = [
-  ["contact", "Contact information"], ["company", "Company information"],
-  ["description", "Deal description"], ["askPrice", "Asking price"],
-  ["map", "Map"], ["wells", "Wells"], ["tracts", "Tracts"],
-  ["production", "Production information"], ["documents", "Documents"],
-  ["attachments", "Attachments"], ["notes", "Notes"],
-];
 
 /**
  * "Buyer Portal" admin panel on the deal page: publish/unpublish, public vs
@@ -101,7 +89,6 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
 
   if (!p) return null;
   const shareUrl = p.portalSlug ? `${window.location.origin}/offer/${p.portalSlug}` : null;
-  const visibleCount = SECTION_LABELS.filter(([key]) => p.portalSections[key]).length;
 
   const statusLabel = p.publishedToPortal ? (p.portalVisibility === "PUBLIC" ? "Published · Public" : "Published · Link only") : "Not published";
 
@@ -121,7 +108,6 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
         </div>
         <span className="dpp-right">
           <span className={`dpp-status ${p.publishedToPortal ? "live" : ""}`}><span className="dot" />{statusLabel}</span>
-          {!open && <span className="muted" style={{ fontSize: 12 }}>{visibleCount} of {SECTION_LABELS.length} sections</span>}
           <span className="muted" style={{ fontSize: 12.5 }}>{open ? "Collapse" : "Expand"}</span>
           <span className={`va-chev ${open ? "" : "down"}`}>⌃</span>
         </span>
@@ -138,15 +124,17 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
         <span className="dpp-vdiv" />
         <div className="dpp-switchrow">
           <span className="ddx-label">Visibility</span>
-          <select
+          <Select
             disabled={!canEdit || !p.publishedToPortal}
             value={p.portalVisibility}
-            onChange={(e) => patch({ visibility: e.target.value })}
-            style={{ width: "auto" }}
-          >
-            <option value="PUBLIC">Public — listed in the marketplace</option>
-            <option value="LINK_ONLY">Private — shared link only</option>
-          </select>
+            onChange={(v) => patch({ visibility: v })}
+            width={280}
+            ariaLabel="Portal visibility"
+            options={[
+              { value: "PUBLIC", label: "Public — listed in the marketplace" },
+              { value: "LINK_ONLY", label: "Private — shared link only" },
+            ]}
+          />
         </div>
         <span className="dpp-vdiv" />
         <label className="dpp-switchrow">
@@ -189,7 +177,7 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
         <div style={{ marginBottom: 16 }}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
             <span className="ddx-label">Contacts</span>
-            <span className="muted" style={{ fontSize: 11.5 }}>{p.portalSections.contact ? `Shown on this listing (${contacts.length})` : "Enable the Contact section to show"}</span>
+            <span className="muted" style={{ fontSize: 11.5 }}>Shown on this listing when filled in</span>
           </div>
           {contacts.map((c, i) => (
             <div key={c.id} className="dpp-contact">
@@ -234,44 +222,26 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
           {canEdit && <button className="small" onClick={addContact} style={{ marginTop: 4 }}>+ Add contact</button>}
         </div>
 
-        {/* Per-deal section visibility — saved only on this deal. */}
-        <div style={{ marginBottom: 16 }}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-            <span className="ddx-label">Sections shown on this listing</span>
-            <span className="muted" style={{ fontSize: 11.5 }}>{visibleCount} of {SECTION_LABELS.length} visible</span>
-          </div>
-          <div className="dpp-sections">
-            {SECTION_LABELS.map(([key, label]) => {
-              const on = p.portalSections[key];
-              return (
-                <button
-                  key={key} type="button" disabled={!canEdit}
-                  className={`dpp-sec ${on ? "on" : ""}`}
-                  onClick={() => { const sections = { ...p.portalSections, [key]: !on }; setP((prev) => prev ? { ...prev, portalSections: sections } : prev); patch({ sections: { [key]: !on } }); }}
-                >
-                  {on && <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12" /></svg>}
-                  {label}
-                </button>
-              );
-            })}
-          </div>
+        {/* The offering auto-displays every section that has data — no manual
+            show/hide. Empty fields are simply omitted from the published page. */}
+        <div className="dpp-autonote">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
+          The listing shows every section that has data — tracts, documents, map, wells, production, and contacts appear automatically, and empty fields are hidden. Nothing to configure.
         </div>
 
         {/* Asking price — defaults to the deal's Ask Price; overridable for the
             listing only (never changes the deal). */}
-        {p.portalSections.askPrice && (
-          <div style={{ marginBottom: 16, maxWidth: 340 }}>
-            <div className="ddx-label" style={{ marginBottom: 8 }}>Published asking price</div>
-            <input
-              type="number" min="0" disabled={!canEdit}
-              value={askOverride}
-              placeholder={p.askPrice != null ? `Deal ask: $${p.askPrice.toLocaleString()}` : "No deal ask price set"}
-              onChange={(e) => setAskOverride(e.target.value)}
-              onBlur={() => { const v = askOverride.trim() === "" ? null : Number(askOverride); if (v !== p.portalAskPrice) { setP((prev) => prev ? { ...prev, portalAskPrice: v } : prev); patch({ askPrice: v }); } }}
-            />
-            <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Leave blank to use the deal's Ask Price ({p.askPrice != null ? `$${p.askPrice.toLocaleString()}` : "not set"}). This override doesn't change the deal.</div>
-          </div>
-        )}
+        <div style={{ marginBottom: 16, maxWidth: 340 }}>
+          <div className="ddx-label" style={{ marginBottom: 8 }}>Published asking price</div>
+          <input
+            type="number" min="0" disabled={!canEdit}
+            value={askOverride}
+            placeholder={p.askPrice != null ? `Deal ask: $${p.askPrice.toLocaleString()}` : "No deal ask price set"}
+            onChange={(e) => setAskOverride(e.target.value)}
+            onBlur={() => { const v = askOverride.trim() === "" ? null : Number(askOverride); if (v !== p.portalAskPrice) { setP((prev) => prev ? { ...prev, portalAskPrice: v } : prev); patch({ askPrice: v }); } }}
+          />
+          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Leave blank to use the deal's Ask Price ({p.askPrice != null ? `$${p.askPrice.toLocaleString()}` : "not set"}). This override doesn't change the deal.</div>
+        </div>
 
         {(p.files?.length ?? 0) > 0 && (
           <div>

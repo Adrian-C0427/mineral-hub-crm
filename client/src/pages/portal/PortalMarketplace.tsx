@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { num } from "../../lib/format";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../../lib/options";
 import { SearchableMultiSelect } from "../../components/SearchableMultiSelect";
+import { Select } from "../../components/Select";
 import { GeoFields } from "../../components/GeoFields";
 import { PortalMap } from "./PortalMap";
 import { PortalShell } from "./PortalOffering";
@@ -178,12 +179,13 @@ export function PortalMarketplace() {
           </button>
           <span className="muted" style={{ fontSize: 13 }}>{filtered.length} of {deals.length} opportunities</span>
           <span className="spacer" style={{ marginLeft: "auto" }} />
-          <select value={sort} onChange={(e) => setSort(e.target.value as SortKey)} style={{ width: "auto" }} aria-label="Sort listings">
-            <option value="featured">Featured first</option>
-            <option value="newest">Newest</option>
-            <option value="nra">Largest NRA</option>
-            <option value="name">Name A–Z</option>
-          </select>
+          <Select value={sort} onChange={(v) => setSort(v as SortKey)} width={170} ariaLabel="Sort listings"
+            options={[
+              { value: "featured", label: "Featured first" },
+              { value: "newest", label: "Newest" },
+              { value: "nra", label: "Largest NRA" },
+              { value: "name", label: "Name A–Z" },
+            ]} />
           <div className="seg-control mkt-seg">
             <span className={`seg ${view === "grid" ? "active" : ""}`} onClick={() => setView("grid")}>▦ Grid</span>
             <span className={`seg ${view === "table" ? "active" : ""}`} onClick={() => setView("table")}>☰ Table</span>
@@ -377,9 +379,8 @@ function LeadCapture({ orgSlug }: { orgSlug: string }) {
           <div className="field"><label>Email {star}</label><input type="email" value={f.email} onChange={(e) => set("email")(e.target.value)} /></div>
           <div className="field"><label>Phone {star}</label><input value={f.phone} onChange={(e) => set("phone")(e.target.value)} /></div>
           <div className="field"><label>Preferred contact</label>
-            <select value={f.preferredContact} onChange={(e) => set("preferredContact")(e.target.value as typeof f.preferredContact)}>
-              <option value="either">Either</option><option value="email">Email</option><option value="phone">Phone</option>
-            </select>
+            <Select value={f.preferredContact} onChange={(v) => set("preferredContact")(v as typeof f.preferredContact)} ariaLabel="Preferred contact"
+              options={[{ value: "either", label: "Either" }, { value: "email", label: "Email" }, { value: "phone", label: "Phone" }]} />
           </div>
         </div>
         <div className="muted portal-lead-section">Your buy box</div>

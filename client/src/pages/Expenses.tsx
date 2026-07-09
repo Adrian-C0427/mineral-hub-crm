@@ -6,6 +6,7 @@ import {
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { MetricCard, Spinner, Banner, Modal, ConfirmDelete } from "../components/ui";
+import { Select } from "../components/Select";
 import { money, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { CHART_COLORS, COLOR_EXPENSE, monthLabel, chartTooltip } from "../lib/charts";
@@ -384,10 +385,9 @@ function AllExpenses({
               onChange={(e) => setQ(e.target.value)} aria-label="Search expenses"
             />
           </div>
-          <select value="" style={{ width: "auto" }} onChange={(e) => { if (e.target.value) applyPreset(e.target.value); }} title="Apply a saved filter preset">
-            <option value="">Presets…</option>
-            {presets.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
-          </select>
+          <Select value="" width={150} placeholder="Presets…" ariaLabel="Apply a saved filter preset"
+            onChange={(v) => { if (v) applyPreset(v); }}
+            options={presets.map((p) => ({ value: p.name, label: p.name }))} />
           <button className="small" onClick={savePreset} disabled={!filtersActive} title="Save the current filters as a preset">Save preset</button>
           <div className="cv-wrap" ref={colsRef}>
             <button className={`small cv-btn ${showCols ? "active" : ""}`} onClick={() => setShowCols((s) => !s)} title="Customize columns">
@@ -418,23 +418,23 @@ function AllExpenses({
         <div className="xp-fld"><div className="xp-lbl">From</div><input type="date" value={filters.from} onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))} /></div>
         <div className="xp-fld"><div className="xp-lbl">To</div><input type="date" value={filters.to} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} /></div>
         <div className="xp-fld"><div className="xp-lbl">User</div>
-          <select value={filters.userId} onChange={(e) => setFilters((f) => ({ ...f, userId: e.target.value }))}>
-            <option value="">All</option>
-            {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          </select>
+          <Select value={filters.userId} onChange={(v) => setFilters((f) => ({ ...f, userId: v }))}
+            placeholder="All" clearable searchable ariaLabel="Filter by user"
+            options={users.map((u) => ({ value: u.id, label: u.name }))} />
         </div>
         <div className="xp-fld"><div className="xp-lbl">Category</div>
-          <select value={filters.categoryId} onChange={(e) => setFilters((f) => ({ ...f, categoryId: e.target.value }))}>
-            <option value="">All</option>
-            {categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <Select value={filters.categoryId} onChange={(v) => setFilters((f) => ({ ...f, categoryId: v }))}
+            placeholder="All" clearable ariaLabel="Filter by category"
+            options={categories.map((c) => ({ value: c.id, label: c.name }))} />
         </div>
         <div className="xp-fld"><div className="xp-lbl">Status</div>
-          <select value={filters.reimbursed} onChange={(e) => setFilters((f) => ({ ...f, reimbursed: e.target.value }))}>
-            <option value="">All</option>
-            <option value="false">Outstanding</option>
-            <option value="true">Reimbursed</option>
-          </select>
+          <Select value={filters.reimbursed} onChange={(v) => setFilters((f) => ({ ...f, reimbursed: v }))}
+            placeholder="All" ariaLabel="Filter by status"
+            options={[
+              { value: "", label: "All" },
+              { value: "false", label: "Outstanding" },
+              { value: "true", label: "Reimbursed" },
+            ]} />
         </div>
         {filtersActive && (
           <button className="small" style={{ alignSelf: "flex-end" }} onClick={() => { setFilters({ from: "", to: "", userId: "", categoryId: "", reimbursed: "" }); setQ(""); }}>Clear all</button>
@@ -627,10 +627,9 @@ function ExpenseForm({
         </div>
         <div className="field">
           <label>Category</label>
-          <select value={f.categoryId} onChange={(e) => setF((p) => ({ ...p, categoryId: e.target.value }))}>
-            <option value="">Uncategorized</option>
-            {categories.filter((c) => c.active || c.id === f.categoryId).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <Select value={f.categoryId} onChange={(v) => setF((p) => ({ ...p, categoryId: v }))}
+            placeholder="Uncategorized" clearable ariaLabel="Category"
+            options={categories.filter((c) => c.active || c.id === f.categoryId).map((c) => ({ value: c.id, label: c.name }))} />
         </div>
         <div className="field"><label>Notes</label><textarea value={f.notes} onChange={(e) => setF((p) => ({ ...p, notes: e.target.value }))} rows={3} /></div>
         <div className="field">

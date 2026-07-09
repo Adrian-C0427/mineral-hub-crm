@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Modal, Banner } from "./ui";
+import { Select } from "./Select";
 import { api, ApiError } from "../api/client";
 
 interface Template { id: string; name: string; subject: string; body: string }
@@ -79,10 +80,8 @@ export function SendDealEmailModal({
           {templates.length > 0 && (
             <div className="field">
               <label>Start from a template</label>
-              <select defaultValue="" onChange={(e) => { if (e.target.value) applyTemplate(e.target.value); }}>
-                <option value="">Choose a template…</option>
-                {templates.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-              </select>
+              <Select value="" onChange={(v) => { if (v) applyTemplate(v); }} placeholder="Choose a template…" ariaLabel="Email template"
+                options={templates.map((t) => ({ value: t.id, label: t.name }))} />
             </div>
           )}
           <div className="field"><label>Subject</label><input value={subject} onChange={(e) => setSubject(e.target.value)} /></div>

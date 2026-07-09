@@ -6,6 +6,7 @@ import {
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, MetricCard, Banner, MatchBar, Modal, ConfirmDialog, BackLink } from "../components/ui";
+import { Select } from "../components/Select";
 import { BuyerActivitySection } from "../components/BuyerActivitySection";
 import { LogContactModal } from "../components/LogContactModal";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
@@ -225,8 +226,8 @@ function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdi
         </div>
       ) : (
         <div className="dd-grid">
-          <Fld l="Ownership Type"><select value={f.ownershipType ?? ""} onChange={(e) => setF({ ...f, ownershipType: e.target.value })}><option value="">—</option>{OWNERSHIP_TYPES.map((t) => <option key={t}>{t}</option>)}</select></Fld>
-          <Fld l="Ownership Status"><select value={f.ownershipStatus ?? ""} onChange={(e) => setF({ ...f, ownershipStatus: e.target.value })}><option value="">—</option>{OWNERSHIP_STATUSES.map((t) => <option key={t}>{t}</option>)}</select></Fld>
+          <Fld l="Ownership Type"><Select value={f.ownershipType ?? ""} onChange={(v) => setF({ ...f, ownershipType: v })} placeholder="—" clearable ariaLabel="Ownership type" options={OWNERSHIP_TYPES.map((t) => ({ value: t, label: t }))} /></Fld>
+          <Fld l="Ownership Status"><Select value={f.ownershipStatus ?? ""} onChange={(v) => setF({ ...f, ownershipStatus: v })} placeholder="—" clearable ariaLabel="Ownership status" options={OWNERSHIP_STATUSES.map((t) => ({ value: t, label: t }))} /></Fld>
           <Fld l="Acquisition Date"><input type="date" value={toInputDate(f.acquisitionDate)} onChange={(e) => setF({ ...f, acquisitionDate: e.target.value })} /></Fld>
           <Fld l="Purchase Price"><input type="number" value={f.purchasePrice ?? ""} onChange={(e) => setF({ ...f, purchasePrice: numOrNull(e.target.value) })} /></Fld>
           <Fld l="Current Value"><input type="number" value={f.currentValue ?? ""} onChange={(e) => setF({ ...f, currentValue: numOrNull(e.target.value) })} /></Fld>
@@ -278,7 +279,7 @@ function PropertyCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit
             abstractIds={f.abstractIds} onAbstractsChange={(v) => setF({ ...f, abstractIds: v })}
             labels={{ county: "Counties", abstract: "Abstracts" }}
           />
-          <Fld l="Producing Status"><select value={f.producingStatus ?? ""} onChange={(e) => setF({ ...f, producingStatus: e.target.value })}><option value="">—</option>{PRODUCING_STATUSES.map((t) => <option key={t}>{t}</option>)}</select></Fld>
+          <Fld l="Producing Status"><Select value={f.producingStatus ?? ""} onChange={(v) => setF({ ...f, producingStatus: v })} placeholder="—" clearable ariaLabel="Producing status" options={PRODUCING_STATUSES.map((t) => ({ value: t, label: t }))} /></Fld>
           <Fld l="Basins"><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={f.basins} onChange={(v) => setF({ ...f, basins: v })} /></Fld>
           <Fld l="Formations"><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={f.formations} onChange={(v) => setF({ ...f, formations: v })} /></Fld>
           <Fld l="Operator"><input value={f.operator ?? ""} onChange={(e) => setF({ ...f, operator: e.target.value })} /></Fld>
@@ -436,9 +437,8 @@ function AddRevenueModal({ assetId, onClose, onSaved }: { assetId: string; onClo
     <Modal title="Add Revenue Entry" onClose={onClose} footer={<><button className="small" onClick={onClose}>Cancel</button><button className="primary" disabled={busy} onClick={save}>{busy ? "Saving…" : "Add"}</button></>}>
       <div className="grid-2">
         <div className="field"><label>Month</label>
-          <select value={monthNum} onChange={(e) => setMonthNum(e.target.value)}>
-            {MONTHS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-          </select>
+          <Select value={monthNum} onChange={setMonthNum} ariaLabel="Month"
+            options={MONTHS.map(([v, l]) => ({ value: v, label: l }))} />
         </div>
         <div className="field"><label>Year</label>
           {/* Searchable: typing filters the year list; free entry validated on save. */}
@@ -446,7 +446,7 @@ function AddRevenueModal({ assetId, onClose, onSaved }: { assetId: string; onClo
           <datalist id="rev-year-options">{years.map((y) => <option key={y} value={y} />)}</datalist>
         </div>
         <div className="field"><label>Amount</label><input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
-        <div className="field"><label>Type</label><select value={kind} onChange={(e) => setKind(e.target.value)}><option value="ROYALTY">Royalty</option><option value="LEASE_BONUS">Lease Bonus</option><option value="OTHER">Other</option></select></div>
+        <div className="field"><label>Type</label><Select value={kind} onChange={setKind} ariaLabel="Revenue type" options={[{ value: "ROYALTY", label: "Royalty" }, { value: "LEASE_BONUS", label: "Lease Bonus" }, { value: "OTHER", label: "Other" }]} /></div>
         <div className="field"><label>Operator</label><input value={operator} onChange={(e) => setOperator(e.target.value)} /></div>
         <div className="field" style={{ gridColumn: "1 / -1" }}><label>Note</label><input value={note} onChange={(e) => setNote(e.target.value)} /></div>
       </div>

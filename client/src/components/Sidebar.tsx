@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Briefcase, Workflow, Users, Map as MapIcon, BarChart3, Telescope, TrendingDown,
@@ -157,7 +158,10 @@ function SidebarItem({ item, collapsed, allowed, pathname }: { item: NavItem; co
           onClick={() => (flyout ? setFlyout(null) : openFlyout())}>
           <span className="sidebar-icon"><Icon size={18} /></span>
         </button>
-        {flyout && (
+        {/* Rendered into <body> so no ancestor stacking context (transforms on
+            the app shell, a MapLibre canvas, sticky headers, etc.) can ever
+            paint over the open navigation flyout. */}
+        {flyout && createPortal(
           <div className="sidebar-flyout" style={{ top: flyout.top, left: flyout.left }}
             onMouseEnter={openFlyout} onMouseLeave={scheduleClose}>
             <div className="flyout-head">{item.label}</div>
@@ -167,7 +171,8 @@ function SidebarItem({ item, collapsed, allowed, pathname }: { item: NavItem; co
                 {c.label}
               </NavLink>
             ))}
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
     );

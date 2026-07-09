@@ -4,6 +4,7 @@ import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, RelationshipDot, Banner, StageBadge, StatusBadge } from "../components/ui";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
+import { Select } from "../components/Select";
 import { AssigneePicker } from "../components/AssigneePicker";
 import { GeoFields } from "../components/GeoFields";
 import { StateSelect } from "../components/StateSelect";
@@ -189,7 +190,7 @@ export function BuyerProfile() {
           <KV k="Close rate (computed)" v={view.closedDeals > 0 ? `${pct(view.closeRate)} · ${view.closedDeals} closed` : "No closed deals yet"} />
           {edit ? (
             <>
-              <Fld l="Status"><select value={view.relationshipStatus} onChange={(e) => setD({ relationshipStatus: e.target.value as Relationship })}><option>HOT</option><option>WARM</option><option>COLD</option></select></Fld>
+              <Fld l="Status"><Select value={view.relationshipStatus} onChange={(v) => setD({ relationshipStatus: v as Relationship })} ariaLabel="Relationship status" options={[{ value: "HOT", label: "Hot" }, { value: "WARM", label: "Warm" }, { value: "COLD", label: "Cold" }]} /></Fld>
               <Fld l="Last contact"><input type="date" value={toInputDate(view.lastContactDate)} onChange={(e) => setD({ lastContactDate: e.target.value || null })} /></Fld>
               <Fld l="Next follow-up"><input type="date" value={toInputDate(view.nextFollowUpDate)} onChange={(e) => setD({ nextFollowUpDate: e.target.value || null })} /></Fld>
             </>
