@@ -180,7 +180,9 @@ describe("guessMapping", () => {
     expect(m.grantor).toBe("Grantor");
     expect(m.grantee).toBe("Grantee");
     expect(m.instrumentNumber).toBe("Doc Number");
-    expect(m.legalDescription).toBe("Legal Description");
+    // Legal Description was removed from the import workflow — even when a file
+    // still has that column, it must not be mapped.
+    expect(m.legalDescription).toBeUndefined();
   });
   it("maps generic county-clerk headers (documents)", () => {
     const m = guessMapping(CSV_DOCUMENTS, ["Document Type", "File Date", "Grantor", "Grantee", "Instrument Number", "Legal Description"]);
