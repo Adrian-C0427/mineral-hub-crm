@@ -7,6 +7,7 @@ import { asyncHandler } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { normalizeAssumptions, runValuation, type MonthVolumes } from "../domain/valuation.js";
 import { monthKey } from "../domain/dates.js";
+import { MAX_CSV_CHARS } from "../config.js";
 
 /**
  * Well Production Analysis & Valuation API.
@@ -631,9 +632,12 @@ wellsRouter.get(
       take: 200,
     });
     // Resolve well names for the list without shipping full result payloads.
+    // Scope the lookup to the caller's org so a saved analysis referencing a
+    // foreign well id can never disclose another org's well name (it resolves to
+    // "(deleted well)" instead).
     const allWellIds = [...new Set(rows.flatMap((r) => r.wellIds))];
     const wells = allWellIds.length
-      ? await prisma.researchWell.findMany({ where: { id: { in: allWellIds } }, select: { id: true, name: true } })
+      ? await prisma.researchWell.findMany({ where: { id: { in: allWellIds }, organizationId: orgId(req) }, select: { id: true, name: true } })
       : [];
     const nameOf = new Map(wells.map((w) => [w.id, w.name]));
     res.json(
@@ -800,7 +804,7 @@ function parseCsv(csv: string): { headers: string[]; rows: Record<string, string
   return { headers, rows: records };
 }
 
-const importAnalyzeSchema = z.object({ csv: z.string().min(1) });
+const importAnalyzeSchema = z.object({ csv: z.string().min(1).max(MAX_CSV_CHARS, "CSV file is too large") });
 
 wellsRouter.post(
   "/import/analyze",
@@ -819,7 +823,7 @@ wellsRouter.post(
 );
 
 const importCommitSchema = z.object({
-  csv: z.string().min(1),
+  csv: z.string().min(1).max(MAX_CSV_CHARS, "CSV file is too large"),
   mapping: z.record(z.string(), z.string()),
   state: z.string().min(2).max(2).transform((s) => s.toUpperCase()),
   county: z.string().optional(),
