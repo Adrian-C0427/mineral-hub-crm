@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { prisma } from "../db.js";
+import { prisma, withDbRetry } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 
@@ -69,7 +69,13 @@ gisTilesRouter.get(
     // ST_AsMVT buffers yields one multi-layer tile. Wellbore rows join their
     // surface well's attributes so the client can apply identical filter
     // expressions to both layers.
-    const rows = await prisma.$queryRawUnsafe<{ tile: Buffer | null }[]>(
+    //
+    // Wrapped in withDbRetry: this route is un-authed and high-frequency, so it
+    // is the one most likely to catch a transient Neon reconnect blip (P1001).
+    // The retry is happy-path-transparent — the query runs once when the DB is
+    // reachable, and only re-runs on a connection error.
+    const rows = await withDbRetry(() =>
+      prisma.$queryRawUnsafe<{ tile: Buffer | null }[]>(
       `WITH bounds AS (SELECT ST_TileEnvelope($1::int, $2::int, $3::int) AS env),
        wanted AS (SELECT ST_Transform(ST_Expand(env, 4000), 4326) AS box, env FROM bounds),
        cty_mvt AS (
@@ -101,7 +107,7 @@ gisTilesRouter.get(
            || CASE WHEN $1::int >= ${WELLS_MIN_ZOOM} THEN coalesce((SELECT ST_AsMVT(well_mvt, 'wells', ${TILE_EXTENT}, 'geom') FROM well_mvt WHERE geom IS NOT NULL), ''::bytea) ELSE ''::bytea END
            || CASE WHEN $1::int >= ${BORES_MIN_ZOOM} THEN coalesce((SELECT ST_AsMVT(bore_mvt, 'wellbores', ${TILE_EXTENT}, 'geom') FROM bore_mvt WHERE geom IS NOT NULL), ''::bytea) ELSE ''::bytea END AS tile`,
       z, x, y,
-    );
+    ));
     const tile = rows[0]?.tile;
     if (!tile || tile.length === 0) return res.status(204).end();
     cachePut(key, tile);
