@@ -74,6 +74,28 @@ export interface DealSummary {
   taxInfo: string | null;
   roiSinceAcquisition: number | null;
   unrealizedGainLoss: number | null;
+  // Multi-asset grouping: parentDealId is set on a child asset; assetCount is the
+  // number of child assets on a package (present on list rows).
+  parentDealId?: string | null;
+  assetCount?: number;
+}
+
+/** Compact child-asset summary shown within its parent package on the deal page. */
+export interface AssetChild {
+  id: string;
+  name: string;
+  stage: Stage;
+  counties: string[];
+  states: string[];
+  assetTypes: string[];
+  nra: number | null;
+  ourPrice: number | null;
+  askPrice: number | null;
+  operator: string | null;
+  rrc: string | null;
+  publishedToPortal: boolean;
+  portalSlug: string | null;
+  selectedBuyer: { id: string; name: string } | null;
 }
 
 export type RecordType = "OPPORTUNITY" | "OWNED_ASSET";

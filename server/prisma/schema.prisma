@@ -403,6 +403,17 @@ model Deal {
   recordType RecordType @default(OPPORTUNITY)
   assetMode  AssetMode?
 
+  // Multi-asset seller transactions: a Deal can group one or more child "asset"
+  // Deals (each an individual mineral interest, with the full deal machinery —
+  // characteristics, map, documents, buyer matching, offers, publishing). The
+  // parent is the overall transaction with the seller; children carry their own
+  // fields and are independently marketable. A child can be split back out into
+  // a standalone Deal (parentDealId → null). Children are hidden from the deals
+  // list / pipeline / analytics (the parent is the counted unit) until split.
+  parentDealId String?
+  parentDeal   Deal?   @relation("DealAssets", fields: [parentDealId], references: [id], onDelete: SetNull)
+  assets       Deal[]  @relation("DealAssets")
+
   // Deal characteristics support multiple selections (state stays single).
   counties       String[]
   // Primary state (kept for buyer matching / map back-compat) = states[0].
@@ -522,6 +533,7 @@ model Deal {
   @@index([organizationId])
   @@index([organizationId, recordType])
   @@index([organizationId, publishedToPortal])
+  @@index([parentDealId])
 }
 
 // A legal tract description on a deal. The raw text is authoritative; `parse`

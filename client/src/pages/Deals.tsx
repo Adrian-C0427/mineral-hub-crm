@@ -51,7 +51,12 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
 
   const columns: Column<DealSummary>[] = [
     { key: "name", header: "Deal", type: "text", value: (d) => d.name,
-      render: (d) => <strong>{d.name}</strong> },
+      render: (d) => (
+        <span className="row" style={{ gap: 6, alignItems: "center" }}>
+          <strong>{d.name}</strong>
+          {d.assetCount ? <span className="badge resp-pending" title={`${d.assetCount} asset${d.assetCount > 1 ? "s" : ""} in this seller package`}>{d.assetCount} asset{d.assetCount > 1 ? "s" : ""}</span> : null}
+        </span>
+      ) },
     { key: "priority", header: "Priority", type: "text",
       value: (d) => ({ HIGH: 0, MEDIUM: 1, LOW: 2 }[d.priority]),
       render: (d) => <PriorityBadge priority={d.priority} /> },
