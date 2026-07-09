@@ -35,6 +35,57 @@ export function useAbstractLabels(ids: string[] | null | undefined): string {
 }
 
 /**
+ * Cascading Survey selector — the last step of State → County → Abstract →
+ * Survey. Options are the surveys of the currently-selected abstract(s) only.
+ * While editing, each survey shows as "Survey — Abstract#" so similarly-named
+ * surveys are distinguishable; the stored value is just the survey name (so the
+ * saved record displays the name alone).
+ */
+export function SurveyMultiPicker({ value, onChange, abstractIds }: {
+  value: string[];
+  onChange: (surveys: string[]) => void;
+  abstractIds: string[];
+}) {
+  const [entries, setEntries] = useState<AbstractEntry[]>(cache ?? []);
+  useEffect(() => { loadIndex().then(setEntries); }, []);
+  const idSet = useMemo(() => new Set(abstractIds), [abstractIds]);
+
+  const { options, surveyByDisplay, displayBySurvey } = useMemo(() => {
+    const options: string[] = [];
+    const surveyByDisplay = new Map<string, string>();
+    const displayBySurvey = new Map<string, string>();
+    const seen = new Set<string>();
+    for (const e of entries) {
+      if (!idSet.has(e.id) || !e.survey) continue;
+      const disp = `${e.survey} — ${e.abstract}`;
+      if (!seen.has(disp)) { seen.add(disp); options.push(disp); surveyByDisplay.set(disp, e.survey); }
+      if (!displayBySurvey.has(e.survey)) displayBySurvey.set(e.survey, disp);
+    }
+    return { options, surveyByDisplay, displayBySurvey };
+  }, [entries, idSet]);
+
+  // The multi-select works in display strings; map to/from survey names. A
+  // previously-saved survey whose abstract is no longer selected stays selected
+  // (shown by its plain name).
+  const selectedDisplays = value.map((s) => displayBySurvey.get(s) ?? s);
+  const allOptions = useMemo(() => [...new Set([...options, ...selectedDisplays])], [options, selectedDisplays]);
+
+  function onSel(nextDisplays: string[]) {
+    const surveys = nextDisplays.map((d) => surveyByDisplay.get(d) ?? d);
+    onChange([...new Set(surveys)]);
+  }
+
+  return (
+    <SearchableMultiSelect
+      options={allOptions}
+      value={selectedDisplays}
+      onChange={onSel}
+      placeholder={abstractIds.length === 0 ? "Select abstract(s) first" : "Select surveys…"}
+    />
+  );
+}
+
+/**
  * Searchable multi-select of abstracts, filtered by the deal's selected counties.
  * (For the Leon POC every abstract is Leon; when no county is chosen we show all
  * available so the picker still works. Statewide, options narrow to selected counties.)

@@ -14,7 +14,7 @@ import { DealPortalPanel } from "../components/DealPortalPanel";
 import { DocumentsSection, type DocFile } from "../components/DocumentsSection";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
-import { useAbstractLabels } from "../components/AbstractPicker";
+import { useAbstractLabels, SurveyMultiPicker } from "../components/AbstractPicker";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS } from "../lib/options";
 import { monthLabel, chartTooltip } from "../lib/charts";
 import { money, num, fmtDate, toInputDate } from "../lib/format";
@@ -276,7 +276,7 @@ function PropertyCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit
           <Fld l="Basins"><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={f.basins} onChange={(v) => setF({ ...f, basins: v })} /></Fld>
           <Fld l="Formations"><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={f.formations} onChange={(v) => setF({ ...f, formations: v })} /></Fld>
           <Fld l="Operator"><input value={f.operator ?? ""} onChange={(e) => setF({ ...f, operator: e.target.value })} /></Fld>
-          <Fld l="Surveys"><SearchableMultiSelect options={[]} value={f.surveys ?? []} onChange={(v) => setF({ ...f, surveys: v })} placeholder="Type a survey, Enter" /></Fld>
+          <Fld l="Surveys"><SurveyMultiPicker value={f.surveys ?? []} onChange={(v) => setF({ ...f, surveys: v })} abstractIds={f.abstractIds} /></Fld>
           <Fld l="Wells"><SearchableMultiSelect options={[]} value={f.wells ?? []} onChange={(v) => setF({ ...f, wells: v })} placeholder="Type a well name/API, Enter" /></Fld>
           <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}><label>Property Notes</label><textarea rows={3} value={f.notes ?? ""} onChange={(e) => setF({ ...f, notes: e.target.value })} /></div>
         </div>
