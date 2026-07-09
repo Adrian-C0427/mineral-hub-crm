@@ -29,6 +29,7 @@ const TractSection = lazy(() => import("../components/TractSection").then((m) =>
 
 interface DealDetailData extends DealSummary {
   operator: string | null;
+  rrc: string | null;
   notes: string | null;
   sellerNames: string[];
   deadReason: string | null;
@@ -357,7 +358,7 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
   async function save() {
     await api.patch(`/deals/${deal.id}`, {
       states: f.states, counties: f.counties, basins: f.basins, formations: f.formations,
-      assetTypes: f.assetTypes, acreageNma: f.acreageNma, nra: f.nra, abstractIds: f.abstractIds, askPrice: f.askPrice, ourPrice: f.ourPrice, operator: f.operator,
+      assetTypes: f.assetTypes, acreageNma: f.acreageNma, nra: f.nra, abstractIds: f.abstractIds, askPrice: f.askPrice, ourPrice: f.ourPrice, operator: f.operator, rrc: f.rrc,
     });
     setEdit(false);
     onSaved(); // editing characteristics auto-refreshes matches
@@ -382,6 +383,7 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
           <DKV k="Our Price" v={deal.ourPrice != null ? money(deal.ourPrice) : null} mono />
           <DKV k="Ask Price (to buyers)" v={deal.askPrice != null ? money(deal.askPrice) : null} mono accent />
           <DKV k="Operator" v={deal.operator} />
+          <DKV k="RRC" v={deal.rrc} />
           {/* Label the abstract with its county only when unambiguous. */}
           <DKV k={deal.counties.length === 1 ? `Abstract (${deal.counties[0]} Co.)` : "Abstract"} v={abstractLabel || null} span2 />
         </div>
@@ -409,6 +411,9 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
             <datalist id="deal-operator-options">
               {operatorOptions.map((o) => <option key={o} value={o} />)}
             </datalist>
+          </Fld>
+          <Fld l="RRC">
+            <input value={f.rrc ?? ""} onChange={set("rrc")} placeholder="RRC lease / district / operator no." />
           </Fld>
         </div>
       )}
