@@ -419,17 +419,17 @@ function AllExpenses({
         <div className="xp-fld"><div className="xp-lbl">To</div><input type="date" value={filters.to} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} /></div>
         <div className="xp-fld"><div className="xp-lbl">User</div>
           <Select value={filters.userId} onChange={(v) => setFilters((f) => ({ ...f, userId: v }))}
-            placeholder="All" clearable searchable ariaLabel="Filter by user"
+            placeholder="All" clearable searchable ariaLabel="Filter by user" width={190}
             options={users.map((u) => ({ value: u.id, label: u.name }))} />
         </div>
         <div className="xp-fld"><div className="xp-lbl">Category</div>
           <Select value={filters.categoryId} onChange={(v) => setFilters((f) => ({ ...f, categoryId: v }))}
-            placeholder="All" clearable ariaLabel="Filter by category"
+            placeholder="All" clearable ariaLabel="Filter by category" width={190}
             options={categories.map((c) => ({ value: c.id, label: c.name }))} />
         </div>
         <div className="xp-fld"><div className="xp-lbl">Status</div>
           <Select value={filters.reimbursed} onChange={(v) => setFilters((f) => ({ ...f, reimbursed: v }))}
-            placeholder="All" ariaLabel="Filter by status"
+            placeholder="All" ariaLabel="Filter by status" width={160}
             options={[
               { value: "", label: "All" },
               { value: "false", label: "Outstanding" },

@@ -95,14 +95,16 @@ const WIDGET_LABELS: Record<WidgetId, string> = {
 };
 const DEFAULT_WIDGETS: WidgetId[] = ["kpis", "profit", "stages", "activity", "buyers", "followups"];
 type WidgetSpan = "full" | "half";
+type WidgetHeight = "auto" | "tall";
 // Default column span per widget; a user can override any of these (except the
-// KPI row, which always spans full width) in Customize mode.
+// KPI row, which always spans full width) in Customize mode. Height defaults to
+// "auto" (fit content) and can be enlarged to "tall" per widget.
 const DEFAULT_SPAN: Record<WidgetId, WidgetSpan> = { kpis: "full", profit: "half", stages: "half", activity: "half", buyers: "half", followups: "full" };
-interface DashPrefs { order: WidgetId[]; hidden: WidgetId[]; spans: Partial<Record<WidgetId, WidgetSpan>> }
+interface DashPrefs { order: WidgetId[]; hidden: WidgetId[]; spans: Partial<Record<WidgetId, WidgetSpan>>; heights: Partial<Record<WidgetId, WidgetHeight>> }
 const DASH_KEY = "mh-dashboard:v1";
 function loadDashPrefs(): DashPrefs {
-  try { const raw = localStorage.getItem(DASH_KEY); if (raw) { const p = JSON.parse(raw) as Partial<DashPrefs>; return { order: p.order ?? [], hidden: p.hidden ?? [], spans: p.spans ?? {} }; } } catch { /* ignore */ }
-  return { order: [], hidden: [], spans: {} };
+  try { const raw = localStorage.getItem(DASH_KEY); if (raw) { const p = JSON.parse(raw) as Partial<DashPrefs>; return { order: p.order ?? [], hidden: p.hidden ?? [], spans: p.spans ?? {}, heights: p.heights ?? {} }; } } catch { /* ignore */ }
+  return { order: [], hidden: [], spans: {}, heights: {} };
 }
 
 export function Dashboard() {
@@ -248,7 +250,8 @@ export function Dashboard() {
   const visibleIds = orderedIds.filter((id) => !prefs.hidden.includes(id));
   const hiddenIds = orderedIds.filter((id) => prefs.hidden.includes(id));
   const spanOf = (id: WidgetId): WidgetSpan => prefs.spans[id] ?? DEFAULT_SPAN[id];
-  const isDefaultLayout = prefs.order.length === 0 && prefs.hidden.length === 0 && Object.keys(prefs.spans).length === 0;
+  const heightOf = (id: WidgetId): WidgetHeight => prefs.heights[id] ?? "auto";
+  const isDefaultLayout = prefs.order.length === 0 && prefs.hidden.length === 0 && Object.keys(prefs.spans).length === 0 && Object.keys(prefs.heights).length === 0;
 
   // Customize mode: drag to reorder, resize (full ⇄ half), hide/show. Everything
   // persists automatically via the prefs effect above; Restore returns to default.
@@ -262,6 +265,7 @@ export function Dashboard() {
     setPrefs({ ...prefs, order: keys });
   };
   const toggleSpan = (id: WidgetId) => setPrefs({ ...prefs, spans: { ...prefs.spans, [id]: spanOf(id) === "full" ? "half" : "full" } });
+  const toggleHeight = (id: WidgetId) => setPrefs({ ...prefs, heights: { ...prefs.heights, [id]: heightOf(id) === "tall" ? "auto" : "tall" } });
   const hideWidget = (id: WidgetId) => setPrefs({ ...prefs, hidden: [...prefs.hidden, id] });
   const showWidget = (id: WidgetId) => setPrefs({ ...prefs, hidden: prefs.hidden.filter((k) => k !== id) });
 
@@ -309,7 +313,7 @@ export function Dashboard() {
             <strong>Customizing dashboard</strong> — drag widgets to reorder, resize, or hide. Changes save automatically.
           </span>
           <span className="row" style={{ gap: 8, marginLeft: "auto" }}>
-            <button type="button" className="small" disabled={isDefaultLayout} onClick={() => setPrefs({ order: [], hidden: [], spans: {} })}>Restore default</button>
+            <button type="button" className="small" disabled={isDefaultLayout} onClick={() => setPrefs({ order: [], hidden: [], spans: {}, heights: {} })}>Restore default</button>
             <button type="button" className="small primary" onClick={() => setCustomizing(false)}>Done</button>
           </span>
         </div>
@@ -331,7 +335,7 @@ export function Dashboard() {
           {visibleIds.map((id) => (
             <div
               key={id}
-              className={`dash-w ${spanOf(id)} ${customizing ? "cz" : ""} ${dragId === id ? "dragging" : ""} ${dragOverId === id ? "drag-over" : ""}`}
+              className={`dash-w ${spanOf(id)} dash-h-${heightOf(id)} ${customizing ? "cz" : ""} ${dragId === id ? "dragging" : ""} ${dragOverId === id ? "drag-over" : ""}`}
               draggable={customizing}
               onDragStart={(e) => { if (customizing) { setDragId(id); e.dataTransfer.effectAllowed = "move"; } }}
               onDragEnd={() => { setDragId(null); setDragOverId(null); }}
@@ -347,6 +351,11 @@ export function Dashboard() {
                       {id !== "kpis" && (
                         <button type="button" className="dash-cz-btn" onClick={() => toggleSpan(id)} title={spanOf(id) === "full" ? "Make half width" : "Make full width"}>
                           {spanOf(id) === "full" ? "◧ Half" : "▭ Full"}
+                        </button>
+                      )}
+                      {id !== "kpis" && (
+                        <button type="button" className="dash-cz-btn" onClick={() => toggleHeight(id)} title={heightOf(id) === "tall" ? "Shrink height" : "Make taller"}>
+                          {heightOf(id) === "tall" ? "▼ Short" : "▲ Tall"}
                         </button>
                       )}
                       <button type="button" className="dash-cz-btn" onClick={() => hideWidget(id)} title="Hide widget">✕ Hide</button>
