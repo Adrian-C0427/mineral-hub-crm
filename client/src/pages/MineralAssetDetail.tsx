@@ -14,6 +14,7 @@ import { DealPortalPanel } from "../components/DealPortalPanel";
 import { DocumentsSection, type DocFile } from "../components/DocumentsSection";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
+import { useAbstractLabels } from "../components/AbstractPicker";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS } from "../lib/options";
 import { monthLabel, chartTooltip } from "../lib/charts";
 import { money, num, fmtDate, toInputDate } from "../lib/format";
@@ -235,6 +236,9 @@ function PropertyCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState(asset);
   useEffect(() => setF(asset), [asset]);
+  // Resolve internal abstract IDs (e.g. TX-289222) to their recognizable
+  // Abstract number/survey label — internal IDs are never shown in the UI.
+  const abstractLabel = useAbstractLabels(asset.abstractIds);
 
   async function save() {
     await api.patch(`/deals/${asset.id}`, {
@@ -256,7 +260,7 @@ function PropertyCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit
           <KV k="Formations" v={asset.formations.join(", ")} />
           <KV k="Operator" v={asset.operator} />
           <KV k="Surveys" v={asset.surveys?.join(", ")} />
-          <KV k="Abstracts" v={asset.abstractIds.join(", ")} />
+          <KV k="Abstracts" v={abstractLabel || null} />
           <KV k="Wells" v={asset.wells?.join(", ")} />
           <div className="kv" style={{ gridColumn: "1 / -1" }}><span className="k">Property Notes</span><span className="v" style={{ whiteSpace: "normal" }}>{asset.notes || "—"}</span></div>
         </div>
