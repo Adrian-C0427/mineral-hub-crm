@@ -29,7 +29,6 @@ export const DOCUMENT_FIELDS: ResearchField[] = [
   { key: "county", label: "County" },
   { key: "state", label: "State" },
   { key: "abstractId", label: "Abstract" },
-  { key: "legalDescription", label: "Legal Description" },
 ];
 
 /** Canonical fields for drilling-permit imports. */
@@ -80,7 +79,6 @@ export const CSV_DOCUMENTS: ResearchSource = {
     county: ["county", "countyname"],
     state: ["state", "st", "statecode", "statename", "stateabbr", "stateabbreviation", "province"],
     abstractId: ["abstract", "abstractno", "abstractnumber", "abst"],
-    legalDescription: ["legaldescription", "legal", "description", "propertydescription", "brieflegal", "briefiegal"],
   },
 };
 

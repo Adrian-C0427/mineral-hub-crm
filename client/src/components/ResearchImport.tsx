@@ -25,12 +25,12 @@ interface IngestRun {
 
 // Templates match the canonical columns for each Data Type.
 const DEED_TEMPLATE = {
-  headers: ["Document Type", "Recording Date", "Grantor", "Grantee", "Instrument Number", "County", "Abstract", "Survey", "Legal Description"],
-  rows: [["Mineral Deed", "03/12/2026", "Smith, John et ux", "Blackrock Minerals LLC", "2026-00412", "Leon", "289653", "J HALLMARK", "40 ac in the J HALLMARK SURVEY A-289"]],
+  headers: ["Document Type", "Recording Date", "Grantor", "Grantee", "Instrument Number", "County", "Abstract", "Survey"],
+  rows: [["Mineral Deed", "03/12/2026", "Smith, John et ux", "Blackrock Minerals LLC", "2026-00412", "Leon", "289653", "J HALLMARK"]],
 };
 const LEASE_TEMPLATE = {
-  headers: ["Document Type", "Recording Date", "Grantor", "Grantee", "Instrument Number", "County", "Abstract", "Survey", "Legal Description"],
-  rows: [["Oil & Gas Lease", "03/14/2026", "Jones Family Trust", "Apex Energy Partners LP", "2026-00418", "Leon", "289183", "T RAGSDALE", "120 ac, T RAGSDALE SURVEY A-183"]],
+  headers: ["Document Type", "Recording Date", "Grantor", "Grantee", "Instrument Number", "County", "Abstract", "Survey"],
+  rows: [["Oil & Gas Lease", "03/14/2026", "Jones Family Trust", "Apex Energy Partners LP", "2026-00418", "Leon", "289183", "T RAGSDALE"]],
 };
 const PERMIT_TEMPLATE = {
   headers: ["Operator Name", "County", "API No", "Permit No", "Lease Name", "Well No", "Status", "Wellbore Profile", "Submitted Date", "Approved Date", "Spud Date", "Formation"],
