@@ -623,6 +623,8 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .dash-grid .dash-w.full { grid-column: 1 / -1; }
 .dash-grid .dash-w.half { grid-column: span 1; min-width: 0; }
 .dash-grid .dash-w > .panel { margin-bottom: 0; min-width: 0; }
+/* Vertical resize: a "tall" widget gets extra height (Customize mode). */
+.dash-grid .dash-w.dash-h-tall > .panel { min-height: 420px; display: flex; flex-direction: column; }
 .dash-grid .dash-w > .metrics-row { margin: 0; }
 @media (max-width: 900px) { .dash-grid { grid-template-columns: 1fr; } .dash-grid .dash-w.half { grid-column: 1 / -1; } }
 
@@ -716,6 +718,10 @@ tr.row-base td { background: var(--panel-2); font-weight: 600; }
 .msel-input { flex:1; min-width:90px; border:none; background:none; padding:2px; width:auto; }
 .msel-input:focus { outline:none; }
 .msel-menu { position:absolute; z-index:60; left:0; right:0; margin-top:4px; max-height:240px; overflow-y:auto; background: var(--panel); border:1px solid var(--border); border-radius:6px; box-shadow: var(--shadow); }
+/* Portaled to <body> (fixed) so it escapes any overflow/scroll container; must
+   sit above modals and other overlays. Double-class keeps it winning the
+   z-index cascade over the generic .msel-menu rule below. */
+.msel-menu.msel-menu-portal { margin-top: 0; z-index: 4000; }
 .msel-opt { padding:8px 12px; cursor:pointer; }
 .msel-opt:hover { background: var(--panel-2); }
 .msel-empty { padding:10px 12px; color: var(--text-dim); font-size:13px; }

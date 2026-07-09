@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Link } from "react-router-dom";
@@ -91,6 +91,10 @@ const STATUS_OPTIONS = [
 
 export function MapView() {
   const mapContainer = useRef<HTMLDivElement>(null);
+  // The map fills all vertical space from its top down to the footer — measured
+  // (not a fixed offset) so there's never blank space below it.
+  const mapWrap = useRef<HTMLDivElement>(null);
+  const [mapH, setMapH] = useState<number>(0);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const styleReady = useRef(false);
   const activeIds = useRef<string[]>([]);
@@ -605,6 +609,19 @@ export function MapView() {
     mapRef.current?.jumpTo({ center: LEON_CENTER, zoom: 10 });
   }
 
+  // Size the map to fill from its top down to the viewport bottom (footer), with
+  // a small gap — recomputed on resize and whenever the controls row changes
+  // height (a panel opening/closing), so there is never blank space below it.
+  useLayoutEffect(() => {
+    const el = mapWrap.current;
+    if (!el) return;
+    const measure = () => setMapH(Math.max(360, Math.round(window.innerHeight - el.getBoundingClientRect().top - 16)));
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, [showLayers, showFilters, showHeat]);
+  useEffect(() => { mapRef.current?.resize(); }, [mapH]);
+
   return (
     <div className="page" style={{ maxWidth: 1400 }}>
       <div className="page-header"><div className="row"><h1 style={{ marginBottom: 0 }}>Map</h1><span className="muted">Texas · {COUNTIES.length} counties · abstracts stream as you pan &amp; zoom</span></div></div>
@@ -782,8 +799,9 @@ export function MapView() {
         <span className="muted">{deals == null ? "…" : `${deals.length} deal${deals.length === 1 ? "" : "s"} · ${abstractCount} highlighted · ${num(gisOptions.wellCount)} wells`}</span>
       </div>
 
-      {/* dvh tracks the real visible viewport on mobile (URL bar collapse). */}
-      <div style={{ position: "relative", height: "calc(100dvh - 250px)", minHeight: 320, borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
+      {/* Height is measured to fill down to the footer (no blank space below);
+          dvh fallback tracks the real visible viewport before the first measure. */}
+      <div ref={mapWrap} style={{ position: "relative", height: mapH ? `${mapH}px` : "calc(100dvh - 250px)", minHeight: 320, borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
         <div ref={mapContainer} style={{ position: "absolute", inset: 0 }} />
         {!deals && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}><Spinner label="Loading map…" /></div>}
 

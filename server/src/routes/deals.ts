@@ -68,6 +68,12 @@ const assetFields = {
   wells: z.array(z.string()).optional(),
   producingStatus: z.string().nullish(),
   royaltyIncomeAnnual: z.number().nullish(),
+  // Current-lease redesign.
+  leaseStatuses: z.array(z.string()).optional(),
+  royaltyRate: z.string().nullish(),
+  leaseEffectiveDate: dateField,
+  leaseExpirationDate: dateField,
+  // Deprecated (still accepted so old clients don't 400, but no longer surfaced).
   leaseStatus: z.string().nullish(),
   leaseInfo: z.string().nullish(),
   divisionOrdersNote: z.string().nullish(),
@@ -77,8 +83,9 @@ const assetFields = {
 const ASSET_SCALAR_KEYS = [
   "recordType", "assetMode", "purchasePrice", "currentValue", "bookValue",
   "ownershipStatus", "ownershipType", "workingInterest", "netRevenueInterest",
-  "surveys", "wells", "producingStatus", "royaltyIncomeAnnual", "leaseStatus",
-  "leaseInfo", "divisionOrdersNote", "taxInfo",
+  "surveys", "wells", "producingStatus", "royaltyIncomeAnnual",
+  "leaseStatuses", "royaltyRate",
+  "leaseStatus", "leaseInfo", "divisionOrdersNote", "taxInfo",
 ] as const;
 
 const hasPerm = (req: AuthedRequest, perm: string) =>
@@ -253,6 +260,10 @@ dealsRouter.post(
           wells: data.wells ?? [],
           producingStatus: data.producingStatus ?? null,
           royaltyIncomeAnnual: data.royaltyIncomeAnnual ?? null,
+          leaseStatuses: data.leaseStatuses ?? [],
+          royaltyRate: data.royaltyRate ?? null,
+          leaseEffectiveDate: toDate(data.leaseEffectiveDate) ?? null,
+          leaseExpirationDate: toDate(data.leaseExpirationDate) ?? null,
           leaseStatus: data.leaseStatus ?? null,
           leaseInfo: data.leaseInfo ?? null,
           divisionOrdersNote: data.divisionOrdersNote ?? null,
@@ -783,7 +794,7 @@ dealsRouter.patch(
     for (const k of ["name", "sellerNames", "counties", "state", "states", "acreageNma", "nra", "abstractIds", "operator", "rrc", "askPrice", "ourPrice", "assetTypes", "basins", "formations", "estimatedClosingCosts", "relationshipOwnerId", "notes", ...ASSET_SCALAR_KEYS] as const) {
       if (k in data) patch[k] = (data as Record<string, unknown>)[k];
     }
-    for (const k of ["dateUnderContract", "originalClosingDate", "findBuyerByDateOverride", "finalClosingDateOverride", "closedDate", "acquisitionDate"] as const) {
+    for (const k of ["dateUnderContract", "originalClosingDate", "findBuyerByDateOverride", "finalClosingDateOverride", "closedDate", "acquisitionDate", "leaseEffectiveDate", "leaseExpirationDate"] as const) {
       if (k in data) patch[k] = toDate((data as Record<string, unknown>)[k]);
     }
     const existing = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
@@ -1226,8 +1237,9 @@ dealsRouter.post(
   }),
 );
 
-// Set an owned asset's operational mode. SELL puts it on the marketing board
-// (SENT_TO_BUYERS if it was parked); HOLD parks it back in CLOSING.
+// Set an owned asset's operational mode. Marking an asset For Sale automatically
+// enters it into the Preparing Package pipeline stage (no manual stage pick);
+// HOLD parks it back in CLOSING.
 dealsRouter.post(
   "/:id/asset-mode",
   requirePermission("editDeals"),
@@ -1238,7 +1250,7 @@ dealsRouter.post(
     if (deal.recordType !== "OWNED_ASSET") throw new HttpError(400, "Only owned assets have a HOLD/SELL mode");
     const stage =
       assetMode === "SELL" && (deal.stage === "CLOSING" || deal.stage === "CLOSED")
-        ? "SENT_TO_BUYERS"
+        ? "PREPARING_PACKAGE"
         : assetMode === "HOLD"
           ? "CLOSING"
           : deal.stage;

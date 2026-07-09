@@ -222,12 +222,8 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
           {canEdit && <button className="small" onClick={addContact} style={{ marginTop: 4 }}>+ Add contact</button>}
         </div>
 
-        {/* The offering auto-displays every section that has data — no manual
-            show/hide. Empty fields are simply omitted from the published page. */}
-        <div className="dpp-autonote">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
-          The listing shows every section that has data — tracts, documents, map, wells, production, and contacts appear automatically, and empty fields are hidden. Nothing to configure.
-        </div>
+        {/* The offering auto-displays every section that has data — empty
+            fields are simply omitted from the published page. */}
 
         {/* Asking price — defaults to the deal's Ask Price; overridable for the
             listing only (never changes the deal). */}

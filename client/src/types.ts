@@ -67,7 +67,14 @@ export interface DealSummary {
   surveys: string[];
   wells: string[];
   producingStatus: string | null;
+  rrc: string | null;
   royaltyIncomeAnnual: number | null;
+  // Current-lease redesign.
+  leaseStatuses: string[];
+  royaltyRate: string | null;
+  leaseEffectiveDate: string | null;
+  leaseExpirationDate: string | null;
+  // Deprecated (kept on the type for back-compat; no longer shown in the UI).
   leaseStatus: string | null;
   leaseInfo: string | null;
   divisionOrdersNote: string | null;

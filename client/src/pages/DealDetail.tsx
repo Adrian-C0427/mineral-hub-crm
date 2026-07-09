@@ -4,7 +4,7 @@ import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import {
   Spinner, PriorityBadge, StageBadge, MetricCard,
-  MatchBar, Banner, ConfirmDelete, ConfirmDialog,
+  MatchBar, Banner, ConfirmDelete, ConfirmDialog, BackLink,
 } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { StageChangeModal } from "../components/StageChangeModal";
@@ -103,6 +103,7 @@ export function DealDetail() {
 
   return (
     <div className="page deal-detail">
+      <BackLink label="Back" fallback="/deals/active" />
       <div className="page-header">
         <div className="row">
           <h1 style={{ marginBottom: 0 }}>{deal.name}</h1>

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 export interface SelectOption {
   value: string;
@@ -39,19 +40,40 @@ export function Select({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // The menu is portaled to <body> with fixed coords so it escapes any
+  // overflow/scroll container (e.g. a table) that would otherwise clip it.
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
 
   const selected = opts.find((o) => o.value === value) ?? null;
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) { setOpen(false); setQuery(""); }
+      const t = e.target as Node;
+      if (ref.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false); setQuery("");
     }
     function onKey(e: KeyboardEvent) { if (e.key === "Escape") { setOpen(false); setQuery(""); } }
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
   }, []);
+
+  // Position the portaled menu under the control; reposition/close on scroll or
+  // resize so it never drifts away from its trigger.
+  useLayoutEffect(() => {
+    if (!open) { setPos(null); return; }
+    const place = () => {
+      const r = ref.current?.getBoundingClientRect();
+      if (r) setPos({ top: r.bottom + 4, left: r.left, width: r.width });
+    };
+    place();
+    const onScroll = () => { setOpen(false); setQuery(""); };
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", onScroll, true);
+    return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", onScroll, true); };
+  }, [open]);
 
   useEffect(() => { if (open && searchable) inputRef.current?.focus(); }, [open, searchable]);
 
@@ -80,8 +102,11 @@ export function Select({
         )}
         <span className="msel-caret" aria-hidden>▾</span>
       </div>
-      {open && !disabled && (
-        <div className="msel-menu" role="listbox">
+      {open && !disabled && pos && createPortal(
+        <div
+          className="msel-menu msel-menu-portal" role="listbox" ref={menuRef}
+          style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
+        >
           {searchable && (
             <input
               ref={inputRef}
@@ -110,7 +135,8 @@ export function Select({
               </div>
             ))
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
