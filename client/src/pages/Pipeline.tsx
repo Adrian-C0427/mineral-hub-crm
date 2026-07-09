@@ -243,11 +243,11 @@ function CardBody({ deal, fields }: { deal: DealSummary; fields: Record<CardFiel
   const row2 = fields.priority || fields.profit || fields.days;
   return (
     <>
-      <div className="dc-name">{deal.name}</div>
+      <div className="dc-name">{deal.name}{deal.assetCount ? <span className="dc-assets"> · {deal.assetCount} asset{deal.assetCount > 1 ? "s" : ""}</span> : null}</div>
       {(showLoc || showNra) && (
         <div className="dc-meta">
           {showLoc && <span>{[deal.counties.join(", "), deal.state].filter(Boolean).join(", ") || "—"}</span>}
-          {showNra && <span>{num(deal.nra!)} NRA</span>}
+          {showNra && <span>{num((deal.aggNra ?? deal.nra)!)} NRA</span>}
         </div>
       )}
       {row2 && (

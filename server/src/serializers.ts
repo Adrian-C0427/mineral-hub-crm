@@ -12,11 +12,16 @@ export type DealWithRels = Prisma.DealGetPayload<{
 }> & {
   offers?: { amount: number }[];
   assignees?: { id: string; name: string }[];
-  // Multi-asset grouping (optional, populated by list/detail queries).
+  // Multi-asset grouping (optional, populated by list/detail queries). `assets`
+  // carries only the scalars needed to roll a package's aggregate up for display;
+  // the full child-asset cards are emitted by the detail route via serializeAssetChild.
   _count?: { assets?: number };
   parentDeal?: { id: string; name: string } | null;
-  assets?: AssetChild[];
+  assets?: RollupAsset[];
 };
+
+/** The child-asset scalars a package sums into its own displayed figures. */
+export type RollupAsset = { nra: number | null; acreageNma: number | null; ourPrice: number | null; askPrice: number | null };
 
 /** A child asset with just the relation needed for its compact summary. */
 export type AssetChild = Prisma.DealGetPayload<{ include: { selectedBuyer: true } }>;
@@ -52,6 +57,21 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
   // pre-Our-Price deals so historical profit stays correct.
   const costBasis = deal.ourPrice ?? deal.askPrice;
   const profitEst = bestOffer != null ? netProfit(bestOffer, costBasis, deal.estimatedClosingCosts) : null;
+
+  // Package roll-up: a deal that groups child assets displays the aggregate of
+  // its own value plus its children's. This is display-only — analytics read
+  // each deal's own stored value, so the package row equals the sum of the
+  // separately-counted children (totals reconcile, nothing double-counts).
+  const kids = deal.assets ?? [];
+  const rollUp = (own: number | null, pick: (a: RollupAsset) => number | null): number | null => {
+    if (!kids.length) return own;
+    const vals = [own, ...kids.map(pick)].filter((v): v is number => v != null);
+    return vals.length ? vals.reduce((s, v) => s + v, 0) : own;
+  };
+  const aggNra = rollUp(deal.nra, (a) => a.nra);
+  const aggNma = rollUp(deal.acreageNma, (a) => a.acreageNma);
+  const aggOur = rollUp(deal.ourPrice, (a) => a.ourPrice);
+  const aggAsk = rollUp(deal.askPrice, (a) => a.askPrice);
 
   // Owned-asset economics (null for opportunities / when inputs are missing).
   const roiSinceAcquisition =
@@ -109,7 +129,12 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     parentDealId: deal.parentDealId ?? null,
     parent: deal.parentDeal ? { id: deal.parentDeal.id, name: deal.parentDeal.name } : null,
     assetCount: deal._count?.assets ?? (deal.assets ? deal.assets.length : undefined),
-    assets: deal.assets ? deal.assets.map(serializeAssetChild) : undefined,
+    // Package aggregates (own + children) for display; equal the own values when
+    // there are no children. Raw own fields above stay authoritative for editing.
+    aggNra: aggNra,
+    aggAcreageNma: aggNma,
+    aggOurPrice: aggOur,
+    aggAskPrice: aggAsk,
     publishedToPortal: deal.publishedToPortal ?? false,
     portalSlug: deal.portalSlug ?? null,
     currentStageEnteredAt: deal.currentStageEnteredAt,

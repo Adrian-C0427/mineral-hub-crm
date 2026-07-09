@@ -426,6 +426,15 @@ function AssetsSection({ deal, canEdit, canPublish, onAdd, onChanged }: {
           seller together (each stays independently marketable).
         </p>
       ) : (
+        <>
+          {/* Package total = this deal's own figures rolled up with its assets'. */}
+          <div className="asset-total">
+            <span className="muted">Package total</span>
+            {deal.aggNra != null && <span><strong>{num(deal.aggNra)}</strong> NRA</span>}
+            {deal.aggAcreageNma != null && <span><strong>{num(deal.aggAcreageNma)}</strong> NMA</span>}
+            {deal.aggOurPrice != null && <span>Our <strong>{money(deal.aggOurPrice)}</strong></span>}
+            {deal.aggAskPrice != null && <span style={{ color: "var(--accent)" }}>Ask <strong>{money(deal.aggAskPrice)}</strong></span>}
+          </div>
         <div className="asset-grid">
           {assets.map((a) => (
             <Link key={a.id} to={`/deals/${a.id}`} className="asset-card">
@@ -449,6 +458,7 @@ function AssetsSection({ deal, canEdit, canPublish, onAdd, onChanged }: {
             </Link>
           ))}
         </div>
+        </>
       )}
     </div>
   );

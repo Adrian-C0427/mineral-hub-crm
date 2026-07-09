@@ -61,7 +61,7 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
       value: (d) => ({ HIGH: 0, MEDIUM: 1, LOW: 2 }[d.priority]),
       render: (d) => <PriorityBadge priority={d.priority} /> },
     { key: "stage", header: "Stage", type: "text", value: (d) => d.stage, render: (d) => <StageBadge stage={d.stage} /> },
-    { key: "nma", header: "NMA", type: "number", align: "right", value: (d) => d.acreageNma, render: (d) => num(d.acreageNma) },
+    { key: "nma", header: "NMA", type: "number", align: "right", value: (d) => d.aggAcreageNma ?? d.acreageNma, render: (d) => num(d.aggAcreageNma ?? d.acreageNma) },
     { key: "profit", header: "Profit Est.", type: "number", align: "right", value: (d) => d.profitEst, render: (d) => money(d.profitEst) },
     { key: "uc", header: "Under Contract", type: "date", value: (d) => d.dateUnderContract, render: (d) => fmtDate(d.dateUnderContract) },
     { key: "fbb", header: "Find Buyer By", type: "date", value: (d) => d.findBuyerByDate,

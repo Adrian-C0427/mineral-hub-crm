@@ -21,6 +21,13 @@ export interface PortalDeal {
   nra: number | null; acreageNma: number | null; operator: string | null; rrc: string | null;
   wells: string[]; producingStatus: string | null;
   askPrice: number | null; notes: string | null; listedAt: string;
+  // >0 when this listing is a seller package published as a single bundle.
+  assetCount?: number;
+}
+/** Buyer-safe summary of one asset inside a published package bundle. */
+export interface PortalPackageAsset {
+  id: string; name: string; counties: string[]; states: string[];
+  nra: number | null; assetTypes: string[]; operator: string | null;
 }
 export interface PortalAbstract { id: string; abstract: string | null; survey: string | null; county: string }
 export interface PortalDocument { id: string; filename: string; mimeType: string; sizeBytes: number; folder: string }

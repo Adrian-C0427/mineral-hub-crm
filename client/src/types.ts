@@ -75,9 +75,15 @@ export interface DealSummary {
   roiSinceAcquisition: number | null;
   unrealizedGainLoss: number | null;
   // Multi-asset grouping: parentDealId is set on a child asset; assetCount is the
-  // number of child assets on a package (present on list rows).
+  // number of child assets on a package (present on list rows). agg* are the
+  // package's rolled-up totals (own + children) for display; equal the own value
+  // when there are no children.
   parentDealId?: string | null;
   assetCount?: number;
+  aggNra?: number | null;
+  aggAcreageNma?: number | null;
+  aggOurPrice?: number | null;
+  aggAskPrice?: number | null;
 }
 
 /** Compact child-asset summary shown within its parent package on the deal page. */

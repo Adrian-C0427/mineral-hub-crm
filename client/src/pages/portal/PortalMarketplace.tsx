@@ -277,6 +277,7 @@ export function PortalMarketplace() {
                   <h3 style={{ margin: "6px 0 2px" }}>{d.name}</h3>
                   <div className="muted" style={{ fontSize: 13 }}>{d.counties.map((c) => `${c} County`).join(", ")}{d.states.length ? ` · ${d.states.join(", ")}` : ""}</div>
                   <div className="portal-card-facts">
+                    {d.assetCount ? <span className="badge resp-pending">Package · {d.assetCount} tract{d.assetCount > 1 ? "s" : ""}</span> : null}
                     {d.nra != null && <span><strong>{num(d.nra)}</strong> NRA</span>}
                     {d.assetTypes.length > 0 && <span>{d.assetTypes.join("/")}</span>}
                     {d.basins.length > 0 && <span>{d.basins[0]}</span>}
@@ -294,7 +295,7 @@ export function PortalMarketplace() {
                 <tbody>
                   {filtered.map((d) => (
                     <tr key={d.slug} className="clickable" onClick={() => navigate(`/offer/${d.slug}`)}>
-                      <td><strong>{d.name}</strong>{d.featured ? " ★" : ""}</td>
+                      <td><strong>{d.name}</strong>{d.featured ? " ★" : ""}{d.assetCount ? <span className="muted" style={{ fontSize: 12 }}> · {d.assetCount} tract{d.assetCount > 1 ? "s" : ""}</span> : null}</td>
                       <td>{d.counties.join(", ")}</td>
                       <td>{d.states.join(", ")}</td>
                       <td className="right">{d.nra != null ? num(d.nra) : "—"}</td>

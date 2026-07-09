@@ -38,7 +38,7 @@ reportsRouter.get(
 
     // Closed deals whose CLOSED transition falls in the period.
     const closedDeals = await prisma.deal.findMany({
-      where: { stage: "CLOSED", recordType: "OPPORTUNITY", organizationId: orgId(req), parentDealId: null },
+      where: { stage: "CLOSED", recordType: "OPPORTUNITY", organizationId: orgId(req) },
       include: { selectedOffer: true, selectedBuyer: { select: { name: true, companyName: true } } },
     });
     const closedAt = await closedAtMap(closedDeals.map((d) => d.id));
@@ -109,7 +109,7 @@ const intersects = (a: string[], b: string[]) => b.length === 0 || a.some((x) =>
 /** Load and normalize the org's deals into the analytics shape. */
 async function loadAnalyticsDeals(organizationId: string): Promise<AnalyticsDeal[]> {
   const deals = await prisma.deal.findMany({
-    where: { organizationId, recordType: "OPPORTUNITY", parentDealId: null },
+    where: { organizationId, recordType: "OPPORTUNITY" },
     include: {
       selectedOffer: { select: { amount: true } },
       // Analytics only reads three event kinds (creation, CLOSED, DEAD) — no
