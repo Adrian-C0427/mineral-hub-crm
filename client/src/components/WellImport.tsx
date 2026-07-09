@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import { Banner, Spinner } from "./ui";
+import { Select } from "./Select";
 import { downloadCsv } from "../lib/csv";
 import { fmtDate } from "../lib/format";
 
@@ -116,10 +117,9 @@ export function WellImport({ onDataChanged }: { onDataChanged: () => void }) {
               {analysis.fields.map((f) => (
                 <div key={f.key} className="field" style={{ marginBottom: 0, minWidth: 190 }}>
                   <label title={f.hint}>{f.label}{f.required ? " *" : ""}</label>
-                  <select value={mapping[f.key] ?? ""} onChange={(e) => setMapping((m) => ({ ...m, [f.key]: e.target.value }))}>
-                    <option value="">— not in file —</option>
-                    {analysis.headers.map((h) => <option key={h} value={h}>{h}</option>)}
-                  </select>
+                  <Select value={mapping[f.key] ?? ""} onChange={(v) => setMapping((m) => ({ ...m, [f.key]: v }))}
+                    placeholder="— not in file —" clearable searchable ariaLabel={`Map column for ${f.label}`}
+                    options={analysis.headers.map((h) => ({ value: h, label: h }))} />
                 </div>
               ))}
             </div>

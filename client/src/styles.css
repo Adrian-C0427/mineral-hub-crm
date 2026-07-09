@@ -1,3 +1,15 @@
+/* App-wide z-index scale — one source of truth so overlapping layers stack
+   predictably everywhere. Higher = closer to the user. Navigation flyouts are
+   the top interactive layer while open (per spec). */
+:root {
+  --z-sticky: 40;      /* sticky page/table headers */
+  --z-bulkbar: 500;    /* floating bulk-action bar */
+  --z-dropdown: 1000;  /* select menus, popovers, customize-view menus */
+  --z-notif: 1500;     /* notifications panel */
+  --z-modal: 2000;     /* modal overlays */
+  --z-flyout: 3000;    /* collapsed-nav flyouts — always on top while open */
+}
+
 /* Dark is the default theme (data-theme unset or "dark"). */
 :root {
   --bg: #0b0e14;
@@ -193,7 +205,7 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
   display: flex; align-items: center; justify-content: center; line-height: 1;
 }
 .notif-panel {
-  position: fixed; bottom: 64px; left: 12px; width: 320px; max-height: 60vh; overflow: auto; z-index: 60;
+  position: fixed; bottom: 64px; left: 12px; width: 320px; max-height: 60vh; overflow: auto; z-index: var(--z-notif);
   background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 12px 32px rgba(0, 0, 0, .35);
 }
 .notif-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--border); }
@@ -215,7 +227,7 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
    click) so navigation stays fully functional with icons only. Fixed
    positioning escapes the nav's overflow:auto, which previously clipped it. */
 .sidebar-flyout {
-  position: fixed; z-index: 200; display: flex; flex-direction: column;
+  position: fixed; z-index: var(--z-flyout); display: flex; flex-direction: column;
   min-width: 190px; background: var(--panel); border: 1px solid var(--border);
   border-radius: 8px; padding: 6px; box-shadow: 0 6px 24px rgba(0,0,0,0.35);
 }
@@ -502,7 +514,7 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .theme-swatch-dark .tsw-line.short { background: #3b82f6; }
 
 /* --- Modal --- */
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index: 100; padding: 20px; }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index: var(--z-modal); padding: 20px; }
 .modal { background: var(--panel); border:1px solid var(--border); border-radius: var(--radius-lg); width: 480px; max-width: 100%; max-height: 90vh; display:flex; flex-direction:column; box-shadow: var(--shadow); }
 .modal-wide { width: 720px; }
 .modal-header { display:flex; justify-content:space-between; align-items:center; padding: 16px 20px; border-bottom: 1px solid var(--border); }
@@ -707,6 +719,28 @@ tr.row-base td { background: var(--panel-2); font-weight: 600; }
 .msel-opt { padding:8px 12px; cursor:pointer; }
 .msel-opt:hover { background: var(--panel-2); }
 .msel-empty { padding:10px 12px; color: var(--text-dim); font-size:13px; }
+
+/* Single-select variant of the shared control (components/Select.tsx). Reuses
+   .msel-box / .msel-menu / .msel-opt so single- and multi-select match exactly. */
+.msel-single .msel-box { flex-wrap: nowrap; cursor: pointer; padding-right: 6px; }
+.msel-single .msel-box:focus-visible { outline: none; border-color: var(--accent); }
+.msel-single-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+.msel-single-value.placeholder { color: var(--text-dim); }
+.msel-caret { flex: none; color: var(--text-dim); font-size: 11px; transition: transform 0.15s ease; pointer-events: none; }
+.msel-single .msel-box[aria-expanded="true"] .msel-caret { transform: rotate(180deg); }
+.msel-clear { flex: none; border: none; background: none; color: var(--text-dim); font-size: 15px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.msel-clear:hover { color: var(--text); }
+.msel.is-disabled .msel-box { opacity: 0.6; cursor: not-allowed; background: var(--panel-2); }
+.msel-search { width: 100%; border: none; border-bottom: 1px solid var(--border); background: none; padding: 8px 12px; font-size: 13px; outline: none; }
+.msel-opt { display: flex; align-items: center; gap: 8px; }
+.msel-opt.selected { color: var(--accent); font-weight: 600; }
+.msel-opt-hint { margin-left: auto; color: var(--text-dim); font-size: 12px; font-weight: 400; }
+.msel-opt-check { flex: none; margin-left: auto; }
+.msel-opt.selected .msel-opt-hint + .msel-opt-check { margin-left: 6px; }
+/* Open/close animation shared by both variants. */
+.msel-menu { animation: mselIn 0.13s ease; transform-origin: top; }
+@keyframes mselIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .msel-menu { animation: none; } .msel-caret { transition: none; } }
 .gear-link { color: var(--text-dim); font-size:20px; display:inline-flex; align-items:center; padding:4px 6px; border-radius:6px; }
 .gear-link:hover { color: var(--text); background: var(--panel-2); text-decoration:none; }
 
@@ -1195,13 +1229,11 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .dpp-copy:hover { background: var(--accent-hover); }
 
 /* Section visibility pills: on = accent-tinted with check, off = dim */
-.dpp-sections { display: flex; flex-wrap: wrap; gap: 8px; }
-.dpp-sec { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600;
-  border-radius: 99px; padding: 7px 14px; cursor: pointer; background: var(--panel-2);
-  border: 1px solid var(--border); color: var(--text-dim); transition: color 0.12s, border-color 0.12s, background 0.12s; }
-.dpp-sec:hover:not(:disabled) { color: var(--text); }
-.dpp-sec.on { color: var(--accent); background: rgba(59, 130, 246, 0.13); border-color: rgba(59, 130, 246, 0.35); }
-.dpp-sec:disabled { cursor: not-allowed; opacity: 0.7; }
+/* Auto-sections explainer (replaces the removed manual show/hide toggles). */
+.dpp-autonote { display: flex; gap: 8px; align-items: flex-start; margin-bottom: 16px; padding: 10px 12px;
+  border-radius: 8px; background: var(--panel-2); border: 1px solid var(--border);
+  color: var(--text-dim); font-size: 12.5px; line-height: 1.5; }
+.dpp-autonote svg { flex: none; margin-top: 2px; color: var(--accent); }
 
 /* ---------------------------------------------------------------------------
    Map controls — reference design: icon toggle buttons, sectioned filter
@@ -1403,7 +1435,7 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
    Layering: panels that host popovers must not clip them, and menus float above
    --------------------------------------------------------------------------- */
 .va-step, .xp-panel, .mc-panel { overflow: visible; }
-.msel-menu, .dropdown-card { z-index: 90; }
+.msel-menu, .dropdown-card, .cv-menu { z-index: var(--z-dropdown); }
 
 /* Standard date field affordance: a visible, accent-tinted calendar icon that
    opens the native picker — consistent across the app, light and dark. */

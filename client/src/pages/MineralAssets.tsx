@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, MetricCard, Modal, Banner } from "../components/ui";
+import { Select } from "../components/Select";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { useRowSelection, BulkActionsBar } from "../components/bulk";
@@ -175,8 +176,8 @@ function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onCreated:
       <div className="grid-2">
         <div className="field"><label>Counties</label><SearchableMultiSelect options={TEXAS_COUNTY_OPTIONS} value={counties} onChange={setCounties} placeholder="Search counties…" /></div>
         <div className="field"><label>State</label><input value={state} maxLength={2} onChange={(e) => setState(e.target.value.toUpperCase())} /></div>
-        <div className="field"><label>Ownership type</label><select value={ownershipType} onChange={(e) => setOwnershipType(e.target.value)}>{OWNERSHIP_TYPES.map((t) => <option key={t}>{t}</option>)}</select></div>
-        <div className="field"><label>Producing status</label><select value={producingStatus} onChange={(e) => setProducingStatus(e.target.value)}>{PRODUCING_STATUSES.map((t) => <option key={t}>{t}</option>)}</select></div>
+        <div className="field"><label>Ownership type</label><Select value={ownershipType} onChange={setOwnershipType} ariaLabel="Ownership type" options={OWNERSHIP_TYPES.map((t) => ({ value: t, label: t }))} /></div>
+        <div className="field"><label>Producing status</label><Select value={producingStatus} onChange={setProducingStatus} ariaLabel="Producing status" options={PRODUCING_STATUSES.map((t) => ({ value: t, label: t }))} /></div>
         <div className="field"><label>Acquisition date</label><input type="date" value={acquisitionDate} onChange={(e) => setAcquisitionDate(e.target.value)} /></div>
         <div className="field"><label>Net Revenue Acres (NRA)</label><input type="number" value={nra} onChange={(e) => setNra(e.target.value)} /></div>
         <div className="field"><label>Purchase price</label><input type="number" value={purchasePrice} onChange={(e) => setPurchasePrice(e.target.value)} /></div>

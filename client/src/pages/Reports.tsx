@@ -8,6 +8,7 @@ import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, Banner, Modal } from "../components/ui";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
+import { Select } from "../components/Select";
 import { GeoFields } from "../components/GeoFields";
 import { PeriodSegmented } from "../components/PeriodSegmented";
 import { SortableTable, type Column } from "../components/SortableTable";
@@ -226,11 +227,12 @@ export function Reports() {
         {showFilters && (
         <div className="filters-grid" style={{ marginTop: 10 }}>
           <div className="field" style={{ marginBottom: 0 }}><label>Compare to</label>
-            <select value={compare} onChange={(e) => setCompare(e.target.value as Compare)}>
-              <option value="NONE">No comparison</option>
-              <option value="PREV_PERIOD">Previous period</option>
-              <option value="PREV_YEAR">Previous year</option>
-            </select>
+            <Select value={compare} onChange={(v) => setCompare(v as Compare)} ariaLabel="Compare to"
+              options={[
+                { value: "NONE", label: "No comparison" },
+                { value: "PREV_PERIOD", label: "Previous period" },
+                { value: "PREV_YEAR", label: "Previous year" },
+              ]} />
           </div>
           {/* Shared geographic hierarchy: all 50 states + cascading counties,
               identical to Buyers/Deals/Research. */}

@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import { Spinner, Banner, Modal, ConfirmChanges, ConfirmDialog } from "../components/ui";
+import { Select } from "../components/Select";
 import { fmtDate } from "../lib/format";
 
 // The catalog lives on the SERVER (domain/integrationCatalog.ts) — the single
@@ -330,11 +331,11 @@ function ConfigureModal({ provider, onClose, onSaved }: { provider: Provider; on
       footer={<><button onClick={onClose}>Cancel</button><button className="primary" onClick={() => setConfirming(true)} disabled={busy}>{busy ? "Saving…" : "Save"}</button></>}>
       <div className="field">
         <label>Automatic synchronization</label>
-        <select value={schedule} onChange={(e) => setSchedule(e.target.value)}>
-          <option value="manual">Manual only</option>
-          {provider.syncable && <option value="hourly">Every hour</option>}
-          {provider.syncable && <option value="daily">Daily</option>}
-        </select>
+        <Select value={schedule} onChange={setSchedule} ariaLabel="Sync schedule"
+          options={[
+            { value: "manual", label: "Manual only" },
+            ...(provider.syncable ? [{ value: "hourly", label: "Every hour" }, { value: "daily", label: "Daily" }] : []),
+          ]} />
         <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Automatic sync re-validates the connection on schedule and records failures on this page and in the activity log.</p>
       </div>
       <div className="field"><label>Notes</label><textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Internal notes about this connection" /></div>

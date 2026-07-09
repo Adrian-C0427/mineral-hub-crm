@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { Spinner } from "../components/ui";
+import { Select } from "../components/Select";
 import { NewDealModal } from "../components/NewDealModal";
 import { StageChangeModal } from "../components/StageChangeModal";
 import { money, num, fmtDate, prettyStage } from "../lib/format";
@@ -312,12 +313,13 @@ function PipelineCustomize({ prefs, onChange }: { prefs: PipelinePrefs; onChange
           </div>
           <div className="cv-head" style={{ borderTop: "1px solid var(--border)" }}><strong>Sort within a stage</strong></div>
           <div style={{ padding: "8px 12px" }}>
-            <select value={prefs.sort} onChange={(e) => onChange({ ...prefs, sort: e.target.value as CardSort })} style={{ width: "100%" }}>
-              <option value="priority">Priority</option>
-              <option value="days">Days in stage</option>
-              <option value="profit">Est. profit</option>
-              <option value="name">Name A–Z</option>
-            </select>
+            <Select value={prefs.sort} onChange={(v) => onChange({ ...prefs, sort: v as CardSort })} ariaLabel="Sort cards by"
+              options={[
+                { value: "priority", label: "Priority" },
+                { value: "days", label: "Days in stage" },
+                { value: "profit", label: "Est. profit" },
+                { value: "name", label: "Name A–Z" },
+              ]} />
           </div>
           <div className="cv-foot">
             <button type="button" className="small" onClick={() => onChange(DEFAULT_PREFS)}>Restore default</button>

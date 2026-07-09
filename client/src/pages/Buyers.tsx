@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { RelationshipDot, Spinner, Banner } from "../components/ui";
+import { Select } from "../components/Select";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { NewBuyerModal } from "../components/NewBuyerModal";
 import { useRowSelection, BulkActionsBar } from "../components/bulk";
@@ -177,10 +178,9 @@ function ImportWizard({ onDone }: { onDone: () => void }) {
             {analyze.fields.map((f) => (
               <div className="field" key={f.key}>
                 <label>{f.label}{f.required ? " *" : ""}</label>
-                <select value={mapping[f.key] ?? ""} onChange={(e) => setMapping((m) => ({ ...m, [f.key]: e.target.value }))}>
-                  <option value="">— not mapped —</option>
-                  {analyze.headers.map((h) => <option key={h} value={h}>{h}</option>)}
-                </select>
+                <Select value={mapping[f.key] ?? ""} onChange={(v) => setMapping((m) => ({ ...m, [f.key]: v }))}
+                  placeholder="— not mapped —" clearable searchable ariaLabel={`Map column for ${f.label}`}
+                  options={analyze.headers.map((h) => ({ value: h, label: h }))} />
               </div>
             ))}
           </div>

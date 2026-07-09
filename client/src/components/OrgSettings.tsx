@@ -2,6 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api/client";
 import { useAuth, type OrgRole } from "../auth/AuthContext";
 import { Banner, ConfirmChanges, ConfirmDialog } from "./ui";
+import { Select } from "./Select";
 import { fmtDate } from "../lib/format";
 import { formatPhone } from "../lib/phone";
 import { ROLE_LABEL } from "../lib/roles";
@@ -209,9 +210,9 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
                       <td>{m.phone ? formatPhone(m.phone) : "—"}</td>
                       <td>
                         {locked ? (ROLE_LABEL[m.orgRole ?? ""] ?? "—") : (
-                          <select value={m.orgRole ?? "MEMBER"} onChange={(e) => setPendingRole({ m, orgRole: e.target.value as OrgRole })}>
-                            {roleOptions(m).map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
-                          </select>
+                          <Select value={m.orgRole ?? "MEMBER"} onChange={(v) => setPendingRole({ m, orgRole: v as OrgRole })}
+                            width={200} ariaLabel={`Role for ${m.name}`}
+                            options={roleOptions(m).map((r) => ({ value: r, label: ROLE_LABEL[r] }))} />
                         )}
                         {m.orgRole === "MANAGER" && <span className="badge" style={{ marginLeft: 6, background: "rgba(245,158,11,.15)", color: "#b45309" }}>reassign</span>}
                       </td>
@@ -487,10 +488,8 @@ function OwnerTab({ onFlash, onError, onTransferred }: { onFlash: (m: string) =>
       <div className="row" style={{ alignItems: "flex-end", marginBottom: 18 }}>
         <div className="field" style={{ marginBottom: 0, minWidth: 240 }}>
           <label>New owner</label>
-          <select value={target} onChange={(e) => setTarget(e.target.value)}>
-            <option value="">Select a member…</option>
-            {candidates.map((m) => <option key={m.id} value={m.id}>{m.name} ({m.email})</option>)}
-          </select>
+          <Select value={target} onChange={setTarget} placeholder="Select a member…" clearable searchable ariaLabel="New owner"
+            options={candidates.map((m) => ({ value: m.id, label: `${m.name} (${m.email})` }))} />
         </div>
         <button className="danger" disabled={!target} onClick={transfer}>Transfer ownership</button>
       </div>

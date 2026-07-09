@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Modal } from "./ui";
+import { Select } from "./Select";
 import { api, ApiError } from "../api/client";
 import { toInputDate } from "../lib/format";
 import { BUYER_STATUS_OPTIONS } from "../lib/buyerStatus";
@@ -80,16 +81,13 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, initial, on
     >
       <div className="field">
         <label>Status</label>
-        <select value={status} onChange={(e) => setStatus(e.target.value as BuyerStatus)}>
-          {BUYER_STATUS_OPTIONS.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}
-        </select>
+        <Select value={status} onChange={(v) => setStatus(v as BuyerStatus)} ariaLabel="Status"
+          options={BUYER_STATUS_OPTIONS.map((s) => ({ value: s.v, label: s.label }))} />
       </div>
       <div className="field">
         <label>Assigned team member</label>
-        <select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
-          <option value="">Unassigned</option>
-          {users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-        </select>
+        <Select value={assignee} onChange={setAssignee} placeholder="Unassigned" clearable searchable ariaLabel="Assigned team member"
+          options={users.map((u) => ({ value: u.id, label: u.name }))} />
       </div>
       {status === "OFFER_RECEIVED" && (
         <>

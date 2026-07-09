@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api } from "../api/client";
 import { Modal, Banner, ConfirmDelete } from "./ui";
 import { PhoneInput } from "./PhoneInput";
+import { Select } from "./Select";
 import { formatPhone } from "../lib/phone";
 import { fmtDate } from "../lib/format";
 import type { Seller, SellerType, UserLite } from "../types";
@@ -236,7 +237,8 @@ function SellerFormModal({ dealId, seller, users, onClose, onSaved }: {
           <Fld l="Company / entity name"><input value={f.companyName} onChange={set("companyName")} /></Fld>
           <Fld l="Trust name"><input value={f.trustName} onChange={set("trustName")} /></Fld>
           <Fld l="Seller type">
-            <select value={f.sellerType} onChange={set("sellerType")}>{SELLER_TYPES.map((t) => <option key={t} value={t}>{prettyType(t)}</option>)}</select>
+            <Select value={f.sellerType} onChange={(v) => setF((p) => ({ ...p, sellerType: v as SellerType }))}
+              options={SELLER_TYPES.map((t) => ({ value: t, label: prettyType(t) }))} ariaLabel="Seller type" />
           </Fld>
         </div>
       </FormGroup>
@@ -246,9 +248,10 @@ function SellerFormModal({ dealId, seller, users, onClose, onSaved }: {
           <Fld l="Primary phone"><PhoneInput value={f.primaryPhone} onChange={(v) => setF((p) => ({ ...p, primaryPhone: v }))} /></Fld>
           <Fld l="Email address"><input type="email" value={f.email} onChange={set("email")} /></Fld>
           <Fld l="Preferred contact method">
-            <select value={f.preferredContactMethod} onChange={set("preferredContactMethod")}>
-              <option value="">—</option>{CONTACT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
+            <Select value={f.preferredContactMethod}
+              onChange={(v) => setF((p) => ({ ...p, preferredContactMethod: v }))}
+              placeholder="—" clearable ariaLabel="Preferred contact method"
+              options={CONTACT_METHODS.map((m) => ({ value: m, label: m }))} />
           </Fld>
         </div>
       </FormGroup>
@@ -283,9 +286,10 @@ function SellerFormModal({ dealId, seller, users, onClose, onSaved }: {
       <FormGroup title="Additional information">
         <div className="grid-2">
           <Fld l="Assigned team member">
-            <select value={f.assignedTeamMemberId} onChange={set("assignedTeamMemberId")}>
-              <option value="">Unassigned</option>{users.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-            </select>
+            <Select value={f.assignedTeamMemberId}
+              onChange={(v) => setF((p) => ({ ...p, assignedTeamMemberId: v }))}
+              placeholder="Unassigned" clearable searchable ariaLabel="Assigned team member"
+              options={users.map((u) => ({ value: u.id, label: u.name }))} />
           </Fld>
           <Fld l="Internal notes" wide><textarea rows={3} value={f.internalNotes} onChange={set("internalNotes")} /></Fld>
         </div>

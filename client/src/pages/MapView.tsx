@@ -4,6 +4,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
+import { Select } from "../components/Select";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION } from "../lib/counties";
 import { addCadastralLayers, styleWithGlyphs } from "../lib/mapLayers";
 import { MapLayersPanel, PillToggle } from "../components/MapLayersPanel";
@@ -672,7 +673,7 @@ export function MapView() {
             Filters apply to all GIS data on the map (wells, abstracts, surveys) — independent of whether a deal exists. <b>"Deal status"</b> only affects the deal highlight.
           </div>
           <div className="mc-grid">
-            <div><div className="ddx-label mc-lbl">Deal status</div><select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>{STATUS_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
+            <div><div className="ddx-label mc-lbl">Deal status</div><Select value={statusFilter} onChange={setStatusFilter} ariaLabel="Deal status" options={STATUS_OPTIONS.map(([v, l]) => ({ value: v, label: l }))} /></div>
             <div><div className="ddx-label mc-lbl">County</div><SearchableMultiSelect options={meta.counties} value={fCounties} onChange={setFCounties} placeholder="Counties…" /></div>
             <div><div className="ddx-label mc-lbl">Survey</div><SearchableMultiSelect options={gisOptions.surveys} value={fSurveys} onChange={setFSurveys} placeholder="Surveys…" /></div>
             <div><div className="ddx-label mc-lbl">Abstract</div><SearchableMultiSelect options={gisOptions.abstracts} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstracts…" /></div>
@@ -731,16 +732,17 @@ export function MapView() {
                 <PillToggle on={heat.hotspots} label="Hotspot labels" onClick={() => setHeatK("hotspots", !heat.hotspots)} />
               </div>
               <div className="ddx-label mc-lbl" style={{ marginTop: 16 }}>Production period</div>
-              <select value={heat.period} onChange={(e) => setHeatK("period", e.target.value as HeatPeriod)}>
-                <option value="current">Current month</option>
-                <option value="3m">Last 3 months</option>
-                <option value="6m">Last 6 months</option>
-                <option value="12m">Last 12 months</option>
-                <option value="3y">Last 3 years</option>
-                <option value="ytd">Year to date</option>
-                <option value="all">Cumulative (all history)</option>
-                <option value="custom">Custom range</option>
-              </select>
+              <Select value={heat.period} onChange={(v) => setHeatK("period", v as HeatPeriod)} ariaLabel="Heat map period"
+                options={[
+                  { value: "current", label: "Current month" },
+                  { value: "3m", label: "Last 3 months" },
+                  { value: "6m", label: "Last 6 months" },
+                  { value: "12m", label: "Last 12 months" },
+                  { value: "3y", label: "Last 3 years" },
+                  { value: "ytd", label: "Year to date" },
+                  { value: "all", label: "Cumulative (all history)" },
+                  { value: "custom", label: "Custom range" },
+                ]} />
               {heat.period === "custom" && (
                 <div className="row" style={{ gap: 8, marginTop: 10 }}>
                   <div style={{ flex: 1 }}><div className="ddx-label mc-lbl">From</div><input type="month" value={heat.from} onChange={(e) => setHeatK("from", e.target.value)} /></div>

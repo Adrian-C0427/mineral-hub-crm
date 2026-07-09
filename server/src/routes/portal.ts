@@ -22,28 +22,13 @@ export const portalRouter = Router();
 
 export const newPortalSlug = (): string => randomBytes(12).toString("base64url");
 
-// Per-deal publishable sections. Defaults match the CRM's DEFAULT_SECTIONS.
-const PORTAL_SECTION_KEYS = [
-  "contact", "company", "description", "documents", "map", "wells",
-  "tracts", "production", "attachments", "notes", "askPrice",
-] as const;
-type PortalSectionKey = (typeof PORTAL_SECTION_KEYS)[number];
-const DEFAULT_SECTIONS: Record<PortalSectionKey, boolean> = {
-  contact: true, company: true, description: true, documents: true, map: true,
-  wells: true, tracts: true, production: true, attachments: true, notes: false, askPrice: true,
-};
-function dealSections(raw: unknown): Record<PortalSectionKey, boolean> {
-  const obj = (raw && typeof raw === "object") ? raw as Record<string, unknown> : {};
-  const out = { ...DEFAULT_SECTIONS };
-  for (const k of PORTAL_SECTION_KEYS) if (typeof obj[k] === "boolean") out[k] = obj[k] as boolean;
-  return out;
-}
-
 /**
  * Buyer-safe projection of a deal. The ONLY shape the portal ever returns.
- * Per-deal section toggles decide which content appears; anything toggled off
- * is omitted here (never sent to the browser), so a hidden section can't leak.
- * `askPrice` uses the deal's buyer-facing override, else the deal askPrice.
+ *
+ * There is no per-deal section configuration: the offering auto-displays any
+ * field that has a value and omits anything empty. `askPrice` uses the deal's
+ * buyer-facing override, else the deal askPrice. Internal notes are NEVER
+ * exposed (they're internal by nature — the panel promises they never appear).
  */
 function publicDeal(d: {
   name: string; portalSlug: string | null; portalSummary: string | null; portalFeatured: boolean;
@@ -51,16 +36,14 @@ function publicDeal(d: {
   basins: string[]; formations: string[]; assetTypes: string[]; surveys: string[];
   nra: number | null; acreageNma: number | null; operator: string | null; rrc?: string | null;
   wells: string[]; producingStatus: string | null; updatedAt: Date;
-  portalSections?: unknown; portalAskPrice?: number | null; askPrice?: number | null; notes?: string | null;
+  portalAskPrice?: number | null; askPrice?: number | null;
   _count?: { assets?: number };
 }) {
-  const s = dealSections(d.portalSections);
   return {
     slug: d.portalSlug,
     name: d.name,
-    summary: s.description ? d.portalSummary : null,
+    summary: d.portalSummary?.trim() ? d.portalSummary : null,
     featured: d.portalFeatured,
-    sections: s,
     counties: d.counties,
     states: d.states.length ? d.states : d.state ? [d.state] : [],
     abstractIds: d.abstractIds,
@@ -74,10 +57,9 @@ function publicDeal(d: {
     rrc: d.rrc ?? null,
     // Number of child assets — a package published as a single bundle listing.
     assetCount: d._count?.assets ?? 0,
-    wells: s.wells ? d.wells : [],
-    producingStatus: s.production ? d.producingStatus : null,
-    askPrice: s.askPrice ? (d.portalAskPrice ?? d.askPrice ?? null) : null,
-    notes: s.notes ? (d.notes ?? null) : null,
+    wells: d.wells,
+    producingStatus: d.producingStatus,
+    askPrice: d.portalAskPrice ?? d.askPrice ?? null,
     listedAt: d.updatedAt,
   };
 }
@@ -275,7 +257,6 @@ portalRouter.get(
     if (!deal || !deal.publishedToPortal || !deal.organization?.portalEnabled) {
       throw new HttpError(404, "Offering not found");
     }
-    const sections = dealSections(deal.portalSections);
     // Abstract/survey labels for the info grid (numbers alone mean little).
     const abstracts = deal.abstractIds.length
       ? await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string }[]>(
@@ -283,10 +264,10 @@ portalRouter.get(
           deal.abstractIds.slice(0, 500),
         )
       : [];
-    // Contacts are only exposed when this deal publishes its contact section.
     // Contact info is configured PER DEAL: this deal's own contacts (all of them)
     // are shown; otherwise fall back to the org's portal contacts so existing
-    // listings never lose a point of contact.
+    // listings never lose a point of contact. The offering hides the whole
+    // Contact block if neither yields anyone.
     const orgBase = await orgPayload(deal.organization);
     const dealContacts = dealPublicContacts(deal, deal.organization.name);
     const org = dealContacts.length
@@ -299,16 +280,18 @@ portalRouter.get(
         }
       : orgBase;
 
-    // Split buyer-visible files: images become a presigned gallery, the rest are documents.
-    const filesVisible = (sections.documents || sections.attachments) ? deal.files : [];
-    const imageFiles = filesVisible.filter((f) => isImage(f.mimeType));
-    const documents = filesVisible.filter((f) => !isImage(f.mimeType))
+    // Buyer-visible files: images become a presigned gallery, the rest are
+    // documents. Any file marked visible-to-buyers is shown automatically.
+    const imageFiles = deal.files.filter((f) => isImage(f.mimeType));
+    const documents = deal.files.filter((f) => !isImage(f.mimeType))
       .map(({ id, filename, mimeType, sizeBytes, folder }) => ({ id, filename, mimeType, sizeBytes, folder }));
     const images = s3Configured()
       ? await Promise.all(imageFiles.map(async (f) => ({ id: f.id, filename: f.filename, url: await getDownloadUrl(f.s3Key, f.filename, true).catch(() => null) })))
       : [];
 
-    const production = sections.production && deal.organizationId ? await productionSummary(deal.organizationId, deal.wells) : null;
+    // Production is aggregated whenever the deal's wells match imported wells;
+    // returns null (and the section hides) when there's nothing to show.
+    const production = deal.organizationId ? await productionSummary(deal.organizationId, deal.wells) : null;
 
     // Bundle: a package's constituent assets (buyer-safe, no pricing).
     const assets = deal.assets.map((a) => ({
@@ -322,7 +305,7 @@ portalRouter.get(
     }));
 
     res.json({
-      org: sections.contact ? org : { ...org, contacts: [], contactName: null, contactEmail: null, contactPhone: null, officeLocation: null },
+      org,
       deal: publicDeal(deal),
       abstracts,
       documents,

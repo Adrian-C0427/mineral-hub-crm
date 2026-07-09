@@ -12,15 +12,13 @@ export interface PortalOrg {
   // Legacy single-contact mirror of the primary contact (kept for back-compat).
   contactName: string | null; contactEmail: string | null; contactPhone: string | null; officeLocation: string | null;
 }
-export type PortalSectionKey = "contact" | "company" | "description" | "documents" | "map" | "wells" | "tracts" | "production" | "attachments" | "notes" | "askPrice";
 export interface PortalDeal {
   slug: string | null; name: string; summary: string | null; featured: boolean;
-  sections?: Record<PortalSectionKey, boolean>;
   counties: string[]; states: string[]; abstractIds: string[]; basins: string[];
   formations: string[]; assetTypes: string[]; surveys: string[];
   nra: number | null; acreageNma: number | null; operator: string | null; rrc: string | null;
   wells: string[]; producingStatus: string | null;
-  askPrice: number | null; notes: string | null; listedAt: string;
+  askPrice: number | null; listedAt: string;
   // >0 when this listing is a seller package published as a single bundle.
   assetCount?: number;
 }

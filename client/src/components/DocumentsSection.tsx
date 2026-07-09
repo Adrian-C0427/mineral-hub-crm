@@ -1,6 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import { Banner } from "./ui";
+import { Select } from "./Select";
 import { SortableTable, type Column } from "./SortableTable";
 import { fmtDate } from "../lib/format";
 
@@ -130,10 +131,8 @@ export function DocumentsSection({
           <button className="small" onClick={() => open(f.id, false)}>Download</button>
           {canEdit && <button className="small" onClick={() => rename(f)}>Rename</button>}
           {canEdit && (
-            <select value={f.folder || "Other"} title="Move to folder" style={{ width: "auto", padding: "4px 6px" }}
-              onChange={(e) => move(f, e.target.value)}>
-              {folders.map((fl) => <option key={fl} value={fl}>{fl === (f.folder || "Other") ? fl : `Move → ${fl}`}</option>)}
-            </select>
+            <Select value={f.folder || "Other"} onChange={(v) => move(f, v)} width={150} ariaLabel="Move to folder"
+              options={folders.map((fl) => ({ value: fl, label: fl }))} />
           )}
           {canEdit && <button className="small" onClick={() => { replaceId.current = f.id; replaceRef.current?.click(); }}>Replace</button>}
           {canDelete && <button className="small danger" onClick={() => run(() => api.del(`/files/${f.id}`))}>Delete</button>}
