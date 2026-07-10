@@ -143,6 +143,15 @@ input[type="checkbox"], input[type="radio"] {
   cursor: pointer;
 }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+/* File pickers: theme the native browse button so CSV imports don't render a
+   raw OS control in the middle of a styled form. */
+input[type="file"] { padding: 6px; cursor: pointer; }
+input[type="file"]::file-selector-button {
+  font: inherit; font-size: 13px; color: var(--text);
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 7px 12px; margin-right: 10px; cursor: pointer;
+}
+input[type="file"]::file-selector-button:hover { border-color: var(--accent); }
 label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
 .field { margin-bottom: 14px; }
 
@@ -812,8 +821,11 @@ tr.row-base td { background: var(--panel-2); font-weight: 600; }
 .msel-single .msel-box:focus-visible { outline: none; border-color: var(--accent); }
 .msel-single-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .msel-single-value.placeholder { color: var(--text-dim); }
-.msel-caret { flex: none; color: var(--text-dim); font-size: 11px; transition: transform 0.15s ease; pointer-events: none; }
-.msel-single .msel-box[aria-expanded="true"] .msel-caret { transform: rotate(180deg); }
+.msel-caret { flex: none; color: var(--text-dim); transition: transform 0.15s ease; pointer-events: none; }
+.msel-caret.open { transform: rotate(180deg); }
+.msel-box.open { border-color: var(--accent); }
+/* Keyboard/hover active row — one highlight for both dropdown variants. */
+.msel-opt.active { background: var(--panel-2); }
 .msel-clear { flex: none; border: none; background: none; color: var(--text-dim); font-size: 15px; line-height: 1; cursor: pointer; padding: 0 2px; }
 .msel-clear:hover { color: var(--text); }
 .msel.is-disabled .msel-box { opacity: 0.6; cursor: not-allowed; background: var(--panel-2); }

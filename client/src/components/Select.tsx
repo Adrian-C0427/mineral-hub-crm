@@ -1,5 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { Caret, scrollActiveIntoView, useDismiss, useMenuPosition } from "./dropdownCore";
 
 export interface SelectOption {
   value: string;
@@ -27,10 +28,12 @@ interface Props {
 const toOpt = (o: SelectOption | string): SelectOption => (typeof o === "string" ? { value: o, label: o } : o);
 
 /**
- * The application's standard SINGLE-select control. Shares the exact `.msel`
- * styling, sizing, dropdown, hover/focus/disabled states, and open/close
- * animation with SearchableMultiSelect, so single- and multi-select fields
- * look and behave identically everywhere. Replaces native <select> usage.
+ * The application's standard SINGLE-select control. Shares the `.msel` design
+ * system and the dropdownCore internals with SearchableMultiSelect, so single-
+ * and multi-select fields look and behave identically everywhere. Fully
+ * keyboard-operable: Enter/Space/ArrowDown open; arrows + Home/End move the
+ * active option; Enter picks; Escape closes (menu only — never a parent
+ * dialog); printable characters type-ahead when the list isn't searchable.
  */
 export function Select({
   options, value, onChange, placeholder = "Select…", disabled,
@@ -39,48 +42,17 @@ export function Select({
   const opts = useMemo(() => options.map(toOpt), [options]);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [active, setActive] = useState(-1);
   const ref = useRef<HTMLDivElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  // The menu is portaled to <body> with fixed coords so it escapes any
-  // overflow/scroll container (e.g. a table) that would otherwise clip it.
-  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const typeahead = useRef({ buf: "", at: 0 });
+
+  const { menuRef, pos } = useMenuPosition(ref, open);
+  const close = () => { setOpen(false); setQuery(""); setActive(-1); };
+  useDismiss([ref, menuRef], open, () => { close(); boxRef.current?.focus(); });
 
   const selected = opts.find((o) => o.value === value) ?? null;
-
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      const t = e.target as Node;
-      if (ref.current?.contains(t) || menuRef.current?.contains(t)) return;
-      setOpen(false); setQuery("");
-    }
-    function onKey(e: KeyboardEvent) { if (e.key === "Escape") { setOpen(false); setQuery(""); } }
-    document.addEventListener("mousedown", onDoc);
-    document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
-  }, []);
-
-  // Position the portaled menu under the control, and keep it attached as the
-  // page (or an ancestor) scrolls by repositioning rather than closing.
-  // Crucially, scrolling *inside* the menu — spinning the wheel/trackpad through
-  // a long option list — must NOT move or close it, so scroll events originating
-  // within the menu are ignored. The menu closes only on selection or an outside
-  // click (handled above), matching every other dropdown in the app.
-  useLayoutEffect(() => {
-    if (!open) { setPos(null); return; }
-    const place = () => {
-      const r = ref.current?.getBoundingClientRect();
-      if (r) setPos({ top: r.bottom + 4, left: r.left, width: r.width });
-    };
-    place();
-    const onScroll = (e: Event) => {
-      if (menuRef.current && e.target instanceof Node && menuRef.current.contains(e.target)) return;
-      place();
-    };
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", onScroll, true);
-    return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", onScroll, true); };
-  }, [open]);
 
   useEffect(() => { if (open && searchable) inputRef.current?.focus(); }, [open, searchable]);
 
@@ -90,16 +62,60 @@ export function Select({
     return opts.filter((o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q));
   }, [opts, query]);
 
-  function pick(v: string) { onChange(v); setOpen(false); setQuery(""); }
+  // Reset the active row whenever the visible list changes.
+  useEffect(() => {
+    if (!open) return;
+    const idx = filtered.findIndex((o) => o.value === value);
+    setActive(idx >= 0 ? idx : filtered.length ? 0 : -1);
+  }, [open, filtered, value]);
+
+  useEffect(() => { if (open) scrollActiveIntoView(menuRef.current, active); }, [open, active, menuRef]);
+
+  function pick(v: string) { onChange(v); close(); boxRef.current?.focus(); }
+
+  function move(delta: number) {
+    if (!filtered.length) return;
+    setActive((a) => (a + delta + filtered.length) % filtered.length);
+  }
+
+  function onTriggerKeyDown(e: React.KeyboardEvent) {
+    if (disabled) return;
+    if (!open) {
+      if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setOpen(true); }
+      return;
+    }
+    switch (e.key) {
+      case "ArrowDown": e.preventDefault(); move(1); break;
+      case "ArrowUp": e.preventDefault(); move(-1); break;
+      case "Home": e.preventDefault(); setActive(filtered.length ? 0 : -1); break;
+      case "End": e.preventDefault(); setActive(filtered.length - 1); break;
+      case "Enter": e.preventDefault(); if (active >= 0 && filtered[active]) pick(filtered[active].value); break;
+      case "Tab": close(); break;
+      default: {
+        // Type-ahead for plain lists (searchable lists get the real input).
+        if (!searchable && e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          const now = Date.now();
+          const t = typeahead.current;
+          t.buf = now - t.at > 700 ? e.key : t.buf + e.key;
+          t.at = now;
+          const q = t.buf.toLowerCase();
+          const idx = opts.findIndex((o) => o.label.toLowerCase().startsWith(q));
+          if (idx >= 0) setActive(idx);
+        }
+      }
+    }
+  }
 
   return (
     <div className={`msel msel-single ${disabled ? "is-disabled" : ""}`} ref={ref} style={width != null ? { width } : undefined}>
       <div
-        className="msel-box"
+        className={`msel-box ${open ? "open" : ""}`}
+        ref={boxRef}
         role="combobox" aria-haspopup="listbox" aria-expanded={open} aria-label={ariaLabel} tabIndex={disabled ? -1 : 0}
+        aria-activedescendant={open && active >= 0 && filtered[active] ? `${id ?? "msel"}-opt-${filtered[active].value}` : undefined}
         id={id}
-        onClick={() => !disabled && setOpen((o) => !o)}
-        onKeyDown={(e) => { if (!disabled && (e.key === "Enter" || e.key === " " || e.key === "ArrowDown")) { e.preventDefault(); setOpen(true); } }}
+        onClick={() => !disabled && (open ? close() : setOpen(true))}
+        onKeyDown={onTriggerKeyDown}
       >
         <span className={`msel-single-value ${selected ? "" : "placeholder"}`}>
           {selected ? selected.label : placeholder}
@@ -107,7 +123,7 @@ export function Select({
         {clearable && selected && !disabled && (
           <button type="button" className="msel-clear" aria-label="Clear" onClick={(e) => { e.stopPropagation(); pick(""); }}>×</button>
         )}
-        <span className="msel-caret" aria-hidden>▾</span>
+        <Caret open={open} />
       </div>
       {open && !disabled && pos && createPortal(
         <div
@@ -122,16 +138,23 @@ export function Select({
               placeholder="Search…"
               onChange={(e) => setQuery(e.target.value)}
               onClick={(e) => e.stopPropagation()}
+              onKeyDown={(e) => {
+                if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
+                else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
+                else if (e.key === "Enter") { e.preventDefault(); if (active >= 0 && filtered[active]) pick(filtered[active].value); }
+              }}
             />
           )}
           {filtered.length === 0 ? (
             <div className="msel-empty">No matches</div>
           ) : (
-            filtered.map((o) => (
+            filtered.map((o, i) => (
               <div
                 key={o.value}
+                id={`${id ?? "msel"}-opt-${o.value}`}
                 role="option" aria-selected={o.value === value}
-                className={`msel-opt ${o.value === value ? "selected" : ""}`}
+                className={`msel-opt ${o.value === value ? "selected" : ""} ${i === active ? "active" : ""}`}
+                onMouseEnter={() => setActive(i)}
                 onClick={() => pick(o.value)}
               >
                 <span>{o.label}</span>
