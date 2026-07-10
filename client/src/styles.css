@@ -495,6 +495,28 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .empty-state-body { margin: 0; font-size: 14px; line-height: 1.6; color: var(--text-dim); }
 .empty-state-body a { color: var(--accent); }
 @media (max-width: 560px) { .empty-state { padding: 24px 18px; } }
+
+/* Import result summary (Research → Import) — a spaced, readable card with
+   emphasized counts and each skip reason on its own line (not one cramped line). */
+.import-summary { margin-top: 18px; padding: 16px 18px; border: 1px solid var(--border);
+  border-radius: var(--radius); background: var(--panel-2); }
+.import-summary-head { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+.import-summary-head svg { color: var(--green); flex: none; }
+.import-summary-title { font-size: 14.5px; font-weight: 650; color: var(--text); }
+.import-summary-stats { display: flex; flex-wrap: wrap; gap: 12px; }
+.iss { display: flex; flex-direction: column; gap: 3px; min-width: 92px; padding: 10px 14px;
+  border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.iss-num { font-size: 22px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.iss-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); }
+.iss-ok .iss-num { color: var(--green); }
+.iss-warn .iss-num { color: var(--amber); }
+.iss-bad .iss-num { color: var(--red); }
+.import-summary-reasons { margin-top: 16px; }
+.import-summary-reasons .ddx-label { display: block; margin-bottom: 8px; }
+.import-summary-reasons ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 7px; }
+.import-summary-reasons li { display: flex; align-items: baseline; gap: 10px; font-size: 13px; line-height: 1.45; color: var(--text); }
+.isr-count { flex: none; min-width: 46px; font-weight: 700; color: var(--amber); font-variant-numeric: tabular-nums; }
+.import-summary-note { margin: 14px 0 0; font-size: 12.5px; line-height: 1.5; }
 .banner-warn { background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.4); color: #fcd34d; }
 .banner-error { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.4); color: #fca5a5; }
 .banner-info { background: rgba(59,130,246,0.12); border: 1px solid rgba(59,130,246,0.4); color: #93c5fd; }

@@ -159,6 +159,45 @@ export function normalizeEntity(name: string | null | undefined): string | null 
 }
 
 // ---------------------------------------------------------------------------
+// Recorded-document duplicate detection
+// ---------------------------------------------------------------------------
+
+/** Normalize an instrument / document number for comparison: uppercase and
+ *  strip all whitespace, so "2026 00412" and "2026-00412 " compare equal to
+ *  their tidy forms without collapsing genuinely different numbers. */
+export function normInstrument(s: string | null | undefined): string {
+  return (s ?? "").toUpperCase().replace(/\s+/g, "");
+}
+
+/**
+ * The full recording signature used to detect TRUE duplicate documents.
+ * Instrument number ALONE is not unique — county-clerk exports repeat one
+ * instrument across each grantor/grantee and legal tract, so keying on it alone
+ * falsely flags distinct rows. A record is only a duplicate when it matches on
+ * the whole signature: geography + normalized instrument + recording date + doc
+ * type + normalized grantor + normalized grantee.
+ */
+export function documentDedupeKey(p: {
+  state: string;
+  county: string;
+  instrumentNumber: string | null;
+  recordingDate: Date;
+  docType: string;
+  grantorNorm: string | null;
+  granteeNorm: string | null;
+}): string {
+  return [
+    p.state.toUpperCase(),
+    p.county.toUpperCase(),
+    normInstrument(p.instrumentNumber),
+    p.recordingDate.toISOString().slice(0, 10),
+    p.docType,
+    p.grantorNorm ?? "",
+    p.granteeNorm ?? "",
+  ].join("|");
+}
+
+// ---------------------------------------------------------------------------
 // Trend math
 // ---------------------------------------------------------------------------
 
