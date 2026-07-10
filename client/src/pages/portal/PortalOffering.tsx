@@ -5,6 +5,7 @@ import { num } from "../../lib/format";
 import { PortalMap } from "./PortalMap";
 import { portalGet, portalPost, type FC, type PortalAbstract, type PortalDeal, type PortalDocument, type PortalImage, type PortalOrg, type PortalPackageAsset, type PortalProduction } from "./portalApi";
 import { formatPhone } from "../../lib/phone";
+import { MoneyInput } from "../../components/MoneyInput";
 
 const EMPTY_FC: FC = { type: "FeatureCollection", features: [] };
 
@@ -293,7 +294,7 @@ function SubmitOffer({ slug, dealName }: { slug: string; dealName: string }) {
       <form onSubmit={submit}>
         <div className="muted portal-lead-section">Your offer</div>
         <div className="dd-grid">
-          <div className="field"><label>Offer amount ($) {star}</label><input type="number" min="0" step="1000" value={f.amount} onChange={(e) => set("amount")(e.target.value)} placeholder="e.g. 250000" /></div>
+          <div className="field"><label>Offer amount {star}</label><MoneyInput value={f.amount} onChange={(v) => setF((p) => ({ ...p, amount: v }))} placeholder="e.g. 250,000" ariaLabel="Offer amount" /></div>
           <div className="field"><label>Offer expires (optional)</label><input type="date" value={f.expiresOn} onChange={(e) => set("expiresOn")(e.target.value)} /></div>
           <div className="field" style={{ gridColumn: "1 / -1" }}><label>Terms / conditions (optional)</label><input value={f.conditions} onChange={(e) => set("conditions")(e.target.value)} placeholder="e.g. subject to title review; 30-day close" /></div>
         </div>

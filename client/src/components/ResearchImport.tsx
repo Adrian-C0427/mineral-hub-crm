@@ -4,6 +4,7 @@ import { Banner, Spinner, ConfirmDelete, Modal } from "./ui";
 import { Select } from "./Select";
 import { downloadCsv } from "../lib/csv";
 import { fmtDate, fmtDateTime } from "../lib/format";
+import { CsvDropzone } from "./CsvDropzone";
 
 /**
  * Research data management: CSV import (Deeds / Leases / Drilling Permits →
@@ -69,7 +70,6 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
   const [confirmRuns, setConfirmRuns] = useState(false);
   const [deletingRuns, setDeletingRuns] = useState(false);
   const [reviewRun, setReviewRun] = useState<IngestRun | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const loadRuns = () => api.get<IngestRun[]>("/research/ingest/runs").then(setRuns).catch(() => {});
   useEffect(() => { loadRuns(); }, []);
@@ -77,7 +77,6 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
   function reset() {
     setCsv(null); setFilename(""); setAnalysis(null); setMapping({}); setResult(null); setError("");
     setAssignState(""); setAssignCounty("");
-    if (fileRef.current) fileRef.current.value = "";
   }
 
   async function onFile(f: File) {
@@ -109,8 +108,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
       setResult(r);
       setAnalysis(null);
       setCsv(null);
-      if (fileRef.current) fileRef.current.value = "";
-      loadRuns();
+        loadRuns();
       onDataChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Import failed");
@@ -144,8 +142,8 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
                 { value: "permits", label: "Drilling Permits" },
               ]} />
           </div>
-          <div className="field" style={{ marginBottom: 0 }}><label>CSV file <span className="muted" style={{ fontWeight: 400, textTransform: "none" }}>· Supported file type: CSV</span></label>
-            <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+          <div className="field" style={{ marginBottom: 0, flex: 1, minWidth: 250 }}><label>CSV file</label>
+            <CsvDropzone slim onFile={onFile} />
           </div>
           <button className="small" onClick={downloadTemplate}>Download template</button>
         </div>

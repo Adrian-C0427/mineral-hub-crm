@@ -7,6 +7,7 @@ import { PhoneInput } from "./PhoneInput";
 import { GeoFields } from "./GeoFields";
 import { StateSelect } from "./StateSelect";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
+import { MoneyInput } from "./MoneyInput";
 
 /**
  * Standardized New Buyer template — the buyer counterpart of NewDealModal.
@@ -121,8 +122,8 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
         <div className="field"><label>Asset types</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
         <div className="field"><label>Min acreage</label><input type="number" value={f.minAcreage} onChange={set("minAcreage")} /></div>
         <div className="field"><label>Max acreage</label><input type="number" value={f.maxAcreage} onChange={set("maxAcreage")} /></div>
-        <div className="field"><label>Min price</label><input type="number" value={f.minPrice} onChange={set("minPrice")} /></div>
-        <div className="field"><label>Max price</label><input type="number" value={f.maxPrice} onChange={set("maxPrice")} /></div>
+        <div className="field"><label>Min price</label><MoneyInput value={f.minPrice} onChange={(v) => setF((p) => ({ ...p, minPrice: v }))} ariaLabel="Minimum price" /></div>
+        <div className="field"><label>Max price</label><MoneyInput value={f.maxPrice} onChange={(v) => setF((p) => ({ ...p, maxPrice: v }))} ariaLabel="Maximum price" /></div>
       </div>
       <div className="field"><label>Notes</label><textarea rows={3} value={f.notes} onChange={set("notes")} /></div>
       {error && <div className="error-text">{error}</div>}

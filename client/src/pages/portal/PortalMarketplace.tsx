@@ -8,6 +8,7 @@ import { GeoFields } from "../../components/GeoFields";
 import { PortalMap } from "./PortalMap";
 import { PortalShell } from "./PortalOffering";
 import { portalGet, portalPost, type FC, type PortalDeal, type PortalOrg } from "./portalApi";
+import { MoneyInput } from "../../components/MoneyInput";
 
 const EMPTY_FC: FC = { type: "FeatureCollection", features: [] };
 
@@ -422,8 +423,8 @@ function LeadCapture({ orgSlug }: { orgSlug: string }) {
           <div className="field"><label>Asset types</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={f.assetTypes} onChange={set("assetTypes")} placeholder="Any" /></div>
           <div className="field"><label>Min acreage</label><input type="number" min="0" value={f.minAcreage} onChange={(e) => set("minAcreage")(e.target.value)} /></div>
           <div className="field"><label>Max acreage</label><input type="number" min="0" value={f.maxAcreage} onChange={(e) => set("maxAcreage")(e.target.value)} /></div>
-          <div className="field"><label>Min deal size ($)</label><input type="number" min="0" value={f.minPrice} onChange={(e) => set("minPrice")(e.target.value)} /></div>
-          <div className="field"><label>Max deal size ($)</label><input type="number" min="0" value={f.maxPrice} onChange={(e) => set("maxPrice")(e.target.value)} /></div>
+          <div className="field"><label>Min deal size</label><MoneyInput value={f.minPrice} onChange={(v) => setF((p) => ({ ...p, minPrice: v }))} ariaLabel="Minimum deal size" /></div>
+          <div className="field"><label>Max deal size</label><MoneyInput value={f.maxPrice} onChange={(v) => setF((p) => ({ ...p, maxPrice: v }))} ariaLabel="Maximum deal size" /></div>
         </div>
         <div className="field">
           <label>Anything else? (NRA range, abstracts, surveys, operator or well-status preferences, notes)</label>

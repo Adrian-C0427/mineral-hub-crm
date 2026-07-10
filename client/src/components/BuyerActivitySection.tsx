@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "../api/client";
-import { StatusBadge } from "./ui";
+import { StatusBadge, EmptyState } from "./ui";
 import { Select } from "./Select";
 import { money, fmtDate } from "../lib/format";
 import { BUYER_STATUS_RANK } from "../lib/buyerStatus";
@@ -40,7 +40,7 @@ export function BuyerActivitySection({
     (a, b) => (BUYER_STATUS_RANK[a.status] - BUYER_STATUS_RANK[b.status]) || b.matchPercent - a.matchPercent,
   );
 
-  if (rows.length === 0) return <p className="muted">No buyers contacted yet. Use Match Recommendations below to start outreach.</p>;
+  if (rows.length === 0) return <EmptyState title="No buyers contacted yet">Use Match Recommendations below to start outreach.</EmptyState>;
 
   return (
     <div className="ba-list">

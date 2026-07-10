@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type maplibregl from "maplibre-gl";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Modal, ConfirmDialog, Spinner, Banner } from "./ui";
+import { Modal, ConfirmDialog, Spinner, Banner, EmptyState } from "./ui";
 import { Select } from "./Select";
 import { TractMap, type TractMapFeature, type TractSegment } from "./TractMap";
 import { exportTractMap } from "../lib/tractExport";
@@ -155,10 +155,10 @@ export function TractSection({ dealId, dealName, canEdit, abstractIds = [] }: { 
       {generating && <Banner kind="info">Claude is reading the legal description and extracting the boundary calls… geometry, closure and acreage are then computed deterministically.</Banner>}
 
       {tracts.length === 0 ? (
-        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-          No tract descriptions yet. Click <strong>+ Add Tract</strong> and paste the legal description from a deed,
-          lease, title commitment or purchase agreement — the boundary is parsed and drawn automatically.
-        </p>
+        <EmptyState title="No tract descriptions yet">
+          Click <strong>+ Add Tract</strong> and paste the legal description from a deed, lease, title commitment
+          or purchase agreement — the boundary is parsed and drawn automatically.
+        </EmptyState>
       ) : (
         <table className="table" style={{ marginTop: 10 }}>
           <thead><tr><th>Tract</th><th>Acres (computed / stated)</th><th>Closure</th><th>Status</th><th style={{ width: 260 }} /></tr></thead>
