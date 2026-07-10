@@ -43,10 +43,18 @@ const arr = (v: unknown): string[] =>
   v == null ? [] : Array.isArray(v) ? v.map(String).filter(Boolean) : [String(v)].filter(Boolean);
 
 /** Parse YYYY-MM-DD (or ISO) as UTC midnight. */
-function parseDay(s: string | undefined): Date | null {
+export function parseDay(s: string | undefined): Date | null {
   if (!s) return null;
   const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s}T00:00:00Z` : s);
-  return isNaN(d.getTime()) ? null : d;
+  if (isNaN(d.getTime())) return null;
+  // Reject implausible years. A typo like "0202-07-09" parses to a valid Date,
+  // but once a comparison/history window is extrapolated backwards it yields a
+  // negative (BCE) year that Prisma can't serialize (PrismaClientUnknownRequest-
+  // Error on findMany). All research data is 20th/21st century, so anything
+  // outside [1900, 2100] is malformed — fall back to the caller's default window.
+  const y = d.getUTCFullYear();
+  if (y < 1900 || y > 2100) return null;
+  return d;
 }
 
 interface ResearchFilters {
@@ -80,14 +88,14 @@ function parseFilters(q: Record<string, unknown>): ResearchFilters {
 }
 
 /** Current window from ?from/&to (defaults to the last 90 days). */
-function parseWindow(q: Record<string, unknown>): Window {
+export function parseWindow(q: Record<string, unknown>): Window {
   const to = parseDay(q.to as string | undefined) ?? new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z");
   const from = parseDay(q.from as string | undefined) ?? new Date(to.getTime() - 89 * DAY);
   return { from, to };
 }
 
 /** Optional compare window; defaults to the same-length period immediately before. */
-function parseCompare(q: Record<string, unknown>, win: Window): Window {
+export function parseCompare(q: Record<string, unknown>, win: Window): Window {
   const from = parseDay(q.compareFrom as string | undefined);
   const to = parseDay(q.compareTo as string | undefined);
   if (from && to) return { from, to };
