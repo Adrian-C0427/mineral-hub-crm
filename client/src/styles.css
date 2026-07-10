@@ -74,7 +74,7 @@
 :root[data-theme="light"] .resp-no,
 :root[data-theme="light"] .resp-passed { background: rgba(107,114,128,0.14); color: #4b5563; }
 :root[data-theme="light"] .crit-yes { background: rgba(22,163,74,0.12); color: #15803d; }
-:root[data-theme="light"] .crit-no { background: rgba(220,38,38,0.10); color: #b91c1c; }
+:root[data-theme="light"] .crit-no { background: rgba(15,23,42,0.06); color: #64748b; }
 :root[data-theme="light"] .banner-warn { background: rgba(180,83,9,0.08); border-color: rgba(180,83,9,0.30); color: #92400e; }
 :root[data-theme="light"] .banner-error { background: rgba(220,38,38,0.07); border-color: rgba(220,38,38,0.30); color: #b91c1c; }
 :root[data-theme="light"] .banner-info { background: rgba(37,99,235,0.07); border-color: rgba(37,99,235,0.30); color: #1d4ed8; }
@@ -436,7 +436,10 @@ table.data-table {
 .data-table td { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
 .data-table td .wrap { white-space: normal; }
 .empty-cell { text-align: center; color: var(--text-dim); padding: 32px; }
-tr.row-overdue td { background: rgba(239, 68, 68, 0.08); }
+/* Overdue: a 3px left accent instead of a full-row wash — the row reads as
+   flagged without shouting (the light theme's pink rows were the loudest
+   element on the page). The Find Buyer By date still renders red. */
+tr.row-overdue td:first-child { box-shadow: inset 3px 0 0 var(--red); }
 tr.row-dimmed td { opacity: 0.5; }
 tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid var(--border); }
 
@@ -484,7 +487,7 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .match-gray-bg { background: var(--gray); }
 .crit-tag { display:inline-block; font-size: 11px; padding: 2px 8px; border-radius: 4px; margin: 0 4px 4px 0; }
 .crit-yes { background: rgba(34,197,94,0.16); color:#86efac; }
-.crit-no { background: rgba(239,68,68,0.16); color:#fca5a5; }
+.crit-no { background: var(--panel-2); color: var(--text-dim); }
 .match-card { border:1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 10px; background: var(--panel-2); }
 .match-card-head { display:flex; align-items:center; gap:10px; margin-bottom: 6px; }
 .match-rank { font-weight:700; color: var(--text-dim); width: 28px; }
@@ -797,6 +800,12 @@ body.modal-open { overflow: hidden; }
 .fit-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px 14px; }
 .anomaly-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; }
 tr.row-base td { background: var(--panel-2); font-weight: 600; }
+
+/* Horizontal-overflow affordance: fade at the right edge while more columns
+   are off-screen; disappears when scrolled to the end. */
+.table-edge-wrap { position: relative; }
+.table-fade-r { position: absolute; top: 0; bottom: 0; right: 0; width: 34px; pointer-events: none; z-index: 6;
+  background: linear-gradient(to left, var(--bg), transparent); }
 
 /* --- Searchable multi-select --- */
 .msel { position: relative; }
@@ -1254,7 +1263,7 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .deal-detail .match-bar { height: 5px; border-radius: 3px; margin: 12px 0; }
 .deal-detail .crit-tag { border-radius: 99px; padding: 4px 11px; font-size: 11.5px; font-weight: 600; margin: 0 7px 7px 0; border: 1px solid transparent; }
 .deal-detail .crit-tag.crit-yes { border-color: rgba(34, 197, 94, 0.3); }
-.deal-detail .crit-tag.crit-no { border-color: rgba(244, 63, 94, 0.3); }
+.deal-detail .crit-tag.crit-no { border-color: var(--border); opacity: 0.75; }
 
 /* Documents folder pills */
 .doc-chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 2px 0 4px; }
