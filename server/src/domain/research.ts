@@ -169,13 +169,20 @@ export function normInstrument(s: string | null | undefined): string {
   return (s ?? "").toUpperCase().replace(/\s+/g, "");
 }
 
+/** Normalize a free-text field for comparison: trim + collapse whitespace +
+ *  uppercase, with null/empty treated as equal. */
+export function normField(s: string | null | undefined): string {
+  return (s ?? "").trim().replace(/\s+/g, " ").toUpperCase();
+}
+
 /**
- * The full recording signature used to detect TRUE duplicate documents.
+ * The full recording signature used to detect TRUE duplicate documents: a row
+ * is a duplicate only when EVERY mapped field matches an existing record.
  * Instrument number ALONE is not unique — county-clerk exports repeat one
  * instrument across each grantor/grantee and legal tract, so keying on it alone
- * falsely flags distinct rows. A record is only a duplicate when it matches on
- * the whole signature: geography + normalized instrument + recording date + doc
- * type + normalized grantor + normalized grantee.
+ * falsely flags distinct rows. The signature covers geography + normalized
+ * instrument + recording date + doc type + normalized parties + volume/page +
+ * abstract.
  */
 export function documentDedupeKey(p: {
   state: string;
@@ -185,6 +192,9 @@ export function documentDedupeKey(p: {
   docType: string;
   grantorNorm: string | null;
   granteeNorm: string | null;
+  volume?: string | null;
+  page?: string | null;
+  abstractId?: string | null;
 }): string {
   return [
     p.state.toUpperCase(),
@@ -194,6 +204,9 @@ export function documentDedupeKey(p: {
     p.docType,
     p.grantorNorm ?? "",
     p.granteeNorm ?? "",
+    normField(p.volume),
+    normField(p.page),
+    normField(p.abstractId),
   ].join("|");
 }
 

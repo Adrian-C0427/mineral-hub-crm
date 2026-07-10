@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
-import { Banner, Spinner, ConfirmDelete } from "./ui";
+import { Banner, Spinner, ConfirmDelete, Modal } from "./ui";
 import { Select } from "./Select";
 import { downloadCsv } from "../lib/csv";
 import { fmtDate } from "../lib/format";
@@ -17,11 +17,18 @@ const CATEGORY_LABEL: Record<Category, string> = { deeds: "Deeds", leases: "Leas
 
 interface FieldDef { key: string; label: string; required?: boolean }
 interface AnalyzeResp { headers: string[]; fields: FieldDef[]; suggestedMapping: Record<string, string>; rowCount: number; sample: Record<string, string>[] }
-interface CommitResp { runId: string; rowsTotal: number; imported: number; skipped: number; failed: number; skippedReasons: { reason: string; count: number }[] }
+interface CommitResp {
+  runId: string; rowsTotal: number;
+  imported: number; updated: number; duplicates: number; rejected: number;
+  skippedReasons: { reason: string; count: number }[];
+}
 interface IngestRun {
   id: string; kind: string; source: string; state: string | null; county: string | null; filename: string | null;
-  rowsTotal: number; rowsImported: number; rowsSkipped: number; rowsFailed: number; status: string; createdAt: string;
+  rowsTotal: number; rowsImported: number; rowsSkipped: number; rowsFailed: number; rowsUpdated: number; status: string; createdAt: string;
 }
+type RowOutcome = "IMPORTED" | "DUPLICATE" | "UPDATED" | "REJECTED";
+interface ReviewRow { rowIndex: number; outcome: RowOutcome; reason: string | null; data: Record<string, string> }
+interface ReviewResp { kind: "DOCUMENTS" | "PERMITS"; rows: ReviewRow[] }
 
 // Templates match the canonical columns for each Data Type.
 const DEED_TEMPLATE = {
@@ -61,6 +68,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
   const [selectedRuns, setSelectedRuns] = useState<Set<string>>(new Set());
   const [confirmRuns, setConfirmRuns] = useState(false);
   const [deletingRuns, setDeletingRuns] = useState(false);
+  const [reviewRun, setReviewRun] = useState<IngestRun | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const loadRuns = () => api.get<IngestRun[]>("/research/ingest/runs").then(setRuns).catch(() => {});
@@ -202,14 +210,15 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
               <span className="import-summary-title">Import complete</span>
             </div>
             <div className="import-summary-stats">
-              <div className="iss iss-ok"><span className="iss-num">{result.imported.toLocaleString()}</span><span className="iss-lbl">Imported</span></div>
-              <div className="iss"><span className="iss-num">{result.rowsTotal.toLocaleString()}</span><span className="iss-lbl">Total rows</span></div>
-              {result.skipped > 0 && <div className="iss iss-warn"><span className="iss-num">{result.skipped.toLocaleString()}</span><span className="iss-lbl">Skipped</span></div>}
-              {result.failed > 0 && <div className="iss iss-bad"><span className="iss-num">{result.failed.toLocaleString()}</span><span className="iss-lbl">Unreadable</span></div>}
+              <div className="iss"><span className="iss-num">{result.rowsTotal.toLocaleString()}</span><span className="iss-lbl">Processed</span></div>
+              <div className="iss iss-ok"><span className="iss-num">{result.imported.toLocaleString()}</span><span className="iss-lbl">New imported</span></div>
+              {result.updated > 0 && <div className="iss iss-upd"><span className="iss-num">{result.updated.toLocaleString()}</span><span className="iss-lbl">Updated</span></div>}
+              {result.duplicates > 0 && <div className="iss iss-warn"><span className="iss-num">{result.duplicates.toLocaleString()}</span><span className="iss-lbl">Duplicates skipped</span></div>}
+              {result.rejected > 0 && <div className="iss iss-bad"><span className="iss-num">{result.rejected.toLocaleString()}</span><span className="iss-lbl">Rejected</span></div>}
             </div>
             {result.skippedReasons.length > 0 && (
               <div className="import-summary-reasons">
-                <span className="ddx-label">Why rows were skipped</span>
+                <span className="ddx-label">Why rows were skipped or rejected</span>
                 <ul>
                   {result.skippedReasons.map((r) => (
                     <li key={r.reason}><span className="isr-count">{r.count.toLocaleString()}×</span><span>{r.reason}</span></li>
@@ -217,11 +226,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
                 </ul>
               </div>
             )}
-            {result.failed > 0 && (
-              <p className="import-summary-note muted">
-                {result.failed.toLocaleString()} row{result.failed === 1 ? "" : "s"} couldn't be read — usually a missing or invalid recording date, or a missing required field.
-              </p>
-            )}
+            <ImportReview runId={result.runId} />
           </div>
         )}
       </div>
@@ -239,7 +244,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
           <div className="table-scroll"><table className="data-table">
             <thead><tr>
               <th style={{ width: 28 }}><input type="checkbox" checked={runs.length > 0 && runs.every((r) => selectedRuns.has(r.id))} onChange={(e) => setSelectedRuns(e.target.checked ? new Set(runs.map((r) => r.id)) : new Set())} /></th>
-              <th>Date</th><th>Type</th><th>Geography</th><th>File</th><th>Imported</th><th>Skipped</th><th>Failed</th>
+              <th>Date</th><th>Type</th><th>Geography</th><th>File</th><th>Imported</th><th>Updated</th><th>Duplicates</th><th>Rejected</th><th></th>
             </tr></thead>
             <tbody>
               {runs.map((r) => (
@@ -250,12 +255,20 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
                   <td>{[r.county, r.state].filter(Boolean).join(", ") || "—"}</td>
                   <td>{r.filename ?? "—"}</td>
                   <td>{r.rowsImported.toLocaleString()}</td>
+                  <td>{(r.rowsUpdated ?? 0).toLocaleString()}</td>
                   <td>{r.rowsSkipped.toLocaleString()}</td>
                   <td>{r.rowsFailed.toLocaleString()}</td>
+                  <td className="right"><button className="small" onClick={() => setReviewRun(r)}>Review</button></td>
                 </tr>
               ))}
             </tbody>
           </table></div>
+        )}
+        {reviewRun && (
+          <Modal title={`Import review — ${reviewRun.filename ?? runTypeLabel(reviewRun.source)} (${fmtDate(reviewRun.createdAt)})`} wide onClose={() => setReviewRun(null)}
+            footer={<button className="primary" onClick={() => setReviewRun(null)}>Done</button>}>
+            <ImportReview runId={reviewRun.id} />
+          </Modal>
         )}
         {confirmRuns && (
           <ConfirmDelete count={selectedRuns.size} itemLabel="import" busy={deletingRuns}
@@ -269,6 +282,97 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
             }} />
         )}
       </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Import review — inspect exactly which rows were imported, skipped as
+// duplicates, updated, or rejected (and why), per import run. Exportable.
+// ---------------------------------------------------------------------------
+
+const OUTCOME_TABS: { key: RowOutcome; label: string }[] = [
+  { key: "IMPORTED", label: "New" },
+  { key: "DUPLICATE", label: "Duplicates" },
+  { key: "UPDATED", label: "Updated" },
+  { key: "REJECTED", label: "Rejected" },
+];
+const DOC_COLS: [string, string][] = [
+  ["docType", "Doc Type"], ["recordingDate", "Recorded"], ["grantor", "Grantor"], ["grantee", "Grantee"],
+  ["instrumentNumber", "Instrument #"], ["volume", "Vol"], ["page", "Pg"], ["county", "County"], ["state", "St"], ["abstractId", "Abstract"],
+];
+const PERMIT_COLS: [string, string][] = [
+  ["operator", "Operator"], ["apiNumber", "API"], ["permitNumber", "Permit"], ["leaseName", "Lease"], ["wellName", "Well"],
+  ["status", "Status"], ["filedDate", "Filed"], ["approvedDate", "Approved"], ["county", "County"], ["state", "St"], ["formation", "Formation"],
+];
+
+function ImportReview({ runId }: { runId: string }) {
+  const [resp, setResp] = useState<ReviewResp | null>(null);
+  const [tab, setTab] = useState<RowOutcome>("IMPORTED");
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    setResp(null); setErr(""); setTab("IMPORTED");
+    api.get<ReviewResp>(`/research/ingest/runs/${runId}/rows`).then(setResp).catch((e) => setErr(e instanceof Error ? e.message : "Could not load the review"));
+  }, [runId]);
+
+  if (err) return <Banner kind="error">{err}</Banner>;
+  if (!resp) return <Spinner label="Loading import review…" />;
+  if (resp.rows.length === 0) {
+    return <p className="muted" style={{ margin: "12px 0 0", fontSize: 13 }}>No per-row detail is stored for this import (imports made before the review feature don't have one).</p>;
+  }
+
+  const counts = new Map<RowOutcome, number>();
+  for (const r of resp.rows) counts.set(r.outcome, (counts.get(r.outcome) ?? 0) + 1);
+  const rows = resp.rows.filter((r) => r.outcome === tab);
+  const cols = resp.kind === "PERMITS" ? PERMIT_COLS : DOC_COLS;
+  const showReason = tab !== "IMPORTED";
+
+  function exportCsv() {
+    if (!resp) return;
+    downloadCsv(
+      `import-review-${runId.slice(0, 8)}.csv`,
+      ["Row", "Outcome", "Reason", ...cols.map(([, l]) => l)],
+      resp.rows.map((r) => [r.rowIndex + 1, r.outcome, r.reason ?? "", ...cols.map(([k]) => r.data[k] ?? "")]),
+    );
+  }
+
+  return (
+    <div className="import-review">
+      <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 14 }}>
+        <span className="ddx-label" style={{ marginRight: 2 }}>Review this import</span>
+        <div className="pill-filter">
+          {OUTCOME_TABS.map((t) => {
+            const n = counts.get(t.key) ?? 0;
+            return (
+              <button key={t.key} type="button" className={tab === t.key ? "active" : ""} disabled={n === 0} style={n === 0 ? { opacity: 0.45 } : undefined}
+                onClick={() => setTab(t.key)}>
+                {t.label} ({n.toLocaleString()})
+              </button>
+            );
+          })}
+        </div>
+        <span className="spacer" />
+        <button type="button" className="small" onClick={exportCsv}>Export summary (CSV)</button>
+      </div>
+      {rows.length === 0 ? (
+        <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>No rows in this category.</p>
+      ) : (
+        <div className="table-scroll" style={{ marginTop: 10, maxHeight: 340, overflowY: "auto" }}>
+          <table className="data-table">
+            <thead><tr><th style={{ width: 52 }}>Row</th>{cols.map(([k, l]) => <th key={k}>{l}</th>)}{showReason && <th>Reason</th>}</tr></thead>
+            <tbody>
+              {rows.slice(0, 500).map((r) => (
+                <tr key={r.rowIndex}>
+                  <td className="muted">{r.rowIndex + 1}</td>
+                  {cols.map(([k]) => <td key={k}>{r.data[k] || "—"}</td>)}
+                  {showReason && <td className="muted">{r.reason ?? "—"}</td>}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {rows.length > 500 && <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>Showing the first 500 of {rows.length.toLocaleString()} rows — use Export for the complete list.</p>}
     </div>
   );
 }

@@ -228,4 +228,13 @@ describe("document duplicate detection", () => {
     expect(documentDedupeKey(base)).not.toBe(documentDedupeKey({ ...base, recordingDate: new Date("2026-03-13T00:00:00Z") }));
     expect(documentDedupeKey(base)).not.toBe(documentDedupeKey({ ...base, docType: "ROYALTY_DEED" }));
   });
+
+  it("covers every mapped field: volume/page/abstract differences are NOT duplicates", () => {
+    const withVol = { ...base, volume: "123", page: "45", abstractId: "289653" };
+    expect(documentDedupeKey(withVol)).toBe(documentDedupeKey({ ...withVol, volume: " 123 ", page: "45 " })); // normalization
+    expect(documentDedupeKey(withVol)).not.toBe(documentDedupeKey({ ...withVol, volume: "124" }));
+    expect(documentDedupeKey(withVol)).not.toBe(documentDedupeKey({ ...withVol, abstractId: "289654" }));
+    // Unmapped/absent fields compare as empty on both sides.
+    expect(documentDedupeKey(base)).toBe(documentDedupeKey({ ...base, volume: "", page: null }));
+  });
 });

@@ -509,6 +509,7 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .iss-num { font-size: 22px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .iss-lbl { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); }
 .iss-ok .iss-num { color: var(--green); }
+.iss-upd .iss-num { color: var(--accent); }
 .iss-warn .iss-num { color: var(--amber); }
 .iss-bad .iss-num { color: var(--red); }
 .import-summary-reasons { margin-top: 16px; }

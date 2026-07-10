@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  Mail, Bot, Map as MapIcon, HardDrive, Calendar, Calculator, Megaphone, ShieldCheck,
+  Mail, Bot, HardDrive, Calendar, Megaphone, ShieldCheck,
   Users, Cloud, Hash, type LucideIcon,
 } from "lucide-react";
 import { api, ApiError } from "../api/client";
@@ -27,8 +27,8 @@ interface Provider {
 }
 
 const CATEGORY_ICON: Record<string, LucideIcon> = {
-  "Email & Communication": Mail, "AI & Automation": Bot, "GIS & Mapping": MapIcon,
-  "Storage & Documents": HardDrive, "Productivity": Calendar, "Accounting & Finance": Calculator,
+  "Email & Communication": Mail, "AI & Automation": Bot,
+  "Storage & Documents": HardDrive, "Productivity": Calendar,
   "CRM & Marketing": Megaphone, "Authentication": ShieldCheck,
 };
 
@@ -45,11 +45,9 @@ const AUTH_LABEL: Record<Auth, string> = { oauth: "OAuth 2.0", apikey: "API key"
 // brand-matched glyph below instead (a clean, recognizable alternative).
 const LOGO_SLUG: Record<string, string> = {
   gmail: "gmail", claude: "claude", openai: "openai", gemini: "googlegemini", perplexity: "perplexity",
-  mapbox: "mapbox", googlemaps: "googlemaps", arcgis: "arcgis",
   googledrive: "googledrive", dropbox: "dropbox", box: "box",
-  calendly: "calendly", googlecalendar: "googlecalendar",
-  quickbooks: "quickbooks", xero: "xero", hubspot: "hubspot", mailchimp: "mailchimp",
-  salesforce: "salesforce", googlesignin: "google", okta: "okta",
+  googlecalendar: "googlecalendar", mailchimp: "mailchimp",
+  googlesignin: "google",
 };
 // Brand-matched glyphs for providers without a usable Simple Icons mark: the
 // glyph echoes the provider's identity (Slack's mark IS a hash; Outlook = mail;

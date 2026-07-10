@@ -154,7 +154,7 @@ type PageTab = "workspace" | "saved" | "data";
 type ResultTab = "production" | "forecast" | "cashflow" | "valuation" | "sensitivity" | "report";
 
 export function Valuation() {
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const canManage = can("manageWellAnalysis");
   const [pageTab, setPageTab] = useState<PageTab>("workspace");
 
@@ -254,7 +254,12 @@ export function Valuation() {
     try {
       if (reportRef.current) {
         const name = openAnalysisName || analysis.wells.map((w) => w.name).join("_").slice(0, 60) || "valuation";
-        await exportElementToPdf(reportRef.current, `${name.replace(/[^\w\-]+/g, "-")}-valuation.pdf`);
+        await exportElementToPdf(reportRef.current, `${name.replace(/[^\w\-]+/g, "-")}-valuation.pdf`, {
+          title: "Well Analysis & Valuation",
+          subtitle: openAnalysisName || analysis.wells.map((w) => w.name).join(", ").slice(0, 80),
+          orgName: user?.organization?.name,
+          logoUrl: user?.organization?.fullLogo,
+        });
       }
     } catch (e) {
       setExportErr(e instanceof Error ? e.message : "PDF export failed — please try again.");
