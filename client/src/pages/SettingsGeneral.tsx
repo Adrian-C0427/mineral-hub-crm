@@ -7,6 +7,7 @@ import { TwoFactorSettings } from "../components/TwoFactorSettings";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import { CompanyBranding } from "../components/CompanyBranding";
 import { AppearanceSettings } from "../components/AppearanceSettings";
+import { NotificationSettings } from "../components/NotificationSettings";
 import { SettingsNav } from "../components/SettingsNav";
 
 /** General settings — account/profile now; structured for more sections later. */
@@ -90,6 +91,8 @@ export function SettingsGeneral() {
 
       <TwoFactorSettings />
 
+      <NotificationSettings />
+
       <AppearanceSettings />
 
       <CompanyBranding />
@@ -97,7 +100,7 @@ export function SettingsGeneral() {
       {/* One line instead of a stack of placeholder panels — empty promise
           sections add scroll and make the finished ones feel less finished. */}
       <p className="muted" style={{ fontSize: 12, textAlign: "center" }}>
-        Coming soon: notification preferences · per-user defaults
+        Coming soon: per-user defaults
       </p>
     </div>
   );

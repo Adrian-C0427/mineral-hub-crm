@@ -351,8 +351,19 @@ model User {
   expenses           Expense[]
   sellerAssignments  DealSeller[]        @relation("SellerAssignments")
   assignedDeals      Deal[]              @relation("DealAssignees")
+  notificationPreference NotificationPreference?
 
   @@index([organizationId])
+}
+
+// Per-user notification muting. A separate table (not a User column) so the
+// generated client for existing models is untouched — additive and safe for
+// trees/databases that haven't migrated yet. Types not listed are delivered.
+model NotificationPreference {
+  userId     String   @id
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  mutedTypes String[] @default([])
+  updatedAt  DateTime @updatedAt
 }
 
 // Single-use, time-limited password reset token. Only the SHA-256 hash of the

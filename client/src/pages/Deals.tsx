@@ -90,14 +90,15 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
         </Banner>
       )}
 
-      <div className="chip-row" style={{ marginBottom: 16 }}>
-        {([["ALL", "All"], ["HIGH", "High Priority"], ["NO_BUYER", "No Buyer Assigned"]] as [Filter, string][]).map(([f, label]) => (
-          <span key={f} className={`chip ${filter === f ? "active" : ""}`} onClick={() => setFilter(f)}>{label}</span>
-        ))}
-      </div>
-
       <SortableTable
         customizeId="deals-list"
+        toolbar={
+          <div className="chip-row">
+            {([["ALL", "All"], ["HIGH", "High Priority"], ["NO_BUYER", "No Buyer Assigned"]] as [Filter, string][]).map(([f, label]) => (
+              <span key={f} className={`chip ${filter === f ? "active" : ""}`} onClick={() => setFilter(f)}>{label}</span>
+            ))}
+          </div>
+        }
         columns={columns}
         rows={filtered}
         rowKey={(d) => d.id}

@@ -83,18 +83,19 @@ export function Buyers() {
         </div>
       </div>
 
-      <div className="row" style={{ gap: 10, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
-        <div style={{ position: "relative", flex: "1 1 260px", maxWidth: 380 }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-dim)", pointerEvents: "none" }}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search company, contact, focus area…" style={{ paddingLeft: 32 }} aria-label="Search buyers" />
-        </div>
-        <Select value={rel} onChange={setRel} width={170} placeholder="All relationships" clearable ariaLabel="Filter by relationship"
-          options={[{ value: "HOT", label: "Hot" }, { value: "WARM", label: "Warm" }, { value: "COLD", label: "Cold" }]} />
-        {(q || rel) && <span className="muted" style={{ fontSize: 13 }}>Showing {filtered.length} of {buyers.length}</span>}
-      </div>
-
       <SortableTable
         customizeId="buyers-list"
+        toolbar={
+          <>
+            <div style={{ position: "relative", flex: "1 1 240px", maxWidth: 380 }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-dim)", pointerEvents: "none" }}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search company, contact, focus area…" style={{ paddingLeft: 32 }} aria-label="Search buyers" />
+            </div>
+            <Select value={rel} onChange={setRel} width={170} placeholder="All relationships" clearable ariaLabel="Filter by relationship"
+              options={[{ value: "HOT", label: "Hot" }, { value: "WARM", label: "Warm" }, { value: "COLD", label: "Cold" }]} />
+            {(q || rel) && <span className="muted" style={{ fontSize: 13, whiteSpace: "nowrap" }}>Showing {filtered.length} of {buyers.length}</span>}
+          </>
+        }
         columns={columns}
         rows={filtered}
         rowKey={(b) => b.id}
