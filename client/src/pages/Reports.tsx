@@ -172,7 +172,14 @@ export function Reports() {
   async function onExport() {
     if (!reportRef.current) return;
     setExporting(true); setExportErr(null);
-    try { await exportElementToPdf(reportRef.current, `mineral-hub-report-${range.from}_to_${range.to}.pdf`); }
+    try {
+      await exportElementToPdf(reportRef.current, `mineral-hub-report-${range.from}_to_${range.to}.pdf`, {
+        title: "Reports & Analytics",
+        subtitle: `${fmtDate(range.from)} – ${fmtDate(range.to)}`,
+        orgName: user?.organization?.name,
+        logoUrl: user?.organization?.fullLogo,
+      });
+    }
     catch (e) { setExportErr(e instanceof Error ? e.message : "PDF export failed — please try again."); }
     finally { setExporting(false); }
   }

@@ -184,7 +184,7 @@ interface RelationshipsData {
 type TxSelector = { grantorNorm?: string; granteeNorm?: string; members?: string[]; path?: string[]; entityNorm?: string };
 
 export function Research() {
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const [period, setPeriod] = useState<Period>("LAST_90D");
   const [custom, setCustom] = useState({ from: "", to: "" });
   const [compare, setCompare] = useState<Compare>("PREV_PERIOD");
@@ -221,7 +221,14 @@ export function Research() {
   async function onExportPdf() {
     if (!captureRef.current) return;
     setExporting(true); setExportErr(null);
-    try { await exportElementToPdf(captureRef.current, `market-intel-${range.from}_to_${range.to}.pdf`); }
+    try {
+      await exportElementToPdf(captureRef.current, `market-intel-${range.from}_to_${range.to}.pdf`, {
+        title: "Research & Market Intelligence",
+        subtitle: `${fmtDate(range.from)} – ${fmtDate(range.to)}`,
+        orgName: user?.organization?.name,
+        logoUrl: user?.organization?.fullLogo,
+      });
+    }
     catch (e) { setExportErr(e instanceof Error ? e.message : "PDF export failed — please try again."); }
     finally { setExporting(false); }
   }

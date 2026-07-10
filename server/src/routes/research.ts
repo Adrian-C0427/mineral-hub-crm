@@ -8,7 +8,7 @@ import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest }
 import {
   autoGranularity, bucketKey, bucketRange, classifyDocType, classifyPermitStatus,
   classifyTrajectory, detectHotspot, documentDedupeKey, historyWindows, normalizeEntity,
-  rollingAverage, surgeSeverity, trend, type Trend,
+  normField, rollingAverage, surgeSeverity, trend, type Trend,
 } from "../domain/research.js";
 import { fieldsFor, guessMapping, sourceFor } from "../domain/researchSources.js";
 import {
@@ -1115,9 +1115,9 @@ researchRouter.post(
       return Number.isFinite(n) ? n : null;
     };
 
-    let imported = 0, skipped = 0, failed = 0;
+    let imported = 0, updated = 0, duplicates = 0, rejected = 0;
     const skippedReasons = new Map<string, number>();
-    const skip = (reason: string) => { skipped++; skippedReasons.set(reason, (skippedReasons.get(reason) ?? 0) + 1); };
+    const countReason = (reason: string) => skippedReasons.set(reason, (skippedReasons.get(reason) ?? 0) + 1);
 
     // Create the import batch first so every row it produces can be stamped with
     // its ingestRunId — that FK is what lets a single import be deleted later
@@ -1129,64 +1129,91 @@ researchRouter.post(
       },
     });
 
+    // Per-row outcome trail (IMPORTED / DUPLICATE / UPDATED / REJECTED) — powers
+    // the post-import review views and the exportable summary. Cascades with the
+    // run, so deleting an import also removes its review trail.
+    type RowOutcome = "IMPORTED" | "DUPLICATE" | "UPDATED" | "REJECTED";
+    const review: Prisma.ResearchIngestRowCreateManyInput[] = [];
+    const record = (rowIndex: number, outcome: RowOutcome, reason: string | null, data: Record<string, string>) => {
+      if (outcome === "DUPLICATE") { duplicates++; if (reason) countReason(reason); }
+      if (outcome === "UPDATED") updated++;
+      if (outcome === "REJECTED") { rejected++; if (reason) countReason(reason); }
+      review.push({ organizationId: org, ingestRunId: run.id, rowIndex, outcome, reason, data });
+    };
+
     if (kind === "DOCUMENTS") {
-      // Duplicate detection keys on the FULL recording signature, not the
-      // instrument number alone (county exports repeat one instrument across each
-      // grantor/grantee and legal tract, so instrument-only keys falsely flag
-      // distinct rows). See documentDedupeKey. We track existing-in-DB and
-      // seen-in-this-file separately so the summary explains each skip.
+      // Automatic duplicate detection: a row is a duplicate ONLY when every
+      // mapped field matches an existing record (see documentDedupeKey — never
+      // the instrument number alone, which county exports repeat across each
+      // grantor/grantee and legal tract). Existing-in-DB vs seen-in-this-file
+      // are reported as distinct reasons.
       const existingKeys = new Set(
         (await prisma.researchDocument.findMany({
-          where: { organizationId: org, instrumentNumber: { not: null } },
-          select: { instrumentNumber: true, county: true, state: true, recordingDate: true, docType: true, grantorNorm: true, granteeNorm: true },
+          where: { organizationId: org },
+          select: {
+            instrumentNumber: true, county: true, state: true, recordingDate: true, docType: true,
+            grantorNorm: true, granteeNorm: true, volume: true, page: true, abstractId: true,
+          },
         })).map((r) => documentDedupeKey({
           state: r.state, county: r.county, instrumentNumber: r.instrumentNumber,
           recordingDate: r.recordingDate, docType: r.docType, grantorNorm: r.grantorNorm, granteeNorm: r.granteeNorm,
+          volume: r.volume, page: r.page, abstractId: r.abstractId,
         })),
       );
       const seenInFile = new Set<string>();
-      // A few example signatures per duplicate class, logged for diagnostics.
       const dupeExamples: string[] = [];
       const REASON_EXISTING = "Duplicate of an already-imported record";
       const REASON_IN_FILE = "Duplicate row within this file";
 
       const batch: Prisma.ResearchDocumentCreateManyInput[] = [];
-      for (const row of rows) {
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
         const docTypeRaw = get(row, "docType");
+        // The mapped values, exactly as the reviewer should see them.
+        const data: Record<string, string> = {
+          docType: docTypeRaw, recordingDate: get(row, "recordingDate"),
+          grantor: get(row, "grantor"), grantee: get(row, "grantee"),
+          instrumentNumber: get(row, "instrumentNumber"), volume: get(row, "volume"), page: get(row, "page"),
+          state: get(row, "state") || fallbackState || "", county: get(row, "county") || fallbackCounty || "",
+          abstractId: get(row, "abstractId"),
+        };
         const cls = classifyDocType(docTypeRaw);
-        if (!cls) { skip(docTypeRaw ? `Not mineral-related: "${docTypeRaw}"` : "Missing document type"); continue; }
+        if (!cls) { record(i, "REJECTED", docTypeRaw ? `Not mineral-related: "${docTypeRaw}"` : "Missing document type", data); continue; }
         // Scope to the selected Data Type: Deeds keep transfers, Leases keep leases.
         if (wantClass && cls.docClass !== wantClass) {
-          skip(cls.docClass === "LEASE" ? "Lease document — import under Leases" : "Deed document — import under Deeds");
+          record(i, "REJECTED", cls.docClass === "LEASE" ? "Lease document — import under Leases" : "Deed document — import under Deeds", data);
           continue;
         }
         const recordingDate = parseRecordDate(get(row, "recordingDate"));
-        if (!recordingDate) { failed++; continue; }
+        if (!recordingDate) { record(i, "REJECTED", "Missing or unreadable recording date", data); continue; }
         // Geography from mapped columns, else the file-level assigned fallback.
         const rowState = get(row, "state") ? normState(get(row, "state")) : fallbackState;
         const rowCounty = get(row, "county") ? titleCounty(get(row, "county")) : fallbackCounty;
-        if (!rowState || !rowCounty) { skip("Missing county/state (assign one for this file)"); continue; }
+        if (!rowState || !rowCounty) { record(i, "REJECTED", "Missing county/state (assign one for this file)", data); continue; }
         const instrumentNumber = get(row, "instrumentNumber") || null;
         const grantor = get(row, "grantor") || null;
         const grantee = get(row, "grantee") || null;
         const grantorNorm = normalizeEntity(grantor);
         const granteeNorm = normalizeEntity(grantee);
-        // Only rows carrying an instrument number are dedupe-eligible, and a match
-        // must agree on the whole signature — never the instrument number alone.
-        if (instrumentNumber) {
-          const key = documentDedupeKey({ state: rowState, county: rowCounty, instrumentNumber, recordingDate, docType: cls.docType, grantorNorm, granteeNorm });
-          const example = `${instrumentNumber} · ${recordingDate.toISOString().slice(0, 10)} · ${grantor ?? "?"} → ${grantee ?? "?"}`;
-          if (existingKeys.has(key)) { if (dupeExamples.length < 5) dupeExamples.push(`existing: ${example}`); skip(REASON_EXISTING); continue; }
-          if (seenInFile.has(key)) { if (dupeExamples.length < 5) dupeExamples.push(`in-file: ${example}`); skip(REASON_IN_FILE); continue; }
-          seenInFile.add(key);
-        }
+        const volume = get(row, "volume") || null;
+        const page = get(row, "page") || null;
+        const abstractId = get(row, "abstractId") || null;
+        const key = documentDedupeKey({
+          state: rowState, county: rowCounty, instrumentNumber, recordingDate, docType: cls.docType,
+          grantorNorm, granteeNorm, volume, page, abstractId,
+        });
+        const example = `${instrumentNumber ?? "no-instr"} · ${recordingDate.toISOString().slice(0, 10)} · ${grantor ?? "?"} → ${grantee ?? "?"}`;
+        if (existingKeys.has(key)) { if (dupeExamples.length < 5) dupeExamples.push(`existing: ${example}`); record(i, "DUPLICATE", REASON_EXISTING, data); continue; }
+        if (seenInFile.has(key)) { if (dupeExamples.length < 5) dupeExamples.push(`in-file: ${example}`); record(i, "DUPLICATE", REASON_IN_FILE, data); continue; }
+        seenInFile.add(key);
+        record(i, "IMPORTED", null, data);
         batch.push({
           organizationId: org, state: rowState, county: rowCounty,
           docTypeRaw, docType: cls.docType, docClass: cls.docClass,
-          instrumentNumber, volume: get(row, "volume") || null, page: get(row, "page") || null,
+          instrumentNumber, volume, page,
           recordingDate,
           grantor, grantee, grantorNorm, granteeNorm,
-          abstractId: get(row, "abstractId") || null,
+          abstractId,
           source, ingestRunId: run.id,
         });
       }
@@ -1194,49 +1221,126 @@ researchRouter.post(
         const r = await prisma.researchDocument.createMany({ data: batch.slice(i, i + CHUNK) });
         imported += r.count;
       }
-      // Diagnostics: make a surprising skip count explainable in the server log.
-      const dupExisting = skippedReasons.get(REASON_EXISTING) ?? 0;
-      const dupInFile = skippedReasons.get(REASON_IN_FILE) ?? 0;
-      if (dupExisting + dupInFile > 0) {
-        console.info(`[research-import] run ${run.id} (${source}): ${imported} imported · ${dupExisting} match existing · ${dupInFile} in-file dup · examples: ${dupeExamples.join(" | ") || "—"}`);
+      // Diagnostics: make a surprising duplicate count explainable in the server log.
+      if (duplicates > 0) {
+        console.info(`[research-import] run ${run.id} (${source}): ${imported} imported · ${duplicates} duplicates · examples: ${dupeExamples.join(" | ") || "—"}`);
       }
     } else {
-      const existing = new Set(
-        (await prisma.researchPermit.findMany({
-          where: { organizationId: org },
-          select: { apiNumber: true, permitNumber: true, county: true, state: true },
-        })).map((r) => `${r.state}|${r.county}|${r.apiNumber ?? ""}|${r.permitNumber ?? ""}`),
-      );
+      // Permits: the API/permit number is the record's identity. An incoming row
+      // whose identity matches an existing record is a DUPLICATE when every
+      // mapped field is identical, or an UPDATE (the existing record is
+      // refreshed in place) when fields changed — e.g. a status or spud date
+      // amendment. Rows without an identity dedupe on the full field signature.
+      type PermitCmp = {
+        id: string; operatorNorm: string; leaseName: string | null; wellName: string | null;
+        status: ResearchPermitStatus; trajectory: WellTrajectory;
+        filedDate: Date | null; approvedDate: Date | null; spudDate: Date | null; completionDate: Date | null;
+        formation: string | null; field: string | null; totalDepth: number | null; abstractId: string | null;
+        latitude: number | null; longitude: number | null;
+      };
+      const existingPermits = await prisma.researchPermit.findMany({
+        where: { organizationId: org },
+        select: {
+          id: true, state: true, county: true, apiNumber: true, permitNumber: true,
+          operatorNorm: true, leaseName: true, wellName: true, status: true, trajectory: true,
+          filedDate: true, approvedDate: true, spudDate: true, completionDate: true,
+          formation: true, field: true, totalDepth: true, abstractId: true, latitude: true, longitude: true,
+        },
+      });
+      const identityKey = (s: string, c: string, api: string | null, permit: string | null) =>
+        `${s}|${c}|${normField(api)}|${normField(permit)}`;
+      const day = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : "");
+      const fullSig = (p: Omit<PermitCmp, "id">, s: string, c: string, api: string | null, permit: string | null) => [
+        s, c, normField(api), normField(permit), p.operatorNorm, normField(p.leaseName), normField(p.wellName),
+        p.status, p.trajectory ?? "", day(p.filedDate), day(p.approvedDate), day(p.spudDate), day(p.completionDate),
+        normField(p.formation), normField(p.field), p.totalDepth ?? "", normField(p.abstractId), p.latitude ?? "", p.longitude ?? "",
+      ].join("|");
+      const sameFields = (a: Omit<PermitCmp, "id">, b: Omit<PermitCmp, "id">) =>
+        a.operatorNorm === b.operatorNorm && normField(a.leaseName) === normField(b.leaseName) &&
+        normField(a.wellName) === normField(b.wellName) && a.status === b.status && a.trajectory === b.trajectory &&
+        day(a.filedDate) === day(b.filedDate) && day(a.approvedDate) === day(b.approvedDate) &&
+        day(a.spudDate) === day(b.spudDate) && day(a.completionDate) === day(b.completionDate) &&
+        normField(a.formation) === normField(b.formation) && normField(a.field) === normField(b.field) &&
+        (a.totalDepth ?? null) === (b.totalDepth ?? null) && normField(a.abstractId) === normField(b.abstractId) &&
+        (a.latitude ?? null) === (b.latitude ?? null) && (a.longitude ?? null) === (b.longitude ?? null);
+
+      const byIdentity = new Map<string, PermitCmp>();
+      const fullSigs = new Set<string>();
+      for (const p of existingPermits) {
+        if (p.apiNumber || p.permitNumber) byIdentity.set(identityKey(p.state, p.county, p.apiNumber, p.permitNumber), p);
+        fullSigs.add(fullSig(p, p.state, p.county, p.apiNumber, p.permitNumber));
+      }
+
       const batch: Prisma.ResearchPermitCreateManyInput[] = [];
-      for (const row of rows) {
+      const updates: { id: string; data: Prisma.ResearchPermitUpdateInput }[] = [];
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
         const operator = get(row, "operator");
-        if (!operator) { failed++; continue; }
+        const data: Record<string, string> = {
+          operator, apiNumber: get(row, "apiNumber"), permitNumber: get(row, "permitNumber"),
+          leaseName: get(row, "leaseName"), wellName: get(row, "wellName"), status: get(row, "status"),
+          filedDate: get(row, "filedDate"), approvedDate: get(row, "approvedDate"),
+          state: get(row, "state") || fallbackState || "", county: get(row, "county") || fallbackCounty || "",
+          formation: get(row, "formation"),
+        };
+        if (!operator) { record(i, "REJECTED", "Missing operator", data); continue; }
         const rowState = get(row, "state") ? normState(get(row, "state")) : fallbackState;
         const rowCounty = get(row, "county") ? titleCounty(get(row, "county")) : fallbackCounty;
-        if (!rowState || !rowCounty) { skip("Missing county/state (assign one for this file)"); continue; }
+        if (!rowState || !rowCounty) { record(i, "REJECTED", "Missing county/state (assign one for this file)", data); continue; }
         const filedDate = parseRecordDate(get(row, "filedDate"));
         const approvedDate = parseRecordDate(get(row, "approvedDate"));
         const spudDate = parseRecordDate(get(row, "spudDate"));
         const completionDate = parseRecordDate(get(row, "completionDate"));
         const activityDate = filedDate ?? approvedDate ?? spudDate ?? completionDate;
-        if (!activityDate) { failed++; continue; }
+        if (!activityDate) { record(i, "REJECTED", "No readable filed/approved/spud/completion date", data); continue; }
         const apiNumber = get(row, "apiNumber") || null;
         const permitNumber = get(row, "permitNumber") || null;
-        if (apiNumber || permitNumber) {
-          const key = `${rowState}|${rowCounty}|${apiNumber ?? ""}|${permitNumber ?? ""}`;
-          if (existing.has(key)) { skip("Duplicate API/permit number"); continue; }
-          existing.add(key);
-        }
-        batch.push({
-          organizationId: org, state: rowState, county: rowCounty,
-          apiNumber, permitNumber, operator, operatorNorm: normalizeEntity(operator) ?? operator.toUpperCase(),
+        const incoming: Omit<PermitCmp, "id"> = {
+          operatorNorm: normalizeEntity(operator) ?? operator.toUpperCase(),
           leaseName: get(row, "leaseName") || null, wellName: get(row, "wellName") || null,
           status: classifyPermitStatus(get(row, "status")), trajectory: classifyTrajectory(get(row, "trajectory")),
-          activityDate, filedDate, approvedDate, spudDate, completionDate,
+          filedDate, approvedDate, spudDate, completionDate,
           formation: get(row, "formation") || null, field: get(row, "field") || null,
-          totalDepth: numOf(get(row, "totalDepth")),
-          abstractId: get(row, "abstractId") || null,
+          totalDepth: numOf(get(row, "totalDepth")), abstractId: get(row, "abstractId") || null,
           latitude: numOf(get(row, "latitude")), longitude: numOf(get(row, "longitude")),
+        };
+        if (apiNumber || permitNumber) {
+          const idk = identityKey(rowState, rowCounty, apiNumber, permitNumber);
+          const found = byIdentity.get(idk);
+          if (found) {
+            if (sameFields(found, incoming)) { record(i, "DUPLICATE", "Identical to an existing permit record", data); continue; }
+            // Same permit, changed fields → refresh the existing record in place.
+            updates.push({
+              id: found.id,
+              data: {
+                operator, operatorNorm: incoming.operatorNorm, leaseName: incoming.leaseName, wellName: incoming.wellName,
+                status: incoming.status, trajectory: incoming.trajectory,
+                activityDate, filedDate, approvedDate, spudDate, completionDate,
+                formation: incoming.formation, field: incoming.field, totalDepth: incoming.totalDepth,
+                abstractId: incoming.abstractId, latitude: incoming.latitude, longitude: incoming.longitude,
+              },
+            });
+            byIdentity.set(idk, { ...incoming, id: found.id });
+            record(i, "UPDATED", "Existing permit refreshed with changed fields", data);
+            continue;
+          }
+          byIdentity.set(idk, { ...incoming, id: "" });
+        } else {
+          const sig = fullSig(incoming, rowState, rowCounty, apiNumber, permitNumber);
+          if (fullSigs.has(sig)) { record(i, "DUPLICATE", "Identical to an existing permit record", data); continue; }
+          fullSigs.add(sig);
+        }
+        record(i, "IMPORTED", null, data);
+        batch.push({
+          organizationId: org, state: rowState, county: rowCounty,
+          apiNumber, permitNumber, operator, operatorNorm: incoming.operatorNorm,
+          leaseName: incoming.leaseName, wellName: incoming.wellName,
+          status: incoming.status, trajectory: incoming.trajectory,
+          activityDate, filedDate, approvedDate, spudDate, completionDate,
+          formation: incoming.formation, field: incoming.field,
+          totalDepth: incoming.totalDepth,
+          abstractId: incoming.abstractId,
+          latitude: incoming.latitude, longitude: incoming.longitude,
           source, ingestRunId: run.id,
         });
       }
@@ -1244,18 +1348,53 @@ researchRouter.post(
         const r = await prisma.researchPermit.createMany({ data: batch.slice(i, i + CHUNK) });
         imported += r.count;
       }
+      // Apply updates in small parallel groups (amendments are typically few).
+      for (let i = 0; i < updates.length; i += 25) {
+        await Promise.all(updates.slice(i, i + 25).map((u) => prisma.researchPermit.update({ where: { id: u.id }, data: u.data })));
+      }
+    }
+
+    // Persist the per-row review trail.
+    for (let i = 0; i < review.length; i += CHUNK) {
+      await prisma.researchIngestRow.createMany({ data: review.slice(i, i + CHUNK) });
     }
 
     await prisma.researchIngestRun.update({
       where: { id: run.id },
-      data: { rowsImported: imported, rowsSkipped: skipped, rowsFailed: failed },
+      data: { rowsImported: imported, rowsSkipped: duplicates, rowsFailed: rejected, rowsUpdated: updated },
     });
 
     res.json({
       runId: run.id,
       rowsTotal: rows.length,
-      imported, skipped, failed,
+      imported, updated, duplicates, rejected,
+      // Back-compat aliases for the previous summary shape.
+      skipped: duplicates, failed: rejected,
       skippedReasons: [...skippedReasons.entries()].map(([reason, count]) => ({ reason, count })).sort((a, b) => b.count - a.count).slice(0, 10),
+    });
+  }),
+);
+
+// Per-row review of an import: which rows were imported, skipped as duplicates,
+// updated, or rejected — and why. Powers the post-import review views + export.
+researchRouter.get(
+  "/ingest/runs/:id/rows",
+  requirePermission("viewResearch"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const run = await prisma.researchIngestRun.findFirst({
+      where: { id: req.params.id, organizationId: orgId(req) },
+      select: { id: true, kind: true },
+    });
+    if (!run) throw new HttpError(404, "Import not found");
+    const outcome = typeof req.query.outcome === "string" ? req.query.outcome.toUpperCase() : undefined;
+    const items = await prisma.researchIngestRow.findMany({
+      where: { ingestRunId: run.id, ...(outcome ? { outcome } : {}) },
+      orderBy: { rowIndex: "asc" },
+      take: 5000,
+    });
+    res.json({
+      kind: run.kind,
+      rows: items.map((r) => ({ rowIndex: r.rowIndex, outcome: r.outcome, reason: r.reason, data: r.data })),
     });
   }),
 );

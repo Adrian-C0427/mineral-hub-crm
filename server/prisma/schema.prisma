@@ -1238,13 +1238,34 @@ model ResearchIngestRun {
   rowsImported Int @default(0)
   rowsSkipped  Int @default(0)
   rowsFailed   Int @default(0)
+  rowsUpdated  Int @default(0)
 
   status          ResearchIngestStatus @default(COMPLETED)
   error           String?
   createdByUserId String?
   createdAt       DateTime             @default(now())
 
+  rows ResearchIngestRow[]
+
   @@index([organizationId, createdAt])
+}
+
+// Per-row import outcome — powers the post-import review (inspect exactly which
+// rows were imported, skipped as duplicates, updated, or rejected, and why).
+// Rows cascade with their run, so deleting an import removes its review trail.
+model ResearchIngestRow {
+  id             String            @id @default(cuid())
+  organizationId String
+  ingestRunId    String
+  ingestRun      ResearchIngestRun @relation(fields: [ingestRunId], references: [id], onDelete: Cascade)
+
+  rowIndex Int
+  outcome  String // IMPORTED | DUPLICATE | UPDATED | REJECTED
+  reason   String?
+  data     Json // the mapped canonical values, for inspection/export
+
+  @@index([ingestRunId, outcome])
+  @@index([organizationId])
 }
 
 // ---------------------------------------------------------------------------

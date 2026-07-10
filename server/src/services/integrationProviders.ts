@@ -73,46 +73,6 @@ async function validatePerplexity(secret: string): Promise<ValidationResult> {
   return authOutcome(res, "Perplexity");
 }
 
-async function validateMapbox(secret: string): Promise<ValidationResult> {
-  const res = await timedFetch(`https://api.mapbox.com/tokens/v2?access_token=${encodeURIComponent(secret)}`);
-  if (!res.ok) return authOutcome(res, "Mapbox");
-  const body = (await res.json().catch(() => ({}))) as { code?: string };
-  return body.code === "TokenValid" ? ok("Mapbox token verified.") : fail(`Mapbox reports the token as ${body.code ?? "invalid"}.`);
-}
-
-async function validateGoogleMaps(secret: string): Promise<ValidationResult> {
-  // Geocoding returns HTTP 200 with an in-body status for bad keys.
-  const res = await timedFetch(`https://maps.googleapis.com/maps/api/geocode/json?address=Austin%2C+TX&key=${encodeURIComponent(secret)}`);
-  if (!res.ok) return authOutcome(res, "Google Maps");
-  const body = (await res.json().catch(() => ({}))) as { status?: string; error_message?: string };
-  if (body.status === "OK" || body.status === "ZERO_RESULTS") return ok("Google Maps key verified (Geocoding API).");
-  return fail(`Google Maps rejected the key: ${body.status ?? "unknown"}${body.error_message ? ` — ${body.error_message}` : ""}`);
-}
-
-async function validateArcgis(secret: string): Promise<ValidationResult> {
-  const res = await timedFetch(
-    `https://geocode-api.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?f=json&singleLine=Austin%2C+TX&maxLocations=1&token=${encodeURIComponent(secret)}`,
-  );
-  if (!res.ok) return authOutcome(res, "ArcGIS");
-  const body = (await res.json().catch(() => ({}))) as { error?: { code?: number; message?: string }; candidates?: unknown[] };
-  if (body.error) return fail(`ArcGIS rejected the key (${body.error.code}): ${body.error.message ?? "invalid token"}`);
-  return ok("ArcGIS key verified (geocoding service).");
-}
-
-async function validateCalendly(secret: string): Promise<ValidationResult> {
-  const res = await timedFetch("https://api.calendly.com/users/me", {
-    headers: { Authorization: `Bearer ${secret}` },
-  });
-  return authOutcome(res, "Calendly");
-}
-
-async function validateHubspot(secret: string): Promise<ValidationResult> {
-  const res = await timedFetch("https://api.hubapi.com/account-info/v3/details", {
-    headers: { Authorization: `Bearer ${secret}` },
-  });
-  return authOutcome(res, "HubSpot");
-}
-
 async function validateMailchimp(secret: string): Promise<ValidationResult> {
   const dc = secret.split("-").pop();
   if (!dc || !/^[a-z]{2,4}\d+$/.test(dc)) return fail("Mailchimp keys must end in a datacenter suffix (e.g. …-us14).");
@@ -214,11 +174,6 @@ const SECRET_VALIDATORS: Record<string, (secret: string) => Promise<ValidationRe
   openai: validateOpenAI,
   gemini: validateGemini,
   perplexity: validatePerplexity,
-  mapbox: validateMapbox,
-  googlemaps: validateGoogleMaps,
-  arcgis: validateArcgis,
-  calendly: validateCalendly,
-  hubspot: validateHubspot,
   mailchimp: validateMailchimp,
   slack: validateSlack,
   teams: validateTeams,

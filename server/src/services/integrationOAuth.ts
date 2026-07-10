@@ -51,8 +51,8 @@ const msAuthorize = `https://login.microsoftonline.com/${msTenant}/oauth2/v2.0/a
 const msToken = `https://login.microsoftonline.com/${msTenant}/oauth2/v2.0/token`;
 
 // Google needs access_type=offline + prompt=consent to reliably return a refresh
-// token. Microsoft/Xero/QuickBooks/Okta get one via the offline_access scope;
-// Dropbox via token_access_type=offline; Salesforce via the refresh_token scope.
+// token. Microsoft gets one via the offline_access scope; Dropbox via
+// token_access_type=offline.
 function google(key: string, scope: string): OAuthApp {
   return {
     key, authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
@@ -68,8 +68,7 @@ function microsoft(key: string, scope: string): OAuthApp {
 }
 
 function buildRegistry(): Record<string, OAuthApp> {
-  const okta = env.OAUTH.OKTA;
-  const reg: Record<string, OAuthApp> = {
+  return {
     // gmail.readonly powers inbound reply sync (emailInboundSync); accounts
     // connected before it existed must reconnect to grant the extra scope.
     gmail: google("gmail", "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly"),
@@ -87,32 +86,13 @@ function buildRegistry(): Record<string, OAuthApp> {
       key: "box", authorizeUrl: "https://account.box.com/api/oauth2/authorize", tokenUrl: "https://api.box.com/oauth2/token",
       scope: "root_readwrite", clientId: env.OAUTH.BOX.CLIENT_ID, clientSecret: env.OAUTH.BOX.CLIENT_SECRET,
     },
-    quickbooks: {
-      key: "quickbooks", authorizeUrl: "https://appcenter.intuit.com/connect/oauth2", tokenUrl: "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer",
-      scope: "com.intuit.quickbooks.accounting", clientId: env.OAUTH.QUICKBOOKS.CLIENT_ID, clientSecret: env.OAUTH.QUICKBOOKS.CLIENT_SECRET,
-    },
-    xero: {
-      key: "xero", authorizeUrl: "https://login.xero.com/identity/connect/authorize", tokenUrl: "https://identity.xero.com/connect/token",
-      scope: "offline_access accounting.transactions accounting.contacts", clientId: env.OAUTH.XERO.CLIENT_ID, clientSecret: env.OAUTH.XERO.CLIENT_SECRET,
-    },
-    salesforce: {
-      key: "salesforce", authorizeUrl: "https://login.salesforce.com/services/oauth2/authorize", tokenUrl: "https://login.salesforce.com/services/oauth2/token",
-      scope: "api refresh_token", clientId: env.OAUTH.SALESFORCE.CLIENT_ID, clientSecret: env.OAUTH.SALESFORCE.CLIENT_SECRET,
-    },
   };
-  if (okta.DOMAIN) {
-    reg.okta = {
-      key: "okta", authorizeUrl: `https://${okta.DOMAIN}/oauth2/v1/authorize`, tokenUrl: `https://${okta.DOMAIN}/oauth2/v1/token`,
-      scope: "openid profile email offline_access", clientId: okta.CLIENT_ID, clientSecret: okta.CLIENT_SECRET,
-    };
-  }
-  return reg;
 }
 
 /** Provider keys that use the integration OAuth flow (regardless of config). */
 export const OAUTH_PROVIDER_KEYS = [
   "gmail", "googlecalendar", "googledrive", "outlook", "outlookcalendar", "onedrive",
-  "dropbox", "box", "quickbooks", "xero", "salesforce", "okta",
+  "dropbox", "box",
 ] as const;
 
 export function isOAuthProvider(key: string): boolean {

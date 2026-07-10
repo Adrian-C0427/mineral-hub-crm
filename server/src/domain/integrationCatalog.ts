@@ -11,6 +11,13 @@
  * "API" — RRC publishes bulk files, not an API; QGIS Server — self-hosted GIS,
  * not a SaaS connection; the placeholder "Custom API Integration") were removed.
  *
+ * 2026-07 scope cut: the GIS & Mapping category (Mapbox, Google Maps, ArcGIS —
+ * mapping is served by the built-in PostGIS tile stack), the Accounting &
+ * Finance category (QuickBooks, Xero), Calendly, HubSpot, Salesforce, and Okta
+ * were removed from the product roadmap. Every remaining entry is production-
+ * ready: live/webhook providers validate instantly, env providers reflect the
+ * runtime config, and OAuth providers need only their client credentials set.
+ *
  * `implementation` is what the UI keys its honesty off:
  *  - "live"    — connect stores an encrypted credential and we validate it
  *                against the provider's API right now.
@@ -93,23 +100,6 @@ export const INTEGRATION_CATALOG: ProviderDef[] = [
     secretLabel: "Perplexity API key", secretHint: "pplx-…", setupUrl: "https://www.perplexity.ai/settings/api", syncable: true,
   },
 
-  // --- GIS & Mapping ---
-  {
-    key: "mapbox", name: "Mapbox", category: "GIS & Mapping", auth: "apikey", implementation: "live",
-    description: "Alternate basemaps and geocoding. The access token is verified via Mapbox's token introspection endpoint.",
-    secretLabel: "Mapbox access token", secretHint: "pk.… (public) or sk.… (secret)", setupUrl: "https://account.mapbox.com/access-tokens/", syncable: true,
-  },
-  {
-    key: "googlemaps", name: "Google Maps Platform", category: "GIS & Mapping", auth: "apikey", implementation: "live",
-    description: "Geocoding and mapping via Google Maps Platform. Validation runs a single geocode request.",
-    secretLabel: "Maps API key", setupUrl: "https://console.cloud.google.com/google/maps-apis/credentials", syncable: true,
-  },
-  {
-    key: "arcgis", name: "ArcGIS Location Platform", category: "GIS & Mapping", auth: "apikey", implementation: "live",
-    description: "Esri geocoding and feature services via an ArcGIS Location Platform API key. Validation runs a single geocode request.",
-    secretLabel: "ArcGIS API key", setupUrl: "https://location.arcgis.com/", syncable: true,
-  },
-
   // --- Storage & Documents ---
   {
     key: "storage", name: "Object storage (S3-compatible)", category: "Storage & Documents", auth: "env", implementation: "env",
@@ -138,11 +128,6 @@ export const INTEGRATION_CATALOG: ProviderDef[] = [
 
   // --- Productivity ---
   {
-    key: "calendly", name: "Calendly", category: "Productivity", auth: "apikey", implementation: "live",
-    description: "Book buyer calls and sync scheduled meetings via the Calendly API. Uses a personal access token, verified when you connect.",
-    secretLabel: "Personal access token", setupUrl: "https://calendly.com/integrations/api_webhooks", syncable: true,
-  },
-  {
     key: "googlecalendar", name: "Google Calendar", category: "Productivity", auth: "oauth", implementation: "oauth",
     description: "Sync closing dates and follow-ups to Google Calendar (calendar.events scope on the Google OAuth client).",
     setupUrl: "https://console.cloud.google.com/apis/credentials",
@@ -153,33 +138,11 @@ export const INTEGRATION_CATALOG: ProviderDef[] = [
     setupUrl: "https://portal.azure.com",
   },
 
-  // --- Accounting & Finance ---
-  {
-    key: "quickbooks", name: "QuickBooks Online", category: "Accounting & Finance", auth: "oauth", implementation: "oauth",
-    description: "Sync expenses and revenue with QuickBooks Online. Requires an Intuit developer app (OAuth 2.0 + refresh tokens).",
-    setupUrl: "https://developer.intuit.com",
-  },
-  {
-    key: "xero", name: "Xero", category: "Accounting & Finance", auth: "oauth", implementation: "oauth",
-    description: "Sync expenses and revenue with Xero. Requires a Xero developer app (OAuth 2.0).",
-    setupUrl: "https://developer.xero.com/app/manage",
-  },
-
   // --- CRM & Marketing ---
-  {
-    key: "hubspot", name: "HubSpot", category: "CRM & Marketing", auth: "apikey", implementation: "live",
-    description: "Sync buyers and activity with HubSpot using a private-app access token — HubSpot's officially recommended method for single-account integrations. Verified when you connect.",
-    secretLabel: "Private app access token", secretHint: "pat-…", setupUrl: "https://developers.hubspot.com/docs/api/private-apps", syncable: true,
-  },
   {
     key: "mailchimp", name: "Mailchimp", category: "CRM & Marketing", auth: "apikey", implementation: "live",
     description: "Sync buyer lists for email campaigns. The key is verified against Mailchimp's ping endpoint (the datacenter is read from the key suffix).",
     secretLabel: "Mailchimp API key", secretHint: "…-us14 (datacenter suffix required)", setupUrl: "https://admin.mailchimp.com/account/api/", syncable: true,
-  },
-  {
-    key: "salesforce", name: "Salesforce", category: "CRM & Marketing", auth: "oauth", implementation: "oauth",
-    description: "Sync buyers and deals with Salesforce. Requires a Salesforce connected app (OAuth 2.0).",
-    setupUrl: "https://developer.salesforce.com",
   },
 
   // --- Authentication ---
@@ -190,11 +153,6 @@ export const INTEGRATION_CATALOG: ProviderDef[] = [
   {
     key: "entra", name: "Microsoft Entra ID", category: "Authentication", auth: "env", implementation: "env",
     description: "Single sign-on with Microsoft Entra ID (OpenID Connect). Configured with MICROSOFT_CLIENT_ID / MICROSOFT_CLIENT_SECRET on the API service; status reflects the live configuration.",
-  },
-  {
-    key: "okta", name: "Okta", category: "Authentication", auth: "oauth", implementation: "oauth",
-    description: "Single sign-on with Okta (OpenID Connect). Fits the existing OIDC provider registry — enabling it is an Okta app registration plus one provider entry.",
-    setupUrl: "https://developer.okta.com",
   },
 ];
 
