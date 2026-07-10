@@ -70,3 +70,21 @@ export function daysBetween(target: string | Date | null | undefined): number | 
   const b = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
   return Math.round((a - b) / MS);
 }
+
+/**
+ * County-record document types arrive as enums ("OG_LEASE") or fused camel
+ * case ("QuitclaimMineralDeed"). Render them like a landman would say them:
+ * "O&G Lease", "Quitclaim Mineral Deed", "Mineral Conveyance".
+ */
+export function prettyDocType(v: string): string {
+  const words = v.includes("_") ? v.split("_") : v.replace(/([a-z])([A-Z])/g, "$1 $2").split(" ");
+  return words
+    .filter(Boolean)
+    .map((w) => {
+      const u = w.toUpperCase();
+      if (u === "OG" || u === "O&G") return "O&G";
+      if (u === "OF" || u === "AND" || u === "TO") return w.toLowerCase();
+      return w[0].toUpperCase() + w.slice(1).toLowerCase();
+    })
+    .join(" ");
+}

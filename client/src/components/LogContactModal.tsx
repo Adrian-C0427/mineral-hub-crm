@@ -5,6 +5,7 @@ import { api, ApiError } from "../api/client";
 import { toInputDate } from "../lib/format";
 import { BUYER_STATUS_OPTIONS } from "../lib/buyerStatus";
 import type { BuyerStatus, UserLite } from "../types";
+import { MoneyInput } from "./MoneyInput";
 
 interface Props {
   dealId: string;
@@ -93,7 +94,7 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, initial, on
       {status === "OFFER_RECEIVED" && (
         <>
           <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Enter an amount to record a formal offer, or leave blank to just set the status.</p>
-          <div className="field"><label>Offer amount</label><input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
+          <div className="field"><label>Offer amount</label><MoneyInput value={amount} onChange={setAmount} ariaLabel="Offer amount" /></div>
           <div className="field"><label>Conditions</label><textarea rows={2} value={conditions} onChange={(e) => setConditions(e.target.value)} /></div>
         </>
       )}

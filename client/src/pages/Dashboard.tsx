@@ -192,10 +192,12 @@ export function Dashboard() {
       <div className="panel">
         <div className="panel-title" style={{ marginBottom: 0 }}>
           <h3 className="dash-h3">Profit by month</h3>
-          <div className="row" style={{ gap: 14, fontSize: 11.5, color: "var(--text-dim)" }}>
-            <span className="row" style={{ gap: 5 }}><span className="dash-swatch" style={{ background: "var(--green)" }} /> Realized</span>
-            <span className="row" style={{ gap: 5 }}><span className="dash-swatch dash-swatch-proj" /> Projected</span>
-          </div>
+          {d.profitByMonth.some((m) => m.profit > 0 || m.projected > 0) && (
+            <div className="row" style={{ gap: 14, fontSize: 11.5, color: "var(--text-dim)" }}>
+              <span className="row" style={{ gap: 5 }}><span className="dash-swatch" style={{ background: "var(--green)" }} /> Realized</span>
+              <span className="row" style={{ gap: 5 }}><span className="dash-swatch dash-swatch-proj" /> Projected</span>
+            </div>
+          )}
         </div>
         {/* Always render the full Jan–Dec year for a stable, comparable view.
             Months with no realized or projected profit show a faint zero

@@ -217,7 +217,7 @@ export function PortalMarketplace() {
             <span className={`seg ${view === "table" ? "active" : ""}`} onClick={() => setView("table")}>☰ Table</span>
           </div>
           <button className="small" title={`Dock listings ${side === "left" ? "right" : "left"}`} onClick={() => setSide((s) => (s === "left" ? "right" : "left"))}>
-            {side === "left" ? "Dock →" : "← Dock"}
+            {side === "left" ? "Dock listings right →" : "← Dock listings left"}
           </button>
         </div>
 

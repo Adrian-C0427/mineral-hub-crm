@@ -4,6 +4,7 @@ import { API_BASE } from "../../api/client";
 import { num } from "../../lib/format";
 import { PortalMap } from "./PortalMap";
 import { portalGet, portalPost, type FC, type PortalAbstract, type PortalDeal, type PortalDocument, type PortalImage, type PortalOrg, type PortalPackageAsset, type PortalProduction } from "./portalApi";
+import { formatPhone } from "../../lib/phone";
 
 const EMPTY_FC: FC = { type: "FeatureCollection", features: [] };
 
@@ -122,16 +123,16 @@ export function PortalOffering() {
         <div className="panel">
           <h3>Property Details</h3>
           <div className="portal-kv">
-            <KV k="State(s)" v={deal.states.join(", ")} />
-            <KV k="County(ies)" v={deal.counties.join(", ")} />
-            <KV k="Basin(s)" v={deal.basins.join(", ")} />
-            <KV k="Formation(s)" v={deal.formations.join(", ")} />
-            <KV k="Asset Type(s)" v={deal.assetTypes.join(", ")} />
+            <KV k={deal.states.length > 1 ? "States" : "State"} v={deal.states.join(", ")} />
+            <KV k={deal.counties.length > 1 ? "Counties" : "County"} v={deal.counties.join(", ")} />
+            <KV k={deal.basins.length > 1 ? "Basins" : "Basin"} v={deal.basins.join(", ")} />
+            <KV k={deal.formations.length > 1 ? "Formations" : "Formation"} v={deal.formations.join(", ")} />
+            <KV k={deal.assetTypes.length > 1 ? "Asset Types" : "Asset Type"} v={deal.assetTypes.join(", ")} />
             <KV k="NRA" v={deal.nra != null ? num(deal.nra) : ""} />
             <KV k="Net Mineral Acres" v={deal.acreageNma != null ? num(deal.acreageNma) : ""} />
-            <KV k="Operator(s)" v={deal.operator ?? ""} />
+            <KV k="Operator" v={deal.operator ?? ""} />
             <KV k="Producing Status" v={deal.producingStatus ?? ""} />
-            <KV k="Survey(s)" v={(deal.surveys.length ? deal.surveys : [...new Set(abstracts.map((a) => a.survey).filter(Boolean))] as string[]).join(", ")} />
+            <KV k={deal.surveys.length > 1 ? "Surveys" : "Survey"} v={(deal.surveys.length ? deal.surveys : [...new Set(abstracts.map((a) => a.survey).filter(Boolean))] as string[]).join(", ")} />
           </div>
           {abstracts.length > 0 && (
             <>
@@ -197,7 +198,7 @@ export function PortalOffering() {
                       <div className="pcc-body">
                         <div><strong>{c.name}</strong>{c.isPrimary && org.contacts.length > 1 && <span className="badge" style={{ marginLeft: 6 }}>Primary</span>}</div>
                         {(c.title || c.department) && <div className="muted" style={{ fontSize: 13 }}>{[c.title, c.department].filter(Boolean).join(" · ")}</div>}
-                        {c.phone && <div className="portal-contact-line"><a href={`tel:${c.phone}`}>{c.phone}</a></div>}
+                        {c.phone && <div className="portal-contact-line"><a href={`tel:${c.phone}`}>{formatPhone(c.phone)}</a></div>}
                         {c.email && <div className="portal-contact-line"><a href={cMail ?? "#"}>{c.email}</a></div>}
                       </div>
                     </div>

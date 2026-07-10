@@ -35,15 +35,18 @@ export const CHART_COLORS = [
   "#14b8a6", // teal
 ];
 
-export const COLOR_EXPENSE = "#ef4444";
+// Violet, not red: spend is a normal operating fact, not an alert.
+export const COLOR_EXPENSE = "#8b5cf6";
 export const COLOR_REIMBURSED = "#22c55e";
 export const COLOR_REVENUE = "#3b82f6";
 export const COLOR_PROFIT = "#22c55e";
 export const COLOR_FORECAST = "#8b5cf6";
 
-/** Format a "YYYY-MM" month key as "Mon YY" for chart axes. */
+/** Format a "YYYY-MM" month key as "Mon 'YY" for chart axes (the
+ *  apostrophe keeps 'Jul 19' from reading as July 19th). */
 export function monthLabel(ym: string): string {
   const [y, m] = ym.split("-").map(Number);
   if (!y || !m) return ym;
-  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" });
+  const d = new Date(Date.UTC(y, m - 1, 1));
+  return `${d.toLocaleDateString("en-US", { month: "short", timeZone: "UTC" })} \u2019${String(y).slice(2)}`;
 }

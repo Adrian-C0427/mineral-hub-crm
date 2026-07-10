@@ -16,7 +16,7 @@ import { ResearchImport } from "../components/ResearchImport";
 import { ResearchChoropleth, type CountyStat } from "../components/ResearchChoropleth";
 import { CLASS_COLORS } from "../components/NetworkGraph";
 import { downloadCsv } from "../lib/csv";
-import { fmtDate, num, prettyEnum } from "../lib/format";
+import { fmtDate, num, prettyEnum, prettyDocType } from "../lib/format";
 import { CHART_COLORS, chartTooltip } from "../lib/charts";
 import { exportElementToPdf } from "../lib/pdf";
 
@@ -327,9 +327,10 @@ export function Research() {
             />
             <div className="field" style={{ marginBottom: 0, minWidth: 190, flex: 1 }}><label>Document types</label>
               <SearchableMultiSelect
-                options={opts.docTypes.map(prettyEnum)}
-                value={filters.docTypes.map(prettyEnum)}
-                onChange={(next) => setFilters((f) => ({ ...f, docTypes: next.map((s) => s.toUpperCase().replace(/ /g, "_")) }))}
+                options={opts.docTypes}
+                labels={Object.fromEntries(opts.docTypes.map((t) => [t, prettyDocType(t)]))}
+                value={filters.docTypes}
+                onChange={(next) => setFilters((f) => ({ ...f, docTypes: next }))}
                 placeholder="Filter doc types…"
               />
             </div>
@@ -457,7 +458,7 @@ function OverviewTab({ qs, compareOff }: { qs: string; compareOff: boolean }) {
           {data.docTypeBreakdown.length === 0 ? <p className="muted">No documents in this period.</p> : docType === "pie" ? (
             <ResponsiveContainer width="100%" height={Math.max(220, data.docTypeBreakdown.length * 30)}>
               <PieChart>
-                <Pie data={data.docTypeBreakdown.map((d) => ({ name: prettyEnum(d.docType), count: d.count }))} dataKey="count" nameKey="name" cx="50%" cy="50%" outerRadius={85} label={(e: { name?: string }) => e.name ?? ""}>
+                <Pie data={data.docTypeBreakdown.map((d) => ({ name: prettyDocType(d.docType), count: d.count }))} dataKey="count" nameKey="name" cx="50%" cy="50%" outerRadius={85} label={(e: { name?: string }) => e.name ?? ""}>
                   {data.docTypeBreakdown.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
                 </Pie>
                 <Tooltip {...chartTooltip} />
@@ -465,7 +466,7 @@ function OverviewTab({ qs, compareOff }: { qs: string; compareOff: boolean }) {
             </ResponsiveContainer>
           ) : (
             <ResponsiveContainer width="100%" height={Math.max(160, data.docTypeBreakdown.length * 30)}>
-              <BarChart data={data.docTypeBreakdown.map((d) => ({ name: prettyEnum(d.docType), count: d.count }))} layout="vertical" margin={{ left: 60 }}>
+              <BarChart data={data.docTypeBreakdown.map((d) => ({ name: prettyDocType(d.docType), count: d.count }))} layout="vertical" margin={{ left: 60 }}>
                 <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
                 <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11 }} />
                 <Tooltip {...chartTooltip} />
@@ -1349,7 +1350,7 @@ function TxDrillModal({ qs, title, selector, onClose }: {
                 {rows.map((r) => (
                   <tr key={r.id}>
                     <td>{fmtDate(r.recordingDate)}</td>
-                    <td title={r.docTypeRaw}>{prettyEnum(r.docType)}</td>
+                    <td title={r.docTypeRaw}>{prettyDocType(r.docType)}</td>
                     <td>{r.grantor ?? "—"}</td>
                     <td>{r.grantee ?? "—"}</td>
                     <td>{r.county}, {r.state}</td>
@@ -1492,7 +1493,7 @@ function RecordsTab({ qs }: { qs: string }) {
 
   const docColumns: Column<DocRecord>[] = [
     { key: "recordingDate", header: "Recorded", value: (r) => r.recordingDate, render: (r) => fmtDate(r.recordingDate), type: "date" },
-    { key: "docType", header: "Type", value: (r) => r.docTypeRaw, render: (r) => <span title={r.docTypeRaw}>{prettyEnum(r.docType)}</span> },
+    { key: "docType", header: "Type", value: (r) => r.docTypeRaw, render: (r) => <span title={r.docTypeRaw}>{prettyDocType(r.docType)}</span> },
     { key: "grantor", header: "Grantor (Seller)", value: (r) => r.grantor },
     { key: "grantee", header: "Grantee (Buyer)", value: (r) => r.grantee },
     { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}` },
