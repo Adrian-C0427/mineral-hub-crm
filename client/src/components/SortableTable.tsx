@@ -1,3 +1,4 @@
+import { fmtDate } from "../lib/format";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
@@ -355,6 +356,6 @@ export function SortableTable<T>({
 
 function displayDefault(v: string | number | Date | null | undefined): ReactNode {
   if (v == null || v === "") return "—";
-  if (v instanceof Date) return v.toLocaleDateString();
+  if (v instanceof Date) return fmtDate(v);
   return String(v);
 }

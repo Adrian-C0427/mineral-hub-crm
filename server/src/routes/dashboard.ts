@@ -121,21 +121,21 @@ dashboardRouter.get(
       const profit = d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : 0;
       monthly.set(m, (monthly.get(m) ?? 0) + profit);
     }
-    // Projected profit by month: active deals with an accepted buyer offer
-    // (selectedOfferId) and an anticipated closing date, bucketed into the
-    // month they're expected to close (current year). Lets users compare
-    // realized profit against expected future profit on the same axis.
+    // Projected profit by month — SAME population as the Projected Profit KPI
+    // above (any active deal with at least one offer; accepted offer wins over
+    // best offer), bucketed by the deal's anticipated closing month. The KPI
+    // and this chart must never disagree: a user who sees "$30K projected"
+    // up top has to find that $30K on this axis.
     const monthlyProjected = new Map<number, number>();
     for (const d of allActive) {
-      if (!d.selectedOfferId) continue;
+      const selOffer = d.selectedOfferId ? d.offers.find((o) => o.id === d.selectedOfferId) : undefined;
+      const best = d.offers.reduce<number | null>((m, o) => (m == null || o.amount > m ? o.amount : m), null);
+      const amount = selOffer?.amount ?? best;
+      if (amount == null) continue;
       const s = serializeDeal(d, now);
       if (!s.finalClosingDate) continue;
       const close = new Date(s.finalClosingDate);
       if (close.getUTCFullYear() !== now.getUTCFullYear()) continue;
-      const selOffer = d.offers.find((o) => o.id === d.selectedOfferId);
-      const best = d.offers.reduce<number | null>((m, o) => (m == null || o.amount > m ? o.amount : m), null);
-      const amount = selOffer?.amount ?? best;
-      if (amount == null) continue;
       const profit = netProfit(amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts);
       const m = close.getUTCMonth();
       monthlyProjected.set(m, (monthlyProjected.get(m) ?? 0) + profit);

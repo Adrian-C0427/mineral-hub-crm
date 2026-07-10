@@ -3,7 +3,7 @@ import { api, ApiError } from "../api/client";
 import { useAuth, type OrgRole } from "../auth/AuthContext";
 import { Banner, ConfirmChanges, ConfirmDialog, showToast } from "./ui";
 import { Select } from "./Select";
-import { fmtDate } from "../lib/format";
+import { fmtDate, fmtDateLocal } from "../lib/format";
 import { formatPhone } from "../lib/phone";
 import { ROLE_LABEL } from "../lib/roles";
 
@@ -222,7 +222,7 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
                         {m.orgRole === "MANAGER" && <span className="badge" style={{ marginLeft: 6, background: "rgba(245,158,11,.15)", color: "#b45309" }}>reassign</span>}
                       </td>
                       <td><span className={`badge ${m.status === "ACTIVE" ? "resp-offer" : "resp-no"}`}>{m.status === "ACTIVE" ? "Active" : "Disabled"}</span></td>
-                      <td>{m.lastActiveAt ? fmtDate(m.lastActiveAt) : "—"}</td>
+                      <td>{m.lastActiveAt ? fmtDateLocal(m.lastActiveAt) : "—"}</td>
                       <td className="right user-actions-cell">
                         {!isSelf && m.orgRole !== "OWNER" && (
                           <div className="user-actions">

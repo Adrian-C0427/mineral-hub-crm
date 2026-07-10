@@ -4,7 +4,7 @@ import { Modal, Banner, ConfirmDelete } from "./ui";
 import { PhoneInput } from "./PhoneInput";
 import { Select } from "./Select";
 import { formatPhone } from "../lib/phone";
-import { fmtDate } from "../lib/format";
+import { fmtDate, fmtDateLocal } from "../lib/format";
 import type { Seller, SellerType, UserLite } from "../types";
 
 /**
@@ -103,7 +103,7 @@ function SellerCard({ s, canEdit, onEdit, onRemove }: { s: Seller; canEdit: bool
         <KV k="Assigned to" v={s.assignedTeamMember?.name} />
         <KV k="Physical address" v={physical} />
         <KV k="Mailing address" v={sameAddr ? "Same as physical" : mailing} />
-        <KV k="Date added" v={fmtDate(s.dateAdded)} />
+        <KV k="Date added" v={fmtDateLocal(s.dateAdded)} />
         {s.internalNotes && <KV k="Internal notes" v={s.internalNotes} wide />}
       </div>
     </div>

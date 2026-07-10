@@ -3,7 +3,7 @@ import { api } from "../api/client";
 import { Banner, Spinner } from "./ui";
 import { Select } from "./Select";
 import { downloadCsv } from "../lib/csv";
-import { fmtDate } from "../lib/format";
+import { fmtDate, fmtDateTime } from "../lib/format";
 
 /**
  * Well production data management: CSV import (analyze → map headers → commit).
@@ -152,7 +152,7 @@ export function WellImport({ onDataChanged }: { onDataChanged: () => void }) {
             <tbody>
               {runs.map((r) => (
                 <tr key={r.id}>
-                  <td>{fmtDate(r.createdAt)}</td>
+                  <td>{fmtDateTime(r.createdAt)}</td>
                   <td>{[r.county, r.state].filter(Boolean).join(", ") || "—"}</td>
                   <td>{r.filename ?? "—"}</td>
                   <td>{r.rowsImported.toLocaleString()}</td>

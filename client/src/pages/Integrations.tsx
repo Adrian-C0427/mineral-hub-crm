@@ -6,7 +6,7 @@ import {
 import { api, ApiError } from "../api/client";
 import { Spinner, Banner, Modal, ConfirmChanges, ConfirmDialog } from "../components/ui";
 import { Select } from "../components/Select";
-import { fmtDate } from "../lib/format";
+import { fmtDate, fmtDateTime } from "../lib/format";
 
 // The catalog lives on the SERVER (domain/integrationCatalog.ts) — the single
 // source of truth for which providers exist, how they authenticate, and how far
@@ -247,7 +247,7 @@ function IntegrationCard({ p, busy, result, onConnect, onOAuth, onDisconnect, on
       <p className="integration-desc">{p.description}</p>
 
       {connected && p.secretMask && <p className="muted" style={{ fontSize: 12, margin: "0 0 4px" }}>Credential: <code>{p.secretMask}</code></p>}
-      {connected && p.lastSyncAt && <p className="muted" style={{ fontSize: 12, margin: "0 0 4px" }}>Last sync: {fmtDate(p.lastSyncAt)}{p.config.schedule && p.config.schedule !== "manual" ? ` · auto (${p.config.schedule})` : ""}</p>}
+      {connected && p.lastSyncAt && <p className="muted" style={{ fontSize: 12, margin: "0 0 4px" }}>Last sync: {fmtDateTime(p.lastSyncAt)}{p.config.schedule && p.config.schedule !== "manual" ? ` · auto (${p.config.schedule})` : ""}</p>}
       {p.lastError && <p className="error-text" style={{ fontSize: 12 }}>{p.lastError}</p>}
       {result && <p className={result.ok ? "muted" : "error-text"} style={{ fontSize: 12 }}>{result.message}</p>}
 

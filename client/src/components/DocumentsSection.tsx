@@ -3,7 +3,7 @@ import { api } from "../api/client";
 import { Banner } from "./ui";
 import { Select } from "./Select";
 import { SortableTable, type Column } from "./SortableTable";
-import { fmtDate } from "../lib/format";
+import { fmtDateLocal } from "../lib/format";
 
 /**
  * The single, shared Documents section used everywhere documents are managed
@@ -118,8 +118,8 @@ export function DocumentsSection({
       key: "filename", header: "Document Name", value: (f) => f.filename.toLowerCase(),
       render: (f) => <span title={f.filename}>{f.filename}{(f.versionCount ?? 0) > 0 && <span className="chip-mini" style={{ marginLeft: 6 }} title={`${f.versionCount} previous version(s)`}>v{(f.versionCount ?? 0) + 1}</span>}</span>,
     },
-    { key: "createdAt", header: "Date Uploaded", type: "date", value: (f) => f.createdAt, render: (f) => fmtDate(f.createdAt) },
-    { key: "updatedAt", header: "Date Modified", type: "date", value: (f) => f.updatedAt ?? f.createdAt, render: (f) => fmtDate(f.updatedAt ?? f.createdAt) },
+    { key: "createdAt", header: "Date Uploaded", type: "date", value: (f) => f.createdAt, render: (f) => fmtDateLocal(f.createdAt) },
+    { key: "updatedAt", header: "Date Modified", type: "date", value: (f) => f.updatedAt ?? f.createdAt, render: (f) => fmtDateLocal(f.updatedAt ?? f.createdAt) },
     { key: "uploadedBy", header: "Uploaded By", value: (f) => f.uploadedBy ?? "", render: (f) => f.uploadedBy ?? "—" },
     { key: "type", header: "File Type", value: (f) => fileType(f) },
     { key: "sizeBytes", header: "File Size", align: "right", value: (f) => f.sizeBytes, render: (f) => humanSize(f.sizeBytes) },

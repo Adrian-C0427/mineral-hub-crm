@@ -3,7 +3,7 @@ import { api } from "../api/client";
 import { Banner, Spinner, ConfirmDelete, Modal } from "./ui";
 import { Select } from "./Select";
 import { downloadCsv } from "../lib/csv";
-import { fmtDate } from "../lib/format";
+import { fmtDate, fmtDateTime } from "../lib/format";
 
 /**
  * Research data management: CSV import (Deeds / Leases / Drilling Permits →
@@ -250,7 +250,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
               {runs.map((r) => (
                 <tr key={r.id}>
                   <td><input type="checkbox" checked={selectedRuns.has(r.id)} onChange={() => setSelectedRuns((p) => { const n = new Set(p); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n; })} /></td>
-                  <td>{fmtDate(r.createdAt)}</td>
+                  <td>{fmtDateTime(r.createdAt)}</td>
                   <td>{runTypeLabel(r.source)}</td>
                   <td>{[r.county, r.state].filter(Boolean).join(", ") || "—"}</td>
                   <td>{r.filename ?? "—"}</td>

@@ -13,11 +13,37 @@ export function pct(rate: number | null | undefined): string {
   return `${Math.round(rate * 100)}%`;
 }
 
+/**
+ * Date-ONLY business fields (contract dates, closings, follow-ups, lease
+ * expirations). These are stored as calendar dates at UTC midnight, so they
+ * must render in UTC — local rendering would shift them a day for anyone
+ * west of Greenwich.
+ */
 export function fmtDate(d: string | Date | null | undefined): string {
   if (!d) return "—";
   const date = typeof d === "string" ? new Date(d) : d;
   if (isNaN(date.getTime())) return "—";
   return date.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+}
+
+/**
+ * TIMESTAMPS (createdAt, updatedAt, last-active, uploads). Real moments in
+ * time render in the user's local zone — with the UTC rendering above,
+ * anything created after ~6-7pm US Central displayed as tomorrow.
+ */
+export function fmtDateLocal(d: string | Date | null | undefined): string {
+  if (!d) return "—";
+  const date = typeof d === "string" ? new Date(d) : d;
+  if (isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+}
+
+/** Timestamp with time-of-day, local zone — for runs, syncs, notifications. */
+export function fmtDateTime(d: string | Date | null | undefined): string {
+  if (!d) return "—";
+  const date = typeof d === "string" ? new Date(d) : d;
+  if (isNaN(date.getTime())) return "—";
+  return date.toLocaleString("en-US", { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 export function toInputDate(d: string | Date | null | undefined): string {

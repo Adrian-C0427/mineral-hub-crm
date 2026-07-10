@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Sun, Moon } from "lucide-react";
 import { api } from "../api/client";
 import { Spinner } from "../components/ui";
-import { money, fmtDate } from "../lib/format";
+import { money, fmtDate, fmtDateLocal } from "../lib/format";
 import { useStages } from "../stages";
 import { PeriodSegmented } from "../components/PeriodSegmented";
 import { useTheme } from "../theme";
@@ -182,8 +182,8 @@ export function Dashboard() {
     kpis: (
       <div className="metrics-row dash-kpis">
         <Kpi label="Active Deals" value={d.metrics.activeDeals} delta={activeDelta} series={t?.activeDealsWeekly} spark="var(--accent)" title="Sparkline: active deals per week (8 weeks)" />
-        <Kpi label="Projected Profit" value={fmtCompact(d.metrics.projectedProfit)} series={projectedSeries} spark="var(--accent)" title="Sparkline: projected profit by expected closing month" />
-        <Kpi label={`Closed ${d.metrics.periodLabel ?? "YTD"}`} value={fmtCompact(d.metrics.closedProfitYtd)} valueColor="var(--green)" delta={closedDelta} series={realized.slice(0, curMonth + 1)} spark="var(--green)" title="Sparkline: realized profit by month" />
+        <Kpi label="Projected Profit" value={fmtCompact(d.metrics.projectedProfit)} series={projectedSeries} spark="var(--accent)" title="Best (or accepted) offer minus cost basis across active deals with offers — the same series as the Projected bars below." />
+        <Kpi label={`Closed ${d.metrics.periodLabel ?? "YTD"}`} value={fmtCompact(d.metrics.closedProfitYtd)} valueColor={d.metrics.closedProfitYtd > 0 ? "var(--green)" : undefined} delta={closedDelta} series={realized.slice(0, curMonth + 1)} spark="var(--green)" title="Sparkline: realized profit by month" />
         <Kpi label="Avg Deal Size" value={fmtCompact(d.metrics.avgDealSize)} delta={avgDelta} series={t?.avgDealSize} spark="var(--text-dim)" title="Sparkline: running average across recent closes" />
         <Kpi label="Offers Pending" value={d.metrics.offersPending} series={t?.offersWeekly} spark="var(--amber)" title="Sparkline: offers received per week (8 weeks)" />
       </div>
@@ -257,7 +257,7 @@ export function Dashboard() {
         {d.recentActivity.length === 0 ? <p className="muted">Nothing yet.</p> : d.recentActivity.slice(0, 8).map((a) => (
           <div className="dash-feed-row" key={a.id}>
             <span className="dash-soft">{a.summary}</span>
-            <span className="dash-faint" style={{ whiteSpace: "nowrap" }}>{fmtDate(a.createdAt)}</span>
+            <span className="dash-faint" style={{ whiteSpace: "nowrap" }}>{fmtDateLocal(a.createdAt)}</span>
           </div>
         ))}
       </div>
