@@ -4,7 +4,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { collectCoords, bboxOfPoints, convexHull } from "../lib/geo";
 import { num } from "../lib/format";
 import { api } from "../api/client";
-import { addCadastralLayers, styleWithGlyphs } from "../lib/mapLayers";
+import { addCadastralLayers, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
 import { MapLayersPanel } from "./MapLayersPanel";
 
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
@@ -36,6 +36,7 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
   useEffect(() => {
     if (mapRef.current || !container.current) return;
     const map = new maplibregl.Map({ container: container.current, style: styleWithGlyphs(), center: LEON_CENTER, zoom: 9 });
+    watchGisHealth(map);
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
     mapRef.current = map;
 

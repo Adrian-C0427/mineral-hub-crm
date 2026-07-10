@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bell } from "lucide-react";
 import { api } from "../api/client";
-import { fmtDate } from "../lib/format";
+import { fmtDateTime } from "../lib/format";
 
 interface Notification { id: string; type: string; title: string; body: string | null; link: string | null; readAt: string | null; createdAt: string }
 
@@ -75,7 +75,7 @@ export function NotificationsBell({ collapsed }: { collapsed: boolean }) {
             <button key={n.id} className={`notif-item ${n.readAt ? "" : "unread"}`} onClick={() => void openItem(n)}>
               <span className="notif-title">{n.title}</span>
               {n.body && <span className="notif-body">{n.body}</span>}
-              <span className="notif-time">{fmtDate(n.createdAt)}</span>
+              <span className="notif-time">{fmtDateTime(n.createdAt)}</span>
             </button>
           ))}
         </div>

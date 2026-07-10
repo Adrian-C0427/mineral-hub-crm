@@ -93,3 +93,23 @@ export function addCadastralLayers(map: maplibregl.Map, countyLabels: GeoJSON.Fe
     "text-size": 11, "text-offset": [0, 1.1], "text-max-width": 8, "text-padding": 2, "text-allow-overlap": false, "text-optional": true },
     paint: { "text-color": "#334155", "text-halo-color": "#ffffff", "text-halo-width": 1.3 } });
 }
+
+/**
+ * Surface GIS outages instead of a silently empty canvas: the first failing
+ * request from the shared "abstracts" vector source drops a small notice
+ * onto the map. The base map keeps working; users learn why layers are gone.
+ */
+export function watchGisHealth(map: maplibregl.Map): void {
+  let shown = false;
+  map.on("error", (e) => {
+    if (shown) return;
+    const err = e as unknown as { sourceId?: string };
+    if (err.sourceId !== "abstracts") return;
+    shown = true;
+    const el = document.createElement("div");
+    el.className = "map-notice";
+    el.setAttribute("role", "status");
+    el.textContent = "Map data layers are unavailable right now — showing the base map only.";
+    map.getContainer().appendChild(el);
+  });
+}

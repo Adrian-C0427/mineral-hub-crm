@@ -7,7 +7,7 @@ import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { Select } from "../components/Select";
 import { downloadCsv } from "../lib/csv";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION } from "../lib/counties";
-import { addCadastralLayers, styleWithGlyphs } from "../lib/mapLayers";
+import { addCadastralLayers, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
 import { MapLayersPanel, PillToggle } from "../components/MapLayersPanel";
 import { Spinner, StageBadge, PriorityBadge } from "../components/ui";
 import { money, num } from "../lib/format";
@@ -176,6 +176,7 @@ export function MapView() {
     // Reopen where the user last left the map (their remembered default view).
     const savedCam = loadJson<MapCam | null>(MAP_VIEW_KEY, null);
     const map = new maplibregl.Map({ container: mapContainer.current, style: styleWithGlyphs(), center: savedCam?.center ?? LEON_CENTER, zoom: savedCam?.zoom ?? 10, attributionControl: { compact: true } });
+    watchGisHealth(map);
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
     mapRef.current = map;
 

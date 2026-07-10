@@ -11,6 +11,7 @@ import { money, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { CHART_COLORS, COLOR_EXPENSE, monthLabel, chartTooltip } from "../lib/charts";
 import type { UserLite } from "../types";
+import { MoneyInput } from "../components/MoneyInput";
 
 interface Category { id: string; name: string; active: boolean }
 interface Expense {
@@ -171,9 +172,12 @@ export function Expenses() {
             ) : (
               <ResponsiveContainer width="100%" height={220}>
                 <PieChart>
-                  <Pie data={dash.byCategory} dataKey="amount" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={(e) => e.name}>
+                  {/* Slice labels clipped at the card edge ("ta & Software") —
+                      a legend never truncates. */}
+                  <Pie data={dash.byCategory} dataKey="amount" nameKey="name" cx="50%" cy="46%" outerRadius={76}>
                     {dash.byCategory.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
                   </Pie>
+                  <Legend iconSize={9} wrapperStyle={{ fontSize: 11.5 }} />
                   <Tooltip {...chartTooltip} formatter={(v: number) => money(v)} />
                 </PieChart>
               </ResponsiveContainer>
@@ -618,7 +622,7 @@ function ExpenseForm({
       <form onSubmit={save}>
         <div className="grid-2">
           <div className="field"><label>Date</label><input type="date" value={f.date} onChange={(e) => setF((p) => ({ ...p, date: e.target.value }))} /></div>
-          <div className="field"><label>Amount</label><input type="number" min="0" step="0.01" value={f.amount} onChange={(e) => setF((p) => ({ ...p, amount: e.target.value }))} placeholder="0.00" /></div>
+          <div className="field"><label>Amount</label><MoneyInput decimals={2} value={f.amount} onChange={(v) => setF((p) => ({ ...p, amount: v }))} placeholder="0.00" ariaLabel="Expense amount" /></div>
         </div>
         <div className="field">
           <label>User</label>

@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { Caret, scrollActiveIntoView, useDismiss, useMenuPosition } from "./dropdownCore";
 
 interface Props {
   options: readonly string[];
@@ -11,20 +13,25 @@ interface Props {
   labels?: Record<string, string>;
 }
 
-/** A searchable, multi-select dropdown with selected items shown as removable chips. */
+/**
+ * The application's standard MULTI-select control: searchable, with selected
+ * items as removable chips. Shares the `.msel` design system and dropdownCore
+ * internals with Select — same portaled menu (never clipped by tables or
+ * modals), same chevron, same keyboard model: arrows move the active option,
+ * Enter adds it, Backspace on an empty query removes the last chip, Escape
+ * closes the menu only.
+ */
 export function SearchableMultiSelect({ options, value, onChange, placeholder = "Search…", labels }: Props) {
   const show = (v: string) => labels?.[v] ?? v;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [active, setActive] = useState(-1);
   const ref = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
+  const { menuRef, pos } = useMenuPosition(ref, open);
+  const close = () => { setOpen(false); setQuery(""); setActive(-1); };
+  useDismiss([ref, menuRef], open, close);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -32,41 +39,76 @@ export function SearchableMultiSelect({ options, value, onChange, placeholder = 
       !value.includes(o) && (q === "" || o.toLowerCase().includes(q) || (labels?.[o]?.toLowerCase().includes(q) ?? false)));
   }, [options, value, query, labels]);
 
+  const shown = filtered.slice(0, 50);
+
+  useEffect(() => {
+    if (!open) return;
+    setActive(shown.length ? 0 : -1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, query, value.length]);
+
+  useEffect(() => { if (open) scrollActiveIntoView(menuRef.current, active); }, [open, active, menuRef]);
+
   function add(opt: string) {
     onChange([...value, opt]);
     setQuery("");
+    inputRef.current?.focus();
   }
   function remove(opt: string) {
     onChange(value.filter((v) => v !== opt));
   }
 
+  function onKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "ArrowDown") { e.preventDefault(); if (!open) setOpen(true); else if (shown.length) setActive((a) => (a + 1) % shown.length); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); if (shown.length) setActive((a) => (a - 1 + shown.length) % shown.length); }
+    else if (e.key === "Enter") { e.preventDefault(); if (open && active >= 0 && shown[active]) add(shown[active]); }
+    else if (e.key === "Backspace" && query === "" && value.length) { remove(value[value.length - 1]); }
+    else if (e.key === "Tab") { close(); }
+  }
+
   return (
     <div className="msel" ref={ref}>
-      <div className="msel-box" onClick={() => setOpen(true)}>
+      <div className={`msel-box ${open ? "open" : ""}`} onClick={() => { setOpen(true); inputRef.current?.focus(); }}>
         {value.map((v) => (
           <span className="msel-chip" key={v}>
             {show(v)}
-            <button type="button" onClick={(e) => { e.stopPropagation(); remove(v); }}>×</button>
+            <button type="button" aria-label={`Remove ${show(v)}`} onClick={(e) => { e.stopPropagation(); remove(v); }}>×</button>
           </span>
         ))}
         <input
+          ref={inputRef}
           className="msel-input"
+          role="combobox" aria-expanded={open} aria-haspopup="listbox"
           value={query}
           placeholder={value.length === 0 ? placeholder : ""}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
+          onKeyDown={onKeyDown}
         />
+        <Caret open={open} />
       </div>
-      {open && (
-        <div className="msel-menu">
-          {filtered.length === 0 ? (
+      {open && pos && createPortal(
+        <div
+          className="msel-menu msel-menu-portal" role="listbox" ref={menuRef}
+          style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
+        >
+          {shown.length === 0 ? (
             <div className="msel-empty">{query ? "No matches" : "All selected"}</div>
           ) : (
-            filtered.slice(0, 50).map((o) => (
-              <div className="msel-opt" key={o} onClick={() => add(o)}>{show(o)}</div>
+            shown.map((o, i) => (
+              <div
+                className={`msel-opt ${i === active ? "active" : ""}`}
+                role="option" aria-selected={false}
+                key={o}
+                onMouseEnter={() => setActive(i)}
+                onClick={() => add(o)}
+              >
+                {show(o)}
+              </div>
             ))
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

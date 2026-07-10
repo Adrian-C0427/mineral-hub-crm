@@ -123,7 +123,7 @@ export function BuyerRelationships({ buyerId }: { buyerId: string }) {
         </div>
       </div>
       <p className="muted" style={{ marginTop: 4, fontSize: 12 }}>
-        Automatically derived from imported public records. Behaviour classified from this buyer's transaction flow.
+        Automatically derived from imported public records. Behavior classified from this buyer's transaction flow.
       </p>
 
       <div className="rel-columns">

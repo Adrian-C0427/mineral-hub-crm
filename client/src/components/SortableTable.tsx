@@ -1,3 +1,4 @@
+import { fmtDate } from "../lib/format";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
@@ -13,8 +14,14 @@ export interface Column<T> {
   type?: SortType;
   align?: "left" | "right" | "center";
   width?: string;
+  /** Floor for the column's width when the user hasn't set one — protects
+   *  identifying columns (names) from being crushed by wide tables. */
+  minWidth?: number;
   /** When true, the column can't be hidden via Customize View (still reorderable). */
   required?: boolean;
+  /** Hidden until the user enables it via Customize View. Keeps the default
+   *  view scannable while every column stays one click away. */
+  defaultHidden?: boolean;
 }
 
 interface Props<T> {
@@ -59,18 +66,23 @@ function compareValues(a: unknown, b: unknown, type: SortType): number {
 
 interface ColPrefs { order: string[]; hidden: string[]; widths: Record<string, number>; pinned: string[] }
 const colKey = (id: string) => `mh-cols:v1:${id}`;
-function loadColPrefs(id: string): ColPrefs {
+/** Returns null when the user has never customized this table — callers fall
+ *  back to the columns' declared defaults (defaultHidden). */
+function loadColPrefs(id: string): ColPrefs | null {
   try { const raw = localStorage.getItem(colKey(id)); if (raw) { const p = JSON.parse(raw) as Partial<ColPrefs>; return { order: p.order ?? [], hidden: p.hidden ?? [], widths: p.widths ?? {}, pinned: p.pinned ?? [] }; } } catch { /* ignore */ }
-  return { order: [], hidden: [], widths: {}, pinned: [] };
+  return null;
 }
 const MIN_COL_W = 64;
 // Pinned columns get a fixed width so their sticky left-offsets are exact.
 const PIN_DEFAULT_W = 160;
 
 function useColumnPrefs<T>(customizeId: string | undefined, columns: Column<T>[]) {
-  const [prefs, setPrefs] = useState<ColPrefs>(() => (customizeId ? loadColPrefs(customizeId) : { order: [], hidden: [], widths: {}, pinned: [] }));
+  // Fresh tables start from the columns' declared defaults; saved prefs win.
+  const defaults = (): ColPrefs => ({ order: [], hidden: columns.filter((c) => c.defaultHidden && !c.required).map((c) => c.key), widths: {}, pinned: [] });
+  const [prefs, setPrefs] = useState<ColPrefs>(() => (customizeId ? loadColPrefs(customizeId) ?? defaults() : { order: [], hidden: [], widths: {}, pinned: [] }));
   // Reload when the table identity changes (e.g. remounted for another list).
-  useEffect(() => { if (customizeId) setPrefs(loadColPrefs(customizeId)); }, [customizeId]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (customizeId) setPrefs(loadColPrefs(customizeId) ?? defaults()); }, [customizeId]);
   useEffect(() => { if (customizeId) { try { localStorage.setItem(colKey(customizeId), JSON.stringify(prefs)); } catch { /* ignore */ } } }, [customizeId, prefs]);
 
   // Apply the saved order (unknown/new columns keep their natural position at the end).
@@ -110,8 +122,11 @@ function useColumnPrefs<T>(customizeId: string | undefined, columns: Column<T>[]
     // Pin: give the column a fixed width (if none yet) so sticky offsets are exact.
     return { ...p, pinned: [...p.pinned, key], widths: p.widths[key] != null ? p.widths : { ...p.widths, [key]: PIN_DEFAULT_W } };
   });
-  const reset = () => setPrefs({ order: [], hidden: [], widths: {}, pinned: [] });
-  const isDefault = prefs.order.length === 0 && prefs.hidden.length === 0 && Object.keys(prefs.widths).length === 0 && prefs.pinned.length === 0;
+  const reset = () => setPrefs(defaults());
+  const defaultHiddenKeys = columns.filter((c) => c.defaultHidden && !c.required).map((c) => c.key);
+  const isDefault = prefs.order.length === 0
+    && prefs.hidden.length === defaultHiddenKeys.length && defaultHiddenKeys.every((k) => prefs.hidden.includes(k))
+    && Object.keys(prefs.widths).length === 0 && prefs.pinned.length === 0;
 
   return { ordered, visible, hidden, widths: prefs.widths, pinnedKeys, pinnedSet, toggle, reorder, setWidth, togglePin, reset, isDefault };
 }
@@ -255,8 +270,25 @@ export function SortableTable<T>({
     });
   }
 
+  // Right-edge fade: a visible cue that more columns exist off-screen. (The
+  // pinned lead column already anchors the left edge, so no left fade.)
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [moreRight, setMoreRight] = useState(false);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const update = () => setMoreRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 2);
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => { el.removeEventListener("scroll", update); ro.disconnect(); };
+  }, [sorted.length, cols.length]);
+
   const table = (
-    <div className="table-scroll">
+    <div className="table-edge-wrap">
+      {moreRight && <div className="table-fade-r" aria-hidden="true" />}
+    <div className="table-scroll" ref={scrollRef}>
       {/* lead-sticky pins the identifying column while wide tables scroll; when
           the user pins columns explicitly, we drive stickiness inline instead. */}
       <table className={`data-table${hasPins ? "" : " lead-sticky"}${selection ? " has-sel" : ""}`}>
@@ -274,7 +306,9 @@ export function SortableTable<T>({
             {cols.map((c) => {
               const active = sort?.key === c.key;
               const w = widths[c.key];
-              const wStyle = w != null ? { width: w, minWidth: w, maxWidth: w } : (c.width ? { width: c.width } : undefined);
+              const wStyle = w != null
+                ? { width: w, minWidth: Math.max(w, c.minWidth ?? 0), maxWidth: Math.max(w, c.minWidth ?? 0) }
+                : { ...(c.width ? { width: c.width } : {}), ...(c.minWidth ? { minWidth: c.minWidth } : {}) };
               const pinned = pinnedSet.has(c.key);
               return (
                 <th
@@ -324,7 +358,9 @@ export function SortableTable<T>({
                 {cols.map((c, ci) => {
                   const cell = c.render ? c.render(row) : displayDefault(c.value(row));
                   const w = widths[c.key];
-                  const wStyle = w != null ? { width: w, minWidth: w, maxWidth: w } : undefined;
+                  const wStyle = w != null
+                    ? { width: w, minWidth: Math.max(w, c.minWidth ?? 0), maxWidth: Math.max(w, c.minWidth ?? 0) }
+                    : (c.minWidth ? { minWidth: c.minWidth } : undefined);
                   const pinned = pinnedSet.has(c.key);
                   return (
                     <td key={c.key} className={`${c.align ?? "left"} ${pinned ? "cv-pin" : ""} ${pinned && c.key === pinnedKeys[pinnedKeys.length - 1] ? "cv-pin-last" : ""}`} style={{ ...wStyle, ...pinStyle(c.key, false) }}>
@@ -339,6 +375,7 @@ export function SortableTable<T>({
           )}
         </tbody>
       </table>
+    </div>
     </div>
   );
 
@@ -355,6 +392,6 @@ export function SortableTable<T>({
 
 function displayDefault(v: string | number | Date | null | undefined): ReactNode {
   if (v == null || v === "") return "—";
-  if (v instanceof Date) return v.toLocaleDateString();
+  if (v instanceof Date) return fmtDate(v);
   return String(v);
 }

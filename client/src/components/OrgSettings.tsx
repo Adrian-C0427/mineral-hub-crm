@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "../api/client";
 import { useAuth, type OrgRole } from "../auth/AuthContext";
-import { Banner, ConfirmChanges, ConfirmDialog } from "./ui";
+import { Banner, ConfirmChanges, ConfirmDialog, showToast } from "./ui";
 import { Select } from "./Select";
-import { fmtDate } from "../lib/format";
+import { fmtDate, fmtDateLocal } from "../lib/format";
 import { formatPhone } from "../lib/phone";
 import { ROLE_LABEL } from "../lib/roles";
 
@@ -23,8 +23,6 @@ export function OrgSettings({ initialTab }: { initialTab?: Tab } = {}) {
   const [tab, setTab] = useState<Tab>(initialTab ?? "org");
   useEffect(() => { if (initialTab) setTab(initialTab); }, [initialTab]);
   const [org, setOrg] = useState<OrgInfo | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
 
   function loadOrg() { api.get<OrgInfo>("/org").then(setOrg).catch(() => setOrg(null)); }
   useEffect(() => { loadOrg(); }, [user?.orgRole]);
@@ -34,8 +32,9 @@ export function OrgSettings({ initialTab }: { initialTab?: Tab } = {}) {
   const showRoles = isOrgOwner;
   const showOwner = isOrgOwner;
 
-  const flash = (m: string) => { setMsg(m); setErr(null); };
-  const fail = (e: unknown) => setErr(e instanceof ApiError ? e.message : "Something went wrong");
+  // Toasts keep the tab content from jumping when feedback appears.
+  const flash = (m: string) => showToast(m);
+  const fail = (e: unknown) => showToast(e instanceof ApiError ? e.message : "Something went wrong", "error");
 
   return (
     <div className="panel">
@@ -45,9 +44,6 @@ export function OrgSettings({ initialTab }: { initialTab?: Tab } = {}) {
         {showRoles && <button className={`tab ${tab === "roles" ? "active" : ""}`} onClick={() => setTab("roles")}>Roles & Permissions</button>}
         {showOwner && <button className={`tab ${tab === "owner" ? "active" : ""}`} onClick={() => setTab("owner")}>Owner controls</button>}
       </div>
-
-      {msg && <Banner kind="info">{msg}</Banner>}
-      {err && <div className="error-text">{err}</div>}
 
       {tab === "org" && org && <OrgTab org={org} canEdit={can("manageOrgSettings")} onSaved={() => { loadOrg(); refresh(); flash("Saved."); }} onJoined={() => { refresh(); loadOrg(); }} onError={fail} />}
       {tab === "users" && showUsers && <UsersTab onFlash={flash} onError={fail} />}
@@ -226,7 +222,7 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
                         {m.orgRole === "MANAGER" && <span className="badge" style={{ marginLeft: 6, background: "rgba(245,158,11,.15)", color: "#b45309" }}>reassign</span>}
                       </td>
                       <td><span className={`badge ${m.status === "ACTIVE" ? "resp-offer" : "resp-no"}`}>{m.status === "ACTIVE" ? "Active" : "Disabled"}</span></td>
-                      <td>{m.lastActiveAt ? fmtDate(m.lastActiveAt) : "—"}</td>
+                      <td>{m.lastActiveAt ? fmtDateLocal(m.lastActiveAt) : "—"}</td>
                       <td className="right user-actions-cell">
                         {!isSelf && m.orgRole !== "OWNER" && (
                           <div className="user-actions">

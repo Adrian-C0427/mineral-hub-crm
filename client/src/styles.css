@@ -58,9 +58,9 @@
 /* Status badges / pills / banners are pastel-on-tint, tuned for dark surfaces.
    In light mode the pale text washes out, so each gets a darker foreground on a
    lighter tint — designed for the theme, not inverted. */
-:root[data-theme="light"] .priority-high { background: rgba(220,38,38,0.10); color: #b91c1c; }
-:root[data-theme="light"] .priority-medium { background: rgba(180,83,9,0.12); color: #92400e; }
-:root[data-theme="light"] .priority-low { background: rgba(22,163,74,0.12); color: #15803d; }
+:root[data-theme="light"] .priority-high { color: #b91c1c; }
+:root[data-theme="light"] .priority-medium { color: #92400e; }
+:root[data-theme="light"] .priority-low { color: #15803d; }
 :root[data-theme="light"] .stage-under_contract { background: rgba(37,99,235,0.10); color: #1d4ed8; }
 :root[data-theme="light"] .stage-preparing_package { background: rgba(139,92,246,0.12); color: #6d28d9; }
 :root[data-theme="light"] .stage-sent_to_buyers { background: rgba(6,182,212,0.12); color: #0e7490; }
@@ -74,7 +74,7 @@
 :root[data-theme="light"] .resp-no,
 :root[data-theme="light"] .resp-passed { background: rgba(107,114,128,0.14); color: #4b5563; }
 :root[data-theme="light"] .crit-yes { background: rgba(22,163,74,0.12); color: #15803d; }
-:root[data-theme="light"] .crit-no { background: rgba(220,38,38,0.10); color: #b91c1c; }
+:root[data-theme="light"] .crit-no { background: rgba(15,23,42,0.06); color: #64748b; }
 :root[data-theme="light"] .banner-warn { background: rgba(180,83,9,0.08); border-color: rgba(180,83,9,0.30); color: #92400e; }
 :root[data-theme="light"] .banner-error { background: rgba(220,38,38,0.07); border-color: rgba(220,38,38,0.30); color: #b91c1c; }
 :root[data-theme="light"] .banner-info { background: rgba(37,99,235,0.07); border-color: rgba(37,99,235,0.30); color: #1d4ed8; }
@@ -143,6 +143,15 @@ input[type="checkbox"], input[type="radio"] {
   cursor: pointer;
 }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+/* File pickers: theme the native browse button so CSV imports don't render a
+   raw OS control in the middle of a styled form. */
+input[type="file"] { padding: 6px; cursor: pointer; }
+input[type="file"]::file-selector-button {
+  font: inherit; font-size: 13px; color: var(--text);
+  background: var(--panel-2); border: 1px solid var(--border); border-radius: 6px;
+  padding: 7px 12px; margin-right: 10px; cursor: pointer;
+}
+input[type="file"]::file-selector-button:hover { border-color: var(--accent); }
 label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
 .field { margin-bottom: 14px; }
 
@@ -171,13 +180,16 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 }
 .sidebar-toggle:hover { background: var(--panel-2); color: var(--text); }
 .sidebar-toggle svg { display: block; }
-.sidebar-nav { flex: 1; overflow-y: auto; padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; }
+.sidebar-nav { flex: 1; overflow-y: auto; padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.sidebar-nav::-webkit-scrollbar { width: 6px; }
+.sidebar-nav::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.sidebar-nav::-webkit-scrollbar-track { background: transparent; }
 .sidebar-link {
   display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 7px;
   color: var(--text-dim); font-weight: 500; cursor: pointer; user-select: none;
 }
 .sidebar-link:hover { background: var(--panel-2); color: var(--text); text-decoration: none; }
-.sidebar-link.active { background: var(--panel-2); color: var(--text); }
+.sidebar-link.active { background: var(--panel-2); color: var(--text); box-shadow: inset 2.5px 0 0 var(--accent); }
 .sidebar-group.within > .group-head { color: var(--text); }
 .sidebar-icon { display: flex; align-items: center; justify-content: center; width: 20px; flex: 0 0 20px; }
 .sidebar-label { flex: 1; white-space: nowrap; overflow: hidden; }
@@ -273,7 +285,8 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .ba-list { display: flex; flex-direction: column; gap: 8px; }
 .ba-row { border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel-2); }
 .ba-row.row-dimmed { opacity: 0.6; }
-.ba-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer; }
+.ba-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px; cursor: pointer; flex-wrap: wrap; }
+@media (max-width: 640px) { .ba-head { row-gap: 6px; } .ba-head .row { flex-basis: 100%; justify-content: flex-start; } }
 .ba-caret { color: var(--text-dim); width: 12px; }
 .ba-body { padding: 4px 12px 12px 32px; border-top: 1px solid var(--border); }
 .ba-log { display: flex; gap: 6px; align-items: center; margin: 8px 0; flex-wrap: wrap; }
@@ -342,7 +355,8 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .integration-logo.brand img { position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%); }
 .integration-logo-fallback { color: #64748b; font-weight: 700; font-size: 13px; }
 .integration-name { font-weight: 600; }
-.integration-desc { font-size: 13px; color: var(--text-dim); margin: 0 0 10px; flex: 1; }
+.integration-desc { font-size: 13px; color: var(--text-dim); margin: 0 0 10px; flex: 1;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .chip-mini { font-size: 11px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; }
 
 /* Report header block */
@@ -427,7 +441,10 @@ table.data-table {
 .data-table td { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
 .data-table td .wrap { white-space: normal; }
 .empty-cell { text-align: center; color: var(--text-dim); padding: 32px; }
-tr.row-overdue td { background: rgba(239, 68, 68, 0.08); }
+/* Overdue: a 3px left accent instead of a full-row wash — the row reads as
+   flagged without shouting (the light theme's pink rows were the loudest
+   element on the page). The Find Buyer By date still renders red. */
+tr.row-overdue td:first-child { box-shadow: inset 3px 0 0 var(--red); }
 tr.row-dimmed td { opacity: 0.5; }
 tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid var(--border); }
 
@@ -435,9 +452,13 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .badge {
   display: inline-block; padding: 2px 9px; border-radius: 100px; font-size: 12px; font-weight: 600; white-space: nowrap;
 }
-.priority-high { background: rgba(239, 68, 68, 0.18); color: #fca5a5; }
-.priority-medium { background: rgba(245, 158, 11, 0.18); color: #fcd34d; }
-.priority-low { background: rgba(34, 197, 94, 0.16); color: #86efac; }
+/* Priority is a dot + text, visually distinct from the filled stage pill —
+   before, a green 'Low' next to a green 'Closing' read as the same thing. */
+.badge[class*="priority-"] { background: transparent; border: 1px solid var(--border); }
+.badge[class*="priority-"]::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 5px; vertical-align: 1px; }
+.priority-high { color: #fca5a5; } .priority-high::before { background: var(--red); }
+.priority-medium { color: #fcd34d; } .priority-medium::before { background: var(--amber); }
+.priority-low { color: #86efac; } .priority-low::before { background: var(--green); }
 .stage-under_contract { background: rgba(59,130,246,0.18); color:#93c5fd; }
 .stage-preparing_package { background: rgba(139,92,246,0.18); color:#c4b5fd; }
 .stage-sent_to_buyers { background: rgba(6,182,212,0.18); color:#67e8f9; }
@@ -475,7 +496,7 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .match-gray-bg { background: var(--gray); }
 .crit-tag { display:inline-block; font-size: 11px; padding: 2px 8px; border-radius: 4px; margin: 0 4px 4px 0; }
 .crit-yes { background: rgba(34,197,94,0.16); color:#86efac; }
-.crit-no { background: rgba(239,68,68,0.16); color:#fca5a5; }
+.crit-no { background: var(--panel-2); color: var(--text-dim); }
 .match-card { border:1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 10px; background: var(--panel-2); }
 .match-card-head { display:flex; align-items:center; gap:10px; margin-bottom: 6px; }
 .match-rank { font-weight:700; color: var(--text-dim); width: 28px; }
@@ -556,6 +577,33 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .modal-header h3 { margin: 0; }
 .modal-body { padding: 20px; overflow-y: auto; }
 .modal-footer { padding: 14px 20px; border-top: 1px solid var(--border); display:flex; justify-content:flex-end; gap: 10px; }
+/* Background never scrolls behind an open dialog. */
+body.modal-open { overflow: hidden; }
+/* Dirty-guard feedback: a blocked backdrop/Escape close pulses the dialog. */
+.modal-attn { animation: modalAttn 0.36s ease; }
+@keyframes modalAttn {
+  0% { transform: scale(1); box-shadow: var(--shadow); }
+  35% { transform: scale(1.015); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent), var(--shadow); }
+  100% { transform: scale(1); box-shadow: var(--shadow); }
+}
+
+/* --- Toasts: fixed feedback, never reflows the page --- */
+.toast-stack { position: fixed; top: 16px; right: 16px; z-index: 5000; display: flex; flex-direction: column; gap: 8px; max-width: min(360px, calc(100vw - 32px)); }
+.toast { display: flex; align-items: flex-start; gap: 10px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; padding: 11px 12px 11px 14px; box-shadow: var(--shadow); font-size: 13.5px; line-height: 1.45;
+  animation: toastIn 0.22s ease; }
+.toast-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex: none; }
+.toast-success { border-color: color-mix(in srgb, var(--green) 45%, var(--border)); }
+.toast-success .toast-dot { background: var(--green); }
+.toast-error { border-color: color-mix(in srgb, var(--red) 50%, var(--border)); }
+.toast-error .toast-dot { background: var(--red); }
+.toast-info { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.toast-info .toast-dot { background: var(--accent); }
+.toast-msg { flex: 1; min-width: 0; }
+.toast-x { background: none; border: none; color: var(--text-dim); font-size: 15px; line-height: 1; padding: 2px 4px; cursor: pointer; border-radius: 6px; }
+.toast-x:hover { color: var(--text); background: var(--panel-2); }
+@keyframes toastIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .toast, .modal-attn { animation: none; } }
 
 /* --- Pipeline kanban --- */
 .kanban { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 12px; }
@@ -762,6 +810,12 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .anomaly-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; max-height: 280px; overflow-y: auto; }
 tr.row-base td { background: var(--panel-2); font-weight: 600; }
 
+/* Horizontal-overflow affordance: fade at the right edge while more columns
+   are off-screen; disappears when scrolled to the end. */
+.table-edge-wrap { position: relative; }
+.table-fade-r { position: absolute; top: 0; bottom: 0; right: 0; width: 34px; pointer-events: none; z-index: 6;
+  background: linear-gradient(to left, var(--bg), transparent); }
+
 /* --- Searchable multi-select --- */
 .msel { position: relative; }
 .msel-box { display:flex; flex-wrap:wrap; gap:6px; align-items:center; min-height:38px; background: var(--bg); border:1px solid var(--border); border-radius:6px; padding:5px 8px; cursor:text; }
@@ -785,8 +839,11 @@ tr.row-base td { background: var(--panel-2); font-weight: 600; }
 .msel-single .msel-box:focus-visible { outline: none; border-color: var(--accent); }
 .msel-single-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
 .msel-single-value.placeholder { color: var(--text-dim); }
-.msel-caret { flex: none; color: var(--text-dim); font-size: 11px; transition: transform 0.15s ease; pointer-events: none; }
-.msel-single .msel-box[aria-expanded="true"] .msel-caret { transform: rotate(180deg); }
+.msel-caret { flex: none; color: var(--text-dim); transition: transform 0.15s ease; pointer-events: none; }
+.msel-caret.open { transform: rotate(180deg); }
+.msel-box.open { border-color: var(--accent); }
+/* Keyboard/hover active row — one highlight for both dropdown variants. */
+.msel-opt.active { background: var(--panel-2); }
 .msel-clear { flex: none; border: none; background: none; color: var(--text-dim); font-size: 15px; line-height: 1; cursor: pointer; padding: 0 2px; }
 .msel-clear:hover { color: var(--text); }
 .msel.is-disabled .msel-box { opacity: 0.6; cursor: not-allowed; background: var(--panel-2); }
@@ -800,6 +857,42 @@ tr.row-base td { background: var(--panel-2); font-weight: 600; }
 .msel-menu { animation: mselIn 0.13s ease; transform-origin: top; }
 @keyframes mselIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .msel-menu { animation: none; } .msel-caret { transition: none; } }
+/* Dollar inputs: $ prefix + live thousand separators (MoneyInput). */
+.money-input { position: relative; display: block; width: 100%; }
+.money-input .mi-prefix { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-dim); font-size: 14px; pointer-events: none; }
+.money-input input { padding-left: 24px; }
+
+/* GIS-outage notice pinned to the top of a map canvas. */
+.map-notice { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); z-index: 7;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow);
+  padding: 7px 12px; font-size: 12.5px; color: var(--text-dim); max-width: calc(100% - 90px); text-align: center; }
+
+/* Deal funnel strip: contacted -> interested -> offers on one line. */
+.dd-funnel { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; font-size: 13.5px; color: var(--text-dim); }
+.dd-funnel-item strong { color: var(--text); font-size: 15px; }
+.dd-funnel-sep { opacity: 0.5; }
+/* Long free-text cells: single line + ellipsis, full text via title tooltip. */
+td.cell-clamp { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Settings sub-navigation — persistent tabs shared by all settings pages. */
+.settings-nav { display: flex; gap: 4px; margin: -6px 0 16px; border-bottom: 1px solid var(--border); }
+.settings-nav-link { padding: 8px 14px; font-size: 13.5px; font-weight: 600; color: var(--text-dim);
+  border-bottom: 2px solid transparent; margin-bottom: -1px; text-decoration: none; border-radius: 6px 6px 0 0; }
+.settings-nav-link:hover { color: var(--text); background: var(--panel-2); text-decoration: none; }
+.settings-nav-link.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Overflow (...) menu for secondary/destructive page actions. */
+.ovf { position: relative; display: inline-flex; }
+.ovf-btn { min-width: 34px; }
+.ovf-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: var(--z-dropdown); min-width: 170px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow);
+  padding: 4px; display: flex; flex-direction: column; animation: mselIn 0.13s ease; }
+.ovf-item { display: block; width: 100%; text-align: left; background: none; border: none; border-radius: 6px;
+  padding: 8px 10px; font-size: 13.5px; color: var(--text); cursor: pointer; }
+.ovf-item:hover { background: var(--panel-2); }
+.ovf-item.danger { color: var(--red); }
+.ovf-item.danger:hover { background: color-mix(in srgb, var(--red) 12%, transparent); }
+
 .gear-link { color: var(--text-dim); font-size:20px; display:inline-flex; align-items:center; padding:4px 6px; border-radius:6px; }
 .gear-link:hover { color: var(--text); background: var(--panel-2); text-decoration:none; }
 
@@ -1002,9 +1095,6 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .portal-lead { border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); }
 .portal-lead-section { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; margin: 14px 0 8px; }
 .portal-map-reset { position: absolute; top: 10px; right: 10px; z-index: 5; }
-.portal-map-layers { position: absolute; left: 10px; bottom: 10px; z-index: 5; display: flex; gap: 10px; flex-wrap: wrap;
-  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 12px; max-width: calc(100% - 20px); }
-.portal-map-layers label { display: flex; align-items: center; gap: 5px; white-space: nowrap; cursor: pointer; }
 .portal-map-hover { position: absolute; top: 10px; left: 52px; z-index: 5; background: var(--panel); border: 1px solid var(--border);
   border-radius: 6px; padding: 5px 10px; font-size: 12px; pointer-events: none; }
 @media (max-width: 900px) { .portal-grid { grid-template-columns: 1fr; } }
@@ -1218,7 +1308,7 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .deal-detail .match-bar { height: 5px; border-radius: 3px; margin: 12px 0; }
 .deal-detail .crit-tag { border-radius: 99px; padding: 4px 11px; font-size: 11.5px; font-weight: 600; margin: 0 7px 7px 0; border: 1px solid transparent; }
 .deal-detail .crit-tag.crit-yes { border-color: rgba(34, 197, 94, 0.3); }
-.deal-detail .crit-tag.crit-no { border-color: rgba(244, 63, 94, 0.3); }
+.deal-detail .crit-tag.crit-no { border-color: var(--border); opacity: 0.75; }
 
 /* Documents folder pills */
 .doc-chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 2px 0 4px; }

@@ -7,7 +7,7 @@ import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Banner, MetricCard, Modal, Spinner } from "../components/ui";
 import { WellImport } from "../components/WellImport";
-import { money, num, prettyEnum } from "../lib/format";
+import { money, num, prettyEnum, fmtDate, fmtDateTime, fmtDateLocal } from "../lib/format";
 import { monthLabel, chartTooltip } from "../lib/charts";
 import { exportElementToPdf } from "../lib/pdf";
 
@@ -531,7 +531,7 @@ function SelectedWellPermits({ wells }: { wells: WellRow[] }) {
         <div key={p.well} style={{ fontSize: 13, marginBottom: 4 }}>
           <strong>{p.well}</strong>
           {p.rows.slice(0, 4).map((r) => (
-            <span key={r.statusNo} className="muted"> · {r.permitDate ? new Date(r.permitDate).toLocaleDateString() : "—"} {r.operator ?? ""} (#{r.statusNo})</span>
+            <span key={r.statusNo} className="muted"> · {r.permitDate ? fmtDate(r.permitDate) : "—"} {r.operator ?? ""} (#{r.statusNo})</span>
           ))}
         </div>
       ))}
@@ -659,7 +659,7 @@ function Results({ analysis, tab, setTab, reportRef, analysisName }: {
             <span>Results</span>
           </div>
           <span className="muted">
-            Run {new Date(r.runAt).toLocaleString()} · forecast <ConfBadge c={r.forecast.confidence} />
+            Run {fmtDateTime(r.runAt)} · forecast <ConfBadge c={r.forecast.confidence} />
           </span>
         </div>
 
@@ -1189,7 +1189,7 @@ function FullReport({ analysis, analysisName }: { analysis: AnalyzeResponse; ana
       <div className="panel report-header">
         <h2 style={{ margin: 0 }}>Well Production &amp; Valuation Report{analysisName ? ` — ${analysisName}` : ""}</h2>
         <p className="muted" style={{ margin: "4px 0 0" }}>
-          Generated {new Date(r.runAt).toLocaleString()} · Forecast confidence: {CONF_LABEL[r.forecast.confidence]} ·
+          Generated {fmtDateTime(r.runAt)} · Forecast confidence: {CONF_LABEL[r.forecast.confidence]} ·
           Historical data and forecast estimates are labeled throughout.
         </p>
       </div>
@@ -1306,7 +1306,7 @@ function SavedAnalyses({ onOpen }: { onOpen: (id: string) => void }) {
                 <td><input type="checkbox" checked={sel.includes(r.id)} disabled={!sel.includes(r.id) && sel.length >= 4} onChange={(e) => setSel((s) => e.target.checked ? [...s, r.id] : s.filter((x) => x !== r.id))} /></td>
                 <td><strong>{r.name}</strong>{r.notes && <div className="muted" style={{ fontSize: 12 }}>{r.notes}</div>}</td>
                 <td className="wrap" style={{ maxWidth: 260 }}>{r.wellNames.join(", ")}</td>
-                <td>{new Date(r.updatedAt).toLocaleDateString()}</td>
+                <td>{fmtDateLocal(r.updatedAt)}</td>
                 <td className="right">{fmtMoneyC(r.headline?.fairMarketValue)}</td>
                 <td className="right">{fmtMoneyC(r.headline?.recommendedOffer)}</td>
                 <td className="right">{fmtMoneyC(r.headline?.npv)}</td>

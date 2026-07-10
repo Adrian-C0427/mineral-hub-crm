@@ -4,7 +4,7 @@ import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import {
   Spinner, PriorityBadge, StageBadge, MetricCard,
-  MatchBar, Banner, ConfirmDelete, ConfirmDialog, BackLink,
+  MatchBar, Banner, ConfirmDelete, ConfirmDialog, BackLink, OverflowMenu,
 } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { StageChangeModal } from "../components/StageChangeModal";
@@ -123,8 +123,8 @@ export function DealDetail() {
           </span>
         </div>
         <div className="row">
-          {can("deleteDeals") && <button className="danger" onClick={() => setConfirmDelete(true)}>Delete</button>}
           {can("editDeals") && <button className="primary" onClick={() => setShowStage(true)}>Move Stage →</button>}
+          {can("deleteDeals") && <OverflowMenu items={[{ label: "Delete deal…", danger: true, onClick: () => setConfirmDelete(true) }]} />}
         </div>
       </div>
 
@@ -183,11 +183,20 @@ export function DealDetail() {
         <TractSection dealId={deal.id} dealName={deal.name} canEdit={can("editDeals")} abstractIds={deal.abstractIds} />
       </Suspense>
 
-      <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
-        <MetricCard label="Buyers Contacted" value={deal.metrics.buyersContacted} />
-        <MetricCard label="Interested" value={deal.metrics.interested} />
-        <MetricCard label="Offers" value={deal.metrics.offers} />
-        <MetricCard label="High Offer" value={money(deal.metrics.highOffer)} />
+      {/* Compact funnel strip — one line, not four card-heights of repeats;
+          the Offers table right below carries the detail. */}
+      <div className="panel dd-funnel">
+        <span className="dd-funnel-item"><strong>{deal.metrics.buyersContacted}</strong> buyers contacted</span>
+        <span className="dd-funnel-sep" aria-hidden="true">→</span>
+        <span className="dd-funnel-item"><strong>{deal.metrics.interested}</strong> interested</span>
+        <span className="dd-funnel-sep" aria-hidden="true">→</span>
+        <span className="dd-funnel-item"><strong>{deal.metrics.offers}</strong> offer{deal.metrics.offers === 1 ? "" : "s"}</span>
+        {deal.metrics.highOffer != null && (
+          <>
+            <span className="spacer" />
+            <span className="dd-funnel-item">High offer <strong>{money(deal.metrics.highOffer)}</strong></span>
+          </>
+        )}
       </div>
 
       {deal.selectedBuyer && (
@@ -215,7 +224,7 @@ export function DealDetail() {
                     <td className="right">{money(o.amount)}</td>
                     <td>{o.status}</td>
                     <td>{fmtDate(o.expirationDate)}</td>
-                    <td>{o.conditions ?? "—"}</td>
+                    <td className="cell-clamp" title={o.conditions ?? undefined}>{o.conditions ?? "—"}</td>
                     <td className="right">
                       {deal.selectedOfferId === o.id ? <span className="badge resp-offer">Accepted</span> :
                         can("editDeals") ? <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button> : null}

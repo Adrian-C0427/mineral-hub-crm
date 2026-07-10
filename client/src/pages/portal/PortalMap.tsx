@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { addCadastralLayers, styleWithGlyphs } from "../../lib/mapLayers";
+import { addCadastralLayers, styleWithGlyphs, watchGisHealth } from "../../lib/mapLayers";
 import { MapLayersPanel } from "../../components/MapLayersPanel";
 import { collectCoords, bboxOfPoints } from "../../lib/geo";
 import type { FC } from "./portalApi";
@@ -47,6 +47,7 @@ export function PortalMap({ features, height = 420, onSelect }: {
   useEffect(() => {
     if (mapRef.current || !container.current) return;
     const map = new maplibregl.Map({ container: container.current, style: styleWithGlyphs(), center: TX_CENTER, zoom: 6 });
+    watchGisHealth(map);
     map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
     mapRef.current = map;
     map.on("load", async () => {

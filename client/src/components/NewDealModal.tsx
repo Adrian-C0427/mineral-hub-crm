@@ -5,6 +5,7 @@ import { SearchableMultiSelect } from "./SearchableMultiSelect";
 import { GeoFields } from "./GeoFields";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
 import type { DealSummary } from "../types";
+import { MoneyInput } from "./MoneyInput";
 
 // An additional asset behaves exactly like a standalone deal record — the same
 // fields, dependencies, and required fields. Its contract timeline defaults to
@@ -142,6 +143,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId }: {
       title={asset ? "Add Deal" : "New Deal"}
       onClose={onClose}
       wide
+      dirty={Object.values(f).some((v) => v.trim() !== "") || states.length > 0 || counties.length > 0 || assetTypes.length > 0}
       footer={
         <>
           <button onClick={onClose}>Cancel</button>
@@ -172,15 +174,15 @@ export function NewDealModal({ onClose, onCreated, parentDealId }: {
         />
         <div className="field"><label>Asset Type {req}</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
         <div className="field"><label>NRA {req}</label><input type="number" value={f.nra} onChange={set("nra")} /></div>
-        <div className="field"><label>Our Price (acquisition cost) {req}</label><input type="number" value={f.ourPrice} onChange={set("ourPrice")} /></div>
+        <div className="field"><label>Our Price (acquisition cost) {req}</label><MoneyInput value={f.ourPrice} onChange={(v) => setF((p) => ({ ...p, ourPrice: v }))} ariaLabel="Our price" /></div>
         <div className="field"><label>Date Under Contract {req}</label><input type="date" value={f.dateUnderContract} onChange={set("dateUnderContract")} /></div>
         <div className="field"><label>Basin</label><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(counties))} value={basins} onChange={setBasins} placeholder={counties.length ? "Suggested for your counties first…" : "Search basins…"} /></div>
         <div className="field"><label>Formation</label><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(counties))} value={formations} onChange={setFormations} placeholder={counties.length ? "Suggested for your counties first…" : "Search formations…"} /></div>
         <div className="field"><label>Operator</label><input value={f.operator} onChange={set("operator")} /></div>
         <div className="field"><label>RRC</label><input value={f.rrc} onChange={set("rrc")} placeholder="RRC lease / district / operator no." /></div>
         <div className="field"><label>NMA</label><input type="number" value={f.acreageNma} onChange={set("acreageNma")} /></div>
-        <div className="field"><label>Ask Price (to buyers)</label><input type="number" value={f.askPrice} onChange={set("askPrice")} /></div>
-        <div className="field"><label>Est. Closing Costs</label><input type="number" value={f.estimatedClosingCosts} onChange={set("estimatedClosingCosts")} /></div>
+        <div className="field"><label>Ask Price (to buyers)</label><MoneyInput value={f.askPrice} onChange={(v) => setF((p) => ({ ...p, askPrice: v }))} ariaLabel="Ask price" /></div>
+        <div className="field"><label>Est. Closing Costs</label><MoneyInput value={f.estimatedClosingCosts} onChange={(v) => setF((p) => ({ ...p, estimatedClosingCosts: v }))} ariaLabel="Estimated closing costs" /></div>
         <div className="field"><label>Original Closing Date</label><input type="date" value={f.originalClosingDate} onChange={set("originalClosingDate")} /></div>
       </div>
       <div className="field"><label>Notes</label><textarea rows={3} value={f.notes} onChange={set("notes")} /></div>

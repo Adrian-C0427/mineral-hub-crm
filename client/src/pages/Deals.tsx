@@ -50,10 +50,13 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
   if (!deals) return <Spinner />;
 
   const columns: Column<DealSummary>[] = [
-    { key: "name", header: "Deal", type: "text", value: (d) => d.name,
+    // The identifying column gets a width floor so names never wrap into a
+    // 4-line sliver while less important columns spread out.
+    { key: "name", header: "Deal", type: "text", value: (d) => d.name, minWidth: 220, required: true,
       render: (d) => (
-        <span className="row" style={{ gap: 6, alignItems: "center" }}>
+        <span className="row" style={{ gap: 6, alignItems: "center", flexWrap: "wrap" }}>
           <strong>{d.name}</strong>
+          {d.recordType === "OWNED_ASSET" && <span className="badge resp-interested" title="This is an owned mineral asset marked for sale — not an acquisition opportunity.">Asset · For sale</span>}
           {d.assetCount ? <span className="badge resp-pending" title={`${d.assetCount} asset${d.assetCount > 1 ? "s" : ""} in this seller package`}>{d.assetCount} asset{d.assetCount > 1 ? "s" : ""}</span> : null}
         </span>
       ) },
@@ -63,10 +66,12 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
     { key: "stage", header: "Stage", type: "text", value: (d) => d.stage, render: (d) => <StageBadge stage={d.stage} /> },
     { key: "nma", header: "NMA", type: "number", align: "right", value: (d) => d.aggAcreageNma ?? d.acreageNma, render: (d) => num(d.aggAcreageNma ?? d.acreageNma) },
     { key: "profit", header: "Profit Est.", type: "number", align: "right", value: (d) => d.profitEst, render: (d) => money(d.profitEst) },
-    { key: "uc", header: "Under Contract", type: "date", value: (d) => d.dateUnderContract, render: (d) => fmtDate(d.dateUnderContract) },
+    // Secondary date columns start hidden (Customize View re-enables them):
+    // the default view keeps the columns that drive weekly decisions.
+    { key: "uc", header: "Under Contract", type: "date", value: (d) => d.dateUnderContract, render: (d) => fmtDate(d.dateUnderContract), defaultHidden: true },
     { key: "fbb", header: "Find Buyer By", type: "date", value: (d) => d.findBuyerByDate,
       render: (d) => <span style={d.isOverdue ? { color: "var(--red)" } : undefined}>{fmtDate(d.findBuyerByDate)}</span> },
-    { key: "oc", header: "Orig. Closing", type: "date", value: (d) => d.originalClosingDate, render: (d) => fmtDate(d.originalClosingDate) },
+    { key: "oc", header: "Orig. Closing", type: "date", value: (d) => d.originalClosingDate, render: (d) => fmtDate(d.originalClosingDate), defaultHidden: true },
     { key: "fc", header: "Final Closing", type: "date", value: (d) => d.finalClosingDate, render: (d) => fmtDate(d.finalClosingDate) },
     { key: "buyer", header: "Current Buyer", type: "text", value: (d) => d.selectedBuyer?.name ?? null, render: (d) => d.selectedBuyer?.name ?? "—" },
     { key: "owner", header: "Owner", type: "text", value: (d) => d.relationshipOwner?.name ?? null, render: (d) => d.relationshipOwner?.name ?? "—" },

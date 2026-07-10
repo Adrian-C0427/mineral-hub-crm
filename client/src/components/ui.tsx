@@ -1,7 +1,89 @@
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { prettyEnum } from "../lib/format";
 import { useStages } from "../stages";
+
+/**
+ * Shared dialog chrome. Every overlay dialog gets, for free:
+ *  - Escape closes (only the top-most dialog when several are stacked)
+ *  - background scroll locked while any dialog is open
+ *  - a "dirty guard": when the caller marks the dialog dirty, backdrop clicks
+ *    and Escape pulse the dialog instead of silently discarding the user's
+ *    input — only the explicit × / Cancel buttons close it.
+ */
+const MODAL_STACK: symbol[] = [];
+
+function useDialogChrome(onClose: () => void, dirty?: boolean) {
+  const id = useRef(Symbol("dialog")).current;
+  const [attn, setAttn] = useState(0);
+  const latest = useRef({ onClose, dirty });
+  latest.current = { onClose, dirty };
+
+  // requestClose("x") always closes; backdrop/esc respect the dirty guard.
+  const requestClose = (source: "backdrop" | "esc" | "x") => {
+    if (source !== "x" && latest.current.dirty) { setAttn((n) => n + 1); return; }
+    latest.current.onClose();
+  };
+
+  useEffect(() => {
+    MODAL_STACK.push(id);
+    document.body.classList.add("modal-open");
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (MODAL_STACK[MODAL_STACK.length - 1] !== id) return;
+      e.stopPropagation();
+      if (latest.current.dirty) { setAttn((n) => n + 1); return; }
+      latest.current.onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => {
+      const i = MODAL_STACK.indexOf(id);
+      if (i >= 0) MODAL_STACK.splice(i, 1);
+      if (MODAL_STACK.length === 0) document.body.classList.remove("modal-open");
+      document.removeEventListener("keydown", onKey);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return { requestClose, attn };
+}
+
+/* ---------------------------------------------------------------- toasts --
+ * Fixed-position success/error feedback that never reflows the page. Fire
+ * from anywhere with showToast("Saved."); <ToastHost/> is mounted once in App.
+ */
+type ToastKind = "success" | "error" | "info";
+interface ToastItem { id: number; kind: ToastKind; msg: ReactNode }
+
+let toastListener: ((t: ToastItem) => void) | null = null;
+let toastSeq = 0;
+
+export function showToast(msg: ReactNode, kind: ToastKind = "success") {
+  toastListener?.({ id: ++toastSeq, kind, msg });
+}
+
+export function ToastHost() {
+  const [toasts, setToasts] = useState<ToastItem[]>([]);
+  useEffect(() => {
+    toastListener = (t) => {
+      setToasts((l) => [...l.slice(-3), t]);
+      window.setTimeout(() => setToasts((l) => l.filter((x) => x.id !== t.id)), 4200);
+    };
+    return () => { toastListener = null; };
+  }, []);
+  if (!toasts.length) return null;
+  return (
+    <div className="toast-stack" role="status" aria-live="polite">
+      {toasts.map((t) => (
+        <div key={t.id} className={`toast toast-${t.kind}`}>
+          <span className="toast-dot" aria-hidden="true" />
+          <span className="toast-msg">{t.msg}</span>
+          <button className="toast-x" aria-label="Dismiss" onClick={() => setToasts((l) => l.filter((x) => x.id !== t.id))}>×</button>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /**
  * Standard back-to-list navigation for detail pages. Prefers browser back (so
@@ -90,19 +172,30 @@ export function Modal({
   onClose,
   footer,
   wide,
+  dirty,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
   footer?: ReactNode;
   wide?: boolean;
+  /** When true, backdrop clicks and Escape pulse the dialog instead of
+   *  discarding the user's in-progress input; × and Cancel still close. */
+  dirty?: boolean;
 }) {
+  const { requestClose, attn } = useDialogChrome(onClose, dirty);
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className={`modal ${wide ? "modal-wide" : ""}`} onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay" onClick={() => requestClose("backdrop")}>
+      <div
+        key={attn} /* re-triggers the pulse animation on each blocked close */
+        className={`modal ${wide ? "modal-wide" : ""} ${attn ? "modal-attn" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="modal-header">
           <h3>{title}</h3>
-          <button className="icon-btn" onClick={onClose} aria-label="Close">
+          <button className="icon-btn" onClick={() => requestClose("x")} aria-label="Close">
             ×
           </button>
         </div>
@@ -140,9 +233,10 @@ export function ConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { requestClose } = useDialogChrome(onCancel);
   return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay" onClick={() => requestClose("backdrop")}>
+      <div className="modal" role="alertdialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{title}</h3>
           <button className="icon-btn" onClick={onCancel} aria-label="Close">×</button>
@@ -184,9 +278,11 @@ export function ConfirmDelete({
   const [typed, setTyped] = useState("");
   const plural = count === 1 ? itemLabel : `${itemLabel}s`;
   const armed = typed.trim().toUpperCase() === "DELETE";
+  // Typed text counts as dirty — a stray backdrop click shouldn't eat it.
+  const { requestClose, attn } = useDialogChrome(onCancel, typed.length > 0);
   return (
-    <div className="modal-overlay" onClick={onCancel}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+    <div className="modal-overlay" onClick={() => requestClose("backdrop")}>
+      <div key={attn} className={`modal ${attn ? "modal-attn" : ""}`} role="alertdialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>Confirm deletion</h3>
           <button className="icon-btn" onClick={onCancel} aria-label="Close">×</button>
@@ -229,6 +325,43 @@ export function ConfirmChanges({ busy, onCancel, onConfirm }: { busy?: boolean; 
       onCancel={onCancel}
       onConfirm={onConfirm}
     />
+  );
+}
+
+/**
+ * Header overflow menu (⋯) for secondary and destructive page actions.
+ * Destructive actions never sit as primary header buttons — they live here,
+ * one deliberate click away, styled red inside the menu.
+ */
+export function OverflowMenu({ items, ariaLabel = "More actions" }: {
+  items: { label: ReactNode; danger?: boolean; onClick: () => void }[];
+  ariaLabel?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey, true);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey, true); };
+  }, [open]);
+  return (
+    <div className="ovf" ref={ref}>
+      <button className="icon-btn ovf-btn" aria-haspopup="menu" aria-expanded={open} aria-label={ariaLabel} title={ariaLabel} onClick={() => setOpen((o) => !o)}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
+      </button>
+      {open && (
+        <div className="ovf-menu" role="menu">
+          {items.map((it, i) => (
+            <button key={i} role="menuitem" className={`ovf-item ${it.danger ? "danger" : ""}`} onClick={() => { setOpen(false); it.onClick(); }}>
+              {it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

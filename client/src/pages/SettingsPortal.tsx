@@ -1,13 +1,18 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
-import { Banner } from "../components/ui";
+import { showToast } from "../components/ui";
 import { Toggle } from "../components/Toggle";
+import { SettingsNav } from "../components/SettingsNav";
 
 /**
  * Buyer Portal settings — enable/disable and the marketplace URL. Contact
  * information is configured PER DEAL (on each deal's Buyer Portal section), so
  * published listings always show the right representative for that opportunity;
  * there is no global contact manager here anymore.
+ *
+ * Feedback rules: successes are toasts (fixed position — the form never jumps
+ * under the cursor); validation problems render inline next to the control
+ * that caused them, and focus moves to the field that fixes the problem.
  */
 
 interface PortalSettings {
@@ -15,55 +20,61 @@ interface PortalSettings {
 }
 
 export function SettingsPortal() {
-  const [msg, setMsg] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const flash = (m: string) => { setMsg(m); setErr(null); };
-  const fail = (e: unknown) => { setErr(e instanceof ApiError ? e.message : "Something went wrong"); setMsg(null); };
-
   return (
     <div className="page" style={{ maxWidth: 820 }}>
-      <div className="page-header"><h1>Buyer Portal</h1></div>
-      {msg && <Banner kind="info">{msg}</Banner>}
-      {err && <div className="error-text">{err}</div>}
-      <PortalGeneral onFlash={flash} onError={fail} />
+      <div className="page-header"><h1>Settings</h1></div>
+      <SettingsNav />
+      <PortalGeneral />
     </div>
   );
 }
 
-function PortalGeneral({ onFlash, onError }: { onFlash: (m: string) => void; onError: (e: unknown) => void }) {
+function PortalGeneral() {
   const [f, setF] = useState({ enabled: false, slug: "" });
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [slugError, setSlugError] = useState<string | null>(null);
+  const slugRef = useRef<HTMLInputElement>(null);
+
+  const fail = (e: unknown) => showToast(e instanceof ApiError ? e.message : "Something went wrong", "error");
 
   useEffect(() => {
     api.get<PortalSettings>("/org/portal-settings").then((d) => {
       setF({ enabled: d.portalEnabled, slug: d.portalSlug ?? "" });
       setLoaded(true);
-    }).catch(onError);
+    }).catch(fail);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // The toggle updates immediately (no Save needed for the on/off state).
   async function toggleEnabled(next: boolean) {
-    if (next && !f.slug.trim()) { onError(new ApiError(400, "Set a portal URL before enabling the portal.")); return; }
+    if (next && !f.slug.trim()) {
+      setSlugError("Set a portal URL first — buyers need an address to visit.");
+      slugRef.current?.focus();
+      return;
+    }
     setF((p) => ({ ...p, enabled: next }));
     try {
       await api.patch("/org/portal-settings", { enabled: next, ...(f.slug.trim() ? { slug: f.slug.trim().toLowerCase() } : {}) });
-      onFlash(next ? "Portal enabled." : "Portal disabled.");
-    } catch (e) { setF((p) => ({ ...p, enabled: !next })); onError(e); }
+      showToast(next ? "Portal enabled — your marketplace is live." : "Portal disabled.");
+    } catch (e) { setF((p) => ({ ...p, enabled: !next })); fail(e); }
   }
 
   async function saveUrl(e: React.FormEvent) {
     e.preventDefault();
-    if (f.enabled && !f.slug.trim()) { onError(new ApiError(400, "Set a portal URL before enabling the portal.")); return; }
+    if (f.enabled && !f.slug.trim()) {
+      setSlugError("The portal is enabled, so it needs a URL.");
+      slugRef.current?.focus();
+      return;
+    }
     setBusy(true);
     try {
       await api.patch("/org/portal-settings", {
         enabled: f.enabled,
         ...(f.slug.trim() ? { slug: f.slug.trim().toLowerCase() } : {}),
       });
-      onFlash("Portal settings saved.");
-    } catch (e2) { onError(e2); }
+      showToast("Portal settings saved.");
+    } catch (e2) { fail(e2); }
     finally { setBusy(false); }
   }
 
@@ -88,7 +99,14 @@ function PortalGeneral({ onFlash, onError }: { onFlash: (m: string) => void; onE
       <form onSubmit={saveUrl} style={{ maxWidth: 520 }}>
         <div className="field">
           <label>Portal URL</label>
-          <input value={f.slug} onChange={(e) => setF((p) => ({ ...p, slug: e.target.value }))} placeholder="your-company" />
+          <input
+            ref={slugRef}
+            value={f.slug}
+            onChange={(e) => { setF((p) => ({ ...p, slug: e.target.value })); if (slugError) setSlugError(null); }}
+            placeholder="your-company"
+            aria-invalid={slugError ? true : undefined}
+          />
+          {slugError && <div className="error-text" style={{ marginTop: 6 }}>{slugError}</div>}
           {url && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{url}</div>}
         </div>
         <p className="muted" style={{ fontSize: 12 }}>

@@ -80,6 +80,7 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
       title="New Buyer"
       onClose={onClose}
       wide
+      dirty={Object.values(f).some((v) => v.trim() !== "") || states.length > 0 || counties.length > 0 || assetTypes.length > 0}
       footer={
         <>
           <button onClick={onClose}>Cancel</button>

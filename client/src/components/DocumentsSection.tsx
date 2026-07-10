@@ -3,7 +3,7 @@ import { api } from "../api/client";
 import { Banner } from "./ui";
 import { Select } from "./Select";
 import { SortableTable, type Column } from "./SortableTable";
-import { fmtDate } from "../lib/format";
+import { fmtDateLocal } from "../lib/format";
 
 /**
  * The single, shared Documents section used everywhere documents are managed
@@ -118,8 +118,8 @@ export function DocumentsSection({
       key: "filename", header: "Document Name", value: (f) => f.filename.toLowerCase(),
       render: (f) => <span title={f.filename}>{f.filename}{(f.versionCount ?? 0) > 0 && <span className="chip-mini" style={{ marginLeft: 6 }} title={`${f.versionCount} previous version(s)`}>v{(f.versionCount ?? 0) + 1}</span>}</span>,
     },
-    { key: "createdAt", header: "Date Uploaded", type: "date", value: (f) => f.createdAt, render: (f) => fmtDate(f.createdAt) },
-    { key: "updatedAt", header: "Date Modified", type: "date", value: (f) => f.updatedAt ?? f.createdAt, render: (f) => fmtDate(f.updatedAt ?? f.createdAt) },
+    { key: "createdAt", header: "Date Uploaded", type: "date", value: (f) => f.createdAt, render: (f) => fmtDateLocal(f.createdAt) },
+    { key: "updatedAt", header: "Date Modified", type: "date", value: (f) => f.updatedAt ?? f.createdAt, render: (f) => fmtDateLocal(f.updatedAt ?? f.createdAt) },
     { key: "uploadedBy", header: "Uploaded By", value: (f) => f.uploadedBy ?? "", render: (f) => f.uploadedBy ?? "—" },
     { key: "type", header: "File Type", value: (f) => fileType(f) },
     { key: "sizeBytes", header: "File Size", align: "right", value: (f) => f.sizeBytes, render: (f) => humanSize(f.sizeBytes) },
@@ -152,10 +152,10 @@ export function DocumentsSection({
 
       <div className="doc-chips">
         {folders.map((fl) => (
+          // Same anatomy for every chip — the active one differs by color,
+          // not by sprouting an icon (which shifted the row's widths).
           <span key={fl} className={`doc-chip ${folder === fl ? "active" : ""}`} onClick={() => setFolder(fl)}>
-            {folder === fl && (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /></svg>
-            )}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /></svg>
             {fl} <span className="doc-count">{countByFolder.get(fl) ?? 0}</span>
           </span>
         ))}

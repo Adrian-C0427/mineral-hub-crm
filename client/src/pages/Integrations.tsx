@@ -6,7 +6,8 @@ import {
 import { api, ApiError } from "../api/client";
 import { Spinner, Banner, Modal, ConfirmChanges, ConfirmDialog } from "../components/ui";
 import { Select } from "../components/Select";
-import { fmtDate } from "../lib/format";
+import { fmtDate, fmtDateTime } from "../lib/format";
+import { SettingsNav } from "../components/SettingsNav";
 
 // The catalog lives on the SERVER (domain/integrationCatalog.ts) — the single
 // source of truth for which providers exist, how they authenticate, and how far
@@ -150,9 +151,10 @@ export function Integrations() {
   return (
     <div className="page">
       <div className="page-header">
-        <h1>Integrations</h1>
+        <h1>Settings</h1>
         <span className="muted">{connectedCount} connected</span>
       </div>
+      <SettingsNav />
       <p className="muted" style={{ marginTop: -8 }}>
         Every integration listed here passed a feasibility audit: it has an officially supported API and can run on our
         stack. Credentials are validated live when you connect and stored encrypted; they are never sent back to the browser.
@@ -244,16 +246,16 @@ function IntegrationCard({ p, busy, result, onConnect, onOAuth, onDisconnect, on
           </span>
         </div>
       </div>
-      <p className="integration-desc">{p.description}</p>
+      <p className="integration-desc" title={p.description}>{p.description}</p>
 
       {connected && p.secretMask && <p className="muted" style={{ fontSize: 12, margin: "0 0 4px" }}>Credential: <code>{p.secretMask}</code></p>}
-      {connected && p.lastSyncAt && <p className="muted" style={{ fontSize: 12, margin: "0 0 4px" }}>Last sync: {fmtDate(p.lastSyncAt)}{p.config.schedule && p.config.schedule !== "manual" ? ` · auto (${p.config.schedule})` : ""}</p>}
+      {connected && p.lastSyncAt && <p className="muted" style={{ fontSize: 12, margin: "0 0 4px" }}>Last sync: {fmtDateTime(p.lastSyncAt)}{p.config.schedule && p.config.schedule !== "manual" ? ` · auto (${p.config.schedule})` : ""}</p>}
       {p.lastError && <p className="error-text" style={{ fontSize: 12 }}>{p.lastError}</p>}
       {result && <p className={result.ok ? "muted" : "error-text"} style={{ fontSize: 12 }}>{result.message}</p>}
 
       <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
         {needsSetup ? (
-          p.setupUrl && <a className="chip-mini" href={p.setupUrl} target="_blank" rel="noreferrer">Setup guide ↗</a>
+          p.setupUrl && <a className="small" role="button" style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 10px", textDecoration: "none", color: "var(--text)" }} href={p.setupUrl} target="_blank" rel="noreferrer">Setup guide ↗</a>
         ) : p.implementation === "env" ? (
           <button className="small" disabled={busy} onClick={onTest}>{busy ? "Testing…" : "Test connection"}</button>
         ) : connected || errored ? (
