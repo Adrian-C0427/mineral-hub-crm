@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Banner, ConfirmChanges } from "../components/ui";
+import { ConfirmChanges, showToast } from "../components/ui";
 import { PhoneInput } from "../components/PhoneInput";
 import { TwoFactorSettings } from "../components/TwoFactorSettings";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
@@ -19,20 +19,17 @@ export function SettingsGeneral() {
     password: "",
   });
   const [error, setError] = useState<string | null>(null);
-  const [ok, setOk] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement>) => {
     setF((p) => ({ ...p, [k]: e.target.value }));
-    setOk(false);
   };
 
   // Validate on submit, but only commit after the user confirms.
   function requestSave(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    setOk(false);
     if (!f.firstName.trim() || !f.lastName.trim() || !f.phone.trim() || !f.email.trim() || !f.password) {
       setError("All fields are required — enter your current password to confirm the changes.");
       return;
@@ -53,7 +50,7 @@ export function SettingsGeneral() {
       });
       await refresh();
       setF((p) => ({ ...p, password: "" }));
-      setOk(true);
+      showToast("Account updated.");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to save settings");
     } finally {
@@ -74,11 +71,10 @@ export function SettingsGeneral() {
             <div className="field"><label>First name</label><input value={f.firstName} onChange={set("firstName")} /></div>
             <div className="field"><label>Last name</label><input value={f.lastName} onChange={set("lastName")} /></div>
           </div>
-          <div className="field"><label>Phone number</label><PhoneInput value={f.phone} onChange={(v) => { setF((p) => ({ ...p, phone: v })); setOk(false); }} /></div>
+          <div className="field"><label>Phone number</label><PhoneInput value={f.phone} onChange={(v) => setF((p) => ({ ...p, phone: v }))} /></div>
           <div className="field"><label>Email address</label><input type="email" value={f.email} onChange={set("email")} /></div>
           <div className="field"><label>Current password</label><input type="password" value={f.password} onChange={set("password")} autoComplete="current-password" placeholder="Required to confirm changes" /></div>
           {error && <div className="error-text">{error}</div>}
-          {ok && <Banner kind="info">Account updated.</Banner>}
           <button className="primary" disabled={busy} style={{ marginTop: 8 }}>{busy ? "Saving…" : "Save changes"}</button>
         </form>
         {confirming && <ConfirmChanges onCancel={() => setConfirming(false)} onConfirm={save} />}

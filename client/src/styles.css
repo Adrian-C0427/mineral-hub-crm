@@ -556,6 +556,33 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .modal-header h3 { margin: 0; }
 .modal-body { padding: 20px; overflow-y: auto; }
 .modal-footer { padding: 14px 20px; border-top: 1px solid var(--border); display:flex; justify-content:flex-end; gap: 10px; }
+/* Background never scrolls behind an open dialog. */
+body.modal-open { overflow: hidden; }
+/* Dirty-guard feedback: a blocked backdrop/Escape close pulses the dialog. */
+.modal-attn { animation: modalAttn 0.36s ease; }
+@keyframes modalAttn {
+  0% { transform: scale(1); box-shadow: var(--shadow); }
+  35% { transform: scale(1.015); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent), var(--shadow); }
+  100% { transform: scale(1); box-shadow: var(--shadow); }
+}
+
+/* --- Toasts: fixed feedback, never reflows the page --- */
+.toast-stack { position: fixed; top: 16px; right: 16px; z-index: 5000; display: flex; flex-direction: column; gap: 8px; max-width: min(360px, calc(100vw - 32px)); }
+.toast { display: flex; align-items: flex-start; gap: 10px; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 10px; padding: 11px 12px 11px 14px; box-shadow: var(--shadow); font-size: 13.5px; line-height: 1.45;
+  animation: toastIn 0.22s ease; }
+.toast-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 5px; flex: none; }
+.toast-success { border-color: color-mix(in srgb, var(--green) 45%, var(--border)); }
+.toast-success .toast-dot { background: var(--green); }
+.toast-error { border-color: color-mix(in srgb, var(--red) 50%, var(--border)); }
+.toast-error .toast-dot { background: var(--red); }
+.toast-info { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.toast-info .toast-dot { background: var(--accent); }
+.toast-msg { flex: 1; min-width: 0; }
+.toast-x { background: none; border: none; color: var(--text-dim); font-size: 15px; line-height: 1; padding: 2px 4px; cursor: pointer; border-radius: 6px; }
+.toast-x:hover { color: var(--text); background: var(--panel-2); }
+@keyframes toastIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { .toast, .modal-attn { animation: none; } }
 
 /* --- Pipeline kanban --- */
 .kanban { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 12px; }

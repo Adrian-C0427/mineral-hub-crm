@@ -72,6 +72,7 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, initial, on
     <Modal
       title={`Update buyer — ${buyerName}`}
       onClose={onClose}
+      dirty={notes.trim() !== (initial?.notes ?? "").trim() || amount.trim() !== "" || conditions.trim() !== ""}
       footer={
         <>
           <button onClick={onClose}>Cancel</button>

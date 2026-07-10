@@ -142,6 +142,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId }: {
       title={asset ? "Add Deal" : "New Deal"}
       onClose={onClose}
       wide
+      dirty={Object.values(f).some((v) => v.trim() !== "") || states.length > 0 || counties.length > 0 || assetTypes.length > 0}
       footer={
         <>
           <button onClick={onClose}>Cancel</button>
