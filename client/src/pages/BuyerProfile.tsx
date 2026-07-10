@@ -14,6 +14,7 @@ import { money, pct, fmtDate, toInputDate } from "../lib/format";
 import { formatPhone } from "../lib/phone";
 import { PhoneInput } from "../components/PhoneInput";
 import type { BuyBox, Relationship, UserLite } from "../types";
+import { MoneyInput } from "../components/MoneyInput";
 
 interface BuyerProfileData {
   id: string;
@@ -179,7 +180,7 @@ export function BuyerProfile() {
                 <SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={view.buyBox.assetTypes} onChange={(v) => setBox("assetTypes", v)} placeholder="Search asset types…" />
               </Fld>
               <Row><Fld l="Min acreage"><input type="number" value={view.buyBox.minAcreage ?? ""} onChange={(e) => setBox("minAcreage", e.target.value === "" ? null : Number(e.target.value))} /></Fld><Fld l="Max acreage"><input type="number" value={view.buyBox.maxAcreage ?? ""} onChange={(e) => setBox("maxAcreage", e.target.value === "" ? null : Number(e.target.value))} /></Fld></Row>
-              <Row><Fld l="Min price"><input type="number" value={view.buyBox.minPrice ?? ""} onChange={(e) => setBox("minPrice", e.target.value === "" ? null : Number(e.target.value))} /></Fld><Fld l="Max price"><input type="number" value={view.buyBox.maxPrice ?? ""} onChange={(e) => setBox("maxPrice", e.target.value === "" ? null : Number(e.target.value))} /></Fld></Row>
+              <Row><Fld l="Min price"><MoneyInput value={view.buyBox.minPrice != null ? String(view.buyBox.minPrice) : ""} onChange={(v) => setBox("minPrice", v === "" ? null : Number(v))} ariaLabel="Minimum price" /></Fld><Fld l="Max price"><MoneyInput value={view.buyBox.maxPrice != null ? String(view.buyBox.maxPrice) : ""} onChange={(v) => setBox("maxPrice", v === "" ? null : Number(v))} ariaLabel="Maximum price" /></Fld></Row>
             </>
           ) : (
             <div className="dd-grid">

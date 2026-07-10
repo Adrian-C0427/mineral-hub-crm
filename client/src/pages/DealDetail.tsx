@@ -24,6 +24,7 @@ import { AssigneePicker } from "../components/AssigneePicker";
 import { DocumentsSection, DEAL_DOC_FOLDERS, type DocFile } from "../components/DocumentsSection";
 import type { AssetChild, BuyerActivityRow, DealSummary, MatchRec, Seller, UserLite } from "../types";
 import { NewDealModal } from "../components/NewDealModal";
+import { MoneyInput } from "../components/MoneyInput";
 // MapLibre is heavy; only load it when a deal detail page is viewed.
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
 const TractSection = lazy(() => import("../components/TractSection").then((m) => ({ default: m.TractSection })));
@@ -551,8 +552,8 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
           <Fld l="Asset Type"><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={f.assetTypes} onChange={setArr("assetTypes")} placeholder="Search asset types…" /></Fld>
           <Fld l="NMA"><input type="number" value={f.acreageNma ?? ""} onChange={setNum("acreageNma")} /></Fld>
           <Fld l="NRA"><input type="number" value={f.nra ?? ""} onChange={setNum("nra")} /></Fld>
-          <Fld l="Our Price"><input type="number" value={f.ourPrice ?? ""} onChange={setNum("ourPrice")} /></Fld>
-          <Fld l="Ask Price (to buyers)"><input type="number" value={f.askPrice ?? ""} onChange={setNum("askPrice")} /></Fld>
+          <Fld l="Our Price"><MoneyInput value={f.ourPrice != null ? String(f.ourPrice) : ""} onChange={(v) => setF((p) => ({ ...p, ourPrice: v === "" ? null : Number(v) }))} ariaLabel="Our price" /></Fld>
+          <Fld l="Ask Price (to buyers)"><MoneyInput value={f.askPrice != null ? String(f.askPrice) : ""} onChange={(v) => setF((p) => ({ ...p, askPrice: v === "" ? null : Number(v) }))} ariaLabel="Ask price" /></Fld>
           <Fld l="Operator">
             <input
               list="deal-operator-options"

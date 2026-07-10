@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
-import { Banner } from "./ui";
+import { Banner, EmptyState } from "./ui";
 import { Select } from "./Select";
 import { SortableTable, type Column } from "./SortableTable";
 import { fmtDateLocal } from "../lib/format";
@@ -175,7 +175,7 @@ export function DocumentsSection({
       {err && <Banner kind="error">{err}</Banner>}
 
       {inFolder.length === 0 ? (
-        <p className="muted">{dragOver ? `Drop to upload to ${folder}` : `No documents in ${folder}.`}</p>
+        <EmptyState title={dragOver ? `Drop to upload to ${folder}` : `No documents in ${folder}`}>{dragOver ? "" : "Drag files anywhere onto this panel, or use Upload."}</EmptyState>
       ) : (
         <SortableTable columns={columns} rows={inFolder} rowKey={(f) => f.id} defaultSort={{ key: "createdAt", dir: "desc" }} />
       )}

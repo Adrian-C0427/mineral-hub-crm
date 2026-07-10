@@ -11,6 +11,7 @@ import { TEXAS_COUNTY_OPTIONS } from "../lib/options";
 import { downloadCsv } from "../lib/csv";
 import { money, num, fmtDate } from "../lib/format";
 import type { DealSummary, UserLite } from "../types";
+import { MoneyInput } from "../components/MoneyInput";
 
 /**
  * Mineral Assets — the company's permanent portfolio of owned mineral interests
@@ -180,7 +181,7 @@ function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onCreated:
         <div className="field"><label>Producing status</label><Select value={producingStatus} onChange={setProducingStatus} ariaLabel="Producing status" options={PRODUCING_STATUSES.map((t) => ({ value: t, label: t }))} /></div>
         <div className="field"><label>Acquisition date</label><input type="date" value={acquisitionDate} onChange={(e) => setAcquisitionDate(e.target.value)} /></div>
         <div className="field"><label>Net Revenue Acres (NRA)</label><input type="number" value={nra} onChange={(e) => setNra(e.target.value)} /></div>
-        <div className="field"><label>Purchase price</label><input type="number" value={purchasePrice} onChange={(e) => setPurchasePrice(e.target.value)} /></div>
+        <div className="field"><label>Purchase price</label><MoneyInput value={purchasePrice} onChange={setPurchasePrice} ariaLabel="Purchase price" /></div>
         <div className="field"><label>Current estimated value</label><input type="number" value={currentValue} onChange={(e) => setCurrentValue(e.target.value)} /></div>
       </div>
       {error && <Banner kind="error">{error}</Banner>}

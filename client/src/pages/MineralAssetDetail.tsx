@@ -20,6 +20,7 @@ import { monthLabel, chartTooltip } from "../lib/charts";
 import { money, num, fmtDate, toInputDate } from "../lib/format";
 import { OWNERSHIP_TYPES, OWNERSHIP_STATUSES, PRODUCING_STATUSES } from "./MineralAssets";
 import type { BuyerActivityRow, DealSummary, MatchRec, RevenueEntry, Seller, UserLite } from "../types";
+import { MoneyInput } from "../components/MoneyInput";
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
 const TractSection = lazy(() => import("../components/TractSection").then((m) => ({ default: m.TractSection })));
 
@@ -227,7 +228,7 @@ function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdi
           <Fld l="Ownership Type"><Select value={f.ownershipType ?? ""} onChange={(v) => setF({ ...f, ownershipType: v })} placeholder="—" clearable ariaLabel="Ownership type" options={OWNERSHIP_TYPES.map((t) => ({ value: t, label: t }))} /></Fld>
           <Fld l="Ownership Status"><Select value={f.ownershipStatus ?? ""} onChange={(v) => setF({ ...f, ownershipStatus: v })} placeholder="—" clearable ariaLabel="Ownership status" options={OWNERSHIP_STATUSES.map((t) => ({ value: t, label: t }))} /></Fld>
           <Fld l="Acquisition Date"><input type="date" value={toInputDate(f.acquisitionDate)} onChange={(e) => setF({ ...f, acquisitionDate: e.target.value })} /></Fld>
-          <Fld l="Purchase Price"><input type="number" value={f.purchasePrice ?? ""} onChange={(e) => setF({ ...f, purchasePrice: numOrNull(e.target.value) })} /></Fld>
+          <Fld l="Purchase Price"><MoneyInput value={f.purchasePrice != null ? String(f.purchasePrice) : ""} onChange={(v) => setF({ ...f, purchasePrice: v === "" ? null : Number(v) })} ariaLabel="Purchase price" /></Fld>
           <Fld l="Current Value"><input type="number" value={f.currentValue ?? ""} onChange={(e) => setF({ ...f, currentValue: numOrNull(e.target.value) })} /></Fld>
           <Fld l="RRC"><input value={f.rrc ?? ""} onChange={(e) => setF({ ...f, rrc: e.target.value })} placeholder="RRC lease / district / operator no." /></Fld>
           <Fld l="NMA"><input type="number" value={f.acreageNma ?? ""} onChange={(e) => setF({ ...f, acreageNma: numOrNull(e.target.value) })} /></Fld>
@@ -445,7 +446,7 @@ function AddRevenueModal({ assetId, onClose, onSaved }: { assetId: string; onClo
           <input list="rev-year-options" value={year} onChange={(e) => setYear(e.target.value)} inputMode="numeric" placeholder="Search year…" />
           <datalist id="rev-year-options">{years.map((y) => <option key={y} value={y} />)}</datalist>
         </div>
-        <div className="field"><label>Amount</label><input type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /></div>
+        <div className="field"><label>Amount</label><MoneyInput value={amount} onChange={setAmount} ariaLabel="Offer amount" /></div>
         <div className="field"><label>Type</label><Select value={kind} onChange={setKind} ariaLabel="Revenue type" options={[{ value: "ROYALTY", label: "Royalty" }, { value: "LEASE_BONUS", label: "Lease Bonus" }, { value: "OTHER", label: "Other" }]} /></div>
         <div className="field"><label>Operator</label><input value={operator} onChange={(e) => setOperator(e.target.value)} /></div>
         <div className="field" style={{ gridColumn: "1 / -1" }}><label>Note</label><input value={note} onChange={(e) => setNote(e.target.value)} /></div>
@@ -506,7 +507,7 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
         ) : (
           <div className="dd-grid">
             <Fld l="Current Value"><input type="number" value={f.currentValue ?? ""} onChange={(e) => setF({ ...f, currentValue: e.target.value === "" ? null : Number(e.target.value) })} /></Fld>
-            <Fld l="Asking Price"><input type="number" value={f.askPrice ?? ""} onChange={(e) => setF({ ...f, askPrice: e.target.value === "" ? null : Number(e.target.value) })} /></Fld>
+            <Fld l="Asking Price"><MoneyInput value={f.askPrice != null ? String(f.askPrice) : ""} onChange={(v) => setF({ ...f, askPrice: v === "" ? null : Number(v) })} ariaLabel="Asking price" /></Fld>
             <Fld l="Est. Closing Costs"><input type="number" value={f.estimatedClosingCosts ?? ""} onChange={(e) => setF({ ...f, estimatedClosingCosts: e.target.value === "" ? null : Number(e.target.value) })} /></Fld>
           </div>
         )}

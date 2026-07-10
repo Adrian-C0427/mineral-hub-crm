@@ -4,6 +4,7 @@ import { Banner, Spinner } from "./ui";
 import { Select } from "./Select";
 import { downloadCsv } from "../lib/csv";
 import { fmtDate, fmtDateTime } from "../lib/format";
+import { CsvDropzone } from "./CsvDropzone";
 
 /**
  * Well production data management: CSV import (analyze → map headers → commit).
@@ -36,7 +37,6 @@ export function WellImport({ onDataChanged }: { onDataChanged: () => void }) {
   const [error, setError] = useState("");
   const [result, setResult] = useState<CommitResp | null>(null);
   const [runs, setRuns] = useState<IngestRun[]>([]);
-  const fileRef = useRef<HTMLInputElement>(null);
 
   const loadRuns = () =>
     api.get<IngestRun[]>("/research/ingest/runs").then((all) => setRuns(all.filter((r) => r.kind === "PRODUCTION"))).catch(() => {});
@@ -44,7 +44,6 @@ export function WellImport({ onDataChanged }: { onDataChanged: () => void }) {
 
   function reset() {
     setCsv(null); setFilename(""); setAnalysis(null); setMapping({}); setResult(null); setError("");
-    if (fileRef.current) fileRef.current.value = "";
   }
 
   async function onFile(f: File) {
@@ -74,8 +73,7 @@ export function WellImport({ onDataChanged }: { onDataChanged: () => void }) {
       setResult(r);
       setAnalysis(null);
       setCsv(null);
-      if (fileRef.current) fileRef.current.value = "";
-      loadRuns();
+        loadRuns();
       onDataChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Import failed");
@@ -101,8 +99,8 @@ export function WellImport({ onDataChanged }: { onDataChanged: () => void }) {
           <div className="field" style={{ marginBottom: 0, minWidth: 160 }}><label>County (default)</label>
             <input value={county} onChange={(e) => setCounty(e.target.value)} placeholder="e.g. Midland" />
           </div>
-          <div className="field" style={{ marginBottom: 0 }}><label>CSV file</label>
-            <input ref={fileRef} type="file" accept=".csv,text/csv" onChange={(e) => e.target.files?.[0] && onFile(e.target.files[0])} />
+          <div className="field" style={{ marginBottom: 0, flex: 1, minWidth: 250 }}><label>CSV file</label>
+            <CsvDropzone slim onFile={onFile} />
           </div>
           <button className="small" onClick={() => downloadCsv("well-production-template.csv", TEMPLATE_HEADERS, TEMPLATE_ROWS)}>Download template</button>
         </div>

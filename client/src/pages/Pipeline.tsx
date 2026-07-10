@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
-import { Spinner } from "../components/ui";
+import { Spinner, showToast } from "../components/ui";
 import { Select } from "../components/Select";
 import { NewDealModal } from "../components/NewDealModal";
 import { StageChangeModal } from "../components/StageChangeModal";
@@ -73,7 +73,7 @@ export function Pipeline() {
   useEffect(() => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } }, [prefs]);
   const nav = useNavigate();
   const { can } = useAuth();
-  const { active: activeStages, reload: reloadStages } = useStages();
+  const { active: activeStages, reload: reloadStages, label } = useStages();
   const [showStages, setShowStages] = useState(false);
   // Viewers can browse the board but not create deals or change stages —
   // hiding the affordances beats letting them click into a 403.
@@ -141,10 +141,31 @@ export function Pipeline() {
 
   async function commitMove(deal: DealSummary, col: Stage) {
     // Terminal stages carry downstream effects — confirm first (their move runs
-    // through the modal). Normal stage moves are immediate + optimistic.
+    // through the modal). Normal stage moves are immediate + optimistic, with
+    // an Undo in the toast: an accidental 20px drag shouldn't silently rewrite
+    // stage history.
     if (col === "CLOSED" || col === "DEAD") { setPending({ deal, toStage: col }); return; }
+    const fromStage = deal.stage;
     setDeals((prev) => prev?.map((d) => (d.id === deal.id ? { ...d, stage: col } : d)) ?? prev);
-    try { await api.post(`/deals/${deal.id}/stage`, { toStage: col }); load(); }
+    try {
+      await api.post(`/deals/${deal.id}/stage`, { toStage: col });
+      load();
+      showToast(
+        <span>
+          Moved <strong>{deal.name}</strong> to {label(col)}.{" "}
+          <button
+            className="link-btn"
+            onClick={() => {
+              void api.post(`/deals/${deal.id}/stage`, { toStage: fromStage })
+                .then(() => { load(); showToast(`Moved back to ${label(fromStage)}.`); })
+                .catch(() => showToast("Could not undo the move.", "error"));
+            }}
+          >
+            Undo
+          </button>
+        </span>,
+      );
+    }
     catch { load(); }
   }
 
