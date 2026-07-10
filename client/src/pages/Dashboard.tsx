@@ -5,7 +5,6 @@ import { api } from "../api/client";
 import { Spinner } from "../components/ui";
 import { money, fmtDate } from "../lib/format";
 import { useStages } from "../stages";
-import { NotificationsPanel } from "../components/NotificationsPanel";
 import { PeriodSegmented } from "../components/PeriodSegmented";
 import { useTheme } from "../theme";
 
@@ -356,8 +355,6 @@ export function Dashboard() {
           </button>
         </div>
       </div>
-
-      <NotificationsPanel />
 
       {firstRun && (
         <div className="panel">
