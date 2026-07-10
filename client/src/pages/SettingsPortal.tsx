@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
 import { showToast } from "../components/ui";
 import { Toggle } from "../components/Toggle";
+import { SettingsNav } from "../components/SettingsNav";
 
 /**
  * Buyer Portal settings — enable/disable and the marketplace URL. Contact
@@ -21,7 +22,8 @@ interface PortalSettings {
 export function SettingsPortal() {
   return (
     <div className="page" style={{ maxWidth: 820 }}>
-      <div className="page-header"><h1>Portal Settings</h1></div>
+      <div className="page-header"><h1>Settings</h1></div>
+      <SettingsNav />
       <PortalGeneral />
     </div>
   );

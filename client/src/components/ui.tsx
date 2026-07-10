@@ -328,6 +328,43 @@ export function ConfirmChanges({ busy, onCancel, onConfirm }: { busy?: boolean; 
   );
 }
 
+/**
+ * Header overflow menu (⋯) for secondary and destructive page actions.
+ * Destructive actions never sit as primary header buttons — they live here,
+ * one deliberate click away, styled red inside the menu.
+ */
+export function OverflowMenu({ items, ariaLabel = "More actions" }: {
+  items: { label: ReactNode; danger?: boolean; onClick: () => void }[];
+  ariaLabel?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey, true);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey, true); };
+  }, [open]);
+  return (
+    <div className="ovf" ref={ref}>
+      <button className="icon-btn ovf-btn" aria-haspopup="menu" aria-expanded={open} aria-label={ariaLabel} title={ariaLabel} onClick={() => setOpen((o) => !o)}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
+      </button>
+      {open && (
+        <div className="ovf-menu" role="menu">
+          {items.map((it, i) => (
+            <button key={i} role="menuitem" className={`ovf-item ${it.danger ? "danger" : ""}`} onClick={() => { setOpen(false); it.onClick(); }}>
+              {it.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function MatchPercentBadge({ value }: { value: number }) {
   const cls = value >= 80 ? "match-green" : value >= 55 ? "match-amber" : "match-gray";
   return <span className={`match-pct ${cls}`}>{value}%</span>;

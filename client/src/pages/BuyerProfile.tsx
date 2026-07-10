@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, RelationshipDot, Banner, StageBadge, StatusBadge } from "../components/ui";
+import { Spinner, RelationshipDot, Banner, StageBadge, StatusBadge, OverflowMenu, ConfirmDelete } from "../components/ui";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { Select } from "../components/Select";
 import { AssigneePicker } from "../components/AssigneePicker";
@@ -55,6 +55,7 @@ export function BuyerProfile() {
   const [b, setB] = useState<BuyerProfileData | null>(null);
   const [users, setUsers] = useState<UserLite[]>([]);
   const [edit, setEdit] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const [draft, setDraft] = useState<BuyerProfileData | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -102,16 +103,24 @@ export function BuyerProfile() {
           <RelationshipDot status={view.relationshipStatus} />
         </div>
         <div className="row">
-          {can("deleteBuyers") && !edit && <button className="danger" onClick={async () => { if (confirm("Hard-delete this buyer?")) { await api.del(`/buyers/${id}`); nav("/buyers"); } }}>Delete</button>}
           {edit ? (
             <><button onClick={cancel}>Cancel</button><button className="primary" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</button></>
           ) : (
             <button className="primary" onClick={startEdit}>Edit</button>
           )}
+          {can("deleteBuyers") && !edit && <OverflowMenu items={[{ label: "Delete buyer…", danger: true, onClick: () => setConfirmDelete(true) }]} />}
         </div>
       </div>
 
       {edit && <Banner kind="info">Editing the whole profile. Save commits everything; Cancel discards all changes.</Banner>}
+      {confirmDelete && (
+        <ConfirmDelete
+          itemLabel="buyer"
+          name={view.companyName}
+          onCancel={() => setConfirmDelete(false)}
+          onConfirm={async () => { await api.del(`/buyers/${id}`); nav("/buyers"); }}
+        />
+      )}
       {err && <div className="error-text">{err}</div>}
 
       <div className="grid-2">

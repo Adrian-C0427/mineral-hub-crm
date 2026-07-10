@@ -7,6 +7,7 @@ import { TwoFactorSettings } from "../components/TwoFactorSettings";
 import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import { CompanyBranding } from "../components/CompanyBranding";
 import { AppearanceSettings } from "../components/AppearanceSettings";
+import { SettingsNav } from "../components/SettingsNav";
 
 /** General settings — account/profile now; structured for more sections later. */
 export function SettingsGeneral() {
@@ -60,7 +61,8 @@ export function SettingsGeneral() {
 
   return (
     <div className="page" style={{ maxWidth: 720 }}>
-      <div className="page-header"><h1>General</h1></div>
+      <div className="page-header"><h1>Settings</h1></div>
+      <SettingsNav />
 
       {/* Account & Security (live) */}
       <div className="panel">

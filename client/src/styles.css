@@ -351,7 +351,8 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .integration-logo.brand img { position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%); }
 .integration-logo-fallback { color: #64748b; font-weight: 700; font-size: 13px; }
 .integration-name { font-weight: 600; }
-.integration-desc { font-size: 13px; color: var(--text-dim); margin: 0 0 10px; flex: 1; }
+.integration-desc { font-size: 13px; color: var(--text-dim); margin: 0 0 10px; flex: 1;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 .chip-mini { font-size: 11px; color: var(--text-dim); border: 1px solid var(--border); border-radius: 5px; padding: 1px 5px; }
 
 /* Report header block */
@@ -848,6 +849,32 @@ tr.row-base td { background: var(--panel-2); font-weight: 600; }
 .msel-menu { animation: mselIn 0.13s ease; transform-origin: top; }
 @keyframes mselIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .msel-menu { animation: none; } .msel-caret { transition: none; } }
+/* Deal funnel strip: contacted -> interested -> offers on one line. */
+.dd-funnel { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; font-size: 13.5px; color: var(--text-dim); }
+.dd-funnel-item strong { color: var(--text); font-size: 15px; }
+.dd-funnel-sep { opacity: 0.5; }
+/* Long free-text cells: single line + ellipsis, full text via title tooltip. */
+td.cell-clamp { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Settings sub-navigation — persistent tabs shared by all settings pages. */
+.settings-nav { display: flex; gap: 4px; margin: -6px 0 16px; border-bottom: 1px solid var(--border); }
+.settings-nav-link { padding: 8px 14px; font-size: 13.5px; font-weight: 600; color: var(--text-dim);
+  border-bottom: 2px solid transparent; margin-bottom: -1px; text-decoration: none; border-radius: 6px 6px 0 0; }
+.settings-nav-link:hover { color: var(--text); background: var(--panel-2); text-decoration: none; }
+.settings-nav-link.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Overflow (...) menu for secondary/destructive page actions. */
+.ovf { position: relative; display: inline-flex; }
+.ovf-btn { min-width: 34px; }
+.ovf-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: var(--z-dropdown); min-width: 170px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow);
+  padding: 4px; display: flex; flex-direction: column; animation: mselIn 0.13s ease; }
+.ovf-item { display: block; width: 100%; text-align: left; background: none; border: none; border-radius: 6px;
+  padding: 8px 10px; font-size: 13.5px; color: var(--text); cursor: pointer; }
+.ovf-item:hover { background: var(--panel-2); }
+.ovf-item.danger { color: var(--red); }
+.ovf-item.danger:hover { background: color-mix(in srgb, var(--red) 12%, transparent); }
+
 .gear-link { color: var(--text-dim); font-size:20px; display:inline-flex; align-items:center; padding:4px 6px; border-radius:6px; }
 .gear-link:hover { color: var(--text); background: var(--panel-2); text-decoration:none; }
 
