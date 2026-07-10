@@ -196,11 +196,33 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
         )}
 
         {result && (
-          <Banner kind="info">
-            Imported <strong>{result.imported.toLocaleString()}</strong> of {result.rowsTotal.toLocaleString()} rows
-            {result.skipped > 0 && <> · {result.skipped.toLocaleString()} skipped{result.skippedReasons.length > 0 && <> ({result.skippedReasons.slice(0, 3).map((r) => `${r.count}× ${r.reason}`).join("; ")})</>}</>}
-            {result.failed > 0 && <> · {result.failed.toLocaleString()} unreadable (bad/missing dates or required fields)</>}
-          </Banner>
+          <div className="import-summary">
+            <div className="import-summary-head">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+              <span className="import-summary-title">Import complete</span>
+            </div>
+            <div className="import-summary-stats">
+              <div className="iss iss-ok"><span className="iss-num">{result.imported.toLocaleString()}</span><span className="iss-lbl">Imported</span></div>
+              <div className="iss"><span className="iss-num">{result.rowsTotal.toLocaleString()}</span><span className="iss-lbl">Total rows</span></div>
+              {result.skipped > 0 && <div className="iss iss-warn"><span className="iss-num">{result.skipped.toLocaleString()}</span><span className="iss-lbl">Skipped</span></div>}
+              {result.failed > 0 && <div className="iss iss-bad"><span className="iss-num">{result.failed.toLocaleString()}</span><span className="iss-lbl">Unreadable</span></div>}
+            </div>
+            {result.skippedReasons.length > 0 && (
+              <div className="import-summary-reasons">
+                <span className="ddx-label">Why rows were skipped</span>
+                <ul>
+                  {result.skippedReasons.map((r) => (
+                    <li key={r.reason}><span className="isr-count">{r.count.toLocaleString()}×</span><span>{r.reason}</span></li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {result.failed > 0 && (
+              <p className="import-summary-note muted">
+                {result.failed.toLocaleString()} row{result.failed === 1 ? "" : "s"} couldn't be read — usually a missing or invalid recording date, or a missing required field.
+              </p>
+            )}
+          </div>
         )}
       </div>
 

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   autoGranularity, bucketKey, bucketRange, classifyDocType, classifyPermitStatus,
-  classifyTrajectory, detectHotspot, historyWindows, normalizeEntity,
-  rollingAverage, surgeSeverity, trend,
+  classifyTrajectory, detectHotspot, documentDedupeKey, historyWindows, normalizeEntity,
+  normInstrument, rollingAverage, surgeSeverity, trend,
 } from "./research.js";
 import { CSV_DOCUMENTS, CSV_PERMITS, guessMapping } from "./researchSources.js";
 
@@ -196,5 +196,36 @@ describe("guessMapping", () => {
     expect(m.acreage).toBeUndefined();
     expect(m.consideration).toBeUndefined();
     expect(m.trs).toBeUndefined();
+  });
+});
+
+describe("document duplicate detection", () => {
+  const base = {
+    state: "TX", county: "Leon", instrumentNumber: "2026-00412",
+    recordingDate: new Date("2026-03-12T00:00:00Z"), docType: "MINERAL_DEED",
+    grantorNorm: "SMITH JOHN", granteeNorm: "BLACKROCK MINERALS",
+  };
+
+  it("normalizes instrument numbers (case + whitespace) before comparison", () => {
+    expect(normInstrument(" 2026-00412 ")).toBe("2026-00412");
+    expect(normInstrument("abc 123")).toBe("ABC123");
+    expect(documentDedupeKey({ ...base, instrumentNumber: "  2026-00412 " }))
+      .toBe(documentDedupeKey({ ...base, instrumentNumber: "2026-00412" }));
+  });
+
+  it("treats an identical recording signature as the same key (true duplicate)", () => {
+    expect(documentDedupeKey(base)).toBe(documentDedupeKey({ ...base }));
+  });
+
+  it("does NOT collide when the same instrument number has different parties", () => {
+    // County exports repeat one instrument across grantors/grantees — these are
+    // distinct rows, not duplicates, so their keys must differ.
+    expect(documentDedupeKey(base)).not.toBe(documentDedupeKey({ ...base, granteeNorm: "APEX ENERGY" }));
+    expect(documentDedupeKey(base)).not.toBe(documentDedupeKey({ ...base, grantorNorm: "JONES TRUST" }));
+  });
+
+  it("does NOT collide when instrument matches but recording date or doc type differ", () => {
+    expect(documentDedupeKey(base)).not.toBe(documentDedupeKey({ ...base, recordingDate: new Date("2026-03-13T00:00:00Z") }));
+    expect(documentDedupeKey(base)).not.toBe(documentDedupeKey({ ...base, docType: "ROYALTY_DEED" }));
   });
 });

@@ -7,8 +7,8 @@ import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import {
   autoGranularity, bucketKey, bucketRange, classifyDocType, classifyPermitStatus,
-  classifyTrajectory, detectHotspot, historyWindows, normalizeEntity, rollingAverage,
-  surgeSeverity, trend, type Trend,
+  classifyTrajectory, detectHotspot, documentDedupeKey, historyWindows, normalizeEntity,
+  rollingAverage, surgeSeverity, trend, type Trend,
 } from "../domain/research.js";
 import { fieldsFor, guessMapping, sourceFor } from "../domain/researchSources.js";
 import {
@@ -1130,13 +1130,26 @@ researchRouter.post(
     });
 
     if (kind === "DOCUMENTS") {
-      // Pre-load existing instrument numbers for dedupe (org scope; keyed by state+county).
-      const existing = new Set(
+      // Duplicate detection keys on the FULL recording signature, not the
+      // instrument number alone (county exports repeat one instrument across each
+      // grantor/grantee and legal tract, so instrument-only keys falsely flag
+      // distinct rows). See documentDedupeKey. We track existing-in-DB and
+      // seen-in-this-file separately so the summary explains each skip.
+      const existingKeys = new Set(
         (await prisma.researchDocument.findMany({
           where: { organizationId: org, instrumentNumber: { not: null } },
-          select: { instrumentNumber: true, county: true, state: true },
-        })).map((r) => `${r.state}|${r.county}|${r.instrumentNumber}`),
+          select: { instrumentNumber: true, county: true, state: true, recordingDate: true, docType: true, grantorNorm: true, granteeNorm: true },
+        })).map((r) => documentDedupeKey({
+          state: r.state, county: r.county, instrumentNumber: r.instrumentNumber,
+          recordingDate: r.recordingDate, docType: r.docType, grantorNorm: r.grantorNorm, granteeNorm: r.granteeNorm,
+        })),
       );
+      const seenInFile = new Set<string>();
+      // A few example signatures per duplicate class, logged for diagnostics.
+      const dupeExamples: string[] = [];
+      const REASON_EXISTING = "Duplicate of an already-imported record";
+      const REASON_IN_FILE = "Duplicate row within this file";
+
       const batch: Prisma.ResearchDocumentCreateManyInput[] = [];
       for (const row of rows) {
         const docTypeRaw = get(row, "docType");
@@ -1154,27 +1167,38 @@ researchRouter.post(
         const rowCounty = get(row, "county") ? titleCounty(get(row, "county")) : fallbackCounty;
         if (!rowState || !rowCounty) { skip("Missing county/state (assign one for this file)"); continue; }
         const instrumentNumber = get(row, "instrumentNumber") || null;
-        if (instrumentNumber) {
-          const dedupeKey = `${rowState}|${rowCounty}|${instrumentNumber}`;
-          if (existing.has(dedupeKey)) { skip("Duplicate instrument number"); continue; }
-          existing.add(dedupeKey);
-        }
         const grantor = get(row, "grantor") || null;
         const grantee = get(row, "grantee") || null;
+        const grantorNorm = normalizeEntity(grantor);
+        const granteeNorm = normalizeEntity(grantee);
+        // Only rows carrying an instrument number are dedupe-eligible, and a match
+        // must agree on the whole signature — never the instrument number alone.
+        if (instrumentNumber) {
+          const key = documentDedupeKey({ state: rowState, county: rowCounty, instrumentNumber, recordingDate, docType: cls.docType, grantorNorm, granteeNorm });
+          const example = `${instrumentNumber} · ${recordingDate.toISOString().slice(0, 10)} · ${grantor ?? "?"} → ${grantee ?? "?"}`;
+          if (existingKeys.has(key)) { if (dupeExamples.length < 5) dupeExamples.push(`existing: ${example}`); skip(REASON_EXISTING); continue; }
+          if (seenInFile.has(key)) { if (dupeExamples.length < 5) dupeExamples.push(`in-file: ${example}`); skip(REASON_IN_FILE); continue; }
+          seenInFile.add(key);
+        }
         batch.push({
           organizationId: org, state: rowState, county: rowCounty,
           docTypeRaw, docType: cls.docType, docClass: cls.docClass,
           instrumentNumber, volume: get(row, "volume") || null, page: get(row, "page") || null,
           recordingDate,
-          grantor, grantee, grantorNorm: normalizeEntity(grantor), granteeNorm: normalizeEntity(grantee),
+          grantor, grantee, grantorNorm, granteeNorm,
           abstractId: get(row, "abstractId") || null,
-          legalDescription: get(row, "legalDescription") || null,
           source, ingestRunId: run.id,
         });
       }
       for (let i = 0; i < batch.length; i += CHUNK) {
         const r = await prisma.researchDocument.createMany({ data: batch.slice(i, i + CHUNK) });
         imported += r.count;
+      }
+      // Diagnostics: make a surprising skip count explainable in the server log.
+      const dupExisting = skippedReasons.get(REASON_EXISTING) ?? 0;
+      const dupInFile = skippedReasons.get(REASON_IN_FILE) ?? 0;
+      if (dupExisting + dupInFile > 0) {
+        console.info(`[research-import] run ${run.id} (${source}): ${imported} imported · ${dupExisting} match existing · ${dupInFile} in-file dup · examples: ${dupeExamples.join(" | ") || "—"}`);
       }
     } else {
       const existing = new Set(
