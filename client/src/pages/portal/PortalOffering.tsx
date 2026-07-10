@@ -127,10 +127,8 @@ export function PortalOffering() {
             <KV k={deal.counties.length > 1 ? "Counties" : "County"} v={deal.counties.join(", ")} />
             <KV k={deal.basins.length > 1 ? "Basins" : "Basin"} v={deal.basins.join(", ")} />
             <KV k={deal.formations.length > 1 ? "Formations" : "Formation"} v={deal.formations.join(", ")} />
-            <KV k={deal.assetTypes.length > 1 ? "Asset Types" : "Asset Type"} v={deal.assetTypes.join(", ")} />
-            <KV k="NRA" v={deal.nra != null ? num(deal.nra) : ""} />
-            <KV k="Net Mineral Acres" v={deal.acreageNma != null ? num(deal.acreageNma) : ""} />
-            <KV k="Operator" v={deal.operator ?? ""} />
+            {/* NRA / NMA / asset type / operator already headline the hero
+                stat chips — repeating them here diluted both. */}
             <KV k="Producing Status" v={deal.producingStatus ?? ""} />
             <KV k={deal.surveys.length > 1 ? "Surveys" : "Survey"} v={(deal.surveys.length ? deal.surveys : [...new Set(abstracts.map((a) => a.survey).filter(Boolean))] as string[]).join(", ")} />
           </div>

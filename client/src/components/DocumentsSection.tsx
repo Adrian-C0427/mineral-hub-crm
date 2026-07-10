@@ -152,10 +152,10 @@ export function DocumentsSection({
 
       <div className="doc-chips">
         {folders.map((fl) => (
+          // Same anatomy for every chip — the active one differs by color,
+          // not by sprouting an icon (which shifted the row's widths).
           <span key={fl} className={`doc-chip ${folder === fl ? "active" : ""}`} onClick={() => setFolder(fl)}>
-            {folder === fl && (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /></svg>
-            )}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /></svg>
             {fl} <span className="doc-count">{countByFolder.get(fl) ?? 0}</span>
           </span>
         ))}
