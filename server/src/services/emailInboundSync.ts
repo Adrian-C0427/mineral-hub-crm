@@ -1,7 +1,7 @@
 /**
- * Inbound email sync — Gmail / Outlook (Microsoft Graph).
+ * Inbound email sync — Outlook (Microsoft Graph).
  *
- * When an org's "gmail" or "outlook" integration is CONNECTED, each sync pulls
+ * When an org's "outlook" integration is CONNECTED, each sync pulls
  * recent inbox messages and matches senders against buyer emails. A message
  * from a known buyer becomes an EMAIL_IN entry on that buyer's most recently
  * active deal timeline, flips responseReceived, refreshes lastActivityDate,
@@ -16,6 +16,7 @@
 import type { Integration, Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { getFreshAccessToken } from "./integrationOAuth.js";
+import { pushTeams } from "./notifyPush.js";
 
 const FIRST_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_MESSAGES_PER_SYNC = 25;
@@ -34,7 +35,7 @@ export interface InboundSyncResult {
 }
 
 export function isInboundEmailProvider(key: string): boolean {
-  return key === "gmail" || key === "outlook";
+  return key === "outlook";
 }
 
 /** "Riley Cole <riley@basinpeak.com>" → "riley@basinpeak.com" (lowercased). */
@@ -54,36 +55,6 @@ async function providerJson(url: string, token: string): Promise<Record<string, 
     throw new Error(`Mail API returned ${res.status}${err.message ? `: ${err.message}` : ""}`);
   }
   return json;
-}
-
-async function fetchGmail(token: string, since: Date): Promise<InboundMessage[]> {
-  // Gmail's `after:` filter has second granularity; the cursor comparison below
-  // handles the overlap. Requires the gmail.readonly scope.
-  const q = encodeURIComponent(`in:inbox after:${Math.floor(since.getTime() / 1000)}`);
-  const list = await providerJson(
-    `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${q}&maxResults=${MAX_MESSAGES_PER_SYNC}`,
-    token,
-  );
-  const ids = ((list.messages ?? []) as { id: string }[]).map((m) => m.id);
-  const out: InboundMessage[] = [];
-  for (const id of ids) {
-    const msg = await providerJson(
-      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`,
-      token,
-    );
-    const headers = (((msg.payload ?? {}) as { headers?: { name: string; value: string }[] }).headers ?? []);
-    const header = (name: string) => headers.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value ?? null;
-    const from = header("From");
-    const fromEmail = from ? parseFromAddress(from) : null;
-    if (!fromEmail) continue;
-    out.push({
-      fromEmail,
-      subject: header("Subject"),
-      snippet: typeof msg.snippet === "string" ? msg.snippet.slice(0, SNIPPET_MAX) : null,
-      receivedAt: new Date(Number(msg.internalDate ?? Date.now())),
-    });
-  }
-  return out;
 }
 
 async function fetchOutlook(token: string, since: Date): Promise<InboundMessage[]> {
@@ -159,11 +130,16 @@ async function recordMessage(organizationId: string, m: InboundMessage, buyerByE
       },
     }),
   ]);
+  void pushTeams(organizationId, {
+    title: `Email reply from ${buyer.name}`,
+    body: m.subject ?? m.snippet ?? null,
+    link: `/deals/${activity.dealId}`,
+  });
   return true;
 }
 
 /**
- * Pull new inbox mail for a connected gmail/outlook integration and log
+ * Pull new inbox mail for a connected outlook integration and log
  * matched buyer replies. Advances the incremental cursor on success.
  */
 export async function syncInboundEmail(row: Integration): Promise<InboundSyncResult> {
@@ -172,7 +148,7 @@ export async function syncInboundEmail(row: Integration): Promise<InboundSyncRes
   const cursor = typeof cfg.inboundCursor === "string" ? new Date(cfg.inboundCursor) : null;
   const since = cursor && !Number.isNaN(cursor.getTime()) ? cursor : new Date(Date.now() - FIRST_LOOKBACK_MS);
 
-  const fetched = row.provider === "gmail" ? await fetchGmail(token, since) : await fetchOutlook(token, since);
+  const fetched = await fetchOutlook(token, since);
   // Providers filter at coarse granularity; the cursor is exact.
   const fresh = fetched.filter((m) => m.receivedAt > since).sort((a, b) => a.receivedAt.getTime() - b.receivedAt.getTime());
 

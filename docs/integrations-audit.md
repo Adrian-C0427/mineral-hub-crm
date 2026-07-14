@@ -1,167 +1,99 @@
-# Integration Audit & Infrastructure Readiness — July 2026
+# Integration Ecosystem — July 2026 (post-cleanup)
 
-A feasibility audit of every integration listed in **Settings → Integrations**,
-plus the infrastructure decisions behind the resulting framework. Ground rule:
-build on the existing **GitHub + Railway + Neon** stack; add services only when
-those three genuinely can't cover the need.
+The July 2026 cleanup replaced a broad catalog with a **small ecosystem where
+every listed integration is fully functional in production**. The catalog
+lives server-side in `server/src/domain/integrationCatalog.ts`; the UI renders
+it verbatim, so this document and the running product can't drift apart
+silently.
 
-The catalog itself now lives server-side in
-`server/src/domain/integrationCatalog.ts` — the UI renders whatever that file
-declares, so this document and the running product can't drift apart silently:
-every provider below maps 1-to-1 to a catalog entry (or to a removal).
+Ground rule unchanged: build on the existing **GitHub + Railway + Neon**
+stack; add services only when those three genuinely can't cover the need.
 
-## 1. Audit results by provider
+## 1. Removed (2026-07 ecosystem cut)
 
-### Ready now — live credential validation implemented (12)
+Removed entirely — UI, catalog entries, OAuth registry entries, validators,
+env vars, and backend logic. A Prisma migration
+(`20260714090000_retire_integrations`) purges any stored per-org rows and
+their encrypted credentials.
 
-These authenticate with an API key or webhook URL, which the app can hold and
-verify today. On connect, the credential is validated against the provider's
-API **before** anything is stored, then encrypted at rest (AES-256-GCM). Test
-and Sync re-validate on demand or on a schedule.
-
-| Provider | Official method | Validation call |
-|---|---|---|
-| Claude (Anthropic) | REST API, API key | `GET /v1/models` (free) |
-| OpenAI | REST API, API key | `GET /v1/models` (free) |
-| Google Gemini | REST API, API key | `GET /v1beta/models` (free) |
-| Perplexity | REST API (OpenAI-compatible), API key | 1-token `sonar` completion (~fractions of a cent; Perplexity has no free ping endpoint) |
-| Mapbox | REST API, access token | `GET /tokens/v2` introspection (free) |
-| Google Maps Platform | REST API, API key | Single geocode (in-body status handled) |
-| ArcGIS Location Platform | REST API, API key | Single geocode |
-| Calendly | REST API v2, personal access token | `GET /users/me` |
-| HubSpot | Private-app access token (HubSpot's recommended method for single-account integrations) | `GET /account-info/v3/details` |
-| Mailchimp | REST API, API key (datacenter suffix) | `GET /3.0/ping` |
-| Slack | Incoming webhooks (officially supported) | URL-shape check + confirmation post to the channel |
-| Microsoft Teams | **Power Automate Workflows webhook** — classic Office 365 connectors were retired by Microsoft in 2025, so the integration targets the supported replacement | URL-shape check + adaptive-card confirmation post |
-
-### Built-in infrastructure — configured via environment variables (4)
-
-Already implemented in the codebase as inert-until-configured services. The
-Integrations page now reflects their **real** runtime status instead of a
-tracked pretend-status, and Test performs a live check.
-
-| Provider | Where it lives | Test performs |
-|---|---|---|
-| SMTP outbound email | `services/email.ts`, `SMTP_*` env vars | `transporter.verify()` against the mail server |
-| Object storage (S3-compatible) | `services/s3.ts`, `S3_*` env vars | `HeadBucket` against the configured bucket |
-| Google Sign-In | `services/oauth.ts`, `GOOGLE_CLIENT_*` | Reflects enabled-provider status |
-| Microsoft Entra ID | `services/oauth.ts`, `MICROSOFT_CLIENT_*` | Reflects enabled-provider status |
-
-### Supported, pending OAuth app registration (12)
-
-All of these have official OAuth 2.0 APIs and fit the existing
-provider-registry pattern in `services/oauth.ts` ("adding a provider is data,
-not code"). What's missing is not code feasibility but **client credentials**:
-each needs an app registration in the provider's console, a client id/secret
-in Railway env vars, and scope-specific token handling. The UI now labels them
-**"Setup required"** with a link to the registration console, and the connect
-endpoint refuses honestly instead of recording a fake connection.
-
-- **Microsoft Graph family** (Outlook mail, Outlook Calendar, OneDrive) — one
-  Entra ID app registration covers all three plus sign-in; scopes per feature.
-- **Google family** (Gmail, Google Calendar, Google Drive) — one Google Cloud
-  OAuth client covers all three plus sign-in.
-- **Dropbox, Box** — standard OAuth apps.
-- **QuickBooks Online, Xero** — OAuth 2.0 with refresh tokens (both officially
-  documented; QuickBooks tokens expire aggressively, so the refresh plumbing
-  below is a prerequisite).
-- **Salesforce** — connected app, OAuth 2.0.
-- **Okta** — plain OIDC; one entry in the oauth.ts registry once an Okta app
-  exists.
-
-When these are enabled, tokens should be stored with the same AES-256-GCM
-encryption (`services/secrets.ts`), refresh tokens included, and refreshed
-server-side ahead of expiry — the storage shape (`config._secret`) already
-accommodates a JSON token bundle.
-
-### Removed — cannot be implemented as listed (5)
-
-| Removed | Why |
+| Removed | Notes |
 |---|---|
-| Texas RRC "API key" | **The RRC has no public API.** Its data ships as bulk mainframe files and GIS exports. The app already integrates RRC data the correct way: the `tools/rrc/` pipeline (dbf900/daf802/gse10 parsers) and Research → Data & Imports. An "API key" entry was unimplementable and misleading. |
-| QGIS / QGIS Server | Desktop GIS + self-hosted map server, not a SaaS you connect with a credential. The map stack (MapLibre + static GeoJSON + optional Mapbox/ArcGIS/Google) covers the need. |
-| Custom API Integration | A placeholder with no defined behavior. Extension points belong in the roadmap items below, not as a fake connectable card. |
-| API Keys (platform feature) | Issuing keys for *our* API is a real roadmap item, but it's a platform capability, not a third-party integration — it was removed from the catalog until it exists. |
-| Webhooks (platform feature) | Same reasoning: outbound webhooks are feasible (Express + fetch + HMAC signatures) and worth building, but shouldn't be listed as connectable before they work. |
+| Perplexity, OpenAI, Google Gemini | AI features standardize on Claude (deal summaries, outreach drafts, tract extraction — `services/ai.ts`). |
+| Gmail | Inbound reply sync standardizes on Outlook; outbound email is Resend's job now. |
+| Slack | Channel notifications standardize on Microsoft Teams. |
+| Dropbox, Box | Document import standardizes on Google Drive + OneDrive. |
+| Google Calendar | Deadline sync standardizes on Outlook Calendar. |
+| Mailchimp | Marketing-list sync dropped from the roadmap. |
+| Google Sign-In | Sign-in standardizes on Microsoft Entra ID + password. The `GOOGLE_CLIENT_*` env vars remain, used only by the Google Drive integration. |
 
-## 2. Infrastructure evaluation (GitHub + Railway + Neon)
+Earlier removals (RRC "API", QGIS Server, placeholder cards, Mapbox/Google
+Maps/ArcGIS, QuickBooks/Xero, Calendly, HubSpot, Salesforce, Okta) predate
+this cut and stay removed.
 
-**Sufficient as-is for the integration framework.** Nothing in this audit
-requires a new always-on service:
+## 2. The current catalog — what each integration actually does
 
-| Need | Covered by | Notes |
+### Email & Communication
+
+| Provider | Status | What flows |
 |---|---|---|
-| Secrets management | **Railway env vars** + AES-256-GCM at rest in Neon | Provider credentials users paste in are encrypted with `INTEGRATION_SECRET_KEY` (falls back to a key derived from `JWT_SECRET` — set the dedicated var in production so JWT rotation doesn't orphan stored credentials). OAuth client secrets stay in env vars, never in the DB. A dedicated secrets manager (Vault, Doppler) is not justified at this team size. |
-| Background jobs / scheduling | **In-process scheduler** (`services/integrationSync.ts`) | Railway runs one long-lived container, so a 15-minute `setInterval` tick covers scheduled re-validation. If job volume ever grows (real data syncs, retries with backoff), the next step is a Neon-backed job table + worker loop — still no new service. Railway cron is available for heavier isolated jobs. |
-| Audit logging | **Existing `ActivityLog` table in Neon** | Connect/disconnect/config/test/sync events are logged with the acting user and surface in the dashboard activity feed. No new infrastructure. |
-| Webhook receiving (future) | **Express on Railway** | Public HTTPS endpoint already exists; adding `/api/hooks/:provider` routes is code, not infrastructure. |
-| Logging & monitoring | **Railway logs** | Adequate today. If uptime alerting becomes a need, a free-tier external ping (UptimeRobot/Better Stack) is the cheapest add. |
-| Rate-limit management / retries | Per-provider code | Validators carry 8s timeouts; sync failures record `lastError` + status ERROR rather than retry-storming. Backoff policies belong next to each future data-sync implementation. |
-| Email service | **Existing SMTP integration** | Works with any provider (Gmail SMTP, Resend, Postmark, SES) purely via env vars. If deliverability/analytics matter later, Resend or Postmark via SMTP creds requires zero code change. |
+| **Resend** (API key) | **Primary email provider.** | ALL outbound email — buyer outreach, portal reminder digests, password resets — routes through `services/email.ts`, which prefers the org's connected Resend key, then the `RESEND_API_KEY`/`RESEND_FROM` env fallback, then SMTP. Connect validates the key against `GET /domains`, snapshots domain verification statuses (shown as chips on the card), requires a sender identity (fromEmail/fromName), and warns when the sender's domain isn't verified. Sync refreshes the domain snapshot. |
+| SMTP (env) | Fallback transport. | Used only when no Resend credential exists — keeps self-hosted installs working. |
+| Microsoft Outlook / 365 (OAuth) | Live. | Inbound reply sync (`services/emailInboundSync.ts`): inbox messages from known buyer emails become EMAIL_IN timeline entries + notifications. Scope narrowed to **Mail.Read** — sending is Resend's job. Hourly by default. |
+| Microsoft Teams (webhook) | Live, with real traffic. | `services/notifyPush.ts` mirrors notifications (portal leads, portal offers, buyer email replies) to the connected channel as adaptive cards with an "Open in Mineral Hub" action. |
 
-**The one genuine gap: object storage.** GitHub, Railway, and Neon cannot
-serve it —
+### AI & Automation
 
-- **Why needed:** deal/buyer file attachments (`FileAttachment` model and
-  `routes/files.ts` are already built and waiting on configuration).
-- **Why the current stack can't:** Railway containers have ephemeral
-  filesystems (files vanish on redeploy); Neon is a relational store — blobs
-  in Postgres bloat backups and saturate the connection pool; GitHub is
-  version control, not user-file storage.
-- **What it solves:** durable, private file storage with signed, expiring
-  download URLs (already implemented in `services/s3.ts`).
-- **Recommendation:** **Cloudflare R2** via the existing S3-compatible client
-  (`S3_ENDPOINT` override) — zero egress fees and ~free at this scale; AWS S3
-  or Backblaze B2 are drop-in alternates. This is configuration, not code:
-  set `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `S3_ENDPOINT`
-  on the Railway API service, then the Integrations page's "Object storage"
-  card flips to Connected and its Test button proves the bucket reachable.
+| Provider | Status | What flows |
+|---|---|---|
+| Claude (API key) | Live. | Deal summaries, outreach drafting, AI tract extraction (`services/ai.ts`), using the org's own key. |
 
-## 3. The standardized framework (implemented)
+### Storage & Documents
 
-Every integration now flows through one modular pipeline — adding a provider
-is a catalog entry plus (for API-key providers) one validator function:
+| Provider | Status | What flows |
+|---|---|---|
+| Object storage (env) | Live. | S3-compatible attachment storage with signed URLs. |
+| Google Drive (OAuth) | Live. | Document import (`services/cloudDocs.ts` + `/api/files/cloud/*`): browse/search Drive from any Documents section and import files into the deal/buyer document manager (Docs/Sheets/Slides export as PDF). Same mime-sniff/size gates as direct uploads. Scope: **drive.readonly**. |
+| Microsoft OneDrive (OAuth) | Live. | Same import flow via Microsoft Graph. Scope narrowed to **Files.Read**. |
 
-- **Catalog** (`domain/integrationCatalog.ts`) — provider metadata, auth type,
-  implementation status; served to the client, which renders it verbatim.
-- **Consistent UX** — Connected / Error / Not connected / Setup required
-  status, Connect/Disconnect, live connection validation, last-sync time,
-  manual "Sync now", automatic hourly/daily scheduling, per-provider
-  configuration (schedule + notes), and error reporting on the card.
-- **Security** — credentials validated before storage; AES-256-GCM at rest;
-  never serialized to the client (masked hint only, last 4 chars); admin-only
-  routes (`manageApiIntegrations` permission); full audit trail in
-  ActivityLog (connection, disconnection, configuration, tests, syncs, with
-  actor attribution).
-- **Scheduler** (`services/integrationSync.ts`) — background re-validation on
-  the configured cadence; failures flip status to ERROR with the message
-  recorded, visible in UI and activity feed.
+### Productivity
 
-### Verified
+| Provider | Status | What flows |
+|---|---|---|
+| Outlook Calendar (OAuth) | Live. | `services/outlookCalendarSync.ts` mirrors every active deal's deadlines (find-buyer-by, original closing, final closing — resolved by `domain/dates.ts`) as all-day events, creating/patching/deleting on each sync so the calendar tracks the pipeline. Daily by default. |
 
-- 128 server tests pass, including new coverage for encryption round-trip,
-  tamper rejection, masking, and catalog invariants (every live provider has
-  a validator; removed providers stay removed).
-- Live checks against real provider APIs: a bad Anthropic key is rejected by
-  Anthropic (HTTP 401) and never stored; malformed Slack/Teams URLs are
-  rejected by shape; planned providers refuse connection with instructions;
-  unconfigured storage/SMTP report exactly which env vars to set.
-- Full lifecycle exercised end-to-end: encrypted storage (ciphertext in Neon,
-  no plaintext), masked serialization, live test → ERROR status + lastError,
-  disconnect purges the credential, audit rows written.
+### Authentication
 
-## 4. Roadmap (in dependency order)
+| Provider | Status | What flows |
+|---|---|---|
+| Microsoft Entra ID (env) | Live. | OIDC sign-in on the login page. |
 
-1. **Configure object storage** (R2/S3 env vars) — unblocks file attachments;
-   no code needed.
-2. **Set `INTEGRATION_SECRET_KEY`** on Railway — decouples credential
-   encryption from JWT rotation.
-3. **Register the Google + Microsoft OAuth apps** — one registration each
-   unlocks sign-in plus six planned integrations (mail, calendar, drive).
-4. **OAuth token plumbing** — extend `services/oauth.ts` with offline-access
-   token storage (encrypted via `services/secrets.ts`) and pre-expiry refresh;
-   then flip Gmail/Outlook/Calendars/Drive/OneDrive to `live`.
-5. **Accounting + CRM OAuth providers** (QuickBooks, Xero, Salesforce) once 4
-   exists.
-6. **Platform capabilities** — outbound webhooks (HMAC-signed) and API keys
-   for programmatic access, as first-class features rather than catalog cards.
+## 3. Framework invariants (unchanged)
+
+- **Catalog-driven**: adding a provider = one catalog entry + (for API-key
+  providers) one validator in `services/integrationProviders.ts`.
+- **Security**: credentials validated against the provider BEFORE storage;
+  AES-256-GCM at rest (`INTEGRATION_SECRET_KEY`); never serialized to the
+  client (masked hint only); admin-only routes (`manageApiIntegrations`);
+  full audit trail in ActivityLog. Document import endpoints live under
+  `/api/files/cloud/*` gated by `manageDocuments` — admins connect once, the
+  team imports freely.
+- **Scheduler** (`services/integrationSync.ts`): re-validates on the
+  configured cadence and runs each provider's data pull (mailbox import,
+  calendar reconcile, Resend domain refresh). Failures flip status to ERROR
+  with the message recorded.
+
+## 4. Production checklist
+
+1. **Resend**: create an API key, verify the sending domain at
+   resend.com/domains, connect in Settings → Integrations with the sender
+   identity. Optionally set `RESEND_API_KEY` + `RESEND_FROM` on the API
+   service as the instance-wide fallback for system email.
+2. **Object storage**: set `S3_*` env vars (Cloudflare R2 recommended) —
+   required for uploads and cloud document import.
+3. **Microsoft**: one Entra app registration covers sign-in, Outlook inbox
+   sync (Mail.Read), OneDrive import (Files.Read), and Calendar sync
+   (Calendars.ReadWrite).
+4. **Google**: the OAuth client now serves only Drive import
+   (drive.readonly).
+5. `INTEGRATION_SECRET_KEY` set (required in production by
+   `assertProductionSecrets`).

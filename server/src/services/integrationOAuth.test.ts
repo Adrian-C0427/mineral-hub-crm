@@ -4,16 +4,16 @@ import { INTEGRATION_CATALOG } from "../domain/integrationCatalog.js";
 
 describe("integration OAuth state", () => {
   it("round-trips a signed state token", () => {
-    const token = signState({ orgId: "org_1", userId: "user_1", provider: "gmail" });
+    const token = signState({ orgId: "org_1", userId: "user_1", provider: "outlook" });
     const state = verifyState(token);
     expect(state.orgId).toBe("org_1");
     expect(state.userId).toBe("user_1");
-    expect(state.provider).toBe("gmail");
+    expect(state.provider).toBe("outlook");
     expect(state.nonce).toBeTruthy();
   });
 
   it("rejects a tampered state token", () => {
-    const token = signState({ orgId: "org_1", userId: "user_1", provider: "gmail" });
+    const token = signState({ orgId: "org_1", userId: "user_1", provider: "outlook" });
     expect(() => verifyState(token.slice(0, -3) + "xxx")).toThrow();
   });
 });

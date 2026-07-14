@@ -5,18 +5,17 @@
  * (GET /api/integrations/catalog); adding a provider is one entry here plus,
  * if it takes an API key, a validator in services/integrationProviders.ts.
  *
- * Every entry survived the 2026-07 feasibility audit (docs/integrations-audit.md):
- * it has an officially supported integration method and is practical to run on
- * the GitHub + Railway + Neon stack. Providers that failed the audit (RRC
- * "API" — RRC publishes bulk files, not an API; QGIS Server — self-hosted GIS,
- * not a SaaS connection; the placeholder "Custom API Integration") were removed.
- *
- * 2026-07 scope cut: the GIS & Mapping category (Mapbox, Google Maps, ArcGIS —
- * mapping is served by the built-in PostGIS tile stack), the Accounting &
- * Finance category (QuickBooks, Xero), Calendly, HubSpot, Salesforce, and Okta
- * were removed from the product roadmap. Every remaining entry is production-
- * ready: live/webhook providers validate instantly, env providers reflect the
- * runtime config, and OAuth providers need only their client credentials set.
+ * 2026-07 ecosystem cut (docs/integrations-audit.md): the roadmap moved to a
+ * small set of integrations that are each FULLY functional in production.
+ * Removed entirely: Perplexity, Gmail, Slack, OpenAI, Gemini, Dropbox, Box,
+ * Google Calendar, Mailchimp, and Google Sign-In. Every remaining entry does
+ * real work the moment it is connected:
+ *  - Resend delivers all outbound email (primary provider; SMTP is fallback).
+ *  - Teams receives deal/portal notifications on its webhook.
+ *  - Outlook imports inbound buyer replies onto deal timelines.
+ *  - Outlook Calendar mirrors deal deadlines as calendar events.
+ *  - Google Drive / OneDrive import files into the document manager.
+ *  - Claude powers deal summaries, outreach drafts, and tract extraction.
  *
  * `implementation` is what the UI keys its honesty off:
  *  - "live"    — connect stores an encrypted credential and we validate it
@@ -26,11 +25,10 @@
  *  - "oauth"   — connect runs the integration OAuth flow (services/
  *                integrationOAuth.ts); connectable once the provider's client
  *                credentials are set, otherwise shown as "Setup required".
- *  - "planned" — officially supported but not yet wired; connect is disabled.
  */
 
 export type IntegrationAuth = "apikey" | "webhook" | "oauth" | "env";
-export type ImplementationStatus = "live" | "env" | "oauth" | "planned";
+export type ImplementationStatus = "live" | "env" | "oauth";
 
 export interface ProviderDef {
   key: string;
@@ -45,35 +43,29 @@ export interface ProviderDef {
   secretHint?: string;
   /** Where an admin creates the credential or app registration. */
   setupUrl?: string;
-  /** Whether periodic sync (scheduled re-validation) applies. */
+  /** Whether periodic sync (scheduled re-validation + data pull) applies. */
   syncable?: boolean;
 }
 
 export const INTEGRATION_CATALOG: ProviderDef[] = [
   // --- Email & Communication ---
   {
-    key: "smtp", name: "SMTP (outbound email)", category: "Email & Communication", auth: "env", implementation: "env",
-    description: "Outbound deal emails through your mail server. Configured with SMTP_* environment variables on the API service; status reflects the live configuration.",
+    key: "resend", name: "Resend", category: "Email & Communication", auth: "apikey", implementation: "live",
+    description: "Primary email delivery for the whole app — buyer outreach, portal notifications, reminders, invitations, and password resets all send through Resend once connected. Verify your sending domain at Resend, paste an API key, and set the sender identity; the key and domain status are validated live.",
+    secretLabel: "Resend API key", secretHint: "re_…", setupUrl: "https://resend.com/api-keys", syncable: true,
+  },
+  {
+    key: "smtp", name: "SMTP (fallback email)", category: "Email & Communication", auth: "env", implementation: "env",
+    description: "Fallback outbound email through your own mail server, used only when Resend is not connected. Configured with SMTP_* environment variables on the API service; status reflects the live configuration.",
   },
   {
     key: "outlook", name: "Microsoft Outlook / 365", category: "Email & Communication", auth: "oauth", implementation: "oauth",
-    description: "Send deal emails and sync inbound buyer replies via Microsoft Graph — replies from known buyer emails land on the deal timeline and raise a notification. Requires an Entra ID app registration (Mail.Send / Mail.Read) — the same registration used for Microsoft sign-in.",
-    setupUrl: "https://portal.azure.com",
-  },
-  {
-    key: "gmail", name: "Gmail / Google Workspace", category: "Email & Communication", auth: "oauth", implementation: "oauth",
-    description: "Send and receive deal emails through the Gmail API — inbound replies from known buyer emails land on the deal timeline and raise a notification. Requires a Google Cloud OAuth client with gmail.send + gmail.readonly scopes (same client as Google sign-in). Accounts connected before inbound sync must reconnect once to grant read access.",
-    setupUrl: "https://console.cloud.google.com/apis/credentials",
-  },
-  {
-    key: "slack", name: "Slack", category: "Email & Communication", auth: "webhook", implementation: "live",
-    description: "Push deal and buyer notifications to a Slack channel via an incoming webhook — Slack's officially supported lightweight integration. Paste the webhook URL; connecting posts a confirmation message to the channel.",
-    secretLabel: "Incoming webhook URL", secretHint: "https://hooks.slack.com/services/…",
-    setupUrl: "https://api.slack.com/messaging/webhooks",
+    description: "Sync inbound buyer replies from your Outlook inbox — emails from known buyer addresses land on the deal timeline, mark the outreach as answered, and raise a notification. Requires an Entra ID app registration with the Mail.Read scope (the same registration used for Microsoft sign-in).",
+    setupUrl: "https://portal.azure.com", syncable: true,
   },
   {
     key: "teams", name: "Microsoft Teams", category: "Email & Communication", auth: "webhook", implementation: "live",
-    description: "Post notifications to a Teams channel via a Power Automate Workflows webhook (Microsoft retired classic Office 365 connectors in 2025; Workflows is the supported replacement). Connecting posts a confirmation card.",
+    description: "Deal and portal notifications (new portal leads, offers, buyer email replies) post to a Teams channel via a Power Automate Workflows webhook. Paste the workflow URL; connecting posts a confirmation card.",
     secretLabel: "Workflow webhook URL", secretHint: "https://….logic.azure.com/workflows/…",
     setupUrl: "https://support.microsoft.com/office/creating-a-workflow-from-a-channel-in-teams",
   },
@@ -81,23 +73,8 @@ export const INTEGRATION_CATALOG: ProviderDef[] = [
   // --- AI & Automation ---
   {
     key: "claude", name: "Claude (Anthropic)", category: "AI & Automation", auth: "apikey", implementation: "live",
-    description: "Draft outreach, summarize deals, and assist research with Anthropic Claude. The key is verified against the Anthropic API when you connect.",
+    description: "Draft outreach, summarize deals, and extract tract descriptions with Anthropic Claude. The key is verified against the Anthropic API when you connect.",
     secretLabel: "Anthropic API key", secretHint: "sk-ant-…", setupUrl: "https://console.anthropic.com/settings/keys", syncable: true,
-  },
-  {
-    key: "openai", name: "OpenAI", category: "AI & Automation", auth: "apikey", implementation: "live",
-    description: "AI drafting and analysis via OpenAI models. The key is verified when you connect.",
-    secretLabel: "OpenAI API key", secretHint: "sk-…", setupUrl: "https://platform.openai.com/api-keys", syncable: true,
-  },
-  {
-    key: "gemini", name: "Google Gemini", category: "AI & Automation", auth: "apikey", implementation: "live",
-    description: "AI assistance via the Gemini API. The key is verified when you connect.",
-    secretLabel: "Gemini API key", setupUrl: "https://aistudio.google.com/apikey", syncable: true,
-  },
-  {
-    key: "perplexity", name: "Perplexity", category: "AI & Automation", auth: "apikey", implementation: "live",
-    description: "Research and answer generation via the Perplexity API. Validation issues a minimal 1-token request (fractions of a cent).",
-    secretLabel: "Perplexity API key", secretHint: "pplx-…", setupUrl: "https://www.perplexity.ai/settings/api", syncable: true,
   },
 
   // --- Storage & Documents ---
@@ -107,49 +84,23 @@ export const INTEGRATION_CATALOG: ProviderDef[] = [
   },
   {
     key: "googledrive", name: "Google Drive", category: "Storage & Documents", auth: "oauth", implementation: "oauth",
-    description: "Attach deal documents from Google Drive. Requires the Google OAuth client plus drive.file scope.",
+    description: "Import documents from Google Drive straight into a deal's document manager — browse or search your Drive from the Documents section and pull files in without downloading them first. Requires the Google Cloud OAuth client with the drive.readonly scope.",
     setupUrl: "https://console.cloud.google.com/apis/credentials",
   },
   {
     key: "onedrive", name: "Microsoft OneDrive", category: "Storage & Documents", auth: "oauth", implementation: "oauth",
-    description: "Attach documents from OneDrive via Microsoft Graph (Files.Read). Uses the same Entra ID app registration as Microsoft sign-in.",
+    description: "Import documents from OneDrive into a deal's document manager via Microsoft Graph (Files.Read). Uses the same Entra ID app registration as Microsoft sign-in.",
     setupUrl: "https://portal.azure.com",
-  },
-  {
-    key: "dropbox", name: "Dropbox", category: "Storage & Documents", auth: "oauth", implementation: "oauth",
-    description: "Attach documents from Dropbox. Requires a Dropbox App Console OAuth app.",
-    setupUrl: "https://www.dropbox.com/developers/apps",
-  },
-  {
-    key: "box", name: "Box", category: "Storage & Documents", auth: "oauth", implementation: "oauth",
-    description: "Attach documents from Box. Requires a Box developer OAuth app.",
-    setupUrl: "https://app.box.com/developers/console",
   },
 
   // --- Productivity ---
   {
-    key: "googlecalendar", name: "Google Calendar", category: "Productivity", auth: "oauth", implementation: "oauth",
-    description: "Sync closing dates and follow-ups to Google Calendar (calendar.events scope on the Google OAuth client).",
-    setupUrl: "https://console.cloud.google.com/apis/credentials",
-  },
-  {
     key: "outlookcalendar", name: "Outlook Calendar", category: "Productivity", auth: "oauth", implementation: "oauth",
-    description: "Sync deadlines and follow-ups via Microsoft Graph (Calendars.ReadWrite).",
-    setupUrl: "https://portal.azure.com",
-  },
-
-  // --- CRM & Marketing ---
-  {
-    key: "mailchimp", name: "Mailchimp", category: "CRM & Marketing", auth: "apikey", implementation: "live",
-    description: "Sync buyer lists for email campaigns. The key is verified against Mailchimp's ping endpoint (the datacenter is read from the key suffix).",
-    secretLabel: "Mailchimp API key", secretHint: "…-us14 (datacenter suffix required)", setupUrl: "https://admin.mailchimp.com/account/api/", syncable: true,
+    description: "Mirrors deal deadlines — find-buyer-by, original closing, and final closing dates — as events on your Outlook calendar, kept up to date on each sync (Calendars.ReadWrite via Microsoft Graph).",
+    setupUrl: "https://portal.azure.com", syncable: true,
   },
 
   // --- Authentication ---
-  {
-    key: "googlesignin", name: "Google Sign-In", category: "Authentication", auth: "env", implementation: "env",
-    description: "Single sign-on with Google (OpenID Connect). Configured with GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET on the API service; status reflects the live configuration.",
-  },
   {
     key: "entra", name: "Microsoft Entra ID", category: "Authentication", auth: "env", implementation: "env",
     description: "Single sign-on with Microsoft Entra ID (OpenID Connect). Configured with MICROSOFT_CLIENT_ID / MICROSOFT_CLIENT_SECRET on the API service; status reflects the live configuration.",
@@ -158,3 +109,12 @@ export const INTEGRATION_CATALOG: ProviderDef[] = [
 
 export const providerByKey = (key: string): ProviderDef | undefined =>
   INTEGRATION_CATALOG.find((p) => p.key === key);
+
+/**
+ * Providers retired in the 2026-07 ecosystem cut. Kept only so startup can
+ * purge any credential rows an org stored while they existed.
+ */
+export const RETIRED_PROVIDERS = [
+  "perplexity", "gmail", "slack", "openai", "gemini", "dropbox", "box",
+  "googlecalendar", "mailchimp", "googlesignin",
+] as const;

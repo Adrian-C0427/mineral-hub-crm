@@ -1,13 +1,11 @@
 import nodemailer, { type Transporter } from "nodemailer";
-import { env, emailConfigured } from "../config.js";
+import { env, smtpConfigured } from "../config.js";
 import { HttpError } from "../middleware/errors.js";
+import { orgResendSender, envResendSender, sendViaResend } from "./resend.js";
 
 let transporter: Transporter | null = null;
 
-function getTransport(): Transporter {
-  if (!emailConfigured()) {
-    throw new HttpError(503, "Email is not configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS on the API service.");
-  }
+function getSmtpTransport(): Transporter {
   if (!transporter) {
     transporter = nodemailer.createTransport({
       host: env.SMTP.HOST,
@@ -24,10 +22,40 @@ export interface SendParams {
   subject: string;
   html: string;
   replyTo?: string;
+  /**
+   * When set, the org's connected Resend integration (key + sender identity)
+   * is preferred over the instance-wide transports.
+   */
+  organizationId?: string;
 }
 
+/**
+ * Deliver one email. Transport resolution, most specific first:
+ *  1. The org's connected Resend integration (Settings → Integrations).
+ *  2. The instance-wide Resend fallback (RESEND_API_KEY + RESEND_FROM).
+ *  3. The SMTP fallback (SMTP_* env vars).
+ * Resend is the app's primary provider; SMTP exists so self-hosters without a
+ * Resend account still get system email.
+ */
 export async function sendEmail(params: SendParams): Promise<void> {
-  const tx = getTransport();
+  const resend = (params.organizationId ? await orgResendSender(params.organizationId) : null) ?? envResendSender();
+  if (resend) {
+    try {
+      await sendViaResend(resend.apiKey, {
+        from: resend.from, to: params.to, subject: params.subject, html: params.html, replyTo: params.replyTo,
+      });
+      return;
+    } catch (e) {
+      // No silent fallback to SMTP: a delivery split across providers is far
+      // harder to debug than a clear error naming the failing transport.
+      const where = resend.source === "org" ? "the connected Resend integration" : "the RESEND_API_KEY fallback";
+      throw new HttpError(502, `Email via ${where} failed: ${e instanceof Error ? e.message : "unknown error"}`);
+    }
+  }
+  if (!smtpConfigured()) {
+    throw new HttpError(503, "Email is not configured. Connect Resend in Settings → Integrations (or set RESEND_API_KEY/RESEND_FROM, or SMTP_* variables, on the API service).");
+  }
+  const tx = getSmtpTransport();
   await tx.sendMail({
     from: env.SMTP.FROM,
     to: params.to,
