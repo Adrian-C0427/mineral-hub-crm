@@ -194,7 +194,8 @@ export function Expenses() {
               <ResponsiveContainer width="100%" height={220}>
                 <BarChart data={dash.byUser} layout="vertical" margin={{ left: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-                  <XAxis type="number" tickFormatter={(v) => money(v)} tick={{ fontSize: 11 }} />
+                  {/* Compact ticks ($4K) — full "$3,500" labels collided at narrow widths. */}
+                  <XAxis type="number" tickFormatter={(v: number) => (v >= 1000 ? `$${Math.round(v / 1000)}K` : `$${v}`)} tick={{ fontSize: 11 }} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={110} />
                   <Tooltip {...chartTooltip} formatter={(v: number) => money(v)} />
                   <Legend />
