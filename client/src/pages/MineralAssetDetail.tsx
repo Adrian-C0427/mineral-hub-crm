@@ -21,6 +21,7 @@ import { money, num, fmtDate, toInputDate } from "../lib/format";
 import { OWNERSHIP_TYPES, OWNERSHIP_STATUSES, PRODUCING_STATUSES } from "./MineralAssets";
 import type { BuyerActivityRow, DealSummary, MatchRec, RevenueEntry, Seller, UserLite } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
+import { useUnsavedSection } from "../lib/unsaved";
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
 const TractSection = lazy(() => import("../components/TractSection").then((m) => ({ default: m.TractSection })));
 
@@ -197,6 +198,7 @@ function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdi
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState(asset);
   useEffect(() => setF(asset), [asset]);
+  useUnsavedSection(edit, f, asset, save, () => { setF(asset); setEdit(false); });
   const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
 
   async function save() {
@@ -244,6 +246,7 @@ function PropertyCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState(asset);
   useEffect(() => setF(asset), [asset]);
+  useUnsavedSection(edit, f, asset, save, () => { setF(asset); setEdit(false); });
   // Resolve internal abstract IDs (e.g. TX-289222) to their recognizable
   // Abstract number/survey label — internal IDs are never shown in the UI.
   const abstractLabel = useAbstractLabels(asset.abstractIds);
@@ -298,6 +301,7 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
   const [f, setF] = useState(asset);
   const [showAddRev, setShowAddRev] = useState(false);
   useEffect(() => setF(asset), [asset]);
+  useUnsavedSection(edit, f, asset, saveFinancials, () => { setF(asset); setEdit(false); });
 
   const chartData = useMemo(
     () => (asset.revenueEntries ?? []).map((r) => ({ month: r.month.slice(0, 7), amount: r.amount, kind: r.kind })),
@@ -471,6 +475,7 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
   const [acceptOffer, setAcceptOffer] = useState<{ id: string; buyer: string; amount: number } | null>(null);
   const [acceptBusy, setAcceptBusy] = useState(false);
   useEffect(() => setF(asset), [asset]);
+  useUnsavedSection(edit, f, asset, savePricing, () => { setF(asset); setEdit(false); });
 
   async function savePricing() {
     await api.patch(`/deals/${asset.id}`, { askPrice: f.askPrice, currentValue: f.currentValue, estimatedClosingCosts: f.estimatedClosingCosts });

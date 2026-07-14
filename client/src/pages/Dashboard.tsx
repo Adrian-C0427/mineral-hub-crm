@@ -1,6 +1,9 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { Sun, Moon } from "lucide-react";
+import GridLayout, { type Layout } from "react-grid-layout";
+import "react-grid-layout/css/styles.css";
+import "react-resizable/css/styles.css";
 import { api } from "../api/client";
 import { Spinner } from "../components/ui";
 import { money, fmtDate, fmtDateLocal } from "../lib/format";
@@ -87,49 +90,63 @@ const STAGE_FILL: Record<string, string> = {
   CLOSING: "var(--green)",
 };
 
-// Customize View — the user chooses which dashboard widgets show and their order.
-type WidgetId = "kpis" | "profit" | "stages" | "activity" | "buyers";
+// ---------------------------------------------------------------------------
+// Layout model — a real dashboard grid (react-grid-layout): every widget has
+// an exact x/y position and w/h size on a 12-column canvas. In Customize mode
+// widgets drag anywhere (others move out of the way live, with animated
+// transforms) and resize from their edges/corner — the fully-freeform layout
+// found in premium analytics tools. Positions persist per browser.
+// ---------------------------------------------------------------------------
+type WidgetId = "kpis" | "profit" | "stages" | "activity" | "buyers" | "followups";
 const WIDGET_LABELS: Record<WidgetId, string> = {
   kpis: "Key metrics", profit: "Profit by month", stages: "Active deals by stage",
-  activity: "Recent activity", buyers: "Top buyers",
+  activity: "Recent activity", buyers: "Top buyers", followups: "Upcoming follow-ups",
 };
-const DEFAULT_WIDGETS: WidgetId[] = ["kpis", "profit", "stages", "activity", "buyers"];
+const ALL_WIDGETS: WidgetId[] = ["kpis", "profit", "stages", "activity", "buyers", "followups"];
 
-// Freeform sizing model: the dashboard is a GRID_COLS-column grid; each widget
-// spans an integer number of columns (width) and can be given an explicit pixel
-// height. Dragging a widget's corner in Customize mode sets both, snapping width
-// to whole columns and height to a small step — flexible, but always aligned to
-// the grid. Neighbours reflow automatically because it's a CSS grid.
-const GRID_COLS = 4;
-const GRID_GAP = 16;
-const MIN_H = 160;   // never collapse a widget below a usable height
-const MAX_H = 900;   // keep a single widget from dwarfing the page
-const H_STEP = 20;   // snap height to a tidy step
-// Default width in columns (2 of 4 = the old "half"; 4 = the old "full").
-const DEFAULT_COLS: Record<WidgetId, number> = { kpis: 4, profit: 2, stages: 2, activity: 2, buyers: 2 };
-const clampCols = (n: number) => Math.max(1, Math.min(GRID_COLS, Math.round(n)));
-interface DashPrefs { order: WidgetId[]; hidden: WidgetId[]; cols: Partial<Record<WidgetId, number>>; heights: Partial<Record<WidgetId, number>> }
-const DASH_KEY = "mh-dashboard:v1";
+const COLS = 12;
+const ROW_H = 30;      // px per grid row (small unit = fine-grained heights)
+const GAP = 14;
+const MIN_W = 3;
+const MIN_H = 4;
+
+interface Cell { x: number; y: number; w: number; h: number }
+const DEFAULT_LAYOUT: Record<WidgetId, Cell> = {
+  kpis: { x: 0, y: 0, w: 12, h: 6 },
+  profit: { x: 0, y: 6, w: 6, h: 9 },
+  stages: { x: 6, y: 6, w: 6, h: 9 },
+  activity: { x: 0, y: 15, w: 6, h: 8 },
+  buyers: { x: 6, y: 15, w: 6, h: 8 },
+  followups: { x: 0, y: 23, w: 12, h: 7 },
+};
+
+interface DashPrefs { layout: Record<WidgetId, Cell>; hidden: WidgetId[] }
+const DASH_KEY = "mh-dashboard:v2";
+
 function loadDashPrefs(): DashPrefs {
   try {
     const raw = localStorage.getItem(DASH_KEY);
     if (raw) {
-      const p = JSON.parse(raw) as Record<string, unknown>;
-      const cols: Partial<Record<WidgetId, number>> = { ...(p.cols as object ?? {}) };
-      // Migrate the retired "full"/"half" span presets → column counts.
-      const spans = p.spans as Record<string, string> | undefined;
-      if (spans) for (const [k, v] of Object.entries(spans)) if (cols[k as WidgetId] == null) cols[k as WidgetId] = v === "full" ? GRID_COLS : 2;
-      // Heights: keep numeric px; migrate the retired "tall" preset → a fixed px.
-      const heights: Partial<Record<WidgetId, number>> = {};
-      const rawH = p.heights as Record<string, unknown> | undefined;
-      if (rawH) for (const [k, v] of Object.entries(rawH)) {
-        if (typeof v === "number") heights[k as WidgetId] = v;
-        else if (v === "tall") heights[k as WidgetId] = 420;
+      const p = JSON.parse(raw) as Partial<DashPrefs>;
+      const layout = { ...DEFAULT_LAYOUT };
+      for (const id of ALL_WIDGETS) {
+        const c = p.layout?.[id];
+        if (c && [c.x, c.y, c.w, c.h].every((n) => typeof n === "number" && isFinite(n))) layout[id] = c;
       }
-      return { order: (p.order as WidgetId[]) ?? [], hidden: (p.hidden as WidgetId[]) ?? [], cols, heights };
+      return { layout, hidden: (p.hidden ?? []).filter((id): id is WidgetId => ALL_WIDGETS.includes(id as WidgetId)) };
+    }
+    // One-time migration from the v1 swap-grid prefs: carry over hidden widgets,
+    // let positions start from the (better) default canvas.
+    const v1 = localStorage.getItem("mh-dashboard:v1");
+    if (v1) {
+      const p = JSON.parse(v1) as { hidden?: string[] };
+      return {
+        layout: { ...DEFAULT_LAYOUT },
+        hidden: (p.hidden ?? []).filter((id): id is WidgetId => ALL_WIDGETS.includes(id as WidgetId)),
+      };
     }
   } catch { /* ignore */ }
-  return { order: [], hidden: [], cols: {}, heights: {} };
+  return { layout: { ...DEFAULT_LAYOUT }, hidden: [] };
 }
 
 export function Dashboard() {
@@ -139,13 +156,36 @@ export function Dashboard() {
   const { label: stageLabel } = useStages();
   const [prefs, setPrefs] = useState<DashPrefs>(loadDashPrefs);
   const [customizing, setCustomizing] = useState(false);
-  const [dragId, setDragId] = useState<WidgetId | null>(null);
-  const [dragOverId, setDragOverId] = useState<WidgetId | null>(null);
-  const [resizingId, setResizingId] = useState<WidgetId | null>(null);
-  const gridRef = useRef<HTMLDivElement>(null);
   useEffect(() => { try { localStorage.setItem(DASH_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } }, [prefs]);
 
   useEffect(() => { api.get<DashboardData>(`/dashboard?period=${period}`).then(setD); }, [period]);
+
+  // Grid width tracks the CONTAINER (not the window), so collapsing/expanding
+  // the sidebar reflows the canvas immediately. Sub-320px readings are ignored:
+  // they only occur transiently (mid-layout, hidden tab) and would collapse the
+  // whole canvas into an overlapping mess if honored.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [gridW, setGridW] = useState(0);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const measure = () => {
+      const w = Math.round(el.getBoundingClientRect().width);
+      if (w >= 320) setGridW(w);
+    };
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    measure();
+    window.addEventListener("resize", measure);
+    return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
+  }, [d == null]);
+
+  const visibleIds = useMemo(() => ALL_WIDGETS.filter((id) => !prefs.hidden.includes(id)), [prefs.hidden]);
+  const gridLayout: Layout[] = useMemo(
+    () => visibleIds.map((id) => ({ i: id, ...prefs.layout[id], minW: MIN_W, minH: MIN_H })),
+    [visibleIds, prefs.layout],
+  );
+
   if (!d) return <Spinner />;
 
   // Paired bars (design): realized and projected render side by side, so the
@@ -167,7 +207,6 @@ export function Dashboard() {
   const firstRun = d.metrics.activeDeals === 0 && d.metrics.closedProfitYtd === 0 && d.recentActivity.length === 0;
   const today = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
-  // Each dashboard section is an independently show/hide-able, reorderable widget.
   const widgetNodes: Record<WidgetId, ReactNode> = {
     kpis: (
       <div className="metrics-row dash-kpis">
@@ -266,57 +305,55 @@ export function Dashboard() {
         ))}
       </div>
     ),
+    followups: (
+      <div className="panel">
+        <h3 className="dash-h3" style={{ marginBottom: 6 }}>Upcoming follow-ups</h3>
+        {d.upcomingFollowUps.length === 0 ? <p className="muted">No follow-ups scheduled.</p> : d.upcomingFollowUps.map((f, i) => (
+          <div className="dash-feed-row" key={i}>
+            <span className="dash-soft">{f.buyerName} · <Link to={`/deals/${f.dealId}`}>{f.dealName}</Link></span>
+            <span className="dash-faint" style={{ whiteSpace: "nowrap" }}>{fmtDate(f.date)}</span>
+          </div>
+        ))}
+      </div>
+    ),
   };
-  const orderedIds: WidgetId[] = [...prefs.order.filter((id) => DEFAULT_WIDGETS.includes(id)), ...DEFAULT_WIDGETS.filter((id) => !prefs.order.includes(id))];
-  const visibleIds = orderedIds.filter((id) => !prefs.hidden.includes(id));
-  const hiddenIds = orderedIds.filter((id) => prefs.hidden.includes(id));
-  const colsOf = (id: WidgetId): number => clampCols(prefs.cols[id] ?? DEFAULT_COLS[id]);
-  const heightOf = (id: WidgetId): number | undefined => prefs.heights[id];
-  const isDefaultLayout = prefs.order.length === 0 && prefs.hidden.length === 0 && Object.keys(prefs.cols).length === 0 && Object.keys(prefs.heights).length === 0;
 
-  // Customize mode: drag to reorder, drag the corner to resize, hide/show.
-  // Everything persists via the prefs effect above; Restore returns to default.
-  const reorder = (dragId: WidgetId, overId: WidgetId) => {
-    if (dragId === overId) return;
-    const keys = [...orderedIds];
-    const from = keys.indexOf(dragId), to = keys.indexOf(overId);
-    if (from < 0 || to < 0) return;
-    keys.splice(from, 1);
-    keys.splice(to, 0, dragId);
-    setPrefs({ ...prefs, order: keys });
+  const hiddenIds = ALL_WIDGETS.filter((id) => prefs.hidden.includes(id));
+  const isDefaultLayout = prefs.hidden.length === 0 && JSON.stringify(prefs.layout) === JSON.stringify(DEFAULT_LAYOUT);
+
+  // RGL reports the whole layout after every drag/resize — persist it. The
+  // same-reference bail-out when nothing changed is LOAD-BEARING: RGL fires
+  // this on mount/sync too, and always returning a fresh object would ping-pong
+  // renders between RGL and React indefinitely.
+  const onLayoutChange = (next: Layout[]) => {
+    setPrefs((p) => {
+      let changed = false;
+      const layout = { ...p.layout };
+      for (const item of next) {
+        const id = item.i as WidgetId;
+        if (!ALL_WIDGETS.includes(id)) continue;
+        const cur = layout[id];
+        if (cur.x !== item.x || cur.y !== item.y || cur.w !== item.w || cur.h !== item.h) {
+          layout[id] = { x: item.x, y: item.y, w: item.w, h: item.h };
+          changed = true;
+        }
+      }
+      return changed ? { ...p, layout } : p;
+    });
   };
-  // Corner-drag freeform resize: width snaps to whole grid columns, height to a
-  // small px step, both clamped. State only updates when the snapped value
-  // actually changes, so neighbours reflow smoothly without a re-render per pixel.
-  const startResize = (e: React.PointerEvent, id: WidgetId) => {
-    e.preventDefault(); e.stopPropagation();
-    const widgetEl = (e.currentTarget as HTMLElement).closest(".dash-w") as HTMLElement | null;
-    const grid = gridRef.current;
-    if (!widgetEl || !grid) return;
-    const colUnit = (grid.clientWidth - GRID_GAP * (GRID_COLS - 1)) / GRID_COLS; // px per column
-    const rect = widgetEl.getBoundingClientRect();
-    const left = rect.left, top = rect.top;
-    const kpis = id === "kpis"; // KPI row width is fixed to full; only its height is free
-    let lastCol = colsOf(id), lastH = heightOf(id) ?? Math.round(rect.height);
-    setResizingId(id);
-    try { (e.target as HTMLElement).setPointerCapture(e.pointerId); } catch { /* ignore */ }
-    const move = (ev: PointerEvent) => {
-      const col = kpis ? GRID_COLS : clampCols((ev.clientX - left + GRID_GAP) / (colUnit + GRID_GAP));
-      const h = Math.max(MIN_H, Math.min(MAX_H, Math.round((ev.clientY - top) / H_STEP) * H_STEP));
-      if (col === lastCol && h === lastH) return;
-      lastCol = col; lastH = h;
-      setPrefs((p) => ({ ...p, cols: { ...p.cols, [id]: col }, heights: { ...p.heights, [id]: h } }));
-    };
-    const up = () => {
-      window.removeEventListener("pointermove", move);
-      window.removeEventListener("pointerup", up);
-      setResizingId(null);
-    };
-    window.addEventListener("pointermove", move);
-    window.addEventListener("pointerup", up);
-  };
-  const hideWidget = (id: WidgetId) => setPrefs({ ...prefs, hidden: [...prefs.hidden, id] });
-  const showWidget = (id: WidgetId) => setPrefs({ ...prefs, hidden: prefs.hidden.filter((k) => k !== id) });
+
+  const hideWidget = (id: WidgetId) => setPrefs((p) => ({ ...p, hidden: [...p.hidden, id] }));
+  const showWidget = (id: WidgetId) =>
+    setPrefs((p) => {
+      // Re-enter at the bottom of the canvas so it never lands on top of
+      // something else; the user drags it wherever they want from there.
+      const visible = ALL_WIDGETS.filter((w) => !p.hidden.includes(w));
+      const bottom = visible.length ? Math.max(...visible.map((w) => p.layout[w].y + p.layout[w].h)) : 0;
+      return {
+        hidden: p.hidden.filter((k) => k !== id),
+        layout: { ...p.layout, [id]: { ...p.layout[id], x: 0, y: bottom } },
+      };
+    });
 
   return (
     <div className="page">
@@ -352,14 +389,13 @@ export function Dashboard() {
         </div>
       )}
 
-
       {customizing && (
         <div className="panel dash-cz-banner">
           <span className="dash-cz-banner-text">
-            <strong>Customizing dashboard</strong> — drag widgets to reorder, drag a corner to resize, or hide. Changes save automatically.
+            <strong>Customizing dashboard</strong> — drag a widget anywhere, resize from its edges or corner, or hide it. Everything saves automatically.
           </span>
           <span className="row" style={{ gap: 8, marginLeft: "auto" }}>
-            <button type="button" className="small" disabled={isDefaultLayout} onClick={() => setPrefs({ order: [], hidden: [], cols: {}, heights: {} })}>Restore default</button>
+            <button type="button" className="small" disabled={isDefaultLayout} onClick={() => setPrefs({ layout: { ...DEFAULT_LAYOUT }, hidden: [] })}>Restore default</button>
             <button type="button" className="small primary" onClick={() => setCustomizing(false)}>Done</button>
           </span>
         </div>
@@ -377,49 +413,43 @@ export function Dashboard() {
       {visibleIds.length === 0 && !customizing ? (
         <div className="panel"><p className="muted" style={{ margin: 0 }}>All widgets are hidden. Use <strong>Customize</strong> to bring them back.</p></div>
       ) : (
-        <div ref={gridRef} className={`dash-grid ${customizing ? "customizing" : ""}`}>
-          {visibleIds.map((id) => {
-            const h = heightOf(id);
-            return (
-              <div
-                key={id}
-                className={`dash-w ${h != null ? "has-h" : ""} ${customizing ? "cz" : ""} ${dragId === id ? "dragging" : ""} ${dragOverId === id ? "drag-over" : ""} ${resizingId === id ? "resizing" : ""}`}
-                style={{ "--col-span": colsOf(id), ...(h != null ? { height: h } : {}) } as React.CSSProperties}
-                draggable={customizing && resizingId == null}
-                onDragStart={(e) => {
-                  // A drag that began on the resize grip must not start a reorder.
-                  if ((e.target as HTMLElement).closest(".dash-resize")) { e.preventDefault(); return; }
-                  if (customizing) { setDragId(id); e.dataTransfer.effectAllowed = "move"; }
-                }}
-                onDragEnd={() => { setDragId(null); setDragOverId(null); }}
-                onDragOver={(e) => { if (customizing && dragId && dragId !== id) { e.preventDefault(); setDragOverId(id); } }}
-                onDrop={(e) => { if (customizing && dragId) { e.preventDefault(); reorder(dragId, id); setDragId(null); setDragOverId(null); } }}
-              >
-                {customizing && (
-                  <div className="dash-cz-cover">
-                    <div className="dash-cz-bar">
-                      <span className="dash-cz-handle" aria-hidden="true">⠿</span>
-                      <span className="dash-cz-name">{WIDGET_LABELS[id]}{id !== "kpis" ? ` · ${colsOf(id)}×${h != null ? Math.round(h) + "px" : "auto"}` : ""}</span>
-                      <span className="dash-cz-actions">
-                        <button type="button" className="dash-cz-btn" onClick={() => hideWidget(id)} title="Hide widget">✕ Hide</button>
-                      </span>
-                    </div>
-                    {/* Drag the corner grip to resize: width snaps to columns, height is free. */}
-                    <span
-                      className="dash-resize"
-                      role="slider"
-                      aria-label={`Resize ${WIDGET_LABELS[id]}`}
-                      title="Drag to resize"
-                      onPointerDown={(e) => startResize(e, id)}
-                    >
-                      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><path d="M11 4 L4 11 M11 8 L8 11" /></svg>
-                    </span>
-                  </div>
-                )}
-                {widgetNodes[id]}
-              </div>
-            );
-          })}
+        // width:100% so the measuring wrapper never collapses while the grid
+        // inside it is still waiting for its first measured width.
+        <div ref={wrapRef} style={{ width: "100%" }}>
+        {gridW > 0 && <GridLayout
+          className={`dash-rgl ${customizing ? "customizing" : ""}`}
+          width={gridW}
+          layout={gridLayout}
+          cols={COLS}
+          rowHeight={ROW_H}
+          margin={[GAP, GAP]}
+          containerPadding={[0, 0]}
+          isDraggable={customizing}
+          isResizable={customizing}
+          resizeHandles={["se", "e", "s"]}
+          // Free placement: widgets sit exactly where they're dropped (no
+          // auto-packing); colliding widgets are pushed live during the drag.
+          compactType={null}
+          preventCollision={false}
+          draggableCancel=".dash-cz-btn, a, button"
+          useCSSTransforms
+          onLayoutChange={onLayoutChange}
+        >
+          {visibleIds.map((id) => (
+            <div key={id} className={`dash-w ${customizing ? "cz" : ""}`}>
+              {customizing && (
+                <div className="dash-cz-bar">
+                  <span className="dash-cz-handle" aria-hidden="true">⠿</span>
+                  <span className="dash-cz-name">{WIDGET_LABELS[id]}</span>
+                  <span className="dash-cz-actions">
+                    <button type="button" className="dash-cz-btn" onClick={() => hideWidget(id)} title="Hide widget">✕ Hide</button>
+                  </span>
+                </div>
+              )}
+              <div className="dash-w-body">{widgetNodes[id]}</div>
+            </div>
+          ))}
+        </GridLayout>}
         </div>
       )}
     </div>

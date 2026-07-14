@@ -16,6 +16,9 @@ const sentryUpload = process.env.SENTRY_AUTH_TOKEN
 export default defineConfig({
   // Emit source maps so Sentry can map minified stack traces back to source.
   build: { sourcemap: true },
+  // A single React instance no matter where a dependency resolves from (the
+  // workspace hoists some packages to the repo root) — duplicates break hooks.
+  resolve: { dedupe: ["react", "react-dom"] },
   plugins: [react(), ...sentryUpload],
   server: {
     port: 5173,

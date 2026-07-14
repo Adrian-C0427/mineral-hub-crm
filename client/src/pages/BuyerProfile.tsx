@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, RelationshipDot, Banner, StageBadge, StatusBadge, OverflowMenu, ConfirmDelete } from "../components/ui";
+import { Spinner, RelationshipDot, StageBadge, StatusBadge, OverflowMenu, ConfirmDelete } from "../components/ui";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { Select } from "../components/Select";
 import { AssigneePicker } from "../components/AssigneePicker";
@@ -15,6 +15,7 @@ import { formatPhone } from "../lib/phone";
 import { PhoneInput } from "../components/PhoneInput";
 import type { BuyBox, Relationship, UserLite } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
+import { useUnsavedSection, guarded } from "../lib/unsaved";
 
 interface BuyerProfileData {
   id: string;
@@ -49,13 +50,17 @@ function fmtRange(min: number | null, max: number | null, fmt: (n: number) => st
   return "Any";
 }
 
+// Section-based editing: each panel edits independently, so changing a phone
+// number can never accidentally disturb the buy box, and vice versa.
+type Section = "contact" | "buybox" | "tracking";
+
 export function BuyerProfile() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
   const { can } = useAuth();
   const [b, setB] = useState<BuyerProfileData | null>(null);
   const [users, setUsers] = useState<UserLite[]>([]);
-  const [edit, setEdit] = useState(false);
+  const [editing, setEditing] = useState<Section | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [draft, setDraft] = useState<BuyerProfileData | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -64,26 +69,48 @@ export function BuyerProfile() {
   function load() { api.get<BuyerProfileData>(`/buyers/${id}`).then(setB); }
   useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers); }, [id]);
 
+  // Registered while a section is dirty: navigation anywhere raises the
+  // standard Save / Discard / Cancel dialog. Section switches go through
+  // guarded() below, so they get the same treatment.
+  useUnsavedSection(editing != null, draft, b, () => saveSection(), () => cancel());
+
   if (!b) return <Spinner />;
-  const view = edit ? draft! : b;
+  const view = editing ? draft! : b;
 
-  function startEdit() { setDraft(JSON.parse(JSON.stringify(b))); setEdit(true); setErr(null); }
-  function cancel() { setEdit(false); setDraft(null); }
+  function startEdit(section: Section) {
+    // Editing a different section while another has unsaved changes runs
+    // through the same unsaved-changes dialog as navigation.
+    guarded(() => {
+      setDraft(JSON.parse(JSON.stringify(b)));
+      setEditing(section);
+      setErr(null);
+    });
+  }
+  function cancel() { setEditing(null); setDraft(null); setErr(null); }
 
-  async function save() {
-    if (!draft) return;
-    setBusy(true); setErr(null);
-    try {
-      await api.patch(`/buyers/${id}`, {
-        name: draft.name, companyName: draft.companyName, contactName: draft.contactName,
+  /** PATCH only the fields belonging to the section being edited. */
+  async function saveSection() {
+    if (!draft || !editing) return;
+    const payload: Record<string, unknown> =
+      editing === "contact" ? {
+        companyName: draft.companyName, contactName: draft.contactName,
         email: draft.email || null, phone: draft.phone, website: draft.website,
         mailingAddress: draft.mailingAddress, mailingCity: draft.mailingCity, mailingState: draft.mailingState, mailingZip: draft.mailingZip,
-        relationshipStatus: draft.relationshipStatus, lastContactDate: draft.lastContactDate, nextFollowUpDate: draft.nextFollowUpDate,
-        notes: draft.notes, ownerIds: draft.owners.map((o) => o.id), buyBox: draft.buyBox,
-      });
-      setEdit(false); setDraft(null); load();
-    } catch (e) { setErr(e instanceof ApiError ? e.message : "Save failed"); }
-    finally { setBusy(false); }
+        ownerIds: draft.owners.map((o) => o.id),
+      }
+      : editing === "buybox" ? { buyBox: draft.buyBox }
+      : {
+        relationshipStatus: draft.relationshipStatus, lastContactDate: draft.lastContactDate,
+        nextFollowUpDate: draft.nextFollowUpDate, notes: draft.notes,
+      };
+    setBusy(true); setErr(null);
+    try {
+      await api.patch(`/buyers/${id}`, payload);
+      setEditing(null); setDraft(null); load();
+    } catch (e) {
+      setErr(e instanceof ApiError ? e.message : "Save failed");
+      throw e; // let the unsaved-changes dialog know the save failed
+    } finally { setBusy(false); }
   }
 
   const setD = (patch: Partial<BuyerProfileData>) => setDraft((d) => (d ? { ...d, ...patch } : d));
@@ -93,6 +120,28 @@ export function BuyerProfile() {
   // survive (the list keeps that state in memory); fall back to /buyers on a
   // deep link with no in-app history.
   const backToBuyers = () => { if (window.history.length > 1) nav(-1); else nav("/buyers"); };
+
+  /** Per-panel header: title + its own Edit (or Save/Cancel while editing). */
+  function SectionHead({ title, section }: { title: string; section: Section }) {
+    const active = editing === section;
+    return (
+      <div className="section-head">
+        <h3 style={{ margin: 0 }}>{title}</h3>
+        {can("editBuyers") && (active ? (
+          <div className="row" style={{ gap: 6 }}>
+            <button className="small" onClick={cancel} disabled={busy}>Cancel</button>
+            <button className="small primary" onClick={() => void saveSection().catch(() => {})} disabled={busy}>{busy ? "Saving…" : "Save"}</button>
+          </div>
+        ) : (
+          <button className="small" onClick={() => startEdit(section)}>Edit</button>
+        ))}
+      </div>
+    );
+  }
+
+  const editContact = editing === "contact";
+  const editBox = editing === "buybox";
+  const editTracking = editing === "tracking";
 
   return (
     <div className="page">
@@ -104,16 +153,10 @@ export function BuyerProfile() {
           <RelationshipDot status={view.relationshipStatus} />
         </div>
         <div className="row">
-          {edit ? (
-            <><button onClick={cancel}>Cancel</button><button className="primary" onClick={save} disabled={busy}>{busy ? "Saving…" : "Save"}</button></>
-          ) : (
-            <button className="primary" onClick={startEdit}>Edit</button>
-          )}
-          {can("deleteBuyers") && !edit && <OverflowMenu items={[{ label: "Delete buyer…", danger: true, onClick: () => setConfirmDelete(true) }]} />}
+          {can("deleteBuyers") && !editing && <OverflowMenu items={[{ label: "Delete buyer…", danger: true, onClick: () => setConfirmDelete(true) }]} />}
         </div>
       </div>
 
-      {edit && <Banner kind="info">Editing the whole profile. Save commits everything; Cancel discards all changes.</Banner>}
       {confirmDelete && (
         <ConfirmDelete
           itemLabel="buyer"
@@ -127,8 +170,8 @@ export function BuyerProfile() {
       <div className="grid-2">
         {/* Contact Info */}
         <div className="panel">
-          <h3>Contact Info</h3>
-          {edit ? (
+          <SectionHead title="Contact Info" section="contact" />
+          {editContact ? (
             <>
               <Row><Fld l="Company"><input value={view.companyName} onChange={(e) => setD({ companyName: e.target.value })} /></Fld><Fld l="Contact name"><input value={view.contactName ?? ""} onChange={(e) => setD({ contactName: e.target.value })} /></Fld></Row>
               <Row><Fld l="Email"><input value={view.email ?? ""} onChange={(e) => setD({ email: e.target.value })} /></Fld><Fld l="Phone"><PhoneInput value={view.phone ?? ""} onChange={(v) => setD({ phone: v })} /></Fld></Row>
@@ -162,8 +205,8 @@ export function BuyerProfile() {
 
         {/* Buy Box */}
         <div className="panel">
-          <h3>Buy Box & Criteria</h3>
-          {edit ? (
+          <SectionHead title="Buy Box & Criteria" section="buybox" />
+          {editBox ? (
             <>
               <GeoFields
                 states={view.buyBox.states} onStatesChange={(v) => setBox("states", v)}
@@ -195,10 +238,10 @@ export function BuyerProfile() {
 
       {/* Relationship & Tracking */}
       <div className="panel">
-        <h3>Relationship & Tracking</h3>
+        <SectionHead title="Relationship & Tracking" section="tracking" />
         <div className="dd-grid">
           <KV k="Close rate (computed)" v={view.closedDeals > 0 ? `${pct(view.closeRate)} · ${view.closedDeals} closed` : "No closed deals yet"} />
-          {edit ? (
+          {editTracking ? (
             <>
               <Fld l="Status"><Select value={view.relationshipStatus} onChange={(v) => setD({ relationshipStatus: v as Relationship })} ariaLabel="Relationship status" options={[{ value: "HOT", label: "Hot" }, { value: "WARM", label: "Warm" }, { value: "COLD", label: "Cold" }]} /></Fld>
               <Fld l="Last contact"><input type="date" value={toInputDate(view.lastContactDate)} onChange={(e) => setD({ lastContactDate: e.target.value || null })} /></Fld>
@@ -212,12 +255,12 @@ export function BuyerProfile() {
           )}
         </div>
         <Fld l="Notes">
-          {edit ? <textarea rows={3} value={view.notes ?? ""} onChange={(e) => setD({ notes: e.target.value })} /> : <div className="wrap">{view.notes || "—"}</div>}
+          {editTracking ? <textarea rows={3} value={view.notes ?? ""} onChange={(e) => setD({ notes: e.target.value })} /> : <div className="wrap">{view.notes || "—"}</div>}
         </Fld>
       </div>
 
       {/* Relationships — transaction-network intelligence from research data */}
-      {!edit && <BuyerRelationships buyerId={b.id} />}
+      {!editing && <BuyerRelationships buyerId={b.id} />}
 
       {/* Deal History — every row clickable */}
       <div className="panel">

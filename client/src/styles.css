@@ -166,20 +166,30 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
   width: 220px; flex: 0 0 220px; background: var(--panel); border-right: 1px solid var(--border);
   position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column;
   transition: width 0.15s, flex-basis 0.15s;
+  /* Above the main column so the edge toggle's outer half stays clickable. */
+  z-index: 40;
 }
 .sidebar.collapsed { width: 60px; flex-basis: 60px; }
-/* Brand header: logo is the focal point (left, roomy), the collapse control is
-   a small, unobtrusive chevron pinned to the right. */
-.sidebar-brand { display: flex; align-items: center; gap: 8px; height: 60px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--border); }
-.sidebar-brand .brand, .sidebar-brand .sidebar-logo { margin-right: auto; }
-.sidebar-toggle {
-  flex: 0 0 auto; width: 22px; height: 22px; min-width: 0; padding: 0;
+/* Collapse control: a minimal chevron pill straddling the panel edge — half
+   inside, half outside — occupying zero horizontal space in the layout. */
+.sidebar-edge-toggle {
+  position: absolute; top: 22px; right: 0; transform: translateX(50%);
+  width: 18px; height: 18px; min-width: 0; padding: 0;
   display: inline-flex; align-items: center; justify-content: center;
-  border: none; border-radius: 6px; color: var(--text-dim); background: transparent;
-  cursor: pointer; transition: background 0.12s ease, color 0.12s ease;
+  border: 1px solid var(--border); border-radius: 50%;
+  background: var(--panel); color: var(--text-dim);
+  cursor: pointer; z-index: 41;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  opacity: 0.75;
+  transition: opacity 0.12s ease, color 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
 }
-.sidebar-toggle:hover { background: var(--panel-2); color: var(--text); }
-.sidebar-toggle svg { display: block; }
+.sidebar-edge-toggle:hover { opacity: 1; color: var(--text); border-color: var(--accent); transform: translateX(50%) scale(1.12); }
+.sidebar-edge-toggle svg { display: block; transition: transform 0.18s ease; }
+.sidebar-edge-toggle svg.flipped { transform: rotate(180deg); }
+/* Brand header: the full row belongs to the logo — the collapse control now
+   rides the panel edge instead of competing for header space. */
+.sidebar-brand { display: flex; align-items: center; gap: 8px; height: 60px; padding: 0 14px; border-bottom: 1px solid var(--border); }
+.sidebar-brand .brand, .sidebar-brand .sidebar-logo { margin-right: auto; }
 .sidebar-nav { flex: 1; overflow-y: auto; padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .sidebar-nav::-webkit-scrollbar { width: 6px; }
 .sidebar-nav::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
@@ -711,28 +721,30 @@ body.modal-open { overflow: hidden; }
 .dash-main .panel, .dash-duo .panel { margin-bottom: 0; }
 @media (max-width: 900px) { .dash-main, .dash-duo { grid-template-columns: 1fr; } }
 
-/* Customizable widget grid (Dashboard Customize View). */
-.dash-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; align-items: start; }
-/* Freeform width: each widget spans a whole number of grid columns via the
-   --col-span custom property (so the responsive rule below can still override it). */
-.dash-grid .dash-w { grid-column: span var(--col-span, 2); min-width: 0; }
-.dash-grid .dash-w > .panel { margin-bottom: 0; min-width: 0; }
-/* Freeform height: an explicit px height on the widget; the panel fills it and
-   scrolls if its content is taller, so widgets can be made shorter or taller. */
-.dash-grid .dash-w.has-h { min-height: 0; }
-.dash-grid .dash-w.has-h > .panel { height: 100%; overflow: auto; display: flex; flex-direction: column; }
-.dash-grid .dash-w.has-h > .metrics-row { height: 100%; }
-.dash-grid .dash-w > .metrics-row { margin: 0; }
-@media (max-width: 900px) { .dash-grid { grid-template-columns: 1fr; } .dash-grid .dash-w { grid-column: 1 / -1; } }
-
-/* Corner resize grip (Customize mode) — freeform drag-to-resize handle. */
-.dash-resize { position: absolute; right: 5px; bottom: 5px; z-index: 5; width: 22px; height: 22px;
-  display: inline-flex; align-items: flex-end; justify-content: flex-end; padding: 2px;
-  color: var(--text-dim); background: var(--panel); border: 1px solid var(--border); border-radius: 6px;
-  cursor: nwse-resize; touch-action: none; }
-.dash-resize:hover { color: var(--accent); border-color: var(--accent); }
-.dash-grid.customizing .dash-w.resizing { outline: 2px solid var(--accent); outline-offset: 2px; }
-.dash-grid.customizing .dash-w.resizing .dash-cz-cover { background: rgba(59, 130, 246, 0.06); }
+/* Customizable widget grid — react-grid-layout canvas. Every widget carries an
+   exact x/y/w/h; dragging repositions live via CSS transforms (no reflow, no
+   jank) and neighbours animate out of the way. */
+.dash-rgl { position: relative; }
+.dash-rgl .dash-w { display: flex; flex-direction: column; min-width: 0; overflow: hidden; border-radius: var(--radius-lg); }
+.dash-rgl .dash-w-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.dash-rgl .dash-w-body > .panel { flex: 1; min-height: 0; margin-bottom: 0; overflow: auto; display: flex; flex-direction: column; }
+.dash-rgl .dash-w-body > .metrics-row { flex: 1; min-height: 0; margin: 0; }
+/* Widget motion: RGL animates via transform; keep it crisp and GPU-friendly. */
+.dash-rgl .react-grid-item { transition: transform 180ms cubic-bezier(0.2, 0, 0, 1), width 180ms cubic-bezier(0.2, 0, 0, 1), height 180ms cubic-bezier(0.2, 0, 0, 1); }
+.dash-rgl .react-grid-item.react-draggable-dragging { transition: none; z-index: 10; cursor: grabbing;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.4); border-radius: var(--radius-lg); opacity: 0.92; }
+.dash-rgl .react-grid-item.resizing { transition: none; z-index: 10; }
+/* Drop target ghost: a soft accent slab where the widget will land. */
+.dash-rgl .react-grid-placeholder { background: var(--accent); opacity: 0.14; border-radius: var(--radius-lg);
+  transition: transform 120ms ease; }
+/* Resize affordances (Customize mode): RGL's handles, restyled to the theme. */
+.dash-rgl .react-resizable-handle { z-index: 6; }
+.dash-rgl .react-resizable-handle-se { background: none; }
+.dash-rgl .react-resizable-handle-se::after { content: ""; position: absolute; right: 5px; bottom: 5px; width: 9px; height: 9px;
+  border-right: 2px solid var(--text-dim); border-bottom: 2px solid var(--text-dim); border-radius: 1px; }
+.dash-rgl .react-grid-item:hover .react-resizable-handle-se::after { border-color: var(--accent); }
+.dash-rgl.customizing .dash-w { cursor: grab; outline: 1px dashed var(--border); outline-offset: 2px; border-radius: var(--radius-lg); }
+.dash-rgl.customizing .dash-w:active { cursor: grabbing; }
 
 /* Dashboard Customize mode — in-place drag-and-drop, resize, hide/show. */
 .dash-cz-toggle { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px;
@@ -747,15 +759,10 @@ body.modal-open { overflow: hidden; }
 .dash-cz-chip { padding: 5px 11px; border-radius: 999px; border: 1px dashed var(--border); background: var(--panel-2);
   color: var(--text-dim); font-size: 12.5px; font-weight: 600; cursor: pointer; }
 .dash-cz-chip:hover { color: var(--accent); border-color: var(--accent); }
-/* Each widget gets a drag cover + toolbar; content dims and stops interacting. */
-.dash-grid.customizing .dash-w { position: relative; }
-.dash-grid.customizing .dash-w.cz { cursor: grab; border-radius: var(--radius-lg); outline: 1px dashed var(--border); outline-offset: 2px; }
-.dash-grid.customizing .dash-w.cz > .panel, .dash-grid.customizing .dash-w.cz > .metrics-row { pointer-events: none; }
-.dash-grid.customizing .dash-w.dragging { opacity: 0.45; }
-.dash-grid.customizing .dash-w.drag-over { outline: 2px solid var(--accent); outline-offset: 2px; }
-.dash-cz-cover { position: absolute; inset: 0; z-index: 3; border-radius: var(--radius-lg);
-  background: rgba(59, 130, 246, 0.04); display: flex; align-items: flex-start; justify-content: stretch; }
-.dash-cz-bar { display: flex; align-items: center; gap: 8px; width: 100%; margin: 8px; padding: 6px 8px;
+/* Customize mode: a slim toolbar above each widget's content (name + Hide);
+   the content below stays visible but inert while arranging. */
+.dash-rgl.customizing .dash-w .dash-w-body { pointer-events: none; opacity: 0.82; }
+.dash-cz-bar { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; margin: 0 0 6px; padding: 5px 8px;
   border-radius: 8px; background: var(--panel); border: 1px solid var(--border); box-shadow: var(--shadow); }
 .dash-cz-handle { color: var(--text-dim); font-size: 15px; cursor: grab; }
 .dash-cz-name { font-size: 12.5px; font-weight: 700; color: var(--text); margin-right: auto; }
