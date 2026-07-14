@@ -6,6 +6,7 @@ import { ensureUsersHaveOrganizations } from "./services/org.js";
 import { backfillBuyerStatus } from "./services/backfill.js";
 import { startIntegrationScheduler } from "./services/integrationSync.js";
 import { startPortalReminderScheduler } from "./services/portalReminders.js";
+import { startDealAlertScheduler } from "./services/dealAlerts.js";
 
 // Fail closed: in production, refuse to boot with default/missing secret keys.
 assertProductionSecrets();
@@ -17,6 +18,7 @@ startIntegrationScheduler();
 
 // Periodic reminder digest of unactioned buyer-portal offers/leads.
 startPortalReminderScheduler();
+startDealAlertScheduler();
 
 // Idempotent backfill so every existing user has an organization (multi-tenancy).
 ensureUsersHaveOrganizations().catch((e) =>

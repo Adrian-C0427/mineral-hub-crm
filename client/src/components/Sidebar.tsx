@@ -4,14 +4,14 @@ import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Briefcase, Workflow, Users, Map as MapIcon, BarChart3, Telescope, TrendingDown,
   Layers, Receipt, Store, Settings as SettingsIcon, ChevronRight, ChevronDown, LogOut,
-  PanelLeftClose, PanelLeftOpen, Search,
+  PanelLeftClose, PanelLeftOpen,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { NotificationsBell } from "./NotificationsBell";
 import { ROLE_LABEL } from "../lib/roles";
 
-export interface NavItem {
+interface NavItem {
   label: string;
   icon: LucideIcon;
   to?: string;
@@ -24,7 +24,7 @@ export interface NavItem {
 }
 
 // Config-driven so new modules are added here without touching layout code.
-export const NAV: NavItem[] = [
+const NAV: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, to: "/", end: true, desc: "Today's acquisition snapshot — active deals, profit, follow-ups" },
   {
     label: "Deals", icon: Briefcase, perm: "viewDeals", desc: "Acquisition opportunities you're working",
@@ -99,16 +99,6 @@ export function Sidebar() {
       </div>
 
       <nav className="sidebar-nav">
-        <button
-          type="button"
-          className="sidebar-link sidebar-search"
-          title="Search everything (⌘K)"
-          onClick={() => window.dispatchEvent(new Event("mh:palette"))}
-        >
-          <Search size={17} aria-hidden />
-          {!collapsed && <span className="sidebar-label">Search</span>}
-          {!collapsed && <kbd className="sidebar-kbd">⌘K</kbd>}
-        </button>
         {NAV.filter(allowed).map((item) => (
           <SidebarItem key={item.label} item={item} collapsed={collapsed} allowed={allowed} pathname={location.pathname} />
         ))}

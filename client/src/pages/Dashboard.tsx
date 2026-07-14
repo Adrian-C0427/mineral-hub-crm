@@ -88,12 +88,12 @@ const STAGE_FILL: Record<string, string> = {
 };
 
 // Customize View — the user chooses which dashboard widgets show and their order.
-type WidgetId = "kpis" | "profit" | "stages" | "activity" | "buyers" | "followups";
+type WidgetId = "kpis" | "profit" | "stages" | "activity" | "buyers";
 const WIDGET_LABELS: Record<WidgetId, string> = {
   kpis: "Key metrics", profit: "Profit by month", stages: "Active deals by stage",
-  activity: "Recent activity", buyers: "Top buyers", followups: "Upcoming follow-ups",
+  activity: "Recent activity", buyers: "Top buyers",
 };
-const DEFAULT_WIDGETS: WidgetId[] = ["kpis", "profit", "stages", "activity", "buyers", "followups"];
+const DEFAULT_WIDGETS: WidgetId[] = ["kpis", "profit", "stages", "activity", "buyers"];
 
 // Freeform sizing model: the dashboard is a GRID_COLS-column grid; each widget
 // spans an integer number of columns (width) and can be given an explicit pixel
@@ -106,7 +106,7 @@ const MIN_H = 160;   // never collapse a widget below a usable height
 const MAX_H = 900;   // keep a single widget from dwarfing the page
 const H_STEP = 20;   // snap height to a tidy step
 // Default width in columns (2 of 4 = the old "half"; 4 = the old "full").
-const DEFAULT_COLS: Record<WidgetId, number> = { kpis: 4, profit: 2, stages: 2, activity: 2, buyers: 2, followups: 4 };
+const DEFAULT_COLS: Record<WidgetId, number> = { kpis: 4, profit: 2, stages: 2, activity: 2, buyers: 2 };
 const clampCols = (n: number) => Math.max(1, Math.min(GRID_COLS, Math.round(n)));
 interface DashPrefs { order: WidgetId[]; hidden: WidgetId[]; cols: Partial<Record<WidgetId, number>>; heights: Partial<Record<WidgetId, number>> }
 const DASH_KEY = "mh-dashboard:v1";
@@ -168,16 +168,6 @@ export function Dashboard() {
   const today = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
   // Each dashboard section is an independently show/hide-able, reorderable widget.
-  const overdueAlert = d.overdue.length > 0 ? (
-    <div className="dash-alert">
-      <span className="dash-alert-icon">!</span>
-      <span className="dash-alert-text">
-        <b>{d.overdue.length} deal{d.overdue.length > 1 ? "s" : ""} overdue</b> — past Find Buyer By with no buyer assigned:{" "}
-        {d.overdue.map((o, i) => (<span key={o.id}>{i > 0 ? ", " : ""}<Link to={`/deals/${o.id}`}>{o.name}</Link></span>))}
-      </span>
-    </div>
-  ) : null;
-
   const widgetNodes: Record<WidgetId, ReactNode> = {
     kpis: (
       <div className="metrics-row dash-kpis">
@@ -276,17 +266,6 @@ export function Dashboard() {
         ))}
       </div>
     ),
-    followups: (
-      <div className="panel">
-        <h3 className="dash-h3" style={{ marginBottom: 6 }}>Upcoming follow-ups</h3>
-        {d.upcomingFollowUps.length === 0 ? <p className="muted">No follow-ups scheduled.</p> : d.upcomingFollowUps.map((f, i) => (
-          <div className="dash-feed-row" key={i}>
-            <span className="dash-soft">{f.buyerName} · <Link to={`/deals/${f.dealId}`}>{f.dealName}</Link></span>
-            <span className="dash-faint" style={{ whiteSpace: "nowrap" }}>{fmtDate(f.date)}</span>
-          </div>
-        ))}
-      </div>
-    ),
   };
   const orderedIds: WidgetId[] = [...prefs.order.filter((id) => DEFAULT_WIDGETS.includes(id)), ...DEFAULT_WIDGETS.filter((id) => !prefs.order.includes(id))];
   const visibleIds = orderedIds.filter((id) => !prefs.hidden.includes(id));
@@ -373,7 +352,6 @@ export function Dashboard() {
         </div>
       )}
 
-      {overdueAlert}
 
       {customizing && (
         <div className="panel dash-cz-banner">

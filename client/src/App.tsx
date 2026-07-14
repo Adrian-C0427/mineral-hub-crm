@@ -2,7 +2,6 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { useAuth } from "./auth/AuthContext";
 import { Spinner, ToastHost } from "./components/ui";
 import { Sidebar } from "./components/Sidebar";
-import { CommandPalette } from "./components/CommandPalette";
 import { Login } from "./pages/Login";
 import { ResetPassword } from "./pages/ResetPassword";
 import { OAuthCallback } from "./pages/OAuthCallback";
@@ -100,7 +99,6 @@ export function App() {
   return (
     <div className="app-shell with-sidebar">
       <ToastHost />
-      <CommandPalette />
       <Sidebar />
       <main className="app-main">
         <Routes>

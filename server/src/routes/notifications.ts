@@ -31,6 +31,8 @@ export const NOTIFICATION_TYPES = [
   { key: "portal_lead", label: "Portal leads", description: "A buyer submits their acquisition criteria on your marketplace" },
   { key: "portal_offer", label: "Portal offers", description: "A buyer submits an offer on a published listing" },
   { key: "email_reply", label: "Email replies", description: "A buyer replies to a deal email (Gmail/Outlook sync)" },
+  { key: "deal_overdue", label: "Overdue deals", description: "An active deal passes its Find Buyer By date with no buyer selected" },
+  { key: "follow_up_due", label: "Follow-up reminders", description: "A scheduled buyer follow-up date arrives" },
 ] as const;
 
 async function mutedTypesFor(userId: string): Promise<string[]> {
