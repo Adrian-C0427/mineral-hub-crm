@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { api } from "../api/client";
+import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import {
   Spinner, PriorityBadge, StageBadge, MetricCard,
-  MatchBar, Banner, ConfirmDelete, ConfirmDialog, BackLink, OverflowMenu,
+  MatchBar, Banner, ConfirmDelete, ConfirmDialog, BackLink, OverflowMenu, showToast,
 } from "../components/ui";
+import { useUnsavedSection } from "../lib/unsaved";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { StageChangeModal } from "../components/StageChangeModal";
 import { LogContactModal } from "../components/LogContactModal";
@@ -488,11 +489,26 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
   const [f, setF] = useState(deal);
   const abstractLabel = useAbstractLabels(deal.abstractIds);
   // Assigned team members are a core deal characteristic, so they live in this
-  // card. Assignment saves immediately (independent of the Edit flow above).
-  const assigneeIds = (deal.assignees ?? []).map((a) => a.id);
-  async function saveAssignees(next: string[]) { await api.patch(`/deals/${deal.id}`, { assigneeIds: next }); onSaved(); }
-  // Seed the multi-state field from a legacy single `state` when needed.
-  useEffect(() => setF({ ...deal, states: deal.states?.length ? deal.states : (deal.state ? [deal.state] : []) }), [deal]);
+  // card. Selection is OPTIMISTIC: the chip appears/disappears instantly and
+  // the PATCH runs in the background — no server round-trip between click and
+  // feedback (the old flow re-fetched the whole deal per click, which made the
+  // control feel sluggish). On failure the previous selection is restored.
+  const [assigneeIds, setAssigneeIds] = useState<string[]>((deal.assignees ?? []).map((a) => a.id));
+  useEffect(() => { setAssigneeIds((deal.assignees ?? []).map((a) => a.id)); }, [deal]);
+  function saveAssignees(next: string[]) {
+    const prev = assigneeIds;
+    setAssigneeIds(next);
+    api.patch(`/deals/${deal.id}`, { assigneeIds: next })
+      .then(() => onSaved())
+      .catch((e) => { setAssigneeIds(prev); showToast(e instanceof ApiError ? e.message : "Could not update assignees"); });
+  }
+  // Seed the multi-state field from a legacy single `state` when needed. The
+  // seed is also the dirty baseline for the unsaved-changes guard.
+  const seed = useMemo(() => ({ ...deal, states: deal.states?.length ? deal.states : (deal.state ? [deal.state] : []) }), [deal]);
+  useEffect(() => setF(seed), [seed]);
+  // Leaving the page with unsaved characteristic edits triggers the standard
+  // Save / Discard / Cancel dialog.
+  useUnsavedSection(edit, f, seed, save, () => { setF(seed); setEdit(false); });
 
   // Operator suggestions come from the deal's counties (same source as the Map
   // page), recomputed whenever the selected counties change.
@@ -605,6 +621,19 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
     setCd(toInputDate(deal.closedDate));
     setEdit(true);
   }
+
+  // Unsaved timeline edits get the standard Save / Discard / Cancel dialog on
+  // any navigation attempt.
+  useUnsavedSection(
+    edit,
+    { duc, fbb, oc, fc, cd },
+    {
+      duc: toInputDate(deal.dateUnderContract), fbb: toInputDate(deal.findBuyerByDate),
+      oc: toInputDate(deal.originalClosingDate), fc: toInputDate(deal.finalClosingDate), cd: toInputDate(deal.closedDate),
+    },
+    save,
+    () => setEdit(false),
+  );
 
   async function save() {
     const patch: Record<string, unknown> = {};
