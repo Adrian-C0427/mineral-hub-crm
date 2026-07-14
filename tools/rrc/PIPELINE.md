@@ -138,3 +138,37 @@ The Map serves wells/wellbores via `ST_AsMVT` tiles; Research and Well Analysis
 query the `rrc` schema live. Once a run commits, those features reflect the new
 data automatically — no re-import, no user action. Add cache-busting only if a
 specific layer caches.
+
+
+## Increment 2 (shipped)
+
+All remaining Phase-1 loaders now run through the incremental merge core —
+no manual prep left for a scheduled run:
+
+| Dataset | Source | Loader | Merge key |
+| --- | --- | --- | --- |
+| Production (PDQ) | dump zip → `unzip -p` stream, county-filtered | `pdqExtract.ts` → `loadProduction` | og, district, lease, gas well, month |
+| Drilling permits | daf802 ASCII (01 roots + 02 API trailers) | `loaders/permits.ts` (pure TS) | status_no, api8 |
+| P5 organizations | orf850 "A " records | `loaders/refData.ts` | op_no |
+| Field names | fldtpe fixed-width | `loaders/refData.ts` | district, field_no, suffix |
+| Gas well status (G-10) | gse10 EBCDIC cp037, 130-byte records | `loaders/gasWellStatus.ts` | og, district, rrc_id |
+| Full Wellbore | dbf900 EBCDIC cp037, 247-byte records | `loaders/wellbore.ts` | UPDATE rrc.wells by api8 + oil W-10 → well_status |
+| Completions | daily packet zips via `tools/rrc/parse_completions.py` | `loaders/completions.ts` | tracking_no, api8 |
+
+Notes:
+- `RRC_DATA_DIR` short-circuits downloads when the raw files are already
+  staged (local runs); production falls back to the catalog/permanent links.
+- EBCDIC decoding is native TS (`ebcdic.ts`, cp037 subset) — python is only
+  required for the completion packets.
+- `mergeSql` gained per-column `casts` (dates) — text params into typed
+  columns need explicit ::casts under prepared statements.
+- The wellbore loader degrades gracefully when `rrc.wells` (PostGIS,
+  shapefile-created) doesn't exist yet: oil W-10 status still merges.
+- Still manual/pending: standalone Oil W-10 file (layout undocumented; oil
+  operator arrives via wellbore type-23) and the county shapefile geometry
+  refresh (`build_wells.py` + `importRrcWells`).
+- Validated against the real statewide files (2026-07 drop): 65,826 fields,
+  74,947 operators, 11,731 gas + 77 oil status rows, 7,237 Freestone/Leon
+  permits, PDQ slice → 6,020 Freestone production rows.
+
+Increment 3 = Railway cron + failure watchdog.

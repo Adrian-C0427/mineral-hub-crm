@@ -15,15 +15,23 @@ export interface MergeSpec {
   columns: string[];       // insert columns, in value order
   conflict: string[];      // natural-key columns
   update?: string[];       // columns to overwrite on conflict; empty ⇒ DO NOTHING
+  /** SQL type casts per column (e.g. { permit_date: "date" }). Text params
+   *  into typed columns (date, int arrays, …) need an explicit ::cast or
+   *  Postgres rejects the prepared statement. */
+  casts?: Record<string, string>;
 }
 
-/** "($1,$2),($3,$4)" for rowCount rows of `width` columns each. */
-export function valuesPlaceholders(rowCount: number, width: number): string {
+/** "($1,$2),($3,$4)" for rowCount rows of `width` columns each; a cast per
+ *  column position (e.g. "::date") is appended when provided. */
+export function valuesPlaceholders(rowCount: number, width: number, castByIndex?: (string | null)[]): string {
   if (rowCount <= 0 || width <= 0) return "";
   const rows: string[] = [];
   for (let r = 0; r < rowCount; r++) {
     const cells: string[] = [];
-    for (let c = 0; c < width; c++) cells.push(`$${r * width + c + 1}`);
+    for (let c = 0; c < width; c++) {
+      const cast = castByIndex?.[c];
+      cells.push(`$${r * width + c + 1}${cast ? `::${cast}` : ""}`);
+    }
     rows.push(`(${cells.join(",")})`);
   }
   return rows.join(",");
@@ -32,7 +40,8 @@ export function valuesPlaceholders(rowCount: number, width: number): string {
 /** Full parameterized INSERT … ON CONFLICT statement for `rowCount` rows. */
 export function mergeSql(spec: MergeSpec, rowCount: number): string {
   const cols = spec.columns.join(", ");
-  const vals = valuesPlaceholders(rowCount, spec.columns.length);
+  const casts = spec.casts ? spec.columns.map((c) => spec.casts![c] ?? null) : undefined;
+  const vals = valuesPlaceholders(rowCount, spec.columns.length, casts);
   const conflictAction =
     spec.update && spec.update.length > 0
       ? `DO UPDATE SET ${spec.update.map((c) => `${c} = EXCLUDED.${c}`).join(", ")}`
