@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { normalizeCompany } from "../serializers.js";
+import { normalizePhone } from "../domain/phone.js";
 import { getDownloadUrl, s3Configured } from "../services/s3.js";
 import { portalRateLimited } from "../services/portalRateLimit.js";
 import { pushTeams } from "../services/notifyPush.js";
@@ -368,7 +369,7 @@ const leadSchema = z.object({
   companyName: z.string().trim().min(1).max(160),
   contactName: z.string().trim().min(1).max(120),
   email: z.string().trim().email().max(200),
-  phone: z.string().trim().max(40).optional().default(""),
+  phone: z.string().trim().max(40).optional().default("").transform(normalizePhone),
   preferredContact: z.enum(["email", "phone", "either"]).optional().default("either"),
   buyBox: z.object({
     states: z.array(z.string().trim().max(40)).max(50).default([]),
@@ -494,7 +495,7 @@ const offerSchema = z.object({
   companyName: z.string().trim().min(1).max(160),
   contactName: z.string().trim().min(1).max(120),
   email: z.string().trim().email().max(200),
-  phone: z.string().trim().max(40).optional().default(""),
+  phone: z.string().trim().max(40).optional().default("").transform(normalizePhone),
   amount: z.number().positive().max(1e12),
   conditions: z.string().trim().max(2000).optional().default(""),
   // Optional buyer-set expiration for the offer (ISO date).

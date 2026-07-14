@@ -113,7 +113,9 @@ async function importAbstracts(file: string): Promise<{ county: string; count: n
       String(f.properties.id),
       String(f.properties.countyFips),
       String(f.properties.county),
-      (f.properties.abstract as string | null) ?? null,
+      // Source labels occasionally carry a stray '?' (upstream disambiguator
+      // for duplicate abstract numbers) — strip it so labels display cleanly.
+      ((f.properties.abstract as string | null) ?? null)?.replace(/\?/g, "") ?? null,
       (f.properties.survey as string | null) ?? null,
       (f.properties.area as number | null) ?? null,
       JSON.stringify(f.geometry),

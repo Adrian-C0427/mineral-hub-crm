@@ -5,6 +5,7 @@ import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal, serializeAssetChild } from "../serializers.js";
 import { computeMatch } from "../domain/matching.js";
+import { normalizePhone } from "../domain/phone.js";
 import { STALE_CONTACT_DAYS } from "../config.js";
 import { daysUntil } from "../domain/dates.js";
 import { logActivity } from "../services/activityLog.js";
@@ -758,7 +759,7 @@ dealsRouter.patch(
         name: z.string().trim().max(160).optional().default(""),
         title: z.string().trim().max(120).nullish(),
         email: z.string().trim().max(200).nullish(),
-        phone: z.string().trim().max(60).nullish(),
+        phone: z.string().trim().max(60).nullish().transform((v) => (v == null ? v : normalizePhone(v))),
       })).max(25).optional(),
     }).parse(req.body);
     const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true, portalSlug: true } });
@@ -1135,8 +1136,8 @@ const sellerSchema = z.object({
   companyName: z.string().trim().max(200).nullish(),
   trustName: z.string().trim().max(200).nullish(),
   sellerType: z.enum(["INDIVIDUAL", "TRUST", "LLC", "CORPORATION", "ESTATE", "PARTNERSHIP", "OTHER"]).optional(),
-  primaryPhone: z.string().trim().max(40).nullish(),
-  secondaryPhone: z.string().trim().max(40).nullish(),
+  primaryPhone: z.string().trim().max(40).nullish().transform((v) => (v == null ? v : normalizePhone(v))),
+  secondaryPhone: z.string().trim().max(40).nullish().transform((v) => (v == null ? v : normalizePhone(v))),
   email: z.string().trim().max(200).nullish(),
   preferredContactMethod: z.string().trim().max(40).nullish(),
   mailingAddress: z.string().trim().max(300).nullish(),

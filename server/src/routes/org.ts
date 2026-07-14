@@ -5,6 +5,7 @@ import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requireOrgOwner, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { generateInviteCode } from "../services/org.js";
+import { normalizePhone } from "../domain/phone.js";
 import { invalidateRoleCache } from "../services/rolePermCache.js";
 import {
   ASSIGNABLE_ROLES, ALL_ROLES, DEFAULT_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_META,
@@ -81,7 +82,7 @@ orgRouter.patch(
       slug: z.string().trim().toLowerCase().regex(/^[a-z0-9-]{3,60}$/, "3-60 chars: letters, numbers, dashes").optional(),
       contactName: z.string().trim().max(120).nullish(),
       contactEmail: z.string().trim().email().max(200).nullish().or(z.literal("").transform(() => null)),
-      contactPhone: z.string().trim().max(40).nullish(),
+      contactPhone: z.string().trim().max(40).nullish().transform((v) => (v == null ? v : normalizePhone(v))),
       officeLocation: z.string().trim().max(200).nullish(),
     }).parse(req.body);
     const data: Record<string, unknown> = {};
@@ -164,7 +165,7 @@ const contactBodySchema = z.object({
   name: z.string().trim().min(1, "Name is required").max(120),
   title: z.string().trim().max(120).nullish(),
   email: z.string().trim().email().max(200).nullish().or(z.literal("").transform(() => null)),
-  phone: z.string().trim().max(40).nullish(),
+  phone: z.string().trim().max(40).nullish().transform((v) => (v == null ? v : normalizePhone(v))),
   department: z.string().trim().max(120).nullish(),
   photo: photoField.optional(),
   isPrimary: z.boolean().optional(),

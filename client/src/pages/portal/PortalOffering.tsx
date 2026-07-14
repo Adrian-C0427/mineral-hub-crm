@@ -6,6 +6,7 @@ import { PortalMap } from "./PortalMap";
 import { portalGet, portalPost, type FC, type PortalAbstract, type PortalDeal, type PortalDocument, type PortalImage, type PortalOrg, type PortalPackageAsset, type PortalProduction } from "./portalApi";
 import { formatPhone } from "../../lib/phone";
 import { MoneyInput } from "../../components/MoneyInput";
+import { PhoneInput } from "../../components/PhoneInput";
 
 const EMPTY_FC: FC = { type: "FeatureCollection", features: [] };
 
@@ -303,7 +304,7 @@ function SubmitOffer({ slug, dealName }: { slug: string; dealName: string }) {
           <div className="field"><label>Company name {star}</label><input value={f.companyName} onChange={(e) => set("companyName")(e.target.value)} /></div>
           <div className="field"><label>Contact name {star}</label><input value={f.contactName} onChange={(e) => set("contactName")(e.target.value)} /></div>
           <div className="field"><label>Email {star}</label><input type="email" value={f.email} onChange={(e) => set("email")(e.target.value)} /></div>
-          <div className="field"><label>Phone</label><input value={f.phone} onChange={(e) => set("phone")(e.target.value)} /></div>
+          <div className="field"><label>Phone</label><PhoneInput value={f.phone} onChange={set("phone")} /></div>
         </div>
         <div className="field"><label>Message (optional)</label><textarea rows={3} value={f.message} onChange={(e) => set("message")(e.target.value)} placeholder="Anything our team should know about your offer" /></div>
         {err && <div className="error-text">{err}</div>}

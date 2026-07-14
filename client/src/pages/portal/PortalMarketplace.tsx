@@ -9,6 +9,7 @@ import { PortalMap } from "./PortalMap";
 import { PortalShell } from "./PortalOffering";
 import { portalGet, portalPost, type FC, type PortalDeal, type PortalOrg } from "./portalApi";
 import { MoneyInput } from "../../components/MoneyInput";
+import { PhoneInput } from "../../components/PhoneInput";
 
 const EMPTY_FC: FC = { type: "FeatureCollection", features: [] };
 
@@ -405,7 +406,7 @@ function LeadCapture({ orgSlug }: { orgSlug: string }) {
           <div className="field"><label>Company name {star}</label><input value={f.companyName} onChange={(e) => set("companyName")(e.target.value)} /></div>
           <div className="field"><label>Contact name {star}</label><input value={f.contactName} onChange={(e) => set("contactName")(e.target.value)} /></div>
           <div className="field"><label>Email {star}</label><input type="email" value={f.email} onChange={(e) => set("email")(e.target.value)} /></div>
-          <div className="field"><label>Phone {star}</label><input value={f.phone} onChange={(e) => set("phone")(e.target.value)} /></div>
+          <div className="field"><label>Phone {star}</label><PhoneInput value={f.phone} onChange={set("phone")} /></div>
           <div className="field"><label>Preferred contact</label>
             <Select value={f.preferredContact} onChange={(v) => set("preferredContact")(v as typeof f.preferredContact)} ariaLabel="Preferred contact"
               options={[{ value: "either", label: "Either" }, { value: "email", label: "Email" }, { value: "phone", label: "Phone" }]} />
