@@ -47,6 +47,9 @@ interface Props<T> {
   /** Turn on the "Customize View" control: a stable id namespaces the saved
    *  column layout (visibility + order) in localStorage, per user + table. */
   customizeId?: string;
+  /** Filters/search rendered on the SAME row as Customize View — no more
+   *  dedicated row with dead space for one right-aligned button. */
+  toolbar?: ReactNode;
 }
 
 function compareValues(a: unknown, b: unknown, type: SortType): number {
@@ -216,6 +219,7 @@ export function SortableTable<T>({
   empty,
   selection,
   customizeId,
+  toolbar,
 }: Props<T>) {
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(defaultSort ?? null);
   const { ordered, visible, hidden, widths, pinnedKeys, pinnedSet, toggle, reorder, setWidth, togglePin, reset, isDefault } = useColumnPrefs(customizeId, columns);
@@ -383,6 +387,7 @@ export function SortableTable<T>({
   return (
     <div className="cv-table">
       <div className="cv-toolbar">
+        <div className="cv-toolbar-left">{toolbar}</div>
         <ColumnCustomizer ordered={ordered} hidden={hidden} pinnedSet={pinnedSet} onToggle={toggle} onReorder={reorder} onPin={togglePin} onReset={reset} isDefault={isDefault} />
       </div>
       {table}

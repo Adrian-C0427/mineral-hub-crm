@@ -629,7 +629,12 @@ body.modal-open { overflow: hidden; }
 
 /* --- Login --- */
 .login-wrap { min-height: 100vh; display:flex; align-items:center; justify-content:center; }
-.login-card { background: var(--panel); border:1px solid var(--border); border-radius: var(--radius); padding: 32px; width: 360px; box-shadow: var(--shadow); }
+.login-card { background: var(--panel); border:1px solid var(--border); border-radius: 16px; padding: 36px; width: 380px; box-shadow: var(--shadow); }
+/* First impression: the login speaks in the landing page's softer voice —
+   sentence-case labels instead of tracked uppercase, a larger brand mark. */
+.login-card .brand { font-size: 26px; }
+.login-card label { text-transform: none; letter-spacing: 0; font-size: 13px; }
+.login-card input { padding: 10px 12px; }
 
 /* OAuth / SSO buttons */
 .oauth-buttons { display:flex; flex-direction:column; gap:8px; }
@@ -688,12 +693,6 @@ body.modal-open { overflow: hidden; }
 .dash-delta.down { color: #ef8f6b; }
 :root[data-theme="light"] .dash-delta.down { color: #c2543a; }
 
-/* Overdue alert — tinted amber strip with a round "!" icon. */
-.dash-alert { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.28); border-radius: 12px; padding: 12px 16px; font-size: 13px; }
-.dash-alert-icon { width: 20px; height: 20px; border-radius: 50%; background: var(--amber); color: #0b0e14; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 13px; flex: none; }
-.dash-alert-text { color: #f4c98a; }
-.dash-alert-text b { color: #fbe3b8; }
-.dash-alert-text a { color: #fff; text-decoration: underline; }
 :root[data-theme="light"] .dash-alert { background: #fdf3e4; border-color: rgba(217,119,6,0.35); }
 :root[data-theme="light"] .dash-alert-icon { color: #fff; }
 :root[data-theme="light"] .dash-alert-text { color: #92510a; }
@@ -875,6 +874,11 @@ tr.row-base td { background: var(--panel-2); font-weight: 600; }
 .dd-funnel-sep { opacity: 0.5; }
 /* Long free-text cells: single line + ellipsis, full text via title tooltip. */
 td.cell-clamp { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Notification preferences list (Settings → General). */
+.notif-pref-list { display: flex; flex-direction: column; }
+.notif-pref-row { display: flex; align-items: center; gap: 14px; padding: 10px 0; border-top: 1px solid var(--border); }
+.notif-pref-row:first-child { border-top: none; }
 
 /* Settings sub-navigation — persistent tabs shared by all settings pages. */
 .settings-nav { display: flex; gap: 4px; margin: -6px 0 16px; border-bottom: 1px solid var(--border); }
@@ -1494,7 +1498,8 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 }
 
 /* Customize View — per-table column layout control (SortableTable). */
-.cv-toolbar { display: flex; justify-content: flex-end; margin-bottom: 8px; }
+.cv-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+.cv-toolbar-left { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; flex-wrap: wrap; }
 .cv-wrap { position: relative; }
 .cv-btn { display: inline-flex; align-items: center; gap: 6px; }
 .cv-btn.active { border-color: var(--accent); }
