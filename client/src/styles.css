@@ -431,6 +431,12 @@ table.data-table {
    checkbox column, that column is pinned too and gets a fixed width so the
    second column's `left` offset is deterministic. */
 .data-table.lead-sticky th:nth-child(1), .data-table.lead-sticky td:nth-child(1) { position: sticky; left: 0; z-index: 3; background: var(--panel); }
+/* Content scrolling under the pinned column gets a soft occlusion shadow
+   instead of a hard seam. */
+.data-table.lead-sticky:not(.has-sel) th:nth-child(1), .data-table.lead-sticky:not(.has-sel) td:nth-child(1),
+.data-table.lead-sticky.has-sel th:nth-child(2), .data-table.lead-sticky.has-sel td:nth-child(2) {
+  box-shadow: 6px 0 8px -6px rgba(0, 0, 0, 0.45);
+}
 .data-table.lead-sticky.has-sel th:nth-child(1), .data-table.lead-sticky.has-sel td:nth-child(1) { width: 44px; min-width: 44px; max-width: 44px; padding-left: 10px; padding-right: 10px; }
 .data-table.lead-sticky.has-sel th:nth-child(2), .data-table.lead-sticky.has-sel td:nth-child(2) { position: sticky; left: 44px; z-index: 3; background: var(--panel); }
 .data-table.lead-sticky thead th:nth-child(1), .data-table.lead-sticky.has-sel thead th:nth-child(2) { z-index: 4; background: var(--panel-2); }
