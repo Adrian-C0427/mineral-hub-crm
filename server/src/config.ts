@@ -86,9 +86,10 @@ export const env = {
   // Public URL of THIS API service (for OAuth redirect_uri registration).
   API_URL: (process.env.API_URL ?? "http://localhost:4000").trim().replace(/\/$/, ""),
   PASSWORD_RESET_TTL_MINUTES: parseInt(process.env.PASSWORD_RESET_TTL_MINUTES ?? "60", 10),
-  // OAuth / SSO providers. Each is inert until its client id + secret are set.
-  // Google + Microsoft creds are shared between sign-in and their integration
-  // features (Gmail/Calendar/Drive, Outlook/Calendar/OneDrive).
+  // OAuth providers. Each is inert until its client id + secret are set.
+  // Microsoft creds are shared between Entra sign-in and the Outlook/
+  // OneDrive/Calendar integrations; Google creds power only the Google Drive
+  // document-import integration (Google Sign-In was retired 2026-07).
   OAUTH: {
     GOOGLE: { CLIENT_ID: process.env.GOOGLE_CLIENT_ID ?? "", CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET ?? "" },
     MICROSOFT: {
@@ -97,11 +98,19 @@ export const env = {
       // Directory (tenant) id, or "common" for multi-tenant + personal accounts.
       TENANT: process.env.MICROSOFT_TENANT ?? "common",
     },
-    // Integration-only OAuth apps (each inert until its client id + secret are set).
-    DROPBOX: { CLIENT_ID: process.env.DROPBOX_CLIENT_ID ?? "", CLIENT_SECRET: process.env.DROPBOX_CLIENT_SECRET ?? "" },
-    BOX: { CLIENT_ID: process.env.BOX_CLIENT_ID ?? "", CLIENT_SECRET: process.env.BOX_CLIENT_SECRET ?? "" },
   },
-  // Outbound email (SMTP). Feature is inert until HOST/USER/PASS are set.
+  // Resend — the app's primary outbound email provider. Org admins normally
+  // connect it per-org in Settings → Integrations (encrypted key + sender
+  // identity); these env vars are the instance-wide fallback so system email
+  // (password resets, invites) works before any org has connected it.
+  RESEND: {
+    API_KEY: process.env.RESEND_API_KEY ?? "",
+    // Sender identity, e.g. `Mineral Hub <notifications@mail.example.com>`
+    // or a bare address on a domain verified in Resend.
+    FROM: process.env.RESEND_FROM ?? "",
+  },
+  // Outbound email fallback (SMTP), used only when Resend is unavailable.
+  // Inert until HOST/USER/PASS are set.
   SMTP: {
     HOST: process.env.SMTP_HOST ?? "",
     PORT: parseInt(process.env.SMTP_PORT ?? "587", 10),
@@ -120,8 +129,18 @@ export const env = {
 
 export const isProd = env.NODE_ENV === "production";
 
-/** Email sending is available only when SMTP is configured. */
-export const emailConfigured = (): boolean => Boolean(env.SMTP.HOST && env.SMTP.USER && env.SMTP.PASS);
+/** True when the SMTP fallback transport is configured. */
+export const smtpConfigured = (): boolean => Boolean(env.SMTP.HOST && env.SMTP.USER && env.SMTP.PASS);
+
+/** True when the instance-wide Resend fallback is configured. */
+export const resendEnvConfigured = (): boolean => Boolean(env.RESEND.API_KEY && env.RESEND.FROM);
+
+/**
+ * Email sending is available when ANY instance-wide transport exists (Resend
+ * env fallback or SMTP). Orgs that connect Resend in Settings → Integrations
+ * can send regardless of this flag.
+ */
+export const emailConfigured = (): boolean => resendEnvConfigured() || smtpConfigured();
 
 /**
  * Fail-closed check for secrets that MUST be real in production. Called at

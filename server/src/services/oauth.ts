@@ -1,5 +1,9 @@
 /**
- * OAuth 2.0 / OpenID Connect sign-in for Google and Microsoft.
+ * OAuth 2.0 / OpenID Connect sign-in (Microsoft Entra ID).
+ *
+ * Google Sign-In was retired in the 2026-07 integration cut — the Google OAuth
+ * client credentials remain in config solely for the Google Drive document
+ * import integration.
  *
  * A small provider registry drives generic authorize → callback → userinfo
  * logic, so adding a provider is data, not code. Each provider is INERT until
@@ -31,25 +35,6 @@ export interface OAuthProvider {
   parseProfile: (userinfo: Record<string, unknown>) => OAuthProfile;
 }
 
-function googleProvider(): OAuthProvider {
-  return {
-    key: "google",
-    label: "Google",
-    authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-    tokenUrl: "https://oauth2.googleapis.com/token",
-    userInfoUrl: "https://openidconnect.googleapis.com/v1/userinfo",
-    scope: "openid email profile",
-    clientId: env.OAUTH.GOOGLE.CLIENT_ID,
-    clientSecret: env.OAUTH.GOOGLE.CLIENT_SECRET,
-    parseProfile: (u) => ({
-      providerAccountId: String(u.sub),
-      email: typeof u.email === "string" ? u.email.toLowerCase() : null,
-      emailVerified: u.email_verified === true || u.email_verified === "true",
-      name: typeof u.name === "string" ? u.name : null,
-    }),
-  };
-}
-
 function microsoftProvider(): OAuthProvider {
   const tenant = env.OAUTH.MICROSOFT.TENANT || "common";
   return {
@@ -74,7 +59,7 @@ function microsoftProvider(): OAuthProvider {
   };
 }
 
-const ALL = [googleProvider, microsoftProvider];
+const ALL = [microsoftProvider];
 
 export function getProvider(key: string): OAuthProvider | null {
   const p = ALL.map((f) => f()).find((x) => x.key === key);

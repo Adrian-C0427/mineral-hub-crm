@@ -17,9 +17,9 @@ describe("parseFromAddress", () => {
 });
 
 describe("isInboundEmailProvider", () => {
-  it("covers exactly gmail and outlook", () => {
-    expect(isInboundEmailProvider("gmail")).toBe(true);
+  it("covers exactly outlook (gmail was retired 2026-07)", () => {
     expect(isInboundEmailProvider("outlook")).toBe(true);
+    expect(isInboundEmailProvider("gmail")).toBe(false);
     expect(isInboundEmailProvider("smtp")).toBe(false);
     expect(isInboundEmailProvider("onedrive")).toBe(false);
   });

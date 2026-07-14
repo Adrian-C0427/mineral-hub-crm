@@ -6,6 +6,7 @@ import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { normalizeCompany } from "../serializers.js";
 import { getDownloadUrl, s3Configured } from "../services/s3.js";
 import { portalRateLimited } from "../services/portalRateLimit.js";
+import { pushTeams } from "../services/notifyPush.js";
 
 /**
  * Buyer Offering Portal — the PUBLIC (unauthenticated) API.
@@ -479,6 +480,7 @@ portalRouter.post(
         organizationId: org.id, userId, type: "portal_lead", title, body, link: `/buyers/${buyerId}`,
       })),
     });
+    void pushTeams(org.id, { title, body, link: `/buyers/${buyerId}` });
 
     res.status(201).json({ ok: true });
   }),
@@ -562,6 +564,7 @@ portalRouter.post(
         type: "portal_offer", title, body: bodyText, link: `/deals/${deal.id}`,
       },
     });
+    void pushTeams(deal.organizationId, { title, body: bodyText, link: `/deals/${deal.id}` });
 
     res.status(201).json({ ok: true });
   }),

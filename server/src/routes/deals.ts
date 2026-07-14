@@ -548,7 +548,7 @@ dealsRouter.post(
       const finalSubject = personalize(subject, tokens);
       const finalBody = renderEmailBody(body, tokens);
       try {
-        await sendEmail({ to: b.email, subject: finalSubject, html: finalBody, replyTo: req.user!.email });
+        await sendEmail({ to: b.email, subject: finalSubject, html: finalBody, replyTo: req.user!.email, organizationId: orgId(req) });
       } catch (e) {
         // First failure (e.g. SMTP not configured) aborts with a clear error.
         if (sent.length === 0) throw e;

@@ -22,6 +22,7 @@ import { validateSecret, validateEnvProvider, envConfigured } from "../services/
 import { encryptSecret, secretHint } from "../services/secrets.js";
 import { syncIntegration, checkIntegration, configOf } from "../services/integrationSync.js";
 import { isInboundEmailProvider } from "../services/emailInboundSync.js";
+import { fetchResendDomains, senderDomainWarning } from "../services/resend.js";
 import { logActivity } from "../services/activityLog.js";
 import { env } from "../config.js";
 import {
@@ -43,9 +44,13 @@ const actionLimiter = rateLimit({
 });
 integrationsRouter.use((req, res, next) => (req.method === "POST" ? actionLimiter(req, res, next) : next()));
 
+// Internal bookkeeping keys that would only bloat the payload (the calendar
+// event map can hold hundreds of entries).
+const INTERNAL_CONFIG_KEYS = new Set(["eventMap", "inboundCursor"]);
+
 function publicConfig(row: Integration | null): Record<string, unknown> {
   const cfg = (row?.config ?? {}) as Record<string, unknown>;
-  return Object.fromEntries(Object.entries(cfg).filter(([k]) => !k.startsWith("_")));
+  return Object.fromEntries(Object.entries(cfg).filter(([k]) => !k.startsWith("_") && !INTERNAL_CONFIG_KEYS.has(k)));
 }
 
 function serialize(def: (typeof INTEGRATION_CATALOG)[number], row: Integration | null) {
@@ -55,7 +60,7 @@ function serialize(def: (typeof INTEGRATION_CATALOG)[number], row: Integration |
   // apikey/webhook are always connectable.
   const configured = def.implementation === "env" ? envConfigured(def.key)
     : def.implementation === "oauth" ? oauthConfigured(def.key)
-    : def.implementation !== "planned";
+    : true;
   return {
     ...def,
     // Env-configured providers report their real runtime status; stored rows
@@ -94,9 +99,17 @@ integrationsRouter.get(
   }),
 );
 
+const configSchema = z.object({
+  schedule: z.enum(["manual", "hourly", "daily"]).optional(),
+  notes: z.string().max(2000).optional(),
+  // Sender identity — Resend only (ignored by other providers).
+  fromEmail: z.string().trim().email().max(320).optional(),
+  fromName: z.string().trim().max(120).optional(),
+});
+
 const connectSchema = z.object({
   secret: z.string().min(1).max(4096).optional(),
-  config: z.object({ schedule: z.enum(["manual", "hourly", "daily"]).optional(), notes: z.string().max(2000).optional() }).optional(),
+  config: configSchema.optional(),
 });
 
 integrationsRouter.post(
@@ -111,25 +124,35 @@ integrationsRouter.post(
     if (def.implementation === "oauth") {
       throw new HttpError(400, `${def.name} connects via OAuth. Start the authorization at GET /api/integrations/${def.key}/oauth/start.`);
     }
-    if (def.implementation === "planned") {
-      throw new HttpError(400, `${def.name} requires an OAuth app registration before it can be enabled${def.setupUrl ? ` (${def.setupUrl})` : ""}. See docs/integrations-audit.md.`);
-    }
     if (!secret) throw new HttpError(400, `${def.secretLabel ?? "A credential"} is required to connect ${def.name}.`);
+    if (def.key === "resend" && !config?.fromEmail) {
+      throw new HttpError(400, "A sender email address is required to connect Resend — it becomes the From address on every email the app sends.");
+    }
 
     // Validate against the provider BEFORE storing anything.
     const result = await validateSecret(def.key, secret);
     if (!result.ok) throw new HttpError(400, result.message);
 
+    // Resend: snapshot the account's domain verification statuses and check
+    // the chosen sender against them, so the card can show exactly why a send
+    // would fail before anyone tries one.
+    let extra: Record<string, unknown> = {};
+    let warning: string | null = null;
+    if (def.key === "resend") {
+      const domains = await fetchResendDomains(secret).catch(() => []);
+      extra = { domains };
+      warning = senderDomainWarning(config!.fromEmail!, domains);
+    }
+
+    const cfg = { ...(config ?? {}), ...extra, _secret: encryptSecret(secret), _hint: secretHint(secret) };
     const row = await prisma.integration.upsert({
       where: { organizationId_provider: { organizationId: orgId(req), provider: def.key } },
       create: {
         organizationId: orgId(req), provider: def.key, status: "CONNECTED", connectedAt: new Date(),
-        lastSyncAt: new Date(), lastError: null,
-        config: { ...(config ?? {}), _secret: encryptSecret(secret), _hint: secretHint(secret) },
+        lastSyncAt: new Date(), lastError: warning, config: cfg,
       },
       update: {
-        status: "CONNECTED", connectedAt: new Date(), lastSyncAt: new Date(), lastError: null,
-        config: { ...(config ?? {}), _secret: encryptSecret(secret), _hint: secretHint(secret) },
+        status: "CONNECTED", connectedAt: new Date(), lastSyncAt: new Date(), lastError: warning, config: cfg,
       },
     });
     await logActivity({
@@ -137,7 +160,7 @@ integrationsRouter.post(
       summary: `Integration ${def.name} connected`,
       organizationId: orgId(req), actorUserId: req.user?.id ?? null,
     });
-    res.json({ ...serialize(def, row), message: result.message });
+    res.json({ ...serialize(def, row), message: warning ? `${result.message} ${warning}` : result.message });
   }),
 );
 
@@ -164,20 +187,35 @@ integrationsRouter.post(
   }),
 );
 
-// Non-secret settings (sync schedule, notes). Secrets only change via connect.
+// Non-secret settings (sync schedule, notes, sender identity). Secrets only
+// change via connect.
 integrationsRouter.patch(
   "/:provider",
   asyncHandler(async (req: AuthedRequest, res) => {
     const def = requireDef(req.params.provider);
-    const { config } = z.object({
-      config: z.object({ schedule: z.enum(["manual", "hourly", "daily"]).optional(), notes: z.string().max(2000).optional() }),
-    }).parse(req.body);
+    const { config } = z.object({ config: configSchema }).parse(req.body);
     const existing = await getRow(req, def.key);
     if (!existing) throw new HttpError(404, "Integration not configured");
-    const secretPart = Object.fromEntries(Object.entries((existing.config ?? {}) as Record<string, unknown>).filter(([k]) => k.startsWith("_")));
+    const prevCfg = (existing.config ?? {}) as Record<string, unknown>;
+    const secretPart = Object.fromEntries(Object.entries(prevCfg).filter(([k]) => k.startsWith("_")));
+    if (def.key === "resend" && !config.fromEmail && !prevCfg.fromEmail) {
+      throw new HttpError(400, "Resend needs a sender email address.");
+    }
+    // Preserve non-secret keys the form doesn't send (domain snapshot, cursors).
+    const preserved = Object.fromEntries(
+      Object.entries(prevCfg).filter(([k]) => !k.startsWith("_") && !(k in config)),
+    );
+    const nextCfg: Record<string, unknown> = { ...preserved, ...config };
+    // A changed Resend sender is re-checked against the stored domain snapshot.
+    const warning = def.key === "resend" && typeof nextCfg.fromEmail === "string"
+      ? senderDomainWarning(nextCfg.fromEmail, Array.isArray(nextCfg.domains) ? (nextCfg.domains as never) : [])
+      : undefined;
     const row = await prisma.integration.update({
       where: { id: existing.id },
-      data: { config: { ...config, ...secretPart } as never },
+      data: {
+        config: { ...nextCfg, ...secretPart } as never,
+        ...(warning !== undefined ? { lastError: warning } : {}),
+      },
     });
     await logActivity({
       eventType: "integration.config_updated",
@@ -293,13 +331,18 @@ integrationsOAuthCallbackRouter.get(
         data: { organizationId: state.orgId, provider, status: "NOT_CONNECTED" },
       });
       await persistBundle(row, bundle);
-      // Mailbox integrations default to hourly so inbound replies flow in
-      // without the user knowing to pick a schedule (still changeable).
-      if (isInboundEmailProvider(provider)) {
+      // Sync-driven integrations get a sensible default schedule so they work
+      // without the user knowing to pick one (still changeable): mailboxes
+      // hourly (replies should surface fast), calendar daily (deadlines move
+      // slowly).
+      const defaultSchedule = isInboundEmailProvider(provider) ? "hourly"
+        : provider === "outlookcalendar" ? "daily"
+        : null;
+      if (defaultSchedule) {
         const fresh = await prisma.integration.findUnique({ where: { id: row.id }, select: { config: true } });
         const cfg = (fresh?.config ?? {}) as Record<string, unknown>;
         if (!cfg.schedule) {
-          await prisma.integration.update({ where: { id: row.id }, data: { config: { ...cfg, schedule: "hourly" } as never } });
+          await prisma.integration.update({ where: { id: row.id }, data: { config: { ...cfg, schedule: defaultSchedule } as never } });
         }
       }
       await prisma.integration.update({

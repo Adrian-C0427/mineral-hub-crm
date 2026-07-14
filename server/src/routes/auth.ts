@@ -367,8 +367,11 @@ authRouter.post(
       });
       const resetUrl = `${env.APP_URL}/reset-password?token=${rawToken}`;
 
-      if (emailConfigured()) {
+      // An org-connected Resend integration can deliver even when no
+      // instance-wide transport (Resend env / SMTP) is configured.
+      if (emailConfigured() || user.organizationId) {
         await sendEmail({
+          organizationId: user.organizationId ?? undefined,
           to: user.email,
           subject: "Reset your Mineral Hub password",
           html: `<p>Hi ${escapeHtml(user.firstName ?? user.name)},</p>

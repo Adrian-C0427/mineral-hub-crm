@@ -19,6 +19,9 @@ import { decryptSecret } from "./secrets.js";
 import { validateSecret, validateEnvProvider, type ValidationResult } from "./integrationProviders.js";
 import { isOAuthProvider, getFreshAccessToken } from "./integrationOAuth.js";
 import { isInboundEmailProvider, syncInboundEmail } from "./emailInboundSync.js";
+import { refreshResendDomains } from "./resend.js";
+import { syncOutlookCalendar } from "./outlookCalendarSync.js";
+import { env } from "../config.js";
 
 export interface IntegrationConfig {
   schedule?: "manual" | "hourly" | "daily";
@@ -60,9 +63,9 @@ export async function checkIntegration(row: Integration): Promise<ValidationResu
 /** Run a sync: validate, stamp lastSyncAt/lastError/status, audit-log the outcome. */
 export async function syncIntegration(row: Integration, actorUserId?: string | null): Promise<ValidationResult> {
   let result = await checkIntegration(row);
-  // Data pull layered on the health check: connected mailboxes import inbound
-  // buyer replies (EMAIL_IN timeline entries + notifications).
+  // Data pulls layered on the health check — each provider's real work:
   if (result.ok && isInboundEmailProvider(row.provider)) {
+    // Connected mailboxes import inbound buyer replies (EMAIL_IN + notification).
     try {
       const r = await syncInboundEmail(row);
       result = { ok: true, message: `${result.message} Scanned ${r.fetched} new message(s); logged ${r.matched} buyer repl${r.matched === 1 ? "y" : "ies"}.` };
@@ -72,10 +75,30 @@ export async function syncIntegration(row: Integration, actorUserId?: string | n
       result = { ok: false, message: `Mailbox sync failed: ${e instanceof Error ? e.message : "unknown error"}. If this account was connected before inbound sync existed, disconnect and reconnect to grant read access.` };
     }
   }
+  if (result.ok && row.provider === "outlookcalendar") {
+    // Mirror deal deadlines onto the connected calendar.
+    try {
+      const r = await syncOutlookCalendar(row, env.APP_URL);
+      result = { ok: true, message: `${result.message} Calendar events: ${r.created} created, ${r.updated} updated, ${r.removed} removed.` };
+    } catch (e) {
+      result = { ok: false, message: `Calendar sync failed: ${e instanceof Error ? e.message : "unknown error"}` };
+    }
+  }
+  let keepWarning: string | null = null;
+  if (result.ok && row.provider === "resend") {
+    // Refresh the domain-verification snapshot shown on the card.
+    try {
+      const r = await refreshResendDomains(row);
+      keepWarning = r.warning; // survives the success stamp below
+      result = { ok: true, message: `${result.message} ${r.summary}${r.warning ? ` Warning: ${r.warning}` : ""}` };
+    } catch (e) {
+      result = { ok: false, message: `Domain status refresh failed: ${e instanceof Error ? e.message : "unknown error"}` };
+    }
+  }
   await prisma.integration.update({
     where: { id: row.id },
     data: result.ok
-      ? { lastSyncAt: new Date(), lastError: null, status: "CONNECTED" }
+      ? { lastSyncAt: new Date(), lastError: keepWarning, status: "CONNECTED" }
       : { lastError: result.message, status: "ERROR" },
   });
   await logActivity({

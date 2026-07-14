@@ -2,8 +2,7 @@
  * Per-provider connection validation — the "live" half of the integration
  * framework. Each validator makes the cheapest officially-supported
  * authenticated call for its provider and maps the outcome to {ok, message}.
- * Nothing here is billed beyond trivial amounts (model list endpoints, ping
- * endpoints, single geocodes; Perplexity is the exception at ~1 token).
+ * Nothing here is billed (model/domain list endpoints, webhook posts).
  *
  * Validators receive the DECRYPTED secret and must never include it in the
  * returned message. All calls carry an 8s timeout so a slow provider can't
@@ -11,9 +10,10 @@
  */
 import nodemailer from "nodemailer";
 import { S3Client, HeadBucketCommand } from "@aws-sdk/client-s3";
-import { env, emailConfigured } from "../config.js";
+import { env, smtpConfigured } from "../config.js";
 import { s3Configured } from "./s3.js";
 import { enabledProviders } from "./oauth.js";
+import { fetchResendDomains } from "./resend.js";
 
 export interface ValidationResult {
   ok: boolean;
@@ -50,41 +50,23 @@ async function validateAnthropic(secret: string): Promise<ValidationResult> {
   return authOutcome(res, "Anthropic");
 }
 
-async function validateOpenAI(secret: string): Promise<ValidationResult> {
-  const res = await timedFetch("https://api.openai.com/v1/models", {
-    headers: { Authorization: `Bearer ${secret}` },
-  });
-  return authOutcome(res, "OpenAI");
-}
-
-async function validateGemini(secret: string): Promise<ValidationResult> {
-  const res = await timedFetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(secret)}&pageSize=1`);
-  return authOutcome(res, "Gemini");
-}
-
-async function validatePerplexity(secret: string): Promise<ValidationResult> {
-  // Perplexity has no free models/ping endpoint; a 1-token sonar request is the
-  // cheapest officially supported auth check.
-  const res = await timedFetch("https://api.perplexity.ai/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${secret}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: "sonar", max_tokens: 1, messages: [{ role: "user", content: "ping" }] }),
-  });
-  return authOutcome(res, "Perplexity");
-}
-
-async function validateMailchimp(secret: string): Promise<ValidationResult> {
-  const dc = secret.split("-").pop();
-  if (!dc || !/^[a-z]{2,4}\d+$/.test(dc)) return fail("Mailchimp keys must end in a datacenter suffix (e.g. …-us14).");
-  const res = await timedFetch(`https://${dc}.api.mailchimp.com/3.0/ping`, {
-    headers: { Authorization: `Bearer ${secret}` },
-  });
-  return authOutcome(res, "Mailchimp");
+async function validateResend(secret: string): Promise<ValidationResult> {
+  // Listing domains both authenticates the key and tells the admin whether
+  // their sending domain is actually verified — the thing that gates delivery.
+  try {
+    const domains = await fetchResendDomains(secret);
+    if (!domains.length) return ok("Resend key verified. No sending domains found yet — add and verify one at resend.com/domains before sending.");
+    const verified = domains.filter((d) => d.status === "verified").map((d) => d.name);
+    return ok(verified.length
+      ? `Resend key verified. Sending domain${verified.length === 1 ? "" : "s"} ready: ${verified.join(", ")}.`
+      : `Resend key verified, but no domain is fully verified yet (${domains.map((d) => `${d.name}: ${d.status}`).join(", ")}). Finish DNS verification at resend.com/domains.`);
+  } catch (e) {
+    return fail(`Resend rejected the key: ${e instanceof Error ? e.message : "unknown error"}`);
+  }
 }
 
 // --- Webhook providers -------------------------------------------------------
 
-const SLACK_WEBHOOK = /^https:\/\/hooks\.slack\.com\/(services|workflows)\//;
 // Power Automate "when a Teams webhook request is received" URLs live on
 // *.logic.azure.com (e.g. prod-00.westus.logic.azure.com). Anchor to that host
 // family (not any *.azure.com) so a connecting admin can't point the server's
@@ -99,11 +81,6 @@ async function postWebhook(url: string, body: unknown, provider: string): Promis
   });
   if (res.ok || res.status === 202) return ok(`${provider} webhook reachable — a confirmation message was posted to the channel.`);
   return fail(`${provider} webhook returned HTTP ${res.status}. Re-copy the URL from ${provider}.`);
-}
-
-async function validateSlack(secret: string): Promise<ValidationResult> {
-  if (!SLACK_WEBHOOK.test(secret)) return fail("That doesn't look like a Slack incoming-webhook URL (expected https://hooks.slack.com/services/…).");
-  return postWebhook(secret, { text: "✅ Mineral Hub connected. Deal and buyer notifications will post here." }, "Slack");
 }
 
 async function validateTeams(secret: string): Promise<ValidationResult> {
@@ -127,7 +104,7 @@ async function validateTeams(secret: string): Promise<ValidationResult> {
 // --- Env-configured (builtin) providers --------------------------------------
 
 async function validateSmtp(): Promise<ValidationResult> {
-  if (!emailConfigured()) return fail("SMTP is not configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS on the API service.");
+  if (!smtpConfigured()) return fail("SMTP is not configured. Set SMTP_HOST, SMTP_USER, and SMTP_PASS on the API service.");
   const transporter = nodemailer.createTransport({
     host: env.SMTP.HOST, port: env.SMTP.PORT, secure: env.SMTP.SECURE,
     auth: { user: env.SMTP.USER, pass: env.SMTP.PASS },
@@ -159,23 +136,19 @@ async function validateStorage(): Promise<ValidationResult> {
   }
 }
 
-async function validateOAuthSignin(providerKey: "google" | "microsoft"): Promise<ValidationResult> {
-  const enabled = enabledProviders().some((p) => p.key === providerKey);
+async function validateEntraSignin(): Promise<ValidationResult> {
+  const enabled = enabledProviders().some((p) => p.key === "microsoft");
   return enabled
     ? ok("Sign-in provider is configured and enabled on the login page.")
-    : fail(`Not configured. Set ${providerKey === "google" ? "GOOGLE" : "MICROSOFT"}_CLIENT_ID and _CLIENT_SECRET on the API service.`);
+    : fail("Not configured. Set MICROSOFT_CLIENT_ID and MICROSOFT_CLIENT_SECRET on the API service.");
 }
 
 // --- Registry -----------------------------------------------------------------
 
 /** Providers whose credential we hold and can validate right now. */
 const SECRET_VALIDATORS: Record<string, (secret: string) => Promise<ValidationResult>> = {
+  resend: validateResend,
   claude: validateAnthropic,
-  openai: validateOpenAI,
-  gemini: validateGemini,
-  perplexity: validatePerplexity,
-  mailchimp: validateMailchimp,
-  slack: validateSlack,
   teams: validateTeams,
 };
 
@@ -183,8 +156,7 @@ const SECRET_VALIDATORS: Record<string, (secret: string) => Promise<ValidationRe
 const ENV_VALIDATORS: Record<string, () => Promise<ValidationResult>> = {
   smtp: validateSmtp,
   storage: validateStorage,
-  googlesignin: () => validateOAuthSignin("google"),
-  entra: () => validateOAuthSignin("microsoft"),
+  entra: validateEntraSignin,
 };
 
 export function hasSecretValidator(provider: string): boolean {
@@ -221,9 +193,8 @@ export async function validateSecret(provider: string, secret: string): Promise<
 /** Env-configured status summary for the catalog listing (cheap, no network). */
 export function envConfigured(provider: string): boolean {
   switch (provider) {
-    case "smtp": return emailConfigured();
+    case "smtp": return smtpConfigured();
     case "storage": return s3Configured();
-    case "googlesignin": return enabledProviders().some((p) => p.key === "google");
     case "entra": return enabledProviders().some((p) => p.key === "microsoft");
     default: return false;
   }

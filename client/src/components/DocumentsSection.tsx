@@ -1,6 +1,7 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Cloud } from "lucide-react";
 import { api } from "../api/client";
-import { Banner, EmptyState } from "./ui";
+import { Banner, EmptyState, Modal, Spinner, showToast } from "./ui";
 import { Select } from "./Select";
 import { SortableTable, type Column } from "./SortableTable";
 import { fmtDateLocal } from "../lib/format";
@@ -68,9 +69,19 @@ export function DocumentsSection({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState(false);
+  const [cloudProviders, setCloudProviders] = useState<CloudProvider[]>([]);
+  const [importing, setImporting] = useState<CloudProvider | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const replaceRef = useRef<HTMLInputElement>(null);
   const replaceId = useRef<string | null>(null);
+
+  // Cloud import is offered only when an admin has connected Drive/OneDrive.
+  useEffect(() => {
+    if (!canEdit) return;
+    api.get<CloudProvider[]>("/files/cloud/providers")
+      .then((list) => setCloudProviders(list.filter((p) => p.connected)))
+      .catch(() => setCloudProviders([]));
+  }, [canEdit]);
 
   // Folders = the module's defaults, plus any folder already present that isn't a default.
   const folders = useMemo(() => {
@@ -164,11 +175,18 @@ export function DocumentsSection({
       <div className="row" style={{ margin: "12px 0", justifyContent: "space-between" }}>
         <strong>{folder}</strong>
         {canEdit && (
-          <label className="chip" style={{ margin: 0 }}>
-            {busy ? "Working…" : `Upload to ${folder}`}
-            <input ref={uploadRef} type="file" multiple style={{ display: "none" }} disabled={busy}
-              onChange={(e) => { if (e.target.files?.length) void uploadMany(e.target.files); e.target.value = ""; }} />
-          </label>
+          <div className="row" style={{ gap: 8 }}>
+            {cloudProviders.map((p) => (
+              <button key={p.key} className="small" disabled={busy} onClick={() => setImporting(p)} title={`Import files from ${p.name} into ${folder}`}>
+                <Cloud size={13} style={{ marginRight: 4, verticalAlign: -2 }} />{p.name}
+              </button>
+            ))}
+            <label className="chip" style={{ margin: 0 }}>
+              {busy ? "Working…" : `Upload to ${folder}`}
+              <input ref={uploadRef} type="file" multiple style={{ display: "none" }} disabled={busy}
+                onChange={(e) => { if (e.target.files?.length) void uploadMany(e.target.files); e.target.value = ""; }} />
+            </label>
+          </div>
         )}
       </div>
 
@@ -183,6 +201,98 @@ export function DocumentsSection({
       {/* Hidden input used by per-row Replace buttons. */}
       <input ref={replaceRef} type="file" style={{ display: "none" }}
         onChange={(e) => { if (e.target.files?.[0]) replace(e.target.files[0]); e.target.value = ""; }} />
+
+      {importing && (
+        <CloudImportModal
+          provider={importing}
+          folder={folder}
+          ownerField={ownerField}
+          ownerId={ownerId}
+          onClose={() => setImporting(null)}
+          onImported={(n) => { setImporting(null); showToast(`${n} file${n === 1 ? "" : "s"} imported from ${importing.name} into ${folder}.`); onChanged(); }}
+        />
+      )}
     </div>
+  );
+}
+
+// --- Cloud import (Google Drive / OneDrive) ----------------------------------
+
+interface CloudProvider { key: string; name: string; connected: boolean }
+interface CloudFile { id: string; name: string; mimeType: string; sizeBytes: number | null; modifiedAt: string | null }
+
+function CloudImportModal({ provider, folder, ownerField, ownerId, onClose, onImported }: {
+  provider: CloudProvider; folder: string; ownerField: "dealId" | "buyerId"; ownerId: string;
+  onClose: () => void; onImported: (count: number) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [files, setFiles] = useState<CloudFile[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+
+  // Load recents on open; re-query as the search debounces.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      setFiles(null); setError(null);
+      api.get<CloudFile[]>(`/files/cloud/${provider.key}/list${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ""}`)
+        .then(setFiles)
+        .catch((e) => { setFiles([]); setError(e instanceof Error ? e.message : "Could not load files"); });
+    }, q ? 350 : 0);
+    return () => clearTimeout(t);
+  }, [provider.key, q]);
+
+  const toggle = (id: string) => setSelected((s) => {
+    const next = new Set(s);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+
+  async function importSelected() {
+    setBusy(true); setError(null);
+    let done = 0;
+    try {
+      for (const id of selected) {
+        await api.post(`/files/cloud/${provider.key}/import`, { fileId: id, [ownerField]: ownerId, folder });
+        done++;
+      }
+      onImported(done);
+    } catch (e) {
+      setError(`${e instanceof Error ? e.message : "Import failed"}${done ? ` (${done} imported before the error)` : ""}`);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title={`Import from ${provider.name}`} onClose={onClose}
+      footer={<>
+        <button onClick={onClose}>Cancel</button>
+        <button className="primary" disabled={busy || selected.size === 0} onClick={importSelected}>
+          {busy ? "Importing…" : `Import ${selected.size || ""} into ${folder}`.replace("  ", " ")}
+        </button>
+      </>}>
+      <div className="field" style={{ marginTop: 0 }}>
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={`Search ${provider.name}…`} autoFocus />
+      </div>
+      {error && <Banner kind="error">{error}</Banner>}
+      {files === null ? <Spinner label="Loading files…" /> : files.length === 0 ? (
+        <EmptyState title={q ? "No matches" : "No files found"}>{q ? "Try a different search." : "Recent files appear here once the account has some."}</EmptyState>
+      ) : (
+        <div style={{ maxHeight: 320, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 8 }}>
+          {files.map((f) => (
+            <label key={f.id} className="row" style={{ gap: 10, padding: "8px 10px", borderBottom: "1px solid var(--border)", cursor: "pointer", alignItems: "center" }}>
+              <input type="checkbox" checked={selected.has(f.id)} onChange={() => toggle(f.id)} />
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.name}>{f.name}</span>
+              <span className="muted" style={{ fontSize: 12, flexShrink: 0 }}>
+                {f.sizeBytes != null ? humanSize(f.sizeBytes) : "—"}{f.modifiedAt ? ` · ${fmtDateLocal(f.modifiedAt)}` : ""}
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
+      <p className="muted" style={{ fontSize: 12, marginTop: 8 }}>
+        Files are copied into the app's document storage — the {provider.name} originals are untouched. Google Docs, Sheets, and Slides import as PDF.
+      </p>
+    </Modal>
   );
 }

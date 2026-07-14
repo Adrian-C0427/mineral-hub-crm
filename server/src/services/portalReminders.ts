@@ -13,7 +13,7 @@
  * throttled per org so a chatty tick or a restart can't spam.
  */
 import { prisma } from "../db.js";
-import { env, emailConfigured } from "../config.js";
+import { env } from "../config.js";
 import { sendEmail } from "./email.js";
 
 const TICK_MS = 6 * 60 * 60 * 1000; // check every 6 hours
@@ -38,8 +38,8 @@ function digestHtml(orgName: string, offers: number, leads: number): string {
 
 /** One pass: email each eligible org's owners a digest of unread portal items. */
 export async function runPortalReminderTick(now = Date.now()): Promise<void> {
-  if (!emailConfigured()) return;
-
+  // No instance-wide transport is fine — orgs with Resend connected still
+  // send (sendEmail resolves per-org); orgs without any transport just log.
   const unread = await prisma.notification.findMany({
     where: { readAt: null, type: { in: ["portal_offer", "portal_lead"] } },
     select: { organizationId: true, type: true },
@@ -72,7 +72,7 @@ export async function runPortalReminderTick(now = Date.now()): Promise<void> {
     const subject = `Portal activity: ${counts.offers + counts.leads} item${counts.offers + counts.leads === 1 ? "" : "s"} awaiting review`;
     const html = digestHtml(org.name, counts.offers, counts.leads);
     for (const to of recipients) {
-      try { await sendEmail({ to, subject, html }); }
+      try { await sendEmail({ to, subject, html, organizationId: org.id }); }
       catch (e) { console.error(`Portal reminder email failed for ${to}:`, e instanceof Error ? e.message : e); }
     }
     lastSent.set(org.id, now);

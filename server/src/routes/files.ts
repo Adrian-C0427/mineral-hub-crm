@@ -6,6 +6,7 @@ import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { env } from "../config.js";
 import { buildKey, putObject, getDownloadUrl, deleteObject, isAllowedMime, sniffMime, s3Configured } from "../services/s3.js";
+import { isImportProvider, listProviderFiles, importProviderFile } from "../services/cloudDocs.js";
 
 export const filesRouter = Router();
 filesRouter.use(requireAuth, requireOrg);
@@ -193,5 +194,81 @@ filesRouter.delete(
     await deleteObject(file.s3Key);
     await prisma.fileAttachment.delete({ where: { id: file.id } });
     res.json({ ok: true });
+  }),
+);
+
+// --- Cloud document import (Google Drive / OneDrive) ---------------------------
+// Lives here (not under /integrations) because importing documents is everyday
+// document work — gated by manageDocuments, not the admin-only integrations
+// permission. The admin connects the account once; the team imports freely.
+
+/** Which import-capable providers this org has connected (safe for any member). */
+filesRouter.get(
+  "/cloud/providers",
+  requirePermission("manageDocuments"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const rows = await prisma.integration.findMany({
+      where: { organizationId: orgId(req), provider: { in: ["googledrive", "onedrive"] }, status: "CONNECTED" },
+      select: { provider: true },
+    });
+    const connected = new Set(rows.map((r) => r.provider));
+    res.json([
+      { key: "googledrive", name: "Google Drive", connected: connected.has("googledrive") },
+      { key: "onedrive", name: "OneDrive", connected: connected.has("onedrive") },
+    ]);
+  }),
+);
+
+async function connectedImportRow(req: AuthedRequest) {
+  const provider = req.params.provider;
+  if (!isImportProvider(provider)) throw new HttpError(400, "This provider does not support document import.");
+  const row = await prisma.integration.findUnique({
+    where: { organizationId_provider: { organizationId: orgId(req), provider } },
+  });
+  if (!row || row.status === "NOT_CONNECTED") {
+    throw new HttpError(400, "This cloud account isn't connected. An admin can connect it in Settings → Integrations.");
+  }
+  return row;
+}
+
+// Browse or search the connected account's files.
+filesRouter.get(
+  "/cloud/:provider/list",
+  requirePermission("manageDocuments"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const row = await connectedImportRow(req);
+    const q = typeof req.query.q === "string" ? req.query.q.trim() : "";
+    res.json(await listProviderFiles(row, q));
+  }),
+);
+
+// Import one file: download from the provider → same sniff/size gate as an
+// upload → S3 → FileAttachment row on the deal or buyer.
+filesRouter.post(
+  "/cloud/:provider/import",
+  requirePermission("manageDocuments"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const row = await connectedImportRow(req);
+    const body = z.object({
+      fileId: z.string().min(1).max(512),
+      dealId: z.string().optional(),
+      buyerId: z.string().optional(),
+      folder: z.string().trim().min(1).max(80).default("Other"),
+    }).parse(req.body);
+    if (!!body.dealId === !!body.buyerId) throw new HttpError(400, "Provide exactly one of dealId or buyerId");
+
+    if (body.dealId) {
+      const d = await prisma.deal.findFirst({ where: { id: body.dealId, organizationId: orgId(req) }, select: { id: true } });
+      if (!d) throw new HttpError(404, "Deal not found");
+    } else {
+      const b = await prisma.buyer.findFirst({ where: { id: body.buyerId!, organizationId: orgId(req) }, select: { id: true } });
+      if (!b) throw new HttpError(404, "Buyer not found");
+    }
+
+    const record = await importProviderFile(row, {
+      fileId: body.fileId, dealId: body.dealId ?? null, buyerId: body.buyerId ?? null,
+      folder: body.folder, uploadedByUserId: req.user?.id ?? null,
+    });
+    res.status(201).json(record);
   }),
 );

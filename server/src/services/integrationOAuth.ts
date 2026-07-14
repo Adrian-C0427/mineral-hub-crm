@@ -1,7 +1,6 @@
 /**
  * Integration OAuth 2.0 — the token lifecycle for provider integrations that
- * act on the org's behalf (Gmail/Calendar/Drive, Outlook/Calendar/OneDrive,
- * Dropbox, Box, QuickBooks, Xero, Salesforce, Okta).
+ * act on the org's behalf (Google Drive, Outlook mail/calendar, OneDrive).
  *
  * Distinct from services/oauth.ts, which does OIDC *sign-in* (creates a user
  * session). This module stores a per-org access+refresh token bundle and keeps
@@ -10,8 +9,8 @@
  * Design:
  *  - A generic confidential-client authorization-code flow. Adding a provider =
  *    one registry entry (endpoints + scopes + which client creds it uses).
- *  - Google/Microsoft reuse the existing sign-in app registrations with extra
- *    scopes — no new app needed for their six features.
+ *  - Google/Microsoft reuse the existing app registrations with extra scopes —
+ *    no new app needed.
  *  - Tokens are stored encrypted (services/secrets.ts) inside the existing
  *    Integration.config._secret JSON — no schema change.
  *  - CSRF/org context travels in a short-lived signed state JWT, so the public
@@ -51,8 +50,7 @@ const msAuthorize = `https://login.microsoftonline.com/${msTenant}/oauth2/v2.0/a
 const msToken = `https://login.microsoftonline.com/${msTenant}/oauth2/v2.0/token`;
 
 // Google needs access_type=offline + prompt=consent to reliably return a refresh
-// token. Microsoft gets one via the offline_access scope; Dropbox via
-// token_access_type=offline.
+// token. Microsoft gets one via the offline_access scope.
 function google(key: string, scope: string): OAuthApp {
   return {
     key, authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth", tokenUrl: "https://oauth2.googleapis.com/token",
@@ -69,30 +67,20 @@ function microsoft(key: string, scope: string): OAuthApp {
 
 function buildRegistry(): Record<string, OAuthApp> {
   return {
-    // gmail.readonly powers inbound reply sync (emailInboundSync); accounts
-    // connected before it existed must reconnect to grant the extra scope.
-    gmail: google("gmail", "https://www.googleapis.com/auth/gmail.send https://www.googleapis.com/auth/gmail.readonly"),
-    googlecalendar: google("googlecalendar", "https://www.googleapis.com/auth/calendar.events"),
-    googledrive: google("googledrive", "https://www.googleapis.com/auth/drive.file"),
-    outlook: microsoft("outlook", "https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/Mail.Read"),
+    // drive.readonly (not drive.file): the document-import browser has to see
+    // the user's existing files, which drive.file cannot list.
+    googledrive: google("googledrive", "https://www.googleapis.com/auth/drive.readonly"),
+    // Mail.Read only — outbound email is delivered by Resend/SMTP, so the
+    // mailbox integration never needs send rights.
+    outlook: microsoft("outlook", "https://graph.microsoft.com/Mail.Read"),
     outlookcalendar: microsoft("outlookcalendar", "https://graph.microsoft.com/Calendars.ReadWrite"),
-    onedrive: microsoft("onedrive", "https://graph.microsoft.com/Files.ReadWrite"),
-    dropbox: {
-      key: "dropbox", authorizeUrl: "https://www.dropbox.com/oauth2/authorize", tokenUrl: "https://api.dropboxapi.com/oauth2/token",
-      scope: "files.content.read files.content.write", clientId: env.OAUTH.DROPBOX.CLIENT_ID, clientSecret: env.OAUTH.DROPBOX.CLIENT_SECRET,
-      authorizeParams: { token_access_type: "offline" },
-    },
-    box: {
-      key: "box", authorizeUrl: "https://account.box.com/api/oauth2/authorize", tokenUrl: "https://api.box.com/oauth2/token",
-      scope: "root_readwrite", clientId: env.OAUTH.BOX.CLIENT_ID, clientSecret: env.OAUTH.BOX.CLIENT_SECRET,
-    },
+    onedrive: microsoft("onedrive", "https://graph.microsoft.com/Files.Read"),
   };
 }
 
 /** Provider keys that use the integration OAuth flow (regardless of config). */
 export const OAUTH_PROVIDER_KEYS = [
-  "gmail", "googlecalendar", "googledrive", "outlook", "outlookcalendar", "onedrive",
-  "dropbox", "box",
+  "googledrive", "outlook", "outlookcalendar", "onedrive",
 ] as const;
 
 export function isOAuthProvider(key: string): boolean {
