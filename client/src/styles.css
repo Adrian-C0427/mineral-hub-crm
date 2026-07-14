@@ -1106,7 +1106,13 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .portal-card-cta { margin-top: auto; color: var(--accent); font-weight: 600; font-size: 14px; }
 .portal-lead { border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); }
 .portal-lead-section { font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; margin: 14px 0 8px; }
-.portal-map-reset { position: absolute; top: 10px; right: 10px; z-index: 5; }
+/* Floating map controls share one top-right container so Reset View and the
+   Layers panel never overlap; on narrow maps the row wraps (reset drops under).
+   Leaves room on the left for the zoom control + hover readout. */
+.portal-map-controls { position: absolute; top: 10px; right: 10px; z-index: 5; display: flex; align-items: flex-start; justify-content: flex-end; gap: 8px; flex-wrap: wrap; max-width: calc(100% - 64px); pointer-events: none; }
+.portal-map-controls > * { pointer-events: auto; }
+.portal-map-controls .ml-floating { position: static; }
+.portal-map-reset { white-space: nowrap; background: var(--panel); }
 .portal-map-hover { position: absolute; top: 10px; left: 52px; z-index: 5; background: var(--panel); border: 1px solid var(--border);
   border-radius: 6px; padding: 5px 10px; font-size: 12px; pointer-events: none; }
 @media (max-width: 900px) { .portal-grid { grid-template-columns: 1fr; } }

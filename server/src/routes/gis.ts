@@ -36,13 +36,19 @@ const BORES_MIN_ZOOM = 10;
 // process-lifetime cache is safe; Railway redeploys (and imports precede
 // deploys) naturally flush it.
 const tileCache = new Map<string, Buffer>();
-const TILE_CACHE_MAX = 500;
+const TILE_CACHE_MAX = 800;
 function cachePut(key: string, buf: Buffer): void {
   if (tileCache.size >= TILE_CACHE_MAX) {
     const oldest = tileCache.keys().next().value;
     if (oldest !== undefined) tileCache.delete(oldest);
   }
   tileCache.set(key, buf);
+}
+/** Get + refresh recency (true LRU): hot tiles survive pans across the state. */
+function cacheGet(key: string): Buffer | undefined {
+  const hit = tileCache.get(key);
+  if (hit) { tileCache.delete(key); tileCache.set(key, hit); }
+  return hit;
 }
 
 export const gisTilesRouter = Router();
@@ -59,7 +65,7 @@ gisTilesRouter.get(
     if (z < TILE_MIN_ZOOM) return res.status(204).end();
 
     const key = `${z}/${x}/${y}`;
-    const hit = tileCache.get(key);
+    const hit = cacheGet(key);
     if (hit) return res.send(hit);
 
     // Bbox filter runs against the 4326 GIST indexes; only intersecting rows
@@ -85,19 +91,19 @@ gisTilesRouter.get(
        ),
        abs_mvt AS (
          SELECT ST_AsMVTGeom(ST_Transform(a.geom, 3857), w.env, ${TILE_EXTENT}, ${TILE_BUFFER}, true) AS geom,
-                a.id, a.county, a.abstract, a.survey, a.area_m2 AS area
+                a.id, a.county, replace(a.abstract, '?', '') AS abstract, a.survey, a.area_m2 AS area
            FROM gis.abstracts a, wanted w WHERE a.geom && w.box
        ),
        well_mvt AS (
          SELECT ST_AsMVTGeom(ST_Transform(wl.geom, 3857), w.env, ${TILE_EXTENT}, ${TILE_BUFFER}, true) AS geom,
                 wl.fid, wl.api8, wl.well_no AS "wellNo", wl.symbol, wl.type, wl.status,
-                wl.county, wl.operator, wl.abstract, wl.survey
+                wl.county, wl.operator, replace(wl.abstract, '?', '') AS abstract, wl.survey
            FROM rrc.wells wl, wanted w WHERE wl.geom && w.box
        ),
        bore_mvt AS (
          SELECT ST_AsMVTGeom(ST_Transform(b.geom, 3857), w.env, ${TILE_EXTENT}, ${TILE_BUFFER}, true) AS geom,
                 b.fid, b.surface_fid AS "surfaceId", b.wellbore_type AS "wellboreType",
-                sw.type, sw.status, sw.county, sw.operator, sw.abstract, sw.survey
+                sw.type, sw.status, sw.county, sw.operator, replace(sw.abstract, '?', '') AS abstract, sw.survey
            FROM rrc.wellbores b
            LEFT JOIN rrc.wells sw ON sw.fid = b.surface_fid, wanted w
           WHERE b.geom && w.box
@@ -145,39 +151,41 @@ gisRouter.get(
       prisma.$queryRawUnsafe<{ name: string; minx: number; miny: number; maxx: number; maxy: number }[]>(
         `SELECT name, ST_XMin(geom) minx, ST_YMin(geom) miny, ST_XMax(geom) maxx, ST_YMax(geom) maxy
            FROM gis.counties WHERE name ILIKE $1
-          ORDER BY similarity(name, $2) DESC, name LIMIT 4`, like, q),
-      // Abstract number OR survey name (both live on gis.abstracts).
+          ORDER BY similarity(name, $2) DESC, name LIMIT 254`, like, q),
+      // Abstract number OR survey name (both live on gis.abstracts). Labels are
+      // matched and returned with the source data's stray '?' stripped.
       prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string; score: number }[]>(
-        `SELECT id, abstract, survey, county,
-                GREATEST(similarity(coalesce(abstract,''), $2), similarity(coalesce(survey,''), $2)) AS score
+        `SELECT id, replace(abstract, '?', '') AS abstract, survey, county,
+                GREATEST(similarity(replace(coalesce(abstract,''), '?', ''), $2), similarity(coalesce(survey,''), $2)) AS score
            FROM gis.abstracts
-          WHERE abstract ILIKE $1 OR survey ILIKE $1
-          ORDER BY score DESC, county, abstract LIMIT 6`, like, q),
-      // Wells: API number, well number, lease name, RRC lease number.
+          WHERE replace(abstract, '?', '') ILIKE $1 OR survey ILIKE $1
+          ORDER BY score DESC, county, abstract LIMIT 200`, like, q),
+      // Wells: API number, well number, well ID, lease name, RRC lease number.
       prisma.$queryRawUnsafe<{ fid: number; api8: string | null; wellNo: string | null; leaseName: string | null; leaseNo: string | null; operator: string | null; type: string | null; county: string; score: number }[]>(
         `SELECT fid, api8, well_no AS "wellNo", lease_name AS "leaseName", lease_no AS "leaseNo",
                 operator, type, county,
                 GREATEST(similarity(coalesce(api8,''), $2), similarity(coalesce(lease_name,''), $2),
                          similarity(coalesce(lease_no,''), $2)) AS score
            FROM rrc.wells
-          WHERE api8 LIKE $1 OR api10 LIKE $1 OR lease_name ILIKE $1 OR lease_no LIKE $1 OR well_no = upper($2)
-          ORDER BY score DESC, county, lease_name NULLS LAST LIMIT 8`, like, q),
+          WHERE api8 LIKE $1 OR api10 LIKE $1 OR lease_name ILIKE $1 OR lease_no LIKE $1
+             OR well_id ILIKE $1 OR well_no = upper($2)
+          ORDER BY score DESC, county, lease_name NULLS LAST LIMIT 200`, like, q),
       // Operators — resolve to a map filter + zoom to their wells' extent.
       prisma.$queryRawUnsafe<{ name: string; n: number; ext: string | null }[]>(
         `SELECT operator AS name, count(*)::int AS n, ST_Extent(geom)::text AS ext FROM rrc.wells
           WHERE operator ILIKE $1 GROUP BY operator
-          ORDER BY similarity(operator, $2) DESC, n DESC LIMIT 4`, like, q),
+          ORDER BY similarity(operator, $2) DESC, n DESC LIMIT 100`, like, q),
       // Fields (RRC reservoir proxy) — zoom to the field's well extent.
       prisma.$queryRawUnsafe<{ name: string; n: number; ext: string | null }[]>(
         `SELECT field_name AS name, count(*)::int AS n, ST_Extent(geom)::text AS ext FROM rrc.wells
           WHERE field_name ILIKE $1 GROUP BY field_name
-          ORDER BY similarity(field_name, $2) DESC, n DESC LIMIT 4`, like, q),
+          ORDER BY similarity(field_name, $2) DESC, n DESC LIMIT 100`, like, q),
       // Formations (from W-2/G-1 completion filings on wells).
       prisma.$queryRawUnsafe<{ name: string; n: number; ext: string | null }[]>(
         `SELECT f AS name, count(*)::int AS n, ST_Extent(geom)::text AS ext
            FROM rrc.wells, unnest(formations) AS f
           WHERE f ILIKE $1 GROUP BY f
-          ORDER BY similarity(f, $2) DESC, n DESC LIMIT 4`, like, q),
+          ORDER BY similarity(f, $2) DESC, n DESC LIMIT 100`, like, q),
       // The org's deals and mineral assets, matched on name or basin. Basin
       // itself has no geometry — matching deals stand in for it.
       prisma.deal.findMany({
@@ -187,7 +195,7 @@ gisRouter.get(
         },
         select: { id: true, name: true, recordType: true, stage: true, counties: true, abstractIds: true, basins: true },
         orderBy: { updatedAt: "desc" },
-        take: 6,
+        take: 100,
       }),
     ]);
 
@@ -222,13 +230,13 @@ gisRouter.get(
     const rows = await prisma.$queryRawUnsafe<
       { id: string; abstract: string | null; survey: string | null; county: string; lon: number; lat: number }[]
     >(
-      `SELECT id, abstract, survey, county,
+      `SELECT id, replace(abstract, '?', '') AS abstract, survey, county,
               ST_X(ST_PointOnSurface(geom)) AS lon, ST_Y(ST_PointOnSurface(geom)) AS lat
          FROM gis.abstracts
-        WHERE abstract ILIKE '%' || $1 || '%' OR survey ILIKE '%' || $1 || '%'
-        ORDER BY GREATEST(similarity(coalesce(abstract, ''), $1), similarity(coalesce(survey, ''), $1)) DESC,
+        WHERE replace(abstract, '?', '') ILIKE '%' || $1 || '%' OR survey ILIKE '%' || $1 || '%'
+        ORDER BY GREATEST(similarity(replace(coalesce(abstract, ''), '?', ''), $1), similarity(coalesce(survey, ''), $1)) DESC,
                  county, abstract
-        LIMIT 20`,
+        LIMIT 100`,
       q,
     );
     res.json(rows);
@@ -250,7 +258,7 @@ gisRouter.get(
            OR lease_name ILIKE '%' || $1 || '%' OR operator ILIKE '%' || $1 || '%'
            OR well_no = upper($1)
         ORDER BY county, lease_name NULLS LAST
-        LIMIT 20`,
+        LIMIT 100`,
       q,
     );
     res.json(rows);
@@ -269,7 +277,7 @@ gisRouter.get(
               operator, operator_no AS "operatorNo", field_no AS "fieldNo", field_name AS field,
               oil_gas AS "oilGas", formations, spud_date AS "spudDate", plug_date AS "plugDate",
               cum_oil AS "cumOil", cum_gas AS "cumGas", last_prod AS "lastProd",
-              abstract, survey, abstract_id AS "abstractId",
+              replace(abstract, '?', '') AS abstract, survey, abstract_id AS "abstractId",
               ST_X(geom) AS lon, ST_Y(geom) AS lat
          FROM rrc.wells WHERE fid = $1`,
       fid,
@@ -311,7 +319,7 @@ gisRouter.get(
       ...params,
     );
     const abstracts = await prisma.$queryRawUnsafe<{ v: string }[]>(
-      `SELECT DISTINCT abstract AS v FROM gis.abstracts WHERE ${scope} abstract IS NOT NULL ORDER BY v`,
+      `SELECT DISTINCT replace(abstract, '?', '') AS v FROM gis.abstracts WHERE ${scope} abstract IS NOT NULL ORDER BY v`,
       ...params,
     );
     // Well-derived filter option lists from rrc.wells, same county scoping.
@@ -345,7 +353,7 @@ gisRouter.get(
   "/abstracts-index",
   asyncHandler(async (_req, res) => {
     const rows = await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string; countyFips: string }[]>(
-      `SELECT id, abstract, survey, county, county_fips AS "countyFips" FROM gis.abstracts ORDER BY county, abstract`,
+      `SELECT id, replace(abstract, '?', '') AS abstract, survey, county, county_fips AS "countyFips" FROM gis.abstracts ORDER BY county, abstract`,
     );
     res.json(rows);
   }),
@@ -358,7 +366,7 @@ gisRouter.get(
     const ids = String(req.query.ids ?? "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 500);
     if (!ids.length) return res.json({ type: "FeatureCollection", features: [] });
     const rows = await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string; area: number | null; geom: string }[]>(
-      `SELECT id, abstract, survey, county, area_m2 AS area, ST_AsGeoJSON(geom, 6) AS geom
+      `SELECT id, replace(abstract, '?', '') AS abstract, survey, county, area_m2 AS area, ST_AsGeoJSON(geom, 6) AS geom
          FROM gis.abstracts WHERE id = ANY($1::text[])`,
       ids,
     );
@@ -423,7 +431,7 @@ gisRouter.get(
     const rows = await prisma.$queryRawUnsafe<
       { id: string; abstract: string | null; survey: string | null; county: string; minx: number; miny: number; maxx: number; maxy: number }[]
     >(
-      `SELECT id, abstract, survey, county,
+      `SELECT id, replace(abstract, '?', '') AS abstract, survey, county,
               ST_XMin(geom) AS minx, ST_YMin(geom) AS miny, ST_XMax(geom) AS maxx, ST_YMax(geom) AS maxy
          FROM gis.abstracts WHERE id = $1`,
       String(req.params.id),

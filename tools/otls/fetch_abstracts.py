@@ -111,7 +111,9 @@ def main():
                 continue
             seen.add(fid)
             survey = (f["properties"].get("LEVEL1_SUR") or "").strip() or None
-            abstract = (f["properties"].get("ABSTRACT_L") or "").strip() or None
+            # Some ABSTRACT_L labels carry a stray "?" (upstream disambiguator
+            # for duplicate abstract numbers) — strip it for clean display.
+            abstract = (f["properties"].get("ABSTRACT_L") or "").strip().replace("?", "") or None
             geom = f["geometry"]
             geom["coordinates"] = round_coords(geom["coordinates"])
             props = {

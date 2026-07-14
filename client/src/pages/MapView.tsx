@@ -7,7 +7,7 @@ import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { Select } from "../components/Select";
 import { downloadCsv } from "../lib/csv";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION } from "../lib/counties";
-import { addCadastralLayers, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
+import { addCadastralLayers, styleWithGlyphs, watchGisHealth, abstractsPaint, wellsPaint, wellboresPaint } from "../lib/mapLayers";
 import { MapLayersPanel, PillToggle } from "../components/MapLayersPanel";
 import { Spinner, StageBadge, PriorityBadge } from "../components/ui";
 import { money, num } from "../lib/format";
@@ -136,6 +136,17 @@ export function MapView() {
   const [gisOptions, setGisOptions] = useState<{ surveys: string[]; abstracts: string[]; wellTypes: string[]; wellStatuses: string[]; operators: string[]; wellCount: number }>({ surveys: [], abstracts: [], wellTypes: [], wellStatuses: [], operators: [], wellCount: 0 });
   const [sug, setSug] = useState<Suggest | null>(null);
   const [searchFocus, setSearchFocus] = useState(false);
+  const searchBoxRef = useRef<HTMLDivElement>(null);
+  // Standard autocomplete behavior: clicking anywhere outside the search box
+  // (map, panels, page) dismisses the results immediately — no need to pick a
+  // result or clear the text. Refocusing the input brings the results back.
+  useEffect(() => {
+    const onPointerDown = (e: PointerEvent) => {
+      if (searchBoxRef.current && !searchBoxRef.current.contains(e.target as Node)) setSearchFocus(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, []);
   const [recents, setRecents] = useState<Recent[]>(() => {
     try { return JSON.parse(sessionStorage.getItem(RECENTS_KEY) ?? "[]") as Recent[]; } catch { return []; }
   });
@@ -151,6 +162,8 @@ export function MapView() {
   // Hover summary of the production points near the cursor.
   const [heatHover, setHeatHover] = useState<{ x: number; y: number; wells: number; oil: number; gas: number } | null>(null);
   const [heatReady, setHeatReady] = useState(false);
+  // Bumped when the background heat-well fetch lands (data arrives after load).
+  const [heatData, setHeatData] = useState(0);
   const setHeatK = <K extends keyof HeatState>(k: K, v: HeatState[K]) => setHeat((p) => ({ ...p, [k]: v }));
   const heatActive = heat.oil || heat.gas;
 
@@ -169,7 +182,7 @@ export function MapView() {
     const forms = wel.flatMap((f) => Array.isArray(f.properties.formations) ? (f.properties.formations as string[]) : []);
     return { formations: [...new Set(forms.filter(Boolean))].sort() };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fCounties, meta]);
+  }, [fCounties, meta, heatData]);
 
   useEffect(() => {
     if (mapRef.current || !mapContainer.current) return;
@@ -182,18 +195,12 @@ export function MapView() {
 
     map.on("load", async () => {
       // Cadastral geometry (counties + abstracts) streams as vector tiles; the
-      // only statics are county label points (tiny, DB-derived) and the
-      // heat-map wells for the two production counties (phase B5 removes).
-      const [countyLabels, welParts, boreParts] = await Promise.all([
-        fetch(`/data/county-labels.geojson`).then((r) => r.json()).catch(() => ({ features: [] })),
-        Promise.all(COUNTIES_WITH_WELLS.map((k) => fetch(`/data/${k}-wells.geojson`).then((r) => r.json()).catch(() => ({ features: [] })))),
-        Promise.all(COUNTIES_WITH_WELLS.map((k) => fetch(`/data/${k}-wellbores.geojson`).then((r) => r.json()).catch(() => ({ features: [] })))),
-      ]);
-      const welFC: FC = { type: "FeatureCollection", features: welParts.flatMap((p: FC) => p.features) } as FC;
-      void boreParts; // laterals render from tiles; the static files feed nothing else
-      wellsFC.current = welFC;
-      heatWells.current = extractWells(welFC.features);
-      perLease.current = wellsPerLease(heatWells.current);
+      // only blocking static is the tiny county label file. Heat-map well
+      // points (static per-county assets, phase B5 removes) load in the
+      // background AFTER the layer stack is up, so first paint never waits on
+      // them — and the wellbore statics aren't fetched at all (laterals render
+      // from tiles; those files feed nothing).
+      const countyLabels = await fetch(`/data/county-labels.geojson`).then((r) => r.json()).catch(() => ({ features: [] }));
 
       // County bboxes (from the DB-derived label file; fips = "48" + our
       // 3-digit code) for search → "go to county" framing.
@@ -202,6 +209,16 @@ export function MapView() {
       for (const c of COUNTIES) { const bb = bboxByFips.get(`48${c.fips}`); if (bb) countyBBox.current.set(c.key, bb); }
 
       setMeta({ counties: COUNTIES.map((c) => c.name).sort() });
+
+      void Promise.all(
+        COUNTIES_WITH_WELLS.map((k) => fetch(`/data/${k}-wells.geojson`).then((r) => r.json()).catch(() => ({ features: [] }))),
+      ).then((welParts) => {
+        const welFC: FC = { type: "FeatureCollection", features: welParts.flatMap((p: FC) => p.features) } as FC;
+        wellsFC.current = welFC;
+        heatWells.current = extractWells(welFC.features);
+        perLease.current = wellsPerLease(heatWells.current);
+        setHeatData((n) => n + 1); // formations options + heat recompute pick up the wells
+      });
 
       // Shared cadastral source + layer stack (counties, abstracts, wells,
       // wellbores, labels) — identical to the deal map via lib/mapLayers.
@@ -384,14 +401,23 @@ export function MapView() {
     vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores);
     applyHighlight();
   }
-  function applyAbstractFilter() {
-    const map = mapRef.current; if (!map || !styleReady.current) return;
+  // Filtering highlights matches rather than hiding the rest: every enabled
+  // layer stays visible for context, and features matching the active filters
+  // get an emphasized paint (accent color / heavier stroke / bigger dot).
+  function abstractMatchExpr(): maplibregl.ExpressionSpecification | null {
     const cl: unknown[] = [];
     if (fAbstracts.length) cl.push(["in", ["get", "abstract"], ["literal", fAbstracts]]);
     if (fSurveys.length) cl.push(["in", ["get", "survey"], ["literal", fSurveys]]);
     if (fCounties.length) cl.push(["in", ["get", "county"], ["literal", fCounties]]);
-    const filter = cl.length ? (["all", ...cl] as maplibregl.FilterSpecification) : null;
-    for (const id of ["abstracts-fill", "abstracts-line", "abstracts-num", "abstracts-survey"]) if (map.getLayer(id)) map.setFilter(id, filter);
+    return cl.length ? (["all", ...cl] as unknown as maplibregl.ExpressionSpecification) : null;
+  }
+  function applyAbstractFilter() {
+    const map = mapRef.current; if (!map || !styleReady.current) return;
+    const p = abstractsPaint(abstractMatchExpr());
+    if (map.getLayer("abstracts-fill")) for (const [k, v] of Object.entries(p.fill)) map.setPaintProperty("abstracts-fill", k, v);
+    if (map.getLayer("abstracts-line")) for (const [k, v] of Object.entries(p.line)) map.setPaintProperty("abstracts-line", k, v);
+    if (map.getLayer("abstracts-num")) map.setPaintProperty("abstracts-num", "text-color", p.num["text-color"]);
+    if (map.getLayer("abstracts-survey")) map.setPaintProperty("abstracts-survey", "text-color", p.survey["text-color"]);
   }
   function applyWellFilter() {
     const map = mapRef.current; if (!map || !styleReady.current || !map.getLayer("wells")) return;
@@ -402,11 +428,11 @@ export function MapView() {
     if (fAbstracts.length) cl.push(["in", ["get", "abstract"], ["literal", fAbstracts]]);
     if (fSurveys.length) cl.push(["in", ["get", "survey"], ["literal", fSurveys]]);
     if (fCounties.length) cl.push(["in", ["get", "county"], ["literal", fCounties]]);
-    const filter = cl.length ? (["all", ...cl] as maplibregl.FilterSpecification) : null;
-    map.setFilter("wells", filter);
+    const match = cl.length ? (["all", ...cl] as unknown as maplibregl.ExpressionSpecification) : null;
+    for (const [k, v] of Object.entries(wellsPaint(match))) map.setPaintProperty("wells", k, v);
     // Wellbore tile features carry their surface well's attributes (joined
-    // server-side), so the SAME filter keeps wells and laterals in lockstep.
-    if (map.getLayer("wellbores")) map.setFilter("wellbores", filter);
+    // server-side), so the SAME match keeps wells and laterals in lockstep.
+    if (map.getLayer("wellbores")) for (const [k, v] of Object.entries(wellboresPaint(match))) map.setPaintProperty("wellbores", k, v);
   }
 
   // Recompute the period-attributed production points from current filters, then
@@ -503,11 +529,18 @@ export function MapView() {
   useEffect(applyLayerVisibility, [layers]);
   // Survey/abstract filter option lists from the GIS API, scoped to the selected
   // counties. Nothing needs to be on-screen (or downloaded) to be filterable.
+  // Debounced (rapid county edits coalesce) and sequence-guarded so a slow
+  // earlier response can never clobber a newer one.
+  const optionsSeq = useRef(0);
   useEffect(() => {
-    const qs = fCounties.length ? `?counties=${encodeURIComponent(fCounties.join(","))}` : "";
-    api.get<typeof gisOptions>(`/gis/options${qs}`)
-      .then(setGisOptions)
-      .catch(() => setGisOptions({ surveys: [], abstracts: [], wellTypes: [], wellStatuses: [], operators: [], wellCount: 0 }));
+    const seq = ++optionsSeq.current;
+    const t = setTimeout(() => {
+      const qs = fCounties.length ? `?counties=${encodeURIComponent(fCounties.join(","))}` : "";
+      api.get<typeof gisOptions>(`/gis/options${qs}`)
+        .then((o) => { if (optionsSeq.current === seq) setGisOptions(o); })
+        .catch(() => { if (optionsSeq.current === seq) setGisOptions({ surveys: [], abstracts: [], wellTypes: [], wellStatuses: [], operators: [], wellCount: 0 }); });
+    }, 250);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fCounties]);
   // Debounced unified search — one round-trip covers every entity type.
@@ -524,7 +557,7 @@ export function MapView() {
   useEffect(applyWellFilter, [fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses, fOperators]);
   // Rebuild heat points whenever the data, filters, period, or thresholds change.
   useEffect(() => { if (heatReady) recomputeHeat(); /* eslint-disable-next-line */ },
-    [heatReady, prod, fCounties, fOperators, fWellTypes, fWellStatuses, fFormations, heat.period, heat.from, heat.to, heat.min, heat.max, heat.oil, heat.gas, heat.hotspots]);
+    [heatReady, heatData, prod, fCounties, fOperators, fWellTypes, fWellStatuses, fFormations, heat.period, heat.from, heat.to, heat.min, heat.max, heat.oil, heat.gas, heat.hotspots]);
   // Cheap paint/visibility tweaks don't need a recompute.
   useEffect(() => { applyHeatPaint(); /* eslint-disable-next-line */ }, [heat.intensity, heat.radius, heat.opacity]);
   useEffect(() => { applyHeatVisibility(); /* eslint-disable-next-line */ }, [heat.topProducers, heat.oil, heat.gas, heat.hotspots]);
@@ -629,13 +662,13 @@ export function MapView() {
       <div className="page-header"><div className="row"><h1 style={{ marginBottom: 0 }}>Map</h1><span className="muted">Texas · {COUNTIES.length} counties · abstracts stream as you pan &amp; zoom</span></div></div>
 
       <div className="row" style={{ marginBottom: 12, gap: 10, position: "relative" }}>
-        <div style={{ position: "relative", flex: 1, maxWidth: 480 }}>
+        <div ref={searchBoxRef} style={{ position: "relative", flex: 1, maxWidth: 480 }}>
           <input
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
+            onChange={(e) => { setQuery(e.target.value); setSearchFocus(true); }}
             onFocus={() => setSearchFocus(true)}
             onClick={() => setSearchFocus(true)}
-            onBlur={() => setTimeout(() => setSearchFocus(false), 150)}
+            onKeyDown={(e) => { if (e.key === "Escape") setSearchFocus(false); }}
             placeholder="Search wells, API #, abstracts, operators, fields, deals…"
             aria-label="Search the map"
           />
@@ -650,7 +683,7 @@ export function MapView() {
               ))}
             </div>
           )}
-          {query.trim().length >= 2 && results.length > 0 && (
+          {searchFocus && query.trim().length >= 2 && results.length > 0 && (
             <div className="msel-menu map-search-menu" style={{ top: "100%" }}>
               {results.map((r, i) => (
                 <div key={`${r.t}-${r.label}-${i}`}>
@@ -662,7 +695,7 @@ export function MapView() {
               ))}
             </div>
           )}
-          {query.trim().length >= 2 && sug && results.length === 0 && (
+          {searchFocus && query.trim().length >= 2 && sug && results.length === 0 && (
             <div className="msel-menu map-search-menu" style={{ top: "100%" }}>
               <div className="msel-opt muted">No matches for “{query.trim()}”</div>
             </div>
@@ -705,7 +738,7 @@ export function MapView() {
       {showFilters && (
         <div className="panel mc-panel" style={{ marginBottom: 12 }}>
           <div className="mc-note">
-            Filters apply to all GIS data on the map (wells, abstracts, surveys) — independent of whether a deal exists. <b>"Deal status"</b> only affects the deal highlight.
+            Filters <b>highlight</b> matching wells, abstracts, and surveys — everything else stays visible for context (toggle layers off to hide them). <b>"Deal status"</b> only affects the deal highlight.
           </div>
           <div className="mc-grid">
             <div><div className="ddx-label mc-lbl">Deal status</div><Select value={statusFilter} onChange={setStatusFilter} ariaLabel="Deal status" options={STATUS_OPTIONS.map(([v, l]) => ({ value: v, label: l }))} /></div>

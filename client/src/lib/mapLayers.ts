@@ -21,6 +21,61 @@ export const STATUS_COLOR = [
   "#64748b",
 ] as unknown as maplibregl.ExpressionSpecification;
 
+type Expr = maplibregl.ExpressionSpecification;
+const SEL = ["boolean", ["feature-state", "selected"], false] as unknown as Expr;
+const ACT = ["boolean", ["feature-state", "active"], false] as unknown as Expr;
+/** A literal-false match: emphasizes nothing, leaving the pure base style. */
+const NONE = false as unknown as Expr;
+
+/**
+ * Paint for the abstract fill/line/label layers. Pass a filter-match expression
+ * to visually emphasize matching parcels — everything else keeps the base look,
+ * so filtering refines focus without hiding the surrounding context.
+ */
+export function abstractsPaint(match?: Expr | null) {
+  const m = match ?? NONE;
+  return {
+    fill: {
+      "fill-color": ["case", SEL, "#f59e0b", ACT, "#ef4444", m, "#0ea5e9", "#3b82f6"] as unknown as Expr,
+      "fill-opacity": ["case", SEL, 0.55, ACT, 0.45, m, 0.32, 0.05] as unknown as Expr,
+    },
+    line: {
+      "line-color": ["case", SEL, "#b45309", m, "#0369a1", "#6b7280"] as unknown as Expr,
+      // Zoom expressions must be TOP-LEVEL (not nested in a case) or MapLibre
+      // drops the whole layer — zoom outside, selection/match inside.
+      "line-width": ["interpolate", ["linear"], ["zoom"],
+        9, ["case", SEL, 3, m, 1.8, 0.35],
+        12, ["case", SEL, 3, m, 2.2, 0.5],
+        14, ["case", SEL, 3, m, 2.6, 0.65]] as unknown as Expr,
+      "line-opacity": ["case", SEL, 1, m, 0.95, 0.6] as unknown as Expr,
+    },
+    num: { "text-color": ["case", m, "#075985", "#0f172a"] as unknown as Expr },
+    survey: { "text-color": ["case", m, "#075985", "#334155"] as unknown as Expr },
+  };
+}
+
+/** Paint for the wells circle layer, with optional filter-match emphasis. */
+export function wellsPaint(match?: Expr | null) {
+  const m = match ?? NONE;
+  return {
+    "circle-radius": ["interpolate", ["linear"], ["zoom"],
+      9, ["case", m, 3.6, 2.3], 12, ["case", m, 5.4, 3.6], 15, ["case", m, 8.5, 6]] as unknown as Expr,
+    "circle-stroke-width": ["case", SEL, 3, m, 1.5, 0.6] as unknown as Expr,
+    "circle-stroke-color": ["case", SEL, "#111827", m, "#075985", "#ffffff"] as unknown as Expr,
+    "circle-opacity": ["case", m, 1, 0.9] as unknown as Expr,
+  };
+}
+
+/** Paint for the wellbore laterals layer, with optional filter-match emphasis. */
+export function wellboresPaint(match?: Expr | null) {
+  const m = match ?? NONE;
+  return {
+    "line-width": ["interpolate", ["linear"], ["zoom"],
+      10, ["case", m, 2, 1], 15, ["case", m, 4, 2.5]] as unknown as Expr,
+    "line-opacity": ["case", m, 1, 0.8] as unknown as Expr,
+  };
+}
+
 /** Base style: OSM raster basemap + self-hosted SDF glyphs for the label layers. */
 export function styleWithGlyphs(): maplibregl.StyleSpecification {
   return {
@@ -51,21 +106,11 @@ export function addCadastralLayers(map: maplibregl.Map, countyLabels: GeoJSON.Fe
     paint: { "text-color": "#475569", "text-halo-color": "#ffffff", "text-halo-width": 1.5,
       "text-opacity": ["interpolate", ["linear"], ["zoom"], 8.5, 0.9, 10, 0.4] } });
 
-  map.addLayer({ id: "abstracts-fill", type: "fill", source: "abstracts", "source-layer": "abstracts", minzoom: MIN_ABSTRACT_ZOOM, paint: {
-    "fill-color": ["case", ["boolean", ["feature-state", "selected"], false], "#f59e0b", ["boolean", ["feature-state", "active"], false], "#ef4444", "#3b82f6"],
-    "fill-opacity": ["case", ["boolean", ["feature-state", "selected"], false], 0.55, ["boolean", ["feature-state", "active"], false], 0.45, 0.05] } });
+  const base = abstractsPaint(null);
+  map.addLayer({ id: "abstracts-fill", type: "fill", source: "abstracts", "source-layer": "abstracts", minzoom: MIN_ABSTRACT_ZOOM, paint: base.fill });
   // Abstract boundaries: thin gray lines, in sync with wells + numbers (z9),
   // lighter than the county lines so the two read as different hierarchy levels.
-  // Zoom expressions must be TOP-LEVEL (not nested in a case) or MapLibre drops
-  // the whole layer — zoom outside, selection inside.
-  const sel = ["boolean", ["feature-state", "selected"], false];
-  map.addLayer({ id: "abstracts-line", type: "line", source: "abstracts", "source-layer": "abstracts", minzoom: 9, paint: {
-    "line-color": ["case", sel, "#b45309", "#6b7280"] as unknown as maplibregl.ExpressionSpecification,
-    "line-width": ["interpolate", ["linear"], ["zoom"],
-      9, ["case", sel, 3, 0.35],
-      12, ["case", sel, 3, 0.5],
-      14, ["case", sel, 3, 0.65]] as unknown as maplibregl.ExpressionSpecification,
-    "line-opacity": ["case", sel, 1, 0.6] as unknown as maplibregl.ExpressionSpecification } });
+  map.addLayer({ id: "abstracts-line", type: "line", source: "abstracts", "source-layer": "abstracts", minzoom: 9, paint: base.line });
   // County boundaries — drawn above the abstract mesh, slightly heavier so the
   // administrative level stays distinct and always visible.
   map.addLayer({ id: "county-bounds", type: "line", source: "abstracts", "source-layer": "counties", paint: {
@@ -73,25 +118,23 @@ export function addCadastralLayers(map: maplibregl.Map, countyLabels: GeoJSON.Fe
     "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.45, 9, 1.05, 13, 1.5],
     "line-opacity": 0.6 } });
   // Wellbore laterals (surface -> bottom hole).
+  const borePaint = wellboresPaint(null);
   map.addLayer({ id: "wellbores", type: "line", source: "abstracts", "source-layer": "wellbores", minzoom: 10, layout: { "line-cap": "round" }, paint: {
     "line-color": ["match", ["get", "wellboreType"], "Horizontal", "#0f766e", "Directional", "#9333ea", "#0f766e"],
-    "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1, 15, 2.5], "line-opacity": 0.8 } });
+    ...borePaint } });
   map.addLayer({ id: "wellbores-sel", type: "line", source: "abstracts", "source-layer": "wellbores", minzoom: 10, filter: ["==", ["get", "surfaceId"], -1], paint: { "line-color": "#111827", "line-width": 3 } });
   // Surface wells — colored by RRC status; selection via feature-state.
   map.addLayer({ id: "wells", type: "circle", source: "abstracts", "source-layer": "wells", minzoom: 9, paint: {
-    "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 2.3, 12, 3.6, 15, 6],
     "circle-color": STATUS_COLOR,
-    "circle-stroke-width": ["case", ["boolean", ["feature-state", "selected"], false], 3, 0.6],
-    "circle-stroke-color": ["case", ["boolean", ["feature-state", "selected"], false], "#111827", "#ffffff"],
-    "circle-opacity": 0.9 } });
+    ...wellsPaint(null) } });
   map.addLayer({ id: "abstracts-num", type: "symbol", source: "abstracts", "source-layer": "abstracts", minzoom: 9, layout: {
     "symbol-sort-key": ["*", -1, ["get", "area"]], "text-field": ["get", "abstract"], "text-font": ["Noto Sans Regular"],
     "text-size": ["interpolate", ["linear"], ["zoom"], 9, 10, 14, 13], "text-padding": 2, "text-allow-overlap": false, "text-optional": true },
-    paint: { "text-color": "#0f172a", "text-halo-color": "#ffffff", "text-halo-width": 1.4 } });
+    paint: { ...base.num, "text-halo-color": "#ffffff", "text-halo-width": 1.4 } });
   map.addLayer({ id: "abstracts-survey", type: "symbol", source: "abstracts", "source-layer": "abstracts", minzoom: 12.5, layout: {
     "symbol-sort-key": ["*", -1, ["get", "area"]], "text-field": ["get", "survey"], "text-font": ["Noto Sans Regular"],
     "text-size": 11, "text-offset": [0, 1.1], "text-max-width": 8, "text-padding": 2, "text-allow-overlap": false, "text-optional": true },
-    paint: { "text-color": "#334155", "text-halo-color": "#ffffff", "text-halo-width": 1.3 } });
+    paint: { ...base.survey, "text-halo-color": "#ffffff", "text-halo-width": 1.3 } });
 }
 
 /**

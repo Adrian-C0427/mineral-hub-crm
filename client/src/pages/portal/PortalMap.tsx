@@ -109,22 +109,27 @@ export function PortalMap({ features, height = 420, onSelect }: {
   return (
     <div className="portal-map" style={{ position: "relative", height, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)" }}>
       <div ref={container} style={{ position: "absolute", inset: 0 }} />
-      <button
-        className="small portal-map-reset"
-        onClick={() => homeBounds.current && mapRef.current?.fitBounds(homeBounds.current, { padding: 50, maxZoom: 13, duration: 500 })}
-        title="Reset view to the property"
-      >⌂ Reset view</button>
-      <MapLayersPanel
-        variant="floating"
-        collapsible
-        defs={[
-          { key: "counties", label: "Counties" }, { key: "boundaries", label: "Abstract boundaries" },
-          { key: "numbers", label: "Abstract numbers" }, { key: "surveys", label: "Survey names" },
-          { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores (laterals)" },
-        ]}
-        layers={layers}
-        onToggle={(k) => toggle(k as keyof LayerState)}
-      />
+      {/* Both floating controls share one top-right flex container so they can
+          never overlap — the reset button sits beside the Layers panel and
+          wraps under it when the map is narrow. */}
+      <div className="portal-map-controls">
+        <button
+          className="small portal-map-reset"
+          onClick={() => homeBounds.current && mapRef.current?.fitBounds(homeBounds.current, { padding: 50, maxZoom: 13, duration: 500 })}
+          title="Reset view to the property"
+        >⌂ Reset view</button>
+        <MapLayersPanel
+          variant="floating"
+          collapsible
+          defs={[
+            { key: "counties", label: "Counties" }, { key: "boundaries", label: "Abstract boundaries" },
+            { key: "numbers", label: "Abstract numbers" }, { key: "surveys", label: "Survey names" },
+            { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores (laterals)" },
+          ]}
+          layers={layers}
+          onToggle={(k) => toggle(k as keyof LayerState)}
+        />
+      </div>
       {hovered && <div className="portal-map-hover">{hovered}</div>}
     </div>
   );
