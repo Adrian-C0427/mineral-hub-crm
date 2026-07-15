@@ -184,7 +184,7 @@ export function PortalOffering() {
           {/* Contact — shown when the listing has any point of contact */}
           {(org.contacts.length > 0 || mailto || org.contactPhone || org.officeLocation) && (
           <div className="panel portal-contact">
-            <h3>Interested in this opportunity?</h3>
+            <h3>Contact</h3>
             {org.name && <div className="portal-contact-line" style={{ marginBottom: 10 }}>{org.name}</div>}
             {org.contacts.length > 0 ? (
               <div className="portal-contact-cards">
@@ -206,12 +206,13 @@ export function PortalOffering() {
                 })}
               </div>
             ) : (
-              org.officeLocation && <div className="portal-contact-line muted">{org.officeLocation}</div>
+              <>
+                {org.contactPhone && <div className="portal-contact-line"><a href={`tel:${org.contactPhone}`}>{formatPhone(org.contactPhone)}</a></div>}
+                {org.officeLocation && <div className="portal-contact-line muted">{org.officeLocation}</div>}
+              </>
             )}
             <div className="row" style={{ marginTop: 14, gap: 8, flexWrap: "wrap" }}>
               {mailto && <a className="btn-primary-link" href={mailto}>Contact Us</a>}
-              {mailto && <a className="btn-ghost-link" href={`${mailto}&body=${encodeURIComponent("Please send additional information about this opportunity.")}`}>Request More Info</a>}
-              {org.contactPhone && <a className="btn-ghost-link" href={`tel:${org.contactPhone}`}>Schedule a Call</a>}
             </div>
           </div>
           )}

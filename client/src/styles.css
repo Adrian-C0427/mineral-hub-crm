@@ -174,7 +174,9 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
    inside, half outside — occupying zero horizontal space in the layout. */
 .sidebar-edge-toggle {
   position: absolute; top: 22px; right: 0; transform: translateX(50%);
-  width: 18px; height: 18px; min-width: 0; padding: 0;
+  /* Hard 1:1 sizing — mobile touch-target rules (min-height: 40px on buttons)
+     must never stretch this circle into an oval. */
+  width: 18px; height: 18px; min-width: 0; min-height: 0; aspect-ratio: 1 / 1; padding: 0;
   display: inline-flex; align-items: center; justify-content: center;
   border: 1px solid var(--border); border-radius: 50%;
   background: var(--panel); color: var(--text-dim);
@@ -243,6 +245,9 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .sidebar.collapsed .sidebar-brand { flex-direction: column; gap: 6px; height: auto; padding: 10px 0 8px; }
 .sidebar.collapsed .sidebar-brand .brand, .sidebar.collapsed .sidebar-brand .sidebar-logo { margin-right: 0; }
 .sidebar.collapsed .sidebar-link { justify-content: center; padding: 9px 0; }
+/* Icon-only rail: the expanded-mode accent stripe reads as clutter at this
+   width — mark the active page with an accent icon on a soft tint instead. */
+.sidebar.collapsed .sidebar-link.active { box-shadow: none; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .app-main { flex: 1; min-width: 0; overflow-x: hidden; }
 
 /* Collapsed groups: children appear in a fixed-position flyout (hover or
@@ -1630,6 +1635,12 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .mc-preset-apply:hover { color: var(--accent); }
 .mc-preset-del { border: none; background: none; padding: 4px 8px 4px 4px; cursor: pointer; color: var(--text-dim); line-height: 1; }
 .mc-preset-del:hover { color: var(--red); }
+/* Overwrite-with-current-filters control on a saved-filter chip. */
+.mc-preset-upd { border: none; background: none; padding: 4px 2px; cursor: pointer; color: var(--text-dim); line-height: 1; font-size: 13px; min-height: 0; }
+.mc-preset-upd:hover { color: var(--accent); background: none; }
+/* Chip whose saved combination exactly matches the filters on screen. */
+.mc-preset-chip.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.mc-preset-chip.active .mc-preset-apply { color: var(--accent); font-weight: 600; }
 
 /* Organization → Users: keep the table readable at any width — cells never wrap
    and the whole table scrolls horizontally inside .table-scroll instead. The
