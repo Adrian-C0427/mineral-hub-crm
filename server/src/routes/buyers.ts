@@ -272,6 +272,7 @@ buyersRouter.post(
   requirePermission("createBuyers"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = upsertSchema.parse(req.body);
+    if (data.ownerIds) await validateOrgOwners(orgId(req), data.ownerIds);
     const buyer = await prisma.$transaction(async (tx) => {
       const created = await tx.buyer.create({
         data: {
@@ -312,6 +313,7 @@ buyersRouter.patch(
     const data = upsertSchema.partial({ name: true, companyName: true }).parse(req.body);
     const existing = await prisma.buyer.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!existing) throw new HttpError(404, "Buyer not found");
+    if (data.ownerIds) await validateOrgOwners(orgId(req), data.ownerIds);
     await prisma.$transaction(async (tx) => {
       const patch: Record<string, unknown> = {};
       if (data.name !== undefined) patch.name = data.name;
@@ -390,6 +392,14 @@ buyersRouter.post(
     res.json({ updated: owned.length });
   }),
 );
+
+/** Reject ownerIds that aren't users in the caller's org (cross-tenant guard). */
+async function validateOrgOwners(org: string, ownerIds: string[]): Promise<void> {
+  const unique = [...new Set(ownerIds)];
+  if (unique.length === 0) return;
+  const valid = await prisma.user.count({ where: { id: { in: unique }, organizationId: org } });
+  if (valid !== unique.length) throw new HttpError(400, "One or more owners are not in your organization");
+}
 
 async function syncOwners(tx: any, buyerId: string, userIds: string[]) {
   await tx.buyerOwner.deleteMany({ where: { buyerId } });

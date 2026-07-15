@@ -221,6 +221,9 @@ dealsRouter.post(
       });
     }
     const assigneeIds = data.assigneeIds ? await validateOrgUsers(orgId(req), data.assigneeIds) : [];
+    // A caller-supplied relationship owner must be a user in the caller's org;
+    // otherwise a foreign userId would be persisted and serialized back.
+    if (data.relationshipOwnerId) await validateOrgUsers(orgId(req), [data.relationshipOwnerId]);
     // New opportunities enter the org's first active pipeline stage (seeds the
     // org's stages on first use). Owned assets park in CLOSING as before.
     const firstStage = await firstActiveStageKey(prisma, orgId(req));
@@ -814,6 +817,8 @@ dealsRouter.patch(
       const ids = await validateOrgUsers(orgId(req), data.assigneeIds);
       patch.assignees = { set: ids.map((id) => ({ id })) };
     }
+    // Reassigning the relationship owner: the new owner must be in the org.
+    if (data.relationshipOwnerId) await validateOrgUsers(orgId(req), [data.relationshipOwnerId]);
     // Keep the single `state` synced to the first selected state (matching/map).
     if (data.states !== undefined) patch.state = data.states[0] ?? null;
     const deal = await prisma.deal.update({ where: { id: req.params.id }, data: patch, include: dealInclude });
@@ -1005,6 +1010,11 @@ dealsRouter.post(
     const data = messageSchema.parse(req.body);
     const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!deal) throw new HttpError(404, "Deal not found");
+    // The buyer must belong to the caller's org — otherwise a foreign buyerId
+    // would be linked to this deal (and leaked back via GET /:id). Mirrors the
+    // check on POST /:id/activity.
+    const buyer = await prisma.buyer.findFirst({ where: { id: req.params.buyerId, organizationId: orgId(req) }, select: { id: true } });
+    if (!buyer) throw new HttpError(404, "Buyer not found");
     const now = new Date();
     // Ensure an activity row exists so the timeline attaches to it.
     const activity = await prisma.dealBuyerActivity.upsert({
