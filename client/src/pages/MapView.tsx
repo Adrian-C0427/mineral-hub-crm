@@ -418,8 +418,16 @@ export function MapView() {
     const expr = cl.length ? (["all", ...cl] as unknown as maplibregl.ExpressionSpecification) : null;
     map.setFilter("wells", expr);
     // Wellbore tile features carry their surface well's attributes (joined
-    // server-side), so the SAME filter keeps wells and laterals in lockstep.
-    if (map.getLayer("wellbores")) map.setFilter("wellbores", expr);
+    // server-side), so the same tests keep laterals in lockstep with their
+    // parent well: a matching well always keeps ALL of its wellbores. Bores
+    // whose parent attributes didn't resolve (orphaned surface_fid → NULL
+    // type/status from the LEFT JOIN) stay visible rather than vanishing the
+    // moment any filter is active — filtering only removes a lateral when its
+    // parent well itself no longer matches.
+    const boreExpr = cl.length
+      ? (["any", ["!", ["has", "type"]], ["all", ...cl]] as unknown as maplibregl.ExpressionSpecification)
+      : null;
+    if (map.getLayer("wellbores")) map.setFilter("wellbores", boreExpr);
   }
 
   // Recompute the period-attributed production points from current filters, then
@@ -667,11 +675,6 @@ export function MapView() {
   }, [filterPresets, statusFilter, fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses, fOperators, fFormations]);
   const anyFilterSet = fCounties.length > 0 || fSurveys.length > 0 || fAbstracts.length > 0 ||
     fWellTypes.length > 0 || fWellStatuses.length > 0 || fOperators.length > 0 || fFormations.length > 0;
-  function resetMapView() {
-    setLayers(DEFAULT_MAP_LAYERS);
-    mapRef.current?.jumpTo({ center: LEON_CENTER, zoom: 10 });
-  }
-
   // Size the map to fill from its top down to the viewport bottom (footer), with
   // a small gap — recomputed on resize and whenever the controls row changes
   // height (a panel opening/closing), so there is never blank space below it.
@@ -765,9 +768,6 @@ export function MapView() {
 
       {showFilters && (
         <div className="panel mc-panel" style={{ marginBottom: 12 }}>
-          <div className="mc-note">
-            Filters <b>zoom the map to the matching results</b> without changing how the layers look. <b>Well type</b> and <b>Well status</b> additionally show only matching wells. <b>"Deal status"</b> only affects the deal highlight.
-          </div>
           <div className="mc-grid">
             <div><div className="ddx-label mc-lbl">Deal status</div><Select value={statusFilter} onChange={setStatusFilter} ariaLabel="Deal status" options={STATUS_OPTIONS.map(([v, l]) => ({ value: v, label: l }))} /></div>
             <div><div className="ddx-label mc-lbl">County</div><SearchableMultiSelect options={meta.counties} value={fCounties} onChange={setFCounties} placeholder="Counties…" /></div>
@@ -804,6 +804,7 @@ export function MapView() {
 
       {showLayers && (
         <div className="panel mc-panel" style={{ marginBottom: 12, padding: "16px 24px" }}>
+          {/* Layer visibility + last camera are remembered automatically. */}
           <MapLayersPanel
             defs={[
               { key: "boundaries", label: "Abstract boundaries" }, { key: "absNums", label: "Abstract numbers" },
@@ -813,12 +814,6 @@ export function MapView() {
             layers={layers}
             onToggle={(k) => toggle(k as keyof typeof layers)}
           />
-          {/* Layer visibility + last camera are remembered automatically;
-              "Restore default" puts both back. (Named filter combinations live
-              in the Filters panel as Saved filters.) */}
-          <div className="row" style={{ gap: 8, marginTop: 12 }}>
-            <button type="button" className="small" onClick={resetMapView}>Restore default</button>
-          </div>
         </div>
       )}
 
