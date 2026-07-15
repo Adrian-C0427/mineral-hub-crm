@@ -40,6 +40,7 @@ const dateStr = z
 
 expensesRouter.get(
   "/categories",
+  requirePermission("manageExpenses"),
   asyncHandler(async (req: AuthedRequest, res) => {
     await ensureCategories(orgId(req));
     const cats = await prisma.expenseCategory.findMany({
@@ -155,6 +156,7 @@ const withRefs = { category: { select: { id: true, name: true } }, user: { selec
 
 expensesRouter.get(
   "/",
+  requirePermission("manageExpenses"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const q = listQuery.parse(req.query);
     const where: Record<string, unknown> = { organizationId: orgId(req) };
@@ -345,6 +347,7 @@ expensesRouter.post(
 
 expensesRouter.get(
   "/dashboard",
+  requirePermission("manageExpenses"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const { from, to } = z.object({ from: z.string().optional(), to: z.string().optional() }).parse(req.query);
     const where: Record<string, unknown> = { organizationId: orgId(req) };
