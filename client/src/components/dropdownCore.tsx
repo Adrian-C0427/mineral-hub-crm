@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { ChevronDown } from "lucide-react";
 
 /**
@@ -8,21 +8,43 @@ import { ChevronDown } from "lucide-react";
  *  - a body-portaled, fixed-position menu that escapes overflow containers
  *    (tables, modals) and repositions on scroll/resize instead of closing;
  *    scrolling INSIDE the menu never moves it
+ *  - the menu always opens fully inside the viewport: it flips upward when
+ *    the anchor sits near the bottom, hugs the anchor when flipped (anchored
+ *    by `bottom`), clamps its height to the available space, and never
+ *    overhangs the right edge
  *  - outside-click closes
  *  - Escape closes the MENU ONLY: handled in the capture phase and stopped,
  *    so an enclosing Modal (which also listens for Escape) stays open
  *  - the same chevron affordance, rotating while open
  */
 
+/** Matches .msel-menu's max-height so flip decisions agree with rendering. */
+const MENU_MAX_H = 240;
+const EDGE = 8; // minimum breathing room from viewport edges
+
 export function useMenuPosition(anchorRef: RefObject<HTMLElement | null>, open: boolean) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [pos, setPos] = useState<CSSProperties | null>(null);
 
   useLayoutEffect(() => {
     if (!open) { setPos(null); return; }
     const place = () => {
       const r = anchorRef.current?.getBoundingClientRect();
-      if (r) setPos({ top: r.bottom + 4, left: r.left, width: r.width });
+      if (!r) return;
+      // documentElement.clientWidth/Height = the CSS viewport, which stays
+      // correct inside embedded/zoomed contexts where window.inner* can lie.
+      const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+      const left = Math.max(EDGE, Math.min(r.left, vw - r.width - EDGE));
+      const below = vh - r.bottom - 4 - EDGE;
+      const above = r.top - 4 - EDGE;
+      // Open downward whenever the full menu fits (or there's simply more room
+      // below); otherwise flip above the anchor, anchored by `bottom` so a
+      // short menu still hugs the control instead of floating mid-screen.
+      if (below >= Math.min(MENU_MAX_H, menuRef.current?.scrollHeight ?? MENU_MAX_H) || below >= above) {
+        setPos({ position: "fixed", top: r.bottom + 4, left, width: r.width, maxHeight: Math.max(80, Math.min(MENU_MAX_H, below)) });
+      } else {
+        setPos({ position: "fixed", bottom: vh - r.top + 4, left, width: r.width, maxHeight: Math.max(80, Math.min(MENU_MAX_H, above)) });
+      }
     };
     place();
     const onScroll = (e: Event) => {

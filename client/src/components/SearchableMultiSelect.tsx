@@ -90,7 +90,7 @@ export function SearchableMultiSelect({ options, value, onChange, placeholder = 
       {open && pos && createPortal(
         <div
           className="msel-menu msel-menu-portal" role="listbox" ref={menuRef}
-          style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
+          style={pos}
         >
           {shown.length === 0 ? (
             <div className="msel-empty">{query ? "No matches" : "All selected"}</div>

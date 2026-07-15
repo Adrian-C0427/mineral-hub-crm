@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { prettyEnum } from "../lib/format";
 import { useStages } from "../stages";
@@ -339,9 +340,39 @@ export function OverflowMenu({ items, ariaLabel = "More actions" }: {
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // Body-portaled + viewport-aware so the menu escapes overflow containers
+  // (table scrollers, panels) and always opens fully on-screen: right-aligned
+  // to the button, flipping above it when the viewport bottom is close.
+  const [pos, setPos] = useState<CSSProperties | null>(null);
+  useLayoutEffect(() => {
+    if (!open) { setPos(null); return; }
+    const place = () => {
+      const r = ref.current?.getBoundingClientRect();
+      if (!r) return;
+      // documentElement.clientWidth/Height = the CSS viewport, which stays
+      // correct inside embedded/zoomed contexts where window.inner* can lie.
+      const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+      const menuH = menuRef.current?.offsetHeight ?? Math.min(items.length, 8) * 36 + 12;
+      const openUp = r.bottom + 6 + menuH > vh - 8 && r.top - 6 - menuH >= 8;
+      setPos({
+        position: "fixed",
+        right: Math.max(8, vw - r.right),
+        ...(openUp ? { bottom: vh - r.top + 6 } : { top: r.bottom + 6 }),
+      });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true); };
+  }, [open, items.length]);
   useEffect(() => {
     if (!open) return;
-    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (ref.current?.contains(t) || menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey, true);
@@ -352,14 +383,15 @@ export function OverflowMenu({ items, ariaLabel = "More actions" }: {
       <button className="icon-btn ovf-btn" aria-haspopup="menu" aria-expanded={open} aria-label={ariaLabel} title={ariaLabel} onClick={() => setOpen((o) => !o)}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
       </button>
-      {open && (
-        <div className="ovf-menu" role="menu">
+      {open && pos && createPortal(
+        <div className="ovf-menu ovf-menu-portal" role="menu" ref={menuRef} style={pos}>
           {items.map((it, i) => (
             <button key={i} role="menuitem" className={`ovf-item ${it.danger ? "danger" : ""}`} onClick={() => { setOpen(false); it.onClick(); }}>
               {it.label}
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
