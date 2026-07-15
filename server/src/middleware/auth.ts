@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { env } from "../config.js";
 import { verifySession } from "../auth/session.js";
-import { prisma } from "../db.js";
+import { prisma, withDbRetry } from "../db.js";
 import { resolvePermissions, type OrgRole, type Permission } from "../domain/permissions.js";
 import { getRoleOverride } from "../services/rolePermCache.js";
 
@@ -42,14 +42,19 @@ export async function attachUser(req: AuthedRequest, _res: Response, next: NextF
       // (passwordHash, totpSecret) out of every request AND means a column added
       // to the schema but not yet pushed to the DB (e.g. themePreference) can't
       // break auth on the whole app.
-      const user = await prisma.user.findUnique({
-        where: { id: session.userId },
-        select: {
-          id: true, role: true, name: true, email: true, firstName: true, lastName: true,
-          phone: true, organizationId: true, orgRole: true, mustChangePassword: true,
-          status: true, lastActiveAt: true,
-        },
-      });
+      // Retry only transient Neon reconnect blips (P1001/P1017): attachUser runs
+      // on every request, so an unretried connection hiccup here becomes an
+      // unhandled rejection that fails the whole request (Sentry MINERAL-HUB-API-7).
+      const user = await withDbRetry(() =>
+        prisma.user.findUnique({
+          where: { id: session.userId },
+          select: {
+            id: true, role: true, name: true, email: true, firstName: true, lastName: true,
+            phone: true, organizationId: true, orgRole: true, mustChangePassword: true,
+            status: true, lastActiveAt: true,
+          },
+        }),
+      );
       if (user && user.status === "ACTIVE") {
         // Effective permissions = role defaults merged with any org override.
         let permissions: Permission[] = [];

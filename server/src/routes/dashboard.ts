@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { prisma } from "../db.js";
+import { prisma, withDbRetry } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
 import { requireAuth, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal } from "../serializers.js";
@@ -80,14 +80,18 @@ dashboardRouter.get(
     // Active = any non-terminal stage. The stage distribution uses the org's own
     // ordered active stages (custom pipeline).
     const activeStageKeys = (await ensureStages(prisma, org)).filter((s) => !s.isTerminal).map((s) => s.key);
-    const [allActive, closedDeals, activeOffers] = await Promise.all([
-      prisma.deal.findMany({ where: { stage: { notIn: [...TERMINAL_STAGE_KEYS] }, organizationId: org, ...IN_PIPELINE }, include: { ...dealInclude, offers: true } }),
-      prisma.deal.findMany({
-        where: { stage: "CLOSED", organizationId: org, ...IN_PIPELINE },
-        include: { ...dealInclude, selectedOffer: true },
-      }),
-      prisma.offer.count({ where: { status: "ACTIVE", deal: { organizationId: org, ...IN_PIPELINE } } }),
-    ]);
+    // Retry only transient Neon reconnect blips (P1001/P1017) on this hot,
+    // authenticated read batch (Sentry MINERAL-HUB-API-6). Happy path unchanged.
+    const [allActive, closedDeals, activeOffers] = await withDbRetry(() =>
+      Promise.all([
+        prisma.deal.findMany({ where: { stage: { notIn: [...TERMINAL_STAGE_KEYS] }, organizationId: org, ...IN_PIPELINE }, include: { ...dealInclude, offers: true } }),
+        prisma.deal.findMany({
+          where: { stage: "CLOSED", organizationId: org, ...IN_PIPELINE },
+          include: { ...dealInclude, selectedOffer: true },
+        }),
+        prisma.offer.count({ where: { status: "ACTIVE", deal: { organizationId: org, ...IN_PIPELINE } } }),
+      ]),
+    );
 
     // Metrics row
     const activeDeals = allActive.length;
