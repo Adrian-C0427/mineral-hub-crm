@@ -707,6 +707,9 @@ model Buyer {
   // Known alternate spellings/aliases (e.g. discovered during research imports),
   // used to strengthen duplicate detection and shown on the profile.
   aliases String[] @default([])
+  // Alias suggestions (normalized keys) the user reviewed and rejected —
+  // suppressed from future "possible alias" prompts on this profile.
+  dismissedAliasNorms String[] @default([])
   // Provenance: "research" marks a profile created/enriched from public-record
   // research so it can be flagged for manual completion. null = user-created.
   source String?

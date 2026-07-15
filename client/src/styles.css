@@ -1199,7 +1199,33 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .rel-party-meta { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .rel-count-mini { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .rel-chain-list { display: flex; flex-direction: column; gap: 8px; }
-.rel-chain { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+.rel-chain { background: var(--panel-2); border: 1px solid var(--border); border-radius: 8px; padding: 0; overflow: hidden; }
+/* Chains collapse to one readable line (endpoints + hop summary); the full
+   path renders only when expanded, so long chains never wall-of-text the page. */
+.rel-chain-head { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px;
+  background: none; border: none; cursor: pointer; text-align: left; }
+.rel-chain-head:hover { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.rel-chain-endpoints { display: inline-flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.rel-chain-mid { font-size: 12px; white-space: nowrap; }
+.rel-chain-sum { margin-left: auto; font-size: 11.5px; white-space: nowrap; }
+.rel-chain-body { padding: 2px 10px 10px; border-top: 1px dashed var(--border); }
+/* Headline stat chips under the Relationships title. */
+.rel-stats { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 8px; }
+.rel-stat { font-size: 12.5px; color: var(--text-dim); }
+.rel-stat strong { color: var(--text); font-variant-numeric: tabular-nums; }
+/* Relative-volume bar beside each counterparty count. */
+.rel-bar { width: 46px; height: 5px; border-radius: 3px; background: color-mix(in srgb, var(--border) 60%, transparent); overflow: hidden; }
+.rel-bar > span { display: block; height: 100%; border-radius: 3px; background: var(--accent); opacity: 0.75; }
+.rel-indiv-toggle { margin-top: 4px; text-align: left; }
+/* Alias review callout — attention-tinted, never auto-applied. */
+.rel-alias-callout { margin-top: 12px; border: 1px solid color-mix(in srgb, #f59e0b 45%, var(--border));
+  background: color-mix(in srgb, #f59e0b 7%, transparent); border-radius: 10px; padding: 10px 12px; }
+.rel-alias-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
+.rel-alias-row { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-top: 1px solid color-mix(in srgb, #f59e0b 18%, transparent); }
+.rel-alias-name { font-size: 13px; font-weight: 600; }
+.rel-alias-meta { font-size: 12px; margin-left: auto; white-space: nowrap; }
+.rel-alias-attr { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+.rel-alias-chip { display: inline-flex; align-items: center; gap: 5px; }
 
 /* --- Buyer Portal: saved searches, image gallery, production summary --- */
 .portal-saved { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
@@ -1663,7 +1689,10 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .ml-collapsible.open .ml-collapse-inner { padding: 0 12px 11px; }
 
 /* Map page saved presets (Customize View: default layers + camera). */
-.mc-presets { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+/* Saved filters live inside the zero-padding .mc-panel, so they carry the same
+   24px horizontal inset as .mc-grid above — labels, chips, and the save row all
+   line up with the filter columns. */
+.mc-presets { padding: 14px 24px 18px; border-top: 1px solid var(--border); }
 .mc-presets .ddx-label { display: block; margin-bottom: 8px; }
 .mc-presets-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .mc-preset-chip { display: inline-flex; align-items: center; background: var(--panel-2); border: 1px solid var(--border); border-radius: 100px; overflow: hidden; }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateRelationships, coBuyerPartnerships, classifyEntity, classifyEntities,
-  buildChains, chainTableRows, buildGraph, entityNetwork, type TxEdge,
+  buildChains, chainTableRows, buildGraph, entityNetwork, partyEntityType, type TxEdge,
 } from "./researchGraph.js";
 
 let seq = 0;
@@ -212,5 +212,46 @@ describe("entityNetwork", () => {
 
   it("returns null when no focus keys are given", () => {
     expect(entityNetwork([], [])).toBeNull();
+  });
+});
+
+describe("partyEntityType", () => {
+  it("classifies entity-suffixed names as companies", () => {
+    for (const n of [
+      "Morningstar Minerals West LP", "Vanguard Partners LLC", "Acme Royalty Co.",
+      "Blackrock Holdings", "Smith Family Trust", "Delgado Energy, Inc.",
+      "Two Rivers Ltd", "Big Star Corporation", "Permian Resources",
+    ]) expect(partyEntityType(n), n).toBe("company");
+  });
+  it("classifies personal names as individuals", () => {
+    for (const n of ["Smith John", "MARY ELLEN CALDWELL", "Bobby Crowley", "Garcia Maria Et Ux"]) {
+      expect(partyEntityType(n), n).toBe("individual");
+    }
+  });
+  it("treats ampersand multi-party names as businesses", () => {
+    expect(partyEntityType("Smith & Sons Cattle")).toBe("company");
+  });
+});
+
+describe("entityNetwork alias attribution and party types", () => {
+  it("attributes activity per focus alias and types the parties", () => {
+    const edges = [
+      // Acquisitions under two different focus spellings/keys.
+      edge({ grantorNorm: "CALDWELL", grantor: "Mary Caldwell", granteeNorm: "MORNINGSTAR MINERALS", grantee: "Morningstar Minerals LLC" }),
+      edge({ grantorNorm: "VANGUARD PARTNERS", grantor: "Vanguard Partners LLC", granteeNorm: "MORNINGSTAR MINERALS WEST", grantee: "Morningstar Minerals West LP" }),
+      // A disposition under the primary key.
+      edge({ grantorNorm: "MORNINGSTAR MINERALS", grantor: "Morningstar Minerals LLC", granteeNorm: "EXXON", grantee: "Exxon Corp" }),
+    ];
+    const net = entityNetwork(edges, ["MORNINGSTAR MINERALS", "MORNINGSTAR MINERALS WEST"], "Morningstar Minerals")!;
+    expect(net.acquisitions).toBe(2);
+    expect(net.dispositions).toBe(1);
+    // Per-alias attribution: primary did 1 acq + 1 disp, the alias 1 acq.
+    const byNorm = Object.fromEntries(net.aliasBreakdown.map((a) => [a.norm, a]));
+    expect(byNorm["MORNINGSTAR MINERALS"]).toMatchObject({ acquisitions: 1, dispositions: 1 });
+    expect(byNorm["MORNINGSTAR MINERALS WEST"]).toMatchObject({ acquisitions: 1, dispositions: 0 });
+    // Party entity types ride along for grantor prioritization.
+    const grantors = Object.fromEntries(net.topGrantors.map((g) => [g.norm, g.entityType]));
+    expect(grantors["CALDWELL"]).toBe("individual");
+    expect(grantors["VANGUARD PARTNERS"]).toBe("company");
   });
 });

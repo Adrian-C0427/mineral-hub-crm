@@ -9,6 +9,7 @@ import { effectiveStatus } from "../domain/buyerStatus.js";
 import { closeRate } from "../domain/metrics.js";
 import { normalizeEntity } from "../domain/research.js";
 import { entityNetwork, ENTITY_CLASS_LABEL, type TxEdge } from "../domain/researchGraph.js";
+import { nameSimilarity } from "../domain/researchBuyers.js";
 import { importRouter } from "./import.js";
 
 export const buyersRouter = Router();
@@ -225,6 +226,259 @@ buyersRouter.get(
         },
       },
     });
+  }),
+);
+
+// --------------------------------------------------------------------------
+// Alias detection & merging
+//
+// Research entities are grouped by normalized name; similar-but-distinct names
+// ("Morningstar Minerals" vs "Morningstar Minerals West") are separate keys.
+// We NEVER merge them automatically: suggestions above a confidence threshold
+// are surfaced for the user to review, and only a confirmed choice creates the
+// alias relationship (or merges two CRM buyer records).
+// --------------------------------------------------------------------------
+
+/** Minimum name similarity for an alias suggestion to be worth the user's time. */
+const ALIAS_SUGGEST_THRESHOLD = 0.72;
+
+const uniqCI = (list: string[]): string[] => {
+  const seen = new Map<string, string>();
+  for (const v of list) { const k = v.trim().toUpperCase(); if (v.trim() && !seen.has(k)) seen.set(k, v.trim()); }
+  return [...seen.values()];
+};
+
+/** Distinct research entity keys for the org, with tx counts + best raw spelling per side. */
+async function researchEntityIndex(org: string): Promise<Map<string, { name: string; asGrantee: number; asGrantor: number }>> {
+  const [grantees, grantors] = await Promise.all([
+    prisma.researchDocument.groupBy({
+      by: ["granteeNorm", "grantee"], where: { organizationId: org, docClass: "TRANSACTION", granteeNorm: { not: null } },
+      _count: { _all: true },
+    }),
+    prisma.researchDocument.groupBy({
+      by: ["grantorNorm", "grantor"], where: { organizationId: org, docClass: "TRANSACTION", grantorNorm: { not: null } },
+      _count: { _all: true },
+    }),
+  ]);
+  const idx = new Map<string, { name: string; nameCount: number; asGrantee: number; asGrantor: number }>();
+  const add = (norm: string | null, raw: string | null, n: number, side: "asGrantee" | "asGrantor") => {
+    if (!norm) return;
+    const e = idx.get(norm) ?? { name: raw ?? norm, nameCount: 0, asGrantee: 0, asGrantor: 0 };
+    e[side] += n;
+    // Display name = the most frequent raw spelling across both sides.
+    if (raw && n > e.nameCount) { e.name = raw; e.nameCount = n; }
+    idx.set(norm, e);
+  };
+  for (const g of grantees) add(g.granteeNorm, g.grantee, g._count._all, "asGrantee");
+  for (const g of grantors) add(g.grantorNorm, g.grantor, g._count._all, "asGrantor");
+  return new Map([...idx.entries()].map(([k, v]) => [k, { name: v.name, asGrantee: v.asGrantee, asGrantor: v.asGrantor }]));
+}
+
+/**
+ * Possible aliases for a buyer: research entity names highly similar to the
+ * buyer's name (or existing aliases) that are NOT already counted as this
+ * buyer. Review-only — nothing is merged until the user confirms.
+ */
+buyersRouter.get(
+  "/:id/alias-suggestions",
+  requirePermission("viewBuyers"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const buyer = await prisma.buyer.findFirst({
+      where: { id: req.params.id, organizationId: org },
+      select: { id: true, companyName: true, aliases: true, dismissedAliasNorms: true },
+    });
+    if (!buyer) throw new HttpError(404, "Buyer not found");
+
+    const focusNorms = new Set(buyerEntityKeys(buyer.companyName, buyer.aliases));
+    const dismissed = new Set(buyer.dismissedAliasNorms);
+    const index = await researchEntityIndex(org);
+
+    // Other CRM buyers' keys — a suggestion that maps to an existing buyer
+    // becomes a "merge profiles" prompt instead of a plain alias add.
+    const allBuyers = await prisma.buyer.findMany({
+      where: { organizationId: org, id: { not: buyer.id } },
+      select: { id: true, companyName: true, aliases: true },
+    });
+    const normToBuyer = new Map<string, { id: string; companyName: string }>();
+    for (const b of allBuyers) for (const k of buyerEntityKeys(b.companyName, b.aliases)) if (!normToBuyer.has(k)) normToBuyer.set(k, { id: b.id, companyName: b.companyName });
+
+    const own = [buyer.companyName, ...buyer.aliases];
+    const suggestions = [...index.entries()]
+      .filter(([norm]) => !focusNorms.has(norm) && !dismissed.has(norm))
+      .map(([norm, e]) => {
+        const confidence = Math.max(...own.map((n) => nameSimilarity(n, e.name)));
+        const other = normToBuyer.get(norm) ?? null;
+        return {
+          norm, name: e.name, confidence: Math.round(confidence * 100) / 100,
+          txCount: e.asGrantee + e.asGrantor, asGrantee: e.asGrantee, asGrantor: e.asGrantor,
+          buyerId: other?.id ?? null, buyerName: other?.companyName ?? null,
+        };
+      })
+      .filter((s) => s.confidence >= ALIAS_SUGGEST_THRESHOLD)
+      .sort((a, b) => b.confidence - a.confidence || b.txCount - a.txCount)
+      .slice(0, 8);
+
+    res.json({ suggestions });
+  }),
+);
+
+/** Confirm an alias: the reviewed name joins this buyer's alias list. */
+buyersRouter.post(
+  "/:id/aliases",
+  requirePermission("editBuyers"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { name } = z.object({ name: z.string().trim().min(1).max(200) }).parse(req.body);
+    const buyer = await prisma.buyer.findFirst({
+      where: { id: req.params.id, organizationId: orgId(req) },
+      select: { id: true, companyName: true, aliases: true, dismissedAliasNorms: true },
+    });
+    if (!buyer) throw new HttpError(404, "Buyer not found");
+    const aliases = uniqCI([...buyer.aliases, name]).filter((a) => a.toUpperCase() !== buyer.companyName.trim().toUpperCase());
+    const norm = normalizeEntity(name);
+    const updated = await prisma.buyer.update({
+      where: { id: buyer.id },
+      data: {
+        aliases,
+        // A confirmed alias is no longer a dismissed suggestion.
+        dismissedAliasNorms: buyer.dismissedAliasNorms.filter((d) => d !== norm),
+      },
+      select: { id: true, aliases: true },
+    });
+    res.json(updated);
+  }),
+);
+
+/**
+ * Merge two CRM buyer records into one logical buyer (target absorbs source).
+ * Everything the source accumulated moves to the target — deal activity,
+ * timelines, offers, documents, tags, owners, activity log, selected-buyer
+ * links — and the source's name + aliases become aliases of the target, so the
+ * relationship network keeps attributing each historical transaction to the
+ * alias that actually appears on the instrument. Nothing is lost; the source
+ * record itself is deleted once emptied.
+ */
+buyersRouter.post(
+  "/:id/merge",
+  requirePermission("deleteBuyers"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const { sourceBuyerId } = z.object({ sourceBuyerId: z.string().min(1) }).parse(req.body);
+    if (sourceBuyerId === req.params.id) throw new HttpError(400, "A buyer cannot be merged into itself");
+
+    const [target, source] = await Promise.all([
+      prisma.buyer.findFirst({ where: { id: req.params.id, organizationId: org }, include: { buyBox: true } }),
+      prisma.buyer.findFirst({ where: { id: sourceBuyerId, organizationId: org }, include: { buyBox: true, owners: true, tags: true } }),
+    ]);
+    if (!target || !source) throw new HttpError(404, "Buyer not found");
+
+    await prisma.$transaction(async (tx) => {
+      // Deal activity: (dealId, buyerId) is unique. Where both buyers touched
+      // the same deal, fold the source's timeline into the target's row and
+      // drop the source row; otherwise the row simply moves.
+      const [targetActs, sourceActs] = await Promise.all([
+        tx.dealBuyerActivity.findMany({ where: { buyerId: target.id }, select: { id: true, dealId: true } }),
+        tx.dealBuyerActivity.findMany({ where: { buyerId: source.id }, select: { id: true, dealId: true } }),
+      ]);
+      const targetByDeal = new Map(targetActs.map((a) => [a.dealId, a.id]));
+      for (const act of sourceActs) {
+        const existing = targetByDeal.get(act.dealId);
+        if (existing) {
+          await tx.dealBuyerMessage.updateMany({ where: { activityId: act.id }, data: { activityId: existing } });
+          await tx.dealBuyerActivity.delete({ where: { id: act.id } });
+        } else {
+          await tx.dealBuyerActivity.update({ where: { id: act.id }, data: { buyerId: target.id } });
+        }
+      }
+      await tx.dealBuyerMessage.updateMany({ where: { buyerId: source.id }, data: { buyerId: target.id } });
+      await tx.offer.updateMany({ where: { buyerId: source.id }, data: { buyerId: target.id } });
+      await tx.fileAttachment.updateMany({ where: { buyerId: source.id }, data: { buyerId: target.id } });
+      await tx.activityLog.updateMany({ where: { buyerId: source.id }, data: { buyerId: target.id } });
+      await tx.deal.updateMany({ where: { selectedBuyerId: source.id }, data: { selectedBuyerId: target.id } });
+
+      // Owners / tags: composite PKs — copy only what the target lacks.
+      const targetOwners = new Set((await tx.buyerOwner.findMany({ where: { buyerId: target.id }, select: { userId: true } })).map((o) => o.userId));
+      for (const o of source.owners) if (!targetOwners.has(o.userId)) await tx.buyerOwner.create({ data: { buyerId: target.id, userId: o.userId } });
+      const targetTags = new Set((await tx.buyerTagOnBuyer.findMany({ where: { buyerId: target.id }, select: { tagId: true } })).map((t) => t.tagId));
+      for (const t of source.tags) if (!targetTags.has(t.tagId)) await tx.buyerTagOnBuyer.create({ data: { buyerId: target.id, tagId: t.tagId } });
+
+      // Buy box: additive union of the geography/type arrays; the target's
+      // numeric bounds win where set, the source's fill the gaps.
+      if (source.buyBox) {
+        const tb = target.buyBox, sb = source.buyBox;
+        const union = (a: string[] = [], b: string[] = []) => uniqCI([...a, ...b]);
+        const boxData = {
+          states: union(tb?.states, sb.states), counties: union(tb?.counties, sb.counties),
+          basins: union(tb?.basins, sb.basins), formations: union(tb?.formations, sb.formations),
+          assetTypes: union(tb?.assetTypes, sb.assetTypes),
+          minAcreage: tb?.minAcreage ?? sb.minAcreage, maxAcreage: tb?.maxAcreage ?? sb.maxAcreage,
+          minPrice: tb?.minPrice ?? sb.minPrice, maxPrice: tb?.maxPrice ?? sb.maxPrice,
+        };
+        if (tb) await tx.buyBoxCriteria.update({ where: { buyerId: target.id }, data: boxData });
+        else await tx.buyBoxCriteria.create({ data: { buyerId: target.id, ...boxData } });
+      }
+
+      // Research summaries: counts add, sets union, date range widens.
+      type RS = { counties?: string[]; states?: string[]; abstracts?: string[]; transactionTypes?: string[]; transactionCount?: number; firstSeen?: string | null; lastSeen?: string | null };
+      const ts = (target.researchSummary ?? null) as RS | null;
+      const ss = (source.researchSummary ?? null) as RS | null;
+      const mergedSummary = ts || ss ? {
+        counties: uniqCI([...(ts?.counties ?? []), ...(ss?.counties ?? [])]),
+        states: uniqCI([...(ts?.states ?? []), ...(ss?.states ?? [])]),
+        abstracts: uniqCI([...(ts?.abstracts ?? []), ...(ss?.abstracts ?? [])]),
+        transactionTypes: uniqCI([...(ts?.transactionTypes ?? []), ...(ss?.transactionTypes ?? [])]),
+        transactionCount: (ts?.transactionCount ?? 0) + (ss?.transactionCount ?? 0),
+        firstSeen: [ts?.firstSeen, ss?.firstSeen].filter(Boolean).sort()[0] ?? null,
+        lastSeen: [ts?.lastSeen, ss?.lastSeen].filter(Boolean).sort().pop() ?? null,
+      } : undefined;
+
+      // The source's identity lives on as aliases of the target — that is what
+      // keeps each historical transaction attributable to the name it used.
+      const aliases = uniqCI([...target.aliases, source.companyName, ...source.aliases])
+        .filter((a) => a.toUpperCase() !== target.companyName.trim().toUpperCase());
+      const mergedNorms = new Set(buyerEntityKeys(target.companyName, aliases));
+
+      await tx.buyer.update({
+        where: { id: target.id },
+        data: {
+          aliases,
+          dismissedAliasNorms: uniqCI([...target.dismissedAliasNorms, ...source.dismissedAliasNorms]).filter((n) => !mergedNorms.has(n)),
+          ...(mergedSummary !== undefined ? { researchSummary: mergedSummary } : {}),
+          // Fill contact gaps from the source; never overwrite target data.
+          contactName: target.contactName ?? source.contactName,
+          email: target.email ?? source.email,
+          phone: target.phone ?? source.phone,
+          website: target.website ?? source.website,
+          notes: target.notes && source.notes
+            ? `${target.notes}\n\n— Merged from ${source.companyName} —\n${source.notes}`
+            : target.notes ?? (source.notes ? `— Merged from ${source.companyName} —\n${source.notes}` : null),
+        },
+      });
+
+      await tx.buyer.delete({ where: { id: source.id } });
+    });
+
+    const merged = await prisma.buyer.findUnique({ where: { id: target.id }, select: { id: true, companyName: true, aliases: true } });
+    res.json({ ok: true, buyer: merged });
+  }),
+);
+
+/** Reject an alias suggestion: never prompt for this entity again. */
+buyersRouter.post(
+  "/:id/alias-dismissals",
+  requirePermission("editBuyers"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { norm } = z.object({ norm: z.string().trim().min(1).max(200) }).parse(req.body);
+    const buyer = await prisma.buyer.findFirst({
+      where: { id: req.params.id, organizationId: orgId(req) },
+      select: { id: true, dismissedAliasNorms: true },
+    });
+    if (!buyer) throw new HttpError(404, "Buyer not found");
+    await prisma.buyer.update({
+      where: { id: buyer.id },
+      data: { dismissedAliasNorms: uniqCI([...buyer.dismissedAliasNorms, norm]) },
+    });
+    res.json({ ok: true });
   }),
 );
 
