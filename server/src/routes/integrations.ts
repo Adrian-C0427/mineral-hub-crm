@@ -46,7 +46,11 @@ integrationsRouter.use((req, res, next) => (req.method === "POST" ? actionLimite
 
 // Internal bookkeeping keys that would only bloat the payload (the calendar
 // event map can hold hundreds of entries).
-const INTERNAL_CONFIG_KEYS = new Set(["eventMap", "inboundCursor"]);
+// "domains" is the Resend account's domain-verification snapshot (DKIM/SPF/DNS
+// selector detail). It's used server-side to derive senderDomainWarning; the
+// client only needs that derived warning, never the raw DNS records — so keep
+// it out of the serialized config the API returns.
+const INTERNAL_CONFIG_KEYS = new Set(["eventMap", "inboundCursor", "domains"]);
 
 function publicConfig(row: Integration | null): Record<string, unknown> {
   const cfg = (row?.config ?? {}) as Record<string, unknown>;

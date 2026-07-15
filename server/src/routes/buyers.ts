@@ -550,7 +550,7 @@ buyersRouter.post(
         },
       });
       await syncOwners(tx, created.id, data.ownerIds ?? []);
-      await syncTags(tx, created.id, data.tags ?? []);
+      await syncTags(tx, orgId(req), created.id, data.tags ?? []);
       return created;
     });
     res.status(201).json({ id: buyer.id });
@@ -599,7 +599,7 @@ buyersRouter.patch(
         });
       }
       if (data.ownerIds) await syncOwners(tx, req.params.id, data.ownerIds);
-      if (data.tags) await syncTags(tx, req.params.id, data.tags);
+      if (data.tags) await syncTags(tx, orgId(req), req.params.id, data.tags);
     });
     res.json({ ok: true });
   }),
@@ -662,12 +662,17 @@ async function syncOwners(tx: any, buyerId: string, userIds: string[]) {
   }
 }
 
-async function syncTags(tx: any, buyerId: string, tagNames: string[]) {
+async function syncTags(tx: any, org: string, buyerId: string, tagNames: string[]) {
   await tx.buyerTagOnBuyer.deleteMany({ where: { buyerId } });
   for (const raw of tagNames) {
     const name = raw.trim();
     if (!name) continue;
-    const tag = await tx.buyerTag.upsert({ where: { name }, create: { name }, update: {} });
+    // Tags are scoped to the caller's org — never a shared global namespace.
+    const tag = await tx.buyerTag.upsert({
+      where: { organizationId_name: { organizationId: org, name } },
+      create: { organizationId: org, name },
+      update: {},
+    });
     await tx.buyerTagOnBuyer.create({ data: { buyerId, tagId: tag.id } });
   }
 }

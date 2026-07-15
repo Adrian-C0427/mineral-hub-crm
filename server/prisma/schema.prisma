@@ -172,6 +172,7 @@ model Organization {
   wellAnalyses      WellAnalysis[]
   notifications     Notification[]
   portalContacts    PortalContact[]
+  buyerTags         BuyerTag[]
 }
 
 // A publishable contact card shown on the Buyer Offering Portal. An org can
@@ -766,9 +767,15 @@ model BuyerOwner {
 }
 
 model BuyerTag {
-  id     String            @id @default(cuid())
-  name   String            @unique
-  buyers BuyerTagOnBuyer[]
+  id             String            @id @default(cuid())
+  // Tags are per-organization: the same name in two orgs is two distinct rows,
+  // so one tenant's tag namespace never leaks into another's.
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  buyers         BuyerTagOnBuyer[]
+
+  @@unique([organizationId, name])
 }
 
 model BuyerTagOnBuyer {

@@ -299,7 +299,9 @@ gisRouter.get(
   }),
 );
 
-const optionsSchema = z.object({ counties: z.string().optional() });
+// Bound the raw string so a pathological county list can't build a giant
+// ANY($1::text[]) array; the names are sliced again below as defense in depth.
+const optionsSchema = z.object({ counties: z.string().max(4000).optional() });
 
 /**
  * Survey/abstract filter option lists, optionally scoped to counties
@@ -310,7 +312,7 @@ gisRouter.get(
   "/options",
   asyncHandler(async (req, res) => {
     const { counties } = optionsSchema.parse(req.query);
-    const names = (counties ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+    const names = (counties ?? "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 500);
     // county = ANY('{}') matches nothing, so an empty list means "all counties".
     const scope = names.length ? `county = ANY($1::text[]) AND` : "";
     const params = names.length ? [names] : [];
@@ -411,6 +413,9 @@ gisRouter.get(
     const rows = await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string; countyFips: string }[]>(
       `SELECT id, replace(abstract, '?', '') AS abstract, survey, county, county_fips AS "countyFips" FROM gis.abstracts ORDER BY county, abstract`,
     );
+    // Shared, org-independent reference geometry — safe to cache so this full
+    // ~11k-row fetch isn't repeated on every map load.
+    res.setHeader("Cache-Control", "public, max-age=3600");
     res.json(rows);
   }),
 );
