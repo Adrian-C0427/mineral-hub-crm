@@ -736,8 +736,12 @@ researchRouter.post(
     }).parse(req.body);
 
     const byKey = await docsByGrantee(org, decisions.map((d) => d.key));
-    // Ensure the "Research Imported" tag exists (global tag catalog).
-    const tag = await prisma.buyerTag.upsert({ where: { name: RESEARCH_TAG }, create: { name: RESEARCH_TAG }, update: {} });
+    // Ensure this org's "Research Imported" tag exists (tags are per-org).
+    const tag = await prisma.buyerTag.upsert({
+      where: { organizationId_name: { organizationId: org, name: RESEARCH_TAG } },
+      create: { organizationId: org, name: RESEARCH_TAG },
+      update: {},
+    });
 
     let created = 0, merged = 0, skipped = 0;
     for (const dec of decisions) {

@@ -171,6 +171,9 @@ expensesRouter.get(
       where,
       include: withRefs,
       orderBy: { date: "desc" },
+      // Bound the list view (newest first). The /dashboard aggregate below is
+      // deliberately left uncapped so totals stay correct.
+      take: 5000,
     });
     res.json(expenses.map(serializeExpense));
   }),

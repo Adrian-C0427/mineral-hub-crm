@@ -162,13 +162,19 @@ reportsRouter.get(
     const org = orgId(req);
     const q = req.query;
     const now = new Date();
-    const from = q.from ? new Date(String(q.from)) : new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
-    const to = q.to ? new Date(`${String(q.to)}T23:59:59.999Z`) : new Date(Date.UTC(now.getUTCFullYear(), 11, 31, 23, 59, 59));
+    // Parse a caller-supplied day as UTC, rejecting malformed/array-valued input
+    // (a bare `new Date("garbage")` yields an Invalid Date that silently makes
+    // every comparison false and returns misleading empty analytics).
+    const day = (v: unknown, endOfDay = false): Date | null => {
+      if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
+      const d = new Date(`${v}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
+      return isNaN(d.getTime()) ? null : d;
+    };
+    const from = day(q.from) ?? new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+    const to = day(q.to, true) ?? new Date(Date.UTC(now.getUTCFullYear(), 11, 31, 23, 59, 59));
     const range: Range = { from, to };
-    const compare: Range | null =
-      q.compareFrom && q.compareTo
-        ? { from: new Date(String(q.compareFrom)), to: new Date(`${String(q.compareTo)}T23:59:59.999Z`) }
-        : null;
+    const cmpFrom = day(q.compareFrom), cmpTo = day(q.compareTo, true);
+    const compare: Range | null = cmpFrom && cmpTo ? { from: cmpFrom, to: cmpTo } : null;
 
     const filters = {
       states: arrParam(q.states),

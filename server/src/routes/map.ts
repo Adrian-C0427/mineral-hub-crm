@@ -52,6 +52,9 @@ mapRouter.get(
       where,
       include: { selectedBuyer: true, relationshipOwner: true, offers: { select: { amount: true } } },
       orderBy: { createdAt: "desc" },
+      // Guard against a pathologically large org loading unbounded rows into
+      // memory; well above any realistic mapped-deal count (newest first).
+      take: 5000,
     });
 
     const now = new Date();
