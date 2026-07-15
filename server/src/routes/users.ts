@@ -162,7 +162,13 @@ usersRouter.delete(
     if (target.orgRole === "ADMIN" && req.user!.orgRole !== "OWNER") {
       throw new HttpError(403, "Only the organization owner can delete an administrator");
     }
-    await prisma.user.delete({ where: { id: req.params.id } });
+    // Detach the member rather than hard-deleting the account: their org-scoped
+    // records (deals, activity, documents) stay attributed to the org instead of
+    // being null'd/cascade-deleted. Mirrors DELETE /org/members/:userId.
+    await prisma.user.update({
+      where: { id: req.params.id },
+      data: { organizationId: null, orgRole: null },
+    });
     res.json({ ok: true });
   }),
 );
