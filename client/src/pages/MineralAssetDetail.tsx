@@ -23,6 +23,7 @@ import { OWNERSHIP_TYPES, OWNERSHIP_STATUSES, PRODUCING_STATUSES } from "./Miner
 import type { BuyerActivityRow, DealSummary, MatchRec, RevenueEntry, Seller, UserLite } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
 import { useUnsavedSection } from "../lib/unsaved";
+import { DateField } from "../components/DateField";
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
 const TractSection = lazy(() => import("../components/TractSection").then((m) => ({ default: m.TractSection })));
 
@@ -229,7 +230,7 @@ function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdi
         <div className="dd-grid">
           <Fld l="Ownership Type"><Select value={f.ownershipType ?? ""} onChange={(v) => setF({ ...f, ownershipType: v })} placeholder="—" clearable ariaLabel="Ownership type" options={OWNERSHIP_TYPES.map((t) => ({ value: t, label: t }))} /></Fld>
           <Fld l="Ownership Status"><Select value={f.ownershipStatus ?? ""} onChange={(v) => setF({ ...f, ownershipStatus: v })} placeholder="—" clearable ariaLabel="Ownership status" options={OWNERSHIP_STATUSES.map((t) => ({ value: t, label: t }))} /></Fld>
-          <Fld l="Acquisition Date"><input type="date" value={toInputDate(f.acquisitionDate)} onChange={(e) => setF({ ...f, acquisitionDate: e.target.value })} /></Fld>
+          <Fld l="Acquisition Date"><DateField value={toInputDate(f.acquisitionDate)} onChange={(v) => setF({ ...f, acquisitionDate: v })} /></Fld>
           <Fld l="Purchase Price"><MoneyInput value={f.purchasePrice != null ? String(f.purchasePrice) : ""} onChange={(v) => setF({ ...f, purchasePrice: v === "" ? null : Number(v) })} ariaLabel="Purchase price" /></Fld>
           <Fld l="Current Value"><input type="number" value={f.currentValue ?? ""} onChange={(e) => setF({ ...f, currentValue: numOrNull(e.target.value) })} /></Fld>
           <Fld l="RRC"><input value={f.rrc ?? ""} onChange={(e) => setF({ ...f, rrc: e.target.value })} placeholder="RRC lease / district / operator no." /></Fld>
@@ -372,8 +373,8 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
             <div className="dd-grid" style={{ gridTemplateColumns: "1fr" }}>
               <Fld l="Lease Status"><SearchableMultiSelect options={LEASE_STATUS_OPTIONS} value={f.leaseStatuses ?? []} onChange={(v) => setF({ ...f, leaseStatuses: v })} placeholder="Select lease status…" /></Fld>
               <Fld l="Royalty Rate"><RoyaltyRateField value={f.royaltyRate} onChange={(v) => setF({ ...f, royaltyRate: v })} /></Fld>
-              <Fld l="Lease Effective Date"><input type="date" value={toInputDate(f.leaseEffectiveDate)} onChange={(e) => setF({ ...f, leaseEffectiveDate: e.target.value })} /></Fld>
-              <Fld l="Lease Expiration Date"><input type="date" value={toInputDate(f.leaseExpirationDate)} onChange={(e) => setF({ ...f, leaseExpirationDate: e.target.value })} /></Fld>
+              <Fld l="Lease Effective Date"><DateField value={toInputDate(f.leaseEffectiveDate)} onChange={(v) => setF({ ...f, leaseEffectiveDate: v })} /></Fld>
+              <Fld l="Lease Expiration Date"><DateField value={toInputDate(f.leaseExpirationDate)} onChange={(v) => setF({ ...f, leaseExpirationDate: v })} /></Fld>
             </div>
           )}
         </div>

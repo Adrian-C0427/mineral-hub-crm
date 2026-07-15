@@ -3,6 +3,7 @@ import { api } from "../api/client";
 import { Modal, Banner, ConfirmDelete } from "./ui";
 import { PhoneInput } from "./PhoneInput";
 import { Select } from "./Select";
+import { StateSelect } from "./StateSelect";
 import { formatPhone } from "../lib/phone";
 import { fmtDate, fmtDateLocal } from "../lib/format";
 import type { Seller, SellerType, UserLite } from "../types";
@@ -176,17 +177,20 @@ function SellerFormModal({ dealId, seller, users, onClose, onSaved }: {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const set = (k: TextKey | "sellerType") => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF((p) => ({ ...p, [k]: e.target.value }));
+  const setV = (k: TextKey | "sellerType") => (v: string) => setF((p) => ({ ...p, [k]: v }));
+  const set = (k: TextKey | "sellerType") => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setV(k)(e.target.value);
   // Physical-address edits mirror into mailing while "same as physical" is on.
-  const setPhysical = (k: "physicalAddress" | "physicalCity" | "physicalState" | "physicalZip") => (e: React.ChangeEvent<HTMLInputElement>) =>
+  const setPhysicalV = (k: "physicalAddress" | "physicalCity" | "physicalState" | "physicalZip") => (v: string) =>
     setF((p) => {
-      const next = { ...p, [k]: e.target.value };
+      const next = { ...p, [k]: v };
       if (sameAsPhysical) {
         next.mailingAddress = next.physicalAddress; next.mailingCity = next.physicalCity;
         next.mailingState = next.physicalState; next.mailingZip = next.physicalZip;
       }
       return next;
     });
+  const setPhysical = (k: "physicalAddress" | "physicalCity" | "physicalState" | "physicalZip") => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setPhysicalV(k)(e.target.value);
   function toggleSame(checked: boolean) {
     setSameAsPhysical(checked);
     if (checked) setF((p) => ({ ...p, mailingAddress: p.physicalAddress, mailingCity: p.physicalCity, mailingState: p.physicalState, mailingZip: p.physicalZip }));
@@ -261,7 +265,7 @@ function SellerFormModal({ dealId, seller, users, onClose, onSaved }: {
           <Fld l="Street address" wide><input value={f.physicalAddress} onChange={setPhysical("physicalAddress")} /></Fld>
           <Fld l="City"><input value={f.physicalCity} onChange={setPhysical("physicalCity")} /></Fld>
           <div className="grid-2">
-            <Fld l="State"><input value={f.physicalState} onChange={setPhysical("physicalState")} /></Fld>
+            <Fld l="State"><StateSelect value={f.physicalState} onChange={setPhysicalV("physicalState")} /></Fld>
             <Fld l="ZIP"><input value={f.physicalZip} onChange={setPhysical("physicalZip")} /></Fld>
           </div>
         </div>
@@ -276,7 +280,7 @@ function SellerFormModal({ dealId, seller, users, onClose, onSaved }: {
             <Fld l="Street address" wide><input value={f.mailingAddress} onChange={set("mailingAddress")} /></Fld>
             <Fld l="City"><input value={f.mailingCity} onChange={set("mailingCity")} /></Fld>
             <div className="grid-2">
-              <Fld l="State"><input value={f.mailingState} onChange={set("mailingState")} /></Fld>
+              <Fld l="State"><StateSelect value={f.mailingState} onChange={setV("mailingState")} /></Fld>
               <Fld l="ZIP"><input value={f.mailingZip} onChange={set("mailingZip")} /></Fld>
             </div>
           </div>

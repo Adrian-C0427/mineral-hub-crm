@@ -11,6 +11,7 @@ import { downloadCsv } from "../lib/csv";
 import { money, num, fmtDate } from "../lib/format";
 import type { DealSummary, UserLite } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
+import { DateField } from "../components/DateField";
 
 /**
  * Mineral Assets — the company's permanent portfolio of owned mineral interests
@@ -180,7 +181,7 @@ function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onCreated:
         <GeoFields states={states} onStatesChange={setStates} counties={counties} onCountiesChange={setCounties} abstractIds={abstractIds} onAbstractsChange={setAbstractIds} />
         <div className="field"><label>Ownership type</label><Select value={ownershipType} onChange={setOwnershipType} ariaLabel="Ownership type" options={OWNERSHIP_TYPES.map((t) => ({ value: t, label: t }))} /></div>
         <div className="field"><label>Producing status</label><Select value={producingStatus} onChange={setProducingStatus} ariaLabel="Producing status" options={PRODUCING_STATUSES.map((t) => ({ value: t, label: t }))} /></div>
-        <div className="field"><label>Acquisition date</label><input type="date" value={acquisitionDate} onChange={(e) => setAcquisitionDate(e.target.value)} /></div>
+        <div className="field"><label>Acquisition date</label><DateField value={acquisitionDate} onChange={(v) => setAcquisitionDate(v)} /></div>
         <div className="field"><label>Net Revenue Acres (NRA)</label><input type="number" value={nra} onChange={(e) => setNra(e.target.value)} /></div>
         <div className="field"><label>Purchase price</label><MoneyInput value={purchasePrice} onChange={setPurchasePrice} ariaLabel="Purchase price" /></div>
         <div className="field"><label>Current estimated value</label><input type="number" value={currentValue} onChange={(e) => setCurrentValue(e.target.value)} /></div>

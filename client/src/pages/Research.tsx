@@ -18,6 +18,7 @@ import { CLASS_COLORS } from "../components/NetworkGraph";
 import { downloadCsv } from "../lib/csv";
 import { fmtDate, num, prettyEnum, prettyDocType } from "../lib/format";
 import { CHART_COLORS, chartTooltip } from "../lib/charts";
+import { DateField } from "../components/DateField";
 
 /**
  * Research & Market Intelligence — trends in mineral transactions, leasing
@@ -283,8 +284,8 @@ export function Research() {
         </div>
         {period === "CUSTOM" && (
           <div className="row" style={{ marginTop: 10 }}>
-            <div className="field" style={{ marginBottom: 0 }}><label>From</label><input type="date" value={custom.from} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} /></div>
-            <div className="field" style={{ marginBottom: 0 }}><label>To</label><input type="date" value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} /></div>
+            <div className="field" style={{ marginBottom: 0 }}><label>From</label><DateField value={custom.from} onChange={(v) => setCustom((c) => ({ ...c, from: v }))} /></div>
+            <div className="field" style={{ marginBottom: 0 }}><label>To</label><DateField value={custom.to} onChange={(v) => setCustom((c) => ({ ...c, to: v }))} /></div>
           </div>
         )}
         {showFilters && opts && (
