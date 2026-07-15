@@ -517,7 +517,6 @@ async function loadTxEdges(org: string, f: ResearchFilters, win: Window): Promis
       docClass: "TRANSACTION",
       grantorNorm: { not: null },
       granteeNorm: { not: null },
-      archivedAt: null,
     },
     select: {
       id: true, grantor: true, grantorNorm: true, grantee: true, granteeNorm: true,
@@ -974,8 +973,7 @@ researchRouter.get(
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
     const { page, pageSize } = pageSchema.parse(req.query);
-    // Archived records are hidden by default; ?archived=true shows only them.
-    const where = { ...docWhere(org, f, win), archivedAt: req.query.archived === "true" ? { not: null } : null };
+    const where = docWhere(org, f, win);
     const [total, rows] = await Promise.all([
       prisma.researchDocument.count({ where }),
       prisma.researchDocument.findMany({
@@ -994,7 +992,7 @@ researchRouter.get(
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
     const { page, pageSize } = pageSchema.parse(req.query);
-    const where = { ...permitWhere(org, f, win), archivedAt: req.query.archived === "true" ? { not: null } : null };
+    const where = permitWhere(org, f, win);
     const [total, rows] = await Promise.all([
       prisma.researchPermit.count({ where }),
       prisma.researchPermit.findMany({
@@ -1476,27 +1474,24 @@ researchRouter.post(
   }),
 );
 
-// Records bulk actions (#43): delete / archive / unarchive selected records.
+// Records bulk delete. Deletion is PERMANENT by design: removed records leave
+// no hidden state behind, so they can never resurface in duplicate detection
+// (the old soft-archive kept invisible rows in the dedupe set — phantom
+// "duplicate" reports on re-import).
 const bulkSchema = z.object({
   kind: z.enum(["DOCUMENTS", "PERMITS"]),
   ids: z.array(z.string()).min(1),
-  action: z.enum(["delete", "archive", "unarchive"]),
+  action: z.literal("delete"),
 });
 researchRouter.post(
   "/records/bulk",
   requirePermission("manageResearchData"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
-    const { kind, ids, action } = bulkSchema.parse(req.body);
+    const { kind, ids } = bulkSchema.parse(req.body);
     const where = { id: { in: ids }, organizationId: org };
     const model = kind === "DOCUMENTS" ? prisma.researchDocument : prisma.researchPermit;
-    let count = 0;
-    if (action === "delete") {
-      count = (await (model as typeof prisma.researchDocument).deleteMany({ where })).count;
-    } else {
-      const archivedAt = action === "archive" ? new Date() : null;
-      count = (await (model as typeof prisma.researchDocument).updateMany({ where, data: { archivedAt } })).count;
-    }
+    const count = (await (model as typeof prisma.researchDocument).deleteMany({ where })).count;
     res.json({ count });
   }),
 );

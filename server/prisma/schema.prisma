@@ -1076,10 +1076,6 @@ model ResearchDocument {
   // so a single import can be deleted without touching other data. Null for
   // records created before batch tracking or by the sample seeder.
   ingestRunId String?
-  // Soft-archive (Records bulk "Archive"): hidden from the default list but
-  // retained; distinct from deletion.
-  archivedAt DateTime?
-
   createdAt DateTime @default(now())
 
   @@index([organizationId, state, county, recordingDate])
@@ -1130,7 +1126,6 @@ model ResearchPermit {
   sourceRef String?
 
   ingestRunId String?
-  archivedAt  DateTime?
 
   createdAt DateTime @default(now())
 

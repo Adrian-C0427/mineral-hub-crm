@@ -40,7 +40,6 @@ interface DealDetailData extends DealSummary {
   offers: { id: string; buyer: { id: string; name: string }; amount: number; status: string; conditions: string | null; expirationDate: string | null; dateSubmitted: string }[];
   files: DocFile[];
   sellers: Seller[];
-  canViewTaxId: boolean;
   metrics: { buyersContacted: number; interested: number; offers: number; highOffer: number | null };
   // Multi-asset grouping.
   parent: { id: string; name: string } | null;

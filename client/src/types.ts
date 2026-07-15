@@ -194,9 +194,6 @@ export interface Seller {
   physicalZip: string | null;
   internalNotes: string | null;
   preferredCommunicationNotes: string | null;
-  /** Only present when the caller holds viewSellerTaxId; otherwise hasTaxId flags existence. */
-  taxId?: string | null;
-  hasTaxId: boolean;
   assignedTeamMember: { id: string; name: string } | null;
   dateAdded: string;
   updatedAt: string;

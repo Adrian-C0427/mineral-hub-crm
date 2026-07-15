@@ -1,10 +1,9 @@
 import type maplibregl from "maplibre-gl";
-import { jsPDF } from "jspdf";
 
 /**
  * Professional exports for the deal tract map: the live MapLibre canvas is
  * composed with a branded header (logo, deal, date), north arrow, scale bar
- * and legend into a single sheet, then delivered as PNG/JPEG/PDF. SVG is a
+ * and legend into a single sheet, then delivered as PNG/JPEG. SVG is a
  * true vector export of the tract drawing (polygons projected through the
  * current view) — no raster basemap, ideal for further editing.
  */
@@ -12,9 +11,7 @@ import { jsPDF } from "jspdf";
 export interface TractExportSummary { name: string; acres: number | null; closes: boolean | null }
 
 export interface TractExportOpts {
-  format: "png" | "jpeg" | "pdf" | "svg";
-  pageSize: "letter" | "a4";
-  orientation: "portrait" | "landscape";
+  format: "png" | "jpeg" | "svg";
   dealName: string;
   orgName: string;
   logoUrl?: string | null;
@@ -193,19 +190,7 @@ export async function exportTractMap(map: maplibregl.Map, opts: TractExportOpts)
     return;
   }
   const canvas = await composeSheet(map, opts);
-  if (opts.format === "png" || opts.format === "jpeg") {
-    const type = opts.format === "png" ? "image/png" : "image/jpeg";
-    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, type, 0.92));
-    if (blob) download(blob, `${stem}.${opts.format}`);
-    return;
-  }
-  // PDF: fit the composed sheet inside the chosen page, preserving aspect.
-  const pdf = new jsPDF({ orientation: opts.orientation, unit: "pt", format: opts.pageSize });
-  const pageW = pdf.internal.pageSize.getWidth();
-  const pageH = pdf.internal.pageSize.getHeight();
-  const margin = 24;
-  const scale = Math.min((pageW - margin * 2) / canvas.width, (pageH - margin * 2) / canvas.height);
-  const w = canvas.width * scale, h = canvas.height * scale;
-  pdf.addImage(canvas.toDataURL("image/jpeg", 0.92), "JPEG", (pageW - w) / 2, (pageH - h) / 2, w, h);
-  pdf.save(`${stem}.pdf`);
+  const type = opts.format === "png" ? "image/png" : "image/jpeg";
+  const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, type, 0.92));
+  if (blob) download(blob, `${stem}.${opts.format}`);
 }

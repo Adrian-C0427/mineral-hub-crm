@@ -9,7 +9,6 @@ import { Banner, MetricCard, Modal, Spinner } from "../components/ui";
 import { WellImport } from "../components/WellImport";
 import { money, num, prettyEnum, fmtDate, fmtDateTime, fmtDateLocal } from "../lib/format";
 import { monthLabel, chartTooltip } from "../lib/charts";
-import { exportElementToPdf } from "../lib/pdf";
 
 /**
  * Well Production Analysis & Valuation — an intentionally launched research
@@ -168,8 +167,6 @@ export function Valuation() {
   const [openAnalysisId, setOpenAnalysisId] = useState<string | null>(null);
   const [openAnalysisName, setOpenAnalysisName] = useState<string>("");
   const [saveOpen, setSaveOpen] = useState(false);
-  const [exporting, setExporting] = useState(false);
-  const [exportErr, setExportErr] = useState<string | null>(null);
   const reportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -244,30 +241,6 @@ export function Valuation() {
     setPageTab("workspace");
   }
 
-  async function onExportPdf() {
-    if (!analysis) return;
-    setExporting(true); setExportErr(null);
-    const prevTab = resultTab;
-    setResultTab("report");
-    // Let the report (and its charts) lay out before rasterizing.
-    await new Promise((r) => setTimeout(r, 600));
-    try {
-      if (reportRef.current) {
-        const name = openAnalysisName || analysis.wells.map((w) => w.name).join("_").slice(0, 60) || "valuation";
-        await exportElementToPdf(reportRef.current, `${name.replace(/[^\w\-]+/g, "-")}-valuation.pdf`, {
-          title: "Well Analysis & Valuation",
-          subtitle: openAnalysisName || analysis.wells.map((w) => w.name).join(", ").slice(0, 80),
-          orgName: user?.organization?.name,
-          logoUrl: user?.organization?.fullLogo,
-        });
-      }
-    } catch (e) {
-      setExportErr(e instanceof Error ? e.message : "PDF export failed — please try again.");
-    } finally {
-      setExporting(false);
-      setResultTab(prevTab);
-    }
-  }
 
   return (
     <div className="page">
@@ -280,13 +253,11 @@ export function Valuation() {
           {analysis && (
             <>
               <button className="small" onClick={() => setSaveOpen(true)}>{openAnalysisId ? "Save / Save as…" : "Save analysis…"}</button>
-              <button className="small" disabled={exporting} onClick={onExportPdf}>{exporting ? "Exporting…" : "Export PDF"}</button>
             </>
           )}
           <button className="primary small" onClick={newAnalysis}>+ New analysis</button>
         </div>
       </div>
-      {exportErr && <Banner kind="error">Couldn't generate the PDF: {exportErr}</Banner>}
 
       <div className="tab-row">
         <button className={`tab ${pageTab === "workspace" ? "active" : ""}`} onClick={() => setPageTab("workspace")}>Analysis Workspace</button>

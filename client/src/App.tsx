@@ -20,11 +20,11 @@ import { SettingsPortal } from "./pages/SettingsPortal";
 const Integrations = lazy(() => import("./pages/Integrations").then((m) => ({ default: m.Integrations })));
 // MapLibre is heavy (~300KB gzip); load it only when the Map route is visited.
 const MapView = lazy(() => import("./pages/MapView").then((m) => ({ default: m.MapView })));
-// recharts (+ jsPDF/html2canvas on Reports) is heavy; load analytics on demand.
+// recharts is heavy; load analytics on demand.
 const Expenses = lazy(() => import("./pages/Expenses").then((m) => ({ default: m.Expenses })));
 const Reports = lazy(() => import("./pages/Reports").then((m) => ({ default: m.Reports })));
 const Research = lazy(() => import("./pages/Research").then((m) => ({ default: m.Research })));
-// Well valuation shares the recharts/jsPDF bundle profile; load on demand too.
+// Well valuation shares the recharts bundle profile; load on demand too.
 const Valuation = lazy(() => import("./pages/Valuation").then((m) => ({ default: m.Valuation })));
 // Mineral Assets (portfolio) — the detail view pulls in recharts + MapLibre.
 const MineralAssets = lazy(() => import("./pages/MineralAssets").then((m) => ({ default: m.MineralAssets })));

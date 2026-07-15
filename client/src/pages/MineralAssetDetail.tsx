@@ -41,7 +41,6 @@ interface AssetDetail extends DealSummary {
   files: DocFile[];
   sellers: Seller[];
   revenueEntries: RevenueEntry[];
-  canViewTaxId: boolean;
   metrics: { buyersContacted: number; interested: number; offers: number; highOffer: number | null };
 }
 

@@ -28,7 +28,7 @@ export type OrgRole = "OWNER" | "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER";
 export const PERMISSIONS = [
   // Deals (also covers Pipeline, Closed/Archived deals, and Mineral Assets,
   // which are all Deal records).
-  "viewDeals", "createDeals", "editDeals", "deleteDeals", "sendEmail", "viewSellerTaxId",
+  "viewDeals", "createDeals", "editDeals", "deleteDeals", "sendEmail",
   // Buyers
   "viewBuyers", "createBuyers", "editBuyers", "deleteBuyers",
   // Buyer Portal
@@ -42,7 +42,7 @@ export const PERMISSIONS = [
   // Maps
   "viewMap",
   // Reports
-  "viewReports", "exportReports",
+  "viewReports",
   // Expenses
   "manageExpenses", "approveExpenses",
   // AI Tools
@@ -60,7 +60,6 @@ export const PERMISSION_META: Record<Permission, { label: string; group: string 
   editDeals: { label: "Edit deals", group: "Deals" },
   deleteDeals: { label: "Delete deals", group: "Deals" },
   sendEmail: { label: "Send deal emails", group: "Deals" },
-  viewSellerTaxId: { label: "View seller tax / entity IDs", group: "Deals" },
 
   viewBuyers: { label: "View buyers", group: "Buyers" },
   createBuyers: { label: "Create buyers", group: "Buyers" },
@@ -81,7 +80,6 @@ export const PERMISSION_META: Record<Permission, { label: string; group: string 
   viewMap: { label: "View the interactive map", group: "Maps" },
 
   viewReports: { label: "View reports", group: "Reports" },
-  exportReports: { label: "Export reports", group: "Reports" },
 
   manageExpenses: { label: "Manage expenses", group: "Expenses" },
   approveExpenses: { label: "Approve expenses", group: "Expenses" },
@@ -91,7 +89,7 @@ export const PERMISSION_META: Record<Permission, { label: string; group: string 
   manageMembers: { label: "Manage team members", group: "Administration" },
   inviteRemoveUsers: { label: "Invite or remove users", group: "Administration" },
   manageOrgSettings: { label: "Manage organization settings & branding", group: "Administration" },
-  manageApiIntegrations: { label: "Manage API integrations", group: "Administration" },
+  manageApiIntegrations: { label: "Manage integrations", group: "Administration" },
 };
 
 /** Module group render order for the matrix (groups not listed fall to the end). */
@@ -161,6 +159,10 @@ const PERMISSION_MIGRATIONS: Record<string, Permission[]> = {
   // Removed permissions (no current equivalent).
   editMapData: [],
   accessAdminSettings: [],
+  // 2026-07 audit: seller tax/entity IDs are no longer stored or displayed
+  // anywhere, and the only export (PDF) was removed app-wide.
+  viewSellerTaxId: [],
+  exportReports: [],
   // Managing roles is now owner-only; it is no longer grantable to any role.
   manageRoles: [],
   // Split permissions: preserve prior effective access. Before the audit these

@@ -706,7 +706,7 @@ function FeatureTrio() {
       <div className="lp-trio rv">
         <div><div className="lp-ico"><Briefcase size={22} strokeWidth={1.8} /></div><h3>Built for the deal flow</h3><p>From signed PSA to funded closing — every stage, document, seller, and dollar in one place. Offers, e-mail outreach, and follow-up alerts included.</p></div>
         <div><div className="lp-ico"><Store size={22} strokeWidth={1.8} /></div><h3>Your own buyer portal</h3><p>Publish offerings to a branded public marketplace. Buyers browse, filter the map, and submit their buy box — leads land in your CRM with a notification.</p></div>
-        <div><div className="lp-ico"><TrendingUp size={22} strokeWidth={1.8} /></div><h3>Profit, not activity</h3><p>Realized vs. projected profit per deal and per month, win rate, county rankings, and PDF reports. The numbers that actually matter.</p></div>
+        <div><div className="lp-ico"><TrendingUp size={22} strokeWidth={1.8} /></div><h3>Profit, not activity</h3><p>Realized vs. projected profit per deal and per month, win rate, county rankings, and CSV exports. The numbers that actually matter.</p></div>
       </div>
     </section>
   );

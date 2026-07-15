@@ -74,9 +74,7 @@ export function TractSection({ dealId, dealName, canEdit, abstractIds = [] }: { 
   const mapHandle = useRef<maplibregl.Map | null>(null);
 
   // Export options.
-  const [expFormat, setExpFormat] = useState<"png" | "jpeg" | "pdf" | "svg">("pdf");
-  const [expPage, setExpPage] = useState<"letter" | "a4">("letter");
-  const [expOrient, setExpOrient] = useState<"landscape" | "portrait">("landscape");
+  const [expFormat, setExpFormat] = useState<"png" | "jpeg" | "svg">("png");
   const [expNotes, setExpNotes] = useState("");
 
   const load = useCallback(() => api.get<Tract[]>(`/deals/${dealId}/tracts`).then(setTracts).catch((e) => setErr(e.message)), [dealId]);
@@ -113,7 +111,7 @@ export function TractSection({ dealId, dealName, canEdit, abstractIds = [] }: { 
     setBusy(true);
     try {
       await exportTractMap(map, {
-        format: expFormat, pageSize: expPage, orientation: expOrient,
+        format: expFormat,
         dealName, orgName: user?.organization?.name ?? "Mineral Hub",
         logoUrl: user?.organization?.fullLogo ?? null,
         notes: expNotes.trim() || undefined,
@@ -199,15 +197,7 @@ export function TractSection({ dealId, dealName, canEdit, abstractIds = [] }: { 
         <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <span className="muted" style={{ fontSize: 13 }}>Export map:</span>
           <Select value={expFormat} onChange={(v) => setExpFormat(v as typeof expFormat)} width={150} ariaLabel="Export format"
-            options={[{ value: "pdf", label: "PDF" }, { value: "png", label: "PNG" }, { value: "jpeg", label: "JPEG" }, { value: "svg", label: "SVG (vector)" }]} />
-          {expFormat === "pdf" && (
-            <>
-              <Select value={expPage} onChange={(v) => setExpPage(v as typeof expPage)} width={120} ariaLabel="Page size"
-                options={[{ value: "letter", label: "Letter" }, { value: "a4", label: "A4" }]} />
-              <Select value={expOrient} onChange={(v) => setExpOrient(v as typeof expOrient)} width={140} ariaLabel="Orientation"
-                options={[{ value: "landscape", label: "Landscape" }, { value: "portrait", label: "Portrait" }]} />
-            </>
-          )}
+            options={[{ value: "png", label: "PNG" }, { value: "jpeg", label: "JPEG" }, { value: "svg", label: "SVG (vector)" }]} />
           <input placeholder="Optional notes for the export…" value={expNotes} onChange={(e) => setExpNotes(e.target.value)} style={{ flex: 1, minWidth: 180 }} />
           <button className="primary small" disabled={busy} onClick={doExport}>Export</button>
         </div>

@@ -18,7 +18,6 @@ import { CLASS_COLORS } from "../components/NetworkGraph";
 import { downloadCsv } from "../lib/csv";
 import { fmtDate, num, prettyEnum, prettyDocType } from "../lib/format";
 import { CHART_COLORS, chartTooltip } from "../lib/charts";
-import { exportElementToPdf } from "../lib/pdf";
 
 /**
  * Research & Market Intelligence — trends in mineral transactions, leasing
@@ -192,7 +191,6 @@ export function Research() {
   const [showFilters, setShowFilters] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
   const [opts, setOpts] = useState<FilterOpts | null>(null);
-  const [exporting, setExporting] = useState(false);
   const captureRef = useRef<HTMLDivElement>(null);
 
   const range = useMemo(() => rangeFor(period, custom), [period, custom]);
@@ -217,21 +215,6 @@ export function Research() {
   const hasAnyData = opts != null && (opts.states.length > 0 || opts.counties.length > 0);
   const canManage = can("manageResearchData");
 
-  const [exportErr, setExportErr] = useState<string | null>(null);
-  async function onExportPdf() {
-    if (!captureRef.current) return;
-    setExporting(true); setExportErr(null);
-    try {
-      await exportElementToPdf(captureRef.current, `market-intel-${range.from}_to_${range.to}.pdf`, {
-        title: "Research & Market Intelligence",
-        subtitle: `${fmtDate(range.from)} – ${fmtDate(range.to)}`,
-        orgName: user?.organization?.name,
-        logoUrl: user?.organization?.fullLogo,
-      });
-    }
-    catch (e) { setExportErr(e instanceof Error ? e.message : "PDF export failed — please try again."); }
-    finally { setExporting(false); }
-  }
 
   const activeFilterCount =
     filters.states.length + filters.counties.length + filters.docTypes.length +
@@ -261,11 +244,7 @@ export function Research() {
     <div className="page">
       <div className="page-header">
         <h1>Research & Market Intelligence</h1>
-        {can("exportReports") && tab !== "data" && (
-          <button className="primary" onClick={onExportPdf} disabled={exporting}>{exporting ? "Generating…" : "Export PDF"}</button>
-        )}
       </div>
-      {exportErr && <Banner kind="error">Couldn't generate the PDF: {exportErr}</Banner>}
 
       {/* --- Period + filter controls --- */}
       <div className="panel">
@@ -1434,7 +1413,6 @@ function RecordsTab({ qs }: { qs: string }) {
   const canManage = can("manageResearchData");
   const [kind, setKind] = useState<"documents" | "permits">("documents");
   const [page, setPage] = useState(1);
-  const [archived, setArchived] = useState(false);
   const [docs, setDocs] = useState<Paged<DocRecord> | null>(null);
   const [permits, setPermits] = useState<Paged<PermitRecord> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1444,18 +1422,20 @@ function RecordsTab({ qs }: { qs: string }) {
   const [reloadKey, setReloadKey] = useState(0);
   const pageSize = 50;
 
-  useEffect(() => { setPage(1); sel.clear(); }, [qs, kind, archived]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setPage(1); sel.clear(); }, [qs, kind]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setLoading(true);
-    const url = `/research/${kind}?${qs}&page=${page}&pageSize=${pageSize}${archived ? "&archived=true" : ""}`;
+    const url = `/research/${kind}?${qs}&page=${page}&pageSize=${pageSize}`;
     if (kind === "documents") api.get<Paged<DocRecord>>(url).then(setDocs).catch(() => setDocs(null)).finally(() => setLoading(false));
     else api.get<Paged<PermitRecord>>(url).then(setPermits).catch(() => setPermits(null)).finally(() => setLoading(false));
-  }, [qs, kind, page, archived, reloadKey]);
+  }, [qs, kind, page, reloadKey]);
 
-  async function bulk(action: "delete" | "archive" | "unarchive") {
+  // Deletion is permanent — removed records can never resurface as phantom
+  // duplicates in a later import.
+  async function bulkDelete() {
     setBusy(true);
     try {
-      await api.post("/research/records/bulk", { kind: kind.toUpperCase(), ids: [...sel.selected], action });
+      await api.post("/research/records/bulk", { kind: kind.toUpperCase(), ids: [...sel.selected], action: "delete" });
       sel.clear(); setConfirmDel(false); setReloadKey((k) => k + 1);
     } finally { setBusy(false); }
   }
@@ -1519,17 +1499,13 @@ function RecordsTab({ qs }: { qs: string }) {
           <span className={`chip ${kind === "permits" ? "active" : ""}`} onClick={() => setKind("permits")}>Drilling Permits</span>
         </div>
         <div className="row" style={{ gap: 8, alignItems: "center" }}>
-          {active && <span className="muted" style={{ fontSize: 12 }}>{num(active.total)} {archived ? "archived " : ""}records</span>}
-          {canManage && <label className="dm-chk" style={{ fontSize: 12 }}><input type="checkbox" checked={archived} onChange={(e) => setArchived(e.target.checked)} /> Show archived</label>}
+          {active && <span className="muted" style={{ fontSize: 12 }}>{num(active.total)} records</span>}
           <button className="small" onClick={exportAll} disabled={!active?.total}>Export CSV</button>
         </div>
       </div>
       {canManage && sel.selected.size > 0 && (
         <BulkBar count={sel.selected.size} onClear={sel.clear}>
           <button className="small" onClick={exportSelected}>Export</button>
-          {archived
-            ? <button className="small" onClick={() => bulk("unarchive")} disabled={busy}>Unarchive</button>
-            : <button className="small" onClick={() => bulk("archive")} disabled={busy}>Archive</button>}
           <button className="small danger" onClick={() => setConfirmDel(true)} disabled={busy}>Delete</button>
         </BulkBar>
       )}
@@ -1548,7 +1524,7 @@ function RecordsTab({ qs }: { qs: string }) {
         </>
       )}
       {confirmDel && (
-        <ConfirmDelete count={sel.selected.size} itemLabel="record" busy={busy} onCancel={() => setConfirmDel(false)} onConfirm={() => bulk("delete")} />
+        <ConfirmDelete count={sel.selected.size} itemLabel="record" busy={busy} onCancel={() => setConfirmDel(false)} onConfirm={bulkDelete} />
       )}
     </div>
   );

@@ -79,9 +79,6 @@ const ASSET_SCALAR_KEYS = [
   "leaseStatus", "leaseInfo", "divisionOrdersNote", "taxInfo",
 ] as const;
 
-const hasPerm = (req: AuthedRequest, perm: string) =>
-  req.user!.orgRole === "OWNER" || req.user!.permissions.includes(perm as never);
-
 // --------------------------------------------------------------------------
 // List
 // --------------------------------------------------------------------------
@@ -393,7 +390,6 @@ dealsRouter.get(
       },
     });
     if (!deal) throw new HttpError(404, "Deal not found");
-    const canSeeTaxId = hasPerm(req, "viewSellerTaxId");
 
     const now = new Date();
     // Buyer activity rows with live match %.
@@ -470,17 +466,16 @@ dealsRouter.get(
         versionCount: f._count.supersedes,
       })),
       buyerActivity: activity,
-      sellers: deal.sellers.map((s) => serializeSeller(s, canSeeTaxId)),
+      sellers: deal.sellers.map((s) => serializeSeller(s)),
       revenueEntries: deal.revenueEntries.map((r) => ({
         id: r.id, month: r.month, amount: r.amount, kind: r.kind, operator: r.operator, note: r.note,
       })),
-      canViewTaxId: canSeeTaxId,
       metrics: { buyersContacted, interested, offers: offerCount, highOffer },
     });
   }),
 );
 
-// Seller serialization — taxId is only included for callers with viewSellerTaxId.
+// Seller serialization — the buyer/UI-facing projection of a DealSeller row.
 function serializeSeller(
   s: {
     id: string; isPrimary: boolean; ownershipPercent: number | null;
@@ -489,11 +484,10 @@ function serializeSeller(
     primaryPhone: string | null; secondaryPhone: string | null; email: string | null; preferredContactMethod: string | null;
     mailingAddress: string | null; mailingCity: string | null; mailingState: string | null; mailingZip: string | null;
     physicalAddress: string | null; physicalCity: string | null; physicalState: string | null; physicalZip: string | null;
-    internalNotes: string | null; taxId: string | null; preferredCommunicationNotes: string | null;
+    internalNotes: string | null; preferredCommunicationNotes: string | null;
     assignedTeamMemberId: string | null; assignedTeamMember: { id: string; name: string } | null;
     createdAt: Date; updatedAt: Date;
   },
-  includeTaxId: boolean,
 ) {
   return {
     id: s.id, isPrimary: s.isPrimary, ownershipPercent: s.ownershipPercent,
@@ -503,9 +497,6 @@ function serializeSeller(
     mailingAddress: s.mailingAddress, mailingCity: s.mailingCity, mailingState: s.mailingState, mailingZip: s.mailingZip,
     physicalAddress: s.physicalAddress, physicalCity: s.physicalCity, physicalState: s.physicalState, physicalZip: s.physicalZip,
     internalNotes: s.internalNotes, preferredCommunicationNotes: s.preferredCommunicationNotes,
-    // Sensitive: present only for permitted callers; a boolean flags its existence otherwise.
-    taxId: includeTaxId ? s.taxId : undefined,
-    hasTaxId: s.taxId != null,
     assignedTeamMember: s.assignedTeamMember ? { id: s.assignedTeamMember.id, name: s.assignedTeamMember.name } : null,
     dateAdded: s.createdAt, updatedAt: s.updatedAt,
   };
@@ -1149,7 +1140,6 @@ const sellerSchema = z.object({
   physicalState: z.string().trim().max(40).nullish(),
   physicalZip: z.string().trim().max(20).nullish(),
   internalNotes: z.string().trim().max(5000).nullish(),
-  taxId: z.string().trim().max(40).nullish(),
   preferredCommunicationNotes: z.string().trim().max(2000).nullish(),
   assignedTeamMemberId: z.string().nullish(),
 });
@@ -1162,19 +1152,12 @@ async function ownDealOr404(req: AuthedRequest): Promise<string> {
   return deal.id;
 }
 
-// taxId is only writable by callers who can view it (keeps the field consistent
-// with its read gate).
-function stripTaxIdIfNeeded(req: AuthedRequest, data: Record<string, unknown>) {
-  if ("taxId" in data && !hasPerm(req, "viewSellerTaxId")) delete data.taxId;
-  return data;
-}
-
 dealsRouter.post(
   "/:id/sellers",
   requirePermission("editDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const dealId = await ownDealOr404(req);
-    const data = stripTaxIdIfNeeded(req, sellerSchema.parse(req.body));
+    const data = sellerSchema.parse(req.body);
     if (data.assignedTeamMemberId) {
       const u = await prisma.user.findFirst({ where: { id: data.assignedTeamMemberId as string, organizationId: orgId(req) } });
       if (!u) throw new HttpError(400, "Assigned team member is not in your organization");
@@ -1185,7 +1168,7 @@ dealsRouter.post(
       data: { ...(data as object), dealId, isPrimary: (data.isPrimary as boolean) ?? count === 0 },
       include: sellerInclude,
     });
-    res.status(201).json(serializeSeller(seller, hasPerm(req, "viewSellerTaxId")));
+    res.status(201).json(serializeSeller(seller));
   }),
 );
 
@@ -1196,7 +1179,7 @@ dealsRouter.patch(
     const dealId = await ownDealOr404(req);
     const existing = await prisma.dealSeller.findFirst({ where: { id: req.params.sellerId, dealId } });
     if (!existing) throw new HttpError(404, "Seller not found");
-    const data = stripTaxIdIfNeeded(req, sellerSchema.partial().parse(req.body));
+    const data = sellerSchema.partial().parse(req.body);
     if (data.assignedTeamMemberId) {
       const u = await prisma.user.findFirst({ where: { id: data.assignedTeamMemberId as string, organizationId: orgId(req) } });
       if (!u) throw new HttpError(400, "Assigned team member is not in your organization");
@@ -1206,7 +1189,7 @@ dealsRouter.patch(
     if (data.isPrimary === true) {
       await prisma.dealSeller.updateMany({ where: { dealId, id: { not: seller.id }, isPrimary: true }, data: { isPrimary: false } });
     }
-    res.json(serializeSeller(seller, hasPerm(req, "viewSellerTaxId")));
+    res.json(serializeSeller(seller));
   }),
 );
 

@@ -183,7 +183,7 @@ buyersRouter.get(
     const rows = await prisma.researchDocument.findMany({
       where: {
         organizationId: org, docClass: "TRANSACTION",
-        grantorNorm: { not: null }, granteeNorm: { not: null }, archivedAt: null,
+        grantorNorm: { not: null }, granteeNorm: { not: null },
       },
       select: {
         id: true, grantor: true, grantorNorm: true, grantee: true, granteeNorm: true,
