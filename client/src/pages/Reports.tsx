@@ -16,7 +16,6 @@ import { ChartTypeToggle, useChartType } from "../components/ChartTypeToggle";
 import { money, pct, num, fmtDate, prettyStage } from "../lib/format";
 import { useStages } from "../stages";
 import { CHART_COLORS, COLOR_REVENUE, COLOR_PROFIT, COLOR_FORECAST, monthLabel, chartTooltip } from "../lib/charts";
-import { exportElementToPdf } from "../lib/pdf";
 import type { DealSummary } from "../types";
 
 interface Kpis {
@@ -136,7 +135,6 @@ export function Reports() {
   // drill, so the page no longer eagerly pulls the whole deal list.
   const dealsRef = useRef<DealSummary[] | null>(null);
   const [loading, setLoading] = useState(true);
-  const [exporting, setExporting] = useState(false);
   const [drill, setDrill] = useState<{ title: string; rows: DealSummary[] } | null>(null);
   const reportRef = useRef<HTMLDivElement>(null);
   // Which KPI metrics are shown + their order (Customize View, saved per user).
@@ -168,21 +166,6 @@ export function Reports() {
     return () => window.clearTimeout(t);
   }, [range.from, range.to, cmp?.from, cmp?.to, filters]);
 
-  const [exportErr, setExportErr] = useState<string | null>(null);
-  async function onExport() {
-    if (!reportRef.current) return;
-    setExporting(true); setExportErr(null);
-    try {
-      await exportElementToPdf(reportRef.current, `mineral-hub-report-${range.from}_to_${range.to}.pdf`, {
-        title: "Reports & Analytics",
-        subtitle: `${fmtDate(range.from)} – ${fmtDate(range.to)}`,
-        orgName: user?.organization?.name,
-        logoUrl: user?.organization?.fullLogo,
-      });
-    }
-    catch (e) { setExportErr(e instanceof Error ? e.message : "PDF export failed — please try again."); }
-    finally { setExporting(false); }
-  }
 
   const activeFilterChips = Object.entries(filters).flatMap(([key, vals]) =>
     vals.map((v) => {
@@ -211,10 +194,8 @@ export function Reports() {
         <h1>Reports & Analytics</h1>
         <div className="row" style={{ gap: 8 }}>
           <MetricsCustomize prefs={metricPrefs} onChange={setMetricPrefs} />
-          {can("exportReports") && <button className="primary" onClick={onExport} disabled={exporting || !data}>{exporting ? "Generating…" : "Export PDF"}</button>}
         </div>
       </div>
-      {exportErr && <Banner kind="error">Couldn't generate the PDF: {exportErr}</Banner>}
 
       {/* --- Controls (not captured in PDF) --- */}
       <div className="panel">
