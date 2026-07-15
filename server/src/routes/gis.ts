@@ -135,7 +135,7 @@ const searchSchema = z.object({ q: z.string().trim().min(1).max(120) });
  * apply a filter.
  */
 /** "BOX(minx miny,maxx maxy)" → [minx, miny, maxx, maxy] (or null). */
-function parseExtent(ext: string | null): [number, number, number, number] | null {
+export function parseExtent(ext: string | null): [number, number, number, number] | null {
   const m = ext?.match(/^BOX\(([-\d.]+) ([-\d.]+),([-\d.]+) ([-\d.]+)\)$/);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])] : null;
 }
@@ -341,6 +341,62 @@ gisRouter.get(
       operators: (w?.operators ?? []).sort(),
       wellCount: w?.n ?? 0,
     });
+  }),
+);
+
+/**
+ * Bounding box of everything matching the current map filters — powers the
+ * map's "zoom to filtered results" behavior. Filter values arrive as repeated
+ * query params (?operators=A&operators=B) because operator names can contain
+ * commas. Precedence: any well-level filter (type/status/operator) frames the
+ * matching wells; otherwise abstract/survey filters frame matching abstracts;
+ * otherwise the selected counties frame themselves.
+ */
+/**
+ * Pure query planner for /extent (exported for tests): picks the table whose
+ * extent best represents "the filtered results" and builds the parameterized
+ * predicate list. Returns null when no filter is set.
+ */
+export function planExtentQuery(q: Record<string, unknown>): { sql: string; params: string[][] } | null {
+  const list = (k: string): string[] =>
+    (Array.isArray(q[k]) ? (q[k] as unknown[]) : q[k] == null ? [] : [q[k]])
+      .map((s) => String(s).trim()).filter(Boolean).slice(0, 500);
+  const counties = list("counties"), surveys = list("surveys"), abstracts = list("abstracts");
+  const wellTypes = list("wellTypes"), wellStatuses = list("wellStatuses"), operators = list("operators");
+
+  const params: string[][] = [];
+  const cond = (col: string, vals: string[]): string => { params.push(vals); return `${col} = ANY($${params.length}::text[])`; };
+
+  if (wellTypes.length || wellStatuses.length || operators.length) {
+    const conds: string[] = [];
+    if (counties.length) conds.push(cond("county", counties));
+    if (surveys.length) conds.push(cond("survey", surveys));
+    if (abstracts.length) conds.push(cond("replace(abstract, '?', '')", abstracts));
+    if (wellTypes.length) conds.push(cond("type", wellTypes));
+    if (wellStatuses.length) conds.push(cond("status", wellStatuses));
+    if (operators.length) conds.push(cond("operator", operators));
+    return { sql: `SELECT ST_Extent(geom)::text AS ext FROM rrc.wells WHERE ${conds.join(" AND ")}`, params };
+  }
+  if (surveys.length || abstracts.length) {
+    const conds: string[] = [];
+    if (counties.length) conds.push(cond("county", counties));
+    if (surveys.length) conds.push(cond("survey", surveys));
+    if (abstracts.length) conds.push(cond("replace(abstract, '?', '')", abstracts));
+    return { sql: `SELECT ST_Extent(geom)::text AS ext FROM gis.abstracts WHERE ${conds.join(" AND ")}`, params };
+  }
+  if (counties.length) {
+    return { sql: `SELECT ST_Extent(geom)::text AS ext FROM gis.counties WHERE ${cond("name", counties)}`, params };
+  }
+  return null;
+}
+
+gisRouter.get(
+  "/extent",
+  asyncHandler(async (req, res) => {
+    const plan = planExtentQuery(req.query as Record<string, unknown>);
+    if (!plan) return res.json({ bbox: null });
+    const rows = await prisma.$queryRawUnsafe<{ ext: string | null }[]>(plan.sql, ...plan.params);
+    res.json({ bbox: parseExtent(rows[0]?.ext ?? null) });
   }),
 );
 

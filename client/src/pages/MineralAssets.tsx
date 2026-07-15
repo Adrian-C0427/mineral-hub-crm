@@ -5,9 +5,8 @@ import { useAuth } from "../auth/AuthContext";
 import { Spinner, MetricCard, Modal, Banner } from "../components/ui";
 import { Select } from "../components/Select";
 import { SortableTable, type Column } from "../components/SortableTable";
-import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
+import { GeoFields } from "../components/GeoFields";
 import { useRowSelection, BulkActionsBar } from "../components/bulk";
-import { TEXAS_COUNTY_OPTIONS } from "../lib/options";
 import { downloadCsv } from "../lib/csv";
 import { money, num, fmtDate } from "../lib/format";
 import type { DealSummary, UserLite } from "../types";
@@ -131,8 +130,9 @@ export function MineralAssets() {
 
 function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onCreated: (d: DealSummary) => void }) {
   const [name, setName] = useState("");
+  const [states, setStates] = useState<string[]>([]);
   const [counties, setCounties] = useState<string[]>([]);
-  const [state, setState] = useState("TX");
+  const [abstractIds, setAbstractIds] = useState<string[]>([]);
   const [ownershipType, setOwnershipType] = useState(OWNERSHIP_TYPES[0]);
   const [producingStatus, setProducingStatus] = useState(PRODUCING_STATUSES[0]);
   const [acquisitionDate, setAcquisitionDate] = useState("");
@@ -150,8 +150,10 @@ function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onCreated:
         name: name.trim(),
         recordType: "OWNED_ASSET",
         assetMode: "HOLD",
+        states,
+        state: states[0] ?? null,
         counties,
-        state: state.trim() || null,
+        abstractIds,
         ownershipType,
         producingStatus,
         acquisitionDate: acquisitionDate || null,
@@ -175,8 +177,7 @@ function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onCreated:
     >
       <div className="field"><label>Asset name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Smith Unit Royalty — Midland Co." autoFocus /></div>
       <div className="grid-2">
-        <div className="field"><label>Counties</label><SearchableMultiSelect options={TEXAS_COUNTY_OPTIONS} value={counties} onChange={setCounties} placeholder="Search counties…" /></div>
-        <div className="field"><label>State</label><input value={state} maxLength={2} onChange={(e) => setState(e.target.value.toUpperCase())} /></div>
+        <GeoFields states={states} onStatesChange={setStates} counties={counties} onCountiesChange={setCounties} abstractIds={abstractIds} onAbstractsChange={setAbstractIds} />
         <div className="field"><label>Ownership type</label><Select value={ownershipType} onChange={setOwnershipType} ariaLabel="Ownership type" options={OWNERSHIP_TYPES.map((t) => ({ value: t, label: t }))} /></div>
         <div className="field"><label>Producing status</label><Select value={producingStatus} onChange={setProducingStatus} ariaLabel="Producing status" options={PRODUCING_STATUSES.map((t) => ({ value: t, label: t }))} /></div>
         <div className="field"><label>Acquisition date</label><input type="date" value={acquisitionDate} onChange={(e) => setAcquisitionDate(e.target.value)} /></div>

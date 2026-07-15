@@ -7,7 +7,7 @@ import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { Select } from "../components/Select";
 import { downloadCsv } from "../lib/csv";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION } from "../lib/counties";
-import { addCadastralLayers, styleWithGlyphs, watchGisHealth, abstractsPaint, wellsPaint, wellboresPaint } from "../lib/mapLayers";
+import { addCadastralLayers, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
 import { MapLayersPanel, PillToggle } from "../components/MapLayersPanel";
 import { Spinner, StageBadge, PriorityBadge } from "../components/ui";
 import { money, num } from "../lib/format";
@@ -52,15 +52,20 @@ interface Suggest {
 interface Recent { t: keyof Suggest; label: string; sub: string; p: Record<string, unknown> }
 const RECENTS_KEY = "mh_map_recents";
 
-// Map view personalization (Customize View): the user's default visible layers,
-// last camera position, and named presets — all remembered locally per browser.
+// Map view personalization: the user's default visible layers, last camera
+// position, and named filter presets — all remembered locally per browser.
 const MAP_LAYERS_KEY = "mh-map-layers:v1";
 const MAP_VIEW_KEY = "mh-map-view:v1";
-const MAP_PRESETS_KEY = "mh-map-presets:v1";
+const MAP_FILTERS_KEY = "mh-map-filters:v1";
 type MapLayers = { boundaries: boolean; absNums: boolean; surveyNames: boolean; deals: boolean; wells: boolean; wellbores: boolean };
 const DEFAULT_MAP_LAYERS: MapLayers = { boundaries: true, absNums: true, surveyNames: true, deals: true, wells: true, wellbores: true };
 interface MapCam { center: [number, number]; zoom: number }
-interface MapPreset { name: string; layers: MapLayers; view: MapCam }
+/** A named, reusable combination of every filter on the Filters panel. */
+interface MapFilterState {
+  status: string; counties: string[]; surveys: string[]; abstracts: string[];
+  wellTypes: string[]; wellStatuses: string[]; operators: string[]; formations: string[];
+}
+interface FilterPreset { name: string; filters: MapFilterState }
 function loadJson<T>(key: string, fallback: T): T {
   try { const raw = localStorage.getItem(key); return raw ? (JSON.parse(raw) as T) : fallback; } catch { return fallback; }
 }
@@ -115,9 +120,9 @@ export function MapView() {
   const [layers, setLayers] = useState<MapLayers>(() => ({ ...DEFAULT_MAP_LAYERS, ...loadJson<Partial<MapLayers>>(MAP_LAYERS_KEY, {}) }));
   const layersRef = useRef(layers); layersRef.current = layers;
   useEffect(() => { saveJson(MAP_LAYERS_KEY, layers); }, [layers]);
-  // Saved map presets (default layers + camera), remembered per browser.
-  const [presets, setPresets] = useState<MapPreset[]>(() => loadJson<MapPreset[]>(MAP_PRESETS_KEY, []));
-  const [presetName, setPresetName] = useState("");
+  // Saved filter presets (named filter combinations), remembered per browser.
+  const [filterPresets, setFilterPresets] = useState<FilterPreset[]>(() => loadJson<FilterPreset[]>(MAP_FILTERS_KEY, []));
+  const [filterName, setFilterName] = useState("");
   const [showLayers, setShowLayers] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [statusFilter, setStatusFilter] = useState("ACTIVE");
@@ -314,7 +319,7 @@ export function MapView() {
       });
 
       styleReady.current = true;
-      applyLayerVisibility(); applyAbstractFilter(); applyWellFilter();
+      applyLayerVisibility(); applyWellFilter();
       setHeatReady(true); // lets the heat effect run its first compute with a fresh closure
     });
     return () => { map.remove(); mapRef.current = null; styleReady.current = false; };
@@ -401,38 +406,20 @@ export function MapView() {
     vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores);
     applyHighlight();
   }
-  // Filtering highlights matches rather than hiding the rest: every enabled
-  // layer stays visible for context, and features matching the active filters
-  // get an emphasized paint (accent color / heavier stroke / bigger dot).
-  function abstractMatchExpr(): maplibregl.ExpressionSpecification | null {
-    const cl: unknown[] = [];
-    if (fAbstracts.length) cl.push(["in", ["get", "abstract"], ["literal", fAbstracts]]);
-    if (fSurveys.length) cl.push(["in", ["get", "survey"], ["literal", fSurveys]]);
-    if (fCounties.length) cl.push(["in", ["get", "county"], ["literal", fCounties]]);
-    return cl.length ? (["all", ...cl] as unknown as maplibregl.ExpressionSpecification) : null;
-  }
-  function applyAbstractFilter() {
-    const map = mapRef.current; if (!map || !styleReady.current) return;
-    const p = abstractsPaint(abstractMatchExpr());
-    if (map.getLayer("abstracts-fill")) for (const [k, v] of Object.entries(p.fill)) map.setPaintProperty("abstracts-fill", k, v);
-    if (map.getLayer("abstracts-line")) for (const [k, v] of Object.entries(p.line)) map.setPaintProperty("abstracts-line", k, v);
-    if (map.getLayer("abstracts-num")) map.setPaintProperty("abstracts-num", "text-color", p.num["text-color"]);
-    if (map.getLayer("abstracts-survey")) map.setPaintProperty("abstracts-survey", "text-color", p.survey["text-color"]);
-  }
+  // Filter behavior: filters never restyle the map — instead the map zooms to
+  // frame the matching results (see the extent effect below). The one
+  // exception: Well type / Well status show ONLY matching wells, hiding the
+  // rest via a layer filter.
   function applyWellFilter() {
     const map = mapRef.current; if (!map || !styleReady.current || !map.getLayer("wells")) return;
     const cl: unknown[] = [];
     if (fWellTypes.length) cl.push(["in", ["get", "type"], ["literal", fWellTypes]]);
     if (fWellStatuses.length) cl.push(["in", ["get", "status"], ["literal", fWellStatuses]]);
-    if (fOperators.length) cl.push(["in", ["get", "operator"], ["literal", fOperators]]);
-    if (fAbstracts.length) cl.push(["in", ["get", "abstract"], ["literal", fAbstracts]]);
-    if (fSurveys.length) cl.push(["in", ["get", "survey"], ["literal", fSurveys]]);
-    if (fCounties.length) cl.push(["in", ["get", "county"], ["literal", fCounties]]);
-    const match = cl.length ? (["all", ...cl] as unknown as maplibregl.ExpressionSpecification) : null;
-    for (const [k, v] of Object.entries(wellsPaint(match))) map.setPaintProperty("wells", k, v);
+    const expr = cl.length ? (["all", ...cl] as unknown as maplibregl.ExpressionSpecification) : null;
+    map.setFilter("wells", expr);
     // Wellbore tile features carry their surface well's attributes (joined
-    // server-side), so the SAME match keeps wells and laterals in lockstep.
-    if (map.getLayer("wellbores")) for (const [k, v] of Object.entries(wellboresPaint(match))) map.setPaintProperty("wellbores", k, v);
+    // server-side), so the SAME filter keeps wells and laterals in lockstep.
+    if (map.getLayer("wellbores")) map.setFilter("wellbores", expr);
   }
 
   // Recompute the period-attributed production points from current filters, then
@@ -553,8 +540,31 @@ export function MapView() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
-  useEffect(applyAbstractFilter, [fCounties, fSurveys, fAbstracts]);
-  useEffect(applyWellFilter, [fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses, fOperators]);
+  useEffect(applyWellFilter, [fWellTypes, fWellStatuses]);
+  // Zoom to the filtered results: whenever filters change, ask the server for
+  // the bounding box of everything matching and frame it. Debounced so rapid
+  // edits coalesce; sequence-guarded so a slow response can't zoom late; the
+  // initial mount is skipped so restoring the last camera position wins.
+  const extentSeq = useRef(0);
+  const filtersTouched = useRef(false);
+  useEffect(() => {
+    if (!filtersTouched.current) { filtersTouched.current = true; return; }
+    const groups: [string, string[]][] = [
+      ["counties", fCounties], ["surveys", fSurveys], ["abstracts", fAbstracts],
+      ["wellTypes", fWellTypes], ["wellStatuses", fWellStatuses], ["operators", fOperators],
+    ];
+    if (!groups.some(([, v]) => v.length)) return;
+    const seq = ++extentSeq.current;
+    const t = setTimeout(() => {
+      const qs = new URLSearchParams();
+      for (const [k, vals] of groups) for (const v of vals) qs.append(k, v);
+      api.get<{ bbox: BBox | null }>(`/gis/extent?${qs.toString()}`)
+        .then((r) => { if (extentSeq.current === seq) fitBbox(r.bbox); })
+        .catch(() => { /* framing is best-effort */ });
+    }, 450);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses, fOperators]);
   // Rebuild heat points whenever the data, filters, period, or thresholds change.
   useEffect(() => { if (heatReady) recomputeHeat(); /* eslint-disable-next-line */ },
     [heatReady, heatData, prod, fCounties, fOperators, fWellTypes, fWellStatuses, fFormations, heat.period, heat.from, heat.to, heat.min, heat.max, heat.oil, heat.gas, heat.hotspots]);
@@ -622,23 +632,41 @@ export function MapView() {
   const abstractCount = dealsByAbstract.size;
   const toggle = (k: keyof typeof layers) => setLayers((p) => ({ ...p, [k]: !p[k] }));
 
-  // Saved presets: capture the current layers + camera, reapply, or delete.
-  function saveCurrentPreset() {
-    const m = mapRef.current; const name = presetName.trim();
-    if (!m || !name) return;
-    const c = m.getCenter();
-    const preset: MapPreset = { name, layers: layersRef.current, view: { center: [c.lng, c.lat], zoom: m.getZoom() } };
-    const next = [...presets.filter((p) => p.name !== name), preset];
-    setPresets(next); saveJson(MAP_PRESETS_KEY, next); setPresetName("");
+  // Saved filters: name the current filter combination, reload it later,
+  // overwrite it with the current filters, or delete it. Saving with an
+  // existing name overwrites that preset.
+  function currentFilters(): MapFilterState {
+    return {
+      status: statusFilter, counties: fCounties, surveys: fSurveys, abstracts: fAbstracts,
+      wellTypes: fWellTypes, wellStatuses: fWellStatuses, operators: fOperators, formations: fFormations,
+    };
   }
-  function applyPreset(p: MapPreset) {
-    setLayers({ ...DEFAULT_MAP_LAYERS, ...p.layers });
-    mapRef.current?.jumpTo({ center: p.view.center, zoom: p.view.zoom });
+  function persistFilterPresets(next: FilterPreset[]) {
+    setFilterPresets(next); saveJson(MAP_FILTERS_KEY, next);
   }
-  function deletePreset(name: string) {
-    const next = presets.filter((p) => p.name !== name);
-    setPresets(next); saveJson(MAP_PRESETS_KEY, next);
+  function saveFilterPreset(name: string) {
+    const n = name.trim(); if (!n) return;
+    persistFilterPresets([...filterPresets.filter((p) => p.name !== n), { name: n, filters: currentFilters() }]);
+    setFilterName("");
   }
+  function applyFilterPreset(p: FilterPreset) {
+    const f = p.filters;
+    setStatusFilter(f.status ?? "ACTIVE");
+    setFCounties(f.counties ?? []); setFSurveys(f.surveys ?? []); setFAbstracts(f.abstracts ?? []);
+    setFWellTypes(f.wellTypes ?? []); setFWellStatuses(f.wellStatuses ?? []);
+    setFOperators(f.operators ?? []); setFFormations(f.formations ?? []);
+  }
+  function deleteFilterPreset(name: string) {
+    persistFilterPresets(filterPresets.filter((p) => p.name !== name));
+  }
+  // A preset is "active" when it exactly matches the filters on screen.
+  const activePresetName = useMemo(() => {
+    const cur = JSON.stringify(currentFilters());
+    return filterPresets.find((p) => JSON.stringify({ ...p.filters, status: p.filters.status ?? "ACTIVE" }) === cur)?.name ?? null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterPresets, statusFilter, fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses, fOperators, fFormations]);
+  const anyFilterSet = fCounties.length > 0 || fSurveys.length > 0 || fAbstracts.length > 0 ||
+    fWellTypes.length > 0 || fWellStatuses.length > 0 || fOperators.length > 0 || fFormations.length > 0;
   function resetMapView() {
     setLayers(DEFAULT_MAP_LAYERS);
     mapRef.current?.jumpTo({ center: LEON_CENTER, zoom: 10 });
@@ -738,7 +766,7 @@ export function MapView() {
       {showFilters && (
         <div className="panel mc-panel" style={{ marginBottom: 12 }}>
           <div className="mc-note">
-            Filters <b>highlight</b> matching wells, abstracts, and surveys — everything else stays visible for context (toggle layers off to hide them). <b>"Deal status"</b> only affects the deal highlight.
+            Filters <b>zoom the map to the matching results</b> without changing how the layers look. <b>Well type</b> and <b>Well status</b> additionally show only matching wells. <b>"Deal status"</b> only affects the deal highlight.
           </div>
           <div className="mc-grid">
             <div><div className="ddx-label mc-lbl">Deal status</div><Select value={statusFilter} onChange={setStatusFilter} ariaLabel="Deal status" options={STATUS_OPTIONS.map(([v, l]) => ({ value: v, label: l }))} /></div>
@@ -749,6 +777,27 @@ export function MapView() {
             <div><div className="ddx-label mc-lbl">Well status</div><SearchableMultiSelect options={gisOptions.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} placeholder="Well statuses…" /></div>
             <div><div className="ddx-label mc-lbl">Operator <span className="mc-count">({gisOptions.operators.length})</span></div><SearchableMultiSelect options={gisOptions.operators} value={fOperators} onChange={setFOperators} placeholder="Operators…" /></div>
             <div><div className="ddx-label mc-lbl">Formation <span className="mc-count">({scoped.formations.length})</span></div><SearchableMultiSelect options={scoped.formations} value={fFormations} onChange={setFFormations} placeholder="Formations…" /></div>
+          </div>
+          {/* Saved filters: reusable named filter combinations for recurring
+              research workflows — load, overwrite, or delete them here. */}
+          <div className="mc-presets">
+            <span className="ddx-label">Saved filters</span>
+            <div className="mc-presets-row">
+              {filterPresets.length === 0 && <span className="muted" style={{ fontSize: 12.5 }}>Save the current filter combination under a name to reapply it in one click.</span>}
+              {filterPresets.map((p) => (
+                <span key={p.name} className={`mc-preset-chip ${activePresetName === p.name ? "active" : ""}`}>
+                  <button type="button" className="mc-preset-apply" title="Load this saved filter" onClick={() => applyFilterPreset(p)}>{p.name}</button>
+                  <button type="button" className="mc-preset-upd" title="Overwrite with the current filters" onClick={() => saveFilterPreset(p.name)}>↻</button>
+                  <button type="button" className="mc-preset-del" title="Delete saved filter" onClick={() => deleteFilterPreset(p.name)}>×</button>
+                </span>
+              ))}
+            </div>
+            <div className="row" style={{ gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input value={filterName} onChange={(e) => setFilterName(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveFilterPreset(filterName); } }}
+                placeholder="Name these filters" style={{ width: 170 }} />
+              <button type="button" className="small" disabled={!filterName.trim() || !anyFilterSet} onClick={() => saveFilterPreset(filterName)}>Save filters</button>
+            </div>
           </div>
         </div>
       )}
@@ -764,26 +813,11 @@ export function MapView() {
             layers={layers}
             onToggle={(k) => toggle(k as keyof typeof layers)}
           />
-          {/* Saved presets: layer visibility + camera are remembered as your
-              default; save named presets to jump between setups. */}
-          <div className="mc-presets">
-            <span className="ddx-label">Saved views</span>
-            <div className="mc-presets-row">
-              {presets.length === 0 && <span className="muted" style={{ fontSize: 12.5 }}>Your layers &amp; last position are remembered. Save a named preset to switch quickly.</span>}
-              {presets.map((p) => (
-                <span key={p.name} className="mc-preset-chip">
-                  <button type="button" className="mc-preset-apply" onClick={() => applyPreset(p)}>{p.name}</button>
-                  <button type="button" className="mc-preset-del" title="Delete preset" onClick={() => deletePreset(p.name)}>×</button>
-                </span>
-              ))}
-            </div>
-            <div className="row" style={{ gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <input value={presetName} onChange={(e) => setPresetName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveCurrentPreset(); } }}
-                placeholder="Name this view" style={{ width: 170 }} />
-              <button type="button" className="small" disabled={!presetName.trim()} onClick={saveCurrentPreset}>Save current view</button>
-              <button type="button" className="small" onClick={resetMapView}>Restore default</button>
-            </div>
+          {/* Layer visibility + last camera are remembered automatically;
+              "Restore default" puts both back. (Named filter combinations live
+              in the Filters panel as Saved filters.) */}
+          <div className="row" style={{ gap: 8, marginTop: 12 }}>
+            <button type="button" className="small" onClick={resetMapView}>Restore default</button>
           </div>
         </div>
       )}
@@ -847,7 +881,7 @@ export function MapView() {
       )}
 
       <div className="row" style={{ marginBottom: 8 }}>
-        <span className="muted">{deals == null ? "…" : `${deals.length} deal${deals.length === 1 ? "" : "s"} · ${abstractCount} highlighted · ${num(gisOptions.wellCount)} wells`}</span>
+        <span className="muted">{deals == null ? "…" : `${deals.length} deal${deals.length === 1 ? "" : "s"} · ${abstractCount} deal tract${abstractCount === 1 ? "" : "s"} · ${num(gisOptions.wellCount)} wells`}</span>
       </div>
 
       {/* Height is measured to fill down to the footer (no blank space below);
