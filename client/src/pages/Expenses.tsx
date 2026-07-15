@@ -12,6 +12,7 @@ import { downloadCsv } from "../lib/csv";
 import { CHART_COLORS, COLOR_EXPENSE, monthLabel, chartTooltip } from "../lib/charts";
 import type { UserLite } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
+import { DateField } from "../components/DateField";
 
 interface Category { id: string; name: string; active: boolean }
 interface Expense {
@@ -420,8 +421,8 @@ function AllExpenses({
 
       {/* Filter bar: structural filters + inline running totals */}
       <div className="xp-filterbar">
-        <div className="xp-fld"><div className="xp-lbl">From</div><input type="date" value={filters.from} onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))} /></div>
-        <div className="xp-fld"><div className="xp-lbl">To</div><input type="date" value={filters.to} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} /></div>
+        <div className="xp-fld"><div className="xp-lbl">From</div><DateField value={filters.from} onChange={(v) => setFilters((f) => ({ ...f, from: v }))} /></div>
+        <div className="xp-fld"><div className="xp-lbl">To</div><DateField value={filters.to} onChange={(v) => setFilters((f) => ({ ...f, to: v }))} /></div>
         <div className="xp-fld"><div className="xp-lbl">User</div>
           <Select value={filters.userId} onChange={(v) => setFilters((f) => ({ ...f, userId: v }))}
             placeholder="All" clearable searchable ariaLabel="Filter by user" width={190}
@@ -622,7 +623,7 @@ function ExpenseForm({
     >
       <form onSubmit={save}>
         <div className="grid-2">
-          <div className="field"><label>Date</label><input type="date" value={f.date} onChange={(e) => setF((p) => ({ ...p, date: e.target.value }))} /></div>
+          <div className="field"><label>Date</label><DateField value={f.date} onChange={(v) => setF((p) => ({ ...p, date: v }))} /></div>
           <div className="field"><label>Amount</label><MoneyInput decimals={2} value={f.amount} onChange={(v) => setF((p) => ({ ...p, amount: v }))} placeholder="0.00" ariaLabel="Expense amount" /></div>
         </div>
         <div className="field">
@@ -643,7 +644,7 @@ function ExpenseForm({
           </label>
         </div>
         {f.reimbursed && (
-          <div className="field"><label>Reimbursement date</label><input type="date" value={f.reimbursementDate} onChange={(e) => setF((p) => ({ ...p, reimbursementDate: e.target.value }))} /></div>
+          <div className="field"><label>Reimbursement date</label><DateField value={f.reimbursementDate} onChange={(v) => setF((p) => ({ ...p, reimbursementDate: v }))} /></div>
         )}
         {error && <div className="error-text">{error}</div>}
       </form>

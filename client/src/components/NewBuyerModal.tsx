@@ -8,6 +8,7 @@ import { GeoFields } from "./GeoFields";
 import { StateSelect } from "./StateSelect";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
 import { MoneyInput } from "./MoneyInput";
+import { DateField } from "./DateField";
 
 /**
  * Standardized New Buyer template — the buyer counterpart of NewDealModal.
@@ -100,7 +101,7 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
           <Select value={relationshipStatus} onChange={(v) => setRelationshipStatus(v as "HOT" | "WARM" | "COLD")} ariaLabel="Relationship status"
             options={[{ value: "HOT", label: "Hot" }, { value: "WARM", label: "Warm" }, { value: "COLD", label: "Cold" }]} />
         </div>
-        <div className="field"><label>Next follow-up</label><input type="date" value={f.nextFollowUpDate} onChange={set("nextFollowUpDate")} /></div>
+        <div className="field"><label>Next follow-up</label><DateField value={f.nextFollowUpDate} onChange={(v) => setF((p) => ({ ...p, nextFollowUpDate: v }))} /></div>
       </div>
       {/* Structured mailing address — same fields used across the CRM. */}
       <div className="dd-grid">

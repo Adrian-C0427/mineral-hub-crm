@@ -6,6 +6,7 @@ import { GeoFields } from "./GeoFields";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
 import type { DealSummary } from "../types";
 import { MoneyInput } from "./MoneyInput";
+import { DateField } from "./DateField";
 
 // An additional asset behaves exactly like a standalone deal record — the same
 // fields, dependencies, and required fields. Its contract timeline defaults to
@@ -175,7 +176,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId }: {
         <div className="field"><label>Asset Type {req}</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
         <div className="field"><label>NRA {req}</label><input type="number" value={f.nra} onChange={set("nra")} /></div>
         <div className="field"><label>Our Price (acquisition cost) {req}</label><MoneyInput value={f.ourPrice} onChange={(v) => setF((p) => ({ ...p, ourPrice: v }))} ariaLabel="Our price" /></div>
-        <div className="field"><label>Date Under Contract {req}</label><input type="date" value={f.dateUnderContract} onChange={set("dateUnderContract")} /></div>
+        <div className="field"><label>Date Under Contract {req}</label><DateField value={f.dateUnderContract} onChange={(v) => setF((p) => ({ ...p, dateUnderContract: v }))} /></div>
         <div className="field"><label>Basin</label><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(counties))} value={basins} onChange={setBasins} placeholder={counties.length ? "Suggested for your counties first…" : "Search basins…"} /></div>
         <div className="field"><label>Formation</label><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(counties))} value={formations} onChange={setFormations} placeholder={counties.length ? "Suggested for your counties first…" : "Search formations…"} /></div>
         <div className="field"><label>Operator</label><input value={f.operator} onChange={set("operator")} /></div>
@@ -183,7 +184,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId }: {
         <div className="field"><label>NMA</label><input type="number" value={f.acreageNma} onChange={set("acreageNma")} /></div>
         <div className="field"><label>Ask Price (to buyers)</label><MoneyInput value={f.askPrice} onChange={(v) => setF((p) => ({ ...p, askPrice: v }))} ariaLabel="Ask price" /></div>
         <div className="field"><label>Est. Closing Costs</label><MoneyInput value={f.estimatedClosingCosts} onChange={(v) => setF((p) => ({ ...p, estimatedClosingCosts: v }))} ariaLabel="Estimated closing costs" /></div>
-        <div className="field"><label>Original Closing Date</label><input type="date" value={f.originalClosingDate} onChange={set("originalClosingDate")} /></div>
+        <div className="field"><label>Original Closing Date</label><DateField value={f.originalClosingDate} onChange={(v) => setF((p) => ({ ...p, originalClosingDate: v }))} /></div>
       </div>
       <div className="field"><label>Notes</label><textarea rows={3} value={f.notes} onChange={set("notes")} /></div>
 
@@ -251,7 +252,7 @@ function AssetCard({ index, a, req, onPatch, onRemove }: {
           <span>Same contract timeline as the deal</span>
         </label>
         {!a.sameTimeline && (
-          <div className="field" style={{ marginBottom: 0 }}><label>Date Under Contract {req}</label><input type="date" value={a.dateUnderContract} onChange={(e) => onPatch({ dateUnderContract: e.target.value })} /></div>
+          <div className="field" style={{ marginBottom: 0 }}><label>Date Under Contract {req}</label><DateField value={a.dateUnderContract} onChange={(v) => onPatch({ dateUnderContract: v })} /></div>
         )}
       </div>
     </div>

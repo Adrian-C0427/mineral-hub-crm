@@ -6,6 +6,7 @@ import { toInputDate } from "../lib/format";
 import { BUYER_STATUS_OPTIONS } from "../lib/buyerStatus";
 import type { BuyerStatus, UserLite } from "../types";
 import { MoneyInput } from "./MoneyInput";
+import { DateField } from "./DateField";
 
 interface Props {
   dealId: string;
@@ -99,8 +100,8 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, initial, on
         </>
       )}
       <div className="grid-2">
-        <div className="field"><label>Date sent</label><input type="date" value={dateSent} onChange={(e) => setDateSent(e.target.value)} /></div>
-        <div className="field"><label>Next follow-up</label><input type="date" value={nextFollowUp} onChange={(e) => setNextFollowUp(e.target.value)} /></div>
+        <div className="field"><label>Date sent</label><DateField value={dateSent} onChange={(v) => setDateSent(v)} /></div>
+        <div className="field"><label>Next follow-up</label><DateField value={nextFollowUp} onChange={(v) => setNextFollowUp(v)} /></div>
       </div>
       <div className="field"><label>Internal notes</label><textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} /></div>
       {error && <div className="error-text">{error}</div>}

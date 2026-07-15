@@ -3,9 +3,10 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import {
-  Spinner, PriorityBadge, StageBadge, MetricCard,
+  Spinner, PriorityBadge, StageBadge, MetricCard, Modal,
   MatchBar, Banner, ConfirmDelete, ConfirmDialog, BackLink, OverflowMenu, showToast,
 } from "../components/ui";
+import { Pencil } from "lucide-react";
 import { useUnsavedSection } from "../lib/unsaved";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { StageChangeModal } from "../components/StageChangeModal";
@@ -27,6 +28,7 @@ import { DocumentsSection, DEAL_DOC_FOLDERS, type DocFile } from "../components/
 import type { AssetChild, BuyerActivityRow, DealSummary, MatchRec, Seller, UserLite } from "../types";
 import { NewDealModal } from "../components/NewDealModal";
 import { MoneyInput } from "../components/MoneyInput";
+import { DateField } from "../components/DateField";
 // MapLibre is heavy; only load it when a deal detail page is viewed.
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
 const TractSection = lazy(() => import("../components/TractSection").then((m) => ({ default: m.TractSection })));
@@ -65,6 +67,7 @@ export function DealDetail() {
   const [acceptOffer, setAcceptOffer] = useState<{ id: string; buyer: string; amount: number } | null>(null);
   const [acceptBusy, setAcceptBusy] = useState(false);
   const [showAddAsset, setShowAddAsset] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const [confirmSplit, setConfirmSplit] = useState(false);
   const [splitBusy, setSplitBusy] = useState(false);
 
@@ -117,6 +120,11 @@ export function DealDetail() {
       <div className="page-header">
         <div className="row">
           <h1 style={{ marginBottom: 0 }}>{deal.name}</h1>
+          {can("editDeals") && (
+            <button type="button" className="icon-btn" title="Rename deal" aria-label="Rename deal" onClick={() => setRenaming(true)}>
+              <Pencil size={14} />
+            </button>
+          )}
           <PriorityBadge priority={deal.priority} />
           <StageBadge stage={deal.stage} />
           <span className="muted" style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -315,6 +323,10 @@ export function DealDetail() {
       {/* Documents */}
       <DocumentsSection ownerType="deal" ownerId={deal.id} files={deal.files} folders={DEAL_DOC_FOLDERS} onChanged={loadDeal} canEdit={can("manageDocuments")} canDelete={can("manageDocuments")} />
 
+      {renaming && (
+        <RenameDealModal dealId={deal.id} current={deal.name} onClose={() => setRenaming(false)}
+          onRenamed={() => { setRenaming(false); refreshAll(); }} />
+      )}
       {showStage && (
         <StageChangeModal
           deal={deal}
@@ -708,11 +720,11 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
         )
       ) : (
         <div className="dd-grid">
-          <Fld l="Under Contract"><input type="date" value={duc} onChange={(e) => setDuc(e.target.value)} /></Fld>
-          <Fld l="Find Buyer By"><input type="date" value={fbb} onChange={(e) => setFbb(e.target.value)} /></Fld>
-          <Fld l="Orig. Closing"><input type="date" value={oc} onChange={(e) => setOc(e.target.value)} /></Fld>
-          <Fld l="Final Closing"><input type="date" value={fc} onChange={(e) => setFc(e.target.value)} /></Fld>
-          <Fld l="Closed Date"><input type="date" value={cd} onChange={(e) => setCd(e.target.value)} /></Fld>
+          <Fld l="Under Contract"><DateField value={duc} onChange={(v) => setDuc(v)} /></Fld>
+          <Fld l="Find Buyer By"><DateField value={fbb} onChange={(v) => setFbb(v)} /></Fld>
+          <Fld l="Orig. Closing"><DateField value={oc} onChange={(v) => setOc(v)} /></Fld>
+          <Fld l="Final Closing"><DateField value={fc} onChange={(v) => setFc(v)} /></Fld>
+          <Fld l="Closed Date"><DateField value={cd} onChange={(v) => setCd(v)} /></Fld>
         </div>
       )}
     </div>
@@ -742,4 +754,46 @@ function KV({ k, v }: { k: string; v: React.ReactNode }) {
 }
 function Fld({ l, children }: { l: string; children: React.ReactNode }) {
   return <div className="field"><label>{l}</label>{children}</div>;
+}
+
+/** Rename the deal. The name lives only on the Deal row (every reference joins
+ * through the relation), so renaming never touches documents, buyer activity,
+ * offers, or history. */
+function RenameDealModal({ dealId, current, onClose, onRenamed }: {
+  dealId: string; current: string; onClose: () => void; onRenamed: () => void;
+}) {
+  const [name, setName] = useState(current);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function save() {
+    const n = name.trim();
+    if (!n) { setError("Give the deal a name."); return; }
+    if (n === current) { onClose(); return; }
+    setBusy(true); setError(null);
+    try {
+      await api.patch(`/deals/${dealId}`, { name: n });
+      showToast("Deal renamed", "success");
+      onRenamed();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not rename the deal");
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal title="Rename deal" onClose={onClose} dirty={name.trim() !== current}
+      footer={<>
+        <button onClick={onClose}>Cancel</button>
+        <button className="primary" disabled={busy || !name.trim()} onClick={save}>{busy ? "Saving…" : "Save"}</button>
+      </>}>
+      <div className="field">
+        <label>Deal name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} autoFocus
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void save(); } }} />
+      </div>
+      <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
+        The new name shows everywhere this deal is referenced. Documents, buyer activity, offers, and history stay attached.
+      </p>
+      {error && <Banner kind="error">{error}</Banner>}
+    </Modal>
+  );
 }

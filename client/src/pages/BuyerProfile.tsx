@@ -16,6 +16,7 @@ import { PhoneInput } from "../components/PhoneInput";
 import type { BuyBox, Relationship, UserLite } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
 import { useUnsavedSection, guarded } from "../lib/unsaved";
+import { DateField } from "../components/DateField";
 
 interface BuyerProfileData {
   id: string;
@@ -244,8 +245,8 @@ export function BuyerProfile() {
           {editTracking ? (
             <>
               <Fld l="Status"><Select value={view.relationshipStatus} onChange={(v) => setD({ relationshipStatus: v as Relationship })} ariaLabel="Relationship status" options={[{ value: "HOT", label: "Hot" }, { value: "WARM", label: "Warm" }, { value: "COLD", label: "Cold" }]} /></Fld>
-              <Fld l="Last contact"><input type="date" value={toInputDate(view.lastContactDate)} onChange={(e) => setD({ lastContactDate: e.target.value || null })} /></Fld>
-              <Fld l="Next follow-up"><input type="date" value={toInputDate(view.nextFollowUpDate)} onChange={(e) => setD({ nextFollowUpDate: e.target.value || null })} /></Fld>
+              <Fld l="Last contact"><DateField value={toInputDate(view.lastContactDate)} onChange={(v) => setD({ lastContactDate: v || null })} /></Fld>
+              <Fld l="Next follow-up"><DateField value={toInputDate(view.nextFollowUpDate)} onChange={(v) => setD({ nextFollowUpDate: v || null })} /></Fld>
             </>
           ) : (
             <>

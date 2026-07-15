@@ -9,12 +9,13 @@ import { Spinner } from "../components/ui";
 import { money, fmtDate, fmtDateLocal } from "../lib/format";
 import { useStages } from "../stages";
 import { PeriodSegmented } from "../components/PeriodSegmented";
+import { DateField } from "../components/DateField";
 import { useTheme } from "../theme";
 
 // Global dashboard period (default YTD). Drives all period-scoped widgets.
-type DashPeriod = "THIS_MONTH" | "LAST_MONTH" | "THIS_QUARTER" | "YTD";
+type DashPeriod = "THIS_MONTH" | "LAST_MONTH" | "THIS_QUARTER" | "YTD" | "CUSTOM";
 const DASH_PERIODS: readonly (readonly [DashPeriod, string])[] = [
-  ["THIS_MONTH", "This Month"], ["LAST_MONTH", "Last Month"], ["THIS_QUARTER", "This Quarter"], ["YTD", "YTD"],
+  ["THIS_MONTH", "This Month"], ["LAST_MONTH", "Last Month"], ["THIS_QUARTER", "This Quarter"], ["YTD", "YTD"], ["CUSTOM", "Custom"],
 ];
 
 interface DashboardData {
@@ -24,7 +25,7 @@ interface DashboardData {
   upcomingFollowUps: { dealId: string; buyerName: string; dealName: string; date: string | null }[];
   recentActivity: { id: string; summary: string; createdAt: string }[];
   topBuyers: { id: string; name: string; companyName: string; volume: number }[];
-  profitByMonth: { month: string; profit: number; projected: number }[];
+  profitByMonth: { month: string; isCurrent: boolean; profit: number; projected: number }[];
   /** Real historical series for the KPI sparklines (optional: older API). */
   trends?: { activeDealsWeekly: number[]; avgDealSize: number[]; offersWeekly: number[] };
 }
@@ -152,13 +153,23 @@ function loadDashPrefs(): DashPrefs {
 export function Dashboard() {
   const [d, setD] = useState<DashboardData | null>(null);
   const [period, setPeriod] = useState<DashPeriod>("YTD");
+  // Custom reporting range (period === "CUSTOM"): fetch waits for both ends.
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const { theme, toggleTheme } = useTheme();
   const { label: stageLabel } = useStages();
   const [prefs, setPrefs] = useState<DashPrefs>(loadDashPrefs);
   const [customizing, setCustomizing] = useState(false);
   useEffect(() => { try { localStorage.setItem(DASH_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } }, [prefs]);
 
-  useEffect(() => { api.get<DashboardData>(`/dashboard?period=${period}`).then(setD); }, [period]);
+  useEffect(() => {
+    const qs = new URLSearchParams({ period });
+    if (period === "CUSTOM") {
+      if (!customFrom || !customTo || customFrom > customTo) return; // wait for a complete range
+      qs.set("from", customFrom); qs.set("to", customTo);
+    }
+    api.get<DashboardData>(`/dashboard?${qs.toString()}`).then(setD);
+  }, [period, customFrom, customTo]);
 
   // Grid width tracks the CONTAINER (not the window), so collapsing/expanding
   // the sidebar reflows the canvas immediately. Sub-320px readings are ignored:
@@ -191,7 +202,8 @@ export function Dashboard() {
   // Paired bars (design): realized and projected render side by side, so the
   // y-scale is the single largest monthly value of either series.
   const maxProfit = Math.max(1, ...d.profitByMonth.map((m) => Math.max(m.profit, m.projected)));
-  const curMonth = new Date().getMonth();
+  // Index of the bucket containing today (-1 when the window is in the past).
+  const curIdx = d.profitByMonth.findIndex((m) => m.isCurrent);
   const realized = d.profitByMonth.map((m) => m.profit);
   const projectedSeries = d.profitByMonth.map((m) => m.projected);
   const maxStage = Math.max(1, ...d.stageCounts.map((s) => s.count));
@@ -199,7 +211,7 @@ export function Dashboard() {
   // Deltas only where an honest baseline exists.
   const t = d.trends;
   const activeDelta = t && t.activeDealsWeekly.length >= 2 ? pctChange(t.activeDealsWeekly[t.activeDealsWeekly.length - 1], t.activeDealsWeekly[0]) : null;
-  const closedDelta = curMonth > 0 ? pctChange(realized[curMonth], realized[curMonth - 1]) : null;
+  const closedDelta = curIdx > 0 ? pctChange(realized[curIdx], realized[curIdx - 1]) : null;
   const avgDelta = t && t.avgDealSize.length >= 2 ? pctChange(t.avgDealSize[t.avgDealSize.length - 1], t.avgDealSize[t.avgDealSize.length - 2]) : null;
 
   // Brand-new workspace: no active deals and nothing closed yet. Guide the
@@ -212,7 +224,7 @@ export function Dashboard() {
       <div className="metrics-row dash-kpis">
         <Kpi label="Active Deals" value={d.metrics.activeDeals} delta={activeDelta} series={t?.activeDealsWeekly} spark="var(--accent)" title="Sparkline: active deals per week (8 weeks)" />
         <Kpi label="Projected Profit" value={fmtCompact(d.metrics.projectedProfit)} series={projectedSeries} spark="var(--accent)" title="Best (or accepted) offer minus cost basis across active deals with offers — the same series as the Projected bars below." />
-        <Kpi label={`Closed ${d.metrics.periodLabel ?? "YTD"}`} value={fmtCompact(d.metrics.closedProfitYtd)} valueColor={d.metrics.closedProfitYtd > 0 ? "var(--green)" : undefined} delta={closedDelta} series={realized.slice(0, curMonth + 1)} spark="var(--green)" title="Sparkline: realized profit by month" />
+        <Kpi label={`Closed ${d.metrics.periodLabel ?? "YTD"}`} value={fmtCompact(d.metrics.closedProfitYtd)} valueColor={d.metrics.closedProfitYtd > 0 ? "var(--green)" : undefined} delta={closedDelta} series={curIdx >= 0 ? realized.slice(0, curIdx + 1) : realized} spark="var(--green)" title="Sparkline: realized profit by month" />
         <Kpi label="Avg Deal Size" value={fmtCompact(d.metrics.avgDealSize)} delta={avgDelta} series={t?.avgDealSize} spark="var(--text-dim)" title="Sparkline: running average across recent closes" />
         <Kpi label="Offers Pending" value={d.metrics.offersPending} series={t?.offersWeekly} spark="var(--amber)" title="Sparkline: offers received per week (8 weeks)" />
       </div>
@@ -228,15 +240,15 @@ export function Dashboard() {
             </div>
           )}
         </div>
-        {/* Always render the full Jan–Dec year for a stable, comparable view.
-            Months with no realized or projected profit show a faint zero
-            placeholder instead of vanishing, so the x-axis spacing is identical
-            across all twelve months regardless of available data. */}
+        {/* The chart spans the SELECTED reporting period (every month of it,
+            yearly buckets for very long custom ranges). Buckets with no
+            realized or projected profit show a faint zero placeholder instead
+            of vanishing, so the x-axis spacing stays stable. */}
         <div className="bar-chart">
-          {d.profitByMonth.map((m, i) => {
+          {d.profitByMonth.map((m) => {
             const empty = m.profit === 0 && m.projected === 0;
             return (
-              <div className={`bar-col ${i === curMonth ? "current" : ""}`} key={m.month} title={`${m.month}\nRealized: ${money(m.profit)}\nProjected: ${money(m.projected)}`}>
+              <div className={`bar-col ${m.isCurrent ? "current" : ""}`} key={m.month} title={`${m.month}\nRealized: ${money(m.profit)}\nProjected: ${money(m.projected)}`}>
                 <div className="bar-zone">
                   {empty ? (
                     <div className="bar bar-zero" title={`${m.month}: no profit`} />
@@ -254,7 +266,7 @@ export function Dashboard() {
         </div>
         {d.profitByMonth.every((m) => m.profit === 0 && m.projected === 0) && (
           <p className="muted" style={{ margin: "10px 0 0", fontSize: 12 }}>
-            No closed or projected profit yet this year — bars fill in as deals close or get an accepted offer with a closing date.
+            No closed or projected profit in this period — bars fill in as deals close (with a Closed Date) or get an accepted offer with a closing date.
           </p>
         )}
       </div>
@@ -364,6 +376,13 @@ export function Dashboard() {
         </div>
         <div className="row" style={{ gap: 10 }}>
           <PeriodSegmented options={DASH_PERIODS} value={period} onChange={setPeriod} compact />
+          {period === "CUSTOM" && (
+            <div className="row" style={{ gap: 6 }}>
+              <div style={{ width: 148 }}><DateField value={customFrom} onChange={setCustomFrom} ariaLabel="Custom range from" placeholder="From" /></div>
+              <span className="muted">–</span>
+              <div style={{ width: 148 }}><DateField value={customTo} onChange={setCustomTo} ariaLabel="Custom range to" placeholder="To" /></div>
+            </div>
+          )}
           <button type="button" className={`dash-cz-toggle ${customizing ? "active" : ""}`} onClick={() => setCustomizing((c) => !c)} title="Customize dashboard layout">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
             <span>{customizing ? "Done" : "Customize"}</span>

@@ -17,6 +17,7 @@ import { money, pct, num, fmtDate, prettyStage } from "../lib/format";
 import { useStages } from "../stages";
 import { CHART_COLORS, COLOR_REVENUE, COLOR_PROFIT, COLOR_FORECAST, monthLabel, chartTooltip } from "../lib/charts";
 import type { DealSummary } from "../types";
+import { DateField } from "../components/DateField";
 
 interface Kpis {
   totalDeals: number; dealsAdded: number; dealsClosed: number; dealsLost: number; winRate: number;
@@ -212,8 +213,8 @@ export function Reports() {
         </div>
         {period === "CUSTOM" && (
           <div className="row" style={{ marginTop: 10 }}>
-            <div className="field" style={{ marginBottom: 0 }}><label>From</label><input type="date" value={custom.from} onChange={(e) => setCustom((c) => ({ ...c, from: e.target.value }))} /></div>
-            <div className="field" style={{ marginBottom: 0 }}><label>To</label><input type="date" value={custom.to} onChange={(e) => setCustom((c) => ({ ...c, to: e.target.value }))} /></div>
+            <div className="field" style={{ marginBottom: 0 }}><label>From</label><DateField value={custom.from} onChange={(v) => setCustom((c) => ({ ...c, from: v }))} /></div>
+            <div className="field" style={{ marginBottom: 0 }}><label>To</label><DateField value={custom.to} onChange={(v) => setCustom((c) => ({ ...c, to: v }))} /></div>
           </div>
         )}
         {showFilters && (

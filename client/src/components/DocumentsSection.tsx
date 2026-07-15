@@ -82,6 +82,17 @@ export function DocumentsSection({
   const [importing, setImporting] = useState<CloudProvider | null>(null);
   const [viewing, setViewing] = useState<DocFile | null>(null);
   const [moving, setMoving] = useState<DocFile | null>(null);
+  const [renaming, setRenaming] = useState<DocFile | null>(null);
+  // Collapsed by default everywhere; the choice is remembered for the session
+  // per record, using the same collapse pattern as the other page sections.
+  const openKey = `mh-docs-open:${ownerType}:${ownerId}`;
+  const [expanded, setExpanded] = useState<boolean>(() => {
+    try { return sessionStorage.getItem(openKey) === "1"; } catch { return false; }
+  });
+  const toggleOpen = () => setExpanded((o) => {
+    try { sessionStorage.setItem(openKey, o ? "0" : "1"); } catch { /* storage off */ }
+    return !o;
+  });
   const uploadRef = useRef<HTMLInputElement>(null);
   const replaceRef = useRef<HTMLInputElement>(null);
   const replaceId = useRef<string | null>(null);
@@ -125,9 +136,8 @@ export function DocumentsSection({
     const form = new FormData(); form.append("file", file);
     await api.upload(`/files/${replaceId.current}/replace`, form);
   });
-  const rename = (f: DocFile) => {
-    const filename = window.prompt("Rename document", f.filename);
-    if (filename && filename.trim() && filename !== f.filename) run(() => api.patch(`/files/${f.id}`, { filename: filename.trim() }));
+  const rename = (f: DocFile, filename: string) => {
+    if (filename.trim() && filename.trim() !== f.filename) run(() => api.patch(`/files/${f.id}`, { filename: filename.trim() }));
   };
   const move = (f: DocFile, toFolder: string) => { if (toFolder !== f.folder) run(() => api.patch(`/files/${f.id}`, { folder: toFolder })); };
   const open = async (id: string, inline: boolean) => {
@@ -166,7 +176,7 @@ export function DocumentsSection({
               ariaLabel={`More actions for ${f.filename}`}
               items={[
                 ...(canEdit ? [
-                  { label: "Rename", onClick: () => rename(f) },
+                  { label: "Rename", onClick: () => setRenaming(f) },
                   { label: "Move to folder…", onClick: () => setMoving(f) },
                   { label: "Replace file…", onClick: () => { replaceId.current = f.id; replaceRef.current?.click(); } },
                 ] : []),
@@ -181,12 +191,26 @@ export function DocumentsSection({
 
   return (
     <div
-      className={`panel doc-section ${dragOver ? "drag-over" : ""}`}
-      onDragOver={canEdit ? (e) => { e.preventDefault(); if (!dragOver) setDragOver(true); } : undefined}
-      onDragLeave={canEdit ? (e) => { if (e.currentTarget === e.target) setDragOver(false); } : undefined}
-      onDrop={canEdit ? (e) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files?.length) void uploadMany(e.dataTransfer.files); } : undefined}
+      className={`panel dpp-panel doc-section ${expanded ? "open" : ""} ${dragOver ? "drag-over" : ""}`}
+      onDragOver={canEdit && expanded ? (e) => { e.preventDefault(); if (!dragOver) setDragOver(true); } : undefined}
+      onDragLeave={canEdit && expanded ? (e) => { if (e.currentTarget === e.target) setDragOver(false); } : undefined}
+      onDrop={canEdit && expanded ? (e) => { e.preventDefault(); setDragOver(false); if (e.dataTransfer.files?.length) void uploadMany(e.dataTransfer.files); } : undefined}
     >
-      <div className="section-head"><h3>{title}</h3><span className="muted">Organized by folder · sortable{canEdit ? " · drag files in to upload" : ""}</span></div>
+      {/* Same collapse anatomy as CollapsibleSection (Buyer Activity etc.) —
+          collapsed by default, remembered per record for the session. */}
+      <div className="dpp-head" role="button" tabIndex={0} aria-expanded={expanded}
+        onClick={toggleOpen}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleOpen(); } }}>
+        <div className="dpp-title"><div>
+          <h3 style={{ margin: 0 }}>{title}</h3>
+          <div className="dpp-sub">{files.length} file{files.length === 1 ? "" : "s"} · organized by folder{canEdit ? " · drag files in to upload" : ""}</div>
+        </div></div>
+        <span className="dpp-right">
+          <span className="muted" style={{ fontSize: 12.5 }}>{expanded ? "Collapse" : "Expand"}</span>
+          <span className={`va-chev ${expanded ? "" : "down"}`}>⌃</span>
+        </span>
+      </div>
+      {expanded && <div className="cs-body">
 
       <div className="doc-chips">
         {folders.map((fl) => (
@@ -250,7 +274,43 @@ export function DocumentsSection({
           onMove={(toFolder) => { setMoving(null); move(moving, toFolder); }}
         />
       )}
+
+      {renaming && (
+        <RenameFileModal
+          file={renaming}
+          onClose={() => setRenaming(null)}
+          onRename={(filename) => { setRenaming(null); rename(renaming, filename); }}
+        />
+      )}
+      </div>}
     </div>
+  );
+}
+
+/** Rename dialog — a standard Modal (typography, spacing, buttons, dirty
+ * pulse), replacing the old bare window.prompt(). */
+function RenameFileModal({ file, onClose, onRename }: {
+  file: DocFile; onClose: () => void; onRename: (filename: string) => void;
+}) {
+  const [name, setName] = useState(file.filename);
+  const changed = name.trim() !== "" && name.trim() !== file.filename;
+  return (
+    <Modal title="Rename document" onClose={onClose} dirty={changed}
+      footer={<>
+        <button onClick={onClose}>Cancel</button>
+        <button className="primary" disabled={!changed} onClick={() => onRename(name)}>Rename</button>
+      </>}>
+      <div className="field">
+        <label>Document name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} autoFocus
+          onFocus={(e) => {
+            // Preselect the base name so typing replaces it but keeps the extension.
+            const dot = e.currentTarget.value.lastIndexOf(".");
+            e.currentTarget.setSelectionRange(0, dot > 0 ? dot : e.currentTarget.value.length);
+          }}
+          onKeyDown={(e) => { if (e.key === "Enter" && changed) { e.preventDefault(); onRename(name); } }} />
+      </div>
+    </Modal>
   );
 }
 

@@ -11,22 +11,62 @@ dashboardRouter.use(requireAuth, requireOrg);
 
 const dealInclude = { selectedBuyer: true, relationshipOwner: true } as const;
 
+/** "YYYY-MM-DD" → UTC midnight, or null. Year-guarded (see research.ts lesson:
+ * a malformed year like 0202 parses to a valid-but-absurd Date). */
+function parseDayUTC(v: unknown): Date | null {
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
+  const d = new Date(`${v}T00:00:00Z`);
+  const y = d.getUTCFullYear();
+  return Number.isNaN(d.getTime()) || y < 1900 || y > 2100 ? null : d;
+}
+
 /** Global dashboard date window (default YTD). Upper bound is exclusive. */
-function dashboardWindow(period: string | undefined, now: Date): { start: Date; end: Date; label: string } {
+export function dashboardWindow(
+  period: string | undefined, now: Date, from?: unknown, to?: unknown,
+): { start: Date; end: Date; label: string } {
   const y = now.getUTCFullYear(), m = now.getUTCMonth();
   switch (period) {
     case "THIS_MONTH": return { start: new Date(Date.UTC(y, m, 1)), end: new Date(Date.UTC(y, m + 1, 1)), label: "This Month" };
     case "LAST_MONTH": return { start: new Date(Date.UTC(y, m - 1, 1)), end: new Date(Date.UTC(y, m, 1)), label: "Last Month" };
     case "THIS_QUARTER": { const q = Math.floor(m / 3) * 3; return { start: new Date(Date.UTC(y, q, 1)), end: new Date(Date.UTC(y, q + 3, 1)), label: "This Quarter" }; }
-    default: return { start: new Date(Date.UTC(y, 0, 1)), end: new Date(Date.UTC(y + 1, 0, 1)), label: "YTD" };
+    case "CUSTOM": {
+      const f = parseDayUTC(from), t = parseDayUTC(to);
+      // End is exclusive: the chosen "to" day is included in full.
+      if (f && t && f.getTime() <= t.getTime()) return { start: f, end: new Date(t.getTime() + 86_400_000), label: "Custom" };
+      break; // malformed range → YTD fallback
+    }
   }
+  return { start: new Date(Date.UTC(y, 0, 1)), end: new Date(Date.UTC(y + 1, 0, 1)), label: "YTD" };
+}
+
+/**
+ * Time buckets spanning a window: monthly, or yearly when a custom range grows
+ * past 24 months (120 bars help nobody). Labels carry the year whenever the
+ * bucket isn't in the current calendar year.
+ */
+export function windowBuckets(win: { start: Date; end: Date }, now: Date): { y: number; m: number | null; label: string; isCurrent: boolean }[] {
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  const endT = new Date(win.end.getTime() - 1);
+  const months: { y: number; m: number }[] = [];
+  for (let y = win.start.getUTCFullYear(), m = win.start.getUTCMonth();
+    y < endT.getUTCFullYear() || (y === endT.getUTCFullYear() && m <= endT.getUTCMonth());
+    m === 11 ? (m = 0, y++) : m++) months.push({ y, m });
+  if (months.length > 24) {
+    const years = [...new Set(months.map((x) => x.y))];
+    return years.map((y) => ({ y, m: null, label: String(y), isCurrent: y === now.getUTCFullYear() }));
+  }
+  return months.map(({ y, m }) => ({
+    y, m,
+    label: y === now.getUTCFullYear() ? monthNames[m] : `${monthNames[m]} '${String(y).slice(2)}`,
+    isCurrent: y === now.getUTCFullYear() && m === now.getUTCMonth(),
+  }));
 }
 
 dashboardRouter.get(
   "/",
   asyncHandler(async (req: AuthedRequest, res) => {
     const now = new Date();
-    const win = dashboardWindow(req.query.period as string | undefined, now);
+    const win = dashboardWindow(req.query.period as string | undefined, now, req.query.from, req.query.to);
     const inWindow = (d: Date) => d.getTime() >= win.start.getTime() && d.getTime() < win.end.getTime();
     const org = orgId(req);
 
@@ -44,7 +84,7 @@ dashboardRouter.get(
       prisma.deal.findMany({ where: { stage: { notIn: [...TERMINAL_STAGE_KEYS] }, organizationId: org, ...IN_PIPELINE }, include: { ...dealInclude, offers: true } }),
       prisma.deal.findMany({
         where: { stage: "CLOSED", organizationId: org, ...IN_PIPELINE },
-        include: { ...dealInclude, selectedOffer: true, stageHistory: { where: { toStage: "CLOSED" }, orderBy: { createdAt: "desc" }, take: 1 } },
+        include: { ...dealInclude, selectedOffer: true },
       }),
       prisma.offer.count({ where: { status: "ACTIVE", deal: { organizationId: org, ...IN_PIPELINE } } }),
     ]);
@@ -59,11 +99,11 @@ dashboardRouter.get(
       return sum + netProfit(best, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts);
     }, 0);
 
-    // Closed profit + average size are scoped to the selected dashboard window;
-    // the year-view widgets (Top Buyers, Profit by Month) stay YTD.
-    const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
-    const closedYtd = closedDeals.filter((d) => (d.stageHistory[0]?.createdAt ?? d.updatedAt) >= yearStart);
-    const closedInWindow = closedDeals.filter((d) => inWindow(d.stageHistory[0]?.createdAt ?? d.updatedAt));
+    // Every closed-deal metric keys EXCLUSIVELY on the Contract Timeline's
+    // Closed Date (Deal.closedDate) — never the stage-transition timestamp or
+    // updatedAt. A closed deal with no Closed Date set is deliberately absent
+    // from period-scoped reporting until the date is entered.
+    const closedInWindow = closedDeals.filter((d) => d.closedDate && inWindow(d.closedDate));
     const closedProfitYtd = closedInWindow.reduce(
       (sum, d) => sum + (d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : 0),
       0,
@@ -99,9 +139,9 @@ dashboardRouter.get(
       take: 15,
     });
 
-    // Top buyers YTD by closed volume
+    // Top buyers by closed volume within the selected window
     const topBuyersMap = new Map<string, { name: string; companyName: string; volume: number }>();
-    for (const d of closedYtd) {
+    for (const d of closedInWindow) {
       if (d.selectedBuyer && d.selectedOffer) {
         const cur = topBuyersMap.get(d.selectedBuyer.id) ?? { name: d.selectedBuyer.name, companyName: d.selectedBuyer.companyName, volume: 0 };
         cur.volume += d.selectedOffer.amount;
@@ -113,13 +153,18 @@ dashboardRouter.get(
       .sort((a, b) => b.volume - a.volume)
       .slice(0, 5);
 
-    // Profit by month (YTD, by CLOSED transition month)
+    // Profit by month — realized profit bucketed by the Contract Timeline's
+    // Closed Date, spanning the SELECTED window (yearly buckets for very long
+    // custom ranges). Projected profit shares the same axis.
+    const buckets = windowBuckets(win, now);
+    const bucketIdx = (dt: Date): number => buckets.findIndex((b) =>
+      b.m === null ? dt.getUTCFullYear() === b.y : dt.getUTCFullYear() === b.y && dt.getUTCMonth() === b.m);
     const monthly = new Map<number, number>();
-    for (const d of closedYtd) {
-      const closedAt = d.stageHistory[0]?.createdAt ?? d.updatedAt;
-      const m = closedAt.getUTCMonth();
+    for (const d of closedInWindow) {
+      const i = bucketIdx(d.closedDate!);
+      if (i < 0) continue;
       const profit = d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : 0;
-      monthly.set(m, (monthly.get(m) ?? 0) + profit);
+      monthly.set(i, (monthly.get(i) ?? 0) + profit);
     }
     // Projected profit by month — SAME population as the Projected Profit KPI
     // above (any active deal with at least one offer; accepted offer wins over
@@ -134,14 +179,12 @@ dashboardRouter.get(
       if (amount == null) continue;
       const s = serializeDeal(d, now);
       if (!s.finalClosingDate) continue;
-      const close = new Date(s.finalClosingDate);
-      if (close.getUTCFullYear() !== now.getUTCFullYear()) continue;
+      const i = bucketIdx(new Date(s.finalClosingDate));
+      if (i < 0) continue;
       const profit = netProfit(amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts);
-      const m = close.getUTCMonth();
-      monthlyProjected.set(m, (monthlyProjected.get(m) ?? 0) + profit);
+      monthlyProjected.set(i, (monthlyProjected.get(i) ?? 0) + profit);
     }
-    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    const profitByMonth = monthNames.map((label, i) => ({ month: label, profit: monthly.get(i) ?? 0, projected: monthlyProjected.get(i) ?? 0 }));
+    const profitByMonth = buckets.map((b, i) => ({ month: b.label, isCurrent: b.isCurrent, profit: monthly.get(i) ?? 0, projected: monthlyProjected.get(i) ?? 0 }));
 
     // --- KPI trends (sparkline series — real history, never fabricated) ------
     const weekMs = 7 * 24 * 3600 * 1000;
@@ -161,10 +204,11 @@ dashboardRouter.get(
       (t) => pipelineHistory.filter((d) => d.createdAt <= t && !(d.stageHistory[0] && d.stageHistory[0].createdAt <= t)).length,
     );
 
-    // Avg deal size as a running average across closes (last 8 points).
+    // Avg deal size as a running average across closes (last 8 points),
+    // ordered by the same Contract Timeline Closed Date as everything else.
     const closesAsc = closedDeals
-      .filter((d) => d.selectedOffer)
-      .sort((a, b) => (a.stageHistory[0]?.createdAt ?? a.updatedAt).getTime() - (b.stageHistory[0]?.createdAt ?? b.updatedAt).getTime());
+      .filter((d) => d.selectedOffer && d.closedDate)
+      .sort((a, b) => a.closedDate!.getTime() - b.closedDate!.getTime());
     let closeSum = 0;
     const avgDealSizeTrend = closesAsc.map((d, i) => { closeSum += d.selectedOffer!.amount; return closeSum / (i + 1); }).slice(-8);
 

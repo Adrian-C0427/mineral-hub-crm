@@ -7,6 +7,7 @@ import { portalGet, portalPost, type FC, type PortalAbstract, type PortalDeal, t
 import { formatPhone } from "../../lib/phone";
 import { MoneyInput } from "../../components/MoneyInput";
 import { PhoneInput } from "../../components/PhoneInput";
+import { DateField } from "../../components/DateField";
 
 const EMPTY_FC: FC = { type: "FeatureCollection", features: [] };
 
@@ -297,7 +298,7 @@ function SubmitOffer({ slug, dealName }: { slug: string; dealName: string }) {
         <div className="muted portal-lead-section">Your offer</div>
         <div className="dd-grid">
           <div className="field"><label>Offer amount {star}</label><MoneyInput value={f.amount} onChange={(v) => setF((p) => ({ ...p, amount: v }))} placeholder="e.g. 250,000" ariaLabel="Offer amount" /></div>
-          <div className="field"><label>Offer expires (optional)</label><input type="date" value={f.expiresOn} onChange={(e) => set("expiresOn")(e.target.value)} /></div>
+          <div className="field"><label>Offer expires (optional)</label><DateField value={f.expiresOn} onChange={set("expiresOn")} /></div>
           <div className="field" style={{ gridColumn: "1 / -1" }}><label>Terms / conditions (optional)</label><input value={f.conditions} onChange={(e) => set("conditions")(e.target.value)} placeholder="e.g. subject to title review; 30-day close" /></div>
         </div>
         <div className="muted portal-lead-section">Contact information</div>
