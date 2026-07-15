@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Cloud } from "lucide-react";
 import { api } from "../api/client";
-import { Banner, EmptyState, Modal, Spinner, showToast } from "./ui";
+import { Banner, EmptyState, Modal, OverflowMenu, Spinner, showToast } from "./ui";
 import { Select } from "./Select";
 import { SortableTable, type Column } from "./SortableTable";
 import { fmtDateLocal } from "../lib/format";
@@ -42,7 +42,16 @@ function fileType(f: DocFile): string {
   if (ext && ext.length <= 5) return ext;
   return ((f.mimeType ?? "").split("/")[1] || f.mimeType || "file").toUpperCase();
 }
-const isPreviewable = (f: DocFile) => f.mimeType === "application/pdf" || (f.mimeType ?? "").startsWith("image/");
+/** How the in-app viewer renders a file; "other" falls back to download. */
+function viewKind(f: DocFile): "pdf" | "image" | "video" | "audio" | "text" | "other" {
+  const m = f.mimeType ?? "";
+  if (m === "application/pdf") return "pdf";
+  if (m.startsWith("image/")) return "image";
+  if (m.startsWith("video/")) return "video";
+  if (m.startsWith("audio/")) return "audio";
+  if (m.startsWith("text/") || m === "application/json") return "text";
+  return "other";
+}
 
 export function DocumentsSection({
   ownerType = "deal",
@@ -71,6 +80,8 @@ export function DocumentsSection({
   const [dragOver, setDragOver] = useState(false);
   const [cloudProviders, setCloudProviders] = useState<CloudProvider[]>([]);
   const [importing, setImporting] = useState<CloudProvider | null>(null);
+  const [viewing, setViewing] = useState<DocFile | null>(null);
+  const [moving, setMoving] = useState<DocFile | null>(null);
   const uploadRef = useRef<HTMLInputElement>(null);
   const replaceRef = useRef<HTMLInputElement>(null);
   const replaceId = useRef<string | null>(null);
@@ -127,7 +138,14 @@ export function DocumentsSection({
   const columns: Column<DocFile>[] = [
     {
       key: "filename", header: "Document Name", value: (f) => f.filename.toLowerCase(),
-      render: (f) => <span title={f.filename}>{f.filename}{(f.versionCount ?? 0) > 0 && <span className="chip-mini" style={{ marginLeft: 6 }} title={`${f.versionCount} previous version(s)`}>v{(f.versionCount ?? 0) + 1}</span>}</span>,
+      // The name itself opens the in-app viewer — the natural "click the
+      // document to see it" affordance.
+      render: (f) => (
+        <span title={f.filename}>
+          <button type="button" className="link-btn doc-name" onClick={() => setViewing(f)}>{f.filename}</button>
+          {(f.versionCount ?? 0) > 0 && <span className="chip-mini" style={{ marginLeft: 6 }} title={`${f.versionCount} previous version(s)`}>v{(f.versionCount ?? 0) + 1}</span>}
+        </span>
+      ),
     },
     { key: "createdAt", header: "Date Uploaded", type: "date", value: (f) => f.createdAt, render: (f) => fmtDateLocal(f.createdAt) },
     { key: "updatedAt", header: "Date Modified", type: "date", value: (f) => f.updatedAt ?? f.createdAt, render: (f) => fmtDateLocal(f.updatedAt ?? f.createdAt) },
@@ -136,17 +154,26 @@ export function DocumentsSection({
     { key: "sizeBytes", header: "File Size", align: "right", value: (f) => f.sizeBytes, render: (f) => humanSize(f.sizeBytes) },
     {
       key: "actions", header: "", value: () => "", align: "right", width: "1%",
+      // Two primary actions stay visible; everything else lives in a ⋯ menu
+      // (body-portaled, so it always opens fully on-screen) — the row never
+      // crowds or overlaps, at any width.
       render: (f) => (
-        <div className="row" style={{ gap: 4, justifyContent: "flex-end", flexWrap: "nowrap" }}>
-          {isPreviewable(f) && <button className="small" onClick={() => open(f.id, true)}>Preview</button>}
+        <div className="doc-actions">
+          <button className="small" onClick={() => setViewing(f)}>View</button>
           <button className="small" onClick={() => open(f.id, false)}>Download</button>
-          {canEdit && <button className="small" onClick={() => rename(f)}>Rename</button>}
-          {canEdit && (
-            <Select value={f.folder || "Other"} onChange={(v) => move(f, v)} width={150} ariaLabel="Move to folder"
-              options={folders.map((fl) => ({ value: fl, label: fl }))} />
+          {(canEdit || canDelete) && (
+            <OverflowMenu
+              ariaLabel={`More actions for ${f.filename}`}
+              items={[
+                ...(canEdit ? [
+                  { label: "Rename", onClick: () => rename(f) },
+                  { label: "Move to folder…", onClick: () => setMoving(f) },
+                  { label: "Replace file…", onClick: () => { replaceId.current = f.id; replaceRef.current?.click(); } },
+                ] : []),
+                ...(canDelete ? [{ label: "Delete", danger: true, onClick: () => run(() => api.del(`/files/${f.id}`)) }] : []),
+              ]}
+            />
           )}
-          {canEdit && <button className="small" onClick={() => { replaceId.current = f.id; replaceRef.current?.click(); }}>Replace</button>}
-          {canDelete && <button className="small danger" onClick={() => run(() => api.del(`/files/${f.id}`))}>Delete</button>}
         </div>
       ),
     },
@@ -212,7 +239,79 @@ export function DocumentsSection({
           onImported={(n) => { setImporting(null); showToast(`${n} file${n === 1 ? "" : "s"} imported from ${importing.name} into ${folder}.`); onChanged(); }}
         />
       )}
+
+      {viewing && <DocViewerModal file={viewing} onClose={() => setViewing(null)} onDownload={() => open(viewing.id, false)} />}
+
+      {moving && (
+        <MoveFolderModal
+          file={moving}
+          folders={folders}
+          onClose={() => setMoving(null)}
+          onMove={(toFolder) => { setMoving(null); move(moving, toFolder); }}
+        />
+      )}
     </div>
+  );
+}
+
+// --- In-app document viewer ---------------------------------------------------
+
+/**
+ * Views a document inside the app: PDFs, images, video, audio, and plain text
+ * render inline (the download endpoint serves them with an inline disposition);
+ * anything else gets a friendly fallback with a Download button.
+ */
+function DocViewerModal({ file, onClose, onDownload }: { file: DocFile; onClose: () => void; onDownload: () => void }) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const kind = viewKind(file);
+  useEffect(() => {
+    if (kind === "other") return; // nothing to fetch — fallback panel only
+    api.get<{ url: string }>(`/files/${file.id}/download?inline=1`)
+      .then((r) => setUrl(r.url))
+      .catch((e) => setError(e instanceof Error ? e.message : "Could not load the document"));
+  }, [file.id, kind]);
+
+  return (
+    <Modal title={file.filename} onClose={onClose} wide
+      footer={<>
+        <button onClick={onClose}>Close</button>
+        <button className="primary" onClick={onDownload}>Download</button>
+      </>}>
+      {error && <Banner kind="error">{error}</Banner>}
+      {kind === "other" ? (
+        <EmptyState title="No inline preview for this file type">
+          {fileType(file)} files can't be shown in the browser — use Download to open it locally.
+        </EmptyState>
+      ) : !url && !error ? (
+        <Spinner label="Loading document…" />
+      ) : url && (
+        <div className="doc-viewer">
+          {kind === "image" && <img src={url} alt={file.filename} />}
+          {(kind === "pdf" || kind === "text") && <iframe src={url} title={file.filename} />}
+          {kind === "video" && <video src={url} controls autoPlay={false} />}
+          {kind === "audio" && <audio src={url} controls style={{ width: "100%" }} />}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+/** Small picker used by the actions menu's "Move to folder…". */
+function MoveFolderModal({ file, folders, onClose, onMove }: {
+  file: DocFile; folders: string[]; onClose: () => void; onMove: (folder: string) => void;
+}) {
+  const [dest, setDest] = useState(file.folder || "Other");
+  return (
+    <Modal title="Move to folder" onClose={onClose}
+      footer={<>
+        <button onClick={onClose}>Cancel</button>
+        <button className="primary" disabled={dest === (file.folder || "Other")} onClick={() => onMove(dest)}>Move</button>
+      </>}>
+      <p className="muted" style={{ marginTop: 0 }}>Move <strong>{file.filename}</strong> from “{file.folder || "Other"}” to:</p>
+      <Select value={dest} onChange={setDest} ariaLabel="Destination folder"
+        options={folders.map((fl) => ({ value: fl, label: fl }))} />
+    </Modal>
   );
 }
 

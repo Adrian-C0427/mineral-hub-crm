@@ -8,6 +8,7 @@ import { useAuth } from "../auth/AuthContext";
 import { Spinner, MetricCard, Banner, MatchBar, Modal, ConfirmDialog, BackLink } from "../components/ui";
 import { Select } from "../components/Select";
 import { BuyerActivitySection } from "../components/BuyerActivitySection";
+import { CollapsibleSection } from "../components/CollapsibleSection";
 import { LogContactModal } from "../components/LogContactModal";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { DealPortalPanel } from "../components/DealPortalPanel";
@@ -545,18 +546,24 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
       {/* Offering page publishing — identical to a standard deal. */}
       <DealPortalPanel dealId={asset.id} />
 
-      <div className="panel">
-        <div className="section-head"><h3>Buyer Activity</h3><span className="muted">Status, notes and communication history for this asset's marketing</span></div>
+      <CollapsibleSection
+        title="Buyer Activity"
+        sub="Status, notes and communication history for this asset's marketing"
+        right={<span className="muted" style={{ fontSize: 12.5 }}>{asset.buyerActivity.length} buyer{asset.buyerActivity.length === 1 ? "" : "s"}</span>}
+      >
         <BuyerActivitySection
           dealId={asset.id}
           rows={asset.buyerActivity}
           onChanged={onChanged}
           onEdit={(r) => setLogBuyer({ id: r.buyerId, name: r.buyerName })}
         />
-      </div>
+      </CollapsibleSection>
 
-      <div className="panel">
-        <div className="section-head"><h3>Buyer Match Recommendations</h3><span className="muted">Ranked by fit with this asset</span></div>
+      <CollapsibleSection
+        title="Buyer Match Recommendations"
+        sub="Ranked by fit with this asset"
+        right={matches ? <span className="muted" style={{ fontSize: 12.5 }}>{matches.length} buyer{matches.length === 1 ? "" : "s"}</span> : undefined}
+      >
         {!matches ? <Spinner /> : matches.length === 0 ? <p className="muted">No buyers in the system yet.</p> : (
           <>
             {canEdit && (
@@ -588,7 +595,7 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
             ))}
           </>
         )}
-      </div>
+      </CollapsibleSection>
 
       {/* Location map + documents — identical to a standard deal. */}
       <div className="panel">

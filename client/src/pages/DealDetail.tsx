@@ -11,6 +11,7 @@ import { SortableTable, type Column } from "../components/SortableTable";
 import { StageChangeModal } from "../components/StageChangeModal";
 import { LogContactModal } from "../components/LogContactModal";
 import { BuyerActivitySection } from "../components/BuyerActivitySection";
+import { CollapsibleSection } from "../components/CollapsibleSection";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { useAbstractLabels } from "../components/AbstractPicker";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
@@ -238,9 +239,12 @@ export function DealDetail() {
         </div>
       )}
 
-      {/* Buyer Activity — expandable per-buyer relationship + timeline */}
-      <div className="panel">
-        <div className="section-head"><h3>Buyer Activity</h3><span className="muted">Every buyer's status, notes, and full communication history on this deal</span></div>
+      {/* Buyer Activity — collapsed by default; expandable per-buyer relationship + timeline */}
+      <CollapsibleSection
+        title="Buyer Activity"
+        sub="Every buyer's status, notes, and full communication history on this deal"
+        right={<span className="muted" style={{ fontSize: 12.5 }}>{deal.buyerActivity.length} buyer{deal.buyerActivity.length === 1 ? "" : "s"}</span>}
+      >
         <BuyerActivitySection
           dealId={deal.id}
           rows={deal.buyerActivity}
@@ -249,11 +253,14 @@ export function DealDetail() {
           onEdit={(r) => setLogBuyer({ id: r.buyerId, name: r.buyerName, initial: { status: r.status, assignedTeamMemberId: r.assignedTeamMember?.id ?? null, notes: r.notes, dateSent: r.dateSent, nextFollowUpDate: r.nextFollowUpDate } })}
           onRecordOffer={can("editDeals") ? (r) => setLogBuyer({ id: r.buyerId, name: r.buyerName, initial: { status: "OFFER_RECEIVED", assignedTeamMemberId: r.assignedTeamMember?.id ?? null, notes: r.notes, dateSent: r.dateSent, nextFollowUpDate: r.nextFollowUpDate } }) : undefined}
         />
-      </div>
+      </CollapsibleSection>
 
-      {/* Match recommendations — actionable outreach */}
-      <div className="panel">
-        <div className="section-head"><h3>Buyer Match Recommendations</h3><span className="muted">Ranked, every buyer, highest match first</span></div>
+      {/* Match recommendations — collapsed by default; actionable outreach */}
+      <CollapsibleSection
+        title="Buyer Match Recommendations"
+        sub="Ranked, every buyer, highest match first"
+        right={matches ? <span className="muted" style={{ fontSize: 12.5 }}>{matches.length} buyer{matches.length === 1 ? "" : "s"}</span> : undefined}
+      >
         {!matches ? <Spinner /> : matches.length === 0 ? <p className="muted">No buyers in the system yet.</p> : (
           <>
             {can("editDeals") && (
@@ -303,7 +310,7 @@ export function DealDetail() {
             ))}
           </>
         )}
-      </div>
+      </CollapsibleSection>
 
       {/* Documents */}
       <DocumentsSection ownerType="deal" ownerId={deal.id} files={deal.files} folders={DEAL_DOC_FOLDERS} onChanged={loadDeal} canEdit={can("manageDocuments")} canDelete={can("manageDocuments")} />

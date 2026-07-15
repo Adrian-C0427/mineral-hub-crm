@@ -128,7 +128,7 @@ export function Select({
       {open && !disabled && pos && createPortal(
         <div
           className="msel-menu msel-menu-portal" role="listbox" ref={menuRef}
-          style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
+          style={pos}
         >
           {searchable && (
             <input
