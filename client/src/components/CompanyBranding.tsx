@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Banner } from "./ui";
+import { ThemedLogo } from "./ThemedLogo";
 
 /**
  * Company Branding settings: upload a Full logo (expanded sidebar, PDF/report
@@ -88,7 +89,7 @@ function LogoSlot({ label, hint, current, defaultLabel, square, busy, disabled, 
         role="button" tabIndex={0}
       >
         {busy ? <span className="muted">Saving…</span>
-          : current ? <img src={current} alt={label} className="logo-preview" />
+          : current ? <ThemedLogo src={current} alt={label} className="logo-preview" />
           : <span className="logo-default">{defaultLabel}<span className="muted" style={{ display: "block", fontSize: 11 }}>default</span></span>}
       </div>
       <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{hint}</div>

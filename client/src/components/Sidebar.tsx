@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { NotificationsBell } from "./NotificationsBell";
+import { ThemedLogo } from "./ThemedLogo";
 import { ROLE_LABEL } from "../lib/roles";
 
 interface NavItem {
@@ -94,7 +95,7 @@ export function Sidebar() {
         {(() => {
           const org = user?.organization;
           const logo = collapsed ? org?.compactLogo : org?.fullLogo;
-          if (logo) return <img className={`sidebar-logo ${collapsed ? "compact" : ""}`} src={logo} alt={org?.name ?? "Company logo"} />;
+          if (logo) return <ThemedLogo className={`sidebar-logo ${collapsed ? "compact" : ""}`} src={logo} alt={org?.name ?? "Company logo"} />;
           return <span className="brand">{collapsed ? "MH" : <>Mineral Hub<span className="dot">.</span></>}</span>;
         })()}
       </div>
