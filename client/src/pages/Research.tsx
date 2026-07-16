@@ -13,8 +13,8 @@ import { GeoFields } from "../components/GeoFields";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { ChartTypeToggle, useChartType } from "../components/ChartTypeToggle";
 import { ResearchImport } from "../components/ResearchImport";
-import { ResearchChoropleth, type CountyStat } from "../components/ResearchChoropleth";
-import { CLASS_COLORS } from "../components/NetworkGraph";
+import { ResearchChoropleth, ResearchAbstractMap, type CountyStat, type AbstractFeature } from "../components/ResearchChoropleth";
+import { CLASS_COLORS } from "../lib/entityClasses";
 import { downloadCsv } from "../lib/csv";
 import { fmtDate, num, prettyEnum, prettyDocType } from "../lib/format";
 import { CHART_COLORS, chartTooltip } from "../lib/charts";
@@ -572,6 +572,16 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onToggleCounty }: {
   const [loading, setLoading] = useState(true);
   // The map always shows county-level stats regardless of the table level.
   const [countyRows, setCountyRows] = useState<GeoRow[]>([]);
+  // Single-county drill-in: every abstract boundary with its transaction totals.
+  const [abstractFC, setAbstractFC] = useState<{ features: AbstractFeature[] } | null>(null);
+  const singleCounty = filters.counties.length === 1 ? filters.counties[0] : null;
+  useEffect(() => {
+    if (!singleCounty) { setAbstractFC(null); return; }
+    setAbstractFC(null);
+    api.get<{ features: AbstractFeature[] }>(`/research/abstract-map?mapCounty=${encodeURIComponent(singleCounty)}&${qs}`)
+      .then(setAbstractFC)
+      .catch(() => setAbstractFC({ features: [] }));
+  }, [singleCounty, qs]);
 
   useEffect(() => {
     setLoading(true);
@@ -615,14 +625,32 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onToggleCounty }: {
       {showMap && (
         <div className="panel">
           <div className="panel-title">
-            <h3 style={{ margin: 0 }}>Texas Activity Map <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(red outline = hotspot; click a county to filter)</span></h3>
-            <div className="chip-row">
-              <span className={`chip ${metric === "activity" ? "active" : ""}`} onClick={() => setMetric("activity")}>Volume</span>
-              <span className={`chip ${metric === "change" ? "active" : ""}`} onClick={() => setMetric("change")}>Change</span>
+            {singleCounty ? (
+              <h3 style={{ margin: 0 }}>
+                {singleCounty} County — Activity by Abstract{" "}
+                <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(hover an abstract for its transaction amount)</span>
+              </h3>
+            ) : (
+              <h3 style={{ margin: 0 }}>Texas Activity Map <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(red outline = hotspot; click a county to filter)</span></h3>
+            )}
+            <div className="row" style={{ gap: 8 }}>
+              {singleCounty && <button className="small" onClick={() => onToggleCounty(singleCounty)}>← All counties</button>}
+              {!singleCounty && (
+                <div className="chip-row">
+                  <span className={`chip ${metric === "activity" ? "active" : ""}`} onClick={() => setMetric("activity")}>Volume</span>
+                  <span className={`chip ${metric === "change" ? "active" : ""}`} onClick={() => setMetric("change")}>Change</span>
+                </div>
+              )}
             </div>
           </div>
           <div style={{ maxWidth: 640, margin: "0 auto" }}>
-            <ResearchChoropleth stats={countyStats} metric={metric} selected={filters.counties} onSelect={onToggleCounty} />
+            {singleCounty ? (
+              abstractFC == null
+                ? <p className="muted">Loading {singleCounty} County abstracts…</p>
+                : <ResearchAbstractMap county={singleCounty} features={abstractFC.features} />
+            ) : (
+              <ResearchChoropleth stats={countyStats} metric={metric} selected={filters.counties} onSelect={onToggleCounty} />
+            )}
           </div>
         </div>
       )}
@@ -1409,6 +1437,10 @@ function OpportunitiesTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
 // Records (drill-in tables)
 // ---------------------------------------------------------------------------
 
+interface RecFilters { abstracts: string[]; counties: string[]; docClass: string; docTypes: string[]; statuses: string[]; trajectories: string[]; from: string; to: string }
+const EMPTY_REC_FILTERS: RecFilters = { abstracts: [], counties: [], docClass: "", docTypes: [], statuses: [], trajectories: [], from: "", to: "" };
+interface RecOptions { counties: string[]; abstracts: string[]; docTypes?: string[]; docClasses?: string[]; statuses?: string[]; trajectories?: string[] }
+
 function RecordsTab({ qs }: { qs: string }) {
   const { can } = useAuth();
   const canManage = can("manageResearchData");
@@ -1423,13 +1455,39 @@ function RecordsTab({ qs }: { qs: string }) {
   const [reloadKey, setReloadKey] = useState(0);
   const pageSize = 50;
 
-  useEffect(() => { setPage(1); sel.clear(); }, [qs, kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Records-level filters. Options are DYNAMIC — distinct values from the data
+  // currently loaded into Research (under the page's active filters/window),
+  // so the dropdowns only ever offer values that exist in the dataset.
+  const [showFilters, setShowFilters] = useState(false);
+  const [rf, setRf] = useState<RecFilters>(EMPTY_REC_FILTERS);
+  const [opts, setOpts] = useState<RecOptions>({ counties: [], abstracts: [] });
+  useEffect(() => { setRf(EMPTY_REC_FILTERS); }, [kind]);
+  useEffect(() => {
+    api.get<RecOptions>(`/research/records/options?kind=${kind}&${qs}`).then(setOpts)
+      .catch(() => setOpts({ counties: [], abstracts: [] }));
+  }, [qs, kind]);
+  const recQs = useMemo(() => {
+    const p = new URLSearchParams(qs);
+    for (const a of rf.abstracts) p.append("abstract", a);
+    for (const c of rf.counties) p.append("county", c);
+    for (const t of rf.docTypes) p.append("docType", t);
+    if (rf.docClass) p.set("docClass", rf.docClass);
+    for (const s of rf.statuses) p.append("permitStatus", s);
+    for (const t of rf.trajectories) p.append("trajectory", t);
+    if (rf.from) p.set("from", rf.from);
+    if (rf.to) p.set("to", rf.to);
+    return p.toString();
+  }, [qs, rf]);
+  const activeFilterCount = rf.abstracts.length + rf.counties.length + rf.docTypes.length +
+    rf.statuses.length + rf.trajectories.length + (rf.docClass ? 1 : 0) + (rf.from ? 1 : 0) + (rf.to ? 1 : 0);
+
+  useEffect(() => { setPage(1); sel.clear(); }, [recQs, kind]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setLoading(true);
-    const url = `/research/${kind}?${qs}&page=${page}&pageSize=${pageSize}`;
+    const url = `/research/${kind}?${recQs}&page=${page}&pageSize=${pageSize}`;
     if (kind === "documents") api.get<Paged<DocRecord>>(url).then(setDocs).catch(() => setDocs(null)).finally(() => setLoading(false));
     else api.get<Paged<PermitRecord>>(url).then(setPermits).catch(() => setPermits(null)).finally(() => setLoading(false));
-  }, [qs, kind, page, reloadKey]);
+  }, [recQs, kind, page, reloadKey]);
 
   // Deletion is permanent — removed records can never resurface as phantom
   // duplicates in a later import.
@@ -1457,12 +1515,12 @@ function RecordsTab({ qs }: { qs: string }) {
   async function exportAll() {
     // Export up to 2000 most-recent matching rows.
     if (kind === "documents") {
-      const d = await api.get<Paged<DocRecord>>(`/research/documents?${qs}&page=1&pageSize=1000`);
+      const d = await api.get<Paged<DocRecord>>(`/research/documents?${recQs}&page=1&pageSize=1000`);
       downloadCsv("research-documents.csv",
         ["Recording Date", "Type", "Class", "Grantor", "Grantee", "Instrument #", "State", "County", "Abstract"],
         d.rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.docClass, r.grantor, r.grantee, r.instrumentNumber, r.state, r.county, r.abstractId]));
     } else {
-      const d = await api.get<Paged<PermitRecord>>(`/research/permits?${qs}&page=1&pageSize=1000`);
+      const d = await api.get<Paged<PermitRecord>>(`/research/permits?${recQs}&page=1&pageSize=1000`);
       downloadCsv("research-permits.csv",
         ["Date", "Operator", "Lease", "Well", "API #", "Permit #", "Status", "Trajectory", "State", "County", "Formation", "Source"],
         d.rows.map((r) => [r.activityDate.slice(0, 10), r.operator, r.leaseName, r.wellName, r.apiNumber, r.permitNumber, r.status, r.trajectory, r.state, r.county, r.formation, r.source]));
@@ -1501,9 +1559,45 @@ function RecordsTab({ qs }: { qs: string }) {
         </div>
         <div className="row" style={{ gap: 8, alignItems: "center" }}>
           {active && <span className="muted" style={{ fontSize: 12 }}>{num(active.total)} records</span>}
+          <button className={`small ${showFilters || activeFilterCount > 0 ? "primary" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters}>
+            Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+          </button>
           <button className="small" onClick={exportAll} disabled={!active?.total}>Export CSV</button>
         </div>
       </div>
+
+      {showFilters && (
+        <div className="mc-grid" style={{ marginBottom: 12 }}>
+          <div><div className="ddx-label mc-lbl">County</div>
+            <SearchableMultiSelect options={opts.counties} value={rf.counties} onChange={(v) => setRf((p) => ({ ...p, counties: v }))} placeholder="Counties…" /></div>
+          <div><div className="ddx-label mc-lbl">Abstract</div>
+            <SearchableMultiSelect options={opts.abstracts} value={rf.abstracts} onChange={(v) => setRf((p) => ({ ...p, abstracts: v }))} placeholder="Abstracts…" /></div>
+          {kind === "documents" ? (
+            <>
+              <div><div className="ddx-label mc-lbl">Record Type</div>
+                <Select value={rf.docClass} onChange={(v) => setRf((p) => ({ ...p, docClass: v }))} clearable placeholder="All record types" ariaLabel="Record type"
+                  options={(opts.docClasses ?? []).map((c) => ({ value: c, label: prettyEnum(c) }))} /></div>
+              <div><div className="ddx-label mc-lbl">Document Type</div>
+                <SearchableMultiSelect options={opts.docTypes ?? []} labels={Object.fromEntries((opts.docTypes ?? []).map((t) => [t, prettyDocType(t)]))}
+                  value={rf.docTypes} onChange={(v) => setRf((p) => ({ ...p, docTypes: v }))} placeholder="Document types…" /></div>
+            </>
+          ) : (
+            <>
+              <div><div className="ddx-label mc-lbl">Status</div>
+                <SearchableMultiSelect options={opts.statuses ?? []} labels={Object.fromEntries((opts.statuses ?? []).map((s) => [s, prettyEnum(s)]))}
+                  value={rf.statuses} onChange={(v) => setRf((p) => ({ ...p, statuses: v }))} placeholder="Statuses…" /></div>
+              <div><div className="ddx-label mc-lbl">Trajectory</div>
+                <SearchableMultiSelect options={opts.trajectories ?? []} labels={Object.fromEntries((opts.trajectories ?? []).map((t) => [t, prettyEnum(t)]))}
+                  value={rf.trajectories} onChange={(v) => setRf((p) => ({ ...p, trajectories: v }))} placeholder="Trajectories…" /></div>
+            </>
+          )}
+          <div><div className="ddx-label mc-lbl">From</div><DateField value={rf.from} onChange={(v) => setRf((p) => ({ ...p, from: v }))} ariaLabel="Records from date" /></div>
+          <div><div className="ddx-label mc-lbl">To</div><DateField value={rf.to} onChange={(v) => setRf((p) => ({ ...p, to: v }))} ariaLabel="Records to date" /></div>
+          {activeFilterCount > 0 && (
+            <div style={{ alignSelf: "end" }}><button className="small" onClick={() => setRf(EMPTY_REC_FILTERS)}>Clear filters</button></div>
+          )}
+        </div>
+      )}
       {canManage && sel.selected.size > 0 && (
         <BulkBar count={sel.selected.size} onClear={sel.clear}>
           <button className="small" onClick={exportSelected}>Export</button>
