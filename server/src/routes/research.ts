@@ -1089,6 +1089,59 @@ researchRouter.get(
   }),
 );
 
+/**
+ * Top buyers (grantees) for the selected abstract(s) — powers the compact
+ * "Top Buyers" preview shown above the Records table when an abstract filter
+ * is active. Respects every active research filter and the period window.
+ */
+researchRouter.get(
+  "/abstract-buyers",
+  requirePermission("viewResearch"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const f = parseFilters(req.query as Record<string, unknown>);
+    const win = parseWindow(req.query as Record<string, unknown>);
+    if (!f.abstractIds.length) {
+      res.json({ total: 0, buyers: [] });
+      return;
+    }
+    const docs = await prisma.researchDocument.findMany({
+      where: { ...docWhere(org, f, win), granteeNorm: { not: null } },
+      select: {
+        grantee: true, granteeNorm: true, docClass: true, recordingDate: true,
+        consideration: true, acreage: true,
+      },
+    });
+    interface Agg {
+      name: string; count: number; transactions: number; leases: number;
+      amount: number; acreage: number; first: Date; last: Date;
+    }
+    const byNorm = new Map<string, Agg>();
+    for (const d of docs) {
+      const a = byNorm.get(d.granteeNorm!) ?? {
+        name: d.grantee ?? d.granteeNorm!, count: 0, transactions: 0, leases: 0,
+        amount: 0, acreage: 0, first: d.recordingDate, last: d.recordingDate,
+      };
+      a.count++;
+      if (d.docClass === "TRANSACTION") a.transactions++; else a.leases++;
+      a.amount += d.consideration ?? 0;
+      a.acreage += d.acreage ?? 0;
+      if (d.recordingDate < a.first) a.first = d.recordingDate;
+      if (d.recordingDate > a.last) { a.last = d.recordingDate; a.name = d.grantee ?? a.name; }
+      byNorm.set(d.granteeNorm!, a);
+    }
+    const buyers = [...byNorm.entries()]
+      .sort((x, y) => y[1].count - x[1].count || y[1].amount - x[1].amount)
+      .slice(0, 5)
+      .map(([norm, a]) => ({
+        norm, name: a.name, count: a.count, transactions: a.transactions,
+        leases: a.leases, amount: a.amount, acreage: a.acreage,
+        firstSeen: a.first, lastSeen: a.last,
+      }));
+    res.json({ total: byNorm.size, buyers });
+  }),
+);
+
 researchRouter.get(
   "/documents",
   requirePermission("viewResearch"),

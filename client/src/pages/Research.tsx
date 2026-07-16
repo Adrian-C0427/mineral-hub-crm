@@ -358,8 +358,8 @@ export function Research() {
 
       <div ref={captureRef} className="report-capture">
         {tab === "overview" && <OverviewTab qs={qs} compareOff={compareOff} />}
-        {tab === "geography" && <GeographyTab qs={qs} filters={filters} compareOff={compareOff} onDrill={drillToRecords} onToggleCounty={(county) =>
-          setFilters((f) => ({ ...f, counties: f.counties.includes(county) ? f.counties.filter((c) => c !== county) : [...f.counties, county] }))} />}
+        {tab === "geography" && <GeographyTab qs={qs} filters={filters} compareOff={compareOff} onDrill={drillToRecords}
+          onSetCounties={(counties) => setFilters((f) => ({ ...f, counties }))} />}
         {tab === "rankings" && <RankingsTab qs={qs} opts={opts} compareOff={compareOff} onDrill={drillToRecords} />}
         {tab === "relationships" && <RelationshipsTab qs={qs} onDrill={drillToRecords} />}
         {tab === "opportunities" && <OpportunitiesTab qs={qs} onDrill={drillToRecords} />}
@@ -627,10 +627,11 @@ function TrendKpi({ label, t, compareOff }: { label: string; t?: TrendT; compare
 // Geography
 // ---------------------------------------------------------------------------
 
-function GeographyTab({ qs, filters, compareOff, onDrill, onToggleCounty }: {
+function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
   qs: string; filters: Filters; compareOff: boolean;
   onDrill: (patch: Partial<Filters>) => void;
-  onToggleCounty: (county: string) => void;
+  /** Replace the page-wide county filter (empty array = statewide). */
+  onSetCounties: (counties: string[]) => void;
 }) {
   const [level, setLevel] = useState<"county" | "abstract" | "state">("county");
   const [metric, setMetric] = useState<"activity" | "change">("activity");
@@ -720,8 +721,16 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onToggleCounty }: {
           </div>
           <div style={{ maxWidth: 640, margin: "0 auto" }}>
             <ResearchChoropleth
-              stats={countyStats} metric={metric} selected={filters.counties} onSelect={onToggleCounty} qs={qs}
-              focusCounty={focusCounty} onFocusChange={setFocusCounty}
+              stats={countyStats} metric={metric} selected={filters.counties} qs={qs}
+              // Clicking a county filters the whole Research page to it (every
+              // tab and visualization follows `qs`); "All counties"/Esc clears
+              // the filter and restores the statewide dataset.
+              onSelect={(county) => {
+                const row = countyRows.find((r) => r.county && r.county.toUpperCase() === county.toUpperCase());
+                onSetCounties([row?.county ?? county]);
+              }}
+              focusCounty={focusCounty}
+              onFocusChange={(c) => { setFocusCounty(c); if (c === null) onSetCounties([]); }}
               abstractStats={focusAbstractRows.filter((r) => r.abstractId).map((r) => ({ abstractId: r.abstractId!, total: r.total, isHotspot: r.isHotspot }))}
               onAbstractClick={(abstractId) => onDrill({
                 states: ["TX"],
@@ -1526,6 +1535,11 @@ function OpportunitiesTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
 // Records (drill-in tables)
 // ---------------------------------------------------------------------------
 
+interface AbstractBuyer {
+  norm: string; name: string; count: number; transactions: number; leases: number;
+  amount: number; acreage: number; firstSeen: string; lastSeen: string;
+}
+
 interface RecFilters { abstracts: string[]; counties: string[]; docClass: string; docTypes: string[]; statuses: string[]; trajectories: string[]; from: string; to: string }
 const EMPTY_REC_FILTERS: RecFilters = { abstracts: [], counties: [], docClass: "", docTypes: [], statuses: [], trajectories: [], from: "", to: "" };
 interface RecOptions { counties: string[]; abstracts: string[]; docTypes?: string[]; docClasses?: string[]; statuses?: string[]; trajectories?: string[] }
@@ -1569,6 +1583,24 @@ function RecordsTab({ qs }: { qs: string }) {
   }, [qs, rf]);
   const activeFilterCount = rf.abstracts.length + rf.counties.length + rf.docTypes.length +
     rf.statuses.length + rf.trajectories.length + (rf.docClass ? 1 : 0) + (rf.from ? 1 : 0) + (rf.to ? 1 : 0);
+
+  // Abstract Buyer Preview: whenever an abstract is selected (page-level drill
+  // or the records Abstract filter), summarize its top 5 buyers above the table
+  // so the map → records flow gives immediate context.
+  const selAbstracts = useMemo(() => {
+    const p = new URLSearchParams(recQs);
+    return [...new Set([...p.getAll("abstractId"), ...p.getAll("abstract")])];
+  }, [recQs]);
+  const [absBuyers, setAbsBuyers] = useState<{ total: number; buyers: AbstractBuyer[] } | null>(null);
+  useEffect(() => {
+    if (!selAbstracts.length || kind !== "documents") { setAbsBuyers(null); return; }
+    let cancelled = false;
+    api.get<{ total: number; buyers: AbstractBuyer[] }>(`/research/abstract-buyers?${recQs}`)
+      .then((d) => { if (!cancelled) setAbsBuyers(d); })
+      .catch(() => { if (!cancelled) setAbsBuyers(null); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recQs, kind]);
 
   useEffect(() => { setPage(1); sel.clear(); }, [recQs, kind]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
@@ -1685,6 +1717,36 @@ function RecordsTab({ qs }: { qs: string }) {
           {activeFilterCount > 0 && (
             <div style={{ alignSelf: "end" }}><button className="small" onClick={() => setRf(EMPTY_REC_FILTERS)}>Clear filters</button></div>
           )}
+        </div>
+      )}
+      {kind === "documents" && selAbstracts.length > 0 && absBuyers && absBuyers.buyers.length > 0 && (
+        <div style={{
+          border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", marginBottom: 12,
+          background: "color-mix(in srgb, var(--accent) 4%, transparent)",
+        }}>
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+            <strong style={{ fontSize: 13 }}>
+              Top Buyers — Abstract {selAbstracts.join(", ")}
+            </strong>
+            <span className="muted" style={{ fontSize: 12 }}>
+              {num(absBuyers.total)} buyer{absBuyers.total === 1 ? "" : "s"} in this period
+            </span>
+          </div>
+          {absBuyers.buyers.map((b, i) => (
+            <div key={b.norm} className="row" style={{
+              justifyContent: "space-between", gap: 12, padding: "4px 0", fontSize: 13,
+              borderTop: i > 0 ? "1px solid var(--border)" : "none",
+            }}>
+              <span style={{ fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
+              <span className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+                {num(b.count)} record{b.count === 1 ? "" : "s"}
+                {b.transactions > 0 && <> · {num(b.transactions)} transaction{b.transactions === 1 ? "" : "s"}</>}
+                {b.leases > 0 && <> · {num(b.leases)} lease{b.leases === 1 ? "" : "s"}</>}
+                {b.amount > 0 && <> · ${Math.round(b.amount).toLocaleString()}</>}
+                {" · last "}{fmtDate(b.lastSeen)}
+              </span>
+            </div>
+          ))}
         </div>
       )}
       {canManage && sel.selected.size > 0 && (
