@@ -75,6 +75,14 @@ export interface ParsedTract {
   confidence: number | null;
   /** Interpretive choices the parser made (each is a review prompt). */
   assumptions: string[];
+  /** Which corner of the referenced survey/abstract the POB (or commencement
+   *  point) is tied to, when the description names one. Lets the anchorer
+   *  derive a precise POB from the abstract polygon instead of an arbitrary
+   *  interior point. */
+  pobCorner?: "NE" | "NW" | "SE" | "SW" | null;
+  /** Commencement tie-line calls (excluded from the boundary walk) — applied
+   *  as a vector from the resolved corner to locate the true POB. */
+  tieCalls?: TractCall[];
 }
 
 // ---------------------------------------------------------------------------
@@ -273,18 +281,39 @@ function parseTexas(text: string): ParsedTract {
 
   // Commencement tie-line: "COMMENCING at … THENCE … to the POINT OF
   // BEGINNING; THENCE …". The calls up to and including the clause that
-  // arrives at the POB locate it — they are not part of the boundary walk.
+  // arrives at the POB locate it — they are not part of the boundary walk,
+  // but they ARE kept (tieCalls) so the anchorer can apply them as a vector
+  // from a resolved survey/abstract corner to compute the true POB.
+  const tieCalls: TractCall[] = [];
   if (/\bCOMMENC/i.test(clean)) {
     const pobIdx = clauses.findIndex((c) => /(POINT|PLACE|TRUE\s+POINT)\s+OF\s+BEGINNING/i.test(c));
     if (pobIdx >= 0 && pobIdx < clauses.length - 1) {
       const tie = clauses.slice(0, pobIdx + 1);
       clauses = clauses.slice(pobIdx + 1);
+      for (const [i, clause] of tie.entries()) {
+        const b = parseBearing(clause);
+        const d = parseDistance(clause);
+        tieCalls.push({
+          seq: i + 1, raw: clause.length > 160 ? clause.slice(0, 157) + "…" : clause,
+          azimuth: b?.azimuth ?? null, bearing: b?.display ?? null,
+          distanceFt: d ? Math.round(d.feet * 100) / 100 : null, distanceRaw: d?.raw ?? null,
+          curve: /\bcurve\b/i.test(clause), issue: b && d ? null : "Tie-line call could not be fully read.",
+        });
+      }
       pobText = `${pobText ?? "COMMENCING clause"} … ${tie[tie.length - 1]}`.slice(0, 400);
       assumptions.push(`Read the first ${tie.length} call(s) as a commencement tie-line locating the POB — they are excluded from the boundary walk.`);
     } else if (pobIdx < 0) {
       warnings.push("“COMMENCING” found but no “POINT OF BEGINNING” — all calls treated as the boundary walk; verify the POB.");
     }
   }
+
+  // Corner reference: "BEGINNING/COMMENCING at the northeast corner of said
+  // survey / the JOHN DOE SURVEY / Abstract No. 123". Resolving this against
+  // the abstract's actual polygon gives a precise POB with no manual placement.
+  const cornerM = /\b(north\s*east|north\s*west|south\s*east|south\s*west|NE|NW|SE|SW)\s+corner\b/i.exec(pobText ?? "");
+  const pobCorner = cornerM
+    ? (cornerM[1].replace(/\s+/g, "").toUpperCase().replace("NORTHEAST", "NE").replace("NORTHWEST", "NW").replace("SOUTHEAST", "SE").replace("SOUTHWEST", "SW") as "NE" | "NW" | "SE" | "SW")
+    : null;
 
   const calls: TractCall[] = [];
   let seq = 0;
@@ -335,8 +364,29 @@ function parseTexas(text: string): ParsedTract {
     pobText, calls, refs: extractRefs(clean, "TX"), warnings, unresolved,
     source: "rules", confidence: null, assumptions,
   });
+  parsed.pobCorner = pobCorner;
+  parsed.tieCalls = tieCalls;
   parsed.confidence = scoreConfidence(parsed);
   return parsed;
+}
+
+/**
+ * Apply commencement tie-line calls as a vector from an origin (a resolved
+ * survey/abstract corner) to the POB. Returns null if any tie call is
+ * unresolvable — a partial tie must never silently misplace the POB.
+ */
+export function applyTieLine(origin: { lon: number; lat: number }, tie: Pick<TractCall, "azimuth" | "distanceFt">[]): { lon: number; lat: number } | null {
+  let dxFt = 0, dyFt = 0;
+  for (const t of tie) {
+    if (t.azimuth === null || t.distanceFt === null) return null;
+    dxFt += t.distanceFt * Math.sin(t.azimuth * DEG);
+    dyFt += t.distanceFt * Math.cos(t.azimuth * DEG);
+  }
+  const cosLat = Math.cos(origin.lat * DEG);
+  return {
+    lon: origin.lon + (dxFt * M_PER_FT) / (M_PER_DEG_LAT * cosLat),
+    lat: origin.lat + (dyFt * M_PER_FT) / M_PER_DEG_LAT,
+  };
 }
 
 // ---------------------------------------------------------------------------

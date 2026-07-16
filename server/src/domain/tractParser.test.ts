@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorPolygon, parseBearing, parseDistance, parseTract, polygonAcres, scoreConfidence } from "./tractParser.js";
+import { anchorPolygon, applyTieLine, parseBearing, parseDistance, parseTract, polygonAcres, scoreConfidence } from "./tractParser.js";
 
 // A clean 1000×1000 ft square: 1,000,000 sq ft ≈ 22.957 acres.
 const SQUARE = `
@@ -130,6 +130,35 @@ THENCE S 90°00'00" W, a distance of 1000.00 feet to the POINT OF BEGINNING, con
     expect(p.closure!.closes).toBe(true);
     expect(p.computedAcres).toBeCloseTo(22.957, 1);
     expect(p.assumptions.some((a) => /same course/i.test(a))).toBe(true);
+  });
+});
+
+describe("POB corner + tie-line anchoring inputs", () => {
+  it("extracts the named corner from the POB clause", () => {
+    const p = parseTract(SQUARE.replace("BEGINNING at a 1/2 inch iron rod found at the southwest corner of said survey",
+      "BEGINNING at a 1/2 inch iron rod found at the northeast corner of said survey"));
+    expect(p.pobCorner).toBe("NE");
+    expect(parseTract(SQUARE).pobCorner).toBe("SW");
+  });
+
+  it("keeps commencement tie calls with resolved bearings/distances", () => {
+    const commenced = `COMMENCING at the northeast corner of the JOHN DOE SURVEY, Abstract No. 123, Leon County, Texas;
+THENCE S 45°00'00" W, a distance of 500.00 feet to the POINT OF BEGINNING;
+THENCE N 00 E, 1000.00 feet; THENCE N 90 E, 1000.00 feet; THENCE S 00 E, 1000.00 feet; THENCE S 90 W, 1000.00 feet to the POINT OF BEGINNING.`;
+    const p = parseTract(commenced);
+    expect(p.pobCorner).toBe("NE");
+    expect(p.tieCalls).toHaveLength(1);
+    expect(p.tieCalls![0].azimuth).toBeCloseTo(225);
+    expect(p.tieCalls![0].distanceFt).toBeCloseTo(500);
+  });
+
+  it("applyTieLine offsets the origin by the tie vector (and refuses partial ties)", () => {
+    // S 45 W, 500 ft from origin: dx = -353.55 ft, dy = -353.55 ft.
+    const pob = applyTieLine({ lon: -96, lat: 31 }, [{ azimuth: 225, distanceFt: 500 }])!;
+    const dLatFt = (pob.lat - 31) * 111_320 / 0.3048;
+    expect(dLatFt).toBeCloseTo(-353.55, 0);
+    expect(pob.lon).toBeLessThan(-96);
+    expect(applyTieLine({ lon: -96, lat: 31 }, [{ azimuth: null, distanceFt: 500 }])).toBeNull();
   });
 });
 

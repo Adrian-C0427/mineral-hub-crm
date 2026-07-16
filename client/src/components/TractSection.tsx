@@ -29,7 +29,7 @@ interface Tract {
   id: string; name: string; text: string; state: string;
   parse: ParsedTract | null;
   geometry: GeoJSON.Feature | null;
-  anchor: { lon: number; lat: number; source: "abstract" | "manual" } | null;
+  anchor: { lon: number; lat: number; source: "abstract" | "manual"; method?: "corner" | "corner-tie" | "area"; corner?: string; abstractId?: string } | null;
   createdAt: string; updatedAt: string;
 }
 
@@ -255,7 +255,14 @@ function ValidationPanel({ tract }: { tract: Tract }) {
           ? <span className="muted" style={{ fontSize: 13 }}>Closes (precision 1:{p.closure.precision.toLocaleString()})</span>
           : <span style={{ fontSize: 13, color: "#dc2626" }}>Open boundary — {p.closure.gapFt.toLocaleString()} ft back to POB</span>)}
         {p.computedAcres != null && <span className="muted" style={{ fontSize: 13 }}>{p.computedAcres.toLocaleString()} ac computed{p.refs.statedAcres != null ? ` · ${p.refs.statedAcres.toLocaleString()} ac stated` : ""}</span>}
-        {tract.anchor && <span className="muted" style={{ fontSize: 13 }}>POB {tract.anchor.source === "manual" ? "placed manually" : "suggested from abstract"}</span>}
+        {tract.anchor && (
+          <span className="muted" style={{ fontSize: 13 }}>
+            POB {tract.anchor.source === "manual" ? "placed manually"
+              : tract.anchor.method === "corner-tie" ? `derived from the ${tract.anchor.corner} corner of the abstract + commencement tie-line`
+                : tract.anchor.method === "corner" ? `derived from the ${tract.anchor.corner} corner of the abstract`
+                  : "approximated from the abstract (no corner reference — refine with Place POB)"}
+          </span>
+        )}
       </div>
       {p.pobText && <p className="muted" style={{ fontSize: 12, margin: "8px 0 0" }}><strong>POB:</strong> {p.pobText}</p>}
       {p.warnings.map((w, i) => <Banner key={i} kind="warn">{w}</Banner>)}

@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
-import { anchorPolygon, parseTract, type ParsedTract } from "../domain/tractParser.js";
+import { anchorPolygon, applyTieLine, parseTract, type ParsedTract } from "../domain/tractParser.js";
 import { logActivity } from "../services/activityLog.js";
 
 /**
@@ -24,9 +24,32 @@ async function ownDealOr404(req: AuthedRequest): Promise<string> {
   return deal.id;
 }
 
-type Anchor = { lon: number; lat: number; source: "abstract" | "manual"; abstractId?: string };
+type Anchor = {
+  lon: number; lat: number; source: "abstract" | "manual"; abstractId?: string;
+  /** How the abstract-derived POB was computed: a named survey corner (+
+   *  commencement tie-line when present) or a fallback interior point. */
+  method?: "corner" | "corner-tie" | "area";
+  corner?: "NE" | "NW" | "SE" | "SW";
+};
 
-/** Suggest a POB from the description's abstract references (best-effort). */
+// Polygon vertex closest to each named corner: maximize/minimize x±y.
+const CORNER_ORDER: Record<string, string> = {
+  NE: "(ST_X(p.pt) + ST_Y(p.pt)) DESC",
+  NW: "(ST_Y(p.pt) - ST_X(p.pt)) DESC",
+  SE: "(ST_X(p.pt) - ST_Y(p.pt)) DESC",
+  SW: "(ST_X(p.pt) + ST_Y(p.pt)) ASC",
+};
+
+/**
+ * Suggest a POB from the description's abstract references (best-effort).
+ * Precision ladder — most exact wins:
+ *  1. Named corner + commencement tie-line ("COMMENCING at the NE corner of
+ *     said survey; THENCE S45W 500 ft to the POINT OF BEGINNING") → the
+ *     abstract polygon's corner vertex with the tie vector applied.
+ *  2. Named corner alone ("BEGINNING at the NE corner of said survey").
+ *  3. Fallback: a representative interior point of the abstract.
+ * The user can always fine-tune by re-placing the POB on the map.
+ */
 async function suggestAnchor(parsed: ParsedTract, dealCounties: string[]): Promise<Anchor | null> {
   const refs = parsed.refs.abstracts.map((a) => a.replace(/^A-/, ""));
   if (!refs.length) return null;
@@ -42,7 +65,30 @@ async function suggestAnchor(parsed: ParsedTract, dealCounties: string[]): Promi
     refs, refs.map((r) => `A-${r}`), counties.length ? counties : ["__none__"],
   ).catch(() => []);
   const hit = rows[0];
-  return hit ? { lon: hit.lon, lat: hit.lat, source: "abstract", abstractId: hit.id } : null;
+  if (!hit) return null;
+
+  // Precise POB from the named corner of the abstract polygon.
+  if (parsed.pobCorner && CORNER_ORDER[parsed.pobCorner]) {
+    const corner = await prisma.$queryRawUnsafe<{ lon: number; lat: number }[]>(
+      `SELECT ST_X(p.pt) AS lon, ST_Y(p.pt) AS lat
+         FROM (SELECT (ST_DumpPoints(geom)).geom AS pt FROM gis.abstracts WHERE id = $1) p
+        ORDER BY ${CORNER_ORDER[parsed.pobCorner]}
+        LIMIT 1`,
+      hit.id,
+    ).catch(() => []);
+    if (corner[0]) {
+      const tie = parsed.tieCalls ?? [];
+      if (tie.length) {
+        const pob = applyTieLine(corner[0], tie);
+        // A partially-readable tie must not silently misplace the POB —
+        // fall through to the corner itself (still better than an interior point).
+        if (pob) return { ...pob, source: "abstract", abstractId: hit.id, method: "corner-tie", corner: parsed.pobCorner };
+      }
+      return { ...corner[0], source: "abstract", abstractId: hit.id, method: "corner", corner: parsed.pobCorner };
+    }
+  }
+
+  return { lon: hit.lon, lat: hit.lat, source: "abstract", abstractId: hit.id, method: "area" };
 }
 
 function withGeometry(parsed: ParsedTract, anchor: Anchor | null, name: string) {
