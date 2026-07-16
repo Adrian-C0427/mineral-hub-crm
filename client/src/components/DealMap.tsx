@@ -32,6 +32,8 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
   // Latest ids for the async map-load handler (the map mounts once, but the
   // deal's abstracts can be edited while it lives).
   const idsRef = useRef(abstractIds); idsRef.current = abstractIds;
+  // Ids currently carrying the "selected" feature-state, for cleanup on change.
+  const prevIds = useRef<string[]>(abstractIds);
 
   useEffect(() => {
     if (mapRef.current || !container.current) return;
@@ -55,14 +57,17 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
       // Identical cadastral source + layers as the main map.
       addCadastralLayers(map, countyLabels as unknown as GeoJSON.FeatureCollection);
 
-      // This deal's abstracts, highlighted on top of the base cadastre (drawn
-      // below wells/labels via beforeId).
-      map.addSource("deal", { type: "geojson", data: dealFC as unknown as GeoJSON.FeatureCollection, promoteId: "id" });
+      // Highlight this deal's abstracts the same way the main map does: via
+      // feature-state on the SHARED tile layers (abstractsPaint reacts to
+      // "selected"), so each parcel is drawn once with the main map's exact
+      // styling and layer order — no duplicate boundary stacked on top.
+      for (const id of idsRef.current) map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id }, { selected: true });
+
+      // The dashed convex hull marks the deal's overall extent (not a per-
+      // parcel boundary), plus zoom-to-fit from the fetched geometry.
       const pts = dealFeats.flatMap((f) => collectCoords(f.geometry));
       const hull = convexHull(pts);
       map.addSource("deal-outline", { type: "geojson", data: { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [hull] } } as unknown as GeoJSON.Feature });
-      map.addLayer({ id: "deal-fill", type: "fill", source: "deal", paint: { "fill-color": "#f59e0b", "fill-opacity": 0.3 } }, "wellbores");
-      map.addLayer({ id: "deal-line", type: "line", source: "deal", paint: { "line-color": "#b45309", "line-width": 1.5 } }, "wellbores");
       map.addLayer({ id: "deal-outline-line", type: "line", source: "deal-outline", paint: { "line-color": "#0f172a", "line-width": 2, "line-dasharray": [2, 1.5] } }, "wellbores");
 
       ready.current = true;
@@ -78,7 +83,7 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
           const wh = map.queryRenderedFeatures([[ev.point.x - 5, ev.point.y - 5], [ev.point.x + 5, ev.point.y + 5]], { layers: map.getLayer("wells") ? ["wells"] : [] });
           if (wh.length) { const p = wh[0].properties as Record<string, unknown>; setSelected({ kind: "well", api: String(p.api8 ?? p.api ?? ""), wellNo: String(p.wellNo ?? ""), operator: String(p.operator ?? ""), leaseName: String(p.leaseName ?? ""), status: String(p.status ?? ""), type: String(p.type ?? "") }); return; }
         }
-        const ah = map.queryRenderedFeatures(ev.point, { layers: ["deal-fill", "abstracts-fill"].filter((l) => map.getLayer(l)) });
+        const ah = map.queryRenderedFeatures(ev.point, { layers: map.getLayer("abstracts-fill") ? ["abstracts-fill"] : [] });
         if (ah.length) { const p = ah[0].properties as Record<string, unknown>; setSelected({ kind: "abstract", abstract: String(p.abstract ?? ""), survey: String(p.survey ?? ""), county: String(p.county ?? "") }); }
         else setSelected(null);
       });
@@ -109,10 +114,13 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
         ? await api.get<FC>(`/gis/features?ids=${encodeURIComponent(ids.join(","))}`).catch(() => ({ type: "FeatureCollection", features: [] } as FC))
         : ({ type: "FeatureCollection", features: [] } as FC);
       if (cancelled) return;
-      const src = map.getSource("deal") as maplibregl.GeoJSONSource | undefined;
       const outline = map.getSource("deal-outline") as maplibregl.GeoJSONSource | undefined;
-      if (!src || !outline) return;
-      src.setData(dealFC as unknown as GeoJSON.FeatureCollection);
+      if (!outline) return;
+      // Re-point the highlight at the new abstract set (feature-state persists
+      // on the source, so clear the old ids before marking the new ones).
+      for (const id of prevIds.current) map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id }, { selected: false });
+      for (const id of ids) map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id }, { selected: true });
+      prevIds.current = ids;
       const pts = dealFC.features.flatMap((f) => collectCoords(f.geometry));
       const hull = convexHull(pts);
       outline.setData({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [hull] } } as unknown as GeoJSON.Feature);

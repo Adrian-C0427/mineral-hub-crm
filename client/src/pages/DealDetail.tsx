@@ -369,6 +369,8 @@ export function DealDetail() {
           buyerId={logBuyer.id}
           buyerName={logBuyer.name}
           users={users}
+          dealNra={deal.nra}
+          dealNma={deal.acreageNma}
           initial={logBuyer.initial}
           onClose={() => setLogBuyer(null)}
           onLogged={() => { setLogBuyer(null); refreshAll(); }}

@@ -5,7 +5,16 @@
  *   State 20, County 20, Basin 20, Formation 20, Asset Type 10,
  *   Acreage range 5, Price range 5
  *
- * An empty buyer-criteria array matches anything for that criterion.
+ * Scoring is deliberately selective so percentages differentiate buyers
+ * instead of clustering at 100:
+ *  - a criterion the buyer SPECIFIED and the deal satisfies earns full weight
+ *  - a criterion the buyer left open ("accepts any") is compatible but weak
+ *    evidence of fit — it earns only ANY_CREDIT of its weight
+ *  - a specified criterion the deal fails earns nothing
+ * A completely empty buy box therefore scores 25%, not 100%; only buyers whose
+ * stated criteria genuinely cover the deal approach the top.
+ *
+ * An empty buyer-criteria array still *matches* (never disqualifies).
  * Acreage/price use inclusive range checks; a null bound is unbounded.
  */
 
@@ -20,6 +29,9 @@ export const MATCH_WEIGHTS = {
 } as const;
 
 export const MATCH_TOTAL_WEIGHT = Object.values(MATCH_WEIGHTS).reduce((a, b) => a + b, 0); // 100
+
+/** Credit multiplier for unspecified ("accepts any") criteria. */
+export const ANY_CREDIT = 0.25;
 
 export interface DealForMatch {
   state: string | null;
@@ -129,7 +141,13 @@ export function computeMatch(deal: DealForMatch, box: BuyBoxForMatch): MatchResu
   push("acreage", "Acreage", box.minAcreage != null || box.maxAcreage != null, rangeMatch(deal.acreageNma, box.minAcreage, box.maxAcreage));
   push("price", "Price", box.minPrice != null || box.maxPrice != null, rangeMatch(deal.askPrice, box.minPrice, box.maxPrice));
 
-  const matchedWeight = criteria.filter((c) => c.matched).reduce((sum, c) => sum + c.weight, 0);
+  // Full weight only for criteria the buyer actually constrained AND the deal
+  // satisfies; open criteria earn a small compatibility credit. This keeps a
+  // sparse buy box from masquerading as a perfect fit.
+  const matchedWeight = criteria.reduce((sum, c) => {
+    if (!c.matched) return sum;
+    return sum + (c.specified ? c.weight : c.weight * ANY_CREDIT);
+  }, 0);
   const matchPercent = Math.round((matchedWeight / MATCH_TOTAL_WEIGHT) * 100);
   const specified = criteria.filter((c) => c.specified);
 

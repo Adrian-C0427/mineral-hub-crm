@@ -163,12 +163,25 @@ dashboardRouter.get(
     const buckets = windowBuckets(win, now);
     const bucketIdx = (dt: Date): number => buckets.findIndex((b) =>
       b.m === null ? dt.getUTCFullYear() === b.y : dt.getUTCFullYear() === b.y && dt.getUTCMonth() === b.m);
+    // Per-bucket deal lists power the chart's click-through drill-down: the
+    // user goes straight from a bar to the deals behind it.
+    type BucketDeal = { id: string; name: string; stage: string; kind: "closed" | "projected"; amount: number | null; profit: number; date: string };
+    const bucketDeals = new Map<number, BucketDeal[]>();
+    const pushBucketDeal = (i: number, entry: BucketDeal) => {
+      const list = bucketDeals.get(i) ?? [];
+      list.push(entry);
+      bucketDeals.set(i, list);
+    };
     const monthly = new Map<number, number>();
     for (const d of closedInWindow) {
       const i = bucketIdx(d.closedDate!);
       if (i < 0) continue;
       const profit = d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : 0;
       monthly.set(i, (monthly.get(i) ?? 0) + profit);
+      pushBucketDeal(i, {
+        id: d.id, name: d.name, stage: d.stage, kind: "closed",
+        amount: d.selectedOffer?.amount ?? null, profit, date: d.closedDate!.toISOString().slice(0, 10),
+      });
     }
     // Projected profit by month — SAME population as the Projected Profit KPI
     // above (any active deal with at least one offer; accepted offer wins over
@@ -187,8 +200,16 @@ dashboardRouter.get(
       if (i < 0) continue;
       const profit = netProfit(amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts);
       monthlyProjected.set(i, (monthlyProjected.get(i) ?? 0) + profit);
+      pushBucketDeal(i, {
+        id: d.id, name: d.name, stage: d.stage, kind: "projected",
+        amount, profit, date: new Date(s.finalClosingDate).toISOString().slice(0, 10),
+      });
     }
-    const profitByMonth = buckets.map((b, i) => ({ month: b.label, isCurrent: b.isCurrent, profit: monthly.get(i) ?? 0, projected: monthlyProjected.get(i) ?? 0 }));
+    const profitByMonth = buckets.map((b, i) => ({
+      month: b.label, isCurrent: b.isCurrent,
+      profit: monthly.get(i) ?? 0, projected: monthlyProjected.get(i) ?? 0,
+      deals: (bucketDeals.get(i) ?? []).sort((a, b2) => (a.kind === b2.kind ? b2.profit - a.profit : a.kind === "closed" ? -1 : 1)),
+    }));
 
     // --- KPI trends (sparkline series — real history, never fabricated) ------
     const weekMs = 7 * 24 * 3600 * 1000;

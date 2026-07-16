@@ -310,7 +310,16 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .timeline-item { position: relative; padding: 6px 0 6px 14px; }
 .timeline-item::before { content: ""; position: absolute; left: -5px; top: 12px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
 .timeline-meta { display: flex; gap: 10px; align-items: center; }
-.timeline-kind { font-size: 12px; font-weight: 600; }
+.timeline-kind { font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
+.timeline-kind svg { color: var(--text-dim); flex-shrink: 0; }
+/* Per-entry edit/delete: quiet icon buttons that surface on hover (always
+   visible on touch, where :hover doesn't apply). */
+.timeline-actions { margin-left: auto; display: inline-flex; gap: 2px; }
+.timeline-act { min-width: 0; width: 24px; height: 24px; padding: 0; display: inline-flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.12s; }
+.timeline-item:hover .timeline-act, .timeline-act:focus-visible { opacity: 0.75; }
+.timeline-act:hover { opacity: 1; }
+.timeline-act.danger:hover { color: var(--red); }
+@media (hover: none) { .timeline-act { opacity: 0.6; } }
 .link-btn { background: none; border: none; color: var(--accent); padding: 0 4px; font-size: 12px; cursor: pointer; }
 .match-selected { outline: 2px solid var(--accent); }
 /* Per-field copy-to-clipboard: icon fades in on hover of the key/value row. */
@@ -682,7 +691,24 @@ body.modal-open { overflow: hidden; }
 /* Profit-by-month chart, per the design: paired bars (realized | projected)
    with 3px rounded tops over a 130px plot area. Bars only render when the
    month has a value — no baseline slivers. */
-.bar-chart { display:flex; align-items:flex-end; gap: 9px; height: 156px; margin-top: 20px; }
+/* Profit chart: $-labeled y-axis + gridlines behind the bars, hover tooltip,
+   and clickable columns that drill into the month's deals. */
+.bar-chart-wrap { display: flex; gap: 8px; margin-top: 20px; }
+.bar-axis { display: flex; flex-direction: column-reverse; justify-content: space-between; height: 130px; text-align: right;
+  font-size: 10px; color: var(--text-dim); font-variant-numeric: tabular-nums; min-width: 34px; flex-shrink: 0; }
+.bar-plot { position: relative; flex: 1; min-width: 0; }
+.bar-grid { position: absolute; left: 0; right: 0; top: 0; height: 130px; pointer-events: none; }
+.bar-grid > span { position: absolute; left: 0; right: 0; border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.bar-col.clickable { cursor: pointer; border-radius: 6px; }
+.bar-col.clickable:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
+.chart-tip { position: absolute; bottom: calc(100% - 122px); z-index: 20; pointer-events: none; min-width: 150px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow);
+  padding: 8px 10px; font-size: 12px; }
+.chart-tip-title { font-weight: 700; margin-bottom: 4px; }
+.chart-tip-row { display: flex; align-items: center; gap: 6px; padding: 1.5px 0; }
+.chart-tip-row strong { margin-left: auto; font-variant-numeric: tabular-nums; }
+.chart-tip-total { border-top: 1px solid var(--border); margin-top: 3px; padding-top: 4px; }
+.bar-chart { display:flex; align-items:flex-end; gap: 9px; height: 156px; }
 .bar-col { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height: 100%; gap: 6px; }
 .bar-zone { display:flex; align-items:flex-end; gap: 2px; width: 100%; height: 130px; }
 /* Stacked bar: projected sits on top of realized as one cumulative column. */

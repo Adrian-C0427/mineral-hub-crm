@@ -13,6 +13,9 @@ interface Props {
   buyerId: string;
   buyerName: string;
   users: UserLite[];
+  /** The deal's total NRA / NMA, enabling the per-acre pricing shortcuts. */
+  dealNra?: number | null;
+  dealNma?: number | null;
   initial?: {
     status?: BuyerStatus;
     assignedTeamMemberId?: string | null;
@@ -24,7 +27,14 @@ interface Props {
   onLogged: () => void;
 }
 
-export function LogContactModal({ dealId, buyerId, buyerName, users, initial, onClose, onLogged }: Props) {
+/** price × total, rounded to the cent, as a MoneyInput-friendly string. */
+function computeAmount(price: string, total: number): string {
+  const p = Number(price);
+  if (!isFinite(p) || p <= 0) return "";
+  return String(Math.round(p * total * 100) / 100);
+}
+
+export function LogContactModal({ dealId, buyerId, buyerName, users, dealNra, dealNma, initial, onClose, onLogged }: Props) {
   const [status, setStatus] = useState<BuyerStatus>(initial?.status ?? "CONTACTED");
   const [assignee, setAssignee] = useState(initial?.assignedTeamMemberId ?? "");
   // Editing an existing contact must preserve its dates — only a brand-new
@@ -34,6 +44,11 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, initial, on
   const [nextFollowUp, setNextFollowUp] = useState(initial?.nextFollowUpDate ? toInputDate(initial.nextFollowUpDate) : "");
   const [notes, setNotes] = useState(initial?.notes ?? "");
   const [amount, setAmount] = useState("");
+  // Optional pricing shortcuts: entering either per-acre price auto-fills the
+  // amount (price × deal total). Manual amount entry stays fully supported —
+  // whichever field was edited last wins.
+  const [pricePerNra, setPricePerNra] = useState("");
+  const [pricePerNma, setPricePerNma] = useState("");
   const [conditions, setConditions] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -95,7 +110,29 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, initial, on
       {status === "OFFER_RECEIVED" && (
         <>
           <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Enter an amount to record a formal offer, or leave blank to just set the status.</p>
-          <div className="field"><label>Offer amount</label><MoneyInput value={amount} onChange={setAmount} ariaLabel="Offer amount" /></div>
+          <div className="grid-2">
+            <div className="field">
+              <label>Price per NRA <span className="muted" style={{ textTransform: "none" }}>(optional)</span></label>
+              <MoneyInput value={pricePerNra} ariaLabel="Price per NRA" disabled={dealNra == null}
+                onChange={(v) => { setPricePerNra(v); setPricePerNma(""); if (dealNra != null) setAmount(computeAmount(v, dealNra)); }} />
+              <span className="muted" style={{ fontSize: 11.5 }}>
+                {dealNra != null ? `× ${dealNra} NRA` : "Deal has no NRA set"}
+              </span>
+            </div>
+            <div className="field">
+              <label>Price per NMA <span className="muted" style={{ textTransform: "none" }}>(optional)</span></label>
+              <MoneyInput value={pricePerNma} ariaLabel="Price per NMA" disabled={dealNma == null}
+                onChange={(v) => { setPricePerNma(v); setPricePerNra(""); if (dealNma != null) setAmount(computeAmount(v, dealNma)); }} />
+              <span className="muted" style={{ fontSize: 11.5 }}>
+                {dealNma != null ? `× ${dealNma} NMA` : "Deal has no NMA set"}
+              </span>
+            </div>
+          </div>
+          <div className="field">
+            <label>Offer amount</label>
+            <MoneyInput value={amount} ariaLabel="Offer amount"
+              onChange={(v) => { setAmount(v); setPricePerNra(""); setPricePerNma(""); }} />
+          </div>
           <div className="field"><label>Conditions</label><textarea rows={2} value={conditions} onChange={(e) => setConditions(e.target.value)} /></div>
         </>
       )}

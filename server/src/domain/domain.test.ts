@@ -75,21 +75,45 @@ describe("matching engine", () => {
     state: "TX", counties: ["Cherokee"], basins: ["Permian"], formations: ["Wolfcamp"],
     assetTypes: ["Minerals"], acreageNma: 40, askPrice: 100000,
   };
-  it("empty buy-box matches everything = 100%", () => {
+  it("an empty buy-box is compatible but scores low, not 100%", () => {
     const r = computeMatch(deal, {
       states: [], counties: [], basins: [], formations: [], assetTypes: [],
       minAcreage: null, maxAcreage: null, minPrice: null, maxPrice: null,
     });
-    expect(r.matchPercent).toBe(100);
+    // Nothing specified → every criterion earns only the 25% "accepts any" credit.
+    expect(r.matchPercent).toBe(25);
+    expect(r.nonMatching).toHaveLength(0); // still never disqualifies
   });
-  it("partial match sums weights correctly", () => {
+  it("a fully specified, fully matching box scores 100%", () => {
+    const r = computeMatch(deal, {
+      states: ["TX"], counties: ["Cherokee"], basins: ["Permian"], formations: ["Wolfcamp"],
+      assetTypes: ["Minerals"], minAcreage: 10, maxAcreage: 100, minPrice: 50000, maxPrice: 200000,
+    });
+    expect(r.matchPercent).toBe(100);
+    expect(r.criteriaSpecified).toBe(7);
+    expect(r.criteriaSpecifiedMatched).toBe(7);
+  });
+  it("specified matches earn full weight; open criteria earn partial credit; misses earn none", () => {
     const r = computeMatch(deal, {
       states: ["TX"], counties: ["Other"], basins: [], formations: [], assetTypes: [],
       minAcreage: null, maxAcreage: null, minPrice: null, maxPrice: null,
     });
-    // state(20) matched, county(20) not, basin/formation/assetType/acreage/price all open(20+20+10+5+5)=60
-    expect(r.matchedWeight).toBe(80);
-    expect(r.matchPercent).toBe(80);
+    // state(20 full) + county(0, specified miss) + open basin/formation/assetType/
+    // acreage/price at 25% credit: (20+20+10+5+5)*0.25 = 15 → 35 total
+    expect(r.matchedWeight).toBe(35);
+    expect(r.matchPercent).toBe(35);
+  });
+  it("differentiates coverage: more specified-and-matched criteria score higher", () => {
+    const sparse = computeMatch(deal, {
+      states: ["TX"], counties: [], basins: [], formations: [], assetTypes: [],
+      minAcreage: null, maxAcreage: null, minPrice: null, maxPrice: null,
+    });
+    const thorough = computeMatch(deal, {
+      states: ["TX"], counties: ["Cherokee"], basins: ["Permian"], formations: [], assetTypes: [],
+      minAcreage: null, maxAcreage: null, minPrice: null, maxPrice: null,
+    });
+    expect(thorough.matchPercent).toBeGreaterThan(sparse.matchPercent);
+    expect(sparse.matchPercent).toBeLessThan(50);
   });
   it("range check is inclusive with null bound unbounded", () => {
     const r = computeMatch(deal, {
