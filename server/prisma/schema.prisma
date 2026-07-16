@@ -564,6 +564,10 @@ model TractDescription {
   name  String // "Tract 1", "160-acre Home Place", …
   text  String // legal description as pasted from the instrument
   state String @default("TX") // which parser grammar applies
+  // User-supplied geographic context (State → County → Abstract) — the
+  // highest-priority anchor source when the deed doesn't cite its abstract.
+  counties       String[] @default([])
+  abstractGisIds String[] @default([]) // gis.abstracts ids, e.g. "TX-289543"
 
   parse    Json? // ParsedTract: calls, refs, closure, computed acres, warnings
   geometry Json? // GeoJSON Feature (Polygon) once anchored; null until then

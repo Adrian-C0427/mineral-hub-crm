@@ -724,6 +724,33 @@ body.modal-open { overflow: hidden; }
 /* The one standardized required-field indicator, app-wide (incl. portal). */
 .req-star { color: var(--red); margin-left: 2px; font-weight: 700; }
 
+/* Tract results: one expandable card per tract — name + acreage hierarchy,
+   status chips, Generate as the primary CTA, overflow for the rest. */
+.tract-cards { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
+.tract-card { border: 1px solid var(--border); border-radius: 10px; background: var(--panel); transition: border-color 150ms ease; }
+.tract-card.expanded, .tract-card:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.tract-card-head { display: flex; align-items: center; gap: 14px; padding: 14px 16px; cursor: pointer; flex-wrap: wrap; }
+.tract-card-title { min-width: 200px; flex: 1 1 220px; }
+.tract-card-title h4 { margin: 0; font-size: 15px; font-weight: 700; }
+.tract-card-sub { font-size: 12.5px; color: var(--text-dim); margin-top: 3px; }
+.tract-card-sub strong { color: var(--text); font-variant-numeric: tabular-nums; }
+.tract-dot { margin: 0 6px; opacity: 0.6; }
+.tract-card-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.tract-chip-good { background: rgba(34,197,94,.15); color: #15803d; }
+.tract-chip-bad { background: rgba(239,68,68,.15); color: #dc2626; }
+.tract-chip-warn { background: rgba(245,158,11,.15); color: #b45309; }
+.tract-chip-neutral { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
+.tract-chip-dim { opacity: 0.7; }
+.tract-card-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.tract-card-chevron { display: inline-flex; color: var(--text-dim); transition: transform 180ms ease; }
+.tract-card-chevron.open { transform: rotate(180deg); }
+.tract-card-placing { padding: 0 16px 10px; font-size: 12.5px; }
+.tract-card-body { border-top: 1px solid var(--border); padding: 14px 16px 16px; }
+@media (max-width: 720px) {
+  .tract-card-head { align-items: flex-start; }
+  .tract-card-actions { margin-left: 0; width: 100%; justify-content: flex-end; }
+}
+
 /* Month drill-down: a floating, NON-blocking panel — no backdrop, no scroll
    lock, so the dashboard behind it stays fully interactive. Its own body
    scrolls independently. */

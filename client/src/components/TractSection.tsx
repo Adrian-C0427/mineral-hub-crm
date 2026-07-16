@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type maplibregl from "maplibre-gl";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Modal, ConfirmDialog, Spinner, Banner, EmptyState } from "./ui";
+import { Modal, ConfirmDialog, Spinner, Banner, EmptyState, OverflowMenu } from "./ui";
 import { Select } from "./Select";
+import { GeoFields } from "./GeoFields";
+import { ChevronDown } from "lucide-react";
 import { TractMap, type TractMapFeature, type TractSegment } from "./TractMap";
 import { exportTractMap } from "../lib/tractExport";
 
@@ -27,6 +29,7 @@ interface ParsedTract {
 }
 interface Tract {
   id: string; name: string; text: string; state: string;
+  counties?: string[]; abstractGisIds?: string[];
   parse: ParsedTract | null;
   geometry: GeoJSON.Feature | null;
   anchor: { lon: number; lat: number; source: "abstract" | "manual"; method?: "corner" | "corner-tie" | "area"; corner?: string; abstractId?: string } | null;
@@ -86,7 +89,6 @@ export function TractSection({ dealId, dealName, canEdit, abstractIds = [] }: { 
     segments: segmentsOf(t),
   })), [tracts]);
 
-  const selected = tracts?.find((t) => t.id === selectedId) ?? null;
 
   async function placePob(lon: number, lat: number) {
     if (!placingFor) return;
@@ -158,41 +160,22 @@ export function TractSection({ dealId, dealName, canEdit, abstractIds = [] }: { 
           or purchase agreement — the boundary is parsed and drawn automatically.
         </EmptyState>
       ) : (
-        <table className="table" style={{ marginTop: 10 }}>
-          <thead><tr><th>Tract</th><th>Acres (computed / stated)</th><th>Closure</th><th>Status</th><th style={{ width: 260 }} /></tr></thead>
-          <tbody>
-            {tracts.map((t) => {
-              const p = t.parse;
-              const issues = (p?.warnings.length ?? 0) + (p?.unresolved.length ?? 0);
-              return (
-                <tr key={t.id} className={t.id === selectedId ? "row-selected" : ""} style={{ cursor: "pointer" }} onClick={() => setSelectedId(t.id === selectedId ? null : t.id)}>
-                  <td><strong>{t.name}</strong>{p?.refs.abstracts.length ? <div className="muted" style={{ fontSize: 12 }}>{p.refs.abstracts.join(", ")}{p.refs.county ? ` · ${p.refs.county} County` : ""}</div> : null}</td>
-                  <td>{p?.computedAcres != null ? p.computedAcres.toLocaleString() : "—"} / {p?.refs.statedAcres != null ? p.refs.statedAcres.toLocaleString() : "—"}</td>
-                  <td>{p?.closure ? (p.closure.closes ? <span style={{ color: "var(--green, #16a34a)" }}>✓ closes</span> : <span style={{ color: "var(--red, #dc2626)" }}>✗ {p.closure.gapFt.toLocaleString()} ft gap</span>) : "—"}</td>
-                  <td>
-                    {t.geometry ? <span className="badge">Mapped</span> : <span className="badge" style={{ opacity: 0.7 }}>Not anchored</span>}
-                    {p?.confidence != null && <span style={{ marginLeft: 6, display: "inline-block" }}><ConfidenceBadge value={p.confidence} /></span>}
-                    {issues > 0 && <span className="badge" style={{ marginLeft: 6, background: "rgba(245,158,11,.15)", color: "#b45309" }}>{issues} to review</span>}
-                  </td>
-                  <td onClick={(e) => e.stopPropagation()} style={{ textAlign: "right" }}>
-                    {canEdit && (
-                      <button className="primary small" disabled={busy || generating !== null} onClick={() => generate(t.id)}
-                        title="Re-parses the legal description and regenerates the tract geometry">
-                        {generating === t.id ? "Processing…" : "Generate Tract Map"}
-                      </button>
-                    )}{" "}
-                    {canEdit && <button className="small" disabled={busy} onClick={() => setPlacingFor(placingFor === t.id ? null : t.id)}>{placingFor === t.id ? "Cancel POB" : "Place POB"}</button>}{" "}
-                    {canEdit && <button className="small" onClick={() => setEditing({ tract: t })}>Edit</button>}{" "}
-                    {canEdit && <button className="small danger" onClick={() => setDeleting(t)}>Remove</button>}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <div className="tract-cards">
+          {tracts.map((t) => (
+            <TractCard
+              key={t.id} tract={t} canEdit={canEdit}
+              expanded={t.id === selectedId}
+              onToggle={() => setSelectedId(t.id === selectedId ? null : t.id)}
+              generating={generating === t.id} anyBusy={busy || generating !== null}
+              placing={placingFor === t.id}
+              onGenerate={() => generate(t.id)}
+              onPlacePob={() => setPlacingFor(placingFor === t.id ? null : t.id)}
+              onEdit={() => setEditing({ tract: t })}
+              onRemove={() => setDeleting(t)}
+            />
+          ))}
+        </div>
       )}
-
-      {selected?.parse && <ValidationPanel tract={selected} />}
 
       {anyMapped && (
         <div className="row" style={{ marginTop: 12, gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -229,6 +212,63 @@ export function TractSection({ dealId, dealName, canEdit, abstractIds = [] }: { 
   );
 }
 
+/**
+ * One tract as an expandable card: name + acreage header, status chips,
+ * Generate as the primary action, everything else in the overflow menu, and
+ * the full parse detail (ValidationPanel) revealed on expand.
+ */
+function TractCard({ tract: t, canEdit, expanded, onToggle, generating, anyBusy, placing, onGenerate, onPlacePob, onEdit, onRemove }: {
+  tract: Tract; canEdit: boolean; expanded: boolean; onToggle: () => void;
+  generating: boolean; anyBusy: boolean; placing: boolean;
+  onGenerate: () => void; onPlacePob: () => void; onEdit: () => void; onRemove: () => void;
+}) {
+  const p = t.parse;
+  const issues = (p?.warnings.length ?? 0) + (p?.unresolved.length ?? 0);
+  return (
+    <div className={`tract-card ${expanded ? "expanded" : ""}`}>
+      <div className="tract-card-head" role="button" tabIndex={0} aria-expanded={expanded}
+        onClick={onToggle}
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); } }}>
+        <div className="tract-card-title">
+          <h4>{t.name}</h4>
+          <div className="tract-card-sub">
+            Computed <strong>{p?.computedAcres != null ? `${p.computedAcres.toLocaleString()} ac` : "—"}</strong>
+            <span className="tract-dot">·</span>
+            Stated <strong>{p?.refs.statedAcres != null ? `${p.refs.statedAcres.toLocaleString()} ac` : "—"}</strong>
+            {p?.refs.abstracts.length ? <><span className="tract-dot">·</span>{p.refs.abstracts.join(", ")}{p.refs.county ? `, ${p.refs.county} County` : ""}</> : null}
+          </div>
+        </div>
+        <div className="tract-card-chips">
+          {p?.closure && (p.closure.closes
+            ? <span className="badge tract-chip-good">✓ Closes</span>
+            : <span className="badge tract-chip-bad">✗ {p.closure.gapFt.toLocaleString()} ft gap</span>)}
+          {t.geometry ? <span className="badge tract-chip-neutral">Mapped</span> : <span className="badge tract-chip-dim">Not anchored</span>}
+          {p?.confidence != null && <ConfidenceBadge value={p.confidence} />}
+          {issues > 0 && <span className="badge tract-chip-warn">{issues} to review</span>}
+        </div>
+        <div className="tract-card-actions" onClick={(e) => e.stopPropagation()}>
+          {canEdit && (
+            <button className="primary small" disabled={anyBusy} onClick={onGenerate}
+              title="Re-parses the legal description and regenerates the tract geometry">
+              {generating ? "Processing…" : "Generate Tract Map"}
+            </button>
+          )}
+          {canEdit && (
+            <OverflowMenu ariaLabel={`Actions for ${t.name}`} items={[
+              { label: placing ? "Cancel POB placement" : "Place Point of Beginning", onClick: onPlacePob },
+              { label: "Edit", onClick: onEdit },
+              { label: "Remove", danger: true, onClick: onRemove },
+            ]} />
+          )}
+          <span className={`tract-card-chevron ${expanded ? "open" : ""}`} aria-hidden="true"><ChevronDown size={16} /></span>
+        </div>
+      </div>
+      {placing && <div className="tract-card-placing muted">Click the map above to place the Point of Beginning.</div>}
+      {expanded && p && <div className="tract-card-body"><ValidationPanel tract={t} /></div>}
+    </div>
+  );
+}
+
 /** Confidence badge: green ≥80, amber 50–79, red <50 — same bands everywhere. */
 function ConfidenceBadge({ value }: { value: number }) {
   const [bg, fg] = value >= 80 ? ["rgba(34,197,94,.15)", "#15803d"] : value >= 50 ? ["rgba(245,158,11,.15)", "#b45309"] : ["rgba(239,68,68,.15)", "#dc2626"];
@@ -244,12 +284,9 @@ function ConfidenceBadge({ value }: { value: number }) {
 function ValidationPanel({ tract }: { tract: Tract }) {
   const p = tract.parse!;
   return (
-    <div style={{ marginTop: 12, border: "1px solid var(--border, #e2e8f0)", borderRadius: 8, padding: 12 }}>
+    <div>
       <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
-        <strong>{tract.name} — parse detail</strong>
-        {p.confidence != null
-          ? <ConfidenceBadge value={p.confidence} />
-          : <span className="badge" style={{ opacity: 0.75 }} title="Parsed before confidence scoring — use Generate Tract Map to rescore">Parsed</span>}
+        {p.confidence == null && <span className="badge" style={{ opacity: 0.75 }} title="Parsed before confidence scoring — use Generate Tract Map to rescore">Parsed</span>}
         {p.source === "ai" && <span className="badge" style={{ opacity: 0.6 }} title="Parsed by the retired AI extraction path — Generate Tract Map re-parses with the built-in engine">legacy parse</span>}
         {p.closure && (p.closure.closes
           ? <span className="muted" style={{ fontSize: 13 }}>Closes (precision 1:{p.closure.precision.toLocaleString()})</span>
@@ -308,6 +345,9 @@ function ValidationPanel({ tract }: { tract: Tract }) {
 function TractEditor({ dealId, tract, onClose, onSaved }: { dealId: string; tract: Tract | null; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState(tract?.name ?? "");
   const [text, setText] = useState(tract?.text ?? "");
+  const [states, setStates] = useState<string[]>(tract?.state ? [tract.state] : ["TX"]);
+  const [counties, setCounties] = useState<string[]>(tract?.counties ?? []);
+  const [abstractIds, setAbstractIds] = useState<string[]>(tract?.abstractGisIds ?? []);
   const [preview, setPreview] = useState<ParsedTract | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -315,16 +355,17 @@ function TractEditor({ dealId, tract, onClose, onSaved }: { dealId: string; trac
   async function runPreview() {
     if (!text.trim()) return;
     setBusy(true); setErr(null);
-    try { setPreview(await api.post<ParsedTract>(`/deals/${dealId}/tracts/preview`, { text })); }
+    try { setPreview(await api.post<ParsedTract>(`/deals/${dealId}/tracts/preview`, { text, state: states[0] ?? "TX" })); }
     catch (e) { setErr((e as Error).message); }
     finally { setBusy(false); }
   }
 
   async function save() {
     setBusy(true); setErr(null);
+    const payload = { text, state: states[0] ?? "TX", counties, abstractIds };
     try {
-      if (tract) await api.patch(`/deals/${dealId}/tracts/${tract.id}`, { name: name.trim() || tract.name, text });
-      else await api.post(`/deals/${dealId}/tracts`, { name: name.trim() || undefined, text });
+      if (tract) await api.patch(`/deals/${dealId}/tracts/${tract.id}`, { name: name.trim() || tract.name, ...payload });
+      else await api.post(`/deals/${dealId}/tracts`, { name: name.trim() || undefined, ...payload });
       onSaved();
     } catch (e) { setErr((e as Error).message); setBusy(false); }
   }
@@ -342,6 +383,22 @@ function TractEditor({ dealId, tract, onClose, onSaved }: { dealId: string; trac
           <label>Tract name</label>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Tract 1 — 160-acre Home Place" />
           <span className="muted" style={{ fontSize: 12 }}>Optional — auto-named from the description if left blank.</span>
+        </div>
+        {/* Location context: many deeds never cite their abstract (they
+            reference neighboring tracts instead). Setting it here places the
+            tract precisely without any manual POB work. */}
+        <div className="field" style={{ marginBottom: 4 }}>
+          <label>Location (recommended)</label>
+          <span className="muted" style={{ fontSize: 12 }}>
+            State, county and abstract the tract sits in — used to place it on the map when the description doesn't say.
+          </span>
+        </div>
+        <div className="dd-grid" style={{ marginBottom: 10 }}>
+          <GeoFields
+            states={states} onStatesChange={(v) => setStates(v.slice(-1))}
+            counties={counties} onCountiesChange={setCounties}
+            abstractIds={abstractIds} onAbstractsChange={setAbstractIds}
+          />
         </div>
         <div className="field">
           <label>Legal description</label>

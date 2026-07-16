@@ -40,31 +40,51 @@ const CORNER_ORDER: Record<string, string> = {
   SW: "(ST_X(p.pt) + ST_Y(p.pt)) ASC",
 };
 
+/** Geographic context available to the anchorer beyond the parsed text. */
+interface AnchorContext {
+  counties: string[]; // user-entered tract counties + deal counties
+  userAbstractGisIds: string[]; // gis.abstracts ids picked in the tract editor
+  dealAbstractIds: string[]; // abstracts linked to the deal itself
+}
+
 /**
- * Suggest a POB from the description's abstract references (best-effort).
- * Precision ladder — most exact wins:
- *  1. Named corner + commencement tie-line ("COMMENCING at the NE corner of
- *     said survey; THENCE S45W 500 ft to the POINT OF BEGINNING") → the
- *     abstract polygon's corner vertex with the tie vector applied.
- *  2. Named corner alone ("BEGINNING at the NE corner of said survey").
- *  3. Fallback: a representative interior point of the abstract.
+ * Suggest a POB — best available source wins:
+ *  Abstract resolution: (1) the tract editor's Abstract picker (exact gis
+ *  ids), (2) abstracts cited in the description text (scoped to the user/
+ *  parsed/deal counties), (3) abstracts linked to the deal.
+ *  POB within that abstract: named corner + commencement tie-line → corner
+ *  alone → representative interior point.
  * The user can always fine-tune by re-placing the POB on the map.
  */
-async function suggestAnchor(parsed: ParsedTract, dealCounties: string[]): Promise<Anchor | null> {
-  const refs = parsed.refs.abstracts.map((a) => a.replace(/^A-/, ""));
-  if (!refs.length) return null;
-  const counties = [parsed.refs.county, ...dealCounties].filter(Boolean) as string[];
-  // Abstract labels vary by source ("A-123" vs "123"); match both spellings,
-  // preferring rows in the referenced county.
-  const rows = await prisma.$queryRawUnsafe<{ id: string; county: string; lon: number; lat: number }[]>(
-    `SELECT id, county, ST_X(ST_PointOnSurface(geom)) AS lon, ST_Y(ST_PointOnSurface(geom)) AS lat
-       FROM gis.abstracts
-      WHERE (abstract = ANY($1::text[]) OR abstract = ANY($2::text[]))
-      ORDER BY CASE WHEN county ILIKE ANY($3::text[]) THEN 0 ELSE 1 END
-      LIMIT 1`,
-    refs, refs.map((r) => `A-${r}`), counties.length ? counties : ["__none__"],
-  ).catch(() => []);
-  const hit = rows[0];
+async function suggestAnchor(parsed: ParsedTract, ctx: AnchorContext): Promise<Anchor | null> {
+  type Hit = { id: string; lon: number; lat: number };
+  const byIds = (ids: string[]) => prisma.$queryRawUnsafe<Hit[]>(
+    `SELECT id, ST_X(ST_PointOnSurface(geom)) AS lon, ST_Y(ST_PointOnSurface(geom)) AS lat
+       FROM gis.abstracts WHERE id = ANY($1::text[]) LIMIT 1`,
+    ids,
+  ).catch(() => [] as Hit[]);
+
+  let hit: Hit | undefined;
+  if (ctx.userAbstractGisIds.length) hit = (await byIds(ctx.userAbstractGisIds))[0];
+  if (!hit) {
+    const refs = parsed.refs.abstracts.map((a) => a.replace(/^A-/, ""));
+    if (refs.length) {
+      const counties = [parsed.refs.county, ...ctx.counties].filter(Boolean) as string[];
+      // Abstract labels vary by source ("A-123" vs "123"); match both
+      // spellings, preferring rows in the referenced county.
+      hit = (await prisma.$queryRawUnsafe<Hit[]>(
+        `SELECT id, ST_X(ST_PointOnSurface(geom)) AS lon, ST_Y(ST_PointOnSurface(geom)) AS lat
+           FROM gis.abstracts
+          WHERE (abstract = ANY($1::text[]) OR abstract = ANY($2::text[]))
+          ORDER BY CASE WHEN county ILIKE ANY($3::text[]) THEN 0 ELSE 1 END
+          LIMIT 1`,
+        refs, refs.map((r) => `A-${r}`), counties.length ? counties : ["__none__"],
+      ).catch(() => [] as Hit[]))[0];
+    }
+  }
+  // Many deeds never cite their abstract (they reference neighboring tracts
+  // instead). The deal usually knows — fall back to its linked abstracts.
+  if (!hit && ctx.dealAbstractIds.length) hit = (await byIds(ctx.dealAbstractIds))[0];
   if (!hit) return null;
 
   // Precise POB from the named corner of the abstract polygon.
@@ -97,8 +117,8 @@ function withGeometry(parsed: ParsedTract, anchor: Anchor | null, name: string) 
   return { type: "Feature", properties: { name }, geometry: polygon } as const;
 }
 
-function serialize(t: { id: string; name: string; text: string; state: string; parse: Prisma.JsonValue; geometry: Prisma.JsonValue; anchor: Prisma.JsonValue; createdAt: Date; updatedAt: Date }) {
-  return { id: t.id, name: t.name, text: t.text, state: t.state, parse: t.parse, geometry: t.geometry, anchor: t.anchor, createdAt: t.createdAt, updatedAt: t.updatedAt };
+function serialize(t: { id: string; name: string; text: string; state: string; counties: string[]; abstractGisIds: string[]; parse: Prisma.JsonValue; geometry: Prisma.JsonValue; anchor: Prisma.JsonValue; createdAt: Date; updatedAt: Date }) {
+  return { id: t.id, name: t.name, text: t.text, state: t.state, counties: t.counties, abstractGisIds: t.abstractGisIds, parse: t.parse, geometry: t.geometry, anchor: t.anchor, createdAt: t.createdAt, updatedAt: t.updatedAt };
 }
 
 const anchorSchema = z.object({ lon: z.number().min(-180).max(180), lat: z.number().min(-90).max(90) });
@@ -133,15 +153,22 @@ tractsRouter.post(
       name: z.string().trim().max(120).optional(),
       text: z.string().trim().min(1).max(50_000),
       state: z.string().trim().length(2).default("TX"),
+      counties: z.array(z.string().trim().max(60)).max(20).default([]),
+      abstractIds: z.array(z.string().trim().max(40)).max(50).default([]),
     }).parse(req.body);
 
-    const deal = await prisma.deal.findUniqueOrThrow({ where: { id: dealId }, select: { counties: true, _count: { select: { tracts: true } } } });
+    const deal = await prisma.deal.findUniqueOrThrow({ where: { id: dealId }, select: { counties: true, abstractIds: true, _count: { select: { tracts: true } } } });
     const parsed = parseTract(body.text, body.state);
-    const anchor = await suggestAnchor(parsed, deal.counties);
+    const anchor = await suggestAnchor(parsed, {
+      counties: [...body.counties, ...deal.counties],
+      userAbstractGisIds: body.abstractIds,
+      dealAbstractIds: deal.abstractIds,
+    });
     const name = body.name || `Tract ${deal._count.tracts + 1}`;
     const tract = await prisma.tractDescription.create({
       data: {
         dealId, name, text: body.text, state: body.state.toUpperCase(),
+        counties: body.counties, abstractGisIds: body.abstractIds,
         parse: parsed as unknown as Prisma.InputJsonValue,
         anchor: (anchor ?? undefined) as Prisma.InputJsonValue | undefined,
         geometry: (withGeometry(parsed, anchor, name) ?? undefined) as Prisma.InputJsonValue | undefined,
@@ -160,6 +187,8 @@ tractsRouter.patch(
       name: z.string().trim().min(1).max(120).optional(),
       text: z.string().trim().min(1).max(50_000).optional(),
       state: z.string().trim().length(2).optional(),
+      counties: z.array(z.string().trim().max(60)).max(20).optional(),
+      abstractIds: z.array(z.string().trim().max(40)).max(50).optional(),
       anchor: anchorSchema.optional(), // user re-placed the POB on the map
     }).parse(req.body);
 
@@ -169,7 +198,11 @@ tractsRouter.patch(
     const name = body.name ?? existing.name;
     const text = body.text ?? existing.text;
     const state = (body.state ?? existing.state).toUpperCase();
+    const counties = body.counties ?? existing.counties;
+    const abstractGisIds = body.abstractIds ?? existing.abstractGisIds;
     const reparse = body.text !== undefined || body.state !== undefined;
+    // Geographic context changes re-run anchoring even when the text didn't change.
+    const reanchor = reparse || body.counties !== undefined || body.abstractIds !== undefined;
     const parsed = reparse ? parseTract(text, state) : (existing.parse as unknown as ParsedTract | null);
 
     // Anchor precedence: an explicit re-placement wins; otherwise keep a manual
@@ -177,16 +210,20 @@ tractsRouter.patch(
     // refresh the abstract-derived suggestion.
     let anchor = (existing.anchor as Anchor | null) ?? null;
     if (body.anchor) anchor = { ...body.anchor, source: "manual" };
-    else if (reparse && parsed && anchor?.source !== "manual") {
-      const deal = await prisma.deal.findUniqueOrThrow({ where: { id: dealId }, select: { counties: true } });
-      anchor = (await suggestAnchor(parsed, deal.counties)) ?? anchor;
+    else if (reanchor && parsed && anchor?.source !== "manual") {
+      const deal = await prisma.deal.findUniqueOrThrow({ where: { id: dealId }, select: { counties: true, abstractIds: true } });
+      anchor = (await suggestAnchor(parsed, {
+        counties: [...counties, ...deal.counties],
+        userAbstractGisIds: abstractGisIds,
+        dealAbstractIds: deal.abstractIds,
+      })) ?? anchor;
     }
 
     const geometry = parsed ? withGeometry(parsed, anchor, name) : null;
     const tract = await prisma.tractDescription.update({
       where: { id: existing.id },
       data: {
-        name, text, state,
+        name, text, state, counties, abstractGisIds,
         parse: (parsed ?? undefined) as unknown as Prisma.InputJsonValue | undefined,
         anchor: anchor ? (anchor as unknown as Prisma.InputJsonValue) : Prisma.JsonNull,
         geometry: geometry ? (geometry as unknown as Prisma.InputJsonValue) : Prisma.JsonNull,
@@ -214,8 +251,12 @@ tractsRouter.post(
 
     let anchor = (tract.anchor as Anchor | null) ?? null;
     if (anchor?.source !== "manual") {
-      const deal = await prisma.deal.findUniqueOrThrow({ where: { id: dealId }, select: { counties: true } });
-      anchor = (await suggestAnchor(parsed, deal.counties)) ?? anchor;
+      const deal = await prisma.deal.findUniqueOrThrow({ where: { id: dealId }, select: { counties: true, abstractIds: true } });
+      anchor = (await suggestAnchor(parsed, {
+        counties: [...tract.counties, ...deal.counties],
+        userAbstractGisIds: tract.abstractGisIds,
+        dealAbstractIds: deal.abstractIds,
+      })) ?? anchor;
     }
     const geometry = withGeometry(parsed, anchor, tract.name);
     const updated = await prisma.tractDescription.update({

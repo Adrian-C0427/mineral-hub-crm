@@ -208,20 +208,26 @@ export function TractMap({ tracts, selectedId, abstractIds = [], placingPob, onP
   const mapped = tracts.filter((t) => t.geometry).length;
   return (
     <div className="deal-map">
-      <div className="ml-bar" style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        <MapLayersPanel
-          variant="inline"
-          defs={[
-            { key: "boundaries", label: "Abstract boundaries" }, { key: "numbers", label: "Abstract numbers" },
-            { key: "surveys", label: "Survey names" }, { key: "wells", label: "Wells" },
-            { key: "wellbores", label: "Wellbores (laterals)" },
-            ...(abstractIds.length > 0 ? [{ key: "dealAbstracts", label: "Deal abstracts" }] : []),
-          ]}
-          layers={layers}
-          onToggle={(k) => toggle(k as keyof typeof layers)}
-        />
-        <button className="small" style={{ marginLeft: "auto" }} onClick={() => { fitted.current = false; fitToTracts(true); }} title="Zoom back to the full tract extent">Reset view</button>
-        {placingPob && <span className="muted" style={{ fontSize: 12 }}>Click the map to place the Point of Beginning</span>}
+      <div className="ml-bar" style={{ display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
+        {/* flex:1 gives the pill grid the full row width so the toggles lay
+            out horizontally — identical to the deal map and main Map page. */}
+        <div style={{ flex: "1 1 480px", minWidth: 0 }}>
+          <MapLayersPanel
+            variant="inline"
+            defs={[
+              { key: "boundaries", label: "Abstract boundaries" }, { key: "numbers", label: "Abstract numbers" },
+              { key: "surveys", label: "Survey names" }, { key: "wells", label: "Wells" },
+              { key: "wellbores", label: "Wellbores (laterals)" },
+              ...(abstractIds.length > 0 ? [{ key: "dealAbstracts", label: "Deal abstracts" }] : []),
+            ]}
+            layers={layers}
+            onToggle={(k) => toggle(k as keyof typeof layers)}
+          />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto" }}>
+          {placingPob && <span className="muted" style={{ fontSize: 12 }}>Click the map to place the Point of Beginning</span>}
+          <button className="small" onClick={() => { fitted.current = false; fitToTracts(true); }} title="Zoom back to the full tract extent">Reset view</button>
+        </div>
       </div>
       <div className="dm-canvas">
         <div ref={container} style={{ position: "absolute", inset: 0 }} />
