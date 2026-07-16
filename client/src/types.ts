@@ -30,6 +30,8 @@ export interface DealSummary {
   abstractIds: string[];
   sellerNames: string[];
   operator: string | null;
+  /** Custom Documents folder list (empty = module defaults). */
+  docFolders?: string[];
   askPrice: number | null;
   ourPrice: number | null;
   assetTypes: string[];

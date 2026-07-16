@@ -178,12 +178,12 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
                 </div>
                 <div className="row" style={{ gap: 8 }}>
                   {!mapping.state && (
-                    <div className="field" style={{ marginBottom: 0, width: 110 }}><label>State *</label>
+                    <div className="field" style={{ marginBottom: 0, width: 110 }}><label>State <Req /></label>
                       <input value={assignState} maxLength={2} onChange={(e) => setAssignState(e.target.value.toUpperCase())} placeholder="TX" />
                     </div>
                   )}
                   {!mapping.county && (
-                    <div className="field" style={{ marginBottom: 0, minWidth: 180 }}><label>County *</label>
+                    <div className="field" style={{ marginBottom: 0, minWidth: 180 }}><label>County <Req /></label>
                       <input value={assignCounty} onChange={(e) => setAssignCounty(e.target.value)} placeholder="e.g. Leon" />
                     </div>
                   )}

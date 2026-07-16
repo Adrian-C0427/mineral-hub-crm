@@ -63,11 +63,26 @@ interface PipelineFilterState {
   buyerId: string;
   assigneeId: string;
   overdueOnly: boolean;
+  // Acreage ranges (inclusive); empty string = unbounded.
+  nraMin: string; nraMax: string;
+  nmaMin: string; nmaMax: string;
 }
-const EMPTY_FILTERS: PipelineFilterState = { q: "", priority: "", states: [], counties: [], buyerId: "", assigneeId: "", overdueOnly: false };
+const EMPTY_FILTERS: PipelineFilterState = {
+  q: "", priority: "", states: [], counties: [], buyerId: "", assigneeId: "", overdueOnly: false,
+  nraMin: "", nraMax: "", nmaMin: "", nmaMax: "",
+};
+const bound = (s: string): number | null => { const n = Number(s); return s.trim() !== "" && isFinite(n) ? n : null; };
+/** Inclusive range test; deals without the metric are excluded once a bound is set. */
+function inRange(v: number | null | undefined, min: number | null, max: number | null): boolean {
+  if (min === null && max === null) return true;
+  if (v == null) return false;
+  return (min === null || v >= min) && (max === null || v <= max);
+}
 function activeFilterCount(f: PipelineFilterState): number {
   return (f.q.trim() ? 1 : 0) + (f.priority ? 1 : 0) + (f.states.length ? 1 : 0) +
-    (f.counties.length ? 1 : 0) + (f.buyerId ? 1 : 0) + (f.assigneeId ? 1 : 0) + (f.overdueOnly ? 1 : 0);
+    (f.counties.length ? 1 : 0) + (f.buyerId ? 1 : 0) + (f.assigneeId ? 1 : 0) + (f.overdueOnly ? 1 : 0) +
+    (bound(f.nraMin) !== null || bound(f.nraMax) !== null ? 1 : 0) +
+    (bound(f.nmaMin) !== null || bound(f.nmaMax) !== null ? 1 : 0);
 }
 function applyPipelineFilters(rows: DealSummary[], f: PipelineFilterState): DealSummary[] {
   const needle = f.q.trim().toLowerCase();
@@ -78,7 +93,10 @@ function applyPipelineFilters(rows: DealSummary[], f: PipelineFilterState): Deal
     (!f.counties.length || d.counties.some((c) => f.counties.includes(c))) &&
     (!f.buyerId || d.selectedBuyer?.id === f.buyerId) &&
     (!f.assigneeId || d.assignees.some((a) => a.id === f.assigneeId) || d.relationshipOwner?.id === f.assigneeId) &&
-    (!f.overdueOnly || d.isOverdue));
+    (!f.overdueOnly || d.isOverdue) &&
+    // Package rollups (agg*) represent the card the user sees — filter on those.
+    inRange(d.aggNra ?? d.nra, bound(f.nraMin), bound(f.nraMax)) &&
+    inRange(d.aggAcreageNma ?? d.acreageNma, bound(f.nmaMin), bound(f.nmaMax)));
 }
 
 const PRIORITY_RANK: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
@@ -408,6 +426,20 @@ function PipelineFilters({ deals, filters, onChange }: {
             <div className="field" style={{ marginBottom: 0 }}><label>Team member</label>
               <Select value={filters.assigneeId} onChange={(v) => onChange({ ...filters, assigneeId: v })} clearable searchable placeholder="Anyone" ariaLabel="Filter by team member"
                 options={people.map(([value, label]) => ({ value, label }))} />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}><label>NRA range</label>
+              <div className="row" style={{ gap: 6 }}>
+                <input type="number" min={0} value={filters.nraMin} onChange={(e) => onChange({ ...filters, nraMin: e.target.value })} placeholder="Min" aria-label="Minimum NRA" />
+                <span className="muted">–</span>
+                <input type="number" min={0} value={filters.nraMax} onChange={(e) => onChange({ ...filters, nraMax: e.target.value })} placeholder="Max" aria-label="Maximum NRA" />
+              </div>
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}><label>NMA range</label>
+              <div className="row" style={{ gap: 6 }}>
+                <input type="number" min={0} value={filters.nmaMin} onChange={(e) => onChange({ ...filters, nmaMin: e.target.value })} placeholder="Min" aria-label="Minimum NMA" />
+                <span className="muted">–</span>
+                <input type="number" min={0} value={filters.nmaMax} onChange={(e) => onChange({ ...filters, nmaMax: e.target.value })} placeholder="Max" aria-label="Maximum NMA" />
+              </div>
             </div>
             <label className="cv-row cv-check" style={{ justifyContent: "flex-start", padding: 0 }}>
               <input type="checkbox" checked={filters.overdueOnly} onChange={() => onChange({ ...filters, overdueOnly: !filters.overdueOnly })} /> <span>Overdue only</span>

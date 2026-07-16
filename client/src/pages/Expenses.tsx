@@ -135,10 +135,10 @@ export function Expenses() {
       {/* KPIs */}
       {dash && (
         <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
-          <MetricCard label="Total Expenses" value={money(dash.totals.totalExpenses)} hint={`${dash.totals.count} records`} />
-          <MetricCard label="Total Reimbursed" value={money(dash.totals.totalReimbursed)} />
-          <MetricCard label="Outstanding Reimbursements" value={money(dash.totals.totalOutstanding)} />
-          <MetricCard label="Company Outstanding Balance" value={money(dash.totals.companyOutstanding)} />
+          <MetricCard label="Total Expenses" value={money(dash.totals.totalExpenses, { cents: true })} hint={`${dash.totals.count} records`} />
+          <MetricCard label="Total Reimbursed" value={money(dash.totals.totalReimbursed, { cents: true })} />
+          <MetricCard label="Outstanding Reimbursements" value={money(dash.totals.totalOutstanding, { cents: true })} />
+          <MetricCard label="Company Outstanding Balance" value={money(dash.totals.companyOutstanding, { cents: true })} />
         </div>
       )}
 
@@ -157,7 +157,7 @@ export function Expenses() {
                   <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
                   <XAxis dataKey="label" tick={{ fontSize: 11 }} />
                   <YAxis tickFormatter={(v) => money(v)} tick={{ fontSize: 11 }} width={70} />
-                  <Tooltip {...chartTooltip} formatter={(v: number) => money(v)} />
+                  <Tooltip {...chartTooltip} formatter={(v: number) => money(v, { cents: true })} />
                   <Bar dataKey="expenses" name="Expenses" fill={COLOR_EXPENSE} radius={[3, 3, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -179,7 +179,7 @@ export function Expenses() {
                     {dash.byCategory.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
                   </Pie>
                   <Legend iconSize={9} wrapperStyle={{ fontSize: 11.5 }} />
-                  <Tooltip {...chartTooltip} formatter={(v: number) => money(v)} />
+                  <Tooltip {...chartTooltip} formatter={(v: number) => money(v, { cents: true })} />
                 </PieChart>
               </ResponsiveContainer>
             )}
@@ -198,7 +198,7 @@ export function Expenses() {
                   {/* Compact ticks ($4K) — full "$3,500" labels collided at narrow widths. */}
                   <XAxis type="number" tickFormatter={(v: number) => (v >= 1000 ? `$${Math.round(v / 1000)}K` : `$${v}`)} tick={{ fontSize: 11 }} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={110} />
-                  <Tooltip {...chartTooltip} formatter={(v: number) => money(v)} />
+                  <Tooltip {...chartTooltip} formatter={(v: number) => money(v, { cents: true })} />
                   <Legend />
                   <Bar dataKey="total" name="Total" fill={CHART_COLORS[0]} radius={[0, 3, 3, 0]} />
                   <Bar dataKey="outstanding" name="Outstanding" fill={CHART_COLORS[2]} radius={[0, 3, 3, 0]} />
@@ -447,9 +447,9 @@ function AllExpenses({
         )}
         <div className="xp-summary">
           <span>Showing <b>{totals.count}</b> expenses</span>
-          <span>Total <b>{money(totals.total)}</b></span>
-          <span className="ok">Reimbursed <b>{money(totals.reimbursed)}</b></span>
-          <span className="warn">Outstanding <b>{money(totals.outstanding)}</b></span>
+          <span>Total <b>{money(totals.total, { cents: true })}</b></span>
+          <span className="ok">Reimbursed <b>{money(totals.reimbursed, { cents: true })}</b></span>
+          <span className="warn">Outstanding <b>{money(totals.outstanding, { cents: true })}</b></span>
         </div>
       </div>
 
@@ -542,7 +542,7 @@ function ExpMonthGroup({
           <span className="exp-month-caret">{collapsed ? "▸" : "▾"}</span>
           <strong>{title}</strong>
           <span className="muted" style={{ marginLeft: 8 }}>{group.rows.length} expense{group.rows.length === 1 ? "" : "s"}</span>
-          <span className="exp-month-subtotal">{money(group.subtotal)}</span>
+          <span className="exp-month-subtotal">{money(group.subtotal, { cents: true })}</span>
         </td>
       </tr>
       {!collapsed && group.rows.map((e) => (
@@ -557,7 +557,7 @@ function ExpMonthGroup({
           {has("date") && <td>{fmtDate(e.date)}</td>}
           {has("user") && <td>{e.userName ?? "—"}</td>}
           {has("category") && <td>{e.categoryName ?? "—"}</td>}
-          {has("amount") && <td className="right">{money(e.amount)}</td>}
+          {has("amount") && <td className="right">{money(e.amount, { cents: true })}</td>}
           {has("status") && (
             <td><span className={`badge ${e.reimbursed ? "resp-offer" : "resp-pending"}`}>{e.reimbursed ? "Reimbursed" : "Outstanding"}</span></td>
           )}

@@ -527,6 +527,10 @@ model Deal {
   divisionOrdersNote  String?
   taxInfo             String?
 
+  // Custom document-folder list for this deal/asset (rename/delete/reorder in
+  // the Documents section). Empty = the module's default folder set.
+  docFolders String[] @default([])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

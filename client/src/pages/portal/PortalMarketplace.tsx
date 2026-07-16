@@ -181,13 +181,6 @@ export function PortalMarketplace() {
 
   return (
     <PortalShell org={org ?? undefined}>
-      <div className="portal-hero panel mkt-hero">
-        <div>
-          <h1 style={{ margin: "0 0 4px" }}>Available Mineral Opportunities</h1>
-          <p className="muted" style={{ margin: 0 }}>{deals.length} active offering{deals.length === 1 ? "" : "s"} · Explore on the map, then reach out — we move fast.</p>
-        </div>
-      </div>
-
       {/* Collapsible filters + workspace controls (map-first: filters stay out of the way). */}
       <div className="panel mkt-controls">
         <div className="mkt-search-row">

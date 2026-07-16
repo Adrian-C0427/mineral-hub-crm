@@ -83,6 +83,12 @@ export function DocumentsSection({
   const [viewing, setViewing] = useState<DocFile | null>(null);
   const [moving, setMoving] = useState<DocFile | null>(null);
   const [renaming, setRenaming] = useState<DocFile | null>(null);
+  // Folder management (rename / delete / drag-reorder) — deals only (assets
+  // are Deal rows too); the customized list is persisted on the deal.
+  const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
+  const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
+  const dragFolder = useRef<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
   // Collapsed by default everywhere; the choice is remembered for the session
   // per record, using the same collapse pattern as the other page sections.
   const openKey = `mh-docs-open:${ownerType}:${ownerId}`;
@@ -140,6 +146,27 @@ export function DocumentsSection({
     if (filename.trim() && filename.trim() !== f.filename) run(() => api.patch(`/files/${f.id}`, { filename: filename.trim() }));
   };
   const move = (f: DocFile, toFolder: string) => { if (toFolder !== f.folder) run(() => api.patch(`/files/${f.id}`, { folder: toFolder })); };
+
+  // --- folder management --------------------------------------------------
+  const canManageFolders = canEdit && ownerType === "deal";
+  const folderOp = (body: Record<string, unknown>) => run(() => api.post(`/deals/${ownerId}/doc-folders`, body));
+  const reorderFolders = (from: string, to: string) => {
+    if (from === to) return;
+    const next = folders.filter((f) => f !== from);
+    next.splice(next.indexOf(to), 0, from);
+    void folderOp({ op: "reorder", folders: next });
+  };
+  const renameFolder = (from: string, to: string) => {
+    const clean = to.trim();
+    if (!clean || clean === from) return;
+    if (folders.some((f) => f.toLowerCase() === clean.toLowerCase())) { setErr(`A “${clean}” folder already exists.`); return; }
+    if (folder === from) setFolder(clean); // keep the renamed folder active
+    void folderOp({ op: "rename", from, to: clean, folders: folders.map((f) => (f === from ? clean : f)) });
+  };
+  const removeFolder = (name: string) => {
+    if (folder === name) setFolder("Other");
+    void folderOp({ op: "remove", name, folders: folders.filter((f) => f !== name) });
+  };
   const open = async (id: string, inline: boolean) => {
     const { url } = await api.get<{ url: string }>(`/files/${id}/download${inline ? "?inline=1" : ""}`);
     window.open(url, "_blank");
@@ -216,7 +243,19 @@ export function DocumentsSection({
         {folders.map((fl) => (
           // Same anatomy for every chip — the active one differs by color,
           // not by sprouting an icon (which shifted the row's widths).
-          <span key={fl} className={`doc-chip ${folder === fl ? "active" : ""}`} onClick={() => setFolder(fl)}>
+          // Chips are draggable to reorder the folder list (persisted).
+          <span
+            key={fl}
+            className={`doc-chip ${folder === fl ? "active" : ""} ${dropTarget === fl ? "drop-target" : ""}`}
+            onClick={() => setFolder(fl)}
+            draggable={canManageFolders}
+            onDragStart={canManageFolders ? (e) => { dragFolder.current = fl; e.dataTransfer.effectAllowed = "move"; } : undefined}
+            onDragOver={canManageFolders ? (e) => { if (dragFolder.current && dragFolder.current !== fl) { e.preventDefault(); setDropTarget(fl); } } : undefined}
+            onDragLeave={canManageFolders ? () => setDropTarget((t) => (t === fl ? null : t)) : undefined}
+            onDrop={canManageFolders ? (e) => { e.preventDefault(); setDropTarget(null); if (dragFolder.current) reorderFolders(dragFolder.current, fl); dragFolder.current = null; } : undefined}
+            onDragEnd={canManageFolders ? () => { dragFolder.current = null; setDropTarget(null); } : undefined}
+            title={canManageFolders ? "Drag to reorder folders" : undefined}
+          >
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /></svg>
             {fl} <span className="doc-count">{countByFolder.get(fl) ?? 0}</span>
           </span>
@@ -224,7 +263,19 @@ export function DocumentsSection({
       </div>
 
       <div className="row" style={{ margin: "12px 0", justifyContent: "space-between" }}>
-        <strong>{folder}</strong>
+        <span className="row" style={{ gap: 4, alignItems: "center" }}>
+          <strong>{folder}</strong>
+          {/* "Other" is the system fallback (unfiled documents) — not editable. */}
+          {canManageFolders && folder !== "Other" && (
+            <OverflowMenu
+              ariaLabel={`Manage the ${folder} folder`}
+              items={[
+                { label: "Rename folder…", onClick: () => setRenamingFolder(folder) },
+                { label: "Delete folder…", danger: true, onClick: () => setDeletingFolder(folder) },
+              ]}
+            />
+          )}
+        </span>
         {canEdit && (
           <div className="row" style={{ gap: 8 }}>
             {cloudProviders.map((p) => (
@@ -282,8 +333,53 @@ export function DocumentsSection({
           onRename={(filename) => { setRenaming(null); rename(renaming, filename); }}
         />
       )}
+
+      {renamingFolder && (
+        <RenameFolderModal
+          current={renamingFolder}
+          onClose={() => setRenamingFolder(null)}
+          onRename={(to) => { const from = renamingFolder; setRenamingFolder(null); renameFolder(from, to); }}
+        />
+      )}
+      {deletingFolder && (
+        <Modal title={`Delete “${deletingFolder}”?`} onClose={() => setDeletingFolder(null)}
+          footer={<>
+            <button onClick={() => setDeletingFolder(null)}>Cancel</button>
+            <button className="danger" onClick={() => { const name = deletingFolder; setDeletingFolder(null); removeFolder(name); }}>Delete folder</button>
+          </>}>
+          <p style={{ marginTop: 0 }}>
+            The folder is removed from this record's Documents section.
+            {(countByFolder.get(deletingFolder) ?? 0) > 0
+              ? <> Its <strong>{countByFolder.get(deletingFolder)}</strong> document{(countByFolder.get(deletingFolder) ?? 0) === 1 ? "" : "s"} move to <strong>Other</strong> — nothing is deleted.</>
+              : <> It has no documents.</>}
+          </p>
+        </Modal>
+      )}
       </div>}
     </div>
+  );
+}
+
+/** Rename a document folder (persisted per deal; the folder's files move with it). */
+function RenameFolderModal({ current, onClose, onRename }: {
+  current: string; onClose: () => void; onRename: (to: string) => void;
+}) {
+  const [name, setName] = useState(current);
+  const changed = name.trim() !== "" && name.trim() !== current;
+  return (
+    <Modal title={`Rename “${current}”`} onClose={onClose} dirty={changed}
+      footer={<>
+        <button onClick={onClose}>Cancel</button>
+        <button className="primary" disabled={!changed} onClick={() => onRename(name)}>Rename</button>
+      </>}>
+      <div className="field">
+        <label>Folder name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} autoFocus
+          onFocus={(e) => e.currentTarget.select()}
+          onKeyDown={(e) => { if (e.key === "Enter" && changed) { e.preventDefault(); onRename(name); } }} />
+      </div>
+      <p className="muted" style={{ marginBottom: 0, fontSize: 12.5 }}>Documents in this folder move with it.</p>
+    </Modal>
   );
 }
 

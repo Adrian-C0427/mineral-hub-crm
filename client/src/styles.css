@@ -724,6 +724,10 @@ body.modal-open { overflow: hidden; }
 /* The one standardized required-field indicator, app-wide (incl. portal). */
 .req-star { color: var(--red); margin-left: 2px; font-weight: 700; }
 
+/* Folder chips highlight the insertion point while another chip is dragged over. */
+.doc-chip.drop-target { outline: 2px dashed var(--accent); outline-offset: 1px; }
+.doc-chip[draggable="true"] { cursor: grab; }
+
 /* Tract results: one expandable card per tract — name + acreage hierarchy,
    status chips, Generate as the primary CTA, overflow for the rest. */
 .tract-cards { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
@@ -753,11 +757,15 @@ body.modal-open { overflow: hidden; }
 
 /* Month drill-down: a floating, NON-blocking panel — no backdrop, no scroll
    lock, so the dashboard behind it stays fully interactive. Its own body
-   scrolls independently. */
-.drill-panel { position: fixed; top: 84px; right: 20px; max-height: calc(100vh - 104px); width: min(440px, calc(100vw - 40px));
+   scrolls independently. Centered in the CONTENT area: `left` is set inline
+   (sidebar-aware, live-updated on collapse/expand) and the transform centers
+   the panel on that point. */
+.drill-panel { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  max-height: min(80vh, 720px); width: min(440px, calc(100vw - 40px));
   display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border);
-  border-radius: 12px; box-shadow: var(--shadow); z-index: 900; animation: drill-in .18s ease; }
-@keyframes drill-in { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+  border-radius: 12px; box-shadow: var(--shadow); z-index: 900; animation: drill-in .18s ease;
+  transition: left 200ms ease; }
+@keyframes drill-in { from { opacity: 0; transform: translate(-50%, -50%) scale(0.97); } to { opacity: 1; transform: translate(-50%, -50%); } }
 .drill-head { display: flex; align-items: flex-start; gap: 10px; padding: 18px 20px 12px; }
 .drill-summary { display: flex; gap: 10px; flex-wrap: wrap; padding: 0 20px 16px; border-bottom: 1px solid var(--border); }
 .drill-stat { flex: 1; min-width: 110px; display: flex; flex-direction: column; gap: 3px;

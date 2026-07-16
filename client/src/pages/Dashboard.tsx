@@ -185,6 +185,23 @@ export function Dashboard() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [profitDrill]);
+  // Center the panel in the CONTENT area (viewport minus the sidebar), and
+  // keep it centered live as the sidebar expands/collapses or the window
+  // resizes. ResizeObserver on the sidebar catches the collapse animation.
+  const [drillLeft, setDrillLeft] = useState<number | null>(null);
+  useEffect(() => {
+    if (profitDrill == null) return;
+    const calc = () => {
+      const sb = document.querySelector(".sidebar")?.getBoundingClientRect().width ?? 0;
+      setDrillLeft(sb + (window.innerWidth - sb) / 2);
+    };
+    calc();
+    window.addEventListener("resize", calc);
+    const sbEl = document.querySelector(".sidebar");
+    const ro = sbEl ? new ResizeObserver(calc) : null;
+    if (sbEl && ro) ro.observe(sbEl);
+    return () => { window.removeEventListener("resize", calc); ro?.disconnect(); };
+  }, [profitDrill]);
   useEffect(() => { try { localStorage.setItem(DASH_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } }, [prefs]);
 
   useEffect(() => {
@@ -367,7 +384,8 @@ export function Dashboard() {
               the react-grid-layout item's CSS transform would otherwise turn
               position:fixed into transform-relative positioning. */}
           return createPortal(
-            <aside className="drill-panel" role="dialog" aria-label={`${m.month} profit breakdown`}>
+            <aside className="drill-panel" role="dialog" aria-label={`${m.month} profit breakdown`}
+              style={drillLeft != null ? { left: drillLeft } : undefined}>
               <div className="drill-head">
                 <div style={{ minWidth: 0 }}>
                   <h3 className="dash-h3" style={{ margin: 0 }}>{m.month} — profit breakdown</h3>
