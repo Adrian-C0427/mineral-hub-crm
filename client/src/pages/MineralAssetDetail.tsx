@@ -16,7 +16,7 @@ import { DocumentsSection, type DocFile } from "../components/DocumentsSection";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
 import { useAbstractLabels, SurveyMultiPicker } from "../components/AbstractPicker";
-import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS } from "../lib/options";
+import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
 import { monthLabel, chartTooltip } from "../lib/charts";
 import { money, num, fmtDate, toInputDate } from "../lib/format";
 import { OWNERSHIP_TYPES, OWNERSHIP_STATUSES, PRODUCING_STATUSES } from "./MineralAssets";
@@ -90,7 +90,7 @@ export function MineralAssetDetail() {
         <div className="row">
           <h1 style={{ marginBottom: 0 }}>{asset.name}</h1>
           <span className="badge owned-badge">Owned Asset</span>
-          {asset.ownershipType && <span className="badge resp-pending">{asset.ownershipType}</span>}
+          {(asset.assetTypes.join("/") || asset.ownershipType) && <span className="badge resp-pending">{asset.assetTypes.join("/") || asset.ownershipType}</span>}
           {asset.assetMode === "SELL" && <span className="badge resp-interested">Marketing for sale</span>}
         </div>
         <div className="row">
@@ -204,7 +204,7 @@ function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdi
 
   async function save() {
     await api.patch(`/deals/${asset.id}`, {
-      ownershipType: f.ownershipType, ownershipStatus: f.ownershipStatus,
+      assetTypes: f.assetTypes, ownershipStatus: f.ownershipStatus,
       acquisitionDate: f.acquisitionDate || null, rrc: f.rrc || null,
       purchasePrice: f.purchasePrice, currentValue: f.currentValue,
       acreageNma: f.acreageNma, nra: f.nra, netRevenueInterest: f.netRevenueInterest,
@@ -216,7 +216,7 @@ function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdi
     <EditCard title="Ownership" canEdit={canEdit} editing={edit} onEdit={() => setEdit(true)} onCancel={() => { setF(asset); setEdit(false); }} onSave={save}>
       {!edit ? (
         <div className="dd-grid">
-          <KV k="Ownership Type" v={asset.ownershipType} />
+          <KV k="Asset Type" v={asset.assetTypes.map((t) => ASSET_TYPE_LABELS[t] ?? t).join(", ") || asset.ownershipType} />
           <KV k="Ownership Status" v={asset.ownershipStatus} />
           <KV k="Acquisition Date" v={fmtDate(asset.acquisitionDate)} />
           <KV k="Purchase Price" v={money(asset.purchasePrice)} />
@@ -228,7 +228,7 @@ function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdi
         </div>
       ) : (
         <div className="dd-grid">
-          <Fld l="Ownership Type"><Select value={f.ownershipType ?? ""} onChange={(v) => setF({ ...f, ownershipType: v })} placeholder="—" clearable ariaLabel="Ownership type" options={OWNERSHIP_TYPES.map((t) => ({ value: t, label: t }))} /></Fld>
+          <Fld l="Asset Type"><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={f.assetTypes} onChange={(v) => setF({ ...f, assetTypes: v })} placeholder="Search asset types…" /></Fld>
           <Fld l="Ownership Status"><Select value={f.ownershipStatus ?? ""} onChange={(v) => setF({ ...f, ownershipStatus: v })} placeholder="—" clearable ariaLabel="Ownership status" options={OWNERSHIP_STATUSES.map((t) => ({ value: t, label: t }))} /></Fld>
           <Fld l="Acquisition Date"><DateField value={toInputDate(f.acquisitionDate)} onChange={(v) => setF({ ...f, acquisitionDate: v })} /></Fld>
           <Fld l="Purchase Price"><MoneyInput value={f.purchasePrice != null ? String(f.purchasePrice) : ""} onChange={(v) => setF({ ...f, purchasePrice: v === "" ? null : Number(v) })} ariaLabel="Purchase price" /></Fld>
@@ -236,7 +236,7 @@ function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdi
           <Fld l="RRC"><input value={f.rrc ?? ""} onChange={(e) => setF({ ...f, rrc: e.target.value })} placeholder="RRC lease / district / operator no." /></Fld>
           <Fld l="NMA"><input type="number" value={f.acreageNma ?? ""} onChange={(e) => setF({ ...f, acreageNma: numOrNull(e.target.value) })} /></Fld>
           <Fld l="NRA"><input type="number" value={f.nra ?? ""} onChange={(e) => setF({ ...f, nra: numOrNull(e.target.value) })} /></Fld>
-          <Fld l="Net Revenue Interest (0–1)"><input type="number" step="0.01" value={f.netRevenueInterest ?? ""} onChange={(e) => setF({ ...f, netRevenueInterest: numOrNull(e.target.value) })} /></Fld>
+          <Fld l="Net Revenue Interest"><input type="number" step="0.01" value={f.netRevenueInterest ?? ""} onChange={(e) => setF({ ...f, netRevenueInterest: numOrNull(e.target.value) })} /></Fld>
         </div>
       )}
     </EditCard>

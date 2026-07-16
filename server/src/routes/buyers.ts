@@ -212,18 +212,21 @@ buyersRouter.get(
     for (const b of allBuyers) for (const k of buyerEntityKeys(b.companyName, b.aliases)) if (!normToBuyer.has(k)) normToBuyer.set(k, b.id);
 
     const annotate = <T extends { norm: string }>(list: T[]) => list.map((x) => ({ ...x, buyerId: normToBuyer.get(x.norm) ?? null }));
+    // Relationship analysis shows business entities ONLY — individual people
+    // are excluded outright (no client-side toggle exists to reveal them).
+    const companiesOnly = <T extends { norm: string; entityType: string }>(list: T[]) =>
+      annotate(list.filter((x) => x.entityType !== "individual"));
 
+    // The network-map graph is no longer shipped (the Buyer Profile map was
+    // removed); everything else in the payload is unchanged.
+    const { graph: _graph, ...networkRest } = network;
     res.json({
       network: {
-        ...network,
+        ...networkRest,
         classLabels: ENTITY_CLASS_LABEL,
-        topGrantors: annotate(network.topGrantors),
-        topGrantees: annotate(network.topGrantees),
-        coBuyers: annotate(network.coBuyers),
-        graph: {
-          ...network.graph,
-          nodes: network.graph.nodes.map((n) => ({ ...n, buyerId: normToBuyer.get(n.norm) ?? null })),
-        },
+        topGrantors: companiesOnly(network.topGrantors),
+        topGrantees: companiesOnly(network.topGrantees),
+        coBuyers: companiesOnly(network.coBuyers),
       },
     });
   }),

@@ -13,6 +13,26 @@ interface GeoFeature {
   geometry: { type: "Polygon" | "MultiPolygon"; coordinates: number[][][] | number[][][][] };
 }
 
+/** Shared ring-walker + equirectangular fit for any feature set. */
+type AnyGeom = { type: "Polygon" | "MultiPolygon"; coordinates: number[][][] | number[][][][] };
+function projectPaths<F extends { geometry: AnyGeom }>(features: F[], w: number, h: number, pad = 8): { d: string; f: F }[] {
+  let minX = 180, minY = 90, maxX = -180, maxY = -90;
+  const polysOf = (g: AnyGeom) => (g.type === "Polygon" ? [g.coordinates as number[][][]] : (g.coordinates as number[][][][]));
+  for (const f of features) for (const poly of polysOf(f.geometry)) for (const ring of poly) for (const [x, y] of ring) {
+    if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
+  }
+  if (minX > maxX) return [];
+  const scale = Math.min((w - pad * 2) / (maxX - minX || 1e-6), (h - pad * 2) / (maxY - minY || 1e-6));
+  const px = (x: number) => pad + (x - minX) * scale;
+  const py = (y: number) => h - pad - (y - minY) * scale;
+  return features.map((f) => ({
+    f,
+    d: polysOf(f.geometry)
+      .map((poly) => poly.map((ring) => "M" + ring.map(([x, y]) => `${px(x).toFixed(1)},${py(y).toFixed(1)}`).join("L") + "Z").join(""))
+      .join(""),
+  }));
+}
+
 export interface CountyStat {
   county: string; // display name, e.g. "Leon"
   total: number;
@@ -28,6 +48,76 @@ interface Props {
 }
 
 const W = 720, H = 680;
+
+// ---------------------------------------------------------------------------
+// Single-county abstract drill-in
+// ---------------------------------------------------------------------------
+
+export interface AbstractFeature {
+  properties: { abstract: string; survey: string | null; count: number; amount: number };
+  geometry: AnyGeom;
+}
+
+/**
+ * Fixed visual summary of ONE county: every abstract boundary rendered and
+ * shaded with the same activity color logic as the county choropleth. The map
+ * is deliberately non-interactive for navigation (no pan/zoom — it frames the
+ * county automatically); hovering an abstract shows its transaction amount.
+ */
+export function ResearchAbstractMap({ county, features }: { county: string; features: AbstractFeature[] }) {
+  const [tip, setTip] = useState<{ x: number; y: number; f: AbstractFeature } | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+
+  const shapes = useMemo(() => projectPaths(features, W, H), [features]);
+  const maxCount = useMemo(() => Math.max(1, ...features.map((f) => f.properties.count)), [features]);
+
+  // Same activity shading as the county view: log-scaled accent blue.
+  const fillFor = (count: number): string => {
+    if (count === 0) return "rgba(148,163,184,0.10)";
+    const t = Math.log(count + 1) / Math.log(maxCount + 1);
+    return `rgba(59,130,246,${(0.15 + 0.8 * t).toFixed(2)})`;
+  };
+  const money = (n: number) => `$${Math.round(n).toLocaleString()}`;
+
+  if (!shapes.length) {
+    return <p className="muted">Abstract boundaries are unavailable for {county} County.</p>;
+  }
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", display: "block" }}>
+        {shapes.map(({ d, f }) => (
+          <path
+            key={f.properties.abstract}
+            d={d}
+            fill={fillFor(f.properties.count)}
+            // Boundary lines stay clearly visible on every parcel.
+            stroke="rgba(148,163,184,0.55)"
+            strokeWidth={0.6}
+            onMouseMove={(e) => {
+              const r = wrapRef.current?.getBoundingClientRect();
+              if (r) setTip({ x: e.clientX - r.left + 12, y: e.clientY - r.top + 12, f });
+            }}
+            onMouseLeave={() => setTip(null)}
+          />
+        ))}
+      </svg>
+      {tip && (
+        <div style={{
+          position: "absolute", left: tip.x, top: tip.y, pointerEvents: "none", zIndex: 5,
+          background: "var(--panel, #1f2937)", border: "1px solid var(--border, #374151)",
+          borderRadius: 6, padding: "6px 9px", fontSize: 12, whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+        }}>
+          <strong>Abstract {tip.f.properties.abstract}</strong>
+          {tip.f.properties.survey && <span className="muted"> · {tip.f.properties.survey}</span>}
+          <br />
+          {tip.f.properties.count > 0
+            ? <>{money(tip.f.properties.amount)} across {tip.f.properties.count} transaction{tip.f.properties.count === 1 ? "" : "s"}</>
+            : <span className="muted">No recorded activity</span>}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function ResearchChoropleth({ stats, metric, selected, onSelect }: Props) {
   const [features, setFeatures] = useState<GeoFeature[] | null>(null);
