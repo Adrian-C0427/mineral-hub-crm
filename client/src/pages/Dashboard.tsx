@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
-import { Sun, Moon } from "lucide-react";
+import { Sun, Moon, X } from "lucide-react";
 import GridLayout, { type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import { api } from "../api/client";
-import { Modal, Spinner, StageBadge } from "../components/ui";
+import { Spinner, StageBadge } from "../components/ui";
 import { money, fmtDate, fmtDateLocal } from "../lib/format";
 import { useStages } from "../stages";
 import { PeriodSegmented } from "../components/PeriodSegmented";
@@ -176,6 +177,14 @@ export function Dashboard() {
   // (drill-down modal listing the deals behind that bar).
   const [profitHover, setProfitHover] = useState<number | null>(null);
   const [profitDrill, setProfitDrill] = useState<number | null>(null);
+  // The drill panel is non-modal (no backdrop / no focus trap), so wire up
+  // Escape ourselves.
+  useEffect(() => {
+    if (profitDrill == null) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setProfitDrill(null); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [profitDrill]);
   useEffect(() => { try { localStorage.setItem(DASH_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } }, [prefs]);
 
   useEffect(() => {
@@ -218,8 +227,10 @@ export function Dashboard() {
   // Paired bars (design): realized and projected render side by side, so the
   // y-scale is the single largest monthly value of either series, rounded up
   // to a clean axis maximum so the $-gridlines land on friendly numbers.
+  // Scale to the tallest bar in the SELECTED range (rescales with the range)
+  // with ~12% headroom so the tallest bar never presses against the top.
   const maxProfit = Math.max(1, ...d.profitByMonth.map((m) => Math.max(m.profit, m.projected)));
-  const niceMax = niceCeil(maxProfit);
+  const niceMax = niceCeil(maxProfit * 1.12);
   const axisTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * niceMax);
   // Index of the bucket containing today (-1 when the window is in the past).
   const curIdx = d.profitByMonth.findIndex((m) => m.isCurrent);
@@ -263,16 +274,16 @@ export function Dashboard() {
             yearly buckets for very long custom ranges). Buckets with no
             realized or projected profit show a faint zero placeholder instead
             of vanishing, so the x-axis spacing stays stable. A $-labeled
-            y-axis + gridlines give scale at a glance; hovering shows the full
-            breakdown; clicking a month drills into its deals. */}
+            y-axis gives scale at a glance (no gridlines — kept minimal);
+            hovering shows the full breakdown; clicking a month opens a
+            non-blocking details panel. The axis renders ascending: the tick
+            array is $0→max and .bar-axis is column-reverse, so $0 sits at the
+            bottom. */}
         <div className="bar-chart-wrap">
           <div className="bar-axis" aria-hidden="true">
-            {axisTicks.slice().reverse().map((tick) => <span key={tick}>{fmtCompact(tick)}</span>)}
+            {axisTicks.map((tick) => <span key={tick}>{fmtCompact(tick)}</span>)}
           </div>
           <div className="bar-plot">
-            <div className="bar-grid" aria-hidden="true">
-              {axisTicks.map((tick) => <span key={tick} style={{ bottom: `${(tick / niceMax) * 100}%` }} />)}
-            </div>
             <div className="bar-chart">
               {d.profitByMonth.map((m, i) => {
                 const empty = m.profit === 0 && m.projected === 0;
@@ -327,33 +338,65 @@ export function Dashboard() {
           const m = d.profitByMonth[profitDrill];
           const closed = (m.deals ?? []).filter((x) => x.kind === "closed");
           const projected = (m.deals ?? []).filter((x) => x.kind === "projected");
+          const total = (m.deals ?? []).length;
           const group = (title: string, sub: string, rows: typeof closed) => rows.length > 0 && (
-            <div style={{ marginBottom: 14 }}>
-              <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em" }}>{title}</div>
-              <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{sub}</div>
+            <div className="drill-group">
+              <div className="drill-group-head">
+                <span className="drill-group-title">{title}</span>
+                <span className="drill-group-count">{rows.length}</span>
+              </div>
+              <div className="drill-group-sub">{sub}</div>
               {rows.map((x) => (
-                <div key={x.id} className="row" style={{ gap: 10, padding: "7px 0", borderTop: "1px solid var(--border)", alignItems: "center" }}>
-                  <Link to={`/deals/${x.id}`} style={{ fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.name}</Link>
-                  <StageBadge stage={x.stage} />
-                  <span className="spacer" />
-                  <span className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>{fmtDate(x.date)}</span>
-                  {x.amount != null && <span style={{ whiteSpace: "nowrap" }}>{money(x.amount)}</span>}
-                  <span style={{ whiteSpace: "nowrap", color: x.profit >= 0 ? "var(--green)" : "var(--red)", fontWeight: 600 }}>{money(x.profit)}</span>
+                <div key={x.id} className="drill-row">
+                  <div className="drill-row-main">
+                    <Link to={`/deals/${x.id}`} className="drill-row-name">{x.name}</Link>
+                    <StageBadge stage={x.stage} />
+                  </div>
+                  <div className="drill-row-meta">
+                    <span className="muted">{fmtDate(x.date)}</span>
+                    {x.amount != null && <span>{money(x.amount)}</span>}
+                    <span className="drill-profit" style={{ color: x.profit >= 0 ? "var(--green)" : "var(--red)" }}>{money(x.profit)}</span>
+                  </div>
                 </div>
               ))}
             </div>
           );
-          return (
-            <Modal title={`${m.month} — profit breakdown`} onClose={() => setProfitDrill(null)} wide
-              footer={<button onClick={() => setProfitDrill(null)}>Close</button>}>
-              <div className="row" style={{ gap: 16, marginBottom: 12, fontSize: 13 }}>
-                <span><span className="dash-swatch" style={{ background: "var(--green)" }} /> Realized <strong>{money(m.profit)}</strong></span>
-                {m.projected > 0 && <span><span className="dash-swatch dash-swatch-proj" /> Projected <strong>{money(m.projected)}</strong></span>}
-                <span className="muted">Total <strong style={{ color: "var(--text)" }}>{money(m.profit + m.projected)}</strong></span>
+          {/* Non-blocking floating panel (no backdrop) — the dashboard stays
+              scrollable and clickable while it's open; clicking another month
+              simply re-points the panel. Esc or × closes. Portaled to <body>:
+              the react-grid-layout item's CSS transform would otherwise turn
+              position:fixed into transform-relative positioning. */}
+          return createPortal(
+            <aside className="drill-panel" role="dialog" aria-label={`${m.month} profit breakdown`}>
+              <div className="drill-head">
+                <div style={{ minWidth: 0 }}>
+                  <h3 className="dash-h3" style={{ margin: 0 }}>{m.month} — profit breakdown</h3>
+                  <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{total} deal{total === 1 ? "" : "s"} this month</div>
+                </div>
+                <button className="icon-btn" onClick={() => setProfitDrill(null)} aria-label="Close" style={{ marginLeft: "auto" }}><X size={16} /></button>
               </div>
-              {group("Closed this month", "Realized — keyed on the Contract Timeline's Closed Date; profit uses the accepted offer.", closed)}
-              {group("Scheduled to close", "Projected — active deals with an offer whose anticipated closing lands in this month.", projected)}
-            </Modal>
+              <div className="drill-summary">
+                <div className="drill-stat">
+                  <span className="drill-stat-label"><span className="dash-swatch" style={{ background: "var(--green)" }} /> Realized</span>
+                  <strong>{money(m.profit)}</strong>
+                </div>
+                {m.projected > 0 && (
+                  <div className="drill-stat">
+                    <span className="drill-stat-label"><span className="dash-swatch dash-swatch-proj" /> Projected</span>
+                    <strong>{money(m.projected)}</strong>
+                  </div>
+                )}
+                <div className="drill-stat">
+                  <span className="drill-stat-label">Total</span>
+                  <strong>{money(m.profit + m.projected)}</strong>
+                </div>
+              </div>
+              <div className="drill-body">
+                {group("Closed this month", "Realized — keyed on the Contract Timeline's Closed Date; profit uses the accepted offer.", closed)}
+                {group("Scheduled to close", "Projected — active deals with an offer whose anticipated closing lands in this month.", projected)}
+              </div>
+            </aside>,
+            document.body
           );
         })()}
       </div>
