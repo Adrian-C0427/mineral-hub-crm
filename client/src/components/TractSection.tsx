@@ -68,7 +68,7 @@ export function TractSection({ dealId, dealName, canEdit, abstractIds = [] }: { 
   const [editing, setEditing] = useState<{ tract: Tract | null } | null>(null); // null tract = new
   const [deleting, setDeleting] = useState<Tract | null>(null);
   const [placingFor, setPlacingFor] = useState<string | null>(null);
-  const [generating, setGenerating] = useState<string | null>(null); // tract id being AI-processed
+  const [generating, setGenerating] = useState<string | null>(null); // tract id being regenerated
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const mapHandle = useRef<maplibregl.Map | null>(null);
@@ -97,7 +97,7 @@ export function TractSection({ dealId, dealName, canEdit, abstractIds = [] }: { 
     finally { setBusy(false); }
   }
 
-  /** Generate Tract Map: Claude extracts the calls; geometry stays deterministic. */
+  /** Generate Tract Map: deterministic re-parse + anchor + geometry (no AI). */
   async function generate(tractId: string) {
     setGenerating(tractId); setErr(null);
     try { await api.post(`/deals/${dealId}/tracts/${tractId}/generate`); await load(); setSelectedId(tractId); }
@@ -150,7 +150,7 @@ export function TractSection({ dealId, dealName, canEdit, abstractIds = [] }: { 
           onReady={(m) => { mapHandle.current = m; }}
         />
       )}
-      {generating && <Banner kind="info">Claude is reading the legal description and extracting the boundary calls… geometry, closure and acreage are then computed deterministically.</Banner>}
+      {generating && <Banner kind="info">Parsing the legal description — boundary calls, closure, acreage and geometry are computed by the built-in tract engine.</Banner>}
 
       {tracts.length === 0 ? (
         <EmptyState title="No tract descriptions yet">
@@ -171,12 +171,13 @@ export function TractSection({ dealId, dealName, canEdit, abstractIds = [] }: { 
                   <td>{p?.closure ? (p.closure.closes ? <span style={{ color: "var(--green, #16a34a)" }}>✓ closes</span> : <span style={{ color: "var(--red, #dc2626)" }}>✗ {p.closure.gapFt.toLocaleString()} ft gap</span>) : "—"}</td>
                   <td>
                     {t.geometry ? <span className="badge">Mapped</span> : <span className="badge" style={{ opacity: 0.7 }}>Not anchored</span>}
+                    {p?.confidence != null && <span style={{ marginLeft: 6, display: "inline-block" }}><ConfidenceBadge value={p.confidence} /></span>}
                     {issues > 0 && <span className="badge" style={{ marginLeft: 6, background: "rgba(245,158,11,.15)", color: "#b45309" }}>{issues} to review</span>}
                   </td>
                   <td onClick={(e) => e.stopPropagation()} style={{ textAlign: "right" }}>
                     {canEdit && (
                       <button className="primary small" disabled={busy || generating !== null} onClick={() => generate(t.id)}
-                        title="Claude re-reads the legal description; geometry is computed deterministically from its extraction">
+                        title="Re-parses the legal description and regenerates the tract geometry">
                         {generating === t.id ? "Processing…" : "Generate Tract Map"}
                       </button>
                     )}{" "}
@@ -228,6 +229,17 @@ export function TractSection({ dealId, dealName, canEdit, abstractIds = [] }: { 
   );
 }
 
+/** Confidence badge: green ≥80, amber 50–79, red <50 — same bands everywhere. */
+function ConfidenceBadge({ value }: { value: number }) {
+  const [bg, fg] = value >= 80 ? ["rgba(34,197,94,.15)", "#15803d"] : value >= 50 ? ["rgba(245,158,11,.15)", "#b45309"] : ["rgba(239,68,68,.15)", "#dc2626"];
+  return (
+    <span className="badge" style={{ background: bg, color: fg }}
+      title="Deterministic confidence — scored from what the parser could verify: POB found, calls resolved, boundary closure, acreage agreement, and how many interpretive assumptions were needed">
+      {value}% confidence
+    </span>
+  );
+}
+
 /** Per-tract QC readout: POB, every call with its reading, closure, refs, flags. */
 function ValidationPanel({ tract }: { tract: Tract }) {
   const p = tract.parse!;
@@ -235,9 +247,10 @@ function ValidationPanel({ tract }: { tract: Tract }) {
     <div style={{ marginTop: 12, border: "1px solid var(--border, #e2e8f0)", borderRadius: 8, padding: 12 }}>
       <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
         <strong>{tract.name} — parse detail</strong>
-        {p.source === "ai"
-          ? <span className="badge" title="Claude extracted the calls; all geometry was computed deterministically">AI-parsed{p.confidence != null ? ` · ${p.confidence}% confidence` : ""}</span>
-          : <span className="badge" style={{ opacity: 0.75 }} title="Deterministic rules parse — use Generate Tract Map for the Claude reading">Rule-based parse</span>}
+        {p.confidence != null
+          ? <ConfidenceBadge value={p.confidence} />
+          : <span className="badge" style={{ opacity: 0.75 }} title="Parsed before confidence scoring — use Generate Tract Map to rescore">Parsed</span>}
+        {p.source === "ai" && <span className="badge" style={{ opacity: 0.6 }} title="Parsed by the retired AI extraction path — Generate Tract Map re-parses with the built-in engine">legacy parse</span>}
         {p.closure && (p.closure.closes
           ? <span className="muted" style={{ fontSize: 13 }}>Closes (precision 1:{p.closure.precision.toLocaleString()})</span>
           : <span style={{ fontSize: 13, color: "#dc2626" }}>Open boundary — {p.closure.gapFt.toLocaleString()} ft back to POB</span>)}
@@ -248,7 +261,7 @@ function ValidationPanel({ tract }: { tract: Tract }) {
       {p.warnings.map((w, i) => <Banner key={i} kind="warn">{w}</Banner>)}
       {(p.assumptions?.length ?? 0) > 0 && (
         <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
-          <strong>AI assumptions (verify these):</strong>
+          <strong>Interpretive assumptions (verify these):</strong>
           <ul style={{ margin: "4px 0 0 18px" }}>{p.assumptions!.map((a, i) => <li key={i}>{a}</li>)}</ul>
         </div>
       )}

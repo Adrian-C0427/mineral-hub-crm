@@ -15,7 +15,7 @@
  *  - Outlook imports inbound buyer replies onto deal timelines.
  *  - Outlook Calendar mirrors deal deadlines as calendar events.
  *  - Google Drive / OneDrive import files into the document manager.
- *  - Claude powers deal summaries, outreach drafts, and tract extraction.
+ *  - Claude powers deal summaries and outreach drafts.
  *
  * `implementation` is what the UI keys its honesty off:
  *  - "live"    — connect stores an encrypted credential and we validate it
@@ -73,7 +73,7 @@ export const INTEGRATION_CATALOG: ProviderDef[] = [
   // --- AI & Automation ---
   {
     key: "claude", name: "Claude (Anthropic)", category: "AI & Automation", auth: "apikey", implementation: "live",
-    description: "Draft outreach, summarize deals, and extract tract descriptions with Anthropic Claude. The key is verified against the Anthropic API when you connect.",
+    description: "Draft outreach and summarize deals with Anthropic Claude. The key is verified against the Anthropic API when you connect.",
     secretLabel: "Anthropic API key", secretHint: "sk-ant-…", setupUrl: "https://console.anthropic.com/settings/keys", syncable: true,
   },
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { anchorPolygon, parseBearing, parseDistance, parseTract, polygonAcres, quadrantToAzimuth, tractFromAiExtraction, type AiExtraction } from "./tractParser.js";
+import { anchorPolygon, parseBearing, parseDistance, parseTract, polygonAcres, scoreConfidence } from "./tractParser.js";
 
 // A clean 1000×1000 ft square: 1,000,000 sq ft ≈ 22.957 acres.
 const SQUARE = `
@@ -102,57 +102,64 @@ describe("parseTract (TX metes and bounds)", () => {
   });
 });
 
-describe("tractFromAiExtraction", () => {
-  const square: AiExtraction = {
-    pobText: "BEGINNING at an iron rod",
-    calls: [
-      { raw: "THENCE N 0 E 1000 ft", bearing: { ns: "N", deg: 0, ew: "E" }, distance: { value: 1000, unit: "feet" } },
-      { raw: "THENCE N 90 E 360 varas", bearing: { ns: "N", deg: 90, ew: "E" }, distance: { value: 360, unit: "varas" } },
-      { raw: "THENCE S 0 E 1000 ft", bearing: { ns: "S", deg: 0, ew: "E" }, distance: { value: 1000, unit: "feet" } },
-      { raw: "THENCE S 90 W 1000 ft", bearing: { ns: "S", deg: 90, ew: "W" }, distance: { value: 1000, unit: "feet" } },
-    ],
-    refs: { statedAcres: 22.96 },
-    assumptions: ["Read 'vrs' as Texas varas."],
-    ambiguities: [{ text: "the meanders of the creek", issue: "East line follows a creek; straight chord assumed" }],
-    confidence: 84,
-  };
-
-  it("assembles geometry deterministically from an AI extraction", () => {
-    const p = tractFromAiExtraction(square, "TX", "Abstract No. 123, Leon County, Texas");
+describe("parseTexas — interpretive reads", () => {
+  it("excludes commencement tie-line calls from the boundary walk", () => {
+    const commenced = `
+COMMENCING at the northeast corner of the JOHN DOE SURVEY, Abstract No. 123, Leon County, Texas;
+THENCE S 45°00'00" W, a distance of 500.00 feet to a 1/2 inch iron rod and the POINT OF BEGINNING;
+THENCE N 00°00'00" E, a distance of 1000.00 feet to a point for corner;
+THENCE N 90°00'00" E, a distance of 1000.00 feet to a point for corner;
+THENCE S 00°00'00" E, a distance of 1000.00 feet to a point for corner;
+THENCE S 90°00'00" W, a distance of 1000.00 feet to the POINT OF BEGINNING, containing 22.96 acres of land.`;
+    const p = parseTract(commenced);
     expect(p.ok).toBe(true);
-    expect(p.source).toBe("ai");
-    expect(p.confidence).toBe(84);
-    expect(p.computedAcres).toBeCloseTo(22.957, 1); // 360 varas = 1000 ft
+    expect(p.calls).toHaveLength(4); // the S45W tie call is excluded
+    expect(p.computedAcres).toBeCloseTo(22.957, 1);
     expect(p.closure!.closes).toBe(true);
-    expect(p.assumptions).toHaveLength(1);
-    expect(p.warnings.some((w) => /creek/.test(w))).toBe(true);
+    expect(p.assumptions.some((a) => /tie-line/i.test(a))).toBe(true);
   });
 
-  it("backfills refs from the deterministic regex pass over the original text", () => {
-    const p = tractFromAiExtraction(square, "TX", "Abstract No. 123, Leon County, Texas");
-    expect(p.refs.abstracts).toContain("A-123");
-    expect(p.refs.county).toBe("Leon");
-    expect(p.refs.statedAcres).toBeCloseTo(22.96);
+  it("repeats the prior bearing for 'same course' / 'continuing' calls", () => {
+    const cont = SQUARE.replace(
+      "THENCE N 90°00'00\" E, a distance of 1000.00 feet to a point for corner;",
+      "THENCE N 90°00'00\" E, a distance of 600.00 feet to a point; THENCE continuing on the same course, a distance of 400.00 feet to a point for corner;");
+    const p = parseTract(cont);
+    expect(p.ok).toBe(true);
+    expect(p.calls).toHaveLength(5);
+    expect(p.calls[2].azimuth).toBeCloseTo(90); // reused N90E
+    expect(p.closure!.closes).toBe(true);
+    expect(p.computedAcres).toBeCloseTo(22.957, 1);
+    expect(p.assumptions.some((a) => /same course/i.test(a))).toBe(true);
+  });
+});
+
+describe("confidence scoring (deterministic)", () => {
+  it("scores a clean closing tract high", () => {
+    const p = parseTract(SQUARE);
+    expect(p.source).toBe("rules");
+    expect(p.confidence).toBeGreaterThanOrEqual(90);
   });
 
-  it("flags calls the model could not resolve instead of guessing", () => {
-    const p = tractFromAiExtraction({
-      pobText: null,
-      calls: [
-        { raw: "curve without chord", curve: true, bearing: null, distance: null, note: "Arc of 312 ft, no chord given" },
-        { raw: "N 45 E 100 ft", bearing: { ns: "N", deg: 45, ew: "E" }, distance: { value: 100, unit: "feet" } },
-      ],
-    }, "TX", "some text");
-    expect(p.ok).toBe(false);
-    expect(p.unresolved.length).toBe(1);
-    expect(p.calls[0].issue).toMatch(/Arc of 312/);
+  it("drops confidence for unresolved calls and open boundaries", () => {
+    const messy = SQUARE.replace("THENCE N 90°00'00\" E, a distance of 1000.00 feet to a point for corner;",
+      "THENCE easterly along the meanders of the creek to a point for corner;");
+    const p = parseTract(messy);
+    expect(p.confidence).not.toBeNull();
+    expect(p.confidence!).toBeLessThan(parseTract(SQUARE).confidence!);
   });
 
-  it("clamps confidence and rejects out-of-quadrant bearings", () => {
-    expect(quadrantToAzimuth({ ns: "N", deg: 120, ew: "E" })).toBeNull();
-    expect(quadrantToAzimuth({ ns: "S", deg: 45, min: 30, ew: "W" })!.azimuth).toBeCloseTo(225.5);
-    const p = tractFromAiExtraction({ pobText: null, calls: [], confidence: 300 }, "TX", "x");
-    expect(p.confidence).toBe(100);
+  it("caps unmappable descriptions at a low score", () => {
+    const p = parseTract("Being Lot 4, Block B, of the Oakwood Addition, Leon County, Texas.");
+    expect(p.confidence!).toBeLessThanOrEqual(20);
+  });
+
+  it("penalizes assumptions and acreage mismatch", () => {
+    const base = { ok: true, pobText: "BEGINNING at", calls: [], closure: { closes: true, gapFt: 0, precision: 100000 }, computedAcres: 10, refs: { statedAcres: 10 } as never, assumptions: [], unresolved: [] };
+    const clean = scoreConfidence(base as never);
+    const assumed = scoreConfidence({ ...base, assumptions: ["a", "b"] } as never);
+    const mismatched = scoreConfidence({ ...base, computedAcres: 15 } as never);
+    expect(assumed).toBeLessThan(clean);
+    expect(mismatched).toBeLessThan(clean);
   });
 });
 
