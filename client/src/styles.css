@@ -691,14 +691,13 @@ body.modal-open { overflow: hidden; }
 /* Profit-by-month chart, per the design: paired bars (realized | projected)
    with 3px rounded tops over a 130px plot area. Bars only render when the
    month has a value — no baseline slivers. */
-/* Profit chart: $-labeled y-axis + gridlines behind the bars, hover tooltip,
-   and clickable columns that drill into the month's deals. */
+/* Profit chart: $-labeled y-axis (ascending — column-reverse puts the first
+   tick, $0, at the bottom), hover tooltip, and clickable columns that open the
+   month's drill-down panel. Deliberately no gridlines — minimal look. */
 .bar-chart-wrap { display: flex; gap: 8px; margin-top: 20px; }
 .bar-axis { display: flex; flex-direction: column-reverse; justify-content: space-between; height: 130px; text-align: right;
   font-size: 10px; color: var(--text-dim); font-variant-numeric: tabular-nums; min-width: 34px; flex-shrink: 0; }
 .bar-plot { position: relative; flex: 1; min-width: 0; }
-.bar-grid { position: absolute; left: 0; right: 0; top: 0; height: 130px; pointer-events: none; }
-.bar-grid > span { position: absolute; left: 0; right: 0; border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
 .bar-col.clickable { cursor: pointer; border-radius: 6px; }
 .bar-col.clickable:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
 .chart-tip { position: absolute; bottom: calc(100% - 122px); z-index: 20; pointer-events: none; min-width: 150px;
@@ -721,6 +720,32 @@ body.modal-open { overflow: hidden; }
 .bar-label { font-size: 10px; color: var(--text-dim); }
 /* Highlight the current month's label to orient past vs. future at a glance. */
 .bar-col.current .bar-label { color: var(--accent); font-weight: 700; }
+
+/* Month drill-down: a floating, NON-blocking panel — no backdrop, no scroll
+   lock, so the dashboard behind it stays fully interactive. Its own body
+   scrolls independently. */
+.drill-panel { position: fixed; top: 84px; right: 20px; max-height: calc(100vh - 104px); width: min(440px, calc(100vw - 40px));
+  display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border);
+  border-radius: 12px; box-shadow: var(--shadow); z-index: 900; animation: drill-in .18s ease; }
+@keyframes drill-in { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+.drill-head { display: flex; align-items: flex-start; gap: 10px; padding: 18px 20px 12px; }
+.drill-summary { display: flex; gap: 10px; flex-wrap: wrap; padding: 0 20px 16px; border-bottom: 1px solid var(--border); }
+.drill-stat { flex: 1; min-width: 110px; display: flex; flex-direction: column; gap: 3px;
+  background: color-mix(in srgb, var(--border) 22%, transparent); border-radius: 8px; padding: 9px 12px; }
+.drill-stat-label { font-size: 11px; color: var(--text-dim); display: inline-flex; align-items: center; gap: 5px; }
+.drill-stat strong { font-size: 14.5px; font-variant-numeric: tabular-nums; }
+.drill-body { flex: 1; overflow-y: auto; padding: 16px 20px 18px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.drill-group + .drill-group { margin-top: 20px; }
+.drill-group-head { display: flex; align-items: center; gap: 8px; }
+.drill-group-title { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); }
+.drill-group-count { font-size: 11px; color: var(--text-dim); background: color-mix(in srgb, var(--border) 40%, transparent);
+  border-radius: 999px; padding: 1px 8px; }
+.drill-group-sub { font-size: 12px; color: var(--text-dim); margin: 3px 0 10px; }
+.drill-row { padding: 10px 0; border-top: 1px solid var(--border); display: flex; flex-direction: column; gap: 5px; }
+.drill-row-main { display: flex; align-items: center; gap: 8px; }
+.drill-row-name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drill-row-meta { display: flex; align-items: center; gap: 12px; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.drill-row-meta .drill-profit { margin-left: auto; font-weight: 600; }
 
 /* ===========================================================================
    Dashboard (design-system look, copied from the Claude Design mockup).
