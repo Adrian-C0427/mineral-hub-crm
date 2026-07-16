@@ -1025,6 +1025,50 @@ dealsRouter.post(
   }),
 );
 
+/** Org-scoped lookup of one timeline entry on this deal+buyer, or 404. */
+async function findDealMessage(req: AuthedRequest): Promise<{ id: string }> {
+  const message = await prisma.dealBuyerMessage.findFirst({
+    where: {
+      id: req.params.messageId,
+      dealId: req.params.id,
+      buyerId: req.params.buyerId,
+      organizationId: orgId(req),
+    },
+    select: { id: true },
+  });
+  if (!message) throw new HttpError(404, "Timeline entry not found");
+  return message;
+}
+
+// Edit a timeline entry. STATUS_CHANGE rows are system-generated, so the kind
+// enum here intentionally covers only the user-loggable kinds.
+dealsRouter.patch(
+  "/:id/activity/:buyerId/messages/:messageId",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const data = messageSchema.partial().parse(req.body);
+    const found = await findDealMessage(req);
+    const patch: Record<string, unknown> = {};
+    if (data.kind !== undefined) patch.kind = data.kind;
+    if (data.subject !== undefined) patch.subject = data.subject ?? null;
+    if (data.body !== undefined) patch.body = data.body;
+    if (data.occurredAt !== undefined) patch.occurredAt = toDate(data.occurredAt);
+    const message = await prisma.dealBuyerMessage.update({ where: { id: found.id }, data: patch });
+    res.json(message);
+  }),
+);
+
+// Delete a timeline entry (any kind, including system STATUS_CHANGE rows).
+dealsRouter.delete(
+  "/:id/activity/:buyerId/messages/:messageId",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const found = await findDealMessage(req);
+    await prisma.dealBuyerMessage.delete({ where: { id: found.id } });
+    res.json({ ok: true });
+  }),
+);
+
 // --------------------------------------------------------------------------
 // Bulk "mark as contacted" from Match Recommendations
 // --------------------------------------------------------------------------

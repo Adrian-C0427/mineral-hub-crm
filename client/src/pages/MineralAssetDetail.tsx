@@ -613,7 +613,7 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
 
       <DocumentsSection ownerType="deal" ownerId={asset.id} files={asset.files} folders={ASSET_DOC_FOLDERS} onChanged={onChanged} canEdit={canEdit} canDelete={canEdit} />
 
-      {logBuyer && <LogContactModal dealId={asset.id} buyerId={logBuyer.id} buyerName={logBuyer.name} users={users} onClose={() => setLogBuyer(null)} onLogged={() => { setLogBuyer(null); onChanged(); }} />}
+      {logBuyer && <LogContactModal dealId={asset.id} buyerId={logBuyer.id} buyerName={logBuyer.name} users={users} dealNra={asset.nra} dealNma={asset.acreageNma} onClose={() => setLogBuyer(null)} onLogged={() => { setLogBuyer(null); onChanged(); }} />}
       {showEmail && <SendDealEmailModal dealId={asset.id} dealName={asset.name} buyerIds={[...selected]} onClose={() => setShowEmail(false)} onSent={() => { setSelected(new Set()); setShowEmail(false); onChanged(); }} />}
       {acceptOffer && (
         <ConfirmDialog

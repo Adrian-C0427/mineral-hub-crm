@@ -5,7 +5,7 @@ import GridLayout, { type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import { api } from "../api/client";
-import { Spinner } from "../components/ui";
+import { Modal, Spinner, StageBadge } from "../components/ui";
 import { money, fmtDate, fmtDateLocal } from "../lib/format";
 import { useStages } from "../stages";
 import { PeriodSegmented } from "../components/PeriodSegmented";
@@ -25,7 +25,11 @@ interface DashboardData {
   upcomingFollowUps: { dealId: string; buyerName: string; dealName: string; date: string | null }[];
   recentActivity: { id: string; summary: string; createdAt: string }[];
   topBuyers: { id: string; name: string; companyName: string; volume: number }[];
-  profitByMonth: { month: string; isCurrent: boolean; profit: number; projected: number }[];
+  profitByMonth: {
+    month: string; isCurrent: boolean; profit: number; projected: number;
+    /** The deals behind the bar — closed in (or scheduled to close in) the bucket. */
+    deals?: { id: string; name: string; stage: string; kind: "closed" | "projected"; amount: number | null; profit: number; date: string }[];
+  }[];
   /** Real historical series for the KPI sparklines (optional: older API). */
   trends?: { activeDealsWeekly: number[]; avgDealSize: number[]; offersWeekly: number[] };
 }
@@ -40,6 +44,14 @@ function fmtCompact(v: number): string {
 }
 
 const pctChange = (cur: number, prev: number): number | null => (prev > 0 ? ((cur - prev) / prev) * 100 : null);
+
+/** Round a chart maximum up to a friendly 1/2/2.5/5 × 10ⁿ so axis ticks land on clean values. */
+function niceCeil(v: number): number {
+  if (v <= 0) return 1;
+  const mag = 10 ** Math.floor(Math.log10(v));
+  for (const m of [1, 2, 2.5, 5, 10]) if (v <= m * mag) return m * mag;
+  return 10 * mag;
+}
 
 /** Design-spec mini trend line (88×28 viewBox, stretched, 2px stroke). */
 function Spark({ data, color }: { data: number[]; color: string }) {
@@ -160,6 +172,10 @@ export function Dashboard() {
   const { label: stageLabel } = useStages();
   const [prefs, setPrefs] = useState<DashPrefs>(loadDashPrefs);
   const [customizing, setCustomizing] = useState(false);
+  // Profit chart interactivity: hovered bucket (rich tooltip) + clicked bucket
+  // (drill-down modal listing the deals behind that bar).
+  const [profitHover, setProfitHover] = useState<number | null>(null);
+  const [profitDrill, setProfitDrill] = useState<number | null>(null);
   useEffect(() => { try { localStorage.setItem(DASH_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } }, [prefs]);
 
   useEffect(() => {
@@ -200,8 +216,11 @@ export function Dashboard() {
   if (!d) return <Spinner />;
 
   // Paired bars (design): realized and projected render side by side, so the
-  // y-scale is the single largest monthly value of either series.
+  // y-scale is the single largest monthly value of either series, rounded up
+  // to a clean axis maximum so the $-gridlines land on friendly numbers.
   const maxProfit = Math.max(1, ...d.profitByMonth.map((m) => Math.max(m.profit, m.projected)));
+  const niceMax = niceCeil(maxProfit);
+  const axisTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * niceMax);
   // Index of the bucket containing today (-1 when the window is in the past).
   const curIdx = d.profitByMonth.findIndex((m) => m.isCurrent);
   const realized = d.profitByMonth.map((m) => m.profit);
@@ -243,32 +262,100 @@ export function Dashboard() {
         {/* The chart spans the SELECTED reporting period (every month of it,
             yearly buckets for very long custom ranges). Buckets with no
             realized or projected profit show a faint zero placeholder instead
-            of vanishing, so the x-axis spacing stays stable. */}
-        <div className="bar-chart">
-          {d.profitByMonth.map((m) => {
-            const empty = m.profit === 0 && m.projected === 0;
-            return (
-              <div className={`bar-col ${m.isCurrent ? "current" : ""}`} key={m.month} title={`${m.month}\nRealized: ${money(m.profit)}\nProjected: ${money(m.projected)}`}>
-                <div className="bar-zone">
-                  {empty ? (
-                    <div className="bar bar-zero" title={`${m.month}: no profit`} />
-                  ) : (
-                    <>
-                      {m.profit > 0 && <div className="bar" style={{ height: `${(m.profit / maxProfit) * 100}%` }} />}
-                      {m.projected > 0 && <div className="bar bar-projected" style={{ height: `${(m.projected / maxProfit) * 100}%` }} />}
-                    </>
-                  )}
+            of vanishing, so the x-axis spacing stays stable. A $-labeled
+            y-axis + gridlines give scale at a glance; hovering shows the full
+            breakdown; clicking a month drills into its deals. */}
+        <div className="bar-chart-wrap">
+          <div className="bar-axis" aria-hidden="true">
+            {axisTicks.slice().reverse().map((tick) => <span key={tick}>{fmtCompact(tick)}</span>)}
+          </div>
+          <div className="bar-plot">
+            <div className="bar-grid" aria-hidden="true">
+              {axisTicks.map((tick) => <span key={tick} style={{ bottom: `${(tick / niceMax) * 100}%` }} />)}
+            </div>
+            <div className="bar-chart">
+              {d.profitByMonth.map((m, i) => {
+                const empty = m.profit === 0 && m.projected === 0;
+                const clickable = (m.deals?.length ?? 0) > 0;
+                return (
+                  <div
+                    className={`bar-col ${m.isCurrent ? "current" : ""} ${clickable ? "clickable" : ""}`} key={m.month}
+                    role={clickable ? "button" : undefined} tabIndex={clickable ? 0 : undefined}
+                    aria-label={clickable ? `${m.month}: view ${m.deals!.length} deal${m.deals!.length === 1 ? "" : "s"}` : undefined}
+                    onMouseEnter={() => setProfitHover(i)} onMouseLeave={() => setProfitHover((h) => (h === i ? null : h))}
+                    onClick={clickable ? () => setProfitDrill(i) : undefined}
+                    onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setProfitDrill(i); } } : undefined}
+                  >
+                    <div className="bar-zone">
+                      {empty ? (
+                        <div className="bar bar-zero" />
+                      ) : (
+                        <>
+                          {m.profit > 0 && <div className="bar" style={{ height: `${(m.profit / niceMax) * 100}%` }} />}
+                          {m.projected > 0 && <div className="bar bar-projected" style={{ height: `${(m.projected / niceMax) * 100}%` }} />}
+                        </>
+                      )}
+                    </div>
+                    <div className="bar-label">{m.month}</div>
+                  </div>
+                );
+              })}
+            </div>
+            {profitHover != null && d.profitByMonth[profitHover] && (() => {
+              const m = d.profitByMonth[profitHover];
+              const onRight = profitHover >= d.profitByMonth.length / 2;
+              return (
+                <div className="chart-tip" style={{
+                  [onRight ? "right" : "left"]: `${(onRight ? 1 - (profitHover + 0.5) / d.profitByMonth.length : (profitHover + 0.5) / d.profitByMonth.length) * 100}%`,
+                }}>
+                  <div className="chart-tip-title">{m.month}</div>
+                  <div className="chart-tip-row"><span className="dash-swatch" style={{ background: "var(--green)" }} /> Realized <strong>{money(m.profit)}</strong></div>
+                  {m.projected > 0 && <div className="chart-tip-row"><span className="dash-swatch dash-swatch-proj" /> Projected <strong>{money(m.projected)}</strong></div>}
+                  <div className="chart-tip-row chart-tip-total">Total <strong>{money(m.profit + m.projected)}</strong></div>
+                  {(m.deals?.length ?? 0) > 0 && <div className="muted" style={{ fontSize: 10.5, marginTop: 3 }}>Click for {m.deals!.length} deal{m.deals!.length === 1 ? "" : "s"}</div>}
                 </div>
-                <div className="bar-label">{m.month}</div>
-              </div>
-            );
-          })}
+              );
+            })()}
+          </div>
         </div>
         {d.profitByMonth.every((m) => m.profit === 0 && m.projected === 0) && (
           <p className="muted" style={{ margin: "10px 0 0", fontSize: 12 }}>
             No closed or projected profit in this period — bars fill in as deals close (with a Closed Date) or get an accepted offer with a closing date.
           </p>
         )}
+        {profitDrill != null && d.profitByMonth[profitDrill] && (() => {
+          const m = d.profitByMonth[profitDrill];
+          const closed = (m.deals ?? []).filter((x) => x.kind === "closed");
+          const projected = (m.deals ?? []).filter((x) => x.kind === "projected");
+          const group = (title: string, sub: string, rows: typeof closed) => rows.length > 0 && (
+            <div style={{ marginBottom: 14 }}>
+              <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em" }}>{title}</div>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>{sub}</div>
+              {rows.map((x) => (
+                <div key={x.id} className="row" style={{ gap: 10, padding: "7px 0", borderTop: "1px solid var(--border)", alignItems: "center" }}>
+                  <Link to={`/deals/${x.id}`} style={{ fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.name}</Link>
+                  <StageBadge stage={x.stage} />
+                  <span className="spacer" />
+                  <span className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>{fmtDate(x.date)}</span>
+                  {x.amount != null && <span style={{ whiteSpace: "nowrap" }}>{money(x.amount)}</span>}
+                  <span style={{ whiteSpace: "nowrap", color: x.profit >= 0 ? "var(--green)" : "var(--red)", fontWeight: 600 }}>{money(x.profit)}</span>
+                </div>
+              ))}
+            </div>
+          );
+          return (
+            <Modal title={`${m.month} — profit breakdown`} onClose={() => setProfitDrill(null)} wide
+              footer={<button onClick={() => setProfitDrill(null)}>Close</button>}>
+              <div className="row" style={{ gap: 16, marginBottom: 12, fontSize: 13 }}>
+                <span><span className="dash-swatch" style={{ background: "var(--green)" }} /> Realized <strong>{money(m.profit)}</strong></span>
+                {m.projected > 0 && <span><span className="dash-swatch dash-swatch-proj" /> Projected <strong>{money(m.projected)}</strong></span>}
+                <span className="muted">Total <strong style={{ color: "var(--text)" }}>{money(m.profit + m.projected)}</strong></span>
+              </div>
+              {group("Closed this month", "Realized — keyed on the Contract Timeline's Closed Date; profit uses the accepted offer.", closed)}
+              {group("Scheduled to close", "Projected — active deals with an offer whose anticipated closing lands in this month.", projected)}
+            </Modal>
+          );
+        })()}
       </div>
     ),
     stages: (
