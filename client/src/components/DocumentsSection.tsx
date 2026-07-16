@@ -87,6 +87,7 @@ export function DocumentsSection({
   // are Deal rows too); the customized list is persisted on the deal.
   const [renamingFolder, setRenamingFolder] = useState<string | null>(null);
   const [deletingFolder, setDeletingFolder] = useState<string | null>(null);
+  const [creatingFolder, setCreatingFolder] = useState(false);
   const dragFolder = useRef<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   // Collapsed by default everywhere; the choice is remembered for the session
@@ -162,6 +163,13 @@ export function DocumentsSection({
     if (folders.some((f) => f.toLowerCase() === clean.toLowerCase())) { setErr(`A “${clean}” folder already exists.`); return; }
     if (folder === from) setFolder(clean); // keep the renamed folder active
     void folderOp({ op: "rename", from, to: clean, folders: folders.map((f) => (f === from ? clean : f)) });
+  };
+  const createFolder = (name: string) => {
+    const clean = name.trim();
+    if (!clean) return;
+    if (folders.some((f) => f.toLowerCase() === clean.toLowerCase())) { setErr(`A “${clean}” folder already exists.`); return; }
+    setFolder(clean); // jump straight into the new folder
+    void folderOp({ op: "reorder", folders: [...folders, clean] });
   };
   const removeFolder = (name: string) => {
     if (folder === name) setFolder("Other");
@@ -260,6 +268,13 @@ export function DocumentsSection({
             {fl} <span className="doc-count">{countByFolder.get(fl) ?? 0}</span>
           </span>
         ))}
+        {canManageFolders && (
+          <span className="doc-chip doc-chip-new" role="button" tabIndex={0} title="Create a new folder"
+            onClick={() => setCreatingFolder(true)}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setCreatingFolder(true); } }}>
+            + New folder
+          </span>
+        )}
       </div>
 
       <div className="row" style={{ margin: "12px 0", justifyContent: "space-between" }}>
@@ -334,6 +349,13 @@ export function DocumentsSection({
         />
       )}
 
+      {creatingFolder && (
+        <NewFolderModal
+          existing={folders}
+          onClose={() => setCreatingFolder(false)}
+          onCreate={(name) => { setCreatingFolder(false); createFolder(name); }}
+        />
+      )}
       {renamingFolder && (
         <RenameFolderModal
           current={renamingFolder}
@@ -357,6 +379,32 @@ export function DocumentsSection({
       )}
       </div>}
     </div>
+  );
+}
+
+/** Create a new document folder (persisted per deal, selected immediately). */
+function NewFolderModal({ existing, onClose, onCreate }: {
+  existing: string[]; onClose: () => void; onCreate: (name: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const clean = name.trim();
+  const duplicate = clean !== "" && existing.some((f) => f.toLowerCase() === clean.toLowerCase());
+  const valid = clean !== "" && !duplicate;
+  return (
+    <Modal title="New folder" onClose={onClose} dirty={clean !== ""}
+      footer={<>
+        <button onClick={onClose}>Cancel</button>
+        <button className="primary" disabled={!valid} onClick={() => onCreate(clean)}>Create folder</button>
+      </>}>
+      <div className="field">
+        <label>Folder name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} autoFocus placeholder="e.g. Closing Documents"
+          onKeyDown={(e) => { if (e.key === "Enter" && valid) { e.preventDefault(); onCreate(clean); } }} />
+      </div>
+      {duplicate
+        ? <p className="error-text" style={{ marginBottom: 0 }}>A “{clean}” folder already exists.</p>
+        : <p className="muted" style={{ marginBottom: 0, fontSize: 12.5 }}>The new folder is added to this record and selected right away.</p>}
+    </Modal>
   );
 }
 

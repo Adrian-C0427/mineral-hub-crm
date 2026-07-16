@@ -237,9 +237,9 @@ export function BuyerProfile() {
         </div>
       </div>
 
-      {/* Relationship & Tracking */}
+      {/* Contact Tracking */}
       <div className="panel">
-        <SectionHead title="Relationship & Tracking" section="tracking" />
+        <SectionHead title="Contact Tracking" section="tracking" />
         <div className="dd-grid">
           <KV k="Close rate (computed)" v={view.closedDeals > 0 ? `${pct(view.closeRate)} · ${view.closedDeals} closed` : "No closed deals yet"} />
           {editTracking ? (

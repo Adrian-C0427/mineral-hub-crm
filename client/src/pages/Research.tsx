@@ -648,6 +648,11 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
 
   useEffect(() => {
     setLoading(true);
+    // Drop rows from a DIFFERENT aggregation level immediately — rendering
+    // county rows under abstract columns (or vice versa) for a frame was the
+    // visible glitch when switching Activity By levels. Same-level rows stay
+    // up while a period/filter refresh loads, so those transitions stay calm.
+    setData((d) => (d && d.level === level ? d : null));
     api.get<{ level: string; rows: GeoRow[] }>(`/research/geography?level=${level}&${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
   }, [qs, level]);
   useEffect(() => {

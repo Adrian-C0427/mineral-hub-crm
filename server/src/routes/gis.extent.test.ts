@@ -19,6 +19,16 @@ describe("planExtentQuery precedence", () => {
     expect(plan.params).toEqual([["Leon", "Freestone"]]);
   });
 
+  it("frames the whole state when only a State filter (incl. TX) is set", () => {
+    const plan = planExtentQuery({ states: "TX" })!;
+    expect(plan.sql).toContain("FROM gis.counties");
+    expect(plan.sql).not.toContain("WHERE");
+  });
+
+  it("returns null for a State-only selection outside GIS coverage", () => {
+    expect(planExtentQuery({ states: ["OK", "NM"] })).toBeNull();
+  });
+
   it("frames matching abstracts when abstract/survey filters are set", () => {
     const plan = planExtentQuery({ counties: "Leon", abstracts: ["101", "202"] })!;
     expect(plan.sql).toContain("FROM gis.abstracts");
