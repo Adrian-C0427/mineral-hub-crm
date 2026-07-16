@@ -5,6 +5,7 @@ import { useAuth } from "../auth/AuthContext";
 import { Modal, ConfirmDialog, Spinner, Banner, EmptyState, OverflowMenu } from "./ui";
 import { Select } from "./Select";
 import { GeoFields } from "./GeoFields";
+import { CollapsibleSection } from "./CollapsibleSection";
 import { ChevronDown } from "lucide-react";
 import { TractMap, type TractMapFeature, type TractSegment } from "./TractMap";
 import { exportTractMap } from "../lib/tractExport";
@@ -128,18 +129,22 @@ export function TractSection({ dealId, dealName, canEdit, abstractIds = [] }: { 
     finally { setBusy(false); }
   }
 
-  if (!tracts) return <div className="panel"><Spinner label="Loading tract descriptions…" /></div>;
-
-  const anyMapped = tracts.some((t) => t.geometry);
+  const anyMapped = (tracts ?? []).some((t) => t.geometry);
+  // Collapsible + collapsed by default (matching Buyer Activity / Match
+  // Recommendations) so tract work only takes space when it's needed.
   return (
-    <div className="panel">
-      <div className="section-head">
-        <div>
-          <h3 style={{ margin: 0 }}>Tract Descriptions</h3>
-          <span className="muted" style={{ fontSize: 12 }}>Paste legal descriptions and see them mapped — calls, closure, acreage</span>
+    <CollapsibleSection
+      title="Tract Descriptions"
+      sub="Paste legal descriptions and see them mapped — calls, closure, acreage"
+      right={tracts ? <span className="muted" style={{ fontSize: 12.5 }}>{tracts.length} tract{tracts.length === 1 ? "" : "s"}</span> : undefined}
+    >
+      {!tracts ? <Spinner label="Loading tract descriptions…" /> : (
+    <div>
+      {canEdit && (
+        <div className="row" style={{ justifyContent: "flex-end", marginBottom: 4 }}>
+          <button className="primary small" onClick={() => setEditing({ tract: null })}>+ Add Tract</button>
         </div>
-        {canEdit && <button className="primary small" onClick={() => setEditing({ tract: null })}>+ Add Tract</button>}
-      </div>
+      )}
       {err && <Banner kind="error">{err}</Banner>}
 
       {tracts.length > 0 && (
@@ -209,6 +214,8 @@ export function TractSection({ dealId, dealName, canEdit, abstractIds = [] }: { 
         />
       )}
     </div>
+      )}
+    </CollapsibleSection>
   );
 }
 

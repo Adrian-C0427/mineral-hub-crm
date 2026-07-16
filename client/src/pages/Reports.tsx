@@ -288,7 +288,7 @@ export function Reports() {
               <strong>Executive summary.</strong> Over this period the team closed <strong>{num(k.dealsClosed)}</strong> {k.dealsClosed === 1 ? "deal" : "deals"}{" "}
               generating <strong>{money(k.revenue)}</strong> in revenue and <strong>{money(k.netProfit)}</strong> net profit,
               added <strong>{num(k.dealsAdded)}</strong> new {k.dealsAdded === 1 ? "deal" : "deals"}, and maintained a <strong>{pct(k.winRate)}</strong> win rate.
-              Total company expenses were <strong>{money(k.expenses)}</strong> with <strong>{money(k.reimbursementsOutstanding)}</strong> outstanding in reimbursements.
+              Total company expenses were <strong>{money(k.expenses, { cents: true })}</strong> with <strong>{money(k.reimbursementsOutstanding, { cents: true })}</strong> outstanding in reimbursements.
             </p>
             {k.totalDeals === 0 && (
               <EmptyState title="No deal activity in this period yet">

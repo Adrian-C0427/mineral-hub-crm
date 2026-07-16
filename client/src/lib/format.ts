@@ -1,6 +1,12 @@
-export function money(n: number | null | undefined, opts: { blank?: string } = {}): string {
+export function money(n: number | null | undefined, opts: { blank?: string; cents?: boolean } = {}): string {
   if (n == null) return opts.blank ?? "—";
-  return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
+  // cents: exact two-decimal display (expenses and anywhere entered amounts
+  // must round-trip verbatim); default stays whole-dollar for big-figure UI.
+  return n.toLocaleString("en-US", {
+    style: "currency", currency: "USD",
+    minimumFractionDigits: opts.cents ? 2 : 0,
+    maximumFractionDigits: opts.cents ? 2 : 0,
+  });
 }
 
 export function num(n: number | null | undefined, suffix = ""): string {

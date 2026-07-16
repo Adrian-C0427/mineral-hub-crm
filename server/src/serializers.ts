@@ -113,6 +113,7 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     id: deal.id,
     name: deal.name,
     sellerNames: deal.sellerNames,
+    docFolders: deal.docFolders,
     recordType: deal.recordType,
     assetMode: deal.assetMode,
     // Owned-asset: ownership

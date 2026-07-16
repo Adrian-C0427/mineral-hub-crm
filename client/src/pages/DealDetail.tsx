@@ -325,7 +325,7 @@ export function DealDetail() {
       </CollapsibleSection>
 
       {/* Documents */}
-      <DocumentsSection ownerType="deal" ownerId={deal.id} files={deal.files} folders={DEAL_DOC_FOLDERS} onChanged={loadDeal} canEdit={can("manageDocuments")} canDelete={can("manageDocuments")} />
+      <DocumentsSection ownerType="deal" ownerId={deal.id} files={deal.files} folders={deal.docFolders?.length ? deal.docFolders : DEAL_DOC_FOLDERS} onChanged={loadDeal} canEdit={can("manageDocuments")} canDelete={can("manageDocuments")} />
 
       {renaming && (
         <RenameDealModal dealId={deal.id} current={deal.name} onClose={() => setRenaming(false)}
@@ -606,7 +606,7 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
             </datalist>
           </Fld>
           <Fld l="RRC">
-            <input value={f.rrc ?? ""} onChange={set("rrc")} placeholder="RRC lease / district / operator no." />
+            <input value={f.rrc ?? ""} onChange={set("rrc")} placeholder="RRC Number" />
           </Fld>
         </div>
       )}

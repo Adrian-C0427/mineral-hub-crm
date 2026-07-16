@@ -1508,6 +1508,53 @@ dealsRouter.post(
   }),
 );
 
+// ---------------------------------------------------------------------------
+// Document folders — per-deal customization of the Documents section's folder
+// list (rename / delete / reorder). The client sends the resulting effective
+// folder list with every op so the stored list always reflects what the user
+// sees (defaults materialize on first customization). "Other" is the system
+// fallback folder (files with no folder display there) and can't be renamed
+// or removed.
+const folderName = z.string().trim().min(1).max(80);
+const folderListSchema = z.array(folderName).min(1).max(30)
+  .refine((xs) => new Set(xs.map((x) => x.toLowerCase())).size === xs.length, "Folder names must be unique")
+  .refine((xs) => xs.includes("Other"), "The Other folder is required");
+const folderOpSchema = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("reorder"), folders: folderListSchema }),
+  z.object({ op: z.literal("rename"), from: folderName, to: folderName, folders: folderListSchema }),
+  z.object({ op: z.literal("remove"), name: folderName, folders: folderListSchema }),
+]);
+
+dealsRouter.post(
+  "/:id/doc-folders",
+  requirePermission("manageDocuments"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true } });
+    if (!deal) throw new HttpError(404, "Deal not found");
+    const body = folderOpSchema.parse(req.body);
+
+    if (body.op === "rename") {
+      if (body.from === "Other") throw new HttpError(400, "The Other folder can't be renamed — it's where unfiled documents live.");
+      // Rename moves the folder's files with it, atomically with the list update.
+      await prisma.$transaction([
+        prisma.deal.update({ where: { id: deal.id }, data: { docFolders: body.folders } }),
+        prisma.fileAttachment.updateMany({ where: { dealId: deal.id, folder: body.from }, data: { folder: body.to } }),
+      ]);
+    } else if (body.op === "remove") {
+      if (body.name === "Other") throw new HttpError(400, "The Other folder can't be removed — it's where unfiled documents live.");
+      // Deleting a folder never deletes documents: they move to Other.
+      await prisma.$transaction([
+        prisma.deal.update({ where: { id: deal.id }, data: { docFolders: body.folders } }),
+        prisma.fileAttachment.updateMany({ where: { dealId: deal.id, folder: body.name }, data: { folder: "Other" } }),
+      ]);
+    } else {
+      await prisma.deal.update({ where: { id: deal.id }, data: { docFolders: body.folders } });
+    }
+    const updated = await prisma.deal.findUniqueOrThrow({ where: { id: deal.id }, select: { docFolders: true } });
+    res.json({ docFolders: updated.docFolders });
+  }),
+);
+
 async function reload(id: string) {
   const d = await prisma.deal.findUniqueOrThrow({ where: { id }, include: dealInclude });
   return d;
