@@ -65,8 +65,7 @@ interface ResearchFilters {
   buyers: string[];   // granteeNorm keys
   sellers: string[];  // grantorNorm keys
   operators: string[]; // operatorNorm keys
-  abstractId?: string;
-  abstracts: string[];
+  abstractIds: string[];
   statuses: string[];
   trajectories: string[];
 }
@@ -82,8 +81,9 @@ function parseFilters(q: Record<string, unknown>): ResearchFilters {
     buyers: arr(q.buyer),
     sellers: arr(q.seller),
     operators: arr(q.operator),
-    abstractId: q.abstractId ? String(q.abstractId) : undefined,
-    abstracts: arr(q.abstract),
+    // Both spellings are accepted (?abstractId=…&abstractId=… and ?abstract=…)
+    // — different callers grew up on different sides of a merge.
+    abstractIds: [...arr(q.abstractId), ...arr(q.abstract)],
     statuses: arr(q.permitStatus),
     trajectories: arr(q.trajectory),
   };
@@ -130,8 +130,7 @@ function docWhere(org: string, f: ResearchFilters, win?: Window): Prisma.Researc
   if (f.docTypes.length) w.docType = { in: f.docTypes as ResearchDocType[] };
   if (f.buyers.length) w.granteeNorm = { in: f.buyers };
   if (f.sellers.length) w.grantorNorm = { in: f.sellers };
-  if (f.abstractId) w.abstractId = f.abstractId;
-  if (f.abstracts.length) w.abstractId = { in: f.abstracts };
+  if (f.abstractIds.length) w.abstractId = { in: f.abstractIds };
   return w;
 }
 
@@ -141,8 +140,7 @@ function permitWhere(org: string, f: ResearchFilters, win?: Window): Prisma.Rese
   if (f.states.length) w.state = { in: f.states };
   if (f.counties.length) w.county = { in: f.counties };
   if (f.operators.length) w.operatorNorm = { in: f.operators };
-  if (f.abstractId) w.abstractId = f.abstractId;
-  if (f.abstracts.length) w.abstractId = { in: f.abstracts };
+  if (f.abstractIds.length) w.abstractId = { in: f.abstractIds };
   if (f.statuses.length) w.status = { in: f.statuses as ResearchPermitStatus[] };
   if (f.trajectories.length) w.trajectory = { in: f.trajectories as WellTrajectory[] };
   return w;
@@ -211,6 +209,7 @@ async function loadRrcPermits(f: ResearchFilters, win: Window): Promise<RrcPermi
       if (f.operators.length && !f.operators.includes(operatorNorm)) continue;
       const trajectory: WellTrajectory = /H[A-Z]?$/.test((r.wellNo ?? "").trim().toUpperCase()) ? "HORIZONTAL" : "UNKNOWN";
       if (f.trajectories.length && !f.trajectories.includes(trajectory)) continue;
+      if (f.abstractIds.length && !(r.abstract && f.abstractIds.includes(r.abstract))) continue;
       out.push({
         activityDate: r.permitDate, state: "TX", county: r.county,
         operator: r.operator ?? "Unknown", operatorNorm,
@@ -233,7 +232,7 @@ researchRouter.get(
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
-    const [states, counties, docTypes, buyers, sellers, operators, permitGeo] = await Promise.all([
+    const [states, counties, docTypes, buyers, sellers, operators, permitGeo, docAbstracts, permitAbstracts] = await Promise.all([
       prisma.researchDocument.groupBy({ by: ["state"], where: { organizationId: org } }),
       prisma.researchDocument.groupBy({ by: ["state", "county"], where: { organizationId: org } }),
       prisma.researchDocument.groupBy({ by: ["docType"], where: { organizationId: org } }),
@@ -250,6 +249,8 @@ researchRouter.get(
         _count: true, orderBy: { _count: { operatorNorm: "desc" } }, take: 500,
       }),
       prisma.researchPermit.groupBy({ by: ["state", "county"], where: { organizationId: org } }),
+      prisma.researchDocument.groupBy({ by: ["state", "county", "abstractId"], where: { organizationId: org, abstractId: { not: null } } }),
+      prisma.researchPermit.groupBy({ by: ["state", "county", "abstractId"], where: { organizationId: org, abstractId: { not: null } } }),
     ]);
 
     // Imported RRC permits (B3) contribute their counties + operators to the
@@ -281,9 +282,17 @@ researchRouter.get(
       return [...seen.entries()].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
     };
 
+    // Abstracts with research activity, keyed to their state+county so the
+    // client can cascade State → County → Abstract like every other selector.
+    const abstractSet = new Map<string, { state: string; county: string; abstractId: string }>();
+    for (const a of [...docAbstracts, ...permitAbstracts]) {
+      if (a.abstractId) abstractSet.set(`${a.state}|${a.county}|${a.abstractId}`, { state: a.state, county: a.county, abstractId: a.abstractId });
+    }
+
     res.json({
       states: [...stateSet].sort(),
       counties: [...countySet.values()].sort((a, b) => a.county.localeCompare(b.county)),
+      abstracts: [...abstractSet.values()].sort((a, b) => a.abstractId.localeCompare(b.abstractId, undefined, { numeric: true }) || a.county.localeCompare(b.county)),
       docTypes: docTypes.map((d) => d.docType).sort(),
       buyers: entityOptions(buyers.map((b) => ({ norm: b.granteeNorm, raw: b.grantee }))),
       sellers: entityOptions(sellers.map((s) => ({ norm: s.grantorNorm, raw: s.grantor }))),

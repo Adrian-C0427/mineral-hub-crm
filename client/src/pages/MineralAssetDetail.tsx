@@ -13,6 +13,7 @@ import { LogContactModal } from "../components/LogContactModal";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { DealPortalPanel } from "../components/DealPortalPanel";
 import { DocumentsSection, type DocFile } from "../components/DocumentsSection";
+import { OfferRowActions } from "../components/OfferActions";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
 import { useAbstractLabels, SurveyMultiPicker } from "../components/AbstractPicker";
@@ -535,8 +536,11 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
               <tr key={o.id}>
                 <td>{o.buyer.name}</td><td className="right">{money(o.amount)}</td><td>{o.status}</td><td>{fmtDate(o.expirationDate)}</td>
                 <td className="right">
-                  {asset.selectedOfferId === o.id ? <span className="badge resp-offer">Accepted</span> :
-                    canEdit && <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button>}
+                  <span className="row" style={{ gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
+                    {asset.selectedOfferId === o.id ? <span className="badge resp-offer">Accepted</span> :
+                      canEdit && <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button>}
+                    {canEdit && <OfferRowActions offer={o} accepted={asset.selectedOfferId === o.id} onChanged={onChanged} />}
+                  </span>
                 </td>
               </tr>
             ))}</tbody>

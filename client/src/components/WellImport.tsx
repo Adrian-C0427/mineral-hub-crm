@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
-import { Banner, Spinner } from "./ui";
+import { Banner, Spinner, Req } from "./ui";
 import { Select } from "./Select";
 import { downloadCsv } from "../lib/csv";
 import { fmtDate, fmtDateTime } from "../lib/format";
@@ -114,7 +114,7 @@ export function WellImport({ onDataChanged }: { onDataChanged: () => void }) {
             <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
               {analysis.fields.map((f) => (
                 <div key={f.key} className="field" style={{ marginBottom: 0, minWidth: 190 }}>
-                  <label title={f.hint}>{f.label}{f.required ? " *" : ""}</label>
+                  <label title={f.hint}>{f.label}{f.required && <Req />}</label>
                   <Select value={mapping[f.key] ?? ""} onChange={(v) => setMapping((m) => ({ ...m, [f.key]: v }))}
                     placeholder="— not in file —" clearable searchable ariaLabel={`Map column for ${f.label}`}
                     options={analysis.headers.map((h) => ({ value: h, label: h }))} />

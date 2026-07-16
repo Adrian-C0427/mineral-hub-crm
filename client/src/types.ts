@@ -28,6 +28,8 @@ export interface DealSummary {
   acreageNma: number | null;
   nra: number | null;
   abstractIds: string[];
+  sellerNames: string[];
+  operator: string | null;
   askPrice: number | null;
   ourPrice: number | null;
   assetTypes: string[];

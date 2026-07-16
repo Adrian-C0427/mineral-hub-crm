@@ -97,6 +97,23 @@ export function BackLink({ label, fallback }: { label: string; fallback: string 
   return <button className="link-btn back-link" onClick={go} style={{ marginBottom: 10 }}>← {label}</button>;
 }
 
+/** The single standardized required-field indicator: a red asterisk. */
+export function Req() {
+  return <span className="req-star" aria-hidden="true">*</span>;
+}
+
+/** Standard table-toolbar search input (magnifier icon + text field). */
+export function SearchInput({ value, onChange, placeholder, ariaLabel }: {
+  value: string; onChange: (v: string) => void; placeholder: string; ariaLabel: string;
+}) {
+  return (
+    <div style={{ position: "relative", flex: "1 1 240px", maxWidth: 380 }}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-dim)", pointerEvents: "none" }}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={{ paddingLeft: 32 }} aria-label={ariaLabel} />
+    </div>
+  );
+}
+
 export function PriorityBadge({ priority }: { priority: "HIGH" | "MEDIUM" | "LOW" }) {
   // Priority is computed, not user-set — the tooltip explains why it changes on its own.
   return (

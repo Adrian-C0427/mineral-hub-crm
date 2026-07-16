@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
-import { Banner, PriorityBadge, StageBadge, Spinner } from "../components/ui";
+import { Banner, PriorityBadge, StageBadge, Spinner, SearchInput } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { NewDealModal } from "../components/NewDealModal";
 import { useRowSelection, BulkActionsBar } from "../components/bulk";
 import { money, num, fmtDate } from "../lib/format";
+import { dealSearchHaystack } from "../lib/dealSearch";
 import { downloadCsv } from "../lib/csv";
 import { useAuth } from "../auth/AuthContext";
 import type { DealSummary, UserLite } from "../types";
@@ -27,6 +28,7 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
   const { can } = useAuth();
   const [deals, setDeals] = useState<DealSummary[] | null>(null);
   const [filter, setFilter] = useState<Filter>("ALL");
+  const [q, setQ] = useState("");
   // ?new=1 (Dashboard "Create your first deal") opens the modal on arrival.
   const [params, setParams] = useSearchParams();
   const [showNew, setShowNew] = useState(params.get("new") === "1");
@@ -42,10 +44,13 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
   const overdue = useMemo(() => scoped.filter((d) => d.isOverdue), [scoped]);
 
   const filtered = useMemo(() => {
-    if (filter === "HIGH") return scoped.filter((d) => d.priority === "HIGH");
-    if (filter === "NO_BUYER") return scoped.filter((d) => !d.selectedBuyer);
-    return scoped;
-  }, [scoped, filter]);
+    let rows = scoped;
+    if (filter === "HIGH") rows = rows.filter((d) => d.priority === "HIGH");
+    if (filter === "NO_BUYER") rows = rows.filter((d) => !d.selectedBuyer);
+    const needle = q.trim().toLowerCase();
+    if (needle) rows = rows.filter((d) => dealSearchHaystack(d).includes(needle));
+    return rows;
+  }, [scoped, filter, q]);
 
   if (!deals) return <Spinner />;
 
@@ -93,11 +98,15 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
       <SortableTable
         customizeId="deals-list"
         toolbar={
-          <div className="chip-row">
-            {([["ALL", "All"], ["HIGH", "High Priority"], ["NO_BUYER", "No Buyer Assigned"]] as [Filter, string][]).map(([f, label]) => (
-              <span key={f} className={`chip ${filter === f ? "active" : ""}`} onClick={() => setFilter(f)}>{label}</span>
-            ))}
-          </div>
+          <>
+            <SearchInput value={q} onChange={setQ} placeholder="Search deal, seller, abstract, survey, county, buyer…" ariaLabel="Search deals" />
+            <div className="chip-row">
+              {([["ALL", "All"], ["HIGH", "High Priority"], ["NO_BUYER", "No Buyer Assigned"]] as [Filter, string][]).map(([f, label]) => (
+                <span key={f} className={`chip ${filter === f ? "active" : ""}`} onClick={() => setFilter(f)}>{label}</span>
+              ))}
+            </div>
+            {q && <span className="muted" style={{ fontSize: 13, whiteSpace: "nowrap" }}>Showing {filtered.length} of {scoped.length}</span>}
+          </>
         }
         columns={columns}
         rows={filtered}
@@ -110,7 +119,7 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
           ? (scope === "active" || scope === "all"
             ? (can("createDeals") ? "No deals yet — click “+ New Deal” to create your first one." : "No deals yet.")
             : `No ${scope} deals yet.`)
-          : "No deals match this filter."}
+          : q ? "No deals match your search." : "No deals match this filter."}
         selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
       />
 

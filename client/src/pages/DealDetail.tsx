@@ -25,6 +25,7 @@ import { SellerDetails } from "../components/SellerDetails";
 import { DealPortalPanel } from "../components/DealPortalPanel";
 import { AssigneePicker } from "../components/AssigneePicker";
 import { DocumentsSection, DEAL_DOC_FOLDERS, type DocFile } from "../components/DocumentsSection";
+import { OfferRowActions } from "../components/OfferActions";
 import type { AssetChild, BuyerActivityRow, DealSummary, MatchRec, Seller, UserLite } from "../types";
 import { NewDealModal } from "../components/NewDealModal";
 import { MoneyInput } from "../components/MoneyInput";
@@ -236,8 +237,11 @@ export function DealDetail() {
                     <td>{fmtDate(o.expirationDate)}</td>
                     <td className="cell-clamp" title={o.conditions ?? undefined}>{o.conditions ?? "—"}</td>
                     <td className="right">
-                      {deal.selectedOfferId === o.id ? <span className="badge resp-offer">Accepted</span> :
-                        can("editDeals") ? <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button> : null}
+                      <span className="row" style={{ gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
+                        {deal.selectedOfferId === o.id ? <span className="badge resp-offer">Accepted</span> :
+                          can("editDeals") ? <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button> : null}
+                        {can("editDeals") && <OfferRowActions offer={o} accepted={deal.selectedOfferId === o.id} onChanged={refreshAll} />}
+                      </span>
                     </td>
                   </tr>
                 ))}

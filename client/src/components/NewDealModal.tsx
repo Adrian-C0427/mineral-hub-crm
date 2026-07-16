@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Modal } from "./ui";
+import { Modal, Req } from "./ui";
 import { api, ApiError } from "../api/client";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
 import { GeoFields } from "./GeoFields";
@@ -138,7 +138,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId }: {
     }
   }
 
-  const req = <span style={{ color: "var(--red)" }}>*</span>;
+  const req = <Req />;
   return (
     <Modal
       title={asset ? "Add Deal" : "New Deal"}

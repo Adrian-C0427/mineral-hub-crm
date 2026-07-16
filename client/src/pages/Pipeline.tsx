@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { Spinner, showToast } from "../components/ui";
 import { Select } from "../components/Select";
+import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
+import { dealSearchHaystack } from "../lib/dealSearch";
 import { NewDealModal } from "../components/NewDealModal";
 import { StageChangeModal } from "../components/StageChangeModal";
 import { money, num, fmtDate } from "../lib/format";
@@ -48,6 +50,37 @@ function loadPrefs(): PipelinePrefs {
   try { const raw = localStorage.getItem(PREFS_KEY); if (raw) { const p = JSON.parse(raw) as PipelinePrefs; return { ...DEFAULT_PREFS, ...p, fields: { ...DEFAULT_PREFS.fields, ...(p.fields ?? {}) } }; } } catch { /* ignore */ }
   return DEFAULT_PREFS;
 }
+// ---------------------------------------------------------------------------
+// Filters — narrow the board to specific opportunities using existing deal
+// attributes. Filtering never changes the pipeline structure: every stage
+// column stays in place, only the cards inside are narrowed.
+// ---------------------------------------------------------------------------
+interface PipelineFilterState {
+  q: string;
+  priority: "" | "HIGH" | "MEDIUM" | "LOW";
+  states: string[];
+  counties: string[];
+  buyerId: string;
+  assigneeId: string;
+  overdueOnly: boolean;
+}
+const EMPTY_FILTERS: PipelineFilterState = { q: "", priority: "", states: [], counties: [], buyerId: "", assigneeId: "", overdueOnly: false };
+function activeFilterCount(f: PipelineFilterState): number {
+  return (f.q.trim() ? 1 : 0) + (f.priority ? 1 : 0) + (f.states.length ? 1 : 0) +
+    (f.counties.length ? 1 : 0) + (f.buyerId ? 1 : 0) + (f.assigneeId ? 1 : 0) + (f.overdueOnly ? 1 : 0);
+}
+function applyPipelineFilters(rows: DealSummary[], f: PipelineFilterState): DealSummary[] {
+  const needle = f.q.trim().toLowerCase();
+  return rows.filter((d) =>
+    (!needle || dealSearchHaystack(d).includes(needle)) &&
+    (!f.priority || d.priority === f.priority) &&
+    (!f.states.length || d.states.some((s) => f.states.includes(s)) || (d.state != null && f.states.includes(d.state))) &&
+    (!f.counties.length || d.counties.some((c) => f.counties.includes(c))) &&
+    (!f.buyerId || d.selectedBuyer?.id === f.buyerId) &&
+    (!f.assigneeId || d.assignees.some((a) => a.id === f.assigneeId) || d.relationshipOwner?.id === f.assigneeId) &&
+    (!f.overdueOnly || d.isOverdue));
+}
+
 const PRIORITY_RANK: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
 function sortDeals(rows: DealSummary[], sort: CardSort): DealSummary[] {
   const cmp: Record<CardSort, (a: DealSummary, b: DealSummary) => number> = {
@@ -70,6 +103,7 @@ export function Pipeline() {
   const [moving, setMoving] = useState<DealSummary | null>(null);
   // Card view preferences (density, visible fields, in-column sort).
   const [prefs, setPrefs] = useState<PipelinePrefs>(loadPrefs);
+  const [filters, setFilters] = useState<PipelineFilterState>(EMPTY_FILTERS);
   useEffect(() => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } }, [prefs]);
   const nav = useNavigate();
   const { can } = useAuth();
@@ -171,6 +205,8 @@ export function Pipeline() {
 
   if (!deals) return <Spinner />;
   const dragDeal = drag ? deals.find((d) => d.id === drag.id) ?? null : null;
+  const boardDeals = applyPipelineFilters(deals, filters);
+  const filtersActive = activeFilterCount(filters) > 0;
 
   return (
     <div className="page">
@@ -179,6 +215,8 @@ export function Pipeline() {
           <h1 style={{ marginBottom: 0 }}>Pipeline</h1>
         </div>
         <div className="row" style={{ gap: 8 }}>
+          {filtersActive && <span className="muted" style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>Showing {boardDeals.length} of {deals.length}</span>}
+          <PipelineFilters deals={deals} filters={filters} onChange={setFilters} />
           {canCustomizeStages && <button className="small" onClick={() => setShowStages(true)}>Customize stages</button>}
           <PipelineCustomize prefs={prefs} onChange={setPrefs} />
           {canCreate && <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>}
@@ -201,7 +239,7 @@ export function Pipeline() {
       <div className={`kanban ${prefs.density === "compact" ? "compact" : ""} ${drag ? "dragging" : ""}`}>
         {activeStages.map((stage) => {
           const col = stage.key;
-          const colDeals = sortDeals(deals.filter((d) => d.stage === col), prefs.sort);
+          const colDeals = sortDeals(boardDeals.filter((d) => d.stage === col), prefs.sort);
           return (
             <div
               key={col} data-stage={col}
@@ -312,6 +350,75 @@ function CardBody({ deal, fields }: { deal: DealSummary; fields: Record<CardFiel
         </div>
       )}
     </>
+  );
+}
+
+/** Filters popover for the Pipeline board — same design language as Customize View. */
+function PipelineFilters({ deals, filters, onChange }: {
+  deals: DealSummary[]; filters: PipelineFilterState; onChange: (f: PipelineFilterState) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+
+  // Option lists come from the deals actually on the board.
+  const states = [...new Set(deals.flatMap((d) => [...d.states, ...(d.state ? [d.state] : [])]))].sort();
+  const counties = [...new Set(deals.flatMap((d) => d.counties))].sort();
+  const buyers = [...new Map(deals.flatMap((d) => (d.selectedBuyer ? [[d.selectedBuyer.id, d.selectedBuyer.name] as const] : []))).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1]));
+  const people = [...new Map(deals.flatMap((d) => [
+    ...d.assignees.map((a) => [a.id, a.name] as const),
+    ...(d.relationshipOwner ? [[d.relationshipOwner.id, d.relationshipOwner.name] as const] : []),
+  ])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  const n = activeFilterCount(filters);
+
+  return (
+    <div className="cv-wrap" ref={ref}>
+      <button type="button" className={`small cv-btn ${open || n > 0 ? "active" : ""}`} onClick={() => setOpen((o) => !o)} title="Filter the board">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+        Filters{n > 0 ? ` (${n})` : ""}
+      </button>
+      {open && (
+        <div className="cv-menu" role="dialog" aria-label="Filter board" style={{ width: 280 }}>
+          <div className="cv-head"><strong>Filter opportunities</strong></div>
+          <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
+            <div className="field" style={{ marginBottom: 0 }}><label>Search</label>
+              <input value={filters.q} onChange={(e) => onChange({ ...filters, q: e.target.value })} placeholder="Deal, seller, abstract, survey…" aria-label="Search pipeline deals" />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}><label>Priority</label>
+              <Select value={filters.priority} onChange={(v) => onChange({ ...filters, priority: v as PipelineFilterState["priority"] })} clearable placeholder="Any priority" ariaLabel="Filter by priority"
+                options={[{ value: "HIGH", label: "High" }, { value: "MEDIUM", label: "Medium" }, { value: "LOW", label: "Low" }]} />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}><label>State</label>
+              <SearchableMultiSelect options={states} value={filters.states} onChange={(v) => onChange({ ...filters, states: v })} placeholder="Any state" />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}><label>County</label>
+              <SearchableMultiSelect options={counties} value={filters.counties} onChange={(v) => onChange({ ...filters, counties: v })} placeholder="Any county" />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}><label>Selected buyer</label>
+              <Select value={filters.buyerId} onChange={(v) => onChange({ ...filters, buyerId: v })} clearable searchable placeholder="Any buyer" ariaLabel="Filter by buyer"
+                options={buyers.map(([value, label]) => ({ value, label }))} />
+            </div>
+            <div className="field" style={{ marginBottom: 0 }}><label>Team member</label>
+              <Select value={filters.assigneeId} onChange={(v) => onChange({ ...filters, assigneeId: v })} clearable searchable placeholder="Anyone" ariaLabel="Filter by team member"
+                options={people.map(([value, label]) => ({ value, label }))} />
+            </div>
+            <label className="cv-row cv-check" style={{ justifyContent: "flex-start", padding: 0 }}>
+              <input type="checkbox" checked={filters.overdueOnly} onChange={() => onChange({ ...filters, overdueOnly: !filters.overdueOnly })} /> <span>Overdue only</span>
+            </label>
+          </div>
+          <div className="cv-foot">
+            <button type="button" className="small" disabled={n === 0} onClick={() => onChange(EMPTY_FILTERS)}>Clear all</button>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
