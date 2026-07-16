@@ -212,9 +212,11 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
 
   // Prefer the hotspot-aware geography stats; fall back to the geometry
   // payload's own record count so activity still shades if the join misses.
+  // Only abstracts with activity get a fill — the rest stay outline-only so
+  // the shading reads as "where activity actually is", not a county wash.
   function abstractFill(a: AbstractStat | undefined, count = 0): string {
     const total = a?.total ?? count;
-    if (total === 0) return "rgba(148,163,184,0.06)";
+    if (total === 0) return "transparent";
     const t = Math.log(total + 1) / Math.log(maxAbstractTotal + 1);
     return `rgba(59,130,246,${(0.18 + 0.72 * t).toFixed(2)})`;
   }
@@ -253,7 +255,9 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
             <path
               key={sh.name}
               d={sh.d}
-              fill={fillFor(sh.name)}
+              // Drilled in, the county's own choropleth wash disappears — the
+              // abstract mesh alone shows where the activity is.
+              fill={isFocus && abstractShapes?.length ? "rgba(148,163,184,0.05)" : fillFor(sh.name)}
               // The focused county keeps its hotspot red outline through the
               // drill-down; selection blue applies only at the overview.
               stroke={isFocus
@@ -266,10 +270,10 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
               pointerEvents={isFocus && abstractShapes?.length ? "none" : undefined}
               onClick={() => {
                 if (!st) return;
-                if (onFocusChange) {
-                  onFocusChange(sh.name);
-                  if (!selected.some((c) => c.toUpperCase() === sh.name.toUpperCase())) onSelect(sh.name);
-                } else onSelect(sh.name);
+                // Clicking a county both zooms in and applies it as the active
+                // research filter (onSelect); backing out clears it upstream.
+                if (onFocusChange) onFocusChange(sh.name);
+                onSelect(sh.name);
               }}
               onMouseMove={(e) => moveTip(e, `${sh.name} County`, st ? [
                 { text: `${st.total.toLocaleString()} records` },
