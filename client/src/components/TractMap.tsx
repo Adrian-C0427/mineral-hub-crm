@@ -165,6 +165,20 @@ export function TractMap({ tracts, selectedId, abstractIds = [], placingPob, onP
   useEffect(() => {
     const map = mapRef.current; if (!map) return;
     map.getCanvas().style.cursor = placingPob ? "crosshair" : "";
+    if (!placingPob) return;
+    // Place the POB from a plain DOM click + unproject rather than relying on
+    // MapLibre's synthesized click: the gesture pipeline can miss clicks in
+    // some browsers, and this interaction must never feel unresponsive.
+    // (TractSection's placePob ignores a second call, so if MapLibre's own
+    // click handler also fires it's harmless.)
+    const canvas = map.getCanvas();
+    const onClick = (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect();
+      const ll = map.unproject([e.clientX - rect.left, e.clientY - rect.top]);
+      cbRef.current.onPobPlaced(ll.lng, ll.lat);
+    };
+    canvas.addEventListener("click", onClick);
+    return () => canvas.removeEventListener("click", onClick);
   }, [placingPob]);
 
   function fitToTracts(initial: boolean) {
@@ -217,7 +231,10 @@ export function TractMap({ tracts, selectedId, abstractIds = [], placingPob, onP
             <div className="muted" style={{ fontSize: 12 }}>{[hover.bearing, hover.distance].filter(Boolean).join(" · ") || "unresolved call"}</div>
           </div>
         )}
-        {mapped === 0 && (
+        {/* Hidden while placing a POB: the overlay is opaque and sits over the
+            canvas, which would both hide the map and swallow the placement
+            click — the exact interaction the user was asked to perform. */}
+        {mapped === 0 && !placingPob && (
           <div className="dm-empty">
             {tracts.length === 0
               ? "No tract descriptions yet. Add one below to see it mapped."

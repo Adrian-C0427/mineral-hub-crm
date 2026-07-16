@@ -4,9 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
-import rateLimit from "express-rate-limit";
-import { anchorPolygon, parseTract, tractFromAiExtraction, type AiExtraction, type ParsedTract } from "../domain/tractParser.js";
-import { extractTractCalls } from "../services/ai.js";
+import { anchorPolygon, applyTieLine, parseTract, type ParsedTract } from "../domain/tractParser.js";
 import { logActivity } from "../services/activityLog.js";
 
 /**
@@ -26,9 +24,32 @@ async function ownDealOr404(req: AuthedRequest): Promise<string> {
   return deal.id;
 }
 
-type Anchor = { lon: number; lat: number; source: "abstract" | "manual"; abstractId?: string };
+type Anchor = {
+  lon: number; lat: number; source: "abstract" | "manual"; abstractId?: string;
+  /** How the abstract-derived POB was computed: a named survey corner (+
+   *  commencement tie-line when present) or a fallback interior point. */
+  method?: "corner" | "corner-tie" | "area";
+  corner?: "NE" | "NW" | "SE" | "SW";
+};
 
-/** Suggest a POB from the description's abstract references (best-effort). */
+// Polygon vertex closest to each named corner: maximize/minimize x±y.
+const CORNER_ORDER: Record<string, string> = {
+  NE: "(ST_X(p.pt) + ST_Y(p.pt)) DESC",
+  NW: "(ST_Y(p.pt) - ST_X(p.pt)) DESC",
+  SE: "(ST_X(p.pt) - ST_Y(p.pt)) DESC",
+  SW: "(ST_X(p.pt) + ST_Y(p.pt)) ASC",
+};
+
+/**
+ * Suggest a POB from the description's abstract references (best-effort).
+ * Precision ladder — most exact wins:
+ *  1. Named corner + commencement tie-line ("COMMENCING at the NE corner of
+ *     said survey; THENCE S45W 500 ft to the POINT OF BEGINNING") → the
+ *     abstract polygon's corner vertex with the tie vector applied.
+ *  2. Named corner alone ("BEGINNING at the NE corner of said survey").
+ *  3. Fallback: a representative interior point of the abstract.
+ * The user can always fine-tune by re-placing the POB on the map.
+ */
 async function suggestAnchor(parsed: ParsedTract, dealCounties: string[]): Promise<Anchor | null> {
   const refs = parsed.refs.abstracts.map((a) => a.replace(/^A-/, ""));
   if (!refs.length) return null;
@@ -44,7 +65,30 @@ async function suggestAnchor(parsed: ParsedTract, dealCounties: string[]): Promi
     refs, refs.map((r) => `A-${r}`), counties.length ? counties : ["__none__"],
   ).catch(() => []);
   const hit = rows[0];
-  return hit ? { lon: hit.lon, lat: hit.lat, source: "abstract", abstractId: hit.id } : null;
+  if (!hit) return null;
+
+  // Precise POB from the named corner of the abstract polygon.
+  if (parsed.pobCorner && CORNER_ORDER[parsed.pobCorner]) {
+    const corner = await prisma.$queryRawUnsafe<{ lon: number; lat: number }[]>(
+      `SELECT ST_X(p.pt) AS lon, ST_Y(p.pt) AS lat
+         FROM (SELECT (ST_DumpPoints(geom)).geom AS pt FROM gis.abstracts WHERE id = $1) p
+        ORDER BY ${CORNER_ORDER[parsed.pobCorner]}
+        LIMIT 1`,
+      hit.id,
+    ).catch(() => []);
+    if (corner[0]) {
+      const tie = parsed.tieCalls ?? [];
+      if (tie.length) {
+        const pob = applyTieLine(corner[0], tie);
+        // A partially-readable tie must not silently misplace the POB —
+        // fall through to the corner itself (still better than an interior point).
+        if (pob) return { ...pob, source: "abstract", abstractId: hit.id, method: "corner-tie", corner: parsed.pobCorner };
+      }
+      return { ...corner[0], source: "abstract", abstractId: hit.id, method: "corner", corner: parsed.pobCorner };
+    }
+  }
+
+  return { lon: hit.lon, lat: hit.lat, source: "abstract", abstractId: hit.id, method: "area" };
 }
 
 function withGeometry(parsed: ParsedTract, anchor: Anchor | null, name: string) {
@@ -152,65 +196,23 @@ tractsRouter.patch(
   }),
 );
 
-// Loose shape guard for Claude's extraction — invalid pieces are dropped, not
-// fatal, so one malformed call doesn't discard an otherwise good reading.
-const aiCallSchema = z.object({
-  raw: z.string().default(""),
-  curve: z.boolean().optional(),
-  bearing: z.object({ ns: z.enum(["N", "S"]), deg: z.number(), min: z.number().optional(), sec: z.number().optional(), ew: z.enum(["E", "W"]) }).nullish(),
-  distance: z.object({ value: z.number(), unit: z.string() }).nullish(),
-  note: z.string().nullish(),
-});
-const aiExtractionSchema = z.object({
-  pobText: z.string().nullish(),
-  calls: z.array(z.unknown()).default([]),
-  refs: z.object({
-    abstracts: z.array(z.string()).optional(), surveys: z.array(z.string()).optional(),
-    county: z.string().nullish(), statedAcres: z.number().nullish(),
-    sections: z.array(z.string()).optional(), blocks: z.array(z.string()).optional(),
-    lots: z.array(z.string()).optional(), quarters: z.array(z.string()).optional(),
-  }).optional(),
-  ambiguities: z.array(z.object({ text: z.string().default(""), issue: z.string() })).optional(),
-  assumptions: z.array(z.string()).optional(),
-  confidence: z.number().optional(),
-});
-
-// Claude extraction spends the org's Anthropic budget — cap like /api/ai.
-const aiLimiter = rateLimit({
-  windowMs: 5 * 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false,
-  message: { error: "Too many AI requests. Wait a few minutes and try again." },
-});
-
 /**
- * Generate Tract Map: Claude extracts the calls/refs from the saved legal
- * description; geometry, closure and acreage are then computed by the same
- * deterministic engine as the rules parser. A manual POB placement survives;
- * otherwise the abstract-derived anchor is refreshed from the AI's references.
+ * Generate Tract Map: re-runs the deterministic parsing engine on the saved
+ * legal description, refreshes the abstract-derived anchor (a manual POB
+ * placement survives), and rebuilds the polygon. Fully self-contained — no AI
+ * provider or API key involved.
  */
 tractsRouter.post(
   "/:id/tracts/:tractId/generate",
   requirePermission("editDeals"),
-  aiLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const dealId = await ownDealOr404(req);
     const tract = await prisma.tractDescription.findFirst({ where: { id: req.params.tractId, dealId } });
     if (!tract) throw new HttpError(404, "Tract not found");
 
-    const rawExtraction = await extractTractCalls(orgId(req)!, tract.text, tract.state);
-    const shaped = aiExtractionSchema.safeParse(rawExtraction);
-    if (!shaped.success) throw new HttpError(502, "Claude's extraction didn't match the expected structure. Try again.");
-    const callResults = shaped.data.calls.map((c) => aiCallSchema.safeParse(c));
-    const extraction: AiExtraction = {
-      ...shaped.data,
-      pobText: shaped.data.pobText ?? null,
-      calls: callResults.filter((r) => r.success).map((r) => (r as { data: AiExtraction["calls"][number] }).data),
-      refs: shaped.data.refs as AiExtraction["refs"],
-    };
-    const dropped = callResults.length - extraction.calls.length;
-    const parsed = tractFromAiExtraction(extraction, tract.state, tract.text);
-    if (dropped > 0) parsed.warnings.unshift(`${dropped} extracted call(s) were malformed and skipped.`);
+    const parsed = parseTract(tract.text, tract.state);
 
-    let anchor = (tract.anchor as { lon: number; lat: number; source: "abstract" | "manual" } | null) ?? null;
+    let anchor = (tract.anchor as Anchor | null) ?? null;
     if (anchor?.source !== "manual") {
       const deal = await prisma.deal.findUniqueOrThrow({ where: { id: dealId }, select: { counties: true } });
       anchor = (await suggestAnchor(parsed, deal.counties)) ?? anchor;
@@ -225,8 +227,8 @@ tractsRouter.post(
       },
     });
     await logActivity({
-      eventType: "ai.tract_parse",
-      summary: `AI tract map generated for "${tract.name}" (${parsed.ok ? `${parsed.calls.length} calls, ${parsed.computedAcres ?? "?"} ac` : "no polygon"}${parsed.confidence != null ? `, confidence ${parsed.confidence}%` : ""})`,
+      eventType: "tract_parse",
+      summary: `Tract map generated for "${tract.name}" (${parsed.ok ? `${parsed.calls.length} calls, ${parsed.computedAcres ?? "?"} ac` : "no polygon"}${parsed.confidence != null ? `, confidence ${parsed.confidence}%` : ""})`,
       organizationId: orgId(req), actorUserId: req.user?.id ?? null, dealId,
     });
     res.json(serialize(updated));
