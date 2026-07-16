@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, MetricCard, Modal, Banner } from "../components/ui";
+import { Spinner, MetricCard, Modal, Banner, SearchInput } from "../components/ui";
+import { dealSearchHaystack } from "../lib/dealSearch";
 import { Select } from "../components/Select";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { GeoFields } from "../components/GeoFields";
@@ -32,7 +33,14 @@ export function MineralAssets() {
   const [assets, setAssets] = useState<DealSummary[] | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [users, setUsers] = useState<UserLite[]>([]);
+  const [q, setQ] = useState("");
   const sel = useRowSelection();
+
+  const filtered = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return assets ?? [];
+    return (assets ?? []).filter((d) => dealSearchHaystack(d).includes(needle));
+  }, [assets, q]);
 
   const load = () => api.get<DealSummary[]>("/deals?recordType=OWNED_ASSET").then(setAssets);
   useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
@@ -102,12 +110,19 @@ export function MineralAssets() {
         ) : (
           <SortableTable
             customizeId="mineral-assets-list"
+            toolbar={
+              <>
+                <SearchInput value={q} onChange={setQ} placeholder="Search asset, abstract, survey, county, operator…" ariaLabel="Search mineral assets" />
+                {q && <span className="muted" style={{ fontSize: 13, whiteSpace: "nowrap" }}>Showing {filtered.length} of {assets.length}</span>}
+              </>
+            }
             columns={columns}
-            rows={assets}
+            rows={filtered}
             rowKey={(d) => d.id}
             onRowClick={(d) => nav(`/assets/${d.id}`)}
             rowHref={(d) => `/assets/${d.id}`}
             defaultSort={{ key: "currentValue", dir: "desc" }}
+            empty="No assets match your search."
             selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
           />
         )}

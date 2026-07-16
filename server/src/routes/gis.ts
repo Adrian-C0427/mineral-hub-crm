@@ -299,6 +299,38 @@ gisRouter.get(
   }),
 );
 
+/**
+ * All abstract outlines for one county as lightweight GeoJSON — the Research
+ * Geography choropleth's drill-in layer (an SVG map, so it can't consume the
+ * vector tiles). Geometry is simplified server-side: at county scale the
+ * detail is invisible and the payload matters more.
+ */
+const countyAbstractsSchema = z.object({ county: z.string().min(1).max(60) });
+gisRouter.get(
+  "/county-abstracts",
+  asyncHandler(async (req, res) => {
+    const { county } = countyAbstractsSchema.parse(req.query);
+    const rows = await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; geojson: string }[]>(
+      `SELECT id, replace(abstract, '?', '') AS abstract, survey,
+              ST_AsGeoJSON(ST_SimplifyPreserveTopology(geom, 0.0015), 5) AS geojson
+         FROM gis.abstracts
+        WHERE upper(county) = upper($1)
+        ORDER BY abstract
+        LIMIT 8000`,
+      county,
+    );
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.json({
+      type: "FeatureCollection",
+      features: rows.map((r) => ({
+        type: "Feature",
+        properties: { id: r.id, abstract: r.abstract, survey: r.survey },
+        geometry: JSON.parse(r.geojson),
+      })),
+    });
+  }),
+);
+
 // Bound the raw string so a pathological county list can't build a giant
 // ANY($1::text[]) array; the names are sliced again below as defense in depth.
 const optionsSchema = z.object({ counties: z.string().max(4000).optional() });

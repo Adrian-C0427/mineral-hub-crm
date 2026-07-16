@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Modal } from "./ui";
+import { Modal, Req } from "./ui";
 import { api, ApiError } from "../api/client";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
 import { Select } from "./Select";
@@ -90,11 +90,11 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
         </>
       }
     >
-      <p className="muted" style={{ marginTop: 0 }}>New buyers start as <strong>Warm</strong> unless set otherwise. Fields marked <span style={{ color: "var(--red)" }}>*</span> are required; the buy box drives deal matching — fill in what you know and add the rest later.</p>
-      <div className="field"><label>Company name <span style={{ color: "var(--red)" }}>*</span></label><input value={f.companyName} onChange={set("companyName")} autoFocus /></div>
+      <p className="muted" style={{ marginTop: 0 }}>New buyers start as <strong>Warm</strong> unless set otherwise. Fields marked <Req /> are required; the buy box drives deal matching — fill in what you know and add the rest later.</p>
+      <div className="field"><label>Company name <Req /></label><input value={f.companyName} onChange={set("companyName")} autoFocus /></div>
       <div className="dd-grid">
-        <div className="field"><label>Contact name <span style={{ color: "var(--red)" }}>*</span></label><input value={f.contactName} onChange={set("contactName")} /></div>
-        <div className="field"><label>Phone <span style={{ color: "var(--red)" }}>*</span></label><PhoneInput value={f.phone} onChange={(v) => setF((p) => ({ ...p, phone: v }))} /></div>
+        <div className="field"><label>Contact name <Req /></label><input value={f.contactName} onChange={set("contactName")} /></div>
+        <div className="field"><label>Phone <Req /></label><PhoneInput value={f.phone} onChange={(v) => setF((p) => ({ ...p, phone: v }))} /></div>
         <div className="field"><label>Email</label><input type="email" value={f.email} onChange={set("email")} /></div>
         <div className="field"><label>Website</label><input value={f.website} onChange={set("website")} /></div>
         <div className="field"><label>Relationship</label>

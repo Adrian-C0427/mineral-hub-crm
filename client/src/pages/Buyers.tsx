@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
-import { RelationshipDot, Spinner, Banner } from "../components/ui";
+import { RelationshipDot, Spinner, Banner, SearchInput, Modal, Req } from "../components/ui";
 import { Select } from "../components/Select";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { NewBuyerModal } from "../components/NewBuyerModal";
@@ -78,7 +78,7 @@ export function Buyers() {
       <div className="page-header">
         <h1>Buyers</h1>
         <div className="row">
-          {can("createBuyers") && <button onClick={() => setShowImport((s) => !s)}>{showImport ? "Close import" : "Import CSV"}</button>}
+          {can("createBuyers") && <button onClick={() => setShowImport(true)}>Import CSV</button>}
           {can("createBuyers") && <button className="primary" onClick={() => setShowNew(true)}>+ New Buyer</button>}
         </div>
       </div>
@@ -87,10 +87,7 @@ export function Buyers() {
         customizeId="buyers-list"
         toolbar={
           <>
-            <div style={{ position: "relative", flex: "1 1 240px", maxWidth: 380 }}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-dim)", pointerEvents: "none" }}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search company, contact, focus area…" style={{ paddingLeft: 32 }} aria-label="Search buyers" />
-            </div>
+            <SearchInput value={q} onChange={setQ} placeholder="Search company, contact, focus area…" ariaLabel="Search buyers" />
             <Select value={rel} onChange={setRel} width={170} placeholder="All relationships" clearable ariaLabel="Filter by relationship"
               options={[{ value: "HOT", label: "Hot" }, { value: "WARM", label: "Warm" }, { value: "COLD", label: "Cold" }]} />
             {(q || rel) && <span className="muted" style={{ fontSize: 13, whiteSpace: "nowrap" }}>Showing {filtered.length} of {buyers.length}</span>}
@@ -122,7 +119,13 @@ export function Buyers() {
         }}
       />
 
-      {showImport && <ImportWizard onDone={() => { load(); }} />}
+      {/* The import wizard runs in a standard modal — the user stays in context
+          instead of scrolling to a bottom-of-page panel. */}
+      {showImport && (
+        <Modal title="Import buyers from CSV" wide onClose={() => setShowImport(false)}>
+          <ImportWizard onDone={() => { load(); }} />
+        </Modal>
+      )}
       {showNew && <NewBuyerModal onClose={() => setShowNew(false)} onCreated={(id) => { setShowNew(false); nav(`/buyers/${id}`); }} />}
     </div>
   );
@@ -178,10 +181,9 @@ function ImportWizard({ onDone }: { onDone: () => void }) {
   }
 
   return (
-    <div className="panel" style={{ marginTop: 18 }}>
-      <div className="section-head">
-        <h3>Import buyers from CSV</h3>
-        <span className="muted">Step: {step === "upload" ? "1 · Upload" : step === "map" ? "2 · Map fields" : step === "preview" ? "3 · Preview" : "4 · Results"}</span>
+    <div>
+      <div className="muted" style={{ marginBottom: 12, fontSize: 12.5 }}>
+        Step: {step === "upload" ? "1 · Upload" : step === "map" ? "2 · Map fields" : step === "preview" ? "3 · Preview" : "4 · Results"}
       </div>
       {err && <div className="error-text">{err}</div>}
 
@@ -204,7 +206,7 @@ function ImportWizard({ onDone }: { onDone: () => void }) {
           <div className="dd-grid">
             {analyze.fields.map((f) => (
               <div className="field" key={f.key}>
-                <label>{f.label}{f.required ? " *" : ""}</label>
+                <label>{f.label}{f.required && <Req />}</label>
                 <Select value={mapping[f.key] ?? ""} onChange={(v) => setMapping((m) => ({ ...m, [f.key]: v }))}
                   placeholder="— not mapped —" clearable searchable ariaLabel={`Map column for ${f.label}`}
                   options={analyze.headers.map((h) => ({ value: h, label: h }))} />

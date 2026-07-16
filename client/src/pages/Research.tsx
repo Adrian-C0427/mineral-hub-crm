@@ -58,6 +58,7 @@ interface Signal {
 }
 interface FilterOpts {
   states: string[]; counties: { state: string; county: string }[]; docTypes: string[];
+  abstracts: { state: string; county: string; abstractId: string }[];
   buyers: { value: string; label: string }[]; sellers: { value: string; label: string }[]; operators: { value: string; label: string }[];
 }
 interface DocRecord {
@@ -128,12 +129,13 @@ function compareRangeFor(mode: Compare, from: string, to: string): { from: strin
 interface Filters {
   states: string[];
   counties: string[];
+  abstracts: string[];
   docTypes: string[];
   buyers: string[];
   sellers: string[];
   operators: string[];
 }
-const EMPTY_FILTERS: Filters = { states: [], counties: [], docTypes: [], buyers: [], sellers: [], operators: [] };
+const EMPTY_FILTERS: Filters = { states: [], counties: [], abstracts: [], docTypes: [], buyers: [], sellers: [], operators: [] };
 
 // Customize View — which Overview KPIs show + their order (saved per user).
 type ResMetricId = "transactions" | "leases" | "permits" | "horizontalPermits" | "uniqueBuyers" | "uniqueOperators";
@@ -203,6 +205,7 @@ export function Research() {
     if (cp.compareFrom && cp.compareTo) { q.set("compareFrom", cp.compareFrom); q.set("compareTo", cp.compareTo); }
     for (const s of filters.states) q.append("state", s);
     for (const c of filters.counties) q.append("county", c);
+    for (const a of filters.abstracts) q.append("abstractId", a);
     for (const t of filters.docTypes) q.append("docType", t);
     for (const b of filters.buyers) q.append("buyer", b);
     for (const s of filters.sellers) q.append("seller", s);
@@ -218,7 +221,7 @@ export function Research() {
 
 
   const activeFilterCount =
-    filters.states.length + filters.counties.length + filters.docTypes.length +
+    filters.states.length + filters.counties.length + filters.abstracts.length + filters.docTypes.length +
     filters.buyers.length + filters.sellers.length + filters.operators.length;
   const compareOff = compare === "NONE";
 
@@ -304,6 +307,17 @@ export function Research() {
               states={filters.states} onStatesChange={(states) => setFilters((f) => ({ ...f, states }))}
               counties={filters.counties} onCountiesChange={(counties) => setFilters((f) => ({ ...f, counties }))}
               labels={{ state: "States", county: "Counties" }}
+            />
+            {/* Abstract completes the State → County → Abstract cascade. Values
+                are the research data's abstract ids; options narrow to the
+                selected counties/states (all abstracts with activity when no
+                county is picked). */}
+            <ResearchAbstractFilter
+              options={opts.abstracts ?? []}
+              states={filters.states}
+              counties={filters.counties}
+              value={filters.abstracts}
+              onChange={(abstracts) => setFilters((f) => ({ ...f, abstracts }))}
             />
             <div className="field" style={{ marginBottom: 0, minWidth: 190, flex: 1 }}><label>Document types</label>
               <SearchableMultiSelect
@@ -540,6 +554,58 @@ function ResearchMetricsCustomize({ prefs, onChange }: { prefs: ResMetricPrefs; 
   );
 }
 
+/**
+ * Abstract filter — third link of the State → County → Abstract cascade in the
+ * Research filter bar. Same searchable multi-select as every other abstract
+ * selector; options are limited to abstracts with research activity in the
+ * currently selected counties (or states), and selections invalidated by a
+ * county change are auto-pruned like the county/state cascade.
+ */
+function ResearchAbstractFilter({ options, states, counties, value, onChange }: {
+  options: { state: string; county: string; abstractId: string }[];
+  states: string[]; counties: string[];
+  value: string[]; onChange: (v: string[]) => void;
+}) {
+  const scoped = useMemo(() => {
+    const cs = new Set(counties.map((c) => c.toUpperCase()));
+    const ss = new Set(states.map((s) => s.toUpperCase()));
+    return options.filter((o) =>
+      (!counties.length || cs.has(o.county.toUpperCase())) &&
+      (!states.length || ss.has(o.state.toUpperCase())));
+  }, [options, states.join("|"), counties.join("|")]); // eslint-disable-line react-hooks/exhaustive-deps
+  const labels = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const o of scoped) {
+      // The same abstract number can exist in several counties; show each once
+      // with its counties listed so the choice stays unambiguous.
+      m[o.abstractId] = m[o.abstractId] ? `${m[o.abstractId].split(" (")[0]} (multiple counties)` : `${o.abstractId} (${o.county} Co)`;
+    }
+    return m;
+  }, [scoped]);
+  const ids = useMemo(() => [...new Set(scoped.map((o) => o.abstractId))], [scoped]);
+
+  // Cascade pruning, mirroring GeoFields' county behavior.
+  useEffect(() => {
+    if (!counties.length && !states.length) return;
+    const valid = new Set(ids);
+    const pruned = value.filter((v) => valid.has(v));
+    if (pruned.length !== value.length) onChange(pruned);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ids.join("|")]);
+
+  return (
+    <div className="field" style={{ marginBottom: 0, minWidth: 190, flex: 1 }}><label>Abstracts</label>
+      <SearchableMultiSelect
+        options={ids}
+        labels={labels}
+        value={value}
+        onChange={onChange}
+        placeholder={ids.length ? "Search abstracts…" : counties.length ? "No abstracts with activity" : "Select a county first"}
+      />
+    </div>
+  );
+}
+
 function TrendKpi({ label, t, compareOff }: { label: string; t?: TrendT; compareOff?: boolean }) {
   if (!t) return null;
   const color = t.direction === "flat" ? "var(--text-dim)" : t.direction === "up" ? "#22c55e" : "#ef4444";
@@ -572,6 +638,9 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onToggleCounty }: {
   const [loading, setLoading] = useState(true);
   // The map always shows county-level stats regardless of the table level.
   const [countyRows, setCountyRows] = useState<GeoRow[]>([]);
+  // Map drill-down: the county the map is zoomed into (null = state overview).
+  const [focusCounty, setFocusCounty] = useState<string | null>(null);
+  const [focusAbstractRows, setFocusAbstractRows] = useState<GeoRow[]>([]);
 
   useEffect(() => {
     setLoading(true);
@@ -581,6 +650,21 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onToggleCounty }: {
     if (level === "county" && data) { setCountyRows(data.rows); return; }
     api.get<{ level: string; rows: GeoRow[] }>(`/research/geography?level=county&${qs}`).then((d) => setCountyRows(d.rows)).catch(() => {});
   }, [qs, level, data]);
+  // Abstract-level stats for the drilled-in county (colors + hotspot outlines
+  // on the map's abstract layer). Scoped to that county on top of the shared
+  // filters; period filters in `qs` still apply.
+  useEffect(() => {
+    if (!focusCounty) { setFocusAbstractRows([]); return; }
+    const q = new URLSearchParams(qs);
+    // County names are matched exactly server-side — use the stats row's own
+    // spelling rather than the map feature's ("Leon" vs "LEON").
+    const row = countyRows.find((r) => r.county && r.county.toUpperCase() === focusCounty.toUpperCase());
+    q.delete("county"); q.append("county", row?.county ?? focusCounty);
+    api.get<{ level: string; rows: GeoRow[] }>(`/research/geography?level=abstract&${q}`)
+      .then((d) => setFocusAbstractRows(d.rows))
+      .catch(() => setFocusAbstractRows([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qs, focusCounty, countyRows.length]);
 
   const geoName = (r: GeoRow) =>
     level === "state" ? r.state
@@ -588,7 +672,17 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onToggleCounty }: {
         : `${r.abstractId} (${r.county} Co)`;
 
   const columns: Column<GeoRow>[] = [
-    { key: "name", header: level === "state" ? "State" : level === "county" ? "County" : "Abstract", value: geoName, render: (r) => <>{geoName(r)} {r.isHotspot && <span className="badge" style={{ background: "rgba(239,68,68,0.15)", color: "#ef4444" }}>HOTSPOT</span>}</> },
+    { key: "name", header: level === "state" ? "State" : level === "county" ? "County" : "Abstract", value: geoName,
+      render: (r) => (
+        <>
+          {/* At abstract level the name is a direct gateway into the records
+              behind it — click opens Records filtered to that abstract. */}
+          {level === "abstract" && r.abstractId
+            ? <a style={{ cursor: "pointer", fontWeight: 600 }} title={`View records for abstract ${r.abstractId}`}>{geoName(r)}</a>
+            : geoName(r)}
+          {" "}{r.isHotspot && <span className="badge" style={{ background: "rgba(239,68,68,0.15)", color: "#ef4444" }}>HOTSPOT</span>}
+        </>
+      ) },
     { key: "transactions", header: "Transactions", value: (r) => r.transactions, align: "right" },
     { key: "leases", header: "Leases", value: (r) => r.leases, align: "right" },
     { key: "permits", header: "Permits", value: (r) => r.permits, align: "right" },
@@ -615,14 +709,28 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onToggleCounty }: {
       {showMap && (
         <div className="panel">
           <div className="panel-title">
-            <h3 style={{ margin: 0 }}>Texas Activity Map <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(red outline = hotspot; click a county to filter)</span></h3>
+            <h3 style={{ margin: 0 }}>Texas Activity Map <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(red outline = hotspot; click a county to zoom into its abstracts)</span></h3>
             <div className="chip-row">
               <span className={`chip ${metric === "activity" ? "active" : ""}`} onClick={() => setMetric("activity")}>Volume</span>
               <span className={`chip ${metric === "change" ? "active" : ""}`} onClick={() => setMetric("change")}>Change</span>
             </div>
           </div>
           <div style={{ maxWidth: 640, margin: "0 auto" }}>
-            <ResearchChoropleth stats={countyStats} metric={metric} selected={filters.counties} onSelect={onToggleCounty} />
+            <ResearchChoropleth
+              stats={countyStats} metric={metric} selected={filters.counties} onSelect={onToggleCounty}
+              focusCounty={focusCounty} onFocusChange={setFocusCounty}
+              abstractStats={focusAbstractRows.filter((r) => r.abstractId).map((r) => ({ abstractId: r.abstractId!, total: r.total, isHotspot: r.isHotspot }))}
+              onAbstractClick={(abstractId) => onDrill({
+                states: ["TX"],
+                // Use the county name exactly as the stats row spells it (that's
+                // what the documents store), not the map feature's casing.
+                counties: (() => {
+                  const row = countyRows.find((r) => r.county && focusCounty && r.county.toUpperCase() === focusCounty.toUpperCase());
+                  return row?.county ? [row.county] : focusCounty ? [focusCounty] : [];
+                })(),
+                abstracts: [abstractId],
+              })}
+            />
           </div>
         </div>
       )}
@@ -649,7 +757,13 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onToggleCounty }: {
             rows={data.rows}
             rowKey={(r) => `${r.state}|${r.county}|${r.abstractId}`}
             defaultSort={{ key: "total", dir: "desc" }}
-            onRowClick={(r) => onDrill({ states: r.state ? [r.state] : [], counties: r.county ? [r.county] : [] })}
+            onRowClick={(r) => onDrill({
+              states: r.state ? [r.state] : [],
+              counties: r.county ? [r.county] : [],
+              // Abstract rows drill straight to that abstract's records; other
+              // levels clear any abstract filter so results aren't over-narrowed.
+              abstracts: level === "abstract" && r.abstractId ? [r.abstractId] : [],
+            })}
           />
         )}
       </div>

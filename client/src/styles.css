@@ -721,6 +721,9 @@ body.modal-open { overflow: hidden; }
 /* Highlight the current month's label to orient past vs. future at a glance. */
 .bar-col.current .bar-label { color: var(--accent); font-weight: 700; }
 
+/* The one standardized required-field indicator, app-wide (incl. portal). */
+.req-star { color: var(--red); margin-left: 2px; font-weight: 700; }
+
 /* Month drill-down: a floating, NON-blocking panel — no backdrop, no scroll
    lock, so the dashboard behind it stays fully interactive. Its own body
    scrolls independently. */

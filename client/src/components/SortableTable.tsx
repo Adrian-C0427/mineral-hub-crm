@@ -1,4 +1,5 @@
 import { fmtDate } from "../lib/format";
+import { Req } from "./ui";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
@@ -186,7 +187,7 @@ function ColumnCustomizer<T>({ ordered, hidden, pinnedSet, onToggle, onReorder, 
                     onDragEnd={() => { setDragKey(null); setOverKey(null); }}>⠿</span>
                   <label className="cv-check">
                     <input type="checkbox" checked={on} disabled={c.required} onChange={() => onToggle(c.key)} />
-                    <span>{c.header}{c.required ? " *" : ""}</span>
+                    <span>{c.header}{c.required && <Req />}</span>
                   </label>
                   <span className="cv-move">
                     <button type="button" className={`icon-btn ${pinned ? "on" : ""}`} title={pinned ? "Unpin column" : "Pin column to the left"} aria-pressed={pinned} onClick={() => onPin(c.key)}>

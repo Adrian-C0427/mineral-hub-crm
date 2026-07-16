@@ -286,7 +286,7 @@ function SubmitOffer({ slug, dealName }: { slug: string; dealName: string }) {
     );
   }
 
-  const star = <span style={{ color: "var(--accent)" }}>*</span>;
+  const star = <span className="req-star" aria-hidden="true">*</span>;
   return (
     <div className="panel portal-lead">
       <div className="section-head">
