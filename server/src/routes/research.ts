@@ -81,7 +81,9 @@ function parseFilters(q: Record<string, unknown>): ResearchFilters {
     buyers: arr(q.buyer),
     sellers: arr(q.seller),
     operators: arr(q.operator),
-    abstractIds: arr(q.abstractId),
+    // Both spellings are accepted (?abstractId=…&abstractId=… and ?abstract=…)
+    // — different callers grew up on different sides of a merge.
+    abstractIds: [...arr(q.abstractId), ...arr(q.abstract)],
     statuses: arr(q.permitStatus),
     trajectories: arr(q.trajectory),
   };
@@ -979,6 +981,113 @@ const pageSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(1000).default(50),
 });
+
+/**
+ * Dynamic option lists for the Records filter panel — distinct values drawn
+ * from the data currently loaded into Research (i.e. under the page's active
+ * filters + window), so the dropdowns never offer values with zero rows.
+ */
+researchRouter.get(
+  "/records/options",
+  requirePermission("viewResearch"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const f = parseFilters(req.query as Record<string, unknown>);
+    const win = parseWindow(req.query as Record<string, unknown>);
+    const kind = req.query.kind === "permits" ? "permits" : "documents";
+    // Options describe the dataset BEFORE the panel's own selections, so
+    // narrow the base filters only (the client omits panel params here).
+    if (kind === "documents") {
+      const where = docWhere(org, f, win);
+      const [counties, abstracts, docTypes, docClasses] = await Promise.all([
+        prisma.researchDocument.groupBy({ by: ["county"], where, orderBy: { county: "asc" } }),
+        prisma.researchDocument.groupBy({ by: ["abstractId"], where, orderBy: { abstractId: "asc" } }),
+        prisma.researchDocument.groupBy({ by: ["docType"], where, orderBy: { docType: "asc" } }),
+        prisma.researchDocument.groupBy({ by: ["docClass"], where, orderBy: { docClass: "asc" } }),
+      ]);
+      return res.json({
+        counties: counties.map((r) => r.county).filter(Boolean),
+        abstracts: abstracts.map((r) => r.abstractId).filter((v): v is string => !!v),
+        docTypes: docTypes.map((r) => r.docType).filter(Boolean),
+        docClasses: docClasses.map((r) => r.docClass).filter(Boolean),
+      });
+    }
+    const where = permitWhere(org, f, win);
+    const [counties, abstracts, statuses, trajectories] = await Promise.all([
+      prisma.researchPermit.groupBy({ by: ["county"], where, orderBy: { county: "asc" } }),
+      prisma.researchPermit.groupBy({ by: ["abstractId"], where, orderBy: { abstractId: "asc" } }),
+      prisma.researchPermit.groupBy({ by: ["status"], where, orderBy: { status: "asc" } }),
+      prisma.researchPermit.groupBy({ by: ["trajectory"], where, orderBy: { trajectory: "asc" } }),
+    ]);
+    res.json({
+      counties: counties.map((r) => r.county).filter(Boolean),
+      abstracts: abstracts.map((r) => r.abstractId).filter((v): v is string => !!v),
+      statuses: statuses.map((r) => r.status).filter(Boolean),
+      trajectories: trajectories.map((r) => r.trajectory).filter(Boolean),
+    });
+  }),
+);
+
+/** Abstract-number join key: "A-123", "A123", "123 " all mean abstract 123. */
+function abstractJoinKey(v: string): string {
+  return v.toUpperCase().replace(/[^0-9A-Z]/g, "").replace(/^A(?=\d)/, "");
+}
+
+/**
+ * Single-county geography drill-in: every abstract boundary in the county
+ * (from PostGIS) with the filtered research activity aggregated per abstract —
+ * record count plus summed transaction amount (consideration). Returns an
+ * empty FeatureCollection when cadastral coverage is unavailable.
+ */
+researchRouter.get(
+  "/abstract-map",
+  requirePermission("viewResearch"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const f = parseFilters(req.query as Record<string, unknown>);
+    const win = parseWindow(req.query as Record<string, unknown>);
+    const county = String(req.query.mapCounty ?? "").trim();
+    if (!county) throw new HttpError(400, "mapCounty is required");
+
+    const docs = await prisma.researchDocument.findMany({
+      where: { ...docWhere(org, { ...f, counties: [county] }, win), abstractId: { not: null } },
+      select: { abstractId: true, consideration: true },
+    });
+    const stats = new Map<string, { count: number; amount: number }>();
+    for (const d of docs) {
+      const k = abstractJoinKey(d.abstractId!);
+      if (!k) continue;
+      const st = stats.get(k) ?? { count: 0, amount: 0 };
+      st.count++; st.amount += d.consideration ?? 0;
+      stats.set(k, st);
+    }
+
+    // Abstract polygons for the county; simplified — this is a summary map.
+    type AbsRow = { abstract: string | null; survey: string | null; geom: string | null };
+    let features: unknown[] = [];
+    try {
+      const rows = await prisma.$queryRawUnsafe<AbsRow[]>(
+        `SELECT replace(abstract, '?', '') AS abstract, survey,
+                ST_AsGeoJSON(ST_SimplifyPreserveTopology(geom, 0.0004), 5) AS geom
+           FROM gis.abstracts WHERE upper(county) = upper($1)`,
+        county,
+      );
+      features = rows
+        .filter((r) => r.geom && r.abstract)
+        .map((r) => {
+          const st = stats.get(abstractJoinKey(r.abstract!));
+          return {
+            type: "Feature",
+            properties: { abstract: r.abstract, survey: r.survey, count: st?.count ?? 0, amount: st?.amount ?? 0 },
+            geometry: JSON.parse(r.geom!) as unknown,
+          };
+        });
+    } catch {
+      // gis schema absent (e.g. local sandbox) -> no boundaries to draw.
+    }
+    res.json({ type: "FeatureCollection", features });
+  }),
+);
 
 researchRouter.get(
   "/documents",

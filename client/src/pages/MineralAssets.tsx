@@ -7,6 +7,9 @@ import { dealSearchHaystack } from "../lib/dealSearch";
 import { Select } from "../components/Select";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { GeoFields } from "../components/GeoFields";
+import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
+import { SurveyMultiPicker } from "../components/AbstractPicker";
+import { ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
 import { useRowSelection, BulkActionsBar } from "../components/bulk";
 import { downloadCsv } from "../lib/csv";
 import { money, num, fmtDate } from "../lib/format";
@@ -48,8 +51,8 @@ export function MineralAssets() {
   function exportSelected() {
     const rows = (assets ?? []).filter((a) => sel.selected.has(a.id));
     downloadCsv(`mineral-assets-${new Date().toISOString().slice(0, 10)}.csv`,
-      ["Asset", "State", "Counties", "Ownership", "Producing", "NRA", "Purchase Price", "Current Value", "ROI %"],
-      rows.map((a) => [a.name, a.state ?? "", a.counties.join("; "), a.ownershipType ?? "", a.producingStatus ?? "", a.nra ?? "", a.purchasePrice ?? "", a.currentValue ?? "", a.roiSinceAcquisition?.toFixed(1) ?? ""]));
+      ["Asset", "State", "Counties", "Asset Type", "Producing", "NRA", "Purchase Price", "Current Value", "ROI %"],
+      rows.map((a) => [a.name, a.state ?? "", a.counties.join("; "), a.assetTypes.join("/") || (a.ownershipType ?? ""), a.producingStatus ?? "", a.nra ?? "", a.purchasePrice ?? "", a.currentValue ?? "", a.roiSinceAcquisition?.toFixed(1) ?? ""]));
   }
 
   const totals = useMemo(() => {
@@ -69,7 +72,9 @@ export function MineralAssets() {
       <div><strong>{d.name}</strong>{d.assetMode === "SELL" && <span className="badge owned-badge" style={{ marginLeft: 8 }}>For sale</span>}</div>
     ) },
     { key: "location", header: "Location", value: (d) => d.counties.join(", "), render: (d) => [d.counties.join(", "), d.state].filter(Boolean).join(", ") || "—" },
-    { key: "ownershipType", header: "Ownership", value: (d) => d.ownershipType, render: (d) => d.ownershipType || "—" },
+    // Standardized asset type (RI/ORRI/…); legacy rows created before the
+    // rename still show their old free-text ownershipType.
+    { key: "ownershipType", header: "Asset Type", value: (d) => d.assetTypes.join("/") || d.ownershipType, render: (d) => d.assetTypes.join("/") || d.ownershipType || "—" },
     { key: "producing", header: "Producing", value: (d) => d.producingStatus, render: (d) => d.producingStatus || "—" },
     { key: "nra", header: "NRA", value: (d) => d.nra, type: "number", align: "right", render: (d) => num(d.nra) },
     { key: "purchasePrice", header: "Cost", value: (d) => d.purchasePrice, type: "number", align: "right", render: (d) => money(d.purchasePrice) },
@@ -149,7 +154,8 @@ function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onCreated:
   const [states, setStates] = useState<string[]>([]);
   const [counties, setCounties] = useState<string[]>([]);
   const [abstractIds, setAbstractIds] = useState<string[]>([]);
-  const [ownershipType, setOwnershipType] = useState(OWNERSHIP_TYPES[0]);
+  const [surveys, setSurveys] = useState<string[]>([]);
+  const [assetTypes, setAssetTypes] = useState<string[]>([]);
   const [producingStatus, setProducingStatus] = useState(PRODUCING_STATUSES[0]);
   const [acquisitionDate, setAcquisitionDate] = useState("");
   const [purchasePrice, setPurchasePrice] = useState("");
@@ -159,7 +165,12 @@ function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onCreated:
   const [error, setError] = useState<string | null>(null);
 
   async function create() {
-    if (!name.trim()) { setError("Give the asset a name."); return; }
+    // Assets require the full location chain + type — same bar as deals.
+    const missing = [
+      [name.trim() !== "", "Asset Name"], [states.length > 0, "State"], [counties.length > 0, "County"],
+      [abstractIds.length > 0, "Abstract"], [surveys.length > 0, "Survey"], [assetTypes.length > 0, "Asset Type"],
+    ].filter(([ok]) => !ok).map(([, label]) => label as string);
+    if (missing.length) { setError(`Missing required fields: ${missing.join(", ")}`); return; }
     setBusy(true); setError(null);
     try {
       const d = await api.post<DealSummary>("/deals", {
@@ -170,7 +181,8 @@ function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onCreated:
         state: states[0] ?? null,
         counties,
         abstractIds,
-        ownershipType,
+        surveys,
+        assetTypes,
         producingStatus,
         acquisitionDate: acquisitionDate || null,
         purchasePrice: purchasePrice.trim() === "" ? null : Number(purchasePrice),
@@ -194,7 +206,8 @@ function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onCreated:
       <div className="field"><label>Asset name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Smith Unit Royalty — Midland Co." autoFocus /></div>
       <div className="grid-2">
         <GeoFields states={states} onStatesChange={setStates} counties={counties} onCountiesChange={setCounties} abstractIds={abstractIds} onAbstractsChange={setAbstractIds} />
-        <div className="field"><label>Ownership type</label><Select value={ownershipType} onChange={setOwnershipType} ariaLabel="Ownership type" options={OWNERSHIP_TYPES.map((t) => ({ value: t, label: t }))} /></div>
+        <div className="field"><label>Survey name</label><SurveyMultiPicker value={surveys} onChange={setSurveys} abstractIds={abstractIds} /></div>
+        <div className="field"><label>Asset type</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
         <div className="field"><label>Producing status</label><Select value={producingStatus} onChange={setProducingStatus} ariaLabel="Producing status" options={PRODUCING_STATUSES.map((t) => ({ value: t, label: t }))} /></div>
         <div className="field"><label>Acquisition date</label><DateField value={acquisitionDate} onChange={(v) => setAcquisitionDate(v)} /></div>
         <div className="field"><label>Net Revenue Acres (NRA)</label><input type="number" value={nra} onChange={(e) => setNra(e.target.value)} /></div>

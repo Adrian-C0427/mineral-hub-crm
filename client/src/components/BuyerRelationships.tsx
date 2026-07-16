@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { ConfirmDialog, Modal, Spinner, showToast } from "./ui";
-import { NetworkGraph, CLASS_COLORS, type GraphNode, type GraphEdge } from "./NetworkGraph";
+import { CLASS_COLORS } from "../lib/entityClasses";
 
 /**
  * Buyer Profile → Relationships section.
@@ -14,11 +14,10 @@ import { NetworkGraph, CLASS_COLORS, type GraphNode, type GraphEdge } from "./Ne
  *  - alias suggestions (similar research names) that the USER confirms or
  *    dismisses — nothing ever merges automatically
  *  - per-alias attribution so a merged profile keeps its history readable
- *  - Acquired From / Sold To with business entities ranked first and
- *    individual sellers tucked behind a disclosure
+ *  - Acquired From / Sold To / Co-Buyers — business entities ONLY; individual
+ *    people are excluded from the relationship analysis entirely
  *  - acquisition chains as compact expandable rows (endpoints + hop count
  *    collapsed; full path on demand; progressive "show all")
- *  - an optional interactive network map of the direct neighbourhood
  */
 
 interface RelParty { norm: string; name: string; count: number; entityType: "company" | "individual"; buyerId: string | null }
@@ -34,7 +33,6 @@ interface Network {
   acquisitions: number; dispositions: number;
   topGrantors: RelParty[]; topGrantees: RelParty[]; coBuyers: RelParty[];
   chains: ChainEntry[];
-  graph: { nodes: (GraphNode & { buyerId?: string | null })[]; edges: GraphEdge[] };
   classLabels: Record<string, string>;
   aliasBreakdown: AliasActivity[];
 }
@@ -60,7 +58,6 @@ export function BuyerRelationships({ buyerId }: { buyerId: string }) {
   const [reviewing, setReviewing] = useState<AliasSuggestion | null>(null);
   const [confirmMerge, setConfirmMerge] = useState<AliasSuggestion | null>(null);
   const [aliasBusy, setAliasBusy] = useState(false);
-  const [showGraph, setShowGraph] = useState(false);
 
   useEffect(() => {
     setLoading(true);
@@ -188,29 +185,14 @@ export function BuyerRelationships({ buyerId }: { buyerId: string }) {
 
       <div className="rel-columns">
         <PartyColumn title="Acquired From" empty="No recorded acquisitions." parties={net.topGrantors}
-          grouped canCreate={canCreate} adding={adding} onAdd={addAsBuyer} onOpen={(p) => p.buyerId && nav(`/buyers/${p.buyerId}`)} />
+          canCreate={canCreate} adding={adding} onAdd={addAsBuyer} onOpen={(p) => p.buyerId && nav(`/buyers/${p.buyerId}`)} />
         <PartyColumn title="Sold To" empty="No recorded dispositions." parties={net.topGrantees}
-          grouped canCreate={canCreate} adding={adding} onAdd={addAsBuyer} onOpen={(p) => p.buyerId && nav(`/buyers/${p.buyerId}`)} />
+          canCreate={canCreate} adding={adding} onAdd={addAsBuyer} onOpen={(p) => p.buyerId && nav(`/buyers/${p.buyerId}`)} />
         <PartyColumn title="Frequent Co-Buyers" empty="No shared acquisitions found." parties={net.coBuyers}
           canCreate={canCreate} adding={adding} onAdd={addAsBuyer} onOpen={(p) => p.buyerId && nav(`/buyers/${p.buyerId}`)} />
       </div>
 
       <ChainSection chains={net.chains} classLabels={net.classLabels} focusNorm={net.norm} />
-
-      {/* Interactive neighbourhood map — heavier, so opt-in. */}
-      {net.graph.nodes.length > 1 && (
-        <div style={{ marginTop: 14 }}>
-          <button className="small" onClick={() => setShowGraph((s) => !s)} aria-expanded={showGraph}>
-            {showGraph ? "Hide network map" : "Show network map"}
-          </button>
-          {showGraph && (
-            <NetworkGraph
-              nodes={net.graph.nodes} edges={net.graph.edges} focusNorm={net.norm} height={380}
-              onNodeClick={(n) => { const b = (n as GraphNode & { buyerId?: string | null }).buyerId; if (b) nav(`/buyers/${b}`); }}
-            />
-          )}
-        </div>
-      )}
 
       {reviewing && !confirmMerge && (
         <Modal title="Review possible alias" onClose={() => setReviewing(null)}
@@ -268,19 +250,18 @@ function RelStat({ n, l }: { n: number; l: string }) {
 }
 
 /**
- * A ranked counterparty column. With `grouped`, business entities lead (the
- * point is company-to-company activity) and individual sellers collapse behind
- * a disclosure so they never dominate the list.
+ * A ranked counterparty column. Business entities only — the server excludes
+ * individual people from the relationship analysis, and there is deliberately
+ * no way to reveal them here.
  */
-function PartyColumn({ title, empty, parties, grouped = false, canCreate, adding, onAdd, onOpen }: {
-  title: string; empty: string; parties: RelParty[]; grouped?: boolean;
+function PartyColumn({ title, empty, parties, canCreate, adding, onAdd, onOpen }: {
+  title: string; empty: string; parties: RelParty[];
   canCreate: boolean; adding: string | null; onAdd: (p: RelParty) => void; onOpen: (p: RelParty) => void;
 }) {
-  const [showIndividuals, setShowIndividuals] = useState(false);
   const [showAll, setShowAll] = useState(false);
-  const companies = useMemo(() => (grouped ? parties.filter((p) => p.entityType === "company") : parties), [parties, grouped]);
-  const individuals = useMemo(() => (grouped ? parties.filter((p) => p.entityType === "individual") : []), [parties, grouped]);
-  const max = Math.max(1, ...parties.map((p) => p.count));
+  // Defense in depth: even if the API ever sends individuals, never show them.
+  const companies = useMemo(() => parties.filter((p) => p.entityType !== "individual"), [parties]);
+  const max = Math.max(1, ...companies.map((p) => p.count));
   const CAP = 8;
 
   const Row = ({ p }: { p: RelParty }) => (
@@ -304,21 +285,13 @@ function PartyColumn({ title, empty, parties, grouped = false, canCreate, adding
   return (
     <div>
       <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>{title}</div>
-      {parties.length === 0 ? <p className="muted" style={{ margin: 0 }}>{empty}</p> : (
+      {companies.length === 0 ? <p className="muted" style={{ margin: 0 }}>{empty}</p> : (
         <div className="rel-party-list">
           {visible.map((p) => <Row key={p.norm} p={p} />)}
           {companies.length > CAP && (
             <button className="link-btn" onClick={() => setShowAll((s) => !s)}>
               {showAll ? "Show fewer" : `Show all ${companies.length}`}
             </button>
-          )}
-          {individuals.length > 0 && (
-            <>
-              <button className="link-btn rel-indiv-toggle" onClick={() => setShowIndividuals((s) => !s)} aria-expanded={showIndividuals}>
-                {showIndividuals ? "▾" : "▸"} {individuals.length} individual seller{individuals.length === 1 ? "" : "s"}
-              </button>
-              {showIndividuals && individuals.slice(0, 20).map((p) => <Row key={p.norm} p={p} />)}
-            </>
           )}
         </div>
       )}

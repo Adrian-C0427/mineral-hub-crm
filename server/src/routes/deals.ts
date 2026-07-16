@@ -210,6 +210,21 @@ dealsRouter.post(
     if (!isAsset) {
       const missing = dealRequired(data);
       if (missing.length) throw new HttpError(400, `Missing required fields: ${missing.join(", ")}`);
+    } else if (!data.parentDealId) {
+      // New standalone Mineral Assets carry the full location chain plus the
+      // standardized Asset Type. (Child assets under a package keep the deal
+      // rule set above; converting an existing deal PATCHes and isn't gated.)
+      const states = data.states ?? (data.state ? [data.state] : []);
+      const req_: [boolean, string][] = [
+        [!!data.name?.trim(), "Asset Name"],
+        [states.length > 0, "State"],
+        [(data.counties ?? []).length > 0, "County"],
+        [(data.abstractIds ?? []).length > 0, "Abstract"],
+        [(data.surveys ?? []).length > 0, "Survey"],
+        [(data.assetTypes ?? []).length > 0, "Asset Type"],
+      ];
+      const missing = req_.filter(([ok]) => !ok).map(([, n]) => n);
+      if (missing.length) throw new HttpError(400, `Missing required fields: ${missing.join(", ")}`);
     }
     // Every additional asset must satisfy the same required-field set.
     if (data.assets?.length) {

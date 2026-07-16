@@ -19,6 +19,8 @@ interface GeoFeature {
   geometry: { type: "Polygon" | "MultiPolygon"; coordinates: number[][][] | number[][][][] };
 }
 
+type AnyGeom = { type: "Polygon" | "MultiPolygon"; coordinates: number[][][] | number[][][][] };
+
 export interface CountyStat {
   county: string; // display name, e.g. "Leon"
   total: number;
@@ -37,6 +39,8 @@ interface Props {
   metric: "activity" | "change";
   selected: string[]; // selected county names
   onSelect: (county: string) => void;
+  /** Active research filter query string — the abstract layer respects it. */
+  qs?: string;
   /** Abstract-level stats for the focused county (drives drill-down coloring). */
   abstractStats?: AbstractStat[];
   focusCounty?: string | null;
@@ -58,9 +62,9 @@ function normAbstract(v: string | null | undefined): string {
   return String(v ?? "").toUpperCase().replace(/[^0-9A-Z]/g, "").replace(/^A/, "").replace(/^0+/, "");
 }
 
-interface AbstractShape { id: string; abstract: string; survey: string | null; d: string }
+interface AbstractShape { abstract: string; survey: string | null; count: number; amount: number; d: string }
 
-export function ResearchChoropleth({ stats, metric, selected, onSelect, abstractStats = [], focusCounty = null, onFocusChange, onAbstractClick }: Props) {
+export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "", abstractStats = [], focusCounty = null, onFocusChange, onAbstractClick }: Props) {
   const [features, setFeatures] = useState<GeoFeature[] | null>(null);
   const [tip, setTip] = useState<{ x: number; y: number; title: string; lines: { text: string; color?: string }[] } | null>(null);
   const [vb, setVb] = useState<ViewBox>(FULL_VIEW);
@@ -158,30 +162,31 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, abstract
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusCounty, shapes.length]);
 
-  // Load + project the focused county's abstract outlines, fading them in once
-  // ready (and once the zoom is largely done) — no abrupt layer pop.
+  // Load + project the focused county's abstract outlines (geometry + per-
+  // abstract record count and summed transaction amount, filter-aware), fading
+  // them in once ready — no abrupt layer pop.
   useEffect(() => {
     setAbstractShapes(null);
     if (!focusCounty || !project) return;
     let cancelled = false;
-    api.get<{ features: { properties: { id: string; abstract: string | null; survey: string | null }; geometry: { type: string; coordinates: unknown } }[] }>(
-      `/gis/county-abstracts?county=${encodeURIComponent(focusCounty)}`,
+    api.get<{ features: { properties: { abstract: string; survey: string | null; count: number; amount: number }; geometry: AnyGeom }[] }>(
+      `/research/abstract-map?mapCounty=${encodeURIComponent(focusCounty)}${qs ? `&${qs}` : ""}`,
     )
       .then((fc) => {
         if (cancelled) return;
-        const toPath = (geom: { type: string; coordinates: unknown }): string => {
+        const toPath = (geom: AnyGeom): string => {
           const polys = geom.type === "Polygon" ? [geom.coordinates as number[][][]] : (geom.coordinates as number[][][][]);
           return polys.map((poly) => poly.map((ring) => "M" + ring.map(([x, y]) => {
             const [X, Y] = project(x, y);
             return `${X.toFixed(2)},${Y.toFixed(2)}`;
           }).join("L") + "Z").join("")).join("");
         };
-        setAbstractShapes(fc.features.map((f) => ({ id: f.properties.id, abstract: f.properties.abstract ?? "", survey: f.properties.survey, d: toPath(f.geometry) })));
+        setAbstractShapes(fc.features.map((f) => ({ ...f.properties, d: toPath(f.geometry) })));
         window.setTimeout(() => { if (!cancelled) setAbstractsVisible(true); }, 120);
       })
       .catch(() => { if (!cancelled) setAbstractShapes([]); });
     return () => { cancelled = true; };
-  }, [focusCounty, project]);
+  }, [focusCounty, project, qs]);
 
   // Esc backs out of the drill-down.
   useEffect(() => {
@@ -205,9 +210,12 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, abstract
     return p >= 0 ? `rgba(34,197,94,${(0.15 + 0.75 * mag).toFixed(2)})` : `rgba(239,68,68,${(0.15 + 0.75 * mag).toFixed(2)})`;
   }
 
-  function abstractFill(a?: AbstractStat): string {
-    if (!a || a.total === 0) return "rgba(148,163,184,0.06)";
-    const t = Math.log(a.total + 1) / Math.log(maxAbstractTotal + 1);
+  // Prefer the hotspot-aware geography stats; fall back to the geometry
+  // payload's own record count so activity still shades if the join misses.
+  function abstractFill(a: AbstractStat | undefined, count = 0): string {
+    const total = a?.total ?? count;
+    if (total === 0) return "rgba(148,163,184,0.06)";
+    const t = Math.log(total + 1) / Math.log(maxAbstractTotal + 1);
     return `rgba(59,130,246,${(0.18 + 0.72 * t).toFixed(2)})`;
   }
 
@@ -281,20 +289,22 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, abstract
             {abstractShapes.map((ab) => {
               const stat = abstractStatMap.get(normAbstract(ab.abstract));
               const hot = stat?.isHotspot ?? false;
+              const active = ab.count > 0 || !!stat;
               return (
                 <path
-                  key={ab.id}
+                  key={ab.abstract}
                   d={ab.d}
-                  fill={abstractFill(stat)}
+                  fill={abstractFill(stat, ab.count)}
                   stroke={hot ? "#ef4444" : "rgba(148,163,184,0.4)"}
                   strokeWidth={hot ? sw(1.4) : sw(0.35)}
-                  style={{ cursor: stat && onAbstractClick ? "pointer" : "default" }}
-                  onClick={() => stat && onAbstractClick?.(stat.abstractId)}
+                  style={{ cursor: active && onAbstractClick ? "pointer" : "default" }}
+                  onClick={() => active && onAbstractClick?.(stat?.abstractId ?? ab.abstract)}
                   onMouseMove={(e) => moveTip(e, `Abstract ${ab.abstract || "?"}`, [
                     ...(ab.survey ? [{ text: ab.survey }] : []),
-                    { text: stat ? `${stat.total.toLocaleString()} records` : "No activity in period" },
+                    { text: active ? `${(stat?.total ?? ab.count).toLocaleString()} records` : "No activity in period" },
+                    ...(ab.amount > 0 ? [{ text: `$${Math.round(ab.amount).toLocaleString()} in transactions` }] : []),
                     ...(hot ? [{ text: "● Hotspot", color: "#ef4444" }] : []),
-                    ...(stat && onAbstractClick ? [{ text: "Click to view records" }] : []),
+                    ...(active && onAbstractClick ? [{ text: "Click to view records" }] : []),
                   ])}
                   onMouseLeave={() => setTip(null)}
                 />
