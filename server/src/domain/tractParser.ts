@@ -319,7 +319,28 @@ function parseTexas(text: string): ParsedTract {
   let seq = 0;
   let prevBearing: { azimuth: number; display: string } | null = null;
 
+  // A single THENCE can carry several courses ("…as follows: NORTH 44°… WEST
+  // 134.81 feet to a tree for a bend, NORTH 40°… WEST 112.64 feet…"). Split a
+  // clause into one segment per bearing so every leg becomes its own call.
+  const splitCourses = (clause: string): string[] => {
+    const re = /\b(?:N(?:ORTH)?|S(?:OUTH)?)\s*[.,]?\s*\d{1,3}(?:\.\d+)?\s*(?:°|º|deg)/gi;
+    const starts: number[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(clause))) starts.push(m.index);
+    if (starts.length <= 1) return [clause];
+    return starts.map((s, i) => clause.slice(s, starts[i + 1] ?? clause.length).replace(/[\s,;]+$/, "").trim());
+  };
+
+  const segments: string[] = [];
   for (const clause of clauses) {
+    // Witness-monument references ("WHENCE a 26\" Post Oak bears N 66°27' W
+    // 11.5 feet") describe reference trees/rods near a corner — they are not
+    // boundary calls. Everything from the first WHENCE on is trimmed away.
+    const cut = clause.split(/\bWHENCE\b/i)[0].trim() || clause;
+    segments.push(...splitCourses(cut));
+  }
+
+  for (const clause of segments) {
     seq += 1;
     const short = clause.length > 160 ? clause.slice(0, 157) + "…" : clause;
     const isCurve = /\bcurve\b/i.test(clause);

@@ -162,6 +162,26 @@ THENCE N 00 E, 1000.00 feet; THENCE N 90 E, 1000.00 feet; THENCE S 00 E, 1000.00
   });
 });
 
+describe("parseTexas — multi-course THENCE + witness monuments", () => {
+  it("splits an 'as follows:' clause into one call per course and ignores WHENCE witness trees", () => {
+    const deed = `Beginning at a stone found at the occupied southerly corner of said 61 acre tract for this southerly corner. WHENCE a 26" Post Oak tree, found, bears NORTH 66 degrees 27 minutes WEST 11.5 feet, and a 22" Post Oak tree bears SOUTH 14 degrees 17 minutes EAST 15.4 feet;
+THENCE in a northwesterly direction, as follows:
+NORTH 44 degrees 28 minutes 58 seconds WEST 134.81 feet to an 18" Post Oak tree for a bend,
+NORTH 40 degrees 15 minutes 57 seconds WEST 112.64 feet to a double Elm tree for a bend,
+NORTH 42 degrees 26 minutes 31 seconds WEST 76.32 feet;
+THENCE NORTH 37 degrees 25 minutes 05 seconds EAST 693.70 feet, to a point, whence a 1/2" iron rod bears SOUTH 37 degrees 25 minutes 05 seconds WEST 13.75 feet;
+THENCE SOUTH 45 degrees 00 minutes EAST 400.00 feet to the point of beginning.`;
+    const p = parseTract(deed);
+    // 3 courses from the multi-course clause + 2 single calls; witness bearings excluded.
+    expect(p.calls).toHaveLength(5);
+    expect(p.unresolved).toHaveLength(0);
+    expect(p.calls[0].bearing).toBe('N 44°28\'58" W');
+    expect(p.calls[2].distanceRaw).toBe("76.32 feet");
+    // The N37E call must be the boundary course, not the 13.75 ft witness tie.
+    expect(p.calls[3].distanceFt).toBeCloseTo(693.7);
+  });
+});
+
 describe("confidence scoring (deterministic)", () => {
   it("scores a clean closing tract high", () => {
     const p = parseTract(SQUARE);
