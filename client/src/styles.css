@@ -1517,6 +1517,11 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .doc-chip.active { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 700; }
 .doc-count { font-weight: 600; font-size: 11px; border-radius: 99px; padding: 1px 7px; background: rgba(127, 127, 127, 0.16); color: inherit; }
 .doc-chip.active .doc-count { background: rgba(255, 255, 255, 0.22); }
+/* Multi-select bulk row: Select all / Deselect all inside the menu. */
+.msel-bulk { display: flex; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.msel-bulk button { border: none; background: none; color: var(--accent); font-size: 12px; font-weight: 600; cursor: pointer; padding: 2px 4px; }
+.msel-bulk button:hover { text-decoration: underline; }
+
 /* "+ New folder" affordance — dashed so it reads as a creator, not a folder. */
 .doc-chip-new { border-style: dashed; background: transparent; }
 .doc-chip-new:hover { color: var(--accent); border-color: var(--accent); }
@@ -1619,6 +1624,9 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
   line-height: 1.2; text-align: left; transition: color 0.12s, border-color 0.12s, background 0.12s; }
 .dpp-sec:hover { color: var(--text); background: var(--panel-2); }
 .dpp-sec > svg, .dpp-sec .mc-off-box { flex: none; }
+/* Layer labels never wrap mid-pill ("Abstract Boundaries" stays one line) —
+   the pill grid reflows instead. */
+.dpp-sec { white-space: nowrap; }
 .dpp-sec.on { color: var(--accent); border-color: rgba(59, 130, 246, 0.4); background: rgba(59, 130, 246, 0.1); }
 
 .mc-heat { display: grid; grid-template-columns: 1fr 1.1fr 1fr; gap: 24px; padding: 20px 24px; }
@@ -1751,7 +1759,9 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
    Heat panel's toggle row (.mc-pills-row) reuses the exact same grid. */
 .ml-layers { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
 .ml-title { margin: 0 0 2px; white-space: nowrap; }
-.ml-pills, .mc-pills-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); gap: 8px; padding: 0; }
+/* Columns are wide enough for the longest label ("Point of Beginning (POB)")
+   so pills never wrap their text onto a second line. */
+.ml-pills, .mc-pills-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(212px, 1fr)); gap: 8px; padding: 0; }
 .ml-pills .dpp-sec, .mc-pills-row .dpp-sec { width: 100%; justify-content: flex-start; }
 /* "bar": a standalone toolbar card sitting above an embedded canvas. */
 .ml-bar { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;

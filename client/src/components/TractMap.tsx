@@ -29,8 +29,9 @@ export interface TractMapFeature {
 // Same layer set as the main map / DealMap so the experience is familiar,
 // plus this deal's own abstract footprint as an optional overlay.
 // Boundaries, numbers, survey names, wells, and wellbores all start ON — the
-// most useful default view; every layer stays individually toggleable.
-const DEFAULT_LAYERS = { boundaries: true, numbers: true, surveys: true, wells: true, wellbores: true, dealAbstracts: false, pob: true };
+// most useful default view; every layer stays individually toggleable. POB is
+// deliberately OFF by default (opt-in for presentations that need it).
+const DEFAULT_LAYERS = { boundaries: true, numbers: true, surveys: true, wells: true, wellbores: true, dealAbstracts: false, pob: false };
 
 /**
  * Deal-isolated tract map: the shared cadastral stack (lib/mapLayers) with this

@@ -23,6 +23,8 @@ interface BuyerProfileData {
   name: string;
   companyName: string;
   contactName: string | null;
+  contactFirstName: string | null;
+  contactLastName: string | null;
   email: string | null;
   phone: string | null;
   website: string | null;
@@ -94,7 +96,8 @@ export function BuyerProfile() {
     if (!draft || !editing) return;
     const payload: Record<string, unknown> =
       editing === "contact" ? {
-        companyName: draft.companyName, contactName: draft.contactName,
+        companyName: draft.companyName,
+        contactFirstName: draft.contactFirstName ?? "", contactLastName: draft.contactLastName ?? "",
         email: draft.email || null, phone: draft.phone, website: draft.website,
         mailingAddress: draft.mailingAddress, mailingCity: draft.mailingCity, mailingState: draft.mailingState, mailingZip: draft.mailingZip,
         ownerIds: draft.owners.map((o) => o.id),
@@ -150,7 +153,9 @@ export function BuyerProfile() {
       <div className="page-header">
         <div className="row">
           <h1 style={{ marginBottom: 0 }}>{view.companyName}</h1>
-          {view.contactName && <span className="muted">{view.contactName}</span>}
+          {(view.contactFirstName || view.contactLastName || view.contactName) && (
+            <span className="muted">{[view.contactFirstName, view.contactLastName].filter(Boolean).join(" ") || view.contactName}</span>
+          )}
           <RelationshipDot status={view.relationshipStatus} />
         </div>
         <div className="row">
@@ -174,7 +179,8 @@ export function BuyerProfile() {
           <SectionHead title="Contact Info" section="contact" />
           {editContact ? (
             <>
-              <Row><Fld l="Company"><input value={view.companyName} onChange={(e) => setD({ companyName: e.target.value })} /></Fld><Fld l="Contact name"><input value={view.contactName ?? ""} onChange={(e) => setD({ contactName: e.target.value })} /></Fld></Row>
+              <Row><Fld l="Company"><input value={view.companyName} onChange={(e) => setD({ companyName: e.target.value })} /></Fld><Fld l="First name"><input value={view.contactFirstName ?? ""} onChange={(e) => setD({ contactFirstName: e.target.value })} /></Fld></Row>
+              <Row><Fld l="Last name"><input value={view.contactLastName ?? ""} onChange={(e) => setD({ contactLastName: e.target.value })} /></Fld><Fld l=""><span /></Fld></Row>
               <Row><Fld l="Email"><input value={view.email ?? ""} onChange={(e) => setD({ email: e.target.value })} /></Fld><Fld l="Phone"><PhoneInput value={view.phone ?? ""} onChange={(v) => setD({ phone: v })} /></Fld></Row>
               <Fld l="Website"><input value={view.website ?? ""} onChange={(e) => setD({ website: e.target.value })} /></Fld>
               <Fld l="Mailing address"><input value={view.mailingAddress ?? ""} onChange={(e) => setD({ mailingAddress: e.target.value })} /></Fld>
@@ -195,7 +201,8 @@ export function BuyerProfile() {
             </>
           ) : (
             <div className="dd-grid">
-              <KV k="Contact" v={view.contactName} /><KV k="Email" v={view.email} /><KV k="Phone" v={view.phone ? formatPhone(view.phone) : null} />
+              <KV k="First name" v={view.contactFirstName} /><KV k="Last name" v={view.contactLastName} />
+              <KV k="Email" v={view.email} /><KV k="Phone" v={view.phone ? formatPhone(view.phone) : null} />
               <KV k="Website" v={view.website} />
               <KV k="Address" v={view.mailingAddress} />
               <KV k="City / State / ZIP" v={[view.mailingCity, view.mailingState, view.mailingZip].filter(Boolean).join(", ")} />

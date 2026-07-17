@@ -18,7 +18,10 @@ importRouter.use(requireAuth, requireOrg, requirePermission("createBuyers"));
 export const IMPORT_FIELDS = [
   { key: "companyName", label: "Company Name", required: true },
   { key: "name", label: "Buyer Name" },
-  { key: "contactName", label: "Contact Name" },
+  { key: "contactFirstName", label: "Contact First Name" },
+  { key: "contactLastName", label: "Contact Last Name" },
+  // Legacy combined column — still mappable; split automatically on import.
+  { key: "contactName", label: "Contact Name (combined)" },
   { key: "email", label: "Email" },
   { key: "phone", label: "Phone" },
   { key: "website", label: "Website" },
@@ -49,6 +52,8 @@ function guessMapping(headers: string[]): Record<string, string> {
         n === target ||
         n.includes(target) ||
         (target === "companyname" && (n === "company" || n === "firm")) ||
+        (target === "contactfirstname" && (n === "firstname" || n === "first")) ||
+        (target === "contactlastname" && (n === "lastname" || n === "last" || n === "surname")) ||
         (target === "name" && n === "buyer") ||
         (target === "relationshipstatus" && (n === "relationship" || n === "status"))
       );
@@ -87,10 +92,17 @@ function buildBuyer(row: Record<string, string>, mapping: Record<string, string>
   const rel = get("relationshipStatus").toUpperCase();
   const relationshipStatus = ["HOT", "WARM", "COLD"].includes(rel) ? rel : "WARM";
 
+  // First/Last are preferred; a mapped legacy combined column is split
+  // (first token → first name, remainder → last name).
+  const legacy = get("contactName");
+  const first = get("contactFirstName") || (legacy ? legacy.split(/\s+/)[0] : "");
+  const last = get("contactLastName") || (legacy ? legacy.split(/\s+/).slice(1).join(" ") : "");
   return {
     companyName: get("companyName"),
     name: get("name") || get("companyName"),
-    contactName: get("contactName") || null,
+    contactFirstName: first || null,
+    contactLastName: last || null,
+    contactName: [first, last].filter(Boolean).join(" ") || null,
     email: get("email") ? get("email").toLowerCase() : null,
     phone: normalizePhoneNullable(get("phone")),
     website: get("website") || null,
@@ -200,6 +212,8 @@ importRouter.post(
             companyName: r.buyer.companyName,
             normalizedCompany: normalizeCompany(r.buyer.companyName),
             contactName: r.buyer.contactName,
+            contactFirstName: r.buyer.contactFirstName,
+            contactLastName: r.buyer.contactLastName,
             email: r.buyer.email,
             phone: r.buyer.phone,
             website: r.buyer.website,

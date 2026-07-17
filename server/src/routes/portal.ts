@@ -540,6 +540,8 @@ portalRouter.post(
         data: {
           organizationId: deal.organizationId,
           name: body.companyName, companyName: body.companyName, contactName: body.contactName,
+          contactFirstName: body.contactName.trim().split(/\s+/)[0] || null,
+          contactLastName: body.contactName.trim().split(/\s+/).slice(1).join(" ") || null,
           email, phone: body.phone || null, normalizedCompany: normalizeCompany(body.companyName),
           source: "portal", portalSubmittedAt: now,
         },

@@ -690,7 +690,8 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
           {/* At abstract level the name is a direct gateway into the records
               behind it — click opens Records filtered to that abstract. */}
           {shownLevel === "abstract" && r.abstractId
-            ? <a style={{ cursor: "pointer", fontWeight: 600 }} title={`View records for abstract ${r.abstractId}`}>{geoName(r)}</a>
+            // Standard text color (not link blue) — still clickable via the row.
+            ? <a style={{ cursor: "pointer", fontWeight: 600, color: "var(--text)" }} title={`View records for abstract ${r.abstractId}`}>{geoName(r)}</a>
             : geoName(r)}
           {" "}{r.isHotspot && <span className="badge" style={{ background: "rgba(239,68,68,0.15)", color: "#ef4444" }}>HOTSPOT</span>}
         </>
@@ -919,7 +920,7 @@ function RankingsTab({ qs, opts, compareOff, onDrill }: { qs: string; opts: Filt
             <button className="small primary" disabled={selected.size === 0 || adding} onClick={addToBuyers}>
               {adding ? "Preparing…" : `Add to Buyers${selected.size ? ` (${selected.size})` : ""}`}
             </button>
-            {selected.size > 0 && <button className="small" onClick={() => setSelected(new Set())}>Clear</button>}
+            {selected.size > 0 && <button className="small" onClick={() => setSelected(new Set())}>Deselect all</button>}
           </div>
         )}
         {err && <Banner kind="error">{err}</Banner>}
@@ -1749,7 +1750,9 @@ function RecordsTab({ qs }: { qs: string }) {
               justifyContent: "space-between", gap: 12, padding: "4px 0", fontSize: 13,
               borderTop: i > 0 ? "1px solid var(--border)" : "none",
             }}>
-              <span style={{ fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{b.name}</span>
+              <span style={{ fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                <span className="muted" style={{ fontWeight: 700, marginRight: 8 }}>{i + 1}.</span>{b.name}
+              </span>
               <span className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
                 {num(b.count)} record{b.count === 1 ? "" : "s"}
                 {b.transactions > 0 && <> · {num(b.transactions)} transaction{b.transactions === 1 ? "" : "s"}</>}

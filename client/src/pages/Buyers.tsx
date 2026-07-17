@@ -16,6 +16,8 @@ interface BuyerRow {
   name: string;
   companyName: string;
   contactName: string | null;
+  contactFirstName: string | null;
+  contactLastName: string | null;
   focusArea: string;
   relationshipStatus: "HOT" | "WARM" | "COLD";
   closeRate: number;
@@ -47,7 +49,7 @@ export function Buyers() {
     return buyers.filter((b) => {
       if (rel && b.relationshipStatus !== rel) return false;
       if (!needle) return true;
-      return [b.companyName, b.contactName, b.name, b.focusArea]
+      return [b.companyName, b.contactName, b.contactFirstName, b.contactLastName, b.name, b.focusArea]
         .some((v) => v?.toLowerCase().includes(needle));
     });
   }, [buyers, q, rel]);
@@ -62,7 +64,9 @@ export function Buyers() {
           {/* Provenance at a glance: portal-captured leads and fuzzy-match reviews. */}
           {b.portalLead && <span className="badge" style={{ marginLeft: 6 }} title="Created or updated by a Buyer Portal submission">Portal lead</span>}
           {b.duplicateReview && <span className="badge" style={{ marginLeft: 6, background: "var(--red)", color: "#fff" }} title="Possible duplicate of an existing buyer — review and merge if needed">Review</span>}
-          {b.contactName && <div className="muted" style={{ fontSize: 12 }}>{b.contactName}</div>}
+          {(b.contactFirstName || b.contactLastName || b.contactName) && (
+            <div className="muted" style={{ fontSize: 12 }}>{[b.contactFirstName, b.contactLastName].filter(Boolean).join(" ") || b.contactName}</div>
+          )}
         </div>
       ) },
     { key: "focus", header: "Focus Area", type: "text", value: (b) => b.focusArea },
@@ -114,8 +118,8 @@ export function Buyers() {
         onExport={() => {
           const rows = buyers.filter((b) => sel.selected.has(b.id));
           downloadCsv(`buyers-${new Date().toISOString().slice(0, 10)}.csv`,
-            ["Company", "Contact", "Focus Area", "Relationship", "Close %", "Closed Deals"],
-            rows.map((b) => [b.companyName, b.contactName ?? "", b.focusArea, b.relationshipStatus, b.closeRate, b.closedDeals]));
+            ["Company", "First Name", "Last Name", "Focus Area", "Relationship", "Close %", "Closed Deals"],
+            rows.map((b) => [b.companyName, b.contactFirstName ?? "", b.contactLastName ?? "", b.focusArea, b.relationshipStatus, b.closeRate, b.closedDeals]));
         }}
       />
 
