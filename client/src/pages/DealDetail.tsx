@@ -69,6 +69,9 @@ export function DealDetail() {
   const [acceptBusy, setAcceptBusy] = useState(false);
   const [showAddAsset, setShowAddAsset] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  // Top-level tab (Mineral Assets pattern) — pure navigation; every section
+  // renders exactly as before, just grouped.
+  const [tab, setTab] = useState<"general" | "additional" | "buyers" | "marketplace" | "documents">("general");
   const [confirmSplit, setConfirmSplit] = useState(false);
   const [splitBusy, setSplitBusy] = useState(false);
 
@@ -148,11 +151,25 @@ export function DealDetail() {
         </Banner>
       )}
 
+      {/* Persistent header — Deal Characteristics + Contract Timeline stay
+          visible on every tab, exactly as before. */}
       <div className="dd-top-grid">
         <CharacteristicsCard deal={deal} users={users} canEdit={can("editDeals")} onSaved={refreshAll} />
         <ContractTimelineCard deal={deal} onSaved={loadDeal} />
       </div>
 
+      {/* Top-level tabs (same pattern as Mineral Assets) — organization only:
+          every section below is the existing component, unchanged, just
+          grouped so the page needs far less scrolling. */}
+      <div className="asset-tabs">
+        <button className={`tab ${tab === "general" ? "active" : ""}`} onClick={() => setTab("general")}>General</button>
+        {!deal.parent && <button className={`tab ${tab === "additional" ? "active" : ""}`} onClick={() => setTab("additional")}>Additional Deals</button>}
+        <button className={`tab ${tab === "buyers" ? "active" : ""}`} onClick={() => setTab("buyers")}>Buyers</button>
+        <button className={`tab ${tab === "marketplace" ? "active" : ""}`} onClick={() => setTab("marketplace")}>Marketplace</button>
+        <button className={`tab ${tab === "documents" ? "active" : ""}`} onClick={() => setTab("documents")}>Documents</button>
+      </div>
+
+      {tab === "general" && <>
       <SellerDetails
         dealId={deal.id}
         sellers={deal.sellers ?? []}
@@ -160,20 +177,6 @@ export function DealDetail() {
         canEdit={can("editDeals")}
         onChanged={loadDeal}
       />
-
-      {/* Additional Deals: the extra deals grouped under this seller. Hidden on a
-          child deal (which is itself one of these). */}
-      {!deal.parent && (
-        <AssetsSection
-          deal={deal}
-          canEdit={can("editDeals")}
-          canPublish={can("publishOfferings")}
-          onAdd={() => setShowAddAsset(true)}
-          onChanged={loadDeal}
-        />
-      )}
-
-      <DealPortalPanel dealId={deal.id} />
 
       {/* Embedded, isolated map showing only this deal's extent. Without any
           abstracts there is nothing to draw, so a compact empty state replaces
@@ -193,7 +196,23 @@ export function DealDetail() {
       <Suspense fallback={<Spinner label="Loading tract descriptions…" />}>
         <TractSection dealId={deal.id} dealName={deal.name} canEdit={can("editDeals")} abstractIds={deal.abstractIds} />
       </Suspense>
+      </>}
 
+      {/* Additional Deals: the extra deals grouped under this seller. Hidden on a
+          child deal (which is itself one of these — the tab is hidden too). */}
+      {tab === "additional" && !deal.parent && (
+        <AssetsSection
+          deal={deal}
+          canEdit={can("editDeals")}
+          canPublish={can("publishOfferings")}
+          onAdd={() => setShowAddAsset(true)}
+          onChanged={loadDeal}
+        />
+      )}
+
+      {tab === "marketplace" && <DealPortalPanel dealId={deal.id} />}
+
+      {tab === "buyers" && <>
       {/* Compact funnel strip — one line, not four card-heights of repeats;
           the Offers table right below carries the detail. */}
       <div className="panel dd-funnel">
@@ -324,9 +343,12 @@ export function DealDetail() {
           </>
         )}
       </CollapsibleSection>
+      </>}
 
       {/* Documents */}
-      <DocumentsSection ownerType="deal" ownerId={deal.id} files={deal.files} folders={deal.docFolders?.length ? deal.docFolders : DEAL_DOC_FOLDERS} onChanged={loadDeal} canEdit={can("manageDocuments")} canDelete={can("manageDocuments")} />
+      {tab === "documents" && (
+        <DocumentsSection ownerType="deal" ownerId={deal.id} files={deal.files} folders={deal.docFolders?.length ? deal.docFolders : DEAL_DOC_FOLDERS} onChanged={loadDeal} canEdit={can("manageDocuments")} canDelete={can("manageDocuments")} />
+      )}
 
       {renaming && (
         <RenameDealModal dealId={deal.id} current={deal.name} onClose={() => setRenaming(false)}
