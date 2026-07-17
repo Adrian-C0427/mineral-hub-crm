@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { collectCoords, bboxOfPoints, convexHull } from "../lib/geo";
+import { collectCoords, bboxOfPoints } from "../lib/geo";
 import { num } from "../lib/format";
 import { api } from "../api/client";
 import { addCadastralLayers, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
@@ -63,12 +63,10 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
       // styling and layer order — no duplicate boundary stacked on top.
       for (const id of idsRef.current) map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id }, { selected: true });
 
-      // The dashed convex hull marks the deal's overall extent (not a per-
-      // parcel boundary), plus zoom-to-fit from the fetched geometry.
+      // No extra outline layer on top: the feature-state highlight above is the
+      // whole treatment, exactly like the main Map page. (The old dashed convex
+      // hull doubled the abstract boundary whenever a deal had one parcel.)
       const pts = dealFeats.flatMap((f) => collectCoords(f.geometry));
-      const hull = convexHull(pts);
-      map.addSource("deal-outline", { type: "geojson", data: { type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [hull] } } as unknown as GeoJSON.Feature });
-      map.addLayer({ id: "deal-outline-line", type: "line", source: "deal-outline", paint: { "line-color": "#0f172a", "line-width": 2, "line-dasharray": [2, 1.5] } }, "wellbores");
 
       ready.current = true;
       applyVis();
@@ -114,16 +112,12 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
         ? await api.get<FC>(`/gis/features?ids=${encodeURIComponent(ids.join(","))}`).catch(() => ({ type: "FeatureCollection", features: [] } as FC))
         : ({ type: "FeatureCollection", features: [] } as FC);
       if (cancelled) return;
-      const outline = map.getSource("deal-outline") as maplibregl.GeoJSONSource | undefined;
-      if (!outline) return;
       // Re-point the highlight at the new abstract set (feature-state persists
       // on the source, so clear the old ids before marking the new ones).
       for (const id of prevIds.current) map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id }, { selected: false });
       for (const id of ids) map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id }, { selected: true });
       prevIds.current = ids;
       const pts = dealFC.features.flatMap((f) => collectCoords(f.geometry));
-      const hull = convexHull(pts);
-      outline.setData({ type: "Feature", properties: {}, geometry: { type: "Polygon", coordinates: [hull] } } as unknown as GeoJSON.Feature);
       if (pts.length) {
         const [w, s, e, n] = bboxOfPoints(pts);
         map.fitBounds([[w, s], [e, n]], { padding: 40, maxZoom: 14 });

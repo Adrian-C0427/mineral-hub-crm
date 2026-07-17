@@ -763,8 +763,7 @@ body.modal-open { overflow: hidden; }
 .drill-panel { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
   max-height: min(80vh, 720px); width: min(440px, calc(100vw - 40px));
   display: flex; flex-direction: column; background: var(--panel); border: 1px solid var(--border);
-  border-radius: 12px; box-shadow: var(--shadow); z-index: 900; animation: drill-in .18s ease;
-  transition: left 200ms ease; }
+  border-radius: 12px; box-shadow: var(--shadow); z-index: 900; animation: drill-in .18s ease; }
 @keyframes drill-in { from { opacity: 0; transform: translate(-50%, -50%) scale(0.97); } to { opacity: 1; transform: translate(-50%, -50%); } }
 .drill-head { display: flex; align-items: flex-start; gap: 10px; padding: 18px 20px 12px; }
 .drill-summary { display: flex; gap: 10px; flex-wrap: wrap; padding: 0 20px 16px; border-bottom: 1px solid var(--border); }

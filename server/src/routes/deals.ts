@@ -887,6 +887,45 @@ dealsRouter.post(
           data: { readAt: new Date() },
         });
       }
+      // Closing a deal automatically marks the WINNING buyer's activity record
+      // CLOSED — the buyer whose offer was accepted (the deal's selected buyer,
+      // falling back to the selected/accepted offer). Every other buyer's
+      // record, and all communication history/notes/timeline, stay untouched.
+      if (toStage === "CLOSED") {
+        let winnerBuyerId: string | null = deal.selectedBuyerId ?? null;
+        if (!winnerBuyerId && deal.selectedOfferId) {
+          const off = await tx.offer.findUnique({ where: { id: deal.selectedOfferId }, select: { buyerId: true } });
+          winnerBuyerId = off?.buyerId ?? null;
+        }
+        if (!winnerBuyerId) {
+          const off = await tx.offer.findFirst({
+            where: { dealId: deal.id, status: "ACCEPTED" },
+            orderBy: { updatedAt: "desc" }, select: { buyerId: true },
+          });
+          winnerBuyerId = off?.buyerId ?? null;
+        }
+        if (winnerBuyerId) {
+          const act = await tx.dealBuyerActivity.findUnique({
+            where: { dealId_buyerId: { dealId: deal.id, buyerId: winnerBuyerId } },
+          });
+          if (act && act.status !== "CLOSED") {
+            await tx.dealBuyerActivity.update({
+              where: { id: act.id },
+              data: { status: "CLOSED", lastActivityDate: new Date() },
+            });
+            // The change shows up in the buyer's interaction log like any other
+            // status change, so the automation is visible and auditable.
+            await tx.dealBuyerMessage.create({
+              data: {
+                organizationId: orgId(req), dealId: deal.id, buyerId: winnerBuyerId, activityId: act.id,
+                kind: "STATUS_CHANGE",
+                body: "Status automatically set to Closed — this buyer's accepted offer closed the deal.",
+                createdByUserId: req.user!.id,
+              },
+            });
+          }
+        }
+      }
       await tx.dealStageHistory.create({
         data: {
           dealId: deal.id,

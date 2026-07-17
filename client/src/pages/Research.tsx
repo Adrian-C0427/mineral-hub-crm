@@ -648,15 +648,18 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
 
   useEffect(() => {
     setLoading(true);
-    // Drop rows from a DIFFERENT aggregation level immediately — rendering
-    // county rows under abstract columns (or vice versa) for a frame was the
-    // visible glitch when switching Activity By levels. Same-level rows stay
-    // up while a period/filter refresh loads, so those transitions stay calm.
-    setData((d) => (d && d.level === level ? d : null));
     api.get<{ level: string; rows: GeoRow[] }>(`/research/geography?level=${level}&${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
   }, [qs, level]);
+  // Seamless level switching: the table keeps showing the PREVIOUS level's
+  // rows (gently dimmed) until the new level's data arrives — no flash to a
+  // spinner, no rows rendered under the wrong columns. Everything derived
+  // from the table (name column, headers, drill links) follows the level of
+  // the data on screen (`shownLevel`), never the not-yet-loaded selection.
+  const shownLevel = (data?.level as typeof level | undefined) ?? level;
   useEffect(() => {
-    if (level === "county" && data) { setCountyRows(data.rows); return; }
+    // Only reuse the table's rows when they really are county rows (data can
+    // briefly hold the previous level while a switch is in flight).
+    if (level === "county" && data?.level === "county") { setCountyRows(data.rows); return; }
     api.get<{ level: string; rows: GeoRow[] }>(`/research/geography?level=county&${qs}`).then((d) => setCountyRows(d.rows)).catch(() => {});
   }, [qs, level, data]);
   // Abstract-level stats for the drilled-in county (colors + hotspot outlines
@@ -676,17 +679,17 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
   }, [qs, focusCounty, countyRows.length]);
 
   const geoName = (r: GeoRow) =>
-    level === "state" ? r.state
-      : level === "county" ? `${r.county}, ${r.state}`
+    shownLevel === "state" ? r.state
+      : shownLevel === "county" ? `${r.county}, ${r.state}`
         : `${r.abstractId} (${r.county} Co)`;
 
   const columns: Column<GeoRow>[] = [
-    { key: "name", header: level === "state" ? "State" : level === "county" ? "County" : "Abstract", value: geoName,
+    { key: "name", header: shownLevel === "state" ? "State" : shownLevel === "county" ? "County" : "Abstract", value: geoName,
       render: (r) => (
         <>
           {/* At abstract level the name is a direct gateway into the records
               behind it — click opens Records filtered to that abstract. */}
-          {level === "abstract" && r.abstractId
+          {shownLevel === "abstract" && r.abstractId
             ? <a style={{ cursor: "pointer", fontWeight: 600 }} title={`View records for abstract ${r.abstractId}`}>{geoName(r)}</a>
             : geoName(r)}
           {" "}{r.isHotspot && <span className="badge" style={{ background: "rgba(239,68,68,0.15)", color: "#ef4444" }}>HOTSPOT</span>}
@@ -754,7 +757,7 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
 
       <div className="panel">
         <div className="panel-title">
-          <h3 style={{ margin: 0 }}>Activity by {level === "state" ? "State" : level === "county" ? "County" : "Abstract"}</h3>
+          <h3 style={{ margin: 0 }}>Activity by {shownLevel === "state" ? "State" : shownLevel === "county" ? "County" : "Abstract"}</h3>
           <div className="row" style={{ gap: 8 }}>
             <div className="chip-row">
               {(["state", "county", "abstract"] as const).map((l) => (
@@ -762,26 +765,30 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
               ))}
             </div>
             <button className="small" disabled={!data?.rows.length} onClick={() => data && downloadCsv(
-              `research-geography-${level}.csv`,
+              `research-geography-${shownLevel}.csv`,
               ["Name", "State", "County", "Transactions", "Leases", "Permits", "Total", "Prior", "Change %", "Hotspot"],
               data.rows.map((r) => [geoName(r), r.state, r.county, r.transactions, r.leases, r.permits, r.total, r.previous, r.pctChange == null ? "" : Math.round(r.pctChange * 100), r.isHotspot ? "YES" : ""]),
             )}>Export CSV</button>
           </div>
         </div>
         {loading && !data ? <Spinner /> : !data || data.rows.length === 0 ? <p className="muted">No activity in this period.</p> : (
-          <SortableTable
-            columns={columns}
-            rows={data.rows}
-            rowKey={(r) => `${r.state}|${r.county}|${r.abstractId}`}
-            defaultSort={{ key: "total", dir: "desc" }}
-            onRowClick={(r) => onDrill({
-              states: r.state ? [r.state] : [],
-              counties: r.county ? [r.county] : [],
-              // Abstract rows drill straight to that abstract's records; other
-              // levels clear any abstract filter so results aren't over-narrowed.
-              abstracts: level === "abstract" && r.abstractId ? [r.abstractId] : [],
-            })}
-          />
+          // While a different level loads, the current table stays put and
+          // gently dims — the new rows swap in without a spinner flash.
+          <div style={{ opacity: loading ? 0.55 : 1, transition: "opacity 160ms ease", pointerEvents: loading ? "none" : undefined }}>
+            <SortableTable
+              columns={columns}
+              rows={data.rows}
+              rowKey={(r) => `${r.state}|${r.county}|${r.abstractId}`}
+              defaultSort={{ key: "total", dir: "desc" }}
+              onRowClick={(r) => onDrill({
+                states: r.state ? [r.state] : [],
+                counties: r.county ? [r.county] : [],
+                // Abstract rows drill straight to that abstract's records; other
+                // levels clear any abstract filter so results aren't over-narrowed.
+                abstracts: shownLevel === "abstract" && r.abstractId ? [r.abstractId] : [],
+              })}
+            />
+          </div>
         )}
       </div>
     </>
