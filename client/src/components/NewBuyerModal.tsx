@@ -17,7 +17,7 @@ import { DateField } from "./DateField";
  */
 export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
   const [f, setF] = useState({
-    companyName: "", contactName: "", email: "", phone: "",
+    companyName: "", contactFirstName: "", contactLastName: "", email: "", phone: "",
     website: "", mailingAddress: "", mailingCity: "", mailingState: "", mailingZip: "",
     minAcreage: "", maxAcreage: "", minPrice: "", maxPrice: "",
     nextFollowUpDate: "", notes: "",
@@ -35,10 +35,11 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
     setF((p) => ({ ...p, [k]: e.target.value }));
   const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
 
-  // Required before a buyer can be created (Company Name, Contact Name, Phone).
+  // Required before a buyer can be created (Company, First/Last name, Phone).
   const missing: string[] = [];
   if (!f.companyName.trim()) missing.push("Company name");
-  if (!f.contactName.trim()) missing.push("Contact name");
+  if (!f.contactFirstName.trim()) missing.push("First name");
+  if (!f.contactLastName.trim()) missing.push("Last name");
   if (!f.phone.trim()) missing.push("Phone number");
 
   async function submit() {
@@ -49,7 +50,8 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
       const { id } = await api.post<{ id: string }>("/buyers", {
         companyName: f.companyName.trim(),
         name: f.companyName.trim(),
-        contactName: f.contactName.trim() || null,
+        contactFirstName: f.contactFirstName.trim(),
+        contactLastName: f.contactLastName.trim(),
         email: f.email.trim() || null,
         phone: f.phone.trim() || null,
         website: f.website.trim() || null,
@@ -93,7 +95,8 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
       <p className="muted" style={{ marginTop: 0 }}>New buyers start as <strong>Warm</strong> unless set otherwise. Fields marked <Req /> are required; the buy box drives deal matching — fill in what you know and add the rest later.</p>
       <div className="field"><label>Company name <Req /></label><input value={f.companyName} onChange={set("companyName")} autoFocus /></div>
       <div className="dd-grid">
-        <div className="field"><label>Contact name <Req /></label><input value={f.contactName} onChange={set("contactName")} /></div>
+        <div className="field"><label>First name <Req /></label><input value={f.contactFirstName} onChange={set("contactFirstName")} /></div>
+        <div className="field"><label>Last name <Req /></label><input value={f.contactLastName} onChange={set("contactLastName")} /></div>
         <div className="field"><label>Phone <Req /></label><PhoneInput value={f.phone} onChange={(v) => setF((p) => ({ ...p, phone: v }))} /></div>
         <div className="field"><label>Email</label><input type="email" value={f.email} onChange={set("email")} /></div>
         <div className="field"><label>Website</label><input value={f.website} onChange={set("website")} /></div>

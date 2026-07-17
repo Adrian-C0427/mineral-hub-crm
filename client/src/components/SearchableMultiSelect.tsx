@@ -92,6 +92,24 @@ export function SearchableMultiSelect({ options, value, onChange, placeholder = 
           className="msel-menu msel-menu-portal" role="listbox" ref={menuRef}
           style={pos}
         >
+          {/* Bulk row: select everything that matches the current search, or
+              clear the whole selection in one click — no unchecking one by one. */}
+          {(filtered.length > 1 || value.length > 1) && (
+            <div className="msel-bulk">
+              {filtered.length > 1 && (
+                <button type="button" onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { onChange([...value, ...filtered]); setQuery(""); inputRef.current?.focus(); }}>
+                  Select all{query ? " matching" : ""} ({filtered.length})
+                </button>
+              )}
+              {value.length > 1 && (
+                <button type="button" onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => { onChange([]); inputRef.current?.focus(); }}>
+                  Deselect all
+                </button>
+              )}
+            </div>
+          )}
           {shown.length === 0 ? (
             <div className="msel-empty">{query ? "No matches" : "All selected"}</div>
           ) : (

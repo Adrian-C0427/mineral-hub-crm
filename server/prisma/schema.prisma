@@ -696,7 +696,11 @@ model Buyer {
   organization       Organization?      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   name               String
   companyName        String
+  // Legacy combined contact name — kept in sync ("First Last") for older
+  // records/integrations; the split fields below are the source of truth.
   contactName        String?
+  contactFirstName   String?
+  contactLastName    String?
   email              String?
   phone              String?
   website            String?

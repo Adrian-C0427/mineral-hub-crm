@@ -284,7 +284,7 @@ export function DealDetail() {
                 <button className="small primary" disabled={selected.size === 0} onClick={() => setShowEmail(true)}>Send Deal via Email</button>
                 <button className="small" disabled={selected.size === 0} onClick={markContacted}>Mark as Contacted</button>
                 <button className="small" disabled={selected.size === 0} onClick={exportSelected}>Export Selected (CSV)</button>
-                <button className="small" disabled={selected.size === 0} onClick={() => setSelected(new Set())}>Remove Selection</button>
+                <button className="small" disabled={selected.size === 0} onClick={() => setSelected(new Set())}>Deselect all</button>
               </div>
             )}
             {matches.map((m) => (

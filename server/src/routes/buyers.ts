@@ -62,6 +62,8 @@ buyersRouter.get(
           name: b.name,
           companyName: b.companyName,
           contactName: b.contactName,
+          contactFirstName: b.contactFirstName ?? splitContactName(b.contactName).first,
+          contactLastName: b.contactLastName ?? splitContactName(b.contactName).last,
           focusArea: focusArea(b.buyBox),
           relationshipStatus: b.relationshipStatus,
           closeRate: cr.rate,
@@ -122,6 +124,8 @@ buyersRouter.get(
       name: b.name,
       companyName: b.companyName,
       contactName: b.contactName,
+      contactFirstName: b.contactFirstName ?? splitContactName(b.contactName).first,
+      contactLastName: b.contactLastName ?? splitContactName(b.contactName).last,
       email: b.email,
       phone: b.phone,
       website: b.website,
@@ -449,6 +453,8 @@ buyersRouter.post(
           ...(mergedSummary !== undefined ? { researchSummary: mergedSummary } : {}),
           // Fill contact gaps from the source; never overwrite target data.
           contactName: target.contactName ?? source.contactName,
+          contactFirstName: target.contactFirstName ?? source.contactFirstName,
+          contactLastName: target.contactLastName ?? source.contactLastName,
           email: target.email ?? source.email,
           phone: target.phone ?? source.phone,
           website: target.website ?? source.website,
@@ -497,12 +503,26 @@ const buyBoxSchema = z.object({
   maxPrice: z.number().nullish(),
 });
 
+/** Legacy "First Last" → split fields, for records that predate the split. */
+export function splitContactName(v: string | null | undefined): { first: string | null; last: string | null } {
+  const t = (v ?? "").trim();
+  if (!t) return { first: null, last: null };
+  const sp = t.indexOf(" ");
+  return sp < 0 ? { first: t, last: null } : { first: t.slice(0, sp), last: t.slice(sp + 1).trim() || null };
+}
+/** Split fields → legacy combined contactName (kept in sync for compatibility). */
+function joinContactName(first: string | null | undefined, last: string | null | undefined): string | null {
+  return [first, last].map((v) => (v ?? "").trim()).filter(Boolean).join(" ") || null;
+}
+
 const upsertSchema = z.object({
   // Display name is retired from the UI — `name` mirrors companyName (kept as a
   // column for legacy references). Optional in the payload; derived server-side.
   name: z.string().min(1).optional(),
   companyName: z.string().min(1),
   contactName: z.string().nullish(),
+  contactFirstName: z.string().trim().nullish(),
+  contactLastName: z.string().trim().nullish(),
   email: z.string().email().nullish().or(z.literal("")),
   // Normalize to canonical digits, but preserve undefined (partial PATCH) and null.
   phone: z.string().nullish().transform((v) => (v == null ? v : normalizePhone(v))),
@@ -528,7 +548,12 @@ buyersRouter.post(
   "/",
   requirePermission("createBuyers"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const data = upsertSchema.parse(req.body);
+    // Creating a buyer requires BOTH contact name parts (the UI enforces this
+    // too); other creation paths (portal leads, research commit) have their own
+    // routes and are unaffected.
+    const data = upsertSchema
+      .extend({ contactFirstName: z.string().trim().min(1), contactLastName: z.string().trim().min(1) })
+      .parse(req.body);
     if (data.ownerIds) await validateOrgOwners(orgId(req), data.ownerIds);
     const buyer = await prisma.$transaction(async (tx) => {
       const created = await tx.buyer.create({
@@ -537,7 +562,9 @@ buyersRouter.post(
           name: data.name ?? data.companyName,
           companyName: data.companyName,
           normalizedCompany: normalizeCompany(data.companyName),
-          contactName: data.contactName ?? null,
+          contactFirstName: data.contactFirstName,
+          contactLastName: data.contactLastName,
+          contactName: joinContactName(data.contactFirstName, data.contactLastName),
           email: data.email ? data.email.toLowerCase() : null,
           phone: data.phone ?? null,
           website: data.website ?? null,
@@ -579,7 +606,19 @@ buyersRouter.patch(
         patch.normalizedCompany = normalizeCompany(data.companyName);
         if (data.name === undefined) patch.name = data.companyName; // keep name mirroring company
       }
-      if (data.contactName !== undefined) patch.contactName = data.contactName;
+      if (data.contactFirstName !== undefined || data.contactLastName !== undefined) {
+        const first = data.contactFirstName !== undefined ? (data.contactFirstName || null) : (existing.contactFirstName ?? splitContactName(existing.contactName).first);
+        const last = data.contactLastName !== undefined ? (data.contactLastName || null) : (existing.contactLastName ?? splitContactName(existing.contactName).last);
+        patch.contactFirstName = first;
+        patch.contactLastName = last;
+        patch.contactName = joinContactName(first, last); // legacy field stays in sync
+      } else if (data.contactName !== undefined) {
+        // Legacy callers still writing the combined field: keep the split in sync.
+        const s = splitContactName(data.contactName);
+        patch.contactName = data.contactName;
+        patch.contactFirstName = s.first;
+        patch.contactLastName = s.last;
+      }
       if (data.email !== undefined) patch.email = data.email ? data.email.toLowerCase() : null;
       if (data.phone !== undefined) patch.phone = data.phone;
       if (data.website !== undefined) patch.website = data.website;

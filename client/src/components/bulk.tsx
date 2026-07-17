@@ -24,7 +24,7 @@ export function BulkBar({ count, onClear, children }: { count: number; onClear: 
       <strong>{count} selected</strong>
       <span className="spacer" />
       {children}
-      <button className="small" onClick={onClear}>Clear</button>
+      <button className="small" onClick={onClear}>Deselect all</button>
     </div>
   );
 }
