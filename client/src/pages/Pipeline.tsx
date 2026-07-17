@@ -427,18 +427,21 @@ function PipelineFilters({ deals, filters, onChange }: {
               <Select value={filters.assigneeId} onChange={(v) => onChange({ ...filters, assigneeId: v })} clearable searchable placeholder="Anyone" ariaLabel="Filter by team member"
                 options={people.map(([value, label]) => ({ value, label }))} />
             </div>
+            {/* From/To side by side on one line — the inputs split the row's
+                width evenly (flex) so they never wrap into a vertical stack,
+                at any panel width. */}
             <div className="field" style={{ marginBottom: 0 }}><label>NRA range</label>
-              <div className="row" style={{ gap: 6 }}>
-                <input type="number" min={0} value={filters.nraMin} onChange={(e) => onChange({ ...filters, nraMin: e.target.value })} placeholder="Min" aria-label="Minimum NRA" />
+              <div className="row" style={{ gap: 6, flexWrap: "nowrap", alignItems: "center" }}>
+                <input type="number" min={0} style={{ flex: 1, minWidth: 0 }} value={filters.nraMin} onChange={(e) => onChange({ ...filters, nraMin: e.target.value })} placeholder="From" aria-label="Minimum NRA" />
                 <span className="muted">–</span>
-                <input type="number" min={0} value={filters.nraMax} onChange={(e) => onChange({ ...filters, nraMax: e.target.value })} placeholder="Max" aria-label="Maximum NRA" />
+                <input type="number" min={0} style={{ flex: 1, minWidth: 0 }} value={filters.nraMax} onChange={(e) => onChange({ ...filters, nraMax: e.target.value })} placeholder="To" aria-label="Maximum NRA" />
               </div>
             </div>
             <div className="field" style={{ marginBottom: 0 }}><label>NMA range</label>
-              <div className="row" style={{ gap: 6 }}>
-                <input type="number" min={0} value={filters.nmaMin} onChange={(e) => onChange({ ...filters, nmaMin: e.target.value })} placeholder="Min" aria-label="Minimum NMA" />
+              <div className="row" style={{ gap: 6, flexWrap: "nowrap", alignItems: "center" }}>
+                <input type="number" min={0} style={{ flex: 1, minWidth: 0 }} value={filters.nmaMin} onChange={(e) => onChange({ ...filters, nmaMin: e.target.value })} placeholder="From" aria-label="Minimum NMA" />
                 <span className="muted">–</span>
-                <input type="number" min={0} value={filters.nmaMax} onChange={(e) => onChange({ ...filters, nmaMax: e.target.value })} placeholder="Max" aria-label="Maximum NMA" />
+                <input type="number" min={0} style={{ flex: 1, minWidth: 0 }} value={filters.nmaMax} onChange={(e) => onChange({ ...filters, nmaMax: e.target.value })} placeholder="To" aria-label="Maximum NMA" />
               </div>
             </div>
             <label className="cv-row cv-check" style={{ justifyContent: "flex-start", padding: 0 }}>
