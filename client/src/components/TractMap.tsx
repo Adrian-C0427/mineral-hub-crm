@@ -28,7 +28,7 @@ export interface TractMapFeature {
 
 // Same layer set as the main map / DealMap so the experience is familiar,
 // plus this deal's own abstract footprint as an optional overlay.
-const DEFAULT_LAYERS = { boundaries: true, numbers: true, surveys: true, wells: false, wellbores: false, dealAbstracts: false };
+const DEFAULT_LAYERS = { boundaries: true, numbers: true, surveys: true, wells: false, wellbores: false, dealAbstracts: false, pob: true };
 
 /**
  * Deal-isolated tract map: the shared cadastral stack (lib/mapLayers) with this
@@ -200,6 +200,7 @@ export function TractMap({ tracts, selectedId, abstractIds = [], placingPob, onP
     vis("abstracts-num", L.numbers); vis("abstracts-survey", L.surveys);
     vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores);
     vis("deal-abs-fill", L.dealAbstracts); vis("deal-abs-line", L.dealAbstracts);
+    vis("tract-pob", L.pob); vis("tract-pob-label", L.pob);
   }
   useEffect(applyVis, [layers]);
 
@@ -218,6 +219,7 @@ export function TractMap({ tracts, selectedId, abstractIds = [], placingPob, onP
               { key: "boundaries", label: "Abstract boundaries" }, { key: "numbers", label: "Abstract numbers" },
               { key: "surveys", label: "Survey names" }, { key: "wells", label: "Wells" },
               { key: "wellbores", label: "Wellbores (laterals)" },
+              { key: "pob", label: "Point of Beginning (POB)" },
               ...(abstractIds.length > 0 ? [{ key: "dealAbstracts", label: "Deal abstracts" }] : []),
             ]}
             layers={layers}

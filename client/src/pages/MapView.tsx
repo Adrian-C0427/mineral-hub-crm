@@ -4,6 +4,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
+import { US_STATE_OPTIONS, US_STATE_LABELS } from "../lib/options";
 import { Select } from "../components/Select";
 import { downloadCsv } from "../lib/csv";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION } from "../lib/counties";
@@ -62,7 +63,7 @@ const DEFAULT_MAP_LAYERS: MapLayers = { boundaries: true, absNums: true, surveyN
 interface MapCam { center: [number, number]; zoom: number }
 /** A named, reusable combination of every filter on the Filters panel. */
 interface MapFilterState {
-  status: string; counties: string[]; surveys: string[]; abstracts: string[];
+  status: string; states?: string[]; counties: string[]; surveys: string[]; abstracts: string[];
   wellTypes: string[]; wellStatuses: string[]; operators: string[]; formations: string[];
 }
 interface FilterPreset { name: string; filters: MapFilterState }
@@ -126,6 +127,7 @@ export function MapView() {
   const [showLayers, setShowLayers] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [statusFilter, setStatusFilter] = useState("ACTIVE");
+  const [fStates, setFStates] = useState<string[]>([]);
   const [fCounties, setFCounties] = useState<string[]>([]);
   const [fSurveys, setFSurveys] = useState<string[]>([]);
   const [fAbstracts, setFAbstracts] = useState<string[]>([]);
@@ -557,9 +559,11 @@ export function MapView() {
   const filtersTouched = useRef(false);
   useEffect(() => {
     if (!filtersTouched.current) { filtersTouched.current = true; return; }
+    // Auto-zoom is a GEOGRAPHIC affordance: only State / County / Survey /
+    // Abstract participate. Attribute filters (well type/status, operator,
+    // formation) narrow what's shown without moving the camera.
     const groups: [string, string[]][] = [
-      ["counties", fCounties], ["surveys", fSurveys], ["abstracts", fAbstracts],
-      ["wellTypes", fWellTypes], ["wellStatuses", fWellStatuses], ["operators", fOperators],
+      ["states", fStates], ["counties", fCounties], ["surveys", fSurveys], ["abstracts", fAbstracts],
     ];
     if (!groups.some(([, v]) => v.length)) return;
     const seq = ++extentSeq.current;
@@ -572,7 +576,7 @@ export function MapView() {
     }, 450);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses, fOperators]);
+  }, [fStates, fCounties, fSurveys, fAbstracts]);
   // Rebuild heat points whenever the data, filters, period, or thresholds change.
   useEffect(() => { if (heatReady) recomputeHeat(); /* eslint-disable-next-line */ },
     [heatReady, heatData, prod, fCounties, fOperators, fWellTypes, fWellStatuses, fFormations, heat.period, heat.from, heat.to, heat.min, heat.max, heat.oil, heat.gas, heat.hotspots]);
@@ -645,7 +649,7 @@ export function MapView() {
   // existing name overwrites that preset.
   function currentFilters(): MapFilterState {
     return {
-      status: statusFilter, counties: fCounties, surveys: fSurveys, abstracts: fAbstracts,
+      status: statusFilter, states: fStates, counties: fCounties, surveys: fSurveys, abstracts: fAbstracts,
       wellTypes: fWellTypes, wellStatuses: fWellStatuses, operators: fOperators, formations: fFormations,
     };
   }
@@ -660,6 +664,7 @@ export function MapView() {
   function applyFilterPreset(p: FilterPreset) {
     const f = p.filters;
     setStatusFilter(f.status ?? "ACTIVE");
+    setFStates(f.states ?? []);
     setFCounties(f.counties ?? []); setFSurveys(f.surveys ?? []); setFAbstracts(f.abstracts ?? []);
     setFWellTypes(f.wellTypes ?? []); setFWellStatuses(f.wellStatuses ?? []);
     setFOperators(f.operators ?? []); setFFormations(f.formations ?? []);
@@ -672,8 +677,8 @@ export function MapView() {
     const cur = JSON.stringify(currentFilters());
     return filterPresets.find((p) => JSON.stringify({ ...p.filters, status: p.filters.status ?? "ACTIVE" }) === cur)?.name ?? null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterPresets, statusFilter, fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses, fOperators, fFormations]);
-  const anyFilterSet = fCounties.length > 0 || fSurveys.length > 0 || fAbstracts.length > 0 ||
+  }, [filterPresets, statusFilter, fStates, fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses, fOperators, fFormations]);
+  const anyFilterSet = fStates.length > 0 || fCounties.length > 0 || fSurveys.length > 0 || fAbstracts.length > 0 ||
     fWellTypes.length > 0 || fWellStatuses.length > 0 || fOperators.length > 0 || fFormations.length > 0;
   // Size the map to fill from its top down to the viewport bottom (footer), with
   // a small gap — recomputed on resize and whenever the controls row changes
@@ -693,14 +698,16 @@ export function MapView() {
       <div className="page-header"><div className="row"><h1 style={{ marginBottom: 0 }}>Map</h1><span className="muted">Texas · {COUNTIES.length} counties · abstracts stream as you pan &amp; zoom</span></div></div>
 
       <div className="row" style={{ marginBottom: 12, gap: 10, position: "relative" }}>
-        <div ref={searchBoxRef} style={{ position: "relative", flex: 1, maxWidth: 480 }}>
+        {/* min-width keeps the full placeholder visible; the row wraps below it
+            on narrow screens instead of clipping the ghost text. */}
+        <div ref={searchBoxRef} style={{ position: "relative", flex: "1 1 360px", minWidth: "min(100%, 360px)", maxWidth: 520 }}>
           <input
             value={query}
             onChange={(e) => { setQuery(e.target.value); setSearchFocus(true); }}
             onFocus={() => setSearchFocus(true)}
             onClick={() => setSearchFocus(true)}
             onKeyDown={(e) => { if (e.key === "Escape") setSearchFocus(false); }}
-            placeholder="Search wells, API #, abstracts, operators, fields, deals…"
+            placeholder="Search wells, abstracts, operators, deals…"
             aria-label="Search the map"
           />
           {searchFocus && query.trim().length < 2 && recents.length > 0 && (
@@ -770,7 +777,10 @@ export function MapView() {
         <div className="panel mc-panel" style={{ marginBottom: 12 }}>
           <div className="mc-grid">
             <div><div className="ddx-label mc-lbl">Deal status</div><Select value={statusFilter} onChange={setStatusFilter} ariaLabel="Deal status" options={STATUS_OPTIONS.map(([v, l]) => ({ value: v, label: l }))} /></div>
-            <div><div className="ddx-label mc-lbl">County</div><SearchableMultiSelect options={meta.counties} value={fCounties} onChange={setFCounties} placeholder="Counties…" /></div>
+            {/* Cascading geography: State → County → Abstract → Survey. Map data
+                is Texas-only today, so counties empty out under a non-TX state. */}
+            <div><div className="ddx-label mc-lbl">State</div><SearchableMultiSelect options={[...US_STATE_OPTIONS]} labels={US_STATE_LABELS} value={fStates} onChange={setFStates} placeholder="States…" /></div>
+            <div><div className="ddx-label mc-lbl">County</div><SearchableMultiSelect options={fStates.length && !fStates.includes("TX") ? [] : meta.counties} value={fCounties} onChange={setFCounties} placeholder="Counties…" /></div>
             <div><div className="ddx-label mc-lbl">Survey</div><SearchableMultiSelect options={gisOptions.surveys} value={fSurveys} onChange={setFSurveys} placeholder="Surveys…" /></div>
             <div><div className="ddx-label mc-lbl">Abstract</div><SearchableMultiSelect options={gisOptions.abstracts} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstracts…" /></div>
             <div><div className="ddx-label mc-lbl">Well type</div><SearchableMultiSelect options={gisOptions.wellTypes} value={fWellTypes} onChange={setFWellTypes} placeholder="Well types…" /></div>

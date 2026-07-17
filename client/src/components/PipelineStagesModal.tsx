@@ -22,8 +22,6 @@ export function PipelineStagesModal({ onClose, onChanged }: { onClose: () => voi
   useEffect(() => { api.get<PipelineStage[]>("/pipeline/stages").then(setStages).catch(() => {}); }, []);
   useEffect(() => { setOrder(stages.filter((s) => !s.isTerminal)); }, [stages]);
 
-  const terminal = stages.filter((s) => s.isTerminal);
-
   async function apply(fn: () => Promise<PipelineStage[]>) {
     setBusy(true); setErr(null);
     try { setStages(await fn()); onChanged(); }
@@ -56,9 +54,10 @@ export function PipelineStagesModal({ onClose, onChanged }: { onClose: () => voi
 
   return (
     <Modal title="Customize pipeline stages" onClose={onClose} footer={<button className="primary" onClick={onClose}>Done</button>}>
+      {/* Closed and Dead are permanent system stages — they keep working as
+          always but are deliberately absent here since they can't be modified. */}
       <p className="muted" style={{ marginTop: 0 }}>
         Rename, reorder (drag by the <span aria-hidden="true">⠿</span> handle), add, or remove the active pipeline stages.
-        <strong> Closed</strong> and <strong>Dead</strong> are permanent system stages and can't be changed.
       </p>
       <div className="stage-editor">
         {order.map((s, i) => (
@@ -86,9 +85,6 @@ export function PipelineStagesModal({ onClose, onChanged }: { onClose: () => voi
         <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="New stage name" disabled={busy}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} style={{ maxWidth: 240 }} />
         <button type="button" className="small" disabled={!newLabel.trim() || busy} onClick={add}>+ Add stage</button>
-      </div>
-      <div className="stage-terminal">
-        {terminal.map((s) => <span key={s.id} className="badge resp-pending">{s.label} · permanent</span>)}
       </div>
       {err && <div className="error-text">{err}</div>}
 

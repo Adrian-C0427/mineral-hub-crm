@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { ConfirmDialog, Modal, Spinner, showToast } from "./ui";
+import { CollapsibleSection } from "./CollapsibleSection";
 import { CLASS_COLORS } from "../lib/entityClasses";
 
 /**
@@ -112,17 +113,24 @@ export function BuyerRelationships({ buyerId }: { buyerId: string }) {
     } finally { setAliasBusy(false); }
   }
 
-  if (loading) return <div className="panel"><h3>Relationships</h3><Spinner /></div>;
+  // Collapsed by default like the app's other collapsible sections; loading and
+  // empty states live inside the section body so the header never jumps around.
+  if (loading) {
+    return (
+      <CollapsibleSection title="Relationships" sub="Transaction network from research data">
+        <Spinner />
+      </CollapsibleSection>
+    );
+  }
   if (!net) {
     return (
-      <div className="panel">
-        <h3>Relationships</h3>
-        <p className="muted" style={{ marginBottom: 0 }}>
+      <CollapsibleSection title="Relationships" sub="Transaction network from research data">
+        <p className="muted" style={{ margin: 0 }}>
           {reason === "no-activity" || reason === "no-entity-key"
             ? "No transaction relationships found for this buyer in the research data yet. As deed and assignment records are imported, this buyer's grantor/grantee network will appear here automatically."
             : "Relationship analysis is unavailable."}
         </p>
-      </div>
+      </CollapsibleSection>
     );
   }
 
@@ -131,12 +139,12 @@ export function BuyerRelationships({ buyerId }: { buyerId: string }) {
   const canMerge = can("deleteBuyers");
 
   return (
-    <div className="panel">
-      {/* Headline: who this buyer is in the network, at a glance. */}
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-        <h3 style={{ margin: 0 }}>Relationships</h3>
-        <ClassBadge klass={net.klass} label={net.classLabel} />
-      </div>
+    <>
+    <CollapsibleSection
+      title="Relationships"
+      sub={`${net.acquisitions} acquisitions · ${net.dispositions} dispositions · derived from research records`}
+      right={<ClassBadge klass={net.klass} label={net.classLabel} />}
+    >
       <div className="rel-stats">
         <RelStat n={net.acquisitions} l="Acquisitions" />
         <RelStat n={net.dispositions} l="Dispositions" />
@@ -191,9 +199,20 @@ export function BuyerRelationships({ buyerId }: { buyerId: string }) {
         <PartyColumn title="Frequent Co-Buyers" empty="No shared acquisitions found." parties={net.coBuyers}
           canCreate={canCreate} adding={adding} onAdd={addAsBuyer} onOpen={(p) => p.buyerId && nav(`/buyers/${p.buyerId}`)} />
       </div>
+    </CollapsibleSection>
 
-      <ChainSection chains={net.chains} classLabels={net.classLabels} focusNorm={net.norm} />
+    {/* Acquisition Chains — its own dedicated section, independent from
+        Relationships, collapsed by default like the other profile sections. */}
+    {net.chains.length > 0 && (
+      <CollapsibleSection
+        title="Acquisition Chains"
+        sub={`${net.chains.length} path${net.chains.length === 1 ? "" : "s"} through the transaction network, strongest first`}
+      >
+        <ChainSection chains={net.chains} classLabels={net.classLabels} focusNorm={net.norm} />
+      </CollapsibleSection>
+    )}
 
+    <>
       {reviewing && !confirmMerge && (
         <Modal title="Review possible alias" onClose={() => setReviewing(null)}
           footer={<>
@@ -241,7 +260,8 @@ export function BuyerRelationships({ buyerId }: { buyerId: string }) {
           }
         />
       )}
-    </div>
+    </>
+    </>
   );
 }
 
@@ -311,11 +331,10 @@ function ChainSection({ chains, classLabels, focusNorm }: { chains: ChainEntry[]
   const CAP = 5;
   const visible = showAll ? chains : chains.slice(0, CAP);
 
+  // The section header (title, count) is provided by the CollapsibleSection
+  // wrapping this list on the Buyer Profile.
   return (
-    <div style={{ marginTop: 14 }}>
-      <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>
-        Acquisition Chains <span style={{ textTransform: "none", letterSpacing: 0 }}>· {chains.length} path{chains.length === 1 ? "" : "s"}, strongest first</span>
-      </div>
+    <div>
       <div className="rel-chain-list">
         {visible.map((c, i) => {
           const open = openIdx === i;

@@ -363,7 +363,7 @@ export function planExtentQuery(q: Record<string, unknown>): { sql: string; para
   const list = (k: string): string[] =>
     (Array.isArray(q[k]) ? (q[k] as unknown[]) : q[k] == null ? [] : [q[k]])
       .map((s) => String(s).trim()).filter(Boolean).slice(0, 500);
-  const counties = list("counties"), surveys = list("surveys"), abstracts = list("abstracts");
+  const states = list("states"), counties = list("counties"), surveys = list("surveys"), abstracts = list("abstracts");
   const wellTypes = list("wellTypes"), wellStatuses = list("wellStatuses"), operators = list("operators");
 
   const params: string[][] = [];
@@ -388,6 +388,13 @@ export function planExtentQuery(q: Record<string, unknown>): { sql: string; para
   }
   if (counties.length) {
     return { sql: `SELECT ST_Extent(geom)::text AS ext FROM gis.counties WHERE ${cond("name", counties)}`, params };
+  }
+  // State filter alone: frame the whole state. GIS coverage is Texas-only
+  // today, so any selection including TX frames the full county extent and a
+  // non-TX-only selection has nothing to frame.
+  if (states.length) {
+    if (!states.some((s) => s.toUpperCase() === "TX")) return null;
+    return { sql: `SELECT ST_Extent(geom)::text AS ext FROM gis.counties`, params };
   }
   return null;
 }

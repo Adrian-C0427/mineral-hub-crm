@@ -312,11 +312,12 @@ export function DealDetail() {
                   {m.matching.map((c) => <span key={c.key} className="crit-tag crit-yes">{c.label}</span>)}
                   {m.nonMatching.map((c) => <span key={c.key} className="crit-tag crit-no">{c.label}</span>)}
                 </div>
-                <div className="dc-meta" style={{ marginTop: 8, justifyContent: "space-between" }}>
+                {/* gap keeps the action clear of the meta text however long it wraps. */}
+                <div className="dc-meta" style={{ marginTop: 8, justifyContent: "space-between", gap: 16, alignItems: "center" }}>
                   <span>Owner(s): {m.owners.length ? m.owners.join(", ") : "—"} · {m.previousDealsClosed} closed together · Last contact: {m.lastContactDate ? fmtDate(m.lastContactDate) : "never"}
                     {/* "stale" only makes sense for aged contact — a never-contacted buyer isn't stale. */}
                     {m.stale && m.lastContactDate && <span className="stale-flag" title="No contact in a while — worth a follow-up"> · stale</span>}</span>
-                  {can("editDeals") && <button className="small" onClick={() => setLogBuyer({ id: m.buyerId, name: m.buyerName })}>Log contact</button>}
+                  {can("editDeals") && <button className="small" style={{ flexShrink: 0 }} onClick={() => setLogBuyer({ id: m.buyerId, name: m.buyerName })}>Log contact</button>}
                 </div>
               </div>
             ))}

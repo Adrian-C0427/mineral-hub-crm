@@ -1518,6 +1518,9 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .doc-chip.active { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 700; }
 .doc-count { font-weight: 600; font-size: 11px; border-radius: 99px; padding: 1px 7px; background: rgba(127, 127, 127, 0.16); color: inherit; }
 .doc-chip.active .doc-count { background: rgba(255, 255, 255, 0.22); }
+/* "+ New folder" affordance — dashed so it reads as a creator, not a folder. */
+.doc-chip-new { border-style: dashed; background: transparent; }
+.doc-chip-new:hover { color: var(--accent); border-color: var(--accent); }
 
 /* Seller cards */
 .seller-avatar { width: 34px; height: 34px; border-radius: 50%; background: rgba(59, 130, 246, 0.15); color: #7fb0ff;
