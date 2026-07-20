@@ -492,11 +492,11 @@ buyersRouter.post(
 );
 
 const buyBoxSchema = z.object({
-  states: z.array(z.string()).default([]),
-  counties: z.array(z.string()).default([]),
-  basins: z.array(z.string()).default([]),
-  formations: z.array(z.string()).default([]),
-  assetTypes: z.array(z.string()).default([]),
+  states: z.array(z.string().max(200)).max(500).default([]),
+  counties: z.array(z.string().max(200)).max(500).default([]),
+  basins: z.array(z.string().max(200)).max(500).default([]),
+  formations: z.array(z.string().max(200)).max(500).default([]),
+  assetTypes: z.array(z.string().max(200)).max(500).default([]),
   minAcreage: z.number().nullish(),
   maxAcreage: z.number().nullish(),
   minPrice: z.number().nullish(),
@@ -518,26 +518,26 @@ function joinContactName(first: string | null | undefined, last: string | null |
 const upsertSchema = z.object({
   // Display name is retired from the UI — `name` mirrors companyName (kept as a
   // column for legacy references). Optional in the payload; derived server-side.
-  name: z.string().min(1).optional(),
-  companyName: z.string().min(1),
-  contactName: z.string().nullish(),
-  contactFirstName: z.string().trim().nullish(),
-  contactLastName: z.string().trim().nullish(),
+  name: z.string().min(1).max(500).optional(),
+  companyName: z.string().min(1).max(500),
+  contactName: z.string().max(10_000).nullish(),
+  contactFirstName: z.string().trim().max(200).nullish(),
+  contactLastName: z.string().trim().max(200).nullish(),
   email: z.string().email().nullish().or(z.literal("")),
   // Normalize to canonical digits, but preserve undefined (partial PATCH) and null.
-  phone: z.string().nullish().transform((v) => (v == null ? v : normalizePhone(v))),
-  website: z.string().nullish(),
-  mailingAddress: z.string().nullish(),
-  mailingCity: z.string().nullish(),
-  mailingState: z.string().nullish(),
-  mailingZip: z.string().nullish(),
+  phone: z.string().max(10_000).nullish().transform((v) => (v == null ? v : normalizePhone(v))),
+  website: z.string().max(10_000).nullish(),
+  mailingAddress: z.string().max(10_000).nullish(),
+  mailingCity: z.string().max(10_000).nullish(),
+  mailingState: z.string().max(10_000).nullish(),
+  mailingZip: z.string().max(10_000).nullish(),
   relationshipStatus: z.enum(["HOT", "WARM", "COLD"]).optional(),
   lastContactDate: dateField,
   nextFollowUpDate: dateField,
-  notes: z.string().nullish(),
+  notes: z.string().max(10_000).nullish(),
   active: z.boolean().optional(),
-  ownerIds: z.array(z.string()).optional(),
-  tags: z.array(z.string()).optional(),
+  ownerIds: z.array(z.string().max(200)).max(500).optional(),
+  tags: z.array(z.string().max(200)).max(500).optional(),
   buyBox: buyBoxSchema.optional(),
 });
 
@@ -552,7 +552,7 @@ buyersRouter.post(
     // too); other creation paths (portal leads, research commit) have their own
     // routes and are unaffected.
     const data = upsertSchema
-      .extend({ contactFirstName: z.string().trim().min(1), contactLastName: z.string().trim().min(1) })
+      .extend({ contactFirstName: z.string().trim().min(1).max(200), contactLastName: z.string().trim().min(1).max(200) })
       .parse(req.body);
     if (data.ownerIds) await validateOrgOwners(orgId(req), data.ownerIds);
     const buyer = await prisma.$transaction(async (tx) => {

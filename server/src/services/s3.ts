@@ -47,7 +47,11 @@ export async function putObject(key: string, body: Buffer, contentType: string):
  *  the object for in-browser preview (PDF/image) instead of forcing a download. */
 export async function getDownloadUrl(key: string, filename?: string, inline = false): Promise<string> {
   if (!client) throw new Error("S3 is not configured");
-  const disposition = filename ? `${inline ? "inline" : "attachment"}; filename="${filename}"` : undefined;
+  // Strip quotes/backslashes/control chars from the filename before it goes in
+  // the quoted Content-Disposition value, so a crafted stored filename can't
+  // break out of the quotes and inject header directives.
+  const safeName = filename?.replace(/[\r\n"\\]/g, "_");
+  const disposition = safeName ? `${inline ? "inline" : "attachment"}; filename="${safeName}"` : undefined;
   const cmd = new GetObjectCommand({
     Bucket: env.S3.BUCKET,
     Key: key,

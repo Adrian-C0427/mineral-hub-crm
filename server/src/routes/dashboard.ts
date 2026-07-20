@@ -1,13 +1,17 @@
 import { Router } from "express";
 import { prisma, withDbRetry } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
-import { requireAuth, requireOrg, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal } from "../serializers.js";
 import { netProfit, avg } from "../domain/metrics.js";
 import { ensureStages, TERMINAL_STAGE_KEYS } from "../domain/stages.js";
 
 export const dashboardRouter = Router();
-dashboardRouter.use(requireAuth, requireOrg);
+// The dashboard surfaces the same sensitive financials as Reports (projected /
+// closed profit, average deal size, top buyers by volume), so it must sit
+// behind the SAME permission — otherwise removing "View reports" from a role
+// leaves the numbers readable here. Keep this gate in lockstep with reports.ts.
+dashboardRouter.use(requireAuth, requireOrg, requirePermission("viewReports"));
 
 const dealInclude = { selectedBuyer: true, relationshipOwner: true } as const;
 

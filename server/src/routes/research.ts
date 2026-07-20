@@ -10,6 +10,7 @@ import {
   classifyTrajectory, detectHotspot, documentDedupeKey, historyWindows, normalizeEntity,
   normField, rollingAverage, surgeSeverity, trend, type Trend,
 } from "../domain/research.js";
+import { MAX_CSV_CHARS } from "../config.js";
 import { fieldsFor, guessMapping, sourceFor } from "../domain/researchSources.js";
 import {
   buildResearchBuyer, classifyMatch, mergePlan, summaryFor,
@@ -1225,8 +1226,15 @@ researchRouter.get(
   }),
 );
 
+// Cap rows per ingest so a single file can't drive an unbounded parse/insert
+// pass (the char-level MAX_CSV_CHARS bound still applies to the raw body).
+const MAX_INGEST_ROWS = 50_000;
+
 function parseCsv(csv: string): { headers: string[]; rows: Record<string, string>[] } {
   const records = parse(csv, { columns: true, skip_empty_lines: true, trim: true, bom: true, relax_column_count: true }) as Record<string, string>[];
+  if (records.length > MAX_INGEST_ROWS) {
+    throw new HttpError(400, `This file has too many rows (${records.length}). Split it into files of ${MAX_INGEST_ROWS.toLocaleString()} rows or fewer.`);
+  }
   const headers = records.length ? Object.keys(records[0]) : [];
   return { headers, rows: records };
 }
@@ -1247,7 +1255,7 @@ function parseRecordDate(s: string): Date | null {
 
 const analyzeSchema = z.object({
   category: z.enum(["deeds", "leases", "permits"]),
-  csv: z.string().min(1),
+  csv: z.string().min(1).max(MAX_CSV_CHARS, "CSV file is too large"),
 });
 
 researchRouter.post(
@@ -1269,7 +1277,7 @@ researchRouter.post(
 
 const commitSchema = z.object({
   category: z.enum(["deeds", "leases", "permits"]),
-  csv: z.string().min(1),
+  csv: z.string().min(1).max(MAX_CSV_CHARS, "CSV file is too large"),
   mapping: z.record(z.string(), z.string()),
   filename: z.string().optional(),
   // Fallback State/County the user assigns when the file has no such columns.
@@ -1637,7 +1645,7 @@ researchRouter.post(
   requirePermission("manageResearchData"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
-    const { ids } = z.object({ ids: z.array(z.string()).min(1) }).parse(req.body);
+    const { ids } = z.object({ ids: z.array(z.string()).min(1).max(1000) }).parse(req.body);
     const runs = await prisma.researchIngestRun.findMany({ where: { id: { in: ids }, organizationId: org }, select: { id: true } });
     const runIds = runs.map((r) => r.id);
     if (!runIds.length) return res.json({ runs: 0, documents: 0, permits: 0 });
@@ -1657,7 +1665,7 @@ researchRouter.post(
 // "duplicate" reports on re-import).
 const bulkSchema = z.object({
   kind: z.enum(["DOCUMENTS", "PERMITS"]),
-  ids: z.array(z.string()).min(1),
+  ids: z.array(z.string()).min(1).max(5000),
   action: z.literal("delete"),
 });
 researchRouter.post(
