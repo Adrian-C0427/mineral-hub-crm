@@ -51,24 +51,24 @@ const assetFields = {
   purchasePrice: z.number().nullish(),
   currentValue: z.number().nullish(),
   bookValue: z.number().nullish(),
-  ownershipStatus: z.string().nullish(),
-  ownershipType: z.string().nullish(),
+  ownershipStatus: z.string().max(10_000).nullish(),
+  ownershipType: z.string().max(10_000).nullish(),
   workingInterest: z.number().nullish(),
   netRevenueInterest: z.number().nullish(),
-  surveys: z.array(z.string()).optional(),
-  wells: z.array(z.string()).optional(),
-  producingStatus: z.string().nullish(),
+  surveys: z.array(z.string().max(200)).max(500).optional(),
+  wells: z.array(z.string().max(200)).max(500).optional(),
+  producingStatus: z.string().max(10_000).nullish(),
   royaltyIncomeAnnual: z.number().nullish(),
   // Current-lease redesign.
-  leaseStatuses: z.array(z.string()).optional(),
-  royaltyRate: z.string().nullish(),
+  leaseStatuses: z.array(z.string().max(200)).max(500).optional(),
+  royaltyRate: z.string().max(10_000).nullish(),
   leaseEffectiveDate: dateField,
   leaseExpirationDate: dateField,
   // Deprecated (still accepted so old clients don't 400, but no longer surfaced).
-  leaseStatus: z.string().nullish(),
-  leaseInfo: z.string().nullish(),
-  divisionOrdersNote: z.string().nullish(),
-  taxInfo: z.string().nullish(),
+  leaseStatus: z.string().max(10_000).nullish(),
+  leaseInfo: z.string().max(10_000).nullish(),
+  divisionOrdersNote: z.string().max(10_000).nullish(),
+  taxInfo: z.string().max(10_000).nullish(),
 };
 // Scalar asset keys copied straight into a Prisma patch (arrays/scalars only).
 const ASSET_SCALAR_KEYS = [
@@ -122,51 +122,51 @@ dealsRouter.get(
 // required (the rest can be filled in later), so a seller's assets can be added
 // quickly during New Deal creation and refined afterward.
 const assetChildSchema = z.object({
-  name: z.string().min(1),
-  counties: z.array(z.string()).optional(),
-  state: z.string().nullish(),
-  states: z.array(z.string()).optional(),
+  name: z.string().min(1).max(500),
+  counties: z.array(z.string().max(200)).max(500).optional(),
+  state: z.string().max(10_000).nullish(),
+  states: z.array(z.string().max(200)).max(500).optional(),
   acreageNma: z.number().nullish(),
   nra: z.number().nullish(),
-  abstractIds: z.array(z.string()).optional(),
-  operator: z.string().nullish(),
-  rrc: z.string().nullish(),
+  abstractIds: z.array(z.string().max(200)).max(500).optional(),
+  operator: z.string().max(10_000).nullish(),
+  rrc: z.string().max(10_000).nullish(),
   askPrice: z.number().nullish(),
   ourPrice: z.number().nullish(),
-  assetTypes: z.array(z.string()).optional(),
-  basins: z.array(z.string()).optional(),
-  formations: z.array(z.string()).optional(),
+  assetTypes: z.array(z.string().max(200)).max(500).optional(),
+  basins: z.array(z.string().max(200)).max(500).optional(),
+  formations: z.array(z.string().max(200)).max(500).optional(),
   dateUnderContract: dateField,
   originalClosingDate: dateField,
   estimatedClosingCosts: z.number().nullish(),
-  notes: z.string().nullish(),
+  notes: z.string().max(10_000).nullish(),
 });
 type AssetChildInput = z.infer<typeof assetChildSchema>;
 
 const createSchema = z.object({
-  name: z.string().min(1),
-  sellerNames: z.array(z.string()).optional(),
-  counties: z.array(z.string()).optional(),
-  state: z.string().nullish(),
-  states: z.array(z.string()).optional(),
+  name: z.string().min(1).max(500),
+  sellerNames: z.array(z.string().max(200)).max(500).optional(),
+  counties: z.array(z.string().max(200)).max(500).optional(),
+  state: z.string().max(10_000).nullish(),
+  states: z.array(z.string().max(200)).max(500).optional(),
   acreageNma: z.number().nullish(),
   nra: z.number().nullish(),
-  abstractIds: z.array(z.string()).optional(),
-  operator: z.string().nullish(),
-  rrc: z.string().nullish(),
+  abstractIds: z.array(z.string().max(200)).max(500).optional(),
+  operator: z.string().max(10_000).nullish(),
+  rrc: z.string().max(10_000).nullish(),
   askPrice: z.number().nullish(),
   ourPrice: z.number().nullish(),
-  assetTypes: z.array(z.string()).optional(),
-  basins: z.array(z.string()).optional(),
-  formations: z.array(z.string()).optional(),
+  assetTypes: z.array(z.string().max(200)).max(500).optional(),
+  basins: z.array(z.string().max(200)).max(500).optional(),
+  formations: z.array(z.string().max(200)).max(500).optional(),
   dateUnderContract: dateField,
   originalClosingDate: dateField,
   estimatedClosingCosts: z.number().nullish(),
-  relationshipOwnerId: z.string().nullish(),
-  assigneeIds: z.array(z.string()).optional(),
-  notes: z.string().nullish(),
+  relationshipOwnerId: z.string().max(10_000).nullish(),
+  assigneeIds: z.array(z.string().max(200)).max(500).optional(),
+  notes: z.string().max(10_000).nullish(),
   // Create this deal as a child asset under an existing parent package.
-  parentDealId: z.string().nullish(),
+  parentDealId: z.string().max(10_000).nullish(),
   // Or create additional child assets under THIS new deal in one shot.
   assets: z.array(assetChildSchema).max(100).optional(),
   ...assetFields,
@@ -525,9 +525,9 @@ function serializeSeller(
 // Buyer Activity (CONTACTED) + an EMAIL_OUT timeline entry with sender + time.
 // --------------------------------------------------------------------------
 const sendEmailSchema = z.object({
-  buyerIds: z.array(z.string()).min(1),
-  subject: z.string().min(1),
-  body: z.string().min(1),
+  buyerIds: z.array(z.string().max(200)).min(1).max(1000),
+  subject: z.string().min(1).max(500),
+  body: z.string().min(1).max(100_000),
 });
 
 dealsRouter.post(
@@ -657,30 +657,30 @@ dealsRouter.get(
 // Update (characteristics + dates + overrides)
 // --------------------------------------------------------------------------
 const updateSchema = z.object({
-  name: z.string().min(1).optional(),
-  sellerNames: z.array(z.string()).optional(),
-  counties: z.array(z.string()).optional(),
-  state: z.string().nullish(),
-  states: z.array(z.string()).optional(),
+  name: z.string().min(1).max(500).optional(),
+  sellerNames: z.array(z.string().max(200)).max(500).optional(),
+  counties: z.array(z.string().max(200)).max(500).optional(),
+  state: z.string().max(10_000).nullish(),
+  states: z.array(z.string().max(200)).max(500).optional(),
   acreageNma: z.number().nullish(),
   nra: z.number().nullish(),
-  abstractIds: z.array(z.string()).optional(),
-  operator: z.string().nullish(),
-  rrc: z.string().nullish(),
+  abstractIds: z.array(z.string().max(200)).max(500).optional(),
+  operator: z.string().max(10_000).nullish(),
+  rrc: z.string().max(10_000).nullish(),
   askPrice: z.number().nullish(),
   ourPrice: z.number().nullish(),
-  assetTypes: z.array(z.string()).optional(),
-  basins: z.array(z.string()).optional(),
-  formations: z.array(z.string()).optional(),
+  assetTypes: z.array(z.string().max(200)).max(500).optional(),
+  basins: z.array(z.string().max(200)).max(500).optional(),
+  formations: z.array(z.string().max(200)).max(500).optional(),
   dateUnderContract: dateField,
   originalClosingDate: dateField,
   findBuyerByDateOverride: dateField,
   finalClosingDateOverride: dateField,
   closedDate: dateField,
   estimatedClosingCosts: z.number().nullish(),
-  relationshipOwnerId: z.string().nullish(),
-  assigneeIds: z.array(z.string()).optional(),
-  notes: z.string().nullish(),
+  relationshipOwnerId: z.string().max(10_000).nullish(),
+  assigneeIds: z.array(z.string().max(200)).max(500).optional(),
+  notes: z.string().max(10_000).nullish(),
   ...assetFields,
 });
 
@@ -960,9 +960,9 @@ const logContactSchema = z.object({
   dateSent: dateField,
   offerAmount: z.number().nullish(),
   nextFollowUpDate: dateField,
-  notes: z.string().nullish(),
+  notes: z.string().max(10_000).nullish(),
   responseReceived: z.boolean().optional(),
-  assignedTeamMemberId: z.string().nullish(),
+  assignedTeamMemberId: z.string().max(10_000).nullish(),
 });
 
 dealsRouter.post(
@@ -1044,7 +1044,7 @@ dealsRouter.post(
 // --------------------------------------------------------------------------
 const messageSchema = z.object({
   kind: z.enum(["PHONE", "MEETING", "NOTE", "NEGOTIATION", "EMAIL_OUT", "EMAIL_IN"]),
-  subject: z.string().nullish(),
+  subject: z.string().max(10_000).nullish(),
   body: z.string().min(1),
   occurredAt: dateField,
 });
@@ -1130,7 +1130,7 @@ dealsRouter.post(
   "/:id/contact-bulk",
   requirePermission("editDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { buyerIds } = z.object({ buyerIds: z.array(z.string()).min(1) }).parse(req.body);
+    const { buyerIds } = z.object({ buyerIds: z.array(z.string().max(200)).min(1).max(1000) }).parse(req.body);
     const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!deal) throw new HttpError(404, "Deal not found");
     // Only buyers in this org.
@@ -1249,7 +1249,7 @@ const sellerSchema = z.object({
   physicalZip: z.string().trim().max(20).nullish(),
   internalNotes: z.string().trim().max(5000).nullish(),
   preferredCommunicationNotes: z.string().trim().max(2000).nullish(),
-  assignedTeamMemberId: z.string().nullish(),
+  assignedTeamMemberId: z.string().max(10_000).nullish(),
 });
 
 const sellerInclude = { assignedTeamMember: { select: { id: true, name: true } } } as const;
@@ -1427,7 +1427,7 @@ dealsRouter.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const body = z
       .object({
-        assetIds: z.array(z.string()).optional(),
+        assetIds: z.array(z.string().max(200)).max(500).optional(),
         published: z.boolean().default(true),
         visibility: z.enum(["PUBLIC", "LINK_ONLY"]).default("PUBLIC"),
       })
@@ -1517,7 +1517,7 @@ dealsRouter.post(
   "/bulk-assign",
   requirePermission("editDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { ids, assigneeIds } = z.object({ ids: z.array(z.string()).min(1).max(500), assigneeIds: z.array(z.string()) }).parse(req.body);
+    const { ids, assigneeIds } = z.object({ ids: z.array(z.string()).min(1).max(500), assigneeIds: z.array(z.string().max(200)).max(500) }).parse(req.body);
     const org = orgId(req);
     const valid = await validateOrgUsers(org, assigneeIds);
     const owned = await prisma.deal.findMany({ where: { id: { in: ids }, organizationId: org }, select: { id: true } });

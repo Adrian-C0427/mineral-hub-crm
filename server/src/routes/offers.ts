@@ -11,14 +11,19 @@ offersRouter.use(requireAuth, requireOrg, requirePermission("editDeals"));
 
 const dateField = z.string().datetime({ offset: true }).or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).nullish();
 
+// Bound the money field (no negative/absurd offers flowing into activity
+// summaries and derived metrics) and free-text; mirrors the public portal's
+// offer schema.
+const amountField = z.number().nonnegative().max(1e12);
+
 const createSchema = z.object({
   dealId: z.string(),
   buyerId: z.string(),
-  amount: z.number(),
-  conditions: z.string().nullish(),
+  amount: amountField,
+  conditions: z.string().max(2000).nullish(),
   expirationDate: dateField,
   parentOfferId: z.string().nullish(),
-  notes: z.string().nullish(),
+  notes: z.string().max(4000).nullish(),
 });
 
 // Creating an Offer is the "Offer Made" trigger: it also upserts the buyer
@@ -88,11 +93,11 @@ offersRouter.post(
 );
 
 const updateSchema = z.object({
-  amount: z.number().optional(),
-  conditions: z.string().nullish(),
+  amount: amountField.optional(),
+  conditions: z.string().max(2000).nullish(),
   expirationDate: dateField,
   status: z.enum(["ACTIVE", "ACCEPTED", "REJECTED", "EXPIRED", "COUNTERED", "WITHDRAWN"]).optional(),
-  notes: z.string().nullish(),
+  notes: z.string().max(4000).nullish(),
 });
 
 offersRouter.patch(

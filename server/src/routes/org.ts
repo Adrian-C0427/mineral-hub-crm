@@ -32,11 +32,15 @@ orgRouter.get(
 // --- Company branding (logos) ---
 // Logos are stored as data URLs (no object storage configured). Validate the
 // declared MIME type and cap the encoded size so the org profile stays small.
+// Raster only — SVG is excluded because logos are echoed on the PUBLIC portal
+// (portal.ts orgPayload → fullLogo/compactLogo) and an SVG can carry <script>,
+// so a malicious tenant admin could plant stored XSS against portal visitors.
+// This mirrors the same decision already made for portal contact photos.
 const LOGO_MAX_BYTES = 512 * 1024; // ~512 KB decoded
-const LOGO_MIME = /^data:image\/(png|svg\+xml|jpeg|jpg|webp);base64,/;
+const LOGO_MIME = /^data:image\/(png|jpeg|jpg|webp);base64,/;
 const logoField = z.string().refine(
   (s) => LOGO_MIME.test(s) && (s.length * 3) / 4 <= LOGO_MAX_BYTES,
-  "Logo must be a PNG, SVG, JPG, or WebP under 512 KB",
+  "Logo must be a PNG, JPG, or WebP under 512 KB",
 ).nullable();
 
 orgRouter.patch(

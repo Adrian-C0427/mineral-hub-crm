@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { parse } from "csv-parse/sync";
 import { prisma } from "../db.js";
-import { asyncHandler } from "../middleware/errors.js";
+import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { MAX_CSV_CHARS } from "../config.js";
 import { normalizeCompany } from "../serializers.js";
@@ -63,8 +63,16 @@ function guessMapping(headers: string[]): Record<string, string> {
   return mapping;
 }
 
+// Upper bound on rows per import. classifyRows fires one dedupe query per row
+// concurrently (Promise.all), so an unbounded row count could exhaust the DB
+// connection pool and stall the whole API — cap it well below that.
+export const MAX_IMPORT_ROWS = 20_000;
+
 function parseCsv(csv: string): { headers: string[]; rows: Record<string, string>[] } {
   const records = parse(csv, { columns: true, skip_empty_lines: true, trim: true, bom: true }) as Record<string, string>[];
+  if (records.length > MAX_IMPORT_ROWS) {
+    throw new HttpError(400, `This file has too many rows (${records.length}). Split it into files of ${MAX_IMPORT_ROWS.toLocaleString()} rows or fewer.`);
+  }
   const headers = records.length ? Object.keys(records[0]) : [];
   return { headers, rows: records };
 }

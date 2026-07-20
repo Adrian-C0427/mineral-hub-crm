@@ -217,9 +217,12 @@ function summaryOf(volumes: MonthVolumes[]): WellSummary {
   };
 }
 
-async function productionSummaries(wellIds: string[]): Promise<Map<string, WellSummary>> {
+async function productionSummaries(organizationId: string, wellIds: string[]): Promise<Map<string, WellSummary>> {
   if (!wellIds.length) return new Map();
-  const wells = await prisma.researchWell.findMany({ where: { id: { in: wellIds } }, select: { id: true, source: true, sourceRef: true, apiNumber: true } });
+  // Scope to the org even though every current caller pre-scopes its ids —
+  // defense-in-depth so a future caller passing raw ids can't leak cross-org
+  // production (mirrors loadMergedProduction).
+  const wells = await prisma.researchWell.findMany({ where: { id: { in: wellIds }, organizationId }, select: { id: true, source: true, sourceRef: true, apiNumber: true } });
   const rrcVols = await rrcVolumesByWell(wells);
   // Manual / CSV production (everything that isn't an rrc live read).
   const groups = await prisma.wellProductionMonth.groupBy({
@@ -305,7 +308,7 @@ wellsRouter.get(
       prisma.researchWell.count({ where }),
       prisma.researchWell.findMany({ where, orderBy: [{ name: "asc" }], skip: (page - 1) * pageSize, take: pageSize }),
     ]);
-    const summaries = await productionSummaries(rows.map((r) => r.id));
+    const summaries = await productionSummaries(orgId(req), rows.map((r) => r.id));
     res.json({ total, page, pageSize, rows: rows.map((w) => serializeWell(w, summaries.get(w.id))) });
   }),
 );
@@ -434,7 +437,7 @@ wellsRouter.post(
              FROM rrc.permits WHERE api8 = $1 ORDER BY permit_date DESC NULLS LAST LIMIT 10`, w.api8)
       : [];
 
-    const summaries = await productionSummaries([well.id]);
+    const summaries = await productionSummaries(orgId(req), [well.id]);
     const fresh = await prisma.researchWell.findUniqueOrThrow({ where: { id: well.id } });
     res.json({ well: serializeWell(fresh, summaries.get(well.id)), monthsSynced: synced, permits });
   }),
@@ -596,7 +599,7 @@ wellsRouter.post(
     const loaded = await loadMergedProduction(orgId(req), wellIds);
     if (!loaded) { res.status(404).json({ error: "One or more wells were not found" }); return; }
     const result = runValuation(loaded.volumes, assumptions);
-    const summaries = await productionSummaries(loaded.wells.map((w) => w.id));
+    const summaries = await productionSummaries(orgId(req), loaded.wells.map((w) => w.id));
     res.json({ wells: loaded.wells.map((w) => serializeWell(w, summaries.get(w.id))), result });
   }),
 );
