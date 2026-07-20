@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { ArrowDown, ArrowUp, Info, Users } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -145,7 +146,8 @@ export function BuyerRelationships({ buyerId }: { buyerId: string }) {
       sub={`${net.acquisitions} acquisitions · ${net.dispositions} dispositions · derived from research records`}
       right={<ClassBadge klass={net.klass} label={net.classLabel} />}
     >
-      <div className="rel-stats">
+      {/* Stats strip — six figures separated by hairlines (reference layout). */}
+      <div className="rel2-stats">
         <RelStat n={net.acquisitions} l="Acquisitions" />
         <RelStat n={net.dispositions} l="Dispositions" />
         <RelStat n={net.topGrantors.length} l="Sources" />
@@ -153,9 +155,24 @@ export function BuyerRelationships({ buyerId }: { buyerId: string }) {
         <RelStat n={net.coBuyers.length} l="Co-buyers" />
         <RelStat n={net.chains.length} l="Chains" />
       </div>
-      <p className="muted" style={{ marginTop: 6, fontSize: 12 }}>
-        Automatically derived from imported public records. Behavior classified from this buyer's transaction flow.
-      </p>
+
+      {/* Provenance note + per-alias attribution share one hairline row. */}
+      <div className="rel2-prov">
+        <span className="rel2-prov-note">
+          <Info size={13} aria-hidden="true" />
+          Automatically derived from imported public records. Behavior classified from this buyer's transaction flow.
+        </span>
+        {net.aliasBreakdown.length > 1 && (
+          <span className="rel2-alias-wrap">
+            <span className="rel2-label">Activity recorded under</span>
+            {net.aliasBreakdown.map((a) => (
+              <span key={a.norm} className="rel2-alias-chip" title={`${a.acquisitions} acquisitions · ${a.dispositions} dispositions as "${a.name}"`}>
+                {a.name} <span className="rel2-alias-count">{a.acquisitions + a.dispositions}×</span>
+              </span>
+            ))}
+          </span>
+        )}
+      </div>
 
       {/* Possible aliases — user reviews and confirms; never merged automatically. */}
       {canEdit && suggestions.length > 0 && (
@@ -177,26 +194,12 @@ export function BuyerRelationships({ buyerId }: { buyerId: string }) {
         </div>
       )}
 
-      {/* Per-alias attribution: which historical name did what. */}
-      {net.aliasBreakdown.length > 1 && (
-        <div className="rel-alias-attr">
-          <span className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em" }}>Activity recorded under</span>
-          <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-            {net.aliasBreakdown.map((a) => (
-              <span key={a.norm} className="chip-mini rel-alias-chip" title={`${a.acquisitions} acquisitions · ${a.dispositions} dispositions as "${a.name}"`}>
-                {a.name} <span className="muted">{a.acquisitions + a.dispositions}×</span>
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div className="rel-columns">
-        <PartyColumn title="Acquired From" empty="No recorded acquisitions." parties={net.topGrantors}
+      <div className="rel2-cols">
+        <PartyColumn title="Acquired From" tone="up" empty="No recorded acquisitions." parties={net.topGrantors}
           canCreate={canCreate} adding={adding} onAdd={addAsBuyer} onOpen={(p) => p.buyerId && nav(`/buyers/${p.buyerId}`)} />
-        <PartyColumn title="Sold To" empty="No recorded dispositions." parties={net.topGrantees}
+        <PartyColumn title="Sold To" tone="down" empty="No recorded dispositions." parties={net.topGrantees}
           canCreate={canCreate} adding={adding} onAdd={addAsBuyer} onOpen={(p) => p.buyerId && nav(`/buyers/${p.buyerId}`)} />
-        <PartyColumn title="Frequent Co-Buyers" empty="No shared acquisitions found." parties={net.coBuyers}
+        <PartyColumn title="Frequent Co-Buyers" tone="co" empty="No shared acquisitions found." parties={net.coBuyers}
           canCreate={canCreate} adding={adding} onAdd={addAsBuyer} onOpen={(p) => p.buyerId && nav(`/buyers/${p.buyerId}`)} />
       </div>
     </CollapsibleSection>
@@ -266,16 +269,23 @@ export function BuyerRelationships({ buyerId }: { buyerId: string }) {
 }
 
 function RelStat({ n, l }: { n: number; l: string }) {
-  return <span className="rel-stat"><strong>{n}</strong> {l}</span>;
+  return (
+    <div className="rel2-stat">
+      <div className={`rel2-stat-n ${n === 0 ? "zero" : ""}`}>{n}</div>
+      <div className="rel2-stat-l">{l}</div>
+    </div>
+  );
 }
 
 /**
- * A ranked counterparty column. Business entities only — the server excludes
+ * A ranked counterparty column (reference design: icon-led uppercase heading,
+ * hairline-divided rows with a mini distribution bar, mono count, and the
+ * "+ Buyer" action pill). Business entities only — the server excludes
  * individual people from the relationship analysis, and there is deliberately
  * no way to reveal them here.
  */
-function PartyColumn({ title, empty, parties, canCreate, adding, onAdd, onOpen }: {
-  title: string; empty: string; parties: RelParty[];
+function PartyColumn({ title, tone, empty, parties, canCreate, adding, onAdd, onOpen }: {
+  title: string; tone: "up" | "down" | "co"; empty: string; parties: RelParty[];
   canCreate: boolean; adding: string | null; onAdd: (p: RelParty) => void; onOpen: (p: RelParty) => void;
 }) {
   const [showAll, setShowAll] = useState(false);
@@ -283,33 +293,36 @@ function PartyColumn({ title, empty, parties, canCreate, adding, onAdd, onOpen }
   const companies = useMemo(() => parties.filter((p) => p.entityType !== "individual"), [parties]);
   const max = Math.max(1, ...companies.map((p) => p.count));
   const CAP = 8;
+  const icon = tone === "up" ? <ArrowUp size={13} className="rel2-ic-up" aria-hidden="true" />
+    : tone === "down" ? <ArrowDown size={13} className="rel2-ic-down" aria-hidden="true" />
+      : <Users size={13} className="rel2-ic-co" aria-hidden="true" />;
 
   const Row = ({ p }: { p: RelParty }) => (
-    <div className="rel-party-row">
-      <button className={`rel-party-name ${p.buyerId ? "link" : ""}`} disabled={!p.buyerId} onClick={() => onOpen(p)} title={p.buyerId ? "Open buyer profile" : p.name}>
+    <div className="rel2-row">
+      <button className={`rel2-name ${p.buyerId ? "link" : ""}`} disabled={!p.buyerId} onClick={() => onOpen(p)} title={p.buyerId ? "Open buyer profile" : p.name}>
         {p.name}
       </button>
-      <span className="rel-party-meta">
-        <span className="rel-bar" aria-hidden="true"><span style={{ width: `${Math.max(8, (p.count / max) * 100)}%` }} /></span>
-        <span className="rel-count-mini">{p.count}×</span>
-        {!p.buyerId && canCreate && (
-          <button className="small" disabled={adding === p.norm} onClick={() => onAdd(p)}>
-            {adding === p.norm ? "Adding…" : "+ Buyer"}
-          </button>
-        )}
-      </span>
+      <span className="rel2-bar" aria-hidden="true"><span style={{ width: `${Math.max(8, (p.count / max) * 100)}%` }} /></span>
+      <span className="rel2-count">{p.count}×</span>
+      {!p.buyerId && canCreate && (
+        <button className="rel2-add" disabled={adding === p.norm} onClick={() => onAdd(p)}>
+          {adding === p.norm ? "Adding…" : "+ Buyer"}
+        </button>
+      )}
     </div>
   );
 
   const visible = showAll ? companies : companies.slice(0, CAP);
   return (
-    <div>
-      <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>{title}</div>
-      {companies.length === 0 ? <p className="muted" style={{ margin: 0 }}>{empty}</p> : (
-        <div className="rel-party-list">
+    <div className="rel2-col">
+      <div className="rel2-col-head">{icon}<span className="rel2-label">{title}</span></div>
+      {companies.length === 0 ? (
+        <div className="rel2-empty"><Users size={20} aria-hidden="true" /><span>{empty}</span></div>
+      ) : (
+        <div className="rel2-list">
           {visible.map((p) => <Row key={p.norm} p={p} />)}
           {companies.length > CAP && (
-            <button className="link-btn" onClick={() => setShowAll((s) => !s)}>
+            <button className="link-btn" style={{ marginTop: 6 }} onClick={() => setShowAll((s) => !s)}>
               {showAll ? "Show fewer" : `Show all ${companies.length}`}
             </button>
           )}
@@ -334,58 +347,98 @@ function ChainSection({ chains, classLabels, focusNorm }: { chains: ChainEntry[]
   // The section header (title, count) is provided by the CollapsibleSection
   // wrapping this list on the Buyer Profile.
   return (
-    <div>
-      <div className="rel-chain-list">
-        {visible.map((c, i) => {
-          const open = openIdx === i;
-          const first = c.chain.nodes[0], last = c.chain.nodes[c.chain.nodes.length - 1];
-          return (
-            <div key={i} className={`rel-chain ${open ? "open" : ""}`}>
-              <button type="button" className="rel-chain-head" onClick={() => setOpenIdx(open ? null : i)} aria-expanded={open}>
-                <span className="rel-chain-endpoints">
-                  <NodeBadge n={first} focus={first.norm === focusNorm} />
-                  <span className="muted rel-chain-mid">→ {c.chain.nodes.length - 2 > 0 ? `${c.chain.nodes.length - 2} more` : ""} →</span>
-                  <NodeBadge n={last} focus={last.norm === focusNorm} />
-                </span>
-                <span className="muted rel-chain-sum">
-                  {c.chain.nodes.length} entities · {c.chain.totalCount} tx
-                  {c.chain.counties.length > 0 && <> · {c.chain.counties.slice(0, 2).join(", ")}{c.chain.counties.length > 2 ? "…" : ""}</>}
-                </span>
+    <div className="chain2-list">
+      {visible.map((c, i) => {
+        const open = openIdx === i;
+        const len = c.chain.nodes.length;
+        const first = c.chain.nodes[0], last = c.chain.nodes[len - 1];
+        return (
+          <div key={i} className={`chain2 ${open ? "open" : ""}`}>
+            <button type="button" className="chain2-head" onClick={() => setOpenIdx(open ? null : i)} aria-expanded={open}>
+              <span className={`chain2-rank ${open ? "hot" : ""}`}>#{i + 1}</span>
+              <span className="chain2-endpoints">
+                <NodeBadge n={first} focus={first.norm === focusNorm} />
+                <span className="chain2-mid">→ {len - 2 > 0 && <b>{len - 2} more</b>} →</span>
+                <NodeBadge n={last} focus={last.norm === focusNorm} />
+              </span>
+              <span className="chain2-meta">
+                <span className="chain2-sum"><b>{len}</b> entities · <b>{c.chain.totalCount}</b> tx</span>
+                {c.chain.counties.length > 0 && (
+                  <span className="chain2-counties">{c.chain.counties.slice(0, 2).join(" · ")}{c.chain.counties.length > 2 ? "…" : ""}</span>
+                )}
                 <span className={`va-chev ${open ? "" : "down"}`}>⌃</span>
-              </button>
-              {open && (
-                <div className="rel-chain-body">
-                  <div className="row" style={{ gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                    {c.chain.nodes.map((n, j) => (
-                      <span key={n.norm} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        <NodeBadge n={n} focus={j === c.position} />
-                        {j < c.chain.nodes.length - 1 && <span className="muted" title={`${c.chain.hops[j]?.count} transactions`}>—{c.chain.hops[j]?.count}→</span>}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="muted" style={{ fontSize: 11, marginTop: 5 }}>
-                    This buyer is the <strong>{classLabels[c.role] ?? c.role}</strong> at position {c.position + 1} of {c.chain.nodes.length}
-                    {c.chain.counties.length > 0 && <> · {c.chain.counties.join(", ")}</>}
-                  </div>
+              </span>
+            </button>
+            {open && (
+              <div className="chain2-body">
+                {/* Horizontal node flow: every entity a labeled box, dashed
+                    tx-count arrows between hops, the focus buyer ringed. */}
+                <div className="chain2-flow">
+                  {c.chain.nodes.map((n, j) => (
+                    <Fragment key={n.norm}>
+                      <div className="chain2-node">
+                        <NodeBox n={n} focus={j === c.position} />
+                        <span className={`chain2-cap ${j === c.position ? "focus" : ""}`}>
+                          {j === c.position ? `This buyer · ${j + 1} of ${len}`
+                            : j === 0 ? "Origin"
+                              : j === len - 1 ? "Terminus"
+                                : `${j + 1} of ${len}`}
+                        </span>
+                      </div>
+                      {j < len - 1 && (
+                        <div className="chain2-arrow" title={`${c.chain.hops[j]?.count ?? 0} transactions`}>
+                          <span>{c.chain.hops[j]?.count ?? 0} tx</span>
+                          <svg width="52" height="10" viewBox="0 0 52 10" fill="none" aria-hidden="true">
+                            <line x1="0" y1="5" x2="46" y2="5" stroke="var(--accent)" strokeWidth="1.5" strokeDasharray="3 3" />
+                            <path d="M46 1.5L51 5l-5 3.5z" fill="var(--accent)" />
+                          </svg>
+                        </div>
+                      )}
+                    </Fragment>
+                  ))}
                 </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+                <div className="chain2-info">
+                  <Info size={13} aria-hidden="true" />
+                  <span>
+                    This buyer is the <strong>{classLabels[c.role] ?? c.role}</strong> at position <b>{c.position + 1} of {len}</b>
+                    {c.chain.counties.length > 0 && <> · {c.chain.counties.join(", ")}</>}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
       {chains.length > CAP && (
-        <button className="link-btn" style={{ marginTop: 6 }} onClick={() => { setShowAll((s) => !s); setOpenIdx(null); }}>
-          {showAll ? "Show strongest only" : `Show all ${chains.length} chains`}
-        </button>
+        <div className="chain2-foot">
+          <button className="link-btn" onClick={() => { setShowAll((s) => !s); setOpenIdx(null); }}>
+            {showAll ? "Show strongest only" : `Show all ${chains.length} chains`}
+          </button>
+          <span className="muted" style={{ fontSize: 11.5 }}>
+            {showAll ? `Showing all ${chains.length}` : `Showing ${Math.min(CAP, chains.length)} strongest of ${chains.length}`}
+          </span>
+        </div>
       )}
     </div>
   );
 }
 
+/** Endpoint pill in a chain's summary row — tinted by the entity's class. */
 function NodeBadge({ n, focus }: { n: ChainNode; focus: boolean }) {
   const c = CLASS_COLORS[n.klass] ?? "#64748b";
   return (
-    <span className="badge" style={{ background: `${c}26`, color: c, outline: focus ? "2px solid var(--accent)" : "none" }}>
+    <span className={`chain2-pill ${focus ? "focus" : ""}`}
+      style={focus ? undefined : { background: `${c}1f`, borderColor: `${c}55`, color: c }}>
+      {n.name}
+    </span>
+  );
+}
+
+/** Node box in the expanded flow — neutral card, accent ring on the focus buyer. */
+function NodeBox({ n, focus }: { n: ChainNode; focus: boolean }) {
+  const c = CLASS_COLORS[n.klass] ?? "#64748b";
+  return (
+    <span className={`chain2-box ${focus ? "focus" : ""}`} style={focus ? undefined : { borderColor: `${c}55` }} title={n.name}>
       {n.name}
     </span>
   );
