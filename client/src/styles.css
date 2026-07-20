@@ -1337,14 +1337,47 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .portal-asset-facts { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12.5px; color: var(--text-dim); }
 
 /* Relationship insights (headline cards) + clickable entity names */
-.rel-insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin-bottom: 12px; }
-.rel-insight { text-align: left; background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
-  padding: 12px 14px; cursor: pointer; transition: border-color 0.12s; min-width: 0; }
-.rel-insight:hover { border-color: var(--accent); }
-.rel-insight-l { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin-bottom: 4px; }
-.rel-insight-v { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Headline insight cards (reference design: icon-led uppercase label, bold
+   two-line value, metric line with emphasized figures). */
+.rel-insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.rel-insight { text-align: left; background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+  padding: 14px 16px; cursor: pointer; transition: border-color 0.12s, transform 0.12s; min-width: 0; }
+.rel-insight:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); transform: translateY(-1px); }
+.rel-insight-l { display: flex; align-items: center; gap: 7px; font-size: 10px; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--text-dim); font-weight: 700; }
+.ri-ic-blue { color: var(--accent); flex: none; }
+.ri-ic-green { color: var(--green, #4ade80); flex: none; }
+.ri-ic-amber { color: #fbbf24; flex: none; }
+.ri-ic-violet { color: #c4b5fd; flex: none; }
+.rel-insight-v { font-weight: 700; font-size: 13px; line-height: 1.4; margin-top: 9px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.rel-insight-m { font-size: 11.5px; color: var(--text-dim); margin-top: 4px; }
+.rel-insight-m b { color: var(--text); font-variant-numeric: tabular-nums; }
 .rel-ent { cursor: pointer; font-weight: 600; }
 .rel-ent:hover { color: var(--accent); text-decoration: underline; }
+
+/* Relationships sub-tab count badges + icon search. */
+.relv-count { font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--text-dim);
+  background: color-mix(in srgb, var(--text) 5%, transparent); border-radius: 99px; padding: 1px 8px; margin-left: 4px; }
+.relv-count.hot { color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, transparent); }
+.relv-search { display: inline-flex; align-items: center; gap: 8px; background: var(--panel);
+  border: 1px solid var(--border); border-radius: 9px; padding: 0 12px; width: 240px; }
+.relv-search svg { color: var(--text-dim); flex: none; }
+.relv-search input { border: none; background: none; padding: 8px 0; width: 100%; min-width: 0; }
+.relv-search input:focus { outline: none; box-shadow: none; }
+.relv-search:focus-within { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+
+/* Grantor -> Grantee table treatments (rendered inside the shared SortableTable). */
+.relt-name { font-size: 13.5px; color: var(--text); }
+.relt-arrow { width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center;
+  justify-content: center; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); }
+.relt-count { display: inline-flex; align-items: center; gap: 8px; }
+.relt-count b { font-variant-numeric: tabular-nums; }
+.relt-bar { width: 44px; height: 4px; border-radius: 3px; background: color-mix(in srgb, var(--border) 60%, transparent); overflow: hidden; flex: none; }
+.relt-bar > span { display: block; height: 100%; border-radius: 3px; background: var(--accent); }
+.relt-chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+.relt-chip { font-size: 12px; font-weight: 600; color: var(--text);
+  background: color-mix(in srgb, var(--text) 6%, transparent); border: 1px solid var(--border); border-radius: 99px; padding: 2px 10px; }
 
 /* Segmented time-period control (Research) */
 .seg-control { display: flex; align-items: center; background: var(--panel-2); border: 1px solid var(--border);
