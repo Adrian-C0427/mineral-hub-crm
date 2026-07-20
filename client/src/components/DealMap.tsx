@@ -131,18 +131,23 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
 
   return (
     <div className="deal-map">
-      <MapLayersPanel
-        variant="bar"
-        defs={[
-          { key: "boundaries", label: "Abstract boundaries" }, { key: "numbers", label: "Abstract numbers" },
-          { key: "surveys", label: "Survey names" }, { key: "wells", label: "Wells" },
-          { key: "wellbores", label: "Wellbores (laterals)" },
-        ]}
-        layers={layers}
-        onToggle={(k) => toggle(k as keyof typeof layers)}
-      />
       <div className="dm-canvas">
         <div ref={container} style={{ position: "absolute", inset: 0 }} />
+        {/* Same collapsible floating Layers control as the Marketplace map. */}
+        <div className="portal-map-controls">
+          <MapLayersPanel
+            variant="floating"
+            collapsible
+            storageKey="mh-dealmap-layers-open"
+            defs={[
+              { key: "boundaries", label: "Abstract boundaries" }, { key: "numbers", label: "Abstract numbers" },
+              { key: "surveys", label: "Survey names" }, { key: "wells", label: "Wells" },
+              { key: "wellbores", label: "Wellbores (laterals)" },
+            ]}
+            layers={layers}
+            onToggle={(k) => toggle(k as keyof typeof layers)}
+          />
+        </div>
         {selected && (
           <div className="dm-info">
             <button className="icon-btn" style={{ float: "right" }} onClick={() => setSelected(null)}>×</button>

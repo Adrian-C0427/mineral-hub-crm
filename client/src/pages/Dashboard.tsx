@@ -20,7 +20,7 @@ const DASH_PERIODS: readonly (readonly [DashPeriod, string])[] = [
 ];
 
 interface DashboardData {
-  metrics: { activeDeals: number; projectedProfit: number; closedProfitYtd: number; avgDealSize: number; offersPending: number; periodLabel?: string };
+  metrics: { activeDeals: number; projectedProfit: number; closedProfitYtd: number; closedDealsCount: number; avgProfitPerDeal: number; offersPending: number; periodLabel?: string };
   overdue: { id: string; name: string; findBuyerByDate: string | null }[];
   stageCounts: { stage: string; count: number }[];
   upcomingFollowUps: { dealId: string; buyerName: string; dealName: string; date: string | null }[];
@@ -32,7 +32,7 @@ interface DashboardData {
     deals?: { id: string; name: string; stage: string; kind: "closed" | "projected"; amount: number | null; profit: number; date: string }[];
   }[];
   /** Real historical series for the KPI sparklines (optional: older API). */
-  trends?: { activeDealsWeekly: number[]; avgDealSize: number[]; offersWeekly: number[] };
+  trends?: { activeDealsWeekly: number[]; avgProfitPerDeal: number[]; closedWeekly: number[]; offersWeekly: number[] };
 }
 
 // Compact currency for KPI values, matching the design ($1.28M / $892K / $47.8K).
@@ -245,7 +245,7 @@ export function Dashboard() {
   const t = d.trends;
   const activeDelta = t && t.activeDealsWeekly.length >= 2 ? pctChange(t.activeDealsWeekly[t.activeDealsWeekly.length - 1], t.activeDealsWeekly[0]) : null;
   const closedDelta = curIdx > 0 ? pctChange(realized[curIdx], realized[curIdx - 1]) : null;
-  const avgDelta = t && t.avgDealSize.length >= 2 ? pctChange(t.avgDealSize[t.avgDealSize.length - 1], t.avgDealSize[t.avgDealSize.length - 2]) : null;
+  const avgDelta = t && t.avgProfitPerDeal.length >= 2 ? pctChange(t.avgProfitPerDeal[t.avgProfitPerDeal.length - 1], t.avgProfitPerDeal[t.avgProfitPerDeal.length - 2]) : null;
 
   // Brand-new workspace: no active deals and nothing closed yet. Guide the
   // first steps instead of presenting a wall of zeros.
@@ -258,7 +258,8 @@ export function Dashboard() {
         <Kpi label="Active Deals" value={d.metrics.activeDeals} delta={activeDelta} series={t?.activeDealsWeekly} spark="var(--accent)" title="Sparkline: active deals per week (8 weeks)" />
         <Kpi label="Projected Profit" value={fmtCompact(d.metrics.projectedProfit)} series={projectedSeries} spark="var(--accent)" title="Best (or accepted) offer minus cost basis across active deals with offers — the same series as the Projected bars below." />
         <Kpi label={`Closed ${d.metrics.periodLabel ?? "YTD"}`} value={fmtCompact(d.metrics.closedProfitYtd)} valueColor={d.metrics.closedProfitYtd > 0 ? "var(--green)" : undefined} delta={closedDelta} series={curIdx >= 0 ? realized.slice(0, curIdx + 1) : realized} spark="var(--green)" title="Sparkline: realized profit by month" />
-        <Kpi label="Avg Deal Size" value={fmtCompact(d.metrics.avgDealSize)} delta={avgDelta} series={t?.avgDealSize} spark="var(--text-dim)" title="Sparkline: running average across recent closes" />
+        <Kpi label="Closed Deals" value={d.metrics.closedDealsCount} series={t?.closedWeekly} spark="var(--green)" title="Deals moved to Closed within the selected range, by Contract Timeline Closed Date. Sparkline: closes per week (8 weeks)." />
+        <Kpi label="Avg Profit per Deal" value={fmtCompact(d.metrics.avgProfitPerDeal)} delta={avgDelta} series={t?.avgProfitPerDeal} spark="var(--text-dim)" title="Realized profit per closed deal in the selected range (Closed Date). Sparkline: running average across recent closes." />
         <Kpi label="Offers Pending" value={d.metrics.offersPending} series={t?.offersWeekly} spark="var(--amber)" title="Sparkline: offers received per week (8 weeks)" />
       </div>
     ),

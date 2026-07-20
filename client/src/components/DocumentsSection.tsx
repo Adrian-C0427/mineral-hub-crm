@@ -103,11 +103,11 @@ export function DocumentsSection({
   const [creatingFolder, setCreatingFolder] = useState(false);
   const dragFolder = useRef<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
-  // Collapsed by default everywhere; the choice is remembered for the session
-  // per record, using the same collapse pattern as the other page sections.
+  // Expanded by default everywhere; collapse remains available and the choice
+  // is remembered for the session per record.
   const openKey = `mh-docs-open:${ownerType}:${ownerId}`;
   const [expanded, setExpanded] = useState<boolean>(() => {
-    try { return sessionStorage.getItem(openKey) === "1"; } catch { return false; }
+    try { return sessionStorage.getItem(openKey) !== "0"; } catch { return true; }
   });
   const toggleOpen = () => setExpanded((o) => {
     try { sessionStorage.setItem(openKey, o ? "0" : "1"); } catch { /* storage off */ }
@@ -256,7 +256,6 @@ export function DocumentsSection({
         onClick={toggleOpen}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleOpen(); } }}>
         <div className="dpp-title">
-          <span className="dpp-ico" aria-hidden="true"><Folder size={16} /></span>
           <div>
             <h3 style={{ margin: 0 }}>{title}</h3>
             <div className="dpp-sub"><b className="docx-count">{files.length}</b> file{files.length === 1 ? "" : "s"} · organized by folder{canEdit ? " · drag files in to upload" : ""}</div>

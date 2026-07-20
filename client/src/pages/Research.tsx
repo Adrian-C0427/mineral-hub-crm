@@ -1518,6 +1518,18 @@ const SIGNAL_META: Record<string, { label: string; color: string }> = {
   NEW_OPERATOR: { label: "New Operator", color: "#06b6d4" },
 };
 
+// Severity (0–100) → intuitive tier color: Low green, Moderate yellow,
+// Elevated orange, High red, Critical deep red. Colors are used on dark panel
+// backgrounds, so all five stay AA-contrast against the panel surface.
+const SEVERITY_TIERS: { min: number; label: string; color: string }[] = [
+  { min: 80, label: "Critical", color: "#dc2626" },
+  { min: 60, label: "High", color: "#ef4444" },
+  { min: 40, label: "Elevated", color: "#f97316" },
+  { min: 20, label: "Moderate", color: "#eab308" },
+  { min: 0, label: "Low", color: "#22c55e" },
+];
+const severityTier = (n: number) => SEVERITY_TIERS.find((t) => n >= t.min) ?? SEVERITY_TIERS[SEVERITY_TIERS.length - 1];
+
 function OpportunitiesTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partial<Filters>) => void }) {
   const [data, setData] = useState<{ signals: Signal[] } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1540,11 +1552,12 @@ function OpportunitiesTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
       </p>
       {data.signals.map((s) => {
         const meta = SIGNAL_META[s.kind] ?? { label: s.kind, color: "#94a3b8" };
+        const tier = severityTier(s.severity);
         return (
-          <div key={s.id} className="panel" style={{ borderLeft: `3px solid ${meta.color}`, display: "flex", gap: 14, alignItems: "flex-start" }}>
+          <div key={s.id} className="panel" style={{ borderLeft: `3px solid ${tier.color}`, display: "flex", gap: 14, alignItems: "flex-start" }}>
             <div style={{ minWidth: 64, textAlign: "center" }}>
-              <div style={{ fontSize: 22, fontWeight: 700, color: meta.color }}>{s.severity}</div>
-              <div className="muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5 }}>severity</div>
+              <div style={{ fontSize: 22, fontWeight: 700, color: tier.color }}>{s.severity}</div>
+              <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600, color: tier.color }}>{tier.label}</div>
             </div>
             <div style={{ flex: 1 }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>

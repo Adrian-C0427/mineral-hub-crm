@@ -12,7 +12,7 @@ import { CollapsibleSection } from "../components/CollapsibleSection";
 import { LogContactModal } from "../components/LogContactModal";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { DealPortalPanel } from "../components/DealPortalPanel";
-import { DocumentsSection, type DocFile } from "../components/DocumentsSection";
+import { DocumentsSection, DEAL_DOC_FOLDERS, type DocFile } from "../components/DocumentsSection";
 import { OfferRowActions } from "../components/OfferActions";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
@@ -615,7 +615,9 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
         <TractSection dealId={asset.id} dealName={asset.name} canEdit={canEdit} abstractIds={asset.abstractIds} />
       </Suspense>
 
-      <DocumentsSection ownerType="deal" ownerId={asset.id} files={asset.files} folders={asset.docFolders?.length ? asset.docFolders : ASSET_DOC_FOLDERS} onChanged={onChanged} canEdit={canEdit} canDelete={canEdit} />
+      {/* Sell mode markets the asset like a deal, so it gets the Active Deal's
+          default folder set (Hold keeps the asset-specific folders). */}
+      <DocumentsSection ownerType="deal" ownerId={asset.id} files={asset.files} folders={asset.docFolders?.length ? asset.docFolders : DEAL_DOC_FOLDERS} onChanged={onChanged} canEdit={canEdit} canDelete={canEdit} />
 
       {logBuyer && <LogContactModal dealId={asset.id} buyerId={logBuyer.id} buyerName={logBuyer.name} users={users} dealNra={asset.nra} dealNma={asset.acreageNma} onClose={() => setLogBuyer(null)} onLogged={() => { setLogBuyer(null); onChanged(); }} />}
       {showEmail && <SendDealEmailModal dealId={asset.id} dealName={asset.name} buyerIds={[...selected]} onClose={() => setShowEmail(false)} onSent={() => { setSelected(new Set()); setShowEmail(false); onChanged(); }} />}

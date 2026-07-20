@@ -26,7 +26,16 @@ export function ThemedLogo({ src, alt, className, style }: {
     if (cached) { setDisplay(cached); return; }
     let alive = true;
     setDisplay(src); // new logo while processing — show the original, never blank
-    adaptLogoToTheme(src, theme).then((out) => { if (alive) setDisplay(out); });
+    adaptLogoToTheme(src, theme).then(async (out) => {
+      // Swap only after the processed image has fully decoded, so the <img>
+      // never paints an empty frame mid-swap (the visible "logo blink").
+      try {
+        const img = new Image();
+        img.src = out;
+        if (img.decode) await img.decode();
+      } catch { /* decode unsupported/failed — swap anyway */ }
+      if (alive) setDisplay(out);
+    });
     return () => { alive = false; };
   }, [src, theme]);
 
