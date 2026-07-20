@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ArrowDown, ArrowUp, FileText, Globe, Star, X } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Banner } from "./ui";
@@ -101,6 +102,7 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((o) => !o); } }}
       >
         <div className="dpp-title">
+          <span className="dpp-ico" aria-hidden="true"><Globe size={16} /></span>
           <div>
             <h3 style={{ margin: 0 }}>Buyer Portal</h3>
             <div className="dpp-sub">Only buyer-safe fields are shown — pricing, notes, sellers, and internal activity never appear.</div>
@@ -139,7 +141,7 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
         <span className="dpp-vdiv" />
         <label className="dpp-switchrow">
           <Toggle checked={p.portalFeatured} disabled={!canEdit || !p.publishedToPortal} onChange={(v) => patch({ featured: v })} />
-          <strong>Featured</strong>
+          <strong style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>Featured <Star size={13} className="dpp-star" aria-hidden="true" /></strong>
         </label>
       </div>
 
@@ -182,12 +184,15 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
           {contacts.map((c, i) => (
             <div key={c.id} className="dpp-contact">
               <div className="dpp-contact-head">
-                <span className="muted" style={{ fontSize: 12 }}>{i === 0 ? "Primary contact" : `Contact ${i + 1}`}</span>
+                <span className="dpp-contact-name">
+                  <span className="dpp-cnum" aria-hidden="true">{i + 1}</span>
+                  {i === 0 ? "Primary contact" : `Contact ${i + 1}`}
+                </span>
                 {canEdit && (
-                  <div className="row" style={{ gap: 4 }}>
-                    <button className="icon-btn" title="Move up" aria-label="Move up" disabled={i === 0} onClick={() => moveContact(i, -1)}>↑</button>
-                    <button className="icon-btn" title="Move down" aria-label="Move down" disabled={i === contacts.length - 1} onClick={() => moveContact(i, 1)}>↓</button>
-                    <button className="icon-btn danger" title="Remove contact" aria-label="Remove contact" onClick={() => removeContact(c.id)}>×</button>
+                  <div className="row" style={{ gap: 6 }}>
+                    <button className="dpp-cbtn" title="Move up" aria-label="Move up" disabled={i === 0} onClick={() => moveContact(i, -1)}><ArrowUp size={12} /></button>
+                    <button className="dpp-cbtn" title="Move down" aria-label="Move down" disabled={i === contacts.length - 1} onClick={() => moveContact(i, 1)}><ArrowDown size={12} /></button>
+                    <button className="dpp-cbtn danger" title="Remove contact" aria-label="Remove contact" onClick={() => removeContact(c.id)}><X size={12} /></button>
                   </div>
                 )}
               </div>
@@ -219,7 +224,7 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
               </div>
             </div>
           ))}
-          {canEdit && <button className="small" onClick={addContact} style={{ marginTop: 4 }}>+ Add contact</button>}
+          {canEdit && <button className="dpp-addcontact" onClick={addContact}>+ Add contact</button>}
         </div>
 
         {/* The offering auto-displays every section that has data — empty
@@ -227,27 +232,33 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
 
         {/* Asking price — defaults to the deal's Ask Price; overridable for the
             listing only (never changes the deal). */}
-        <div style={{ marginBottom: 16, maxWidth: 340 }}>
-          <div className="ddx-label" style={{ marginBottom: 8 }}>Published asking price</div>
-          <input
-            type="number" min="0" disabled={!canEdit}
-            value={askOverride}
-            placeholder={p.askPrice != null ? `Deal ask: $${p.askPrice.toLocaleString()}` : "No deal ask price set"}
-            onChange={(e) => setAskOverride(e.target.value)}
-            onBlur={() => { const v = askOverride.trim() === "" ? null : Number(askOverride); if (v !== p.portalAskPrice) { setP((prev) => prev ? { ...prev, portalAskPrice: v } : prev); patch({ askPrice: v }); } }}
-          />
-          <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Leave blank to use the deal's Ask Price ({p.askPrice != null ? `$${p.askPrice.toLocaleString()}` : "not set"}). This override doesn't change the deal.</div>
+        <div className="dpp-price">
+          <div style={{ minWidth: 260 }}>
+            <div className="ddx-label" style={{ marginBottom: 8 }}>Published asking price</div>
+            <input
+              type="number" min="0" disabled={!canEdit}
+              value={askOverride}
+              placeholder={p.askPrice != null ? `Deal ask: $${p.askPrice.toLocaleString()}` : "No deal ask price set"}
+              onChange={(e) => setAskOverride(e.target.value)}
+              onBlur={() => { const v = askOverride.trim() === "" ? null : Number(askOverride); if (v !== p.portalAskPrice) { setP((prev) => prev ? { ...prev, portalAskPrice: v } : prev); patch({ askPrice: v }); } }}
+            />
+          </div>
+          <div className="dpp-price-note">Leave blank to use the deal's Ask Price <b>({p.askPrice != null ? `$${p.askPrice.toLocaleString()}` : "not set"})</b>. This override doesn't change the deal.</div>
         </div>
 
         {(p.files?.length ?? 0) > 0 && (
           <div>
-            <div className="ddx-label" style={{ marginBottom: 8 }}>Documents visible to buyers</div>
-            {p.files!.map((f) => (
-              <label key={f.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 0", fontSize: 14 }}>
-                <input type="checkbox" disabled={!canDocs} checked={f.visibleToBuyers} onChange={(e) => toggleDoc(f.id, e.target.checked)} />
-                {f.filename} <span className="muted" style={{ fontSize: 12 }}>· {f.folder}</span>
-              </label>
-            ))}
+            <div className="ddx-label" style={{ marginBottom: 10 }}>Documents visible to buyers</div>
+            <div className="dpp-docs">
+              {p.files!.map((f) => (
+                <label key={f.id} className={`dpp-doc ${f.visibleToBuyers ? "on" : ""}`}>
+                  <input type="checkbox" disabled={!canDocs} checked={f.visibleToBuyers} onChange={(e) => toggleDoc(f.id, e.target.checked)} />
+                  <span className="dpp-doc-ico" aria-hidden="true"><FileText size={14} /></span>
+                  <span className="dpp-doc-name">{f.filename}</span>
+                  <span className="dpp-doc-folder">{f.folder}</span>
+                </label>
+              ))}
+            </div>
           </div>
         )}
       </div>
