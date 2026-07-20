@@ -3,6 +3,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
   PieChart, Pie, Cell,
 } from "recharts";
+import { Receipt } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { MetricCard, Spinner, Banner, Modal, ConfirmDelete } from "../components/ui";
@@ -382,7 +383,7 @@ function AllExpenses({
     <div className="panel xp-panel">
       {/* Panel header: title + search + presets + columns */}
       <div className="xp-head">
-        <h3>All expenses</h3>
+        <h3 className="xp-title"><span className="xp-ico" aria-hidden="true"><Receipt size={16} /></span>All expenses</h3>
         <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
           <div className="xp-search">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
@@ -446,10 +447,11 @@ function AllExpenses({
           <button className="small" style={{ alignSelf: "flex-end" }} onClick={() => { setFilters({ from: "", to: "", userId: "", categoryId: "", reimbursed: "" }); setQ(""); }}>Clear all</button>
         )}
         <div className="xp-summary">
-          <span>Showing <b>{totals.count}</b> expenses</span>
-          <span>Total <b>{money(totals.total, { cents: true })}</b></span>
-          <span className="ok">Reimbursed <b>{money(totals.reimbursed, { cents: true })}</b></span>
-          <span className="warn">Outstanding <b>{money(totals.outstanding, { cents: true })}</b></span>
+          <span className="xp-showing">Showing <b>{totals.count}</b> expenses</span>
+          <span className="xp-vdiv" aria-hidden="true" />
+          <span className="xp-stat"><span className="xp-stat-l">Total</span><b>{money(totals.total, { cents: true })}</b></span>
+          <span className="xp-stat ok"><span className="xp-stat-l">Reimbursed</span><b>{money(totals.reimbursed, { cents: true })}</b></span>
+          <span className="xp-stat warn"><span className="xp-stat-l">Outstanding</span><b>{money(totals.outstanding, { cents: true })}</b></span>
         </div>
       </div>
 
@@ -554,14 +556,16 @@ function ExpMonthGroup({
           <td className="center" onClick={(ev) => ev.stopPropagation()}>
             <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggle(e.id)} aria-label="Select row" />
           </td>
-          {has("date") && <td>{fmtDate(e.date)}</td>}
-          {has("user") && <td>{e.userName ?? "—"}</td>}
-          {has("category") && <td>{e.categoryName ?? "—"}</td>}
-          {has("amount") && <td className="right">{money(e.amount, { cents: true })}</td>}
+          {has("date") && <td className="xp-num">{fmtDate(e.date)}</td>}
+          {has("user") && <td>{e.userName
+            ? <span className="xp-user"><span className="xp-avatar" aria-hidden="true">{e.userName.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "•"}</span>{e.userName}</span>
+            : "—"}</td>}
+          {has("category") && <td>{e.categoryName ? <span className="xp-cat">{e.categoryName}</span> : "—"}</td>}
+          {has("amount") && <td className="right xp-num xp-amount">{money(e.amount, { cents: true })}</td>}
           {has("status") && (
-            <td><span className={`badge ${e.reimbursed ? "resp-offer" : "resp-pending"}`}>{e.reimbursed ? "Reimbursed" : "Outstanding"}</span></td>
+            <td><span className={`xp-status ${e.reimbursed ? "ok" : "warn"}`}><span className="dot" aria-hidden="true" />{e.reimbursed ? "Reimbursed" : "Outstanding"}</span></td>
           )}
-          {has("reimbursementDate") && <td>{e.reimbursementDate ? fmtDate(e.reimbursementDate) : "—"}</td>}
+          {has("reimbursementDate") && <td className="xp-num">{e.reimbursementDate ? fmtDate(e.reimbursementDate) : "—"}</td>}
           {has("notes") && <td className="exp-notes">{e.notes || "—"}</td>}
         </tr>
       ))}
