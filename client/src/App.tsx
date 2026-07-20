@@ -3,6 +3,7 @@ import { useAuth } from "./auth/AuthContext";
 import { Spinner, ToastHost } from "./components/ui";
 import { UnsavedChangesGuard } from "./lib/unsaved";
 import { Sidebar } from "./components/Sidebar";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Login } from "./pages/Login";
 import { ResetPassword } from "./pages/ResetPassword";
 import { OAuthCallback } from "./pages/OAuthCallback";
@@ -68,12 +69,14 @@ export function App() {
   // Buyer Offering Portal is public: reachable signed-in or out, no CRM chrome.
   if (pathname.startsWith("/portal/") || pathname.startsWith("/offer/")) {
     return (
-      <Suspense fallback={<Spinner label="Loading…" />}>
-        <Routes>
-          <Route path="/portal/:orgSlug" element={<PortalMarketplace />} />
-          <Route path="/offer/:slug" element={<PortalOffering />} />
-        </Routes>
-      </Suspense>
+      <ErrorBoundary resetKey={pathname}>
+        <Suspense fallback={<Spinner label="Loading…" />}>
+          <Routes>
+            <Route path="/portal/:orgSlug" element={<PortalMarketplace />} />
+            <Route path="/offer/:slug" element={<PortalOffering />} />
+          </Routes>
+        </Suspense>
+      </ErrorBoundary>
     );
   }
 
@@ -82,15 +85,17 @@ export function App() {
     // Signed-out: "/" is the marketing site; deep links (e.g. /deals) still land
     // on the login form, and sign-up remains invite-code-gated on the Login page.
     return (
-      <Suspense fallback={<Spinner label="Loading…" />}>
-        <Routes>
-          <Route path="/" element={<Landing />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/reset-password" element={<ResetPassword />} />
-          <Route path="/auth/callback" element={<OAuthCallback />} />
-          <Route path="*" element={<Login />} />
-        </Routes>
-      </Suspense>
+      <ErrorBoundary resetKey={pathname}>
+        <Suspense fallback={<Spinner label="Loading…" />}>
+          <Routes>
+            <Route path="/" element={<Landing />} />
+            <Route path="/login" element={<Login />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/auth/callback" element={<OAuthCallback />} />
+            <Route path="*" element={<Login />} />
+          </Routes>
+        </Suspense>
+      </ErrorBoundary>
     );
   }
 
@@ -103,6 +108,10 @@ export function App() {
       <UnsavedChangesGuard />
       <Sidebar />
       <main className="app-main">
+        {/* Boundary lives INSIDE the shell: a route error (e.g. a stale lazy
+            chunk after a redeploy) can never blank the whole app or unmount
+            the sidebar — navigation and the logo stay put. */}
+        <ErrorBoundary resetKey={pathname}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/pipeline" element={<Guard perm="viewDeals"><Pipeline /></Guard>} />
@@ -130,6 +139,7 @@ export function App() {
           <Route path="/settings/integrations" element={<Guard perm="manageApiIntegrations"><Suspense fallback={<Spinner label="Loading integrations…" />}><Integrations /></Suspense></Guard>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        </ErrorBoundary>
       </main>
     </div>
   );

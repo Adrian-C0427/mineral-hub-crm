@@ -212,12 +212,17 @@ export function TractMap({ tracts, selectedId, abstractIds = [], placingPob, onP
   const mapped = tracts.filter((t) => t.geometry).length;
   return (
     <div className="deal-map">
-      <div className="ml-bar" style={{ display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
-        {/* flex:1 gives the pill grid the full row width so the toggles lay
-            out horizontally — identical to the deal map and main Map page. */}
-        <div style={{ flex: "1 1 480px", minWidth: 0 }}>
+      <div className="dm-canvas">
+        <div ref={container} style={{ position: "absolute", inset: 0 }} />
+        {/* Same collapsible floating Layers control as the Marketplace map;
+            the reset button sits beside it, exactly like the portal maps. */}
+        <div className="portal-map-controls">
+          {placingPob && <span className="muted" style={{ fontSize: 12, alignSelf: "center", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, padding: "4px 8px" }}>Click the map to place the Point of Beginning</span>}
+          <button className="small portal-map-reset" onClick={() => { fitted.current = false; fitToTracts(true); }} title="Zoom back to the full tract extent">⌂ Reset view</button>
           <MapLayersPanel
-            variant="inline"
+            variant="floating"
+            collapsible
+            storageKey="mh-tractmap-layers-open"
             defs={[
               { key: "boundaries", label: "Abstract boundaries" }, { key: "numbers", label: "Abstract numbers" },
               { key: "surveys", label: "Survey names" }, { key: "wells", label: "Wells" },
@@ -229,13 +234,6 @@ export function TractMap({ tracts, selectedId, abstractIds = [], placingPob, onP
             onToggle={(k) => toggle(k as keyof typeof layers)}
           />
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginLeft: "auto" }}>
-          {placingPob && <span className="muted" style={{ fontSize: 12 }}>Click the map to place the Point of Beginning</span>}
-          <button className="small" onClick={() => { fitted.current = false; fitToTracts(true); }} title="Zoom back to the full tract extent">Reset view</button>
-        </div>
-      </div>
-      <div className="dm-canvas">
-        <div ref={container} style={{ position: "absolute", inset: 0 }} />
         {hover && (
           <div className="dm-info" style={{ left: Math.min(hover.x + 12, 9999), top: hover.y + 12, right: "auto", position: "absolute", pointerEvents: "none" }}>
             <strong>Call {hover.seq}</strong>

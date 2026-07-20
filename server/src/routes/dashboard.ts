@@ -112,7 +112,12 @@ dashboardRouter.get(
       (sum, d) => sum + (d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : 0),
       0,
     );
-    const avgDealSize = avg(closedInWindow.map((d) => d.selectedOffer?.amount).filter((n): n is number => n != null));
+    const closedDealsCount = closedInWindow.length;
+    // Average realized profit per closed deal in the window (same population
+    // and Closed Date keying as the Closed profit KPI above).
+    const avgProfitPerDeal = avg(
+      closedInWindow.map((d) => (d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : null)).filter((n): n is number => n != null),
+    );
 
     // Overdue alert (active, no buyer, past find-buyer-by)
     const overdue = allActive
@@ -229,13 +234,23 @@ dashboardRouter.get(
       (t) => pipelineHistory.filter((d) => d.createdAt <= t && !(d.stageHistory[0] && d.stageHistory[0].createdAt <= t)).length,
     );
 
-    // Avg deal size as a running average across closes (last 8 points),
+    // Avg profit per deal as a running average across closes (last 8 points),
     // ordered by the same Contract Timeline Closed Date as everything else.
     const closesAsc = closedDeals
       .filter((d) => d.selectedOffer && d.closedDate)
       .sort((a, b) => a.closedDate!.getTime() - b.closedDate!.getTime());
     let closeSum = 0;
-    const avgDealSizeTrend = closesAsc.map((d, i) => { closeSum += d.selectedOffer!.amount; return closeSum / (i + 1); }).slice(-8);
+    const avgProfitTrend = closesAsc.map((d, i) => {
+      closeSum += netProfit(d.selectedOffer!.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts);
+      return closeSum / (i + 1);
+    }).slice(-8);
+
+    // Closed deals per week (8 weeks) by Closed Date — sparkline for the
+    // Closed Deals KPI.
+    const closedWeekly = weekMarks.map((t, i) => {
+      const from = i === 0 ? new Date(t.getTime() - weekMs) : weekMarks[i - 1];
+      return closedDeals.filter((d) => d.closedDate && d.closedDate > from && d.closedDate <= t).length;
+    });
 
     // Offers RECEIVED per week (pending-status history isn't stored, so the
     // honest series for the offers card is submission volume).
@@ -253,7 +268,8 @@ dashboardRouter.get(
         activeDeals,
         projectedProfit,
         closedProfitYtd,
-        avgDealSize,
+        closedDealsCount,
+        avgProfitPerDeal,
         offersPending: activeOffers,
         periodLabel: win.label,
       },
@@ -268,7 +284,7 @@ dashboardRouter.get(
       recentActivity: recent.map((r) => ({ id: r.id, summary: r.summary, eventType: r.eventType, createdAt: r.createdAt, dealId: r.dealId, buyerId: r.buyerId })),
       topBuyers,
       profitByMonth,
-      trends: { activeDealsWeekly, avgDealSize: avgDealSizeTrend, offersWeekly },
+      trends: { activeDealsWeekly, avgProfitPerDeal: avgProfitTrend, closedWeekly, offersWeekly },
     });
   }),
 );

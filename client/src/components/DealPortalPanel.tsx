@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowDown, ArrowUp, FileText, Globe, Star, X } from "lucide-react";
+import { ArrowDown, ArrowUp, FileText, Star, X } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Banner } from "./ui";
@@ -41,9 +41,9 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
   const [contacts, setContacts] = useState<DealContact[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  // Collapsed by default — the portal controls are a secondary, occasional task,
-  // so the panel stays out of the way until the user expands it.
-  const [open, setOpen] = useState(false);
+  // Expanded by default — collapse remains available for users who want the
+  // panel out of the way.
+  const [open, setOpen] = useState(true);
   // Publish controls need publishOfferings; buyer-visibility of a document is a
   // document action (manageDocuments) — mirrors the server gates.
   const canEdit = can("publishOfferings");
@@ -102,7 +102,6 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((o) => !o); } }}
       >
         <div className="dpp-title">
-          <span className="dpp-ico" aria-hidden="true"><Globe size={16} /></span>
           <div>
             <h3 style={{ margin: 0 }}>Buyer Portal</h3>
             <div className="dpp-sub">Only buyer-safe fields are shown — pricing, notes, sellers, and internal activity never appear.</div>

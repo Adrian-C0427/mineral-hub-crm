@@ -270,8 +270,9 @@ export function DealDetail() {
         </div>
       )}
 
-      {/* Buyer Activity — collapsed by default; expandable per-buyer relationship + timeline */}
+      {/* Buyer Activity — expanded by default; collapsible per-buyer relationship + timeline */}
       <CollapsibleSection
+        defaultOpen
         title="Buyer Activity"
         sub="Every buyer's status, notes, and full communication history on this deal"
         right={<span className="muted" style={{ fontSize: 12.5 }}>{deal.buyerActivity.length} buyer{deal.buyerActivity.length === 1 ? "" : "s"}</span>}
@@ -286,8 +287,9 @@ export function DealDetail() {
         />
       </CollapsibleSection>
 
-      {/* Match recommendations — collapsed by default; actionable outreach */}
+      {/* Match recommendations — expanded by default; actionable outreach */}
       <CollapsibleSection
+        defaultOpen
         title="Buyer Match Recommendations"
         sub="Ranked, every buyer, highest match first"
         right={matches ? <span className="muted" style={{ fontSize: 12.5 }}>{matches.length} buyer{matches.length === 1 ? "" : "s"}</span> : undefined}

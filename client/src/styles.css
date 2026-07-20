@@ -286,6 +286,8 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 
 /* --- Metrics --- */
 .metrics-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--grid-gap); margin-bottom: var(--block-gap); }
+/* Dashboard KPI row has six cards (Closed Deals joined the lineup). */
+.metrics-row.dash-kpis { grid-template-columns: repeat(6, 1fr); }
 .metric-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; }
 .metric-label { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
 .metric-value { font-size: 24px; font-weight: 700; margin-top: 6px; }
