@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Cloud } from "lucide-react";
+import { Cloud, FileText, Folder, Upload } from "lucide-react";
 import { api } from "../api/client";
 import { Banner, EmptyState, Modal, OverflowMenu, Spinner, showToast } from "./ui";
 import { Select } from "./Select";
@@ -42,6 +42,19 @@ function fileType(f: DocFile): string {
   if (ext && ext.length <= 5) return ext;
   return ((f.mimeType ?? "").split("/")[1] || f.mimeType || "file").toUpperCase();
 }
+/** File-type pill tint family, keyed by extension (reference design). */
+function typeTone(t: string): "pdf" | "doc" | "sheet" | "image" | "plain" {
+  if (t === "PDF") return "pdf";
+  if (t === "DOC" || t === "DOCX" || t === "TXT" || t === "RTF") return "doc";
+  if (t === "XLS" || t === "XLSX" || t === "CSV") return "sheet";
+  if (["PNG", "JPG", "JPEG", "GIF", "WEBP", "HEIC", "SVG"].includes(t)) return "image";
+  return "plain";
+}
+/** Initials avatar for the uploader (e.g. "Adrian Campos" → "AC"). */
+function initialsOf(name: string): string {
+  return name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "•";
+}
+
 /** How the in-app viewer renders a file; "other" falls back to download. */
 function viewKind(f: DocFile): "pdf" | "image" | "video" | "audio" | "text" | "other" {
   const m = f.mimeType ?? "";
@@ -186,17 +199,23 @@ export function DocumentsSection({
       // The name itself opens the in-app viewer — the natural "click the
       // document to see it" affordance.
       render: (f) => (
-        <span title={f.filename}>
-          <button type="button" className="link-btn doc-name" onClick={() => setViewing(f)}>{f.filename}</button>
+        <span className="docx-namecell" title={f.filename}>
+          <span className={`docx-ftile ${typeTone(fileType(f))}`} aria-hidden="true"><FileText size={14} /></span>
+          <button type="button" className="link-btn doc-name docx-name" onClick={() => setViewing(f)}>{f.filename}</button>
           {(f.versionCount ?? 0) > 0 && <span className="chip-mini" style={{ marginLeft: 6 }} title={`${f.versionCount} previous version(s)`}>v{(f.versionCount ?? 0) + 1}</span>}
         </span>
       ),
     },
-    { key: "createdAt", header: "Date Uploaded", type: "date", value: (f) => f.createdAt, render: (f) => fmtDateLocal(f.createdAt) },
-    { key: "updatedAt", header: "Date Modified", type: "date", value: (f) => f.updatedAt ?? f.createdAt, render: (f) => fmtDateLocal(f.updatedAt ?? f.createdAt) },
-    { key: "uploadedBy", header: "Uploaded By", value: (f) => f.uploadedBy ?? "", render: (f) => f.uploadedBy ?? "—" },
-    { key: "type", header: "File Type", value: (f) => fileType(f) },
-    { key: "sizeBytes", header: "File Size", align: "right", value: (f) => f.sizeBytes, render: (f) => humanSize(f.sizeBytes) },
+    { key: "createdAt", header: "Date Uploaded", type: "date", value: (f) => f.createdAt, render: (f) => <span className="docx-date">{fmtDateLocal(f.createdAt)}</span> },
+    { key: "updatedAt", header: "Date Modified", type: "date", value: (f) => f.updatedAt ?? f.createdAt, render: (f) => <span className="docx-date dim">{fmtDateLocal(f.updatedAt ?? f.createdAt)}</span> },
+    {
+      key: "uploadedBy", header: "Uploaded By", value: (f) => f.uploadedBy ?? "",
+      render: (f) => f.uploadedBy
+        ? <span className="docx-by"><span className="docx-avatar" aria-hidden="true">{initialsOf(f.uploadedBy)}</span>{f.uploadedBy}</span>
+        : "—",
+    },
+    { key: "type", header: "File Type", value: (f) => fileType(f), render: (f) => <span className={`docx-type ${typeTone(fileType(f))}`}>{fileType(f)}</span> },
+    { key: "sizeBytes", header: "File Size", align: "right", value: (f) => f.sizeBytes, render: (f) => <span className="docx-date dim">{humanSize(f.sizeBytes)}</span> },
     {
       key: "actions", header: "", value: () => "", align: "right", width: "1%",
       // Two primary actions stay visible; everything else lives in a ⋯ menu
@@ -205,7 +224,7 @@ export function DocumentsSection({
       render: (f) => (
         <div className="doc-actions">
           <button className="small" onClick={() => setViewing(f)}>View</button>
-          <button className="small" onClick={() => open(f.id, false)}>Download</button>
+          <button className="small primary" onClick={() => open(f.id, false)}>Download</button>
           {(canEdit || canDelete) && (
             <OverflowMenu
               ariaLabel={`More actions for ${f.filename}`}
@@ -236,10 +255,13 @@ export function DocumentsSection({
       <div className="dpp-head" role="button" tabIndex={0} aria-expanded={expanded}
         onClick={toggleOpen}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleOpen(); } }}>
-        <div className="dpp-title"><div>
-          <h3 style={{ margin: 0 }}>{title}</h3>
-          <div className="dpp-sub">{files.length} file{files.length === 1 ? "" : "s"} · organized by folder{canEdit ? " · drag files in to upload" : ""}</div>
-        </div></div>
+        <div className="dpp-title">
+          <span className="dpp-ico" aria-hidden="true"><Folder size={16} /></span>
+          <div>
+            <h3 style={{ margin: 0 }}>{title}</h3>
+            <div className="dpp-sub"><b className="docx-count">{files.length}</b> file{files.length === 1 ? "" : "s"} · organized by folder{canEdit ? " · drag files in to upload" : ""}</div>
+          </div>
+        </div>
         <span className="dpp-right">
           <span className="muted" style={{ fontSize: 12.5 }}>{expanded ? "Collapse" : "Expand"}</span>
           <span className={`va-chev ${expanded ? "" : "down"}`}>⌃</span>
@@ -298,7 +320,8 @@ export function DocumentsSection({
                 <Cloud size={13} style={{ marginRight: 4, verticalAlign: -2 }} />{p.name}
               </button>
             ))}
-            <label className="chip" style={{ margin: 0 }}>
+            <label className="docx-upload">
+              <Upload size={14} aria-hidden="true" />
               {busy ? "Working…" : `Upload to ${folder}`}
               <input ref={uploadRef} type="file" multiple style={{ display: "none" }} disabled={busy}
                 onChange={(e) => { if (e.target.files?.length) void uploadMany(e.target.files); e.target.value = ""; }} />
