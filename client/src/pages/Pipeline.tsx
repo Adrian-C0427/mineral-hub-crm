@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
-import { Spinner, showToast } from "../components/ui";
+import { Modal, Spinner, showToast } from "../components/ui";
 import { Select } from "../components/Select";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { dealSearchHaystack } from "../lib/dealSearch";
@@ -125,8 +125,9 @@ export function Pipeline() {
   useEffect(() => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } }, [prefs]);
   const nav = useNavigate();
   const { can } = useAuth();
-  const { active: activeStages, reload: reloadStages, label } = useStages();
+  const { active: activeStages, reload: reloadStages, label, pipelines, selected, selectedId, setSelectedId } = useStages();
   const [showStages, setShowStages] = useState(false);
+  const [showNewPipeline, setShowNewPipeline] = useState(false);
   // Viewers can browse the board but not create deals or change stages —
   // hiding the affordances beats letting them click into a 403.
   const canCreate = can("createDeals");
@@ -223,7 +224,10 @@ export function Pipeline() {
 
   if (!deals) return <Spinner />;
   const dragDeal = drag ? deals.find((d) => d.id === drag.id) ?? null : null;
-  const boardDeals = applyPipelineFilters(deals, filters);
+  // Board shows ONLY the selected pipeline's deals. A null pipelineId means the
+  // org's default pipeline (legacy rows and the common case).
+  const pipelineDeals = deals.filter((d) => (selected.isDefault ? !d.pipelineId || d.pipelineId === selected.id : d.pipelineId === selected.id));
+  const boardDeals = applyPipelineFilters(pipelineDeals, filters);
   const filtersActive = activeFilterCount(filters) > 0;
 
   return (
@@ -233,8 +237,17 @@ export function Pipeline() {
           <h1 style={{ marginBottom: 0 }}>Pipeline</h1>
         </div>
         <div className="row" style={{ gap: 8 }}>
-          {filtersActive && <span className="muted" style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>Showing {boardDeals.length} of {deals.length}</span>}
-          <PipelineFilters deals={deals} filters={filters} onChange={setFilters} />
+          {filtersActive && <span className="muted" style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>Showing {boardDeals.length} of {pipelineDeals.length}</span>}
+          {/* Pipeline selector — switch boards; each pipeline has its own stages. */}
+          <Select
+            ariaLabel="Pipeline"
+            width={190}
+            options={pipelines.map((p) => ({ value: p.id, label: p.name }))}
+            value={selectedId}
+            onChange={(v) => v && setSelectedId(v)}
+          />
+          {canCustomizeStages && <button className="small" title="Create a new pipeline with its own stages" onClick={() => setShowNewPipeline(true)}>+ New pipeline</button>}
+          <PipelineFilters deals={pipelineDeals} filters={filters} onChange={setFilters} />
           {canCustomizeStages && <button className="small" onClick={() => setShowStages(true)}>Customize stages</button>}
           <PipelineCustomize prefs={prefs} onChange={setPrefs} />
           {canCreate && <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>}
@@ -287,8 +300,21 @@ export function Pipeline() {
         </div>
       )}
 
-      {showStages && <PipelineStagesModal onClose={() => setShowStages(false)} onChanged={() => { reloadStages(); load(); }} />}
-      {showNew && <NewDealModal onClose={() => setShowNew(false)} onCreated={(d) => { setShowNew(false); nav(`/deals/${d.id}`); }} />}
+      {showStages && (
+        <PipelineStagesModal
+          pipeline={selected}
+          onClose={() => setShowStages(false)}
+          onChanged={() => { reloadStages(); load(); }}
+          onPipelineDeleted={() => { setShowStages(false); setSelectedId(""); reloadStages(); load(); }}
+        />
+      )}
+      {showNewPipeline && (
+        <NewPipelineModal
+          onClose={() => setShowNewPipeline(false)}
+          onCreated={(id) => { setShowNewPipeline(false); reloadStages(); setSelectedId(id); }}
+        />
+      )}
+      {showNew && <NewDealModal pipelineId={selected.id || undefined} onClose={() => setShowNew(false)} onCreated={(d) => { setShowNew(false); nav(`/deals/${d.id}`); }} />}
       {pending && (
         <StageChangeModal
           deal={pending.deal}
@@ -509,5 +535,36 @@ function PipelineCustomize({ prefs, onChange }: { prefs: PipelinePrefs; onChange
         </div>
       )}
     </div>
+  );
+}
+
+/** Small create-pipeline dialog: name it, get the default stage set, switch to it. */
+function NewPipelineModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const create = async () => {
+    if (!name.trim() || busy) return;
+    setBusy(true); setErr(null);
+    try {
+      const p = await api.post<{ id: string }>("/pipeline/pipelines", { name: name.trim() });
+      showToast(`Pipeline "${name.trim()}" created.`);
+      onCreated(p.id);
+    } catch (e) { setErr(e instanceof Error ? e.message : "Something went wrong"); setBusy(false); }
+  };
+  return (
+    <Modal title="New pipeline" onClose={onClose} footer={<>
+      <button onClick={onClose} disabled={busy}>Cancel</button>
+      <button className="primary" onClick={create} disabled={!name.trim() || busy}>Create pipeline</button>
+    </>}>
+      <p className="muted" style={{ marginTop: 0 }}>
+        A new pipeline starts with the standard stage set — customize its stages any time.
+        Closed and Dead are always included and work exactly like today.
+      </p>
+      <label>Pipeline name</label>
+      <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Leasing"
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void create(); } }} />
+      {err && <div className="error-text">{err}</div>}
+    </Modal>
   );
 }

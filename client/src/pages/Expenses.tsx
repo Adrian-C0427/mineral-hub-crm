@@ -3,7 +3,6 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
   PieChart, Pie, Cell,
 } from "recharts";
-import { Receipt } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { MetricCard, Spinner, Banner, Modal, ConfirmDelete } from "../components/ui";
@@ -383,7 +382,7 @@ function AllExpenses({
     <div className="panel xp-panel">
       {/* Panel header: title + search + presets + columns */}
       <div className="xp-head">
-        <h3 className="xp-title"><span className="xp-ico" aria-hidden="true"><Receipt size={16} /></span>All expenses</h3>
+        <h3 className="xp-title">All expenses</h3>
         <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
           <div className="xp-search">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>

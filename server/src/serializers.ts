@@ -155,6 +155,8 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     basins: deal.basins,
     formations: deal.formations,
     stage: deal.stage,
+    // Null means the org's default pipeline.
+    pipelineId: deal.pipelineId ?? null,
     // Multi-asset grouping. `assetCount` is present on list rows; `parent`/`assets`
     // on the detail. A deal with assets is a "package"; a deal with a parent is a
     // child "asset". Standalone deals have neither.

@@ -26,7 +26,10 @@ const DEAD_REASONS = [
 ] as const;
 
 export function StageChangeModal({ deal, initialStage, directTerminal, hasUnresolvedActivity, onClose, onChanged }: Props) {
-  const { stages, label: stageLabel } = useStages();
+  // Destinations come from the DEAL'S OWN pipeline (deals in a non-default
+  // pipeline offer that pipeline's stages, not the board's current selection).
+  const { stagesOf, label: stageLabel } = useStages();
+  const stages = stagesOf(deal.pipelineId);
   const [toStage, setToStage] = useState<Stage>(initialStage ?? deal.stage);
   const [deadCategory, setDeadCategory] = useState<string>("");
   const [deadNotes, setDeadNotes] = useState("");

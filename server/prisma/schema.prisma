@@ -164,6 +164,7 @@ model Organization {
   buyerMessages     DealBuyerMessage[]
   emailTemplates    EmailTemplate[]
   pipelineStages    PipelineStage[]
+  pipelines         Pipeline[]
   integrations      Integration[]
   researchDocuments ResearchDocument[]
   researchPermits   ResearchPermit[]
@@ -447,6 +448,10 @@ model Deal {
   formations     String[]
 
   stage                 String   @default("UNDER_CONTRACT") // PipelineStage.key
+  // Which pipeline the deal moves through. Null means the org's default
+  // pipeline (pre-migration rows and the common case).
+  pipelineId            String?
+  pipeline              Pipeline? @relation(fields: [pipelineId], references: [id], onDelete: SetNull)
   currentStageEnteredAt DateTime @default(now())
   deadReason            String?
 
@@ -676,13 +681,35 @@ model PipelineStage {
   id             String       @id @default(cuid())
   organizationId String
   organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Which pipeline this stage belongs to. Nullable only for pre-migration
+  // rows; the backfill assigns every stage to its org's default pipeline and
+  // ensureStages always writes it.
+  pipelineId     String?
+  pipeline       Pipeline?    @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
   key            String // stored in Deal.stage
   label          String
   position       Int
   isTerminal     Boolean      @default(false)
   createdAt      DateTime     @default(now())
 
-  @@unique([organizationId, key])
+  @@unique([pipelineId, key])
+  @@index([organizationId])
+}
+
+// An independent pipeline: its own ordered stage set (CLOSED/DEAD always
+// present and permanent), its own board. Every org has exactly one default
+// pipeline (not deletable); users can add/rename/delete additional ones.
+model Pipeline {
+  id             String          @id @default(cuid())
+  organizationId String
+  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  isDefault      Boolean         @default(false)
+  position       Int             @default(0)
+  createdAt      DateTime        @default(now())
+  stages         PipelineStage[]
+  deals          Deal[]
+
   @@index([organizationId])
 }
 

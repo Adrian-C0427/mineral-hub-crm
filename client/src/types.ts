@@ -22,6 +22,8 @@ export interface TimelineEntry {
 export interface DealSummary {
   id: string;
   name: string;
+  /** Pipeline the deal belongs to; null = the org's default pipeline. */
+  pipelineId?: string | null;
   counties: string[];
   state: string | null;
   states: string[];

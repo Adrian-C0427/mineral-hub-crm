@@ -42,10 +42,12 @@ function assetMissing(a: AssetRow): string[] {
  * additional deals (each an identical full deal form) before saving, so a
  * multi-deal seller package is created in a single step.
  */
-export function NewDealModal({ onClose, onCreated, parentDealId }: {
+export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
   onClose: () => void;
   onCreated: (d: DealSummary) => void;
   parentDealId?: string;
+  /** Pipeline the new deal enters (defaults to the org's default pipeline). */
+  pipelineId?: string;
 }) {
   const asset = !!parentDealId;
   const [f, setF] = useState({
@@ -97,6 +99,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId }: {
     try {
       const deal = await api.post<DealSummary>("/deals", {
         name: f.name.trim(),
+        pipelineId: pipelineId ?? null,
         states, state: states[0] ?? null,
         counties, basins, formations, assetTypes, abstractIds,
         operator: f.operator || null,

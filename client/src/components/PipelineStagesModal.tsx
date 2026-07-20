@@ -1,25 +1,35 @@
 import { useEffect, useState } from "react";
 import { Modal, ConfirmDialog } from "./ui";
 import { api } from "../api/client";
+import type { PipelineInfo } from "../stages";
 import type { PipelineStage } from "../types";
 
 /**
- * Admin editor for the org's pipeline stages: rename, reorder, add, and remove
- * the active stages. Closed and Dead are permanent system stages (shown locked).
+ * Admin editor for ONE pipeline: rename the pipeline itself, rename/reorder/
+ * add/remove its active stages, and delete the pipeline (user-created only).
+ * Closed and Dead are permanent system stages in every pipeline (shown locked).
  * Every change persists immediately and refreshes the board via onChanged.
  */
-export function PipelineStagesModal({ onClose, onChanged }: { onClose: () => void; onChanged: () => void }) {
+export function PipelineStagesModal({ pipeline, onClose, onChanged, onPipelineDeleted }: {
+  pipeline: PipelineInfo;
+  onClose: () => void;
+  onChanged: () => void;
+  onPipelineDeleted: () => void;
+}) {
   const [stages, setStages] = useState<PipelineStage[]>([]);
+  const [name, setName] = useState(pipeline.name);
   const [newLabel, setNewLabel] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<PipelineStage | null>(null);
+  const [confirmDeletePipeline, setConfirmDeletePipeline] = useState(false);
   // Local active-stage order so drag reordering feels instant; persisted on drop.
   const [order, setOrder] = useState<PipelineStage[]>([]);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   const [overIdx, setOverIdx] = useState<number | null>(null);
 
-  useEffect(() => { api.get<PipelineStage[]>("/pipeline/stages").then(setStages).catch(() => {}); }, []);
+  const pid = pipeline.id;
+  useEffect(() => { api.get<PipelineStage[]>(`/pipeline/stages?pipelineId=${encodeURIComponent(pid)}`).then(setStages).catch(() => {}); }, [pid]);
   useEffect(() => { setOrder(stages.filter((s) => !s.isTerminal)); }, [stages]);
 
   async function apply(fn: () => Promise<PipelineStage[]>) {
@@ -29,6 +39,15 @@ export function PipelineStagesModal({ onClose, onChanged }: { onClose: () => voi
     finally { setBusy(false); }
   }
 
+  const renamePipeline = async (value: string) => {
+    const v = value.trim();
+    if (!v || v === pipeline.name) return;
+    setBusy(true); setErr(null);
+    try { await api.patch(`/pipeline/pipelines/${pid}`, { name: v }); onChanged(); }
+    catch (e) { setErr(e instanceof Error ? e.message : "Something went wrong"); }
+    finally { setBusy(false); }
+  };
+
   const rename = (s: PipelineStage, label: string) => {
     const v = label.trim();
     if (!v || v === s.label) return;
@@ -36,7 +55,7 @@ export function PipelineStagesModal({ onClose, onChanged }: { onClose: () => voi
   };
   const add = () => {
     if (!newLabel.trim()) return;
-    apply(async () => { const r = await api.post<PipelineStage[]>("/pipeline/stages", { label: newLabel.trim() }); setNewLabel(""); return r; });
+    apply(async () => { const r = await api.post<PipelineStage[]>("/pipeline/stages", { label: newLabel.trim(), pipelineId: pid }); setNewLabel(""); return r; });
   };
   // Drag a stage to a new position (reorder the active stages) and persist.
   function commitReorder(from: number, to: number) {
@@ -45,7 +64,7 @@ export function PipelineStagesModal({ onClose, onChanged }: { onClose: () => voi
     const [moved] = next.splice(from, 1);
     next.splice(to, 0, moved);
     setOrder(next); // optimistic — the board updates instantly, then we persist
-    apply(() => api.post<PipelineStage[]>("/pipeline/stages/reorder", { order: next.map((s) => s.id) }));
+    apply(() => api.post<PipelineStage[]>("/pipeline/stages/reorder", { order: next.map((s) => s.id), pipelineId: pid }));
   }
   function onDrop(target: number) {
     if (dragIdx != null) commitReorder(dragIdx, target);
@@ -53,11 +72,25 @@ export function PipelineStagesModal({ onClose, onChanged }: { onClose: () => voi
   }
 
   return (
-    <Modal title="Customize pipeline stages" onClose={onClose} footer={<button className="primary" onClick={onClose}>Done</button>}>
+    <Modal title="Customize pipeline" onClose={onClose} footer={<button className="primary" onClick={onClose}>Done</button>}>
+      {/* The pipeline itself: rename any pipeline; delete only user-created ones. */}
+      <div className="row" style={{ gap: 8, alignItems: "center", marginBottom: 14 }}>
+        <label style={{ margin: 0, whiteSpace: "nowrap" }}>Pipeline name</label>
+        <input value={name} disabled={busy} onChange={(e) => setName(e.target.value)}
+          onBlur={(e) => renamePipeline(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} style={{ maxWidth: 260 }} />
+        {!pipeline.isDefault && (
+          <button type="button" className="small danger" disabled={busy} onClick={() => setConfirmDeletePipeline(true)} style={{ marginLeft: "auto" }}>
+            Delete pipeline
+          </button>
+        )}
+      </div>
+
       {/* Closed and Dead are permanent system stages — they keep working as
           always but are deliberately absent here since they can't be modified. */}
       <p className="muted" style={{ marginTop: 0 }}>
-        Rename, reorder (drag by the <span aria-hidden="true">⠿</span> handle), add, or remove the active pipeline stages.
+        Rename, reorder (drag by the <span aria-hidden="true">⠿</span> handle), add, or remove this pipeline's active stages.
+        Closed and Dead are always present and cannot be changed.
       </p>
       <div className="stage-editor">
         {order.map((s, i) => (
@@ -97,6 +130,22 @@ export function PipelineStagesModal({ onClose, onChanged }: { onClose: () => voi
           message={<>Any deals currently in <strong>{confirmDelete.label}</strong> move to the first active stage. This can't be undone.</>}
           onCancel={() => setConfirmDelete(null)}
           onConfirm={async () => { await apply(() => api.del<PipelineStage[]>(`/pipeline/stages/${confirmDelete.id}`)); setConfirmDelete(null); }}
+        />
+      )}
+
+      {confirmDeletePipeline && (
+        <ConfirmDialog
+          title={`Delete "${pipeline.name}"?`}
+          confirmLabel="Delete pipeline"
+          danger
+          busy={busy}
+          message={<>Deals in this pipeline move to your default pipeline (Closed and Dead deals keep their status; active deals restart in its first stage). This can't be undone.</>}
+          onCancel={() => setConfirmDeletePipeline(false)}
+          onConfirm={async () => {
+            setBusy(true); setErr(null);
+            try { await api.del(`/pipeline/pipelines/${pid}`); setConfirmDeletePipeline(false); onPipelineDeleted(); }
+            catch (e) { setErr(e instanceof Error ? e.message : "Something went wrong"); setBusy(false); setConfirmDeletePipeline(false); }
+          }}
         />
       )}
     </Modal>

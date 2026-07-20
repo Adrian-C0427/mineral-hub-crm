@@ -26,14 +26,8 @@ interface NavItem {
 // Config-driven so new modules are added here without touching layout code.
 const NAV: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, to: "/", end: true, desc: "Today's acquisition snapshot — active deals, profit, follow-ups" },
-  {
-    label: "Deals", icon: Briefcase, perm: "viewDeals", desc: "Acquisition opportunities you're working",
-    children: [
-      { label: "Active Deals", icon: Briefcase, to: "/deals/active" },
-      { label: "Closed Deals", icon: Briefcase, to: "/deals/closed" },
-      { label: "Archived Deals", icon: Briefcase, to: "/deals/archived" },
-    ],
-  },
+  // Single entry — Active/Closed/Archived are tabs on the Deals page itself.
+  { label: "Deals", icon: Briefcase, to: "/deals", perm: "viewDeals", desc: "Acquisition opportunities you're working" },
   { label: "Mineral Assets", icon: Layers, to: "/assets", perm: "viewDeals", desc: "Your owned mineral & royalty portfolio" },
   { label: "Pipeline", icon: Workflow, to: "/pipeline", perm: "viewDeals", desc: "Drag deals through the acquisition stages" },
   { label: "Buyers", icon: Users, to: "/buyers", perm: "viewBuyers", desc: "Buyer list, buy boxes, and relationships" },
@@ -46,19 +40,9 @@ const NAV: NavItem[] = [
   // configuration lives under Settings → Buyer Portal, so viewing settings
   // never lights up this item.
   { label: "Buyer Portal", icon: Store, to: "/portal-admin", perm: "publishOfferings", desc: "Your public offering marketplace" },
-  {
-    label: "Settings", icon: SettingsIcon,
-    children: [
-      { label: "General", icon: SettingsIcon, to: "/settings/general" },
-      // Organization now lives under Settings (company, members, roles, owner).
-      // Visible to EVERY member: the page itself scopes what each role can do,
-      // and it's the only home of org info + "Join a different company" —
-      // hiding it made that section unreachable for members/viewers.
-      { label: "Organization", icon: SettingsIcon, to: "/settings/organization" },
-      { label: "Buyer Portal", icon: Store, to: "/settings/portal", perm: "managePortal" },
-      { label: "Integrations", icon: SettingsIcon, to: "/settings/integrations", perm: "manageApiIntegrations" },
-    ],
-  },
+  // Single entry — General/Organization/Portal/Integrations are tabs inside
+  // the Settings pages (SettingsNav), so the sidebar stays flat.
+  { label: "Settings", icon: SettingsIcon, to: "/settings", desc: "Account, organization, portal, and integrations" },
 ];
 
 export function Sidebar() {
