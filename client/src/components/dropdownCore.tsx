@@ -37,10 +37,15 @@ export function useMenuPosition(anchorRef: RefObject<HTMLElement | null>, open: 
       const left = Math.max(EDGE, Math.min(r.left, vw - r.width - EDGE));
       const below = vh - r.bottom - 4 - EDGE;
       const above = r.top - 4 - EDGE;
-      // Open downward whenever the full menu fits (or there's simply more room
-      // below); otherwise flip above the anchor, anchored by `bottom` so a
-      // short menu still hugs the control instead of floating mid-screen.
-      if (below >= Math.min(MENU_MAX_H, menuRef.current?.scrollHeight ?? MENU_MAX_H) || below >= above) {
+      // Open downward whenever space permits: the full menu fits below, OR
+      // there's enough room below for a usable (scrollable) menu. Only flip
+      // above the anchor when the space below is genuinely cramped AND the
+      // space above is meaningfully larger — this keeps every dropdown in the
+      // app opening down by default (the direction users expect), including
+      // controls that sit low inside modals.
+      const MIN_USABLE = 160; // a menu this tall scrolls comfortably
+      const fitsBelow = below >= Math.min(MENU_MAX_H, menuRef.current?.scrollHeight ?? MENU_MAX_H);
+      if (fitsBelow || below >= MIN_USABLE || below >= above) {
         setPos({ position: "fixed", top: r.bottom + 4, left, width: r.width, maxHeight: Math.max(80, Math.min(MENU_MAX_H, below)) });
       } else {
         setPos({ position: "fixed", bottom: vh - r.top + 4, left, width: r.width, maxHeight: Math.max(80, Math.min(MENU_MAX_H, above)) });

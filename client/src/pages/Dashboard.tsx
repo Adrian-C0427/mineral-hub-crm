@@ -581,9 +581,13 @@ export function Dashboard() {
           isResizable={customizing}
           resizeHandles={["se", "e", "s"]}
           // Free placement: widgets sit exactly where they're dropped (no
-          // auto-packing); colliding widgets are pushed live during the drag.
+          // auto-packing). preventCollision keeps the rest of the layout
+          // perfectly still during a drag — other widgets are never shoved
+          // around by a fast mouse movement; a widget simply won't drop onto
+          // occupied space. Calm, predictable, and impossible to scramble the
+          // whole board by accident.
           compactType={null}
-          preventCollision={false}
+          preventCollision
           draggableCancel=".dash-cz-btn, a, button"
           useCSSTransforms
           onLayoutChange={onLayoutChange}

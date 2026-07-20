@@ -213,20 +213,13 @@ export function DealDetail() {
       {tab === "marketplace" && <DealPortalPanel dealId={deal.id} />}
 
       {tab === "buyers" && <>
-      {/* Compact funnel strip — one line, not four card-heights of repeats;
-          the Offers table right below carries the detail. */}
-      <div className="panel dd-funnel">
-        <span className="dd-funnel-item"><strong>{deal.metrics.buyersContacted}</strong> buyers contacted</span>
-        <span className="dd-funnel-sep" aria-hidden="true">→</span>
-        <span className="dd-funnel-item"><strong>{deal.metrics.interested}</strong> interested</span>
-        <span className="dd-funnel-sep" aria-hidden="true">→</span>
-        <span className="dd-funnel-item"><strong>{deal.metrics.offers}</strong> offer{deal.metrics.offers === 1 ? "" : "s"}</span>
-        {deal.metrics.highOffer != null && (
-          <>
-            <span className="spacer" />
-            <span className="dd-funnel-item">High offer <strong>{money(deal.metrics.highOffer)}</strong></span>
-          </>
-        )}
+      {/* Buyer summary — the same KPI card row as the Mineral Assets Sell tab,
+          fed by the same server-computed deal.metrics. */}
+      <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
+        <MetricCard label="Buyers Contacted" value={deal.metrics.buyersContacted} />
+        <MetricCard label="Interested" value={deal.metrics.interested} />
+        <MetricCard label="Offers" value={deal.metrics.offers} />
+        <MetricCard label="High Offer" value={money(deal.metrics.highOffer)} />
       </div>
 
       {deal.selectedBuyer && (

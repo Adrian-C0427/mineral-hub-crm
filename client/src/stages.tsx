@@ -14,45 +14,95 @@ const DEFAULT_STAGES: PipelineStage[] = [
   { id: "d6", key: "DEAD", label: "Dead", position: 6, isTerminal: true },
 ];
 
+export interface PipelineInfo {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  position: number;
+  stages: PipelineStage[];
+}
+
+const FALLBACK_PIPELINE: PipelineInfo = { id: "", name: "Sales Pipeline", isDefault: true, position: 0, stages: DEFAULT_STAGES };
+
+const SELECTED_KEY = "mh-pipeline-selected";
+
 interface StagesCtx {
+  /** All of the org's pipelines with their stage sets (default first). */
+  pipelines: PipelineInfo[];
+  /** The pipeline currently selected on the Pipeline board. */
+  selectedId: string;
+  setSelectedId: (id: string) => void;
+  selected: PipelineInfo;
+  /** Stage rows of the SELECTED pipeline (board consumers). */
   stages: PipelineStage[];
   active: PipelineStage[];   // board columns, in order
   terminal: PipelineStage[]; // Closed / Dead
+  /** Stages of a specific pipeline; null/undefined/unknown → default pipeline. */
+  stagesOf: (pipelineId?: string | null) => PipelineStage[];
+  /** Display label for a stage key — selected pipeline first, then any pipeline. */
   label: (key: string) => string;
   reload: () => void;
 }
 
 const Ctx = createContext<StagesCtx>({
+  pipelines: [FALLBACK_PIPELINE],
+  selectedId: "",
+  setSelectedId: () => {},
+  selected: FALLBACK_PIPELINE,
   stages: DEFAULT_STAGES,
   active: DEFAULT_STAGES.filter((s) => !s.isTerminal),
   terminal: DEFAULT_STAGES.filter((s) => s.isTerminal),
+  stagesOf: () => DEFAULT_STAGES,
   label: (k) => DEFAULT_STAGES.find((s) => s.key === k)?.label ?? prettyStage(k),
   reload: () => {},
 });
 
 /**
- * Provides the organization's customizable pipeline stages (labels + order) to
- * the whole app, so stage badges, the board, the dashboard, and the move-stage
- * modal all render the org's own stage names. Falls back to the seven built-in
- * defaults until the fetch resolves.
+ * Provides the organization's pipelines (each with its own customizable stage
+ * set) to the whole app, so stage badges, the board, the dashboard, and the
+ * move-stage modal all render the right stage names. Falls back to a single
+ * built-in pipeline until the fetch resolves.
  */
 export function StagesProvider({ children }: { children: ReactNode }) {
-  const [stages, setStages] = useState<PipelineStage[]>(DEFAULT_STAGES);
+  const [pipelines, setPipelines] = useState<PipelineInfo[]>([FALLBACK_PIPELINE]);
+  const [selectedId, setSelectedIdState] = useState<string>(() => {
+    try { return localStorage.getItem(SELECTED_KEY) ?? ""; } catch { return ""; }
+  });
   const load = useCallback(() => {
-    api.get<PipelineStage[]>("/pipeline/stages").then((s) => { if (s.length) setStages(s); }).catch(() => { /* keep defaults */ });
+    api.get<PipelineInfo[]>("/pipeline/pipelines").then((ps) => { if (ps.length) setPipelines(ps); }).catch(() => { /* keep defaults */ });
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  const setSelectedId = useCallback((id: string) => {
+    setSelectedIdState(id);
+    try { localStorage.setItem(SELECTED_KEY, id); } catch { /* storage off */ }
+  }, []);
+
   const value = useMemo<StagesCtx>(() => {
+    const def = pipelines.find((p) => p.isDefault) ?? pipelines[0] ?? FALLBACK_PIPELINE;
+    const selected = pipelines.find((p) => p.id === selectedId) ?? def;
+    const stages = selected.stages.length ? selected.stages : DEFAULT_STAGES;
     const byKey = new Map(stages.map((s) => [s.key, s]));
+    // Global fallback: a stage key from ANY pipeline still labels correctly
+    // (Deals table, dashboard, buyer profiles show deals across pipelines).
+    const globalByKey = new Map<string, PipelineStage>();
+    for (const p of pipelines) for (const s of p.stages) if (!globalByKey.has(s.key)) globalByKey.set(s.key, s);
     return {
+      pipelines,
+      selectedId: selected.id,
+      setSelectedId,
+      selected,
       stages,
       active: stages.filter((s) => !s.isTerminal),
       terminal: stages.filter((s) => s.isTerminal),
-      label: (k) => byKey.get(k)?.label ?? prettyStage(k),
+      stagesOf: (pid) => {
+        const p = (pid ? pipelines.find((x) => x.id === pid) : def) ?? def;
+        return p.stages.length ? p.stages : DEFAULT_STAGES;
+      },
+      label: (k) => byKey.get(k)?.label ?? globalByKey.get(k)?.label ?? prettyStage(k),
       reload: load,
     };
-  }, [stages, load]);
+  }, [pipelines, selectedId, setSelectedId, load]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -165,6 +165,8 @@ const createSchema = z.object({
   relationshipOwnerId: z.string().max(10_000).nullish(),
   assigneeIds: z.array(z.string().max(200)).max(500).optional(),
   notes: z.string().max(10_000).nullish(),
+  // Which pipeline the deal enters (default pipeline when omitted).
+  pipelineId: z.string().max(200).nullish(),
   // Create this deal as a child asset under an existing parent package.
   parentDealId: z.string().max(10_000).nullish(),
   // Or create additional child assets under THIS new deal in one shot.
@@ -237,14 +239,22 @@ dealsRouter.post(
     // A caller-supplied relationship owner must be a user in the caller's org;
     // otherwise a foreign userId would be persisted and serialized back.
     if (data.relationshipOwnerId) await validateOrgUsers(orgId(req), [data.relationshipOwnerId]);
-    // New opportunities enter the org's first active pipeline stage (seeds the
-    // org's stages on first use). Owned assets park in CLOSING as before.
-    const firstStage = await firstActiveStageKey(prisma, orgId(req));
+    // New opportunities enter the chosen pipeline's first active stage (the
+    // org's default pipeline when none was specified; seeds stages on first
+    // use). Owned assets park in CLOSING as before.
+    let pipelineId: string | null = null;
+    if (data.pipelineId) {
+      const p = await prisma.pipeline.findFirst({ where: { id: data.pipelineId, organizationId: orgId(req) } });
+      if (!p) throw new HttpError(400, "Unknown pipeline");
+      pipelineId = p.isDefault ? null : p.id; // null = default, keeps legacy rows uniform
+    }
+    const firstStage = await firstActiveStageKey(prisma, orgId(req), pipelineId);
     const initialStage = isAsset ? "CLOSING" : firstStage;
     const deal = await prisma.$transaction(async (tx) => {
       const created = await tx.deal.create({
         data: {
           organizationId: orgId(req),
+          pipelineId,
           name: data.name,
           sellerNames: data.sellerNames ?? [],
           recordType: data.recordType ?? "OPPORTUNITY",
@@ -848,8 +858,8 @@ dealsRouter.post(
     const { toStage, deadReason } = stageSchema.parse(req.body);
     const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!deal) throw new HttpError(404, "Deal not found");
-    // toStage must be one of the org's configured pipeline stages.
-    const stages = await ensureStages(prisma, orgId(req));
+    // toStage must be one of the DEAL'S pipeline's configured stages.
+    const stages = await ensureStages(prisma, orgId(req), deal.pipelineId);
     if (!stages.some((s) => s.key === toStage)) throw new HttpError(400, "Unknown pipeline stage");
 
     if (toStage === "DEAD" && (!deadReason || !deadReason.trim())) {
@@ -1171,7 +1181,7 @@ dealsRouter.post(
     // activity and communications are untouched (kept for auditing). Stage only
     // advances forward — never regress a deal already at/after CLOSING (by the
     // org's own stage order).
-    const stages = await ensureStages(prisma, orgId(req));
+    const stages = await ensureStages(prisma, orgId(req), deal.pipelineId);
     const closing = stages.find((s) => s.key === "CLOSING");
     const posOf = (key: string) => stages.find((s) => s.key === key)?.position ?? Number.MAX_SAFE_INTEGER;
     const advanceToClosing = !!closing && deal.stage !== "DEAD" && deal.stage !== "CLOSED" && posOf(deal.stage) < closing.position;

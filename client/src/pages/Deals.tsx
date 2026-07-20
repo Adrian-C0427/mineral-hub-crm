@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { NavLink, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { Banner, PriorityBadge, StageBadge, Spinner, SearchInput } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
@@ -87,6 +87,14 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
       <div className="page-header">
         <h1>{SCOPE_TITLE[scope]}</h1>
         {can("createDeals") && <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>}
+      </div>
+
+      {/* Scope tabs — the sidebar shows a single "Deals" entry; Active/Closed/
+          Archived (and future sections) live here as top tab navigation. */}
+      <div className="asset-tabs" role="tablist" style={{ marginBottom: 14 }}>
+        {([["all", "All", "/deals"], ["active", "Active", "/deals/active"], ["closed", "Closed", "/deals/closed"], ["archived", "Archived", "/deals/archived"]] as [Scope, string, string][]).map(([s, label, to]) => (
+          <NavLink key={s} to={to} end className={`tab ${scope === s ? "active" : ""}`} role="tab" aria-selected={scope === s}>{label}</NavLink>
+        ))}
       </div>
 
       {overdue.length > 0 && (
