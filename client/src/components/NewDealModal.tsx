@@ -174,7 +174,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
           states={states} onStatesChange={setStates}
           counties={counties} onCountiesChange={setCounties}
           abstractIds={abstractIds} onAbstractsChange={setAbstractIds}
-          labels={{ state: "State *", county: "County *", abstract: "Abstract *" }}
+          labels={{ state: <>State {req}</>, county: <>County {req}</>, abstract: <>Abstract {req}</> }}
         />
         <div className="field"><label>Asset Type {req}</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
         <div className="field"><label>NRA {req}</label><input type="number" value={f.nra} onChange={set("nra")} /></div>
@@ -236,7 +236,7 @@ function AssetCard({ index, a, req, onPatch, onRemove }: {
           states={a.states} onStatesChange={(v) => onPatch({ states: v })}
           counties={a.counties} onCountiesChange={(v) => onPatch({ counties: v })}
           abstractIds={a.abstractIds} onAbstractsChange={(v) => onPatch({ abstractIds: v })}
-          labels={{ state: "State *", county: "County *", abstract: "Abstract *" }}
+          labels={{ state: <>State {req}</>, county: <>County {req}</>, abstract: <>Abstract {req}</> }}
         />
         <div className="field"><label>Asset Type {req}</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={a.assetTypes} onChange={(v) => onPatch({ assetTypes: v })} placeholder="Search asset types…" /></div>
         <div className="field"><label>NRA {req}</label><input type="number" value={a.nra} onChange={(e) => onPatch({ nra: e.target.value })} /></div>

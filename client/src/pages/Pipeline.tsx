@@ -267,6 +267,13 @@ export function Pipeline() {
         ))}
       </div>}
 
+      {activeStages.length === 0 && (
+        <div className="panel" style={{ textAlign: "center", padding: "36px 20px" }}>
+          <p style={{ margin: 0 }}><strong>This pipeline has no stages yet.</strong></p>
+          <p className="muted" style={{ margin: "6px 0 14px" }}>Build it from scratch — add your first stage to start moving deals through it. Closed and Dead are already included.</p>
+          {canCustomizeStages && <button className="primary" onClick={() => setShowStages(true)}>Add stages</button>}
+        </div>
+      )}
       <div className={`kanban ${prefs.density === "compact" ? "compact" : ""} ${drag ? "dragging" : ""}`}>
         {activeStages.map((stage) => {
           const col = stage.key;
@@ -558,8 +565,8 @@ function NewPipelineModal({ onClose, onCreated }: { onClose: () => void; onCreat
       <button className="primary" onClick={create} disabled={!name.trim() || busy}>Create pipeline</button>
     </>}>
       <p className="muted" style={{ marginTop: 0 }}>
-        A new pipeline starts with the standard stage set — customize its stages any time.
-        Closed and Dead are always included and work exactly like today.
+        A new pipeline starts blank so you can define your own stages from scratch.
+        Closed and Dead are always included automatically and work exactly like today.
       </p>
       <label>Pipeline name</label>
       <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Leasing"

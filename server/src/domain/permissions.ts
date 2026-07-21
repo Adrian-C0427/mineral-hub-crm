@@ -31,6 +31,8 @@ export const PERMISSIONS = [
   "viewDeals", "createDeals", "editDeals", "deleteDeals", "sendEmail",
   // Buyers
   "viewBuyers", "createBuyers", "editBuyers", "deleteBuyers",
+  // Contacts (acquisitions: sellers, prospects, inbound leads)
+  "viewContacts", "manageContacts",
   // Buyer Portal
   "publishOfferings", "managePortal",
   // Documents (deal file attachments)
@@ -66,6 +68,9 @@ export const PERMISSION_META: Record<Permission, { label: string; group: string 
   editBuyers: { label: "Edit buyers", group: "Buyers" },
   deleteBuyers: { label: "Delete buyers", group: "Buyers" },
 
+  viewContacts: { label: "View contacts", group: "Contacts" },
+  manageContacts: { label: "Create, edit & delete contacts", group: "Contacts" },
+
   publishOfferings: { label: "Publish offerings to the portal", group: "Buyer Portal" },
   managePortal: { label: "Manage portal settings & contacts", group: "Buyer Portal" },
 
@@ -94,7 +99,7 @@ export const PERMISSION_META: Record<Permission, { label: string; group: string 
 
 /** Module group render order for the matrix (groups not listed fall to the end). */
 export const PERMISSION_GROUP_ORDER = [
-  "Deals", "Buyers", "Buyer Portal", "Documents", "Research", "Well Analysis",
+  "Deals", "Buyers", "Contacts", "Buyer Portal", "Documents", "Research", "Well Analysis",
   "Maps", "Reports", "Expenses", "AI Tools", "Administration",
 ] as const;
 
@@ -134,6 +139,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<OrgRole, Permission[]> = {
   MANAGER: [
     "viewDeals", "createDeals", "editDeals", "sendEmail",
     "viewBuyers", "createBuyers", "editBuyers",
+    "viewContacts", "manageContacts",
     "publishOfferings", "manageDocuments",
     "viewResearch", "viewWellAnalysis",
     "viewMap", "viewReports", "manageExpenses", "useAiFeatures",
@@ -141,12 +147,13 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<OrgRole, Permission[]> = {
   MEMBER: [
     "viewDeals", "createDeals", "editDeals", "sendEmail",
     "viewBuyers", "createBuyers", "editBuyers",
+    "viewContacts", "manageContacts",
     "publishOfferings", "manageDocuments",
     "viewResearch", "viewWellAnalysis",
     "viewMap", "viewReports", "manageExpenses", "useAiFeatures",
   ],
   // Read-only: viewing across modules, no mutations, no AI spend.
-  VIEWER: ["viewDeals", "viewBuyers", "viewResearch", "viewWellAnalysis", "viewMap", "viewReports"],
+  VIEWER: ["viewDeals", "viewBuyers", "viewContacts", "viewResearch", "viewWellAnalysis", "viewMap", "viewReports"],
 };
 
 /**

@@ -45,10 +45,15 @@ export async function ensurePipelines(tx: Tx, organizationId: string): Promise<P
   return tx.pipeline.findMany({ where: { organizationId }, orderBy: [{ isDefault: "desc" }, { position: "asc" }, { createdAt: "asc" }] });
 }
 
-/** Seed a pipeline's stage rows from the defaults (used on pipeline create). */
-export async function seedStages(tx: Tx, organizationId: string, pipelineId: string): Promise<void> {
+/**
+ * Seed a pipeline's stage rows. The org's default pipeline gets the full
+ * built-in workflow; user-created pipelines start BLANK — just the permanent
+ * Closed/Dead terminals — so users define their own stages from scratch.
+ */
+export async function seedStages(tx: Tx, organizationId: string, pipelineId: string, blank = false): Promise<void> {
+  const rows = blank ? TERMINAL_STAGES : DEFAULT_STAGES;
   await tx.pipelineStage.createMany({
-    data: DEFAULT_STAGES.map((s, i) => ({ organizationId, pipelineId, key: s.key, label: s.label, position: i, isTerminal: s.isTerminal })),
+    data: rows.map((s, i) => ({ organizationId, pipelineId, key: s.key, label: s.label, position: i, isTerminal: s.isTerminal })),
     skipDuplicates: true,
   });
 }

@@ -61,7 +61,9 @@ pipelineStagesRouter.post(
     const org = orgId(req);
     const max = await prisma.pipeline.aggregate({ where: { organizationId: org }, _max: { position: true } });
     const p = await prisma.pipeline.create({ data: { organizationId: org, name, position: (max._max.position ?? 0) + 1 } });
-    await seedStages(prisma, org, p.id);
+    // User-created pipelines start blank: only the permanent Closed/Dead
+    // terminals — users build their own active stages from scratch.
+    await seedStages(prisma, org, p.id, true);
     const stages = await ensureStages(prisma, org, p.id);
     res.status(201).json({ ...serializePipeline(p), stages: stages.map(serialize) });
   }),
@@ -194,10 +196,20 @@ pipelineStagesRouter.delete(
     if (!p) throw new HttpError(404, "Pipeline not found");
     const stages = await ensureStages(prisma, org, p.id);
     const remainingActive = stages.filter((s) => !s.isTerminal && s.id !== stage.id);
-    if (remainingActive.length === 0) throw new HttpError(400, "At least one active stage is required");
-    const fallbackKey = remainingActive[0].key;
+    // The default pipeline always keeps at least one active stage (new deals
+    // land there). User-created pipelines may be emptied back to just
+    // Closed/Dead — but never while deals still occupy the stage being
+    // removed, since there'd be nowhere to move them.
+    if (remainingActive.length === 0) {
+      if (p.isDefault) throw new HttpError(400, "At least one active stage is required");
+      const occupied = await prisma.deal.count({ where: { ...dealsOfPipeline(org, p), stage: stage.key } });
+      if (occupied > 0) throw new HttpError(400, "Deals are still in this stage — add another stage or move them first");
+    }
+    const fallbackKey = remainingActive[0]?.key;
     await prisma.$transaction([
-      prisma.deal.updateMany({ where: { ...dealsOfPipeline(org, p), stage: stage.key }, data: { stage: fallbackKey } }),
+      ...(fallbackKey
+        ? [prisma.deal.updateMany({ where: { ...dealsOfPipeline(org, p), stage: stage.key }, data: { stage: fallbackKey } })]
+        : []),
       prisma.pipelineStage.delete({ where: { id: stage.id } }),
     ]);
     await renumber(p.id);

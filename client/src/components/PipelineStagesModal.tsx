@@ -92,6 +92,11 @@ export function PipelineStagesModal({ pipeline, onClose, onChanged, onPipelineDe
         Rename, reorder (drag by the <span aria-hidden="true">⠿</span> handle), add, or remove this pipeline's active stages.
         Closed and Dead are always present and cannot be changed.
       </p>
+      {order.length === 0 && (
+        <p className="muted" style={{ margin: "4px 0 10px" }}>
+          This pipeline is blank — add your first stage below. Closed and Dead are already included.
+        </p>
+      )}
       <div className="stage-editor">
         {order.map((s, i) => (
           <div key={s.id}
@@ -108,8 +113,8 @@ export function PipelineStagesModal({ pipeline, onClose, onChanged, onPipelineDe
             >⠿</span>
             <input defaultValue={s.label} disabled={busy} onBlur={(e) => rename(s, e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-            <button type="button" className="stage-del" disabled={busy || order.length <= 1}
-              title={order.length <= 1 ? "At least one active stage is required" : "Remove stage"}
+            <button type="button" className="stage-del" disabled={busy || (pipeline.isDefault && order.length <= 1)}
+              title={pipeline.isDefault && order.length <= 1 ? "The default pipeline needs at least one active stage" : "Remove stage"}
               onClick={() => setConfirmDelete(s)}>×</button>
           </div>
         ))}

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
+import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
 import {
   Spinner, PriorityBadge, StageBadge, MetricCard, Modal,
@@ -161,13 +162,17 @@ export function DealDetail() {
       {/* Top-level tabs (same pattern as Mineral Assets) — organization only:
           every section below is the existing component, unchanged, just
           grouped so the page needs far less scrolling. */}
-      <div className="asset-tabs">
-        <button className={`tab ${tab === "general" ? "active" : ""}`} onClick={() => setTab("general")}>General</button>
-        {!deal.parent && <button className={`tab ${tab === "additional" ? "active" : ""}`} onClick={() => setTab("additional")}>Additional Deals</button>}
-        <button className={`tab ${tab === "buyers" ? "active" : ""}`} onClick={() => setTab("buyers")}>Buyers</button>
-        <button className={`tab ${tab === "marketplace" ? "active" : ""}`} onClick={() => setTab("marketplace")}>Marketplace</button>
-        <button className={`tab ${tab === "documents" ? "active" : ""}`} onClick={() => setTab("documents")}>Documents</button>
-      </div>
+      <Tabs
+        tabs={[
+          { key: "general" as const, label: "General" },
+          { key: "additional" as const, label: "Additional Deals", hidden: !!deal.parent },
+          { key: "buyers" as const, label: "Buyers" },
+          { key: "marketplace" as const, label: "Marketplace" },
+          { key: "documents" as const, label: "Documents" },
+        ]}
+        active={tab}
+        onSelect={setTab}
+      />
 
       {tab === "general" && <>
       <SellerDetails

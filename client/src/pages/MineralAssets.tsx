@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, MetricCard, Modal, Banner, SearchInput } from "../components/ui";
+import { Spinner, MetricCard, Modal, Banner, SearchInput, Req } from "../components/ui";
 import { dealSearchHaystack } from "../lib/dealSearch";
 import { Select } from "../components/Select";
 import { SortableTable, type Column } from "../components/SortableTable";
@@ -203,11 +203,12 @@ function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onCreated:
       onClose={onClose}
       footer={<><button className="small" onClick={onClose}>Cancel</button><button className="primary" disabled={busy} onClick={create}>{busy ? "Creating…" : "Create asset"}</button></>}
     >
-      <div className="field"><label>Asset name</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Smith Unit Royalty — Midland Co." autoFocus /></div>
+      <div className="field"><label>Asset name <Req /></label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Smith Unit Royalty — Midland Co." autoFocus /></div>
       <div className="grid-2">
-        <GeoFields states={states} onStatesChange={setStates} counties={counties} onCountiesChange={setCounties} abstractIds={abstractIds} onAbstractsChange={setAbstractIds} />
-        <div className="field"><label>Survey name</label><SurveyMultiPicker value={surveys} onChange={setSurveys} abstractIds={abstractIds} /></div>
-        <div className="field"><label>Asset type</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
+        <GeoFields states={states} onStatesChange={setStates} counties={counties} onCountiesChange={setCounties} abstractIds={abstractIds} onAbstractsChange={setAbstractIds}
+          labels={{ state: <>State <Req /></>, county: <>County <Req /></>, abstract: <>Abstract <Req /></> }} />
+        <div className="field"><label>Survey name <Req /></label><SurveyMultiPicker value={surveys} onChange={setSurveys} abstractIds={abstractIds} /></div>
+        <div className="field"><label>Asset type <Req /></label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
         <div className="field"><label>Producing status</label><Select value={producingStatus} onChange={setProducingStatus} ariaLabel="Producing status" options={PRODUCING_STATUSES.map((t) => ({ value: t, label: t }))} /></div>
         <div className="field"><label>Acquisition date</label><DateField value={acquisitionDate} onChange={(v) => setAcquisitionDate(v)} /></div>
         <div className="field"><label>Net Revenue Acres (NRA)</label><input type="number" value={nra} onChange={(e) => setNra(e.target.value)} /></div>

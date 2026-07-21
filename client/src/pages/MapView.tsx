@@ -124,7 +124,6 @@ export function MapView() {
   // Saved filter presets (named filter combinations), remembered per browser.
   const [filterPresets, setFilterPresets] = useState<FilterPreset[]>(() => loadJson<FilterPreset[]>(MAP_FILTERS_KEY, []));
   const [filterName, setFilterName] = useState("");
-  const [showLayers, setShowLayers] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   const [statusFilter, setStatusFilter] = useState("ACTIVE");
   const [fStates, setFStates] = useState<string[]>([]);
@@ -690,7 +689,7 @@ export function MapView() {
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
-  }, [showLayers, showFilters, showHeat]);
+  }, [showFilters, showHeat]);
   useEffect(() => { mapRef.current?.resize(); }, [mapH]);
 
   return (
@@ -740,17 +739,12 @@ export function MapView() {
           )}
         </div>
         <div className="spacer" />
-        <button className={`mc-btn ${showFilters ? "active" : ""}`} onClick={() => { setShowFilters((s) => !s); setShowLayers(false); setShowHeat(false); }}>
+        <button className={`mc-btn ${showFilters ? "active" : ""}`} onClick={() => { setShowFilters((s) => !s); setShowHeat(false); }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
           Filters
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
         </button>
-        <button className={`mc-btn ${showLayers ? "active" : ""}`} onClick={() => { setShowLayers((s) => !s); setShowFilters(false); setShowHeat(false); }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" /></svg>
-          Layers
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
-        </button>
-        <button className={`mc-btn ${showHeat ? "active" : ""} ${heatActive ? "hot" : ""}`} onClick={() => { setShowHeat((s) => !s); setShowFilters(false); setShowLayers(false); }}>
+        <button className={`mc-btn ${showHeat ? "active" : ""} ${heatActive ? "hot" : ""}`} onClick={() => { setShowHeat((s) => !s); setShowFilters(false); }}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2c3 4.5 6 7.5 6 11a6 6 0 01-12 0c0-1.5.5-3 1.5-4.5C8.5 10 10.5 7 12 2z" /></svg>
           Heat map
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
@@ -809,21 +803,6 @@ export function MapView() {
               <button type="button" className="small" disabled={!filterName.trim() || !anyFilterSet} onClick={() => saveFilterPreset(filterName)}>Save filters</button>
             </div>
           </div>
-        </div>
-      )}
-
-      {showLayers && (
-        <div className="panel mc-panel" style={{ marginBottom: 12, padding: "16px 24px" }}>
-          {/* Layer visibility + last camera are remembered automatically. */}
-          <MapLayersPanel
-            defs={[
-              { key: "boundaries", label: "Abstract boundaries" }, { key: "absNums", label: "Abstract numbers" },
-              { key: "surveyNames", label: "Survey names" }, { key: "deals", label: "Active deals" },
-              { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores (laterals)" },
-            ]}
-            layers={layers}
-            onToggle={(k) => toggle(k as keyof typeof layers)}
-          />
         </div>
       )}
 
@@ -893,6 +872,22 @@ export function MapView() {
           dvh fallback tracks the real visible viewport before the first measure. */}
       <div ref={mapWrap} style={{ position: "relative", height: mapH ? `${mapH}px` : "calc(100dvh - 250px)", minHeight: 320, borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
         <div ref={mapContainer} style={{ position: "absolute", inset: 0 }} />
+        {/* Same collapsible floating Layers control as the Marketplace map —
+            one shared component, identical interaction on every map. */}
+        <div className="portal-map-controls">
+          <MapLayersPanel
+            variant="floating"
+            collapsible
+            storageKey="mh-mainmap-layers-open"
+            defs={[
+              { key: "boundaries", label: "Abstract boundaries" }, { key: "absNums", label: "Abstract numbers" },
+              { key: "surveyNames", label: "Survey names" }, { key: "deals", label: "Active deals" },
+              { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores (laterals)" },
+            ]}
+            layers={layers}
+            onToggle={(k) => toggle(k as keyof typeof layers)}
+          />
+        </div>
         {!deals && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}><Spinner label="Loading map…" /></div>}
 
         <div style={{ position: "absolute", left: 12, bottom: 26, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, padding: "8px 12px", fontSize: 12 }}>
