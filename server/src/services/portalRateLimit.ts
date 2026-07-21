@@ -18,6 +18,14 @@ import { prisma } from "../db.js";
 const WINDOW_MS = 60 * 60 * 1000; // 1 hour
 const MAX_PER_WINDOW = 10; // submissions per IP per window (matches prior cap)
 
+/**
+ * Ceiling for the unauthenticated READ endpoints (offering detail, document
+ * download). Far looser than the write cap — a buyer legitimately clicking
+ * through an offering and its documents should never see a 429 — but low
+ * enough to stop a script from grinding the DB and S3 presign path in a loop.
+ */
+export const PORTAL_READ_MAX_PER_WINDOW = 600;
+
 /** Start of the fixed window that `now` falls into. */
 function windowStartFor(now: number): Date {
   return new Date(Math.floor(now / WINDOW_MS) * WINDOW_MS);
@@ -28,7 +36,12 @@ function windowStartFor(now: number): Date {
  * window cap. Fails OPEN (returns false) on any DB error so a transient outage
  * never blocks a legitimate buyer submission.
  */
-export async function portalRateLimited(bucket: string, ip: string, now = Date.now()): Promise<boolean> {
+export async function portalRateLimited(
+  bucket: string,
+  ip: string,
+  now = Date.now(),
+  max = MAX_PER_WINDOW,
+): Promise<boolean> {
   const key = `${bucket}:${ip}`;
   const windowStart = windowStartFor(now);
   try {
@@ -44,7 +57,7 @@ export async function portalRateLimited(bucket: string, ip: string, now = Date.n
         .deleteMany({ where: { windowStart: { lt: new Date(now - WINDOW_MS) } } })
         .catch(() => {});
     }
-    return row.count > MAX_PER_WINDOW;
+    return row.count > max;
   } catch {
     return false;
   }

@@ -55,7 +55,7 @@ expensesRouter.post(
   "/categories",
   requirePermission("manageExpenses"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { name } = z.object({ name: z.string().trim().min(1) }).parse(req.body);
+    const { name } = z.object({ name: z.string().trim().min(1).max(200) }).parse(req.body);
     const existing = await prisma.expenseCategory.findFirst({
       where: { organizationId: orgId(req), name },
     });
@@ -72,7 +72,7 @@ expensesRouter.patch(
   requirePermission("manageExpenses"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = z
-      .object({ name: z.string().trim().min(1).optional(), active: z.boolean().optional() })
+      .object({ name: z.string().trim().min(1).max(200).optional(), active: z.boolean().optional() })
       .parse(req.body);
     const cat = await prisma.expenseCategory.findFirst({
       where: { id: req.params.id, organizationId: orgId(req) },
@@ -102,7 +102,7 @@ expensesRouter.post(
   "/categories/reorder",
   requirePermission("manageExpenses"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { ids } = z.object({ ids: z.array(z.string()).min(1) }).parse(req.body);
+    const { ids } = z.object({ ids: z.array(z.string()).min(1).max(500) }).parse(req.body);
     const org = orgId(req);
     const owned = new Set((await prisma.expenseCategory.findMany({ where: { organizationId: org, id: { in: ids } }, select: { id: true } })).map((c) => c.id));
     await prisma.$transaction(
@@ -183,9 +183,9 @@ expensesRouter.get(
 
 const createSchema = z.object({
   date: dateStr,
-  amount: z.number().nonnegative(),
+  amount: z.number().nonnegative().max(1e12),
   categoryId: z.string().nullish(),
-  notes: z.string().nullish(),
+  notes: z.string().max(10_000).nullish(),
   reimbursed: z.boolean().optional(),
   reimbursementDate: dateStr.nullish(),
 });
@@ -229,9 +229,9 @@ expensesRouter.post(
 
 const updateSchema = z.object({
   date: dateStr.optional(),
-  amount: z.number().nonnegative().optional(),
+  amount: z.number().nonnegative().max(1e12).optional(),
   categoryId: z.string().nullish(),
-  notes: z.string().nullish(),
+  notes: z.string().max(10_000).nullish(),
   reimbursed: z.boolean().optional(),
   reimbursementDate: dateStr.nullish(),
 });
@@ -300,7 +300,7 @@ expensesRouter.delete(
 // ---------------------------------------------------------------------------
 
 const bulkSchema = z.object({
-  ids: z.array(z.string()).min(1),
+  ids: z.array(z.string()).min(1).max(500),
   action: z.enum(["reimburse", "unreimburse", "setCategory", "delete"]),
   categoryId: z.string().nullish(),
 });

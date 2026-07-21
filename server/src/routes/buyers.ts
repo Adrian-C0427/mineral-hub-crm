@@ -672,7 +672,7 @@ buyersRouter.post(
   "/bulk-assign",
   requirePermission("editBuyers"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { ids, ownerIds } = z.object({ ids: z.array(z.string()).min(1).max(500), ownerIds: z.array(z.string()) }).parse(req.body);
+    const { ids, ownerIds } = z.object({ ids: z.array(z.string()).min(1).max(500), ownerIds: z.array(z.string()).max(500) }).parse(req.body);
     const org = orgId(req);
     if (ownerIds.length) {
       const valid = await prisma.user.count({ where: { id: { in: ownerIds }, organizationId: org } });
