@@ -342,6 +342,7 @@ model User {
 
   passwordResetTokens PasswordResetToken[]
   ownedContacts       Contact[] @relation("ContactOwner")
+  contactActivities   ContactActivity[] @relation("ContactActivityAuthor")
   oauthAccounts       OAuthAccount[]
 
   ownedDeals         Deal[]              @relation("DealRelationshipOwner")
@@ -1378,6 +1379,8 @@ model Contact {
   counties String[]
 
   notes String?
+  // Free-form labels shown as chips on the contact workspace.
+  tags  String[] @default([])
 
   ownerId String?
   owner   User?   @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: SetNull)
@@ -1388,6 +1391,40 @@ model Contact {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  activities ContactActivity[]
+
   @@index([organizationId])
   @@index([organizationId, status])
+}
+
+// A timeline entry on a contact: internal notes, logged calls/emails/texts,
+// tasks (dueDate + completedAt), and reminders. `kind` is a string key so new
+// activity types (automated sequences, dialer events) need no schema change.
+model ContactActivity {
+  id             String       @id @default(cuid())
+  organizationId String
+  contactId      String
+  contact        Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  kind String // NOTE | CALL | EMAIL | SMS | TASK | REMINDER
+  body String
+
+  // Logged-call metadata (kind CALL): disposition + duration in seconds.
+  disposition     String?
+  durationSeconds Int?
+
+  // Tasks & reminders.
+  dueDate     DateTime?
+  completedAt DateTime?
+
+  pinned Boolean @default(false)
+
+  createdById String?
+  createdBy   User?   @relation("ContactActivityAuthor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([contactId, createdAt])
+  @@index([organizationId])
 }

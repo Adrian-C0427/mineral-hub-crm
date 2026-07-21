@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, Modal, Banner, MetricCard, SearchInput, ConfirmDelete, Req, showToast } from "../components/ui";
@@ -35,21 +36,23 @@ export interface ContactRow {
   states: string[];
   counties: string[];
   notes: string | null;
+  tags?: string[];
   owner: { id: string; name: string } | null;
   lastContactedAt: string | null;
   nextFollowUpDate: string | null;
   createdAt: string;
+  updatedAt?: string;
 }
 
-const TYPES: [string, string][] = [
+export const TYPES: [string, string][] = [
   ["SELLER", "Seller"], ["PROSPECT", "Prospect"], ["LEAD", "Inbound Lead"], ["REFERRAL", "Referral"], ["OTHER", "Other"],
 ];
-const STATUSES: [string, string][] = [
+export const STATUSES: [string, string][] = [
   ["NEW", "New"], ["CONTACTED", "Contacted"], ["ENGAGED", "Engaged"],
   ["NEGOTIATING", "Negotiating"], ["CONVERTED", "Converted"], ["NOT_INTERESTED", "Not Interested"],
 ];
-const typeLabel = (v: string) => TYPES.find(([k]) => k === v)?.[1] ?? v;
-const statusLabel = (v: string) => STATUSES.find(([k]) => k === v)?.[1] ?? v;
+export const typeLabel = (v: string) => TYPES.find(([k]) => k === v)?.[1] ?? v;
+export const statusLabel = (v: string) => STATUSES.find(([k]) => k === v)?.[1] ?? v;
 // Status → tone class (reuses the app's badge palette).
 const STATUS_TONE: Record<string, string> = {
   NEW: "resp-pending", CONTACTED: "resp-pending", ENGAGED: "resp-interested",
@@ -65,6 +68,7 @@ export function Contacts() {
   const [statusFilter, setStatusFilter] = useState("");
   const [editing, setEditing] = useState<ContactRow | "new" | null>(null);
   const canManage = can("manageContacts");
+  const nav = useNavigate();
 
   const load = () => api.get<ContactRow[]>("/contacts").then(setRows).catch(() => setRows([]));
   useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
@@ -146,7 +150,8 @@ export function Contacts() {
         columns={columns}
         rows={filtered}
         rowKey={(r) => r.id}
-        onRowClick={canManage ? (r) => setEditing(r) : undefined}
+        onRowClick={(r) => nav(`/contacts/${r.id}`)}
+        rowHref={(r) => `/contacts/${r.id}`}
         defaultSort={{ key: "next", dir: "asc" }}
         empty={rows.length === 0
           ? (canManage ? "No contacts yet — click “+ New Contact” to start building your acquisitions network." : "No contacts yet.")
@@ -166,7 +171,7 @@ export function Contacts() {
   );
 }
 
-function ContactModal({ contact, users, onClose, onSaved, onDeleted }: {
+export function ContactModal({ contact, users, onClose, onSaved, onDeleted }: {
   contact: ContactRow | null;
   users: UserLite[];
   onClose: () => void;
