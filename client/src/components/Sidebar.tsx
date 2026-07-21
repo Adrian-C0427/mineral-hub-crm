@@ -3,13 +3,11 @@ import { createPortal } from "react-dom";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Briefcase, Workflow, Users, Map as MapIcon, BarChart3, Telescope, TrendingDown,
-  Layers, Receipt, Store, Settings as SettingsIcon, ContactRound, ChevronRight, ChevronDown, LogOut,
+  Layers, Receipt, Store, Settings as SettingsIcon, ContactRound, ChevronRight, ChevronDown,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
-import { NotificationsBell } from "./NotificationsBell";
 import { ThemedLogo } from "./ThemedLogo";
-import { ROLE_LABEL } from "../lib/roles";
 
 interface NavItem {
   label: string;
@@ -48,7 +46,7 @@ const NAV: NavItem[] = [
 ];
 
 export function Sidebar() {
-  const { user, logout, can } = useAuth();
+  const { user, can } = useAuth();
   const location = useLocation();
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
@@ -92,11 +90,8 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="sidebar-footer">
-        <NotificationsBell collapsed={collapsed} />
-        {!collapsed && <div className="sidebar-user">{user?.name}<br /><span className="muted">{user?.orgRole ? ROLE_LABEL[user.orgRole] ?? user.orgRole : ""}</span></div>}
-        <button className="small" onClick={() => logout()} title="Sign out">{collapsed ? <LogOut size={16} /> : "Sign out"}</button>
-      </div>
+      {/* Notifications, user identity, and Sign out live in the fixed top
+          navigation bar (TopBar) — the sidebar is pure navigation. */}
     </aside>
   );
 }

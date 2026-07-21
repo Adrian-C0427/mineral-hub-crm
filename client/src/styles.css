@@ -2191,3 +2191,107 @@ body.pipeline-dragging, body.pipeline-dragging * { user-select: none !important;
 
 /* Research chains view: action row inside an expanded shared chain entry. */
 .chain2-actions { display: flex; align-items: center; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+
+/* ---------------------------------------------------------------------------
+   Top navigation bar — notifications, signed-in user, and Log out, fixed on
+   every page (moved here from the sidebar footer).
+   --------------------------------------------------------------------------- */
+.app-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.topbar {
+  display: flex; align-items: center; justify-content: flex-end; gap: 14px;
+  padding: 10px 24px; background: var(--panel); border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 40;
+}
+.topbar .notif-wrap { position: relative; }
+.topbar .notif-bell {
+  width: 34px; height: 34px; padding: 0; justify-content: center; border-radius: 9px;
+  background: var(--panel-2); border: 1px solid var(--border); color: var(--text-dim);
+}
+.topbar .notif-bell:hover { color: var(--text); background: var(--panel-2); }
+.topbar .notif-badge { top: -4px; left: auto; right: -4px; }
+/* In the top bar the panel drops DOWN from the bell, hugging the right edge. */
+.topbar .notif-panel { position: absolute; top: calc(100% + 8px); right: 0; bottom: auto; left: auto; }
+.topbar-div { width: 1px; height: 22px; background: var(--border); }
+.topbar-user { display: flex; align-items: center; gap: 9px; border-radius: 9px; padding: 4px 8px 4px 4px; }
+.topbar-avatar {
+  width: 28px; height: 28px; border-radius: 50%; flex: none;
+  background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent);
+  display: flex; align-items: center; justify-content: center; font-size: 10.5px; font-weight: 800;
+}
+.topbar-user-meta { display: flex; flex-direction: column; line-height: 1.2; }
+.topbar-user-name { font-size: 12.5px; font-weight: 700; }
+.topbar-user-role { font-size: 10.5px; color: var(--text-dim); }
+.topbar-logout {
+  display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600;
+  color: var(--text-dim); background: var(--panel-2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 13px;
+}
+.topbar-logout:hover { color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, transparent); background: var(--panel-2); }
+
+/* ---------------------------------------------------------------------------
+   Pipeline board redesign (reference layout): flexible columns with colored
+   top edges, count pills + per-column $ totals, dashed drop targets, and
+   Closed/Dead resolution zones below the board.
+   --------------------------------------------------------------------------- */
+.pl2-picker { display: inline-flex; align-items: center; gap: 9px; }
+.pl2-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+.pl2-sum { font-size: 12px; color: var(--text-dim); }
+.pl2-sum b { color: var(--text); font-variant-numeric: tabular-nums; }
+
+.kanban { gap: 14px; align-items: stretch; }
+.kanban-col {
+  flex: 1 1 0; min-width: 230px; width: auto; border-radius: 14px; overflow: hidden;
+}
+.kanban-col-head { padding: 13px 16px; display: flex; align-items: center; gap: 9px; font-size: 13.5px; font-weight: 700; }
+.pl2-count {
+  margin-left: auto; font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums;
+  color: var(--text-dim); background: color-mix(in srgb, var(--text) 6%, transparent);
+  border-radius: 99px; padding: 2px 8px;
+}
+.pl2-count.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 13%, transparent); }
+.pl2-colsum {
+  font-size: 11px; font-weight: 500; font-variant-numeric: tabular-nums; color: var(--text-dim);
+  padding: 7px 16px; border-bottom: 1px solid var(--border);
+}
+.pl2-colsum.pos { color: var(--green); }
+.kanban-col-body { padding: 12px; display: flex; flex-direction: column; }
+.kanban-empty {
+  flex: 1; min-height: 150px; border: 1.5px dashed var(--border); border-radius: 10px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  color: var(--text-dim); font-size: 12px; font-weight: 600; padding: 14px;
+}
+
+.deal-card { border-radius: 11px; padding: 13px 14px; margin-bottom: 10px; }
+.dc2-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dc2-head .dc-name { margin-bottom: 0; font-size: 13.5px; font-weight: 700; }
+.dc2-tag {
+  font-size: 10px; font-weight: 700; letter-spacing: .05em; flex: none;
+  color: var(--green); background: color-mix(in srgb, var(--green) 11%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
+  border-radius: 99px; padding: 2px 8px;
+}
+.dc2-nums { display: flex; align-items: center; gap: 10px; margin-top: 9px; font-size: 11.5px; color: var(--text-dim); }
+.dc2-nums b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
+.dc2-sep { opacity: .5; }
+.dc2-money { font-size: 12.5px; font-weight: 600; color: var(--green); font-variant-numeric: tabular-nums; }
+.dc2-foot {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
+}
+.dc2-days { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
+.dc2-open { display: flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 700; color: var(--accent); }
+
+.transition-bar { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 4px 0 0; }
+.transition-zone {
+  border-radius: 14px; padding: 18px; gap: 12px;
+  border: 1.5px dashed color-mix(in srgb, var(--text) 12%, transparent);
+}
+.transition-zone.closed { border-color: color-mix(in srgb, var(--green) 35%, transparent); background: color-mix(in srgb, var(--green) 4%, transparent); }
+.transition-zone.dead { border-color: color-mix(in srgb, var(--red) 30%, transparent); background: color-mix(in srgb, var(--red) 3%, transparent); }
+.tz-ico { width: 30px; height: 30px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex: none; }
+.tz-ico.closed { background: color-mix(in srgb, var(--green) 13%, transparent); color: var(--green); }
+.tz-ico.dead { background: color-mix(in srgb, var(--red) 12%, transparent); color: var(--red); }
+.tz-name { font-size: 13.5px; font-weight: 700; }
+.tz-name.closed { color: var(--green); }
+.tz-name.dead { color: var(--red); }
+.tz-hint { font-size: 12px; color: var(--text-dim); font-weight: 500; }
