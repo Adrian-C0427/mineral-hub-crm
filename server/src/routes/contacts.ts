@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
-import type { Contact, User } from "@prisma/client";
+import type { Contact, ContactActivity, User } from "@prisma/client";
 
 /**
  * Acquisitions — Contacts.
@@ -37,6 +37,7 @@ const serialize = (c: ContactWithOwner) => ({
   states: c.states,
   counties: c.counties,
   notes: c.notes,
+  tags: c.tags,
   owner: c.owner ? { id: c.owner.id, name: c.owner.name } : null,
   lastContactedAt: c.lastContactedAt,
   nextFollowUpDate: c.nextFollowUpDate,
@@ -59,6 +60,7 @@ const upsertSchema = z.object({
   states: z.array(z.string().max(50)).max(100).optional(),
   counties: z.array(z.string().max(200)).max(500).optional(),
   notes: z.string().max(10_000).nullish(),
+  tags: z.array(z.string().trim().min(1).max(60)).max(100).optional(),
   ownerId: z.string().max(200).nullish(),
   lastContactedAt: dateField,
   nextFollowUpDate: dateField,
@@ -107,6 +109,7 @@ contactsRouter.post(
         states: data.states ?? [],
         counties: data.counties ?? [],
         notes: data.notes ?? null,
+        tags: data.tags ?? [],
         ownerId,
         lastContactedAt: data.lastContactedAt,
         nextFollowUpDate: data.nextFollowUpDate,
@@ -139,6 +142,7 @@ contactsRouter.patch(
         ...(data.states !== undefined ? { states: data.states } : {}),
         ...(data.counties !== undefined ? { counties: data.counties } : {}),
         ...(data.notes !== undefined ? { notes: data.notes ?? null } : {}),
+        ...(data.tags !== undefined ? { tags: data.tags } : {}),
         ...(ownerId !== undefined ? { ownerId } : {}),
         ...(data.lastContactedAt !== undefined ? { lastContactedAt: data.lastContactedAt } : {}),
         ...(data.nextFollowUpDate !== undefined ? { nextFollowUpDate: data.nextFollowUpDate } : {}),
@@ -156,6 +160,136 @@ contactsRouter.delete(
     const existing = await prisma.contact.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!existing) throw new HttpError(404, "Contact not found");
     await prisma.contact.delete({ where: { id: existing.id } });
+    res.json({ ok: true });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Contact activities — the workspace timeline: internal notes, logged calls /
+// emails / texts, tasks, and reminders.
+// ---------------------------------------------------------------------------
+
+export const ACTIVITY_KINDS = ["NOTE", "CALL", "EMAIL", "SMS", "TASK", "REMINDER"] as const;
+export const CALL_DISPOSITIONS = ["Connected", "No Answer", "Voicemail", "Bad Number", "Callback Requested"] as const;
+
+type ActivityWithAuthor = ContactActivity & { createdBy: Pick<User, "id" | "name"> | null };
+const serializeActivity = (a: ActivityWithAuthor) => ({
+  id: a.id,
+  kind: a.kind,
+  body: a.body,
+  disposition: a.disposition,
+  durationSeconds: a.durationSeconds,
+  dueDate: a.dueDate,
+  completedAt: a.completedAt,
+  pinned: a.pinned,
+  createdBy: a.createdBy ? { id: a.createdBy.id, name: a.createdBy.name } : null,
+  createdAt: a.createdAt,
+});
+
+const authorInclude = { createdBy: { select: { id: true, name: true } } } as const;
+
+async function findContact(org: string, id: string): Promise<Contact> {
+  const c = await prisma.contact.findFirst({ where: { id, organizationId: org } });
+  if (!c) throw new HttpError(404, "Contact not found");
+  return c;
+}
+
+/** Single contact (workspace header + detail pane). */
+contactsRouter.get(
+  "/:id",
+  requirePermission("viewContacts"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const c = await prisma.contact.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, include: ownerInclude });
+    if (!c) throw new HttpError(404, "Contact not found");
+    res.json(serialize(c));
+  }),
+);
+
+contactsRouter.get(
+  "/:id/activities",
+  requirePermission("viewContacts"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const c = await findContact(orgId(req), req.params.id);
+    const rows = await prisma.contactActivity.findMany({
+      where: { contactId: c.id },
+      include: authorInclude,
+      orderBy: { createdAt: "asc" },
+    });
+    res.json(rows.map(serializeActivity));
+  }),
+);
+
+const activitySchema = z.object({
+  kind: z.enum(ACTIVITY_KINDS),
+  body: z.string().trim().min(1).max(10_000),
+  disposition: z.enum(CALL_DISPOSITIONS).nullish(),
+  durationSeconds: z.number().int().min(0).max(86_400).nullish(),
+  dueDate: dateField,
+});
+
+contactsRouter.post(
+  "/:id/activities",
+  requirePermission("manageContacts"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const c = await findContact(orgId(req), req.params.id);
+    const data = activitySchema.parse(req.body);
+    const created = await prisma.contactActivity.create({
+      data: {
+        organizationId: orgId(req),
+        contactId: c.id,
+        kind: data.kind,
+        body: data.body,
+        disposition: data.kind === "CALL" ? data.disposition ?? null : null,
+        durationSeconds: data.kind === "CALL" ? data.durationSeconds ?? null : null,
+        dueDate: data.kind === "TASK" || data.kind === "REMINDER" ? data.dueDate : null,
+        createdById: req.user?.id ?? null,
+      },
+      include: authorInclude,
+    });
+    // Logged outreach naturally advances "last contacted".
+    if (data.kind === "CALL" || data.kind === "EMAIL" || data.kind === "SMS") {
+      await prisma.contact.update({ where: { id: c.id }, data: { lastContactedAt: new Date() } });
+    }
+    res.status(201).json(serializeActivity(created));
+  }),
+);
+
+// Toggle completion (tasks) / pin, or edit the body.
+contactsRouter.patch(
+  "/:id/activities/:aid",
+  requirePermission("manageContacts"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const c = await findContact(orgId(req), req.params.id);
+    const existing = await prisma.contactActivity.findFirst({ where: { id: req.params.aid, contactId: c.id } });
+    if (!existing) throw new HttpError(404, "Activity not found");
+    const data = z.object({
+      body: z.string().trim().min(1).max(10_000).optional(),
+      completed: z.boolean().optional(),
+      pinned: z.boolean().optional(),
+      dueDate: dateField.optional(),
+    }).parse(req.body);
+    const updated = await prisma.contactActivity.update({
+      where: { id: existing.id },
+      data: {
+        ...(data.body !== undefined ? { body: data.body } : {}),
+        ...(data.completed !== undefined ? { completedAt: data.completed ? new Date() : null } : {}),
+        ...(data.pinned !== undefined ? { pinned: data.pinned } : {}),
+        ...(data.dueDate !== undefined ? { dueDate: data.dueDate } : {}),
+      },
+      include: authorInclude,
+    });
+    res.json(serializeActivity(updated));
+  }),
+);
+
+contactsRouter.delete(
+  "/:id/activities/:aid",
+  requirePermission("manageContacts"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const c = await findContact(orgId(req), req.params.id);
+    const existing = await prisma.contactActivity.findFirst({ where: { id: req.params.aid, contactId: c.id } });
+    if (!existing) throw new HttpError(404, "Activity not found");
+    await prisma.contactActivity.delete({ where: { id: existing.id } });
     res.json({ ok: true });
   }),
 );
