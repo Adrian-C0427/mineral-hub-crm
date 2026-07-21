@@ -3,6 +3,7 @@ import { useAuth } from "./auth/AuthContext";
 import { Spinner, ToastHost } from "./components/ui";
 import { UnsavedChangesGuard } from "./lib/unsaved";
 import { Sidebar } from "./components/Sidebar";
+import { TopBar } from "./components/TopBar";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Login } from "./pages/Login";
 import { ResetPassword } from "./pages/ResetPassword";
@@ -109,6 +110,10 @@ export function App() {
       <ToastHost />
       <UnsavedChangesGuard />
       <Sidebar />
+      {/* Content column: fixed top navigation (notifications, user, log out)
+          above the scrolling page area — present on every page and subpage. */}
+      <div className="app-col">
+      <TopBar />
       <main className="app-main">
         {/* Boundary lives INSIDE the shell: a route error (e.g. a stale lazy
             chunk after a redeploy) can never blank the whole app or unmount
@@ -144,6 +149,7 @@ export function App() {
         </Routes>
         </ErrorBoundary>
       </main>
+      </div>
     </div>
   );
 }

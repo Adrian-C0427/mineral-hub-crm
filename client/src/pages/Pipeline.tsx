@@ -27,6 +27,10 @@ const TRANSITIONS: { stage: Stage; label: string; hint: string }[] = [
 // the gesture is treated as a click (navigate to the deal).
 const DRAG_THRESHOLD = 5;
 
+// Per-column accent colors (top edge of each stage column + its cards' left
+// edge), cycling in board order — visual only.
+const STAGE_COLORS = ["#3b82f6", "#8b5cf6", "#06b6d4", "#f59e0b", "#22c55e", "#ec4899", "#14b8a6", "#f97316"];
+
 interface DragState { id: string; w: number; offX: number; offY: number; moved: boolean }
 
 // ---------------------------------------------------------------------------
@@ -229,23 +233,33 @@ export function Pipeline() {
   const pipelineDeals = deals.filter((d) => (selected.isDefault ? !d.pipelineId || d.pipelineId === selected.id : d.pipelineId === selected.id));
   const boardDeals = applyPipelineFilters(pipelineDeals, filters);
   const filtersActive = activeFilterCount(filters) > 0;
+  // Header summary: deals currently on the board + their combined est. profit.
+  const activeKeys = new Set(activeStages.map((s) => s.key));
+  const activeBoardDeals = boardDeals.filter((d) => activeKeys.has(d.stage));
+  const boardTotal = activeBoardDeals.reduce((sum, d) => sum + (d.profitEst ?? 0), 0);
 
   return (
     <div className="page">
-      <div className="page-header">
-        <div className="row">
+      <div className="page-header pl2-head">
+        <div className="row" style={{ gap: 14, alignItems: "center", flexWrap: "wrap" }}>
           <h1 style={{ marginBottom: 0 }}>Pipeline</h1>
+          {/* Pipeline selector — switch boards; each pipeline has its own stages. */}
+          <span className="pl2-picker">
+            <span className="pl2-dot" aria-hidden="true" />
+            <Select
+              ariaLabel="Pipeline"
+              width={170}
+              options={pipelines.map((p) => ({ value: p.id, label: p.name }))}
+              value={selectedId}
+              onChange={(v) => v && setSelectedId(v)}
+            />
+          </span>
+          <span className="pl2-sum">
+            <b>{activeBoardDeals.length}</b> active deal{activeBoardDeals.length === 1 ? "" : "s"} · <b>{money(boardTotal)}</b> in pipeline
+          </span>
+          {filtersActive && <span className="muted" style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>Showing {boardDeals.length} of {pipelineDeals.length}</span>}
         </div>
         <div className="row" style={{ gap: 8 }}>
-          {filtersActive && <span className="muted" style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>Showing {boardDeals.length} of {pipelineDeals.length}</span>}
-          {/* Pipeline selector — switch boards; each pipeline has its own stages. */}
-          <Select
-            ariaLabel="Pipeline"
-            width={190}
-            options={pipelines.map((p) => ({ value: p.id, label: p.name }))}
-            value={selectedId}
-            onChange={(v) => v && setSelectedId(v)}
-          />
           {canCustomizeStages && <button className="small" title="Create a new pipeline with its own stages" onClick={() => setShowNewPipeline(true)}>+ New pipeline</button>}
           <PipelineFilters deals={pipelineDeals} filters={filters} onChange={setFilters} />
           {canCustomizeStages && <button className="small" onClick={() => setShowStages(true)}>Customize stages</button>}
@@ -253,19 +267,6 @@ export function Pipeline() {
           {canCreate && <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>}
         </div>
       </div>
-
-      {/* Transition targets live ABOVE the board so they're always on-screen. */}
-      {canMove && <div className="transition-bar">
-        {TRANSITIONS.map((t) => (
-          <div
-            key={t.stage} data-stage={t.stage}
-            className={`transition-zone ${t.stage === "DEAD" ? "dead" : "closed"} ${drag && overCol === t.stage ? "drop-target" : ""}`}
-          >
-            <span>{t.label}</span>
-            <span className="muted" style={{ fontSize: 11 }}>{t.hint}</span>
-          </div>
-        ))}
-      </div>}
 
       {activeStages.length === 0 && (
         <div className="panel" style={{ textAlign: "center", padding: "36px 20px" }}>
@@ -275,29 +276,56 @@ export function Pipeline() {
         </div>
       )}
       <div className={`kanban ${prefs.density === "compact" ? "compact" : ""} ${drag ? "dragging" : ""}`}>
-        {activeStages.map((stage) => {
+        {activeStages.map((stage, i) => {
           const col = stage.key;
+          const color = STAGE_COLORS[i % STAGE_COLORS.length];
           const colDeals = sortDeals(boardDeals.filter((d) => d.stage === col), prefs.sort);
+          const colTotal = colDeals.reduce((sum, d) => sum + (d.profitEst ?? 0), 0);
           return (
             <div
               key={col} data-stage={col}
               className={`kanban-col ${drag && overCol === col ? "drop-target" : ""}`}
+              style={{ borderTop: `3px solid ${color}` }}
             >
               <div className="kanban-col-head">
                 <span>{stage.label}</span>
-                <span className="muted">{colDeals.length}</span>
+                <span className={`pl2-count ${colDeals.length ? "on" : ""}`}>{colDeals.length}</span>
               </div>
+              <div className={`pl2-colsum ${colTotal > 0 ? "pos" : ""}`}>{money(colTotal) === "—" ? "$0" : money(colTotal)}</div>
               <div className="kanban-col-body">
                 {colDeals.map((d) => (
-                  <Card key={d.id} deal={d} canMove={canMove} fields={prefs.fields} dragging={drag?.id === d.id && drag.moved}
+                  <Card key={d.id} deal={d} color={color} canMove={canMove} fields={prefs.fields} dragging={drag?.id === d.id && drag.moved}
                     onPointerDown={(e) => startDrag(e, d)} onMove={() => setMoving(d)} />
                 ))}
-                {colDeals.length === 0 && <div className="kanban-empty">Drop here</div>}
+                {colDeals.length === 0 && (
+                  <div className="kanban-empty">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
+                    <span>Drop deals here</span>
+                  </div>
+                )}
               </div>
             </div>
           );
         })}
       </div>
+
+      {/* Resolution zones — permanent Closed/Dead targets below the board. */}
+      {canMove && <div className="transition-bar">
+        {TRANSITIONS.map((t) => (
+          <div
+            key={t.stage} data-stage={t.stage}
+            className={`transition-zone ${t.stage === "DEAD" ? "dead" : "closed"} ${drag && overCol === t.stage ? "drop-target" : ""}`}
+          >
+            <span className={`tz-ico ${t.stage === "DEAD" ? "dead" : "closed"}`} aria-hidden="true">
+              {t.stage === "DEAD"
+                ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
+            </span>
+            <span className={`tz-name ${t.stage === "DEAD" ? "dead" : "closed"}`}>{t.label}</span>
+            <span className="tz-hint">{t.hint}</span>
+          </div>
+        ))}
+      </div>}
 
       {/* Floating clone follows the cursor for a natural, lag-free drag. Its
           position is updated imperatively (cloneRef) during the drag. */}
@@ -342,14 +370,15 @@ export function Pipeline() {
   );
 }
 
-function Card({ deal, canMove, fields, dragging, onPointerDown, onMove }: {
-  deal: DealSummary; canMove: boolean; fields: Record<CardField, boolean>; dragging: boolean;
+function Card({ deal, color, canMove, fields, dragging, onPointerDown, onMove }: {
+  deal: DealSummary; color?: string; canMove: boolean; fields: Record<CardField, boolean>; dragging: boolean;
   onPointerDown: (e: React.PointerEvent) => void; onMove: () => void;
 }) {
   const isDead = deal.stage === "DEAD";
   return (
     <div
-      className={`deal-card prio-${deal.priority.toLowerCase()} ${isDead ? "dead" : ""} ${dragging ? "drag-source" : ""} ${canMove ? "draggable" : ""}`}
+      className={`deal-card ${isDead ? "dead" : ""} ${dragging ? "drag-source" : ""} ${canMove ? "draggable" : ""}`}
+      style={color ? { borderLeft: `3px solid ${color}` } : undefined}
       onPointerDown={canMove ? onPointerDown : undefined}
     >
       {canMove && <button
@@ -369,22 +398,30 @@ function Card({ deal, canMove, fields, dragging, onPointerDown, onMove }: {
 function CardBody({ deal, fields }: { deal: DealSummary; fields: Record<CardField, boolean> }) {
   const isClosing = deal.stage === "CLOSING";
   const isDead = deal.stage === "DEAD";
-  const showLoc = fields.location, showNra = fields.nra && deal.nra != null;
-  const row2 = fields.priority || fields.profit || fields.days;
+  const showNra = fields.nra && (deal.aggNra ?? deal.nra) != null;
+  // Short uppercase tag for the head chip (e.g. Minerals → MI), reference-style.
+  const typeTag = deal.assetTypes?.[0] ? deal.assetTypes[0].slice(0, 2).toUpperCase() : null;
   return (
     <>
-      <div className="dc-name">{deal.name}{deal.assetCount ? <span className="dc-assets"> · {deal.assetCount} asset{deal.assetCount > 1 ? "s" : ""}</span> : null}</div>
-      {(showLoc || showNra) && (
+      <div className="dc2-head">
+        <span className="dc-name">{deal.name}{deal.assetCount ? <span className="dc-assets"> · {deal.assetCount} asset{deal.assetCount > 1 ? "s" : ""}</span> : null}</span>
+        {typeTag && <span className="dc2-tag" title={deal.assetTypes.join(", ")}>{typeTag}</span>}
+      </div>
+      {fields.location && (
         <div className="dc-meta">
-          {showLoc && <span>{[deal.counties.join(", "), deal.state].filter(Boolean).join(", ") || "—"}</span>}
-          {showNra && <span>{num((deal.aggNra ?? deal.nra)!)} NRA</span>}
+          <span>{[deal.counties.join(", "), deal.state].filter(Boolean).join(", ") || "—"}</span>
         </div>
       )}
-      {row2 && (
-        <div className="dc-meta" style={{ marginTop: 4 }}>
-          {fields.priority && <span className={`badge priority-${deal.priority.toLowerCase()}`}>{deal.priority[0] + deal.priority.slice(1).toLowerCase()}</span>}
-          {fields.profit && <span>{money(deal.profitEst)}</span>}
-          {fields.days && <span>{deal.daysInStage}d in stage</span>}
+      {(showNra || fields.profit) && (
+        <div className="dc2-nums">
+          {showNra && <span className="dc2-nra"><b>{num((deal.aggNra ?? deal.nra)!)}</b> NRA</span>}
+          {showNra && fields.profit && <span className="dc2-sep">·</span>}
+          {fields.profit && <span className="dc2-money">{money(deal.profitEst)}</span>}
+        </div>
+      )}
+      {fields.priority && (
+        <div className="dc-meta" style={{ marginTop: 6 }}>
+          <span className={`badge priority-${deal.priority.toLowerCase()}`}>{deal.priority[0] + deal.priority.slice(1).toLowerCase()}</span>
         </div>
       )}
       {fields.buyer && isClosing && deal.selectedBuyer && <div className="dc-buyer">→ {deal.selectedBuyer.name}</div>}
@@ -400,6 +437,18 @@ function CardBody({ deal, fields }: { deal: DealSummary; fields: Record<CardFiel
           )}
         </div>
       )}
+      <div className="dc2-foot">
+        {fields.days ? (
+          <span className="dc2-days">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
+            {deal.daysInStage}d in stage
+          </span>
+        ) : <span />}
+        <span className="dc2-open">
+          Open
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>
+        </span>
+      </div>
     </>
   );
 }
