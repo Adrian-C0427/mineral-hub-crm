@@ -19,13 +19,17 @@ interface NavItem {
    *  "analytics", so each spells out which question it answers. */
   desc?: string;
   children?: NavItem[];
+  /** Path prefix that keeps this entry highlighted beyond its exact target
+   *  (e.g. Deals lands on /deals/active but stays lit for all /deals/*). */
+  match?: string;
 }
 
 // Config-driven so new modules are added here without touching layout code.
 const NAV: NavItem[] = [
   { label: "Dashboard", icon: LayoutDashboard, to: "/", end: true, desc: "Today's acquisition snapshot — active deals, profit, follow-ups" },
-  // Single entry — Active/Closed/Archived are tabs on the Deals page itself.
-  { label: "Deals", icon: Briefcase, to: "/deals", perm: "viewDeals", desc: "Acquisition opportunities you're working" },
+  // Single entry landing on ACTIVE deals (the working set); All/Closed/
+  // Archived remain reachable via the tabs on the Deals pages themselves.
+  { label: "Deals", icon: Briefcase, to: "/deals/active", match: "/deals", perm: "viewDeals", desc: "Acquisition opportunities you're working" },
   { label: "Mineral Assets", icon: Layers, to: "/assets", perm: "viewDeals", desc: "Your owned mineral & royalty portfolio" },
   { label: "Pipeline", icon: Workflow, to: "/pipeline", perm: "viewDeals", desc: "Drag deals through the acquisition stages" },
   { label: "Buyers", icon: Users, to: "/buyers", perm: "viewBuyers", desc: "Buyer list, buy boxes, and relationships" },
@@ -78,9 +82,19 @@ export function Sidebar() {
       <div className="sidebar-brand">
         {(() => {
           const org = user?.organization;
-          const logo = collapsed ? org?.compactLogo : org?.fullLogo;
-          if (logo) return <ThemedLogo className={`sidebar-logo ${collapsed ? "compact" : ""}`} src={logo} alt={org?.name ?? "Company logo"} />;
-          return <span className="brand">{collapsed ? "MH" : <>Mineral Hub<span className="dot">.</span></>}</span>;
+          const full = org?.fullLogo ?? null;
+          const compact = org?.compactLogo ?? full;
+          if (!full && !compact) return <span className="brand">{collapsed ? "MH" : <>Mineral Hub<span className="dot">.</span></>}</span>;
+          // BOTH variants stay mounted at all times; collapse only toggles CSS
+          // visibility. Nothing remounts, reloads, or reprocesses on expand/
+          // collapse, navigation, or theme change — the logo is a persistent
+          // element, never recreated (the recurring "logo disappears" bug).
+          return (
+            <>
+              {full && <ThemedLogo className="sidebar-logo logo-full" src={full} alt={org?.name ?? "Company logo"} />}
+              {compact && <ThemedLogo className="sidebar-logo compact logo-compact" src={compact} alt={org?.name ?? "Company logo"} />}
+            </>
+          );
         })()}
       </div>
 
@@ -127,7 +141,7 @@ function SidebarItem({ item, collapsed, allowed, pathname }: { item: NavItem; co
 
   if (!hasChildren) {
     return (
-      <NavLink to={item.to!} end={item.end} className={({ isActive }) => `sidebar-link ${isActive ? "active" : ""}`} title={collapsed ? item.label : item.desc}>
+      <NavLink to={item.to!} end={item.end} className={({ isActive }) => `sidebar-link ${isActive || (item.match && pathname.startsWith(item.match)) ? "active" : ""}`} title={collapsed ? item.label : item.desc}>
         <span className="sidebar-icon"><Icon size={18} /></span>
         {!collapsed && <span className="sidebar-label">{item.label}</span>}
       </NavLink>

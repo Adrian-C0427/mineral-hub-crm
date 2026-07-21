@@ -1205,7 +1205,9 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
                     </span>
                   ),
                 },
-                { key: "counties", header: "Counties", value: (r: RelRow) => r.counties.length, render: (r: RelRow) => r.counties.length ? <span className="relt-chips">{r.counties.map((c) => <span key={c} className="relt-chip">{c}</span>)}</span> : "—" },
+                // Counties read as plain text — pills added visual noise at a
+                // glance-density this table doesn't need.
+                { key: "counties", header: "Counties", value: (r: RelRow) => r.counties.length, render: (r: RelRow) => r.counties.length ? <span className="relt-counties" title={r.counties.join(", ")}>{r.counties.join(", ")}</span> : "—" },
                 { key: "abstracts", header: "Abstracts", value: (r: RelRow) => r.abstracts.length, align: "right" as const, render: (r: RelRow) => r.abstracts.length ? <span title={r.abstracts.join(", ")}><b>{r.abstracts.length}</b></span> : "—" },
                 { key: "lastDate", header: "Latest", value: (r: RelRow) => r.lastDate ?? "", render: (r: RelRow) => <span className="muted">{fmtDate(r.lastDate)}</span>, type: "date" as const },
               ]}
@@ -1387,34 +1389,47 @@ function EntityModal({ norm, data, onClose, onOpenEntity, onViewTx }: {
 
   return (
     <Modal title={name} onClose={onClose} wide>
-      <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 4 }}>
-        {info && <ClassBadge klass={info.klass} label={info.classLabel} />}
-        <span className="muted" style={{ fontSize: 13 }}>
-          Acquired {info?.acquisitions ?? bought.reduce((s, r) => s + r.count, 0)} · Sold {info?.dispositions ?? sold.reduce((s, r) => s + r.count, 0)}
-        </span>
+      {/* Consistent section rhythm: header block, relationship columns, chains,
+          footer actions — uniform spacing/labels (the modal read cramped and
+          unevenly aligned before). Used by both the Largest Terminal Holder and
+          Top Intermediary insights. */}
+      <div className="ent-head">
+        <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          {info && <ClassBadge klass={info.klass} label={info.classLabel} />}
+          <span className="muted" style={{ fontSize: 13 }}>
+            Acquired <strong style={{ color: "var(--text)" }}>{info?.acquisitions ?? bought.reduce((s, r) => s + r.count, 0)}</strong>
+            <span className="tract-dot">·</span>
+            Sold <strong style={{ color: "var(--text)" }}>{info?.dispositions ?? sold.reduce((s, r) => s + r.count, 0)}</strong>
+          </span>
+        </div>
+        {info && <p className="ent-desc">{CLASS_DESC[info.klass]}</p>}
       </div>
-      {info && <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>{CLASS_DESC[info.klass]}</p>}
 
-      <div className="rel2-cols" style={{ marginTop: 8 }}>
-        <PartyColumn title="Acquired From" tone="up" empty="No recorded acquisitions." parties={grantorParties}
-          canCreate={false} adding={null} onAdd={() => {}} onOpen={(p) => onOpenEntity(p.norm)}
-          alwaysOpenable openTitle="Open dossier" renderExtra={deedsButton("in")} />
-        <PartyColumn title="Sold To" tone="down" empty="No recorded dispositions." parties={granteeParties}
-          canCreate={false} adding={null} onAdd={() => {}} onOpen={(p) => onOpenEntity(p.norm)}
-          alwaysOpenable openTitle="Open dossier" renderExtra={deedsButton("out")} />
-        <PartyColumn title="Frequent Co-Buyers" tone="co" empty="No shared acquisitions found." parties={coBuyerParties}
-          canCreate={false} adding={null} onAdd={() => {}} onOpen={(p) => onOpenEntity(p.norm)}
-          alwaysOpenable openTitle="Open dossier" />
+      <div className="ent-sec">
+        <div className="ent-sec-label">Relationships</div>
+        <div className="rel2-cols">
+          <PartyColumn title="Acquired From" tone="up" empty="No recorded acquisitions." parties={grantorParties}
+            canCreate={false} adding={null} onAdd={() => {}} onOpen={(p) => onOpenEntity(p.norm)}
+            alwaysOpenable openTitle="Open dossier" renderExtra={deedsButton("in")} />
+          <PartyColumn title="Sold To" tone="down" empty="No recorded dispositions." parties={granteeParties}
+            canCreate={false} adding={null} onAdd={() => {}} onOpen={(p) => onOpenEntity(p.norm)}
+            alwaysOpenable openTitle="Open dossier" renderExtra={deedsButton("out")} />
+          <PartyColumn title="Frequent Co-Buyers" tone="co" empty="No shared acquisitions found." parties={coBuyerParties}
+            canCreate={false} adding={null} onAdd={() => {}} onOpen={(p) => onOpenEntity(p.norm)}
+            alwaysOpenable openTitle="Open dossier" />
+        </div>
       </div>
 
       {chains.length > 0 && (
-        <div style={{ marginTop: 14 }}>
-          <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>Appears in Chains</div>
+        <div className="ent-sec">
+          <div className="ent-sec-label">Appears in Chains</div>
+          {/* The same compact ChainSection used on Buyer Profiles — collapsed
+              summary rows that expand on demand. */}
           <ChainSection chains={chainRowsToEntries(chains, norm)} classLabels={data.classLabels} focusNorm={norm} />
         </div>
       )}
 
-      <div className="row" style={{ gap: 8, marginTop: 14, flexWrap: "wrap", alignItems: "center" }}>
+      <div className="ent-foot">
         <button className="small" onClick={() => onViewTx(`All transactions involving ${name}`, { entityNorm: norm })}>View all transactions →</button>
         {can("createBuyers") && !added && (
           <button className="small primary" disabled={adding} onClick={addToBuyers}>{adding ? "Adding…" : "Add to Buyers"}</button>

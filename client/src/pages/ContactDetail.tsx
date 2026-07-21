@@ -270,33 +270,48 @@ function Tags({ contact, canManage, onSave }: { contact: ContactRow; canManage: 
 
 /* --------------------------------------------------------- field sections */
 
+/**
+ * Purpose-built for mineral acquisitions (not a generic CRM rail): who to
+ * reach, what minerals they hold and where, how the lead entered the
+ * pipeline, and the outreach cadence. All sections start open — this rail is
+ * the at-a-glance dossier — and each can be collapsed individually.
+ */
 function FieldSections({ contact, onEdit }: { contact: ContactRow; onEdit?: () => void }) {
   const [q, setQ] = useState("");
-  const [open, setOpen] = useState<string>("Contact");
+  const [closed, setClosed] = useState<Set<string>>(new Set());
+  const followUpOverdue = contact.nextFollowUpDate != null && new Date(contact.nextFollowUpDate).getTime() < Date.now();
+
   const sections: { title: string; rows: [string, React.ReactNode][] }[] = [
     {
-      title: "Contact",
+      title: "Reach the Owner",
       rows: [
-        ["Phone", contact.phone ? <span className="cw-mono">{contact.phone}</span> : null],
-        ["Email", contact.email],
-        ["County / State", [contact.counties.join(", "), contact.states.join(", ")].filter(Boolean).join(" · ") || null],
+        ["Phone", contact.phone ? <a className="cw-mono" href={`tel:${contact.phone}`}>{contact.phone}</a> : null],
+        ["Email", contact.email ? <a href={`mailto:${contact.email}`}>{contact.email}</a> : null],
       ],
     },
     {
-      title: "General Info",
+      title: "Mineral Interest",
       rows: [
-        ["Type", typeLabel(contact.type)],
-        ["Entity", contact.entityName],
+        ["Ownership entity", contact.entityName],
+        ["Counties", contact.counties.length ? contact.counties.join(", ") : null],
+        ["State", contact.states.length ? contact.states.join(", ") : null],
+      ],
+    },
+    {
+      title: "Acquisition",
+      rows: [
+        ["Role", typeLabel(contact.type)],
+        ["Lead source", contact.source],
         ["Owner", contact.owner?.name ?? null],
-        ["Created", fmtDate(contact.createdAt)],
       ],
     },
     {
-      title: "Lead Source Info",
+      title: "Outreach Cadence",
       rows: [
-        ["Source", contact.source],
         ["Last contacted", contact.lastContactedAt ? fmtDate(contact.lastContactedAt) : null],
-        ["Next follow-up", contact.nextFollowUpDate ? fmtDate(contact.nextFollowUpDate) : null],
+        ["Next follow-up", contact.nextFollowUpDate
+          ? <span style={followUpOverdue ? { color: "var(--red)", fontWeight: 600 } : undefined}>{fmtDate(contact.nextFollowUpDate)}{followUpOverdue ? " · overdue" : ""}</span>
+          : null],
       ],
     },
   ];
@@ -312,10 +327,10 @@ function FieldSections({ contact, onEdit }: { contact: ContactRow; onEdit?: () =
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search fields…" aria-label="Search contact fields" />
       </div>
       {visible.map((s) => {
-        const isOpen = needle ? true : open === s.title;
+        const isOpen = needle ? true : !closed.has(s.title);
         return (
           <div key={s.title} className={`cw-sec ${isOpen ? "open" : ""}`}>
-            <button className="cw-sec-head" onClick={() => setOpen(isOpen && !needle ? "" : s.title)} aria-expanded={isOpen}>
+            <button className="cw-sec-head" onClick={() => setClosed((prev) => { const n = new Set(prev); n.has(s.title) ? n.delete(s.title) : n.add(s.title); return n; })} aria-expanded={isOpen}>
               <span>{s.title}</span>
               {isOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
             </button>
@@ -332,6 +347,7 @@ function FieldSections({ contact, onEdit }: { contact: ContactRow; onEdit?: () =
           </div>
         );
       })}
+      <div className="cw-meta muted">Added {fmtDate(contact.createdAt)}</div>
       {onEdit && <button className="small" style={{ marginTop: 4 }} onClick={onEdit}>Edit contact</button>}
     </div>
   );
