@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { NavLink, useLocation } from "react-router-dom";
 import {
   LayoutDashboard, Briefcase, Workflow, Users, Map as MapIcon, BarChart3, Telescope, TrendingDown,
-  Layers, Receipt, Store, Settings as SettingsIcon, ChevronRight, ChevronDown, LogOut,
+  Layers, Receipt, Store, Settings as SettingsIcon, ContactRound, ChevronRight, ChevronDown, LogOut,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
@@ -31,6 +31,8 @@ const NAV: NavItem[] = [
   { label: "Mineral Assets", icon: Layers, to: "/assets", perm: "viewDeals", desc: "Your owned mineral & royalty portfolio" },
   { label: "Pipeline", icon: Workflow, to: "/pipeline", perm: "viewDeals", desc: "Drag deals through the acquisition stages" },
   { label: "Buyers", icon: Users, to: "/buyers", perm: "viewBuyers", desc: "Buyer list, buy boxes, and relationships" },
+  // Acquisitions module — sourcing side of the CRM.
+  { label: "Contacts", icon: ContactRound, to: "/contacts", perm: "viewContacts", desc: "Acquisitions — sellers, prospects, and inbound leads" },
   { label: "Map", icon: MapIcon, to: "/map", perm: "viewMap", desc: "Wells, abstracts, and deals on the Texas map" },
   { label: "Research", icon: Telescope, to: "/research", perm: "viewResearch", desc: "Market intelligence — county transactions, permits, operators" },
   { label: "Well Analysis", icon: TrendingDown, to: "/valuation", perm: "viewWellAnalysis", desc: "Value specific wells — decline curves, forecasts, offer prices" },

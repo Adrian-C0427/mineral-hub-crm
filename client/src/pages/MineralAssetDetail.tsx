@@ -4,6 +4,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell,
 } from "recharts";
 import { api } from "../api/client";
+import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, MetricCard, Banner, MatchBar, Modal, ConfirmDialog, BackLink } from "../components/ui";
 import { Select } from "../components/Select";
@@ -108,10 +109,14 @@ export function MineralAssetDetail() {
         <MetricCard label="Annual Royalty Income" value={money(asset.royaltyIncomeAnnual)} hint="Trailing 12 mo · from revenue" valueColor={asset.royaltyIncomeAnnual ? "var(--green)" : undefined} />
       </div>
 
-      <div className="asset-tabs">
-        <button className={`tab ${tab === "hold" ? "active" : ""}`} onClick={() => setTab("hold")}>Hold — Portfolio Management</button>
-        <button className={`tab ${tab === "sell" ? "active" : ""}`} onClick={() => setTab("sell")}>Sell — Active Marketing</button>
-      </div>
+      <Tabs
+        tabs={[
+          { key: "hold" as const, label: "Hold", title: "Portfolio management" },
+          { key: "sell" as const, label: "Sell", title: "Active marketing" },
+        ]}
+        active={tab}
+        onSelect={setTab}
+      />
 
       {tab === "hold" ? (
         <HoldTab asset={asset} canEdit={canEdit} onChanged={load} />
@@ -549,7 +554,7 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
       )}
 
       {/* Offering page publishing — identical to a standard deal. */}
-      <DealPortalPanel dealId={asset.id} />
+      <DealPortalPanel dealId={asset.id} defaultOpen={false} />
 
       <CollapsibleSection
         title="Buyer Activity"

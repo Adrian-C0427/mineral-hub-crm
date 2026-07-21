@@ -15,6 +15,7 @@ import { dealsRouter } from "./routes/deals.js";
 import { pipelineStagesRouter } from "./routes/pipelineStages.js";
 import { tractsRouter } from "./routes/tracts.js";
 import { buyersRouter } from "./routes/buyers.js";
+import { contactsRouter } from "./routes/contacts.js";
 import { offersRouter } from "./routes/offers.js";
 import { filesRouter } from "./routes/files.js";
 import { reportsRouter } from "./routes/reports.js";
@@ -74,6 +75,7 @@ export function createApp() {
   // for the /api/deals/:id/tracts* paths the deals router doesn't define.
   app.use("/api/deals", tractsRouter);
   app.use("/api/buyers", buyersRouter);
+  app.use("/api/contacts", contactsRouter);
   app.use("/api/offers", offersRouter);
   app.use("/api/files", filesRouter);
   app.use("/api/reports", reportsRouter);

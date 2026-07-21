@@ -13,7 +13,7 @@ import { effectiveStatus, ENGAGED_STATUSES, BUYER_STATUSES } from "../domain/buy
 import { sendEmail, personalize, renderEmailBody } from "../services/email.js";
 import { money as fmtMoney } from "../domain/format.js";
 import { newPortalSlug } from "./portal.js";
-import { ensureStages, firstActiveStageKey } from "../domain/stages.js";
+import { ensureStages, activeStageKeys } from "../domain/stages.js";
 
 export const dealsRouter = Router();
 // All deal routes require membership in an organization and are scoped to it.
@@ -248,7 +248,11 @@ dealsRouter.post(
       if (!p) throw new HttpError(400, "Unknown pipeline");
       pipelineId = p.isDefault ? null : p.id; // null = default, keeps legacy rows uniform
     }
-    const firstStage = await firstActiveStageKey(prisma, orgId(req), pipelineId);
+    const activeKeys = await activeStageKeys(prisma, orgId(req), pipelineId);
+    if (!isAsset && activeKeys.length === 0) {
+      throw new HttpError(400, "This pipeline has no stages yet — add a stage to it before creating deals there");
+    }
+    const firstStage = activeKeys[0] ?? "UNDER_CONTRACT";
     const initialStage = isAsset ? "CLOSING" : firstStage;
     const deal = await prisma.$transaction(async (tx) => {
       const created = await tx.deal.create({

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
 import { AbstractMultiPicker } from "./AbstractPicker";
 import { US_STATE_OPTIONS, US_STATE_LABELS, countiesForStates } from "../lib/options";
@@ -40,7 +40,7 @@ export function GeoFields({
   /** Override the county option list (defaults to counties of the selected states). */
   countyOptions?: string[];
   disabled?: boolean;
-  labels?: { state?: string; county?: string; abstract?: string };
+  labels?: { state?: ReactNode; county?: ReactNode; abstract?: ReactNode };
 }) {
   const availableCounties = countyOptions ?? countiesForStates(states);
   // Tell the user when a state change silently dropped county selections.

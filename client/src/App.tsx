@@ -36,6 +36,8 @@ const PortalOffering = lazy(() => import("./pages/portal/PortalOffering").then((
 const PortalAdmin = lazy(() => import("./pages/PortalAdmin").then((m) => ({ default: m.PortalAdmin })));
 // Public marketing site (signed-out "/"); heavy visuals stay out of the app bundle.
 const Landing = lazy(() => import("./pages/Landing").then((m) => ({ default: m.Landing })));
+// Acquisitions module — Contacts (sourcing side of the CRM).
+const Contacts = lazy(() => import("./pages/Contacts").then((m) => ({ default: m.Contacts })));
 
 /** Redirect to Dashboard if the user lacks the required permission. */
 function Guard({ perm, children }: { perm: string; children: ReactNode }) {
@@ -121,6 +123,7 @@ export function App() {
           <Route path="/deals/archived" element={<Guard perm="viewDeals"><Deals scope="archived" /></Guard>} />
           <Route path="/deals/:id" element={<Guard perm="viewDeals"><DealDetail /></Guard>} />
           <Route path="/buyers" element={<Guard perm="viewBuyers"><Buyers /></Guard>} />
+          <Route path="/contacts" element={<Guard perm="viewContacts"><Suspense fallback={<Spinner label="Loading contacts…" />}><Contacts /></Suspense></Guard>} />
           <Route path="/buyers/:id" element={<Guard perm="viewBuyers"><BuyerProfile /></Guard>} />
           <Route path="/reports" element={<Guard perm="viewReports"><Suspense fallback={<Spinner label="Loading reports…" />}><Reports /></Suspense></Guard>} />
           <Route path="/research" element={<Guard perm="viewResearch"><Suspense fallback={<Spinner label="Loading research…" />}><Research /></Suspense></Guard>} />

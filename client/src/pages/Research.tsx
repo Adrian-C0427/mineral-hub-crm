@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend, BarChart,
   LineChart, PieChart, Pie, Cell,
@@ -20,6 +20,7 @@ import { downloadCsv } from "../lib/csv";
 import { fmtDate, num, prettyEnum, prettyDocType } from "../lib/format";
 import { CHART_COLORS, chartTooltip } from "../lib/charts";
 import { DateField } from "../components/DateField";
+import { ChainSection, ClassBadge, PartyColumn, type ChainEntry, type RelParty } from "../components/relationshipViews";
 
 /**
  * Research & Market Intelligence — trends in mineral transactions, leasing
@@ -1026,9 +1027,24 @@ function AddToBuyersReview({ auto, possibles, onCancel, onConfirm }: {
 // Relationships — grantor→grantee graph, co-buyers, chains, classifications
 // ---------------------------------------------------------------------------
 
-function ClassBadge({ klass, label }: { klass: string; label: string }) {
-  const c = CLASS_COLORS[klass] ?? "#64748b";
-  return <span className="badge" style={{ background: `${c}26`, color: c }}>{label}</span>;
+/** Adapt relationship rows to the shared PartyColumn's party shape. */
+function relRowsToParties(rows: RelRow[], nameOf: (r: RelRow) => { norm: string; name: string }): RelParty[] {
+  return rows
+    .map((r) => { const { norm, name } = nameOf(r); return { norm, name, count: r.count, entityType: "company" as const, buyerId: null }; })
+    .sort((a, b) => b.count - a.count);
+}
+
+/** Adapt chain table rows to the shared ChainSection's entry shape. */
+function chainRowsToEntries(rows: ChainRow[], focusNorm: string): ChainEntry[] {
+  return rows.map((c) => {
+    const idx = focusNorm ? c.nodes.findIndex((n) => n.norm === focusNorm) : -1;
+    const position = idx >= 0 ? idx : 0;
+    return {
+      chain: { nodes: c.nodes, hops: c.hops, length: c.length, strength: c.strength, totalCount: c.totalCount, counties: c.counties },
+      position,
+      role: c.nodes[position]?.klass ?? "",
+    };
+  });
 }
 
 type RelView = "relationships" | "cobuyers" | "chains" | "entities";
@@ -1050,7 +1066,6 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<RelView>("relationships");
   const [tx, setTx] = useState<{ title: string; selector: TxSelector } | null>(null);
-  const [expanded, setExpanded] = useState<number | null>(null);
   const [q, setQ] = useState("");
   const [repeatOnly, setRepeatOnly] = useState(false);
   const [classFilter, setClassFilter] = useState<string | null>(null);
@@ -1235,52 +1250,21 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
           <h3 style={{ marginTop: 0 }}>Acquisition Chains</h3>
           <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>How interests move through multiple entities. Each row is a complete path; click to expand hops, counties, and supporting transactions.</p>
           {chains.length === 0 ? <p className="muted">No multi-hop acquisition paths {q ? `match “${q}”` : "detected in this period"}.</p> : (
-            <div className="table-scroll">
-              <table className="data-table">
-                <thead><tr><th>Platform / Chain</th><th>Feeder Entities</th><th>Aggregator / Mid-Tier</th><th>End Terminus</th><th className="right">Strength</th></tr></thead>
-                <tbody>
-                  {chains.map((c, i) => (
-                    <Fragment key={i}>
-                      <tr className="clickable" onClick={() => setExpanded(expanded === i ? null : i)}>
-                        <td><strong>{c.path}</strong><div className="muted" style={{ fontSize: 11 }}>{c.length} hops · {c.totalCount} transactions</div></td>
-                        <td>{c.feeders.join(", ") || "—"}</td>
-                        <td>{c.midTier.join(", ") || "—"}</td>
-                        <td>{c.terminus ?? "—"}</td>
-                        <td className="right">{c.strength}</td>
-                      </tr>
-                      {expanded === i && (
-                        <tr>
-                          <td colSpan={5} style={{ background: "var(--panel-2)" }}>
-                            <div className="chain-detail">
-                              <div className="row" style={{ gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
-                                {c.nodes.map((n, j) => (
-                                  <span key={n.norm} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                                    <span style={{ cursor: "pointer" }} title={`${CLASS_DESC[n.klass] ?? n.klass} — click for dossier`} onClick={() => setEntity(n.norm)}>
-                                      <ClassBadge klass={n.klass} label={n.name} />
-                                    </span>
-                                    {j < c.nodes.length - 1 && (
-                                      <span className="muted" title={`${c.hops[j]?.count} transactions`}>—{c.hops[j]?.count}→</span>
-                                    )}
-                                  </span>
-                                ))}
-                              </div>
-                              <div className="muted" style={{ fontSize: 12 }}>
-                                {c.counties.length > 0 && <>Counties: {c.counties.join(", ")} · </>}
-                                {c.firstDate && c.lastDate && <>{fmtDate(c.firstDate)} – {fmtDate(c.lastDate)}</>}
-                              </div>
-                              <div className="row" style={{ gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                                <button className="small" onClick={() => setTx({ title: `Chain: ${c.path}`, selector: { path: c.nodes.map((n) => n.norm) } })}>View supporting transactions →</button>
-                                {c.terminus && <button className="small" onClick={() => onDrill({ counties: c.counties })}>Filter records to these counties →</button>}
-                              </div>
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <ChainSection
+              chains={chainRowsToEntries(chains, "")}
+              classLabels={data.classLabels}
+              focusNorm=""
+              renderActions={(_entry, i) => {
+                const c = chains[i];
+                return (
+                  <>
+                    <button className="small" onClick={() => setTx({ title: `Chain: ${c.path}`, selector: { path: c.nodes.map((n) => n.norm) } })}>View supporting transactions →</button>
+                    {c.terminus && <button className="small" onClick={() => onDrill({ counties: c.counties })}>Filter records to these counties →</button>}
+                    {c.firstDate && c.lastDate && <span className="muted" style={{ fontSize: 12 }}>{fmtDate(c.firstDate)} – {fmtDate(c.lastDate)}</span>}
+                  </>
+                );
+              }}
+            />
           )}
         </div>
       )}
@@ -1379,30 +1363,26 @@ function EntityModal({ norm, data, onClose, onOpenEntity, onViewTx }: {
     }
   }
 
-  const Counterparties = ({ title, rows, dir }: { title: string; rows: RelRow[]; dir: "in" | "out" }) => (
-    <div>
-      <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>{title}</div>
-      {rows.length === 0 ? <p className="muted" style={{ margin: 0 }}>None in this period.</p> : (
-        <div className="rel-party-list">
-          {rows.slice(0, 10).map((r) => {
-            const otherNorm = dir === "in" ? r.grantorNorm : r.granteeNorm;
-            const otherName = dir === "in" ? r.grantor : r.grantee;
-            return (
-              <div key={otherNorm} className="rel-party-row">
-                <button className="rel-party-name link" onClick={() => onOpenEntity(otherNorm)} title="Open dossier">{otherName}</button>
-                <span className="rel-party-meta">
-                  <span className="rel-count-mini">{r.count}×</span>
-                  <button className="small" onClick={() => onViewTx(
-                    dir === "in" ? `${otherName} → ${name}` : `${name} → ${otherName}`,
-                    dir === "in" ? { grantorNorm: otherNorm, granteeNorm: norm } : { grantorNorm: norm, granteeNorm: otherNorm },
-                  )}>deeds</button>
-                </span>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+  // Shared PartyColumn shapes: grantors we bought from, grantees we sold to,
+  // and co-buying partners aggregated per partner entity.
+  const grantorParties = relRowsToParties(bought, (r) => ({ norm: r.grantorNorm, name: r.grantor }));
+  const granteeParties = relRowsToParties(sold, (r) => ({ norm: r.granteeNorm, name: r.grantee }));
+  const coBuyerParties: RelParty[] = (() => {
+    const agg = new Map<string, RelParty>();
+    for (const p of partners) for (const m of p.members) {
+      if (m.norm === norm) continue;
+      const cur = agg.get(m.norm);
+      if (cur) cur.count += p.count;
+      else agg.set(m.norm, { norm: m.norm, name: m.name, count: p.count, entityType: "company", buyerId: null });
+    }
+    return [...agg.values()].sort((a, b) => b.count - a.count);
+  })();
+
+  const deedsButton = (dir: "in" | "out") => (p: RelParty) => (
+    <button className="small" onClick={() => onViewTx(
+      dir === "in" ? `${p.name} → ${name}` : `${name} → ${p.name}`,
+      dir === "in" ? { grantorNorm: p.norm, granteeNorm: norm } : { grantorNorm: norm, granteeNorm: p.norm },
+    )}>deeds</button>
   );
 
   return (
@@ -1415,33 +1395,22 @@ function EntityModal({ norm, data, onClose, onOpenEntity, onViewTx }: {
       </div>
       {info && <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>{CLASS_DESC[info.klass]}</p>}
 
-      <div className="rel-columns" style={{ marginTop: 8 }}>
-        <Counterparties title="Bought From" rows={bought} dir="in" />
-        <Counterparties title="Sold To" rows={sold} dir="out" />
-        <div>
-          <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>Co-Buying Partners</div>
-          {partners.length === 0 ? <p className="muted" style={{ margin: 0 }}>None found.</p> : (
-            <div className="rel-party-list">
-              {partners.slice(0, 8).map((p, i) => (
-                <div key={i} className="rel-party-row">
-                  <span style={{ fontSize: 13 }}>{p.members.filter((m) => m.norm !== norm).map((m) => m.name).join(", ")}</span>
-                  <span className="rel-count-mini">{p.count}×</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+      <div className="rel2-cols" style={{ marginTop: 8 }}>
+        <PartyColumn title="Acquired From" tone="up" empty="No recorded acquisitions." parties={grantorParties}
+          canCreate={false} adding={null} onAdd={() => {}} onOpen={(p) => onOpenEntity(p.norm)}
+          alwaysOpenable openTitle="Open dossier" renderExtra={deedsButton("in")} />
+        <PartyColumn title="Sold To" tone="down" empty="No recorded dispositions." parties={granteeParties}
+          canCreate={false} adding={null} onAdd={() => {}} onOpen={(p) => onOpenEntity(p.norm)}
+          alwaysOpenable openTitle="Open dossier" renderExtra={deedsButton("out")} />
+        <PartyColumn title="Frequent Co-Buyers" tone="co" empty="No shared acquisitions found." parties={coBuyerParties}
+          canCreate={false} adding={null} onAdd={() => {}} onOpen={(p) => onOpenEntity(p.norm)}
+          alwaysOpenable openTitle="Open dossier" />
       </div>
 
       {chains.length > 0 && (
         <div style={{ marginTop: 14 }}>
           <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 6 }}>Appears in Chains</div>
-          {chains.slice(0, 5).map((c, i) => (
-            <div key={i} className="rel-chain" style={{ marginBottom: 6 }}>
-              <span style={{ fontSize: 13 }}>{c.path}</span>
-              <span className="muted" style={{ fontSize: 11, marginLeft: 8 }}>{c.length} hops · {c.totalCount} txns</span>
-            </div>
-          ))}
+          <ChainSection chains={chainRowsToEntries(chains, norm)} classLabels={data.classLabels} focusNorm={norm} />
         </div>
       )}
 

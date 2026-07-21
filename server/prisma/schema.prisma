@@ -165,6 +165,7 @@ model Organization {
   emailTemplates    EmailTemplate[]
   pipelineStages    PipelineStage[]
   pipelines         Pipeline[]
+  contacts          Contact[]
   integrations      Integration[]
   researchDocuments ResearchDocument[]
   researchPermits   ResearchPermit[]
@@ -340,6 +341,7 @@ model User {
   lastActiveAt DateTime?
 
   passwordResetTokens PasswordResetToken[]
+  ownedContacts       Contact[] @relation("ContactOwner")
   oauthAccounts       OAuthAccount[]
 
   ownedDeals         Deal[]              @relation("DealRelationshipOwner")
@@ -1339,4 +1341,49 @@ model PortalRateHit {
 
   @@id([key, windowStart])
   @@index([windowStart])
+}
+
+// ---------------------------------------------------------------------------
+// Acquisitions — Contacts
+// ---------------------------------------------------------------------------
+
+// An acquisitions-side contact: a mineral owner, prospect, or inbound lead the
+// team is sourcing from. This is the foundation of the Acquisitions module —
+// outreach campaigns, follow-up sequences, and lead-to-deal conversion will
+// build on this record without structural changes (type/status are string
+// keys, like Deal.stage, so future workflows stay data-driven).
+model Contact {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  firstName  String
+  lastName   String
+  entityName String? // company / trust the person represents, if any
+
+  // Classification (string keys — extensible without migrations).
+  type   String @default("PROSPECT") // SELLER | PROSPECT | LEAD | REFERRAL | OTHER
+  status String @default("NEW") // NEW | CONTACTED | ENGAGED | NEGOTIATING | CONVERTED | NOT_INTERESTED
+  source String? // where this contact came from (mailer, call, referral, web…)
+
+  email String?
+  phone String?
+
+  // Geography of interest (mirrors Deal geography fields).
+  states   String[]
+  counties String[]
+
+  notes String?
+
+  ownerId String?
+  owner   User?   @relation("ContactOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  lastContactedAt  DateTime?
+  nextFollowUpDate DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([organizationId])
+  @@index([organizationId, status])
 }

@@ -32,7 +32,7 @@ const blankContact = (): DealContact => ({ id: newId(), name: "", title: "", ema
  * link-only visibility, featured flag, buyer-facing summary, per-document
  * approval, and the copyable share link.
  */
-export function DealPortalPanel({ dealId }: { dealId: string }) {
+export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string; defaultOpen?: boolean }) {
   const { can } = useAuth();
   const [p, setP] = useState<PortalState | null>(null);
   const [summary, setSummary] = useState("");
@@ -41,9 +41,9 @@ export function DealPortalPanel({ dealId }: { dealId: string }) {
   const [contacts, setContacts] = useState<DealContact[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  // Expanded by default — collapse remains available for users who want the
-  // panel out of the way.
-  const [open, setOpen] = useState(true);
+  // Expanded by default on the Deal page; hosts can start it collapsed
+  // (Mineral Assets does). Collapse always remains available.
+  const [open, setOpen] = useState(defaultOpen);
   // Publish controls need publishOfferings; buyer-visibility of a document is a
   // document action (manageDocuments) — mirrors the server gates.
   const canEdit = can("publishOfferings");

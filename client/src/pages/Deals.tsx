@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { NavLink, useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { Banner, PriorityBadge, StageBadge, Spinner, SearchInput } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
@@ -8,6 +8,7 @@ import { useRowSelection, BulkActionsBar } from "../components/bulk";
 import { money, num, fmtDate } from "../lib/format";
 import { dealSearchHaystack } from "../lib/dealSearch";
 import { downloadCsv } from "../lib/csv";
+import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
 import type { DealSummary, UserLite } from "../types";
 
@@ -91,11 +92,16 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
 
       {/* Scope tabs — the sidebar shows a single "Deals" entry; Active/Closed/
           Archived (and future sections) live here as top tab navigation. */}
-      <div className="asset-tabs" role="tablist" style={{ marginBottom: 14 }}>
-        {([["all", "All", "/deals"], ["active", "Active", "/deals/active"], ["closed", "Closed", "/deals/closed"], ["archived", "Archived", "/deals/archived"]] as [Scope, string, string][]).map(([s, label, to]) => (
-          <NavLink key={s} to={to} end className={`tab ${scope === s ? "active" : ""}`} role="tab" aria-selected={scope === s}>{label}</NavLink>
-        ))}
-      </div>
+      <Tabs
+        style={{ marginBottom: 14 }}
+        tabs={[
+          { key: "all" as const, label: "All", to: "/deals" },
+          { key: "active" as const, label: "Active", to: "/deals/active" },
+          { key: "closed" as const, label: "Closed", to: "/deals/closed" },
+          { key: "archived" as const, label: "Archived", to: "/deals/archived" },
+        ]}
+        active={scope}
+      />
 
       {overdue.length > 0 && (
         <Banner kind="warn">
