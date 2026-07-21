@@ -333,6 +333,11 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 /* Company branding logos in the sidebar. */
 .sidebar-logo { max-height: 36px; max-width: 156px; object-fit: contain; object-position: left center; display: block; }
 .sidebar-logo.compact { max-height: 34px; max-width: 40px; object-position: center; }
+/* Both logo variants are ALWAYS mounted (see Sidebar) — collapse toggles pure
+   CSS visibility so nothing ever remounts, reloads, or flashes. */
+.sidebar .logo-compact { display: none; }
+.sidebar.collapsed .logo-full { display: none; }
+.sidebar.collapsed .logo-compact { display: block; }
 /* Company Branding settings — drag-and-drop logo slots. */
 .logo-drop { display: grid; place-items: center; min-height: 96px; padding: 12px; border: 1.5px dashed var(--border); border-radius: 8px; background: var(--panel-2); cursor: pointer; transition: border-color .12s, background .12s; text-align: center; }
 .logo-drop:hover { border-color: var(--accent); }
@@ -730,6 +735,21 @@ body.modal-open { overflow: hidden; }
 
 /* The one standardized required-field indicator, app-wide (incl. portal). */
 .req-star { color: var(--red); margin-left: 2px; font-weight: 700; }
+
+/* Contact rail footer meta — quiet provenance line, not a field. */
+.cw-meta { font-size: 11.5px; margin: 6px 2px 2px; }
+.cw-fields a { color: inherit; text-decoration: none; }
+.cw-fields a:hover { color: var(--accent); }
+
+/* Research entity dossier (Largest Terminal Holder / Top Intermediary):
+   uniform section rhythm — header, labeled sections, bordered footer. */
+.ent-head { padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+.ent-desc { margin: 8px 0 0; color: var(--text-dim); font-size: 12.5px; max-width: 68ch; }
+.ent-sec { margin-bottom: 18px; }
+.ent-sec-label { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin-bottom: 10px; }
+.ent-foot { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding-top: 12px; border-top: 1px solid var(--border); }
+/* Relationships table: counties as plain text, single line with ellipsis. */
+.relt-counties { display: inline-block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-size: 12.5px; vertical-align: bottom; }
 
 /* Folder chips highlight the insertion point while another chip is dragged over. */
 .doc-chip.drop-target { outline: 2px dashed var(--accent); outline-offset: 1px; }
@@ -2325,9 +2345,18 @@ body.pipeline-dragging, body.pipeline-dragging * { user-select: none !important;
 .pls-row-name { font-size: 13px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pls-default { font-size: 10px; font-weight: 700; letter-spacing: .04em; color: var(--text-dim); background: color-mix(in srgb, var(--text) 7%, transparent); border-radius: 99px; padding: 2px 7px; flex: none; }
 .pls-row-actions { margin-left: auto; display: flex; gap: 2px; }
-.stage-color { width: 26px; height: 26px; padding: 0; border: 1px solid var(--border); border-radius: 7px; background: transparent; cursor: pointer; flex: none; }
+/* Compact stage color indicator: a small round dot (the input itself stays a
+   comfortable click target via padding-box hit area). */
+input.stage-color, .stage-color { width: 18px !important; min-width: 18px; height: 18px; padding: 0; border: 1px solid var(--border); border-radius: 999px; background: transparent; cursor: pointer; flex: none; }
 .stage-color::-webkit-color-swatch-wrapper { padding: 2px; }
-.stage-color::-webkit-color-swatch { border: none; border-radius: 5px; }
+.stage-color::-webkit-color-swatch { border: none; border-radius: 999px; }
+.stage-color::-moz-color-swatch { border: none; border-radius: 999px; }
+
+/* Pipeline list drag-reorder feedback (mirrors the stage editor). */
+.pls-row { transition: transform 140ms ease, opacity 140ms ease, border-color 140ms ease; }
+.pls-row.dragging { opacity: 0.45; }
+.pls-row.drop-target { border-color: var(--accent); transform: translateY(2px); }
+.pls-row .stage-drag { cursor: grab; }
 
 /* ---------------------------------------------------------------------------
    Contact workspace (reference layout): left details rail · center activity
@@ -2437,22 +2466,22 @@ body.pipeline-dragging, body.pipeline-dragging * { user-select: none !important;
 .pl2-page .kanban { flex: 1; padding-bottom: 4px; }
 .pl2-page .kanban-col { max-height: none; }
 .pl2-page .kanban-col-body { flex: 1; overflow-y: auto; }
-.tz-col {
-  flex: 0 0 150px; min-width: 150px; width: 150px;
-  position: sticky; z-index: 6; background: var(--panel);
-  box-shadow: -8px 0 16px rgba(0, 0, 0, .18);
-}
-.tz-col.closed { right: 164px; border-top-color: var(--green) !important; }
-.tz-col.dead { right: 0; border-top-color: var(--red) !important; }
-.tz-col .kanban-col-head { font-size: 12.5px; gap: 7px; }
-.tz-col-target {
-  flex: 1; margin: 12px; border: 1.5px dashed var(--border); border-radius: 10px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
-  text-align: center; color: var(--text-dim); font-size: 11px; font-weight: 600; padding: 12px 8px; min-height: 150px;
-}
-.tz-col.closed .tz-col-target { border-color: color-mix(in srgb, var(--green) 30%, transparent); background: color-mix(in srgb, var(--green) 3%, transparent); }
-.tz-col.dead .tz-col-target { border-color: color-mix(in srgb, var(--red) 28%, transparent); background: color-mix(in srgb, var(--red) 3%, transparent); }
-.tz-col .tz-ico { width: 26px; height: 26px; border-radius: 7px; }
+/* Closed/Dead resolution zones: a fixed bar at the BOTTOM of the board, the
+   two zones side by side, always visible (sticky) — completed opportunities
+   are visually separated from the active workflow above. */
+.tz-bottom { display: flex; gap: 12px; position: sticky; bottom: 0; z-index: 6; padding: 8px 0 10px; margin-top: 6px;
+  background: linear-gradient(to bottom, transparent, var(--bg) 35%); }
+.tz-zone { flex: 1; display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 10px 16px;
+  border: 1.5px dashed var(--border); border-radius: 10px; background: var(--panel);
+  transition: border-color 120ms ease, background 120ms ease, transform 120ms ease; }
+.tz-zone.closed { border-color: color-mix(in srgb, var(--green) 32%, transparent); background: color-mix(in srgb, var(--green) 4%, var(--panel)); }
+.tz-zone.dead { border-color: color-mix(in srgb, var(--red) 30%, transparent); background: color-mix(in srgb, var(--red) 4%, var(--panel)); }
+.tz-zone.drop-target { border-style: solid; transform: translateY(-2px); }
+.tz-zone.closed.drop-target { border-color: var(--green); background: color-mix(in srgb, var(--green) 12%, var(--panel)); }
+.tz-zone.dead.drop-target { border-color: var(--red); background: color-mix(in srgb, var(--red) 12%, var(--panel)); }
+.tz-zone .tz-ico { width: 26px; height: 26px; border-radius: 7px; flex-shrink: 0; }
+.tz-zone .tz-name { font-weight: 700; font-size: 13px; }
+.tz-hint { color: var(--text-dim); font-size: 11.5px; margin-left: auto; text-align: right; }
 .kanban.dragging .tz-col.drop-target .tz-col-target { border-style: solid; }
 
 /* Sidebar collapse control must always ride ABOVE the fixed top bar (z 40):

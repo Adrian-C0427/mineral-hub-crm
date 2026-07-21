@@ -43,12 +43,14 @@ export function PipelineSettingsModal({ pipelines, initialId, onClose, onChanged
     });
   };
 
-  const movePipeline = (id: string, dir: -1 | 1) => {
-    const ids = pipelines.map((p) => p.id);
-    const i = ids.indexOf(id);
-    const j = i + dir;
-    if (i < 0 || j < 0 || j >= ids.length) return;
-    [ids[i], ids[j]] = [ids[j], ids[i]];
+  // Drag-and-drop pipeline ordering (same interaction as the stage editor):
+  // drag any row onto another and the list re-saves immediately.
+  const [dragPipeline, setDragPipeline] = useState<string | null>(null);
+  const [dropPipeline, setDropPipeline] = useState<string | null>(null);
+  const reorderPipelines = (fromId: string, toId: string) => {
+    if (fromId === toId) return;
+    const ids = pipelines.map((p) => p.id).filter((id) => id !== fromId);
+    ids.splice(ids.indexOf(toId), 0, fromId);
     void run(async () => { await api.post("/pipeline/pipelines/reorder", { order: ids }); });
   };
 
@@ -58,16 +60,23 @@ export function PipelineSettingsModal({ pipelines, initialId, onClose, onChanged
         {/* ------------------------------------------------ pipelines pane */}
         <div className="pls-list">
           <div className="ddx-label" style={{ marginBottom: 8 }}>Pipelines</div>
-          {pipelines.map((p, i) => (
-            <div key={p.id} className={`pls-row ${p.id === sel?.id ? "active" : ""}`} onClick={() => setSelId(p.id)} role="button" tabIndex={0}
-              onKeyDown={(e) => { if (e.key === "Enter") setSelId(p.id); }}>
+          {pipelines.map((p) => (
+            <div key={p.id}
+              className={`pls-row ${p.id === sel?.id ? "active" : ""} ${dropPipeline === p.id ? "drop-target" : ""} ${dragPipeline === p.id ? "dragging" : ""}`}
+              onClick={() => setSelId(p.id)} role="button" tabIndex={0}
+              onKeyDown={(e) => { if (e.key === "Enter") setSelId(p.id); }}
+              draggable={!busy}
+              onDragStart={(e) => { setDragPipeline(p.id); e.dataTransfer.effectAllowed = "move"; }}
+              onDragOver={(e) => { if (dragPipeline && dragPipeline !== p.id) { e.preventDefault(); setDropPipeline(p.id); } }}
+              onDragLeave={() => setDropPipeline((t) => (t === p.id ? null : t))}
+              onDrop={(e) => { e.preventDefault(); setDropPipeline(null); if (dragPipeline) reorderPipelines(dragPipeline, p.id); setDragPipeline(null); }}
+              onDragEnd={() => { setDragPipeline(null); setDropPipeline(null); }}
+              title="Drag to reorder pipelines"
+            >
+              <span className="stage-drag" aria-hidden="true">⠿</span>
               <span className="pls-row-dot" style={{ background: stageColor(p.stages, p.stages.find((s) => !s.isTerminal)?.key ?? "") }} />
               <span className="pls-row-name">{p.name}</span>
               {p.isDefault && <span className="pls-default">Default</span>}
-              <span className="pls-row-actions" onClick={(e) => e.stopPropagation()}>
-                <button type="button" className="icon-btn" title="Move up" disabled={busy || i === 0} onClick={() => movePipeline(p.id, -1)}>↑</button>
-                <button type="button" className="icon-btn" title="Move down" disabled={busy || i === pipelines.length - 1} onClick={() => movePipeline(p.id, 1)}>↓</button>
-              </span>
             </div>
           ))}
           <div className="row" style={{ gap: 8, marginTop: 10 }}>
