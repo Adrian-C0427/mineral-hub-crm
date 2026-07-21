@@ -12,7 +12,6 @@ import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
 import type { DealSummary, UserLite } from "../types";
 
-type Filter = "ALL" | "HIGH" | "NO_BUYER";
 type Scope = "all" | "active" | "closed" | "archived";
 
 const SCOPE_TITLE: Record<Scope, string> = { all: "Deals", active: "Active Deals", closed: "Closed Deals", archived: "Archived Deals" };
@@ -28,7 +27,6 @@ function inScope(d: DealSummary, scope: Scope): boolean {
 export function Deals({ scope = "all" }: { scope?: Scope }) {
   const { can } = useAuth();
   const [deals, setDeals] = useState<DealSummary[] | null>(null);
-  const [filter, setFilter] = useState<Filter>("ALL");
   const [q, setQ] = useState("");
   // ?new=1 (Dashboard "Create your first deal") opens the modal on arrival.
   const [params, setParams] = useSearchParams();
@@ -46,12 +44,10 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
 
   const filtered = useMemo(() => {
     let rows = scoped;
-    if (filter === "HIGH") rows = rows.filter((d) => d.priority === "HIGH");
-    if (filter === "NO_BUYER") rows = rows.filter((d) => !d.selectedBuyer);
     const needle = q.trim().toLowerCase();
     if (needle) rows = rows.filter((d) => dealSearchHaystack(d).includes(needle));
     return rows;
-  }, [scoped, filter, q]);
+  }, [scoped, q]);
 
   if (!deals) return <Spinner />;
 
@@ -69,7 +65,7 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
     { key: "priority", header: "Priority", type: "text",
       value: (d) => ({ HIGH: 0, MEDIUM: 1, LOW: 2 }[d.priority]),
       render: (d) => <PriorityBadge priority={d.priority} /> },
-    { key: "stage", header: "Stage", type: "text", value: (d) => d.stage, render: (d) => <StageBadge stage={d.stage} /> },
+    { key: "stage", header: "Stage", type: "text", value: (d) => d.stage, render: (d) => <StageBadge stage={d.stage} pipelineId={d.pipelineId} /> },
     { key: "nma", header: "NMA", type: "number", align: "right", value: (d) => d.aggAcreageNma ?? d.acreageNma, render: (d) => num(d.aggAcreageNma ?? d.acreageNma) },
     { key: "profit", header: "Profit Est.", type: "number", align: "right", value: (d) => d.profitEst, render: (d) => money(d.profitEst) },
     // Secondary date columns start hidden (Customize View re-enables them):
@@ -110,15 +106,10 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
       )}
 
       <SortableTable
-        customizeId="deals-list"
+        customizeId={`deals-list:${scope}`}
         toolbar={
           <>
             <SearchInput value={q} onChange={setQ} placeholder="Search deal, seller, abstract, survey, county, buyer…" ariaLabel="Search deals" />
-            <div className="chip-row">
-              {([["ALL", "All"], ["HIGH", "High Priority"], ["NO_BUYER", "No Buyer Assigned"]] as [Filter, string][]).map(([f, label]) => (
-                <span key={f} className={`chip ${filter === f ? "active" : ""}`} onClick={() => setFilter(f)}>{label}</span>
-              ))}
-            </div>
             {q && <span className="muted" style={{ fontSize: 13, whiteSpace: "nowrap" }}>Showing {filtered.length} of {scoped.length}</span>}
           </>
         }
@@ -133,7 +124,7 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
           ? (scope === "active" || scope === "all"
             ? (can("createDeals") ? "No deals yet — click “+ New Deal” to create your first one." : "No deals yet.")
             : `No ${scope} deals yet.`)
-          : q ? "No deals match your search." : "No deals match this filter."}
+          : "No deals match your search."}
         selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
       />
 

@@ -26,6 +26,20 @@ const FALLBACK_PIPELINE: PipelineInfo = { id: "", name: "Sales Pipeline", isDefa
 
 const SELECTED_KEY = "mh-pipeline-selected";
 
+/** Default stage color palette, cycled by board position when a stage has no
+ *  stored color. Closed/Dead always resolve to the app's green/red. */
+export const STAGE_PALETTE = ["#3b82f6", "#8b5cf6", "#06b6d4", "#f59e0b", "#22c55e", "#ec4899", "#14b8a6", "#f97316"];
+
+/** Resolve a stage's display color within an ordered stage list. */
+export function stageColor(stages: PipelineStage[], key: string): string {
+  if (key === "CLOSED") return "var(--green)";
+  if (key === "DEAD") return "var(--red)";
+  const active = stages.filter((s) => !s.isTerminal);
+  const i = active.findIndex((s) => s.key === key);
+  const stage = i >= 0 ? active[i] : undefined;
+  return stage?.color ?? STAGE_PALETTE[(i >= 0 ? i : 0) % STAGE_PALETTE.length];
+}
+
 interface StagesCtx {
   /** All of the org's pipelines with their stage sets (default first). */
   pipelines: PipelineInfo[];
@@ -41,6 +55,8 @@ interface StagesCtx {
   stagesOf: (pipelineId?: string | null) => PipelineStage[];
   /** Display label for a stage key — selected pipeline first, then any pipeline. */
   label: (key: string) => string;
+  /** Display color for a stage key — selected pipeline first, then any pipeline. */
+  colorOf: (key: string, pipelineId?: string | null) => string;
   reload: () => void;
 }
 
@@ -54,6 +70,7 @@ const Ctx = createContext<StagesCtx>({
   terminal: DEFAULT_STAGES.filter((s) => s.isTerminal),
   stagesOf: () => DEFAULT_STAGES,
   label: (k) => DEFAULT_STAGES.find((s) => s.key === k)?.label ?? prettyStage(k),
+  colorOf: (k) => stageColor(DEFAULT_STAGES, k),
   reload: () => {},
 });
 
@@ -100,6 +117,14 @@ export function StagesProvider({ children }: { children: ReactNode }) {
         return p.stages.length ? p.stages : DEFAULT_STAGES;
       },
       label: (k) => byKey.get(k)?.label ?? globalByKey.get(k)?.label ?? prettyStage(k),
+      colorOf: (k, pid) => {
+        // Resolve within the deal's own pipeline when given; otherwise the
+        // selected pipeline; otherwise whichever pipeline defines the key.
+        const inP = (p: PipelineInfo | undefined) => p && p.stages.some((s) => s.key === k) ? p : undefined;
+        const host = inP(pid ? pipelines.find((x) => x.id === pid) : undefined)
+          ?? inP(selected) ?? pipelines.find((p) => p.stages.some((s) => s.key === k));
+        return stageColor(host?.stages ?? stages, k);
+      },
       reload: load,
     };
   }, [pipelines, selectedId, setSelectedId, load]);

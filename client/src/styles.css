@@ -201,7 +201,9 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
   color: var(--text-dim); font-weight: 500; cursor: pointer; user-select: none;
 }
 .sidebar-link:hover { background: var(--panel-2); color: var(--text); text-decoration: none; }
-.sidebar-link.active { background: var(--panel-2); color: var(--text); box-shadow: inset 2.5px 0 0 var(--accent); }
+/* Single shared active style for BOTH sidebar states: accent-tinted pill, no
+   edge stripe — identical to the collapsed rail's treatment. */
+.sidebar-link.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .sidebar-group.within > .group-head { color: var(--text); }
 .sidebar-icon { display: flex; align-items: center; justify-content: center; width: 20px; flex: 0 0 20px; }
 .sidebar-label { flex: 1; white-space: nowrap; overflow: hidden; }
@@ -247,7 +249,6 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .sidebar.collapsed .sidebar-link { justify-content: center; padding: 9px 0; }
 /* Icon-only rail: the expanded-mode accent stripe reads as clutter at this
    width — mark the active page with an accent icon on a soft tint instead. */
-.sidebar.collapsed .sidebar-link.active { box-shadow: none; color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .app-main { flex: 1; min-width: 0; overflow-x: hidden; }
 
 /* Collapsed groups: children appear in a fixed-position flyout (hover or
@@ -2295,3 +2296,19 @@ body.pipeline-dragging, body.pipeline-dragging * { user-select: none !important;
 .tz-name.closed { color: var(--green); }
 .tz-name.dead { color: var(--red); }
 .tz-hint { font-size: 12px; color: var(--text-dim); font-weight: 500; }
+
+/* Pipeline Settings modal: pipelines pane + stage editor with color swatches. */
+.pls-grid { display: grid; grid-template-columns: 260px 1fr; gap: 20px; align-items: start; }
+@media (max-width: 720px) { .pls-grid { grid-template-columns: 1fr; } }
+.pls-list { border-right: 1px solid var(--border); padding-right: 16px; }
+@media (max-width: 720px) { .pls-list { border-right: 0; padding-right: 0; } }
+.pls-row { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+.pls-row:hover { background: var(--panel-2); }
+.pls-row.active { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.pls-row-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.pls-row-name { font-size: 13px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pls-default { font-size: 10px; font-weight: 700; letter-spacing: .04em; color: var(--text-dim); background: color-mix(in srgb, var(--text) 7%, transparent); border-radius: 99px; padding: 2px 7px; flex: none; }
+.pls-row-actions { margin-left: auto; display: flex; gap: 2px; }
+.stage-color { width: 26px; height: 26px; padding: 0; border: 1px solid var(--border); border-radius: 7px; background: transparent; cursor: pointer; flex: none; }
+.stage-color::-webkit-color-swatch-wrapper { padding: 2px; }
+.stage-color::-webkit-color-swatch { border: none; border-radius: 5px; }

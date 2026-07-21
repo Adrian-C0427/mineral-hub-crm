@@ -9,8 +9,8 @@ import { NewDealModal } from "../components/NewDealModal";
 import { StageChangeModal } from "../components/StageChangeModal";
 import { money, num, fmtDate } from "../lib/format";
 import { useAuth } from "../auth/AuthContext";
-import { useStages } from "../stages";
-import { PipelineStagesModal } from "../components/PipelineStagesModal";
+import { useStages, stageColor } from "../stages";
+import { PipelineSettingsModal } from "../components/PipelineSettingsModal";
 import type { DealSummary, Stage } from "../types";
 
 // The Pipeline shows only ACTIVE-lifecycle stages as columns. Closed and Dead
@@ -27,9 +27,6 @@ const TRANSITIONS: { stage: Stage; label: string; hint: string }[] = [
 // the gesture is treated as a click (navigate to the deal).
 const DRAG_THRESHOLD = 5;
 
-// Per-column accent colors (top edge of each stage column + its cards' left
-// edge), cycling in board order — visual only.
-const STAGE_COLORS = ["#3b82f6", "#8b5cf6", "#06b6d4", "#f59e0b", "#22c55e", "#ec4899", "#14b8a6", "#f97316"];
 
 interface DragState { id: string; w: number; offX: number; offY: number; moved: boolean }
 
@@ -129,9 +126,8 @@ export function Pipeline() {
   useEffect(() => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } }, [prefs]);
   const nav = useNavigate();
   const { can } = useAuth();
-  const { active: activeStages, reload: reloadStages, label, pipelines, selected, selectedId, setSelectedId } = useStages();
+  const { stages: allStages, active: activeStages, reload: reloadStages, label, pipelines, selected, selectedId, setSelectedId } = useStages();
   const [showStages, setShowStages] = useState(false);
-  const [showNewPipeline, setShowNewPipeline] = useState(false);
   // Viewers can browse the board but not create deals or change stages —
   // hiding the affordances beats letting them click into a 403.
   const canCreate = can("createDeals");
@@ -260,9 +256,8 @@ export function Pipeline() {
           {filtersActive && <span className="muted" style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>Showing {boardDeals.length} of {pipelineDeals.length}</span>}
         </div>
         <div className="row" style={{ gap: 8 }}>
-          {canCustomizeStages && <button className="small" title="Create a new pipeline with its own stages" onClick={() => setShowNewPipeline(true)}>+ New pipeline</button>}
           <PipelineFilters deals={pipelineDeals} filters={filters} onChange={setFilters} />
-          {canCustomizeStages && <button className="small" onClick={() => setShowStages(true)}>Customize stages</button>}
+          {canCustomizeStages && <button className="small" title="Create, rename, reorder, and delete pipelines; configure stages and colors" onClick={() => setShowStages(true)}>Pipeline settings</button>}
           <PipelineCustomize prefs={prefs} onChange={setPrefs} />
           {canCreate && <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>}
         </div>
@@ -272,13 +267,13 @@ export function Pipeline() {
         <div className="panel" style={{ textAlign: "center", padding: "36px 20px" }}>
           <p style={{ margin: 0 }}><strong>This pipeline has no stages yet.</strong></p>
           <p className="muted" style={{ margin: "6px 0 14px" }}>Build it from scratch — add your first stage to start moving deals through it. Closed and Dead are already included.</p>
-          {canCustomizeStages && <button className="primary" onClick={() => setShowStages(true)}>Add stages</button>}
+          {canCustomizeStages && <button className="primary" onClick={() => setShowStages(true)}>Open Pipeline settings</button>}
         </div>
       )}
       <div className={`kanban ${prefs.density === "compact" ? "compact" : ""} ${drag ? "dragging" : ""}`}>
-        {activeStages.map((stage, i) => {
+        {activeStages.map((stage) => {
           const col = stage.key;
-          const color = STAGE_COLORS[i % STAGE_COLORS.length];
+          const color = stageColor(allStages, col);
           const colDeals = sortDeals(boardDeals.filter((d) => d.stage === col), prefs.sort);
           const colTotal = colDeals.reduce((sum, d) => sum + (d.profitEst ?? 0), 0);
           return (
@@ -336,17 +331,11 @@ export function Pipeline() {
       )}
 
       {showStages && (
-        <PipelineStagesModal
-          pipeline={selected}
-          onClose={() => setShowStages(false)}
+        <PipelineSettingsModal
+          pipelines={pipelines}
+          initialId={selected.id}
+          onClose={() => { setShowStages(false); reloadStages(); load(); }}
           onChanged={() => { reloadStages(); load(); }}
-          onPipelineDeleted={() => { setShowStages(false); setSelectedId(""); reloadStages(); load(); }}
-        />
-      )}
-      {showNewPipeline && (
-        <NewPipelineModal
-          onClose={() => setShowNewPipeline(false)}
-          onCreated={(id) => { setShowNewPipeline(false); reloadStages(); setSelectedId(id); }}
         />
       )}
       {showNew && <NewDealModal pipelineId={selected.id || undefined} onClose={() => setShowNew(false)} onCreated={(d) => { setShowNew(false); nav(`/deals/${d.id}`); }} />}
@@ -591,36 +580,5 @@ function PipelineCustomize({ prefs, onChange }: { prefs: PipelinePrefs; onChange
         </div>
       )}
     </div>
-  );
-}
-
-/** Small create-pipeline dialog: name it, get the default stage set, switch to it. */
-function NewPipelineModal({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
-  const [name, setName] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const create = async () => {
-    if (!name.trim() || busy) return;
-    setBusy(true); setErr(null);
-    try {
-      const p = await api.post<{ id: string }>("/pipeline/pipelines", { name: name.trim() });
-      showToast(`Pipeline "${name.trim()}" created.`);
-      onCreated(p.id);
-    } catch (e) { setErr(e instanceof Error ? e.message : "Something went wrong"); setBusy(false); }
-  };
-  return (
-    <Modal title="New pipeline" onClose={onClose} footer={<>
-      <button onClick={onClose} disabled={busy}>Cancel</button>
-      <button className="primary" onClick={create} disabled={!name.trim() || busy}>Create pipeline</button>
-    </>}>
-      <p className="muted" style={{ marginTop: 0 }}>
-        A new pipeline starts blank so you can define your own stages from scratch.
-        Closed and Dead are always included automatically and work exactly like today.
-      </p>
-      <label>Pipeline name</label>
-      <input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Leasing"
-        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void create(); } }} />
-      {err && <div className="error-text">{err}</div>}
-    </Modal>
   );
 }

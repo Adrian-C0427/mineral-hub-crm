@@ -126,9 +126,19 @@ export function PriorityBadge({ priority }: { priority: "HIGH" | "MEDIUM" | "LOW
   );
 }
 
-export function StageBadge({ stage }: { stage: string }) {
-  const { label } = useStages();
-  return <span className={`badge stage-${stage.toLowerCase()}`}>{label(stage)}</span>;
+export function StageBadge({ stage, pipelineId }: { stage: string; pipelineId?: string | null }) {
+  const { label, colorOf } = useStages();
+  // Tinted with the stage's (customizable, per-pipeline) color so stage colors
+  // stay consistent everywhere a stage appears.
+  const c = colorOf(stage, pipelineId);
+  return (
+    <span
+      className={`badge stage-${stage.toLowerCase()}`}
+      style={{ color: c, background: `color-mix(in srgb, ${c} 12%, transparent)`, borderColor: `color-mix(in srgb, ${c} 35%, transparent)` }}
+    >
+      {label(stage)}
+    </span>
+  );
 }
 
 export function RelationshipDot({ status }: { status: "HOT" | "WARM" | "COLD" }) {
