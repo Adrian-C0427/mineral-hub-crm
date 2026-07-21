@@ -163,6 +163,7 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 
 /* --- Left sidebar navigation --- */
 .sidebar {
+  position: relative; z-index: 50;
   width: 220px; flex: 0 0 220px; background: var(--panel); border-right: 1px solid var(--border);
   position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column;
   transition: width 0.15s, flex-basis 0.15s;
@@ -173,6 +174,7 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 /* Collapse control: a minimal chevron pill straddling the panel edge — half
    inside, half outside — occupying zero horizontal space in the layout. */
 .sidebar-edge-toggle {
+  z-index: 60;
   position: absolute; top: 22px; right: 0; transform: translateX(50%);
   /* Hard 1:1 sizing — mobile touch-target rules (min-height: 40px on buttons)
      must never stretch this circle into an oval. */
@@ -2199,35 +2201,49 @@ body.pipeline-dragging, body.pipeline-dragging * { user-select: none !important;
    --------------------------------------------------------------------------- */
 .app-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .topbar {
-  display: flex; align-items: center; justify-content: flex-end; gap: 14px;
-  padding: 10px 24px; background: var(--panel); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+  padding: 4px 18px; min-height: 44px; background: var(--panel); border-bottom: 1px solid var(--border);
   position: sticky; top: 0; z-index: 40;
 }
 .topbar .notif-wrap { position: relative; }
 .topbar .notif-bell {
-  width: 34px; height: 34px; padding: 0; justify-content: center; border-radius: 9px;
+  width: 30px; height: 30px; padding: 0; justify-content: center; border-radius: 8px;
   background: var(--panel-2); border: 1px solid var(--border); color: var(--text-dim);
 }
 .topbar .notif-bell:hover { color: var(--text); background: var(--panel-2); }
 .topbar .notif-badge { top: -4px; left: auto; right: -4px; }
 /* In the top bar the panel drops DOWN from the bell, hugging the right edge. */
 .topbar .notif-panel { position: absolute; top: calc(100% + 8px); right: 0; bottom: auto; left: auto; }
-.topbar-div { width: 1px; height: 22px; background: var(--border); }
-.topbar-user { display: flex; align-items: center; gap: 9px; border-radius: 9px; padding: 4px 8px 4px 4px; }
+.topbar-div { width: 1px; height: 18px; background: var(--border); }
+.topbar-userwrap { position: relative; }
+.topbar-user { display: flex; align-items: center; gap: 8px; border-radius: 8px; padding: 3px 8px 3px 4px; border: 1px solid transparent; background: transparent; }
+.topbar-user:hover, .topbar-user.open { background: var(--panel-2); border-color: var(--border); }
 .topbar-avatar {
-  width: 28px; height: 28px; border-radius: 50%; flex: none;
+  width: 25px; height: 25px; border-radius: 50%; flex: none;
   background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent);
-  display: flex; align-items: center; justify-content: center; font-size: 10.5px; font-weight: 800;
+  display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 800;
 }
-.topbar-user-meta { display: flex; flex-direction: column; line-height: 1.2; }
-.topbar-user-name { font-size: 12.5px; font-weight: 700; }
-.topbar-user-role { font-size: 10.5px; color: var(--text-dim); }
-.topbar-logout {
-  display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600;
-  color: var(--text-dim); background: var(--panel-2); border: 1px solid var(--border);
-  border-radius: 8px; padding: 7px 13px;
+.topbar-user-meta { display: flex; flex-direction: column; line-height: 1.15; text-align: left; min-width: 0; }
+.topbar-user-name { font-size: 12px; font-weight: 700; white-space: nowrap; }
+.topbar-user-role { font-size: 10px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-caret { color: var(--text-dim); transition: transform .12s ease; }
+.topbar-caret.up { transform: rotate(180deg); }
+/* User menu — same dropdown language as the rest of the app. */
+.topbar-menu {
+  position: absolute; top: calc(100% + 8px); right: 0; min-width: 220px; z-index: 60;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, .35); padding: 6px; display: flex; flex-direction: column;
 }
-.topbar-logout:hover { color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, transparent); background: var(--panel-2); }
+.topbar-menu-id { display: flex; align-items: center; gap: 9px; padding: 8px 10px 10px; border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+.topbar-menu-item {
+  display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 7px;
+  font-size: 12.5px; font-weight: 600; color: var(--text); background: transparent; border: none;
+  text-decoration: none; text-align: left; width: 100%;
+}
+.topbar-menu-item:hover { background: var(--panel-2); text-decoration: none; color: var(--text); }
+.topbar-menu-item.danger { color: var(--red); }
+.topbar-menu-item.danger:hover { background: color-mix(in srgb, var(--red) 10%, transparent); }
+.topbar-menu-div { height: 1px; background: var(--border); margin: 6px 0; }
 
 /* ---------------------------------------------------------------------------
    Pipeline board redesign (reference layout): flexible columns with colored
@@ -2414,3 +2430,33 @@ body.pipeline-dragging, body.pipeline-dragging * { user-select: none !important;
   .cw { flex-wrap: wrap; }
   .cw-left, .cw-right { width: 100%; border-right: 0; border-left: 0; border-bottom: 1px solid var(--border); }
 }
+
+
+/* Pipeline: full-height board + anchored compact Closed/Dead columns. */
+.pl2-page { display: flex; flex-direction: column; min-height: calc(100vh - 45px); }
+.pl2-page .kanban { flex: 1; padding-bottom: 4px; }
+.pl2-page .kanban-col { max-height: none; }
+.pl2-page .kanban-col-body { flex: 1; overflow-y: auto; }
+.tz-col {
+  flex: 0 0 150px; min-width: 150px; width: 150px;
+  position: sticky; z-index: 6; background: var(--panel);
+  box-shadow: -8px 0 16px rgba(0, 0, 0, .18);
+}
+.tz-col.closed { right: 164px; border-top-color: var(--green) !important; }
+.tz-col.dead { right: 0; border-top-color: var(--red) !important; }
+.tz-col .kanban-col-head { font-size: 12.5px; gap: 7px; }
+.tz-col-target {
+  flex: 1; margin: 12px; border: 1.5px dashed var(--border); border-radius: 10px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px;
+  text-align: center; color: var(--text-dim); font-size: 11px; font-weight: 600; padding: 12px 8px; min-height: 150px;
+}
+.tz-col.closed .tz-col-target { border-color: color-mix(in srgb, var(--green) 30%, transparent); background: color-mix(in srgb, var(--green) 3%, transparent); }
+.tz-col.dead .tz-col-target { border-color: color-mix(in srgb, var(--red) 28%, transparent); background: color-mix(in srgb, var(--red) 3%, transparent); }
+.tz-col .tz-ico { width: 26px; height: 26px; border-radius: 7px; }
+.kanban.dragging .tz-col.drop-target .tz-col-target { border-style: solid; }
+
+/* Sidebar collapse control must always ride ABOVE the fixed top bar (z 40):
+   the sidebar forms its own stacking context higher than the header, and the
+   toggle sits on top within it — never clipped, hover ring fully visible. */
+.sidebar { z-index: 50; }
+.sidebar-edge-toggle { z-index: 51; }
