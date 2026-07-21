@@ -9,7 +9,10 @@ import type { Pipeline, PipelineStage } from "@prisma/client";
 export const pipelineStagesRouter = Router();
 pipelineStagesRouter.use(requireAuth, requireOrg);
 
-const serialize = (s: PipelineStage) => ({ id: s.id, key: s.key, label: s.label, position: s.position, isTerminal: s.isTerminal, pipelineId: s.pipelineId });
+const serialize = (s: PipelineStage) => ({ id: s.id, key: s.key, label: s.label, position: s.position, isTerminal: s.isTerminal, pipelineId: s.pipelineId, color: s.color });
+
+// Stage colors are hex values picked in the UI ("#rrggbb").
+const colorField = z.string().regex(/^#[0-9a-fA-F]{6}$/).nullish();
 const serializePipeline = (p: Pipeline) => ({ id: p.id, name: p.name, isDefault: p.isDefault, position: p.position });
 
 /** Resolve the pipeline a request targets (query/body pipelineId, else the
@@ -66,6 +69,24 @@ pipelineStagesRouter.post(
     await seedStages(prisma, org, p.id, true);
     const stages = await ensureStages(prisma, org, p.id);
     res.status(201).json({ ...serializePipeline(p), stages: stages.map(serialize) });
+  }),
+);
+
+// Reorder pipelines (ids in desired order; missing ids keep relative order at the end).
+pipelineStagesRouter.post(
+  "/pipelines/reorder",
+  requirePermission("manageOrgSettings"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { order } = z.object({ order: z.array(z.string()).min(1) }).parse(req.body);
+    const org = orgId(req);
+    const all = await ensurePipelines(prisma, org);
+    const byId = new Map(all.map((p) => [p.id, p]));
+    let pos = 0;
+    const updates = [];
+    for (const id of order) if (byId.has(id)) { updates.push(prisma.pipeline.update({ where: { id }, data: { position: pos++ } })); byId.delete(id); }
+    for (const p of byId.values()) updates.push(prisma.pipeline.update({ where: { id: p.id }, data: { position: pos++ } }));
+    await prisma.$transaction(updates);
+    res.json({ ok: true });
   }),
 );
 
@@ -130,28 +151,31 @@ pipelineStagesRouter.post(
   "/stages",
   requirePermission("manageOrgSettings"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { label } = z.object({ label: z.string().trim().min(1).max(60), pipelineId: z.string().optional() }).parse(req.body);
+    const { label, color } = z.object({ label: z.string().trim().min(1).max(60), color: colorField, pipelineId: z.string().optional() }).parse(req.body);
     const p = await resolvePipeline(req);
     const stages = await ensureStages(prisma, orgId(req), p.id);
     const activeCount = stages.filter((s) => !s.isTerminal).length;
     const key = `custom_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-    await prisma.pipelineStage.create({ data: { organizationId: orgId(req), pipelineId: p.id, key, label, position: activeCount, isTerminal: false } });
+    await prisma.pipelineStage.create({ data: { organizationId: orgId(req), pipelineId: p.id, key, label, position: activeCount, isTerminal: false, color: color ?? null } });
     await renumber(p.id);
     const out = await prisma.pipelineStage.findMany({ where: { pipelineId: p.id }, orderBy: { position: "asc" } });
     res.status(201).json(out.map(serialize));
   }),
 );
 
-// Rename an active stage. Terminal (Closed / Dead) stages are locked.
+// Rename / recolor an active stage. Terminal (Closed / Dead) stages are locked.
 pipelineStagesRouter.patch(
   "/stages/:id",
   requirePermission("manageOrgSettings"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { label } = z.object({ label: z.string().trim().min(1).max(60) }).parse(req.body);
+    const { label, color } = z.object({ label: z.string().trim().min(1).max(60).optional(), color: colorField }).parse(req.body);
     const stage = await prisma.pipelineStage.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!stage) throw new HttpError(404, "Stage not found");
-    if (stage.isTerminal) throw new HttpError(400, "Closed and Dead are permanent system stages and cannot be renamed");
-    await prisma.pipelineStage.update({ where: { id: stage.id }, data: { label } });
+    if (stage.isTerminal) throw new HttpError(400, "Closed and Dead are permanent system stages and cannot be changed");
+    await prisma.pipelineStage.update({
+      where: { id: stage.id },
+      data: { ...(label !== undefined ? { label } : {}), ...(color !== undefined ? { color } : {}) },
+    });
     const out = await prisma.pipelineStage.findMany({ where: { pipelineId: stage.pipelineId }, orderBy: { position: "asc" } });
     res.json(out.map(serialize));
   }),

@@ -1,7 +1,7 @@
 // Pipeline stages are customizable per org, so a stage is just its key. The
 // seven built-in keys below are the defaults; CLOSED and DEAD are permanent.
 export type Stage = string;
-export interface PipelineStage { id: string; key: string; label: string; position: number; isTerminal: boolean }
+export interface PipelineStage { id: string; key: string; label: string; position: number; isTerminal: boolean; color?: string | null }
 
 export type Priority = "HIGH" | "MEDIUM" | "LOW";
 export type Relationship = "HOT" | "WARM" | "COLD";

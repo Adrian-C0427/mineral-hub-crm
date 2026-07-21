@@ -692,6 +692,10 @@ model PipelineStage {
   label          String
   position       Int
   isTerminal     Boolean      @default(false)
+  // Per-stage accent color (hex). Null = the app's default palette color for
+  // the stage's board position. Stored per pipeline, so each pipeline can
+  // carry its own color scheme.
+  color          String?
   createdAt      DateTime     @default(now())
 
   @@unique([pipelineId, key])

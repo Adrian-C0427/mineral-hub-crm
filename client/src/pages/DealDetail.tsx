@@ -131,7 +131,7 @@ export function DealDetail() {
             </button>
           )}
           <PriorityBadge priority={deal.priority} />
-          <StageBadge stage={deal.stage} />
+          <StageBadge stage={deal.stage} pipelineId={deal.pipelineId} />
           <span className="muted" style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
             {deal.daysInStage}d in stage

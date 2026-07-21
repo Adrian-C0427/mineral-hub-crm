@@ -95,14 +95,6 @@ function Kpi({ label, value, valueColor, delta, series, spark, title }: {
   );
 }
 
-// Stage funnel fill colors, per the design (accent/amber/green resolve per theme).
-const STAGE_FILL: Record<string, string> = {
-  UNDER_CONTRACT: "var(--accent)",
-  PREPARING_PACKAGE: "#6366f1",
-  SENT_TO_BUYERS: "#8b5cf6",
-  NEGOTIATING: "var(--amber)",
-  CLOSING: "var(--green)",
-};
 
 // ---------------------------------------------------------------------------
 // Layout model — a real dashboard grid (react-grid-layout): every widget has
@@ -170,7 +162,7 @@ export function Dashboard() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const { theme, toggleTheme } = useTheme();
-  const { label: stageLabel } = useStages();
+  const { label: stageLabel, colorOf: stageColorOf } = useStages();
   const [prefs, setPrefs] = useState<DashPrefs>(loadDashPrefs);
   const [customizing, setCustomizing] = useState(false);
   // Profit chart interactivity: hovered bucket (rich tooltip) + clicked bucket
@@ -420,7 +412,7 @@ export function Dashboard() {
                   <span className="dash-faintish">{s.count}</span>
                 </span>
                 <span className="dash-fun-track">
-                  <span className="dash-fun-fill" style={{ width: `${(s.count / maxStage) * 100}%`, background: STAGE_FILL[s.stage] ?? "var(--accent)" }} />
+                  <span className="dash-fun-fill" style={{ width: `${(s.count / maxStage) * 100}%`, background: stageColorOf(s.stage) }} />
                 </span>
               </Link>
             ))}

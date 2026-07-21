@@ -10,14 +10,15 @@ export function isTerminalKey(key: string): boolean {
 
 // Built-in defaults seeded for every new pipeline (position = array order). The
 // five active stages are fully customizable; CLOSED and DEAD are terminal.
-export const DEFAULT_STAGES: { key: string; label: string; isTerminal: boolean }[] = [
-  { key: "UNDER_CONTRACT", label: "Under Contract", isTerminal: false },
-  { key: "PREPARING_PACKAGE", label: "Preparing Package", isTerminal: false },
-  { key: "SENT_TO_BUYERS", label: "Sent to Buyers", isTerminal: false },
-  { key: "NEGOTIATING", label: "Negotiating", isTerminal: false },
-  { key: "CLOSING", label: "Closing", isTerminal: false },
-  { key: "CLOSED", label: "Closed", isTerminal: true },
-  { key: "DEAD", label: "Dead", isTerminal: true },
+// Colors are the app's default stage palette — users can override per stage.
+export const DEFAULT_STAGES: { key: string; label: string; isTerminal: boolean; color: string | null }[] = [
+  { key: "UNDER_CONTRACT", label: "Under Contract", isTerminal: false, color: "#3b82f6" },
+  { key: "PREPARING_PACKAGE", label: "Preparing Package", isTerminal: false, color: "#8b5cf6" },
+  { key: "SENT_TO_BUYERS", label: "Sent to Buyers", isTerminal: false, color: "#06b6d4" },
+  { key: "NEGOTIATING", label: "Negotiating", isTerminal: false, color: "#f59e0b" },
+  { key: "CLOSING", label: "Closing", isTerminal: false, color: "#22c55e" },
+  { key: "CLOSED", label: "Closed", isTerminal: true, color: null },
+  { key: "DEAD", label: "Dead", isTerminal: true, color: null },
 ];
 
 // Terminal rows appended to every user-created pipeline no matter what.
@@ -42,7 +43,8 @@ export async function ensureDefaultPipeline(tx: Tx, organizationId: string): Pro
 /** All of the org's pipelines, ordered (default first). Seeds the default. */
 export async function ensurePipelines(tx: Tx, organizationId: string): Promise<Pipeline[]> {
   await ensureDefaultPipeline(tx, organizationId);
-  return tx.pipeline.findMany({ where: { organizationId }, orderBy: [{ isDefault: "desc" }, { position: "asc" }, { createdAt: "asc" }] });
+  // User-controlled ordering (Pipeline Settings reorder); position wins.
+  return tx.pipeline.findMany({ where: { organizationId }, orderBy: [{ position: "asc" }, { createdAt: "asc" }] });
 }
 
 /**
@@ -53,7 +55,7 @@ export async function ensurePipelines(tx: Tx, organizationId: string): Promise<P
 export async function seedStages(tx: Tx, organizationId: string, pipelineId: string, blank = false): Promise<void> {
   const rows = blank ? TERMINAL_STAGES : DEFAULT_STAGES;
   await tx.pipelineStage.createMany({
-    data: rows.map((s, i) => ({ organizationId, pipelineId, key: s.key, label: s.label, position: i, isTerminal: s.isTerminal })),
+    data: rows.map((s, i) => ({ organizationId, pipelineId, key: s.key, label: s.label, position: i, isTerminal: s.isTerminal, color: s.color })),
     skipDuplicates: true,
   });
 }
