@@ -3,7 +3,8 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
-import type { Contact, ContactActivity, User } from "@prisma/client";
+import { parse } from "csv-parse/sync";
+import type { Contact, ContactActivity, ContactList, User } from "@prisma/client";
 
 /**
  * Acquisitions — Contacts.
@@ -21,7 +22,7 @@ contactsRouter.use(requireAuth, requireOrg);
 export const CONTACT_TYPES = ["SELLER", "PROSPECT", "LEAD", "REFERRAL", "OTHER"] as const;
 export const CONTACT_STATUSES = ["NEW", "CONTACTED", "ENGAGED", "NEGOTIATING", "CONVERTED", "NOT_INTERESTED"] as const;
 
-type ContactWithOwner = Contact & { owner: Pick<User, "id" | "name"> | null };
+type ContactWithOwner = Contact & { owner: Pick<User, "id" | "name"> | null; lists?: { id: string }[] };
 
 const serialize = (c: ContactWithOwner) => ({
   id: c.id,
@@ -43,6 +44,7 @@ const serialize = (c: ContactWithOwner) => ({
   nextFollowUpDate: c.nextFollowUpDate,
   createdAt: c.createdAt,
   updatedAt: c.updatedAt,
+  listIds: (c.lists ?? []).map((l) => l.id),
 });
 
 const dateField = z.string().datetime({ offset: true }).or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).nullish()
@@ -73,7 +75,7 @@ async function validateOwner(org: string, ownerId: string | null | undefined): P
   return u.id;
 }
 
-const ownerInclude = { owner: { select: { id: true, name: true } } } as const;
+const ownerInclude = { owner: { select: { id: true, name: true } }, lists: { select: { id: true } } } as const;
 
 /** All contacts (org-scoped). Filtering/search is client-side for now. */
 contactsRouter.get(
@@ -291,5 +293,338 @@ contactsRouter.delete(
     if (!existing) throw new HttpError(404, "Activity not found");
     await prisma.contactActivity.delete({ where: { id: existing.id } });
     res.json({ ok: true });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Contact lists — reusable named groupings (m2m membership, computed counts).
+// Collection lives at "/lists/all" (two segments) so it can never collide with
+// the single-segment "GET /:id" contact route registered above.
+// ---------------------------------------------------------------------------
+
+const listInclude = { _count: { select: { members: true } } } as const;
+type ListWithCount = ContactList & { _count: { members: number } };
+const serializeList = (l: ListWithCount) => ({ id: l.id, name: l.name, count: l._count.members, createdAt: l.createdAt });
+
+contactsRouter.get(
+  "/lists/all",
+  requirePermission("viewContacts"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const rows = await prisma.contactList.findMany({ where: { organizationId: orgId(req) }, include: listInclude, orderBy: { name: "asc" } });
+    res.json(rows.map(serializeList));
+  }),
+);
+
+contactsRouter.post(
+  "/lists/all",
+  requirePermission("manageContacts"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { name } = z.object({ name: z.string().trim().min(1).max(120) }).parse(req.body);
+    const dupe = await prisma.contactList.findFirst({ where: { organizationId: orgId(req), name } });
+    if (dupe) throw new HttpError(400, "A list with that name already exists");
+    const created = await prisma.contactList.create({ data: { organizationId: orgId(req), name }, include: listInclude });
+    res.status(201).json(serializeList(created));
+  }),
+);
+
+contactsRouter.patch(
+  "/lists/:listId",
+  requirePermission("manageContacts"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { name } = z.object({ name: z.string().trim().min(1).max(120) }).parse(req.body);
+    const l = await prisma.contactList.findFirst({ where: { id: req.params.listId, organizationId: orgId(req) } });
+    if (!l) throw new HttpError(404, "List not found");
+    const updated = await prisma.contactList.update({ where: { id: l.id }, data: { name }, include: listInclude });
+    res.json(serializeList(updated));
+  }),
+);
+
+contactsRouter.delete(
+  "/lists/:listId",
+  requirePermission("manageContacts"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const l = await prisma.contactList.findFirst({ where: { id: req.params.listId, organizationId: orgId(req) } });
+    if (!l) throw new HttpError(404, "List not found");
+    await prisma.contactList.delete({ where: { id: l.id } }); // membership rows cascade
+    res.json({ ok: true });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Bulk operations
+// ---------------------------------------------------------------------------
+
+const idsSchema = z.object({ ids: z.array(z.string().max(200)).min(1).max(10_000) });
+
+/** Resolve the caller's ids to contacts THEY own (org-scoped). */
+async function ownedIds(org: string, ids: string[]): Promise<string[]> {
+  const rows = await prisma.contact.findMany({ where: { id: { in: ids }, organizationId: org }, select: { id: true } });
+  return rows.map((r) => r.id);
+}
+
+contactsRouter.post(
+  "/bulk-delete",
+  requirePermission("manageContacts"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { ids } = idsSchema.parse(req.body);
+    const mine = await ownedIds(orgId(req), ids);
+    await prisma.contact.deleteMany({ where: { id: { in: mine } } });
+    res.json({ ok: true, deleted: mine.length });
+  }),
+);
+
+// Bulk edit: apply any provided field to every selected contact (status
+// updates, team-member assignment, type/source/follow-up changes).
+contactsRouter.post(
+  "/bulk-update",
+  requirePermission("manageContacts"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const data = idsSchema.extend({
+      status: z.enum(CONTACT_STATUSES).optional(),
+      type: z.enum(CONTACT_TYPES).optional(),
+      ownerId: z.string().max(200).nullish(),
+      source: z.string().trim().max(300).nullish(),
+      nextFollowUpDate: dateField.optional(),
+      addTags: z.array(z.string().trim().min(1).max(60)).max(50).optional(),
+    }).parse(req.body);
+    const mine = await ownedIds(orgId(req), data.ids);
+    const ownerId = data.ownerId !== undefined ? await validateOwner(orgId(req), data.ownerId) : undefined;
+    const patch: Record<string, unknown> = {
+      ...(data.status !== undefined ? { status: data.status } : {}),
+      ...(data.type !== undefined ? { type: data.type } : {}),
+      ...(ownerId !== undefined ? { ownerId } : {}),
+      ...(data.source !== undefined ? { source: data.source ?? null } : {}),
+      ...(data.nextFollowUpDate !== undefined ? { nextFollowUpDate: data.nextFollowUpDate } : {}),
+    };
+    if (Object.keys(patch).length) await prisma.contact.updateMany({ where: { id: { in: mine } }, data: patch });
+    if (data.addTags?.length) {
+      // Tag merge must be per-row (array union).
+      const rows = await prisma.contact.findMany({ where: { id: { in: mine } }, select: { id: true, tags: true } });
+      await prisma.$transaction(rows.map((r) =>
+        prisma.contact.update({ where: { id: r.id }, data: { tags: [...new Set([...r.tags, ...data.addTags!])] } })));
+    }
+    res.json({ ok: true, updated: mine.length });
+  }),
+);
+
+// Bulk add/remove list memberships.
+contactsRouter.post(
+  "/bulk-lists",
+  requirePermission("manageContacts"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const data = idsSchema.extend({
+      addListIds: z.array(z.string().max(200)).max(100).optional(),
+      removeListIds: z.array(z.string().max(200)).max(100).optional(),
+    }).parse(req.body);
+    const org = orgId(req);
+    const mine = await ownedIds(org, data.ids);
+    const validLists = await prisma.contactList.findMany({
+      where: { id: { in: [...(data.addListIds ?? []), ...(data.removeListIds ?? [])] }, organizationId: org },
+      select: { id: true },
+    });
+    const valid = new Set(validLists.map((l) => l.id));
+    const add = (data.addListIds ?? []).filter((i) => valid.has(i));
+    const remove = (data.removeListIds ?? []).filter((i) => valid.has(i));
+    await prisma.$transaction(mine.map((id) =>
+      prisma.contact.update({
+        where: { id },
+        data: {
+          lists: {
+            ...(add.length ? { connect: add.map((i) => ({ id: i })) } : {}),
+            ...(remove.length ? { disconnect: remove.map((i) => ({ id: i })) } : {}),
+          },
+        },
+      })));
+    res.json({ ok: true, updated: mine.length });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// CSV import: analyze (headers + suggested mapping) → preview (dedupe classes)
+// → commit (insert new, fill-in-update duplicates, report errors).
+// ---------------------------------------------------------------------------
+
+const CONTACT_IMPORT_FIELDS: { key: string; label: string; required?: boolean }[] = [
+  { key: "firstName", label: "First Name", required: true },
+  { key: "lastName", label: "Last Name", required: true },
+  { key: "entityName", label: "Company / Entity" },
+  { key: "type", label: "Type" },
+  { key: "status", label: "Status" },
+  { key: "source", label: "Source" },
+  { key: "email", label: "Email" },
+  { key: "phone", label: "Phone" },
+  { key: "states", label: "State(s)" },
+  { key: "counties", label: "County(ies)" },
+  { key: "tags", label: "Tags" },
+  { key: "notes", label: "Notes" },
+];
+
+const MAX_CONTACT_IMPORT_ROWS = 20_000;
+
+function parseContactsCsv(csv: string): { headers: string[]; rows: Record<string, string>[] } {
+  const records = parse(csv, { columns: true, skip_empty_lines: true, trim: true, bom: true }) as Record<string, string>[];
+  if (records.length > MAX_CONTACT_IMPORT_ROWS) {
+    throw new HttpError(400, `This file has too many rows (${records.length}). Split it into files of ${MAX_CONTACT_IMPORT_ROWS.toLocaleString()} rows or fewer.`);
+  }
+  return { headers: records.length ? Object.keys(records[0]) : [], rows: records };
+}
+
+const splitMulti = (v: string): string[] => v.split(/[;,|]/).map((x) => x.trim()).filter(Boolean);
+const normPhone = (v: string): string => v.replace(/\D/g, "");
+
+function buildContact(row: Record<string, string>, mapping: Record<string, string>) {
+  const get = (f: string): string => (mapping[f] ? (row[mapping[f]] ?? "").trim() : "");
+  const type = get("type").toUpperCase().replace(/\s+/g, "_");
+  const status = get("status").toUpperCase().replace(/\s+/g, "_");
+  return {
+    firstName: get("firstName"),
+    lastName: get("lastName"),
+    entityName: get("entityName") || null,
+    type: (CONTACT_TYPES as readonly string[]).includes(type) ? type : "PROSPECT",
+    status: (CONTACT_STATUSES as readonly string[]).includes(status) ? status : "NEW",
+    source: get("source") || null,
+    email: get("email").toLowerCase() || null,
+    phone: get("phone") || null,
+    states: mapping.states ? splitMulti(get("states")).map((s) => s.toUpperCase()) : [],
+    counties: mapping.counties ? splitMulti(get("counties")) : [],
+    tags: mapping.tags ? splitMulti(get("tags")) : [],
+    notes: get("notes") || null,
+  };
+}
+
+contactsRouter.post(
+  "/import/analyze",
+  requirePermission("manageContacts"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { csv } = z.object({ csv: z.string().min(1) }).parse(req.body);
+    const { headers, rows } = parseContactsCsv(csv);
+    const suggestedMapping: Record<string, string> = {};
+    const SYNONYMS: Record<string, string[]> = {
+      firstName: ["first name", "firstname", "first"],
+      lastName: ["last name", "lastname", "last", "surname"],
+      entityName: ["company", "entity", "trust", "organization"],
+      type: ["type", "contact type"],
+      status: ["status", "stage"],
+      source: ["source", "lead source"],
+      email: ["email", "e-mail", "email address"],
+      phone: ["phone", "phone number", "mobile", "cell"],
+      states: ["state", "states"],
+      counties: ["county", "counties"],
+      tags: ["tags", "labels"],
+      notes: ["notes", "comments"],
+    };
+    for (const f of CONTACT_IMPORT_FIELDS) {
+      const hit = headers.find((h) => {
+        const n = h.toLowerCase().trim();
+        return n === f.key.toLowerCase() || (SYNONYMS[f.key] ?? []).includes(n);
+      });
+      if (hit) suggestedMapping[f.key] = hit;
+    }
+    res.json({ headers, fields: CONTACT_IMPORT_FIELDS, suggestedMapping, rowCount: rows.length });
+  }),
+);
+
+/** Classify each row: New / Duplicate (existing contact matched) / Error. */
+async function classifyContactRows(org: string, csv: string, mapping: Record<string, string>) {
+  const { rows } = parseContactsCsv(csv);
+  const existing = await prisma.contact.findMany({
+    where: { organizationId: org },
+    select: { id: true, firstName: true, lastName: true, email: true, phone: true },
+  });
+  const byEmail = new Map<string, string>();
+  const byNamePhone = new Map<string, string>();
+  for (const c of existing) {
+    if (c.email) byEmail.set(c.email.toLowerCase(), c.id);
+    if (c.phone) byNamePhone.set(`${c.firstName.toLowerCase()}|${c.lastName.toLowerCase()}|${normPhone(c.phone)}`, c.id);
+  }
+  const seen = new Set<string>();
+  return rows.map((row, index) => {
+    const c = buildContact(row, mapping);
+    if (!c.firstName || !c.lastName) {
+      return { index, status: "Error" as const, reason: "Missing first or last name", contact: c, matchId: null };
+    }
+    const emailKey = c.email ?? "";
+    const npKey = c.phone ? `${c.firstName.toLowerCase()}|${c.lastName.toLowerCase()}|${normPhone(c.phone)}` : "";
+    const fileKey = emailKey || npKey || `${c.firstName.toLowerCase()}|${c.lastName.toLowerCase()}`;
+    if (seen.has(fileKey)) {
+      return { index, status: "Error" as const, reason: "Duplicate row within this file", contact: c, matchId: null };
+    }
+    seen.add(fileKey);
+    const matchId = (emailKey && byEmail.get(emailKey)) || (npKey && byNamePhone.get(npKey)) || null;
+    if (matchId) return { index, status: "Duplicate" as const, reason: emailKey && byEmail.get(emailKey) ? "Email matches an existing contact" : "Name + phone match an existing contact", contact: c, matchId };
+    return { index, status: "New" as const, reason: "", contact: c, matchId: null };
+  });
+}
+
+contactsRouter.post(
+  "/import/preview",
+  requirePermission("manageContacts"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { csv, mapping } = z.object({ csv: z.string().min(1), mapping: z.record(z.string()) }).parse(req.body);
+    const classified = await classifyContactRows(orgId(req), csv, mapping);
+    res.json({
+      rows: classified.slice(0, 500).map((r) => ({
+        index: r.index, status: r.status, reason: r.reason,
+        name: `${r.contact.firstName} ${r.contact.lastName}`.trim(), email: r.contact.email, phone: r.contact.phone,
+      })),
+      counts: {
+        new: classified.filter((r) => r.status === "New").length,
+        duplicate: classified.filter((r) => r.status === "Duplicate").length,
+        error: classified.filter((r) => r.status === "Error").length,
+      },
+    });
+  }),
+);
+
+contactsRouter.post(
+  "/import/commit",
+  requirePermission("manageContacts"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { csv, mapping, updateDuplicates, listId } = z.object({
+      csv: z.string().min(1),
+      mapping: z.record(z.string()),
+      // When true, matched duplicates get blank fields filled in (never
+      // overwriting existing data) and are counted as "updated".
+      updateDuplicates: z.boolean().optional(),
+      // Optionally drop every imported (new + updated) contact into a list.
+      listId: z.string().max(200).nullish(),
+    }).parse(req.body);
+    const org = orgId(req);
+    const classified = await classifyContactRows(org, csv, mapping);
+    const list = listId ? await prisma.contactList.findFirst({ where: { id: listId, organizationId: org } }) : null;
+
+    let inserted = 0, updated = 0, skipped = 0, errors = 0;
+    const touched: string[] = [];
+    for (const r of classified) {
+      if (r.status === "Error") { errors++; continue; }
+      if (r.status === "Duplicate") {
+        if (updateDuplicates && r.matchId) {
+          const ex = await prisma.contact.findUnique({ where: { id: r.matchId } });
+          if (ex) {
+            await prisma.contact.update({
+              where: { id: ex.id },
+              data: {
+                entityName: ex.entityName ?? r.contact.entityName,
+                source: ex.source ?? r.contact.source,
+                email: ex.email ?? r.contact.email,
+                phone: ex.phone ?? r.contact.phone,
+                notes: ex.notes ?? r.contact.notes,
+                states: ex.states.length ? ex.states : r.contact.states,
+                counties: ex.counties.length ? ex.counties : r.contact.counties,
+                tags: [...new Set([...ex.tags, ...r.contact.tags])],
+              },
+            });
+            updated++; touched.push(ex.id);
+          }
+        } else skipped++;
+        continue;
+      }
+      const created = await prisma.contact.create({ data: { organizationId: org, ...r.contact } });
+      inserted++; touched.push(created.id);
+    }
+    if (list && touched.length) {
+      await prisma.contactList.update({ where: { id: list.id }, data: { members: { connect: touched.map((id) => ({ id })) } } });
+    }
+    res.json({ inserted, updated, skipped, errors });
   }),
 );

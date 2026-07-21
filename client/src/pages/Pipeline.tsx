@@ -235,7 +235,7 @@ export function Pipeline() {
   const boardTotal = activeBoardDeals.reduce((sum, d) => sum + (d.profitEst ?? 0), 0);
 
   return (
-    <div className="page">
+    <div className="page pl2-page">
       <div className="page-header pl2-head">
         <div className="row" style={{ gap: 14, alignItems: "center", flexWrap: "wrap" }}>
           <h1 style={{ marginBottom: 0 }}>Pipeline</h1>
@@ -302,25 +302,32 @@ export function Pipeline() {
             </div>
           );
         })}
-      </div>
 
-      {/* Resolution zones — permanent Closed/Dead targets below the board. */}
-      {canMove && <div className="transition-bar">
-        {TRANSITIONS.map((t) => (
+        {/* Permanent Closed/Dead resolution columns — always anchored at the
+            end of every pipeline (sticky right), narrower than active stages. */}
+        {canMove && TRANSITIONS.map((t) => (
           <div
             key={t.stage} data-stage={t.stage}
-            className={`transition-zone ${t.stage === "DEAD" ? "dead" : "closed"} ${drag && overCol === t.stage ? "drop-target" : ""}`}
+            className={`kanban-col tz-col ${t.stage === "DEAD" ? "dead" : "closed"} ${drag && overCol === t.stage ? "drop-target" : ""}`}
+            style={{ borderTop: `3px solid ${t.stage === "DEAD" ? "var(--red)" : "var(--green)"}` }}
           >
-            <span className={`tz-ico ${t.stage === "DEAD" ? "dead" : "closed"}`} aria-hidden="true">
-              {t.stage === "DEAD"
-                ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-                : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
-            </span>
-            <span className={`tz-name ${t.stage === "DEAD" ? "dead" : "closed"}`}>{t.label}</span>
-            <span className="tz-hint">{t.hint}</span>
+            <div className="kanban-col-head">
+              <span className={`tz-ico ${t.stage === "DEAD" ? "dead" : "closed"}`} aria-hidden="true">
+                {t.stage === "DEAD"
+                  ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+                  : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
+              </span>
+              <span className={`tz-name ${t.stage === "DEAD" ? "dead" : "closed"}`}>{t.label}</span>
+            </div>
+            <div className="kanban-col-body">
+              <div className="tz-col-target">
+                <span>Drop deals here</span>
+                <span style={{ fontWeight: 500 }}>{t.hint}</span>
+              </div>
+            </div>
           </div>
         ))}
-      </div>}
+      </div>
 
       {/* Floating clone follows the cursor for a natural, lag-free drag. Its
           position is updated imperatively (cloneRef) during the drag. */}
