@@ -31,8 +31,8 @@ const loginLimiter = rateLimit({
 });
 
 /** Issue a session (cookie + bearer token) and the compact user summary. */
-function issueSession(res: import("express").Response, user: { id: string; name: string; email: string; role: "OWNER" | "ASSOCIATE"; orgRole: string | null }) {
-  const token = signSession({ userId: user.id, role: user.role });
+function issueSession(res: import("express").Response, user: { id: string; name: string; email: string; role: "OWNER" | "ASSOCIATE"; orgRole: string | null; sessionEpoch: number }) {
+  const token = signSession({ userId: user.id, role: user.role, epoch: user.sessionEpoch });
   setSessionCookie(res, token);
   return { token, user: { id: user.id, name: user.name, email: user.email, role: user.role, orgRole: user.orgRole } };
 }
@@ -170,7 +170,7 @@ authRouter.post(
       });
     });
 
-    const token = signSession({ userId: user.id, role: user.role });
+    const token = signSession({ userId: user.id, role: user.role, epoch: user.sessionEpoch });
     setSessionCookie(res, token);
     res.status(201).json({
       token,
@@ -327,11 +327,19 @@ authRouter.post(
     if (!(await verifyPassword(currentPassword, user.passwordHash))) {
       throw new HttpError(400, "Your current password is incorrect");
     }
-    await prisma.user.update({
+    // Bumping sessionEpoch strands every token issued before this moment — the
+    // whole point of changing a password after a suspected compromise. That
+    // includes the caller's own token, so re-issue one for them: they stay
+    // signed in on THIS device while every other session is evicted.
+    const updated = await prisma.user.update({
       where: { id: user.id },
-      data: { passwordHash: await hashPassword(newPassword), mustChangePassword: false },
+      data: {
+        passwordHash: await hashPassword(newPassword),
+        mustChangePassword: false,
+        sessionEpoch: { increment: 1 },
+      },
     });
-    res.json({ ok: true });
+    res.json({ ok: true, ...issueSession(res, updated) });
   }),
 );
 
@@ -402,7 +410,13 @@ authRouter.post(
       throw new HttpError(400, "This reset link is invalid or has expired. Request a new one.");
     }
     await prisma.$transaction([
-      prisma.user.update({ where: { id: row.userId }, data: { passwordHash: await hashPassword(password) } }),
+      // sessionEpoch bump evicts every existing session: someone resetting a
+      // forgotten password is exactly the case where an attacker may be holding
+      // a live token. No re-issue here — the user signs in fresh afterwards.
+      prisma.user.update({
+        where: { id: row.userId },
+        data: { passwordHash: await hashPassword(password), sessionEpoch: { increment: 1 } },
+      }),
       prisma.passwordResetToken.update({ where: { id: row.id }, data: { usedAt: new Date() } }),
       // Invalidate any other outstanding tokens for this user.
       prisma.passwordResetToken.updateMany({
@@ -579,7 +593,10 @@ authRouter.get(
               email: profile.email!,
               // No password login for SSO-provisioned accounts until they set one via reset.
               passwordHash: await hashPassword(crypto.randomBytes(32).toString("hex")),
-              role: "OWNER",
+              // Same rule as /register: the legacy account role is OWNER only
+              // for workspace creators. SSO must not be a side door that hands
+              // an invite-code joiner the elevated legacy role.
+              role: join ? "ASSOCIATE" : "OWNER",
               organizationId,
               orgRole,
             },

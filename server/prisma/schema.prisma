@@ -328,6 +328,14 @@ model User {
   totpEnabled       Boolean  @default(false)
   totpRecoveryCodes String[] @default([])
 
+  // Bumped on every password write (self-service change, owner-issued reset,
+  // forgot-password reset). The value is stamped into each session JWT, and
+  // attachUser rejects tokens whose stamp is stale — so changing a password
+  // actually signs out every other session, which is the remediation users
+  // expect after a token is stolen. Default 0 matches the implicit epoch of
+  // tokens issued before this column existed, so no one is logged out on deploy.
+  sessionEpoch      Int      @default(0)
+
   // Per-user UI theme ("dark" | "light"), or null when the user hasn't chosen.
   // Nullable-with-no-default is deliberate: the client only adopts the server
   // value when it's a REAL choice, so an unset/unavailable column never

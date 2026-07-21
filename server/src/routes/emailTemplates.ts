@@ -19,9 +19,9 @@ emailTemplatesRouter.get(
 );
 
 const upsert = z.object({
-  name: z.string().trim().min(1),
-  subject: z.string().trim().min(1),
-  body: z.string().min(1),
+  name: z.string().trim().min(1).max(200),
+  subject: z.string().trim().min(1).max(2_000),
+  body: z.string().min(1).max(200_000),
 });
 
 emailTemplatesRouter.post(

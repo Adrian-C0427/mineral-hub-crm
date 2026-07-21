@@ -100,7 +100,13 @@ usersRouter.patch(
     const patch: Record<string, unknown> = {};
     if (data.name) patch.name = data.name;
     if (data.status) patch.status = data.status;
-    if (data.password) patch.passwordHash = await hashPassword(data.password);
+    // Any password write evicts that user's outstanding sessions (see
+    // User.sessionEpoch) — an owner resetting a compromised account must not
+    // leave the attacker's existing token alive.
+    if (data.password) {
+      patch.passwordHash = await hashPassword(data.password);
+      patch.sessionEpoch = { increment: 1 };
+    }
     const user = await prisma.user.update({
       where: { id: req.params.id },
       data: patch,
@@ -144,7 +150,12 @@ usersRouter.post(
     const temporaryPassword = mode === "temp" ? generateTempPassword() : password!;
     await prisma.user.update({
       where: { id: target.id },
-      data: { passwordHash: await hashPassword(temporaryPassword), mustChangePassword: true },
+      data: {
+        passwordHash: await hashPassword(temporaryPassword),
+        mustChangePassword: true,
+        // Evict the target's live sessions — see User.sessionEpoch.
+        sessionEpoch: { increment: 1 },
+      },
     });
     // Only echo a generated temp password; never echo an owner-supplied one back.
     res.json({ ok: true, ...(mode === "temp" ? { temporaryPassword } : {}) });

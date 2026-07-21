@@ -852,7 +852,7 @@ dealsRouter.patch(
 // --------------------------------------------------------------------------
 const stageSchema = z.object({
   toStage: z.string().min(1),
-  deadReason: z.string().optional(),
+  deadReason: z.string().max(2_000).optional(),
 });
 
 dealsRouter.post(
@@ -1059,7 +1059,7 @@ dealsRouter.post(
 const messageSchema = z.object({
   kind: z.enum(["PHONE", "MEETING", "NOTE", "NEGOTIATION", "EMAIL_OUT", "EMAIL_IN"]),
   subject: z.string().max(10_000).nullish(),
-  body: z.string().min(1),
+  body: z.string().min(1).max(100_000),
   occurredAt: dateField,
 });
 

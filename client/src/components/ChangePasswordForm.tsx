@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api, ApiError } from "../api/client";
+import { api, ApiError, setAuthToken } from "../api/client";
 import { Banner } from "./ui";
 
 /**
@@ -31,7 +31,11 @@ export function ChangePasswordForm({ onChanged, compact }: { onChanged?: () => v
     if (v) { setError(v); return; }
     setBusy(true); setError(null);
     try {
-      await api.post("/auth/change-password", { currentPassword: current, newPassword: next });
+      // Changing the password evicts every session issued before it, including
+      // this tab's. The server hands back a freshly-stamped token so the user
+      // stays signed in here while other devices are signed out.
+      const r = await api.post<{ token?: string }>("/auth/change-password", { currentPassword: current, newPassword: next });
+      if (r.token) setAuthToken(r.token);
       setCurrent(""); setNext(""); setConfirm(""); setOk(true);
       onChanged?.();
     } catch (err) {

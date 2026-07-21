@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { prisma, withDbRetry } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
@@ -53,8 +54,27 @@ function cacheGet(key: string): Buffer | undefined {
 
 export const gisTilesRouter = Router();
 
+/**
+ * The tile endpoint is intentionally unauthenticated (MapLibre can't attach an
+ * Authorization header, and the underlying survey data is public record), so a
+ * per-IP cap is the only backstop against someone walking the z/x/y space to
+ * force uncached PostGIS tile generation in a loop. The ceiling is deliberately
+ * generous: a real user panning and zooming a statewide map pulls tiles in
+ * bursts of hundreds, and most of those are served from the LRU without
+ * touching Postgres. Per-process (not DB-backed) on purpose — this guards CPU
+ * on the instance actually doing the work, and must not add a write per tile.
+ */
+const tileLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 2000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many tile requests — please slow down." },
+});
+
 gisTilesRouter.get(
   "/:z/:x/:y.pbf",
+  tileLimiter,
   asyncHandler(async (req, res) => {
     const z = Number(req.params.z), x = Number(req.params.x), y = Number(req.params.y);
     if (!Number.isInteger(z) || !Number.isInteger(x) || !Number.isInteger(y) || z < 0 || z > TILE_MAX_ZOOM || x < 0 || y < 0 || x >= 2 ** z || y >= 2 ** z) {

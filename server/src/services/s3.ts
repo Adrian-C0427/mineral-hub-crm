@@ -84,7 +84,44 @@ export function isAllowedMime(detected: string): boolean {
   return ALLOWED_MIME.has(detected);
 }
 
-/** Lightweight magic-byte sniff so we don't trust the client's mimetype. */
+// Types with no magic bytes to check, where the declared type is all we have.
+// Both are inert: they're stored and served with a concrete text/* Content-Type,
+// so a browser won't parse them as HTML even if the bytes happen to look like it.
+const SNIFFLESS_MIME = new Set(["text/plain", "text/csv"]);
+
+/**
+ * Heuristic "is this plain text?": no NUL bytes and no C0 control characters
+ * beyond the usual whitespace. Every binary format we accept is identified by a
+ * signature well before this runs, so it only ever adjudicates signature-less
+ * payloads.
+ */
+function looksLikeText(buf: Buffer): boolean {
+  const sample = buf.subarray(0, 4096);
+  for (const b of sample) {
+    if (b === 0) return false;
+    if (b < 0x20 && b !== 0x09 && b !== 0x0a && b !== 0x0d) return false;
+  }
+  return true;
+}
+
+// Declared types we accept behind a zip (PK\x03\x04) header — the OOXML office
+// formats. Anything else claiming to be a zip is rejected rather than waved
+// through on the client's word.
+const ZIP_BACKED_MIME = new Set([
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+]);
+
+/**
+ * Lightweight magic-byte sniff so we don't trust the client's mimetype.
+ *
+ * Returns the DETECTED type when the bytes identify one, and otherwise falls
+ * back to the declared type only in the two cases where that's defensible:
+ * a zip header with an OOXML declaration, or a format that has no signature to
+ * check. Every other unrecognized payload returns "application/octet-stream",
+ * which isAllowedMime rejects — so a file can no longer smuggle arbitrary
+ * content through by simply declaring a permitted type.
+ */
 export function sniffMime(buf: Buffer, fallback: string): string {
   if (buf.length >= 4) {
     const hex = buf.subarray(0, 4).toString("hex");
@@ -94,9 +131,22 @@ export function sniffMime(buf: Buffer, fallback: string): string {
     if (hex === "49492a00" || hex === "4d4d002a") return "image/tiff";
     if (hex.startsWith("47494638")) return "image/gif";
     if (hex === "504b0304") {
-      // zip-based (docx/xlsx) — trust the declared office type if it's one we allow
-      return fallback;
+      // zip-based container: only the office formats we allow may claim it.
+      return ZIP_BACKED_MIME.has(fallback) ? fallback : "application/octet-stream";
+    }
+    // Legacy .doc/.xls (OLE2 compound file) share one signature, so the
+    // declared type picks between them.
+    if (hex === "d0cf11e0") {
+      return fallback === "application/msword" || fallback === "application/vnd.ms-excel"
+        ? fallback
+        : "application/octet-stream";
     }
   }
-  return fallback;
+  if (SNIFFLESS_MIME.has(fallback)) return fallback;
+  // Windows browsers routinely report a .csv as application/vnd.ms-excel. A real
+  // .xls is OLE2 and was matched above, so anything still claiming Excel here is
+  // signature-less — if it reads as text, treat it as the CSV it almost certainly
+  // is. This is a downgrade to an inert type, never an escalation.
+  if (fallback === "application/vnd.ms-excel" && looksLikeText(buf)) return "text/csv";
+  return "application/octet-stream";
 }

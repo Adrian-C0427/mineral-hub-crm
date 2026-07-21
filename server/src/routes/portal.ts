@@ -6,7 +6,7 @@ import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { normalizeCompany } from "../serializers.js";
 import { normalizePhone } from "../domain/phone.js";
 import { getDownloadUrl, s3Configured } from "../services/s3.js";
-import { portalRateLimited } from "../services/portalRateLimit.js";
+import { portalRateLimited, PORTAL_READ_MAX_PER_WINDOW } from "../services/portalRateLimit.js";
 import { pushTeams } from "../services/notifyPush.js";
 
 /**
@@ -245,6 +245,13 @@ async function productionSummary(organizationId: string, wells: string[]) {
 portalRouter.get(
   "/offering/:slug",
   asyncHandler(async (req, res) => {
+    // Heaviest public route: deal + org + files + assets, a raw abstracts query,
+    // a production aggregation, and one S3 presign per image. Cap it per IP so a
+    // scripted loop can't turn it into a cheap DB/S3 amplifier.
+    const ip = req.ip ?? "unknown";
+    if (await portalRateLimited("portal-read", ip, Date.now(), PORTAL_READ_MAX_PER_WINDOW)) {
+      throw new HttpError(429, "Too many requests — please try again later");
+    }
     const deal = await prisma.deal.findUnique({
       where: { portalSlug: String(req.params.slug) },
       include: {
@@ -306,6 +313,11 @@ portalRouter.get(
       operator: a.operator,
     }));
 
+    // Deliberately `private` and short, unlike the marketplace routes' `public`
+    // caching: this body embeds presigned S3 URLs that expire, so a shared cache
+    // could hand a later visitor dead image links. 30s is enough to absorb a
+    // reload without outliving the signatures.
+    res.setHeader("Cache-Control", "private, max-age=30");
     res.json({
       org,
       deal: publicDeal(deal),
@@ -349,11 +361,25 @@ portalRouter.get(
   "/offering/:slug/files/:fileId/download",
   asyncHandler(async (req, res) => {
     if (!s3Configured()) throw new HttpError(503, "Document downloads are temporarily unavailable");
+    const ip = req.ip ?? "unknown";
+    if (await portalRateLimited("portal-read", ip, Date.now(), PORTAL_READ_MAX_PER_WINDOW)) {
+      throw new HttpError(429, "Too many requests — please try again later");
+    }
     const file = await prisma.fileAttachment.findUnique({
       where: { id: String(req.params.fileId) },
-      include: { deal: { select: { portalSlug: true, publishedToPortal: true } } },
+      // portalEnabled is the org's portal kill switch. Every other portal route
+      // honours it; this one didn't, so a saved document link kept minting fresh
+      // presigned URLs after an owner had taken the portal down.
+      include: { deal: { select: { portalSlug: true, publishedToPortal: true, organization: { select: { portalEnabled: true } } } } },
     });
-    if (!file || !file.visibleToBuyers || !file.deal || file.deal.portalSlug !== req.params.slug || !file.deal.publishedToPortal) {
+    if (
+      !file ||
+      !file.visibleToBuyers ||
+      !file.deal ||
+      file.deal.portalSlug !== req.params.slug ||
+      !file.deal.publishedToPortal ||
+      !file.deal.organization?.portalEnabled
+    ) {
       throw new HttpError(404, "Document not found");
     }
     const url = await getDownloadUrl(file.s3Key, file.filename, req.query.inline === "1");

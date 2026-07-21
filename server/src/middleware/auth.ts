@@ -51,11 +51,14 @@ export async function attachUser(req: AuthedRequest, _res: Response, next: NextF
           select: {
             id: true, role: true, name: true, email: true, firstName: true, lastName: true,
             phone: true, organizationId: true, orgRole: true, mustChangePassword: true,
-            status: true, lastActiveAt: true,
+            status: true, lastActiveAt: true, sessionEpoch: true,
           },
         }),
       );
-      if (user && user.status === "ACTIVE") {
+      // A password change bumps sessionEpoch, stranding every token issued
+      // before it. Without this, "I changed my password" would not evict an
+      // attacker holding a stolen token — the one remediation users reach for.
+      if (user && user.status === "ACTIVE" && session.epoch === user.sessionEpoch) {
         // Effective permissions = role defaults merged with any org override.
         let permissions: Permission[] = [];
         if (user.organizationId && user.orgRole) {
