@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitParties } from "./research.js";
+import { splitAbstracts, splitParties } from "./research.js";
 import {
   aggregateRelationships, aggregateGroupRelationships, classifyEntities, coBuyerPartnerships,
   buildChains, entityNetwork, expandDocToEdges, type TransferDocRow,
@@ -23,6 +23,20 @@ describe("splitParties", () => {
     expect(splitParties("Company A,, ;/ Company A LLC")).toEqual(["Company A"]);
     expect(splitParties("")).toEqual([]);
     expect(splitParties(null)).toEqual([]);
+  });
+});
+
+describe("splitAbstracts", () => {
+  it("splits on any common delimiter and normalizes to numbers only", () => {
+    expect(splitAbstracts("58, 61, 102")).toEqual(["58", "61", "102"]);
+    expect(splitAbstracts("A-58; A-61 / 102")).toEqual(["58", "61", "102"]);
+    expect(splitAbstracts("ABS 58 & 61 and 102")).toEqual(["58", "61", "102"]);
+  });
+  it("strips leading zeros, drops duplicates, ignores empties", () => {
+    expect(splitAbstracts("058, 58; A58")).toEqual(["58"]);
+    expect(splitAbstracts(" , ; / ")).toEqual([]);
+    expect(splitAbstracts(null)).toEqual([]);
+    expect(splitAbstracts("A-455")).toEqual(["455"]);
   });
 });
 
@@ -103,6 +117,18 @@ describe("aggregateGroupRelationships (display)", () => {
     expect(rels[0].grantee).toBe("Company C + Company D");
     expect(rels[0].count).toBe(1);
     expect(rels[0].txIds).toEqual(["grp"]);
+  });
+  it("credits every abstract on a multi-abstract instrument while staying ONE transaction", () => {
+    const edges = expandDocToEdges(doc({ id: "ma1", abstractId: "A-58, 61 / 102", abstractIds: ["58", "61", "102"] }));
+    const rels = aggregateGroupRelationships(edges);
+    expect(rels).toHaveLength(1);
+    expect(rels[0].count).toBe(1);                          // one recorded transaction
+    expect(rels[0].abstracts).toEqual(["102", "58", "61"]); // each abstract credited
+  });
+  it("splits legacy multi-abstract cells at read time", () => {
+    const edges = expandDocToEdges(doc({ id: "ma2", abstractId: "58; 61" })); // no stored array
+    const rels = aggregateRelationships(edges);
+    expect(rels[0].abstracts).toEqual(["58", "61"]);
   });
   it("still aggregates repeat single-party transfers as before", () => {
     const edges = [

@@ -190,6 +190,34 @@ export function splitParties(raw: string | null | undefined): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// Multi-abstract splitting (one instrument covering several abstracts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Split a raw Abstract cell into a clean list of individual abstract numbers.
+ *
+ * Public-record exports separate multiple abstracts with commas, semicolons,
+ * slashes, ampersands, "and", or plain spaces — and often prefix them
+ * ("A-58", "ABS 58"). Extracting the digit runs handles every delimiter
+ * uniformly and normalizes each value to numbers only ("A-58, 61 & 102" →
+ * ["58", "61", "102"]). Leading zeros are stripped, duplicates within the
+ * cell are dropped, and empty values are ignored. The ORIGINAL cell stays
+ * stored on the record untouched — this only feeds abstract-level analytics.
+ */
+export function splitAbstracts(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const run of String(raw).match(/\d+/g) ?? []) {
+    const n = run.replace(/^0+(?=\d)/, "");
+    if (seen.has(n)) continue;
+    seen.add(n);
+    out.push(n);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Recorded-document duplicate detection
 // ---------------------------------------------------------------------------
 
