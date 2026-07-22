@@ -17,8 +17,8 @@ import {
   type ExistingBuyerLite, type ResearchDocLite,
 } from "../domain/researchBuyers.js";
 import {
-  aggregateRelationships, coBuyerPartnerships, classifyEntities, buildChains,
-  chainTableRows, expandDocToEdges, ENTITY_CLASS_LABEL, type TxEdge,
+  aggregateRelationships, aggregateGroupRelationships, coBuyerPartnerships, classifyEntities,
+  buildChains, chainTableRows, expandDocToEdges, ENTITY_CLASS_LABEL, type TxEdge,
 } from "../domain/researchGraph.js";
 import { normalizeCompany } from "../serializers.js";
 
@@ -552,8 +552,15 @@ researchRouter.get(
     const win = parseWindow(req.query as Record<string, unknown>);
     const edges = await loadTxEdges(org, f, win);
 
+    // Participant-level relationships drive chains + classifications; the
+    // DISPLAYED relationship list preserves each instrument's recorded party
+    // groups — "(A + B) → (C + D)" is one relationship, never four.
     const relationships = aggregateRelationships(edges);
-    const coBuyers = coBuyerPartnerships(edges);
+    const groupRelationships = aggregateGroupRelationships(edges);
+    // Co-Buyer view: shared ACQUISITIONS only. Sell-side partnership data
+    // stays computed (and feeds other analytics) but is not surfaced here.
+    const coBuyers = coBuyerPartnerships(edges).filter((p) => p.sharedAcquisitions > 0);
+    coBuyers.sort((a, b) => b.sharedAcquisitions - a.sharedAcquisitions || b.members.length - a.members.length);
     const chains = buildChains(relationships);
     const table = chainTableRows(chains);
     const classMap = classifyEntities(relationships);
@@ -565,14 +572,20 @@ researchRouter.get(
       totals: {
         // Distinct recorded documents — multi-party expansion never inflates this.
         transactions: new Set(edges.map((e) => e.id)).size,
-        relationships: relationships.length,
+        relationships: groupRelationships.length,
         entities: classMap.size,
         partnerships: coBuyers.length,
         chains: chains.length,
       },
       // Strip heavy txIds from the top-level list (drill-in fetches them on demand).
-      relationships: relationships.slice(0, 300).map(({ txIds, ...r }) => ({ ...r, transactions: r.count, _txCount: txIds.length })),
-      coBuyers: coBuyers.slice(0, 100).map(({ txKeys, ...p }) => ({ ...p, _txCount: txKeys.length })),
+      relationships: groupRelationships.slice(0, 300).map(({ txIds, ...r }) => ({ ...r, transactions: r.count, _txCount: txIds.length })),
+      coBuyers: coBuyers.slice(0, 100).map(({ txKeys, sharedDispositions, firstDate, lastDate, acqFirstDate, acqLastDate, ...p }) => ({
+        ...p,
+        count: p.sharedAcquisitions,           // rankings/counts: acquisitions only
+        firstDate: acqFirstDate,               // first shared acquisition
+        lastDate: acqLastDate,                 // most recent shared acquisition
+        _txCount: txKeys.length,
+      })),
       chainTable: table.map((row) => ({
         path: row.path, feeders: row.feeders, midTier: row.midTier, terminus: row.terminus,
         length: row.chain.length, strength: row.chain.strength, totalCount: row.chain.totalCount,
@@ -607,26 +620,34 @@ researchRouter.post(
 
     let ids: string[] = [];
     if (sel.grantorNorm && sel.granteeNorm) {
-      ids = edges.filter((e) => e.grantorNorm === sel.grantorNorm && e.granteeNorm === sel.granteeNorm).map((e) => e.id);
+      // Relationship rows preserve recorded party groups, so the pair selector
+      // matches the GROUP keys first (participant keys as fallback for older
+      // callers / single-party rows, where the two are identical).
+      ids = edges
+        .filter((e) =>
+          ((e.grantorGroupNorm ?? e.grantorNorm) === sel.grantorNorm && (e.granteeGroupNorm ?? e.granteeNorm) === sel.granteeNorm) ||
+          (e.grantorNorm === sel.grantorNorm && e.granteeNorm === sel.granteeNorm))
+        .map((e) => e.id);
     } else if (sel.members && sel.members.length >= 2) {
-      // Partnership drill: transactions where the member set acquired together
-      // (co-grantees) OR conveyed together (co-grantors). Grouped per recorded
+      // Co-Buyer drill: transactions where the member set acquired together as
+      // co-GRANTEES (the view is acquisitions-only). Grouped per recorded
       // transaction — instrument key when present, else document id.
       const want = new Set(sel.members);
       const byTx = new Map<string, TxEdge[]>();
       for (const e of edges) { const k = e.txKey ?? e.id; (byTx.get(k) ?? byTx.set(k, []).get(k)!).push(e); }
       for (const list of byTx.values()) {
         const grantees = new Set(list.map((e) => e.granteeNorm));
-        const grantors = new Set(list.map((e) => e.grantorNorm));
-        const matches = (side: Set<string>) => [...want].every((m) => side.has(m)) && side.size === want.size;
-        if (matches(grantees) || matches(grantors)) ids.push(...list.map((e) => e.id));
+        if ([...want].every((m) => grantees.has(m)) && grantees.size === want.size) ids.push(...list.map((e) => e.id));
       }
     } else if (sel.path && sel.path.length >= 2) {
       const hops = new Set<string>();
       for (let i = 0; i < sel.path.length - 1; i++) hops.add(`${sel.path[i]} ${sel.path[i + 1]}`);
       ids = edges.filter((e) => hops.has(`${e.grantorNorm} ${e.granteeNorm}`)).map((e) => e.id);
     } else if (sel.entityNorm) {
-      ids = edges.filter((e) => e.grantorNorm === sel.entityNorm || e.granteeNorm === sel.entityNorm).map((e) => e.id);
+      ids = edges
+        .filter((e) => e.grantorNorm === sel.entityNorm || e.granteeNorm === sel.entityNorm ||
+          e.grantorGroupNorm === sel.entityNorm || e.granteeGroupNorm === sel.entityNorm)
+        .map((e) => e.id);
     } else {
       throw new HttpError(400, "Provide a relationship pair, co-buyer members, chain path, or entity.");
     }

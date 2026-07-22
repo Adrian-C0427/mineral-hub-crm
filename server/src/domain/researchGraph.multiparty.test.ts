@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { splitParties } from "./research.js";
 import {
-  aggregateRelationships, classifyEntities, coBuyerPartnerships, buildChains,
-  entityNetwork, expandDocToEdges, type TransferDocRow,
+  aggregateRelationships, aggregateGroupRelationships, classifyEntities, coBuyerPartnerships,
+  buildChains, entityNetwork, expandDocToEdges, type TransferDocRow,
 } from "./researchGraph.js";
 
 // ---------------------------------------------------------------------------
@@ -79,11 +79,39 @@ describe("transaction counting with participant groups", () => {
     expect(new Set(edges.map((e) => e.id)).size).toBe(1);   // totals count documents
   });
 
-  it("entityNetwork counts the focus entity's group transaction once", () => {
+  it("entityNetwork counts the focus entity's group transaction once and shows the recorded group", () => {
     const edges = expandDocToEdges(groupDoc({ id: "g1" }));
     const net = entityNetwork(edges, ["COMPANY C"])!;
     expect(net.acquisitions).toBe(1);
-    expect(net.topGrantors.map((g) => g.norm).sort()).toEqual(["COMPANY A", "COMPANY B"]);
+    // The counterparty is the RECORDED group — one unit, not two implied 1:1s.
+    expect(net.topGrantors.map((g) => `${g.norm}:${g.count}`)).toEqual(["COMPANY A + COMPANY B:1"]);
+  });
+});
+
+describe("aggregateGroupRelationships (display)", () => {
+  it("preserves the recorded group structure as ONE relationship / ONE transaction", () => {
+    // (A + B) → (C + D): never four one-to-one rows.
+    const edges = expandDocToEdges(groupDoc({
+      id: "grp",
+      grantee: "Company C / Company D", granteeNorm: "COMPANY C COMPANY D",
+      granteeParties: ["Company C", "Company D"], granteeNorms: ["COMPANY C", "COMPANY D"],
+    }));
+    expect(edges).toHaveLength(4); // participant analytics still see all pairs
+    const rels = aggregateGroupRelationships(edges);
+    expect(rels).toHaveLength(1);
+    expect(rels[0].grantor).toBe("Company A + Company B");
+    expect(rels[0].grantee).toBe("Company C + Company D");
+    expect(rels[0].count).toBe(1);
+    expect(rels[0].txIds).toEqual(["grp"]);
+  });
+  it("still aggregates repeat single-party transfers as before", () => {
+    const edges = [
+      ...expandDocToEdges(doc({ id: "s1" })),
+      ...expandDocToEdges(doc({ id: "s2" })),
+    ];
+    const rels = aggregateGroupRelationships(edges);
+    expect(rels).toHaveLength(1);
+    expect(rels[0].count).toBe(2);
   });
 });
 
@@ -108,6 +136,9 @@ describe("coBuyerPartnerships with multi-party groups", () => {
     expect(ab.count).toBe(3);                       // total partnership transactions
     expect(ab.firstDate).toBe("2025-01-10");        // first recorded together
     expect(ab.lastDate).toBe("2026-06-01");         // most recent together
+    // Acquisition-only dates — what the Co-Buyer view surfaces.
+    expect(ab.acqFirstDate).toBe("2025-01-10");
+    expect(ab.acqLastDate).toBe("2025-01-10");
   });
 });
 
