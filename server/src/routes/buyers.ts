@@ -9,7 +9,7 @@ import { normalizePhone } from "../domain/phone.js";
 import { effectiveStatus } from "../domain/buyerStatus.js";
 import { closeRate } from "../domain/metrics.js";
 import { normalizeEntity } from "../domain/research.js";
-import { entityNetwork, ENTITY_CLASS_LABEL, type TxEdge } from "../domain/researchGraph.js";
+import { entityNetwork, expandDocToEdges, ENTITY_CLASS_LABEL, type TxEdge } from "../domain/researchGraph.js";
 import { nameSimilarity } from "../domain/researchBuyers.js";
 import { importRouter } from "./import.js";
 
@@ -228,16 +228,14 @@ buyersRouter.get(
       },
       select: {
         id: true, grantor: true, grantorNorm: true, grantee: true, granteeNorm: true,
+        grantorParties: true, granteeParties: true, grantorNorms: true, granteeNorms: true,
         state: true, county: true, abstractId: true, recordingDate: true, instrumentNumber: true,
       },
     });
-    const edges: TxEdge[] = rows.map((r) => ({
-      id: r.id,
-      grantorNorm: r.grantorNorm!, grantor: r.grantor ?? r.grantorNorm!,
-      granteeNorm: r.granteeNorm!, grantee: r.grantee ?? r.granteeNorm!,
-      state: r.state, county: r.county, abstractId: r.abstractId, date: r.recordingDate,
-      txKey: r.instrumentNumber ? `${r.state}|${r.county}|${r.instrumentNumber}` : null,
-    }));
+    // Participant-level expansion: each party on a multi-party instrument is
+    // linked to the (single) transaction, so this buyer's profile sees every
+    // record it participated in — individually or as part of a group.
+    const edges: TxEdge[] = rows.flatMap((r) => expandDocToEdges(r));
 
     const network = entityNetwork(edges, focusNorms, buyer.companyName);
     if (!network) return res.json({ network: null, reason: "no-activity" });
@@ -314,6 +312,20 @@ async function researchEntityIndex(org: string): Promise<Map<string, { name: str
   };
   for (const g of grantees) add(g.granteeNorm, g.grantee, g._count._all, "asGrantee");
   for (const g of grantors) add(g.grantorNorm, g.grantor, g._count._all, "asGrantor");
+  // Multi-party groups: index each individual participant too (rows whose
+  // party arrays hold >1 entry — the groupBy above only saw the combined-cell
+  // key, which is a different norm, so this never double-counts).
+  const partyRows = await prisma.researchDocument.findMany({
+    where: {
+      organizationId: org, docClass: "TRANSACTION",
+      OR: [{ granteeNorms: { isEmpty: false } }, { grantorNorms: { isEmpty: false } }],
+    },
+    select: { granteeNorms: true, granteeParties: true, grantorNorms: true, grantorParties: true },
+  });
+  for (const d of partyRows) {
+    if (d.granteeNorms.length > 1) d.granteeNorms.forEach((n, i) => add(n, d.granteeParties[i] ?? n, 1, "asGrantee"));
+    if (d.grantorNorms.length > 1) d.grantorNorms.forEach((n, i) => add(n, d.grantorParties[i] ?? n, 1, "asGrantor"));
+  }
   return new Map([...idx.entries()].map(([k, v]) => [k, { name: v.name, asGrantee: v.asGrantee, asGrantor: v.asGrantor }]));
 }
 
