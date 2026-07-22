@@ -290,7 +290,7 @@ dashboardRouter.get(
     const taskRows = await prisma.contactActivity.findMany({
       where: { organizationId: org, kind: "TASK", completedAt: null, dueDate: { not: null, lte: taskHorizon } },
       select: {
-        id: true, body: true, dueDate: true, priority: true,
+        id: true, title: true, body: true, dueDate: true, priority: true,
         assignedTo: { select: { id: true, name: true } },
         createdBy: { select: { id: true, name: true } },
         contact: { select: { id: true, firstName: true, lastName: true, entityName: true } },
@@ -300,7 +300,7 @@ dashboardRouter.get(
     });
     const dueSoonTasks = taskRows.map((t) => ({
       id: t.id,
-      title: t.body,
+      title: t.title ?? t.body,
       dueDate: t.dueDate,
       priority: t.priority ?? "MEDIUM",
       assignedTo: t.assignedTo ?? t.createdBy,

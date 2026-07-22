@@ -6,7 +6,7 @@ import {
 import { api } from "../api/client";
 import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, MetricCard, Banner, MatchBar, Modal, ConfirmDialog, BackLink } from "../components/ui";
+import { Spinner, MetricCard, EstimatedProfitCard, Banner, MatchBar, Modal, ConfirmDialog, BackLink } from "../components/ui";
 import { Select } from "../components/Select";
 import { BuyerActivitySection } from "../components/BuyerActivitySection";
 import { CollapsibleSection } from "../components/CollapsibleSection";
@@ -20,7 +20,7 @@ import { GeoFields } from "../components/GeoFields";
 import { useAbstractLabels, SurveyMultiPicker } from "../components/AbstractPicker";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
 import { monthLabel, chartTooltip } from "../lib/charts";
-import { money, num, fmtDate, toInputDate } from "../lib/format";
+import { money, num, fmtDate, toInputDate, prettyEnum } from "../lib/format";
 import { OWNERSHIP_TYPES, OWNERSHIP_STATUSES, PRODUCING_STATUSES } from "./MineralAssets";
 import type { BuyerActivityRow, DealSummary, MatchRec, RevenueEntry, Seller, UserLite } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
@@ -525,11 +525,12 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
         )}
       </div>
 
-      <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
+      <div className="metrics-row" style={{ gridTemplateColumns: "repeat(5,1fr)" }}>
         <MetricCard label="Buyers Contacted" value={asset.metrics.buyersContacted} />
         <MetricCard label="Interested" value={asset.metrics.interested} />
         <MetricCard label="Offers" value={asset.metrics.offers} />
-        <MetricCard label="High Offer" value={money(asset.metrics.highOffer)} />
+        <MetricCard label="Highest Offer" value={money(asset.metrics.highOffer)} />
+        <EstimatedProfitCard highOffer={asset.metrics.highOffer} basis={asset.ourPrice ?? asset.askPrice} />
       </div>
 
       {asset.offers.length > 0 && (
@@ -539,10 +540,10 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
             <thead><tr><th>Buyer</th><th className="right">Amount</th><th>Status</th><th>Expires</th><th></th></tr></thead>
             <tbody>{asset.offers.map((o) => (
               <tr key={o.id}>
-                <td>{o.buyer.name}</td><td className="right">{money(o.amount)}</td><td>{o.status}</td><td>{fmtDate(o.expirationDate)}</td>
+                <td>{o.buyer.name}</td><td className="right">{money(o.amount)}</td><td>{o.status === "ACCEPTED" || asset.selectedOfferId === o.id ? "Accepted Offer" : prettyEnum(o.status)}</td><td>{fmtDate(o.expirationDate)}</td>
                 <td className="right">
                   <span className="row" style={{ gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
-                    {asset.selectedOfferId === o.id ? <span className="badge resp-offer">Accepted</span> :
+                    {asset.selectedOfferId === o.id ? <span className="badge resp-offer">Accepted Offer</span> :
                       canEdit && <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button>}
                     {canEdit && <OfferRowActions offer={o} accepted={asset.selectedOfferId === o.id} onChanged={onChanged} />}
                   </span>

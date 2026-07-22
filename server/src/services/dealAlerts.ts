@@ -93,7 +93,7 @@ export async function runDealAlertSweep(now = new Date()): Promise<{ overdue: nu
   const dueTasks = await prisma.contactActivity.findMany({
     where: { kind: "TASK", completedAt: null, dueDate: { lte: now } },
     select: {
-      id: true, body: true, dueDate: true, organizationId: true,
+      id: true, title: true, body: true, dueDate: true, organizationId: true,
       assignedToId: true, createdById: true,
       contact: { select: { id: true, firstName: true, lastName: true, entityName: true } },
     },
@@ -110,7 +110,7 @@ export async function runDealAlertSweep(now = new Date()): Promise<{ overdue: nu
         organizationId: t.organizationId,
         userId: t.assignedToId ?? t.createdById,
         type: "task_due",
-        title: overdueDays > 0 ? `Task overdue: ${t.body.slice(0, 80)}` : `Task due: ${t.body.slice(0, 80)}`,
+        title: overdueDays > 0 ? `Task overdue: ${(t.title ?? t.body).slice(0, 80)}` : `Task due: ${(t.title ?? t.body).slice(0, 80)}`,
         body: `On ${who}${overdueDays > 0 ? ` — ${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue.` : " — due today."}`,
         link,
       },

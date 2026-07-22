@@ -12,6 +12,7 @@ import { GeoFields } from "../components/GeoFields";
 import { PhoneInput } from "../components/PhoneInput";
 import { DateField } from "../components/DateField";
 import { fmtDate, toInputDate } from "../lib/format";
+import { formatPhone } from "../lib/phone";
 import type { UserLite } from "../types";
 
 /**
@@ -118,7 +119,7 @@ export function Contacts() {
     { key: "type", header: "Type", type: "text", value: (r) => typeLabel(r.type), render: (r) => <span className="badge resp-pending">{typeLabel(r.type)}</span> },
     { key: "status", header: "Status", type: "text", value: (r) => statusLabel(r.status),
       render: (r) => <span className={`badge ${STATUS_TONE[r.status] ?? "resp-pending"}`}>{statusLabel(r.status)}</span> },
-    { key: "phone", header: "Phone", type: "text", value: (r) => r.phone, render: (r) => r.phone ?? "—" },
+    { key: "phone", header: "Phone", type: "text", value: (r) => r.phone, render: (r) => (r.phone ? formatPhone(r.phone) : "—") },
     { key: "email", header: "Email", type: "text", value: (r) => r.email, render: (r) => r.email ?? "—" },
     { key: "geo", header: "Counties", type: "text", value: (r) => r.counties.join(", "),
       render: (r) => r.counties.length ? r.counties.join(", ") : (r.states.join(", ") || "—") },
@@ -596,7 +597,7 @@ function ContactImportWizard({ lists, onDone }: { lists: ContactListRow[]; onDon
               <tbody>
                 {preview.rows.map((r) => (
                   <tr key={r.index} className={r.status === "Error" ? "row-overdue" : r.status === "Duplicate" ? "row-dimmed" : ""}>
-                    <td>{r.index + 1}</td><td>{r.name || "—"}</td><td>{r.email ?? "—"}</td><td>{r.phone ?? "—"}</td><td>{r.status}</td><td>{r.reason || "—"}</td>
+                    <td>{r.index + 1}</td><td>{r.name || "—"}</td><td>{r.email ?? "—"}</td><td>{r.phone ? formatPhone(r.phone) : "—"}</td><td>{r.status}</td><td>{r.reason || "—"}</td>
                   </tr>
                 ))}
               </tbody>

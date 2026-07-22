@@ -183,6 +183,7 @@ type ActivityWithAuthor = ContactActivity & {
 const serializeActivity = (a: ActivityWithAuthor) => ({
   id: a.id,
   kind: a.kind,
+  title: a.title,
   body: a.body,
   disposition: a.disposition,
   durationSeconds: a.durationSeconds,
@@ -240,6 +241,7 @@ contactsRouter.get(
 
 const activitySchema = z.object({
   kind: z.enum(ACTIVITY_KINDS),
+  title: z.string().trim().min(1).max(200).nullish(),
   body: z.string().trim().min(1).max(10_000),
   disposition: z.enum(CALL_DISPOSITIONS).nullish(),
   durationSeconds: z.number().int().min(0).max(86_400).nullish(),
@@ -255,12 +257,16 @@ contactsRouter.post(
     const c = await findContact(orgId(req), req.params.id);
     const data = activitySchema.parse(req.body);
     const isDated = data.kind === "TASK" || data.kind === "REMINDER";
+    // Notes, tasks, and reminders carry a required concise title above the
+    // detailed note; quick call/email/text logs stay single-field.
+    if ((data.kind === "NOTE" || isDated) && !data.title) throw new HttpError(400, "Title is required");
     await checkAssignee(orgId(req), data.assignedToId);
     const created = await prisma.contactActivity.create({
       data: {
         organizationId: orgId(req),
         contactId: c.id,
         kind: data.kind,
+        title: data.title ?? null,
         body: data.body,
         disposition: data.kind === "CALL" ? data.disposition ?? null : null,
         durationSeconds: data.kind === "CALL" ? data.durationSeconds ?? null : null,
@@ -288,6 +294,7 @@ contactsRouter.patch(
     const existing = await prisma.contactActivity.findFirst({ where: { id: req.params.aid, contactId: c.id } });
     if (!existing) throw new HttpError(404, "Activity not found");
     const data = z.object({
+      title: z.string().trim().min(1).max(200).optional(),
       body: z.string().trim().min(1).max(10_000).optional(),
       completed: z.boolean().optional(),
       pinned: z.boolean().optional(),
@@ -299,6 +306,7 @@ contactsRouter.patch(
     const updated = await prisma.contactActivity.update({
       where: { id: existing.id },
       data: {
+        ...(data.title !== undefined ? { title: data.title } : {}),
         ...(data.body !== undefined ? { body: data.body } : {}),
         ...(data.completed !== undefined ? { completedAt: data.completed ? new Date() : null } : {}),
         ...(data.pinned !== undefined ? { pinned: data.pinned } : {}),
