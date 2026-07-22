@@ -193,7 +193,7 @@ buyersRouter.get(
       select: {
         id: true, grantor: true, grantorNorm: true, grantee: true, granteeNorm: true,
         grantorParties: true, granteeParties: true, grantorNorms: true, granteeNorms: true,
-        state: true, county: true, abstractId: true, recordingDate: true, instrumentNumber: true,
+        state: true, county: true, abstractId: true, abstractIds: true, recordingDate: true, instrumentNumber: true,
       },
     });
     // Participant-level expansion: each party on a multi-party instrument is

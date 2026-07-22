@@ -27,7 +27,8 @@ describe("aggregateRelationships", () => {
       firstDate: "2026-01-01", lastDate: "2026-03-01",
     });
     expect(rels[0].counties).toEqual(["Freestone", "Leon"]);
-    expect(rels[0].abstracts).toEqual(["A-1", "A-2"]);
+    // Abstract lists are normalized to numbers only ("A-1" → "1").
+    expect(rels[0].abstracts).toEqual(["1", "2"]);
     expect(rels[0].txIds).toHaveLength(3);
   });
 

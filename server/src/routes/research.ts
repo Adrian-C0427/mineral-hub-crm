@@ -7,7 +7,7 @@ import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import {
   autoGranularity, bucketKey, bucketRange, classifyDocType, classifyPermitStatus,
-  classifyTrajectory, detectHotspot, documentDedupeKey, historyWindows, normalizeEntity, splitParties,
+  classifyTrajectory, detectHotspot, documentDedupeKey, historyWindows, normalizeEntity, splitAbstracts, splitParties,
   normField, rollingAverage, surgeSeverity, trend, type Trend,
 } from "../domain/research.js";
 import { MAX_CSV_CHARS } from "../config.js";
@@ -131,7 +131,9 @@ function docWhere(org: string, f: ResearchFilters, win?: Window): Prisma.Researc
   if (f.docTypes.length) w.docType = { in: f.docTypes as ResearchDocType[] };
   if (f.buyers.length) w.granteeNorm = { in: f.buyers };
   if (f.sellers.length) w.grantorNorm = { in: f.sellers };
-  if (f.abstractIds.length) w.abstractId = { in: f.abstractIds };
+  // Abstract filters match the individual normalized numbers (a multi-abstract
+  // record matches each of its abstracts) with the raw cell as legacy fallback.
+  if (f.abstractIds.length) w.OR = [{ abstractIds: { hasSome: f.abstractIds } }, { abstractId: { in: f.abstractIds } }];
   return w;
 }
 
@@ -152,10 +154,16 @@ async function loadDocs(org: string, f: ResearchFilters, win: Window): Promise<D
     where: docWhere(org, f, win),
     select: {
       recordingDate: true, docClass: true, docType: true, state: true, county: true,
-      abstractId: true, survey: true, grantee: true, granteeNorm: true, grantor: true,
+      abstractId: true, abstractIds: true, survey: true, grantee: true, granteeNorm: true, grantor: true,
       grantorNorm: true, acreage: true,
     },
   });
+}
+
+/** Individual abstract numbers for a row — stored array first, else split the
+ *  raw cell at read time (legacy rows / permits). Empty when no abstract. */
+function rowAbstracts(row: { abstractId: string | null; abstractIds?: string[] }): string[] {
+  return row.abstractIds?.length ? row.abstractIds : splitAbstracts(row.abstractId);
 }
 
 async function loadPermits(org: string, f: ResearchFilters, win: Window): Promise<PermitRow[]> {
@@ -285,9 +293,12 @@ researchRouter.get(
 
     // Abstracts with research activity, keyed to their state+county so the
     // client can cascade State → County → Abstract like every other selector.
+    // Multi-abstract cells contribute each individual number as its own option.
     const abstractSet = new Map<string, { state: string; county: string; abstractId: string }>();
     for (const a of [...docAbstracts, ...permitAbstracts]) {
-      if (a.abstractId) abstractSet.set(`${a.state}|${a.county}|${a.abstractId}`, { state: a.state, county: a.county, abstractId: a.abstractId });
+      for (const ab of splitAbstracts(a.abstractId)) {
+        abstractSet.set(`${a.state}|${a.county}|${ab}`, { state: a.state, county: a.county, abstractId: ab });
+      }
     }
 
     res.json({
@@ -426,8 +437,15 @@ researchRouter.get(
       if (within(date, cmp)) a.prevTotal++;
       hist.forEach((h, i) => { if (within(date, h)) a.history[i]++; });
     };
-    for (const d of docs) bump(d, d.recordingDate, d.docClass === "TRANSACTION" ? "transactions" : "leases");
-    for (const p of permits) bump(p, p.activityDate, "permits");
+    // At abstract level, a record covering several abstracts credits EACH
+    // abstract (+1 apiece) while remaining one recorded transaction — the
+    // state/county levels still count the record exactly once.
+    const bumpRow = (row: { state: string; county: string; abstractId: string | null; abstractIds?: string[] }, date: Date, kind: "transactions" | "leases" | "permits") => {
+      if (level !== "abstract") return bump(row, date, kind);
+      for (const ab of rowAbstracts(row)) bump({ ...row, abstractId: ab }, date, kind);
+    };
+    for (const d of docs) bumpRow(d, d.recordingDate, d.docClass === "TRANSACTION" ? "transactions" : "leases");
+    for (const p of permits) bumpRow(p, p.activityDate, "permits");
 
     const rows = [...map.values()]
       .map((a) => {
@@ -535,7 +553,7 @@ async function loadTxEdges(org: string, f: ResearchFilters, win: Window): Promis
     select: {
       id: true, grantor: true, grantorNorm: true, grantee: true, granteeNorm: true,
       grantorParties: true, granteeParties: true, grantorNorms: true, granteeNorms: true,
-      state: true, county: true, abstractId: true, recordingDate: true, instrumentNumber: true,
+      state: true, county: true, abstractId: true, abstractIds: true, recordingDate: true, instrumentNumber: true,
     },
   });
   // Participant-level expansion: multi-party instruments yield one edge per
@@ -963,12 +981,15 @@ researchRouter.get(
     // -- Abstract concentration: transactions clustering in one abstract ----
     const absAgg = new Map<string, { state: string; county: string; abstractId: string; cur: number; prevCnt: number }>();
     for (const d of docs) {
-      if (!d.abstractId || d.docClass !== "TRANSACTION") continue;
-      const key = `${d.state}|${d.county}|${d.abstractId}`;
-      let a = absAgg.get(key);
-      if (!a) { a = { state: d.state, county: d.county, abstractId: d.abstractId, cur: 0, prevCnt: 0 }; absAgg.set(key, a); }
-      if (within(d.recordingDate, win)) a.cur++;
-      if (within(d.recordingDate, prev)) a.prevCnt++;
+      if (d.docClass !== "TRANSACTION") continue;
+      // Each abstract on a multi-abstract instrument accrues the transaction.
+      for (const ab of rowAbstracts(d)) {
+        const key = `${d.state}|${d.county}|${ab}`;
+        let a = absAgg.get(key);
+        if (!a) { a = { state: d.state, county: d.county, abstractId: ab, cur: 0, prevCnt: 0 }; absAgg.set(key, a); }
+        if (within(d.recordingDate, win)) a.cur++;
+        if (within(d.recordingDate, prev)) a.prevCnt++;
+      }
     }
     for (const a of absAgg.values()) {
       if (a.cur >= 3) {
@@ -1045,7 +1066,8 @@ researchRouter.get(
       ]);
       return res.json({
         counties: counties.map((r) => r.county).filter(Boolean),
-        abstracts: abstracts.map((r) => r.abstractId).filter((v): v is string => !!v),
+        abstracts: [...new Set(abstracts.flatMap((r) => splitAbstracts(r.abstractId)))]
+          .sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
         docTypes: docTypes.map((r) => r.docType).filter(Boolean),
         docClasses: docClasses.map((r) => r.docClass).filter(Boolean),
       });
@@ -1089,15 +1111,18 @@ researchRouter.get(
 
     const docs = await prisma.researchDocument.findMany({
       where: { ...docWhere(org, { ...f, counties: [county] }, win), abstractId: { not: null } },
-      select: { abstractId: true, consideration: true },
+      select: { abstractId: true, abstractIds: true, consideration: true },
     });
     const stats = new Map<string, { count: number; amount: number }>();
     for (const d of docs) {
-      const k = abstractJoinKey(d.abstractId!);
-      if (!k) continue;
-      const st = stats.get(k) ?? { count: 0, amount: 0 };
-      st.count++; st.amount += d.consideration ?? 0;
-      stats.set(k, st);
+      // A multi-abstract instrument shades EACH of its abstract polygons.
+      for (const ab of rowAbstracts(d)) {
+        const k = abstractJoinKey(ab);
+        if (!k) continue;
+        const st = stats.get(k) ?? { count: 0, amount: 0 };
+        st.count++; st.amount += d.consideration ?? 0;
+        stats.set(k, st);
+      }
     }
 
     // Abstract polygons for the county; simplified — this is a summary map.
@@ -1445,6 +1470,7 @@ researchRouter.post(
           instrumentNumber, volume, page,
           recordingDate,
           grantor, grantee, grantorNorm, granteeNorm,
+          abstractIds: splitAbstracts(abstractId),
           grantorParties, granteeParties,
           grantorNorms: grantorParties.map((p) => normalizeEntity(p)!).filter(Boolean),
           granteeNorms: granteeParties.map((p) => normalizeEntity(p)!).filter(Boolean),
