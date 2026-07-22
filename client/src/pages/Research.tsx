@@ -165,7 +165,11 @@ interface RelRow {
   count: number; transactions: number; counties: string[]; abstracts: string[];
   firstDate: string | null; lastDate: string | null;
 }
-interface CoBuyerRow { members: { norm: string; name: string }[]; count: number; counties: string[] }
+interface CoBuyerRow {
+  members: { norm: string; name: string }[]; count: number; counties: string[];
+  sharedAcquisitions?: number; sharedDispositions?: number;
+  firstDate?: string | null; lastDate?: string | null;
+}
 interface ChainNode { norm: string; name: string; klass: string }
 interface ChainHop { fromNorm: string; from: string; toNorm: string; to: string; count: number }
 interface ChainRow {
@@ -1223,8 +1227,8 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
       {view === "cobuyers" && (
         <div className="panel">
           <h3 style={{ marginTop: 0 }}>Co-Buyer Partnerships</h3>
-          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Entities that acquired together on the same recorded instrument, ranked by how often they partner. Click to view the shared transactions.</p>
-          {coBuyers.length === 0 ? <p className="muted">No co-buying partnerships {q ? `match “${q}”` : "detected — this needs multiple grantees sharing an instrument number"}.</p> : (
+          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Entities that acquired or conveyed together on the same recorded transaction (multi-party grantees/grantors, or co-grantees sharing an instrument), ranked by how often they partner. Click to view the shared transactions.</p>
+          {coBuyers.length === 0 ? <p className="muted">No co-buying partnerships {q ? `match “${q}”` : "detected — this needs multiple parties on one recorded transaction"}.</p> : (
             <div className="rel-list">
               {coBuyers.map((p, i) => (
                 <button key={i} className="rel-card" onClick={() => setTx({ title: `Co-buyers: ${p.members.map((m) => m.name).join(", ")}`, selector: { members: p.members.map((m) => m.norm) } })}>
@@ -1236,8 +1240,11 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
                       </span>
                     ))}
                   </div>
-                  <div className="row" style={{ gap: 10, marginTop: 6 }}>
+                  <div className="row" style={{ gap: 10, marginTop: 6, flexWrap: "wrap" }}>
                     <span className="rel-count">{p.count} shared transaction{p.count === 1 ? "" : "s"}</span>
+                    {(p.sharedAcquisitions ?? 0) > 0 && <span className="muted" style={{ fontSize: 12 }}>{p.sharedAcquisitions} acquired together</span>}
+                    {(p.sharedDispositions ?? 0) > 0 && <span className="muted" style={{ fontSize: 12 }}>{p.sharedDispositions} conveyed together</span>}
+                    {p.firstDate && <span className="muted" style={{ fontSize: 12 }}>First {fmtDate(p.firstDate)}{p.lastDate && p.lastDate !== p.firstDate ? ` · Latest ${fmtDate(p.lastDate)}` : ""}</span>}
                     {p.counties.length > 0 && <span className="muted" style={{ fontSize: 12 }}>{p.counties.join(", ")}</span>}
                   </div>
                 </button>

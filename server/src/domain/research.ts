@@ -159,6 +159,37 @@ export function normalizeEntity(name: string | null | undefined): string | null 
 }
 
 // ---------------------------------------------------------------------------
+// Multi-party splitting (co-grantors / co-grantees on one instrument)
+// ---------------------------------------------------------------------------
+
+/**
+ * Split a raw grantor/grantee cell into its individual parties.
+ *
+ * STRICT separator set — exactly commas, semicolons, and forward slashes.
+ * Nothing else splits: "&", "AND", "ET UX" and similar joiners stay inside a
+ * single party name (they are part of how a party is written, not a party
+ * boundary), so "SMITH & SONS LLC" remains one entity.
+ *
+ * Parts that normalize to nothing are dropped; parts that normalize to the
+ * same entity key are de-duplicated (first spelling wins). A single-party
+ * cell returns a one-element array.
+ */
+export function splitParties(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of String(raw).split(/[,;/]+/)) {
+    const p = part.trim();
+    if (!p) continue;
+    const norm = normalizeEntity(p);
+    if (!norm || seen.has(norm)) continue;
+    seen.add(norm);
+    out.push(p);
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Recorded-document duplicate detection
 // ---------------------------------------------------------------------------
 

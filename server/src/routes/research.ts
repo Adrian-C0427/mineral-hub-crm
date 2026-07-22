@@ -7,7 +7,7 @@ import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import {
   autoGranularity, bucketKey, bucketRange, classifyDocType, classifyPermitStatus,
-  classifyTrajectory, detectHotspot, documentDedupeKey, historyWindows, normalizeEntity,
+  classifyTrajectory, detectHotspot, documentDedupeKey, historyWindows, normalizeEntity, splitParties,
   normField, rollingAverage, surgeSeverity, trend, type Trend,
 } from "../domain/research.js";
 import { MAX_CSV_CHARS } from "../config.js";
@@ -18,7 +18,7 @@ import {
 } from "../domain/researchBuyers.js";
 import {
   aggregateRelationships, coBuyerPartnerships, classifyEntities, buildChains,
-  chainTableRows, ENTITY_CLASS_LABEL, type TxEdge,
+  chainTableRows, expandDocToEdges, ENTITY_CLASS_LABEL, type TxEdge,
 } from "../domain/researchGraph.js";
 import { normalizeCompany } from "../serializers.js";
 
@@ -534,16 +534,13 @@ async function loadTxEdges(org: string, f: ResearchFilters, win: Window): Promis
     },
     select: {
       id: true, grantor: true, grantorNorm: true, grantee: true, granteeNorm: true,
+      grantorParties: true, granteeParties: true, grantorNorms: true, granteeNorms: true,
       state: true, county: true, abstractId: true, recordingDate: true, instrumentNumber: true,
     },
   });
-  return rows.map((r) => ({
-    id: r.id,
-    grantorNorm: r.grantorNorm!, grantor: r.grantor ?? r.grantorNorm!,
-    granteeNorm: r.granteeNorm!, grantee: r.grantee ?? r.granteeNorm!,
-    state: r.state, county: r.county, abstractId: r.abstractId, date: r.recordingDate,
-    txKey: r.instrumentNumber ? `${r.state}|${r.county}|${r.instrumentNumber}` : null,
-  }));
+  // Participant-level expansion: multi-party instruments yield one edge per
+  // grantor×grantee pair, all sharing the document id (ONE transaction).
+  return rows.flatMap((r) => expandDocToEdges(r));
 }
 
 researchRouter.get(
@@ -566,7 +563,8 @@ researchRouter.get(
 
     res.json({
       totals: {
-        transactions: edges.length,
+        // Distinct recorded documents — multi-party expansion never inflates this.
+        transactions: new Set(edges.map((e) => e.id)).size,
         relationships: relationships.length,
         entities: classMap.size,
         partnerships: coBuyers.length,
@@ -611,12 +609,17 @@ researchRouter.post(
     if (sel.grantorNorm && sel.granteeNorm) {
       ids = edges.filter((e) => e.grantorNorm === sel.grantorNorm && e.granteeNorm === sel.granteeNorm).map((e) => e.id);
     } else if (sel.members && sel.members.length >= 2) {
+      // Partnership drill: transactions where the member set acquired together
+      // (co-grantees) OR conveyed together (co-grantors). Grouped per recorded
+      // transaction — instrument key when present, else document id.
       const want = new Set(sel.members);
       const byTx = new Map<string, TxEdge[]>();
-      for (const e of edges) if (e.txKey) (byTx.get(e.txKey) ?? byTx.set(e.txKey, []).get(e.txKey)!).push(e);
+      for (const e of edges) { const k = e.txKey ?? e.id; (byTx.get(k) ?? byTx.set(k, []).get(k)!).push(e); }
       for (const list of byTx.values()) {
         const grantees = new Set(list.map((e) => e.granteeNorm));
-        if ([...want].every((m) => grantees.has(m)) && grantees.size === want.size) ids.push(...list.map((e) => e.id));
+        const grantors = new Set(list.map((e) => e.grantorNorm));
+        const matches = (side: Set<string>) => [...want].every((m) => side.has(m)) && side.size === want.size;
+        if (matches(grantees) || matches(grantors)) ids.push(...list.map((e) => e.id));
       }
     } else if (sel.path && sel.path.length >= 2) {
       const hops = new Set<string>();
@@ -628,6 +631,7 @@ researchRouter.post(
       throw new HttpError(400, "Provide a relationship pair, co-buyer members, chain path, or entity.");
     }
 
+    ids = [...new Set(ids)]; // expanded edges share document ids — one row each
     const rows = ids.length
       ? await prisma.researchDocument.findMany({
           where: { id: { in: ids.slice(0, 1000) }, organizationId: org },
@@ -646,8 +650,8 @@ researchRouter.post(
 const RESEARCH_TAG = "Research Imported";
 
 const DOC_LITE_SELECT = {
-  grantee: true, granteeNorm: true, state: true, county: true,
-  abstractId: true, docType: true, recordingDate: true,
+  grantee: true, granteeNorm: true, granteeParties: true, granteeNorms: true,
+  state: true, county: true, abstractId: true, docType: true, recordingDate: true,
 } as const;
 
 /**
@@ -658,16 +662,28 @@ const DOC_LITE_SELECT = {
  * relationship graph — can still be turned into a CRM buyer.
  */
 async function docsByGrantee(org: string, keys: string[]): Promise<Map<string, ResearchDocLite[]>> {
+  // Match keys as the full-cell norm OR as an individual participant of a
+  // multi-party grantee group — each participant owns its transaction history.
   const docs = await prisma.researchDocument.findMany({
-    where: { organizationId: org, granteeNorm: { in: keys } },
+    where: { organizationId: org, OR: [{ granteeNorm: { in: keys } }, { granteeNorms: { hasSome: keys } }] },
     select: DOC_LITE_SELECT,
   });
+  const wanted = new Set(keys);
   const byKey = new Map<string, ResearchDocLite[]>();
+  const attach = (key: string, name: string | null, d: (typeof docs)[number]) => {
+    const list = byKey.get(key) ?? [];
+    list.push({ grantee: name, granteeNorm: key, state: d.state, county: d.county, abstractId: d.abstractId, docType: d.docType, recordingDate: d.recordingDate });
+    byKey.set(key, list);
+  };
   for (const d of docs) {
-    if (!d.granteeNorm) continue;
-    const list = byKey.get(d.granteeNorm) ?? [];
-    list.push({ grantee: d.grantee, granteeNorm: d.granteeNorm, state: d.state, county: d.county, abstractId: d.abstractId, docType: d.docType, recordingDate: d.recordingDate });
-    byKey.set(d.granteeNorm, list);
+    const matchedParticipants = d.granteeNorms
+      .map((n, i) => ({ norm: n, name: d.granteeParties[i] ?? n }))
+      .filter((p) => wanted.has(p.norm));
+    for (const p of matchedParticipants) attach(p.norm, p.name, d);
+    // Full-cell key match (single-party rows, or a caller using the group key).
+    if (d.granteeNorm && wanted.has(d.granteeNorm) && !matchedParticipants.some((p) => p.norm === d.granteeNorm)) {
+      attach(d.granteeNorm, d.grantee, d);
+    }
   }
   const missing = keys.filter((k) => !byKey.has(k));
   if (missing.length) {
@@ -1386,6 +1402,10 @@ researchRouter.post(
         const grantee = get(row, "grantee") || null;
         const grantorNorm = normalizeEntity(grantor);
         const granteeNorm = normalizeEntity(grantee);
+        // Individual participants (strict split on , ; /) — the record itself
+        // stays ONE transaction; these link each participant to it.
+        const grantorParties = splitParties(grantor);
+        const granteeParties = splitParties(grantee);
         const volume = get(row, "volume") || null;
         const page = get(row, "page") || null;
         const abstractId = get(row, "abstractId") || null;
@@ -1404,6 +1424,9 @@ researchRouter.post(
           instrumentNumber, volume, page,
           recordingDate,
           grantor, grantee, grantorNorm, granteeNorm,
+          grantorParties, granteeParties,
+          grantorNorms: grantorParties.map((p) => normalizeEntity(p)!).filter(Boolean),
+          granteeNorms: granteeParties.map((p) => normalizeEntity(p)!).filter(Boolean),
           abstractId,
           source, ingestRunId: run.id,
         });

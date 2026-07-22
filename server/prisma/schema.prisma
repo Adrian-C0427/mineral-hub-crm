@@ -1123,8 +1123,17 @@ model ResearchDocument {
   grantor     String?
   grantee     String?
   // Normalized (uppercased, punctuation/suffix-stripped) for grouping/rankings.
+  // These normalize the FULL cell (the transaction group) and remain the
+  // dedupe/backfill keys; the arrays below carry the individual participants.
   grantorNorm String?
   granteeNorm String?
+  // Individual parties split from multi-party cells ("A; B / C") at import:
+  // raw spellings + their normalized keys, index-aligned. Empty for legacy
+  // rows (analytics fall back to splitting the raw string at read time).
+  grantorParties String[] @default([])
+  granteeParties String[] @default([])
+  grantorNorms   String[] @default([])
+  granteeNorms   String[] @default([])
 
   // Geography below county level. TX: abstract/survey. Elsewhere: trs
   // ("Sec 12 T2N R3W") or whatever the state's cadastral unit is.
