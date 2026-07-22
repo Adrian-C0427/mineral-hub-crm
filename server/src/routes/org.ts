@@ -37,9 +37,44 @@ orgRouter.get(
 // so a malicious tenant admin could plant stored XSS against portal visitors.
 // This mirrors the same decision already made for portal contact photos.
 const LOGO_MAX_BYTES = 512 * 1024; // ~512 KB decoded
-const LOGO_MIME = /^data:image\/(png|jpeg|jpg|webp);base64,/;
+export const LOGO_MIME = /^data:image\/(png|jpeg|jpg|webp);base64,/;
+
+/**
+ * Magic-byte signatures for the three raster formats these fields accept.
+ * Deliberately NOT services/s3.ts `sniffMime`: that sniffer serves the document
+ * upload path, whose allow-list has no WebP entry, so routing logos through it
+ * would reject every valid .webp.
+ */
+function sniffRaster(buf: Buffer): "png" | "jpeg" | "webp" | null {
+  if (buf.length >= 12 && buf.toString("ascii", 0, 4) === "RIFF" && buf.toString("ascii", 8, 12) === "WEBP") return "webp";
+  if (buf.length >= 8 && buf.subarray(0, 8).toString("hex") === "89504e470d0a1a0a") return "png";
+  if (buf.length >= 3 && buf.subarray(0, 3).toString("hex") === "ffd8ff") return "jpeg";
+  return null;
+}
+
+/**
+ * Decode the payload and confirm the BYTES are the raster image the data URL
+ * claims. The prefix regex alone is not validation — it checks a string the
+ * uploader wrote about itself, so `data:image/png;base64,<arbitrary bytes>`
+ * sailed through and was then echoed on the public portal. Uploads through
+ * `POST /api/files` have always been sniffed (services/s3.ts); these data-URL
+ * fields were the one image path that skipped it.
+ */
+export function isDeclaredRaster(dataUrl: string, mimeRe: RegExp, maxBytes: number): boolean {
+  const m = mimeRe.exec(dataUrl);
+  if (!m) return false;
+  const b64 = dataUrl.slice(dataUrl.indexOf(",") + 1);
+  // Buffer.from is lenient with base64 — bound the ENCODED length first so a
+  // huge payload isn't decoded into memory just to be rejected.
+  if (b64.length > (maxBytes * 4) / 3 + 4) return false;
+  const buf = Buffer.from(b64, "base64");
+  if (!buf.length || buf.length > maxBytes) return false;
+  const declared = m[1] === "jpg" ? "jpeg" : m[1];
+  return sniffRaster(buf) === declared;
+}
+
 const logoField = z.string().refine(
-  (s) => LOGO_MIME.test(s) && (s.length * 3) / 4 <= LOGO_MAX_BYTES,
+  (s) => isDeclaredRaster(s, LOGO_MIME, LOGO_MAX_BYTES),
   "Logo must be a PNG, JPG, or WebP under 512 KB",
 ).nullable();
 
@@ -114,7 +149,7 @@ orgRouter.patch(
 const PHOTO_MAX_BYTES = 512 * 1024;
 const PHOTO_MIME = /^data:image\/(png|jpeg|jpg|webp);base64,/;
 const photoField = z.string().refine(
-  (s) => PHOTO_MIME.test(s) && (s.length * 3) / 4 <= PHOTO_MAX_BYTES,
+  (s) => isDeclaredRaster(s, PHOTO_MIME, PHOTO_MAX_BYTES),
   "Photo must be a PNG, JPG, or WebP under 512 KB",
 ).nullable();
 

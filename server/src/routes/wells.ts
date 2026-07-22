@@ -374,6 +374,11 @@ wellsRouter.get(
 
 wellsRouter.post(
   "/import-rrc",
+  // Deliberately the VIEW gate. This is a read-through cache fill over PUBLIC
+  // RRC record data — it is how any user opens a well to analyze at all, so
+  // requiring the write permission would lock read-only users out of the core
+  // workflow. It writes only rrc-sourced rows, and (see below) refuses to
+  // overwrite a well the org curated itself.
   requirePermission("viewWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const body = z.object({ fid: z.number().int().optional(), api: z.string().trim().max(20).optional() })
@@ -413,8 +418,15 @@ wellsRouter.post(
     const existing = await prisma.researchWell.findFirst({
       where: { organizationId: org, OR: [{ source: "rrc", sourceRef: String(w.fid) }, ...(api ? [{ apiNumber: api }] : [])] },
     });
+    // A match on apiNumber alone can be a well the org entered or curated
+    // itself. Refreshing that from RRC used to overwrite every attribute (and
+    // reassign source to "rrc"), silently destroying manual work — any user who
+    // could open a well could trigger it, and nothing recorded what was lost.
+    // Only rrc-sourced rows are refreshed; anything else is returned untouched.
     const well = existing
-      ? await prisma.researchWell.update({ where: { id: existing.id }, data })
+      ? existing.source === "rrc"
+        ? await prisma.researchWell.update({ where: { id: existing.id }, data })
+        : existing
       : await prisma.researchWell.create({ data: { ...data, organizationId: org, apiNumber: api } });
 
     // Production is NOT copied — it's read live from rrc.production wherever it's
@@ -671,7 +683,7 @@ wellsRouter.get(
 
 wellsRouter.post(
   "/analyses",
-  requirePermission("viewWellAnalysis"),
+  requirePermission("manageWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const body = analysisBodySchema.parse(req.body);
     const row = await prisma.wellAnalysis.create({
@@ -710,7 +722,7 @@ wellsRouter.get(
 
 wellsRouter.patch(
   "/analyses/:id",
-  requirePermission("viewWellAnalysis"),
+  requirePermission("manageWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const body = analysisBodySchema.partial().parse(req.body);
     const existing = await prisma.wellAnalysis.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
@@ -731,7 +743,7 @@ wellsRouter.patch(
 
 wellsRouter.delete(
   "/analyses/:id",
-  requirePermission("viewWellAnalysis"),
+  requirePermission("manageWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const existing = await prisma.wellAnalysis.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!existing) { res.status(404).json({ error: "Analysis not found" }); return; }

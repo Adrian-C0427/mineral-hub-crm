@@ -141,7 +141,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<OrgRole, Permission[]> = {
     "viewBuyers", "createBuyers", "editBuyers",
     "viewContacts", "manageContacts",
     "publishOfferings", "manageDocuments",
-    "viewResearch", "viewWellAnalysis",
+    "viewResearch", "viewWellAnalysis", "manageWellAnalysis",
     "viewMap", "viewReports", "manageExpenses", "useAiFeatures",
   ],
   MEMBER: [
@@ -149,7 +149,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<OrgRole, Permission[]> = {
     "viewBuyers", "createBuyers", "editBuyers",
     "viewContacts", "manageContacts",
     "publishOfferings", "manageDocuments",
-    "viewResearch", "viewWellAnalysis",
+    "viewResearch", "viewWellAnalysis", "manageWellAnalysis",
     "viewMap", "viewReports", "manageExpenses", "useAiFeatures",
   ],
   // Read-only: viewing across modules, no mutations, no AI spend.

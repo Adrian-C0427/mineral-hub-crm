@@ -148,10 +148,25 @@ async function orgBySlug(slug: string) {
   return org;
 }
 
+/**
+ * Per-IP ceiling for the unauthenticated READ routes. Every public route runs
+ * this: the marketplace pair used to be uncapped, which left a scripted loop
+ * free to grind the abstracts geometry query (up to 2,000 polygons a call) with
+ * no auth and no cost. `Cache-Control` on those responses is only a hint to the
+ * client — nothing caches them server-side, so it was never a throttle.
+ */
+async function guardPortalRead(req: import("express").Request): Promise<void> {
+  const ip = req.ip ?? "unknown";
+  if (await portalRateLimited("portal-read", ip, Date.now(), PORTAL_READ_MAX_PER_WINDOW)) {
+    throw new HttpError(429, "Too many requests — please try again later");
+  }
+}
+
 /** Marketplace: the org's published PUBLIC offerings + branding/contact. */
 portalRouter.get(
   "/:orgSlug",
   asyncHandler(async (req, res) => {
+    await guardPortalRead(req);
     const org = await orgBySlug(String(req.params.orgSlug));
     const deals = await prisma.deal.findMany({
       where: { organizationId: org.id, publishedToPortal: true, portalVisibility: "PUBLIC" },
@@ -167,6 +182,7 @@ portalRouter.get(
 portalRouter.get(
   "/:orgSlug/features",
   asyncHandler(async (req, res) => {
+    await guardPortalRead(req);
     const org = await orgBySlug(String(req.params.orgSlug));
     const deals = await prisma.deal.findMany({
       where: { organizationId: org.id, publishedToPortal: true, portalVisibility: "PUBLIC" },
@@ -248,10 +264,7 @@ portalRouter.get(
     // Heaviest public route: deal + org + files + assets, a raw abstracts query,
     // a production aggregation, and one S3 presign per image. Cap it per IP so a
     // scripted loop can't turn it into a cheap DB/S3 amplifier.
-    const ip = req.ip ?? "unknown";
-    if (await portalRateLimited("portal-read", ip, Date.now(), PORTAL_READ_MAX_PER_WINDOW)) {
-      throw new HttpError(429, "Too many requests — please try again later");
-    }
+    await guardPortalRead(req);
     const deal = await prisma.deal.findUnique({
       where: { portalSlug: String(req.params.slug) },
       include: {
@@ -334,6 +347,7 @@ portalRouter.get(
 portalRouter.get(
   "/offering/:slug/features",
   asyncHandler(async (req, res) => {
+    await guardPortalRead(req);
     const deal = await prisma.deal.findUnique({
       where: { portalSlug: String(req.params.slug) },
       select: { publishedToPortal: true, abstractIds: true, organization: { select: { portalEnabled: true } } },
@@ -361,10 +375,7 @@ portalRouter.get(
   "/offering/:slug/files/:fileId/download",
   asyncHandler(async (req, res) => {
     if (!s3Configured()) throw new HttpError(503, "Document downloads are temporarily unavailable");
-    const ip = req.ip ?? "unknown";
-    if (await portalRateLimited("portal-read", ip, Date.now(), PORTAL_READ_MAX_PER_WINDOW)) {
-      throw new HttpError(429, "Too many requests — please try again later");
-    }
+    await guardPortalRead(req);
     const file = await prisma.fileAttachment.findUnique({
       where: { id: String(req.params.fileId) },
       // portalEnabled is the org's portal kill switch. Every other portal route
@@ -439,40 +450,24 @@ portalRouter.post(
       : await prisma.buyer.findFirst({ where: { organizationId: org.id, normalizedCompany: normCompany } });
 
     let buyerId: string;
-    let outcome: "created" | "merged" | "flagged";
+    let outcome: "created" | "review" | "flagged";
     if (existing) {
-      // Merge: fill blanks only — never overwrite user-entered data.
+      // This submission is UNAUTHENTICATED and the only thing proving identity
+      // is knowledge of an email address — which is not a secret. So a match
+      // must never write attacker-controlled content into a trusted CRM record:
+      // previously the submitted text was appended to the buyer's notes and an
+      // empty buy box was populated outright, letting anyone who knew a buyer's
+      // address poison the targeting the team acts on.
+      //
+      // Only the timestamp (not attacker-controlled) is recorded; everything the
+      // submitter typed rides along in the notification below for a human to
+      // review and merge deliberately.
       await prisma.buyer.update({
         where: { id: existing.id },
-        data: {
-          contactName: existing.contactName || lead.contactName,
-          phone: existing.phone || lead.phone || null,
-          portalSubmittedAt: now,
-          notes: [existing.notes, criteriaNote].filter(Boolean).join("\n\n"),
-        },
+        data: { portalSubmittedAt: now, duplicateReview: true },
       });
-      // Buy box: fill only empty criteria lists/limits.
-      const bb = await prisma.buyBoxCriteria.findUnique({ where: { buyerId: existing.id } });
-      if (!bb) {
-        await prisma.buyBoxCriteria.create({ data: { buyerId: existing.id, ...lead.buyBox } });
-      } else {
-        await prisma.buyBoxCriteria.update({
-          where: { buyerId: existing.id },
-          data: {
-            states: bb.states.length ? bb.states : lead.buyBox.states,
-            counties: bb.counties.length ? bb.counties : lead.buyBox.counties,
-            basins: bb.basins.length ? bb.basins : lead.buyBox.basins,
-            formations: bb.formations.length ? bb.formations : lead.buyBox.formations,
-            assetTypes: bb.assetTypes.length ? bb.assetTypes : lead.buyBox.assetTypes,
-            minAcreage: bb.minAcreage ?? lead.buyBox.minAcreage,
-            maxAcreage: bb.maxAcreage ?? lead.buyBox.maxAcreage,
-            minPrice: bb.minPrice ?? lead.buyBox.minPrice,
-            maxPrice: bb.maxPrice ?? lead.buyBox.maxPrice,
-          },
-        });
-      }
       buyerId = existing.id;
-      outcome = "merged";
+      outcome = "review";
     } else {
       const created = await prisma.buyer.create({
         data: {
@@ -500,7 +495,15 @@ portalRouter.post(
     const owners = await prisma.buyerOwner.findMany({ where: { buyerId }, select: { userId: true } });
     const interest = [...lead.buyBox.states, ...lead.buyBox.counties, ...lead.buyBox.basins].slice(0, 6).join(", ") || "—";
     const title = `Portal lead: ${lead.contactName} (${lead.companyName})`;
-    const body = `Submitted ${now.toLocaleDateString("en-US")} · Areas of interest: ${interest}${outcome === "flagged" ? " · POSSIBLE DUPLICATE — review" : outcome === "merged" ? " · merged into existing profile" : ""}`;
+    const suffix = outcome === "flagged"
+      ? " · POSSIBLE DUPLICATE — review"
+      : outcome === "review"
+        // Matched an existing buyer by email alone, which anyone could guess.
+        // The profile was NOT updated — the submission is reproduced here so an
+        // authenticated user can merge what they judge legitimate.
+        ? `\n\nMatched an existing buyer by email. The profile was NOT modified — review and merge manually.\n\n${criteriaNote}`
+        : "";
+    const body = `Submitted ${now.toLocaleDateString("en-US")} · Areas of interest: ${interest}${suffix}`;
     const targets: (string | null)[] = owners.length ? owners.map((o) => o.userId) : [null];
     await prisma.notification.createMany({
       data: targets.map((userId) => ({

@@ -122,21 +122,13 @@ export function requireAuth(req: AuthedRequest, res: Response, next: NextFunctio
   next();
 }
 
-/**
- * Role gate — enforced SERVER-SIDE (never just hidden in UI).
- * Owner-only actions: deleting records, managing users.
- */
-export function requireOwner(req: AuthedRequest, res: Response, next: NextFunction): void {
-  if (!req.user) {
-    res.status(401).json({ error: "Authentication required" });
-    return;
-  }
-  if (req.user.role !== "OWNER") {
-    res.status(403).json({ error: "Owner role required for this action" });
-    return;
-  }
-  next();
-}
+// `requireOwner` was removed here. It gated on the LEGACY account role
+// (`user.role`), which `POST /auth/join` never downgrades: a user who created
+// their own workspace keeps `role: "OWNER"` after joining someone else's org as
+// a MEMBER. Nothing mounted it, so nothing was exposed — but leaving a
+// ready-made privilege-escalation gate lying around for the next person to
+// reach for was the risk. Authorization runs on `orgRole` + permissions:
+// use `requireOrgOwner` or `requirePermission`.
 
 /**
  * Requires the user to belong to an organization, and exposes it as

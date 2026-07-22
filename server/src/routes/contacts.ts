@@ -4,6 +4,7 @@ import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { parse } from "csv-parse/sync";
+import { LIST_LIMIT } from "../config.js";
 import type { Contact, ContactActivity, ContactList, User } from "@prisma/client";
 
 /**
@@ -86,6 +87,7 @@ contactsRouter.get(
       where: { organizationId: orgId(req) },
       include: ownerInclude,
       orderBy: { createdAt: "desc" },
+      take: LIST_LIMIT,
     });
     res.json(rows.map(serialize));
   }),

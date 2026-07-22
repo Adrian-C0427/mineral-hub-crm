@@ -29,6 +29,15 @@ export const LOGIN_RATE_LIMIT = {
 
 export const BCRYPT_COST = 12;
 
+/**
+ * Ceiling on rows returned by the client-side-filtered list endpoints (buyers,
+ * contacts, deals). Those tables render and search in the browser, so their
+ * `findMany` calls carried no `take` at all — one request could pull an entire
+ * tenant's table into memory, and any authenticated member could loop it.
+ * Matches the existing caps in expenses.ts and map.ts.
+ */
+export const LIST_LIMIT = 5000;
+
 // Upper bound on a CSV import payload (characters ≈ bytes for ASCII data). The
 // global express.json limit already caps a request at 25 MB; this tighter,
 // schema-level bound rejects oversized imports with a clean 400 before the file

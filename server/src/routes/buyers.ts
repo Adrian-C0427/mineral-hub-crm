@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { LIST_LIMIT } from "../config.js";
 import { normalizeCompany } from "../serializers.js";
 import { normalizePhone } from "../domain/phone.js";
 import { effectiveStatus } from "../domain/buyerStatus.js";
@@ -33,6 +34,36 @@ async function buyerCloseRate(buyerId: string, organizationId: string): Promise<
   return { rate: closeRate(closedWon, dealsWithOffer), closedWon, dealsWithOffer };
 }
 
+/**
+ * Close-rate inputs for EVERY buyer in the org, in two aggregate queries.
+ *
+ * The list route used to call `buyerCloseRate` per row inside a `Promise.all`,
+ * making one `GET /api/buyers` cost 2N+1 queries — ~10,001 round-trips at 5,000
+ * buyers, which any authenticated member could loop to saturate the pool.
+ */
+async function closeRatesByBuyer(organizationId: string): Promise<Map<string, { closedWon: number; dealsWithOffer: number }>> {
+  const [won, offerPairs] = await Promise.all([
+    prisma.deal.groupBy({
+      by: ["selectedBuyerId"],
+      where: { organizationId, stage: "CLOSED", selectedBuyerId: { not: null } },
+      _count: { _all: true },
+    }),
+    // groupBy on the pair yields one row per DISTINCT (buyer, deal) — the same
+    // thing the per-buyer `distinct: ["dealId"]` query was computing.
+    prisma.offer.groupBy({ by: ["buyerId", "dealId"], where: { deal: { organizationId } } }),
+  ]);
+
+  const out = new Map<string, { closedWon: number; dealsWithOffer: number }>();
+  const bump = (id: string, key: "closedWon" | "dealsWithOffer", n: number) => {
+    const row = out.get(id) ?? { closedWon: 0, dealsWithOffer: 0 };
+    row[key] += n;
+    out.set(id, row);
+  };
+  for (const w of won) if (w.selectedBuyerId) bump(w.selectedBuyerId, "closedWon", w._count._all);
+  for (const p of offerPairs) bump(p.buyerId, "dealsWithOffer", 1);
+  return out;
+}
+
 function focusArea(box: { states: string[]; counties: string[]; basins: string[] } | null): string {
   if (!box) return "—";
   const parts: string[] = [];
@@ -49,34 +80,39 @@ buyersRouter.get(
   "/",
   requirePermission("viewBuyers"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const buyers = await prisma.buyer.findMany({
-      where: { organizationId: orgId(req) },
-      include: { buyBox: true },
-      orderBy: { companyName: "asc" },
-    });
-    const rows = await Promise.all(
-      buyers.map(async (b) => {
-        const cr = await buyerCloseRate(b.id, orgId(req));
-        return {
-          id: b.id,
-          name: b.name,
-          companyName: b.companyName,
-          contactName: b.contactName,
-          contactFirstName: b.contactFirstName ?? splitContactName(b.contactName).first,
-          contactLastName: b.contactLastName ?? splitContactName(b.contactName).last,
-          focusArea: focusArea(b.buyBox),
-          relationshipStatus: b.relationshipStatus,
-          closeRate: cr.rate,
-          closedDeals: cr.closedWon,
-          active: b.active,
-          // Provenance flags so portal leads and review-needed profiles are
-          // visually distinguishable in the list.
-          source: b.source,
-          portalLead: b.portalSubmittedAt != null,
-          duplicateReview: b.duplicateReview,
-        };
+    const [buyers, rates] = await Promise.all([
+      prisma.buyer.findMany({
+        where: { organizationId: orgId(req) },
+        include: { buyBox: true },
+        orderBy: { companyName: "asc" },
+        // Ceiling matching the rest of the codebase (expenses.ts, map.ts): the
+        // list is rendered and filtered client-side, so an unbounded findMany
+        // was one request away from loading the whole table into memory.
+        take: LIST_LIMIT,
       }),
-    );
+      closeRatesByBuyer(orgId(req)),
+    ]);
+    const rows = buyers.map((b) => {
+      const cr = rates.get(b.id) ?? { closedWon: 0, dealsWithOffer: 0 };
+      return {
+        id: b.id,
+        name: b.name,
+        companyName: b.companyName,
+        contactName: b.contactName,
+        contactFirstName: b.contactFirstName ?? splitContactName(b.contactName).first,
+        contactLastName: b.contactLastName ?? splitContactName(b.contactName).last,
+        focusArea: focusArea(b.buyBox),
+        relationshipStatus: b.relationshipStatus,
+        closeRate: closeRate(cr.closedWon, cr.dealsWithOffer),
+        closedDeals: cr.closedWon,
+        active: b.active,
+        // Provenance flags so portal leads and review-needed profiles are
+        // visually distinguishable in the list.
+        source: b.source,
+        portalLead: b.portalSubmittedAt != null,
+        duplicateReview: b.duplicateReview,
+      };
+    });
     res.json(rows);
   }),
 );

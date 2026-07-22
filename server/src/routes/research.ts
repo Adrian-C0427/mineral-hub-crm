@@ -1352,7 +1352,6 @@ researchRouter.post(
         })),
       );
       const seenInFile = new Set<string>();
-      const dupeExamples: string[] = [];
       const REASON_EXISTING = "Duplicate of an already-imported record";
       const REASON_IN_FILE = "Duplicate row within this file";
 
@@ -1393,9 +1392,8 @@ researchRouter.post(
           state: rowState, county: rowCounty, instrumentNumber, recordingDate, docType: cls.docType,
           grantorNorm, granteeNorm, volume, page, abstractId,
         });
-        const example = `${instrumentNumber ?? "no-instr"} · ${recordingDate.toISOString().slice(0, 10)} · ${grantor ?? "?"} → ${grantee ?? "?"}`;
-        if (existingKeys.has(key)) { if (dupeExamples.length < 5) dupeExamples.push(`existing: ${example}`); record(i, "DUPLICATE", REASON_EXISTING, data); continue; }
-        if (seenInFile.has(key)) { if (dupeExamples.length < 5) dupeExamples.push(`in-file: ${example}`); record(i, "DUPLICATE", REASON_IN_FILE, data); continue; }
+        if (existingKeys.has(key)) { record(i, "DUPLICATE", REASON_EXISTING, data); continue; }
+        if (seenInFile.has(key)) { record(i, "DUPLICATE", REASON_IN_FILE, data); continue; }
         seenInFile.add(key);
         record(i, "IMPORTED", null, data);
         batch.push({
@@ -1412,9 +1410,15 @@ researchRouter.post(
         const r = await prisma.researchDocument.createMany({ data: batch.slice(i, i + CHUNK) });
         imported += r.count;
       }
-      // Diagnostics: make a surprising duplicate count explainable in the server log.
+      // Diagnostics: make a surprising duplicate count explainable in the server
+      // log. Counts ONLY — this used to append sample rows as
+      // "instrument · date · grantor → grantee", putting real party names
+      // (frequently individuals) into deploy logs, which platform access can
+      // read outside the app's RBAC. Per-row duplicate detail is already
+      // recorded against the org-scoped import run by `record(...)` above, so
+      // nothing diagnostic is lost — it just stays behind the permission checks.
       if (duplicates > 0) {
-        console.info(`[research-import] run ${run.id} (${source}): ${imported} imported · ${duplicates} duplicates · examples: ${dupeExamples.join(" | ") || "—"}`);
+        console.info(`[research-import] run ${run.id} (${source}): ${imported} imported · ${duplicates} duplicates`);
       }
     } else {
       // Permits: the API/permit number is the record's identity. An incoming row
