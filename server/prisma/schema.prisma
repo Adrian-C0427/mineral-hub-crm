@@ -90,6 +90,7 @@ enum BuyerStatus {
   REVIEWING
   OFFER_RECEIVED
   NEGOTIATING
+  ACCEPTED
   PASSED
   CLOSED
 }
@@ -352,6 +353,7 @@ model User {
   passwordResetTokens PasswordResetToken[]
   ownedContacts       Contact[] @relation("ContactOwner")
   contactActivities   ContactActivity[] @relation("ContactActivityAuthor")
+  assignedContactActivities ContactActivity[] @relation("ContactActivityAssignee")
   oauthAccounts       OAuthAccount[]
 
   ownedDeals         Deal[]              @relation("DealRelationshipOwner")
@@ -1443,6 +1445,11 @@ model ContactActivity {
   // Tasks & reminders.
   dueDate     DateTime?
   completedAt DateTime?
+  // Task metadata: LOW | MEDIUM | HIGH (string key — extensible without a
+  // schema change) and an optional assignee (defaults to the author in UI).
+  priority     String?
+  assignedToId String?
+  assignedTo   User?   @relation("ContactActivityAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
 
   pinned Boolean @default(false)
 
@@ -1454,4 +1461,5 @@ model ContactActivity {
 
   @@index([contactId, createdAt])
   @@index([organizationId])
+  @@index([organizationId, dueDate])
 }

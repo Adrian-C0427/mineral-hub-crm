@@ -5,6 +5,8 @@
  *  - `deal_overdue`   : active deal past its effective Find-Buyer-By with no
  *                       buyer selected (same isOverdue() rule the lists use)
  *  - `follow_up_due`  : a buyer-activity nextFollowUpDate that has arrived
+ *  - `task_due`       : an incomplete contact task whose due date has arrived
+ *                       (cleared immediately when the task is completed)
  *
  * Rows target the deal's relationship owner / the activity's assignee when one
  * exists, else userId null (visible to org owners). Re-alert throttling is
@@ -19,12 +21,12 @@ import { TERMINAL_STAGE_KEYS } from "../domain/stages.js";
 const TICK_MS = 6 * 60 * 60 * 1000;        // sweep every 6 hours
 const REALERT_MS = 3 * 24 * 60 * 60 * 1000; // resurface a persisting condition after ~3 days
 
-export async function runDealAlertSweep(now = new Date()): Promise<{ overdue: number; followUps: number }> {
+export async function runDealAlertSweep(now = new Date()): Promise<{ overdue: number; followUps: number; tasks: number }> {
   const since = new Date(now.getTime() - REALERT_MS);
 
   // Recent alert rows (any read state) — the dedupe/throttle set.
   const recent = await prisma.notification.findMany({
-    where: { type: { in: ["deal_overdue", "follow_up_due"] }, createdAt: { gte: since } },
+    where: { type: { in: ["deal_overdue", "follow_up_due", "task_due"] }, createdAt: { gte: since } },
     select: { type: true, link: true, organizationId: true },
   });
   const seen = new Set(recent.map((r) => `${r.organizationId}|${r.type}|${r.link}`));
@@ -84,7 +86,40 @@ export async function runDealAlertSweep(now = new Date()): Promise<{ overdue: nu
     followUps++;
   }
 
-  return { overdue, followUps };
+  // --- Tasks due -----------------------------------------------------------
+  // Incomplete contact tasks whose due date has arrived. The link carries the
+  // task id (`?task=<id>`) so completing the task can retire its alert exactly,
+  // and so each task dedupes independently of its siblings on the same contact.
+  const dueTasks = await prisma.contactActivity.findMany({
+    where: { kind: "TASK", completedAt: null, dueDate: { lte: now } },
+    select: {
+      id: true, body: true, dueDate: true, organizationId: true,
+      assignedToId: true, createdById: true,
+      contact: { select: { id: true, firstName: true, lastName: true, entityName: true } },
+    },
+  });
+  let tasks = 0;
+  for (const t of dueTasks) {
+    const link = `/contacts/${t.contact.id}?task=${t.id}`;
+    const key = `${t.organizationId}|task_due|${link}`;
+    if (seen.has(key)) continue;
+    const who = [t.contact.firstName, t.contact.lastName].filter(Boolean).join(" ") || t.contact.entityName || "contact";
+    const overdueDays = Math.floor((now.getTime() - t.dueDate!.getTime()) / 86_400_000);
+    await prisma.notification.create({
+      data: {
+        organizationId: t.organizationId,
+        userId: t.assignedToId ?? t.createdById,
+        type: "task_due",
+        title: overdueDays > 0 ? `Task overdue: ${t.body.slice(0, 80)}` : `Task due: ${t.body.slice(0, 80)}`,
+        body: `On ${who}${overdueDays > 0 ? ` — ${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue.` : " — due today."}`,
+        link,
+      },
+    });
+    seen.add(key);
+    tasks++;
+  }
+
+  return { overdue, followUps, tasks };
 }
 
 export function startDealAlertScheduler(): void {

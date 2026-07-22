@@ -28,6 +28,8 @@ export interface ContactActivityRow {
   durationSeconds: number | null;
   dueDate: string | null;
   completedAt: string | null;
+  priority: "LOW" | "MEDIUM" | "HIGH" | string | null;
+  assignedTo: { id: string; name: string } | null;
   pinned: boolean;
   createdBy: { id: string; name: string } | null;
   createdAt: string;
@@ -209,7 +211,7 @@ export function ContactDetail() {
       </section>
 
       {/* ============================================== right: notes/tasks/... */}
-      <SidePanel contact={contact} activities={activities ?? []} canManage={canManage} onChanged={load} />
+      <SidePanel contact={contact} activities={activities ?? []} canManage={canManage} onChanged={load} users={users} />
 
       {editing && (
         <ContactModal
@@ -411,13 +413,24 @@ function Composer({ contactId, onLogged }: { contactId: string; onLogged: () => 
 
 /* -------------------------------------------------------------- side panel */
 
-function SidePanel({ contact, activities, canManage, onChanged }: {
-  contact: ContactRow; activities: ContactActivityRow[]; canManage: boolean; onChanged: () => void;
+const TASK_PRIORITIES = [
+  { v: "LOW", label: "Low", color: "var(--green)" },
+  { v: "MEDIUM", label: "Medium", color: "var(--amber)" },
+  { v: "HIGH", label: "High", color: "var(--red)" },
+];
+
+function SidePanel({ contact, activities, canManage, onChanged, users }: {
+  contact: ContactRow; activities: ContactActivityRow[]; canManage: boolean; onChanged: () => void; users: UserLite[];
 }) {
-  const [tab, setTab] = useState<"notes" | "tasks" | "reminders" | "minerals">("notes");
+  // Deep link from the dashboard Tasks widget / task-due notifications:
+  // `?task=<id>` opens straight onto the Tasks tab.
+  const openedOnTask = useMemo(() => new URLSearchParams(window.location.search).has("task"), []);
+  const [tab, setTab] = useState<"notes" | "tasks" | "reminders" | "minerals">(openedOnTask ? "tasks" : "notes");
   const [q, setQ] = useState("");
   const [draft, setDraft] = useState("");
   const [due, setDue] = useState("");
+  const [priority, setPriority] = useState("MEDIUM");
+  const [assignee, setAssignee] = useState("");
   const [busy, setBusy] = useState(false);
 
   const notes = useMemo(() => {
@@ -433,8 +446,11 @@ function SidePanel({ contact, activities, canManage, onChanged }: {
     if (!draft.trim() || busy) return;
     setBusy(true);
     try {
-      await api.post(`/contacts/${contact.id}/activities`, { kind, body: draft.trim(), dueDate: due || null });
-      setDraft(""); setDue("");
+      await api.post(`/contacts/${contact.id}/activities`, {
+        kind, body: draft.trim(), dueDate: due || null,
+        ...(kind === "TASK" ? { priority, assignedToId: assignee || null } : {}),
+      });
+      setDraft(""); setDue(""); setPriority("MEDIUM"); setAssignee("");
       onChanged();
     } finally { setBusy(false); }
   };
@@ -495,12 +511,22 @@ function SidePanel({ contact, activities, canManage, onChanged }: {
         {(tab === "tasks" || tab === "reminders") && (
           <>
             {canManage && (
-              <div className="cw-addrow">
-                <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={tab === "tasks" ? "New task…" : "New reminder…"}
-                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(tab === "tasks" ? "TASK" : "REMINDER"); } }} />
-                <DateField value={due} onChange={setDue} />
-                <button className="primary small" disabled={!draft.trim() || busy} onClick={() => void add(tab === "tasks" ? "TASK" : "REMINDER")}><Plus size={11} /> Add</button>
-              </div>
+              <>
+                <div className="cw-addrow">
+                  <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={tab === "tasks" ? "New task…" : "New reminder…"}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(tab === "tasks" ? "TASK" : "REMINDER"); } }} />
+                  <DateField value={due} onChange={setDue} />
+                  <button className="primary small" disabled={!draft.trim() || busy} onClick={() => void add(tab === "tasks" ? "TASK" : "REMINDER")}><Plus size={11} /> Add</button>
+                </div>
+                {tab === "tasks" && (
+                  <div className="row" style={{ gap: 8, marginTop: 6 }}>
+                    <Select ariaLabel="Priority" value={priority} onChange={(v) => setPriority(v || "MEDIUM")}
+                      options={TASK_PRIORITIES.map((p) => ({ value: p.v, label: `${p.label} priority` }))} />
+                    <Select ariaLabel="Assignee" clearable searchable placeholder="Assign to me" value={assignee} onChange={setAssignee}
+                      options={users.map((u) => ({ value: u.id, label: u.name }))} />
+                  </div>
+                )}
+              </>
             )}
             {tab === "tasks" && (
               <>
@@ -511,7 +537,14 @@ function SidePanel({ contact, activities, canManage, onChanged }: {
                     <input type="checkbox" checked={!!a.completedAt} disabled={!canManage} onChange={() => void update(a, { completed: !a.completedAt })} aria-label={`Complete ${a.body}`} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div className="cw-task-title">{a.body}</div>
-                      {a.dueDate && <div className="cw-mono" style={{ fontSize: 11, color: a.completedAt ? "var(--text-dim)" : "var(--amber)", marginTop: 2 }}>{fmtDate(a.dueDate)}</div>}
+                      <div className="row" style={{ gap: 6, marginTop: 2, flexWrap: "wrap" }}>
+                        {a.dueDate && <span className="cw-mono" style={{ fontSize: 11, color: a.completedAt ? "var(--text-dim)" : "var(--amber)" }}>{fmtDate(a.dueDate)}</span>}
+                        {a.priority && (() => {
+                          const p = TASK_PRIORITIES.find((x) => x.v === a.priority);
+                          return p ? <span style={{ fontSize: 10.5, fontWeight: 700, color: p.color, background: `color-mix(in srgb, ${p.color} 13%, transparent)`, borderRadius: 999, padding: "1px 7px" }}>{p.label}</span> : null;
+                        })()}
+                        {a.assignedTo && <span className="muted" style={{ fontSize: 11 }}>{a.assignedTo.name}</span>}
+                      </div>
                     </div>
                     {canManage && <button className="icon-btn" title="Delete" onClick={() => void remove(a)}><X size={12} /></button>}
                   </div>

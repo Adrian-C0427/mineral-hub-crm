@@ -6,7 +6,7 @@ export interface PipelineStage { id: string; key: string; label: string; positio
 export type Priority = "HIGH" | "MEDIUM" | "LOW";
 export type Relationship = "HOT" | "WARM" | "COLD";
 export type BuyerStatus =
-  | "CONTACTED" | "INTERESTED" | "REVIEWING" | "OFFER_RECEIVED" | "NEGOTIATING" | "PASSED" | "CLOSED";
+  | "CONTACTED" | "INTERESTED" | "REVIEWING" | "OFFER_RECEIVED" | "NEGOTIATING" | "ACCEPTED" | "PASSED" | "CLOSED";
 export type CommKind = "EMAIL_OUT" | "EMAIL_IN" | "PHONE" | "MEETING" | "NOTE" | "NEGOTIATION" | "STATUS_CHANGE";
 
 export interface TimelineEntry {

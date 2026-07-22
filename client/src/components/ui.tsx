@@ -152,6 +152,7 @@ export function RelationshipDot({ status }: { status: "HOT" | "WARM" | "COLD" })
 // New buyer pipeline statuses (BuyerStatus).
 const STATUS_CLASS: Record<string, string> = {
   CLOSED: "resp-offer",
+  ACCEPTED: "resp-offer",
   OFFER_RECEIVED: "resp-offer",
   NEGOTIATING: "resp-interested",
   REVIEWING: "resp-interested",
@@ -160,8 +161,8 @@ const STATUS_CLASS: Record<string, string> = {
   PASSED: "resp-passed",
 };
 
-export function StatusBadge({ status }: { status: string }) {
-  return <span className={`badge ${STATUS_CLASS[status] ?? ""}`}>{prettyEnum(status)}</span>;
+export function StatusBadge({ status, label }: { status: string; label?: string }) {
+  return <span className={`badge ${STATUS_CLASS[status] ?? ""}`}>{label ?? prettyEnum(status)}</span>;
 }
 
 export function MetricCard({ label, value, hint, valueColor }: { label: string; value: ReactNode; hint?: string; valueColor?: string }) {

@@ -230,7 +230,7 @@ export function DealDetail() {
       {deal.selectedBuyer && (
         <div className="panel">
           <div className="row">
-            <strong>Selected buyer:</strong> <Link to={`/buyers/${deal.selectedBuyer.id}`}>{deal.selectedBuyer.name}</Link>
+            <strong>Selected buyer:</strong> <Link to={`/buyers/${deal.selectedBuyer.id}`} className="subtle-link" style={{ fontWeight: 600 }}>{deal.selectedBuyer.name}</Link>
             {deal.selectedBuyer.companyName && deal.selectedBuyer.companyName !== deal.selectedBuyer.name && <span className="muted">· {deal.selectedBuyer.companyName}</span>}
             <span className="spacer" />
             <strong>Profit est:</strong> <span>{money(deal.profitEst)}</span>
@@ -313,7 +313,7 @@ export function DealDetail() {
                   <span className="match-rank">#{m.rank}</span>
                   {/* Company name only — the primary identifier when evaluating matches.
                       Contact person is available on the Buyer Profile. */}
-                  <Link to={`/buyers/${m.buyerId}`} className="match-name" title={m.companyName || m.buyerName}>{m.companyName || m.buyerName}</Link>
+                  <Link to={`/buyers/${m.buyerId}`} className="match-name subtle-link" title={m.companyName || m.buyerName}>{m.companyName || m.buyerName}</Link>
                   <span className="match-right">
                     <span className="match-pct-num" style={{ color: pctColor(m.matchPercent) }}>{m.matchPercent}%</span>
                     {/* Coverage context: "100%" against a sparse buy box is weak
@@ -336,7 +336,7 @@ export function DealDetail() {
                   <span>Owner(s): {m.owners.length ? m.owners.join(", ") : "—"} · {m.previousDealsClosed} closed together · Last contact: {m.lastContactDate ? fmtDate(m.lastContactDate) : "never"}
                     {/* "stale" only makes sense for aged contact — a never-contacted buyer isn't stale. */}
                     {m.stale && m.lastContactDate && <span className="stale-flag" title="No contact in a while — worth a follow-up"> · stale</span>}</span>
-                  {can("editDeals") && <button className="small" style={{ flexShrink: 0 }} onClick={() => setLogBuyer({ id: m.buyerId, name: m.buyerName })}>Log contact</button>}
+                  {can("editDeals") && <button className="small primary" style={{ flexShrink: 0 }} onClick={() => setLogBuyer({ id: m.buyerId, name: m.buyerName })}>Log contact</button>}
                 </div>
               </div>
             ))}

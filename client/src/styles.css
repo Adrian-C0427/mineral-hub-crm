@@ -92,6 +92,23 @@ body {
 
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
+/* In-content record links (buyer names etc.): normal text color, no hyperlink
+   look — the accent only appears on hover/focus so it still reads clickable. */
+a.subtle-link { color: var(--text); }
+a.subtle-link:hover, a.subtle-link:focus-visible { color: var(--accent); text-decoration: none; }
+
+/* Dashboard Tasks widget rows */
+.dash-task-row { display: flex; align-items: center; gap: 10px; padding: 7px 2px; border-bottom: 1px solid var(--border); }
+.dash-task-row:last-child { border-bottom: none; }
+.dash-task-row input[type="checkbox"] { flex: none; }
+.dash-task-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; color: var(--text); }
+.dash-task-main:hover { text-decoration: none; }
+.dash-task-main:hover .dash-task-title { color: var(--accent); }
+.dash-task-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-task-meta { font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-task-pr { flex: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+.dash-task-due { flex: none; font-size: 11.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dash-task-due.overdue { color: var(--red); font-weight: 600; }
 
 h1, h2, h3, h4 { margin: 0 0 12px; font-weight: 600; }
 h1 { font-size: 22px; }

@@ -1192,6 +1192,30 @@ dealsRouter.post(
     const wasPublished = deal.publishedToPortal;
     const updated = await prisma.$transaction(async (tx) => {
       await tx.offer.update({ where: { id: offerId }, data: { status: "ACCEPTED" } });
+      // The winning buyer's activity status advances to Accepted Offer — only
+      // this buyer; everyone else's history is untouched, and the status stays
+      // manually editable afterwards.
+      const now = new Date();
+      const prevAct = await tx.dealBuyerActivity.findUnique({
+        where: { dealId_buyerId: { dealId: deal.id, buyerId: offer.buyerId } },
+        select: { id: true, status: true },
+      });
+      const acceptedAct = await tx.dealBuyerActivity.upsert({
+        where: { dealId_buyerId: { dealId: deal.id, buyerId: offer.buyerId } },
+        create: {
+          dealId: deal.id, buyerId: offer.buyerId, status: "ACCEPTED", responseReceived: true,
+          offerAmount: offer.amount, dateSent: now, lastActivityDate: now, sentByUserId: req.user!.id,
+        },
+        update: { status: "ACCEPTED", responseReceived: true, offerAmount: offer.amount, lastActivityDate: now },
+      });
+      if (prevAct?.status !== "ACCEPTED") {
+        await tx.dealBuyerMessage.create({
+          data: {
+            organizationId: orgId(req), dealId: deal.id, buyerId: offer.buyerId, activityId: acceptedAct.id,
+            kind: "STATUS_CHANGE", body: "Status set to ACCEPTED (offer accepted)", occurredAt: now, createdByUserId: req.user!.id,
+          },
+        });
+      }
       const u = await tx.deal.update({
         where: { id: req.params.id },
         data: {
