@@ -109,7 +109,7 @@ function EditOfferModal({ offer, accepted, onClose, onSaved }: { offer: OfferRow
         <div className="field"><label>Status</label>
           {/* The accepted offer's status is managed by the accept flow. */}
           {accepted
-            ? <input value="Accepted" disabled aria-label="Offer status" />
+            ? <input value="Accepted Offer" disabled aria-label="Offer status" />
             : <Select value={status} onChange={setStatus} ariaLabel="Offer status" options={STATUS_OPTIONS} />}
         </div>
         <div className="field"><label>Expiration date</label><DateField value={expiration} onChange={setExpiration} /></div>

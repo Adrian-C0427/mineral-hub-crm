@@ -1436,7 +1436,10 @@ model ContactActivity {
   contact        Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
   kind String // NOTE | CALL | EMAIL | SMS | TASK | REMINDER
-  body String
+  // Concise summary shown as the entry's heading (required in the UI for
+  // notes/tasks/reminders; older rows and quick call/email logs have none).
+  title String?
+  body  String
 
   // Logged-call metadata (kind CALL): disposition + duration in seconds.
   disposition     String?

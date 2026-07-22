@@ -156,6 +156,14 @@ offersRouter.patch(
         });
       }
     }
+    // Offers and Buyer Activity share one truth: an offer marked ACCEPTED (by
+    // any path) advances that buyer's activity status to Accepted Offer.
+    if (data.status === "ACCEPTED") {
+      await prisma.dealBuyerActivity.updateMany({
+        where: { dealId: owned.dealId, buyerId: owned.buyerId },
+        data: { status: "ACCEPTED", responseReceived: true, lastActivityDate: new Date() },
+      });
+    }
     res.json(offer);
   }),
 );
