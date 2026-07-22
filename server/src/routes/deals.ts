@@ -6,7 +6,7 @@ import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest }
 import { serializeDeal, serializeAssetChild } from "../serializers.js";
 import { computeMatch } from "../domain/matching.js";
 import { normalizePhone } from "../domain/phone.js";
-import { STALE_CONTACT_DAYS } from "../config.js";
+import { STALE_CONTACT_DAYS, LIST_LIMIT } from "../config.js";
 import { daysUntil } from "../domain/dates.js";
 import { logActivity } from "../services/activityLog.js";
 import { effectiveStatus, ENGAGED_STATUSES, BUYER_STATUSES } from "../domain/buyerStatus.js";
@@ -110,6 +110,7 @@ dealsRouter.get(
       where,
       include: { ...dealInclude, offers: { select: { amount: true } }, _count: { select: { assets: true } }, assets: { select: { nra: true, acreageNma: true, ourPrice: true, askPrice: true } }, ...revenueInclude },
       orderBy: { createdAt: "desc" },
+      take: LIST_LIMIT,
     });
     res.json(deals.map((d) => serializeDeal(d)));
   }),

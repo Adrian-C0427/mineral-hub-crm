@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { parse } from "csv-parse/sync";
 import { prisma } from "../db.js";
@@ -13,6 +14,18 @@ export const importRouter = Router();
 // read-only analyze/preview) is gated on createBuyers — a read-only viewer has
 // no business feeding CSVs through the importer.
 importRouter.use(requireAuth, requireOrg, requirePermission("createBuyers"));
+
+// Even a well-batched import is the heaviest thing a MEMBER can trigger — a
+// full-file parse plus bulk lookups. Cap replays so /analyze and /preview (both
+// write-free, and therefore repeatable at no cost to the caller) can't be looped
+// into a self-inflicted denial of service.
+importRouter.use(rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many import requests. Wait a few minutes and try again." },
+}));
 
 // Target buyer fields the importer understands. companyName is required to proceed.
 export const IMPORT_FIELDS = [
@@ -63,9 +76,9 @@ function guessMapping(headers: string[]): Record<string, string> {
   return mapping;
 }
 
-// Upper bound on rows per import. classifyRows fires one dedupe query per row
-// concurrently (Promise.all), so an unbounded row count could exhaust the DB
-// connection pool and stall the whole API — cap it well below that.
+// Upper bound on rows per import. Dedup is now a fixed number of batched
+// queries (see classifyRows), so this bounds parse memory and the commit
+// transaction's duration rather than the query count.
 export const MAX_IMPORT_ROWS = 20_000;
 
 function parseCsv(csv: string): { headers: string[]; rows: Record<string, string>[] } {
@@ -142,41 +155,90 @@ const commitSchema = z.object({
   mapping: z.record(z.string(), z.string()),
 });
 
-// Dedup check shared by preview and commit. Dedup is scoped to the caller's org.
+/** Split an array into fixed-size chunks (keeps `IN` lists off the parameter limit). */
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/**
+ * Dedup check shared by preview and commit. Dedup is scoped to the caller's org.
+ *
+ * The whole file is resolved in a FIXED number of queries — two `IN` lookups per
+ * chunk — rather than one query per row. The previous shape fired every row's
+ * `findFirst` concurrently inside a single `Promise.all`, so a 20,000-row CSV
+ * queued 20,000 simultaneous queries against a pool sized for a handful; the
+ * importer starved every other request in the process for as long as it ran, and
+ * `POST /preview` (no writes, no rate limit) could be replayed to hold it there.
+ *
+ * Classification itself is now a plain synchronous pass, which also repairs
+ * within-file dedup: the `seen*` sets were mutated AFTER an await, so every
+ * row's membership check ran before any row had been recorded and in-file
+ * duplicates were never detected at all.
+ */
 async function classifyRows(csv: string, mapping: Record<string, string>, organizationId: string) {
   const { rows } = parseCsv(csv);
+  const parsed = rows.map((row, index) => ({ index, buyer: buildBuyer(row, mapping) }));
+
+  const companies = [...new Set(parsed.filter((p) => p.buyer.companyName).map((p) => normalizeCompany(p.buyer.companyName)))];
+  const emails = [...new Set(parsed.map((p) => p.buyer.email).filter((e): e is string => Boolean(e)))];
+
+  // Two batched lookups per chunk, regardless of row count.
+  const existingCompanies = new Set<string>();
+  const existingEmails = new Set<string>();
+  for (const c of chunk(companies, 1000)) {
+    const hits = await prisma.buyer.findMany({
+      where: { organizationId, normalizedCompany: { in: c } },
+      select: { normalizedCompany: true },
+    });
+    for (const h of hits) if (h.normalizedCompany) existingCompanies.add(h.normalizedCompany);
+  }
+  for (const e of chunk(emails, 1000)) {
+    const hits = await prisma.buyer.findMany({
+      where: { organizationId, email: { in: e } },
+      select: { email: true },
+    });
+    for (const h of hits) if (h.email) existingEmails.add(h.email);
+  }
+
+  return classifyParsed(parsed, existingCompanies, existingEmails);
+}
+
+export const REASON_MISSING_COMPANY = "Missing Company Name";
+export const REASON_IN_FILE = "Duplicate within file";
+export const REASON_EXISTING = "Matches existing buyer (skipped)";
+
+/**
+ * The classification pass itself — pure, so the dedup rules are testable without
+ * a database. Order matters: a row is checked against earlier rows in the SAME
+ * file before it is checked against the org, and it joins the `seen` sets only
+ * once it has passed the in-file check.
+ */
+export function classifyParsed<T extends { companyName: string; email?: string | null }>(
+  parsed: { index: number; buyer: T }[],
+  existingCompanies: Set<string>,
+  existingEmails: Set<string>,
+) {
   const seenCompany = new Set<string>();
   const seenEmail = new Set<string>();
-
-  const results = await Promise.all(
-    rows.map(async (row, index) => {
-      const buyer = buildBuyer(row, mapping);
-      if (!buyer.companyName) {
-        return { index, status: "Error" as const, reason: "Missing Company Name", buyer };
-      }
-      const normCompany = normalizeCompany(buyer.companyName);
-
-      // Within-file duplicate
-      if (seenCompany.has(normCompany) || (buyer.email && seenEmail.has(buyer.email))) {
-        return { index, status: "Duplicate" as const, reason: "Duplicate within file", buyer };
-      }
-      // Existing record — company (normalized) OR exact email is sufficient
-      const existing = await prisma.buyer.findFirst({
-        where: {
-          organizationId,
-          OR: [{ normalizedCompany: normCompany }, ...(buyer.email ? [{ email: buyer.email }] : [])],
-        },
-        select: { id: true },
-      });
-      seenCompany.add(normCompany);
-      if (buyer.email) seenEmail.add(buyer.email);
-      if (existing) {
-        return { index, status: "Duplicate" as const, reason: "Matches existing buyer (skipped)", buyer };
-      }
-      return { index, status: "New" as const, reason: "", buyer };
-    }),
-  );
-  return results;
+  return parsed.map(({ index, buyer }) => {
+    if (!buyer.companyName) {
+      return { index, status: "Error" as const, reason: REASON_MISSING_COMPANY, buyer };
+    }
+    const normCompany = normalizeCompany(buyer.companyName);
+    // Within-file duplicate
+    if (seenCompany.has(normCompany) || (buyer.email && seenEmail.has(buyer.email))) {
+      return { index, status: "Duplicate" as const, reason: REASON_IN_FILE, buyer };
+    }
+    seenCompany.add(normCompany);
+    if (buyer.email) seenEmail.add(buyer.email);
+    // Existing record — company (normalized) OR exact email is sufficient
+    if (existingCompanies.has(normCompany) || (buyer.email && existingEmails.has(buyer.email))) {
+      return { index, status: "Duplicate" as const, reason: REASON_EXISTING, buyer };
+    }
+    return { index, status: "New" as const, reason: "", buyer };
+  });
 }
 
 // Step 2: preview — per-row New/Duplicate/Error (no writes)
@@ -211,6 +273,9 @@ importRouter.post(
     const results = await classifyRows(csv, mapping, orgId(req));
     const toInsert = results.filter((r) => r.status === "New");
 
+    // The import is all-or-nothing, so a large file legitimately needs longer
+    // than Prisma's 5s interactive default — which a few thousand rows blew
+    // through, aborting the whole commit with P2028.
     await prisma.$transaction(async (tx) => {
       for (const r of toInsert) {
         await tx.buyer.create({
@@ -232,7 +297,7 @@ importRouter.post(
           },
         });
       }
-    });
+    }, { maxWait: 10_000, timeout: 5 * 60_000 });
 
     res.json({
       inserted: toInsert.length,

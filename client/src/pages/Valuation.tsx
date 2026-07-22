@@ -252,7 +252,10 @@ export function Valuation() {
         <div className="row">
           {analysis && (
             <>
-              <button className="small" onClick={() => setSaveOpen(true)}>{openAnalysisId ? "Save / Save as…" : "Save analysis…"}</button>
+              {/* Saving writes a WellAnalysis row, so it follows the same
+                  manageWellAnalysis gate the server enforces — a read-only
+                  VIEWER can run and read analyses but not persist them. */}
+              {canManage && <button className="small" onClick={() => setSaveOpen(true)}>{openAnalysisId ? "Save / Save as…" : "Save analysis…"}</button>}
             </>
           )}
           <button className="primary small" onClick={newAnalysis}>+ New analysis</button>
@@ -284,7 +287,7 @@ export function Valuation() {
       )}
       {pageTab === "workspace" && !assumptions && <Spinner label="Loading…" />}
 
-      {pageTab === "saved" && <SavedAnalyses onOpen={openSaved} />}
+      {pageTab === "saved" && <SavedAnalyses onOpen={openSaved} canManage={canManage} />}
 
       {pageTab === "data" && <WellData canManage={canManage} />}
 
@@ -1230,7 +1233,7 @@ function FullReport({ analysis, analysisName }: { analysis: AnalyzeResponse; ana
 // Saved analyses tab
 // ---------------------------------------------------------------------------
 
-function SavedAnalyses({ onOpen }: { onOpen: (id: string) => void }) {
+function SavedAnalyses({ onOpen, canManage }: { onOpen: (id: string) => void; canManage: boolean }) {
   const [rows, setRows] = useState<SavedAnalysisRow[] | null>(null);
   const [sel, setSel] = useState<string[]>([]);
   const [compare, setCompare] = useState<SavedAnalysisDetail[] | null>(null);
@@ -1284,7 +1287,7 @@ function SavedAnalyses({ onOpen }: { onOpen: (id: string) => void }) {
                 <td className="right">{fmtPct1(r.headline?.irrAnnualPct)}</td>
                 <td className="right">
                   <button className="link-btn" onClick={() => onOpen(r.id)}>Open</button>
-                  <button className="link-btn" style={{ color: "var(--red)" }} onClick={() => del(r.id)}>Delete</button>
+                  {canManage && <button className="link-btn" style={{ color: "var(--red)" }} onClick={() => del(r.id)}>Delete</button>}
                 </td>
               </tr>
             ))}

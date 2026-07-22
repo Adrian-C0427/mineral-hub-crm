@@ -22,6 +22,17 @@ import { encryptSecret, decryptSecret } from "../services/secrets.js";
 
 export const authRouter = Router();
 
+/**
+ * Audience tags for the two short-lived JWTs this router mints. Both are signed
+ * with JWT_SECRET, the same key as session tokens: the SSO state token travels
+ * to the provider in a URL (provider logs, history, referrers) and the pre-auth
+ * token is handed to the browser in a URL fragment before 2FA has been
+ * satisfied. Tagging them keeps `jwt.verify` from ever accepting one class
+ * where another is expected, instead of relying on payload shape to disambiguate.
+ */
+const SSO_STATE_AUDIENCE = "sso-state";
+const PREAUTH_AUDIENCE = "sso-preauth";
+
 const loginLimiter = rateLimit({
   windowMs: LOGIN_RATE_LIMIT.WINDOW_MS,
   max: LOGIN_RATE_LIMIT.MAX_ATTEMPTS,
@@ -520,7 +531,7 @@ authRouter.get(
     const provider = getProvider(req.params.provider);
     if (!provider) throw new HttpError(404, "That sign-in provider isn't configured.");
     const joinToken = typeof req.query.joinToken === "string" ? req.query.joinToken : undefined;
-    const state = jwt.sign({ p: provider.key, joinToken }, env.JWT_SECRET, { expiresIn: "10m" });
+    const state = jwt.sign({ p: provider.key, joinToken }, env.JWT_SECRET, { expiresIn: "10m", audience: SSO_STATE_AUDIENCE });
     res.redirect(buildAuthorizeUrl(provider, state));
   }),
 );
@@ -540,7 +551,7 @@ authRouter.get(
 
     let joinToken: string | undefined;
     try {
-      const decoded = jwt.verify(state, env.JWT_SECRET) as { p: string; joinToken?: string };
+      const decoded = jwt.verify(state, env.JWT_SECRET, { audience: SSO_STATE_AUDIENCE }) as { p: string; joinToken?: string };
       if (decoded.p !== provider.key) return fail("Invalid sign-in state");
       joinToken = decoded.joinToken;
     } catch {
@@ -612,7 +623,7 @@ authRouter.get(
     // SSO satisfies primary auth; if the user also has TOTP on, they still
     // complete it — issue a short-lived pre-auth token the SPA exchanges.
     if (user.totpEnabled) {
-      const pre = jwt.sign({ uid: user.id, twofa: true }, env.JWT_SECRET, { expiresIn: "5m" });
+      const pre = jwt.sign({ uid: user.id, twofa: true }, env.JWT_SECRET, { expiresIn: "5m", audience: PREAUTH_AUDIENCE });
       return res.redirect(`${env.APP_URL}/auth/callback#twofa=${pre}`);
     }
     const { token } = issueSession(res, user);
@@ -628,7 +639,7 @@ authRouter.post(
     const { preAuthToken, totpCode } = z.object({ preAuthToken: z.string().min(1), totpCode: z.string().trim().min(1) }).parse(req.body);
     let uid: string;
     try {
-      const decoded = jwt.verify(preAuthToken, env.JWT_SECRET) as { uid: string; twofa?: boolean };
+      const decoded = jwt.verify(preAuthToken, env.JWT_SECRET, { audience: PREAUTH_AUDIENCE }) as { uid: string; twofa?: boolean };
       if (!decoded.twofa || !decoded.uid) throw new Error("bad token");
       uid = decoded.uid;
     } catch {

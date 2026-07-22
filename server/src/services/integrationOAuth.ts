@@ -106,11 +106,26 @@ export function integrationRedirectUri(key: string): string {
 
 interface OAuthState { orgId: string; userId: string; provider: string; nonce: string }
 
+/**
+ * Audience tag separating this token class from session tokens. Both are signed
+ * with JWT_SECRET, but a state token travels to Google/Microsoft inside a URL —
+ * so it lands in provider logs, browser history, and referrer headers. Without
+ * an audience, the only thing stopping an exfiltrated state token from being
+ * replayed as a session was `verifySession`'s incidental requirement for a
+ * `role` claim; a single future change to either payload shape would have
+ * quietly turned that into a full authentication bypass. `jwt.verify` rejects a
+ * token whose `aud` doesn't match, in both directions.
+ */
+const STATE_AUDIENCE = "integration-oauth-state";
+
 export function signState(s: Omit<OAuthState, "nonce">): string {
-  return jwt.sign({ ...s, nonce: crypto.randomUUID() }, env.JWT_SECRET, { expiresIn: "10m" });
+  return jwt.sign({ ...s, nonce: crypto.randomUUID() }, env.JWT_SECRET, {
+    expiresIn: "10m",
+    audience: STATE_AUDIENCE,
+  });
 }
 export function verifyState(token: string): OAuthState {
-  return jwt.verify(token, env.JWT_SECRET) as OAuthState;
+  return jwt.verify(token, env.JWT_SECRET, { audience: STATE_AUDIENCE }) as OAuthState;
 }
 
 /** Authorization URL the browser is sent to. Throws if the provider is unconfigured. */

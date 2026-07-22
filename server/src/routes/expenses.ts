@@ -29,10 +29,26 @@ async function ensureCategories(organizationId: string): Promise<void> {
 }
 
 // A yyyy-mm-dd or ISO datetime string → Date.
+// The regex alone is not a validity check: "9999-99-99" matches it and yields an
+// Invalid Date, which Prisma rejects with a 500. Refine on the parsed value so a
+// malformed date is answered as the 400 it is.
 const dateStr = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}/, "Expected a date")
-  .transform((s) => new Date(s));
+  .transform((s) => new Date(s))
+  .refine((d) => !Number.isNaN(d.getTime()), "Not a valid date");
+
+/**
+ * Query-string date bound → Date, or null when absent/unparseable. Filters are
+ * best-effort, so an unusable bound is dropped rather than 500ing the request.
+ * `endOfDay` makes the bound inclusive of the whole day.
+ */
+function parseBound(v: string | undefined, endOfDay = false): Date | null {
+  if (!v) return null;
+  const d = new Date(endOfDay ? `${v}T23:59:59.999Z` : v);
+  const y = d.getUTCFullYear();
+  return Number.isNaN(d.getTime()) || y < 1900 || y > 2100 ? null : d;
+}
 
 // ---------------------------------------------------------------------------
 // Categories
@@ -163,11 +179,10 @@ expensesRouter.get(
     if (q.userId) where.userId = q.userId;
     if (q.categoryId) where.categoryId = q.categoryId;
     if (q.reimbursed) where.reimbursed = q.reimbursed === "true";
-    if (q.from || q.to) {
-      where.date = {
-        ...(q.from ? { gte: new Date(q.from) } : {}),
-        ...(q.to ? { lte: new Date(`${q.to}T23:59:59.999Z`) } : {}),
-      };
+    const qFrom = parseBound(q.from);
+    const qTo = parseBound(q.to, true);
+    if (qFrom || qTo) {
+      where.date = { ...(qFrom ? { gte: qFrom } : {}), ...(qTo ? { lte: qTo } : {}) };
     }
     const expenses = await prisma.expense.findMany({
       where,
@@ -351,11 +366,10 @@ expensesRouter.get(
   asyncHandler(async (req: AuthedRequest, res) => {
     const { from, to } = z.object({ from: z.string().optional(), to: z.string().optional() }).parse(req.query);
     const where: Record<string, unknown> = { organizationId: orgId(req) };
-    if (from || to) {
-      where.date = {
-        ...(from ? { gte: new Date(from) } : {}),
-        ...(to ? { lte: new Date(`${to}T23:59:59.999Z`) } : {}),
-      };
+    const fromDate = parseBound(from);
+    const toDate = parseBound(to, true);
+    if (fromDate || toDate) {
+      where.date = { ...(fromDate ? { gte: fromDate } : {}), ...(toDate ? { lte: toDate } : {}) };
     }
     const expenses = await prisma.expense.findMany({ where, include: withRefs });
 

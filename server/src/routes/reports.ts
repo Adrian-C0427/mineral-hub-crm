@@ -18,36 +18,50 @@ const periodSchema = z.object({
   to: z.string().datetime({ offset: true }).or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).optional(),
 });
 
-/** Closing date for a deal = timestamp it entered CLOSED (from stage history). */
-async function closedAtMap(dealIds: string[]): Promise<Map<string, Date>> {
+/**
+ * Deals whose CLOSED transition falls inside [from, to], keyed to that
+ * timestamp. The period is applied in SQL: this previously loaded EVERY closed
+ * deal in the org (plus its selectedOffer and buyer) and discarded the
+ * out-of-period ones in memory, so the cost of a one-week report grew with the
+ * tenant's entire history.
+ */
+async function closedAtMap(organizationId: string, from: Date, to: Date): Promise<Map<string, Date>> {
   const hist = await prisma.dealStageHistory.findMany({
-    where: { dealId: { in: dealIds }, toStage: "CLOSED" },
+    where: {
+      toStage: "CLOSED",
+      createdAt: { gte: from, lte: to },
+      deal: { organizationId, recordType: "OPPORTUNITY", stage: "CLOSED" },
+    },
     orderBy: { createdAt: "desc" },
     select: { dealId: true, createdAt: true },
   });
   const map = new Map<string, Date>();
+  // Descending order → the first row per deal is its most recent CLOSED entry.
   for (const h of hist) if (!map.has(h.dealId)) map.set(h.dealId, h.createdAt);
   return map;
+}
+
+/** Period bound → Date, falling back to `fallback` when absent or unparseable. */
+function periodBound(v: string | undefined, fallback: string): Date {
+  const d = new Date(v ?? fallback);
+  return Number.isNaN(d.getTime()) ? new Date(fallback) : d;
 }
 
 reportsRouter.get(
   "/closed",
   asyncHandler(async (req: AuthedRequest, res) => {
     const { from, to } = periodSchema.parse(req.query);
-    const fromDate = from ? new Date(from) : new Date("1970-01-01");
-    const toDate = to ? new Date(to) : new Date("2999-12-31");
+    const fromDate = periodBound(from, "1970-01-01");
+    const toDate = periodBound(to, "2999-12-31");
 
-    // Closed deals whose CLOSED transition falls in the period.
-    const closedDeals = await prisma.deal.findMany({
-      where: { stage: "CLOSED", recordType: "OPPORTUNITY", organizationId: orgId(req) },
-      include: { selectedOffer: true, selectedBuyer: { select: { name: true, companyName: true } } },
-    });
-    const closedAt = await closedAtMap(closedDeals.map((d) => d.id));
-
-    const inPeriod = closedDeals.filter((d) => {
-      const c = closedAt.get(d.id);
-      return c && c >= fromDate && c <= toDate;
-    });
+    // Resolve the period in SQL first, then load only the deals it selected.
+    const closedAt = await closedAtMap(orgId(req), fromDate, toDate);
+    const inPeriod = closedAt.size
+      ? await prisma.deal.findMany({
+          where: { id: { in: [...closedAt.keys()] }, organizationId: orgId(req) },
+          include: { selectedOffer: true, selectedBuyer: { select: { name: true, companyName: true } } },
+        })
+      : [];
 
     const rows = inPeriod.map((d) => {
       const accepted = d.selectedOffer?.amount ?? null;
@@ -188,6 +202,12 @@ reportsRouter.get(
       buyers: arrParam(q.buyers),
     };
 
+    // NOTE: these four loads are deliberately uncapped. They feed org-wide
+    // aggregates (KPIs, deltas, breakdowns), so a `take` would not bound the
+    // work — it would silently return WRONG financials, which is worse than a
+    // slow report. Bounding this properly means pre-aggregating in SQL rather
+    // than filtering in memory; until then the cost scales with tenant size.
+    // The period filter IS pushed down where it can be (see /closed above).
     const [allDeals, expensesRaw, buyersRaw, activitiesRaw, usersRaw] = await Promise.all([
       loadAnalyticsDeals(org),
       prisma.expense.findMany({ where: { organizationId: org }, select: { amount: true, date: true, reimbursed: true } }),

@@ -304,8 +304,21 @@ integrationsRouter.get(
  * Mounted before the authed router so it handles only this exact path.
  */
 export const integrationsOAuthCallbackRouter = Router();
+
+// `actionLimiter` above is attached to the AUTHED router and only for POST, so
+// this public GET had no throttle at all — the one unauthenticated entry point
+// into the integrations surface, and the one that drives a token exchange.
+const callbackLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many callback attempts. Try connecting again in a few minutes." },
+});
+
 integrationsOAuthCallbackRouter.get(
   "/:provider/oauth/callback",
+  callbackLimiter,
   asyncHandler(async (req, res) => {
     const provider = req.params.provider;
     const back = (params: Record<string, string>) =>
@@ -313,7 +326,14 @@ integrationsOAuthCallbackRouter.get(
 
     const code = typeof req.query.code === "string" ? req.query.code : "";
     const stateToken = typeof req.query.state === "string" ? req.query.state : "";
-    if (req.query.error) return back({ error: String(req.query.error), provider });
+    // Do NOT reflect the provider's raw `error` (or, below, the token
+    // endpoint's response text) into the redirect: both are attacker- or
+    // third-party-controlled strings that end up rendered by the SPA. Log the
+    // detail server-side and hand the client a fixed message instead.
+    if (req.query.error) {
+      console.warn(`[oauth-callback] ${provider} returned error: ${String(req.query.error).slice(0, 200)}`);
+      return back({ error: "The provider declined the connection.", provider });
+    }
     if (!code || !stateToken) return back({ error: "Missing authorization code or state.", provider });
 
     let state: { orgId: string; userId: string; provider: string };
@@ -361,7 +381,8 @@ integrationsOAuthCallbackRouter.get(
       });
       return back({ connected: provider });
     } catch (e) {
-      return back({ error: e instanceof Error ? e.message : "Token exchange failed.", provider });
+      console.warn(`[oauth-callback] ${provider} token exchange failed: ${e instanceof Error ? e.message : e}`);
+      return back({ error: "Could not complete the connection. Please try again.", provider });
     }
   }),
 );
