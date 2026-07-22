@@ -5,7 +5,7 @@ import { api, ApiError } from "../api/client";
 import { ConfirmDialog, StatusBadge, EmptyState } from "./ui";
 import { Select } from "./Select";
 import { money, fmtDate } from "../lib/format";
-import { BUYER_STATUS_RANK } from "../lib/buyerStatus";
+import { BUYER_STATUS_RANK, buyerStatusLabel } from "../lib/buyerStatus";
 import type { BuyerActivityRow, CommKind, TimelineEntry } from "../types";
 
 // Clean line icons per entry kind — professional, no emoji.
@@ -57,7 +57,7 @@ export function BuyerActivitySection({
           <div key={r.id} className={`ba-row ${r.status === "PASSED" ? "row-dimmed" : ""}`}>
             <div className="ba-head" onClick={() => setOpen(isOpen ? null : r.id)}>
               <span className="ba-caret">{isOpen ? "▾" : "▸"}</span>
-              <Link to={`/buyers/${r.buyerId}`} onClick={(e) => e.stopPropagation()} style={{ fontWeight: 600 }}>{r.buyerName}</Link>
+              <Link to={`/buyers/${r.buyerId}`} className="subtle-link" onClick={(e) => e.stopPropagation()} style={{ fontWeight: 600 }}>{r.buyerName}</Link>
               {r.companyName && r.companyName !== r.buyerName && <span className="muted">· {r.companyName}</span>}
               <span className="spacer" />
               {/* Reference-style match meter: 90px bar + mono colored percent. */}
@@ -65,7 +65,7 @@ export function BuyerActivitySection({
                 <span className="ba-bar"><span style={{ width: `${Math.min(100, Math.max(0, r.matchPercent))}%`, background: baPctColor(r.matchPercent) }} /></span>
                 <span className="ba-pct" style={{ color: baPctColor(r.matchPercent) }}>{r.matchPercent}%</span>
               </span>
-              <StatusBadge status={r.status} />
+              <StatusBadge status={r.status} label={buyerStatusLabel(r.status)} />
               {r.offerAmount != null && <span className="ba-amount">{money(r.offerAmount)}</span>}
               <span className="ba-date">{fmtDate(r.lastActivityDate)}</span>
               {onRecordOffer && r.status !== "PASSED" && r.status !== "CLOSED" && (

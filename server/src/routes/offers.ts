@@ -39,18 +39,41 @@ offersRouter.post(
 
     const now = new Date();
     const offer = await prisma.$transaction(async (tx) => {
-      const o = await tx.offer.create({
-        data: {
-          dealId: data.dealId,
-          buyerId: data.buyerId,
-          amount: data.amount,
-          conditions: data.conditions ?? null,
-          expirationDate: data.expirationDate ? new Date(data.expirationDate) : null,
-          parentOfferId: data.parentOfferId ?? null,
-          notes: data.notes ?? null,
-          status: "ACTIVE",
-        },
-      });
+      // One ACTIVE offer per buyer per deal: recording a new/revised offer
+      // updates the buyer's existing active offer in place instead of stacking
+      // duplicates. The revision is still auditable — the buyer's activity log
+      // and the org activity feed record each amount. Explicit counter-offers
+      // (parentOfferId) keep their own rows since that history is intentional.
+      const existing = data.parentOfferId
+        ? null
+        : await tx.offer.findFirst({
+          where: { dealId: data.dealId, buyerId: data.buyerId, status: "ACTIVE" },
+          orderBy: { dateSubmitted: "desc" },
+        });
+      const revised = existing != null;
+      const o = existing
+        ? await tx.offer.update({
+          where: { id: existing.id },
+          data: {
+            amount: data.amount,
+            dateSubmitted: now,
+            conditions: data.conditions !== undefined ? data.conditions ?? null : undefined,
+            expirationDate: data.expirationDate !== undefined ? (data.expirationDate ? new Date(data.expirationDate) : null) : undefined,
+            notes: data.notes !== undefined ? data.notes ?? null : undefined,
+          },
+        })
+        : await tx.offer.create({
+          data: {
+            dealId: data.dealId,
+            buyerId: data.buyerId,
+            amount: data.amount,
+            conditions: data.conditions ?? null,
+            expirationDate: data.expirationDate ? new Date(data.expirationDate) : null,
+            parentOfferId: data.parentOfferId ?? null,
+            notes: data.notes ?? null,
+            status: "ACTIVE",
+          },
+        });
       if (data.parentOfferId) {
         // The parent must be an offer on THIS (org-scoped) deal — never trust a
         // caller-supplied id to point at another org's offer (IDOR write).
@@ -78,7 +101,9 @@ offersRouter.post(
       await logActivity(
         {
           eventType: "OFFER_MADE",
-          summary: `${buyer.name} made an offer of $${data.amount.toLocaleString()} on "${deal.name}"`,
+          summary: revised
+            ? `${buyer.name} revised their offer to $${data.amount.toLocaleString()} on "${deal.name}"`
+            : `${buyer.name} made an offer of $${data.amount.toLocaleString()} on "${deal.name}"`,
           organizationId: orgId(req),
           actorUserId: req.user!.id,
           dealId: deal.id,

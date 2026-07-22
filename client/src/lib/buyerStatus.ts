@@ -11,11 +11,16 @@ export const BUYER_STATUS_OPTIONS: { v: BuyerStatus; label: string }[] = [
   { v: "REVIEWING", label: "Reviewing" },
   { v: "OFFER_RECEIVED", label: "Offer Received" },
   { v: "NEGOTIATING", label: "Negotiating" },
+  { v: "ACCEPTED", label: "Accepted Offer" },
   { v: "PASSED", label: "Passed" },
   { v: "CLOSED", label: "Closed" },
 ];
 
 /** Sort rank: most-advanced statuses first, PASSED last. */
 export const BUYER_STATUS_RANK: Record<string, number> = {
-  CLOSED: 0, NEGOTIATING: 1, OFFER_RECEIVED: 2, REVIEWING: 3, INTERESTED: 4, CONTACTED: 5, PASSED: 6,
+  CLOSED: 0, ACCEPTED: 1, NEGOTIATING: 2, OFFER_RECEIVED: 3, REVIEWING: 4, INTERESTED: 5, CONTACTED: 6, PASSED: 7,
 };
+
+/** Display label for a buyer status ("ACCEPTED" → "Accepted Offer"). */
+export const buyerStatusLabel = (s: string): string =>
+  BUYER_STATUS_OPTIONS.find((o) => o.v === s)?.label ?? s;

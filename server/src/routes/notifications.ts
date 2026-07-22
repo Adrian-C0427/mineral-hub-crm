@@ -33,6 +33,7 @@ export const NOTIFICATION_TYPES = [
   { key: "email_reply", label: "Email replies", description: "A buyer replies to a deal email (Outlook inbox sync)" },
   { key: "deal_overdue", label: "Overdue deals", description: "An active deal passes its Find Buyer By date with no buyer selected" },
   { key: "follow_up_due", label: "Follow-up reminders", description: "A scheduled buyer follow-up date arrives" },
+  { key: "task_due", label: "Task reminders", description: "A task you're assigned reaches its due date (or is overdue)" },
 ] as const;
 
 async function mutedTypesFor(userId: string): Promise<string[]> {
