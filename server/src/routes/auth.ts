@@ -33,6 +33,43 @@ export const authRouter = Router();
 const SSO_STATE_AUDIENCE = "sso-state";
 const PREAUTH_AUDIENCE = "sso-preauth";
 
+/**
+ * Login-CSRF guard for the SSO round trip.
+ *
+ * A signed `state` token proves only that WE minted it — not that the browser
+ * completing the flow is the one that started it. An attacker can start their
+ * own flow, obtain a perfectly valid state + code, and then feed the resulting
+ * callback URL to a victim; the victim's browser completes the exchange and is
+ * silently signed into the ATTACKER's account, where anything they subsequently
+ * enter belongs to the attacker.
+ *
+ * Binding the flow to a high-entropy nonce that lives only in an HttpOnly cookie
+ * on the initiating browser makes a stolen/planted state token useless on its
+ * own: the callback requires the matching cookie, which the attacker cannot set
+ * on the victim's browser. Only the nonce's HASH travels in the state token, so
+ * the token itself (which reaches the provider, its logs, and the URL bar) never
+ * carries the value that authorizes it.
+ */
+const OAUTH_NONCE_COOKIE = "mh_oauth_nonce";
+const OAUTH_NONCE_TTL_MS = 10 * 60 * 1000; // matches the state token's expiry
+
+function oauthNonceCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: env.COOKIE_CROSS_SITE, // must be true when SameSite=None
+    // Lax still rides the provider's top-level GET redirect back to us; None is
+    // required in production, where the SPA and API are separate subdomains.
+    sameSite: (env.COOKIE_CROSS_SITE ? "none" : "lax") as "none" | "lax",
+    path: "/",
+  };
+}
+
+/** Constant-time compare of two hex digests (length-guarded). */
+function digestsMatch(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b));
+}
+
 const loginLimiter = rateLimit({
   windowMs: LOGIN_RATE_LIMIT.WINDOW_MS,
   max: LOGIN_RATE_LIMIT.MAX_ATTEMPTS,
@@ -139,17 +176,24 @@ authRouter.post(
   asyncHandler(async (req, res) => {
     const data = registerSchema.parse(req.body);
     const email = data.email.toLowerCase();
-    const exists = await prisma.user.findUnique({ where: { email } });
-    if (exists) throw new HttpError(409, "An account with that email already exists");
 
     // Resolve the join token up front so an invalid code fails before we create anything.
     const join = data.joinToken ? await resolveJoinToken(data.joinToken) : null;
 
     // Invite-only signup (default): without a valid code, brand-new workspaces
     // can't be self-provisioned. Flip ALLOW_PUBLIC_SIGNUP=true to open it up.
+    //
+    // This gate runs BEFORE the email-existence check on purpose. With the order
+    // reversed, an unauthenticated caller could tell a registered address (409)
+    // from an unregistered one (403) on an invite-only instance — an account
+    // enumeration oracle that the invite requirement otherwise closes. Now a
+    // caller with no valid code learns nothing about who has an account.
     if (!join && !env.ALLOW_PUBLIC_SIGNUP) {
       throw new HttpError(403, "Sign-up requires a Team ID or invite code. Ask your administrator for an invite.");
     }
+
+    const exists = await prisma.user.findUnique({ where: { email } });
+    if (exists) throw new HttpError(409, "An account with that email already exists");
 
     const user = await prisma.$transaction(async (tx) => {
       let organizationId: string;
@@ -531,7 +575,15 @@ authRouter.get(
     const provider = getProvider(req.params.provider);
     if (!provider) throw new HttpError(404, "That sign-in provider isn't configured.");
     const joinToken = typeof req.query.joinToken === "string" ? req.query.joinToken : undefined;
-    const state = jwt.sign({ p: provider.key, joinToken }, env.JWT_SECRET, { expiresIn: "10m", audience: SSO_STATE_AUDIENCE });
+    // Pin this flow to THIS browser: the raw nonce stays in an HttpOnly cookie,
+    // only its hash travels in the state token. See OAUTH_NONCE_COOKIE.
+    const nonce = crypto.randomBytes(32).toString("base64url");
+    const state = jwt.sign(
+      { p: provider.key, joinToken, n: sha256(nonce) },
+      env.JWT_SECRET,
+      { expiresIn: "10m", audience: SSO_STATE_AUDIENCE },
+    );
+    res.cookie(OAUTH_NONCE_COOKIE, nonce, { ...oauthNonceCookieOptions(), maxAge: OAUTH_NONCE_TTL_MS });
     res.redirect(buildAuthorizeUrl(provider, state));
   }),
 );
@@ -549,10 +601,24 @@ authRouter.get(
     if (req.query.error) return fail(String(req.query.error));
     if (!code || !state) return fail("Missing authorization code");
 
+    // The nonce is single-use: clear it before doing anything else, so a
+    // replayed callback URL can't ride the same cookie twice.
+    const presentedNonce = typeof req.cookies?.[OAUTH_NONCE_COOKIE] === "string"
+      ? (req.cookies[OAUTH_NONCE_COOKIE] as string)
+      : null;
+    res.clearCookie(OAUTH_NONCE_COOKIE, oauthNonceCookieOptions());
+
     let joinToken: string | undefined;
     try {
-      const decoded = jwt.verify(state, env.JWT_SECRET, { audience: SSO_STATE_AUDIENCE }) as { p: string; joinToken?: string };
+      const decoded = jwt.verify(state, env.JWT_SECRET, { audience: SSO_STATE_AUDIENCE }) as { p: string; joinToken?: string; n?: string };
       if (decoded.p !== provider.key) return fail("Invalid sign-in state");
+      // Fail closed: a state token without a nonce claim, or one whose nonce
+      // doesn't match this browser's cookie, is either a pre-upgrade token (they
+      // expire within 10 minutes of deploy) or a planted one. Either way the
+      // browser finishing this flow is not the browser that started it.
+      if (!decoded.n || !presentedNonce || !digestsMatch(sha256(presentedNonce), decoded.n)) {
+        return fail("Sign-in session expired, please try again");
+      }
       joinToken = decoded.joinToken;
     } catch {
       return fail("Sign-in session expired, please try again");

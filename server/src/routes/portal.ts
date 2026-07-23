@@ -552,8 +552,18 @@ portalRouter.post(
     const expirationDate = body.expiresOn ? new Date(body.expiresOn) : null;
     if (expirationDate && isNaN(expirationDate.getTime())) throw new HttpError(400, "Invalid expiration date");
 
-    // Resolve the buyer the same way leads do: exact-email match merges (filling
-    // blanks only), otherwise create a new portal-sourced profile.
+    // Resolve the buyer the same way leads do — and with the same rule: this
+    // submission is UNAUTHENTICATED, and the only thing tying it to an existing
+    // profile is knowledge of an email address, which is not a secret. So an
+    // email match must never write submitted content into a trusted CRM record.
+    // Previously the submitter's contactName/phone were merged into any blank
+    // field on the match, so anyone who knew a buyer's address could edit that
+    // buyer's contact details and hang a fabricated offer off their profile.
+    //
+    // The offer still attaches to the matched buyer (that attribution is the
+    // point of the record), but the profile is left untouched and flagged for
+    // review, and the self-reported identity rides along on the offer note so
+    // whoever works it can verify before acting.
     const existing = await prisma.buyer.findFirst({
       where: { organizationId: deal.organizationId, email: { equals: email, mode: "insensitive" } },
     });
@@ -561,7 +571,7 @@ portalRouter.post(
     if (existing) {
       await prisma.buyer.update({
         where: { id: existing.id },
-        data: { contactName: existing.contactName || body.contactName, phone: existing.phone || body.phone || null, portalSubmittedAt: now },
+        data: { portalSubmittedAt: now, duplicateReview: true },
       });
       buyerId = existing.id;
     } else {
@@ -578,18 +588,29 @@ portalRouter.post(
       buyerId = created.id;
     }
 
+    // Provenance note. The submitter's self-reported identity is recorded HERE
+    // rather than on the buyer profile: it is unverified input, so it belongs on
+    // the artifact it describes, where it reads as a claim instead of as CRM fact.
+    const submitted = [
+      `Submitted via buyer portal on ${now.toLocaleDateString("en-US")}.`,
+      `Submitter (unverified): ${body.contactName} · ${body.companyName} · ${email}${body.phone ? ` · ${body.phone}` : ""}`,
+      existing ? "Matched an existing buyer by email alone — verify identity before acting on this offer." : null,
+      body.message || null,
+    ].filter(Boolean).join("\n\n");
+
     await prisma.offer.create({
       data: {
         dealId: deal.id, buyerId, amount: body.amount, status: "ACTIVE",
         conditions: body.conditions || null, expirationDate,
-        // Mark provenance in the note so the CRM shows where it came from.
-        notes: `Submitted via buyer portal on ${now.toLocaleDateString("en-US")}.${body.message ? `\n\n${body.message}` : ""}`,
+        notes: submitted,
       },
     });
 
     // Notify the deal's owner (else the org broadly) so an offer never sits unseen.
     const title = `Portal offer: ${body.companyName} on "${deal.name}"`;
-    const bodyText = `$${Math.round(body.amount).toLocaleString("en-US")} offer from ${body.contactName}${body.conditions ? ` · terms: ${body.conditions.slice(0, 80)}` : ""}`;
+    const bodyText = `$${Math.round(body.amount).toLocaleString("en-US")} offer from ${body.contactName}${body.conditions ? ` · terms: ${body.conditions.slice(0, 80)}` : ""}`
+      // An email match is not proof of identity, so say so where it's read.
+      + (existing ? " · UNVERIFIED — matched an existing buyer by email only; confirm before acting" : "");
     await prisma.notification.create({
       data: {
         organizationId: deal.organizationId, userId: deal.relationshipOwnerId ?? null,

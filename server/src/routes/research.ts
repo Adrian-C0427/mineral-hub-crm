@@ -620,8 +620,8 @@ researchRouter.post(
       }
     } else if (sel.path && sel.path.length >= 2) {
       const hops = new Set<string>();
-      for (let i = 0; i < sel.path.length - 1; i++) hops.add(`${sel.path[i]} ${sel.path[i + 1]}`);
-      ids = edges.filter((e) => hops.has(`${e.grantorNorm} ${e.granteeNorm}`)).map((e) => e.id);
+      for (let i = 0; i < sel.path.length - 1; i++) hops.add(`${sel.path[i]}\u0000${sel.path[i + 1]}`);
+      ids = edges.filter((e) => hops.has(`${e.grantorNorm}\u0000${e.granteeNorm}`)).map((e) => e.id);
     } else if (sel.entityNorm) {
       ids = edges.filter((e) => e.grantorNorm === sel.entityNorm || e.granteeNorm === sel.entityNorm).map((e) => e.id);
     } else {
