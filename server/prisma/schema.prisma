@@ -5,9 +5,22 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// `url` is the RUNTIME connection and should point at Neon's *pooled*
+// (pgbouncer) endpoint — the hostname with `-pooler` in it. Pooling is what
+// absorbs the serverless cold-start reconnect blips that repeatedly surfaced as
+// P1001 "Can't reach database server" in Sentry (MINERAL-HUB-API-1/-6/-7).
+//
+// `directUrl` is the un-pooled endpoint and is used ONLY by the Prisma CLI
+// (migrate/introspect). Migrations must not run through a transaction-mode
+// pooler: `migrate deploy` relies on session-scoped state (advisory locks) that
+// pgbouncer does not hold across statements. Runtime queries never use it.
+//
+// If DIRECT_URL is unset, scripts/migrate-deploy.mjs falls back to DATABASE_URL
+// so a deploy that hasn't set it yet still behaves exactly as it did before.
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ---------------------------------------------------------------------------
@@ -90,6 +103,7 @@ enum BuyerStatus {
   REVIEWING
   OFFER_RECEIVED
   NEGOTIATING
+  ACCEPTED
   PASSED
   CLOSED
 }
@@ -352,6 +366,7 @@ model User {
   passwordResetTokens PasswordResetToken[]
   ownedContacts       Contact[] @relation("ContactOwner")
   contactActivities   ContactActivity[] @relation("ContactActivityAuthor")
+  assignedContactActivities ContactActivity[] @relation("ContactActivityAssignee")
   oauthAccounts       OAuthAccount[]
 
   ownedDeals         Deal[]              @relation("DealRelationshipOwner")
@@ -1129,8 +1144,17 @@ model ResearchDocument {
   grantor     String?
   grantee     String?
   // Normalized (uppercased, punctuation/suffix-stripped) for grouping/rankings.
+  // These normalize the FULL cell (the transaction group) and remain the
+  // dedupe/backfill keys; the arrays below carry the individual participants.
   grantorNorm String?
   granteeNorm String?
+  // Individual parties split from multi-party cells ("A; B / C") at import:
+  // raw spellings + their normalized keys, index-aligned. Empty for legacy
+  // rows (analytics fall back to splitting the raw string at read time).
+  grantorParties String[] @default([])
+  granteeParties String[] @default([])
+  grantorNorms   String[] @default([])
+  granteeNorms   String[] @default([])
 
   // Geography below county level. TX: abstract/survey. Elsewhere: trs
   // ("Sec 12 T2N R3W") or whatever the state's cadastral unit is.
@@ -1442,7 +1466,10 @@ model ContactActivity {
   contact        Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
   kind String // NOTE | CALL | EMAIL | SMS | TASK | REMINDER
-  body String
+  // Concise summary shown as the entry's heading (required in the UI for
+  // notes/tasks/reminders; older rows and quick call/email logs have none).
+  title String?
+  body  String
 
   // Logged-call metadata (kind CALL): disposition + duration in seconds.
   disposition     String?
@@ -1451,6 +1478,11 @@ model ContactActivity {
   // Tasks & reminders.
   dueDate     DateTime?
   completedAt DateTime?
+  // Task metadata: LOW | MEDIUM | HIGH (string key — extensible without a
+  // schema change) and an optional assignee (defaults to the author in UI).
+  priority     String?
+  assignedToId String?
+  assignedTo   User?   @relation("ContactActivityAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
 
   pinned Boolean @default(false)
 
@@ -1462,4 +1494,5 @@ model ContactActivity {
 
   @@index([contactId, createdAt])
   @@index([organizationId])
+  @@index([organizationId, dueDate])
 }

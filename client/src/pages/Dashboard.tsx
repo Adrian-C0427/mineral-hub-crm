@@ -6,6 +6,7 @@ import GridLayout, { type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import { api } from "../api/client";
+import { useAuth } from "../auth/AuthContext";
 import { Spinner, StageBadge } from "../components/ui";
 import { money, fmtDate, fmtDateLocal } from "../lib/format";
 import { useStages } from "../stages";
@@ -19,8 +20,19 @@ const DASH_PERIODS: readonly (readonly [DashPeriod, string])[] = [
   ["THIS_MONTH", "This Month"], ["LAST_MONTH", "Last Month"], ["THIS_QUARTER", "This Quarter"], ["YTD", "YTD"], ["CUSTOM", "Custom"],
 ];
 
+interface DashTask {
+  id: string; title: string; dueDate: string | null; priority: "LOW" | "MEDIUM" | "HIGH" | string;
+  assignedTo: { id: string; name: string } | null; contactId: string; contactName: string;
+}
+
 interface DashboardData {
-  metrics: { activeDeals: number; projectedProfit: number; closedProfitYtd: number; closedDealsCount: number; avgProfitPerDeal: number; offersPending: number; periodLabel?: string };
+  metrics: {
+    activeDeals: number; projectedProfit: number; closedProfitYtd: number; closedDealsCount: number; avgProfitPerDeal: number; offersPending: number; periodLabel?: string;
+    /** Prior equal-length window (Closed Date keyed) — delta baselines. */
+    closedProfitPrev?: number; closedDealsPrev?: number; avgProfitPrev?: number;
+  };
+  /** Contact tasks that are overdue, due today, or due within 7 days. */
+  tasks?: DashTask[];
   overdue: { id: string; name: string; findBuyerByDate: string | null }[];
   stageCounts: { stage: string; count: number }[];
   upcomingFollowUps: { dealId: string; buyerName: string; dealName: string; date: string | null }[];
@@ -103,12 +115,13 @@ function Kpi({ label, value, valueColor, delta, series, spark, title }: {
 // transforms) and resize from their edges/corner — the fully-freeform layout
 // found in premium analytics tools. Positions persist per browser.
 // ---------------------------------------------------------------------------
-type WidgetId = "kpis" | "profit" | "stages" | "activity" | "buyers" | "followups";
+type WidgetId = "kpis" | "profit" | "stages" | "activity" | "buyers" | "followups" | "tasks";
 const WIDGET_LABELS: Record<WidgetId, string> = {
   kpis: "Key metrics", profit: "Profit by month", stages: "Active deals by stage",
   activity: "Recent activity", buyers: "Top buyers", followups: "Upcoming follow-ups",
+  tasks: "Tasks",
 };
-const ALL_WIDGETS: WidgetId[] = ["kpis", "profit", "stages", "activity", "buyers", "followups"];
+const ALL_WIDGETS: WidgetId[] = ["kpis", "profit", "stages", "activity", "buyers", "followups", "tasks"];
 
 const COLS = 12;
 const ROW_H = 30;      // px per grid row (small unit = fine-grained heights)
@@ -124,6 +137,7 @@ const DEFAULT_LAYOUT: Record<WidgetId, Cell> = {
   activity: { x: 0, y: 15, w: 6, h: 8 },
   buyers: { x: 6, y: 15, w: 6, h: 8 },
   followups: { x: 0, y: 23, w: 12, h: 7 },
+  tasks: { x: 0, y: 30, w: 12, h: 7 },
 };
 
 interface DashPrefs { layout: Record<WidgetId, Cell>; hidden: WidgetId[] }
@@ -236,8 +250,13 @@ export function Dashboard() {
   // Deltas only where an honest baseline exists.
   const t = d.trends;
   const activeDelta = t && t.activeDealsWeekly.length >= 2 ? pctChange(t.activeDealsWeekly[t.activeDealsWeekly.length - 1], t.activeDealsWeekly[0]) : null;
-  const closedDelta = curIdx > 0 ? pctChange(realized[curIdx], realized[curIdx - 1]) : null;
-  const avgDelta = t && t.avgProfitPerDeal.length >= 2 ? pctChange(t.avgProfitPerDeal[t.avgProfitPerDeal.length - 1], t.avgProfitPerDeal[t.avgProfitPerDeal.length - 2]) : null;
+  // Closed-metric deltas compare the SELECTED window against the equal-length
+  // window immediately before it (both keyed on Closed Date, computed
+  // server-side) — so the percentage always matches the reporting period.
+  const m = d.metrics;
+  const closedDelta = m.closedProfitPrev !== undefined ? pctChange(m.closedProfitYtd, m.closedProfitPrev) : null;
+  const closedCountDelta = m.closedDealsPrev !== undefined ? pctChange(m.closedDealsCount, m.closedDealsPrev) : null;
+  const avgDelta = m.avgProfitPrev !== undefined ? pctChange(m.avgProfitPerDeal, m.avgProfitPrev) : null;
 
   // Brand-new workspace: no active deals and nothing closed yet. Guide the
   // first steps instead of presenting a wall of zeros.
@@ -250,7 +269,7 @@ export function Dashboard() {
         <Kpi label="Active Deals" value={d.metrics.activeDeals} delta={activeDelta} series={t?.activeDealsWeekly} spark="var(--accent)" title="Sparkline: active deals per week (8 weeks)" />
         <Kpi label="Projected Profit" value={fmtCompact(d.metrics.projectedProfit)} series={projectedSeries} spark="var(--accent)" title="Best (or accepted) offer minus cost basis across active deals with offers — the same series as the Projected bars below." />
         <Kpi label={`Closed ${d.metrics.periodLabel ?? "YTD"}`} value={fmtCompact(d.metrics.closedProfitYtd)} valueColor={d.metrics.closedProfitYtd > 0 ? "var(--green)" : undefined} delta={closedDelta} series={curIdx >= 0 ? realized.slice(0, curIdx + 1) : realized} spark="var(--green)" title="Sparkline: realized profit by month" />
-        <Kpi label="Closed Deals" value={d.metrics.closedDealsCount} series={t?.closedWeekly} spark="var(--green)" title="Deals moved to Closed within the selected range, by Contract Timeline Closed Date. Sparkline: closes per week (8 weeks)." />
+        <Kpi label="Closed Deals" value={d.metrics.closedDealsCount} delta={closedCountDelta} series={t?.closedWeekly} spark="var(--green)" title="Deals moved to Closed within the selected range, by Contract Timeline Closed Date. Δ vs the previous equal-length period. Sparkline: closes per week (8 weeks)." />
         <Kpi label="Avg Profit per Deal" value={fmtCompact(d.metrics.avgProfitPerDeal)} delta={avgDelta} series={t?.avgProfitPerDeal} spark="var(--text-dim)" title="Realized profit per closed deal in the selected range (Closed Date). Sparkline: running average across recent closes." />
         <Kpi label="Offers Pending" value={d.metrics.offersPending} series={t?.offersWeekly} spark="var(--amber)" title="Sparkline: offers received per week (8 weeks)" />
       </div>
@@ -454,6 +473,7 @@ export function Dashboard() {
         ))}
       </div>
     ),
+    tasks: <TasksWidget tasks={d.tasks ?? []} onCompleted={(id) => setD((prev) => (prev ? { ...prev, tasks: (prev.tasks ?? []).filter((x) => x.id !== id) } : prev))} />,
   };
 
   const hiddenIds = ALL_WIDGETS.filter((id) => prefs.hidden.includes(id));
@@ -601,6 +621,66 @@ export function Dashboard() {
         </GridLayout>}
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Tasks widget — every outstanding contact task that needs attention (overdue,
+// due today, or due within the next week). Checking a task completes it in the
+// database and removes it from the widget instantly; clicking the row opens
+// the contact workspace with that task in focus.
+// ---------------------------------------------------------------------------
+const TASK_PRIORITY_META: Record<string, { label: string; color: string }> = {
+  HIGH: { label: "High", color: "var(--red)" },
+  MEDIUM: { label: "Medium", color: "var(--amber)" },
+  LOW: { label: "Low", color: "var(--green)" },
+};
+
+function TasksWidget({ tasks, onCompleted }: { tasks: DashTask[]; onCompleted: (id: string) => void }) {
+  const { can } = useAuth();
+  const canManage = can("manageContacts");
+  const [busy, setBusy] = useState<string | null>(null);
+  // Due dates are calendar days stored at UTC midnight — compare day keys, not
+  // timestamps, so a task due today never shows as overdue mid-morning.
+  const todayKey = new Date().toISOString().slice(0, 10);
+
+  const complete = async (t: DashTask) => {
+    if (busy) return;
+    setBusy(t.id);
+    try {
+      await api.patch(`/contacts/${t.contactId}/activities/${t.id}`, { completed: true });
+      onCompleted(t.id);
+    } finally { setBusy(null); }
+  };
+
+  return (
+    <div className="panel">
+      <h3 className="dash-h3" style={{ marginBottom: 6 }}>Tasks</h3>
+      {tasks.length === 0 ? (
+        <p className="muted">Nothing due — you're all caught up.</p>
+      ) : tasks.map((t) => {
+        const dayKey = t.dueDate ? t.dueDate.slice(0, 10) : null;
+        const overdue = dayKey != null && dayKey < todayKey;
+        const dueToday = dayKey === todayKey;
+        const pr = TASK_PRIORITY_META[t.priority] ?? TASK_PRIORITY_META.MEDIUM;
+        return (
+          <div className="dash-task-row" key={t.id}>
+            {canManage && (
+              <input type="checkbox" checked={false} disabled={busy === t.id} onChange={() => void complete(t)}
+                title="Mark complete" aria-label={`Complete task: ${t.title}`} />
+            )}
+            <Link to={`/contacts/${t.contactId}?task=${t.id}`} className="dash-task-main" title="Open this task on the contact's workspace">
+              <span className="dash-task-title">{t.title}</span>
+              <span className="dash-task-meta">{t.contactName}{t.assignedTo ? ` · ${t.assignedTo.name}` : ""}</span>
+            </Link>
+            <span className="dash-task-pr" style={{ color: pr.color, background: `color-mix(in srgb, ${pr.color} 13%, transparent)` }}>{pr.label}</span>
+            <span className={`dash-task-due ${overdue ? "overdue" : ""}`}>
+              {dayKey == null ? "—" : overdue ? `Overdue · ${fmtDate(t.dueDate!)}` : dueToday ? "Due today" : fmtDate(t.dueDate!)}
+            </span>
+          </div>
+        );
+      })}
     </div>
   );
 }

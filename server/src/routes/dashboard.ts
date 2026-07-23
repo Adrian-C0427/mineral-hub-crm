@@ -117,10 +117,26 @@ dashboardRouter.get(
       0,
     );
     const closedDealsCount = closedInWindow.length;
+
+    // Prior-period baselines for the KPI deltas: the window of EQUAL length
+    // immediately before the selected one, keyed on the same Closed Date. This
+    // is what the ▲/▼ percentages compare against, so they always answer "vs
+    // the previous equivalent period" for whatever range the user picked.
+    const prevStart = new Date(win.start.getTime() - (win.end.getTime() - win.start.getTime()));
+    const inPrevWindow = (d: Date) => d.getTime() >= prevStart.getTime() && d.getTime() < win.start.getTime();
+    const closedInPrev = closedDeals.filter((d) => d.closedDate && inPrevWindow(d.closedDate));
+    const closedProfitPrev = closedInPrev.reduce(
+      (sum, d) => sum + (d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : 0),
+      0,
+    );
+    const closedDealsPrev = closedInPrev.length;
     // Average realized profit per closed deal in the window (same population
     // and Closed Date keying as the Closed profit KPI above).
     const avgProfitPerDeal = avg(
       closedInWindow.map((d) => (d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : null)).filter((n): n is number => n != null),
+    );
+    const avgProfitPrev = avg(
+      closedInPrev.map((d) => (d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : null)).filter((n): n is number => n != null),
     );
 
     // Overdue alert (active, no buyer, past find-buyer-by)
@@ -267,6 +283,31 @@ dashboardRouter.get(
       return offersRecent.filter((o) => o.dateSubmitted > from && o.dateSubmitted <= t).length;
     });
 
+    // Tasks widget feed: incomplete contact tasks that are overdue, due today,
+    // or coming due within the next 7 days (the same near-future horizon the
+    // notification sweep leads into), soonest first.
+    const taskHorizon = new Date(now.getTime() + 7 * 86_400_000);
+    const taskRows = await prisma.contactActivity.findMany({
+      where: { organizationId: org, kind: "TASK", completedAt: null, dueDate: { not: null, lte: taskHorizon } },
+      select: {
+        id: true, title: true, body: true, dueDate: true, priority: true,
+        assignedTo: { select: { id: true, name: true } },
+        createdBy: { select: { id: true, name: true } },
+        contact: { select: { id: true, firstName: true, lastName: true, entityName: true } },
+      },
+      orderBy: { dueDate: "asc" },
+      take: 50,
+    });
+    const dueSoonTasks = taskRows.map((t) => ({
+      id: t.id,
+      title: t.title ?? t.body,
+      dueDate: t.dueDate,
+      priority: t.priority ?? "MEDIUM",
+      assignedTo: t.assignedTo ?? t.createdBy,
+      contactId: t.contact.id,
+      contactName: [t.contact.firstName, t.contact.lastName].filter(Boolean).join(" ") || t.contact.entityName || "Contact",
+    }));
+
     res.json({
       metrics: {
         activeDeals,
@@ -276,7 +317,12 @@ dashboardRouter.get(
         avgProfitPerDeal,
         offersPending: activeOffers,
         periodLabel: win.label,
+        // Prior equal-length window (Closed Date keyed) — delta baselines.
+        closedProfitPrev,
+        closedDealsPrev,
+        avgProfitPrev,
       },
+      tasks: dueSoonTasks,
       overdue: overdue.map((d) => ({ id: d.id, name: d.name, findBuyerByDate: d.findBuyerByDate })),
       stageCounts,
       upcomingFollowUps: followUps.map((f) => ({

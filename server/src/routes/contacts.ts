@@ -176,21 +176,39 @@ contactsRouter.delete(
 export const ACTIVITY_KINDS = ["NOTE", "CALL", "EMAIL", "SMS", "TASK", "REMINDER"] as const;
 export const CALL_DISPOSITIONS = ["Connected", "No Answer", "Voicemail", "Bad Number", "Callback Requested"] as const;
 
-type ActivityWithAuthor = ContactActivity & { createdBy: Pick<User, "id" | "name"> | null };
+export const TASK_PRIORITIES = ["LOW", "MEDIUM", "HIGH"] as const;
+
+type ActivityWithAuthor = ContactActivity & {
+  createdBy: Pick<User, "id" | "name"> | null;
+  assignedTo: Pick<User, "id" | "name"> | null;
+};
 const serializeActivity = (a: ActivityWithAuthor) => ({
   id: a.id,
   kind: a.kind,
+  title: a.title,
   body: a.body,
   disposition: a.disposition,
   durationSeconds: a.durationSeconds,
   dueDate: a.dueDate,
   completedAt: a.completedAt,
+  priority: a.priority,
+  assignedTo: a.assignedTo ? { id: a.assignedTo.id, name: a.assignedTo.name } : null,
   pinned: a.pinned,
   createdBy: a.createdBy ? { id: a.createdBy.id, name: a.createdBy.name } : null,
   createdAt: a.createdAt,
 });
 
-const authorInclude = { createdBy: { select: { id: true, name: true } } } as const;
+const authorInclude = {
+  createdBy: { select: { id: true, name: true } },
+  assignedTo: { select: { id: true, name: true } },
+} as const;
+
+/** Validate an (optional) task assignee is a member of this organization. */
+async function checkAssignee(org: string, userId: string | null | undefined): Promise<void> {
+  if (!userId) return;
+  const u = await prisma.user.findFirst({ where: { id: userId, organizationId: org }, select: { id: true } });
+  if (!u) throw new HttpError(400, "Assignee is not in your organization");
+}
 
 async function findContact(org: string, id: string): Promise<Contact> {
   const c = await prisma.contact.findFirst({ where: { id, organizationId: org } });
@@ -225,10 +243,13 @@ contactsRouter.get(
 
 const activitySchema = z.object({
   kind: z.enum(ACTIVITY_KINDS),
+  title: z.string().trim().min(1).max(200).nullish(),
   body: z.string().trim().min(1).max(10_000),
   disposition: z.enum(CALL_DISPOSITIONS).nullish(),
   durationSeconds: z.number().int().min(0).max(86_400).nullish(),
   dueDate: dateField,
+  priority: z.enum(TASK_PRIORITIES).nullish(),
+  assignedToId: z.string().nullish(),
 });
 
 contactsRouter.post(
@@ -237,15 +258,23 @@ contactsRouter.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const c = await findContact(orgId(req), req.params.id);
     const data = activitySchema.parse(req.body);
+    const isDated = data.kind === "TASK" || data.kind === "REMINDER";
+    // Notes, tasks, and reminders carry a required concise title above the
+    // detailed note; quick call/email/text logs stay single-field.
+    if ((data.kind === "NOTE" || isDated) && !data.title) throw new HttpError(400, "Title is required");
+    await checkAssignee(orgId(req), data.assignedToId);
     const created = await prisma.contactActivity.create({
       data: {
         organizationId: orgId(req),
         contactId: c.id,
         kind: data.kind,
+        title: data.title ?? null,
         body: data.body,
         disposition: data.kind === "CALL" ? data.disposition ?? null : null,
         durationSeconds: data.kind === "CALL" ? data.durationSeconds ?? null : null,
-        dueDate: data.kind === "TASK" || data.kind === "REMINDER" ? data.dueDate : null,
+        dueDate: isDated ? data.dueDate : null,
+        priority: data.kind === "TASK" ? data.priority ?? "MEDIUM" : null,
+        assignedToId: isDated ? data.assignedToId ?? req.user?.id ?? null : null,
         createdById: req.user?.id ?? null,
       },
       include: authorInclude,
@@ -267,21 +296,34 @@ contactsRouter.patch(
     const existing = await prisma.contactActivity.findFirst({ where: { id: req.params.aid, contactId: c.id } });
     if (!existing) throw new HttpError(404, "Activity not found");
     const data = z.object({
+      title: z.string().trim().min(1).max(200).optional(),
       body: z.string().trim().min(1).max(10_000).optional(),
       completed: z.boolean().optional(),
       pinned: z.boolean().optional(),
       dueDate: dateField.optional(),
+      priority: z.enum(TASK_PRIORITIES).nullish(),
+      assignedToId: z.string().nullish().optional(),
     }).parse(req.body);
+    if (data.assignedToId !== undefined) await checkAssignee(orgId(req), data.assignedToId);
     const updated = await prisma.contactActivity.update({
       where: { id: existing.id },
       data: {
+        ...(data.title !== undefined ? { title: data.title } : {}),
         ...(data.body !== undefined ? { body: data.body } : {}),
         ...(data.completed !== undefined ? { completedAt: data.completed ? new Date() : null } : {}),
         ...(data.pinned !== undefined ? { pinned: data.pinned } : {}),
         ...(data.dueDate !== undefined ? { dueDate: data.dueDate } : {}),
+        ...(data.priority !== undefined ? { priority: data.priority } : {}),
+        ...(data.assignedToId !== undefined ? { assignedToId: data.assignedToId } : {}),
       },
       include: authorInclude,
     });
+    // Completing a task retires its due-alert from every bell immediately.
+    if (data.completed) {
+      await prisma.notification.deleteMany({
+        where: { organizationId: orgId(req), type: "task_due", link: { contains: `task=${existing.id}` } },
+      });
+    }
     res.json(serializeActivity(updated));
   }),
 );

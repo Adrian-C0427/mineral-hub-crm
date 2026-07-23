@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { prettyEnum } from "../lib/format";
+import { prettyEnum, money } from "../lib/format";
 import { useStages } from "../stages";
 
 /**
@@ -152,6 +152,7 @@ export function RelationshipDot({ status }: { status: "HOT" | "WARM" | "COLD" })
 // New buyer pipeline statuses (BuyerStatus).
 const STATUS_CLASS: Record<string, string> = {
   CLOSED: "resp-offer",
+  ACCEPTED: "resp-offer",
   OFFER_RECEIVED: "resp-offer",
   NEGOTIATING: "resp-interested",
   REVIEWING: "resp-interested",
@@ -160,8 +161,8 @@ const STATUS_CLASS: Record<string, string> = {
   PASSED: "resp-passed",
 };
 
-export function StatusBadge({ status }: { status: string }) {
-  return <span className={`badge ${STATUS_CLASS[status] ?? ""}`}>{prettyEnum(status)}</span>;
+export function StatusBadge({ status, label }: { status: string; label?: string }) {
+  return <span className={`badge ${STATUS_CLASS[status] ?? ""}`}>{label ?? prettyEnum(status)}</span>;
 }
 
 export function MetricCard({ label, value, hint, valueColor }: { label: string; value: ReactNode; hint?: string; valueColor?: string }) {
@@ -171,6 +172,24 @@ export function MetricCard({ label, value, hint, valueColor }: { label: string; 
       <div className="metric-value" style={valueColor ? { color: valueColor } : undefined}>{value}</div>
       {hint && <div className="metric-hint">{hint}</div>}
     </div>
+  );
+}
+
+/**
+ * Live projected-profit KPI: Highest Offer − Our Price (falls back to Ask when
+ * Our Price is unset, matching the server's netProfit basis). Recomputed on
+ * every render, so it tracks offer and price edits immediately; green/red per
+ * the app's standard money conventions.
+ */
+export function EstimatedProfitCard({ highOffer, basis }: { highOffer: number | null; basis: number | null }) {
+  const v = highOffer != null && basis != null ? highOffer - basis : null;
+  return (
+    <MetricCard
+      label="Estimated Profit"
+      value={v != null ? money(v) : "—"}
+      valueColor={v == null ? undefined : v >= 0 ? "var(--green)" : "var(--red)"}
+      hint="Highest Offer − Our Price"
+    />
   );
 }
 

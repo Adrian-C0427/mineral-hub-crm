@@ -4,7 +4,7 @@ import { api, ApiError } from "../api/client";
 import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
 import {
-  Spinner, PriorityBadge, StageBadge, MetricCard, Modal,
+  Spinner, PriorityBadge, StageBadge, MetricCard, EstimatedProfitCard, Modal,
   MatchBar, Banner, ConfirmDelete, ConfirmDialog, BackLink, OverflowMenu, showToast,
 } from "../components/ui";
 import { Pencil } from "lucide-react";
@@ -20,7 +20,7 @@ import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
 import { operatorsForCounties } from "../lib/operators";
-import { money, num, fmtDate, toInputDate } from "../lib/format";
+import { money, num, fmtDate, toInputDate, prettyEnum } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { SellerDetails } from "../components/SellerDetails";
 import { DealPortalPanel } from "../components/DealPortalPanel";
@@ -220,17 +220,18 @@ export function DealDetail() {
       {tab === "buyers" && <>
       {/* Buyer summary — the same KPI card row as the Mineral Assets Sell tab,
           fed by the same server-computed deal.metrics. */}
-      <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
+      <div className="metrics-row" style={{ gridTemplateColumns: "repeat(5,1fr)" }}>
         <MetricCard label="Buyers Contacted" value={deal.metrics.buyersContacted} />
         <MetricCard label="Interested" value={deal.metrics.interested} />
         <MetricCard label="Offers" value={deal.metrics.offers} />
-        <MetricCard label="High Offer" value={money(deal.metrics.highOffer)} />
+        <MetricCard label="Highest Offer" value={money(deal.metrics.highOffer)} />
+        <EstimatedProfitCard highOffer={deal.metrics.highOffer} basis={deal.ourPrice ?? deal.askPrice} />
       </div>
 
       {deal.selectedBuyer && (
         <div className="panel">
           <div className="row">
-            <strong>Selected buyer:</strong> <Link to={`/buyers/${deal.selectedBuyer.id}`}>{deal.selectedBuyer.name}</Link>
+            <strong>Selected buyer:</strong> <Link to={`/buyers/${deal.selectedBuyer.id}`} className="subtle-link" style={{ fontWeight: 600 }}>{deal.selectedBuyer.name}</Link>
             {deal.selectedBuyer.companyName && deal.selectedBuyer.companyName !== deal.selectedBuyer.name && <span className="muted">· {deal.selectedBuyer.companyName}</span>}
             <span className="spacer" />
             <strong>Profit est:</strong> <span>{money(deal.profitEst)}</span>
@@ -250,12 +251,12 @@ export function DealDetail() {
                   <tr key={o.id}>
                     <td>{o.buyer.name}</td>
                     <td className="right">{money(o.amount)}</td>
-                    <td>{o.status}</td>
+                    <td>{o.status === "ACCEPTED" || deal.selectedOfferId === o.id ? "Accepted Offer" : prettyEnum(o.status)}</td>
                     <td>{fmtDate(o.expirationDate)}</td>
                     <td className="cell-clamp" title={o.conditions ?? undefined}>{o.conditions ?? "—"}</td>
                     <td className="right">
                       <span className="row" style={{ gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
-                        {deal.selectedOfferId === o.id ? <span className="badge resp-offer">Accepted</span> :
+                        {deal.selectedOfferId === o.id ? <span className="badge resp-offer">Accepted Offer</span> :
                           can("editDeals") ? <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button> : null}
                         {can("editDeals") && <OfferRowActions offer={o} accepted={deal.selectedOfferId === o.id} onChanged={refreshAll} />}
                       </span>
@@ -313,7 +314,7 @@ export function DealDetail() {
                   <span className="match-rank">#{m.rank}</span>
                   {/* Company name only — the primary identifier when evaluating matches.
                       Contact person is available on the Buyer Profile. */}
-                  <Link to={`/buyers/${m.buyerId}`} className="match-name" title={m.companyName || m.buyerName}>{m.companyName || m.buyerName}</Link>
+                  <Link to={`/buyers/${m.buyerId}`} className="match-name subtle-link" title={m.companyName || m.buyerName}>{m.companyName || m.buyerName}</Link>
                   <span className="match-right">
                     <span className="match-pct-num" style={{ color: pctColor(m.matchPercent) }}>{m.matchPercent}%</span>
                     {/* Coverage context: "100%" against a sparse buy box is weak
@@ -325,18 +326,17 @@ export function DealDetail() {
                         : "no buy box set"}
                     </span>
                   </span>
+                  {can("editDeals") && <button className="small primary match-log" onClick={() => setLogBuyer({ id: m.buyerId, name: m.buyerName })}>Log contact</button>}
                 </div>
                 <MatchBar value={m.matchPercent} />
                 <div>
                   {m.matching.map((c) => <span key={c.key} className="crit-tag crit-yes">{c.label}</span>)}
                   {m.nonMatching.map((c) => <span key={c.key} className="crit-tag crit-no">{c.label}</span>)}
                 </div>
-                {/* gap keeps the action clear of the meta text however long it wraps. */}
-                <div className="dc-meta" style={{ marginTop: 8, justifyContent: "space-between", gap: 16, alignItems: "center" }}>
+                <div className="dc-meta" style={{ marginTop: 8, gap: 16, alignItems: "center" }}>
                   <span>Owner(s): {m.owners.length ? m.owners.join(", ") : "—"} · {m.previousDealsClosed} closed together · Last contact: {m.lastContactDate ? fmtDate(m.lastContactDate) : "never"}
                     {/* "stale" only makes sense for aged contact — a never-contacted buyer isn't stale. */}
                     {m.stale && m.lastContactDate && <span className="stale-flag" title="No contact in a while — worth a follow-up"> · stale</span>}</span>
-                  {can("editDeals") && <button className="small" style={{ flexShrink: 0 }} onClick={() => setLogBuyer({ id: m.buyerId, name: m.buyerName })}>Log contact</button>}
                 </div>
               </div>
             ))}

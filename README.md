@@ -82,7 +82,8 @@ in each subdir defines build/start commands.
 **API service** (`server/`):
 | Var | Value |
 | --- | --- |
-| `DATABASE_URL` | reference the Postgres service's connection URL |
+| `DATABASE_URL` | the **pooled** Postgres URL — on Neon, the host with `-pooler` in it |
+| `DIRECT_URL` | the **un-pooled** URL (same host without `-pooler`) — Prisma CLI/migrations only |
 | `JWT_SECRET` | long random string |
 | `NODE_ENV` | `production` |
 | `COOKIE_CROSS_SITE` | `true` |
@@ -102,6 +103,33 @@ with the prod `DATABASE_URL`):
 ```bash
 ADMIN_NAME="You" ADMIN_EMAIL="you@co.com" ADMIN_PASSWORD="<strong>" npm run bootstrap:admin
 ```
+
+### Connection pooling (Neon)
+
+The API talks to Postgres through Neon's **pooled** (pgbouncer) endpoint and
+migrates through the **direct** one:
+
+| Var | Endpoint | Used by |
+| --- | --- | --- |
+| `DATABASE_URL` | `ep-xxx**-pooler**.region.aws.neon.tech` | the running app (all runtime queries) |
+| `DIRECT_URL` | `ep-xxx.region.aws.neon.tech` | Prisma CLI only (`migrate deploy`, `migrate dev`) |
+
+Why the split: Neon's serverless Postgres drops the occasional connection during
+a cold start, which reached users as `P1001 "Can't reach database server"` (three
+separate Sentry issues — MINERAL-HUB-API-1/-6/-7). The pooler keeps warm
+server-side connections, so a single reconnect no longer fails a request. The
+`withDbRetry()` wrapper in `src/db.ts` stays as defense-in-depth.
+
+Migrations must *not* go through the pooler: `migrate deploy` takes a
+session-scoped advisory lock that pgbouncer's transaction mode won't hold across
+statements, so it can hang or misreport. Hence `directUrl` in `schema.prisma`.
+If `DIRECT_URL` is unset, `scripts/migrate-deploy.mjs` falls back to
+`DATABASE_URL` (the pre-pooling behavior) rather than failing the boot.
+
+Neon's pooler supports prepared statements, so **no** `?pgbouncer=true` is
+needed on the URL (that flag is only for PgBouncer < 1.21). Keep
+`sslmode=require&channel_binding=require`; `connect_timeout=15` gives a cold
+start room to finish.
 
 ### Database migrations
 

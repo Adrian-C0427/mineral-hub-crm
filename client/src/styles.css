@@ -92,6 +92,34 @@ body {
 
 a { color: var(--accent); text-decoration: none; }
 a:hover { text-decoration: underline; }
+/* In-content record links (buyer names etc.): normal text color, no hyperlink
+   look — the accent only appears on hover/focus so it still reads clickable. */
+a.subtle-link { color: var(--text); }
+a.subtle-link:hover, a.subtle-link:focus-visible { color: var(--accent); text-decoration: none; }
+
+/* Contact workspace: inline field editing + title/note add forms */
+.cw-fval.editable { cursor: pointer; border-radius: 6px; }
+.cw-fval.editable:hover, .cw-fval.editable:focus-visible { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.cw-fval .cw-fpen { opacity: 0; margin-left: 6px; color: var(--text-dim); vertical-align: middle; transition: opacity .12s; }
+.cw-fval.editable:hover .cw-fpen, .cw-fval.editable:focus-visible .cw-fpen { opacity: 1; }
+.cw-fedit { display: flex; align-items: center; gap: 6px; }
+.cw-fedit input { flex: 1; min-width: 0; }
+.cw-name.editable { cursor: pointer; border-radius: 6px; }
+.cw-name.editable:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.cw-addcol { display: flex; flex-direction: column; gap: 6px; }
+
+/* Dashboard Tasks widget rows */
+.dash-task-row { display: flex; align-items: center; gap: 10px; padding: 7px 2px; border-bottom: 1px solid var(--border); }
+.dash-task-row:last-child { border-bottom: none; }
+.dash-task-row input[type="checkbox"] { flex: none; }
+.dash-task-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; color: var(--text); }
+.dash-task-main:hover { text-decoration: none; }
+.dash-task-main:hover .dash-task-title { color: var(--accent); }
+.dash-task-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-task-meta { font-size: 11.5px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-task-pr { flex: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
+.dash-task-due { flex: none; font-size: 11.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.dash-task-due.overdue { color: var(--red); font-weight: 600; }
 
 h1, h2, h3, h4 { margin: 0 0 12px; font-weight: 600; }
 h1 { font-size: 22px; }
@@ -541,6 +569,8 @@ tfoot td { font-weight: 700; background: var(--panel-2); border-top: 2px solid v
 .crit-no { background: var(--panel-2); color: var(--text-dim); }
 .match-card { border:1px solid var(--border); border-radius: var(--radius); padding: 14px; margin-bottom: 10px; background: var(--panel-2); }
 .match-card-head { display:flex; align-items:center; gap:10px; margin-bottom: 6px; }
+/* Compact primary action pinned to the right edge of each recommendation card. */
+button.match-log { flex: none; margin-left: auto; padding: 3px 10px; font-size: 12px; }
 .match-rank { font-weight:700; color: var(--text-dim); width: 28px; }
 .stale-flag { color: var(--amber); font-size: 12px; }
 
