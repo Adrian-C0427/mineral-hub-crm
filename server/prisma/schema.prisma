@@ -5,9 +5,22 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// `url` is the RUNTIME connection and should point at Neon's *pooled*
+// (pgbouncer) endpoint — the hostname with `-pooler` in it. Pooling is what
+// absorbs the serverless cold-start reconnect blips that repeatedly surfaced as
+// P1001 "Can't reach database server" in Sentry (MINERAL-HUB-API-1/-6/-7).
+//
+// `directUrl` is the un-pooled endpoint and is used ONLY by the Prisma CLI
+// (migrate/introspect). Migrations must not run through a transaction-mode
+// pooler: `migrate deploy` relies on session-scoped state (advisory locks) that
+// pgbouncer does not hold across statements. Runtime queries never use it.
+//
+// If DIRECT_URL is unset, scripts/migrate-deploy.mjs falls back to DATABASE_URL
+// so a deploy that hasn't set it yet still behaves exactly as it did before.
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ---------------------------------------------------------------------------
