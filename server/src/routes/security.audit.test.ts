@@ -140,3 +140,38 @@ describe("role defaults", () => {
     expect(DEFAULT_ROLE_PERMISSIONS.MANAGER).toContain("manageWellAnalysis");
   });
 });
+
+describe("source encoding", () => {
+  // routes/research.ts carried two literal NUL bytes (used as a composite-key
+  // delimiter in a template literal). Functionally harmless, but `file` reported
+  // the 1,686-line source as binary data and grep SILENTLY skipped it — exit
+  // code 1, no match, no warning. Every grep-driven control (secret scanning, CI
+  // policy greps, "which endpoints lack requirePermission" sweeps) therefore
+  // reported that file clean without ever reading it. This guards the class, not
+  // the one file — and it earned that scope immediately: written to cover
+  // server/src, it caught two more NUL-carrying sources the audit's own greps had
+  // silently skipped (domain/researchGraph.ts and client/src/lib/dealSearch.ts).
+  // So it walks the whole repo, both packages.
+  it("keeps every source free of NUL bytes so grep-based scanning sees them", async () => {
+    const { readFileSync, readdirSync, statSync } = await import("node:fs");
+    const { join, dirname } = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+
+    // server/src/routes/ -> repo root
+    const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+    const SKIP = new Set(["node_modules", ".git", "dist", "build", "coverage", ".next"]);
+    const SCAN = /\.(ts|tsx|js|jsx|json|prisma|css|md)$/;
+
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((entry) => {
+        if (SKIP.has(entry)) return [];
+        const full = join(dir, entry);
+        return statSync(full).isDirectory() ? walk(full) : SCAN.test(full) ? [full] : [];
+      });
+
+    const offenders = walk(repoRoot)
+      .filter((f) => readFileSync(f).includes(0x00))
+      .map((f) => f.slice(repoRoot.length + 1));
+    expect(offenders).toEqual([]);
+  });
+});

@@ -656,7 +656,15 @@ model DealSeller {
 
   // Additional
   internalNotes               String?
-  taxId                       String? // sensitive — API only returns it with viewSellerTaxId
+  // RETIRED (2026-07). The `viewSellerTaxId` permission this column's old comment
+  // referenced no longer exists — it is a no-op entry in PERMISSION_MIGRATIONS.
+  // The column is now orphaned in both directions: `sellerSchema` doesn't accept
+  // it (Zod strips it, so no write path) and `serializeSeller` doesn't emit it
+  // (no read path). It is retained ONLY because dropping it destroys any tax IDs
+  // captured before the retirement. Data-minimization follow-up: confirm no rows
+  // are populated, then drop the column in its own migration — do NOT re-expose
+  // it through the API without a fresh gate.
+  taxId                       String?
   preferredCommunicationNotes String?
 
   assignedTeamMemberId String?
