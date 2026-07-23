@@ -15,8 +15,13 @@
  * which is the whole point of moving off `db push` before the data matters.
  */
 import { spawnSync } from "node:child_process";
+import { ensureDirectUrl } from "./dbEnv.mjs";
 
 const BASELINE = "0_init";
+
+// schema.prisma declares `directUrl = env("DIRECT_URL")` so migrations run over
+// the un-pooled endpoint while the app itself runs on the pooled one.
+ensureDirectUrl();
 
 // Migrations that run entirely inside one transaction, so a failure rolls the
 // whole thing back and leaves the schema untouched. If `migrate deploy` reports
