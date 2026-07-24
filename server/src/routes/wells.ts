@@ -353,6 +353,9 @@ wellsRouter.get(
   asyncHandler(async (req: AuthedRequest, res) => {
     const { q } = z.object({ q: z.string().trim().min(2).max(120) }).parse(req.query);
     const rows = await prisma.$queryRawUnsafe<(RrcWellRow & { has_prod: boolean })[]>(
+      // Every indexed well identifier is searchable: API (8/10 digit), RRC
+      // lease number, well name/number, operator, lease name, county, survey,
+      // abstract and field — one box finds a well by whatever the user has.
       `SELECT w.fid, w.api8, w.api10, w.well_no, w.lease_no, w.lease_name, w.operator, w.county,
               w.district, w.oil_gas, w.type, w.status,
               EXISTS (SELECT 1 FROM rrc.production p
@@ -361,6 +364,10 @@ wellsRouter.get(
          FROM rrc.wells w
         WHERE w.api8 LIKE '%' || $1 || '%' OR w.api10 LIKE '%' || $1 || '%'
            OR w.lease_name ILIKE '%' || $1 || '%' OR w.operator ILIKE '%' || $1 || '%'
+           OR w.lease_no LIKE '%' || $1 || '%' OR w.well_no ILIKE $1
+           OR w.county ILIKE $1 OR w.survey ILIKE '%' || $1 || '%'
+           OR w.abstract ILIKE $1 OR w.abstract_id ILIKE $1
+           OR w.field_name ILIKE '%' || $1 || '%'
         ORDER BY has_prod DESC, similarity(coalesce(w.lease_name, ''), $1) DESC, w.county
         LIMIT 15`,
       q,
@@ -452,6 +459,157 @@ wellsRouter.post(
     const summaries = await productionSummaries(orgId(req), [well.id]);
     const fresh = await prisma.researchWell.findUniqueOrThrow({ where: { id: well.id } });
     res.json({ well: serializeWell(fresh, summaries.get(well.id)), monthsSynced: synced, permits });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Well dossier — EVERYTHING the centralized database knows about one well,
+// aggregated in a single call. The Well Analysis page renders this whether the
+// well was opened from the map or found via search, so both workflows show the
+// identical, complete record with no extra imports: identity, status/dates,
+// formations, field/reservoir, lease + lease production, operator history
+// (current + at-permit-time + per-production-era), every permit, every
+// completion filing, wellbore/lateral geometry, nearby wells and offset
+// operators, plus deep links to the RRC's own viewers.
+// ---------------------------------------------------------------------------
+
+wellsRouter.get(
+  "/:id/dossier",
+  requirePermission("viewWellAnalysis"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const well = await prisma.researchWell.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
+    if (!well) { res.status(404).json({ error: "Well not found" }); return; }
+
+    // Resolve the well into the centralized rrc dataset by fid (exact) or API.
+    const fid = well.source === "rrc" && well.sourceRef ? Number(well.sourceRef) : null;
+    const apiDigits = (well.apiNumber ?? "").replace(/\D/g, "");
+    const api8Guess = apiDigits.replace(/^42/, "").slice(0, 8);
+    const rrcRows = fid || api8Guess.length === 8
+      ? await prisma.$queryRawUnsafe<(RrcWellRow & { operator_no: string | null; field_no: string | null; well_id: string | null; symbol: string | null; category: string | null; plug_date: Date | null; cum_oil: number | null; cum_gas: number | null; last_prod: string | null })[]>(
+          `SELECT fid, api8, api10, well_no, well_id, symbol, type, status, category, county, district,
+                  lease_no, lease_name, operator, operator_no, field_no, field_name, oil_gas, formations,
+                  spud_date, plug_date, cum_oil, cum_gas, last_prod, abstract, survey,
+                  ST_X(geom) AS lon, ST_Y(geom) AS lat
+             FROM rrc.wells WHERE ${fid ? "fid = $1" : "(api8 = $1 OR api10 = '42' || $1)"} LIMIT 1`,
+          fid ?? api8Guess)
+      : [];
+    const rw = rrcRows[0];
+    const api8 = rw?.api8 ?? (api8Guess.length === 8 ? api8Guess : null);
+
+    // Everything below is guarded: each section loads only when its key exists,
+    // and a missing section is simply empty in the response.
+    const og = rw?.oil_gas === "Gas" ? "G" : "O";
+    const [wellbores, permits, completions, prodOperators, leaseStats, leaseWells, fieldRows, nearby] = await Promise.all([
+      rw ? prisma.$queryRawUnsafe<{ fid: number; wellbore_type: string | null; length_ft: number }[]>(
+        `SELECT fid, wellbore_type, ST_Length(geom::geography) * 3.28084 AS length_ft
+           FROM rrc.wellbores WHERE surface_fid = $1 ORDER BY length_ft DESC`, rw.fid) : [],
+      api8 ? prisma.$queryRawUnsafe<{ statusNo: string; permitDate: Date | null; operator: string | null; operatorNo: string | null; leaseName: string | null; wellNo: string | null; district: string | null }[]>(
+        `SELECT status_no AS "statusNo", permit_date AS "permitDate", operator, operator_no AS "operatorNo",
+                lease_name AS "leaseName", well_no AS "wellNo", district
+           FROM rrc.permits WHERE api8 = $1 ORDER BY permit_date DESC NULLS LAST LIMIT 100`, api8) : [],
+      api8 ? prisma.$queryRawUnsafe<{ trackingNo: string; filingType: string | null; status: string | null; filedDate: Date | null; completionDate: Date | null; operatorNo: string | null; fieldName: string | null; wellName: string | null; wellNo: string | null; survey: string | null }[]>(
+        `SELECT tracking_no AS "trackingNo", filing_type AS "filingType", status, filed_date AS "filedDate",
+                completion_date AS "completionDate", operator_no AS "operatorNo", field_name AS "fieldName",
+                well_name AS "wellName", well_no AS "wellNo", survey
+           FROM rrc.completions WHERE api8 = $1
+          ORDER BY completion_date DESC NULLS LAST, filed_date DESC NULLS LAST LIMIT 100`, api8) : [],
+      rw?.lease_no && rw.district ? prisma.$queryRawUnsafe<{ operator_no: string; name: string | null; first_ym: number; last_ym: number }[]>(
+        `SELECT p.operator_no, o.name, min(p.cycle_ym)::int AS first_ym, max(p.cycle_ym)::int AS last_ym
+           FROM rrc.production p LEFT JOIN rrc.operators o ON o.op_no = p.operator_no
+          WHERE p.og_code = $1 AND p.district = $2 AND p.lease_no = $3 AND p.operator_no <> ''
+          GROUP BY p.operator_no, o.name ORDER BY min(p.cycle_ym)`, og, rw.district, rw.lease_no) : [],
+      rw?.lease_no && rw.district ? prisma.$queryRawUnsafe<{ months: bigint; first_ym: number | null; last_ym: number | null; oil: number | null; gas: number | null }[]>(
+        `SELECT count(DISTINCT cycle_ym)::bigint AS months, min(cycle_ym)::int AS first_ym, max(cycle_ym)::int AS last_ym,
+                sum(oil_bbl + cond_bbl)::float AS oil, sum(gas_mcf + csgd_mcf)::float AS gas
+           FROM rrc.production WHERE og_code = $1 AND district = $2 AND lease_no = $3`, og, rw.district, rw.lease_no) : [],
+      rw?.lease_no && rw.district ? prisma.$queryRawUnsafe<{ n: bigint }[]>(
+        `SELECT count(*)::bigint AS n FROM rrc.wells WHERE district = $1 AND lease_no = $2`, rw.district, rw.lease_no) : [],
+      rw?.field_no ? prisma.$queryRawUnsafe<{ district: string; field_no: string; name: string; type: string | null }[]>(
+        `SELECT district, field_no, name, type FROM rrc.fields WHERE field_no = $1 LIMIT 5`, rw.field_no) : [],
+      rw ? prisma.$queryRawUnsafe<{ fid: number; api: string | null; name: string | null; well_no: string | null; operator: string | null; status: string | null; type: string | null; distance_m: number }[]>(
+        `SELECT w2.fid, coalesce(w2.api10, w2.api8) AS api, w2.lease_name AS name, w2.well_no, w2.operator,
+                w2.status, w2.type, ST_Distance(w2.geom::geography, w1.geom::geography) AS distance_m
+           FROM rrc.wells w1 JOIN rrc.wells w2
+             ON w2.fid <> w1.fid AND ST_DWithin(w2.geom::geography, w1.geom::geography, 1609)
+          WHERE w1.fid = $1 ORDER BY distance_m LIMIT 12`, rw.fid) : [],
+    ]);
+
+    // Operator history merges the three sources the data actually has:
+    // production eras (authoritative months), permit-time operators (historic),
+    // and the current operator on the well record.
+    const operatorHistory = [
+      ...prodOperators.map((o) => ({
+        operatorNo: o.operator_no, name: o.name, source: "production" as const,
+        from: ymStr(o.first_ym), to: ymStr(o.last_ym),
+      })),
+      ...permits.filter((p) => p.operator).map((p) => ({
+        operatorNo: p.operatorNo, name: p.operator, source: "permit" as const,
+        from: p.permitDate ? p.permitDate.toISOString().slice(0, 10) : null, to: null,
+      })),
+    ];
+
+    const stats = leaseStats[0];
+    res.json({
+      wellId: well.id,
+      linked: Boolean(rw),
+      identity: rw ? {
+        api8: rw.api8, api10: rw.api10, wellNo: rw.well_no, rrcWellId: rw.well_id, fid: rw.fid,
+        name: `${rw.lease_name ?? well.name}${rw.well_no ? ` #${rw.well_no}` : ""}`,
+        county: rw.county, district: rw.district, state: "TX",
+        abstract: rw.abstract, survey: rw.survey, latitude: rw.lat, longitude: rw.lon,
+      } : {
+        api8, api10: well.apiNumber, wellNo: null, rrcWellId: null, fid: null,
+        name: well.name, county: well.county, district: null, state: well.state,
+        abstract: well.abstractId, survey: well.survey, latitude: well.latitude, longitude: well.longitude,
+      },
+      status: {
+        symbol: rw?.symbol ?? null, type: rw?.type ?? well.wellType, status: rw?.status ?? well.status,
+        category: rw?.category ?? null, oilGas: rw?.oil_gas ?? null,
+        spudDate: (rw?.spud_date ?? well.spudDate)?.toISOString().slice(0, 10) ?? null,
+        plugDate: rw?.plug_date?.toISOString().slice(0, 10) ?? null,
+        lastProd: rw?.last_prod ?? null,
+      },
+      formations: rw?.formations ?? (well.formation ? [well.formation] : []),
+      field: {
+        fieldNo: rw?.field_no ?? null, fieldName: rw?.field_name ?? well.fieldName,
+        reservoirs: fieldRows.map((f) => ({ district: f.district, fieldNo: f.field_no, name: f.name, type: f.type })),
+      },
+      lease: rw?.lease_no ? {
+        leaseNo: rw.lease_no, leaseName: rw.lease_name, district: rw.district, ogCode: og,
+        wellsOnLease: Number(leaseWells[0]?.n ?? 0n),
+        production: stats && stats.months ? {
+          months: Number(stats.months), firstMonth: stats.first_ym ? ymStr(stats.first_ym) : null,
+          lastMonth: stats.last_ym ? ymStr(stats.last_ym) : null,
+          cumOilBbl: stats.oil ?? 0, cumGasMcf: stats.gas ?? 0,
+        } : null,
+      } : null,
+      operators: {
+        current: { operatorNo: rw?.operator_no ?? null, name: rw?.operator ?? well.operator },
+        history: operatorHistory,
+      },
+      permits: permits.map((p) => ({ ...p, permitDate: p.permitDate?.toISOString().slice(0, 10) ?? null })),
+      completions: completions.map((c) => ({
+        ...c,
+        filedDate: c.filedDate?.toISOString().slice(0, 10) ?? null,
+        completionDate: c.completionDate?.toISOString().slice(0, 10) ?? null,
+      })),
+      wellbore: {
+        laterals: wellbores.map((b) => ({ fid: b.fid, type: b.wellbore_type, lengthFt: Math.round(b.length_ft) })),
+        totalLateralFt: Math.round(wellbores.reduce((s, b) => s + b.length_ft, 0)),
+      },
+      cumulative: rw && (rw.cum_oil != null || rw.cum_gas != null)
+        ? { oilBbl: rw.cum_oil, gasMcf: rw.cum_gas } : null,
+      nearby: nearby.map((n) => ({
+        fid: n.fid, api: n.api, name: `${n.name ?? "Well"}${n.well_no ? ` #${n.well_no}` : ""}`,
+        operator: n.operator, status: n.status, type: n.type, distanceFt: Math.round(n.distance_m * 3.28084),
+      })),
+      offsetOperators: [...new Set(nearby.map((n) => n.operator).filter((o): o is string => Boolean(o) && o !== rw?.operator))],
+      links: api8 ? {
+        rrcWellboreQuery: `https://webapps.rrc.state.tx.us/EWA/wellboreQueryAction.do?searchArgs.apiNoHndlr.inputValue=${api8}&methodToCall=search`,
+        rrcGisViewer: `https://gis.rrc.texas.gov/GISViewer/?api=${api8}`,
+        rrcDrillingPermits: `https://webapps.rrc.state.tx.us/DP/publicSearchAction.do?searchArgs.apiNoHndlr.inputValue=${api8}&methodToCall=search`,
+      } : null,
+    });
   }),
 );
 
