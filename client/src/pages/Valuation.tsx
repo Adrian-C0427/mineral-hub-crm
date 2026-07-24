@@ -11,10 +11,13 @@ import { money, num, prettyEnum, fmtDate, fmtDateTime, fmtDateLocal } from "../l
 import { monthLabel, chartTooltip } from "../lib/charts";
 
 /**
- * Well Production Analysis & Valuation — an intentionally launched research
- * tool (never triggered from the map): pick wells, set assumptions, run the
- * decline-curve + economics engine, review a report-grade result set, save and
- * compare analyses, and export a PDF.
+ * Well Production Analysis & Valuation — the single comprehensive view of
+ * everything the centralized well database knows about a well. Launch it from
+ * the map ("Open in Well Analysis" auto-loads AND auto-runs the analysis) or
+ * search here by any identifier (API, RRC lease no, well/lease name, operator,
+ * county, survey, abstract…). Either path lands on the same fully-populated
+ * record: the dossier (permits, completions, operators, lease, wellbore,
+ * offsets) plus the decline-curve + economics engine over live production.
  */
 
 // ---------------------------------------------------------------------------
@@ -175,8 +178,10 @@ export function Valuation() {
 
   // Deep-link from the map's well panel ("Open in Well Analysis"):
   // ?fid=<rrc well id>&well=<API#>. The well is linked into the centralized
-  // dataset and its production is read live from rrc.production, so the user
-  // lands ready to run with the full history — no manual search or re-import.
+  // dataset, its production is read live from rrc.production, and the analysis
+  // RUNS IMMEDIATELY with default assumptions — the user lands on a finished,
+  // fully-populated result with no search, import or extra click.
+  const [autoRunPending, setAutoRunPending] = useState(false);
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const fid = params.get("fid");
@@ -187,18 +192,28 @@ export function Valuation() {
         // fid is exact — upsert-link the rrc well so analyze reads it live.
         if (fid) {
           const imported = await api.post<{ well: WellRow }>(`/wells/import-rrc`, { fid: Number(fid) });
-          setSelected([imported.well]); setPageTab("workspace"); return;
+          setSelected([imported.well]); setPageTab("workspace"); setAutoRunPending(true); return;
         }
         const found = await api.get<Paged<WellRow>>(`/wells?q=${encodeURIComponent(w!)}&pageSize=1`);
-        if (found.rows[0]?.production?.months) { setSelected([found.rows[0]]); setPageTab("workspace"); return; }
+        if (found.rows[0]?.production?.months) { setSelected([found.rows[0]]); setPageTab("workspace"); setAutoRunPending(true); return; }
         const imported = await api.post<{ well: WellRow }>(`/wells/import-rrc`, { api: w });
         setSelected([imported.well]);
         setPageTab("workspace");
+        setAutoRunPending(true);
       } catch {
         // Not in the org list or the RRC data — leave the workspace open.
       }
     })();
   }, []);
+
+  // Fire the deep-linked analysis as soon as the well and the default
+  // assumptions are both in hand (they load concurrently).
+  useEffect(() => {
+    if (!autoRunPending || !assumptions || selected.length === 0) return;
+    setAutoRunPending(false);
+    void runAnalysis(selected, assumptions);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoRunPending, assumptions, selected]);
 
   const runAnalysis = useCallback(async (wells: WellRow[], a: Assumptions) => {
     setRunning(true); setError("");
@@ -247,7 +262,7 @@ export function Valuation() {
       <div className="page-header">
         <div>
           <h2 style={{ margin: 0 }}>Well Analysis &amp; Valuation</h2>
-          <span className="muted">Production forecasting, decline curves and acquisition economics — run on demand, never from the map.</span>
+          <span className="muted">Everything known about a well in one place — full RRC record, production forecasting, decline curves and acquisition economics.</span>
         </div>
         <div className="row">
           {analysis && (
@@ -340,7 +355,7 @@ function Workspace(props: {
         {setupOpen && (
           <div className="va-body">
             <WellPicker selected={selected} setSelected={setSelected} />
-            <SelectedWellPermits wells={selected} />
+            <WellDossier wells={selected} />
             <AssumptionsForm a={assumptions} onChange={setAssumptions} />
             <div className="row" style={{ marginTop: 14 }}>
               <button className="primary" disabled={running || selected.length === 0} onClick={onRun}>
@@ -439,7 +454,7 @@ function WellPicker({ selected, setSelected }: { selected: WellRow[]; setSelecte
           <input
             className="msel-input"
             value={q}
-            placeholder={selected.length === 0 ? "Search by well/lease name, API, operator, county, formation, status…" : ""}
+            placeholder={selected.length === 0 ? "Search by API, RRC lease no, well/lease name, operator, county, survey, abstract…" : ""}
             onChange={(e) => { setQ(e.target.value); setOpen(true); }}
             onFocus={() => setOpen(true)}
           />
@@ -482,32 +497,195 @@ function WellPicker({ selected, setSelected }: { selected: WellRow[]; setSelecte
   );
 }
 
-// --- Permit history for the selected wells (live from rrc.permits) ----------
+// --- Well dossier: the full centralized record for each selected well --------
 
-interface PermitRow { statusNo: string; permitDate: string | null; operator: string | null; leaseName: string | null; wellNo: string | null }
+interface Dossier {
+  wellId: string;
+  linked: boolean;
+  identity: { api8: string | null; api10: string | null; wellNo: string | null; rrcWellId: string | null; fid: number | null; name: string; county: string; district: string | null; state: string; abstract: string | null; survey: string | null; latitude: number | null; longitude: number | null };
+  status: { symbol: string | null; type: string | null; status: string | null; category: string | null; oilGas: string | null; spudDate: string | null; plugDate: string | null; lastProd: string | null };
+  formations: string[];
+  field: { fieldNo: string | null; fieldName: string | null; reservoirs: { district: string; fieldNo: string; name: string; type: string | null }[] };
+  lease: { leaseNo: string; leaseName: string | null; district: string | null; ogCode: string; wellsOnLease: number; production: { months: number; firstMonth: string | null; lastMonth: string | null; cumOilBbl: number; cumGasMcf: number } | null } | null;
+  operators: { current: { operatorNo: string | null; name: string | null }; history: { operatorNo: string | null; name: string | null; source: "production" | "permit"; from: string | null; to: string | null }[] };
+  permits: { statusNo: string; permitDate: string | null; operator: string | null; operatorNo: string | null; leaseName: string | null; wellNo: string | null; district: string | null }[];
+  completions: { trackingNo: string; filingType: string | null; status: string | null; filedDate: string | null; completionDate: string | null; operatorNo: string | null; fieldName: string | null; wellName: string | null; wellNo: string | null; survey: string | null }[];
+  wellbore: { laterals: { fid: number; type: string | null; lengthFt: number }[]; totalLateralFt: number };
+  cumulative: { oilBbl: number | null; gasMcf: number | null } | null;
+  nearby: { fid: number; api: string | null; name: string; operator: string | null; status: string | null; type: string | null; distanceFt: number }[];
+  offsetOperators: string[];
+  links: { rrcWellboreQuery: string; rrcGisViewer: string; rrcDrillingPermits: string } | null;
+}
 
-function SelectedWellPermits({ wells }: { wells: WellRow[] }) {
-  const [permits, setPermits] = useState<{ well: string; rows: PermitRow[] }[]>([]);
+function Kv({ label, value }: { label: string; value: React.ReactNode }) {
+  return (value == null || value === "" || value === "—") ? null : (
+    <div className="dossier-kv"><span className="muted">{label}</span><span>{value}</span></div>
+  );
+}
+
+function DossierCard({ well, open, onToggle }: { well: WellRow; open: boolean; onToggle: () => void }) {
+  const [d, setD] = useState<Dossier | null>(null);
+  const [loading, setLoading] = useState(false);
   useEffect(() => {
-    let live = true;
-    // Only worth fetching for a small selection — permit context is per-well.
-    const targets = wells.filter((w) => w.apiNumber).slice(0, 3);
-    if (!targets.length) { setPermits([]); return; }
-    Promise.all(targets.map((w) => api.get<PermitRow[]>(`/wells/${w.id}/permits`).then((rows) => ({ well: w.name, rows })).catch(() => ({ well: w.name, rows: [] as PermitRow[] }))))
-      .then((all) => { if (live) setPermits(all.filter((p) => p.rows.length)); });
-    return () => { live = false; };
+    if (!open || d || loading) return;
+    setLoading(true);
+    api.get<Dossier>(`/wells/${well.id}/dossier`).then(setD).catch(() => {}).finally(() => setLoading(false));
+  }, [open, d, loading, well.id]);
+
+  return (
+    <div className="dossier-card">
+      <div className="dossier-head" onClick={onToggle}>
+        <strong>{well.name}</strong>
+        <span className="muted">
+          {well.apiNumber && <>API {well.apiNumber} · </>}{well.county} Co, {well.state}
+        </span>
+        <span className={`va-chev ${open ? "" : "down"}`} style={{ marginLeft: "auto" }}>⌃</span>
+      </div>
+      {open && (
+        <div className="dossier-body">
+          {loading && <Spinner label="Loading full well record…" />}
+          {!loading && d && (
+            <>
+              <div className="dossier-grid">
+                <Kv label="API (10)" value={d.identity.api10} />
+                <Kv label="API (8)" value={d.identity.api8} />
+                <Kv label="RRC lease no" value={d.lease?.leaseNo} />
+                <Kv label="Well no" value={d.identity.wellNo} />
+                <Kv label="District" value={d.identity.district} />
+                <Kv label="County" value={`${d.identity.county}, ${d.identity.state}`} />
+                <Kv label="Abstract" value={d.identity.abstract} />
+                <Kv label="Survey" value={d.identity.survey} />
+                <Kv label="Surface location" value={d.identity.latitude != null ? `${d.identity.latitude.toFixed(5)}, ${d.identity.longitude?.toFixed(5)}` : null} />
+                <Kv label="Well type" value={[d.status.oilGas, d.status.type].filter(Boolean).join(" · ") || null} />
+                <Kv label="Status" value={d.status.status} />
+                <Kv label="Spud date" value={d.status.spudDate && fmtDate(d.status.spudDate)} />
+                <Kv label="Plug date" value={d.status.plugDate && fmtDate(d.status.plugDate)} />
+                <Kv label="Last production" value={d.status.lastProd} />
+                <Kv label="Field" value={d.field.fieldName && `${d.field.fieldName}${d.field.fieldNo ? ` (#${d.field.fieldNo})` : ""}`} />
+                <Kv label="Reservoir(s)" value={d.field.reservoirs.length ? d.field.reservoirs.map((r) => `${r.name}${r.type ? ` (${r.type})` : ""}`).join("; ") : null} />
+                <Kv label="Formations" value={d.formations.length ? d.formations.join(", ") : null} />
+                <Kv label="Operator (current)" value={d.operators.current.name && `${d.operators.current.name}${d.operators.current.operatorNo ? ` · P-5 #${d.operators.current.operatorNo}` : ""}`} />
+                <Kv label="Wellbore" value={d.wellbore.laterals.length ? `${d.wellbore.laterals.length} lateral${d.wellbore.laterals.length > 1 ? "s" : ""} · ${fmtVol(d.wellbore.totalLateralFt)} ft mapped` : null} />
+                <Kv label="RRC cumulative" value={d.cumulative ? `${fmtVol(d.cumulative.oilBbl)} bbl oil · ${fmtVol(d.cumulative.gasMcf)} mcf gas` : null} />
+              </div>
+
+              {d.lease && (
+                <div className="dossier-section">
+                  <div className="va-microlabel">Lease</div>
+                  <span style={{ fontSize: 13 }}>
+                    {d.lease.leaseName ?? "Lease"} · #{d.lease.leaseNo} ({d.lease.ogCode === "G" ? "gas" : "oil"}, District {d.lease.district}) · {d.lease.wellsOnLease} well{d.lease.wellsOnLease === 1 ? "" : "s"} on lease
+                    {d.lease.production && <> · {d.lease.production.months} months of production ({d.lease.production.firstMonth} → {d.lease.production.lastMonth}) · cum {fmtVol(d.lease.production.cumOilBbl)} bbl / {fmtVol(d.lease.production.cumGasMcf)} mcf</>}
+                  </span>
+                </div>
+              )}
+
+              {d.operators.history.length > 0 && (
+                <div className="dossier-section">
+                  <div className="va-microlabel">Operator history</div>
+                  <div className="dossier-table-wrap">
+                    <table className="dossier-table">
+                      <thead><tr><th>Operator</th><th>P-5 #</th><th>Source</th><th>From</th><th>To</th></tr></thead>
+                      <tbody>
+                        {d.operators.history.map((o, i) => (
+                          <tr key={i}><td>{o.name ?? "—"}</td><td>{o.operatorNo ?? "—"}</td><td>{o.source === "production" ? "Production era" : "At permit"}</td><td>{o.from ?? "—"}</td><td>{o.to ?? (o.source === "production" ? "—" : "")}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {d.permits.length > 0 && (
+                <div className="dossier-section">
+                  <div className="va-microlabel">Drilling permits ({d.permits.length})</div>
+                  <div className="dossier-table-wrap">
+                    <table className="dossier-table">
+                      <thead><tr><th>Date</th><th>Permit #</th><th>Operator</th><th>Lease</th><th>Well</th></tr></thead>
+                      <tbody>
+                        {d.permits.map((p) => (
+                          <tr key={p.statusNo}><td>{p.permitDate ? fmtDate(p.permitDate) : "—"}</td><td>{p.statusNo}</td><td>{p.operator ?? "—"}</td><td>{p.leaseName ?? "—"}</td><td>{p.wellNo ?? "—"}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {d.completions.length > 0 && (
+                <div className="dossier-section">
+                  <div className="va-microlabel">Completion filings ({d.completions.length})</div>
+                  <div className="dossier-table-wrap">
+                    <table className="dossier-table">
+                      <thead><tr><th>Completed</th><th>Filed</th><th>Form</th><th>Status</th><th>Field</th><th>Survey</th></tr></thead>
+                      <tbody>
+                        {d.completions.map((c) => (
+                          <tr key={c.trackingNo}><td>{c.completionDate ? fmtDate(c.completionDate) : "—"}</td><td>{c.filedDate ? fmtDate(c.filedDate) : "—"}</td><td>{c.filingType ?? "—"}</td><td>{c.status ?? "—"}</td><td>{c.fieldName ?? "—"}</td><td>{c.survey ?? "—"}</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {d.nearby.length > 0 && (
+                <div className="dossier-section">
+                  <div className="va-microlabel">Nearby wells (within 1 mile)</div>
+                  <div className="dossier-table-wrap">
+                    <table className="dossier-table">
+                      <thead><tr><th>Well</th><th>API</th><th>Operator</th><th>Status</th><th>Distance</th></tr></thead>
+                      <tbody>
+                        {d.nearby.map((n) => (
+                          <tr key={n.fid}><td>{n.name}</td><td>{n.api ?? "—"}</td><td>{n.operator ?? "—"}</td><td>{n.status ?? "—"}</td><td>{fmtVol(n.distanceFt)} ft</td></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {d.offsetOperators.length > 0 && (
+                    <div style={{ fontSize: 13, marginTop: 4 }}><span className="muted">Offset operators: </span>{d.offsetOperators.join(", ")}</div>
+                  )}
+                </div>
+              )}
+
+              {d.links && (
+                <div className="dossier-section" style={{ fontSize: 13 }}>
+                  <span className="muted">Railroad Commission: </span>
+                  <a href={d.links.rrcWellboreQuery} target="_blank" rel="noreferrer">Wellbore query</a>
+                  {" · "}<a href={d.links.rrcDrillingPermits} target="_blank" rel="noreferrer">Drilling permits</a>
+                  {" · "}<a href={d.links.rrcGisViewer} target="_blank" rel="noreferrer">GIS viewer</a>
+                </div>
+              )}
+
+              {!d.linked && (
+                <div className="muted" style={{ fontSize: 12 }}>
+                  This well isn't linked to the centralized RRC dataset (no matching API) — showing the attributes on file.
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One card per selected well with the complete centralized record —
+ * identity, status, lease, operators, permits, completions, wellbore,
+ * nearby/offset wells — loaded automatically, no separate import.
+ */
+function WellDossier({ wells }: { wells: WellRow[] }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  useEffect(() => {
+    if (wells.length === 1) setOpenId(wells[0].id);
+    else if (openId && !wells.some((w) => w.id === openId)) setOpenId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wells]);
-  if (!permits.length) return null;
+  if (!wells.length) return null;
   return (
     <div style={{ margin: "0 0 14px" }}>
-      <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 4 }}>Permit history (RRC W-1)</div>
-      {permits.map((p) => (
-        <div key={p.well} style={{ fontSize: 13, marginBottom: 4 }}>
-          <strong>{p.well}</strong>
-          {p.rows.slice(0, 4).map((r) => (
-            <span key={r.statusNo} className="muted"> · {r.permitDate ? fmtDate(r.permitDate) : "—"} {r.operator ?? ""} (#{r.statusNo})</span>
-          ))}
-        </div>
+      <div className="va-microlabel">Well record — everything on file in the centralized database</div>
+      {wells.map((w) => (
+        <DossierCard key={w.id} well={w} open={openId === w.id} onToggle={() => setOpenId(openId === w.id ? null : w.id)} />
       ))}
     </div>
   );
