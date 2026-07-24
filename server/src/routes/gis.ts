@@ -144,6 +144,20 @@ gisTilesRouter.get(
 export const gisRouter = Router();
 gisRouter.use(requireAuth, requireOrg, requirePermission("viewMap"));
 
+// Same exposure the tile route above is capped for, one layer in: /suggest runs
+// trigram matching across gis.abstracts and rrc.wells and aggregates operator
+// and field extents, and /options and /extent scan on filter values — all of it
+// behind a VIEW permission, so a read-only member could otherwise loop any of
+// them and saturate the pool. Sized like the wells router: search fires per
+// keystroke behind a debounce, so the ceiling has to clear real typing.
+gisRouter.use(rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many map requests. Wait a moment and try again." },
+}));
+
 const searchSchema = z.object({ q: z.string().trim().min(1).max(120) });
 
 /**

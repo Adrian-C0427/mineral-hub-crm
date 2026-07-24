@@ -20,6 +20,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { prisma } from "../db.js";
+import { ensureWellSearchIndexes } from "./ensureSearchIndexes.js";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const DATA = path.join(ROOT, "tools/rrc/work12/data");
@@ -104,6 +105,10 @@ async function ddl(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS wellbores_geom_gist ON rrc.wellbores USING GIST (geom)`,
     `CREATE INDEX IF NOT EXISTS wellbores_surface_idx ON rrc.wellbores (surface_fid)`,
   ]) await prisma.$executeRawUnsafe(sql);
+  // Trigram/upper() indexes backing /wells/rrc-search and /gis/suggest. The
+  // btrees above serve none of those predicates — without these, every search
+  // seq-scans the table. See scripts/ensureSearchIndexes.ts.
+  await ensureWellSearchIndexes();
 }
 
 async function importCounty(key: string, db900: Record<string, Dbf900>): Promise<[number, number]> {

@@ -16,6 +16,7 @@
     "research:sample": "tsx src/scripts/seedResearchSample.ts",
     "wells:sample": "tsx src/scripts/seedWellsSample.ts",
     "ingest:rrc": "tsx src/ingest/run.ts",
+    "db:search-indexes": "tsx src/scripts/ensureSearchIndexes.ts",
     "test": "vitest run"
   },
   "dependencies": {

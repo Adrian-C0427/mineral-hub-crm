@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { parse } from "csv-parse/sync";
 import type { Prisma, WellStatus, WellTrajectory } from "@prisma/client";
@@ -20,6 +21,23 @@ import { MAX_CSV_CHARS } from "../config.js";
  */
 export const wellsRouter = Router();
 wellsRouter.use(requireAuth, requireOrg);
+
+// The read endpoints on this router are the most expensive queries any
+// authenticated user can trigger without a write permission: /rrc-search runs
+// trigram matching across the whole wells table, /:id/dossier fans out eight
+// queries including a lease-wide aggregation over rrc.production and a PostGIS
+// radius self-join, and /analyze runs the valuation engine. All three are
+// gated only on the VIEW permission, so a read-only member could loop any of
+// them and saturate the connection pool. The ceiling is generous — search runs
+// per keystroke behind a debounce, and a Well Analysis page load fires several
+// requests — but it bounds a scripted loop to roughly one heavy query a second.
+wellsRouter.use(rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many well analysis requests. Wait a moment and try again." },
+}));
 
 // ---------------------------------------------------------------------------
 // Month helpers ("YYYY-MM" ⇄ first-of-month UTC DateTime)
@@ -351,24 +369,54 @@ wellsRouter.get(
   "/rrc-search",
   requirePermission("viewWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { q } = z.object({ q: z.string().trim().min(2).max(120) }).parse(req.query);
+    // Three characters, not two. Every free-text predicate below is a leading
+    // wildcard, and a trigram index can only be probed once the term holds at
+    // least one full trigram — a 2-char term degrades to a full scan of the
+    // wells table no matter how it is indexed.
+    const { q } = z.object({ q: z.string().trim().min(3).max(120) }).parse(req.query);
     const rows = await prisma.$queryRawUnsafe<(RrcWellRow & { has_prod: boolean })[]>(
       // Every indexed well identifier is searchable: API (8/10 digit), RRC
       // lease number, well name/number, operator, lease name, county, survey,
       // abstract and field — one box finds a well by whatever the user has.
-      `SELECT w.fid, w.api8, w.api10, w.well_no, w.lease_no, w.lease_name, w.operator, w.county,
-              w.district, w.oil_gas, w.type, w.status,
+      //
+      // Two stages on purpose. `has_prod` is a correlated lookup into
+      // rrc.production, the largest table in the schema; ranking by it directly
+      // forced that lookup for EVERY row the WHERE matched, since a sort must
+      // see all of them before it can take the top 15. Narrowing to 60
+      // candidates by text score first caps the production probes at 60 per
+      // request regardless of how broad the term is.
+      //
+      // Ranking note: a producing well outside the top 60 by name similarity no
+      // longer outranks a closer non-producing name. The pool is deep enough
+      // that this is invisible for real identifier searches.
+      //
+      // Predicate shapes are load-bearing — they must match the indexes in
+      // scripts/ensureSearchIndexes.ts. The `%term%` columns ride trigram GIN
+      // indexes; the case-insensitive exact columns are written upper(col) =
+      // upper($1) so they ride the upper() btrees. Writing those as `col ILIKE
+      // $1` instead (the previous form) matches identical rows but is
+      // unindexable, which is what made this endpoint a seq-scan amplifier.
+      `WITH candidates AS (
+         SELECT w.fid, w.api8, w.api10, w.well_no, w.lease_no, w.lease_name, w.operator, w.county,
+                w.district, w.oil_gas, w.type, w.status,
+                similarity(coalesce(w.lease_name, ''), $1) AS score
+           FROM rrc.wells w
+          WHERE w.api8 LIKE '%' || $1 || '%' OR w.api10 LIKE '%' || $1 || '%'
+             OR w.lease_name ILIKE '%' || $1 || '%' OR w.operator ILIKE '%' || $1 || '%'
+             OR w.lease_no LIKE '%' || $1 || '%' OR w.survey ILIKE '%' || $1 || '%'
+             OR w.field_name ILIKE '%' || $1 || '%'
+             OR upper(w.well_no) = upper($1) OR upper(w.county) = upper($1)
+             OR upper(w.abstract) = upper($1) OR upper(w.abstract_id) = upper($1)
+          ORDER BY score DESC, w.county
+          LIMIT 60
+       )
+       SELECT c.fid, c.api8, c.api10, c.well_no, c.lease_no, c.lease_name, c.operator, c.county,
+              c.district, c.oil_gas, c.type, c.status,
               EXISTS (SELECT 1 FROM rrc.production p
-                       WHERE p.lease_no = w.lease_no AND p.district = w.district
-                         AND p.og_code = CASE WHEN w.oil_gas = 'Gas' THEN 'G' ELSE 'O' END) AS has_prod
-         FROM rrc.wells w
-        WHERE w.api8 LIKE '%' || $1 || '%' OR w.api10 LIKE '%' || $1 || '%'
-           OR w.lease_name ILIKE '%' || $1 || '%' OR w.operator ILIKE '%' || $1 || '%'
-           OR w.lease_no LIKE '%' || $1 || '%' OR w.well_no ILIKE $1
-           OR w.county ILIKE $1 OR w.survey ILIKE '%' || $1 || '%'
-           OR w.abstract ILIKE $1 OR w.abstract_id ILIKE $1
-           OR w.field_name ILIKE '%' || $1 || '%'
-        ORDER BY has_prod DESC, similarity(coalesce(w.lease_name, ''), $1) DESC, w.county
+                       WHERE p.lease_no = c.lease_no AND p.district = c.district
+                         AND p.og_code = CASE WHEN c.oil_gas = 'Gas' THEN 'G' ELSE 'O' END) AS has_prod
+         FROM candidates c
+        ORDER BY has_prod DESC, c.score DESC, c.county
         LIMIT 15`,
       q,
     );
@@ -481,17 +529,24 @@ wellsRouter.get(
     if (!well) { res.status(404).json({ error: "Well not found" }); return; }
 
     // Resolve the well into the centralized rrc dataset by fid (exact) or API.
-    const fid = well.source === "rrc" && well.sourceRef ? Number(well.sourceRef) : null;
+    // Number.isFinite, not a truthiness check: a non-numeric sourceRef yields
+    // NaN, which is falsy (so the SQL below picks the api8 branch) but is NOT
+    // nullish (so `fid ?? api8Guess` would still bind NaN into a text compare
+    // and fail the query). Nothing writes a non-numeric sourceRef today —
+    // /import-rrc only ever stores String(fid) and the well schema doesn't
+    // accept the field — so this is a guard against a future writer, not a fix.
+    const fidRaw = well.source === "rrc" && well.sourceRef ? Number(well.sourceRef) : null;
+    const fid = fidRaw !== null && Number.isFinite(fidRaw) ? fidRaw : null;
     const apiDigits = (well.apiNumber ?? "").replace(/\D/g, "");
     const api8Guess = apiDigits.replace(/^42/, "").slice(0, 8);
-    const rrcRows = fid || api8Guess.length === 8
+    const rrcRows = fid !== null || api8Guess.length === 8
       ? await prisma.$queryRawUnsafe<(RrcWellRow & { operator_no: string | null; field_no: string | null; well_id: string | null; symbol: string | null; category: string | null; plug_date: Date | null; cum_oil: number | null; cum_gas: number | null; last_prod: string | null })[]>(
           `SELECT fid, api8, api10, well_no, well_id, symbol, type, status, category, county, district,
                   lease_no, lease_name, operator, operator_no, field_no, field_name, oil_gas, formations,
                   spud_date, plug_date, cum_oil, cum_gas, last_prod, abstract, survey,
                   ST_X(geom) AS lon, ST_Y(geom) AS lat
-             FROM rrc.wells WHERE ${fid ? "fid = $1" : "(api8 = $1 OR api10 = '42' || $1)"} LIMIT 1`,
-          fid ?? api8Guess)
+             FROM rrc.wells WHERE ${fid !== null ? "fid = $1" : "(api8 = $1 OR api10 = '42' || $1)"} LIMIT 1`,
+          fid !== null ? fid : api8Guess)
       : [];
     const rw = rrcRows[0];
     const api8 = rw?.api8 ?? (api8Guess.length === 8 ? api8Guess : null);
