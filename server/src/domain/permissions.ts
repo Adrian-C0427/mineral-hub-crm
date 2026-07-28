@@ -158,10 +158,54 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<OrgRole, Permission[]> = {
 };
 
 /**
- * Migration map for STORED overrides (custom role configs saved before this
- * audit). Old keys expand to the current key(s) they now correspond to, so a
- * custom role never silently loses access when a permission is split or renamed.
- * Keys absent here pass through unchanged; keys mapping to [] are dropped.
+ * Sentinel appended to a stored override to record that the row was written by
+ * the CURRENT permission matrix, and must therefore be taken at face value.
+ *
+ * Why this exists: PERMISSION_MIGRATIONS below is applied on every READ, so a
+ * permission implied by a split key could never be turned off — unchecking
+ * `manageDocuments` while `editDeals` stayed checked appeared to save, then
+ * came back on the next read, because `editDeals` re-expanded to include it.
+ * The matrix silently ignored the revocation.
+ *
+ * The two cases genuinely need different handling and are indistinguishable
+ * from the key list alone: a PRE-split row means "this org never had a say
+ * about the finer keys, so preserve their prior access", while a POST-split row
+ * means "an owner ticked exactly these boxes, so honour the empty ones too".
+ * This marker is what tells them apart. Rows written before it exists have no
+ * marker and keep migrating; any subsequent save through the matrix stamps one,
+ * so overrides heal themselves on first edit.
+ *
+ * It is not a valid Permission, so it never survives into a resolved set.
+ */
+export const OVERRIDE_LITERAL_MARKER = "__matrix_v2";
+
+/**
+ * INVARIANTS — holding the key on the left always implies the keys on the
+ * right, for defaults and for stored overrides of either vintage.
+ *
+ * Distinct from the migrations below: those are one-time historical fixups that
+ * an owner is allowed to override, whereas these are incoherent to violate. A
+ * role that can replace or delete a document must be able to open it, so
+ * `viewDocuments` is not independently revocable while `manageDocuments` is
+ * held — that is correct, not the bug described above.
+ */
+const PERMISSION_IMPLICATIONS: Partial<Record<Permission, Permission[]>> = {
+  manageDocuments: ["viewDocuments"],
+};
+
+function applyImplications(out: Set<Permission>): void {
+  for (const [key, implied] of Object.entries(PERMISSION_IMPLICATIONS) as [Permission, Permission[]][]) {
+    if (out.has(key)) for (const p of implied) out.add(p);
+  }
+}
+
+/**
+ * Migration map for LEGACY stored overrides — custom role configs saved before
+ * a permission was split or renamed. Old keys expand to the current key(s) they
+ * now correspond to, so a custom role never silently loses access.
+ *
+ * Applied ONLY to rows without OVERRIDE_LITERAL_MARKER. Obsolete keys (mapping
+ * to []) are dropped either way, since `isPermission` rejects them too.
  */
 const PERMISSION_MIGRATIONS: Record<string, Permission[]> = {
   // Removed permissions (no current equivalent).
@@ -177,19 +221,13 @@ const PERMISSION_MIGRATIONS: Record<string, Permission[]> = {
   // coarse gates implied the finer ones now broken out.
   viewDeals: ["viewDeals", "useAiFeatures"], // AI features were gated by viewDeals
   editDeals: ["editDeals", "publishOfferings", "manageDocuments", "viewDocuments"], // publish + docs were under editDeals
-  // Managing documents necessarily implies being able to read them. Unlike the
-  // splits above this is an INVARIANT, not a historical fixup: a role that can
-  // replace or delete a file must be able to open it, so viewDocuments staying
-  // implied here (and therefore not independently revocable) is correct.
-  //
-  // Note on scope: document download used to have NO permission gate at all —
-  // any authenticated org member could fetch any file in their org. Adding
-  // `viewDocuments` closes that, and every built-in role (VIEWER included) gets
-  // it by default, so nothing changes for orgs on the defaults. An org that
-  // saved a CUSTOM role holding neither editDeals nor manageDocuments does lose
-  // document access until an owner ticks the new box — which is the intended
-  // tightening, not a regression.
-  manageDocuments: ["manageDocuments", "viewDocuments"],
+  // Document download used to have NO permission gate at all — any
+  // authenticated org member could fetch any file in their org. `viewDocuments`
+  // closes that; every built-in role (VIEWER included) holds it by default, so
+  // nothing changes for orgs on the defaults, and a legacy override that could
+  // already read documents keeps doing so via the expansions here. (The
+  // manageDocuments ⇒ viewDocuments direction is an invariant and lives in
+  // PERMISSION_IMPLICATIONS instead.)
   viewResearch: ["viewResearch", "viewWellAnalysis"], // well analysis viewing was under viewResearch
   manageResearchData: ["manageResearchData", "manageWellAnalysis"], // analysis runs were under manageResearchData
   manageOrgSettings: ["manageOrgSettings", "managePortal"], // portal admin was under org settings
@@ -199,23 +237,33 @@ const isPermission = (p: string): p is Permission => (PERMISSIONS as readonly st
 
 /**
  * Merge defaults with an optional stored override for a role. OWNER short-
- * circuits to all permissions. Stored overrides are migrated forward (old keys
- * expanded/dropped per PERMISSION_MIGRATIONS) and unknown keys ignored.
+ * circuits to all permissions. Unknown keys are ignored, invariants
+ * (PERMISSION_IMPLICATIONS) always hold, and LEGACY overrides — those without
+ * OVERRIDE_LITERAL_MARKER — additionally get the split-permission expansions in
+ * PERMISSION_MIGRATIONS so they never silently lose prior access.
+ *
+ * A marked override is taken literally: an absent key means the owner
+ * deliberately unticked that box, and it stays off.
  */
 export function resolvePermissions(role: OrgRole | null | undefined, override?: string[] | null): Permission[] {
   if (role === "OWNER") return ALL;
   if (!role) return [];
   // A stored override row (even an empty one) is authoritative for that role.
   if (override) {
+    const literal = override.includes(OVERRIDE_LITERAL_MARKER);
     const out = new Set<Permission>();
     for (const key of override) {
-      const migrated = PERMISSION_MIGRATIONS[key];
+      if (key === OVERRIDE_LITERAL_MARKER) continue;
+      const migrated = literal ? undefined : PERMISSION_MIGRATIONS[key];
       if (migrated) { for (const m of migrated) out.add(m); }
       else if (isPermission(key)) out.add(key);
     }
+    applyImplications(out);
     return [...out];
   }
-  return DEFAULT_ROLE_PERMISSIONS[role] ?? DEFAULT_ROLE_PERMISSIONS.MEMBER;
+  const defaults = new Set(DEFAULT_ROLE_PERMISSIONS[role] ?? DEFAULT_ROLE_PERMISSIONS.MEMBER);
+  applyImplications(defaults);
+  return [...defaults];
 }
 
 export function isOwnerRole(role: OrgRole | null | undefined): boolean {

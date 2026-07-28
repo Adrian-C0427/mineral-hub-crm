@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   resolvePermissions, DEFAULT_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_META,
-  ASSIGNABLE_ROLES, ALL_ROLES, OWNER_ONLY_ACTIONS, isLegacyRole,
+  ASSIGNABLE_ROLES, ALL_ROLES, OWNER_ONLY_ACTIONS, OVERRIDE_LITERAL_MARKER, isLegacyRole,
 } from "./permissions.js";
 
 describe("resolvePermissions", () => {
@@ -62,6 +62,55 @@ describe("permission migration (preserve access on stored overrides)", () => {
   it("drops obsolete/owner-only keys from stored overrides", () => {
     const p = resolvePermissions("MEMBER", ["editMapData", "accessAdminSettings", "manageRoles", "viewBuyers"]);
     expect(p).toEqual(["viewBuyers"]);
+  });
+});
+
+describe("matrix-authored overrides are taken literally", () => {
+  const marked = (...keys: string[]) => [...keys, OVERRIDE_LITERAL_MARKER];
+
+  it("honours a revocation the legacy expansion used to silently undo", () => {
+    // THE BUG: the migration map is applied on every read, so `editDeals`
+    // re-expanded to include publishOfferings/manageDocuments no matter what
+    // the owner had unticked. Saving the matrix now stamps the row, and a
+    // stamped row means exactly what it says.
+    const legacy = resolvePermissions("MEMBER", ["editDeals"]);
+    expect(legacy).toEqual(expect.arrayContaining(["publishOfferings", "manageDocuments"]));
+
+    const revoked = resolvePermissions("MEMBER", marked("editDeals"));
+    expect(revoked).toEqual(["editDeals"]);
+    expect(revoked).not.toContain("publishOfferings");
+    expect(revoked).not.toContain("manageDocuments");
+  });
+
+  it("lets viewDocuments be turned off once manageDocuments is also off", () => {
+    expect(resolvePermissions("MEMBER", marked("viewDeals"))).not.toContain("viewDocuments");
+  });
+
+  it("still enforces invariants — managing documents implies reading them", () => {
+    // Not the bug: unticking `viewDocuments` while keeping `manageDocuments` is
+    // incoherent, so the invariant reasserts itself for marked rows too.
+    expect(resolvePermissions("MEMBER", marked("manageDocuments"))).toEqual(
+      expect.arrayContaining(["manageDocuments", "viewDocuments"]),
+    );
+  });
+
+  it("does not re-add AI spend to a marked viewDeals-only role", () => {
+    expect(resolvePermissions("MEMBER", marked("viewDeals"))).toEqual(["viewDeals"]);
+  });
+
+  it("never leaks the marker into a resolved permission set", () => {
+    for (const p of resolvePermissions("MEMBER", marked("viewDeals", "viewBuyers"))) {
+      expect(p).not.toBe(OVERRIDE_LITERAL_MARKER);
+    }
+  });
+
+  it("treats an empty marked override as a genuine no-permissions role", () => {
+    expect(resolvePermissions("MEMBER", marked())).toEqual([]);
+  });
+
+  it("leaves unmarked (pre-existing) rows migrating as before", () => {
+    expect(resolvePermissions("MEMBER", ["viewResearch"]))
+      .toEqual(expect.arrayContaining(["viewResearch", "viewWellAnalysis"]));
   });
 });
 
