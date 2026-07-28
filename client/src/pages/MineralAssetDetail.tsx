@@ -132,6 +132,7 @@ export function MineralAssetDetail() {
 // ---------------------------------------------------------------------------
 
 function HoldTab({ asset, canEdit, onChanged }: { asset: AssetDetail; canEdit: boolean; onChanged: () => void }) {
+  const { can } = useAuth();
   return (
     <div>
       <div className="grid-2">
@@ -152,7 +153,7 @@ function HoldTab({ asset, canEdit, onChanged }: { asset: AssetDetail; canEdit: b
         <TractSection dealId={asset.id} dealName={asset.name} canEdit={canEdit} abstractIds={asset.abstractIds} />
       </Suspense>
 
-      <DocumentsSection ownerType="deal" ownerId={asset.id} files={asset.files} folders={asset.docFolders?.length ? asset.docFolders : ASSET_DOC_FOLDERS} onChanged={onChanged} canEdit={canEdit} canDelete={canEdit} />
+      {can("viewDocuments") && <DocumentsSection ownerType="deal" ownerId={asset.id} files={asset.files} folders={asset.docFolders?.length ? asset.docFolders : ASSET_DOC_FOLDERS} onChanged={onChanged} canEdit={canEdit} canDelete={canEdit} />}
     </div>
   );
 }
@@ -474,6 +475,7 @@ function AddRevenueModal({ assetId, onClose, onSaved }: { assetId: string; onClo
 function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
   asset: AssetDetail; matches: MatchRec[] | null; users: UserLite[]; canEdit: boolean; onChanged: () => void; onSetSell: () => void;
 }) {
+  const { can } = useAuth();
   const [logBuyer, setLogBuyer] = useState<{ id: string; name: string } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showEmail, setShowEmail] = useState(false);
@@ -623,7 +625,7 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
 
       {/* Sell mode markets the asset like a deal, so it gets the Active Deal's
           default folder set (Hold keeps the asset-specific folders). */}
-      <DocumentsSection ownerType="deal" ownerId={asset.id} files={asset.files} folders={asset.docFolders?.length ? asset.docFolders : DEAL_DOC_FOLDERS} onChanged={onChanged} canEdit={canEdit} canDelete={canEdit} />
+      {can("viewDocuments") && <DocumentsSection ownerType="deal" ownerId={asset.id} files={asset.files} folders={asset.docFolders?.length ? asset.docFolders : DEAL_DOC_FOLDERS} onChanged={onChanged} canEdit={canEdit} canDelete={canEdit} />}
 
       {logBuyer && <LogContactModal dealId={asset.id} buyerId={logBuyer.id} buyerName={logBuyer.name} users={users} dealNra={asset.nra} dealNma={asset.acreageNma} onClose={() => setLogBuyer(null)} onLogged={() => { setLogBuyer(null); onChanged(); }} />}
       {showEmail && <SendDealEmailModal dealId={asset.id} dealName={asset.name} buyerIds={[...selected]} onClose={() => setShowEmail(false)} onSent={() => { setSelected(new Set()); setShowEmail(false); onChanged(); }} />}

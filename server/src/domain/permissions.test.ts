@@ -33,14 +33,26 @@ describe("resolvePermissions", () => {
       expect(p).not.toContain(k);
     }
   });
+
+  it("every role that can see a deal can read its documents by default", () => {
+    // Document download had NO permission gate before the 2026-07-28 audit, so
+    // adding `viewDocuments` must not take access away from anyone on the
+    // built-in roles — only from a role an org explicitly customized.
+    for (const role of ["ADMIN", "MANAGER", "MEMBER", "VIEWER"] as const) {
+      expect(resolvePermissions(role)).toContain("viewDocuments");
+    }
+    expect(resolvePermissions("OWNER")).toContain("viewDocuments");
+  });
 });
 
 describe("permission migration (preserve access on stored overrides)", () => {
   it("expands split permissions so prior access is preserved", () => {
     // viewDeals implied AI access before the audit.
     expect(resolvePermissions("MEMBER", ["viewDeals"])).toEqual(expect.arrayContaining(["viewDeals", "useAiFeatures"]));
-    // editDeals implied publishing + document management.
-    expect(resolvePermissions("MEMBER", ["editDeals"])).toEqual(expect.arrayContaining(["editDeals", "publishOfferings", "manageDocuments"]));
+    // editDeals implied publishing + document management (and so, reading).
+    expect(resolvePermissions("MEMBER", ["editDeals"])).toEqual(expect.arrayContaining(["editDeals", "publishOfferings", "manageDocuments", "viewDocuments"]));
+    // Managing documents implies reading them — an invariant, not a fixup.
+    expect(resolvePermissions("MEMBER", ["manageDocuments"])).toEqual(expect.arrayContaining(["manageDocuments", "viewDocuments"]));
     // research view implied well-analysis view.
     expect(resolvePermissions("MEMBER", ["viewResearch"])).toEqual(expect.arrayContaining(["viewResearch", "viewWellAnalysis"]));
     // portal admin was under org settings.

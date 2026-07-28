@@ -347,7 +347,9 @@ export function DealDetail() {
 
       {/* Documents */}
       {tab === "documents" && (
-        <DocumentsSection ownerType="deal" ownerId={deal.id} files={deal.files} folders={deal.docFolders?.length ? deal.docFolders : DEAL_DOC_FOLDERS} onChanged={loadDeal} canEdit={can("manageDocuments")} canDelete={can("manageDocuments")} />
+        can("viewDocuments")
+          ? <DocumentsSection ownerType="deal" ownerId={deal.id} files={deal.files} folders={deal.docFolders?.length ? deal.docFolders : DEAL_DOC_FOLDERS} onChanged={loadDeal} canEdit={can("manageDocuments")} canDelete={can("manageDocuments")} />
+          : <div className="panel muted">You do not have permission to view documents.</div>
       )}
 
       {renaming && (

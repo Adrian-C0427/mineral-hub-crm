@@ -9,6 +9,7 @@ import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest }
 import { normalizeAssumptions, runValuation, type MonthVolumes } from "../domain/valuation.js";
 import { monthKey } from "../domain/dates.js";
 import { MAX_CSV_CHARS } from "../config.js";
+import { escapeLike, MIN_SEARCH_CHARS } from "../domain/search.js";
 
 /**
  * Well Production Analysis & Valuation API.
@@ -373,7 +374,7 @@ wellsRouter.get(
     // wildcard, and a trigram index can only be probed once the term holds at
     // least one full trigram — a 2-char term degrades to a full scan of the
     // wells table no matter how it is indexed.
-    const { q } = z.object({ q: z.string().trim().min(3).max(120) }).parse(req.query);
+    const { q } = z.object({ q: z.string().trim().min(MIN_SEARCH_CHARS).max(120) }).parse(req.query);
     const rows = await prisma.$queryRawUnsafe<(RrcWellRow & { has_prod: boolean })[]>(
       // Every indexed well identifier is searchable: API (8/10 digit), RRC
       // lease number, well name/number, operator, lease name, county, survey,
@@ -396,15 +397,21 @@ wellsRouter.get(
       // upper($1) so they ride the upper() btrees. Writing those as `col ILIKE
       // $1` instead (the previous form) matches identical rows but is
       // unindexable, which is what made this endpoint a seq-scan amplifier.
+      //
+      // $2 is the same term as an ESCAPED wildcard pattern. `%` and `_` are
+      // LIKE operators, so a term of `%%%` cleared the length floor above and
+      // still produced a pattern with no extractable trigram — reopening the
+      // exact seq scan (plus a per-row `similarity()`) that the two-stage shape
+      // and the GIN indexes were introduced to close. See domain/search.
       `WITH candidates AS (
          SELECT w.fid, w.api8, w.api10, w.well_no, w.lease_no, w.lease_name, w.operator, w.county,
                 w.district, w.oil_gas, w.type, w.status,
                 similarity(coalesce(w.lease_name, ''), $1) AS score
            FROM rrc.wells w
-          WHERE w.api8 LIKE '%' || $1 || '%' OR w.api10 LIKE '%' || $1 || '%'
-             OR w.lease_name ILIKE '%' || $1 || '%' OR w.operator ILIKE '%' || $1 || '%'
-             OR w.lease_no LIKE '%' || $1 || '%' OR w.survey ILIKE '%' || $1 || '%'
-             OR w.field_name ILIKE '%' || $1 || '%'
+          WHERE w.api8 LIKE $2 ESCAPE '\\' OR w.api10 LIKE $2 ESCAPE '\\'
+             OR w.lease_name ILIKE $2 ESCAPE '\\' OR w.operator ILIKE $2 ESCAPE '\\'
+             OR w.lease_no LIKE $2 ESCAPE '\\' OR w.survey ILIKE $2 ESCAPE '\\'
+             OR w.field_name ILIKE $2 ESCAPE '\\'
              OR upper(w.well_no) = upper($1) OR upper(w.county) = upper($1)
              OR upper(w.abstract) = upper($1) OR upper(w.abstract_id) = upper($1)
           ORDER BY score DESC, w.county
@@ -418,7 +425,7 @@ wellsRouter.get(
          FROM candidates c
         ORDER BY has_prod DESC, c.score DESC, c.county
         LIMIT 15`,
-      q,
+      q, `%${escapeLike(q)}%`,
     );
     res.json(rows.map((w) => ({
       fid: w.fid, api: w.api10 ?? w.api8, name: `${w.lease_name ?? "Well"}${w.well_no ? ` #${w.well_no}` : ""}`,

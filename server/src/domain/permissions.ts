@@ -36,7 +36,7 @@ export const PERMISSIONS = [
   // Buyer Portal
   "publishOfferings", "managePortal",
   // Documents (deal file attachments)
-  "manageDocuments",
+  "viewDocuments", "manageDocuments",
   // Research
   "viewResearch", "manageResearchData",
   // Well Analysis
@@ -74,6 +74,7 @@ export const PERMISSION_META: Record<Permission, { label: string; group: string 
   publishOfferings: { label: "Publish offerings to the portal", group: "Buyer Portal" },
   managePortal: { label: "Manage portal settings & contacts", group: "Buyer Portal" },
 
+  viewDocuments: { label: "View & download documents", group: "Documents" },
   manageDocuments: { label: "Upload, edit & delete documents", group: "Documents" },
 
   viewResearch: { label: "View research & market intel", group: "Research" },
@@ -140,7 +141,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<OrgRole, Permission[]> = {
     "viewDeals", "createDeals", "editDeals", "sendEmail",
     "viewBuyers", "createBuyers", "editBuyers",
     "viewContacts", "manageContacts",
-    "publishOfferings", "manageDocuments",
+    "publishOfferings", "viewDocuments", "manageDocuments",
     "viewResearch", "viewWellAnalysis", "manageWellAnalysis",
     "viewMap", "viewReports", "manageExpenses", "useAiFeatures",
   ],
@@ -148,12 +149,12 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<OrgRole, Permission[]> = {
     "viewDeals", "createDeals", "editDeals", "sendEmail",
     "viewBuyers", "createBuyers", "editBuyers",
     "viewContacts", "manageContacts",
-    "publishOfferings", "manageDocuments",
+    "publishOfferings", "viewDocuments", "manageDocuments",
     "viewResearch", "viewWellAnalysis", "manageWellAnalysis",
     "viewMap", "viewReports", "manageExpenses", "useAiFeatures",
   ],
   // Read-only: viewing across modules, no mutations, no AI spend.
-  VIEWER: ["viewDeals", "viewBuyers", "viewContacts", "viewResearch", "viewWellAnalysis", "viewMap", "viewReports"],
+  VIEWER: ["viewDeals", "viewBuyers", "viewContacts", "viewDocuments", "viewResearch", "viewWellAnalysis", "viewMap", "viewReports"],
 };
 
 /**
@@ -175,7 +176,20 @@ const PERMISSION_MIGRATIONS: Record<string, Permission[]> = {
   // Split permissions: preserve prior effective access. Before the audit these
   // coarse gates implied the finer ones now broken out.
   viewDeals: ["viewDeals", "useAiFeatures"], // AI features were gated by viewDeals
-  editDeals: ["editDeals", "publishOfferings", "manageDocuments"], // publish + docs were under editDeals
+  editDeals: ["editDeals", "publishOfferings", "manageDocuments", "viewDocuments"], // publish + docs were under editDeals
+  // Managing documents necessarily implies being able to read them. Unlike the
+  // splits above this is an INVARIANT, not a historical fixup: a role that can
+  // replace or delete a file must be able to open it, so viewDocuments staying
+  // implied here (and therefore not independently revocable) is correct.
+  //
+  // Note on scope: document download used to have NO permission gate at all —
+  // any authenticated org member could fetch any file in their org. Adding
+  // `viewDocuments` closes that, and every built-in role (VIEWER included) gets
+  // it by default, so nothing changes for orgs on the defaults. An org that
+  // saved a CUSTOM role holding neither editDeals nor manageDocuments does lose
+  // document access until an owner ticks the new box — which is the intended
+  // tightening, not a regression.
+  manageDocuments: ["manageDocuments", "viewDocuments"],
   viewResearch: ["viewResearch", "viewWellAnalysis"], // well analysis viewing was under viewResearch
   manageResearchData: ["manageResearchData", "manageWellAnalysis"], // analysis runs were under manageResearchData
   manageOrgSettings: ["manageOrgSettings", "managePortal"], // portal admin was under org settings

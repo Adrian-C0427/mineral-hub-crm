@@ -542,7 +542,9 @@ export function MapView() {
   // Debounced unified search — one round-trip covers every entity type.
   useEffect(() => {
     const q = query.trim();
-    if (q.length < 2) { setSug(null); return; }
+    // Three characters is the server's floor too (/gis/suggest): below it the
+    // search predicates can't probe the trigram indexes and seq-scan instead.
+    if (q.length < 3) { setSug(null); return; }
     const t = setTimeout(() => {
       api.get<Suggest>(`/gis/suggest?q=${encodeURIComponent(q)}`).then(setSug).catch(() => setSug(null));
     }, 200);
