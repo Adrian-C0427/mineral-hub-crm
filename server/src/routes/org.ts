@@ -9,7 +9,7 @@ import { normalizePhone } from "../domain/phone.js";
 import { invalidateRoleCache } from "../services/rolePermCache.js";
 import {
   ASSIGNABLE_ROLES, ALL_ROLES, DEFAULT_ROLE_PERMISSIONS, PERMISSIONS, PERMISSION_META,
-  OWNER_ONLY_ACTIONS, resolvePermissions, type OrgRole,
+  OWNER_ONLY_ACTIONS, OVERRIDE_LITERAL_MARKER, resolvePermissions, type OrgRole,
 } from "../domain/permissions.js";
 
 export const orgRouter = Router();
@@ -432,13 +432,21 @@ orgRouter.patch(
     // Only known permission keys are stored; owner-only actions are not part of
     // PERMISSIONS so they can never be granted here.
     const clean = permissions.filter((p) => (PERMISSIONS as readonly string[]).includes(p));
+    // Stamp the row as matrix-authored. Without this, resolvePermissions cannot
+    // tell "saved before a permission was split" from "the owner unticked that
+    // box", so it applies the legacy expansions to both — and a revocation of
+    // any implied permission is silently discarded on the next read. See
+    // OVERRIDE_LITERAL_MARKER.
+    const stored = [...clean, OVERRIDE_LITERAL_MARKER];
     const saved = await prisma.rolePermissions.upsert({
       where: { organizationId_role: { organizationId: orgId(req), role } },
-      create: { organizationId: orgId(req), role, permissions: clean },
-      update: { permissions: clean },
+      create: { organizationId: orgId(req), role, permissions: stored },
+      update: { permissions: stored },
     });
     invalidateRoleCache(orgId(req)); // attachUser caches overrides
-    res.json({ role: saved.role, permissions: saved.permissions });
+    // Echo the EFFECTIVE set (marker stripped, invariants applied) so the
+    // matrix immediately reflects what the server will actually enforce.
+    res.json({ role: saved.role, permissions: resolvePermissions(role, saved.permissions) });
   }),
 );
 

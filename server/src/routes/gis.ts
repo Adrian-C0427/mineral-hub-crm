@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma, withDbRetry } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { escapeLike, rankRefEntries, MIN_SEARCH_CHARS, type RefEntry } from "../domain/search.js";
 
 /**
  * GIS Phase A (see docs/architecture/0003-gis-scale-architecture.md).
@@ -144,7 +145,135 @@ gisTilesRouter.get(
 export const gisRouter = Router();
 gisRouter.use(requireAuth, requireOrg, requirePermission("viewMap"));
 
-const searchSchema = z.object({ q: z.string().trim().min(1).max(120) });
+// Same exposure the tile route above is capped for, one layer in: /suggest runs
+// trigram matching across gis.abstracts and rrc.wells and aggregates operator
+// and field extents, and /options and /extent scan on filter values — all of it
+// behind a VIEW permission, so a read-only member could otherwise loop any of
+// them and saturate the pool. Sized like the wells router: search fires per
+// keystroke behind a debounce, so the ceiling has to clear real typing.
+gisRouter.use(rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many map requests. Wait a moment and try again." },
+}));
+
+// Three characters, not one — the same rule and the same reason as
+// /api/wells/rrc-search: every predicate below is a leading-wildcard match, and
+// a shorter term cannot probe the trigram indexes in
+// scripts/ensureSearchIndexes.ts, so it seq-scans rrc.wells / gis.abstracts
+// instead. The map search box enforces the same floor client-side.
+const searchSchema = z.object({ q: z.string().trim().min(MIN_SEARCH_CHARS).max(120) });
+
+// ---------------------------------------------------------------------------
+// Reference index — precomputed operator / field / formation lists
+//
+// /suggest used to derive these per request: `GROUP BY operator` (and
+// field_name, and `unnest(formations)`) across rrc.wells, three aggregations
+// over the whole table on every keystroke. The formations one can never be
+// indexed at all — `unnest` forces a full scan regardless of the term — so no
+// amount of index work fixes it in place.
+//
+// They are aggregations over IMMUTABLE reference data: rrc.wells changes only
+// on the monthly ingest. So compute them once and rank in memory (see
+// domain/search), which is the same reasoning as the tile LRU above. Cost per
+// request drops from three full-table aggregations to a filter over a few
+// thousand cached rows.
+//
+// Single-flight: a cold cache under concurrent load must issue ONE load, not
+// one per waiting request — a stampede is the very thing being prevented here.
+// ---------------------------------------------------------------------------
+
+interface WellReferenceIndex {
+  operators: RefEntry[];
+  fields: RefEntry[];
+  formations: RefEntry[];
+  /** Filter-option lists for the unscoped (no county selected) /options call. */
+  types: string[];
+  statuses: string[];
+  wellCount: number;
+  surveys: string[];
+  abstracts: string[];
+}
+
+const EMPTY_REFERENCE: WellReferenceIndex = {
+  operators: [], fields: [], formations: [], types: [], statuses: [], wellCount: 0, surveys: [], abstracts: [],
+};
+
+/** Reference data is re-imported monthly; re-read it a few times a day. */
+const REFERENCE_TTL_MS = 6 * 60 * 60 * 1000;
+/** A failed load (rrc schema absent in dev, transient blip) retries soon. */
+const REFERENCE_ERROR_TTL_MS = 30 * 1000;
+
+let referenceCache: { at: number; ttl: number; value: WellReferenceIndex } | null = null;
+let referenceInFlight: Promise<WellReferenceIndex> | null = null;
+
+async function loadReferenceIndex(): Promise<WellReferenceIndex> {
+  // Column names are hard-coded literals, never request input.
+  const agg = (col: string) => prisma.$queryRawUnsafe<{ name: string; n: number; ext: string | null }[]>(
+    `SELECT ${col} AS name, count(*)::int AS n, ST_Extent(geom)::text AS ext
+       FROM rrc.wells WHERE ${col} IS NOT NULL AND ${col} <> '' GROUP BY ${col}`,
+  );
+  const [operators, fields, formations, wellAgg, absAgg] = await Promise.all([
+    agg("operator"),
+    agg("field_name"),
+    prisma.$queryRawUnsafe<{ name: string; n: number; ext: string | null }[]>(
+      `SELECT f AS name, count(*)::int AS n, ST_Extent(geom)::text AS ext
+         FROM rrc.wells, unnest(formations) AS f WHERE f IS NOT NULL AND f <> '' GROUP BY f`,
+    ),
+    prisma.$queryRawUnsafe<{ types: string[] | null; statuses: string[] | null; n: number }[]>(
+      `SELECT array_agg(DISTINCT type) FILTER (WHERE type IS NOT NULL) AS types,
+              array_agg(DISTINCT status) FILTER (WHERE status IS NOT NULL) AS statuses,
+              count(*)::int AS n
+         FROM rrc.wells`,
+    ),
+    prisma.$queryRawUnsafe<{ surveys: string[] | null; abstracts: string[] | null }[]>(
+      `SELECT array_agg(DISTINCT survey) FILTER (WHERE survey IS NOT NULL) AS surveys,
+              array_agg(DISTINCT replace(abstract, '?', '')) FILTER (WHERE abstract IS NOT NULL) AS abstracts
+         FROM gis.abstracts`,
+    ),
+  ]);
+  const entries = (rows: { name: string; n: number; ext: string | null }[]): RefEntry[] =>
+    rows.map((r) => ({ name: r.name, n: r.n, bbox: parseExtent(r.ext) }));
+  const w = wellAgg[0];
+  const a = absAgg[0];
+  return {
+    operators: entries(operators),
+    fields: entries(fields),
+    formations: entries(formations),
+    types: (w?.types ?? []).sort(),
+    statuses: (w?.statuses ?? []).sort(),
+    wellCount: w?.n ?? 0,
+    surveys: (a?.surveys ?? []).sort(),
+    abstracts: (a?.abstracts ?? []).sort((x, y) => x.localeCompare(y, undefined, { numeric: true })),
+  };
+}
+
+async function referenceIndex(): Promise<WellReferenceIndex> {
+  const now = Date.now();
+  if (referenceCache && now - referenceCache.at < referenceCache.ttl) return referenceCache.value;
+  if (referenceInFlight) return referenceInFlight;
+  referenceInFlight = loadReferenceIndex()
+    .then((value) => {
+      referenceCache = { at: Date.now(), ttl: REFERENCE_TTL_MS, value };
+      return value;
+    })
+    .catch((e) => {
+      // Never let a missing rrc schema (dev databases) or a transient blip turn
+      // the map's search box into a 500 — degrade to no suggestions, retry soon.
+      console.warn("[gis] reference index load failed:", e instanceof Error ? e.message : e);
+      referenceCache = { at: Date.now(), ttl: REFERENCE_ERROR_TTL_MS, value: EMPTY_REFERENCE };
+      return EMPTY_REFERENCE;
+    })
+    .finally(() => { referenceInFlight = null; });
+  return referenceInFlight;
+}
+
+/** Drop the memoized reference lists (call after an ingest re-import). */
+export function invalidateReferenceIndex(): void {
+  referenceCache = null;
+}
 
 /**
  * Unified map search: one query, every entity the map knows about — counties,
@@ -164,13 +293,16 @@ gisRouter.get(
   "/suggest",
   asyncHandler(async (req: AuthedRequest, res) => {
     const { q } = searchSchema.parse(req.query);
-    const like = `%${q}%`;
+    // `%` and `_` are LIKE operators, not literals: an unescaped term made of
+    // them yields a pattern with no extractable trigram, which is precisely the
+    // seq scan the indexes exist to prevent. See domain/search.escapeLike.
+    const like = `%${escapeLike(q)}%`;
 
-    const [counties, abstracts, wells, operators, fields, formations, deals] = await Promise.all([
+    const [counties, abstracts, wells, reference, deals] = await Promise.all([
       // Counties, with bbox so the client can frame them without local data.
       prisma.$queryRawUnsafe<{ name: string; minx: number; miny: number; maxx: number; maxy: number }[]>(
         `SELECT name, ST_XMin(geom) minx, ST_YMin(geom) miny, ST_XMax(geom) maxx, ST_YMax(geom) maxy
-           FROM gis.counties WHERE name ILIKE $1
+           FROM gis.counties WHERE name ILIKE $1 ESCAPE '\\'
           ORDER BY similarity(name, $2) DESC, name LIMIT 254`, like, q),
       // Abstract number OR survey name (both live on gis.abstracts). Labels are
       // matched and returned with the source data's stray '?' stripped.
@@ -178,7 +310,7 @@ gisRouter.get(
         `SELECT id, replace(abstract, '?', '') AS abstract, survey, county,
                 GREATEST(similarity(replace(coalesce(abstract,''), '?', ''), $2), similarity(coalesce(survey,''), $2)) AS score
            FROM gis.abstracts
-          WHERE replace(abstract, '?', '') ILIKE $1 OR survey ILIKE $1
+          WHERE replace(abstract, '?', '') ILIKE $1 ESCAPE '\\' OR survey ILIKE $1 ESCAPE '\\'
           ORDER BY score DESC, county, abstract LIMIT 200`, like, q),
       // Wells: API number, well number, well ID, lease name, RRC lease number.
       prisma.$queryRawUnsafe<{ fid: number; api8: string | null; wellNo: string | null; leaseName: string | null; leaseNo: string | null; operator: string | null; type: string | null; county: string; score: number }[]>(
@@ -187,25 +319,14 @@ gisRouter.get(
                 GREATEST(similarity(coalesce(api8,''), $2), similarity(coalesce(lease_name,''), $2),
                          similarity(coalesce(lease_no,''), $2)) AS score
            FROM rrc.wells
-          WHERE api8 LIKE $1 OR api10 LIKE $1 OR lease_name ILIKE $1 OR lease_no LIKE $1
-             OR well_id ILIKE $1 OR well_no = upper($2)
+          WHERE api8 LIKE $1 ESCAPE '\\' OR api10 LIKE $1 ESCAPE '\\'
+             OR lease_name ILIKE $1 ESCAPE '\\' OR lease_no LIKE $1 ESCAPE '\\'
+             OR well_id ILIKE $1 ESCAPE '\\' OR well_no = upper($2)
           ORDER BY score DESC, county, lease_name NULLS LAST LIMIT 200`, like, q),
-      // Operators — resolve to a map filter + zoom to their wells' extent.
-      prisma.$queryRawUnsafe<{ name: string; n: number; ext: string | null }[]>(
-        `SELECT operator AS name, count(*)::int AS n, ST_Extent(geom)::text AS ext FROM rrc.wells
-          WHERE operator ILIKE $1 GROUP BY operator
-          ORDER BY similarity(operator, $2) DESC, n DESC LIMIT 100`, like, q),
-      // Fields (RRC reservoir proxy) — zoom to the field's well extent.
-      prisma.$queryRawUnsafe<{ name: string; n: number; ext: string | null }[]>(
-        `SELECT field_name AS name, count(*)::int AS n, ST_Extent(geom)::text AS ext FROM rrc.wells
-          WHERE field_name ILIKE $1 GROUP BY field_name
-          ORDER BY similarity(field_name, $2) DESC, n DESC LIMIT 100`, like, q),
-      // Formations (from W-2/G-1 completion filings on wells).
-      prisma.$queryRawUnsafe<{ name: string; n: number; ext: string | null }[]>(
-        `SELECT f AS name, count(*)::int AS n, ST_Extent(geom)::text AS ext
-           FROM rrc.wells, unnest(formations) AS f
-          WHERE f ILIKE $1 GROUP BY f
-          ORDER BY similarity(f, $2) DESC, n DESC LIMIT 100`, like, q),
+      // Operators, fields and formations come from the precomputed reference
+      // index and are ranked in memory — see WellReferenceIndex above for why
+      // these three cannot remain per-request aggregations.
+      referenceIndex(),
       // The org's deals and mineral assets, matched on name or basin. Basin
       // itself has no geometry — matching deals stand in for it.
       prisma.deal.findMany({
@@ -227,9 +348,9 @@ gisRouter.get(
         label: `${w.leaseName ?? "Well"}${w.wellNo ? ` #${w.wellNo}` : ""}`,
         sub: [w.api8 ? `API ${w.api8}` : null, w.leaseNo ? `Lease ${w.leaseNo}` : null, w.operator, `${w.county} County`].filter(Boolean).join(" · "),
       })),
-      operators: operators.map((o) => ({ name: o.name, sub: `${o.n} wells · filters the map`, bbox: parseExtent(o.ext) })),
-      fields: fields.map((f) => ({ name: f.name, sub: `${f.n} wells`, bbox: parseExtent(f.ext) })),
-      formations: formations.map((f) => ({ name: f.name, sub: `${f.n} wells · filters the map`, bbox: parseExtent(f.ext) })),
+      operators: rankRefEntries(reference.operators, q, 100).map((o) => ({ name: o.name, sub: `${o.n} wells · filters the map`, bbox: o.bbox })),
+      fields: rankRefEntries(reference.fields, q, 100).map((f) => ({ name: f.name, sub: `${f.n} wells`, bbox: f.bbox })),
+      formations: rankRefEntries(reference.formations, q, 100).map((f) => ({ name: f.name, sub: `${f.n} wells · filters the map`, bbox: f.bbox })),
       deals: deals.filter((d) => d.recordType !== "OWNED_ASSET").map((d) => ({
         id: d.id, label: d.name, abstractIds: d.abstractIds,
         sub: [d.stage, d.counties.join(", "), d.basins.join(", ")].filter(Boolean).join(" · "),
@@ -253,11 +374,11 @@ gisRouter.get(
       `SELECT id, replace(abstract, '?', '') AS abstract, survey, county,
               ST_X(ST_PointOnSurface(geom)) AS lon, ST_Y(ST_PointOnSurface(geom)) AS lat
          FROM gis.abstracts
-        WHERE replace(abstract, '?', '') ILIKE '%' || $1 || '%' OR survey ILIKE '%' || $1 || '%'
-        ORDER BY GREATEST(similarity(replace(coalesce(abstract, ''), '?', ''), $1), similarity(coalesce(survey, ''), $1)) DESC,
+        WHERE replace(abstract, '?', '') ILIKE $1 ESCAPE '\\' OR survey ILIKE $1 ESCAPE '\\'
+        ORDER BY GREATEST(similarity(replace(coalesce(abstract, ''), '?', ''), $2), similarity(coalesce(survey, ''), $2)) DESC,
                  county, abstract
         LIMIT 100`,
-      q,
+      `%${escapeLike(q)}%`, q,
     );
     res.json(rows);
   }),
@@ -274,12 +395,12 @@ gisRouter.get(
       `SELECT fid, api8, well_no AS "wellNo", lease_name AS "leaseName", operator, type, county,
               ST_X(geom) AS lon, ST_Y(geom) AS lat
          FROM rrc.wells
-        WHERE api8 LIKE '%' || $1 || '%' OR api10 LIKE '%' || $1 || '%'
-           OR lease_name ILIKE '%' || $1 || '%' OR operator ILIKE '%' || $1 || '%'
-           OR well_no = upper($1)
+        WHERE api8 LIKE $1 ESCAPE '\\' OR api10 LIKE $1 ESCAPE '\\'
+           OR lease_name ILIKE $1 ESCAPE '\\' OR operator ILIKE $1 ESCAPE '\\'
+           OR well_no = upper($2)
         ORDER BY county, lease_name NULLS LAST
         LIMIT 100`,
-      q,
+      `%${escapeLike(q)}%`, q,
     );
     res.json(rows);
   }),
@@ -333,9 +454,27 @@ gisRouter.get(
   asyncHandler(async (req, res) => {
     const { counties } = optionsSchema.parse(req.query);
     const names = (counties ?? "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 500);
-    // county = ANY('{}') matches nothing, so an empty list means "all counties".
-    const scope = names.length ? `county = ANY($1::text[]) AND` : "";
-    const params = names.length ? [names] : [];
+
+    // No county selected — every query below degrades to a full scan with a
+    // DISTINCT/array_agg over the whole table, and the map issues this on load.
+    // That statewide answer is identical for every caller and changes only on
+    // ingest, so serve it from the same precomputed index /suggest uses.
+    if (!names.length) {
+      const ref = await referenceIndex();
+      res.json({
+        surveys: ref.surveys,
+        abstracts: ref.abstracts,
+        wellTypes: ref.types,
+        wellStatuses: ref.statuses,
+        operators: ref.operators.map((o) => o.name).sort(),
+        wellCount: ref.wellCount,
+      });
+      return;
+    }
+
+    // County-scoped: these ride the county btree, so they stay live queries.
+    const scope = `county = ANY($1::text[]) AND`;
+    const params = [names];
     const surveys = await prisma.$queryRawUnsafe<{ v: string }[]>(
       `SELECT DISTINCT survey AS v FROM gis.abstracts WHERE ${scope} survey IS NOT NULL ORDER BY v`,
       ...params,
@@ -345,7 +484,7 @@ gisRouter.get(
       ...params,
     );
     // Well-derived filter option lists from rrc.wells, same county scoping.
-    const wScope = names.length ? `WHERE county = ANY($1::text[])` : "";
+    const wScope = `WHERE county = ANY($1::text[])`;
     const wellAgg = await prisma.$queryRawUnsafe<{ types: string[]; statuses: string[]; operators: string[]; n: number }[]>(
       `SELECT array_agg(DISTINCT type) FILTER (WHERE type IS NOT NULL) AS types,
               array_agg(DISTINCT status) FILTER (WHERE status IS NOT NULL) AS statuses,

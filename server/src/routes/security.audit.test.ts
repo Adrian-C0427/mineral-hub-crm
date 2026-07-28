@@ -10,6 +10,7 @@ import { classifyParsed, REASON_IN_FILE, REASON_EXISTING, REASON_MISSING_COMPANY
 import { isDeclaredRaster, LOGO_MIME } from "./org.js";
 import { normalizeCompany } from "../serializers.js";
 import { DEFAULT_ROLE_PERMISSIONS } from "../domain/permissions.js";
+import { cardSafeText } from "../services/notifyPush.js";
 
 const rows = (...buyers: { companyName: string; email?: string | null }[]) =>
   buyers.map((buyer, index) => ({ index, buyer }));
@@ -138,6 +139,66 @@ describe("role defaults", () => {
     // silently broken everyday use.
     expect(DEFAULT_ROLE_PERMISSIONS.MEMBER).toContain("manageWellAnalysis");
     expect(DEFAULT_ROLE_PERMISSIONS.MANAGER).toContain("manageWellAnalysis");
+  });
+});
+
+describe("Teams card text sanitization", () => {
+  // An Adaptive Card TextBlock renders markdown, and portal.ts feeds it strings
+  // that came from UNAUTHENTICATED lead/offer submissions. Without this, anyone
+  // holding a portal URL could author a clickable link inside the org's own
+  // Teams channel — content that arrives wearing the trust of an internal bot.
+  const big = 10_000;
+
+  it("defuses a markdown hyperlink", () => {
+    const out = cardSafeText("[Verify your account](https://evil.example/login)", big);
+    expect(out).not.toContain("](");
+    expect(out).toContain("\\[");
+  });
+
+  it("strips URL schemes, which Teams autolinks even without markdown", () => {
+    // Escaping alone cannot fix this one: a bare https:// URL is linkified by
+    // the client with no markdown syntax involved at all.
+    expect(cardSafeText("go to https://evil.example now", big)).not.toContain("https://");
+    expect(cardSafeText("javascript:alert(1)", big)).not.toContain("javascript:");
+    expect(cardSafeText("data:text/html,<b>", big)).not.toContain("data:");
+  });
+
+  it("neutralizes emphasis and block syntax", () => {
+    // Asserted as an exact string: every marker must come back backslash-escaped
+    // so the renderer prints it literally instead of acting on it.
+    expect(cardSafeText("**bold** _em_ `code` # head > quote", big))
+      .toBe("\\*\\*bold\\*\\* \\_em\\_ \\`code\\` \\# head \\> quote");
+  });
+
+  it("caps length so a 4,000-character submission can't flood the channel", () => {
+    const out = cardSafeText("a".repeat(5_000), 600);
+    expect(out.length).toBe(601); // 600 + the ellipsis
+    expect(out.endsWith("…")).toBe(true);
+  });
+
+  it("measures the cap against the escaped string, not the input", () => {
+    // Escaping can more than double the length; bounding the input instead
+    // would let a payload of pure punctuation blow past the cap.
+    expect(cardSafeText("[".repeat(500), 100).length).toBe(101);
+  });
+
+  it("never leaves a dangling backslash that would escape the ellipsis", () => {
+    // Truncating mid-escape-pair is the edge case: "\\" + "…" would render the
+    // ellipsis literally and, worse, re-enable the next character.
+    expect(cardSafeText(`${"a".repeat(99)}[rest`, 100)).not.toContain("\\…");
+  });
+
+  it("keeps a complete escape pair intact when the cut lands right after it", () => {
+    // An even run of trailing backslashes is a fully-escaped literal `\`.
+    // Dropping one to "be safe" would leave a lone backslash — creating the very
+    // dangling escape the odd-run check exists to prevent.
+    // 98 a's + a literal backslash escapes to 98 a's + "\\", exactly 100 chars.
+    const out = cardSafeText(`${"a".repeat(98)}\\rest`, 100);
+    expect(out).toBe(`${"a".repeat(98)}\\\\…`);
+  });
+
+  it("leaves ordinary notification text readable", () => {
+    expect(cardSafeText("New portal lead", big)).toBe("New portal lead");
   });
 });
 

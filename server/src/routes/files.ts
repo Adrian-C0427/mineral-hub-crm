@@ -79,8 +79,13 @@ function fileOrgWhere(id: string, organizationId: string) {
   };
 }
 
+// Reading a document is its own permission. Org scoping (fileOrgWhere) has
+// always been correct here, but there was no gate beyond "is a member of this
+// org" — so a role deliberately stripped of document access could still fetch
+// a presigned URL for every file on every deal and buyer in the org.
 filesRouter.get(
   "/:id/download",
+  requirePermission("viewDocuments"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const file = await prisma.fileAttachment.findFirst({ where: fileOrgWhere(req.params.id, orgId(req)) });
     if (!file) throw new HttpError(404, "File not found");
@@ -165,6 +170,7 @@ filesRouter.post(
 // Prior versions of a file (most recent first).
 filesRouter.get(
   "/:id/versions",
+  requirePermission("viewDocuments"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const file = await prisma.fileAttachment.findFirst({ where: fileOrgWhere(req.params.id, orgId(req)) });
     if (!file) throw new HttpError(404, "File not found");

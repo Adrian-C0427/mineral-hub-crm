@@ -18,11 +18,46 @@ export interface PushPayload {
   link?: string | null;
 }
 
+/** Longest submitter-influenced string worth pushing; the app holds the full text. */
+const MAX_TITLE = 200;
+const MAX_BODY = 600;
+
+/**
+ * Make a string safe to place in an Adaptive Card TextBlock.
+ *
+ * TextBlock renders a markdown subset, so any text reaching this function is
+ * markup, not a literal. Some of it originates from UNAUTHENTICATED buyer-portal
+ * submissions (portal.ts lead and offer capture), which means an attacker could
+ * otherwise author content inside the org's own trusted Teams channel.
+ *
+ * Two separate problems, because escaping alone does not solve this:
+ *  1. Markdown syntax — `[label](url)` builds a hyperlink. Backslash-escaping
+ *     the CommonMark punctuation set renders it as literal text instead.
+ *  2. Bare URLs — Teams autolinks `https://…` even with no markdown at all, so
+ *     escaping cannot stop it. Nothing legitimately pushed here contains a URL
+ *     (the card's one real link is the Action.OpenUrl back into the app), so a
+ *     scheme is simply removed.
+ */
+export function cardSafeText(s: string, max: number): string {
+  const noSchemes = s.replace(/\b[a-z][a-z0-9+.-]*:\/\//gi, "").replace(/\bdata:/gi, "").replace(/\bjavascript:/gi, "");
+  const escaped = noSchemes.replace(/[\\`*_{}[\]()#+\-.!|>~]/g, (c) => `\\${c}`);
+  // Truncate on the ESCAPED string, so the cap bounds what is actually sent
+  // rather than what came in (escaping can more than double the length).
+  if (escaped.length <= max) return escaped;
+  const cut = escaped.slice(0, max);
+  // The cut can land mid-escape-pair, leaving a dangling backslash that would
+  // escape the ellipsis and re-arm whatever follows. Only an ODD run of trailing
+  // backslashes is dangling — an even run is a complete pair (a literal `\` is
+  // itself escaped to `\\`), so blindly dropping one would CREATE the problem.
+  const trailingSlashes = (/\\*$/.exec(cut)?.[0] ?? "").length;
+  return `${trailingSlashes % 2 === 1 ? cut.slice(0, -1) : cut}…`;
+}
+
 function card(p: PushPayload) {
   const bodyBlocks: Record<string, unknown>[] = [
-    { type: "TextBlock", text: p.title, weight: "Bolder", size: "Medium", wrap: true },
+    { type: "TextBlock", text: cardSafeText(p.title, MAX_TITLE), weight: "Bolder", size: "Medium", wrap: true },
   ];
-  if (p.body) bodyBlocks.push({ type: "TextBlock", text: p.body, wrap: true, spacing: "Small" });
+  if (p.body) bodyBlocks.push({ type: "TextBlock", text: cardSafeText(p.body, MAX_BODY), wrap: true, spacing: "Small" });
   return {
     type: "message",
     attachments: [{

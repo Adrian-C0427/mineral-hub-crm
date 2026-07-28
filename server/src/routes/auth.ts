@@ -455,6 +455,9 @@ authRouter.post(
 
 authRouter.post(
   "/password/reset",
+  // The token is 32 random bytes, so guessing it is not the threat — this caps
+  // the replay/enumeration volume any single client can put on the endpoint.
+  forgotLimiter,
   asyncHandler(async (req, res) => {
     const { token, password } = z
       .object({ token: z.string().min(1), password: z.string().min(8, "Password must be at least 8 characters") })
@@ -487,6 +490,28 @@ authRouter.post(
 // Two-factor authentication (TOTP)
 // ===========================================================================
 
+/**
+ * Guards the three routes that verify a second factor. A TOTP code is six
+ * digits, and /2fa/disable accepts a recovery code as an alternative — so
+ * without a cap, an attacker already holding a stolen session could grind the
+ * code space and strip the victim's second factor, removing the one control
+ * that still stood between them and a durable takeover.
+ *
+ * Keyed on the authenticated user, not the source address: the caller is logged
+ * in, so the account is the thing to protect, and IP keying would let anyone
+ * rotating addresses keep guessing against the same account. `requireAuth` runs
+ * before this on every route it guards, so req.user is always populated; the IP
+ * fallback only ever covers a future unauthenticated mount.
+ */
+const twoFactorLimiter = rateLimit({
+  windowMs: LOGIN_RATE_LIMIT.WINDOW_MS,
+  max: LOGIN_RATE_LIMIT.MAX_ATTEMPTS,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as AuthedRequest).user?.id ?? req.ip ?? "unknown",
+  message: { error: "Too many verification attempts. Try again later." },
+});
+
 authRouter.get(
   "/2fa/status",
   requireAuth,
@@ -514,6 +539,7 @@ authRouter.post(
 authRouter.post(
   "/2fa/enable",
   requireAuth,
+  twoFactorLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const { code } = z.object({ code: z.string().trim().min(1) }).parse(req.body);
     const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { totpSecret: true, totpEnabled: true } });
@@ -531,6 +557,7 @@ authRouter.post(
 authRouter.post(
   "/2fa/disable",
   requireAuth,
+  twoFactorLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const { code } = z.object({ code: z.string().trim().min(1) }).parse(req.body);
     const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { id: true, totpSecret: true, totpEnabled: true, totpRecoveryCodes: true } });
@@ -546,6 +573,7 @@ authRouter.post(
 authRouter.post(
   "/2fa/recovery-codes",
   requireAuth,
+  twoFactorLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const { code } = z.object({ code: z.string().trim().min(1) }).parse(req.body);
     const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { id: true, totpSecret: true, totpEnabled: true, totpRecoveryCodes: true } });

@@ -405,7 +405,9 @@ function WellPicker({ selected, setSelected }: { selected: WellRow[]; setSelecte
       // reachable here without any separate import step.
       Promise.all([
         api.get<Paged<WellRow>>(`/wells?q=${encodeURIComponent(q)}&pageSize=8`),
-        q.trim().length >= 2 ? api.get<RrcCandidate[]>(`/wells/rrc-search?q=${encodeURIComponent(q)}`).catch(() => [] as RrcCandidate[]) : Promise.resolve([] as RrcCandidate[]),
+        // 3 is the server's minimum (routes/wells.ts): below one full trigram
+        // the search can't use its indexes, so shorter terms are not sent.
+        q.trim().length >= 3 ? api.get<RrcCandidate[]>(`/wells/rrc-search?q=${encodeURIComponent(q)}`).catch(() => [] as RrcCandidate[]) : Promise.resolve([] as RrcCandidate[]),
       ])
         .then(([r, rr]) => {
           setResults(r.rows); setTotal(r.total);

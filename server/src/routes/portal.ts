@@ -510,7 +510,16 @@ portalRouter.post(
         organizationId: org.id, userId, type: "portal_lead", title, body, link: `/buyers/${buyerId}`,
       })),
     });
-    void pushTeams(org.id, { title, body, link: `/buyers/${buyerId}` });
+    // The Teams card gets a SUMMARY, never `body`. `body` can carry the whole
+    // criteriaNote — up to 4,000 characters of unauthenticated free text — and
+    // pushing that would let anyone with the portal URL author bulk content
+    // inside the org's own chat channel. The in-app notification above holds the
+    // full submission (React escapes it), and the card links straight to it.
+    void pushTeams(org.id, {
+      title,
+      body: `New portal lead · Areas of interest: ${interest}${outcome === "flagged" ? " · POSSIBLE DUPLICATE" : outcome === "review" ? " · matched an existing buyer by email — review in the app" : ""}`,
+      link: `/buyers/${buyerId}`,
+    });
 
     res.status(201).json({ ok: true });
   }),

@@ -1,10 +1,11 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { parse } from "csv-parse/sync";
-import { LIST_LIMIT } from "../config.js";
+import { LIST_LIMIT, MAX_CSV_CHARS } from "../config.js";
 import type { Contact, ContactActivity, ContactList, User } from "@prisma/client";
 
 /**
@@ -505,12 +506,42 @@ const CONTACT_IMPORT_FIELDS: { key: string; label: string; required?: boolean }[
 
 const MAX_CONTACT_IMPORT_ROWS = 20_000;
 
+/**
+ * Raw-body ceiling, applied BEFORE the parse. MAX_CONTACT_IMPORT_ROWS bounds the
+ * result, but it can only be checked once csv-parse has already materialised
+ * every record — so without this the row cap was paid for by parsing whatever
+ * fit inside the 25 MB JSON body limit first. Matches the cap the other three
+ * importers already apply (routes/import.ts, wells.ts, research.ts).
+ */
+const csvField = z.string().min(1).max(MAX_CSV_CHARS, "CSV file is too large");
+
+/**
+ * Import replays are the heaviest thing `manageContacts` can trigger: a full
+ * parse plus a scan of every contact in the org. /analyze and /preview write
+ * nothing, so they are free for the caller to repeat — cap them. Mounted on the
+ * import paths only, so ordinary contact CRUD is unaffected.
+ */
+const importLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many import requests. Wait a few minutes and try again." },
+});
+
 function parseContactsCsv(csv: string): { headers: string[]; rows: Record<string, string>[] } {
   const records = parse(csv, { columns: true, skip_empty_lines: true, trim: true, bom: true }) as Record<string, string>[];
   if (records.length > MAX_CONTACT_IMPORT_ROWS) {
     throw new HttpError(400, `This file has too many rows (${records.length}). Split it into files of ${MAX_CONTACT_IMPORT_ROWS.toLocaleString()} rows or fewer.`);
   }
   return { headers: records.length ? Object.keys(records[0]) : [], rows: records };
+}
+
+/** Split into fixed-size batches so a large import never builds one giant statement. */
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
 }
 
 const splitMulti = (v: string): string[] => v.split(/[;,|]/).map((x) => x.trim()).filter(Boolean);
@@ -539,8 +570,9 @@ function buildContact(row: Record<string, string>, mapping: Record<string, strin
 contactsRouter.post(
   "/import/analyze",
   requirePermission("manageContacts"),
+  importLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { csv } = z.object({ csv: z.string().min(1) }).parse(req.body);
+    const { csv } = z.object({ csv: csvField }).parse(req.body);
     const { headers, rows } = parseContactsCsv(csv);
     const suggestedMapping: Record<string, string> = {};
     const SYNONYMS: Record<string, string[]> = {
@@ -603,8 +635,9 @@ async function classifyContactRows(org: string, csv: string, mapping: Record<str
 contactsRouter.post(
   "/import/preview",
   requirePermission("manageContacts"),
+  importLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { csv, mapping } = z.object({ csv: z.string().min(1), mapping: z.record(z.string()) }).parse(req.body);
+    const { csv, mapping } = z.object({ csv: csvField, mapping: z.record(z.string()) }).parse(req.body);
     const classified = await classifyContactRows(orgId(req), csv, mapping);
     res.json({
       rows: classified.slice(0, 500).map((r) => ({
@@ -623,9 +656,10 @@ contactsRouter.post(
 contactsRouter.post(
   "/import/commit",
   requirePermission("manageContacts"),
+  importLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const { csv, mapping, updateDuplicates, listId } = z.object({
-      csv: z.string().min(1),
+      csv: csvField,
       mapping: z.record(z.string()),
       // When true, matched duplicates get blank fields filled in (never
       // overwriting existing data) and are counted as "updated".
@@ -637,38 +671,69 @@ contactsRouter.post(
     const classified = await classifyContactRows(org, csv, mapping);
     const list = listId ? await prisma.contactList.findFirst({ where: { id: listId, organizationId: org } }) : null;
 
-    let inserted = 0, updated = 0, skipped = 0, errors = 0;
+    const errors = classified.filter((r) => r.status === "Error").length;
+    const toInsert = classified.filter((r) => r.status === "New");
+    const toUpdate = updateDuplicates
+      ? classified.filter((r): r is typeof r & { matchId: string } => r.status === "Duplicate" && Boolean(r.matchId))
+      : [];
+    const skipped = classified.filter((r) => r.status === "Duplicate").length - toUpdate.length;
+
+    // All-or-nothing, and batched. The previous shape fired one create per row
+    // (plus a findUnique + update per duplicate) sequentially and outside any
+    // transaction, so a file at the 20,000-row ceiling issued tens of thousands
+    // of round trips on a single request and a mid-run failure left the import
+    // half-applied with no way to roll back. The generous timeout mirrors
+    // routes/import.ts: a legitimate large file needs longer than Prisma's 5s
+    // interactive default, which a few thousand rows blow straight through.
     const touched: string[] = [];
-    for (const r of classified) {
-      if (r.status === "Error") { errors++; continue; }
-      if (r.status === "Duplicate") {
-        if (updateDuplicates && r.matchId) {
-          const ex = await prisma.contact.findUnique({ where: { id: r.matchId } });
-          if (ex) {
-            await prisma.contact.update({
-              where: { id: ex.id },
-              data: {
-                entityName: ex.entityName ?? r.contact.entityName,
-                source: ex.source ?? r.contact.source,
-                email: ex.email ?? r.contact.email,
-                phone: ex.phone ?? r.contact.phone,
-                notes: ex.notes ?? r.contact.notes,
-                states: ex.states.length ? ex.states : r.contact.states,
-                counties: ex.counties.length ? ex.counties : r.contact.counties,
-                tags: [...new Set([...ex.tags, ...r.contact.tags])],
-              },
-            });
-            updated++; touched.push(ex.id);
-          }
-        } else skipped++;
-        continue;
+    let inserted = 0, updated = 0;
+    await prisma.$transaction(async (tx) => {
+      // One batched read of the duplicates being filled in, replacing the
+      // findUnique that previously ran once per duplicate row. Inside the
+      // transaction so each merge below is computed from the row it writes to,
+      // and scoped to the org so a matchId can never reach across tenants.
+      const existingById = new Map(
+        toUpdate.length
+          ? (await tx.contact.findMany({ where: { organizationId: org, id: { in: toUpdate.map((r) => r.matchId) } } }))
+            .map((c) => [c.id, c] as const)
+          : [],
+      );
+
+      for (const batch of chunk(toInsert, 1000)) {
+        // createManyAndReturn (Postgres) gets the ids back in one statement —
+        // they are needed below to add every imported contact to the list.
+        const rows = await tx.contact.createManyAndReturn({
+          data: batch.map((r) => ({ organizationId: org, ...r.contact })),
+          select: { id: true },
+        });
+        inserted += rows.length;
+        for (const row of rows) touched.push(row.id);
       }
-      const created = await prisma.contact.create({ data: { organizationId: org, ...r.contact } });
-      inserted++; touched.push(created.id);
-    }
-    if (list && touched.length) {
-      await prisma.contactList.update({ where: { id: list.id }, data: { members: { connect: touched.map((id) => ({ id })) } } });
-    }
+      for (const r of toUpdate) {
+        const ex = existingById.get(r.matchId);
+        if (!ex) continue;
+        await tx.contact.update({
+          where: { id: ex.id },
+          data: {
+            entityName: ex.entityName ?? r.contact.entityName,
+            source: ex.source ?? r.contact.source,
+            email: ex.email ?? r.contact.email,
+            phone: ex.phone ?? r.contact.phone,
+            notes: ex.notes ?? r.contact.notes,
+            states: ex.states.length ? ex.states : r.contact.states,
+            counties: ex.counties.length ? ex.counties : r.contact.counties,
+            tags: [...new Set([...ex.tags, ...r.contact.tags])],
+          },
+        });
+        updated++; touched.push(ex.id);
+      }
+      if (list && touched.length) {
+        for (const ids of chunk(touched, 1000)) {
+          await tx.contactList.update({ where: { id: list.id }, data: { members: { connect: ids.map((id) => ({ id })) } } });
+        }
+      }
+    }, { maxWait: 10_000, timeout: 5 * 60_000 });
+
     res.json({ inserted, updated, skipped, errors });
   }),
 );
