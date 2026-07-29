@@ -51,6 +51,9 @@ interface Props<T> {
   /** Filters/search rendered on the SAME row as Customize View — no more
    *  dedicated row with dead space for one right-aligned button. */
   toolbar?: ReactNode;
+  /** Rendered between the toolbar row and the table — e.g. an expandable
+   *  filter strip that must sit under the toolbar but above the columns. */
+  subToolbar?: ReactNode;
 }
 
 function compareValues(a: unknown, b: unknown, type: SortType): number {
@@ -221,6 +224,7 @@ export function SortableTable<T>({
   selection,
   customizeId,
   toolbar,
+  subToolbar,
 }: Props<T>) {
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(defaultSort ?? null);
   const { ordered, visible, hidden, widths, pinnedKeys, pinnedSet, toggle, reorder, setWidth, togglePin, reset, isDefault } = useColumnPrefs(customizeId, columns);
@@ -391,6 +395,7 @@ export function SortableTable<T>({
         <div className="cv-toolbar-left">{toolbar}</div>
         <ColumnCustomizer ordered={ordered} hidden={hidden} pinnedSet={pinnedSet} onToggle={toggle} onReorder={reorder} onPin={togglePin} onReset={reset} isDefault={isDefault} />
       </div>
+      {subToolbar}
       {table}
     </div>
   );

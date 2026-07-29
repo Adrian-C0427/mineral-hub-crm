@@ -2850,8 +2850,8 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .opp-foot { padding: 10px 20px 16px; font-size: 12px; color: var(--text-dim); }
 @media (max-width: 720px) { .opp-signal { flex-wrap: wrap; } .opp-view { margin-left: 76px; } }
 
-/* Records — document Type shown as a subtle accent pill (reference). */
-.rec-type { display: inline-block; font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 99px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); white-space: nowrap; }
+/* Records — document Type as the reference's accent rounded-rect chip. */
+.rec-type { display: inline-block; font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 7px; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); white-space: nowrap; }
 /* Rankings — custom horizontal bar chart (reference: right-aligned names, blue
    20px bars, value after each, a 0…max axis row) + table card. */
 .rk-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; margin-bottom: 14px; }
@@ -2877,3 +2877,37 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 /* Relationships sub-tab row: search sits above the shared border baseline with
    comfortable spacing before the table (reference layout). */
 .res-subtabs .relv-search { margin-bottom: 8px; }
+
+/* Records — reference card anatomy: flush card with a bordered toolbar row,
+   a recessed filter strip, inset table with rounded header caps, and a footer
+   summary line with pagination. */
+.rec-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; margin-bottom: var(--block-gap); }
+:root[data-theme="light"] .rec-card { box-shadow: var(--shadow); }
+.rec-card .cv-toolbar { padding: 14px 20px; border-bottom: 1px solid var(--hairline); margin-bottom: 0; }
+.rec-card .cv-toolbar-left { gap: 12px; }
+/* Filters toggle fills accent while the strip is open (reference). */
+.rbtn.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.rbtn.on:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+/* Recessed filter strip (reference: darker inset section between toolbar and table). */
+.rec-filterbar { padding: 16px 20px; border-bottom: 1px solid var(--hairline); background: var(--surface); }
+:root[data-theme="light"] .rec-filterbar { background: var(--panel-2); }
+.rec-fgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px 16px; }
+@media (max-width: 900px) { .rec-fgrid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .rec-fgrid { grid-template-columns: 1fr; } }
+.rec-flabel { font-size: 12.5px; font-weight: 600; color: var(--text-dim); margin-bottom: 6px; }
+/* Table inset inside the card; header row gets the darker surface + end caps. */
+.rec-card .table-scroll { border: none; border-radius: 0; margin: 0 12px; }
+.rec-card .data-table { min-width: 0; }
+.rec-card .data-table thead th { background: var(--surface); }
+:root[data-theme="light"] .rec-card .data-table thead th { background: var(--control); }
+.rec-card .data-table thead th:first-child { border-radius: 9px 0 0 9px; }
+.rec-card .data-table thead th:last-child { border-radius: 0 9px 9px 0; }
+.rec-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 20px 14px; font-size: 12px; color: var(--text-dim); }
+/* Cell tones from the reference: names 600-weight text, mid/faint metadata. */
+.rec-name { font-weight: 600; }
+.rec-mid { color: color-mix(in srgb, var(--text) 70%, var(--text-dim)); }
+.rec-faint { color: var(--text-faint); }
+.rec-nowrap { white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* Segmented tracks inside cards sit on the darker surface tone (reference). */
+.rec-card .seg-control, .rk-card .seg-control { background: var(--surface); }
+:root[data-theme="light"] .rec-card .seg-control, :root[data-theme="light"] .rk-card .seg-control { background: var(--control); }

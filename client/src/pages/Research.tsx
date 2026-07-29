@@ -1721,77 +1721,88 @@ function RecordsTab({ qs }: { qs: string }) {
   const totalPages = active ? Math.max(1, Math.ceil(active.total / pageSize)) : 1;
 
   const docColumns: Column<DocRecord>[] = [
-    { key: "recordingDate", header: "Recorded", value: (r) => r.recordingDate, render: (r) => fmtDate(r.recordingDate), type: "date" },
+    { key: "recordingDate", header: "Recorded", value: (r) => r.recordingDate, render: (r) => <span className="rec-mid rec-nowrap">{fmtDate(r.recordingDate)}</span>, type: "date" },
     { key: "docType", header: "Type", value: (r) => r.docTypeRaw, render: (r) => <span className="rec-type" title={r.docTypeRaw}>{prettyDocType(r.docType)}</span> },
-    { key: "grantor", header: "Grantor (Seller)", value: (r) => r.grantor },
-    { key: "grantee", header: "Grantee (Buyer)", value: (r) => r.grantee },
-    { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}` },
-    { key: "abstractId", header: "Abstract", value: (r) => r.abstractId },
-    { key: "instrumentNumber", header: "Instr #", value: (r) => r.instrumentNumber },
+    { key: "grantor", header: "Grantor (Seller)", value: (r) => r.grantor, render: (r) => <span className="rec-name">{r.grantor ?? "—"}</span> },
+    { key: "grantee", header: "Grantee (Buyer)", value: (r) => r.grantee, render: (r) => <span className="rec-name">{r.grantee ?? "—"}</span> },
+    { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}`, render: (r) => <span className="rec-mid rec-nowrap">{r.county}, {r.state}</span> },
+    { key: "abstractId", header: "Abstract", value: (r) => r.abstractId, align: "right", render: (r) => r.abstractId ? <span className="rec-mid">{r.abstractId}</span> : <span className="rec-faint">—</span> },
+    { key: "instrumentNumber", header: "Instr #", value: (r) => r.instrumentNumber, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{r.instrumentNumber ?? "—"}</span> },
   ];
   const permitColumns: Column<PermitRecord>[] = [
-    { key: "activityDate", header: "Date", value: (r) => r.activityDate, render: (r) => fmtDate(r.activityDate), type: "date" },
-    { key: "operator", header: "Operator", value: (r) => r.operator },
+    { key: "activityDate", header: "Date", value: (r) => r.activityDate, render: (r) => <span className="rec-mid rec-nowrap">{fmtDate(r.activityDate)}</span>, type: "date" },
+    { key: "operator", header: "Operator", value: (r) => r.operator, render: (r) => <span className="rec-name">{r.operator ?? "—"}</span> },
     { key: "leaseName", header: "Lease / Well", value: (r) => `${r.leaseName ?? ""} ${r.wellName ?? ""}`.trim() || null },
     { key: "status", header: "Status", value: (r) => r.status, render: (r) => prettyEnum(r.status) },
     { key: "trajectory", header: "Trajectory", value: (r) => r.trajectory, render: (r) => prettyEnum(r.trajectory) },
-    { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}` },
+    { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}`, render: (r) => <span className="rec-mid rec-nowrap">{r.county}, {r.state}</span> },
     { key: "formation", header: "Formation", value: (r) => r.formation },
-    { key: "apiNumber", header: "API #", value: (r) => r.apiNumber },
+    { key: "apiNumber", header: "API #", value: (r) => r.apiNumber, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{r.apiNumber ?? "—"}</span> },
   ];
 
-  return (
-    <div className="panel">
-      <div className="panel-title">
-        <div className="seg-control">
-          <span className={`seg ${kind === "documents" ? "active" : ""}`} onClick={() => setKind("documents")}>Recorded Documents</span>
-          <span className={`seg ${kind === "permits" ? "active" : ""}`} onClick={() => setKind("permits")}>Drilling Permits</span>
-        </div>
-        <div className="res-card-tools">
-          {active && <span className="muted" style={{ fontSize: 12.5 }}><b style={{ color: "var(--text)" }}>{num(active.total)}</b> records</span>}
-          <button className={`rbtn ${showFilters || activeFilterCount > 0 ? "active" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
-            Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
-          </button>
-          <button className="rbtn" onClick={exportAll} disabled={!active?.total}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
-            Export CSV
-          </button>
-        </div>
+  // Toolbar row (reference order): source segmented control · count · Filters
+  // (fills accent while open) · Export CSV — Customize View joins on the right
+  // via the table's own toolbar row.
+  const toolbarContent = (
+    <>
+      <div className="seg-control">
+        <span className={`seg ${kind === "documents" ? "active" : ""}`} onClick={() => setKind("documents")}>Recorded Documents</span>
+        <span className={`seg ${kind === "permits" ? "active" : ""}`} onClick={() => setKind("permits")}>Drilling Permits</span>
       </div>
+      <span className="spacer" />
+      {active && <span className="muted" style={{ fontSize: 12.5, whiteSpace: "nowrap" }}><b style={{ color: "var(--text)" }}>{num(active.total)}</b> records</span>}
+      <button
+        className={`rbtn ${showFilters ? "on" : activeFilterCount > 0 ? "active" : ""}`}
+        onClick={() => setShowFilters((s) => !s)}
+        aria-expanded={showFilters}
+      >
+        Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+      </button>
+      <button className="rbtn" onClick={exportAll} disabled={!active?.total}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+        Export CSV
+      </button>
+    </>
+  );
 
-      {showFilters && (
-        <div className="mc-grid" style={{ marginBottom: 12 }}>
-          <div><div className="ddx-label mc-lbl">County</div>
-            <SearchableMultiSelect options={opts.counties} value={rf.counties} onChange={(v) => setRf((p) => ({ ...p, counties: v }))} placeholder="Counties…" /></div>
-          <div><div className="ddx-label mc-lbl">Abstract</div>
-            <SearchableMultiSelect options={opts.abstracts} value={rf.abstracts} onChange={(v) => setRf((p) => ({ ...p, abstracts: v }))} placeholder="Abstracts…" /></div>
-          {kind === "documents" ? (
-            <>
-              <div><div className="ddx-label mc-lbl">Record Type</div>
-                <Select value={rf.docClass} onChange={(v) => setRf((p) => ({ ...p, docClass: v }))} clearable placeholder="All record types" ariaLabel="Record type"
-                  options={(opts.docClasses ?? []).map((c) => ({ value: c, label: prettyEnum(c) }))} /></div>
-              <div><div className="ddx-label mc-lbl">Document Type</div>
-                <SearchableMultiSelect options={opts.docTypes ?? []} labels={Object.fromEntries((opts.docTypes ?? []).map((t) => [t, prettyDocType(t)]))}
-                  value={rf.docTypes} onChange={(v) => setRf((p) => ({ ...p, docTypes: v }))} placeholder="Document types…" /></div>
-            </>
-          ) : (
-            <>
-              <div><div className="ddx-label mc-lbl">Status</div>
-                <SearchableMultiSelect options={opts.statuses ?? []} labels={Object.fromEntries((opts.statuses ?? []).map((s) => [s, prettyEnum(s)]))}
-                  value={rf.statuses} onChange={(v) => setRf((p) => ({ ...p, statuses: v }))} placeholder="Statuses…" /></div>
-              <div><div className="ddx-label mc-lbl">Trajectory</div>
-                <SearchableMultiSelect options={opts.trajectories ?? []} labels={Object.fromEntries((opts.trajectories ?? []).map((t) => [t, prettyEnum(t)]))}
-                  value={rf.trajectories} onChange={(v) => setRf((p) => ({ ...p, trajectories: v }))} placeholder="Trajectories…" /></div>
-            </>
-          )}
-          <div><div className="ddx-label mc-lbl">From</div><DateField value={rf.from} onChange={(v) => setRf((p) => ({ ...p, from: v }))} ariaLabel="Records from date" /></div>
-          <div><div className="ddx-label mc-lbl">To</div><DateField value={rf.to} onChange={(v) => setRf((p) => ({ ...p, to: v }))} ariaLabel="Records to date" /></div>
-          {activeFilterCount > 0 && (
-            <div style={{ alignSelf: "end" }}><button className="small" onClick={() => setRf(EMPTY_REC_FILTERS)}>Clear filters</button></div>
-          )}
-        </div>
-      )}
+  // Recessed filter strip under the toolbar (reference: darker inset section).
+  const filterStrip = showFilters ? (
+    <div className="rec-filterbar">
+      <div className="rec-fgrid">
+        <div><div className="rec-flabel">County</div>
+          <SearchableMultiSelect options={opts.counties} value={rf.counties} onChange={(v) => setRf((p) => ({ ...p, counties: v }))} placeholder="Counties…" /></div>
+        <div><div className="rec-flabel">Abstract</div>
+          <SearchableMultiSelect options={opts.abstracts} value={rf.abstracts} onChange={(v) => setRf((p) => ({ ...p, abstracts: v }))} placeholder="Abstracts…" /></div>
+        {kind === "documents" ? (
+          <>
+            <div><div className="rec-flabel">Record type</div>
+              <Select value={rf.docClass} onChange={(v) => setRf((p) => ({ ...p, docClass: v }))} clearable placeholder="All record types" ariaLabel="Record type"
+                options={(opts.docClasses ?? []).map((c) => ({ value: c, label: prettyEnum(c) }))} /></div>
+            <div><div className="rec-flabel">Document type</div>
+              <SearchableMultiSelect options={opts.docTypes ?? []} labels={Object.fromEntries((opts.docTypes ?? []).map((t) => [t, prettyDocType(t)]))}
+                value={rf.docTypes} onChange={(v) => setRf((p) => ({ ...p, docTypes: v }))} placeholder="Document types…" /></div>
+          </>
+        ) : (
+          <>
+            <div><div className="rec-flabel">Status</div>
+              <SearchableMultiSelect options={opts.statuses ?? []} labels={Object.fromEntries((opts.statuses ?? []).map((s) => [s, prettyEnum(s)]))}
+                value={rf.statuses} onChange={(v) => setRf((p) => ({ ...p, statuses: v }))} placeholder="Statuses…" /></div>
+            <div><div className="rec-flabel">Trajectory</div>
+              <SearchableMultiSelect options={opts.trajectories ?? []} labels={Object.fromEntries((opts.trajectories ?? []).map((t) => [t, prettyEnum(t)]))}
+                value={rf.trajectories} onChange={(v) => setRf((p) => ({ ...p, trajectories: v }))} placeholder="Trajectories…" /></div>
+          </>
+        )}
+        <div><div className="rec-flabel">From</div><DateField value={rf.from} onChange={(v) => setRf((p) => ({ ...p, from: v }))} ariaLabel="Records from date" /></div>
+        <div><div className="rec-flabel">To</div><DateField value={rf.to} onChange={(v) => setRf((p) => ({ ...p, to: v }))} ariaLabel="Records to date" /></div>
+        {activeFilterCount > 0 && (
+          <div style={{ alignSelf: "end" }}><button className="small" onClick={() => setRf(EMPTY_REC_FILTERS)}>Clear filters</button></div>
+        )}
+      </div>
+    </div>
+  ) : null;
+
+  return (
+    <>
       {kind === "documents" && selAbstracts.length > 0 && absBuyers && absBuyers.buyers.length > 0 && (
         <div style={{
           border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", marginBottom: 12,
@@ -1830,23 +1841,40 @@ function RecordsTab({ qs }: { qs: string }) {
           <button className="small danger" onClick={() => setConfirmDel(true)} disabled={busy}>Delete</button>
         </BulkBar>
       )}
-      {loading && !active ? <Spinner /> : !active || active.total === 0 ? <p className="muted">No matching records.</p> : (
-        <>
-          {kind === "documents"
-            ? <SortableTable customizeId="research-records-docs" columns={docColumns} rows={docs!.rows} rowKey={(r) => r.id} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />
-            : <SortableTable customizeId="research-records-permits" columns={permitColumns} rows={permits!.rows} rowKey={(r) => r.id} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />}
-          {totalPages > 1 && (
-            <div className="row" style={{ gap: 8, alignItems: "center", justifyContent: "flex-end", marginTop: 10 }}>
-              <button className="small" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Prev</button>
-              <span className="muted" style={{ fontSize: 12 }}>Page {page} of {num(totalPages)}</span>
-              <button className="small" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next →</button>
+      <div className="rec-card">
+        {loading && !active ? (
+          <>
+            <div className="cv-toolbar"><div className="cv-toolbar-left">{toolbarContent}</div></div>
+            {filterStrip}
+            <Spinner />
+          </>
+        ) : !active || active.total === 0 ? (
+          <>
+            <div className="cv-toolbar"><div className="cv-toolbar-left">{toolbarContent}</div></div>
+            {filterStrip}
+            <p className="muted" style={{ padding: "4px 20px 16px", margin: 0 }}>No matching records.</p>
+          </>
+        ) : (
+          <>
+            {kind === "documents"
+              ? <SortableTable customizeId="research-records-docs" columns={docColumns} rows={docs!.rows} rowKey={(r) => r.id} toolbar={toolbarContent} subToolbar={filterStrip} defaultSort={{ key: "recordingDate", dir: "desc" }} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />
+              : <SortableTable customizeId="research-records-permits" columns={permitColumns} rows={permits!.rows} rowKey={(r) => r.id} toolbar={toolbarContent} subToolbar={filterStrip} defaultSort={{ key: "activityDate", dir: "desc" }} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />}
+            <div className="rec-foot">
+              <span>Showing {num(active.rows.length)} of {num(active.total)} records · sorted by {kind === "documents" ? "recorded" : ""} date, newest first</span>
+              {totalPages > 1 && (
+                <span className="row" style={{ gap: 8, alignItems: "center" }}>
+                  <button className="small" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Prev</button>
+                  <span className="muted" style={{ fontSize: 12 }}>Page {page} of {num(totalPages)}</span>
+                  <button className="small" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next →</button>
+                </span>
+              )}
             </div>
-          )}
-        </>
-      )}
+          </>
+        )}
+      </div>
       {confirmDel && (
         <ConfirmDelete count={sel.selected.size} itemLabel="record" busy={busy} onCancel={() => setConfirmDel(false)} onConfirm={bulkDelete} />
       )}
-    </div>
+    </>
   );
 }
