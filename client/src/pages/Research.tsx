@@ -698,23 +698,22 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
           {shownLevel === "abstract" && r.abstractId
             // Standard text color (not link blue) — still clickable via the row.
             ? <a style={{ cursor: "pointer", fontWeight: 600, color: "var(--text)" }} title={`View records for abstract ${r.abstractId}`}>{geoName(r)}</a>
-            : geoName(r)}
-          {" "}{r.isHotspot && <span className="badge" style={{ background: "rgba(239,68,68,0.15)", color: "#ef4444" }}>HOTSPOT</span>}
+            : <span className="rec-name">{geoName(r)}</span>}
         </>
       ) },
-    { key: "transactions", header: "Transactions", value: (r) => r.transactions, align: "right" },
-    { key: "leases", header: "Leases", value: (r) => r.leases, align: "right" },
-    { key: "permits", header: "Permits", value: (r) => r.permits, align: "right" },
-    { key: "total", header: "Total", value: (r) => r.total, align: "right" },
+    { key: "transactions", header: "Transactions", value: (r) => r.transactions, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{num(r.transactions)}</span> },
+    { key: "leases", header: "Leases", value: (r) => r.leases, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{num(r.leases)}</span> },
+    { key: "permits", header: "Permits", value: (r) => r.permits, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{num(r.permits)}</span> },
+    { key: "total", header: "Total", value: (r) => r.total, align: "right", render: (r) => <b className="rec-nowrap">{num(r.total)}</b> },
     // Prior/Change columns are comparative — hidden when comparison is off.
     ...(compareOff ? [] : ([
-      { key: "previous", header: "Prior", value: (r: GeoRow) => r.previous, align: "right" },
+      { key: "previous", header: "Prior", value: (r: GeoRow) => r.previous, align: "right", render: (r: GeoRow) => <span className="rec-mid rec-nowrap">{num(r.previous)}</span> },
       {
         key: "pctChange", header: "Change", value: (r: GeoRow) => r.pctChange ?? Number.MAX_SAFE_INTEGER, align: "right",
-        render: (r: GeoRow) => <span style={{ color: r.absoluteChange > 0 ? "#22c55e" : r.absoluteChange < 0 ? "#ef4444" : "var(--text-dim)" }}>{fmtPct(r.pctChange)} ({r.absoluteChange >= 0 ? "+" : ""}{r.absoluteChange})</span>,
+        render: (r: GeoRow) => <span className="rec-nowrap" style={{ color: r.absoluteChange > 0 ? "#22c55e" : r.absoluteChange < 0 ? "#ef4444" : "var(--text-dim)" }}>{fmtPct(r.pctChange)} ({r.absoluteChange >= 0 ? "+" : ""}{r.absoluteChange})</span>,
       },
     ] as Column<GeoRow>[])),
-    { key: "zScore", header: "z", value: (r) => r.zScore, align: "right", render: (r) => (r.zScore == null ? "—" : r.zScore.toFixed(1)) },
+    { key: "zScore", header: "Z", value: (r) => r.zScore, align: "right", render: (r) => <span className="rec-mid">{r.zScore == null ? "—" : r.zScore.toFixed(1)}</span> },
   ];
 
   const countyStats: CountyStat[] = useMemo(
@@ -727,14 +726,17 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
     <>
       {showMap && (
         <div className="panel">
-          <div className="panel-title">
-            <h3 style={{ margin: 0 }}>Texas Activity Map <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(red outline = hotspot; click a county to zoom into its abstracts)</span></h3>
-            <div className="chip-row">
-              <span className={`chip ${metric === "activity" ? "active" : ""}`} onClick={() => setMetric("activity")}>Volume</span>
-              <span className={`chip ${metric === "change" ? "active" : ""}`} onClick={() => setMetric("change")}>Change</span>
+          <div className="panel-title" style={{ alignItems: "flex-start" }}>
+            <div>
+              <h3 style={{ margin: 0 }}>Texas Activity Map</h3>
+              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>Blue = hotspot · click a county to zoom into its abstracts</div>
+            </div>
+            <div className="seg-control">
+              <span className={`seg ${metric === "activity" ? "active" : ""}`} onClick={() => setMetric("activity")}>Volume</span>
+              <span className={`seg ${metric === "change" ? "active" : ""}`} onClick={() => setMetric("change")}>Change</span>
             </div>
           </div>
-          <div style={{ maxWidth: 640, margin: "0 auto" }}>
+          <div style={{ maxWidth: 820, margin: "0 auto" }}>
             <ResearchChoropleth
               stats={countyStats} metric={metric} selected={filters.counties} qs={qs}
               // Clicking a county filters the whole Research page to it (every
@@ -762,23 +764,26 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
         </div>
       )}
 
-      <div className="panel">
-        <div className="panel-title">
+      <div className="rec-card">
+        <div className="geo-head">
           <h3 style={{ margin: 0 }}>Activity by {shownLevel === "state" ? "State" : shownLevel === "county" ? "County" : "Abstract"}</h3>
-          <div className="row" style={{ gap: 8 }}>
-            <div className="chip-row">
+          <div className="res-card-tools">
+            <div className="seg-control">
               {(["state", "county", "abstract"] as const).map((l) => (
-                <span key={l} className={`chip ${level === l ? "active" : ""}`} onClick={() => setLevel(l)}>{l[0].toUpperCase() + l.slice(1)}</span>
+                <span key={l} className={`seg ${level === l ? "active" : ""}`} onClick={() => setLevel(l)}>{l[0].toUpperCase() + l.slice(1)}</span>
               ))}
             </div>
-            <button className="small" disabled={!data?.rows.length} onClick={() => data && downloadCsv(
+            <button className="rbtn" disabled={!data?.rows.length} onClick={() => data && downloadCsv(
               `research-geography-${shownLevel}.csv`,
               ["Name", "State", "County", "Transactions", "Leases", "Permits", "Total", "Prior", "Change %", "Hotspot"],
               data.rows.map((r) => [geoName(r), r.state, r.county, r.transactions, r.leases, r.permits, r.total, r.previous, r.pctChange == null ? "" : Math.round(r.pctChange * 100), r.isHotspot ? "YES" : ""]),
-            )}>Export CSV</button>
+            )}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+              Export CSV
+            </button>
           </div>
         </div>
-        {loading && !data ? <Spinner /> : !data || data.rows.length === 0 ? <p className="muted">No activity in this period.</p> : (
+        {loading && !data ? <Spinner /> : !data || data.rows.length === 0 ? <p className="muted" style={{ padding: "0 20px 16px", margin: 0 }}>No activity in this period.</p> : (
           // While a different level loads, the current table stays put and
           // gently dims — the new rows swap in without a spinner flash.
           <div style={{ opacity: loading ? 0.55 : 1, transition: "opacity 160ms ease", pointerEvents: loading ? "none" : undefined }}>
@@ -795,6 +800,9 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
                 abstracts: shownLevel === "abstract" && r.abstractId ? [r.abstractId] : [],
               })}
             />
+            <div className="rec-foot">
+              <span>{num(data.rows.length)} {shownLevel === "state" ? "states" : shownLevel === "county" ? "counties" : "abstracts"} · sorted by total, descending</span>
+            </div>
           </div>
         )}
       </div>

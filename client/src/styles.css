@@ -2911,3 +2911,11 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 /* Segmented tracks inside cards sit on the darker surface tone (reference). */
 .rec-card .seg-control, .rk-card .seg-control { background: var(--surface); }
 :root[data-theme="light"] .rec-card .seg-control, :root[data-theme="light"] .rk-card .seg-control { background: var(--control); }
+
+/* Geography — "Activity by …" card header (reference: title left, level
+   segmented control + Export right; no divider under the header). */
+.geo-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 16px 20px 12px; }
+.geo-head h3 { font-size: 14.5px; font-weight: 700; }
+/* Map card's Volume/Change seg track sits on the darker surface too. */
+.research-page .panel .seg-control { background: var(--surface); }
+:root[data-theme="light"] .research-page .panel .seg-control { background: var(--control); }
