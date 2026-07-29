@@ -13,6 +13,13 @@ import { PhoneInput } from "../../components/PhoneInput";
 
 const EMPTY_FC: FC = { type: "FeatureCollection", features: [] };
 
+/** Uppercase asset-type pill for the card image header (e.g. MINERALS, ROYALTY). */
+function typePill(d: PortalDeal): string | null {
+  if (d.assetCount) return `PACKAGE · ${d.assetCount}`;
+  if (!d.assetTypes.length) return null;
+  return d.assetTypes.map((t) => (ASSET_TYPE_LABELS as Record<string, string>)[t] ?? t).join(" / ").toUpperCase();
+}
+
 type SortKey = "featured" | "newest" | "nra" | "name";
 type ListView = "grid" | "table";
 type DockSide = "left" | "right";
@@ -30,7 +37,7 @@ interface SavedSearch { name: string; f: FilterSnapshot }
 // The buyer's remembered workspace layout — list view, which side the listings
 // panel is docked on, and how wide it is.
 interface LayoutPrefs { view: ListView; side: DockSide; width: number }
-const DEFAULT_LAYOUT: LayoutPrefs = { view: "grid", side: "left", width: 400 };
+const DEFAULT_LAYOUT: LayoutPrefs = { view: "grid", side: "left", width: 520 };
 const MIN_PANEL = 300;
 const MAX_PANEL = 760;
 
@@ -75,6 +82,14 @@ export function PortalMarketplace() {
   const [nraMax, setNraMax] = useState("");
   const [saved, setSaved] = useState<SavedSearch[]>([]);
   const [presetName, setPresetName] = useState("");
+  // Buy-box form ("Tell us what you're looking for") — opened from the header
+  // CTA per the design; state lives here so the button can reach it.
+  const [buyBoxOpen, setBuyBoxOpen] = useState(false);
+  const leadRef = useRef<HTMLDivElement>(null);
+  function openBuyBox() {
+    setBuyBoxOpen(true);
+    setTimeout(() => leadRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  }
 
   const snapshot = useMemo<FilterSnapshot>(() => ({
     q, states: fStates, counties: fCounties, basins: fBasins, formations: fFormations,
@@ -180,11 +195,19 @@ export function PortalMarketplace() {
   if (error) return <PortalShell><div className="panel" style={{ textAlign: "center", padding: 48 }}><h2>Portal unavailable</h2><p className="muted">{error}</p></div></PortalShell>;
 
   return (
-    <PortalShell org={org ?? undefined}>
+    <PortalShell org={org ?? undefined} wide>
+      {/* Page header — title + the buy-box CTA. */}
+      <header className="mp-head">
+        <div>
+          <h1>Marketplace</h1>
+          <div className="mp-head-sub">Mineral &amp; royalty opportunities, sourced weekly</div>
+        </div>
+        <button className="pbtn pbtn-primary" onClick={openBuyBox}>Tell us what you're looking for</button>
+      </header>
+
       {/* Collapsible filters + workspace controls (map-first: filters stay out of the way). */}
       <div className="panel mkt-controls">
         <div className="mkt-search-row">
-          <svg className="mkt-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
           <input
             className="mkt-search"
             value={q}
@@ -195,10 +218,10 @@ export function PortalMarketplace() {
           {q && <button type="button" className="mkt-search-clear" onClick={() => setQ("")} title="Clear search" aria-label="Clear search">×</button>}
         </div>
         <div className="mkt-controls-bar">
-          <button className="small" onClick={() => setShowFilters((s) => !s)}>
+          <button className="mp-btn" onClick={() => setShowFilters((s) => !s)}>
             {showFilters ? "▾" : "▸"} Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
           </button>
-          <span className="muted" style={{ fontSize: 13 }}>{filtered.length} of {deals.length} opportunities</span>
+          <span className="mp-count"><b>{filtered.length}</b> of {deals.length} opportunities</span>
           <span className="spacer" style={{ marginLeft: "auto" }} />
           <Select value={sort} onChange={(v) => setSort(v as SortKey)} width={170} ariaLabel="Sort listings"
             options={[
@@ -209,9 +232,9 @@ export function PortalMarketplace() {
             ]} />
           <div className="seg-control mkt-seg">
             <span className={`seg ${view === "grid" ? "active" : ""}`} onClick={() => setView("grid")}>▦ Grid</span>
-            <span className={`seg ${view === "table" ? "active" : ""}`} onClick={() => setView("table")}>☰ Table</span>
+            <span className={`seg ${view === "table" ? "active" : ""}`} onClick={() => setView("table")}>≡ Table</span>
           </div>
-          <button className="small" title={`Dock listings ${side === "left" ? "right" : "left"}`} onClick={() => setSide((s) => (s === "left" ? "right" : "left"))}>
+          <button className="mp-btn" title={`Dock listings ${side === "left" ? "right" : "left"}`} onClick={() => setSide((s) => (s === "left" ? "right" : "left"))}>
             {side === "left" ? "Dock listings right →" : "← Dock listings left"}
           </button>
         </div>
@@ -236,8 +259,8 @@ export function PortalMarketplace() {
                 placeholder="Name this search"
                 style={{ width: 160 }}
               />
-              <button type="button" className="small" disabled={!presetName.trim() || !hasFilters} onClick={saveCurrent}>Save</button>
-              {hasFilters ? <button type="button" className="small" onClick={() => applySnapshot({})}>Clear</button> : null}
+              <button type="button" className="mp-btn" disabled={!presetName.trim() || !hasFilters} onClick={saveCurrent}>Save</button>
+              {hasFilters ? <button type="button" className="mp-btn" onClick={() => applySnapshot({})}>Clear</button> : null}
             </div>
             <div className="filters-grid" style={{ marginTop: 10 }}>
               {/* Same cascading geographic selector as the CRM; options scope to
@@ -267,37 +290,41 @@ export function PortalMarketplace() {
               <p className="muted" style={{ margin: 0 }}>No opportunities match those filters — broaden them, or tell us what you're looking for below.</p>
             </div>
           ) : view === "grid" ? (
-            <div className="mkt-cards">
+            <div className="mp-cards">
               {filtered.map((d) => (
-                <div key={d.slug} className="panel portal-card clickable" onClick={() => navigate(`/offer/${d.slug}`)}>
-                  {d.featured && <span className="badge resp-offer">Featured</span>}
-                  <h3 style={{ margin: "6px 0 2px" }}>{d.name}</h3>
-                  <div className="muted" style={{ fontSize: 13 }}>{d.counties.map((c) => `${c} County`).join(", ")}{d.states.length ? ` · ${d.states.join(", ")}` : ""}</div>
-                  <div className="portal-card-facts">
-                    {d.assetCount ? <span className="badge resp-pending">Package · {d.assetCount} tract{d.assetCount > 1 ? "s" : ""}</span> : null}
-                    {d.nra != null && <span><strong>{num(d.nra)}</strong> NRA</span>}
-                    {d.assetTypes.length > 0 && <span>{d.assetTypes.join("/")}</span>}
-                    {d.basins.length > 0 && <span>{d.basins[0]}</span>}
-                    {d.operator && <span>{d.operator}</span>}
+                <div key={d.slug} className="mp-card" onClick={() => navigate(`/offer/${d.slug}`)}>
+                  <div className="mp-card-hero">
+                    <svg width="54" height="54" viewBox="0 0 24 24" fill="none" strokeWidth="1.4" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" /></svg>
+                    {d.featured && <span className="pill-featured">★ FEATURED</span>}
+                    {typePill(d) && <span className="mp-pill-type">{typePill(d)}</span>}
                   </div>
-                  {d.summary && <p className="muted portal-card-summary">{d.summary}</p>}
-                  <span className="portal-card-cta">View offering →</span>
+                  <div className="mp-card-body">
+                    <div className="mp-card-top">
+                      <div className="mp-card-name">{d.name}</div>
+                      {d.askPrice != null && <div className="mp-card-price">${num(d.askPrice)}</div>}
+                    </div>
+                    <div className="mp-card-loc">{[d.counties.join(", "), d.states.join(", ")].filter(Boolean).join(" · ")}{d.basins.length ? ` · ${d.basins[0]}` : ""}</div>
+                    <div className="mp-card-stats">
+                      <div><div className="mp-stat-l">NRA</div><div className="mp-stat-v">{d.nra != null ? num(d.nra) : "—"}</div></div>
+                      <div><div className="mp-stat-l">WELLS</div><div className="mp-stat-v">{d.wells.length || "—"}</div></div>
+                      <div className="mp-stat-op"><div className="mp-stat-l">OPERATOR</div><div className="mp-stat-v">{d.operator ?? "—"}</div></div>
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="table-scroll mkt-table">
-              <table className="data-table">
-                <thead><tr><th>Opportunity</th><th>County</th><th>State</th><th className="right">NRA</th><th>Asset</th><th>Operator</th></tr></thead>
+            <div className="mp-tablecard">
+              <table>
+                <thead><tr><th>Opportunity</th><th>Location</th><th className="right">NRA</th><th className="right">Asking</th><th>Operator</th></tr></thead>
                 <tbody>
                   {filtered.map((d) => (
                     <tr key={d.slug} className="clickable" onClick={() => navigate(`/offer/${d.slug}`)}>
-                      <td><strong>{d.name}</strong>{d.featured ? " ★" : ""}{d.assetCount ? <span className="muted" style={{ fontSize: 12 }}> · {d.assetCount} tract{d.assetCount > 1 ? "s" : ""}</span> : null}</td>
-                      <td>{d.counties.join(", ")}</td>
-                      <td>{d.states.join(", ")}</td>
-                      <td className="right">{d.nra != null ? num(d.nra) : "—"}</td>
-                      <td>{d.assetTypes.join("/") || "—"}</td>
-                      <td>{d.operator ?? "—"}</td>
+                      <td className="mp-td-name">{d.name}{d.featured ? " ★" : ""}{d.assetCount ? <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}> · {d.assetCount} tract{d.assetCount > 1 ? "s" : ""}</span> : null}</td>
+                      <td className="mp-td-dim">{[d.counties.join(", "), d.states.join(", ")].filter(Boolean).join(" · ")}</td>
+                      <td className="right mp-td-nra">{d.nra != null ? num(d.nra) : "—"}</td>
+                      <td className="right mp-td-ask">{d.askPrice != null ? `$${num(d.askPrice)}` : "—"}</td>
+                      <td className="mp-td-dim">{d.operator ?? "—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -313,7 +340,9 @@ export function PortalMarketplace() {
         </div>
       </div>
 
-      <LeadCapture orgSlug={orgSlug} />
+      <div ref={leadRef}>
+        <LeadCapture orgSlug={orgSlug} open={buyBoxOpen} onOpenChange={setBuyBoxOpen} />
+      </div>
     </PortalShell>
   );
 }
@@ -322,7 +351,7 @@ export function PortalMarketplace() {
 // "Don't see an opportunity that fits your needs?" — lead capture
 // ---------------------------------------------------------------------------
 
-function LeadCapture({ orgSlug }: { orgSlug: string }) {
+function LeadCapture({ orgSlug, open, onOpenChange }: { orgSlug: string; open: boolean; onOpenChange: (v: boolean) => void }) {
   const [f, setF] = useState({
     companyName: "", contactName: "", email: "", phone: "", preferredContact: "either" as "email" | "phone" | "either",
     states: [] as string[], counties: [] as string[], basins: [] as string[], formations: [] as string[], assetTypes: [] as string[],
@@ -330,7 +359,6 @@ function LeadCapture({ orgSlug }: { orgSlug: string }) {
   });
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
-  const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const set = <K extends keyof typeof f>(k: K) => (v: (typeof f)[K]) => setF((p) => ({ ...p, [k]: v }));
 
@@ -380,7 +408,7 @@ function LeadCapture({ orgSlug }: { orgSlug: string }) {
           <h3 style={{ margin: "0 0 4px" }}>Don't see an opportunity that fits your needs?</h3>
           <p className="muted" style={{ margin: 0 }}>Tell us your buy box — when a matching deal surfaces, you'll be the first call.</p>
         </div>
-        <button className="primary" onClick={() => setOpen(true)}>Submit Your Buy Box</button>
+        <button className="primary" onClick={() => onOpenChange(true)}>Submit Your Buy Box</button>
       </div>
     );
   }
@@ -390,7 +418,7 @@ function LeadCapture({ orgSlug }: { orgSlug: string }) {
     <div className="panel portal-lead">
       <div className="section-head">
         <h2 style={{ margin: 0 }}>Tell Us What You're Looking For</h2>
-        <button className="small" onClick={() => setOpen(false)}>Close</button>
+        <button className="mp-btn" onClick={() => onOpenChange(false)}>Close</button>
       </div>
       <p className="muted">We source new mineral and royalty opportunities every week — when something matches your buy box, you'll be the first call.</p>
       <form onSubmit={submit}>

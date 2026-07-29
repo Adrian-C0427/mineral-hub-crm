@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { API_BASE } from "../../api/client";
-import { num } from "../../lib/format";
+import { fmtDateLocal, num } from "../../lib/format";
 import { PortalMap } from "./PortalMap";
 import { portalGet, portalPost, type FC, type PortalAbstract, type PortalDeal, type PortalDocument, type PortalImage, type PortalOrg, type PortalPackageAsset, type PortalProduction } from "./portalApi";
 import { formatPhone } from "../../lib/phone";
@@ -41,20 +41,20 @@ export function PortalOffering() {
       {/* Hero */}
       <div className="portal-hero panel">
         <div>
-          <div className="row" style={{ gap: 8, marginBottom: 8 }}>
-            {deal.featured && <span className="badge resp-offer">Featured opportunity</span>}
-            {assets.length > 0 && <span className="badge resp-pending">Package · {assets.length} tract{assets.length > 1 ? "s" : ""}</span>}
+          <div className="portal-hero-title">
+            <h1>{deal.name}</h1>
+            {deal.featured && <span className="pill-featured">★ FEATURED</span>}
+            {assets.length > 0 && <span className="mp-chip" style={{ padding: "3px 11px", fontSize: 11.5 }}>Package · {assets.length} tract{assets.length > 1 ? "s" : ""}</span>}
           </div>
-          <h1 style={{ margin: "4px 0 6px" }}>{deal.name}</h1>
-          <div className="muted">{[deal.counties.map((c) => `${c} County`).join(", "), deal.states.join(", ")].filter(Boolean).join(" · ")}</div>
-          {deal.summary && <p style={{ marginTop: 12, maxWidth: 720, lineHeight: 1.55 }}>{deal.summary}</p>}
+          <div className="portal-hero-sub">{[deal.counties.map((c) => `${c} County`).join(", "), deal.states.join(", ")].filter(Boolean).join(" · ")}</div>
+          {deal.summary && <p style={{ marginTop: 12, maxWidth: 720, lineHeight: 1.55, fontSize: 13.5 }}>{deal.summary}</p>}
         </div>
         <div className="portal-hero-facts">
-          {deal.askPrice != null && <Fact label="Asking Price" value={`$${num(deal.askPrice)}`} />}
           {deal.nra != null && <Fact label="Net Royalty Acres" value={num(deal.nra)} />}
           {deal.acreageNma != null && <Fact label="Net Mineral Acres" value={num(deal.acreageNma)} />}
           {deal.assetTypes.length > 0 && <Fact label="Asset Type" value={deal.assetTypes.join(", ")} />}
           {deal.operator && <Fact label="Operator" value={deal.operator} />}
+          {deal.askPrice != null && <Fact label="Asking" value={`$${num(deal.askPrice)}`} green />}
         </div>
       </div>
 
@@ -134,20 +134,21 @@ export function PortalOffering() {
                 stat chips — repeating them here diluted both. */}
             <KV k="Producing Status" v={deal.producingStatus ?? ""} />
             <KV k={deal.surveys.length > 1 ? "Surveys" : "Survey"} v={(deal.surveys.length ? deal.surveys : [...new Set(abstracts.map((a) => a.survey).filter(Boolean))] as string[]).join(", ")} />
+            <KV k="Listed" v={fmtDateLocal(deal.listedAt)} />
           </div>
           {abstracts.length > 0 && (
             <>
-              <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", margin: "14px 0 6px" }}>Abstracts</div>
-              <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-                {abstracts.map((a) => <span key={a.id} className="badge resp-pending">{a.abstract ?? a.id}{a.survey ? ` · ${a.survey}` : ""} · {a.county}</span>)}
+              <div className="portal-sec">Abstracts</div>
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                {abstracts.map((a) => <span key={a.id} className="mp-chip">{a.abstract ?? a.id}{a.survey ? ` · ${a.survey}` : ""} · {a.county}</span>)}
               </div>
             </>
           )}
           {deal.wells.length > 0 && (
             <>
-              <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", margin: "14px 0 6px" }}>Wells</div>
-              <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-                {deal.wells.map((w) => <span key={w} className="badge resp-pending">{w}</span>)}
+              <div className="portal-sec">Wells</div>
+              <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
+                {deal.wells.map((w) => <span key={w} className="mp-chip">{w}</span>)}
               </div>
             </>
           )}
@@ -174,8 +175,9 @@ export function PortalOffering() {
                     } catch { alert("Download unavailable"); }
                   }}
                 >
-                  <span>📄 {d.filename}</span>
-                  <span className="muted">{(d.sizeBytes / 1024 / 1024).toFixed(1)} MB</span>
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ color: "var(--text-dim)", flexShrink: 0 }} aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /></svg>
+                  <span className="portal-doc-name">{d.filename}</span>
+                  <span className="portal-doc-size">{(d.sizeBytes / 1024 / 1024).toFixed(1)} MB</span>
                 </a>
               ))
             )}
@@ -224,9 +226,9 @@ export function PortalOffering() {
       <SubmitOffer slug={slug} dealName={deal.name} />
 
       {org.slug && (
-        <p className="muted" style={{ textAlign: "center" }}>
+        <div className="mp-backlink">
           <Link to={`/portal/${org.slug}`}>← Browse all available opportunities</Link>
-        </p>
+        </div>
       )}
     </PortalShell>
   );
@@ -291,7 +293,7 @@ function SubmitOffer({ slug, dealName }: { slug: string; dealName: string }) {
     <div className="panel portal-lead">
       <div className="section-head">
         <h2 style={{ margin: 0 }}>Submit an Offer</h2>
-        <button className="small" onClick={() => setOpen(false)}>Close</button>
+        <button className="mp-btn" onClick={() => setOpen(false)}>Close</button>
       </div>
       <p className="muted">An offer is non-binding and simply opens the conversation. Our team reviews every submission and responds promptly.</p>
       <form onSubmit={submit}>
@@ -316,8 +318,8 @@ function SubmitOffer({ slug, dealName }: { slug: string; dealName: string }) {
   );
 }
 
-function Fact({ label, value }: { label: string; value: string }) {
-  return <div className="portal-fact"><div className="portal-fact-v">{value}</div><div className="portal-fact-l">{label}</div></div>;
+function Fact({ label, value, green }: { label: string; value: string; green?: boolean }) {
+  return <div className={`portal-fact ${green ? "portal-fact-green" : ""}`}><div className="portal-fact-v">{value}</div><div className="portal-fact-l">{label}</div></div>;
 }
 function ProdStat({ v, l }: { v: string; l: string }) {
   return <div className="portal-prod-stat"><div className="portal-prod-v">{v}</div><div className="portal-prod-l">{l}</div></div>;
@@ -328,7 +330,7 @@ function KV({ k, v }: { k: string; v: string }) {
 }
 
 /** Shared public chrome: branded header + footer, no CRM sidebar/auth. */
-export function PortalShell({ org, children }: { org?: PortalOrg; children: React.ReactNode }) {
+export function PortalShell({ org, wide, children }: { org?: PortalOrg; wide?: boolean; children: React.ReactNode }) {
   return (
     <div className="portal-shell">
       <header className="portal-header">
@@ -337,7 +339,7 @@ export function PortalShell({ org, children }: { org?: PortalOrg; children: Reac
           : <span className="brand" style={{ fontSize: 18 }}>{org?.name ?? <>Mineral Hub<span className="dot">.</span></>}</span>}
         <span className="muted" style={{ fontSize: 13 }}>Mineral Opportunities</span>
       </header>
-      <main className="portal-main">{children}</main>
+      <main className={`portal-main ${wide ? "mp-wide" : ""}`}>{children}</main>
       <footer className="portal-footer muted">
         © {new Date().getFullYear()} {org?.name ?? "Mineral Hub"} · All information subject to verification. Nothing herein constitutes an offer to sell securities.
       </footer>
