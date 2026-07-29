@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend, BarChart,
-  LineChart, PieChart, Pie, Cell,
+  LineChart, PieChart, Pie, Cell, LabelList,
 } from "recharts";
 import { ArrowRight, Heart, Lock, Search, Share2, TrendingUp } from "lucide-react";
 import { api } from "../api/client";
@@ -889,26 +889,31 @@ function RankingsTab({ qs, opts, compareOff, onDrill }: { qs: string; opts: Filt
         <div className="panel" style={{ gridColumn: "1 / -1" }}>
           <div className="panel-title">
             <h3 style={{ margin: 0 }}>{ROLE_LABEL[role]}</h3>
-            <div className="row" style={{ gap: 8 }}>
-              <div className="chip-row">
+            <div className="res-card-tools">
+              <div className="seg-control">
                 {(["buyers", "sellers", "operators"] as const).map((r) => (
-                  <span key={r} className={`chip ${role === r ? "active" : ""}`} onClick={() => setRole(r)}>{r[0].toUpperCase() + r.slice(1)}</span>
+                  <span key={r} className={`seg ${role === r ? "active" : ""}`} onClick={() => setRole(r)}>{r[0].toUpperCase() + r.slice(1)}</span>
                 ))}
               </div>
-              <button className="small" disabled={!rows.length} onClick={() => data && downloadCsv(
+              <button className="rbtn" disabled={!rows.length} onClick={() => data && downloadCsv(
                 `research-${role}.csv`,
                 ["Name", "Count", "Prior", "Change %", "Counties", "New Entrant"],
                 data.rows.map((r) => [r.name, r.count, r.previous, r.pctChange == null ? "" : Math.round(r.pctChange * 100), r.counties.join("; "), r.newEntrant ? "YES" : ""]),
-              )}>Export CSV</button>
+              )}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+                Export CSV
+              </button>
             </div>
           </div>
           {loading && !data ? <Spinner /> : top.length === 0 ? <p className="muted">No activity in this period.</p> : (
-            <ResponsiveContainer width="100%" height={Math.max(160, top.length * 32)}>
-              <BarChart data={top} layout="vertical" margin={{ left: 80 }}>
-                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
+            <ResponsiveContainer width="100%" height={Math.max(160, top.length * 34)}>
+              <BarChart data={top} layout="vertical" margin={{ left: 80, right: 34 }}>
+                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} hide />
                 <YAxis type="category" dataKey="name" width={200} tick={{ fontSize: 11 }} />
-                <Tooltip {...chartTooltip} />
-                <Bar dataKey="count" name={role === "operators" ? "Permits" : "Records"} fill={CHART_COLORS[role === "buyers" ? 0 : role === "sellers" ? 4 : 3]} radius={[0, 3, 3, 0]} />
+                <Tooltip {...chartTooltip} cursor={{ fill: "color-mix(in srgb, var(--text) 5%, transparent)" }} />
+                <Bar dataKey="count" name={role === "operators" ? "Permits" : "Records"} fill={CHART_COLORS[role === "buyers" ? 0 : role === "sellers" ? 4 : 3]} radius={[0, 4, 4, 0]}>
+                  <LabelList dataKey="count" position="right" style={{ fill: "var(--text)", fontSize: 12, fontWeight: 700 }} />
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           )}
@@ -1533,34 +1538,45 @@ function OpportunitiesTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
     return <Banner kind="info">No statistically significant surges detected in this period — try widening the date range or clearing filters.</Banner>;
   }
 
+  const criticalCount = data.signals.filter((s) => severityTier(s.severity).label === "Critical").length;
+
   return (
-    <div>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Signals are detected by comparing the selected period against six equal history windows (z-score ≥ 2 plus a
-        material lift), clustering by geography, and flagging new entrants. Higher severity = stronger, higher-volume anomaly.
-      </p>
-      {data.signals.map((s) => {
-        const meta = SIGNAL_META[s.kind] ?? { label: s.kind, color: "#94a3b8" };
-        const tier = severityTier(s.severity);
-        return (
-          <div key={s.id} className="panel" style={{ borderLeft: `3px solid ${tier.color}`, display: "flex", gap: 14, alignItems: "flex-start" }}>
-            <div style={{ minWidth: 64, textAlign: "center" }}>
-              <div style={{ fontSize: 22, fontWeight: 700, color: tier.color }}>{s.severity}</div>
-              <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600, color: tier.color }}>{tier.label}</div>
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <span className="badge" style={{ background: `${meta.color}26`, color: meta.color }}>{meta.label}</span>
-                <strong>{s.title}</strong>
+    <div className="res-card">
+      <div className="res-card-head">
+        <div>
+          <h3>Buying signals</h3>
+          <div className="res-card-desc">
+            Signals are detected by comparing the selected period against six equal history windows (z-score ≥ 2 plus a
+            material lift), clustering by geography, and flagging new entrants. Higher severity = stronger, higher-volume anomaly.
+          </div>
+        </div>
+        {criticalCount > 0 && <span className="opp-crit-badge">{criticalCount} critical signal{criticalCount === 1 ? "" : "s"}</span>}
+      </div>
+      <div className="opp-list">
+        {data.signals.map((s) => {
+          const meta = SIGNAL_META[s.kind] ?? { label: s.kind, color: "#94a3b8" };
+          const tier = severityTier(s.severity);
+          return (
+            <div key={s.id} className="opp-signal" style={{ borderLeftColor: tier.color }}>
+              <div className="opp-score">
+                <div className="opp-score-n" style={{ color: tier.color }}>{s.severity}</div>
+                <div className="opp-score-tier" style={{ color: tier.color }}>{tier.label}</div>
               </div>
-              <p style={{ margin: "6px 0 8px" }}>{s.detail}</p>
-              <button className="small" onClick={() => onDrill({ states: s.state ? [s.state] : [], counties: s.county ? [s.county] : [] })}>
-                View underlying records →
+              <div className="opp-body">
+                <div className="opp-title-row">
+                  <span className="badge" style={{ background: `${meta.color}26`, color: meta.color }}>{meta.label}</span>
+                  <strong>{s.title}</strong>
+                </div>
+                <p className="opp-detail">{s.detail}</p>
+              </div>
+              <button className="rbtn opp-view" onClick={() => onDrill({ states: s.state ? [s.state] : [], counties: s.county ? [s.county] : [] })}>
+                View records →
               </button>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
+      <div className="opp-foot">{data.signals.length} signal{data.signals.length === 1 ? "" : "s"} in this period · sorted by severity</div>
     </div>
   );
 }
@@ -1687,7 +1703,7 @@ function RecordsTab({ qs }: { qs: string }) {
 
   const docColumns: Column<DocRecord>[] = [
     { key: "recordingDate", header: "Recorded", value: (r) => r.recordingDate, render: (r) => fmtDate(r.recordingDate), type: "date" },
-    { key: "docType", header: "Type", value: (r) => r.docTypeRaw, render: (r) => <span title={r.docTypeRaw}>{prettyDocType(r.docType)}</span> },
+    { key: "docType", header: "Type", value: (r) => r.docTypeRaw, render: (r) => <span className="rec-type" title={r.docTypeRaw}>{prettyDocType(r.docType)}</span> },
     { key: "grantor", header: "Grantor (Seller)", value: (r) => r.grantor },
     { key: "grantee", header: "Grantee (Buyer)", value: (r) => r.grantee },
     { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}` },
@@ -1708,16 +1724,20 @@ function RecordsTab({ qs }: { qs: string }) {
   return (
     <div className="panel">
       <div className="panel-title">
-        <div className="chip-row">
-          <span className={`chip ${kind === "documents" ? "active" : ""}`} onClick={() => setKind("documents")}>Recorded Documents</span>
-          <span className={`chip ${kind === "permits" ? "active" : ""}`} onClick={() => setKind("permits")}>Drilling Permits</span>
+        <div className="seg-control">
+          <span className={`seg ${kind === "documents" ? "active" : ""}`} onClick={() => setKind("documents")}>Recorded Documents</span>
+          <span className={`seg ${kind === "permits" ? "active" : ""}`} onClick={() => setKind("permits")}>Drilling Permits</span>
         </div>
-        <div className="row" style={{ gap: 8, alignItems: "center" }}>
-          {active && <span className="muted" style={{ fontSize: 12 }}>{num(active.total)} records</span>}
-          <button className={`small ${showFilters || activeFilterCount > 0 ? "primary" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters}>
+        <div className="res-card-tools">
+          {active && <span className="muted" style={{ fontSize: 12.5 }}><b style={{ color: "var(--text)" }}>{num(active.total)}</b> records</span>}
+          <button className={`rbtn ${showFilters || activeFilterCount > 0 ? "active" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
             Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
           </button>
-          <button className="small" onClick={exportAll} disabled={!active?.total}>Export CSV</button>
+          <button className="rbtn" onClick={exportAll} disabled={!active?.total}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+            Export CSV
+          </button>
         </div>
       </div>
 
