@@ -883,44 +883,57 @@ function RankingsTab({ qs, opts, compareOff, onDrill }: { qs: string; opts: Filt
 
   const top = rows.slice(0, 10);
 
+  const barColor = CHART_COLORS[role === "buyers" ? 0 : role === "sellers" ? 4 : 3];
+  const drillKey = (k: string) => onDrill(role === "buyers" ? { buyers: [k] } : role === "sellers" ? { sellers: [k] } : { operators: [k] });
+  // Nice axis: a rounded maximum (with headroom) + evenly-spaced ticks, so the
+  // horizontal bars read against a 0…max scale exactly like the reference.
+  const maxCount = top.length ? Math.max(...top.map((r) => r.count)) : 1;
+  const niceNum = (x: number) => { const p = Math.pow(10, Math.floor(Math.log10(x || 1))); const f = (x || 1) / p; const nf = f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10; return nf * p; };
+  const step = niceNum(Math.max(1, maxCount) / 4);
+  let niceMax = Math.ceil(maxCount / step) * step; if (niceMax <= maxCount) niceMax += step;
+  const ticks: number[] = []; for (let v = 0; v <= niceMax + step * 0.001; v += step) ticks.push(Math.round(v));
+
   return (
     <>
-      <div className="chart-grid">
-        <div className="panel" style={{ gridColumn: "1 / -1" }}>
-          <div className="panel-title">
-            <h3 style={{ margin: 0 }}>{ROLE_LABEL[role]}</h3>
-            <div className="res-card-tools">
-              <div className="seg-control">
-                {(["buyers", "sellers", "operators"] as const).map((r) => (
-                  <span key={r} className={`seg ${role === r ? "active" : ""}`} onClick={() => setRole(r)}>{r[0].toUpperCase() + r.slice(1)}</span>
-                ))}
+      <div className="rk-card">
+        <div className="rk-head">
+          <h3>{ROLE_LABEL[role]}</h3>
+          <div className="res-card-tools">
+            <div className="seg-control">
+              {(["buyers", "sellers", "operators"] as const).map((r) => (
+                <span key={r} className={`seg ${role === r ? "active" : ""}`} onClick={() => setRole(r)}>{r[0].toUpperCase() + r.slice(1)}</span>
+              ))}
+            </div>
+            <button className="rbtn" disabled={!rows.length} onClick={() => data && downloadCsv(
+              `research-${role}.csv`,
+              ["Name", "Count", "Prior", "Change %", "Counties", "New Entrant"],
+              data.rows.map((r) => [r.name, r.count, r.previous, r.pctChange == null ? "" : Math.round(r.pctChange * 100), r.counties.join("; "), r.newEntrant ? "YES" : ""]),
+            )}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+              Export CSV
+            </button>
+          </div>
+        </div>
+        {loading && !data ? <Spinner /> : top.length === 0 ? <p className="muted">No activity in this period.</p> : (
+          <div className="rk-bars">
+            {top.map((r) => (
+              <div key={r.key} className="rk-bar-row" onClick={() => drillKey(r.key)} title={`${r.name} — ${r.count}`}>
+                <div className="rk-bar-name">{r.name}</div>
+                <div className="rk-bar-track">
+                  <div className="rk-bar-fill" style={{ width: `${(r.count / niceMax) * 100}%`, background: barColor }} />
+                  <span className="rk-bar-val">{r.count}</span>
+                </div>
               </div>
-              <button className="rbtn" disabled={!rows.length} onClick={() => data && downloadCsv(
-                `research-${role}.csv`,
-                ["Name", "Count", "Prior", "Change %", "Counties", "New Entrant"],
-                data.rows.map((r) => [r.name, r.count, r.previous, r.pctChange == null ? "" : Math.round(r.pctChange * 100), r.counties.join("; "), r.newEntrant ? "YES" : ""]),
-              )}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
-                Export CSV
-              </button>
+            ))}
+            <div className="rk-bar-row rk-axis-row">
+              <div />
+              <div className="rk-axis">{ticks.map((t) => <span key={t}>{t}</span>)}</div>
             </div>
           </div>
-          {loading && !data ? <Spinner /> : top.length === 0 ? <p className="muted">No activity in this period.</p> : (
-            <ResponsiveContainer width="100%" height={Math.max(160, top.length * 34)}>
-              <BarChart data={top} layout="vertical" margin={{ left: 80, right: 34 }}>
-                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} hide />
-                <YAxis type="category" dataKey="name" width={200} tick={{ fontSize: 11 }} />
-                <Tooltip {...chartTooltip} cursor={{ fill: "color-mix(in srgb, var(--text) 5%, transparent)" }} />
-                <Bar dataKey="count" name={role === "operators" ? "Permits" : "Records"} fill={CHART_COLORS[role === "buyers" ? 0 : role === "sellers" ? 4 : 3]} radius={[0, 4, 4, 0]}>
-                  <LabelList dataKey="count" position="right" style={{ fill: "var(--text)", fontSize: 12, fontWeight: 700 }} />
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
+        )}
       </div>
 
-      <div className="panel">
+      <div className="panel rk-table-card">
         {/* Selection + bulk actions — turn active buyers into CRM Buyer profiles. */}
         {isBuyers && rows.length > 0 && (
           <div className="row" style={{ gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
@@ -942,13 +955,16 @@ function RankingsTab({ qs, opts, compareOff, onDrill }: { qs: string; opts: Filt
           </Banner>
         )}
         {loading && !data ? <Spinner /> : rows.length > 0 ? (
-          <SortableTable
-            columns={columns}
-            rows={data!.rows}
-            rowKey={(r) => r.key}
-            defaultSort={{ key: "count", dir: "desc" }}
-            onRowClick={(r) => onDrill(role === "buyers" ? { buyers: [r.key] } : role === "sellers" ? { sellers: [r.key] } : { operators: [r.key] })}
-          />
+          <>
+            <SortableTable
+              columns={columns}
+              rows={data!.rows}
+              rowKey={(r) => r.key}
+              defaultSort={{ key: "count", dir: "desc" }}
+              onRowClick={(r) => onDrill(role === "buyers" ? { buyers: [r.key] } : role === "sellers" ? { sellers: [r.key] } : { operators: [r.key] })}
+            />
+            <div className="rk-foot">{rows.length} {role} · sorted by {role === "operators" ? "permits" : "records"}, descending</div>
+          </>
         ) : null}
       </div>
       {opts && <p className="muted" style={{ fontSize: 12 }}>Names are grouped after normalizing punctuation and legal suffixes (LLC/LP/Inc), so filings under slightly different spellings roll up together.</p>}
