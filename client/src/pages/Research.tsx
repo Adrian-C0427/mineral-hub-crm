@@ -1152,7 +1152,7 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
         <div className="rel-insights">
           {topRel && (
             <button className="rel-insight" onClick={() => setTx({ title: `${topRel.grantor} → ${topRel.grantee}`, selector: { grantorNorm: topRel.grantorNorm, granteeNorm: topRel.granteeNorm } })}>
-              <div className="rel-insight-l"><Heart size={12} className="ri-ic-blue" aria-hidden="true" /> Most Active Relationship</div>
+              <div className="rel-insight-l"><Heart size={13} className="ri-ic-red" aria-hidden="true" /> Most Active Relationship</div>
               <div className="rel-insight-v">{topRel.grantor} → {topRel.grantee}</div>
               <div className="rel-insight-m"><b>{topRel.count}</b> transaction{topRel.count === 1 ? "" : "s"}</div>
             </button>
@@ -1203,14 +1203,17 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
       {view === "relationships" && (
         <div className="panel">
           <div className="panel-title">
-            <h3 style={{ margin: 0 }}>Grantor → Grantee Relationships</h3>
-            <div className="row" style={{ gap: 10, alignItems: "center" }}>
-              <label className="dm-chk" style={{ fontSize: 12 }}>
+            <h3 style={{ margin: 0 }}>Grantor → Grantee relationships</h3>
+            <div className="res-card-tools">
+              <label className="rel-repeat">
                 <input type="checkbox" checked={repeatOnly} onChange={(e) => setRepeatOnly(e.target.checked)} /> Repeat relationships only (2+)
               </label>
-              <button className="small" onClick={() => downloadCsv("research-relationships.csv",
+              <button className="rbtn" onClick={() => downloadCsv("research-relationships.csv",
                 ["Grantor", "Grantee", "Transactions", "Counties", "First", "Last"],
-                rels.map((r) => [r.grantor, r.grantee, r.count, r.counties.join("; "), r.firstDate, r.lastDate]))}>Export CSV</button>
+                rels.map((r) => [r.grantor, r.grantee, r.count, r.counties.join("; "), r.firstDate, r.lastDate]))}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+                Export CSV
+              </button>
             </div>
           </div>
           <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Repeated transfers between the same two parties roll up into one relationship with a transaction count. Click a row for the underlying deeds, or an entity name for its full dossier.</p>
@@ -1234,7 +1237,7 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
                 // glance-density this table doesn't need.
                 { key: "counties", header: "Counties", value: (r: RelRow) => r.counties.length, render: (r: RelRow) => r.counties.length ? <span className="relt-counties" title={r.counties.join(", ")}>{r.counties.join(", ")}</span> : "—" },
                 { key: "abstracts", header: "Abstracts", value: (r: RelRow) => r.abstracts.length, align: "right" as const, render: (r: RelRow) => r.abstracts.length ? <span title={r.abstracts.join(", ")}><b>{r.abstracts.length}</b></span> : "—" },
-                { key: "lastDate", header: "Latest", value: (r: RelRow) => r.lastDate ?? "", render: (r: RelRow) => <span className="muted">{fmtDate(r.lastDate)}</span>, type: "date" as const },
+                { key: "lastDate", header: "Latest", value: (r: RelRow) => r.lastDate ?? "", align: "right" as const, render: (r: RelRow) => <span className="muted" style={{ whiteSpace: "nowrap" }}>{fmtDate(r.lastDate)}</span>, type: "date" as const },
               ]}
               rows={rels}
               rowKey={(r) => `${r.grantorNorm}→${r.granteeNorm}`}

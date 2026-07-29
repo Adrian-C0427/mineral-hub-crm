@@ -826,7 +826,7 @@ body.modal-open { overflow: hidden; }
 .ent-sec-label { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-dim); margin-bottom: 10px; }
 .ent-foot { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding-top: 12px; border-top: 1px solid var(--border); }
 /* Relationships table: counties as plain text, single line with ellipsis. */
-.relt-counties { display: inline-block; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-size: 12.5px; vertical-align: bottom; }
+.relt-counties { display: inline-block; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); font-size: 12.5px; vertical-align: bottom; }
 
 /* Folder chips highlight the insertion point while another chip is dragged over. */
 .doc-chip.drop-target { outline: 2px dashed var(--accent); outline-offset: 1px; }
@@ -1440,13 +1440,19 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 /* Relationship insights (headline cards) + clickable entity names */
 /* Headline insight cards (reference design: icon-led uppercase label, bold
    two-line value, metric line with emphasized figures). */
-.rel-insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-bottom: 14px; }
+.rel-insights { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 14px; }
+@media (max-width: 1000px) { .rel-insights { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .rel-insights { grid-template-columns: 1fr; } }
+/* Sentence-case toggle label (reference "Repeat relationships only (2+)") —
+   overrides the app's uppercased <label> default. */
+.rel-repeat { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--text); text-transform: none; letter-spacing: normal; cursor: pointer; white-space: nowrap; margin: 0; }
 .rel-insight { text-align: left; background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
   padding: 14px 16px; cursor: pointer; transition: border-color 0.12s, transform 0.12s; min-width: 0; }
 .rel-insight:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); transform: translateY(-1px); }
 .rel-insight-l { display: flex; align-items: center; gap: 7px; font-size: 10px; text-transform: uppercase;
   letter-spacing: 0.08em; color: var(--text-dim); font-weight: 700; }
 .ri-ic-blue { color: var(--accent); flex: none; }
+.ri-ic-red { color: var(--red); flex: none; }
 .ri-ic-green { color: var(--green, #4ade80); flex: none; }
 .ri-ic-amber { color: #fbbf24; flex: none; }
 .ri-ic-violet { color: #c4b5fd; flex: none; }
