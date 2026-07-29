@@ -562,9 +562,9 @@ function PipelineCustomize({ prefs, onChange }: { prefs: PipelinePrefs; onChange
             </div>
           </div>
           <div className="cv-head" style={{ borderTop: "1px solid var(--border)" }}><strong>Card fields</strong></div>
-          <div className="cv-list">
+          <div className="cv-fields-2">
             {CARD_FIELDS.map(([k, label]) => (
-              <label key={k} className="cv-row cv-check" style={{ justifyContent: "flex-start" }}>
+              <label key={k} className="cv-check" style={{ justifyContent: "flex-start" }}>
                 <input type="checkbox" checked={prefs.fields[k]} onChange={() => toggleField(k)} /> <span>{label}</span>
               </label>
             ))}

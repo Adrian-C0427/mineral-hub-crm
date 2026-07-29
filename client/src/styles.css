@@ -73,6 +73,8 @@
   --gold-border: rgba(245, 158, 11, 0.30);
   --control: #12161f;       /* inset control track (segmented tabs, search) */
   --control-active: #232a36;/* selected segment fill */
+  --board-col: #10141d;     /* kanban column — recessed below the cards */
+  --board-col-border: #1e2530;
 }
 :root[data-theme="light"] {
   --surface: #ffffff;
@@ -83,6 +85,8 @@
   --gold-border: rgba(180, 83, 9, 0.28);
   --control: #eef1f5;
   --control-active: #ffffff;
+  --board-col: #eef1f5;
+  --board-col-border: var(--border);
 }
 
 :root[data-theme="light"] .priority-high { color: #b91c1c; }
@@ -2713,3 +2717,41 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .cl-line { width: 14px; height: 3px; border-radius: 2px; flex: none; }
 .cl-line.dashed { background: none !important; border-top: 3px dashed currentColor; height: 0; }
 .cl-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+
+/* ===========================================================================
+   Pipeline — premium refinement pass (references: Pipeline Refined.html,
+   Pipeline Panels Refined.html). The board structure already matched; these
+   tune surface depth (recessed columns / raised cards), the asset-type tag,
+   the value row, and the popover elevation to the reference exactly. Scoped to
+   .pl2-page so no other board (e.g. Mineral Assets) is affected.
+   =========================================================================== */
+/* Recessed columns so the cards read as raised above them. */
+.pl2-page .kanban-col { background: var(--board-col); border-color: var(--board-col-border); }
+.pl2-page .kanban-col-head { border-bottom: none; padding-bottom: 4px; }
+.pl2-page .pl2-colsum { border-bottom: none; padding-top: 2px; padding-bottom: 10px; font-size: 12px; font-weight: 700; }
+/* Raised cards with a soft lift (dark only — light keeps the token shadow). */
+.pl2-page .deal-card { background: var(--panel); border-color: var(--border); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.30); }
+:root[data-theme="light"] .pl2-page .deal-card { box-shadow: 0 1px 2px rgba(19, 23, 34, 0.06); }
+.pl2-page .deal-card:hover { border-color: var(--border-hover, #323b4b); }
+/* Asset-type tag: accent chip (reference uses blue, rounded-rect — not a green pill). */
+.pl2-page .dc2-tag {
+  color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent);
+  border: none; border-radius: 5px; padding: 2px 6px; letter-spacing: 0.05em;
+}
+/* Value row: NRA on the left, est. profit pushed to the right edge. */
+.pl2-page .dc2-money { margin-left: auto; font-size: 13.5px; font-weight: 700; }
+.pl2-page .dc2-sep { display: none; }
+/* Full-bleed card footer divider (reference spans the card edges). */
+.pl2-page .dc2-foot { margin: 10px -14px 0; padding: 8px 14px 0; border-top-color: var(--hairline); }
+/* Empty column placeholder reads as a quiet drop hint. */
+.pl2-page .kanban-empty { color: var(--text-faint); border-color: var(--board-col-border); }
+
+/* Popover elevation — match the reference panels (14px radius, deeper shadow).
+   Shared by the Pipeline Filters/Customize popovers, Reports Customize, and the
+   table customizers, so every popover gains the same premium lift. */
+.cv-menu { border-radius: 14px; box-shadow: 0 16px 44px rgba(0, 0, 0, 0.50); border-color: var(--board-col-border); }
+:root[data-theme="light"] .cv-menu { box-shadow: 0 16px 44px rgba(19, 23, 34, 0.16); border-color: var(--border); }
+.cv-head strong { font-size: 13.5px; font-weight: 800; }
+/* Pipeline Customize: card-field checkboxes in a 2-up grid (reference layout). */
+.cv-fields-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; padding: 6px 12px 4px; }
+.cv-fields-2 .cv-check { padding: 4px 2px; }
