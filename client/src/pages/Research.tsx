@@ -1181,8 +1181,8 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
         </div>
       )}
 
-      <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <div className="tab-row" style={{ margin: 0, flex: 1, minWidth: 260 }}>
+      <div className="res-subtabs">
+        <div className="tab-row" style={{ margin: 0 }}>
           {VIEWS.map(([v, l, n]) => (
             <button key={v} className={`tab ${view === v ? "active" : ""}`} onClick={() => setView(v)}>
               {l} <span className={`relv-count ${view === v && n > 0 ? "hot" : ""}`}>{n}</span>
