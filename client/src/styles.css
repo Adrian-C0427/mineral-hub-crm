@@ -2835,20 +2835,27 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 /* Inline entity search → reference control field. */
 .research-page .relv-search input { height: 34px; background: var(--control); border-radius: 9px; }
 
-/* Opportunities — "Buying signals" card with severity-scored signal rows. */
-.opp-crit-badge { flex: none; font-size: 12px; font-weight: 700; color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); border: 1px solid color-mix(in srgb, var(--red) 30%, transparent); border-radius: 99px; padding: 5px 12px; white-space: nowrap; }
-.opp-list { display: flex; flex-direction: column; gap: 12px; padding: 4px 20px 8px; }
-.opp-signal { display: flex; align-items: center; gap: 16px; padding: 14px 16px; background: var(--panel-2); border: 1px solid var(--hairline); border-left: 3px solid var(--border); border-radius: 12px; }
-.opp-score { min-width: 60px; text-align: center; flex: none; }
-.opp-score-n { font-size: 22px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
-.opp-score-tier { font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; margin-top: 3px; }
+/* Opportunities — "Buying signals" card with severity-scored signal rows
+   (reference: bordered head, recessed rows on the surface tone, 3px severity
+   left accent, pink kind chip, ghost "View records →" on the right). */
+.opp-head { padding: 16px 20px 14px; border-bottom: 1px solid var(--hairline); }
+.opp-crit-badge { flex: none; font-size: 12px; font-weight: 700; color: var(--red); background: color-mix(in srgb, var(--red) 10%, transparent); border: 1px solid color-mix(in srgb, var(--red) 30%, transparent); border-radius: 8px; padding: 4px 11px; white-space: nowrap; }
+.opp-list { display: flex; flex-direction: column; gap: 10px; padding: 16px 20px 0; }
+.opp-signal { display: flex; align-items: center; gap: 18px; padding: 14px 18px; background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--border); border-radius: 11px; transition: border-color 0.12s, background 0.12s; }
+.opp-signal:hover { border-color: color-mix(in srgb, var(--text-dim) 45%, var(--border)); }
+:root[data-theme="light"] .opp-signal { background: var(--panel-2); }
+.opp-score { width: 64px; text-align: center; flex: none; }
+.opp-score-n { font-size: 23px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+.opp-score-tier { font-size: 9.5px; text-transform: uppercase; letter-spacing: 0.09em; font-weight: 800; margin-top: 3px; }
 .opp-body { flex: 1; min-width: 0; }
-.opp-title-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.opp-title-row { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
 .opp-title-row strong { font-size: 13.5px; font-weight: 700; }
-.opp-detail { margin: 6px 0 0; font-size: 12.5px; color: var(--text-dim); line-height: 1.5; }
-.opp-view { flex: none; }
-.opp-foot { padding: 10px 20px 16px; font-size: 12px; color: var(--text-dim); }
-@media (max-width: 720px) { .opp-signal { flex-wrap: wrap; } .opp-view { margin-left: 76px; } }
+.opp-kind { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 7px; border: 1px solid transparent; white-space: nowrap; }
+.opp-detail { margin: 5px 0 0; font-size: 12.5px; color: var(--text-dim); line-height: 1.45; }
+.opp-view { flex: none; height: 32px; padding: 0 14px; border-radius: 8px; background: var(--panel-2); border: 1px solid var(--border); color: var(--text); font: 600 12.5px var(--font-sans); cursor: pointer; white-space: nowrap; }
+.opp-view:hover { border-color: var(--accent); background: var(--panel-2); }
+.opp-foot { padding: 2px 0 14px; font-size: 12px; color: var(--text-dim); }
+@media (max-width: 720px) { .opp-signal { flex-wrap: wrap; } .opp-view { margin-left: 82px; } }
 
 /* Records — document Type as the reference's accent rounded-rect chip. */
 .rec-type { display: inline-block; font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 7px; background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--accent); white-space: nowrap; }

@@ -1543,8 +1543,10 @@ const SIGNAL_META: Record<string, { label: string; color: string }> = {
 // Elevated orange, High red, Critical deep red. Colors are used on dark panel
 // backgrounds, so all five stay AA-contrast against the panel surface.
 const SEVERITY_TIERS: { min: number; label: string; color: string }[] = [
-  { min: 80, label: "Critical", color: "#dc2626" },
-  { min: 60, label: "High", color: "#ef4444" },
+  // Critical uses the reference red (#ef4444); High steps to a lighter red so
+  // the two tiers stay distinguishable side by side.
+  { min: 80, label: "Critical", color: "#ef4444" },
+  { min: 60, label: "High", color: "#f87171" },
   { min: 40, label: "Elevated", color: "#f97316" },
   { min: 20, label: "Moderate", color: "#eab308" },
   { min: 0, label: "Low", color: "#22c55e" },
@@ -1569,8 +1571,8 @@ function OpportunitiesTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
 
   return (
     <div className="res-card">
-      <div className="res-card-head">
-        <div>
+      <div className="res-card-head opp-head">
+        <div style={{ maxWidth: 760 }}>
           <h3>Buying signals</h3>
           <div className="res-card-desc">
             Signals are detected by comparing the selected period against six equal history windows (z-score ≥ 2 plus a
@@ -1591,19 +1593,19 @@ function OpportunitiesTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
               </div>
               <div className="opp-body">
                 <div className="opp-title-row">
-                  <span className="badge" style={{ background: `${meta.color}26`, color: meta.color }}>{meta.label}</span>
+                  <span className="opp-kind" style={{ color: meta.color, background: `${meta.color}1A`, borderColor: `${meta.color}4D` }}>{meta.label}</span>
                   <strong>{s.title}</strong>
                 </div>
                 <p className="opp-detail">{s.detail}</p>
               </div>
-              <button className="rbtn opp-view" onClick={() => onDrill({ states: s.state ? [s.state] : [], counties: s.county ? [s.county] : [] })}>
+              <button className="opp-view" onClick={() => onDrill({ states: s.state ? [s.state] : [], counties: s.county ? [s.county] : [] })}>
                 View records →
               </button>
             </div>
           );
         })}
+        <div className="opp-foot">{data.signals.length} signal{data.signals.length === 1 ? "" : "s"} in this period · sorted by severity</div>
       </div>
-      <div className="opp-foot">{data.signals.length} signal{data.signals.length === 1 ? "" : "s"} in this period · sorted by severity</div>
     </div>
   );
 }
