@@ -58,6 +58,33 @@
 /* Status badges / pills / banners are pastel-on-tint, tuned for dark surfaces.
    In light mode the pale text washes out, so each gets a darker foreground on a
    lighter tint — designed for the theme, not inverted. */
+/* ---------------------------------------------------------------------------
+   Refined surface / typography scale for the premium design system. These
+   layer on top of the base palette above and are shared by every redesigned
+   page so the same card, hairline, faint-label and "featured" tones read
+   identically app-wide. Dark values here; light overrides in the block below.
+   =========================================================================== */
+:root {
+  --surface: #0e121b;       /* card / section surface — one step above --bg */
+  --hairline: #1a202c;      /* subtle internal divider / card border */
+  --text-faint: #5a6274;    /* dimmest labels & de-emphasized numerals */
+  --gold: #f5b04b;          /* "featured" accent */
+  --gold-tint: rgba(245, 158, 11, 0.10);
+  --gold-border: rgba(245, 158, 11, 0.30);
+  --control: #12161f;       /* inset control track (segmented tabs, search) */
+  --control-active: #232a36;/* selected segment fill */
+}
+:root[data-theme="light"] {
+  --surface: #ffffff;
+  --hairline: var(--border);
+  --text-faint: #8a93a5;
+  --gold: #b45309;
+  --gold-tint: rgba(180, 83, 9, 0.10);
+  --gold-border: rgba(180, 83, 9, 0.28);
+  --control: #eef1f5;
+  --control-active: #ffffff;
+}
+
 :root[data-theme="light"] .priority-high { color: #b91c1c; }
 :root[data-theme="light"] .priority-medium { color: #92400e; }
 :root[data-theme="light"] .priority-low { color: #15803d; }
@@ -1437,6 +1464,7 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .seg-control { display: flex; align-items: center; background: var(--panel-2); border: 1px solid var(--border);
   border-radius: 10px; padding: 3px; gap: 2px; font-size: 12.5px; font-weight: 600; flex-wrap: wrap; }
 .seg { padding: 7px 14px; border-radius: 8px; color: var(--text-dim); cursor: pointer;
+  background: transparent; border: none; font: inherit;
   display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; transition: background 0.12s, color 0.12s; user-select: none; }
 .seg:hover { color: var(--text); }
 .seg.active { color: #fff; background: var(--accent); }
@@ -2535,3 +2563,96 @@ input.stage-color, .stage-color { width: 18px !important; min-width: 18px; heigh
    toggle sits on top within it — never clipped, hover ring fully visible. */
 .sidebar { z-index: 50; }
 .sidebar-edge-toggle { z-index: 51; }
+
+/* ===========================================================================
+   Buyer Portal — premium redesign (reference: Buyer Portal.html).
+   Reusable primitives introduced here (KPI cards, segmented control, listing
+   grid, status/featured pills) are named generically so later redesigned
+   pages can adopt the same design language. All colors run through tokens so
+   both dark and light themes render correctly.
+   =========================================================================== */
+
+/* KPI cards -------------------------------------------------------------- */
+.kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: var(--block-gap); }
+.kpi-grid.g3 { grid-template-columns: repeat(3, 1fr); }
+.kpi-card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px; padding: 16px 17px; }
+:root[data-theme="light"] .kpi-card { box-shadow: 0 1px 2px rgba(19, 23, 34, 0.05); }
+.kpi-label { font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-faint); }
+.kpi-value { font-size: 24px; font-weight: 800; margin-top: 6px; letter-spacing: -0.01em; line-height: 1.1; }
+.kpi-sub { font-size: 11.5px; color: var(--text-dim); margin-top: 4px; }
+
+/* Listing section (card wrapping a header toolbar + grid) ----------------- */
+.listing { background: var(--surface); border: 1px solid var(--hairline); border-radius: var(--radius-lg); overflow: hidden; margin-bottom: var(--block-gap); }
+:root[data-theme="light"] .listing { box-shadow: var(--shadow); }
+.listing-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 18px; flex-wrap: wrap; }
+.listing-title { font-size: 15px; font-weight: 800; }
+.listing-title .count { color: var(--text-dim); font-weight: 600; }
+.listing-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* Segmented control — reuses the app-wide .seg-control/.seg system (defined
+   above). The Buyer Portal visibility tabs use the `subtle` variant: the active
+   pill is a soft gray fill rather than the accent-filled default, matching the
+   Buyer Portal reference. */
+.seg-control.subtle .seg.active { color: var(--text); background: var(--control-active); }
+:root[data-theme="light"] .seg-control.subtle .seg.active { box-shadow: 0 1px 2px rgba(19, 23, 34, 0.08); }
+
+/* Compact search field used in listing toolbars --------------------------- */
+.listing-search { width: 210px; max-width: 100%; height: 35px; background: var(--control); border: 1px solid var(--border); border-radius: 9px; color: var(--text); font: 600 12.5px var(--font-sans); padding: 0 12px; }
+.listing-search::placeholder { color: var(--text-faint); }
+.listing-search:focus { outline: none; border-color: var(--accent); }
+
+/* CSS-grid "table" — aligned columns without a <table> ------------------- */
+.listing-grid { display: grid; font-size: 13px; }
+.lg-head { padding: 11px 16px; background: var(--control); color: var(--text-faint); font-weight: 700; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; display: flex; align-items: center; }
+.lg-cell { padding: 14px 16px; border-top: 1px solid var(--hairline); display: flex; align-items: center; min-width: 0; }
+.lg-right { justify-content: flex-end; text-align: right; }
+.lg-num { font-weight: 700; font-variant-numeric: tabular-nums; }
+.lg-dim { color: var(--text-dim); }
+.lg-faint { color: var(--text-faint); }
+.lg-name { font-weight: 700; color: var(--text); }
+a.lg-name:hover { color: var(--accent); text-decoration: none; }
+.lg-cell .ellip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Featured pill --------------------------------------------------------- */
+.pill-featured { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 800; letter-spacing: 0.05em; color: var(--gold); background: var(--gold-tint); border: 1px solid var(--gold-border); border-radius: 99px; padding: 2px 8px; white-space: nowrap; }
+
+/* Status pill (dot + label) --------------------------------------------- */
+.pill-status { display: inline-flex; align-items: center; gap: 6px; border-radius: 99px; padding: 4px 11px; font-size: 11.5px; font-weight: 800; border: 1px solid var(--border); color: var(--text-dim); white-space: nowrap; }
+.pill-status .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint); }
+.pill-status.is-published { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, transparent); }
+.pill-status.is-published .dot { background: var(--green); }
+
+/* Visibility indicator -------------------------------------------------- */
+.vis-public { color: var(--accent); font-weight: 700; font-size: 12.5px; }
+.vis-private { color: var(--text-dim); font-weight: 700; font-size: 12.5px; }
+.vis-none { color: var(--text-faint); }
+
+/* Row action (ghost button) --------------------------------------------- */
+.lg-action { height: 30px; padding: 0 12px; background: var(--control); border: 1px solid var(--border); border-radius: 8px; color: var(--text-dim); font: 700 12px var(--font-sans); cursor: pointer; white-space: nowrap; }
+.lg-action:hover { background: var(--control); border-color: color-mix(in srgb, var(--text-dim) 45%, var(--border)); color: var(--text); }
+
+/* Header action buttons (pill height, matches reference) ----------------- */
+.portal-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pbtn { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 14px; border-radius: 9px; font: 700 13px var(--font-sans); cursor: pointer; text-decoration: none !important; border: 1px solid var(--border); background: var(--panel); color: var(--text); transition: background 0.12s, border-color 0.12s, color 0.12s; }
+.pbtn:hover { border-color: color-mix(in srgb, var(--text-dim) 45%, var(--border)); color: var(--text); background: var(--panel); }
+.pbtn-primary { background: var(--accent); border-color: var(--accent); color: #fff; padding: 0 15px; }
+.pbtn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+
+/* Empty state inside the listing grid ----------------------------------- */
+.listing-empty { padding: 40px 20px; text-align: center; }
+.listing-empty-title { font-size: 14px; font-weight: 700; color: var(--text); }
+.listing-empty-body { font-size: 12.5px; color: var(--text-dim); margin-top: 5px; }
+
+/* Footer explainer note ------------------------------------------------- */
+.portal-note { margin-top: 14px; font-size: 12.5px; color: var(--text-faint); line-height: 1.5; }
+
+/* Responsive: collapse KPI grid + let the listing grid scroll ------------ */
+@media (max-width: 860px) {
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .listing-scroll { overflow-x: auto; }
+  .listing-grid { min-width: 720px; }
+}
+@media (max-width: 520px) {
+  .kpi-grid { grid-template-columns: 1fr; }
+  .listing-search { width: 100%; }
+}
