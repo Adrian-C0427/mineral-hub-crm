@@ -2656,3 +2656,60 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
   .kpi-grid { grid-template-columns: 1fr; }
   .listing-search { width: 100%; }
 }
+
+/* ===========================================================================
+   Reports & Analytics — premium redesign (reference: Reports Refined.html).
+   Reuses the shared KPI card (.kpi-card), segmented control (.seg-control) and
+   surface tokens; adds a header toolbar, filters card, executive-summary card
+   and chart-card refinements. Scoped under .reports-page so other pages that
+   share .chart-grid/.panel are untouched.
+   =========================================================================== */
+.reports-page .page-header { align-items: flex-end; }
+.page-sub { font-size: 13px; color: var(--text-dim); margin-top: 3px; }
+.reports-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* Pill controls in the header (Filters, Customize View) --------------------- */
+.rbtn { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 13px; background: var(--panel); border: 1px solid var(--border); border-radius: 9px; color: var(--text-dim); font: 600 12.5px var(--font-sans); cursor: pointer; transition: border-color 0.12s, color 0.12s; white-space: nowrap; }
+.rbtn:hover { background: var(--panel); border-color: color-mix(in srgb, var(--text-dim) 45%, var(--border)); color: var(--text); }
+.rbtn.active { border-color: var(--accent); color: var(--text); }
+.rbtn svg { flex-shrink: 0; }
+.rbtn .rbtn-count { color: var(--accent); font-weight: 700; }
+
+/* Filters card ------------------------------------------------------------- */
+.reports-filters { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px 18px; margin-bottom: 16px; }
+:root[data-theme="light"] .reports-filters { box-shadow: var(--shadow); }
+.reports-filters .filters-grid { align-items: start; }
+.reports-filters .filters-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+.reports-filters .filters-head .muted { font-size: 12px; }
+
+/* Executive summary card --------------------------------------------------- */
+.exec-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; display: flex; gap: 18px; align-items: flex-start; margin-bottom: 14px; }
+:root[data-theme="light"] .exec-card { box-shadow: var(--shadow); }
+.exec-icon { width: 44px; height: 44px; border-radius: 12px; background: var(--panel-2); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; padding: 4px; }
+.exec-icon img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.exec-title { font-size: 14.5px; font-weight: 800; }
+.exec-text { font-size: 13px; color: var(--text-dim); margin: 6px 0 0; line-height: 1.6; max-width: 980px; }
+.exec-text b, .exec-text strong { color: var(--text); font-weight: 700; }
+
+/* KPI card refinements (shared .kpi-card gains hover + numeric alignment) --- */
+.kpi-value { font-variant-numeric: tabular-nums; }
+.kpi-card { transition: border-color 0.12s; }
+.kpi-card.clickable { cursor: pointer; }
+.kpi-card:hover { border-color: color-mix(in srgb, var(--text-dim) 40%, var(--border)); }
+.kpi-sub.delta-up { color: var(--green); }
+.kpi-sub.delta-down { color: var(--red); }
+
+/* Chart cards ------------------------------------------------------------- */
+.reports-page .chart-grid .panel { padding: 18px 20px; }
+.reports-page .chart-grid .panel h3 { font-size: 14.5px; font-weight: 700; }
+/* Plain title (no toolbar): space it from the chart. Titles inside a flex
+   .panel-head keep margin:0 (the panel-head's own margin sets the gap). */
+.reports-page .chart-grid .panel > h3 { margin-bottom: 14px; }
+.reports-page .chart-grid .panel h3 .muted { font-weight: 600; font-size: 12px; }
+.reports-page .chart-grid .panel-head { margin-bottom: 14px; }
+/* Custom colored-swatch legend below charts */
+.cl { display: flex; gap: 18px; margin-top: 10px; flex-wrap: wrap; }
+.cl-item { display: inline-flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: var(--text); }
+.cl-line { width: 14px; height: 3px; border-radius: 2px; flex: none; }
+.cl-line.dashed { background: none !important; border-top: 3px dashed currentColor; height: 0; }
+.cl-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
