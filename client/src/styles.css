@@ -1009,9 +1009,12 @@ body.modal-open { overflow: hidden; }
 .kv { display:flex; flex-direction: column; gap: 2px; }
 .kv .k { font-size: 11px; color: var(--text-dim); text-transform: uppercase; }
 .kv .v { font-size: 14px; }
-.dropzone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 32px; text-align:center; color: var(--text-dim); cursor:pointer; }
+.dropzone { border: 2px dashed var(--border); border-radius: var(--radius); padding: 32px; text-align:center; color: var(--text-dim); cursor:pointer;
+  display: flex; align-items: center; justify-content: center; gap: 9px; }
+.dropzone:hover { border-color: var(--accent); color: var(--text); }
 .dropzone.drag { border-color: var(--accent); background: var(--panel-2); }
-.dropzone-slim { padding: 9px 14px; font-size: 13px; border-radius: 6px; }
+/* Compact single-line variant (reference: 38px, 1.5px dash, 9px radius). */
+.dropzone-slim { padding: 0 14px; height: 38px; font-size: 13px; border-radius: 9px; border-width: 1.5px; }
 
 /* --- Well Analysis & Valuation --- */
 .assumption-groups { display: flex; flex-direction: column; gap: 14px; }
@@ -2926,3 +2929,10 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 /* Map card's Volume/Change seg track sits on the darker surface too. */
 .research-page .panel .seg-control { background: var(--surface); }
 :root[data-theme="light"] .research-page .panel .seg-control { background: var(--control); }
+
+/* Data & Imports — reference import row (Data type · dashed CSV dropzone ·
+   Download template) and the always-present Delete selected control. */
+.imp-row { display: grid; grid-template-columns: 200px 1fr auto; gap: 16px; align-items: end; margin-top: 16px; }
+@media (max-width: 760px) { .imp-row { grid-template-columns: 1fr; align-items: stretch; } }
+.imp-del:not(:disabled) { border-color: color-mix(in srgb, var(--red) 45%, transparent); color: var(--red); }
+.imp-del:not(:disabled):hover { background: color-mix(in srgb, var(--red) 10%, transparent); border-color: var(--red); color: var(--red); }
