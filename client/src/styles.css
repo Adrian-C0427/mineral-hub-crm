@@ -2755,3 +2755,48 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 /* Pipeline Customize: card-field checkboxes in a 2-up grid (reference layout). */
 .cv-fields-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; padding: 6px 12px 4px; }
 .cv-fields-2 .cv-check { padding: 4px 2px; }
+
+/* ===========================================================================
+   Research & Market Intelligence — premium redesign (references: the six
+   "Research * Standalone" tabs). Shares the header toolbar / filters card /
+   KPI card / segmented control primitives; these tune the stat rows and table
+   cards to the reference. Scoped to .research-page.
+   =========================================================================== */
+/* Stat rows: reference proportions (10.5px label, 26px value, min-height, hover). */
+.research-page .metrics-row .metric-card { min-height: 88px; display: flex; flex-direction: column; transition: border-color 0.12s; }
+.research-page .metrics-row .metric-card:hover { border-color: color-mix(in srgb, var(--text-dim) 40%, var(--border)); }
+.research-page .metrics-row .metric-label { font-size: 10.5px; letter-spacing: 0.07em; font-weight: 700; }
+.research-page .metrics-row .metric-value { font-size: 26px; margin-top: 7px; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+
+/* Table card wrapper: a titled, described card around a data table (reference
+   "Grantor → Grantee relationships" etc.). */
+.res-card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 14px; overflow: hidden; margin-bottom: var(--block-gap); }
+:root[data-theme="light"] .res-card { background: var(--panel); box-shadow: var(--shadow); }
+.res-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 16px 20px 12px; }
+.res-card-head h3 { margin: 0; font-size: 14.5px; font-weight: 700; }
+.res-card-desc { font-size: 12.5px; color: var(--text-dim); margin-top: 4px; line-height: 1.5; max-width: 640px; }
+.res-card-tools { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.res-card .data-table thead th { background: var(--control); }
+
+/* Sub-tab row (Relationships/Rankings inner tabs) with count badges. */
+.res-subtabs { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; border-bottom: 1px solid var(--hairline); margin: 22px 0 16px; }
+.res-subtabs .tab-row { border-bottom: none; margin-bottom: 0; }
+.res-subtab-badge { margin-left: 7px; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 99px; background: color-mix(in srgb, var(--text) 8%, transparent); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.tab.active .res-subtab-badge { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+
+/* Inline search field (reference: "Search entities…"). */
+.res-search { position: relative; }
+.res-search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: var(--text-faint); pointer-events: none; }
+.res-search input { width: 230px; max-width: 100%; height: 34px; padding: 0 11px 0 33px; background: var(--control); border: 1px solid var(--border); border-radius: 9px; font: 500 13px var(--font-sans); }
+
+/* Highlight cards (icon + label + title + stat). */
+.res-highlights { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-top: 14px; }
+@media (max-width: 1000px) { .res-highlights { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 560px) { .res-highlights { grid-template-columns: 1fr; } }
+.res-hl { background: var(--surface); border: 1px solid var(--hairline); border-radius: 14px; padding: 16px 18px; display: flex; flex-direction: column; gap: 8px; transition: border-color 0.12s; }
+:root[data-theme="light"] .res-hl { background: var(--panel); box-shadow: var(--shadow); }
+.res-hl:hover { border-color: color-mix(in srgb, var(--text-dim) 40%, var(--border)); }
+.res-hl-label { display: flex; align-items: center; gap: 7px; font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-dim); font-weight: 700; }
+.res-hl-title { font-size: 13.5px; font-weight: 700; line-height: 1.35; }
+.res-hl-stat { font-size: 12.5px; color: var(--text-dim); margin-top: auto; }
+.res-hl-stat b { color: var(--text); font-weight: 700; }

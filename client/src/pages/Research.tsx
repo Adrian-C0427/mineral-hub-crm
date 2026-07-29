@@ -252,14 +252,20 @@ export function Research() {
   ];
 
   return (
-    <div className="page">
+    <div className="page research-page">
       <div className="page-header">
-        <h1>Research & Market Intelligence</h1>
-      </div>
-
-      {/* --- Period + filter controls --- */}
-      <div className="panel">
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ marginBottom: 0 }}>Research &amp; Market Intelligence</h1>
+          <div className="page-sub">
+            {range.from && range.to ? (
+              <>
+                <span style={{ color: "var(--text)", fontWeight: 600 }}>{fmtRangeLabel(range.from, range.to)}</span>
+                {cmpRange && <> &nbsp;vs&nbsp; {fmtRangeLabel(cmpRange.from, cmpRange.to, cmpWithYear)} · {compare === "PREV_YEAR" ? "Previous year" : "Previous period"}</>}
+              </>
+            ) : "Select a custom date range"}
+          </div>
+        </div>
+        <div className="reports-toolbar">
           <div className="seg-control">
             {CHIPS.map(([p, label]) => (
               <span key={p} className={`seg ${period === p ? "active" : ""}`} onClick={() => setPeriod(p)}>
@@ -272,34 +278,27 @@ export function Research() {
               </span>
             ))}
           </div>
-          <div className="row" style={{ gap: 10, alignItems: "center" }}>
-            {range.from && range.to ? (
-              <div className="row" style={{ gap: 10, alignItems: "center", fontSize: 12.5 }}>
-                <span style={{ fontWeight: 600 }}>{fmtRangeLabel(range.from, range.to)}</span>
-                {cmpRange && (
-                  <>
-                    <span className="muted" style={{ opacity: 0.7 }}>vs</span>
-                    <span className="muted">{fmtRangeLabel(cmpRange.from, cmpRange.to, cmpWithYear)}</span>
-                  </>
-                )}
-              </div>
-            ) : (
-              <span className="muted" style={{ fontSize: 12.5 }}>Select a custom date range</span>
-            )}
-            {activeFilterCount > 0 && <button className="small" onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>}
-            <button className="small" onClick={() => setShowFilters((s) => !s)}>
-              {showFilters ? "▾" : "▸"} Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
-            </button>
-          </div>
+          <button className={`rbtn ${showFilters ? "active" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+            Filters{activeFilterCount > 0 && <span className="rbtn-count"> ({activeFilterCount})</span>}
+          </button>
         </div>
-        {period === "CUSTOM" && (
-          <div className="row" style={{ marginTop: 10 }}>
-            <div className="field" style={{ marginBottom: 0 }}><label>From</label><DateField value={custom.from} onChange={(v) => setCustom((c) => ({ ...c, from: v }))} /></div>
-            <div className="field" style={{ marginBottom: 0 }}><label>To</label><DateField value={custom.to} onChange={(v) => setCustom((c) => ({ ...c, to: v }))} /></div>
+      </div>
+
+      {/* --- Filter controls --- */}
+      {showFilters && opts && (
+        <div className="reports-filters">
+          <div className="filters-head">
+            <strong style={{ fontSize: 14 }}>Filters</strong>
+            {activeFilterCount > 0 && <button className="small" onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>}
           </div>
-        )}
-        {showFilters && opts && (
-          <div className="filters-grid" style={{ marginTop: 10 }}>
+          <div className="filters-grid">
+            {period === "CUSTOM" && (
+              <>
+                <div className="field" style={{ marginBottom: 0 }}><label>From</label><DateField value={custom.from} onChange={(v) => setCustom((c) => ({ ...c, from: v }))} /></div>
+                <div className="field" style={{ marginBottom: 0 }}><label>To</label><DateField value={custom.to} onChange={(v) => setCustom((c) => ({ ...c, to: v }))} /></div>
+              </>
+            )}
             <div className="field" style={{ marginBottom: 0 }}><label>Compare to</label>
               <Select value={compare} onChange={(v) => setCompare(v as Compare)} ariaLabel="Compare to"
                 options={[
@@ -348,8 +347,8 @@ export function Research() {
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {opts != null && !hasAnyData && tab !== "data" && (
         <Banner kind="info">
