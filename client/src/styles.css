@@ -201,6 +201,22 @@ input[type="checkbox"], input[type="radio"] {
   accent-color: var(--accent);
   cursor: pointer;
 }
+/* Design-system checkbox: a 16px rounded square that fills with the accent and
+   shows a white check when on (the control every redesign reference uses). Radios
+   keep their native look. Size overrides elsewhere (map layers, touch) still win. */
+input[type="checkbox"] {
+  appearance: none; -webkit-appearance: none;
+  width: 16px; height: 16px; border-radius: 5px;
+  border: 1.5px solid var(--border); background: transparent;
+  display: inline-grid; place-content: center; position: relative;
+  transition: background 0.12s, border-color 0.12s;
+}
+input[type="checkbox"]:hover { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+input[type="checkbox"]:checked, input[type="checkbox"]:indeterminate { background: var(--accent); border-color: var(--accent); }
+input[type="checkbox"]:checked::after { content: ""; width: 4px; height: 8px; margin-top: -1.5px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+input[type="checkbox"]:indeterminate::after { content: ""; width: 8px; height: 2px; border-radius: 1px; background: #fff; }
+input[type="checkbox"]:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 50%, transparent); outline-offset: 1px; }
+input[type="checkbox"]:disabled { opacity: 0.5; cursor: not-allowed; }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
 /* File pickers: theme the native browse button so CSV imports don't render a
    raw OS control in the middle of a styled form. */
