@@ -70,7 +70,7 @@ export const STATUS_COLORS: Record<string, string> = {
   NEGOTIATING: "#8b5cf6", CONVERTED: "#22c55e", NOT_INTERESTED: "#ef4444",
 };
 export { CtPill };
-const initialsOf = (name: string): string =>
+export const initialsOf = (name: string): string =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
 /** "Adrian Campos" → "Adrian C." (reference owner cell). */
 const shortName = (name: string): string => {

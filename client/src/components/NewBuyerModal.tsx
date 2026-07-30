@@ -79,43 +79,50 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
     }
   }
 
+  const req = <Req />;
   return (
     <Modal
       title="New Buyer"
+      subtitle={<>Starts as <strong style={{ color: "var(--amber)" }}>Warm</strong> unless set otherwise · the buy box drives deal matching — add the rest later</>}
       onClose={onClose}
       wide
       dirty={Object.values(f).some((v) => v.trim() !== "") || states.length > 0 || counties.length > 0 || assetTypes.length > 0}
       footer={
         <>
+          <span className="modal-req-note"><Req /> Required</span>
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={submit} disabled={busy || missing.length > 0}>{busy ? "Creating…" : "Create buyer"}</button>
+          <button className="primary" onClick={submit} disabled={busy || missing.length > 0}
+            title={missing.length ? "Enabled once required fields are filled" : undefined}>
+            {busy ? "Creating…" : "Create buyer"}
+          </button>
         </>
       }
     >
-      <p className="muted" style={{ marginTop: 0 }}>New buyers start as <strong>Warm</strong> unless set otherwise. Fields marked <Req /> are required; the buy box drives deal matching — fill in what you know and add the rest later.</p>
-      <div className="field"><label>Company name <Req /></label><input value={f.companyName} onChange={set("companyName")} autoFocus /></div>
-      <div className="dd-grid">
-        <div className="field"><label>First name <Req /></label><input value={f.contactFirstName} onChange={set("contactFirstName")} /></div>
-        <div className="field"><label>Last name <Req /></label><input value={f.contactLastName} onChange={set("contactLastName")} /></div>
-        <div className="field"><label>Phone <Req /></label><PhoneInput value={f.phone} onChange={(v) => setF((p) => ({ ...p, phone: v }))} /></div>
-        <div className="field"><label>Email</label><input type="email" value={f.email} onChange={set("email")} /></div>
-        <div className="field"><label>Website</label><input value={f.website} onChange={set("website")} /></div>
+      <div className="modal-sec">Company &amp; contact</div>
+      <div className="nd-grid3">
+        <div className="field" style={{ gridColumn: "1 / -1" }}><label>Company name {req}</label><input value={f.companyName} onChange={set("companyName")} autoFocus placeholder="e.g. Bluebonnet Minerals LLC" /></div>
+        <div className="field"><label>First name {req}</label><input value={f.contactFirstName} onChange={set("contactFirstName")} placeholder="First" /></div>
+        <div className="field"><label>Last name {req}</label><input value={f.contactLastName} onChange={set("contactLastName")} placeholder="Last" /></div>
+        <div className="field"><label>Phone {req}</label><PhoneInput value={f.phone} onChange={(v) => setF((p) => ({ ...p, phone: v }))} /></div>
+        <div className="field"><label>Email</label><input type="email" value={f.email} onChange={set("email")} placeholder="name@company.com" /></div>
+        <div className="field"><label>Website</label><input value={f.website} onChange={set("website")} placeholder="company.com" /></div>
         <div className="field"><label>Relationship</label>
           <Select value={relationshipStatus} onChange={(v) => setRelationshipStatus(v as "HOT" | "WARM" | "COLD")} ariaLabel="Relationship status"
             options={[{ value: "HOT", label: "Hot" }, { value: "WARM", label: "Warm" }, { value: "COLD", label: "Cold" }]} />
         </div>
-        <div className="field"><label>Next follow-up</label><DateField value={f.nextFollowUpDate} onChange={(v) => setF((p) => ({ ...p, nextFollowUpDate: v }))} /></div>
-      </div>
-      {/* Structured mailing address — same fields used across the CRM. */}
-      <div className="dd-grid">
-        <div className="field"><label>Mailing address</label><input value={f.mailingAddress} onChange={set("mailingAddress")} /></div>
-        <div className="field"><label>Mailing city</label><input value={f.mailingCity} onChange={set("mailingCity")} /></div>
-        <div className="field"><label>Mailing state</label><StateSelect value={f.mailingState} onChange={(v) => setF((p) => ({ ...p, mailingState: v }))} /></div>
-        <div className="field"><label>Mailing ZIP code</label><input value={f.mailingZip} onChange={set("mailingZip")} /></div>
       </div>
 
-      <div className="section-head" style={{ marginTop: 6 }}><h3 style={{ margin: 0 }}>Buy box</h3></div>
-      <div className="dd-grid">
+      <div className="modal-sec">Follow-up &amp; mailing address</div>
+      <div className="nd-grid3">
+        <div className="field"><label>Next follow-up</label><DateField value={f.nextFollowUpDate} onChange={(v) => setF((p) => ({ ...p, nextFollowUpDate: v }))} /></div>
+        <div className="field" style={{ gridColumn: "2 / -1" }}><label>Mailing address</label><input value={f.mailingAddress} onChange={set("mailingAddress")} placeholder="Street address" /></div>
+        <div className="field"><label>City</label><input value={f.mailingCity} onChange={set("mailingCity")} placeholder="City" /></div>
+        <div className="field"><label>State</label><StateSelect value={f.mailingState} onChange={(v) => setF((p) => ({ ...p, mailingState: v }))} /></div>
+        <div className="field"><label>ZIP code</label><input value={f.mailingZip} onChange={set("mailingZip")} placeholder="75201" /></div>
+      </div>
+
+      <div className="modal-sec">Buy box <span className="modal-sec-hint">— what this buyer wants; drives deal matching</span></div>
+      <div className="nd-grid3">
         <GeoFields
           states={states} onStatesChange={setStates}
           counties={counties} onCountiesChange={setCounties}
@@ -124,12 +131,12 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
         <div className="field"><label>Basins</label><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={basins} onChange={setBasins} placeholder="Search basins…" /></div>
         <div className="field"><label>Formations</label><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={formations} onChange={setFormations} placeholder="Search formations…" /></div>
         <div className="field"><label>Asset types</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
-        <div className="field"><label>Min acreage</label><input type="number" value={f.minAcreage} onChange={set("minAcreage")} /></div>
-        <div className="field"><label>Max acreage</label><input type="number" value={f.maxAcreage} onChange={set("maxAcreage")} /></div>
+        <div className="field"><label>Min acreage</label><input type="number" value={f.minAcreage} onChange={set("minAcreage")} placeholder="0" /></div>
+        <div className="field"><label>Max acreage</label><input type="number" value={f.maxAcreage} onChange={set("maxAcreage")} placeholder="No max" /></div>
         <div className="field"><label>Min price</label><MoneyInput value={f.minPrice} onChange={(v) => setF((p) => ({ ...p, minPrice: v }))} ariaLabel="Minimum price" /></div>
         <div className="field"><label>Max price</label><MoneyInput value={f.maxPrice} onChange={(v) => setF((p) => ({ ...p, maxPrice: v }))} ariaLabel="Maximum price" /></div>
+        <div className="field" style={{ gridColumn: "1 / -1" }}><label>Notes</label><textarea rows={3} value={f.notes} onChange={set("notes")} placeholder="Anything worth remembering about this buyer…" /></div>
       </div>
-      <div className="field"><label>Notes</label><textarea rows={3} value={f.notes} onChange={set("notes")} /></div>
       {error && <div className="error-text">{error}</div>}
     </Modal>
   );
