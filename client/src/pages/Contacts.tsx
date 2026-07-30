@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, Modal, Banner, MetricCard, SearchInput, ConfirmDelete, Req, showToast } from "../components/ui";
+import { Spinner, Modal, Banner, MetricCard, SearchInput, ConfirmDelete, Req, showToast, CtPill } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { useRowSelection, BulkBar } from "../components/bulk";
 import { downloadCsv } from "../lib/csv";
@@ -69,14 +69,7 @@ export const STATUS_COLORS: Record<string, string> = {
   NEW: "#06b6d4", CONTACTED: "#f59e0b", ENGAGED: "#22c55e",
   NEGOTIATING: "#8b5cf6", CONVERTED: "#22c55e", NOT_INTERESTED: "#ef4444",
 };
-export function CtPill({ color, dot, children }: { color: string; dot?: boolean; children: React.ReactNode }) {
-  return (
-    <span className="ct-pill" style={{ color, background: `${color}1A`, border: `1px solid ${color}40` }}>
-      {dot && <span className="ct-pill-dot" style={{ background: color }} />}
-      {children}
-    </span>
-  );
-}
+export { CtPill };
 const initialsOf = (name: string): string =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
 /** "Adrian Campos" → "Adrian C." (reference owner cell). */

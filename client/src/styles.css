@@ -3233,3 +3233,67 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .cw-addbtn:hover { background: var(--accent-hover); }
 .cw-addbtn:disabled { opacity: 0.5; cursor: default; }
 .cw-rbody .df-input input, .cw-rbody .msel { min-width: 0; }
+
+/* ===========================================================================
+   Deals references — shared list-page + tab refinements (design system).
+   =========================================================================== */
+/* App-wide page tabs (Deals scopes, Deal page, asset Hold/Sell, …): reference
+   underline style with optional count badges. */
+.asset-tabs { gap: 2px; border-bottom: 1px solid var(--hairline); }
+.tab { padding: 9px 14px 11px; font-size: 13.5px; font-weight: 600; margin-bottom: -1px; }
+.tab.active { font-weight: 700; }
+.tab-badge { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 99px;
+  background: var(--hairline); color: var(--text-dim); }
+.tab.active .tab-badge { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+.ct-dim { color: var(--text-dim); }
+
+/* Modal chrome — reference spec, app-wide (every dialog renders through Modal). */
+.modal { width: 520px; border-radius: 16px; border-color: #2a3242; box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55); }
+:root[data-theme="light"] .modal { border-color: var(--border); box-shadow: 0 24px 64px rgba(19, 23, 34, 0.25); }
+.modal-wide { width: 760px; }
+.modal-overlay { background: rgba(4, 6, 10, 0.72); backdrop-filter: blur(3px); }
+:root[data-theme="light"] .modal-overlay { background: rgba(19, 23, 34, 0.4); }
+.modal-header { padding: 18px 24px; border-bottom: 1px solid var(--hairline); align-items: center; }
+.modal-header h3 { font-size: 17px; font-weight: 800; letter-spacing: -0.01em; }
+.modal-sub { font-size: 12.5px; color: var(--text-dim); margin-top: 2px; }
+.modal-sub strong, .modal-sub b { color: color-mix(in srgb, var(--text) 72%, var(--text-dim)); font-weight: 600; }
+.modal-x { width: 32px; height: 32px; border-radius: 8px; font-size: 15px; color: var(--text-dim); }
+.modal-x:hover { background: var(--hairline); color: var(--text); }
+.modal-body { padding: 20px 24px; }
+.modal-footer { padding: 14px 24px; border-top: 1px solid var(--hairline); background: var(--surface); border-radius: 0 0 16px 16px; }
+.modal-req-note { margin-right: auto; font-size: 12px; color: var(--text-faint); align-self: center; }
+/* Modal form fields — 38px surface inputs under 12.5px/700 labels (reference). */
+.modal .field > label { font-size: 12.5px; font-weight: 700; color: color-mix(in srgb, var(--text) 72%, var(--text-dim)); text-transform: none; letter-spacing: 0; }
+.modal .field input:not([type="checkbox"]):not([type="radio"]), .modal .field .msel-box { min-height: 38px; background: var(--surface); border-radius: 9px; font-size: 13.5px; }
+.modal .field textarea { background: var(--surface); border-radius: 9px; font-size: 13.5px; }
+/* Section labels inside grouped modal forms (New Deal etc.). */
+.modal-sec { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); font-weight: 800; margin: 22px 0 10px; }
+.modal-sec:first-child { margin-top: 0; }
+/* New Deal modal — grouped-section grids (reference layout). */
+.nd-basics { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.nd-grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.nd-timeline { display: grid; grid-template-columns: 1fr 2fr; gap: 14px; }
+.nd-basics .field, .nd-grid3 .field, .nd-timeline .field { margin: 0; }
+@media (max-width: 700px) { .nd-grid3 { grid-template-columns: 1fr; } .nd-basics, .nd-timeline { grid-template-columns: 1fr; } }
+/* Contract timeline — relative-time indicators (reference). */
+.ctl-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex: 1; min-width: 0; }
+.ctl-when { font-size: 11px; color: var(--text-faint); white-space: nowrap; }
+.ctl-when.chip { font-weight: 700; color: #fbbf24; background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 99px; padding: 2px 9px; }
+:root[data-theme="light"] .ctl-when.chip { color: #b45309; background: rgba(180, 83, 9, 0.1); border-color: rgba(180, 83, 9, 0.3); }
+.ctl-dot.next { border-color: var(--amber); }
+.ctl-lbl.next { color: #d3a55c; }
+.ctl-date.next { color: #fbe3b8; }
+:root[data-theme="light"] .ctl-lbl.next { color: #b45309; }
+:root[data-theme="light"] .ctl-date.next { color: #92400e; }
+
+/* Documents section — reference refinements. */
+.dpp-title { display: flex; align-items: center; gap: 12px; }
+.docx-htile { width: 34px; height: 34px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.docx-upload { background: var(--surface); border: 1px dashed color-mix(in srgb, var(--text-dim) 45%, var(--border));
+  border-radius: 9px; padding: 9px 16px; }
+.doc-section .table-scroll { border: 1px solid var(--hairline); border-radius: 12px; }
+.doc-section .data-table thead th { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-faint); font-weight: 700; background: color-mix(in srgb, var(--text) 2%, transparent); }
+.doc-actions .small { border-radius: 8px; font-size: 12px; font-weight: 600; }

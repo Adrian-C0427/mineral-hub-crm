@@ -88,13 +88,18 @@ export function MineralAssets() {
   if (!assets) return <Spinner label="Loading mineral assets…" />;
 
   return (
-    <div className="page">
+    <div className="page contacts-page">
       <div className="page-header">
         <div>
           <h1 style={{ marginBottom: 0 }}>Mineral Assets</h1>
-          <span className="muted">Owned mineral &amp; royalty interests — your portfolio, distinct from acquisition opportunities.</span>
+          <div className="page-sub">Owned mineral &amp; royalty interests — your portfolio, distinct from acquisition opportunities.</div>
         </div>
-        {can("createDeals") && <button className="primary" onClick={() => setShowNew(true)}>+ New Asset</button>}
+        {can("createDeals") && (
+          <button className="pbtn pbtn-primary" onClick={() => setShowNew(true)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+            New Asset
+          </button>
+        )}
       </div>
 
       <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
@@ -109,9 +114,9 @@ export function MineralAssets() {
         <MetricCard label="Annual Royalty Income" value={money(totals.royalty)} valueColor={totals.royalty ? "var(--green)" : undefined} />
       </div>
 
-      <div className="panel">
+      <div className="ct-card">
         {assets.length === 0 ? (
-          <p className="muted">No mineral assets yet. Add one here, or convert a closed deal into an owned asset from its detail page.</p>
+          <p className="muted" style={{ padding: "18px 20px", margin: 0 }}>No mineral assets yet. Add one here, or convert a closed deal into an owned asset from its detail page.</p>
         ) : (
           <SortableTable
             customizeId="mineral-assets-list"
@@ -130,6 +135,16 @@ export function MineralAssets() {
             empty="No assets match your search."
             selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
           />
+        )}
+        {assets.length > 0 && (
+          <div className="ct-foot">
+            <span>{filtered.length} asset{filtered.length === 1 ? "" : "s"}</span>
+            <span className="ct-pages">
+              <button className="ct-pgbtn" disabled aria-label="Previous page">‹</button>
+              <span className="ct-pgcur">1</span>
+              <button className="ct-pgbtn" disabled aria-label="Next page">›</button>
+            </span>
+          </div>
         )}
       </div>
 

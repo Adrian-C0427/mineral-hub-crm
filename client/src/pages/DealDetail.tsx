@@ -654,6 +654,14 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
   );
 }
 
+/** Relative day count for timeline milestones — "today", "4 days ago", "in 11 days". */
+function relDays(iso: string): string {
+  const days = Math.round((new Date(iso).getTime() - Date.now()) / 86_400_000);
+  if (days === 0) return "today";
+  if (days < 0) return `${-days} day${days === -1 ? "" : "s"} ago`;
+  return `in ${days} day${days === 1 ? "" : "s"}`;
+}
+
 function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved: () => void }) {
   const [edit, setEdit] = useState(false);
   const [duc, setDuc] = useState("");
@@ -730,23 +738,32 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
       {!edit ? (
         noDates ? null : (
         <div className="ctl">
-          {milestones.map((m) => {
-            const done = m.date != null && new Date(m.date).getTime() <= Date.now();
-            return (
-              <div className={`ctl-item ${done ? "done" : ""}`} key={m.label}>
-                <div className="ctl-rail">
-                  <span className={`ctl-dot ${done ? "done" : ""}`} />
-                </div>
-                <div className="ctl-body">
-                  <div className={`ctl-lbl ${done ? "done" : ""}`}>{m.label}{m.overridden && <em style={{ letterSpacing: 0, textTransform: "none" }}> (overridden)</em>}</div>
-                  <div className="ctl-date">
-                    {fmtDate(m.date)}
-                    {m.overridden && m.revertKey && <button className="small" onClick={() => revert(m.revertKey!)}>Revert to auto</button>}
+          {(() => {
+            // The first upcoming milestone gets the amber "next up" treatment
+            // and a relative-time chip; the rest show quiet relative times.
+            const nextLabel = milestones.find((m) => m.date != null && new Date(m.date).getTime() > Date.now())?.label;
+            return milestones.map((m) => {
+              const done = m.date != null && new Date(m.date).getTime() <= Date.now();
+              const isNext = m.label === nextLabel;
+              return (
+                <div className={`ctl-item ${done ? "done" : ""}`} key={m.label}>
+                  <div className="ctl-rail">
+                    <span className={`ctl-dot ${done ? "done" : ""} ${isNext ? "next" : ""}`} />
+                  </div>
+                  <div className="ctl-body ctl-row">
+                    <div>
+                      <div className={`ctl-lbl ${done ? "done" : ""} ${isNext ? "next" : ""}`}>{m.label}{m.overridden && <em style={{ letterSpacing: 0, textTransform: "none" }}> (overridden)</em>}</div>
+                      <div className={`ctl-date ${isNext ? "next" : ""}`}>
+                        {fmtDate(m.date)}
+                        {m.overridden && m.revertKey && <button className="small" onClick={() => revert(m.revertKey!)}>Revert to auto</button>}
+                      </div>
+                    </div>
+                    {m.date && <span className={`ctl-when ${isNext ? "chip" : ""}`}>{relDays(m.date)}</span>}
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            });
+          })()}
         </div>
         )
       ) : (
