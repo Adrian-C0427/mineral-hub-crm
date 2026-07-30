@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, MetricCard, Modal, Banner, SearchInput, Req } from "../components/ui";
+import { Spinner, MetricCard, Modal, Banner, SearchInput, Req, CtPill } from "../components/ui";
 import { dealSearchHaystack } from "../lib/dealSearch";
 import { Select } from "../components/Select";
 import { SortableTable, type Column } from "../components/SortableTable";
@@ -69,13 +69,16 @@ export function MineralAssets() {
 
   const columns: Column<DealSummary>[] = [
     { key: "name", header: "Asset", value: (d) => d.name, render: (d) => (
-      <div><strong>{d.name}</strong>{d.assetMode === "SELL" && <span className="badge owned-badge" style={{ marginLeft: 8 }}>For sale</span>}</div>
+      <div className="row" style={{ gap: 8, alignItems: "center" }}><strong>{d.name}</strong>{d.assetMode === "SELL" && <CtPill color="#f5b04b">For sale</CtPill>}</div>
     ) },
     { key: "location", header: "Location", value: (d) => d.counties.join(", "), render: (d) => [d.counties.join(", "), d.state].filter(Boolean).join(", ") || "—" },
     // Standardized asset type (RI/ORRI/…); legacy rows created before the
     // rename still show their old free-text ownershipType.
     { key: "ownershipType", header: "Asset Type", value: (d) => d.assetTypes.join("/") || d.ownershipType, render: (d) => d.assetTypes.join("/") || d.ownershipType || "—" },
-    { key: "producing", header: "Producing", value: (d) => d.producingStatus, render: (d) => d.producingStatus || "—" },
+    { key: "producing", header: "Producing", value: (d) => d.producingStatus,
+      render: (d) => d.producingStatus
+        ? <CtPill dot color={d.producingStatus === "Producing" ? "#22c55e" : "#8b93a7"}>{d.producingStatus}</CtPill>
+        : "—" },
     { key: "nra", header: "NRA", value: (d) => d.nra, type: "number", align: "right", render: (d) => num(d.nra) },
     { key: "purchasePrice", header: "Cost", value: (d) => d.purchasePrice, type: "number", align: "right", render: (d) => money(d.purchasePrice) },
     { key: "currentValue", header: "Current Value", value: (d) => d.currentValue, type: "number", align: "right", render: (d) => money(d.currentValue) },
@@ -108,10 +111,14 @@ export function MineralAssets() {
         <MetricCard
           label="Unrealized Gain"
           value={money(totals.currentValue - totals.purchasePrice)}
-          hint={totals.purchasePrice > 0 ? fmtPct(((totals.currentValue - totals.purchasePrice) / totals.purchasePrice) * 100) : undefined}
+          hint={totals.purchasePrice > 0
+            ? fmtPct(((totals.currentValue - totals.purchasePrice) / totals.purchasePrice) * 100)
+            : totals.currentValue > 0 ? "Cost basis not set — add purchase price for a real gain figure" : undefined}
           valueColor={(() => { const g = totals.currentValue - totals.purchasePrice; return g > 0 ? "var(--green)" : g < 0 ? "var(--red)" : undefined; })()}
         />
-        <MetricCard label="Annual Royalty Income" value={money(totals.royalty)} valueColor={totals.royalty ? "var(--green)" : undefined} />
+        <MetricCard label="Annual Royalty Income" value={money(totals.royalty)}
+          hint={totals.royalty ? undefined : "Fills in from royalty income on each asset"}
+          valueColor={totals.royalty ? "var(--green)" : undefined} />
       </div>
 
       <div className="ct-card">
@@ -138,7 +145,7 @@ export function MineralAssets() {
         )}
         {assets.length > 0 && (
           <div className="ct-foot">
-            <span>{filtered.length} asset{filtered.length === 1 ? "" : "s"}</span>
+            <span>{filtered.length} asset{filtered.length === 1 ? "" : "s"}{totals.currentValue > 0 ? ` · ${money(totals.currentValue)} total value` : ""}</span>
             <span className="ct-pages">
               <button className="ct-pgbtn" disabled aria-label="Previous page">‹</button>
               <span className="ct-pgcur">1</span>

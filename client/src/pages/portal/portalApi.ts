@@ -36,8 +36,22 @@ export interface PortalProduction {
 }
 export type FC = { type: "FeatureCollection"; features: { type: "Feature"; id?: string | number; properties: Record<string, unknown>; geometry: { type: string; coordinates: unknown } }[] };
 
+// Anonymous per-browser visitor id for listing analytics (views / unique
+// visitors / downloads). Random, stored locally, carries no personal data.
+export function visitorId(): string {
+  try {
+    const KEY = "mh-portal-visitor";
+    let v = localStorage.getItem(KEY);
+    if (!v || !/^[A-Za-z0-9_-]{8,64}$/.test(v)) {
+      v = (crypto.randomUUID?.() ?? `${Date.now()}${Math.random().toString(36).slice(2)}`).replace(/[^A-Za-z0-9_-]/g, "");
+      localStorage.setItem(KEY, v);
+    }
+    return v;
+  } catch { return "anon-no-storage"; }
+}
+
 export async function portalGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}/api/portal${path}`);
+  const res = await fetch(`${API_BASE}/api/portal${path}`, { headers: { "x-mh-visitor": visitorId() } });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error ?? `Request failed (${res.status})`);
@@ -47,7 +61,7 @@ export async function portalGet<T>(path: string): Promise<T> {
 
 export async function portalPost<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}/api/portal${path}`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    method: "POST", headers: { "Content-Type": "application/json", "x-mh-visitor": visitorId() }, body: JSON.stringify(body),
   });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { error?: string };

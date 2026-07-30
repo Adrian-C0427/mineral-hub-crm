@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { API_BASE } from "../../api/client";
 import { fmtDateLocal, num } from "../../lib/format";
 import { PortalMap } from "./PortalMap";
-import { portalGet, portalPost, type FC, type PortalAbstract, type PortalDeal, type PortalDocument, type PortalImage, type PortalOrg, type PortalPackageAsset, type PortalProduction } from "./portalApi";
+import { portalGet, portalPost, visitorId, type FC, type PortalAbstract, type PortalDeal, type PortalDocument, type PortalImage, type PortalOrg, type PortalPackageAsset, type PortalProduction } from "./portalApi";
 import { formatPhone } from "../../lib/phone";
 import { MoneyInput } from "../../components/MoneyInput";
 import { PhoneInput } from "../../components/PhoneInput";
@@ -168,7 +168,7 @@ export function PortalOffering() {
                   onClick={async (e) => {
                     e.preventDefault();
                     try {
-                      const r = await fetch(`${API_BASE}/api/portal/offering/${encodeURIComponent(slug)}/files/${d.id}/download`);
+                      const r = await fetch(`${API_BASE}/api/portal/offering/${encodeURIComponent(slug)}/files/${d.id}/download`, { headers: { "x-mh-visitor": visitorId() } });
                       const j = (await r.json()) as { url?: string; error?: string };
                       if (j.url) window.open(j.url, "_blank");
                       else alert(j.error ?? "Download unavailable");
