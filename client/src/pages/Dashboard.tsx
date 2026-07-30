@@ -66,8 +66,12 @@ function niceCeil(v: number): number {
   return 10 * mag;
 }
 
-/** Design-spec mini trend line (88×28 viewBox, stretched, 2px stroke). */
+/** Design-spec mini trend line (88×28 viewBox, stretched, 2px stroke) with a
+ *  soft gradient area fill fading to transparent beneath the line. */
+let sparkSeq = 0;
 function Spark({ data, color }: { data: number[]; color: string }) {
+  // Stable per-instance gradient id (colors repeat across KPI cards).
+  const idRef = useRef(`dash-spark-${++sparkSeq}`);
   if (data.length < 2 || !data.some((v) => v !== 0)) return <div style={{ height: 26, marginTop: 8 }} />;
   const min = Math.min(...data);
   const max = Math.max(...data);
@@ -78,9 +82,17 @@ function Spark({ data, color }: { data: number[]; color: string }) {
       return `${x.toFixed(1)},${y.toFixed(1)}`;
     })
     .join(" ");
+  const id = idRef.current;
   return (
     <svg width="100%" height="26" viewBox="0 0 88 28" preserveAspectRatio="none" style={{ marginTop: 8, display: "block" }}>
-      <polyline points={pts} fill="none" strokeWidth="2" style={{ stroke: color }} />
+      <defs>
+        <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" style={{ stopColor: color, stopOpacity: 0.22 }} />
+          <stop offset="100%" style={{ stopColor: color, stopOpacity: 0 }} />
+        </linearGradient>
+      </defs>
+      <polygon points={`0,28 ${pts} 88,28`} fill={`url(#${id})`} />
+      <polyline points={pts} fill="none" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" style={{ stroke: color }} />
     </svg>
   );
 }
@@ -130,14 +142,17 @@ const MIN_W = 3;
 const MIN_H = 4;
 
 interface Cell { x: number; y: number; w: number; h: number }
+// Default canvas mirrors the design reference: KPI strip, then the profit
+// chart (wide) beside the pipeline funnel, then a 3-up row of tasks / top
+// buyers / recent activity, with follow-ups full-width beneath.
 const DEFAULT_LAYOUT: Record<WidgetId, Cell> = {
   kpis: { x: 0, y: 0, w: 12, h: 6 },
-  profit: { x: 0, y: 6, w: 6, h: 9 },
-  stages: { x: 6, y: 6, w: 6, h: 9 },
-  activity: { x: 0, y: 15, w: 6, h: 8 },
-  buyers: { x: 6, y: 15, w: 6, h: 8 },
-  followups: { x: 0, y: 23, w: 12, h: 7 },
-  tasks: { x: 0, y: 30, w: 12, h: 7 },
+  profit: { x: 0, y: 6, w: 7, h: 9 },
+  stages: { x: 7, y: 6, w: 5, h: 9 },
+  tasks: { x: 0, y: 15, w: 4, h: 9 },
+  buyers: { x: 4, y: 15, w: 4, h: 9 },
+  activity: { x: 8, y: 15, w: 4, h: 9 },
+  followups: { x: 0, y: 24, w: 12, h: 7 },
 };
 
 interface DashPrefs { layout: Record<WidgetId, Cell>; hidden: WidgetId[] }
@@ -176,6 +191,7 @@ export function Dashboard() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const { theme, toggleTheme } = useTheme();
+  const { user } = useAuth();
   const { label: stageLabel, colorOf: stageColorOf } = useStages();
   const [prefs, setPrefs] = useState<DashPrefs>(loadDashPrefs);
   const [customizing, setCustomizing] = useState(false);
@@ -261,7 +277,11 @@ export function Dashboard() {
   // Brand-new workspace: no active deals and nothing closed yet. Guide the
   // first steps instead of presenting a wall of zeros.
   const firstRun = d.metrics.activeDeals === 0 && d.metrics.closedProfitYtd === 0 && d.recentActivity.length === 0;
-  const today = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric" });
+  // Time-of-day greeting (design): "Good evening, Adrian".
+  const hour = new Date().getHours();
+  const daypart = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
+  const firstName = (user?.name ?? "").trim().split(/\s+/)[0] || "there";
 
   const widgetNodes: Record<WidgetId, ReactNode> = {
     kpis: (
@@ -277,11 +297,16 @@ export function Dashboard() {
     profit: (
       <div className="panel">
         <div className="panel-title" style={{ marginBottom: 0 }}>
-          <h3 className="dash-h3">Profit by month</h3>
+          <div>
+            <h3 className="dash-h3">Profit by month</h3>
+            <div className="dash-panel-sub">
+              {fmtCompact(d.profitByMonth.reduce((s, m) => s + m.profit + m.projected, 0))} realized + projected{d.metrics.periodLabel ? ` · ${d.metrics.periodLabel}` : ` in ${new Date().getFullYear()}`}
+            </div>
+          </div>
           {d.profitByMonth.some((m) => m.profit > 0 || m.projected > 0) && (
-            <div className="row" style={{ gap: 14, fontSize: 11.5, color: "var(--text-dim)" }}>
-              <span className="row" style={{ gap: 5 }}><span className="dash-swatch" style={{ background: "var(--green)" }} /> Realized</span>
-              <span className="row" style={{ gap: 5 }}><span className="dash-swatch dash-swatch-proj" /> Projected</span>
+            <div className="row" style={{ gap: 14, fontSize: 11.5, fontWeight: 600, color: "var(--text-dim)" }}>
+              <span className="row" style={{ gap: 6 }}><span className="dash-swatch" style={{ background: "var(--green)" }} /> Realized</span>
+              <span className="row" style={{ gap: 6 }}><span className="dash-swatch dash-swatch-proj" /> Projected</span>
             </div>
           )}
         </div>
@@ -312,6 +337,11 @@ export function Dashboard() {
                     onClick={clickable ? () => setProfitDrill(i) : undefined}
                     onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setProfitDrill(i); } } : undefined}
                   >
+                    {/* Value label above the bar (design): green for realized,
+                        soft blue for projected; blank keeps rows aligned. */}
+                    <div className="bar-val" style={{ color: m.projected > m.profit ? "var(--dash-proj-text, #93b4f8)" : "var(--green)" }}>
+                      {empty ? "" : fmtCompact(Math.max(m.profit, m.projected))}
+                    </div>
                     <div className="bar-zone">
                       {empty ? (
                         <div className="bar bar-zero" />
@@ -419,16 +449,16 @@ export function Dashboard() {
     stages: (
       <div className="panel">
         <div className="panel-title" style={{ marginBottom: 14 }}>
-          <h3 className="dash-h3">Active deals by stage</h3>
-          <Link to="/pipeline" className="muted" style={{ fontSize: 12 }}>View pipeline →</Link>
+          <h3 className="dash-h3">Pipeline by stage</h3>
+          <Link to="/pipeline" className="dash-viewlink">View pipeline →</Link>
         </div>
         {d.stageCounts.every((s) => s.count === 0) ? <p className="muted">No active deals.</p> : (
           <div className="dash-funnel">
             {d.stageCounts.map((s) => (
               <Link className="dash-fun-row" key={s.stage} to={`/pipeline?stage=${s.stage}`}>
                 <span className="dash-fun-head">
-                  <span className="dash-soft">{stageLabel(s.stage)}</span>
-                  <span className="dash-faintish">{s.count}</span>
+                  <span className="dash-fun-name"><span className="dash-fun-dot" style={{ background: stageColorOf(s.stage) }} />{stageLabel(s.stage)}</span>
+                  <span className="dash-fun-count" style={{ color: s.count > 0 ? "var(--text)" : "var(--text-faint)" }}>{s.count}</span>
                 </span>
                 <span className="dash-fun-track">
                   <span className="dash-fun-fill" style={{ width: `${(s.count / maxStage) * 100}%`, background: stageColorOf(s.stage) }} />
@@ -441,25 +471,50 @@ export function Dashboard() {
     ),
     activity: (
       <div className="panel">
-        <h3 className="dash-h3" style={{ marginBottom: 6 }}>Recent activity</h3>
-        {d.recentActivity.length === 0 ? <p className="muted">Nothing yet.</p> : d.recentActivity.slice(0, 8).map((a) => (
-          <div className="dash-feed-row" key={a.id}>
-            <span className="dash-soft">{a.summary}</span>
-            <span className="dash-faint" style={{ whiteSpace: "nowrap" }}>{fmtDateLocal(a.createdAt)}</span>
+        <div className="panel-title" style={{ marginBottom: 14 }}>
+          <h3 className="dash-h3">Recent activity</h3>
+        </div>
+        {d.recentActivity.length === 0 ? <p className="muted">Nothing yet.</p> : (
+          <div className="dash-tl">
+            {d.recentActivity.slice(0, 8).map((a, i, arr) => (
+              <div className="dash-tl-row" key={a.id}>
+                <div className="dash-tl-rail">
+                  <span className="dash-tl-dot" />
+                  {i < arr.length - 1 && <span className="dash-tl-line" />}
+                </div>
+                <div className="dash-tl-body">
+                  <div className="dash-tl-text">{a.summary}</div>
+                  <div className="dash-tl-when">{fmtDateLocal(a.createdAt)}</div>
+                </div>
+              </div>
+            ))}
           </div>
-        ))}
+        )}
       </div>
     ),
     buyers: (
       <div className="panel">
-        <h3 className="dash-h3" style={{ marginBottom: 6 }}>Top buyers YTD</h3>
-        {d.topBuyers.length === 0 ? <p className="muted">No closed volume yet.</p> : d.topBuyers.map((b, i) => (
-          <div className="dash-rank-row" key={b.id}>
-            <span className="dash-faint" style={{ width: 14 }}>{i + 1}</span>
-            <Link to={`/buyers/${b.id}`} className="dash-rank-name">{b.companyName || b.name}</Link>
-            <span className="dash-rank-amt">{fmtCompact(b.volume)}</span>
-          </div>
-        ))}
+        <div className="panel-title" style={{ marginBottom: 12 }}>
+          <h3 className="dash-h3">Top buyers YTD</h3>
+          <Link to="/buyers" className="dash-viewlink">View buyers →</Link>
+        </div>
+        {d.topBuyers.length === 0 ? <p className="muted">No closed volume yet.</p> : (() => {
+          const topVol = Math.max(1, ...d.topBuyers.map((b) => b.volume));
+          const totalVol = Math.max(1, d.topBuyers.reduce((s, b) => s + b.volume, 0));
+          const BAR_COLORS = ["#3b82f6", "#a855f7", "#06b6d4", "#f59e0b", "#22c55e"];
+          return d.topBuyers.map((b, i) => (
+            <Link to={`/buyers/${b.id}`} className="dash-buyer-row" key={b.id}>
+              <span className="dash-buyer-top">
+                <span className="dash-buyer-name">{b.companyName || b.name}</span>
+                <span className="dash-buyer-amt">{fmtCompact(b.volume)}</span>
+              </span>
+              <span className="dash-buyer-bottom">
+                <span className="dash-buyer-track"><span className="dash-buyer-fill" style={{ width: `${(b.volume / topVol) * 100}%`, background: BAR_COLORS[i % BAR_COLORS.length] }} /></span>
+                <span className="dash-buyer-share">{Math.round((b.volume / totalVol) * 100)}%</span>
+              </span>
+            </Link>
+          ));
+        })()}
       </div>
     ),
     followups: (
@@ -517,7 +572,7 @@ export function Dashboard() {
     <div className="page">
       <div className="page-header">
         <div>
-          <h1 className="dash-title">Dashboard</h1>
+          <h1 className="dash-title">Good {daypart}, {firstName}</h1>
           <span className="dash-sub">Acquisition snapshot · {today}</span>
         </div>
         <div className="row" style={{ gap: 10 }}>
@@ -536,6 +591,11 @@ export function Dashboard() {
           <button className="dash-icon-btn" title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} onClick={toggleTheme}>
             {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
           </button>
+          {/* ?new=1 opens the New Deal modal directly (design's header CTA). */}
+          <Link to="/deals/active?new=1" className="pbtn-primary dash-newdeal">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+            New Deal
+          </Link>
         </div>
       </div>
 
@@ -656,9 +716,15 @@ function TasksWidget({ tasks, onCompleted }: { tasks: DashTask[]; onCompleted: (
 
   return (
     <div className="panel">
-      <h3 className="dash-h3" style={{ marginBottom: 6 }}>Tasks</h3>
+      <div className="panel-title" style={{ marginBottom: 12 }}>
+        <h3 className="dash-h3">Tasks</h3>
+        {tasks.length > 0 && <span className="dash-task-badge">{tasks.length} due</span>}
+      </div>
       {tasks.length === 0 ? (
-        <p className="muted">Nothing due — you're all caught up.</p>
+        <div className="dash-task-clear">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>
+          No overdue tasks or follow-ups
+        </div>
       ) : tasks.map((t) => {
         const dayKey = t.dueDate ? t.dueDate.slice(0, 10) : null;
         const overdue = dayKey != null && dayKey < todayKey;

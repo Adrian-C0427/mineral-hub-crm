@@ -140,8 +140,12 @@ a.subtle-link:hover, a.subtle-link:focus-visible { color: var(--accent); text-de
 .cw-addcol { display: flex; flex-direction: column; gap: 6px; }
 
 /* Dashboard Tasks widget rows */
-.dash-task-row { display: flex; align-items: center; gap: 10px; padding: 7px 2px; border-bottom: 1px solid var(--border); }
-.dash-task-row:last-child { border-bottom: none; }
+/* Task items as soft tiles (design's Priorities card). */
+.dash-task-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 9px;
+  background: var(--control, var(--panel-2)); border: 1px solid var(--hairline, var(--border)); border-radius: 11px;
+  transition: border-color .15s; }
+.dash-task-row:hover { border-color: color-mix(in srgb, var(--text) 18%, transparent); }
+.dash-task-row:last-child { margin-bottom: 0; }
 .dash-task-row input[type="checkbox"] { flex: none; }
 .dash-task-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; color: var(--text); }
 .dash-task-main:hover { text-decoration: none; }
@@ -151,6 +155,10 @@ a.subtle-link:hover, a.subtle-link:focus-visible { color: var(--accent); text-de
 .dash-task-pr { flex: none; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; }
 .dash-task-due { flex: none; font-size: 11.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .dash-task-due.overdue { color: var(--red); font-weight: 600; }
+/* Amber count badge + green all-clear footer (design's Priorities card). */
+.dash-task-badge { font-size: 11px; font-weight: 800; color: var(--amber); background: color-mix(in srgb, var(--amber) 10%, transparent);
+  padding: 2px 8px; border-radius: 99px; }
+.dash-task-clear { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-faint); margin-top: auto; padding-top: 12px; }
 
 h1, h2, h3, h4 { margin: 0 0 12px; font-weight: 600; }
 h1 { font-size: 22px; }
@@ -784,8 +792,8 @@ body.modal-open { overflow: hidden; }
    tick, $0, at the bottom), hover tooltip, and clickable columns that open the
    month's drill-down panel. Deliberately no gridlines — minimal look. */
 .bar-chart-wrap { display: flex; gap: 8px; margin-top: 20px; }
-.bar-axis { display: flex; flex-direction: column-reverse; justify-content: space-between; height: 130px; text-align: right;
-  font-size: 10px; color: var(--text-dim); font-variant-numeric: tabular-nums; min-width: 34px; flex-shrink: 0; }
+.bar-axis { display: flex; flex-direction: column-reverse; justify-content: space-between; height: 130px; margin-top: 20px; text-align: right;
+  font-size: 10.5px; font-weight: 600; color: var(--text-faint); font-variant-numeric: tabular-nums; min-width: 34px; flex-shrink: 0; }
 .bar-plot { position: relative; flex: 1; min-width: 0; }
 .bar-col.clickable { cursor: pointer; border-radius: 6px; }
 .bar-col.clickable:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); }
@@ -796,19 +804,22 @@ body.modal-open { overflow: hidden; }
 .chart-tip-row { display: flex; align-items: center; gap: 6px; padding: 1.5px 0; }
 .chart-tip-row strong { margin-left: auto; font-variant-numeric: tabular-nums; }
 .chart-tip-total { border-top: 1px solid var(--border); margin-top: 3px; padding-top: 4px; }
-.bar-chart { display:flex; align-items:flex-end; gap: 9px; height: 156px; }
-.bar-col { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height: 100%; gap: 6px; }
-.bar-zone { display:flex; align-items:flex-end; gap: 2px; width: 100%; height: 130px; }
-/* Stacked bar: projected sits on top of realized as one cumulative column. */
-.bar { flex: 1; background: var(--green); border-radius: 3px 3px 0 0; }
-.bar-projected { background: var(--accent); opacity: 0.55; }
-:root[data-theme="light"] .bar-projected { opacity: 0.45; }
+.bar-chart { display:flex; align-items:flex-end; gap: 8px; height: 178px; }
+.bar-col { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height: 100%; gap: 7px; }
+.bar-zone { display:flex; align-items:flex-end; gap: 2px; width: 100%; height: 130px; justify-content: center; }
+/* Value label riding above each bar (design): green realized / blue projected. */
+.bar-val { font-size: 10px; font-weight: 800; font-variant-numeric: tabular-nums; height: 13px; line-height: 13px; white-space: nowrap; }
+:root[data-theme="light"] .bar-val { filter: saturate(1.1) brightness(0.82); }
+/* Design bars: rounded caps, translucent dashed outline for projected. */
+.bar { flex: 1; max-width: 34px; background: var(--green); border-radius: 5px 5px 2px 2px; }
+.bar-projected { background: color-mix(in srgb, var(--accent) 22%, transparent); opacity: 1;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 75%, transparent); }
 /* Zero placeholder: a faint baseline stub so months with no profit still appear
    on the chart (keeps all twelve months visible with consistent spacing). */
-.bar-zero { flex: 1; height: 3px; background: var(--border); border-radius: 3px 3px 0 0; opacity: 0.7; }
-.bar-label { font-size: 10px; color: var(--text-dim); }
+.bar-zero { flex: 1; max-width: 34px; height: 3px; background: var(--border); border-radius: 3px 3px 0 0; opacity: 0.7; }
+.bar-label { font-size: 11px; font-weight: 600; color: var(--text-faint); }
 /* Highlight the current month's label to orient past vs. future at a glance. */
-.bar-col.current .bar-label { color: var(--accent); font-weight: 700; }
+.bar-col.current .bar-label { color: var(--accent); font-weight: 800; }
 
 /* The one standardized required-field indicator, app-wide (incl. portal). */
 .req-star { color: var(--red); margin-left: 2px; font-weight: 700; }
@@ -892,15 +903,25 @@ body.modal-open { overflow: hidden; }
    Dashboard (design-system look, copied from the Claude Design mockup).
    Scoped to dash-* classes so nothing outside the Dashboard changes.
    =========================================================================== */
-.dash-title { font-size: 19px; font-weight: 700; margin: 0; }
-.dash-sub { font-size: 12px; color: var(--text-dim); }
+.dash-title { font-size: 22px; font-weight: 800; letter-spacing: -0.01em; margin: 0; }
+.dash-sub { font-size: 13px; color: var(--text-dim); display: inline-block; margin-top: 3px; }
+/* Header CTA (design): solid blue New Deal button beside the period picker. */
+.dash-newdeal { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px;
+  border-radius: 9px; background: var(--accent); color: #fff !important; font-size: 12.5px; font-weight: 700; }
+.dash-newdeal:hover { background: color-mix(in srgb, var(--accent) 88%, #000); text-decoration: none; }
+/* Panel subtitle line under a dash-h3 (e.g. profit chart summary). */
+.dash-panel-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.dash-viewlink { font-size: 12px; font-weight: 600; color: var(--text-dim); }
+.dash-viewlink:hover { color: var(--accent); text-decoration: none; }
 .dash-icon-btn { width: 34px; height: 34px; padding: 0; border-radius: 8px; background: var(--panel); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; color: var(--text-dim); }
 .dash-icon-btn:hover { color: var(--text); background: var(--panel); border-color: var(--text-dim); }
 .dash-h3 { font-size: 14.5px; font-weight: 700; margin: 0; }
 .dash-kpis { margin-bottom: 16px; }
-.dash-kpi-label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
-.dash-kpi-row { display: flex; align-items: baseline; gap: 8px; margin-top: 8px; }
-.dash-kpi-value { font-size: 28px; font-weight: 600; line-height: 1.1; }
+.dash-kpi-label { font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-dim); font-weight: 700; }
+.dash-kpi-row { display: flex; align-items: baseline; gap: 8px; margin-top: 7px; }
+.dash-kpi-value { font-size: 26px; font-weight: 700; line-height: 1.1; letter-spacing: -0.01em; }
+.dash-kpi { display: flex; flex-direction: column; min-height: 122px; }
+.dash-kpi > svg, .dash-kpi > div:last-child { margin-top: auto !important; padding-top: 10px; }
 .dash-delta { font-size: 11.5px; font-weight: 600; }
 .dash-delta.up { color: var(--green); }
 .dash-delta.down { color: #ef8f6b; }
@@ -972,15 +993,43 @@ body.modal-open { overflow: hidden; }
 .dash-swatch-proj { background: var(--accent); opacity: 0.55; }
 :root[data-theme="light"] .dash-swatch-proj { opacity: 0.45; }
 
-/* Stage funnel: label + count over a slim colored track. */
-.dash-funnel { display: flex; flex-direction: column; gap: 11px; }
+/* Stage funnel (design): colored dot + name, tabular count, slim colored track. */
+.dash-funnel { display: flex; flex-direction: column; gap: 13px; }
 .dash-fun-row { display: block; color: inherit; }
 .dash-fun-row:hover { text-decoration: none; }
-.dash-fun-row:hover .dash-soft { color: var(--text); }
-.dash-fun-head { display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 5px; }
-.dash-fun-track { display: block; height: 7px; background: rgba(255,255,255,0.06); border-radius: 4px; overflow: hidden; }
+.dash-fun-row:hover .dash-fun-name { color: var(--text); }
+.dash-fun-head { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+.dash-fun-name { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--text-mid, #c3c9d6); }
+:root[data-theme="light"] .dash-fun-name { color: #475467; }
+.dash-fun-dot { width: 8px; height: 8px; border-radius: 3px; flex: none; }
+.dash-fun-count { font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.dash-fun-track { display: block; height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; }
 :root[data-theme="light"] .dash-fun-track { background: rgba(19,23,34,0.07); }
-.dash-fun-fill { display: block; height: 100%; border-radius: 4px; min-width: 2px; }
+.dash-fun-fill { display: block; height: 100%; border-radius: 3px; min-width: 3px; }
+
+/* Top buyers (design): name + green amount over a share bar and percentage. */
+.dash-buyer-row { display: block; padding: 9px 8px; margin: 0 -8px; border-radius: 9px; color: inherit; }
+.dash-buyer-row:hover { background: color-mix(in srgb, var(--text) 5%, transparent); text-decoration: none; }
+.dash-buyer-top { display: flex; align-items: center; gap: 11px; }
+.dash-buyer-name { flex: 1; font-size: 13px; font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-buyer-amt { font-size: 12.5px; font-weight: 700; color: var(--green); font-variant-numeric: tabular-nums; }
+.dash-buyer-bottom { display: flex; align-items: center; gap: 9px; margin-top: 7px; }
+.dash-buyer-track { flex: 1; display: block; height: 4px; border-radius: 2px; background: rgba(255,255,255,0.06); overflow: hidden; }
+:root[data-theme="light"] .dash-buyer-track { background: rgba(19,23,34,0.07); }
+.dash-buyer-fill { display: block; height: 100%; border-radius: 2px; }
+.dash-buyer-share { font-size: 10.5px; color: var(--text-faint); font-weight: 700; font-variant-numeric: tabular-nums; width: 30px; text-align: right; }
+
+/* Recent activity (design): timeline dots with a hairline connector. */
+.dash-tl { display: flex; flex-direction: column; }
+.dash-tl-row { display: flex; gap: 12px; position: relative; padding-bottom: 16px; }
+.dash-tl-row:last-child { padding-bottom: 0; }
+.dash-tl-rail { display: flex; flex-direction: column; align-items: center; flex: none; width: 10px; padding-top: 5px; }
+.dash-tl-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--control-active, #2a3242); flex: none; }
+.dash-tl-line { flex: 1; width: 1px; background: var(--hairline, var(--border)); margin-top: 5px; }
+.dash-tl-body { min-width: 0; padding-top: 1px; }
+.dash-tl-text { font-size: 12.5px; color: var(--text-mid, #c3c9d6); line-height: 1.45; }
+:root[data-theme="light"] .dash-tl-text { color: #475467; }
+.dash-tl-when { font-size: 11px; color: var(--text-faint); font-weight: 600; margin-top: 3px; }
 
 /* Feed / ranked rows (recent activity, top buyers, follow-ups). */
 .dash-soft { color: #c7cddb; }
