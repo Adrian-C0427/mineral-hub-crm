@@ -42,12 +42,13 @@ export function SellerDetails({ dealId, sellers, users, canEdit, onChanged }: {
 
   return (
     <div className="panel">
-      <div className="section-head" style={{ alignItems: "flex-start" }}>
-        <div>
+      {/* Centered section header with the action pinned right (reference). */}
+      <div className="seller-head">
+        <div className="seller-head-c">
           <h3 style={{ margin: 0 }}>Seller Details</h3>
-          <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>Owner and contact information for this deal, kept separate from the deal characteristics.</div>
+          <div className="muted" style={{ fontSize: 12.5, marginTop: 3 }}>Owner and contact information for this deal, kept separate from the deal characteristics.</div>
         </div>
-        {canEdit && <button className="small primary" style={{ whiteSpace: "nowrap" }} onClick={() => setEditing("new")}>+ Add seller</button>}
+        {canEdit && <button className="small primary seller-head-add" style={{ whiteSpace: "nowrap" }} onClick={() => setEditing("new")}>+ Add seller</button>}
       </div>
 
       {sellers.length === 0 ? (
@@ -85,27 +86,48 @@ function SellerCard({ s, canEdit, onEdit, onRemove }: { s: Seller; canEdit: bool
   return (
     <div className="seller-card">
       <div className="seller-card-head">
-        <div className="row" style={{ gap: 10, alignItems: "center" }}>
+        <div className="row" style={{ gap: 11, alignItems: "center", minWidth: 0 }}>
           <span className="seller-avatar">{initials}</span>
-          <strong style={{ fontSize: 14.5 }}>{name}</strong>
-          <span className="badge resp-pending">{prettyType(s.sellerType)}</span>
+          <strong style={{ fontSize: 14.5, fontWeight: 800 }}>{name}</strong>
+          <span className="ct-pill seller-type-pill">{prettyType(s.sellerType)}</span>
+          {s.preferredContactMethod && (
+            <span className="ct-pill seller-pref-pill">
+              <span className="ct-pill-dot" style={{ background: "var(--green)" }} />
+              Prefers {s.preferredContactMethod.toLowerCase()}
+            </span>
+          )}
         </div>
-        {canEdit && (
-          <div className="row" style={{ gap: 14 }}>
-            <button className="link-btn" onClick={onEdit}>Edit</button>
-            <button className="link-btn" style={{ color: "var(--red)" }} onClick={onRemove}>Remove</button>
-          </div>
-        )}
+        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+          {s.primaryPhone && (
+            <a className="seller-act" href={`tel:${s.primaryPhone}`} title={`Call ${formatPhone(s.primaryPhone)}`}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.13.96.36 1.9.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0122 16.92z" /></svg>
+              Call
+            </a>
+          )}
+          {s.email && (
+            <a className="seller-act" href={`mailto:${s.email}`} title={`Email ${s.email}`}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M22 7l-10 6L2 7" /></svg>
+              Email
+            </a>
+          )}
+          {canEdit && (
+            <>
+              {(s.primaryPhone || s.email) && <span className="seller-sep" />}
+              <button className="link-btn" onClick={onEdit}>Edit</button>
+              <button className="link-btn" style={{ color: "var(--red)" }} onClick={onRemove}>Remove</button>
+            </>
+          )}
+        </div>
       </div>
       <div className="seller-grid">
-        <KV k="Primary phone" v={s.primaryPhone ? formatPhone(s.primaryPhone) : null} />
+        <KV k="Primary Phone" v={s.primaryPhone ? formatPhone(s.primaryPhone) : null} />
         <KV k="Email" v={s.email} />
-        <KV k="Preferred contact" v={s.preferredContactMethod} />
-        <KV k="Assigned to" v={s.assignedTeamMember?.name} />
-        <KV k="Physical address" v={physical} />
-        <KV k="Mailing address" v={sameAddr ? "Same as physical" : mailing} />
-        <KV k="Date added" v={fmtDateLocal(s.dateAdded)} />
-        {s.internalNotes && <KV k="Internal notes" v={s.internalNotes} wide />}
+        <KV k="Preferred Contact" v={s.preferredContactMethod} />
+        <KV k="Assigned To" v={s.assignedTeamMember?.name} />
+        <KV k="Physical Address" v={physical} />
+        <KV k="Mailing Address" v={sameAddr ? "Same as physical" : mailing} />
+        <KV k="Date Added" v={fmtDateLocal(s.dateAdded)} />
+        {s.internalNotes && <KV k="Internal Notes" v={s.internalNotes} wide />}
       </div>
     </div>
   );
@@ -113,9 +135,9 @@ function SellerCard({ s, canEdit, onEdit, onRemove }: { s: Seller; canEdit: bool
 
 function KV({ k, v, wide }: { k: string; v: React.ReactNode; wide?: boolean }) {
   return (
-    <div className="kv" style={wide ? { gridColumn: "1 / -1" } : undefined}>
-      <span className="k">{k}</span>
-      <span className="v" style={{ whiteSpace: wide ? "normal" : undefined }}>{v || "—"}</span>
+    <div style={wide ? { gridColumn: "1 / -1" } : undefined}>
+      <div className="ddx-label">{k}</div>
+      <div className={`seller-v ${v ? "" : "dim"}`}>{v || "—"}</div>
     </div>
   );
 }

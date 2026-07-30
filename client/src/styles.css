@@ -3299,3 +3299,127 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .doc-section .data-table thead th { font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
   color: var(--text-faint); font-weight: 700; background: color-mix(in srgb, var(--text) 2%, transparent); }
 .doc-actions .small { border-radius: 8px; font-size: 12px; font-weight: 600; }
+
+/* ===========================================================================
+   Deal profile (reference: Deal Detail-2) — shared across deal + asset pages.
+   =========================================================================== */
+/* Deadline alert banner */
+.dd-alert { display: flex; align-items: center; gap: 11px; background: rgba(245, 158, 11, 0.06);
+  border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 12px; padding: 13px 16px; margin-bottom: 14px;
+  color: var(--amber); }
+.dd-alert-msg { font-size: 13px; color: color-mix(in srgb, var(--text) 72%, var(--text-dim)); }
+.dd-alert-msg b { color: #f5b04b; }
+:root[data-theme="light"] .dd-alert-msg b { color: #b45309; }
+.dd-alert-link { margin-left: auto; font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+
+/* Characteristics completeness meter */
+.ddc-meter-n { font-size: 11.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ddc-meter { width: 56px; height: 4px; border-radius: 99px; background: var(--hairline); overflow: hidden; display: inline-block; }
+.ddc-meter-fill { display: block; height: 100%; background: #f5b04b; }
+.ddc-meter-fill.full { background: var(--green); }
+
+/* Derived economics strip */
+.ddc-strip { margin-top: 16px; background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px;
+  padding: 12px 14px; display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+.ddc-strip-v { font-size: 16px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.ddc-strip-v.dim { color: var(--text-dim); }
+.ddc-strip-v.pos { color: var(--green); }
+.ddc-strip-v.neg { color: var(--red); }
+
+/* Timeline: relative-time chips on every milestone + contract window footer */
+.ctl-toprow { display: flex; align-items: center; justify-content: space-between; gap: 9px; }
+.ctl-row > div { flex: 1; min-width: 0; }
+.ctl-when.pill { font-weight: 700; font-size: 10.5px; color: var(--text-dim); background: var(--surface);
+  border: 1px solid var(--border); border-radius: 99px; padding: 2px 8px; }
+.ctl-lbl.next { color: #f5b04b; }
+:root[data-theme="light"] .ctl-lbl.next { color: #b45309; }
+.ctl-date.next { color: inherit; }
+.ctl-window { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--hairline); }
+.ctl-window-head { display: flex; align-items: baseline; justify-content: space-between; }
+.ctl-window-n { font-size: 11.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.ctl-window-bar { height: 5px; border-radius: 99px; background: var(--hairline); margin-top: 8px; overflow: hidden; }
+.ctl-window-bar > div { height: 100%; border-radius: 99px; background: var(--accent); }
+.ctl-window-bar > div.over { background: var(--red); }
+.ctl-window-sub { font-size: 11.5px; color: var(--text-faint); margin-top: 7px; }
+
+/* Buyers tab — selected-buyer banner + offers table + match cards */
+.dd-selected-banner { display: flex; align-items: center; gap: 11px; background: rgba(34, 197, 94, 0.06);
+  border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 12px; padding: 13px 16px; color: var(--green);
+  font-size: 13px; margin-bottom: var(--block-gap, 16px); }
+.dd-selected-banner span { color: color-mix(in srgb, var(--text) 72%, var(--text-dim)); }
+.dd-selected-banner b { color: var(--text); font-weight: 700; }
+.dd-selected-banner .pos { color: var(--green); font-variant-numeric: tabular-nums; }
+.dd-selected-right { margin-left: auto; white-space: nowrap; }
+.dd-offers .table-scroll { background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px; }
+.dd-offers .data-table thead th { font-size: 10.5px; letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--text-dim); font-weight: 700; border-bottom: 1px solid var(--hairline); }
+.dd-offer-buyer { font-size: 13px; font-weight: 700; }
+.mr-legend { margin-left: auto; font-size: 12px; color: var(--text-faint); white-space: nowrap; }
+.mr-list { display: flex; flex-direction: column; gap: 10px; }
+.match-card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px; padding: 13px 16px; }
+.match-card:hover { border-color: #323b4b; }
+:root[data-theme="light"] .match-card:hover { border-color: color-mix(in srgb, var(--text-dim) 45%, var(--border)); }
+.match-card.match-selected { border-color: rgba(59, 130, 246, 0.45); }
+.match-card-head { display: flex; align-items: center; gap: 11px; }
+.mr-ring { position: relative; width: 40px; height: 40px; flex-shrink: 0; display: inline-block; }
+.mr-ring-n { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+  font-size: 10.5px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.mr-title { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.mr-title .match-name { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mr-contacted { display: inline-flex; align-items: center; height: 20px; padding: 0 9px; border-radius: 99px;
+  font-size: 10.5px; font-weight: 700; color: var(--text-dim); background: var(--panel); border: 1px solid var(--border); }
+.mr-crit { margin-left: auto; font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+.mr-tags { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 11px; padding-left: 75px; }
+.mr-meta { font-size: 12px; color: var(--text-faint); margin-top: 10px; padding-left: 75px; }
+.mr-more { display: flex; justify-content: center; margin-top: 12px; }
+/* Criteria chips — matched = green tint pill; unmatched = dashed ghost. */
+.crit-tag { display: inline-flex; align-items: center; height: 23px; padding: 0 11px; border-radius: 99px;
+  font-size: 11.5px; font-weight: 600; margin: 0; }
+.crit-tag.crit-yes { color: var(--green); background: rgba(34, 197, 94, 0.08); border: 1px solid rgba(34, 197, 94, 0.3); }
+.crit-tag.crit-no { color: var(--text-faint); background: transparent; border: 1px dashed var(--border); }
+/* Seller Details (reference) */
+.seller-head { position: relative; display: flex; align-items: center; justify-content: center; margin-bottom: 14px; }
+.seller-head-c { text-align: center; }
+.seller-head-add { position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
+.seller-card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px; padding: 16px; }
+.seller-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.seller-avatar { width: 34px; height: 34px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent); font-size: 12.5px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.seller-type-pill { color: color-mix(in srgb, var(--text) 72%, var(--text-dim)); background: var(--panel); border: 1px solid var(--border); }
+.seller-pref-pill { color: var(--green); background: rgba(34, 197, 94, 0.10); border: 1px solid rgba(34, 197, 94, 0.25); font-size: 11px; }
+.seller-act { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; background: transparent;
+  border: 1px solid var(--border); border-radius: 8px; color: color-mix(in srgb, var(--text) 72%, var(--text-dim));
+  font: 600 12px var(--font-sans); text-decoration: none !important; }
+.seller-act:hover { color: var(--text); border-color: color-mix(in srgb, var(--text-dim) 45%, var(--border)); }
+.seller-sep { width: 1px; height: 20px; background: var(--border); display: inline-block; }
+.seller-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 24px; margin-top: 16px; }
+.seller-v { font-size: 13.5px; font-weight: 600; margin-top: 6px; overflow-wrap: anywhere; }
+.seller-v.dim { color: var(--text-faint); }
+@media (max-width: 700px) { .seller-grid { grid-template-columns: 1fr; } }
+/* Buyer Portal panel — summary + listing-quality grid (reference) */
+.dpp-sumgrid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 14px; align-items: stretch; }
+@media (max-width: 800px) { .dpp-sumgrid { grid-template-columns: 1fr; } }
+.dpp-quality { background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px; padding: 14px 16px; }
+.dpp-quality-head { display: flex; align-items: center; justify-content: space-between; }
+.dpp-quality-pct { font-size: 13px; font-weight: 800; color: #f5b04b; font-variant-numeric: tabular-nums; }
+.dpp-quality-pct.full { color: var(--green); }
+:root[data-theme="light"] .dpp-quality-pct { color: #b45309; }
+:root[data-theme="light"] .dpp-quality-pct.full { color: var(--green); }
+.dpp-quality-bar { height: 5px; border-radius: 99px; background: var(--hairline); margin-top: 9px; overflow: hidden; }
+.dpp-quality-bar > div { height: 100%; border-radius: 99px; background: #f5b04b; }
+.dpp-quality-bar > div.full { background: var(--green); }
+.dpp-quality-list { display: flex; flex-direction: column; margin-top: 10px; }
+.dpp-quality-item { display: flex; align-items: center; gap: 9px; padding: 7px 0; border-top: 1px solid var(--hairline); }
+.dpp-qdot { width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0; display: inline-flex; align-items: center;
+  justify-content: center; background: transparent; border: 1.5px solid color-mix(in srgb, var(--text-dim) 45%, var(--border)); }
+.dpp-qdot.done { background: var(--green); border-color: var(--green); }
+.dpp-qlbl { font-size: 12.5px; font-weight: 600; color: var(--text-dim); }
+.dpp-qlbl.done { color: var(--text); }
+/* Documents — reference polish: 36px folder pills w/ count badges, inactive on
+   the page-dark track; dashed empty drop card. */
+.doc-chip { height: 36px; padding: 0 15px; background: var(--surface); color: color-mix(in srgb, var(--text) 72%, var(--text-dim)); font-weight: 700; }
+.doc-count { min-width: 18px; height: 18px; padding: 0 5px; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 10.5px; font-weight: 700; background: var(--hairline); color: var(--text-dim); }
+.doc-chip.active .doc-count { background: rgba(255, 255, 255, 0.22); color: #fff; }
+.doc-chip-new { background: transparent; border: 1.5px dashed color-mix(in srgb, var(--text-dim) 45%, var(--border)); font-weight: 600; color: var(--text-dim); }
+.doc-section .empty-state { border: 1.5px dashed color-mix(in srgb, var(--text-dim) 45%, var(--border)); border-radius: 12px; padding: 36px 20px; }
