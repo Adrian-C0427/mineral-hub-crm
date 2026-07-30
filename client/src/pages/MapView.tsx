@@ -9,7 +9,7 @@ import { Select } from "../components/Select";
 import { downloadCsv } from "../lib/csv";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION } from "../lib/counties";
 import { addCadastralLayers, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
-import { MapLayersPanel, PillToggle } from "../components/MapLayersPanel";
+import { MapLayersPanel } from "../components/MapLayersPanel";
 import { Spinner, StageBadge, PriorityBadge } from "../components/ui";
 import { money, num } from "../lib/format";
 import {
@@ -784,26 +784,39 @@ export function MapView() {
             <div><div className="ddx-label mc-lbl">Operator <span className="mc-count">({gisOptions.operators.length})</span></div><SearchableMultiSelect options={gisOptions.operators} value={fOperators} onChange={setFOperators} placeholder="Operators…" /></div>
             <div><div className="ddx-label mc-lbl">Formation <span className="mc-count">({scoped.formations.length})</span></div><SearchableMultiSelect options={scoped.formations} value={fFormations} onChange={setFFormations} placeholder="Formations…" /></div>
           </div>
-          {/* Saved filters: reusable named filter combinations for recurring
-              research workflows — load, overwrite, or delete them here. */}
+          {/* Saved filters (reference footer bar): label + hint on the left,
+              name-it + Save + Clear all on the right; saved chips (load /
+              overwrite / delete) keep their row beneath when any exist. */}
           <div className="mc-presets">
-            <span className="ddx-label">Saved filters</span>
-            <div className="mc-presets-row">
-              {filterPresets.length === 0 && <span className="muted" style={{ fontSize: 12.5 }}>Save the current filter combination under a name to reapply it in one click.</span>}
-              {filterPresets.map((p) => (
-                <span key={p.name} className={`mc-preset-chip ${activePresetName === p.name ? "active" : ""}`}>
-                  <button type="button" className="mc-preset-apply" title="Load this saved filter" onClick={() => applyFilterPreset(p)}>{p.name}</button>
-                  <button type="button" className="mc-preset-upd" title="Overwrite with the current filters" onClick={() => saveFilterPreset(p.name)}>↻</button>
-                  <button type="button" className="mc-preset-del" title="Delete saved filter" onClick={() => deleteFilterPreset(p.name)}>×</button>
-                </span>
-              ))}
+            <div className="mc-presets-bar">
+              <span className="ddx-label" style={{ marginBottom: 0 }}>Saved filters</span>
+              <span className="mc-presets-hint">Save this combination to reapply it in one click.</span>
+              <span className="mc-presets-actions">
+                <input value={filterName} onChange={(e) => setFilterName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveFilterPreset(filterName); } }}
+                  placeholder="Name these filters" style={{ width: 190 }} />
+                <button type="button" className="small" disabled={!filterName.trim() || !anyFilterSet}
+                  title={!filterName.trim() ? "Enabled once you name the filter set" : undefined}
+                  onClick={() => saveFilterPreset(filterName)}>Save filters</button>
+                <button type="button" className="small" disabled={!anyFilterSet && statusFilter === "ACTIVE"}
+                  onClick={() => {
+                    setStatusFilter("ACTIVE");
+                    setFStates([]); setFCounties([]); setFSurveys([]); setFAbstracts([]);
+                    setFWellTypes([]); setFWellStatuses([]); setFOperators([]); setFFormations([]);
+                  }}>Clear all</button>
+              </span>
             </div>
-            <div className="row" style={{ gap: 8, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <input value={filterName} onChange={(e) => setFilterName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveFilterPreset(filterName); } }}
-                placeholder="Name these filters" style={{ width: 170 }} />
-              <button type="button" className="small" disabled={!filterName.trim() || !anyFilterSet} onClick={() => saveFilterPreset(filterName)}>Save filters</button>
-            </div>
+            {filterPresets.length > 0 && (
+              <div className="mc-presets-row" style={{ marginTop: 10 }}>
+                {filterPresets.map((p) => (
+                  <span key={p.name} className={`mc-preset-chip ${activePresetName === p.name ? "active" : ""}`}>
+                    <button type="button" className="mc-preset-apply" title="Load this saved filter" onClick={() => applyFilterPreset(p)}>{p.name}</button>
+                    <button type="button" className="mc-preset-upd" title="Overwrite with the current filters" onClick={() => saveFilterPreset(p.name)}>↻</button>
+                    <button type="button" className="mc-preset-del" title="Delete saved filter" onClick={() => deleteFilterPreset(p.name)}>×</button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -813,11 +826,12 @@ export function MapView() {
           <div className="mc-heat">
             <div>
               <div className="mc-dot-lbl"><span className="va-dot" style={{ background: "#f59e0b" }} /><span className="ddx-label">Layers</span></div>
-              <div className="mc-pills-row" style={{ padding: 0 }}>
-                <PillToggle on={heat.oil} label="Oil production" onClick={() => setHeatK("oil", !heat.oil)} />
-                <PillToggle on={heat.gas} label="Gas production" onClick={() => setHeatK("gas", !heat.gas)} />
-                <PillToggle on={heat.topProducers} label="Top producers" onClick={() => setHeatK("topProducers", !heat.topProducers)} />
-                <PillToggle on={heat.hotspots} label="Hotspot labels" onClick={() => setHeatK("hotspots", !heat.hotspots)} />
+              {/* Full-width checkbox tiles (reference) — active rows tint blue. */}
+              <div className="mc-tiles">
+                <HeatTile on={heat.oil} label="Oil production" onClick={() => setHeatK("oil", !heat.oil)} />
+                <HeatTile on={heat.gas} label="Gas production" onClick={() => setHeatK("gas", !heat.gas)} />
+                <HeatTile on={heat.topProducers} label="Top producers" onClick={() => setHeatK("topProducers", !heat.topProducers)} />
+                <HeatTile on={heat.hotspots} label="Hotspot labels" onClick={() => setHeatK("hotspots", !heat.hotspots)} />
               </div>
               <div className="ddx-label mc-lbl" style={{ marginTop: 16 }}>Production period</div>
               <Select value={heat.period} onChange={(v) => setHeatK("period", v as HeatPeriod)} ariaLabel="Heat map period"
@@ -847,9 +861,9 @@ export function MapView() {
             <div>
               <div className="mc-dot-lbl"><span className="va-dot" style={{ background: "#22c55e" }} /><span className="ddx-label">Production thresholds</span><span className="muted" style={{ fontSize: 11.5 }}>(per well, period)</span></div>
               <div className="ddx-label mc-lbl">Minimum</div>
-              <input type="number" value={heat.min || ""} onChange={(e) => setHeatK("min", Number(e.target.value) || 0)} placeholder="no minimum" />
+              <input type="number" value={heat.min || ""} onChange={(e) => setHeatK("min", Number(e.target.value) || 0)} placeholder="No minimum" />
               <div className="ddx-label mc-lbl" style={{ marginTop: 10 }}>Maximum</div>
-              <input type="number" value={heat.max || ""} onChange={(e) => setHeatK("max", Number(e.target.value) || 0)} placeholder="no maximum" />
+              <input type="number" value={heat.max || ""} onChange={(e) => setHeatK("max", Number(e.target.value) || 0)} placeholder="No maximum" />
               <p className="muted" style={{ fontSize: 11.5, margin: "8px 0 0" }}>Oil in bbl, gas in mcf. Wells outside the range drop from the heat.</p>
             </div>
           </div>
@@ -1069,11 +1083,27 @@ export function MapView() {
 function Legend({ color, label, line }: { color: string; label: string; line?: boolean }) {
   return <div className="row" style={{ gap: 8, marginTop: 4 }}><span style={{ width: 12, height: line ? 3 : 12, background: color, opacity: 0.9, borderRadius: line ? 0 : "50%", display: "inline-block" }} /> {label}</div>;
 }
+/** Full-width layer checkbox tile (Map Panels reference): 38px row with a
+ *  filled blue checkbox when on and a blue-tinted row background. */
+function HeatTile({ on, label, onClick }: { on: boolean; label: string; onClick: () => void }) {
+  return (
+    <button type="button" className={`mc-tile ${on ? "on" : ""}`} onClick={onClick} aria-pressed={on}>
+      <span className="mc-tile-box">
+        {on && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5"><path d="M20 6L9 17l-5-5" /></svg>}
+      </span>
+      {label}
+    </button>
+  );
+}
+
 function Slider({ label, min, max, step, value, onChange, suffix }: { label: string; min: number; max: number; step: number; value: number; onChange: (v: number) => void; suffix?: string }) {
+  // Filled-track effect (reference): accent up to the thumb, track beyond it.
+  const pct = ((value - min) / (max - min)) * 100;
   return (
     <div className="mc-slider">
       <div className="mc-slider-head"><span>{label}</span><span className="mc-slider-val">{value}{suffix ?? ""}</span></div>
-      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} />
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))}
+        style={{ ["--pct" as never]: `${pct}%` }} />
     </div>
   );
 }
