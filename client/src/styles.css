@@ -3101,7 +3101,12 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .contacts-page .metric-hint { color: var(--text-faint); margin-top: auto; padding-top: 6px; }
 
 /* Table card wraps the shared SortableTable. */
-.ct-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; margin-top: 14px; }
+/* overflow stays visible so the Customize View menu (absolutely positioned)
+   can extend past the card, exactly as on every other table in the app; the
+   inner .table-scroll still clips/scrolls the table itself. */
+.ct-card { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; margin-top: 14px; }
+.ct-card > * { min-width: 0; }
+.ct-card .table-scroll { border-radius: 0; }
 .ct-card .cv-toolbar { padding: 12px 14px; border-bottom: 1px solid var(--hairline); margin-bottom: 0; }
 .ct-card .cv-toolbar input:not([type="checkbox"]) { height: 34px; background: var(--surface); border-radius: 9px; font: 500 13px var(--font-sans); }
 .ct-card .cv-toolbar .msel-box { height: 34px; min-height: 34px; background: var(--surface); border-radius: 9px; font: 500 13px var(--font-sans); }
