@@ -251,18 +251,9 @@ export function PortalMarketplace() {
                   <button type="button" className="portal-saved-del" title="Delete" onClick={() => deleteSaved(s.name)}>×</button>
                 </span>
               ))}
-              <span className="spacer" />
-              <input
-                value={presetName}
-                onChange={(e) => setPresetName(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveCurrent(); } }}
-                placeholder="Name this search"
-                style={{ width: 160 }}
-              />
-              <button type="button" className="mp-btn" disabled={!presetName.trim() || !hasFilters} onClick={saveCurrent}>Save</button>
               {hasFilters ? <button type="button" className="mp-btn" onClick={() => applySnapshot({})}>Clear</button> : null}
             </div>
-            <div className="filters-grid" style={{ marginTop: 10 }}>
+            <div className="mp-filter-row">
               {/* Same cascading geographic selector as the CRM; options scope to
                   what's actually published so nothing dangles. */}
               <GeoFields
@@ -275,8 +266,17 @@ export function PortalMarketplace() {
               <div className="field"><label>Formation</label><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={fFormations} onChange={setFFormations} placeholder="Any formation" /></div>
               <div className="field"><label>Asset type</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={fAssetTypes} onChange={setFAssetTypes} placeholder="Any type" /></div>
               <div className="field"><label>Operator</label><SearchableMultiSelect options={options.operators} value={fOperators} onChange={setFOperators} placeholder="Any operator" /></div>
-              <div className="field"><label>NRA min</label><input type="number" min="0" value={nraMin} onChange={(e) => setNraMin(e.target.value)} placeholder="0" /></div>
-              <div className="field"><label>NRA max</label><input type="number" min="0" value={nraMax} onChange={(e) => setNraMax(e.target.value)} placeholder="No max" /></div>
+              <div className="field mp-nra"><label>NRA min</label><input type="number" min="0" value={nraMin} onChange={(e) => setNraMin(e.target.value)} placeholder="0" /></div>
+              <div className="field mp-nra"><label>NRA max</label><input type="number" min="0" value={nraMax} onChange={(e) => setNraMax(e.target.value)} placeholder="No max" /></div>
+              <div className="mp-savebar">
+                <input
+                  value={presetName}
+                  onChange={(e) => setPresetName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveCurrent(); } }}
+                  placeholder="Name this search"
+                />
+                <button type="button" className="mp-btn" disabled={!presetName.trim() || !hasFilters} onClick={saveCurrent}>Save</button>
+              </div>
             </div>
           </div>
         )}

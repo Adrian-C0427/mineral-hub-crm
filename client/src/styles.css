@@ -3045,3 +3045,40 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .portal-contact .btn-primary-link { height: 38px; padding: 0 17px; border-radius: 9px; font: 700 13px var(--font-sans); }
 .mp-backlink { text-align: center; margin-top: 10px; }
 .mp-backlink a { font-size: 13.5px; font-weight: 700; }
+
+/* Map layers overlay (portal maps) — reference card: header row + checkbox list. */
+.ml2-panel { position: absolute; top: 12px; right: 12px; z-index: 2; width: 238px;
+  background: var(--control); border: 1px solid #2a3242; border-radius: 12px;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45); overflow: hidden; }
+:root[data-theme="light"] .ml2-panel { border-color: var(--border); box-shadow: var(--shadow); }
+.ml2-head { display: flex; align-items: center; gap: 9px; width: 100%; padding: 11px 14px;
+  background: transparent; border: none; cursor: pointer; text-align: left; color: var(--text); }
+.ml2-panel.open .ml2-head { border-bottom: 1px solid var(--hairline); }
+.ml2-glyph { color: var(--text-dim); flex: none; }
+.ml2-title { font-size: 13px; font-weight: 800; flex: 1; }
+.ml2-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px;
+  padding: 0 5px; border-radius: 99px; font-size: 10.5px; font-weight: 700;
+  background: rgba(59, 130, 246, 0.14); color: var(--accent); }
+.ml2-caret { color: var(--text-faint); flex: none; }
+.ml2-list { padding: 6px; }
+.ml2-row { display: flex; align-items: center; gap: 9px; height: 34px; padding: 0 8px;
+  border-radius: 8px; cursor: pointer; }
+.ml2-row:hover { background: #171d29; }
+:root[data-theme="light"] .ml2-row:hover { background: var(--panel-2); }
+.ml2-box { width: 15px; height: 15px; border-radius: 5px; display: inline-flex; align-items: center;
+  justify-content: center; flex-shrink: 0; background: var(--control); border: 1.5px solid #2b3446; }
+:root[data-theme="light"] .ml2-box { border-color: color-mix(in srgb, var(--text-dim) 45%, var(--border)); background: var(--panel); }
+.ml2-box.on { background: var(--accent); border: none; }
+.ml2-label { font-size: 12.5px; font-weight: 600; color: var(--text-faint); }
+.ml2-label.on { color: color-mix(in srgb, var(--text) 72%, var(--text-dim)); }
+
+/* Filters strip: fields flow inline; "Name this search" + Save sit at the
+   right end of the same row (reference layout). */
+.mp-filter-row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; margin-top: 10px; }
+.mp-filter-row .field { width: 150px; margin: 0; }
+.mp-filter-row .field.mp-nra { width: 100px; }
+.mp-savebar { margin-left: auto; display: flex; align-items: flex-end; gap: 8px; }
+.mp-savebar input { width: 160px; height: 35px; background: var(--control); border-radius: 9px; font: 600 12.5px var(--font-sans); }
+/* Inside the portal map's controls row the panel is laid out by flex (keeps
+   Reset view beside it, never underneath). */
+.portal-map-controls .ml2-panel { position: static; }
