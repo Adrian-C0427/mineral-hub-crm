@@ -56,31 +56,42 @@ export function Buyers() {
 
   if (!buyers) return <Spinner />;
 
+  const withVolume = buyers.filter((b) => b.closedDeals > 0).length;
+  const dash = <span className="bx-dash">—</span>;
+
   const columns: Column<BuyerRow>[] = [
     { key: "buyer", header: "Buyer", type: "text", value: (b) => b.companyName,
       render: (b) => (
-        <div>
-          <strong>{b.companyName}</strong>
-          {/* Provenance at a glance: portal-captured leads and fuzzy-match reviews. */}
-          {b.portalLead && <span className="badge" style={{ marginLeft: 6 }} title="Created or updated by a Buyer Portal submission">Portal lead</span>}
-          {b.duplicateReview && <span className="badge" style={{ marginLeft: 6, background: "var(--red)", color: "#fff" }} title="Possible duplicate of an existing buyer — review and merge if needed">Review</span>}
+        <span className="bx-cell-text">
+          <span className="bx-name">
+            {b.companyName}
+            {/* Provenance at a glance: portal-captured leads and fuzzy-match reviews. */}
+            {b.portalLead && <span className="badge" style={{ marginLeft: 6 }} title="Created or updated by a Buyer Portal submission">Portal lead</span>}
+            {b.duplicateReview && <span className="badge" style={{ marginLeft: 6, background: "var(--red)", color: "#fff" }} title="Possible duplicate of an existing buyer — review and merge if needed">Review</span>}
+          </span>
           {(b.contactFirstName || b.contactLastName || b.contactName) && (
-            <div className="muted" style={{ fontSize: 12 }}>{[b.contactFirstName, b.contactLastName].filter(Boolean).join(" ") || b.contactName}</div>
+            <span className="bx-contact">{[b.contactFirstName, b.contactLastName].filter(Boolean).join(" ") || b.contactName}</span>
           )}
-        </div>
+        </span>
       ) },
-    { key: "focus", header: "Focus Area", type: "text", value: (b) => b.focusArea },
+    { key: "focus", header: "Focus Area", type: "text", value: (b) => b.focusArea,
+      render: (b) => (b.focusArea ? <span className="bx-focus">{b.focusArea}</span> : dash) },
     { key: "rel", header: "Relationship", type: "text", value: (b) => ({ HOT: 0, WARM: 1, COLD: 2 }[b.relationshipStatus]),
       render: (b) => <RelationshipDot status={b.relationshipStatus} /> },
     // New buyers show "—" rather than a discouraging 0% / 0 until they have history.
-    { key: "close", header: "Close %", type: "number", align: "right", value: (b) => b.closeRate, render: (b) => (b.closedDeals > 0 ? pct(b.closeRate) : "—") },
-    { key: "deals", header: "Deals", type: "number", align: "right", value: (b) => b.closedDeals, render: (b) => (b.closedDeals > 0 ? String(b.closedDeals) : "—") },
+    { key: "close", header: "Close %", type: "number", align: "right", value: (b) => b.closeRate,
+      render: (b) => (b.closedDeals > 0 ? <span className="bx-num">{pct(b.closeRate)}</span> : dash) },
+    { key: "deals", header: "Deals", type: "number", align: "right", value: (b) => b.closedDeals,
+      render: (b) => (b.closedDeals > 0 ? <span className="bx-num" style={{ fontWeight: 400 }}>{b.closedDeals}</span> : dash) },
   ];
 
   return (
     <div className="page contacts-page">
       <div className="page-header">
-        <h1>Buyers</h1>
+        <div>
+          <h1>Buyers</h1>
+          <span className="page-sub">{buyers.length} buyer{buyers.length === 1 ? "" : "s"} · {withVolume} with closed volume YTD</span>
+        </div>
         <div className="row" style={{ gap: 8 }}>
           {can("createBuyers") && (
             <button className="ct-btn" onClick={() => setShowImport(true)}>

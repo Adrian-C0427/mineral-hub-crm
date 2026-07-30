@@ -1607,6 +1607,20 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .va-microlabel { font-size: 10.5px; letter-spacing: 0.09em; text-transform: uppercase;
   color: var(--text-dim); font-weight: 700; }
 
+/* Wells table (reference): dim secondary columns, colored status, tabular numerics. */
+.va-dim { color: var(--text-dim); }
+.va-num-cell { font-variant-numeric: tabular-nums; }
+.va-wstatus { font-weight: 600; color: var(--text-dim); }
+.va-wstatus.ok { color: var(--green); }
+.va-wstatus.warn { color: var(--amber); }
+
+/* Recommended-offer highlight (reference): green tinted card. */
+.va-offerbox { margin-top: 14px; background: color-mix(in srgb, var(--green) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green) 22%, transparent); border-radius: 10px; padding: 12px 14px; }
+.va-offerbox-label { font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--green); }
+.va-offerbox-value { font-size: 24px; font-weight: 800; margin-top: 3px; letter-spacing: -0.01em; }
+.va-offerbox-sub { font-size: 11.5px; color: var(--text-dim); margin-top: 3px; }
+
 /* Well dossier — the full centralized record per selected well */
 .dossier-card { border: 1px solid var(--border); border-radius: var(--radius-sm, 8px); margin-top: 8px; background: var(--panel); }
 .dossier-head { display: flex; align-items: center; gap: 10px; padding: 9px 12px; cursor: pointer; font-size: 13.5px; }
@@ -1846,10 +1860,37 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 
 .mc-slider { margin-bottom: 16px; }
 .mc-slider:last-child { margin-bottom: 0; }
-.mc-slider-head { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 8px; }
+.mc-slider-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 13px; margin-bottom: 8px; }
 .mc-slider-head span:first-child { color: var(--text); font-weight: 600; }
-.mc-slider-val { font-weight: 600; color: #7fb0ff; font-variant-numeric: tabular-nums; }
-.mc-slider input[type="range"] { width: 100%; padding: 0; accent-color: var(--accent); height: 5px; }
+.mc-slider-val { font-weight: 700; font-size: 12.5px; color: var(--accent); font-variant-numeric: tabular-nums; }
+/* Reference slider: 4px track filled with accent up to the thumb (--pct set
+   inline), 14px round accent thumb. */
+.mc-slider input[type="range"] { width: 100%; padding: 0; height: 14px; appearance: none; -webkit-appearance: none; background: transparent; cursor: pointer; }
+.mc-slider input[type="range"]::-webkit-slider-runnable-track { height: 4px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--accent) var(--pct, 50%), var(--control-active, #232a36) var(--pct, 50%)); }
+.mc-slider input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--accent); border: none; margin-top: -5px; cursor: grab; }
+.mc-slider input[type="range"]::-moz-range-track { height: 4px; border-radius: 2px; background: var(--control-active, #232a36); }
+.mc-slider input[type="range"]::-moz-range-progress { height: 4px; border-radius: 2px; background: var(--accent); }
+.mc-slider input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: none; cursor: grab; }
+
+/* Heat-layer checkbox tiles (Map Panels reference): full-width 38px rows,
+   blue-filled checkbox + tinted row when active. */
+.mc-tiles { display: flex; flex-direction: column; gap: 8px; }
+.mc-tile { display: flex; align-items: center; gap: 10px; height: 38px; padding: 0 12px; width: 100%;
+  background: var(--control, var(--panel-2)); border: 1px solid var(--border); border-radius: 9px;
+  color: var(--text); font-size: 13px; font-weight: 600; cursor: pointer; text-align: left; }
+.mc-tile:hover { border-color: color-mix(in srgb, var(--text) 22%, transparent); }
+.mc-tile.on { background: color-mix(in srgb, var(--accent) 8%, transparent); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.mc-tile-box { width: 16px; height: 16px; border-radius: 5px; border: 1.5px solid color-mix(in srgb, var(--text) 25%, transparent);
+  background: transparent; display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.mc-tile.on .mc-tile-box { background: var(--accent); border-color: var(--accent); }
+
+/* Saved-filters footer bar (reference): label + hint left, actions right. */
+.mc-presets-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mc-presets-hint { font-size: 12px; color: var(--text-faint); }
+.mc-presets-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mc-presets-actions input { height: 32px; font-size: 12.5px; }
 
 /* Shared period control variants */
 .seg-compact { padding: 2px; }
@@ -2002,8 +2043,9 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 /* Saved filters live inside the zero-padding .mc-panel, so they carry the same
    24px horizontal inset as .mc-grid above — labels, chips, and the save row all
    line up with the filter columns. */
-.mc-presets { padding: 14px 24px 18px; border-top: 1px solid var(--border); }
-.mc-presets .ddx-label { display: block; margin-bottom: 8px; }
+.mc-presets { padding: 13px 24px; border-top: 1px solid var(--border); background: var(--control, var(--panel-2));
+  border-radius: 0 0 16px 16px; }
+.mc-presets .ddx-label { display: inline-block; }
 .mc-presets-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .mc-preset-chip { display: inline-flex; align-items: center; background: var(--panel-2); border: 1px solid var(--border); border-radius: 100px; overflow: hidden; }
 .mc-preset-apply { border: none; background: none; padding: 4px 10px; cursor: pointer; color: var(--text); font-size: 12.5px; }
@@ -2352,8 +2394,23 @@ body.pipeline-dragging, body.pipeline-dragging * { user-select: none !important;
 .xp-avatar { width: 20px; height: 20px; border-radius: 50%; flex: none; display: inline-flex; align-items: center;
   justify-content: center; font-size: 9px; font-weight: 800;
   background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
-.xp-cat { font-size: 11.5px; font-weight: 700; color: var(--text);
-  background: color-mix(in srgb, var(--text) 6%, transparent); border: 1px solid var(--border); border-radius: 99px; padding: 3px 11px; white-space: nowrap; }
+/* Category chip (reference): dark rounded chip with the category's accent as
+   text color — the inline style supplies the per-category color. */
+.xp-cat { font-size: 12px; font-weight: 700; color: var(--text);
+  background: #1a2233; border: 1px solid #2b3852; border-radius: 7px; padding: 4px 10px; white-space: nowrap; }
+:root[data-theme="light"] .xp-cat { background: color-mix(in srgb, currentColor 8%, var(--panel)); border-color: color-mix(in srgb, currentColor 30%, var(--border)); }
+
+/* Category donut (reference): center total + side legend with percentages. */
+.xp-donut-wrap { display: flex; align-items: center; gap: 14px; }
+.xp-donut { position: relative; flex: 1; min-width: 180px; }
+.xp-donut-wrap { min-width: 0; }
+.xp-donut-center { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; pointer-events: none; }
+.xp-donut-total { font-size: 16px; font-weight: 800; letter-spacing: -0.01em; }
+.xp-donut-sub { font-size: 9.5px; font-weight: 700; letter-spacing: 0.08em; color: var(--text-faint); margin-top: 2px; }
+.xp-donut-legend { display: flex; flex-direction: column; gap: 7px; flex: none; max-height: 190px; overflow-y: auto; padding-right: 2px; scrollbar-width: thin; }
+.xp-leg-row { display: flex; align-items: center; gap: 7px; font-size: 11.5px; color: var(--text); white-space: nowrap; }
+.xp-leg-dot { width: 9px; height: 9px; border-radius: 3px; flex: none; }
+.xp-leg-pct { color: var(--text-faint); }
 .xp-status { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700; letter-spacing: 0.04em;
   border-radius: 99px; padding: 4px 11px; white-space: nowrap; }
 .xp-status .dot { width: 6px; height: 6px; border-radius: 50%; }
@@ -3180,6 +3237,15 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
   color: var(--text-dim); font-size: 11px; font-weight: 800; display: inline-flex; align-items: center;
   justify-content: center; flex-shrink: 0; }
 :root[data-theme="light"] .ct-avatar { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); color: var(--accent); }
+
+/* Buyers list (Buyers Refined reference): name/contact stack (no avatar —
+   user preference), dim em-dash placeholders, tabular numerics. */
+.bx-cell-text { display: block; min-width: 0; }
+.bx-name { display: block; font-size: 13.5px; font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bx-contact { display: block; font-size: 12px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bx-focus { font-size: 13px; }
+.bx-num { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.bx-dash { color: var(--text-faint); }
 .ct-name-txt { font-size: 13.5px; font-weight: 700; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ct-name-ent { font-size: 12px; color: var(--text-dim); font-weight: 500; }
 .ct-pill { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 10px; border-radius: 99px;
@@ -3318,8 +3384,15 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .modal .field input:not([type="checkbox"]):not([type="radio"]), .modal .field .msel-box { min-height: 38px; background: var(--surface); border-radius: 9px; font-size: 13.5px; }
 .modal .field textarea { background: var(--surface); border-radius: 9px; font-size: 13.5px; }
 /* Section labels inside grouped modal forms (New Deal etc.). */
-.modal-sec { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-faint); font-weight: 800; margin: 22px 0 10px; }
+/* Modal section header (Buyers/Deals modal references): blue tick bar +
+   uppercase label over a hairline rule. */
+.modal-sec { display: flex; align-items: center; gap: 9px; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase;
+  color: #c3c9d6; font-weight: 800; margin: 22px 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--hairline, var(--border)); }
+.modal-sec::before { content: ""; width: 3px; height: 14px; border-radius: 2px; background: var(--accent); flex: none; }
 .modal-sec:first-child { margin-top: 0; }
+:root[data-theme="light"] .modal-sec { color: #475467; }
+/* Dim inline hint after a section label ("— what this buyer wants…"). */
+.modal-sec-hint { font-size: 11.5px; color: var(--text-faint); font-weight: 500; text-transform: none; letter-spacing: normal; }
 /* New Deal modal — grouped-section grids (reference layout). */
 .nd-basics { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .nd-grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }

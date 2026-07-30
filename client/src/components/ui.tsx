@@ -148,12 +148,11 @@ export function StageBadge({ stage, pipelineId }: { stage: string; pipelineId?: 
   return <CtPill color={c}>{label(stage)}</CtPill>;
 }
 
+const REL_COLORS: Record<string, string> = { HOT: "#ef4444", WARM: "#f59e0b", COLD: "#6b7280" };
+
+/** Relationship as the design system's tinted, dotted capsule (Buyers reference). */
 export function RelationshipDot({ status }: { status: "HOT" | "WARM" | "COLD" }) {
-  return (
-    <span className="rel">
-      <span className={`rel-dot rel-${status.toLowerCase()}`} /> {prettyEnum(status)}
-    </span>
-  );
+  return <CtPill dot color={REL_COLORS[status] ?? "#6b7280"}>{prettyEnum(status)}</CtPill>;
 }
 
 // New buyer pipeline statuses (BuyerStatus).
