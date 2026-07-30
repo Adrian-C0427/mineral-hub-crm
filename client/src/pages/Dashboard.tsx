@@ -58,12 +58,35 @@ function fmtCompact(v: number): string {
 
 const pctChange = (cur: number, prev: number): number | null => (prev > 0 ? ((cur - prev) / prev) * 100 : null);
 
-/** Round a chart maximum up to a friendly 1/2/2.5/5 × 10ⁿ so axis ticks land on clean values. */
-function niceCeil(v: number): number {
-  if (v <= 0) return 1;
-  const mag = 10 ** Math.floor(Math.log10(v));
-  for (const m of [1, 2, 2.5, 5, 10]) if (v <= m * mag) return m * mag;
-  return 10 * mag;
+/**
+ * Dynamic y-axis for the profit chart. Returns a `max` that sits just above the
+ * tallest data point (small buffer, not a fixed scale) plus evenly spaced,
+ * round tick values from 0 to that max.
+ *
+ * The old approach snapped the max up to a coarse 1/2/2.5/5 × 10ⁿ value, which
+ * turned a $93K peak into a $200K axis (>2×) and visually flattened the bars.
+ * Here we instead pick a "nice" step (1/1.5/2/2.5/3/4/5/6/8 × 10ⁿ) and take the
+ * smallest round multiple of it that clears the peak. We try a few gridline
+ * counts and keep the TIGHTEST resulting max, so the top of the axis hugs the
+ * data — typically ~5–15% headroom — while tick labels stay round.
+ */
+function niceAxis(peak: number): { max: number; ticks: number[] } {
+  if (!(peak > 0)) return { max: 1, ticks: [0, 1] };
+  const NICE = [1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10];
+  // The max must clear the tallest bar by a hair so it never touches the top.
+  const min = peak * 1.03;
+  let best: { max: number; step: number } | null = null;
+  for (const divs of [4, 5, 6]) {
+    const rough = min / divs;
+    const mag = 10 ** Math.floor(Math.log10(rough));
+    const norm = rough / mag;
+    const step = (NICE.find((s) => s >= norm - 1e-9) ?? 10) * mag;
+    const max = Math.ceil(min / step - 1e-9) * step;
+    if (!best || max < best.max) best = { max, step };
+  }
+  const ticks: number[] = [];
+  for (let t = 0; t <= best!.max + best!.step * 1e-6; t += best!.step) ticks.push(t);
+  return { max: best!.max, ticks };
 }
 
 /** Design-spec mini trend line (88×28 viewBox, stretched, 2px stroke) with a
@@ -250,13 +273,12 @@ export function Dashboard() {
   if (!d) return <Spinner />;
 
   // Paired bars (design): realized and projected render side by side, so the
-  // y-scale is the single largest monthly value of either series, rounded up
-  // to a clean axis maximum so the $-gridlines land on friendly numbers.
-  // Scale to the tallest bar in the SELECTED range (rescales with the range)
-  // with ~12% headroom so the tallest bar never presses against the top.
+  // y-scale is driven by the single largest monthly value of either series.
+  // The axis is DYNAMIC — its max sits just above the tallest bar in the
+  // SELECTED range (rescales with the range) rather than on a fixed scale, so
+  // month-to-month differences stay proportional and readable.
   const maxProfit = Math.max(1, ...d.profitByMonth.map((m) => Math.max(m.profit, m.projected)));
-  const niceMax = niceCeil(maxProfit * 1.12);
-  const axisTicks = [0, 0.25, 0.5, 0.75, 1].map((f) => f * niceMax);
+  const { max: niceMax, ticks: axisTicks } = niceAxis(maxProfit);
   // Index of the bucket containing today (-1 when the window is in the past).
   const curIdx = d.profitByMonth.findIndex((m) => m.isCurrent);
   const realized = d.profitByMonth.map((m) => m.profit);
