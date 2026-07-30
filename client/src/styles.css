@@ -2567,15 +2567,17 @@ input.stage-color, .stage-color { width: 18px !important; min-width: 18px; heigh
 
 
 /* Pipeline: full-height board + anchored compact Closed/Dead columns. */
-.pl2-page { display: flex; flex-direction: column; min-height: calc(100vh - 45px); }
-.pl2-page .kanban { flex: 1; padding-bottom: 4px; }
-.pl2-page .kanban-col { max-height: none; }
-.pl2-page .kanban-col-body { flex: 1; overflow-y: auto; }
-/* Closed/Dead resolution zones: a fixed bar at the BOTTOM of the board, the
-   two zones side by side, always visible (sticky) — completed opportunities
-   are visually separated from the active workflow above. */
-.tz-bottom { display: flex; gap: 12px; position: sticky; bottom: 0; z-index: 6; padding: 8px 0 10px; margin-top: 6px;
-  background: linear-gradient(to bottom, transparent, var(--bg) 35%); }
+/* The board is viewport-fixed: the page never scrolls. Each stage column
+   scrolls its own cards independently, so Closed/Dead below stay visible and
+   droppable no matter how many opportunities are on the board. */
+.pl2-page { display: flex; flex-direction: column; height: calc(100vh - 45px); overflow: hidden; }
+.pl2-page .kanban { flex: 1; min-height: 0; padding-bottom: 4px; overflow-x: auto; overflow-y: hidden; }
+.pl2-page .kanban-col { max-height: 100%; min-height: 0; }
+.pl2-page .kanban-col-body { flex: 1; overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
+/* Closed/Dead resolution zones: a permanent bar at the BOTTOM of the board,
+   the two zones side by side, always visible — the board above scrolls, this
+   bar never moves. */
+.tz-bottom { display: flex; gap: 12px; flex: none; z-index: 6; padding: 8px 0 10px; margin-top: 6px; }
 .tz-zone { flex: 1; display: flex; align-items: center; gap: 10px; min-height: 56px; padding: 10px 16px;
   border: 1.5px dashed var(--border); border-radius: 10px; background: var(--panel);
   transition: border-color 120ms ease, background 120ms ease, transform 120ms ease; }
