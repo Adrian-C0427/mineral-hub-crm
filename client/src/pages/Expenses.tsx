@@ -31,6 +31,14 @@ interface Dashboard {
 
 const EMPTY_FORM = { date: toInputDate(new Date()), amount: "", categoryId: "", notes: "", reimbursed: false, reimbursementDate: "" };
 
+/** Stable per-category accent color — same palette everywhere (donut, legend,
+ *  table chips), keyed by the category's position in the org's list. */
+function catColorFor(name: string | null | undefined, categories: Category[]): string {
+  if (!name) return "#8b93a7";
+  const i = categories.findIndex((c) => c.name === name);
+  return i >= 0 ? CHART_COLORS[i % CHART_COLORS.length] : "#8b93a7";
+}
+
 export function Expenses() {
   const { user } = useAuth();
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -132,13 +140,14 @@ export function Expenses() {
 
       {err && <Banner kind="error">{err}</Banner>}
 
-      {/* KPIs */}
+      {/* KPIs — subs and colors per the Expenses design reference. */}
       {dash && (
         <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
           <MetricCard label="Total Expenses" value={money(dash.totals.totalExpenses, { cents: true })} hint={`${dash.totals.count} records`} />
-          <MetricCard label="Total Reimbursed" value={money(dash.totals.totalReimbursed, { cents: true })} />
-          <MetricCard label="Outstanding Reimbursements" value={money(dash.totals.totalOutstanding, { cents: true })} />
-          <MetricCard label="Company Outstanding Balance" value={money(dash.totals.companyOutstanding, { cents: true })} />
+          <MetricCard label="Total Reimbursed" value={money(dash.totals.totalReimbursed, { cents: true })} valueColor="var(--green)"
+            hint={dash.totals.totalExpenses > 0 ? `${((dash.totals.totalReimbursed / dash.totals.totalExpenses) * 100).toFixed(1)}% of spend` : undefined} />
+          <MetricCard label="Outstanding Reimbursements" value={money(dash.totals.totalOutstanding, { cents: true })} valueColor="var(--amber)" hint="Awaiting payout" />
+          <MetricCard label="Company Outstanding Balance" value={money(dash.totals.companyOutstanding, { cents: true })} hint="Owed to team" />
         </div>
       )}
 
@@ -170,19 +179,37 @@ export function Expenses() {
               <ChartEmpty icon={<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21.21 15.89A10 10 0 118 2.83" /><path d="M22 12A10 10 0 0012 2v10z" /></svg>}>
                 No categories to chart yet
               </ChartEmpty>
-            ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <PieChart>
-                  {/* Slice labels clipped at the card edge ("ta & Software") —
-                      a legend never truncates. */}
-                  <Pie data={dash.byCategory} dataKey="amount" nameKey="name" cx="50%" cy="46%" outerRadius={76}>
-                    {dash.byCategory.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
-                  </Pie>
-                  <Legend iconSize={9} wrapperStyle={{ fontSize: 11.5 }} />
-                  <Tooltip {...chartTooltip} formatter={(v: number) => money(v, { cents: true })} />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
+            ) : (() => {
+              // Donut with the period total in the center + side legend with
+              // percentages (design reference) — a legend never truncates.
+              const catTotal = dash.byCategory.reduce((s, c) => s + c.amount, 0);
+              return (
+                <div className="xp-donut-wrap">
+                  <div className="xp-donut">
+                    <ResponsiveContainer width="100%" height={190}>
+                      <PieChart>
+                        <Pie data={dash.byCategory} dataKey="amount" nameKey="name" cx="50%" cy="50%" innerRadius={56} outerRadius={82} paddingAngle={1} stroke="none">
+                          {dash.byCategory.map((c, i) => <Cell key={i} fill={catColorFor(c.name, categories)} />)}
+                        </Pie>
+                        <Tooltip {...chartTooltip} formatter={(v: number) => money(v, { cents: true })} />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="xp-donut-center" aria-hidden="true">
+                      <div className="xp-donut-total">{money(catTotal)}</div>
+                      <div className="xp-donut-sub">{filters.from || filters.to ? "IN RANGE" : "ALL TIME"}</div>
+                    </div>
+                  </div>
+                  <div className="xp-donut-legend">
+                    {dash.byCategory.map((c) => (
+                      <div className="xp-leg-row" key={c.name}>
+                        <span className="xp-leg-dot" style={{ background: catColorFor(c.name, categories) }} />
+                        {c.name} <span className="xp-leg-pct">{catTotal > 0 ? Math.round((c.amount / catTotal) * 100) : 0}%</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           <div className="panel xp-chart">
@@ -505,6 +532,7 @@ function AllExpenses({
                 selected={selected}
                 toggle={toggle}
                 onEdit={onEdit}
+                catColor={(name) => catColorFor(name, categories)}
               />
             ))}
           </tbody>
@@ -523,7 +551,7 @@ function AllExpenses({
 }
 
 function ExpMonthGroup({
-  title, group, cols, colSpan, collapsed, onToggleCollapse, selected, toggle, onEdit,
+  title, group, cols, colSpan, collapsed, onToggleCollapse, selected, toggle, onEdit, catColor,
 }: {
   title: string;
   group: { month: string; rows: Expense[]; subtotal: number };
@@ -534,6 +562,7 @@ function ExpMonthGroup({
   selected: Set<string>;
   toggle: (id: string) => void;
   onEdit: (e: Expense) => void;
+  catColor: (name: string | null) => string;
 }) {
   const has = (k: ColKey) => cols.includes(k);
   return (
@@ -559,7 +588,7 @@ function ExpMonthGroup({
           {has("user") && <td>{e.userName
             ? <span className="xp-user"><span className="xp-avatar" aria-hidden="true">{e.userName.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "•"}</span>{e.userName}</span>
             : "—"}</td>}
-          {has("category") && <td>{e.categoryName ? <span className="xp-cat">{e.categoryName}</span> : "—"}</td>}
+          {has("category") && <td>{e.categoryName ? <span className="xp-cat" style={{ color: catColor(e.categoryName) }}>{e.categoryName}</span> : "—"}</td>}
           {has("amount") && <td className="right xp-num xp-amount">{money(e.amount, { cents: true })}</td>}
           {has("status") && (
             <td><span className={`xp-status ${e.reimbursed ? "ok" : "warn"}`}><span className="dot" aria-hidden="true" />{e.reimbursed ? "Reimbursed" : "Outstanding"}</span></td>

@@ -5,7 +5,7 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Banner, MetricCard, Modal, Spinner } from "../components/ui";
+import { Banner, CtPill, MetricCard, Modal, Spinner } from "../components/ui";
 import { WellImport } from "../components/WellImport";
 import { money, num, prettyEnum, fmtDate, fmtDateTime, fmtDateLocal } from "../lib/format";
 import { monthLabel, chartTooltip } from "../lib/charts";
@@ -858,8 +858,9 @@ function Results({ analysis, tab, setTab, reportRef, analysisName }: {
 }
 
 function ConfBadge({ c }: { c: "high" | "medium" | "low" }) {
-  const cls = c === "high" ? "resp-offer" : c === "medium" ? "resp-interested" : "resp-passed";
-  return <span className={`badge ${cls}`}>{CONF_LABEL[c]}</span>;
+  // Tinted capsule per the Well Analysis reference (green/amber/red).
+  const color = c === "high" ? "#22c55e" : c === "medium" ? "#f59e0b" : "#ef4444";
+  return <CtPill color={color}>{CONF_LABEL[c]}</CtPill>;
 }
 
 // --- Chart data builders ----------------------------------------------------
@@ -1201,9 +1202,17 @@ function ValuationTab({ r }: { r: ValuationResult }) {
               <ValRow label="Seller's asking price" value={a.askingPrice > 0 ? money(a.askingPrice) : "—"} hint="Your input" />
               <ValRow label="Closing costs" value={a.closingCosts > 0 ? money(a.closingCosts) : "—"} hint="Your input" />
               <ValRow label="Maximum purchase price" value={money(v.maxPurchasePrice)} hint="Highest price meeting all your targets" calc strong />
-              <ValRow label="Recommended offer" value={money(v.recommendedOffer)} hint={v.offerVsAskingPct != null ? `${v.offerVsAskingPct >= 0 ? "+" : ""}${v.offerVsAskingPct.toFixed(1)}% vs asking` : undefined} calc strong accent />
             </tbody>
           </table>
+          {/* Recommended offer as the reference's green highlight card. */}
+          <div className="va-offerbox">
+            <div className="va-offerbox-label">Recommended offer</div>
+            <div className="va-offerbox-value">{money(v.recommendedOffer)}</div>
+            <div className="va-offerbox-sub">
+              {money(Math.max(0, v.fairMarketValue - v.recommendedOffer))} margin of safety vs fair value
+              {v.offerVsAskingPct != null && <> · {v.offerVsAskingPct >= 0 ? "+" : ""}{v.offerVsAskingPct.toFixed(1)}% vs asking</>}
+            </div>
+          </div>
           {v.askingPriceAssessment && (
             <Banner kind={v.askingPriceAssessment === "ABOVE_VALUE" ? "warn" : "info"}>
               {v.askingPriceAssessment === "ABOVE_VALUE" && <>The asking price is <strong>above</strong> the estimated fair market value — negotiate down or pass.</>}
@@ -1614,14 +1623,15 @@ function WellData({ canManage }: { canManage: boolean }) {
                 {data.rows.map((w) => (
                   <tr key={w.id}>
                     <td><strong>{w.name}</strong>{w.leaseName && <div className="muted" style={{ fontSize: 11 }}>{w.leaseName}</div>}</td>
-                    <td>{w.apiNumber ?? "—"}</td>
-                    <td>{w.operator ?? "—"}</td>
-                    <td>{w.county}, {w.state}</td>
-                    <td>{prettyEnum(w.status)}</td>
-                    <td className="right">{w.production?.months ?? 0}</td>
-                    <td className="right">{w.production?.lastMonth ?? "—"}</td>
-                    <td className="right">{fmtVol(w.production?.cumOilBbl)}</td>
-                    <td className="right">{fmtVol(w.production?.cumGasMcf)}</td>
+                    <td className="va-dim">{w.apiNumber ?? "—"}</td>
+                    <td className="va-dim">{w.operator ?? "—"}</td>
+                    <td className="va-dim">{w.county}, {w.state}</td>
+                    {/* Status colors per the reference: Producing green, Shut-in amber, else dim. */}
+                    <td><span className={`va-wstatus ${w.status === "PRODUCING" ? "ok" : w.status === "SHUT_IN" ? "warn" : ""}`}>{prettyEnum(w.status)}</span></td>
+                    <td className="right va-num-cell">{w.production?.months ?? 0}</td>
+                    <td className="right va-num-cell">{w.production?.lastMonth ?? "—"}</td>
+                    <td className="right va-num-cell">{fmtVol(w.production?.cumOilBbl)}</td>
+                    <td className="right va-num-cell">{fmtVol(w.production?.cumGasMcf)}</td>
                     {canManage && <td className="right"><button className="link-btn" style={{ color: "var(--red)" }} onClick={() => del(w)}>Delete</button></td>}
                   </tr>
                 ))}
