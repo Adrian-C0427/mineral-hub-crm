@@ -62,10 +62,12 @@ export function MineralAssetDetail() {
   const [users, setUsers] = useState<UserLite[]>([]);
   const [tab, setTab] = useState<"hold" | "sell">("hold");
 
-  const load = useCallback(() => api.get<AssetDetail>(`/deals/${id}`).then((d) => { setAsset(d); setTab(d.assetMode === "SELL" ? "sell" : "hold"); }), [id]);
+  // Refreshes must not yank the user off their current tab — the tab follows
+  // the asset's mode only on first load.
+  const load = useCallback(() => api.get<AssetDetail>(`/deals/${id}`).then(setAsset), [id]);
   const loadMatches = useCallback(() => api.get<MatchRec[]>(`/deals/${id}/matches`).then(setMatches), [id]);
   useEffect(() => {
-    api.get<AssetDetail>(`/deals/${id}`).then(setAsset);
+    api.get<AssetDetail>(`/deals/${id}`).then((d) => { setAsset(d); setTab(d.assetMode === "SELL" ? "sell" : "hold"); });
     api.get<UserLite[]>("/users").then(setUsers).catch(() => {});
   }, [id]);
   // Initialize the tab from the asset's mode once, on first load.
@@ -349,7 +351,7 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
     const last = months[months.length - 1] ?? null;
     const prior = months[months.length - 2] ?? null;
     const mom = last && prior && prior[1] > 0 ? Math.round(((last[1] - prior[1]) / prior[1]) * 100) : null;
-    return { months: months.length, avg, best, last, mom };
+    return { months: months.length, avg, best, last, prior, mom };
   }, [asset.revenueEntries, totalRevenue]);
   const hasLease = (asset.leaseStatuses?.length ?? 0) > 0 || !!asset.royaltyRate || !!asset.leaseEffectiveDate || !!asset.leaseExpirationDate;
 
@@ -386,15 +388,23 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
         <MetricCard label="Lease Status" value={asset.leaseStatuses?.length ? asset.leaseStatuses.join(", ") : "—"} />
       </div>
 
-      {/* Revenue insights strip (reference) — shown once revenue exists. */}
-      {rev.months > 0 && (
+      {/* Revenue insights strip (reference) — shown once revenue exists.
+          Projected 12-mo extrapolates the current monthly average; Yield on
+          Value divides that projection by the asset's current value. */}
+      {rev.months > 0 && (() => {
+        const projected = Math.round(rev.avg * 12);
+        const yieldPct = asset.currentValue ? (projected / asset.currentValue) * 100 : null;
+        return (
         <div className="fin-insights">
-          <div className="fin-insight"><div className="ddx-label">Avg / Month</div><div className="fin-insight-row"><span className="fin-insight-v">{money(Math.round(rev.avg))}</span><span className="fin-insight-h">{rev.months} month{rev.months === 1 ? "" : "s"}</span></div></div>
+          <div className="fin-insight"><div className="ddx-label">Avg Monthly Revenue</div><div className="fin-insight-row"><span className="fin-insight-v">{money(Math.round(rev.avg))}</span><span className="fin-insight-h">last {rev.months} month{rev.months === 1 ? "" : "s"}</span></div></div>
+          <div className="fin-insight"><div className="ddx-label">MoM Change</div><div className="fin-insight-row"><span className="fin-insight-v" style={{ color: rev.mom == null ? undefined : rev.mom >= 0 ? "var(--green)" : "var(--red)" }}>{rev.mom == null ? "—" : `${rev.mom >= 0 ? "+" : ""}${rev.mom}%`}</span><span className="fin-insight-h">{rev.mom == null ? "needs 2 months" : `${money(rev.prior![1])} → ${money(rev.last![1])}`}</span></div></div>
+          <div className="fin-insight"><div className="ddx-label">Projected 12-mo</div><div className="fin-insight-row"><span className="fin-insight-v">{money(projected)}</span><span className="fin-insight-h">at current avg</span></div></div>
+          <div className="fin-insight"><div className="ddx-label">Yield on Value</div><div className="fin-insight-row"><span className="fin-insight-v">{yieldPct == null ? "—" : `${yieldPct.toFixed(1)}%`}</span><span className="fin-insight-h">{yieldPct == null ? "set current value" : `${money(projected)} / ${money(asset.currentValue)}`}</span></div></div>
           <div className="fin-insight"><div className="ddx-label">Best Month</div><div className="fin-insight-row"><span className="fin-insight-v">{money(rev.best![1])}</span><span className="fin-insight-h">{monthLabel(rev.best![0])}</span></div></div>
           <div className="fin-insight"><div className="ddx-label">Last Month</div><div className="fin-insight-row"><span className="fin-insight-v">{money(rev.last![1])}</span><span className="fin-insight-h">{monthLabel(rev.last![0])}</span></div></div>
-          <div className="fin-insight"><div className="ddx-label">MoM Change</div><div className="fin-insight-row"><span className="fin-insight-v" style={{ color: rev.mom == null ? undefined : rev.mom >= 0 ? "var(--green)" : "var(--red)" }}>{rev.mom == null ? "—" : `${rev.mom >= 0 ? "+" : ""}${rev.mom}%`}</span><span className="fin-insight-h">{rev.mom == null ? "needs 2 months" : "vs prior month"}</span></div></div>
         </div>
-      )}
+        );
+      })()}
 
       <div className="chart-grid">
         <div className="panel" style={{ marginBottom: 0 }}>
@@ -565,6 +575,7 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
   const [logBuyer, setLogBuyer] = useState<{ id: string; name: string } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showEmail, setShowEmail] = useState(false);
+  const [showAllMatches, setShowAllMatches] = useState(false);
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState(asset);
   const [acceptOffer, setAcceptOffer] = useState<{ id: string; buyer: string; amount: number } | null>(null);
@@ -590,84 +601,147 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
         </Banner>
       )}
 
-      <div className="panel">
-        <div className="section-head">
-          <h3 style={{ margin: 0 }}>Pricing &amp; Marketing</h3>
-          {canEdit && (edit
-            ? <div className="row"><button className="small" onClick={() => { setF(asset); setEdit(false); }}>Cancel</button><button className="small primary" onClick={savePricing}>Save</button></div>
-            : <button className="small" onClick={() => setEdit(true)}>Edit</button>)}
-        </div>
-        {!edit ? (
-          <div className="dd-grid">
-            <KV k="Current Value" v={money(asset.currentValue)} />
-            <KV k="Asking Price" v={money(asset.askPrice)} />
-            <KV k="Est. Closing Costs" v={money(asset.estimatedClosingCosts)} />
-            <KV k="Marketing Status" v={asset.assetMode === "SELL" ? "Active" : "Not marketed"} />
-          </div>
-        ) : (
-          <div className="dd-grid">
-            <Fld l="Current Value"><input type="number" value={f.currentValue ?? ""} onChange={(e) => setF({ ...f, currentValue: e.target.value === "" ? null : Number(e.target.value) })} /></Fld>
-            <Fld l="Asking Price"><MoneyInput value={f.askPrice != null ? String(f.askPrice) : ""} onChange={(v) => setF({ ...f, askPrice: v === "" ? null : Number(v) })} ariaLabel="Asking price" /></Fld>
-            <Fld l="Est. Closing Costs"><input type="number" value={f.estimatedClosingCosts ?? ""} onChange={(e) => setF({ ...f, estimatedClosingCosts: e.target.value === "" ? null : Number(e.target.value) })} /></Fld>
-          </div>
-        )}
-      </div>
-
-      {/* Sale Readiness — ring + live checklist from this asset's real state. */}
+      {/* Sale Readiness + Pricing Intelligence side by side (reference layout). */}
       {(() => {
+        const perNra = (p: number | null) => (p != null && asset.nra ? Math.round(p / asset.nra) : null);
+        const ask = asset.askPrice;
+        const proceeds = ask != null ? Math.round(ask * 0.97) - (asset.purchasePrice ?? 0) : null;
+        // Pricing scenarios anchored to the asset's own current value —
+        // Conservative / Market / Aggressive (0.9× / 1× / 1.18×).
+        const chips = asset.currentValue
+          ? [
+              { label: "Conservative", price: Math.round(asset.currentValue * 0.9) },
+              { label: "Market", price: asset.currentValue },
+              { label: "Aggressive", price: Math.round(asset.currentValue * 1.18) },
+            ]
+          : [];
+        const setAsk = async (price: number | null) => { await api.patch(`/deals/${asset.id}`, { askPrice: price }); onChanged(); };
+        // Marker band spans the scenario range with padding, ask marker on it.
+        const lo = chips.length ? perNra(chips[0].price)! : null;
+        const hi = chips.length ? perNra(chips[2].price)! : null;
+        const askNra = perNra(ask);
+        const barLo = lo != null && hi != null ? lo - (hi - lo) * 0.35 : null;
+        const barHi = lo != null && hi != null ? hi + (hi - lo) * 0.35 : null;
+        const pos = (v: number) => Math.max(4, Math.min(96, ((v - barLo!) / (barHi! - barLo!)) * 100));
+
         const items: { label: string; done: boolean; cta?: string; onCta?: () => void }[] = [
-          { label: "Asking price set", done: asset.askPrice != null, cta: canEdit ? "Set price" : undefined, onCta: () => setEdit(true) },
-          { label: "NRA recorded", done: asset.nra != null },
-          { label: "Abstracts mapped", done: asset.abstractIds.length > 0 },
+          { label: "Tract boundary mapped", done: asset.abstractIds.length > 0 },
+          { label: "Revenue history added", done: (asset.revenueEntries ?? []).length > 0 },
+          { label: "Asking price set", done: ask != null, cta: canEdit ? "Set below" : undefined, onCta: () => setEdit(true) },
           { label: "Documents uploaded", done: (asset.files ?? []).length > 0 },
-          { label: "Published to the Buyer Portal", done: !!asset.publishedToPortal },
           { label: "Buyers contacted", done: asset.metrics.buyersContacted > 0 },
         ];
         const done = items.filter((i) => i.done).length;
         const pct = Math.round((done / items.length) * 100);
         const ring = 2 * Math.PI * 31;
-        const color = pct >= 80 ? "#22c55e" : pct >= 50 ? "#f5b04b" : "#5a6274";
+        const color = pct >= 80 ? "#22c55e" : "#f5b04b";
         return (
-          <div className="panel sr-card">
-            <h3 style={{ margin: 0 }}>Sale Readiness</h3>
-            <div className="sr-top">
-              <span className="sr-ring">
-                <svg width="74" height="74" viewBox="0 0 74 74">
-                  <circle cx="37" cy="37" r="31" fill="none" stroke="var(--hairline)" strokeWidth="7" />
-                  <circle cx="37" cy="37" r="31" fill="none" stroke={color} strokeWidth="7" strokeLinecap="round"
-                    strokeDasharray={`${((ring * pct) / 100).toFixed(1)} ${ring.toFixed(1)}`} transform="rotate(-90 37 37)" />
-                </svg>
-                <span className="sr-ring-n">{pct}%</span>
-              </span>
-              <span className="sr-blurb">
-                {pct === 100 ? "Fully packaged — everything a buyer needs is in place." : `${items.length - done} step${items.length - done === 1 ? "" : "s"} left before this asset is fully packaged for buyers.`}
-              </span>
+          <div className="sr-grid">
+            <div className="panel sr-card" style={{ marginBottom: 0 }}>
+              <h3 style={{ margin: 0 }}>Sale Readiness</h3>
+              <div className="sr-top">
+                <span className="sr-ring">
+                  <svg width="74" height="74" viewBox="0 0 74 74">
+                    <circle cx="37" cy="37" r="31" fill="none" stroke="var(--hairline)" strokeWidth="7" />
+                    <circle cx="37" cy="37" r="31" fill="none" stroke={color} strokeWidth="7" strokeLinecap="round"
+                      strokeDasharray={`${((ring * pct) / 100).toFixed(1)} ${ring.toFixed(1)}`} transform="rotate(-90 37 37)" />
+                  </svg>
+                  <span className="sr-ring-n">{pct}%</span>
+                </span>
+                <span className="sr-blurb">
+                  {pct >= 80 ? "Ready to publish — listings with the full checklist complete get far more buyer views." : "Complete the checklist before publishing — finished listings get far more buyer views."}
+                </span>
+              </div>
+              <div className="sr-list">
+                {items.map((q) => (
+                  <div key={q.label} className="sr-item">
+                    <span className={`dpp-qdot ${q.done ? "done" : ""}`}>
+                      {q.done && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.2" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>}
+                    </span>
+                    <span className={`dpp-qlbl ${q.done ? "done" : ""}`} style={{ fontSize: 13 }}>{q.label}</span>
+                    {!q.done && q.cta && <button className="link-btn sr-cta" onClick={q.onCta}>{q.cta}</button>}
+                  </div>
+                ))}
+              </div>
             </div>
-            <div className="sr-list">
-              {items.map((q) => (
-                <div key={q.label} className="sr-item">
-                  <span className={`dpp-qdot ${q.done ? "done" : ""}`}>
-                    {q.done && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.2" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>}
-                  </span>
-                  <span className={`dpp-qlbl ${q.done ? "done" : ""}`} style={{ fontSize: 13 }}>{q.label}</span>
-                  {!q.done && q.cta && <button className="link-btn sr-cta" onClick={q.onCta}>{q.cta}</button>}
+
+            <div className="panel pi-card" style={{ marginBottom: 0 }}>
+              <div className="section-head" style={{ alignItems: "baseline", marginBottom: 0 }}>
+                <h3 style={{ margin: 0 }}>Pricing Intelligence</h3>
+                <div className="row" style={{ gap: 10, alignItems: "center" }}>
+                  <span className="muted" style={{ fontSize: 12 }}>Scenarios from this asset's current value</span>
+                  {canEdit && (edit
+                    ? <><button className="small" onClick={() => { setF(asset); setEdit(false); }}>Cancel</button><button className="small primary" onClick={savePricing}>Save</button></>
+                    : <button className="small" onClick={() => setEdit(true)}>Edit</button>)}
                 </div>
-              ))}
+              </div>
+              {edit ? (
+                <div className="dd-grid" style={{ marginTop: 14 }}>
+                  <Fld l="Current Value"><input type="number" value={f.currentValue ?? ""} onChange={(e) => setF({ ...f, currentValue: e.target.value === "" ? null : Number(e.target.value) })} /></Fld>
+                  <Fld l="Asking Price"><MoneyInput value={f.askPrice != null ? String(f.askPrice) : ""} onChange={(v) => setF({ ...f, askPrice: v === "" ? null : Number(v) })} ariaLabel="Asking price" /></Fld>
+                  <Fld l="Est. Closing Costs"><input type="number" value={f.estimatedClosingCosts ?? ""} onChange={(e) => setF({ ...f, estimatedClosingCosts: e.target.value === "" ? null : Number(e.target.value) })} /></Fld>
+                </div>
+              ) : (<>
+                <div className="pi-figures">
+                  <div>
+                    <div className="ddx-label">Your Ask</div>
+                    <div className={`pi-v ${ask == null ? "dim" : ""}`}>{ask != null ? money(ask) : "—"}</div>
+                  </div>
+                  <div>
+                    <div className="ddx-label">$ / NRA</div>
+                    <div className={`pi-v ${askNra == null ? "dim" : ""}`}>{askNra != null ? money(askNra) : "—"}</div>
+                  </div>
+                  <div className="pi-right">
+                    <div className="ddx-label">Est. Net Proceeds</div>
+                    <div className={`pi-v ${proceeds == null ? "dim" : "pos"}`}>{proceeds != null ? money(proceeds) : "—"}</div>
+                    <div className="pi-note">after ~3% closing{asset.purchasePrice != null ? ` · ${money(asset.purchasePrice)} basis` : " · no basis set"}</div>
+                  </div>
+                </div>
+                {chips.length > 0 && lo != null && hi != null && (
+                  <div className="pi-band-wrap">
+                    <div className="pi-band">
+                      <div className="pi-band-track" />
+                      <div className="pi-band-range" style={{ left: `${pos(lo)}%`, width: `${pos(hi) - pos(lo)}%` }} />
+                      <div className="pi-band-median" style={{ left: `${pos(perNra(asset.currentValue!)!)}%` }} />
+                      <div className="pi-band-mlabel" style={{ left: `${pos(perNra(asset.currentValue!)!)}%` }}>market {money(perNra(asset.currentValue!)!)}</div>
+                      {askNra != null && <div className="pi-band-ask" style={{ left: `${pos(askNra)}%` }} title={`Your ask · ${money(askNra)}/NRA`} />}
+                      <div className="pi-band-lo" style={{ left: `${pos(lo)}%` }}>{money(lo)}</div>
+                      <div className="pi-band-hi" style={{ left: `${pos(hi)}%` }}>{money(hi)}</div>
+                    </div>
+                    <div className="pi-band-cap">$/NRA across your pricing scenarios · blue band = conservative–aggressive</div>
+                  </div>
+                )}
+                {canEdit && chips.length > 0 && (
+                  <div className="pi-chips">
+                    {chips.map((c) => {
+                      const active = ask === c.price;
+                      return (
+                        <button key={c.label} className={`pi-chip ${active ? "active" : ""}`} onClick={() => void setAsk(c.price)}>
+                          {c.label} · {money(c.price)}
+                        </button>
+                      );
+                    })}
+                    {ask != null && <button className="link-btn" style={{ fontSize: 12.5, color: "var(--text-dim)" }} onClick={() => void setAsk(null)}>Clear</button>}
+                  </div>
+                )}
+              </>)}
             </div>
           </div>
         );
       })()}
 
-      {/* Marketing funnel — contacted → interested → offers → accepted, with
-          conversion bars relative to buyers contacted. */}
+      {/* Marketing funnel (reference): Contacted → Interested → Offers →
+          Highest Offer, with conversion bars and the proceeds target. */}
       {(() => {
+        const matchCount = matches?.length ?? 0;
         const contacted = asset.metrics.buyersContacted;
-        const accepted = asset.selectedOfferId ? 1 : 0;
+        const proceeds = asset.askPrice != null ? Math.round(asset.askPrice * 0.97) - (asset.purchasePrice ?? 0) : null;
+        const pctOf = (v: number, of: number) => (of > 0 ? Math.min(100, Math.round((v / of) * 100)) : 0);
         const stages = [
-          { label: "Contacted", value: contacted, color: "var(--text)" },
-          { label: "Interested", value: asset.metrics.interested, color: "var(--text)" },
-          { label: "Offers", value: asset.metrics.offers, color: "var(--text)" },
-          { label: "Accepted", value: accepted, color: accepted ? "var(--green)" : "var(--text)" },
+          { label: "Contacted", value: String(contacted), hint: matchCount ? `of ${matchCount} matches` : "no matches yet", dim: !contacted, bar: "var(--accent)", w: pctOf(contacted, matchCount) },
+          { label: "Interested", value: String(asset.metrics.interested), hint: "replied positively", dim: !asset.metrics.interested, bar: "var(--accent)", w: pctOf(asset.metrics.interested, contacted) },
+          { label: "Offers", value: String(asset.metrics.offers), hint: "received", dim: !asset.metrics.offers, bar: "#f5b04b", w: pctOf(asset.metrics.offers, contacted) },
+          { label: "Highest Offer", value: asset.metrics.highOffer != null ? money(asset.metrics.highOffer) : "—", hint: asset.metrics.highOffer != null && proceeds != null ? `vs ${money(proceeds)} target` : proceeds != null ? `${money(proceeds)} target` : "no offers yet", dim: asset.metrics.highOffer == null, bar: "var(--green)", w: asset.metrics.highOffer != null && proceeds ? Math.min(100, Math.round((asset.metrics.highOffer / proceeds) * 100)) : 0 },
         ];
         return (
           <div className="panel">
@@ -676,28 +750,17 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
               <span className="muted" style={{ fontSize: 12 }}>Updates as you contact buyers below</span>
             </div>
             <div className="mf-grid">
-              {stages.map((st) => {
-                const pct = contacted > 0 ? Math.round((st.value / contacted) * 100) : 0;
-                return (
-                  <div key={st.label} className="mf-stage">
-                    <div className="ddx-label">{st.label}</div>
-                    <div className="mf-row"><span className="mf-v" style={{ color: st.color }}>{st.value}</span><span className="mf-h">{st.label === "Contacted" ? (contacted ? "of matches" : "none yet") : contacted ? `${pct}% of contacted` : "—"}</span></div>
-                    <div className="mf-bar"><div style={{ width: `${Math.min(100, pct)}%`, background: st.label === "Accepted" && st.value ? "var(--green)" : "var(--accent)" }} /></div>
-                  </div>
-                );
-              })}
+              {stages.map((st) => (
+                <div key={st.label} className="mf-stage">
+                  <div className="ddx-label">{st.label}</div>
+                  <div className="mf-row"><span className={`mf-v ${st.dim ? "dim" : ""}`}>{st.value}</span><span className="mf-h">{st.hint}</span></div>
+                  <div className="mf-bar"><div style={{ width: `${st.w}%`, background: st.bar }} /></div>
+                </div>
+              ))}
             </div>
           </div>
         );
       })()}
-
-      <div className="metrics-row" style={{ gridTemplateColumns: "repeat(5,1fr)" }}>
-        <MetricCard label="Buyers Contacted" value={asset.metrics.buyersContacted} />
-        <MetricCard label="Interested" value={asset.metrics.interested} />
-        <MetricCard label="Offers" value={asset.metrics.offers} />
-        <MetricCard label="Highest Offer" value={money(asset.metrics.highOffer)} />
-        <EstimatedProfitCard highOffer={asset.metrics.highOffer} basis={asset.ourPrice ?? asset.askPrice} />
-      </div>
 
       {asset.offers.length > 0 && (
         <div className="panel">
@@ -744,13 +807,15 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
         {!matches ? <Spinner /> : matches.length === 0 ? <p className="muted">No buyers in the system yet.</p> : (
           <>
             {canEdit && (
-              <div className="row" style={{ marginBottom: 10 }}>
+              <div className="row" style={{ marginBottom: 10, alignItems: "center", gap: 8 }}>
                 <span className="muted" style={{ fontSize: 13 }}>{selected.size} selected</span>
                 <button className="small primary" disabled={selected.size === 0} onClick={() => setShowEmail(true)}>Send via Email</button>
                 <button className="small" disabled={selected.size === 0} onClick={markContacted}>Mark Contacted</button>
+                <span className="mr-legend">● matched · ○ not in buyer's buy box</span>
               </div>
             )}
-            {matches.slice(0, 25).map((m) => {
+            <div className="mr-list">
+            {(showAllMatches ? matches : matches.slice(0, 6)).map((m) => {
               const ring = 2 * Math.PI * 16;
               const ringColor = m.matchPercent >= 70 ? "#22c55e" : m.matchPercent >= 55 ? "#f5b04b" : "#5a6274";
               return (
@@ -782,6 +847,14 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
               </div>
               );
             })}
+            </div>
+            {matches.length > 6 && (
+              <div className="mr-more">
+                <button className="ct-btn" onClick={() => setShowAllMatches((v) => !v)}>
+                  {showAllMatches ? "Show top 6" : `Show all ${matches.length} buyers`}
+                </button>
+              </div>
+            )}
           </>
         )}
       </CollapsibleSection>
