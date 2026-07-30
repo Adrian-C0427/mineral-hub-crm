@@ -3423,3 +3423,14 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .doc-chip.active .doc-count { background: rgba(255, 255, 255, 0.22); color: #fff; }
 .doc-chip-new { background: transparent; border: 1.5px dashed color-mix(in srgb, var(--text-dim) 45%, var(--border)); font-weight: 600; color: var(--text-dim); }
 .doc-section .empty-state { border: 1.5px dashed color-mix(in srgb, var(--text-dim) 45%, var(--border)); border-radius: 12px; padding: 36px 20px; }
+/* Buyer Portal listing analytics KPI row (reference) */
+.dpp-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: var(--block-gap, 16px); }
+.dpp-stat { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px;
+  min-height: 92px; display: flex; flex-direction: column; }
+.dpp-stat:hover { border-color: color-mix(in srgb, var(--text-dim) 45%, var(--border)); }
+.dpp-stat-top { display: flex; align-items: center; justify-content: space-between; }
+.dpp-stat-trend { font-size: 11px; font-weight: 700; color: var(--green); white-space: nowrap; }
+.dpp-stat-v { font-size: 24px; font-weight: 700; letter-spacing: -0.01em; margin-top: 7px; font-variant-numeric: tabular-nums; }
+.dpp-stat-v.pos { color: var(--green); }
+.dpp-stat-hint { font-size: 12px; color: var(--text-faint); margin-top: auto; padding-top: 6px; }
+@media (max-width: 900px) { .dpp-stats { grid-template-columns: 1fr 1fr; } }

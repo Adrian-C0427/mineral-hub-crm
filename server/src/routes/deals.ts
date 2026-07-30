@@ -741,6 +741,46 @@ dealsRouter.get(
   }),
 );
 
+// Listing analytics for the Buyer Portal panel: views / unique visitors /
+// document downloads from anonymous PortalEvent rows, plus inquiry context
+// from the deal's offers. Everything here is computed — nothing is estimated.
+dealsRouter.get(
+  "/:id/portal/stats",
+  requirePermission("viewDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const deal = await prisma.deal.findFirst({
+      where: { id: req.params.id, organizationId: orgId(req) },
+      select: { id: true },
+    });
+    if (!deal) throw new HttpError(404, "Deal not found");
+    const weekAgo = new Date(Date.now() - 7 * 86_400_000);
+    const [views, viewsThisWeek, viewVisitors, downloads, topDownloads, firstView, offers] = await Promise.all([
+      prisma.portalEvent.count({ where: { dealId: deal.id, kind: "VIEW" } }),
+      prisma.portalEvent.count({ where: { dealId: deal.id, kind: "VIEW", createdAt: { gte: weekAgo } } }),
+      prisma.portalEvent.groupBy({ by: ["visitorId"], where: { dealId: deal.id, kind: "VIEW" }, _count: { _all: true } }),
+      prisma.portalEvent.count({ where: { dealId: deal.id, kind: "DOWNLOAD" } }),
+      prisma.portalEvent.groupBy({ by: ["fileId"], where: { dealId: deal.id, kind: "DOWNLOAD", fileId: { not: null } }, _count: { _all: true }, orderBy: { _count: { fileId: "desc" } }, take: 1 }),
+      prisma.portalEvent.findFirst({ where: { dealId: deal.id, kind: "VIEW" }, orderBy: { createdAt: "asc" }, select: { createdAt: true } }),
+      prisma.offer.findMany({ where: { dealId: deal.id }, orderBy: { dateSubmitted: "desc" }, select: { dateSubmitted: true, buyer: { select: { name: true } } } }),
+    ]);
+    const topFileId = topDownloads[0]?.fileId ?? null;
+    const topFile = topFileId
+      ? await prisma.fileAttachment.findUnique({ where: { id: topFileId }, select: { filename: true, folder: true } })
+      : null;
+    res.json({
+      views,
+      viewsThisWeek,
+      uniqueVisitors: viewVisitors.length,
+      returningVisitors: viewVisitors.filter((v) => v._count._all >= 2).length,
+      downloads,
+      topDownload: topFile ? { filename: topFile.filename, folder: topFile.folder } : null,
+      firstViewAt: firstView?.createdAt ?? null,
+      inquiries: offers.length,
+      lastInquiry: offers[0] ? { name: offers[0].buyer.name, date: offers[0].dateSubmitted } : null,
+    });
+  }),
+);
+
 // Per-deal published contacts. Source of truth is the `portalContacts` JSON
 // array; a legacy single-contact (scalar columns) seeds a one-element array so
 // existing listings keep their contact through the rollout.

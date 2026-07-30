@@ -24,6 +24,37 @@ export const portalRouter = Router();
 
 export const newPortalSlug = (): string => randomBytes(12).toString("base64url");
 
+// ---------------------------------------------------------------------------
+// Listing analytics — anonymous view/download events.
+//
+// The public portal client generates a random per-browser id and sends it as
+// the `x-mh-visitor` header; no personal data is involved. Views are deduped
+// per visitor per 30 minutes so refresh loops don't inflate the numbers.
+// Recording is fire-and-forget: analytics must never break a public page.
+// ---------------------------------------------------------------------------
+
+const VIEW_DEDUPE_MS = 30 * 60 * 1000;
+
+function visitorIdFrom(req: { headers: Record<string, unknown> }): string | null {
+  const raw = req.headers["x-mh-visitor"];
+  const v = typeof raw === "string" ? raw.trim() : "";
+  return /^[A-Za-z0-9_-]{8,64}$/.test(v) ? v : null;
+}
+
+function recordPortalEvent(dealId: string, kind: "VIEW" | "DOWNLOAD", visitorId: string | null, fileId?: string) {
+  if (!visitorId) return;
+  void (async () => {
+    if (kind === "VIEW") {
+      const recent = await prisma.portalEvent.findFirst({
+        where: { dealId, visitorId, kind: "VIEW", createdAt: { gte: new Date(Date.now() - VIEW_DEDUPE_MS) } },
+        select: { id: true },
+      });
+      if (recent) return;
+    }
+    await prisma.portalEvent.create({ data: { dealId, kind, visitorId, fileId: fileId ?? null } });
+  })().catch(() => { /* analytics are best-effort */ });
+}
+
 /**
  * Buyer-safe projection of a deal. The ONLY shape the portal ever returns.
  *
@@ -279,6 +310,7 @@ portalRouter.get(
     if (!deal || !deal.publishedToPortal || !deal.organization?.portalEnabled) {
       throw new HttpError(404, "Offering not found");
     }
+    recordPortalEvent(deal.id, "VIEW", visitorIdFrom(req));
     // Abstract/survey labels for the info grid (numbers alone mean little).
     const abstracts = deal.abstractIds.length
       ? await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string }[]>(
@@ -394,6 +426,7 @@ portalRouter.get(
       throw new HttpError(404, "Document not found");
     }
     const url = await getDownloadUrl(file.s3Key, file.filename, req.query.inline === "1");
+    if (file.dealId) recordPortalEvent(file.dealId, "DOWNLOAD", visitorIdFrom(req), file.id);
     res.json({ url });
   }),
 );

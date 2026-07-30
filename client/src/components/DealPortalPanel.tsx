@@ -27,6 +27,15 @@ interface PortalState {
 const newId = () => (typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `c${Date.now()}${Math.random().toString(36).slice(2, 7)}`);
 const blankContact = (): DealContact => ({ id: newId(), name: "", title: "", email: "", phone: "" });
 
+// Anonymous listing analytics computed server-side from PortalEvent rows.
+interface PortalStats {
+  views: number; viewsThisWeek: number; uniqueVisitors: number; returningVisitors: number;
+  downloads: number; topDownload: { filename: string; folder: string } | null;
+  firstViewAt: string | null; inquiries: number; lastInquiry: { name: string; date: string } | null;
+}
+
+const fmtShort = (iso: string) => new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
 /**
  * "Buyer Portal" admin panel on the deal page: publish/unpublish, public vs
  * link-only visibility, featured flag, buyer-facing summary, per-document
@@ -41,6 +50,7 @@ export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string
   const [contacts, setContacts] = useState<DealContact[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [stats, setStats] = useState<PortalStats | null>(null);
   // Expanded by default on the Deal page; hosts can start it collapsed
   // (Mineral Assets does). Collapse always remains available.
   const [open, setOpen] = useState(defaultOpen);
@@ -54,7 +64,11 @@ export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string
     // Default to one contact so a new deal always shows a contact row to fill in.
     setContacts(d.contacts.length ? d.contacts : [blankContact()]);
   }).catch(() => {});
-  useEffect(() => { void load(); /* eslint-disable-next-line */ }, [dealId]);
+  useEffect(() => {
+    void load();
+    api.get<PortalStats>(`/deals/${dealId}/portal/stats`).then(setStats).catch(() => {});
+    // eslint-disable-next-line
+  }, [dealId]);
 
   async function patch(body: Record<string, unknown>) {
     setErr(null);
@@ -94,6 +108,36 @@ export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string
   const statusLabel = p.publishedToPortal ? (p.portalVisibility === "PUBLIC" ? "Published · Public" : "Published · Link only") : "Not published";
 
   return (
+    <>
+    {/* Listing analytics (reference KPI row) — shown once the listing has ever
+        been published or has any recorded traffic. Real events only. */}
+    {stats && (p.publishedToPortal || stats.views > 0 || stats.inquiries > 0) && (
+      <div className="dpp-stats">
+        <div className="dpp-stat">
+          <div className="dpp-stat-top">
+            <span className="ddx-label">Listing Views</span>
+            {stats.viewsThisWeek > 0 && <span className="dpp-stat-trend">+{stats.viewsThisWeek} this week</span>}
+          </div>
+          <div className="dpp-stat-v">{stats.views}</div>
+          <div className="dpp-stat-hint">{stats.firstViewAt ? `since ${fmtShort(stats.firstViewAt)}` : "no views yet"}</div>
+        </div>
+        <div className="dpp-stat">
+          <div className="dpp-stat-top"><span className="ddx-label">Unique Visitors</span></div>
+          <div className="dpp-stat-v">{stats.uniqueVisitors}</div>
+          <div className="dpp-stat-hint">{stats.returningVisitors > 0 ? `${stats.returningVisitors} returned twice+` : "—"}</div>
+        </div>
+        <div className="dpp-stat">
+          <div className="dpp-stat-top"><span className="ddx-label">Doc Downloads</span></div>
+          <div className="dpp-stat-v">{stats.downloads}</div>
+          <div className="dpp-stat-hint">{stats.topDownload ? stats.topDownload.folder : "—"}</div>
+        </div>
+        <div className="dpp-stat">
+          <div className="dpp-stat-top"><span className="ddx-label">Inquiries</span></div>
+          <div className={`dpp-stat-v ${stats.inquiries > 0 ? "pos" : ""}`}>{stats.inquiries}</div>
+          <div className="dpp-stat-hint">{stats.lastInquiry ? `${stats.lastInquiry.name} · ${fmtShort(stats.lastInquiry.date)}` : "—"}</div>
+        </div>
+      </div>
+    )}
     <div className={`panel dpp-panel ${open ? "open" : ""}`}>
       <div
         className="dpp-head"
@@ -298,5 +342,6 @@ export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string
       </>
       )}
     </div>
+    </>
   );
 }
