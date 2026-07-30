@@ -6,7 +6,6 @@ import { Select } from "../components/Select";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { NewBuyerModal } from "../components/NewBuyerModal";
 import { useRowSelection, BulkActionsBar } from "../components/bulk";
-import { initialsOf } from "./Contacts";
 import { pct } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { useAuth } from "../auth/AuthContext";
@@ -63,19 +62,16 @@ export function Buyers() {
   const columns: Column<BuyerRow>[] = [
     { key: "buyer", header: "Buyer", type: "text", value: (b) => b.companyName,
       render: (b) => (
-        <span className="bx-cell">
-          <span className="bx-av">{initialsOf(b.companyName)}</span>
-          <span className="bx-cell-text">
-            <span className="bx-name">
-              {b.companyName}
-              {/* Provenance at a glance: portal-captured leads and fuzzy-match reviews. */}
-              {b.portalLead && <span className="badge" style={{ marginLeft: 6 }} title="Created or updated by a Buyer Portal submission">Portal lead</span>}
-              {b.duplicateReview && <span className="badge" style={{ marginLeft: 6, background: "var(--red)", color: "#fff" }} title="Possible duplicate of an existing buyer — review and merge if needed">Review</span>}
-            </span>
-            {(b.contactFirstName || b.contactLastName || b.contactName) && (
-              <span className="bx-contact">{[b.contactFirstName, b.contactLastName].filter(Boolean).join(" ") || b.contactName}</span>
-            )}
+        <span className="bx-cell-text">
+          <span className="bx-name">
+            {b.companyName}
+            {/* Provenance at a glance: portal-captured leads and fuzzy-match reviews. */}
+            {b.portalLead && <span className="badge" style={{ marginLeft: 6 }} title="Created or updated by a Buyer Portal submission">Portal lead</span>}
+            {b.duplicateReview && <span className="badge" style={{ marginLeft: 6, background: "var(--red)", color: "#fff" }} title="Possible duplicate of an existing buyer — review and merge if needed">Review</span>}
           </span>
+          {(b.contactFirstName || b.contactLastName || b.contactName) && (
+            <span className="bx-contact">{[b.contactFirstName, b.contactLastName].filter(Boolean).join(" ") || b.contactName}</span>
+          )}
         </span>
       ) },
     { key: "focus", header: "Focus Area", type: "text", value: (b) => b.focusArea,
