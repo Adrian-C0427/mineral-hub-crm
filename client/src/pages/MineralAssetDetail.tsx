@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState, lazy, Suspense } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell,
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell, ReferenceLine,
 } from "recharts";
 import { api } from "../api/client";
 import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, MetricCard, EstimatedProfitCard, Banner, MatchBar, Modal, ConfirmDialog, BackLink } from "../components/ui";
+import { Spinner, MetricCard, EstimatedProfitCard, Banner, Modal, ConfirmDialog, BackLink, CtPill } from "../components/ui";
 import { Select } from "../components/Select";
 import { BuyerActivitySection } from "../components/BuyerActivitySection";
 import { CollapsibleSection } from "../components/CollapsibleSection";
@@ -53,8 +53,6 @@ const REV_COLOR = "#22c55e";
 /** Positive financial values render in the app's success green; negative in red. */
 const posColor = (v: number | null | undefined): string | undefined =>
   v == null || v === 0 ? undefined : v > 0 ? "var(--green)" : "var(--red)";
-/** Match-percent scale (green/amber/red) — mirrors the deal page. */
-const matchColor = (pct: number): string => (pct >= 67 ? "#4ade80" : pct >= 34 ? "#f59e0b" : "#f87171");
 
 export function MineralAssetDetail() {
   const { id } = useParams<{ id: string }>();
@@ -91,9 +89,9 @@ export function MineralAssetDetail() {
       <div className="page-header">
         <div className="row">
           <h1 style={{ marginBottom: 0 }}>{asset.name}</h1>
-          <span className="badge owned-badge">Owned Asset</span>
-          {(asset.assetTypes.join("/") || asset.ownershipType) && <span className="badge resp-pending">{asset.assetTypes.join("/") || asset.ownershipType}</span>}
-          {asset.assetMode === "SELL" && <span className="badge resp-interested">Marketing for sale</span>}
+          <CtPill color="#f5b04b">Owned Asset</CtPill>
+          {(asset.assetTypes.join("/") || asset.ownershipType) && <span className="ct-pill seller-type-pill">{asset.assetTypes.join("/") || asset.ownershipType}</span>}
+          {asset.assetMode === "SELL" && <CtPill dot color="#22c55e">Marketing for sale</CtPill>}
         </div>
         <div className="row">
           {canEdit && asset.assetMode !== "SELL" && <button className="primary" onClick={() => setMode("SELL")}>Mark for Sale</button>}
@@ -158,16 +156,26 @@ function HoldTab({ asset, canEdit, onChanged }: { asset: AssetDetail; canEdit: b
   );
 }
 
-function EditCard({ title, children, editing, onEdit, onCancel, onSave, canEdit }: {
+function EditCard({ title, children, editing, onEdit, onCancel, onSave, canEdit, meter }: {
   title: string; children: React.ReactNode; editing: boolean; onEdit: () => void; onCancel: () => void; onSave: () => void; canEdit: boolean;
+  /** Completeness meter (reference): "N/M filled" + mini progress bar. */
+  meter?: { filled: number; total: number };
 }) {
   return (
     <div className="panel">
       <div className="section-head">
         <h3 style={{ margin: 0 }}>{title}</h3>
-        {canEdit && (editing
-          ? <div className="row"><button className="small" onClick={onCancel}>Cancel</button><button className="small primary" onClick={onSave}>Save</button></div>
-          : <button className="small" onClick={onEdit}>Edit</button>)}
+        <div className="row" style={{ gap: 10, alignItems: "center" }}>
+          {meter && !editing && (
+            <>
+              <span className="ddc-meter-n">{meter.filled}/{meter.total} filled</span>
+              <span className="ddc-meter"><span className={`ddc-meter-fill ${meter.filled === meter.total ? "full" : ""}`} style={{ width: `${Math.round((meter.filled / meter.total) * 100)}%` }} /></span>
+            </>
+          )}
+          {canEdit && (editing
+            ? <><button className="small" onClick={onCancel}>Cancel</button><button className="small primary" onClick={onSave}>Save</button></>
+            : <button className="small" onClick={onEdit}>Edit</button>)}
+        </div>
       </div>
       {children}
     </div>
@@ -219,8 +227,15 @@ function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdi
     setEdit(false); onSaved();
   }
 
+  const ownFilled = [
+    asset.assetTypes.length > 0 || !!asset.ownershipType, !!asset.ownershipStatus, !!asset.acquisitionDate,
+    asset.purchasePrice != null, asset.currentValue != null, !!asset.rrc,
+    asset.acreageNma != null, asset.nra != null, asset.netRevenueInterest != null,
+  ].filter(Boolean).length;
+
   return (
-    <EditCard title="Ownership" canEdit={canEdit} editing={edit} onEdit={() => setEdit(true)} onCancel={() => { setF(asset); setEdit(false); }} onSave={save}>
+    <EditCard title="Ownership" canEdit={canEdit} editing={edit} onEdit={() => setEdit(true)} onCancel={() => { setF(asset); setEdit(false); }} onSave={save}
+      meter={{ filled: ownFilled, total: 9 }}>
       {!edit ? (
         <div className="dd-grid">
           <KV k="Asset Type" v={asset.assetTypes.map((t) => ASSET_TYPE_LABELS[t] ?? t).join(", ") || asset.ownershipType} />
@@ -268,8 +283,15 @@ function PropertyCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit
     setEdit(false); onSaved();
   }
 
+  const propFilled = [
+    (asset.states?.length ?? 0) > 0 || !!asset.state, asset.counties.length > 0, !!asset.producingStatus,
+    asset.basins.length > 0, asset.formations.length > 0, !!asset.operator,
+    (asset.surveys?.length ?? 0) > 0, asset.abstractIds.length > 0, (asset.wells?.length ?? 0) > 0, !!asset.notes,
+  ].filter(Boolean).length;
+
   return (
-    <EditCard title="Property" canEdit={canEdit} editing={edit} onEdit={() => setEdit(true)} onCancel={() => { setF(asset); setEdit(false); }} onSave={save}>
+    <EditCard title="Property" canEdit={canEdit} editing={edit} onEdit={() => setEdit(true)} onCancel={() => { setF(asset); setEdit(false); }} onSave={save}
+      meter={{ filled: propFilled, total: 10 }}>
       {!edit ? (
         <div className="dd-grid">
           <KV k="State" v={(asset.states?.length ? asset.states : (asset.state ? [asset.state] : [])).join(", ")} />
@@ -316,6 +338,20 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
     [asset.revenueEntries],
   );
   const totalRevenue = useMemo(() => (asset.revenueEntries ?? []).reduce((s, r) => s + r.amount, 0), [asset.revenueEntries]);
+  // Derived revenue insights — all straight arithmetic on the booked entries.
+  const rev = useMemo(() => {
+    const entries = [...(asset.revenueEntries ?? [])].sort((a, b) => a.month.localeCompare(b.month));
+    const byMonth = new Map<string, number>();
+    for (const r of entries) byMonth.set(r.month.slice(0, 7), (byMonth.get(r.month.slice(0, 7)) ?? 0) + r.amount);
+    const months = [...byMonth.entries()];
+    const avg = months.length ? totalRevenue / months.length : 0;
+    const best = months.reduce<[string, number] | null>((m, x) => (m == null || x[1] > m[1] ? x : m), null);
+    const last = months[months.length - 1] ?? null;
+    const prior = months[months.length - 2] ?? null;
+    const mom = last && prior && prior[1] > 0 ? Math.round(((last[1] - prior[1]) / prior[1]) * 100) : null;
+    return { months: months.length, avg, best, last, mom };
+  }, [asset.revenueEntries, totalRevenue]);
+  const hasLease = (asset.leaseStatuses?.length ?? 0) > 0 || !!asset.royaltyRate || !!asset.leaseEffectiveDate || !!asset.leaseExpirationDate;
 
   async function saveFinancials() {
     await api.patch(`/deals/${asset.id}`, {
@@ -343,16 +379,29 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
         </div>
       </div>
 
-      <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
+      <div className="metrics-row fin-kpis" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
         <MetricCard label="Total Revenue Booked" value={money(totalRevenue)} hint={`${asset.revenueEntries?.length ?? 0} entries`} valueColor={totalRevenue ? "var(--green)" : undefined} />
         <MetricCard label="ROI Since Acquisition" value={fmtPct(asset.roiSinceAcquisition)} valueColor={posColor(asset.roiSinceAcquisition)} />
         <MetricCard label="Unrealized Gain / Loss" value={money(asset.unrealizedGainLoss)} valueColor={posColor(asset.unrealizedGainLoss)} />
         <MetricCard label="Lease Status" value={asset.leaseStatuses?.length ? asset.leaseStatuses.join(", ") : "—"} />
       </div>
 
+      {/* Revenue insights strip (reference) — shown once revenue exists. */}
+      {rev.months > 0 && (
+        <div className="fin-insights">
+          <div className="fin-insight"><div className="ddx-label">Avg / Month</div><div className="fin-insight-row"><span className="fin-insight-v">{money(Math.round(rev.avg))}</span><span className="fin-insight-h">{rev.months} month{rev.months === 1 ? "" : "s"}</span></div></div>
+          <div className="fin-insight"><div className="ddx-label">Best Month</div><div className="fin-insight-row"><span className="fin-insight-v">{money(rev.best![1])}</span><span className="fin-insight-h">{monthLabel(rev.best![0])}</span></div></div>
+          <div className="fin-insight"><div className="ddx-label">Last Month</div><div className="fin-insight-row"><span className="fin-insight-v">{money(rev.last![1])}</span><span className="fin-insight-h">{monthLabel(rev.last![0])}</span></div></div>
+          <div className="fin-insight"><div className="ddx-label">MoM Change</div><div className="fin-insight-row"><span className="fin-insight-v" style={{ color: rev.mom == null ? undefined : rev.mom >= 0 ? "var(--green)" : "var(--red)" }}>{rev.mom == null ? "—" : `${rev.mom >= 0 ? "+" : ""}${rev.mom}%`}</span><span className="fin-insight-h">{rev.mom == null ? "needs 2 months" : "vs prior month"}</span></div></div>
+        </div>
+      )}
+
       <div className="chart-grid">
         <div className="panel" style={{ marginBottom: 0 }}>
-          <div className="panel-title"><h3>Revenue / Royalty History</h3></div>
+          <div className="panel-title" style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <h3>Revenue / Royalty History</h3>
+            {rev.mom != null && <CtPill color={rev.mom >= 0 ? "#22c55e" : "#ef4444"}>{rev.mom >= 0 ? "▲" : "▼"} {rev.mom >= 0 ? "+" : ""}{rev.mom}% MoM</CtPill>}
+          </div>
           {chartData.length === 0 ? <p className="muted">No revenue entries yet. Add monthly royalty or lease income to build the history.</p> : (
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={chartData}>
@@ -360,22 +409,45 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
                 <XAxis dataKey="month" tickFormatter={monthLabel} tick={{ fontSize: 11 }} minTickGap={20} />
                 <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => (v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${v}`)} width={54} />
                 <Tooltip {...chartTooltip} labelFormatter={monthLabel} formatter={(v: number) => money(v)} />
-                <Bar dataKey="amount" name="Revenue" isAnimationActive={false}>
+                {rev.avg > 0 && rev.months > 1 && (
+                  <ReferenceLine y={rev.avg} stroke="#f5b04b" strokeDasharray="6 5" strokeOpacity={0.8}
+                    label={{ value: `avg ${money(Math.round(rev.avg))} / mo`, position: "insideTopRight", fill: "#f5b04b", fontSize: 10.5, fontWeight: 700 }} />
+                )}
+                <Bar dataKey="amount" name="Revenue" isAnimationActive={false} radius={[3, 3, 0, 0]}>
                   {chartData.map((d, i) => <Cell key={i} fill={d.kind === "LEASE_BONUS" ? "#f59e0b" : REV_COLOR} />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
           )}
         </div>
-        <div className="panel" style={{ marginBottom: 0 }}>
-          <div className="panel-title"><h3>Current Lease</h3></div>
+        <div className="panel" style={{ marginBottom: 0, display: "flex", flexDirection: "column" }}>
+          <div className="panel-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <h3>Current Lease</h3>
+            {!edit && (hasLease
+              ? <CtPill dot color="#22c55e">{asset.leaseStatuses?.[0] ?? "Lease on file"}</CtPill>
+              : <CtPill dot color="#f5b04b">No lease on file</CtPill>)}
+          </div>
           {!edit ? (
+            hasLease ? (
             <div className="dd-grid" style={{ gridTemplateColumns: "1fr" }}>
               <KV k="Lease Status" v={asset.leaseStatuses?.length ? asset.leaseStatuses.join(", ") : null} />
               <KV k="Royalty Rate" v={asset.royaltyRate} />
               <KV k="Lease Effective Date" v={fmtDate(asset.leaseEffectiveDate)} />
               <KV k="Lease Expiration Date" v={fmtDate(asset.leaseExpirationDate)} />
             </div>
+            ) : (
+            <div className="fin-lease-empty">
+              <div className="fin-lease-blurb">
+                {asset.producingStatus ? <>This asset is marked <b>{asset.producingStatus}</b> but has no lease terms recorded.</> : <>No lease terms recorded yet.</>} Add them to unlock:
+              </div>
+              <div className="fin-lease-perks">
+                <span><i />Royalty-rate checks against incoming revenue</span>
+                <span><i />Expiration reminders before the lease lapses</span>
+                <span><i />Lease terms on the sale package when marketing</span>
+              </div>
+              {canEdit && <button className="primary fin-lease-add" onClick={() => setEdit(true)}>+ Add lease terms</button>}
+            </div>
+            )
           ) : (
             <div className="dd-grid" style={{ gridTemplateColumns: "1fr" }}>
               <Fld l="Lease Status"><SearchableMultiSelect options={LEASE_STATUS_OPTIONS} value={f.leaseStatuses ?? []} onChange={(v) => setF({ ...f, leaseStatuses: v })} placeholder="Select lease status…" /></Fld>
@@ -388,20 +460,34 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
       </div>
 
       {(asset.revenueEntries?.length ?? 0) > 0 && (
-        <div className="table-scroll" style={{ marginTop: 12 }}>
+        <div className="table-scroll fin-revtable" style={{ marginTop: 12 }}>
           <table className="data-table">
-            <thead><tr><th>Month</th><th>Type</th><th>Operator</th><th className="right">Amount</th><th>Note</th>{canEdit && <th></th>}</tr></thead>
+            <thead><tr><th>Month</th><th>Type</th><th>Operator</th><th className="right">Amount</th><th className="right">Δ Prior</th><th className="right">Running</th><th>Note</th>{canEdit && <th></th>}</tr></thead>
             <tbody>
-              {[...asset.revenueEntries].reverse().map((r) => (
-                <tr key={r.id}>
-                  <td>{r.month.slice(0, 7)}</td>
-                  <td>{r.kind.replace("_", " ")}</td>
-                  <td>{r.operator || "—"}</td>
-                  <td className="right">{money(r.amount)}</td>
-                  <td>{r.note || "—"}</td>
-                  {canEdit && <td className="right"><button className="link-btn" style={{ color: "var(--red)" }} onClick={() => delRevenue(r.id)}>Delete</button></td>}
-                </tr>
-              ))}
+              {(() => {
+                // Δ vs the prior entry and a running total, computed in month order
+                // then displayed newest-first (reference columns).
+                const asc = [...asset.revenueEntries].sort((a, b) => a.month.localeCompare(b.month));
+                let running = 0;
+                const enriched = asc.map((r, i) => {
+                  running += r.amount;
+                  const prior = i > 0 ? asc[i - 1].amount : null;
+                  const delta = prior != null && prior > 0 ? Math.round(((r.amount - prior) / prior) * 100) : null;
+                  return { ...r, running, delta };
+                });
+                return enriched.reverse().map((r) => (
+                  <tr key={r.id}>
+                    <td style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{r.month.slice(0, 7)}</td>
+                    <td><CtPill color={r.kind === "LEASE_BONUS" ? "#f59e0b" : "#22c55e"}>{r.kind.replace("_", " ")}</CtPill></td>
+                    <td className="ct-dim">{r.operator || "—"}</td>
+                    <td className="right" style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{money(r.amount)}</td>
+                    <td className="right" style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", color: r.delta == null ? "var(--text-faint)" : r.delta >= 0 ? "var(--green)" : "var(--red)" }}>{r.delta == null ? "—" : `${r.delta >= 0 ? "+" : ""}${r.delta}%`}</td>
+                    <td className="right ct-dim" style={{ fontVariantNumeric: "tabular-nums" }}>{money(r.running)}</td>
+                    <td>{r.note || "—"}</td>
+                    {canEdit && <td className="right"><button className="link-btn" style={{ color: "var(--red)" }} onClick={() => delRevenue(r.id)}>Delete</button></td>}
+                  </tr>
+                ));
+              })()}
             </tbody>
           </table>
         </div>
@@ -527,6 +613,84 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
         )}
       </div>
 
+      {/* Sale Readiness — ring + live checklist from this asset's real state. */}
+      {(() => {
+        const items: { label: string; done: boolean; cta?: string; onCta?: () => void }[] = [
+          { label: "Asking price set", done: asset.askPrice != null, cta: canEdit ? "Set price" : undefined, onCta: () => setEdit(true) },
+          { label: "NRA recorded", done: asset.nra != null },
+          { label: "Abstracts mapped", done: asset.abstractIds.length > 0 },
+          { label: "Documents uploaded", done: (asset.files ?? []).length > 0 },
+          { label: "Published to the Buyer Portal", done: !!asset.publishedToPortal },
+          { label: "Buyers contacted", done: asset.metrics.buyersContacted > 0 },
+        ];
+        const done = items.filter((i) => i.done).length;
+        const pct = Math.round((done / items.length) * 100);
+        const ring = 2 * Math.PI * 31;
+        const color = pct >= 80 ? "#22c55e" : pct >= 50 ? "#f5b04b" : "#5a6274";
+        return (
+          <div className="panel sr-card">
+            <h3 style={{ margin: 0 }}>Sale Readiness</h3>
+            <div className="sr-top">
+              <span className="sr-ring">
+                <svg width="74" height="74" viewBox="0 0 74 74">
+                  <circle cx="37" cy="37" r="31" fill="none" stroke="var(--hairline)" strokeWidth="7" />
+                  <circle cx="37" cy="37" r="31" fill="none" stroke={color} strokeWidth="7" strokeLinecap="round"
+                    strokeDasharray={`${((ring * pct) / 100).toFixed(1)} ${ring.toFixed(1)}`} transform="rotate(-90 37 37)" />
+                </svg>
+                <span className="sr-ring-n">{pct}%</span>
+              </span>
+              <span className="sr-blurb">
+                {pct === 100 ? "Fully packaged — everything a buyer needs is in place." : `${items.length - done} step${items.length - done === 1 ? "" : "s"} left before this asset is fully packaged for buyers.`}
+              </span>
+            </div>
+            <div className="sr-list">
+              {items.map((q) => (
+                <div key={q.label} className="sr-item">
+                  <span className={`dpp-qdot ${q.done ? "done" : ""}`}>
+                    {q.done && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.2" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>}
+                  </span>
+                  <span className={`dpp-qlbl ${q.done ? "done" : ""}`} style={{ fontSize: 13 }}>{q.label}</span>
+                  {!q.done && q.cta && <button className="link-btn sr-cta" onClick={q.onCta}>{q.cta}</button>}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Marketing funnel — contacted → interested → offers → accepted, with
+          conversion bars relative to buyers contacted. */}
+      {(() => {
+        const contacted = asset.metrics.buyersContacted;
+        const accepted = asset.selectedOfferId ? 1 : 0;
+        const stages = [
+          { label: "Contacted", value: contacted, color: "var(--text)" },
+          { label: "Interested", value: asset.metrics.interested, color: "var(--text)" },
+          { label: "Offers", value: asset.metrics.offers, color: "var(--text)" },
+          { label: "Accepted", value: accepted, color: accepted ? "var(--green)" : "var(--text)" },
+        ];
+        return (
+          <div className="panel">
+            <div className="section-head" style={{ alignItems: "baseline" }}>
+              <h3 style={{ margin: 0 }}>Marketing Funnel</h3>
+              <span className="muted" style={{ fontSize: 12 }}>Updates as you contact buyers below</span>
+            </div>
+            <div className="mf-grid">
+              {stages.map((st) => {
+                const pct = contacted > 0 ? Math.round((st.value / contacted) * 100) : 0;
+                return (
+                  <div key={st.label} className="mf-stage">
+                    <div className="ddx-label">{st.label}</div>
+                    <div className="mf-row"><span className="mf-v" style={{ color: st.color }}>{st.value}</span><span className="mf-h">{st.label === "Contacted" ? (contacted ? "of matches" : "none yet") : contacted ? `${pct}% of contacted` : "—"}</span></div>
+                    <div className="mf-bar"><div style={{ width: `${Math.min(100, pct)}%`, background: st.label === "Accepted" && st.value ? "var(--green)" : "var(--accent)" }} /></div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
+
       <div className="metrics-row" style={{ gridTemplateColumns: "repeat(5,1fr)" }}>
         <MetricCard label="Buyers Contacted" value={asset.metrics.buyersContacted} />
         <MetricCard label="Interested" value={asset.metrics.interested} />
@@ -586,26 +750,38 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
                 <button className="small" disabled={selected.size === 0} onClick={markContacted}>Mark Contacted</button>
               </div>
             )}
-            {matches.slice(0, 25).map((m) => (
+            {matches.slice(0, 25).map((m) => {
+              const ring = 2 * Math.PI * 16;
+              const ringColor = m.matchPercent >= 70 ? "#22c55e" : m.matchPercent >= 55 ? "#f5b04b" : "#5a6274";
+              return (
               <div className={`match-card ${selected.has(m.buyerId) ? "match-selected" : ""}`} key={m.buyerId}>
                 <div className="match-card-head">
                   {canEdit && <input type="checkbox" checked={selected.has(m.buyerId)} onChange={() => setSelected((p) => { const n = new Set(p); n.has(m.buyerId) ? n.delete(m.buyerId) : n.add(m.buyerId); return n; })} />}
                   <span className="match-rank">#{m.rank}</span>
-                  <Link to={`/buyers/${m.buyerId}`} className="match-name">{m.companyName || m.buyerName}</Link>
-                  <span className="match-right">
-                    <span className="match-pct-num" style={{ color: matchColor(m.matchPercent) }}>{m.matchPercent}%</span>
-                    <span className="muted" style={{ fontSize: 11.5, whiteSpace: "nowrap" }}>
-                      {m.criteriaSpecified > 0 ? `${m.criteriaSpecifiedMatched}/${m.criteriaSpecified} criteria` : "no buy box set"}
-                    </span>
+                  <span className="mr-ring" aria-label={`${m.matchPercent}% match`}>
+                    <svg width="40" height="40" viewBox="0 0 40 40">
+                      <circle cx="20" cy="20" r="16" fill="none" stroke="var(--hairline)" strokeWidth="4" />
+                      <circle cx="20" cy="20" r="16" fill="none" stroke={ringColor} strokeWidth="4" strokeLinecap="round"
+                        strokeDasharray={`${((ring * m.matchPercent) / 100).toFixed(1)} ${ring.toFixed(1)}`} transform="rotate(-90 20 20)" />
+                    </svg>
+                    <span className="mr-ring-n">{m.matchPercent}</span>
+                  </span>
+                  <span className="mr-title">
+                    <Link to={`/buyers/${m.buyerId}`} className="match-name subtle-link">{m.companyName || m.buyerName}</Link>
+                    {m.matchPercent >= 70 && m.criteriaSpecified >= 4 && <CtPill color="#22c55e">Strong fit</CtPill>}
+                    {m.lastContactDate && <span className="mr-contacted">Contacted</span>}
+                  </span>
+                  <span className="mr-crit">
+                    {m.criteriaSpecified > 0 ? `${m.criteriaSpecifiedMatched}/${m.criteriaSpecified} criteria met` : "no buy box set"}
                   </span>
                 </div>
-                <MatchBar value={m.matchPercent} />
-                <div>
+                <div className="mr-tags">
                   {m.matching.map((c) => <span key={c.key} className="crit-tag crit-yes">{c.label}</span>)}
                   {m.nonMatching.map((c) => <span key={c.key} className="crit-tag crit-no">{c.label}</span>)}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </>
         )}
       </CollapsibleSection>
