@@ -256,6 +256,9 @@ export function DocumentsSection({
         onClick={toggleOpen}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggleOpen(); } }}>
         <div className="dpp-title">
+          <span className="docx-htile" aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z" /></svg>
+          </span>
           <div>
             <h3 style={{ margin: 0 }}>{title}</h3>
             <div className="dpp-sub"><b className="docx-count">{files.length}</b> file{files.length === 1 ? "" : "s"} · organized by folder{canEdit ? " · drag files in to upload" : ""}</div>

@@ -10,7 +10,7 @@ import { Spinner, Banner, ConfirmDelete, EmptyState, showToast } from "../compon
 import { Select } from "../components/Select";
 import { DateField } from "../components/DateField";
 import { fmtDate } from "../lib/format";
-import { type ContactRow, TYPES, STATUSES, typeLabel, statusLabel } from "./Contacts";
+import { type ContactRow, TYPES, STATUSES, typeLabel, statusLabel, CtPill, TYPE_COLORS, STATUS_COLORS } from "./Contacts";
 import { formatPhone, formatPhoneAsYouType, normalizePhone } from "../lib/phone";
 import type { UserLite } from "../types";
 
@@ -38,10 +38,6 @@ export interface ContactActivityRow {
 }
 
 const DISPOSITIONS = ["Connected", "No Answer", "Voicemail", "Bad Number", "Callback Requested"];
-const STATUS_DOT: Record<string, string> = {
-  NEW: "var(--accent)", CONTACTED: "var(--amber)", ENGAGED: "var(--green)",
-  NEGOTIATING: "var(--green)", CONVERTED: "var(--green)", NOT_INTERESTED: "var(--red)",
-};
 
 const initialsOf = (name: string): string =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
@@ -102,30 +98,33 @@ export function ContactDetail() {
   const timeline = (activities ?? []).filter((a) => a.kind !== "TASK" && a.kind !== "REMINDER");
 
   return (
-    <div className="cw">
+    <div className="cw-wrap">
+      {/* Top bar: breadcrumb + record pager (reference header). */}
+      <header className="cw-top">
+        <Link to="/contacts" className="cw-topback" aria-label="Back to contacts"><ArrowLeft size={13} /></Link>
+        <span className="cw-toptitle">Contact Details</span>
+        {idx >= 0 && <span className="cw-count">{idx + 1} of {all.length.toLocaleString()}</span>}
+        <span className="cw-pager">
+          <button className="cw-pgbtn" disabled={idx <= 0} onClick={() => go(-1)} aria-label="Previous contact"><ChevronLeft size={11} /></button>
+          <button className="cw-pgbtn" disabled={idx < 0 || idx >= all.length - 1} onClick={() => go(1)} aria-label="Next contact"><ChevronRight size={11} /></button>
+        </span>
+      </header>
+
+      <div className="cw">
       {/* ============================================== left: contact details */}
       <aside className="cw-left">
-        <div className="cw-left-head">
-          <Link to="/contacts" className="cw-back"><ArrowLeft size={14} /> Contact Details</Link>
-          <span className="cw-pager">
-            {idx >= 0 && <span className="cw-count">{idx + 1} / {all.length.toLocaleString()}</span>}
-            <button className="cw-pgbtn" disabled={idx <= 0} onClick={() => go(-1)} aria-label="Previous contact"><ChevronLeft size={11} /></button>
-            <button className="cw-pgbtn" disabled={idx < 0 || idx >= all.length - 1} onClick={() => go(1)} aria-label="Next contact"><ChevronRight size={11} /></button>
-          </span>
-        </div>
-
         <div className="cw-ident">
           <div className="cw-ident-row">
             <span className="cw-avatar lg">{initialsOf(contact.name)}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <NameField contact={contact} canEdit={canManage} onSave={patch} />
-              <div className="cw-substatus">
-                <span className="cw-dot" style={{ background: STATUS_DOT[contact.status] ?? "var(--accent)" }} />
-                {typeLabel(contact.type)} · {statusLabel(contact.status)}
+              <div className="cw-pills">
+                <CtPill color={TYPE_COLORS[contact.type] ?? "#6b7280"}>{typeLabel(contact.type)}</CtPill>
+                <CtPill dot color={STATUS_COLORS[contact.status] ?? "#6b7280"}>{statusLabel(contact.status)}</CtPill>
               </div>
             </div>
             {canManage && (
-              <button className="cw-del" title="Delete contact" aria-label="Delete contact" onClick={() => setConfirmDelete(true)}><Trash2 size={12} /></button>
+              <button className="cw-del" title="Delete contact" aria-label="Delete contact" onClick={() => setConfirmDelete(true)}><Trash2 size={13} /></button>
             )}
           </div>
 
@@ -160,15 +159,18 @@ export function ContactDetail() {
               {contact.phone && <div className="cw-mono muted">{formatPhone(contact.phone)}</div>}
             </div>
           </div>
-          <div className="row" style={{ gap: 6 }}>
-            {contact.phone && <a className="cw-act call" href={`tel:${contact.phone}`} title={`Call ${formatPhone(contact.phone)}`}><Phone size={14} /></a>}
-            {contact.email && <a className="cw-act" href={`mailto:${contact.email}`} title={`Email ${contact.email}`}><Mail size={14} /></a>}
+          <div className="row" style={{ gap: 8 }}>
+            {contact.phone && <a className="cw-act call" href={`tel:${contact.phone}`} title={`Call ${formatPhone(contact.phone)}`}><Phone size={13} /> Call</a>}
+            {contact.email && <a className="cw-act" href={`mailto:${contact.email}`} title={`Email ${contact.email}`}><Mail size={13} /> Email</a>}
           </div>
         </div>
 
         <div className="cw-timeline">
           {activities === null ? <Spinner /> : timeline.length === 0 ? (
-            <EmptyState title="No activity yet">
+            <EmptyState
+              icon={<span className="cw-empty-tile"><MessageSquare size={20} /></span>}
+              title="No activity yet"
+            >
               Log your first call, text, email, or internal note below — everything lands on this timeline.
             </EmptyState>
           ) : (
@@ -214,6 +216,7 @@ export function ContactDetail() {
 
       {/* ============================================== right: notes/tasks/... */}
       <SidePanel contact={contact} activities={activities ?? []} canManage={canManage} onChanged={load} users={users} />
+      </div>
 
       {confirmDelete && (
         <ConfirmDelete
@@ -242,7 +245,7 @@ function Tags({ contact, canManage, onSave }: { contact: ContactRow; canManage: 
     <div style={{ marginTop: 14 }}>
       <div className="cw-tags-head">
         <span className="cw-lbl" style={{ marginBottom: 0 }}>Tags <span className="cw-mono" style={{ color: "var(--text-dim)" }}>({tags.length})</span></span>
-        {canManage && <button className="cw-tag-add" title="Add tag" aria-label="Add tag" onClick={() => setAdding(true)}><Plus size={10} /></button>}
+        {canManage && <button className="cw-tag-add" onClick={() => setAdding(true)}>+ Add tag</button>}
       </div>
       <div className="cw-tags">
         {tags.map((t) => (
@@ -382,9 +385,18 @@ function InlineField({ spec, canEdit, onSave }: { spec: FieldSpec; canEdit: bool
   );
 }
 
+const SECTION_ICONS: Record<string, JSX.Element> = {
+  "Reach the Owner": <Phone size={15} />,
+  "Mineral Interest": <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg>,
+  "Acquisition": <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" /></svg>,
+  "Outreach Cadence": <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M3 12h4l3 8 4-16 3 8h4" /></svg>,
+};
+
 function FieldSections({ contact, canManage, onSave }: { contact: ContactRow; canManage: boolean; onSave: (body: Record<string, unknown>) => Promise<void> }) {
   const [q, setQ] = useState("");
-  const [closed, setClosed] = useState<Set<string>>(new Set());
+  // Reference: the dossier sections start as collapsed cards; open on demand.
+  const [closed, setClosed] = useState<Set<string>>(
+    () => new Set(["Reach the Owner", "Mineral Interest", "Acquisition", "Outreach Cadence"]));
   const followUpOverdue = contact.nextFollowUpDate != null && new Date(contact.nextFollowUpDate).getTime() < Date.now();
 
   const list = (raw: string) => raw.split(",").map((s) => s.trim()).filter(Boolean);
@@ -470,8 +482,9 @@ function FieldSections({ contact, canManage, onSave }: { contact: ContactRow; ca
         return (
           <div key={s.title} className={`cw-sec ${isOpen ? "open" : ""}`}>
             <button className="cw-sec-head" onClick={() => setClosed((prev) => { const n = new Set(prev); n.has(s.title) ? n.delete(s.title) : n.add(s.title); return n; })} aria-expanded={isOpen}>
-              <span>{s.title}</span>
-              {isOpen ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+              <span className="cw-sec-ico">{SECTION_ICONS[s.title]}</span>
+              <span className="cw-sec-name">{s.title}</span>
+              {isOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
             </button>
             {isOpen && (
               <div className="cw-sec-body">
@@ -571,7 +584,8 @@ function SidePanel({ contact, activities, canManage, onChanged, users }: {
   // Deep link from the dashboard Tasks widget / task-due notifications:
   // `?task=<id>` opens straight onto the Tasks tab.
   const openedOnTask = useMemo(() => new URLSearchParams(window.location.search).has("task"), []);
-  const [tab, setTab] = useState<"notes" | "tasks" | "reminders" | "minerals">(openedOnTask ? "tasks" : "notes");
+  // Tasks is the default rail tab (reference); ?task deep links land there too.
+  const [tab, setTab] = useState<"notes" | "tasks" | "reminders" | "minerals">(openedOnTask ? "tasks" : "tasks");
   const [q, setQ] = useState("");
   const [draft, setDraft] = useState("");   // Title — concise summary (required)
   const [note, setNote] = useState("");     // Note — detailed information (required)
@@ -662,27 +676,41 @@ function SidePanel({ contact, activities, canManage, onChanged, users }: {
           <>
             {canManage && (
               <div className="cw-addcol">
-                <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Title — concise summary…" aria-label="Title" />
-                <div className="cw-addrow" style={{ marginBottom: 0 }}>
-                  <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note — details…" aria-label="Note details"
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(tab === "tasks" ? "TASK" : "REMINDER"); } }} />
-                  <DateField value={due} onChange={setDue} />
-                  <button className="primary small" disabled={!draft.trim() || !note.trim() || busy} onClick={() => void add(tab === "tasks" ? "TASK" : "REMINDER")}><Plus size={11} /> Add</button>
-                </div>
-                {tab === "tasks" && (
+                <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Task title…" aria-label="Title" />
+                <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note — details…" aria-label="Note details"
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(tab === "tasks" ? "TASK" : "REMINDER"); } }} />
+                {tab === "tasks" ? (
+                  <>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      <DateField value={due} onChange={setDue} />
+                      <Select ariaLabel="Priority" value={priority} onChange={(v) => setPriority(v || "MEDIUM")}
+                        options={TASK_PRIORITIES.map((p) => ({ value: p.v, label: p.label }))} />
+                    </div>
+                    <div className="row" style={{ gap: 8 }}>
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <Select ariaLabel="Assignee" clearable searchable placeholder="Assign to me" value={assignee} onChange={setAssignee}
+                          options={users.map((u) => ({ value: u.id, label: u.name }))} />
+                      </span>
+                      <button className="cw-addbtn" disabled={!draft.trim() || !note.trim() || busy} onClick={() => void add("TASK")}>+ Add</button>
+                    </div>
+                  </>
+                ) : (
                   <div className="row" style={{ gap: 8 }}>
-                    <Select ariaLabel="Priority" value={priority} onChange={(v) => setPriority(v || "MEDIUM")}
-                      options={TASK_PRIORITIES.map((p) => ({ value: p.v, label: `${p.label} priority` }))} />
-                    <Select ariaLabel="Assignee" clearable searchable placeholder="Assign to me" value={assignee} onChange={setAssignee}
-                      options={users.map((u) => ({ value: u.id, label: u.name }))} />
+                    <span style={{ flex: 1, minWidth: 0 }}><DateField value={due} onChange={setDue} /></span>
+                    <button className="cw-addbtn" disabled={!draft.trim() || !note.trim() || busy} onClick={() => void add("REMINDER")}>+ Add</button>
                   </div>
                 )}
               </div>
             )}
             {tab === "tasks" && (
               <>
-                <div className="cw-lbl">Up next</div>
-                {tasks.length === 0 && <p className="muted" style={{ fontSize: 12.5 }}>No tasks yet.</p>}
+                <div className="cw-lbl" style={{ marginTop: 8 }}>Up next</div>
+                {tasks.length === 0 && (
+                  <div className="cw-empty-dash">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><path d="M22 4L12 14.01l-3-3" /></svg>
+                    <span>No tasks yet — add one above.</span>
+                  </div>
+                )}
                 {tasks.map((a) => (
                   <div key={a.id} className={`cw-task ${a.completedAt ? "done" : ""}`}>
                     <input type="checkbox" checked={!!a.completedAt} disabled={!canManage} onChange={() => void update(a, { completed: !a.completedAt })} aria-label={`Complete ${a.body}`} />

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, Modal, Banner, MetricCard, SearchInput, ConfirmDelete, Req, showToast } from "../components/ui";
+import { Spinner, Modal, Banner, MetricCard, SearchInput, ConfirmDelete, Req, showToast, CtPill } from "../components/ui";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { useRowSelection, BulkBar } from "../components/bulk";
 import { downloadCsv } from "../lib/csv";
@@ -60,10 +60,22 @@ export const typeLabel = (v: string) => TYPES.find(([k]) => k === v)?.[1] ?? v;
 export const statusLabel = (v: string) => STATUSES.find(([k]) => k === v)?.[1] ?? v;
 
 export interface ContactListRow { id: string; name: string; count: number }
-// Status → tone class (reuses the app's badge palette).
-const STATUS_TONE: Record<string, string> = {
-  NEW: "resp-pending", CONTACTED: "resp-pending", ENGAGED: "resp-interested",
-  NEGOTIATING: "resp-interested", CONVERTED: "resp-interested", NOT_INTERESTED: "resp-passed",
+// Reference pill palette — type and status render as tinted pills (status adds
+// a leading dot). Colors extend the reference's Prospect/New examples.
+export const TYPE_COLORS: Record<string, string> = {
+  SELLER: "#22c55e", PROSPECT: "#3b82f6", LEAD: "#f59e0b", REFERRAL: "#8b5cf6", OTHER: "#6b7280",
+};
+export const STATUS_COLORS: Record<string, string> = {
+  NEW: "#06b6d4", CONTACTED: "#f59e0b", ENGAGED: "#22c55e",
+  NEGOTIATING: "#8b5cf6", CONVERTED: "#22c55e", NOT_INTERESTED: "#ef4444",
+};
+export { CtPill };
+const initialsOf = (name: string): string =>
+  name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
+/** "Adrian Campos" → "Adrian C." (reference owner cell). */
+const shortName = (name: string): string => {
+  const parts = name.split(/\s+/).filter(Boolean);
+  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1]![0]}.` : name;
 };
 
 export function Contacts() {
@@ -111,20 +123,30 @@ export function Contacts() {
   const columns: Column<ContactRow>[] = [
     { key: "name", header: "Contact", type: "text", value: (r) => r.name, minWidth: 200, required: true,
       render: (r) => (
-        <span className="row" style={{ gap: 8, alignItems: "center" }}>
-          <strong>{r.name}</strong>
-          {r.entityName && <span className="muted" style={{ fontSize: 12.5 }}>· {r.entityName}</span>}
+        <span className="ct-name">
+          <span className="ct-avatar">{initialsOf(r.name)}</span>
+          <span style={{ minWidth: 0 }}>
+            <span className="ct-name-txt">{r.name}</span>
+            {r.entityName && <span className="ct-name-ent"> · {r.entityName}</span>}
+          </span>
         </span>
       ) },
-    { key: "type", header: "Type", type: "text", value: (r) => typeLabel(r.type), render: (r) => <span className="badge resp-pending">{typeLabel(r.type)}</span> },
+    { key: "type", header: "Type", type: "text", value: (r) => typeLabel(r.type),
+      render: (r) => <CtPill color={TYPE_COLORS[r.type] ?? "#6b7280"}>{typeLabel(r.type)}</CtPill> },
     { key: "status", header: "Status", type: "text", value: (r) => statusLabel(r.status),
-      render: (r) => <span className={`badge ${STATUS_TONE[r.status] ?? "resp-pending"}`}>{statusLabel(r.status)}</span> },
-    { key: "phone", header: "Phone", type: "text", value: (r) => r.phone, render: (r) => (r.phone ? formatPhone(r.phone) : "—") },
+      render: (r) => <CtPill dot color={STATUS_COLORS[r.status] ?? "#6b7280"}>{statusLabel(r.status)}</CtPill> },
+    { key: "phone", header: "Phone", type: "text", value: (r) => r.phone, render: (r) => (r.phone ? <span className="ct-phone">{formatPhone(r.phone)}</span> : "—") },
     { key: "email", header: "Email", type: "text", value: (r) => r.email, render: (r) => r.email ?? "—" },
     { key: "geo", header: "Counties", type: "text", value: (r) => r.counties.join(", "),
       render: (r) => r.counties.length ? r.counties.join(", ") : (r.states.join(", ") || "—") },
     { key: "source", header: "Source", type: "text", value: (r) => r.source, render: (r) => r.source ?? "—", defaultHidden: true },
-    { key: "owner", header: "Owner", type: "text", value: (r) => r.owner?.name ?? null, render: (r) => r.owner?.name ?? "—" },
+    { key: "owner", header: "Owner", type: "text", value: (r) => r.owner?.name ?? null,
+      render: (r) => r.owner ? (
+        <span className="ct-owner">
+          <span className="ct-owner-av">{initialsOf(r.owner.name)}</span>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shortName(r.owner.name)}</span>
+        </span>
+      ) : "—" },
     { key: "last", header: "Last Contact", type: "date", value: (r) => r.lastContactedAt, render: (r) => fmtDate(r.lastContactedAt) },
     { key: "next", header: "Next Follow-up", type: "date", value: (r) => r.nextFollowUpDate,
       render: (r) => {
@@ -134,16 +156,29 @@ export function Contacts() {
   ];
 
   return (
-    <div className="page">
+    <div className="page contacts-page">
       <div className="page-header">
         <div>
           <h1>Contacts</h1>
-          <span className="muted" style={{ fontSize: 13.5 }}>Acquisitions — sellers, prospects, and inbound leads you're sourcing from</span>
+          <div className="page-sub">Acquisitions — sellers, prospects, and inbound leads you're sourcing from</div>
         </div>
         <div className="row" style={{ gap: 8 }}>
-          {canManage && <button className="small" onClick={() => setShowImport(true)}>Import CSV</button>}
-          <button className="small" onClick={() => setShowExport("filtered")}>Export</button>
-          {canManage && <button className="primary" onClick={() => setEditing("new")}>+ New Contact</button>}
+          {canManage && (
+            <button className="ct-btn" onClick={() => setShowImport(true)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+              Import CSV
+            </button>
+          )}
+          <button className="ct-btn" onClick={() => setShowExport("filtered")}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" /></svg>
+            Export
+          </button>
+          {canManage && (
+            <button className="pbtn pbtn-primary" onClick={() => setEditing("new")}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              New Contact
+            </button>
+          )}
         </div>
       </div>
 
@@ -154,43 +189,51 @@ export function Contacts() {
         <MetricCard label="Follow-ups Due" value={followUpsDue} valueColor={followUpsDue > 0 ? "var(--amber)" : undefined} />
       </div>
 
-      {/* Lists — reusable groupings; click to filter (multi-select), counts live. */}
-      <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
-        <span className="ddx-label" style={{ marginRight: 2 }}>Lists</span>
-        {lists.length === 0 && <span className="muted" style={{ fontSize: 12.5 }}>No lists yet.</span>}
-        {lists.map((l) => (
-          <span key={l.id} className={`chip ${listFilter.includes(l.id) ? "active" : ""}`}
-            onClick={() => setListFilter((p) => p.includes(l.id) ? p.filter((x) => x !== l.id) : [...p, l.id])}>
-            {l.name} <span style={{ opacity: .65, fontVariantNumeric: "tabular-nums" }}>{l.count}</span>
+      <div className="ct-card">
+        <SortableTable
+          customizeId="contacts-list"
+          toolbar={
+            <>
+              <SearchInput value={q} onChange={setQ} placeholder="Search name, entity, email, phone, county, owner…" ariaLabel="Search contacts" />
+              <Select ariaLabel="Type" width={140} clearable value={typeFilter} onChange={(v) => setTypeFilter(v ?? "")} placeholder="All types"
+                options={TYPES.map(([v, l]) => ({ value: v, label: l }))} />
+              <Select ariaLabel="Status" width={140} clearable value={statusFilter} onChange={(v) => setStatusFilter(v ?? "")} placeholder="All statuses"
+                options={STATUSES.map(([v, l]) => ({ value: v, label: l }))} />
+              {/* Lists — reusable groupings; click to filter (multi-select), counts live. */}
+              <span className="ct-lists">
+                <span className="ct-lists-lbl">Lists:</span>
+                {lists.map((l) => (
+                  <span key={l.id} className={`chip ${listFilter.includes(l.id) ? "active" : ""}`}
+                    onClick={() => setListFilter((p) => p.includes(l.id) ? p.filter((x) => x !== l.id) : [...p, l.id])}>
+                    {l.name} <span style={{ opacity: .65, fontVariantNumeric: "tabular-nums" }}>{l.count}</span>
+                  </span>
+                ))}
+                {listFilter.length > 0 && <button className="link-btn" style={{ fontSize: 12 }} onClick={() => setListFilter([])}>Clear</button>}
+                {canManage && <button className="ct-managelists" onClick={() => setShowLists(true)}>+ Manage lists</button>}
+              </span>
+              {(q || typeFilter || statusFilter) && <span className="muted" style={{ fontSize: 13, whiteSpace: "nowrap" }}>Showing {filtered.length} of {rows.length}</span>}
+            </>
+          }
+          columns={columns}
+          rows={filtered}
+          rowKey={(r) => r.id}
+          onRowClick={(r) => nav(`/contacts/${r.id}`)}
+          rowHref={(r) => `/contacts/${r.id}`}
+          defaultSort={{ key: "next", dir: "asc" }}
+          empty={rows.length === 0
+            ? (canManage ? "No contacts yet — click “+ New Contact” to start building your acquisitions network." : "No contacts yet.")
+            : "No contacts match your filters."}
+          selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
+        />
+        <div className="ct-foot">
+          <span>{filtered.length} contact{filtered.length === 1 ? "" : "s"}</span>
+          <span className="ct-pages">
+            <button className="ct-pgbtn" disabled aria-label="Previous page">‹</button>
+            <span className="ct-pgcur">1</span>
+            <button className="ct-pgbtn" disabled aria-label="Next page">›</button>
           </span>
-        ))}
-        {listFilter.length > 0 && <button className="link-btn" style={{ fontSize: 12 }} onClick={() => setListFilter([])}>Clear</button>}
-        {canManage && <button className="small" onClick={() => setShowLists(true)}>Manage lists</button>}
+        </div>
       </div>
-
-      <SortableTable
-        customizeId="contacts-list"
-        toolbar={
-          <>
-            <SearchInput value={q} onChange={setQ} placeholder="Search name, entity, email, phone, county, owner…" ariaLabel="Search contacts" />
-            <Select ariaLabel="Type" width={150} clearable value={typeFilter} onChange={(v) => setTypeFilter(v ?? "")} placeholder="All types"
-              options={TYPES.map(([v, l]) => ({ value: v, label: l }))} />
-            <Select ariaLabel="Status" width={160} clearable value={statusFilter} onChange={(v) => setStatusFilter(v ?? "")} placeholder="All statuses"
-              options={STATUSES.map(([v, l]) => ({ value: v, label: l }))} />
-            {(q || typeFilter || statusFilter) && <span className="muted" style={{ fontSize: 13, whiteSpace: "nowrap" }}>Showing {filtered.length} of {rows.length}</span>}
-          </>
-        }
-        columns={columns}
-        rows={filtered}
-        rowKey={(r) => r.id}
-        onRowClick={(r) => nav(`/contacts/${r.id}`)}
-        rowHref={(r) => `/contacts/${r.id}`}
-        defaultSort={{ key: "next", dir: "asc" }}
-        empty={rows.length === 0
-          ? (canManage ? "No contacts yet — click “+ New Contact” to start building your acquisitions network." : "No contacts yet.")
-          : "No contacts match your filters."}
-        selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
-      />
 
       {canManage && (
         <ContactsBulkBar

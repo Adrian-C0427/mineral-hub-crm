@@ -149,6 +149,31 @@ export function Pipeline() {
   function load() { api.get<DealSummary[]>("/deals?recordType=OPPORTUNITY").then(setDeals); }
   useEffect(load, []);
 
+  // While dragging, a rAF loop auto-scrolls whichever column body the pointer
+  // hovers (near its top/bottom edge) and the board horizontally (near its
+  // left/right edge) — the columns scroll themselves now, not the page.
+  const autoScrollTimer = useRef<number | null>(null);
+  function autoScrollTick() {
+    const d = dragRef.current;
+    if (d?.moved) {
+      const { x, y } = posRef.current;
+      const EDGE = 70, MAX = 16;
+      const under = document.elementFromPoint(x, y) as HTMLElement | null;
+      const body = under?.closest(".kanban-col")?.querySelector(".kanban-col-body") as HTMLElement | null;
+      if (body) {
+        const r = body.getBoundingClientRect();
+        if (y < r.top + EDGE) body.scrollTop -= MAX * ((r.top + EDGE - y) / EDGE);
+        else if (y > r.bottom - EDGE) body.scrollTop += MAX * ((y - (r.bottom - EDGE)) / EDGE);
+      }
+      const board = document.querySelector(".pl2-page .kanban") as HTMLElement | null;
+      if (board) {
+        const r = board.getBoundingClientRect();
+        if (x < r.left + EDGE) board.scrollLeft -= MAX * ((r.left + EDGE - x) / EDGE);
+        else if (x > r.right - EDGE) board.scrollLeft += MAX * ((x - (r.right - EDGE)) / EDGE);
+      }
+    }
+  }
+
   // ------ pointer-based drag: the card follows the cursor with no native-DnD lag
   function startDrag(e: React.PointerEvent, deal: DealSummary) {
     if (!canMove || e.button !== 0) return;
@@ -158,6 +183,7 @@ export function Pipeline() {
     const start = { x: e.clientX, y: e.clientY };
     posRef.current = start;
     setDrag({ id: deal.id, w: card.width, offX, offY, moved: false });
+    if (autoScrollTimer.current == null) autoScrollTimer.current = window.setInterval(autoScrollTick, 16);
 
     const onMove = (ev: PointerEvent) => {
       const d = dragRef.current;
@@ -179,6 +205,7 @@ export function Pipeline() {
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      if (autoScrollTimer.current != null) { window.clearInterval(autoScrollTimer.current); autoScrollTimer.current = null; }
       document.body.classList.remove("pipeline-dragging");
       window.getSelection()?.removeAllRanges(); // clear any stray text selection from the drag
       const d = dragRef.current;
@@ -562,9 +589,9 @@ function PipelineCustomize({ prefs, onChange }: { prefs: PipelinePrefs; onChange
             </div>
           </div>
           <div className="cv-head" style={{ borderTop: "1px solid var(--border)" }}><strong>Card fields</strong></div>
-          <div className="cv-list">
+          <div className="cv-fields-2">
             {CARD_FIELDS.map(([k, label]) => (
-              <label key={k} className="cv-row cv-check" style={{ justifyContent: "flex-start" }}>
+              <label key={k} className="cv-check" style={{ justifyContent: "flex-start" }}>
                 <input type="checkbox" checked={prefs.fields[k]} onChange={() => toggleField(k)} /> <span>{label}</span>
               </label>
             ))}

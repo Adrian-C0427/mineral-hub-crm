@@ -164,12 +164,46 @@ export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string
           </div>
         )}
 
-        <div style={{ marginBottom: 16 }}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-            <span className="ddx-label">Buyer-facing summary</span>
-            <span className="muted" style={{ fontSize: 11.5 }}>Shown on the offering page</span>
+        {/* Summary + Listing Quality side by side (reference layout). Quality is
+            computed live from this listing's real state — nothing invented. */}
+        <div className="dpp-sumgrid" style={{ marginBottom: 16 }}>
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+              <span className="ddx-label">Buyer-facing summary</span>
+              <span className="muted" style={{ fontSize: 11.5 }}>Shown on the offering page</span>
+            </div>
+            <textarea rows={3} style={{ flex: 1, minHeight: 110 }} disabled={!canEdit} value={summary} onChange={(e) => setSummary(e.target.value)} onBlur={() => summary !== (p.portalSummary ?? "") && patch({ summary })} placeholder="Describe the opportunity for buyers…" />
           </div>
-          <textarea rows={3} disabled={!canEdit} value={summary} onChange={(e) => setSummary(e.target.value)} onBlur={() => summary !== (p.portalSummary ?? "") && patch({ summary })} placeholder="Describe the opportunity for buyers…" />
+          {(() => {
+            const items = [
+              { label: "Published & shareable", done: p.publishedToPortal },
+              { label: "Asking price set", done: (p.portalAskPrice ?? p.askPrice) != null },
+              ...((p.files?.length ?? 0) > 0 ? [{ label: "Documents shared", done: (p.files ?? []).some((f) => f.visibleToBuyers) }] : []),
+              { label: "Buyer-facing summary", done: summary.trim() !== "" },
+              { label: "Contact person listed", done: contacts.some((c) => c.name.trim() !== "") },
+            ];
+            const done = items.filter((i) => i.done).length;
+            const pct = Math.round((done / items.length) * 100);
+            return (
+              <div className="dpp-quality">
+                <div className="dpp-quality-head">
+                  <span className="ddx-label">Listing Quality</span>
+                  <span className={`dpp-quality-pct ${pct === 100 ? "full" : ""}`}>{pct}%</span>
+                </div>
+                <div className="dpp-quality-bar"><div className={pct === 100 ? "full" : ""} style={{ width: `${pct}%` }} /></div>
+                <div className="dpp-quality-list">
+                  {items.map((q) => (
+                    <div key={q.label} className="dpp-quality-item">
+                      <span className={`dpp-qdot ${q.done ? "done" : ""}`}>
+                        {q.done && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.2" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>}
+                      </span>
+                      <span className={`dpp-qlbl ${q.done ? "done" : ""}`}>{q.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* Per-deal contacts — the point(s) of contact differ per listing, so they

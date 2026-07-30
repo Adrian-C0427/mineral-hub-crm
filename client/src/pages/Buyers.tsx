@@ -78,15 +78,26 @@ export function Buyers() {
   ];
 
   return (
-    <div className="page">
+    <div className="page contacts-page">
       <div className="page-header">
         <h1>Buyers</h1>
-        <div className="row">
-          {can("createBuyers") && <button onClick={() => setShowImport(true)}>Import CSV</button>}
-          {can("createBuyers") && <button className="primary" onClick={() => setShowNew(true)}>+ New Buyer</button>}
+        <div className="row" style={{ gap: 8 }}>
+          {can("createBuyers") && (
+            <button className="ct-btn" onClick={() => setShowImport(true)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+              Import CSV
+            </button>
+          )}
+          {can("createBuyers") && (
+            <button className="pbtn pbtn-primary" onClick={() => setShowNew(true)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              New Buyer
+            </button>
+          )}
         </div>
       </div>
 
+      <div className="ct-card" style={{ marginTop: 0 }}>
       <SortableTable
         customizeId="buyers-list"
         toolbar={
@@ -106,6 +117,15 @@ export function Buyers() {
         empty={buyers.length === 0 ? "No buyers yet. Import a CSV or add one manually." : "No buyers match your search."}
         selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
       />
+      <div className="ct-foot">
+        <span>{filtered.length} buyer{filtered.length === 1 ? "" : "s"}</span>
+        <span className="ct-pages">
+          <button className="ct-pgbtn" disabled aria-label="Previous page">‹</button>
+          <span className="ct-pgcur">1</span>
+          <button className="ct-pgbtn" disabled aria-label="Next page">›</button>
+        </span>
+      </div>
+      </div>
 
       <BulkActionsBar
         selectedIds={[...sel.selected]}

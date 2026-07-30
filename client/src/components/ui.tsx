@@ -114,15 +114,29 @@ export function SearchInput({ value, onChange, placeholder, ariaLabel }: {
   );
 }
 
+/** Design-system pill (reference spec): 22px tinted capsule, optional leading
+ *  status dot. The one pill used for types, statuses, stages, and priorities. */
+export function CtPill({ color, dot, title, children }: { color: string; dot?: boolean; title?: string; children: ReactNode }) {
+  return (
+    <span className="ct-pill" title={title} style={{ color, background: `${color.startsWith("#") ? color + "1A" : `color-mix(in srgb, ${color} 10%, transparent)`}`, border: `1px solid ${color.startsWith("#") ? color + "40" : `color-mix(in srgb, ${color} 25%, transparent)`}` }}>
+      {dot && <span className="ct-pill-dot" style={{ background: color }} />}
+      {children}
+    </span>
+  );
+}
+
+const PRIORITY_COLORS: Record<string, string> = { HIGH: "#ef4444", MEDIUM: "#f59e0b", LOW: "#22c55e" };
+
 export function PriorityBadge({ priority }: { priority: "HIGH" | "MEDIUM" | "LOW" }) {
   // Priority is computed, not user-set — the tooltip explains why it changes on its own.
   return (
-    <span
-      className={`badge priority-${priority.toLowerCase()}`}
+    <CtPill
+      dot
+      color={PRIORITY_COLORS[priority] ?? "#6b7280"}
       title="Priority is computed automatically from deadline proximity and deal stage — e.g. it relaxes once a buyer is selected and the deal moves to closing."
     >
       {prettyEnum(priority)}
-    </span>
+    </CtPill>
   );
 }
 
@@ -131,14 +145,7 @@ export function StageBadge({ stage, pipelineId }: { stage: string; pipelineId?: 
   // Tinted with the stage's (customizable, per-pipeline) color so stage colors
   // stay consistent everywhere a stage appears.
   const c = colorOf(stage, pipelineId);
-  return (
-    <span
-      className={`badge stage-${stage.toLowerCase()}`}
-      style={{ color: c, background: `color-mix(in srgb, ${c} 12%, transparent)`, borderColor: `color-mix(in srgb, ${c} 35%, transparent)` }}
-    >
-      {label(stage)}
-    </span>
-  );
+  return <CtPill color={c}>{label(stage)}</CtPill>;
 }
 
 export function RelationshipDot({ status }: { status: "HOT" | "WARM" | "COLD" }) {
@@ -215,6 +222,7 @@ export function EmptyState({ title, icon, children }: { title?: ReactNode; icon?
 
 export function Modal({
   title,
+  subtitle,
   children,
   onClose,
   footer,
@@ -222,6 +230,8 @@ export function Modal({
   dirty,
 }: {
   title: string;
+  /** Dim one-liner under the title (reference modal header). */
+  subtitle?: ReactNode;
   children: ReactNode;
   onClose: () => void;
   footer?: ReactNode;
@@ -241,9 +251,12 @@ export function Modal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
-          <h3>{title}</h3>
-          <button className="icon-btn" onClick={() => requestClose("x")} aria-label="Close">
-            ×
+          <div>
+            <h3>{title}</h3>
+            {subtitle && <div className="modal-sub">{subtitle}</div>}
+          </div>
+          <button className="icon-btn modal-x" onClick={() => requestClose("x")} aria-label="Close">
+            ✕
           </button>
         </div>
         <div className="modal-body">{children}</div>

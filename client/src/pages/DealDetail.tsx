@@ -5,7 +5,7 @@ import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
 import {
   Spinner, PriorityBadge, StageBadge, MetricCard, EstimatedProfitCard, Modal,
-  MatchBar, Banner, ConfirmDelete, ConfirmDialog, BackLink, OverflowMenu, showToast,
+  Banner, ConfirmDelete, ConfirmDialog, BackLink, OverflowMenu, showToast, CtPill,
 } from "../components/ui";
 import { Pencil } from "lucide-react";
 import { useUnsavedSection } from "../lib/unsaved";
@@ -75,6 +75,8 @@ export function DealDetail() {
   const [tab, setTab] = useState<"general" | "additional" | "buyers" | "marketplace" | "documents">("general");
   const [confirmSplit, setConfirmSplit] = useState(false);
   const [splitBusy, setSplitBusy] = useState(false);
+  // Match list shows the top 6 by default (reference); one click expands.
+  const [showAllMatches, setShowAllMatches] = useState(false);
 
   const loadDeal = useCallback(() => api.get<DealDetailData>(`/deals/${id}`).then(setDeal), [id]);
   const loadMatches = useCallback(() => api.get<MatchRec[]>(`/deals/${id}/matches`).then(setMatches), [id]);
@@ -144,6 +146,21 @@ export function DealDetail() {
       </div>
 
       {deal.stage === "DEAD" && deal.deadReason && <Banner kind="error">Dead: {deal.deadReason}</Banner>}
+
+      {/* Deadline alert — Find Buyer By is close (or past) and no buyer is
+          attached yet. One click lands on the Buyers tab. */}
+      {deal.stage !== "CLOSED" && deal.stage !== "DEAD" && !deal.selectedBuyer && deal.findBuyerByDate && (() => {
+        const days = Math.ceil((new Date(deal.findBuyerByDate).getTime() - Date.now()) / 86_400_000);
+        if (days > 7) return null;
+        const when = days < 0 ? `was ${-days} day${days === -1 ? "" : "s"} ago` : days === 0 ? "is today" : `is in ${days} day${days === 1 ? "" : "s"}`;
+        return (
+          <div className="dd-alert">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /><path d="M12 9v4M12 17h.01" /></svg>
+            <span className="dd-alert-msg"><b>Find Buyer By {when}</b> ({fmtDate(deal.findBuyerByDate)}) and no buyer is attached to this deal yet.</span>
+            <button type="button" className="link-btn dd-alert-link" onClick={() => setTab("buyers")}>Open Buyers tab →</button>
+          </div>
+        );
+      })()}
 
       {deal.parent && (
         <Banner kind="info">
@@ -229,19 +246,17 @@ export function DealDetail() {
       </div>
 
       {deal.selectedBuyer && (
-        <div className="panel">
-          <div className="row">
-            <strong>Selected buyer:</strong> <Link to={`/buyers/${deal.selectedBuyer.id}`} className="subtle-link" style={{ fontWeight: 600 }}>{deal.selectedBuyer.name}</Link>
-            {deal.selectedBuyer.companyName && deal.selectedBuyer.companyName !== deal.selectedBuyer.name && <span className="muted">· {deal.selectedBuyer.companyName}</span>}
-            <span className="spacer" />
-            <strong>Profit est:</strong> <span>{money(deal.profitEst)}</span>
-          </div>
+        <div className="dd-selected-banner">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>
+          <span><b>Selected buyer:</b> <Link to={`/buyers/${deal.selectedBuyer.id}`} className="subtle-link" style={{ fontWeight: 700 }}>{deal.selectedBuyer.name}</Link>
+            {deal.selectedBuyer.companyName && deal.selectedBuyer.companyName !== deal.selectedBuyer.name && <span className="muted"> · {deal.selectedBuyer.companyName}</span>}</span>
+          <span className="dd-selected-right"><b>Profit est:</b> <b className="pos">{money(deal.profitEst)}</b></span>
         </div>
       )}
 
       {/* Offers */}
       {deal.offers.length > 0 && (
-        <div className="panel">
+        <div className="panel dd-offers">
           <h3>Offers</h3>
           <div className="table-scroll">
             <table className="data-table">
@@ -249,14 +264,14 @@ export function DealDetail() {
               <tbody>
                 {deal.offers.map((o) => (
                   <tr key={o.id}>
-                    <td>{o.buyer.name}</td>
-                    <td className="right">{money(o.amount)}</td>
+                    <td><Link to={`/buyers/${o.buyer.id}`} className="dd-offer-buyer">{o.buyer.name}</Link></td>
+                    <td className="right" style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{money(o.amount)}</td>
                     <td>{o.status === "ACCEPTED" || deal.selectedOfferId === o.id ? "Accepted Offer" : prettyEnum(o.status)}</td>
                     <td>{fmtDate(o.expirationDate)}</td>
                     <td className="cell-clamp" title={o.conditions ?? undefined}>{o.conditions ?? "—"}</td>
                     <td className="right">
                       <span className="row" style={{ gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
-                        {deal.selectedOfferId === o.id ? <span className="badge resp-offer">Accepted Offer</span> :
+                        {deal.selectedOfferId === o.id ? <CtPill color="#22c55e">Accepted Offer</CtPill> :
                           can("editDeals") ? <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button> : null}
                         {can("editDeals") && <OfferRowActions offer={o} accepted={deal.selectedOfferId === o.id} onChanged={refreshAll} />}
                       </span>
@@ -304,42 +319,60 @@ export function DealDetail() {
                 <button className="small primary" disabled={selected.size === 0} onClick={() => setShowEmail(true)}>Send Deal via Email</button>
                 <button className="small" disabled={selected.size === 0} onClick={markContacted}>Mark as Contacted</button>
                 <button className="small" disabled={selected.size === 0} onClick={exportSelected}>Export Selected (CSV)</button>
-                <button className="small" disabled={selected.size === 0} onClick={() => setSelected(new Set())}>Deselect all</button>
+                {selected.size > 0 && <button className="link-btn" style={{ fontSize: 12.5 }} onClick={() => setSelected(new Set())}>Deselect all</button>}
+                <span className="mr-legend">● matched · ○ not in buyer's buy box</span>
               </div>
             )}
-            {matches.map((m) => (
+            <div className="mr-list">
+            {(showAllMatches ? matches : matches.slice(0, 6)).map((m) => {
+              const ring = 2 * Math.PI * 16;
+              const ringColor = m.matchPercent >= 70 ? "#22c55e" : m.matchPercent >= 55 ? "#f5b04b" : "#5a6274";
+              return (
               <div className={`match-card ${selected.has(m.buyerId) ? "match-selected" : ""}`} key={m.buyerId}>
                 <div className="match-card-head">
                   {can("editDeals") && <input type="checkbox" checked={selected.has(m.buyerId)} onChange={() => toggleMatch(m.buyerId)} />}
                   <span className="match-rank">#{m.rank}</span>
-                  {/* Company name only — the primary identifier when evaluating matches.
-                      Contact person is available on the Buyer Profile. */}
-                  <Link to={`/buyers/${m.buyerId}`} className="match-name subtle-link" title={m.companyName || m.buyerName}>{m.companyName || m.buyerName}</Link>
-                  <span className="match-right">
-                    <span className="match-pct-num" style={{ color: pctColor(m.matchPercent) }}>{m.matchPercent}%</span>
-                    {/* Coverage context: "100%" against a sparse buy box is weak
-                        evidence, so say how many criteria were actually compared. */}
-                    <span className="muted" style={{ fontSize: 11.5, whiteSpace: "nowrap" }}
-                      title="How many buy-box criteria this buyer has set, and how many this deal matches">
-                      {m.criteriaSpecified > 0
-                        ? `${m.criteriaSpecifiedMatched}/${m.criteriaSpecified} criteria`
-                        : "no buy box set"}
-                    </span>
+                  {/* Score ring (reference): circular progress with the % inside. */}
+                  <span className="mr-ring" aria-label={`${m.matchPercent}% match`}>
+                    <svg width="40" height="40" viewBox="0 0 40 40">
+                      <circle cx="20" cy="20" r="16" fill="none" stroke="var(--hairline)" strokeWidth="4" />
+                      <circle cx="20" cy="20" r="16" fill="none" stroke={ringColor} strokeWidth="4" strokeLinecap="round"
+                        strokeDasharray={`${((ring * m.matchPercent) / 100).toFixed(1)} ${ring.toFixed(1)}`} transform="rotate(-90 20 20)" />
+                    </svg>
+                    <span className="mr-ring-n">{m.matchPercent}</span>
+                  </span>
+                  <span className="mr-title">
+                    {/* Company name only — the primary identifier when evaluating matches.
+                        Contact person is available on the Buyer Profile. */}
+                    <Link to={`/buyers/${m.buyerId}`} className="match-name subtle-link" title={m.companyName || m.buyerName}>{m.companyName || m.buyerName}</Link>
+                    {m.matchPercent >= 70 && m.criteriaSpecified >= 4 && <CtPill color="#22c55e">Strong fit</CtPill>}
+                    {m.lastContactDate && <span className="mr-contacted">Contacted</span>}
+                  </span>
+                  <span className="mr-crit" title="How many buy-box criteria this buyer has set, and how many this deal matches">
+                    {m.criteriaSpecified > 0 ? `${m.criteriaSpecifiedMatched}/${m.criteriaSpecified} criteria met` : "no buy box set"}
                   </span>
                   {can("editDeals") && <button className="small primary match-log" onClick={() => setLogBuyer({ id: m.buyerId, name: m.buyerName })}>Log contact</button>}
                 </div>
-                <MatchBar value={m.matchPercent} />
-                <div>
+                <div className="mr-tags">
                   {m.matching.map((c) => <span key={c.key} className="crit-tag crit-yes">{c.label}</span>)}
                   {m.nonMatching.map((c) => <span key={c.key} className="crit-tag crit-no">{c.label}</span>)}
                 </div>
-                <div className="dc-meta" style={{ marginTop: 8, gap: 16, alignItems: "center" }}>
-                  <span>Owner(s): {m.owners.length ? m.owners.join(", ") : "—"} · {m.previousDealsClosed} closed together · Last contact: {m.lastContactDate ? fmtDate(m.lastContactDate) : "never"}
-                    {/* "stale" only makes sense for aged contact — a never-contacted buyer isn't stale. */}
-                    {m.stale && m.lastContactDate && <span className="stale-flag" title="No contact in a while — worth a follow-up"> · stale</span>}</span>
+                <div className="mr-meta">
+                  Owner(s): {m.owners.length ? m.owners.join(", ") : "—"} · {m.previousDealsClosed} closed together · Last contact: {m.lastContactDate ? fmtDate(m.lastContactDate) : "never"}
+                  {/* "stale" only makes sense for aged contact — a never-contacted buyer isn't stale. */}
+                  {m.stale && m.lastContactDate && <span className="stale-flag" title="No contact in a while — worth a follow-up"> · stale</span>}
                 </div>
               </div>
-            ))}
+              );
+            })}
+            </div>
+            {matches.length > 6 && (
+              <div className="mr-more">
+                <button className="ct-btn" onClick={() => setShowAllMatches((v) => !v)}>
+                  {showAllMatches ? "Show top 6" : `Show all ${matches.length} buyers`}
+                </button>
+              </div>
+            )}
           </>
         )}
       </CollapsibleSection>
@@ -582,14 +615,28 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
     onSaved(); // editing characteristics auto-refreshes matches
   }
 
+  // "N/12 filled" completeness meter (the 12 characteristics shown below).
+  const filled = [
+    (deal.states?.length ?? 0) > 0 || !!deal.state, deal.counties.length > 0, deal.basins.length > 0,
+    deal.formations.length > 0, deal.assetTypes.length > 0, deal.acreageNma != null,
+    deal.nra != null, deal.ourPrice != null, deal.askPrice != null,
+    !!deal.operator, !!deal.rrc, deal.abstractIds.length > 0,
+  ].filter(Boolean).length;
+
   return (
     <div className="panel">
       <div className="section-head">
         <h3>Deal characteristics</h3>
         {edit ? <div className="row"><button className="small" onClick={() => { setF(deal); setEdit(false); }}>Cancel</button><button className="small primary" onClick={save}>Save</button></div>
-          : <button className="small" onClick={() => setEdit(true)}>Edit</button>}
+          : (
+            <div className="row" style={{ gap: 10, alignItems: "center" }}>
+              <span className="ddc-meter-n">{filled}/12 filled</span>
+              <span className="ddc-meter"><span className={`ddc-meter-fill ${filled === 12 ? "full" : ""}`} style={{ width: `${Math.round((filled / 12) * 100)}%` }} /></span>
+              <button className="small" onClick={() => setEdit(true)}>Edit</button>
+            </div>
+          )}
       </div>
-      {!edit ? (
+      {!edit ? (<>
         <div className="ddc-grid">
           <DKV k="State" v={(deal.states?.length ? deal.states : (deal.state ? [deal.state] : [])).join(", ") || null} />
           <DKV k="County" v={deal.counties.join(", ") || null} />
@@ -605,7 +652,31 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
           {/* Label the abstract with its county only when unambiguous. */}
           <DKV k={deal.counties.length === 1 ? `Abstract (${deal.counties[0]} Co.)` : "Abstract"} v={abstractLabel || null} span2 />
         </div>
-      ) : (
+        {/* Derived economics — per-NRA figures and the implied ask-over-cost
+            margin, computed from the deal's own numbers (shown when they exist). */}
+        {deal.ourPrice != null && deal.nra ? (
+          <div className="ddc-strip">
+            <div>
+              <div className="ddx-label">Our $ / NRA</div>
+              <div className="ddc-strip-v">{money(Math.round(deal.ourPrice / deal.nra))}</div>
+            </div>
+            {deal.askPrice != null && (
+              <div>
+                <div className="ddx-label">Ask $ / NRA</div>
+                <div className="ddc-strip-v dim">{money(Math.round(deal.askPrice / deal.nra))}</div>
+              </div>
+            )}
+            {deal.askPrice != null && deal.ourPrice > 0 && (
+              <div>
+                <div className="ddx-label">Implied Margin</div>
+                <div className={`ddc-strip-v ${deal.askPrice >= deal.ourPrice ? "pos" : "neg"}`}>
+                  {deal.askPrice >= deal.ourPrice ? "+" : ""}{Math.round(((deal.askPrice - deal.ourPrice) / deal.ourPrice) * 100)}%
+                </div>
+              </div>
+            )}
+          </div>
+        ) : null}
+      </>) : (
         <div className="dd-grid">
           <GeoFields
             states={f.states ?? []} onStatesChange={setArr("states")}
@@ -652,6 +723,14 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
       </div>
     </div>
   );
+}
+
+/** Compact relative day count for timeline milestones — "today", "13d ago", "in 2d". */
+function relDays(iso: string): string {
+  const days = Math.round((new Date(iso).getTime() - Date.now()) / 86_400_000);
+  if (days === 0) return "today";
+  if (days < 0) return `${-days}d ago`;
+  return `in ${days}d`;
 }
 
 function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved: () => void }) {
@@ -730,23 +809,34 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
       {!edit ? (
         noDates ? null : (
         <div className="ctl">
-          {milestones.map((m) => {
-            const done = m.date != null && new Date(m.date).getTime() <= Date.now();
-            return (
-              <div className={`ctl-item ${done ? "done" : ""}`} key={m.label}>
-                <div className="ctl-rail">
-                  <span className={`ctl-dot ${done ? "done" : ""}`} />
-                </div>
-                <div className="ctl-body">
-                  <div className={`ctl-lbl ${done ? "done" : ""}`}>{m.label}{m.overridden && <em style={{ letterSpacing: 0, textTransform: "none" }}> (overridden)</em>}</div>
-                  <div className="ctl-date">
-                    {fmtDate(m.date)}
-                    {m.overridden && m.revertKey && <button className="small" onClick={() => revert(m.revertKey!)}>Revert to auto</button>}
+          {(() => {
+            // The first upcoming milestone gets the amber "next up" treatment
+            // and a relative-time chip; the rest show quiet relative times.
+            const nextLabel = milestones.find((m) => m.date != null && new Date(m.date).getTime() > Date.now())?.label;
+            return milestones.map((m) => {
+              const done = m.date != null && new Date(m.date).getTime() <= Date.now();
+              const isNext = m.label === nextLabel;
+              return (
+                <div className={`ctl-item ${done ? "done" : ""}`} key={m.label}>
+                  <div className="ctl-rail">
+                    <span className={`ctl-dot ${done ? "done" : ""} ${isNext ? "next" : ""}`} />
+                  </div>
+                  <div className="ctl-body ctl-row">
+                    <div>
+                      <div className="ctl-toprow">
+                        <span className={`ctl-lbl ${done ? "done" : ""} ${isNext ? "next" : ""}`}>{m.label}{m.overridden && <em style={{ letterSpacing: 0, textTransform: "none" }}> (overridden)</em>}</span>
+                        {m.date && <span className={`ctl-when ${isNext ? "chip" : "pill"}`}>{relDays(m.date)}</span>}
+                      </div>
+                      <div className={`ctl-date ${isNext ? "next" : ""}`}>
+                        {fmtDate(m.date)}
+                        {m.overridden && m.revertKey && <button className="small" onClick={() => revert(m.revertKey!)}>Revert to auto</button>}
+                      </div>
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            });
+          })()}
         </div>
         )
       ) : (
@@ -758,15 +848,36 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
           <Fld l="Closed Date"><DateField value={cd} onChange={(v) => setCd(v)} /></Fld>
         </div>
       )}
+
+      {/* Contract window — where today sits between Under Contract and Final
+          Closing (shown once both anchor dates exist). */}
+      {!edit && deal.dateUnderContract && deal.finalClosingDate && (() => {
+        const start = new Date(deal.dateUnderContract).getTime();
+        const end = new Date(deal.finalClosingDate).getTime();
+        const total = Math.max(1, Math.round((end - start) / 86_400_000));
+        const day = Math.round((Date.now() - start) / 86_400_000) + 1;
+        const pct = Math.min(100, Math.max(0, Math.round(((day - 1) / total) * 100)));
+        const left = Math.max(0, Math.ceil((end - Date.now()) / 86_400_000));
+        const overdue = Date.now() > end && deal.stage !== "CLOSED";
+        return (
+          <div className="ctl-window">
+            <div className="ctl-window-head">
+              <span className="ddx-label">Contract Window</span>
+              <span className="ctl-window-n">Day {Math.min(day, total)} of {total} · {pct}%</span>
+            </div>
+            <div className="ctl-window-bar"><div style={{ width: `${pct}%` }} className={overdue ? "over" : ""} /></div>
+            <div className="ctl-window-sub">
+              {overdue ? `${Math.ceil((Date.now() - end) / 86_400_000)} days past final closing` : `${left} days until final closing · on pace`}
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
 
 
-/** Match-percent color scale (mirrors the reference: green / amber / red). */
-function pctColor(pct: number): string {
-  return pct >= 67 ? "#4ade80" : pct >= 34 ? "#f59e0b" : "#f87171";
-}
+
 
 /** Reference-style KV: uppercase micro-label over a semibold value (mono for
  *  numerics, green accent for the buyer-facing ask price, dimmed em-dash when empty). */

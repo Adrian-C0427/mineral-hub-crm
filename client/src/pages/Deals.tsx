@@ -16,6 +16,21 @@ type Scope = "all" | "active" | "closed" | "archived";
 
 const SCOPE_TITLE: Record<Scope, string> = { all: "Deals", active: "Active Deals", closed: "Closed Deals", archived: "Archived Deals" };
 
+/** Compact money for the header stat line — "$93.7K", "$1.2M". */
+function moneyCompact(v: number): string {
+  const a = Math.abs(v);
+  if (a >= 1_000_000) return `$${(v / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+  if (a >= 1_000) return `$${(v / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
+  return `$${Math.round(v)}`;
+}
+
+const initialsOf = (name: string): string =>
+  name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
+const shortName = (name: string): string => {
+  const parts = name.split(/\s+/).filter(Boolean);
+  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1]![0]}.` : name;
+};
+
 /** Active = still in play; Closed = won; Archived = dead. */
 function inScope(d: DealSummary, scope: Scope): boolean {
   if (scope === "active") return d.stage !== "CLOSED" && d.stage !== "DEAD";
@@ -75,26 +90,54 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
       render: (d) => <span style={d.isOverdue ? { color: "var(--red)" } : undefined}>{fmtDate(d.findBuyerByDate)}</span> },
     { key: "oc", header: "Orig. Closing", type: "date", value: (d) => d.originalClosingDate, render: (d) => fmtDate(d.originalClosingDate), defaultHidden: true },
     { key: "fc", header: "Final Closing", type: "date", value: (d) => d.finalClosingDate, render: (d) => fmtDate(d.finalClosingDate) },
-    { key: "buyer", header: "Current Buyer", type: "text", value: (d) => d.selectedBuyer?.name ?? null, render: (d) => d.selectedBuyer?.name ?? "—" },
-    { key: "owner", header: "Owner", type: "text", value: (d) => d.relationshipOwner?.name ?? null, render: (d) => d.relationshipOwner?.name ?? "—" },
+    { key: "buyer", header: "Current Buyer", type: "text", value: (d) => d.selectedBuyer?.name ?? null,
+      render: (d) => <span className="ct-dim">{d.selectedBuyer?.name ?? "—"}</span> },
+    { key: "owner", header: "Owner", type: "text", value: (d) => d.relationshipOwner?.name ?? null,
+      render: (d) => d.relationshipOwner ? (
+        <span className="ct-owner">
+          <span className="ct-owner-av">{initialsOf(d.relationshipOwner.name)}</span>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shortName(d.relationshipOwner.name)}</span>
+        </span>
+      ) : "—" },
   ];
 
+  // Live header stat line: what's in play and what it's projected to make.
+  const projected = scoped.reduce((s, d) => s + (d.profitEst ?? 0), 0);
+  const sub =
+    scope === "active" ? `${scoped.length} deal${scoped.length === 1 ? "" : "s"} in play${projected ? ` · ${moneyCompact(projected)} projected profit` : ""}`
+    : scope === "closed" ? `${scoped.length} closed deal${scoped.length === 1 ? "" : "s"}${projected ? ` · ${moneyCompact(projected)} profit` : ""}`
+    : scope === "archived" ? `${scoped.length} archived deal${scoped.length === 1 ? "" : "s"}`
+    : `${scoped.length} deal${scoped.length === 1 ? "" : "s"} across every stage`;
+
+  const countFor = (s: Scope) => (deals ?? []).filter((d) => inScope(d, s)).length;
+  const tabLabel = (label: string, n: number) => (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>{label}<span className="tab-badge">{n}</span></span>
+  );
+
   return (
-    <div className="page">
+    <div className="page contacts-page">
       <div className="page-header">
-        <h1>{SCOPE_TITLE[scope]}</h1>
-        {can("createDeals") && <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>}
+        <div>
+          <h1>{SCOPE_TITLE[scope]}</h1>
+          <div className="page-sub">{sub}</div>
+        </div>
+        {can("createDeals") && (
+          <button className="pbtn pbtn-primary" onClick={() => setShowNew(true)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+            New Deal
+          </button>
+        )}
       </div>
 
       {/* Scope tabs — the sidebar shows a single "Deals" entry; Active/Closed/
           Archived (and future sections) live here as top tab navigation. */}
       <Tabs
-        style={{ marginBottom: 14 }}
+        style={{ marginBottom: 16 }}
         tabs={[
-          { key: "all" as const, label: "All", to: "/deals" },
-          { key: "active" as const, label: "Active", to: "/deals/active" },
-          { key: "closed" as const, label: "Closed", to: "/deals/closed" },
-          { key: "archived" as const, label: "Archived", to: "/deals/archived" },
+          { key: "all" as const, label: tabLabel("All", countFor("all")), to: "/deals" },
+          { key: "active" as const, label: tabLabel("Active", countFor("active")), to: "/deals/active" },
+          { key: "closed" as const, label: tabLabel("Closed", countFor("closed")), to: "/deals/closed" },
+          { key: "archived" as const, label: tabLabel("Archived", countFor("archived")), to: "/deals/archived" },
         ]}
         active={scope}
       />
@@ -105,28 +148,38 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
         </Banner>
       )}
 
-      <SortableTable
-        customizeId={`deals-list:${scope}`}
-        toolbar={
-          <>
-            <SearchInput value={q} onChange={setQ} placeholder="Search deal, seller, abstract, survey, county, buyer…" ariaLabel="Search deals" />
-            {q && <span className="muted" style={{ fontSize: 13, whiteSpace: "nowrap" }}>Showing {filtered.length} of {scoped.length}</span>}
-          </>
-        }
-        columns={columns}
-        rows={filtered}
-        rowKey={(d) => d.id}
-        onRowClick={(d) => nav(`/deals/${d.id}`)}
-        rowHref={(d) => `/deals/${d.id}`}
-        rowClassName={(d) => (d.isOverdue ? "row-overdue" : undefined)}
-        defaultSort={{ key: "priority", dir: "asc" }}
-        empty={scoped.length === 0
-          ? (scope === "active" || scope === "all"
-            ? (can("createDeals") ? "No deals yet — click “+ New Deal” to create your first one." : "No deals yet.")
-            : `No ${scope} deals yet.`)
-          : "No deals match your search."}
-        selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
-      />
+      <div className="ct-card" style={{ marginTop: 0 }}>
+        <SortableTable
+          customizeId={`deals-list:${scope}`}
+          toolbar={
+            <>
+              <SearchInput value={q} onChange={setQ} placeholder="Search deal, seller, abstract, survey, county, buyer…" ariaLabel="Search deals" />
+              {q && <span className="muted" style={{ fontSize: 13, whiteSpace: "nowrap" }}>Showing {filtered.length} of {scoped.length}</span>}
+            </>
+          }
+          columns={columns}
+          rows={filtered}
+          rowKey={(d) => d.id}
+          onRowClick={(d) => nav(`/deals/${d.id}`)}
+          rowHref={(d) => `/deals/${d.id}`}
+          rowClassName={(d) => (d.isOverdue ? "row-overdue" : undefined)}
+          defaultSort={{ key: "priority", dir: "asc" }}
+          empty={scoped.length === 0
+            ? (scope === "active" || scope === "all"
+              ? (can("createDeals") ? "No deals yet — click “+ New Deal” to create your first one." : "No deals yet.")
+              : `No ${scope} deals yet.`)
+            : "No deals match your search."}
+          selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
+        />
+        <div className="ct-foot">
+          <span>{filtered.length} deal{filtered.length === 1 ? "" : "s"}</span>
+          <span className="ct-pages">
+            <button className="ct-pgbtn" disabled aria-label="Previous page">‹</button>
+            <span className="ct-pgcur">1</span>
+            <button className="ct-pgbtn" disabled aria-label="Next page">›</button>
+          </span>
+        </div>
+      </div>
 
       <BulkActionsBar
         selectedIds={[...sel.selected]}

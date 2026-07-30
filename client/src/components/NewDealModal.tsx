@@ -145,51 +145,58 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
   return (
     <Modal
       title={asset ? "Add Deal" : "New Deal"}
+      subtitle={asset
+        ? <>Added under the same seller — the full deal form, independently marketable</>
+        : <>Starts in <strong>Under Contract</strong> · add sellers later in Seller Details</>}
       onClose={onClose}
       wide
       dirty={Object.values(f).some((v) => v.trim() !== "") || states.length > 0 || counties.length > 0 || assetTypes.length > 0}
       footer={
         <>
+          <span className="modal-req-note"><Req /> Required</span>
           <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={submit} disabled={busy || missing.length > 0 || anyAssetIncomplete}>
+          <button className="primary" onClick={submit} disabled={busy || missing.length > 0 || anyAssetIncomplete}
+            title={missing.length ? "Enabled once required fields are filled" : undefined}>
             {busy ? "Saving…" : asset ? "Add Deal" : assets.length ? `Create deal + ${assets.length} more` : "Create deal"}
           </button>
         </>
       }
     >
-      {asset ? (
-        <p className="muted" style={{ marginTop: 0 }}>
-          This deal is added under the same seller — the same full deal form. Fields marked {req} are required.
-          It's independently marketable.
-        </p>
-      ) : (
-        <p className="muted" style={{ marginTop: 0 }}>
-          New deals start in <strong>Under Contract</strong>. Fields marked {req} are required.
-          Add sellers afterward in the deal's <strong>Seller Details</strong> section.
-        </p>
-      )}
-      <div className="field"><label>Deal Name {req}</label><input value={f.name} onChange={set("name")} autoFocus /></div>
-      <div className="dd-grid">
+      <div className="modal-sec">Basics</div>
+      <div className="nd-basics">
+        <div className="field" style={{ gridColumn: "1 / -1" }}><label>Deal name {req}</label><input value={f.name} onChange={set("name")} autoFocus placeholder="e.g. Terry Casey — Reeves Co." /></div>
+        <div className="field"><label>Asset type {req}</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
+        <div className="field"><label>Date under contract {req}</label><DateField value={f.dateUnderContract} onChange={(v) => setF((p) => ({ ...p, dateUnderContract: v }))} /></div>
+      </div>
+
+      <div className="modal-sec">Location</div>
+      <div className="nd-grid3">
         <GeoFields
           states={states} onStatesChange={setStates}
           counties={counties} onCountiesChange={setCounties}
           abstractIds={abstractIds} onAbstractsChange={setAbstractIds}
           labels={{ state: <>State {req}</>, county: <>County {req}</>, abstract: <>Abstract {req}</> }}
         />
-        <div className="field"><label>Asset Type {req}</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
-        <div className="field"><label>NRA {req}</label><input type="number" value={f.nra} onChange={set("nra")} /></div>
-        <div className="field"><label>Our Price (acquisition cost) {req}</label><MoneyInput value={f.ourPrice} onChange={(v) => setF((p) => ({ ...p, ourPrice: v }))} ariaLabel="Our price" /></div>
-        <div className="field"><label>Date Under Contract {req}</label><DateField value={f.dateUnderContract} onChange={(v) => setF((p) => ({ ...p, dateUnderContract: v }))} /></div>
         <div className="field"><label>Basin</label><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(counties))} value={basins} onChange={setBasins} placeholder={counties.length ? "Suggested for your counties first…" : "Search basins…"} /></div>
         <div className="field"><label>Formation</label><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(counties))} value={formations} onChange={setFormations} placeholder={counties.length ? "Suggested for your counties first…" : "Search formations…"} /></div>
-        <div className="field"><label>Operator</label><input value={f.operator} onChange={set("operator")} /></div>
-        <div className="field"><label>RRC</label><input value={f.rrc} onChange={set("rrc")} placeholder="RRC Number" /></div>
-        <div className="field"><label>NMA</label><input type="number" value={f.acreageNma} onChange={set("acreageNma")} /></div>
-        <div className="field"><label>Ask Price (to buyers)</label><MoneyInput value={f.askPrice} onChange={(v) => setF((p) => ({ ...p, askPrice: v }))} ariaLabel="Ask price" /></div>
-        <div className="field"><label>Est. Closing Costs</label><MoneyInput value={f.estimatedClosingCosts} onChange={(v) => setF((p) => ({ ...p, estimatedClosingCosts: v }))} ariaLabel="Estimated closing costs" /></div>
-        <div className="field"><label>Original Closing Date</label><DateField value={f.originalClosingDate} onChange={(v) => setF((p) => ({ ...p, originalClosingDate: v }))} /></div>
+        <div className="field"><label>Operator</label><input value={f.operator} onChange={set("operator")} placeholder="Operator name" /></div>
       </div>
-      <div className="field"><label>Notes</label><textarea rows={3} value={f.notes} onChange={set("notes")} /></div>
+
+      <div className="modal-sec">Economics</div>
+      <div className="nd-grid3">
+        <div className="field"><label>NRA {req}</label><input type="number" value={f.nra} onChange={set("nra")} placeholder="0.00" /></div>
+        <div className="field"><label>NMA</label><input type="number" value={f.acreageNma} onChange={set("acreageNma")} placeholder="0.00" /></div>
+        <div className="field"><label>RRC</label><input value={f.rrc} onChange={set("rrc")} placeholder="RRC Number" /></div>
+        <div className="field"><label>Our price (acquisition cost) {req}</label><MoneyInput value={f.ourPrice} onChange={(v) => setF((p) => ({ ...p, ourPrice: v }))} ariaLabel="Our price" /></div>
+        <div className="field"><label>Ask price (to buyers)</label><MoneyInput value={f.askPrice} onChange={(v) => setF((p) => ({ ...p, askPrice: v }))} ariaLabel="Ask price" /></div>
+        <div className="field"><label>Est. closing costs</label><MoneyInput value={f.estimatedClosingCosts} onChange={(v) => setF((p) => ({ ...p, estimatedClosingCosts: v }))} ariaLabel="Estimated closing costs" /></div>
+      </div>
+
+      <div className="modal-sec">Timeline &amp; notes</div>
+      <div className="nd-timeline">
+        <div className="field"><label>Original closing date</label><DateField value={f.originalClosingDate} onChange={(v) => setF((p) => ({ ...p, originalClosingDate: v }))} /></div>
+        <div className="field"><label>Notes</label><textarea rows={2} value={f.notes} onChange={set("notes")} placeholder="Anything worth remembering about this deal…" /></div>
+      </div>
 
       {/* Additional deals under the same seller. Each is an identical full deal
           form and becomes an independently-marketable deal grouped under this

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend, BarChart,
-  LineChart, PieChart, Pie, Cell,
+  LineChart, PieChart, Pie, Cell, LabelList,
 } from "recharts";
 import { ArrowRight, Heart, Lock, Search, Share2, TrendingUp } from "lucide-react";
 import { api } from "../api/client";
@@ -252,14 +252,20 @@ export function Research() {
   ];
 
   return (
-    <div className="page">
+    <div className="page research-page">
       <div className="page-header">
-        <h1>Research & Market Intelligence</h1>
-      </div>
-
-      {/* --- Period + filter controls --- */}
-      <div className="panel">
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ marginBottom: 0 }}>Research &amp; Market Intelligence</h1>
+          <div className="page-sub">
+            {range.from && range.to ? (
+              <>
+                <span style={{ color: "var(--text)", fontWeight: 600 }}>{fmtRangeLabel(range.from, range.to)}</span>
+                {cmpRange && <> &nbsp;vs&nbsp; {fmtRangeLabel(cmpRange.from, cmpRange.to, cmpWithYear)} · {compare === "PREV_YEAR" ? "Previous year" : "Previous period"}</>}
+              </>
+            ) : "Select a custom date range"}
+          </div>
+        </div>
+        <div className="reports-toolbar">
           <div className="seg-control">
             {CHIPS.map(([p, label]) => (
               <span key={p} className={`seg ${period === p ? "active" : ""}`} onClick={() => setPeriod(p)}>
@@ -272,34 +278,27 @@ export function Research() {
               </span>
             ))}
           </div>
-          <div className="row" style={{ gap: 10, alignItems: "center" }}>
-            {range.from && range.to ? (
-              <div className="row" style={{ gap: 10, alignItems: "center", fontSize: 12.5 }}>
-                <span style={{ fontWeight: 600 }}>{fmtRangeLabel(range.from, range.to)}</span>
-                {cmpRange && (
-                  <>
-                    <span className="muted" style={{ opacity: 0.7 }}>vs</span>
-                    <span className="muted">{fmtRangeLabel(cmpRange.from, cmpRange.to, cmpWithYear)}</span>
-                  </>
-                )}
-              </div>
-            ) : (
-              <span className="muted" style={{ fontSize: 12.5 }}>Select a custom date range</span>
-            )}
-            {activeFilterCount > 0 && <button className="small" onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>}
-            <button className="small" onClick={() => setShowFilters((s) => !s)}>
-              {showFilters ? "▾" : "▸"} Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
-            </button>
-          </div>
+          <button className={`rbtn ${showFilters ? "active" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
+            Filters{activeFilterCount > 0 && <span className="rbtn-count"> ({activeFilterCount})</span>}
+          </button>
         </div>
-        {period === "CUSTOM" && (
-          <div className="row" style={{ marginTop: 10 }}>
-            <div className="field" style={{ marginBottom: 0 }}><label>From</label><DateField value={custom.from} onChange={(v) => setCustom((c) => ({ ...c, from: v }))} /></div>
-            <div className="field" style={{ marginBottom: 0 }}><label>To</label><DateField value={custom.to} onChange={(v) => setCustom((c) => ({ ...c, to: v }))} /></div>
+      </div>
+
+      {/* --- Filter controls --- */}
+      {showFilters && opts && (
+        <div className="reports-filters">
+          <div className="filters-head">
+            <strong style={{ fontSize: 14 }}>Filters</strong>
+            {activeFilterCount > 0 && <button className="small" onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>}
           </div>
-        )}
-        {showFilters && opts && (
-          <div className="filters-grid" style={{ marginTop: 10 }}>
+          <div className="filters-grid">
+            {period === "CUSTOM" && (
+              <>
+                <div className="field" style={{ marginBottom: 0 }}><label>From</label><DateField value={custom.from} onChange={(v) => setCustom((c) => ({ ...c, from: v }))} /></div>
+                <div className="field" style={{ marginBottom: 0 }}><label>To</label><DateField value={custom.to} onChange={(v) => setCustom((c) => ({ ...c, to: v }))} /></div>
+              </>
+            )}
             <div className="field" style={{ marginBottom: 0 }}><label>Compare to</label>
               <Select value={compare} onChange={(v) => setCompare(v as Compare)} ariaLabel="Compare to"
                 options={[
@@ -348,8 +347,8 @@ export function Research() {
               </div>
             ))}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {opts != null && !hasAnyData && tab !== "data" && (
         <Banner kind="info">
@@ -699,23 +698,22 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
           {shownLevel === "abstract" && r.abstractId
             // Standard text color (not link blue) — still clickable via the row.
             ? <a style={{ cursor: "pointer", fontWeight: 600, color: "var(--text)" }} title={`View records for abstract ${r.abstractId}`}>{geoName(r)}</a>
-            : geoName(r)}
-          {" "}{r.isHotspot && <span className="badge" style={{ background: "rgba(239,68,68,0.15)", color: "#ef4444" }}>HOTSPOT</span>}
+            : <span className="rec-name">{geoName(r)}</span>}
         </>
       ) },
-    { key: "transactions", header: "Transactions", value: (r) => r.transactions, align: "right" },
-    { key: "leases", header: "Leases", value: (r) => r.leases, align: "right" },
-    { key: "permits", header: "Permits", value: (r) => r.permits, align: "right" },
-    { key: "total", header: "Total", value: (r) => r.total, align: "right" },
+    { key: "transactions", header: "Transactions", value: (r) => r.transactions, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{num(r.transactions)}</span> },
+    { key: "leases", header: "Leases", value: (r) => r.leases, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{num(r.leases)}</span> },
+    { key: "permits", header: "Permits", value: (r) => r.permits, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{num(r.permits)}</span> },
+    { key: "total", header: "Total", value: (r) => r.total, align: "right", render: (r) => <b className="rec-nowrap">{num(r.total)}</b> },
     // Prior/Change columns are comparative — hidden when comparison is off.
     ...(compareOff ? [] : ([
-      { key: "previous", header: "Prior", value: (r: GeoRow) => r.previous, align: "right" },
+      { key: "previous", header: "Prior", value: (r: GeoRow) => r.previous, align: "right", render: (r: GeoRow) => <span className="rec-mid rec-nowrap">{num(r.previous)}</span> },
       {
         key: "pctChange", header: "Change", value: (r: GeoRow) => r.pctChange ?? Number.MAX_SAFE_INTEGER, align: "right",
-        render: (r: GeoRow) => <span style={{ color: r.absoluteChange > 0 ? "#22c55e" : r.absoluteChange < 0 ? "#ef4444" : "var(--text-dim)" }}>{fmtPct(r.pctChange)} ({r.absoluteChange >= 0 ? "+" : ""}{r.absoluteChange})</span>,
+        render: (r: GeoRow) => <span className="rec-nowrap" style={{ color: r.absoluteChange > 0 ? "#22c55e" : r.absoluteChange < 0 ? "#ef4444" : "var(--text-dim)" }}>{fmtPct(r.pctChange)} ({r.absoluteChange >= 0 ? "+" : ""}{r.absoluteChange})</span>,
       },
     ] as Column<GeoRow>[])),
-    { key: "zScore", header: "z", value: (r) => r.zScore, align: "right", render: (r) => (r.zScore == null ? "—" : r.zScore.toFixed(1)) },
+    { key: "zScore", header: "Z", value: (r) => r.zScore, align: "right", render: (r) => <span className="rec-mid">{r.zScore == null ? "—" : r.zScore.toFixed(1)}</span> },
   ];
 
   const countyStats: CountyStat[] = useMemo(
@@ -728,14 +726,17 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
     <>
       {showMap && (
         <div className="panel">
-          <div className="panel-title">
-            <h3 style={{ margin: 0 }}>Texas Activity Map <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>(red outline = hotspot; click a county to zoom into its abstracts)</span></h3>
-            <div className="chip-row">
-              <span className={`chip ${metric === "activity" ? "active" : ""}`} onClick={() => setMetric("activity")}>Volume</span>
-              <span className={`chip ${metric === "change" ? "active" : ""}`} onClick={() => setMetric("change")}>Change</span>
+          <div className="panel-title" style={{ alignItems: "flex-start" }}>
+            <div>
+              <h3 style={{ margin: 0 }}>Texas Activity Map</h3>
+              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>Blue = hotspot · click a county to zoom into its abstracts</div>
+            </div>
+            <div className="seg-control">
+              <span className={`seg ${metric === "activity" ? "active" : ""}`} onClick={() => setMetric("activity")}>Volume</span>
+              <span className={`seg ${metric === "change" ? "active" : ""}`} onClick={() => setMetric("change")}>Change</span>
             </div>
           </div>
-          <div style={{ maxWidth: 640, margin: "0 auto" }}>
+          <div style={{ maxWidth: 820, margin: "0 auto" }}>
             <ResearchChoropleth
               stats={countyStats} metric={metric} selected={filters.counties} qs={qs}
               // Clicking a county filters the whole Research page to it (every
@@ -763,23 +764,26 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
         </div>
       )}
 
-      <div className="panel">
-        <div className="panel-title">
+      <div className="rec-card">
+        <div className="geo-head">
           <h3 style={{ margin: 0 }}>Activity by {shownLevel === "state" ? "State" : shownLevel === "county" ? "County" : "Abstract"}</h3>
-          <div className="row" style={{ gap: 8 }}>
-            <div className="chip-row">
+          <div className="res-card-tools">
+            <div className="seg-control">
               {(["state", "county", "abstract"] as const).map((l) => (
-                <span key={l} className={`chip ${level === l ? "active" : ""}`} onClick={() => setLevel(l)}>{l[0].toUpperCase() + l.slice(1)}</span>
+                <span key={l} className={`seg ${level === l ? "active" : ""}`} onClick={() => setLevel(l)}>{l[0].toUpperCase() + l.slice(1)}</span>
               ))}
             </div>
-            <button className="small" disabled={!data?.rows.length} onClick={() => data && downloadCsv(
+            <button className="rbtn" disabled={!data?.rows.length} onClick={() => data && downloadCsv(
               `research-geography-${shownLevel}.csv`,
               ["Name", "State", "County", "Transactions", "Leases", "Permits", "Total", "Prior", "Change %", "Hotspot"],
               data.rows.map((r) => [geoName(r), r.state, r.county, r.transactions, r.leases, r.permits, r.total, r.previous, r.pctChange == null ? "" : Math.round(r.pctChange * 100), r.isHotspot ? "YES" : ""]),
-            )}>Export CSV</button>
+            )}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+              Export CSV
+            </button>
           </div>
         </div>
-        {loading && !data ? <Spinner /> : !data || data.rows.length === 0 ? <p className="muted">No activity in this period.</p> : (
+        {loading && !data ? <Spinner /> : !data || data.rows.length === 0 ? <p className="muted" style={{ padding: "0 20px 16px", margin: 0 }}>No activity in this period.</p> : (
           // While a different level loads, the current table stays put and
           // gently dims — the new rows swap in without a spinner flash.
           <div style={{ opacity: loading ? 0.55 : 1, transition: "opacity 160ms ease", pointerEvents: loading ? "none" : undefined }}>
@@ -796,6 +800,9 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
                 abstracts: shownLevel === "abstract" && r.abstractId ? [r.abstractId] : [],
               })}
             />
+            <div className="rec-foot">
+              <span>{num(data.rows.length)} {shownLevel === "state" ? "states" : shownLevel === "county" ? "counties" : "abstracts"} · sorted by total, descending</span>
+            </div>
           </div>
         )}
       </div>
@@ -884,39 +891,57 @@ function RankingsTab({ qs, opts, compareOff, onDrill }: { qs: string; opts: Filt
 
   const top = rows.slice(0, 10);
 
+  const barColor = CHART_COLORS[role === "buyers" ? 0 : role === "sellers" ? 4 : 3];
+  const drillKey = (k: string) => onDrill(role === "buyers" ? { buyers: [k] } : role === "sellers" ? { sellers: [k] } : { operators: [k] });
+  // Nice axis: a rounded maximum (with headroom) + evenly-spaced ticks, so the
+  // horizontal bars read against a 0…max scale exactly like the reference.
+  const maxCount = top.length ? Math.max(...top.map((r) => r.count)) : 1;
+  const niceNum = (x: number) => { const p = Math.pow(10, Math.floor(Math.log10(x || 1))); const f = (x || 1) / p; const nf = f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10; return nf * p; };
+  const step = niceNum(Math.max(1, maxCount) / 4);
+  let niceMax = Math.ceil(maxCount / step) * step; if (niceMax <= maxCount) niceMax += step;
+  const ticks: number[] = []; for (let v = 0; v <= niceMax + step * 0.001; v += step) ticks.push(Math.round(v));
+
   return (
     <>
-      <div className="chart-grid">
-        <div className="panel" style={{ gridColumn: "1 / -1" }}>
-          <div className="panel-title">
-            <h3 style={{ margin: 0 }}>{ROLE_LABEL[role]}</h3>
-            <div className="row" style={{ gap: 8 }}>
-              <div className="chip-row">
-                {(["buyers", "sellers", "operators"] as const).map((r) => (
-                  <span key={r} className={`chip ${role === r ? "active" : ""}`} onClick={() => setRole(r)}>{r[0].toUpperCase() + r.slice(1)}</span>
-                ))}
+      <div className="rk-card">
+        <div className="rk-head">
+          <h3>{ROLE_LABEL[role]}</h3>
+          <div className="res-card-tools">
+            <div className="seg-control">
+              {(["buyers", "sellers", "operators"] as const).map((r) => (
+                <span key={r} className={`seg ${role === r ? "active" : ""}`} onClick={() => setRole(r)}>{r[0].toUpperCase() + r.slice(1)}</span>
+              ))}
+            </div>
+            <button className="rbtn" disabled={!rows.length} onClick={() => data && downloadCsv(
+              `research-${role}.csv`,
+              ["Name", "Count", "Prior", "Change %", "Counties", "New Entrant"],
+              data.rows.map((r) => [r.name, r.count, r.previous, r.pctChange == null ? "" : Math.round(r.pctChange * 100), r.counties.join("; "), r.newEntrant ? "YES" : ""]),
+            )}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+              Export CSV
+            </button>
+          </div>
+        </div>
+        {loading && !data ? <Spinner /> : top.length === 0 ? <p className="muted">No activity in this period.</p> : (
+          <div className="rk-bars">
+            {top.map((r) => (
+              <div key={r.key} className="rk-bar-row" onClick={() => drillKey(r.key)} title={`${r.name} — ${r.count}`}>
+                <div className="rk-bar-name">{r.name}</div>
+                <div className="rk-bar-track">
+                  <div className="rk-bar-fill" style={{ width: `${(r.count / niceMax) * 100}%`, background: barColor }} />
+                  <span className="rk-bar-val">{r.count}</span>
+                </div>
               </div>
-              <button className="small" disabled={!rows.length} onClick={() => data && downloadCsv(
-                `research-${role}.csv`,
-                ["Name", "Count", "Prior", "Change %", "Counties", "New Entrant"],
-                data.rows.map((r) => [r.name, r.count, r.previous, r.pctChange == null ? "" : Math.round(r.pctChange * 100), r.counties.join("; "), r.newEntrant ? "YES" : ""]),
-              )}>Export CSV</button>
+            ))}
+            <div className="rk-bar-row rk-axis-row">
+              <div />
+              <div className="rk-axis">{ticks.map((t) => <span key={t}>{t}</span>)}</div>
             </div>
           </div>
-          {loading && !data ? <Spinner /> : top.length === 0 ? <p className="muted">No activity in this period.</p> : (
-            <ResponsiveContainer width="100%" height={Math.max(160, top.length * 32)}>
-              <BarChart data={top} layout="vertical" margin={{ left: 80 }}>
-                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
-                <YAxis type="category" dataKey="name" width={200} tick={{ fontSize: 11 }} />
-                <Tooltip {...chartTooltip} />
-                <Bar dataKey="count" name={role === "operators" ? "Permits" : "Records"} fill={CHART_COLORS[role === "buyers" ? 0 : role === "sellers" ? 4 : 3]} radius={[0, 3, 3, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
+        )}
       </div>
 
-      <div className="panel">
+      <div className="panel rk-table-card">
         {/* Selection + bulk actions — turn active buyers into CRM Buyer profiles. */}
         {isBuyers && rows.length > 0 && (
           <div className="row" style={{ gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
@@ -938,13 +963,16 @@ function RankingsTab({ qs, opts, compareOff, onDrill }: { qs: string; opts: Filt
           </Banner>
         )}
         {loading && !data ? <Spinner /> : rows.length > 0 ? (
-          <SortableTable
-            columns={columns}
-            rows={data!.rows}
-            rowKey={(r) => r.key}
-            defaultSort={{ key: "count", dir: "desc" }}
-            onRowClick={(r) => onDrill(role === "buyers" ? { buyers: [r.key] } : role === "sellers" ? { sellers: [r.key] } : { operators: [r.key] })}
-          />
+          <>
+            <SortableTable
+              columns={columns}
+              rows={data!.rows}
+              rowKey={(r) => r.key}
+              defaultSort={{ key: "count", dir: "desc" }}
+              onRowClick={(r) => onDrill(role === "buyers" ? { buyers: [r.key] } : role === "sellers" ? { sellers: [r.key] } : { operators: [r.key] })}
+            />
+            <div className="rk-foot">{rows.length} {role} · sorted by {role === "operators" ? "permits" : "records"}, descending</div>
+          </>
         ) : null}
       </div>
       {opts && <p className="muted" style={{ fontSize: 12 }}>Names are grouped after normalizing punctuation and legal suffixes (LLC/LP/Inc), so filings under slightly different spellings roll up together.</p>}
@@ -1132,7 +1160,7 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
         <div className="rel-insights">
           {topRel && (
             <button className="rel-insight" onClick={() => setTx({ title: `${topRel.grantor} → ${topRel.grantee}`, selector: { grantorNorm: topRel.grantorNorm, granteeNorm: topRel.granteeNorm } })}>
-              <div className="rel-insight-l"><Heart size={12} className="ri-ic-blue" aria-hidden="true" /> Most Active Relationship</div>
+              <div className="rel-insight-l"><Heart size={13} className="ri-ic-red" aria-hidden="true" /> Most Active Relationship</div>
               <div className="rel-insight-v">{topRel.grantor} → {topRel.grantee}</div>
               <div className="rel-insight-m"><b>{topRel.count}</b> transaction{topRel.count === 1 ? "" : "s"}</div>
             </button>
@@ -1161,8 +1189,8 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
         </div>
       )}
 
-      <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-        <div className="tab-row" style={{ margin: 0, flex: 1, minWidth: 260 }}>
+      <div className="res-subtabs">
+        <div className="tab-row" style={{ margin: 0 }}>
           {VIEWS.map(([v, l, n]) => (
             <button key={v} className={`tab ${view === v ? "active" : ""}`} onClick={() => setView(v)}>
               {l} <span className={`relv-count ${view === v && n > 0 ? "hot" : ""}`}>{n}</span>
@@ -1183,14 +1211,17 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
       {view === "relationships" && (
         <div className="panel">
           <div className="panel-title">
-            <h3 style={{ margin: 0 }}>Grantor → Grantee Relationships</h3>
-            <div className="row" style={{ gap: 10, alignItems: "center" }}>
-              <label className="dm-chk" style={{ fontSize: 12 }}>
+            <h3 style={{ margin: 0 }}>Grantor → Grantee relationships</h3>
+            <div className="res-card-tools">
+              <label className="rel-repeat">
                 <input type="checkbox" checked={repeatOnly} onChange={(e) => setRepeatOnly(e.target.checked)} /> Repeat relationships only (2+)
               </label>
-              <button className="small" onClick={() => downloadCsv("research-relationships.csv",
+              <button className="rbtn" onClick={() => downloadCsv("research-relationships.csv",
                 ["Grantor", "Grantee", "Transactions", "Counties", "First", "Last"],
-                rels.map((r) => [r.grantor, r.grantee, r.count, r.counties.join("; "), r.firstDate, r.lastDate]))}>Export CSV</button>
+                rels.map((r) => [r.grantor, r.grantee, r.count, r.counties.join("; "), r.firstDate, r.lastDate]))}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+                Export CSV
+              </button>
             </div>
           </div>
           <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Repeated transfers between the same two parties roll up into one relationship with a transaction count. Click a row for the underlying deeds, or an entity name for its full dossier.</p>
@@ -1214,7 +1245,7 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
                 // glance-density this table doesn't need.
                 { key: "counties", header: "Counties", value: (r: RelRow) => r.counties.length, render: (r: RelRow) => r.counties.length ? <span className="relt-counties" title={r.counties.join(", ")}>{r.counties.join(", ")}</span> : "—" },
                 { key: "abstracts", header: "Abstracts", value: (r: RelRow) => r.abstracts.length, align: "right" as const, render: (r: RelRow) => r.abstracts.length ? <span title={r.abstracts.join(", ")}><b>{r.abstracts.length}</b></span> : "—" },
-                { key: "lastDate", header: "Latest", value: (r: RelRow) => r.lastDate ?? "", render: (r: RelRow) => <span className="muted">{fmtDate(r.lastDate)}</span>, type: "date" as const },
+                { key: "lastDate", header: "Latest", value: (r: RelRow) => r.lastDate ?? "", align: "right" as const, render: (r: RelRow) => <span className="muted" style={{ whiteSpace: "nowrap" }}>{fmtDate(r.lastDate)}</span>, type: "date" as const },
               ]}
               rows={rels}
               rowKey={(r) => `${r.grantorNorm}→${r.granteeNorm}`}
@@ -1512,8 +1543,10 @@ const SIGNAL_META: Record<string, { label: string; color: string }> = {
 // Elevated orange, High red, Critical deep red. Colors are used on dark panel
 // backgrounds, so all five stay AA-contrast against the panel surface.
 const SEVERITY_TIERS: { min: number; label: string; color: string }[] = [
-  { min: 80, label: "Critical", color: "#dc2626" },
-  { min: 60, label: "High", color: "#ef4444" },
+  // Critical uses the reference red (#ef4444); High steps to a lighter red so
+  // the two tiers stay distinguishable side by side.
+  { min: 80, label: "Critical", color: "#ef4444" },
+  { min: 60, label: "High", color: "#f87171" },
   { min: 40, label: "Elevated", color: "#f97316" },
   { min: 20, label: "Moderate", color: "#eab308" },
   { min: 0, label: "Low", color: "#22c55e" },
@@ -1534,34 +1567,45 @@ function OpportunitiesTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
     return <Banner kind="info">No statistically significant surges detected in this period — try widening the date range or clearing filters.</Banner>;
   }
 
+  const criticalCount = data.signals.filter((s) => severityTier(s.severity).label === "Critical").length;
+
   return (
-    <div>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Signals are detected by comparing the selected period against six equal history windows (z-score ≥ 2 plus a
-        material lift), clustering by geography, and flagging new entrants. Higher severity = stronger, higher-volume anomaly.
-      </p>
-      {data.signals.map((s) => {
-        const meta = SIGNAL_META[s.kind] ?? { label: s.kind, color: "#94a3b8" };
-        const tier = severityTier(s.severity);
-        return (
-          <div key={s.id} className="panel" style={{ borderLeft: `3px solid ${tier.color}`, display: "flex", gap: 14, alignItems: "flex-start" }}>
-            <div style={{ minWidth: 64, textAlign: "center" }}>
-              <div style={{ fontSize: 22, fontWeight: 700, color: tier.color }}>{s.severity}</div>
-              <div style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5, fontWeight: 600, color: tier.color }}>{tier.label}</div>
-            </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <span className="badge" style={{ background: `${meta.color}26`, color: meta.color }}>{meta.label}</span>
-                <strong>{s.title}</strong>
+    <div className="res-card">
+      <div className="res-card-head opp-head">
+        <div style={{ maxWidth: 760 }}>
+          <h3>Buying signals</h3>
+          <div className="res-card-desc">
+            Signals are detected by comparing the selected period against six equal history windows (z-score ≥ 2 plus a
+            material lift), clustering by geography, and flagging new entrants. Higher severity = stronger, higher-volume anomaly.
+          </div>
+        </div>
+        {criticalCount > 0 && <span className="opp-crit-badge">{criticalCount} critical signal{criticalCount === 1 ? "" : "s"}</span>}
+      </div>
+      <div className="opp-list">
+        {data.signals.map((s) => {
+          const meta = SIGNAL_META[s.kind] ?? { label: s.kind, color: "#94a3b8" };
+          const tier = severityTier(s.severity);
+          return (
+            <div key={s.id} className="opp-signal" style={{ borderLeftColor: tier.color }}>
+              <div className="opp-score">
+                <div className="opp-score-n" style={{ color: tier.color }}>{s.severity}</div>
+                <div className="opp-score-tier" style={{ color: tier.color }}>{tier.label}</div>
               </div>
-              <p style={{ margin: "6px 0 8px" }}>{s.detail}</p>
-              <button className="small" onClick={() => onDrill({ states: s.state ? [s.state] : [], counties: s.county ? [s.county] : [] })}>
-                View underlying records →
+              <div className="opp-body">
+                <div className="opp-title-row">
+                  <span className="opp-kind" style={{ color: meta.color, background: `${meta.color}1A`, borderColor: `${meta.color}4D` }}>{meta.label}</span>
+                  <strong>{s.title}</strong>
+                </div>
+                <p className="opp-detail">{s.detail}</p>
+              </div>
+              <button className="opp-view" onClick={() => onDrill({ states: s.state ? [s.state] : [], counties: s.county ? [s.county] : [] })}>
+                View records →
               </button>
             </div>
-          </div>
-        );
-      })}
+          );
+        })}
+        <div className="opp-foot">{data.signals.length} signal{data.signals.length === 1 ? "" : "s"} in this period · sorted by severity</div>
+      </div>
     </div>
   );
 }
@@ -1687,73 +1731,88 @@ function RecordsTab({ qs }: { qs: string }) {
   const totalPages = active ? Math.max(1, Math.ceil(active.total / pageSize)) : 1;
 
   const docColumns: Column<DocRecord>[] = [
-    { key: "recordingDate", header: "Recorded", value: (r) => r.recordingDate, render: (r) => fmtDate(r.recordingDate), type: "date" },
-    { key: "docType", header: "Type", value: (r) => r.docTypeRaw, render: (r) => <span title={r.docTypeRaw}>{prettyDocType(r.docType)}</span> },
-    { key: "grantor", header: "Grantor (Seller)", value: (r) => r.grantor },
-    { key: "grantee", header: "Grantee (Buyer)", value: (r) => r.grantee },
-    { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}` },
-    { key: "abstractId", header: "Abstract", value: (r) => r.abstractId },
-    { key: "instrumentNumber", header: "Instr #", value: (r) => r.instrumentNumber },
+    { key: "recordingDate", header: "Recorded", value: (r) => r.recordingDate, render: (r) => <span className="rec-mid rec-nowrap">{fmtDate(r.recordingDate)}</span>, type: "date" },
+    { key: "docType", header: "Type", value: (r) => r.docTypeRaw, render: (r) => <span className="rec-type" title={r.docTypeRaw}>{prettyDocType(r.docType)}</span> },
+    { key: "grantor", header: "Grantor (Seller)", value: (r) => r.grantor, render: (r) => <span className="rec-name">{r.grantor ?? "—"}</span> },
+    { key: "grantee", header: "Grantee (Buyer)", value: (r) => r.grantee, render: (r) => <span className="rec-name">{r.grantee ?? "—"}</span> },
+    { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}`, render: (r) => <span className="rec-mid rec-nowrap">{r.county}, {r.state}</span> },
+    { key: "abstractId", header: "Abstract", value: (r) => r.abstractId, align: "right", render: (r) => r.abstractId ? <span className="rec-mid">{r.abstractId}</span> : <span className="rec-faint">—</span> },
+    { key: "instrumentNumber", header: "Instr #", value: (r) => r.instrumentNumber, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{r.instrumentNumber ?? "—"}</span> },
   ];
   const permitColumns: Column<PermitRecord>[] = [
-    { key: "activityDate", header: "Date", value: (r) => r.activityDate, render: (r) => fmtDate(r.activityDate), type: "date" },
-    { key: "operator", header: "Operator", value: (r) => r.operator },
+    { key: "activityDate", header: "Date", value: (r) => r.activityDate, render: (r) => <span className="rec-mid rec-nowrap">{fmtDate(r.activityDate)}</span>, type: "date" },
+    { key: "operator", header: "Operator", value: (r) => r.operator, render: (r) => <span className="rec-name">{r.operator ?? "—"}</span> },
     { key: "leaseName", header: "Lease / Well", value: (r) => `${r.leaseName ?? ""} ${r.wellName ?? ""}`.trim() || null },
     { key: "status", header: "Status", value: (r) => r.status, render: (r) => prettyEnum(r.status) },
     { key: "trajectory", header: "Trajectory", value: (r) => r.trajectory, render: (r) => prettyEnum(r.trajectory) },
-    { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}` },
+    { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}`, render: (r) => <span className="rec-mid rec-nowrap">{r.county}, {r.state}</span> },
     { key: "formation", header: "Formation", value: (r) => r.formation },
-    { key: "apiNumber", header: "API #", value: (r) => r.apiNumber },
+    { key: "apiNumber", header: "API #", value: (r) => r.apiNumber, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{r.apiNumber ?? "—"}</span> },
   ];
 
-  return (
-    <div className="panel">
-      <div className="panel-title">
-        <div className="chip-row">
-          <span className={`chip ${kind === "documents" ? "active" : ""}`} onClick={() => setKind("documents")}>Recorded Documents</span>
-          <span className={`chip ${kind === "permits" ? "active" : ""}`} onClick={() => setKind("permits")}>Drilling Permits</span>
-        </div>
-        <div className="row" style={{ gap: 8, alignItems: "center" }}>
-          {active && <span className="muted" style={{ fontSize: 12 }}>{num(active.total)} records</span>}
-          <button className={`small ${showFilters || activeFilterCount > 0 ? "primary" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters}>
-            Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
-          </button>
-          <button className="small" onClick={exportAll} disabled={!active?.total}>Export CSV</button>
-        </div>
+  // Toolbar row (reference order): source segmented control · count · Filters
+  // (fills accent while open) · Export CSV — Customize View joins on the right
+  // via the table's own toolbar row.
+  const toolbarContent = (
+    <>
+      <div className="seg-control">
+        <span className={`seg ${kind === "documents" ? "active" : ""}`} onClick={() => setKind("documents")}>Recorded Documents</span>
+        <span className={`seg ${kind === "permits" ? "active" : ""}`} onClick={() => setKind("permits")}>Drilling Permits</span>
       </div>
+      <span className="spacer" />
+      {active && <span className="muted" style={{ fontSize: 12.5, whiteSpace: "nowrap" }}><b style={{ color: "var(--text)" }}>{num(active.total)}</b> records</span>}
+      <button
+        className={`rbtn ${showFilters ? "on" : activeFilterCount > 0 ? "active" : ""}`}
+        onClick={() => setShowFilters((s) => !s)}
+        aria-expanded={showFilters}
+      >
+        Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+      </button>
+      <button className="rbtn" onClick={exportAll} disabled={!active?.total}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+        Export CSV
+      </button>
+    </>
+  );
 
-      {showFilters && (
-        <div className="mc-grid" style={{ marginBottom: 12 }}>
-          <div><div className="ddx-label mc-lbl">County</div>
-            <SearchableMultiSelect options={opts.counties} value={rf.counties} onChange={(v) => setRf((p) => ({ ...p, counties: v }))} placeholder="Counties…" /></div>
-          <div><div className="ddx-label mc-lbl">Abstract</div>
-            <SearchableMultiSelect options={opts.abstracts} value={rf.abstracts} onChange={(v) => setRf((p) => ({ ...p, abstracts: v }))} placeholder="Abstracts…" /></div>
-          {kind === "documents" ? (
-            <>
-              <div><div className="ddx-label mc-lbl">Record Type</div>
-                <Select value={rf.docClass} onChange={(v) => setRf((p) => ({ ...p, docClass: v }))} clearable placeholder="All record types" ariaLabel="Record type"
-                  options={(opts.docClasses ?? []).map((c) => ({ value: c, label: prettyEnum(c) }))} /></div>
-              <div><div className="ddx-label mc-lbl">Document Type</div>
-                <SearchableMultiSelect options={opts.docTypes ?? []} labels={Object.fromEntries((opts.docTypes ?? []).map((t) => [t, prettyDocType(t)]))}
-                  value={rf.docTypes} onChange={(v) => setRf((p) => ({ ...p, docTypes: v }))} placeholder="Document types…" /></div>
-            </>
-          ) : (
-            <>
-              <div><div className="ddx-label mc-lbl">Status</div>
-                <SearchableMultiSelect options={opts.statuses ?? []} labels={Object.fromEntries((opts.statuses ?? []).map((s) => [s, prettyEnum(s)]))}
-                  value={rf.statuses} onChange={(v) => setRf((p) => ({ ...p, statuses: v }))} placeholder="Statuses…" /></div>
-              <div><div className="ddx-label mc-lbl">Trajectory</div>
-                <SearchableMultiSelect options={opts.trajectories ?? []} labels={Object.fromEntries((opts.trajectories ?? []).map((t) => [t, prettyEnum(t)]))}
-                  value={rf.trajectories} onChange={(v) => setRf((p) => ({ ...p, trajectories: v }))} placeholder="Trajectories…" /></div>
-            </>
-          )}
-          <div><div className="ddx-label mc-lbl">From</div><DateField value={rf.from} onChange={(v) => setRf((p) => ({ ...p, from: v }))} ariaLabel="Records from date" /></div>
-          <div><div className="ddx-label mc-lbl">To</div><DateField value={rf.to} onChange={(v) => setRf((p) => ({ ...p, to: v }))} ariaLabel="Records to date" /></div>
-          {activeFilterCount > 0 && (
-            <div style={{ alignSelf: "end" }}><button className="small" onClick={() => setRf(EMPTY_REC_FILTERS)}>Clear filters</button></div>
-          )}
-        </div>
-      )}
+  // Recessed filter strip under the toolbar (reference: darker inset section).
+  const filterStrip = showFilters ? (
+    <div className="rec-filterbar">
+      <div className="rec-fgrid">
+        <div><div className="rec-flabel">County</div>
+          <SearchableMultiSelect options={opts.counties} value={rf.counties} onChange={(v) => setRf((p) => ({ ...p, counties: v }))} placeholder="Counties…" /></div>
+        <div><div className="rec-flabel">Abstract</div>
+          <SearchableMultiSelect options={opts.abstracts} value={rf.abstracts} onChange={(v) => setRf((p) => ({ ...p, abstracts: v }))} placeholder="Abstracts…" /></div>
+        {kind === "documents" ? (
+          <>
+            <div><div className="rec-flabel">Record type</div>
+              <Select value={rf.docClass} onChange={(v) => setRf((p) => ({ ...p, docClass: v }))} clearable placeholder="All record types" ariaLabel="Record type"
+                options={(opts.docClasses ?? []).map((c) => ({ value: c, label: prettyEnum(c) }))} /></div>
+            <div><div className="rec-flabel">Document type</div>
+              <SearchableMultiSelect options={opts.docTypes ?? []} labels={Object.fromEntries((opts.docTypes ?? []).map((t) => [t, prettyDocType(t)]))}
+                value={rf.docTypes} onChange={(v) => setRf((p) => ({ ...p, docTypes: v }))} placeholder="Document types…" /></div>
+          </>
+        ) : (
+          <>
+            <div><div className="rec-flabel">Status</div>
+              <SearchableMultiSelect options={opts.statuses ?? []} labels={Object.fromEntries((opts.statuses ?? []).map((s) => [s, prettyEnum(s)]))}
+                value={rf.statuses} onChange={(v) => setRf((p) => ({ ...p, statuses: v }))} placeholder="Statuses…" /></div>
+            <div><div className="rec-flabel">Trajectory</div>
+              <SearchableMultiSelect options={opts.trajectories ?? []} labels={Object.fromEntries((opts.trajectories ?? []).map((t) => [t, prettyEnum(t)]))}
+                value={rf.trajectories} onChange={(v) => setRf((p) => ({ ...p, trajectories: v }))} placeholder="Trajectories…" /></div>
+          </>
+        )}
+        <div><div className="rec-flabel">From</div><DateField value={rf.from} onChange={(v) => setRf((p) => ({ ...p, from: v }))} ariaLabel="Records from date" /></div>
+        <div><div className="rec-flabel">To</div><DateField value={rf.to} onChange={(v) => setRf((p) => ({ ...p, to: v }))} ariaLabel="Records to date" /></div>
+        {activeFilterCount > 0 && (
+          <div style={{ alignSelf: "end" }}><button className="small" onClick={() => setRf(EMPTY_REC_FILTERS)}>Clear filters</button></div>
+        )}
+      </div>
+    </div>
+  ) : null;
+
+  return (
+    <>
       {kind === "documents" && selAbstracts.length > 0 && absBuyers && absBuyers.buyers.length > 0 && (
         <div style={{
           border: "1px solid var(--border)", borderRadius: 8, padding: "10px 12px", marginBottom: 12,
@@ -1792,23 +1851,40 @@ function RecordsTab({ qs }: { qs: string }) {
           <button className="small danger" onClick={() => setConfirmDel(true)} disabled={busy}>Delete</button>
         </BulkBar>
       )}
-      {loading && !active ? <Spinner /> : !active || active.total === 0 ? <p className="muted">No matching records.</p> : (
-        <>
-          {kind === "documents"
-            ? <SortableTable customizeId="research-records-docs" columns={docColumns} rows={docs!.rows} rowKey={(r) => r.id} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />
-            : <SortableTable customizeId="research-records-permits" columns={permitColumns} rows={permits!.rows} rowKey={(r) => r.id} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />}
-          {totalPages > 1 && (
-            <div className="row" style={{ gap: 8, alignItems: "center", justifyContent: "flex-end", marginTop: 10 }}>
-              <button className="small" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Prev</button>
-              <span className="muted" style={{ fontSize: 12 }}>Page {page} of {num(totalPages)}</span>
-              <button className="small" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next →</button>
+      <div className="rec-card">
+        {loading && !active ? (
+          <>
+            <div className="cv-toolbar"><div className="cv-toolbar-left">{toolbarContent}</div></div>
+            {filterStrip}
+            <Spinner />
+          </>
+        ) : !active || active.total === 0 ? (
+          <>
+            <div className="cv-toolbar"><div className="cv-toolbar-left">{toolbarContent}</div></div>
+            {filterStrip}
+            <p className="muted" style={{ padding: "4px 20px 16px", margin: 0 }}>No matching records.</p>
+          </>
+        ) : (
+          <>
+            {kind === "documents"
+              ? <SortableTable customizeId="research-records-docs" columns={docColumns} rows={docs!.rows} rowKey={(r) => r.id} toolbar={toolbarContent} subToolbar={filterStrip} defaultSort={{ key: "recordingDate", dir: "desc" }} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />
+              : <SortableTable customizeId="research-records-permits" columns={permitColumns} rows={permits!.rows} rowKey={(r) => r.id} toolbar={toolbarContent} subToolbar={filterStrip} defaultSort={{ key: "activityDate", dir: "desc" }} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />}
+            <div className="rec-foot">
+              <span>Showing {num(active.rows.length)} of {num(active.total)} records · sorted by {kind === "documents" ? "recorded" : ""} date, newest first</span>
+              {totalPages > 1 && (
+                <span className="row" style={{ gap: 8, alignItems: "center" }}>
+                  <button className="small" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Prev</button>
+                  <span className="muted" style={{ fontSize: 12 }}>Page {page} of {num(totalPages)}</span>
+                  <button className="small" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next →</button>
+                </span>
+              )}
             </div>
-          )}
-        </>
-      )}
+          </>
+        )}
+      </div>
       {confirmDel && (
         <ConfirmDelete count={sel.selected.size} itemLabel="record" busy={busy} onCancel={() => setConfirmDel(false)} onConfirm={bulkDelete} />
       )}
-    </div>
+    </>
   );
 }

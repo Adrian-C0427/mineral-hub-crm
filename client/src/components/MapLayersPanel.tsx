@@ -67,6 +67,38 @@ export function MapLayersPanel<K extends string>({
     </div>
   );
 
+  // Floating overlay (portal maps): the reference card design — header row with
+  // layers glyph, count badge and chevron; a vertical checkbox list when open.
+  if (variant === "floating") {
+    return (
+      <div className={`ml2-panel ${open ? "open" : ""}`}>
+        <button type="button" className="ml2-head" onClick={() => (collapsible ? setOpen((o) => !o) : undefined)} aria-expanded={open} title={open ? `Hide ${title.toLowerCase()}` : `Show ${title.toLowerCase()}`}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="ml2-glyph" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg>
+          <span className="ml2-title">{title}</span>
+          <span className="ml2-count">{activeCount}</span>
+          <svg className="ml2-caret" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">{open ? <path d="M18 15l-6-6-6 6" /> : <path d="M6 9l6 6 6-6" />}</svg>
+        </button>
+        {open && (
+          <div className="ml2-list">
+            {defs.map((d) => {
+              const on = Boolean(layers[d.key as K]);
+              return (
+                <div key={d.key} className="ml2-row" role="checkbox" aria-checked={on} tabIndex={0}
+                  onClick={() => onToggle(d.key as K)}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(d.key as K); } }}>
+                  <span className={`ml2-box ${on ? "on" : ""}`}>
+                    {on && <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>}
+                  </span>
+                  <span className={`ml2-label ${on ? "on" : ""}`}>{d.label}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (collapsible) {
     return (
       <div className={`ml-layers ml-${variant} ml-collapsible ${open ? "open" : "closed"}`}>

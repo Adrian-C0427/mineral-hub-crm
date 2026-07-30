@@ -127,14 +127,15 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
   return (
     <div>
       <div className="panel">
-        <h3>Import Public Records</h3>
-        <p className="muted" style={{ marginTop: 0 }}>
+        <h3 style={{ marginBottom: 0 }}>Import public records</h3>
+        <p className="muted" style={{ margin: "4px 0 0", fontSize: 12.5, lineHeight: 1.55, maxWidth: 920 }}>
           Upload a CSV of recorded deeds or leases (or a drilling-permit export). Rows are classified,
           normalized and de-duplicated automatically; non-mineral instruments (liens, deeds of trust, easements) are skipped.
           State and County come from the file's columns where present; if your file doesn't include them, assign them below before importing.
         </p>
-        <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-          <div className="field" style={{ marginBottom: 0, minWidth: 180 }}><label>Data Type</label>
+        <div className="imp-row">
+          <div>
+            <div className="rec-flabel">Data type</div>
             <Select value={category} onChange={(v) => { setCategory(v as Category); reset(); }} ariaLabel="Data type"
               options={[
                 { value: "deeds", label: "Deeds" },
@@ -142,10 +143,11 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
                 { value: "permits", label: "Drilling Permits" },
               ]} />
           </div>
-          <div className="field" style={{ marginBottom: 0, flex: 1, minWidth: 250 }}><label>CSV file</label>
+          <div>
+            <div className="rec-flabel">CSV file</div>
             <CsvDropzone slim onFile={onFile} />
           </div>
-          <button className="small" onClick={downloadTemplate}>Download template</button>
+          <button className="rbtn" style={{ height: 38 }} onClick={downloadTemplate}>Download template</button>
         </div>
 
         {busy && <Spinner label="Working…" />}
@@ -229,38 +231,46 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
         )}
       </div>
 
-      <div className="panel">
-        <div className="section-head"><h3 style={{ margin: 0 }}>Import History</h3>
-          {selectedRuns.size > 0 && (
-            <button className="small danger" onClick={() => setConfirmRuns(true)} disabled={deletingRuns}>
-              Delete {selectedRuns.size} import{selectedRuns.size === 1 ? "" : "s"}…
-            </button>
-          )}
+      <div className="rec-card">
+        <div className="geo-head" style={{ alignItems: "flex-start" }}>
+          <div>
+            <h3 style={{ margin: 0 }}>Import history</h3>
+            <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>Deleting an import removes only the records that file created; all other imports stay intact.</div>
+          </div>
+          <button className="rbtn imp-del" onClick={() => setConfirmRuns(true)} disabled={selectedRuns.size === 0 || deletingRuns}>
+            Delete selected{selectedRuns.size > 0 ? ` (${selectedRuns.size})` : ""}
+          </button>
         </div>
-        <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Deleting an import removes only the records that file created; all other imports stay intact.</p>
-        {runs.length === 0 ? <p className="muted">No imports yet.</p> : (
-          <div className="table-scroll"><table className="data-table">
-            <thead><tr>
-              <th style={{ width: 28 }}><input type="checkbox" checked={runs.length > 0 && runs.every((r) => selectedRuns.has(r.id))} onChange={(e) => setSelectedRuns(e.target.checked ? new Set(runs.map((r) => r.id)) : new Set())} /></th>
-              <th>Date</th><th>Type</th><th>Geography</th><th>File</th><th>Imported</th><th>Updated</th><th>Duplicates</th><th>Rejected</th><th></th>
-            </tr></thead>
-            <tbody>
-              {runs.map((r) => (
-                <tr key={r.id}>
-                  <td><input type="checkbox" checked={selectedRuns.has(r.id)} onChange={() => setSelectedRuns((p) => { const n = new Set(p); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n; })} /></td>
-                  <td>{fmtDateTime(r.createdAt)}</td>
-                  <td>{runTypeLabel(r.source)}</td>
-                  <td>{[r.county, r.state].filter(Boolean).join(", ") || "—"}</td>
-                  <td>{r.filename ?? "—"}</td>
-                  <td>{r.rowsImported.toLocaleString()}</td>
-                  <td>{(r.rowsUpdated ?? 0).toLocaleString()}</td>
-                  <td>{r.rowsSkipped.toLocaleString()}</td>
-                  <td>{r.rowsFailed.toLocaleString()}</td>
-                  <td className="right"><button className="small" onClick={() => setReviewRun(r)}>Review</button></td>
-                </tr>
-              ))}
-            </tbody>
-          </table></div>
+        {runs.length === 0 ? <p className="muted" style={{ padding: "0 20px 16px", margin: 0 }}>No imports yet.</p> : (
+          <>
+            <div className="table-scroll"><table className="data-table">
+              <thead><tr>
+                <th style={{ width: 36 }}><input type="checkbox" checked={runs.length > 0 && runs.every((r) => selectedRuns.has(r.id))} onChange={(e) => setSelectedRuns(e.target.checked ? new Set(runs.map((r) => r.id)) : new Set())} /></th>
+                <th style={{ color: "var(--text)" }}>Date <span style={{ color: "var(--accent)" }}>▼</span></th>
+                <th>Type</th><th>Geography</th><th>File</th>
+                <th className="right">Imported</th><th className="right">Updated</th><th className="right">Duplicates</th><th className="right">Rejected</th><th style={{ width: 90 }}></th>
+              </tr></thead>
+              <tbody>
+                {runs.map((r) => (
+                  <tr key={r.id}>
+                    <td><input type="checkbox" checked={selectedRuns.has(r.id)} onChange={() => setSelectedRuns((p) => { const n = new Set(p); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n; })} /></td>
+                    <td><span className="rec-mid rec-nowrap">{fmtDateTime(r.createdAt)}</span></td>
+                    <td><span className="rec-type">{runTypeLabel(r.source)}</span></td>
+                    <td><span className="rec-faint">{[r.county, r.state].filter(Boolean).join(", ") || "—"}</span></td>
+                    <td><span className="rec-name" style={{ display: "inline-block", maxWidth: 340, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "bottom" }}>{r.filename ?? "—"}</span></td>
+                    <td className="right"><b className="rec-nowrap">{r.rowsImported.toLocaleString()}</b></td>
+                    <td className="right"><span className="rec-nowrap" style={{ color: (r.rowsUpdated ?? 0) > 0 ? "var(--green)" : "var(--text-faint)" }}>{(r.rowsUpdated ?? 0).toLocaleString()}</span></td>
+                    <td className="right"><span className="rec-nowrap" style={{ color: r.rowsSkipped > 0 ? "var(--amber)" : "var(--text-faint)" }}>{r.rowsSkipped.toLocaleString()}</span></td>
+                    <td className="right"><span className="rec-nowrap" style={{ color: r.rowsFailed > 0 ? "var(--red)" : "var(--text-faint)" }}>{r.rowsFailed.toLocaleString()}</span></td>
+                    <td className="right"><button className="opp-view" style={{ height: 30, padding: "0 13px", fontSize: 12 }} onClick={() => setReviewRun(r)}>Review</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
+            <div className="rec-foot">
+              <span>{runs.length.toLocaleString()} import{runs.length === 1 ? "" : "s"} · sorted by date, newest first</span>
+            </div>
+          </>
         )}
         {reviewRun && (
           <Modal title={`Import review — ${reviewRun.filename ?? runTypeLabel(reviewRun.source)} (${fmtDate(reviewRun.createdAt)})`} wide onClose={() => setReviewRun(null)}
