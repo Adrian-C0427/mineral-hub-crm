@@ -3676,3 +3676,62 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .bp-cards .dd-grid { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 15px 18px; }
 .bp-cards .kv .k { font-size: 10px; letter-spacing: 0.07em; font-weight: 700; color: var(--text-faint); white-space: nowrap; }
 .bp-cards .kv .v { font-size: 13px; font-weight: 600; margin-top: 4px; overflow-wrap: anywhere; }
+
+/* ===========================================================================
+   Well Analysis & Valuation — exact values from the Well Analysis reference.
+   Scoped to .va-page so nothing leaks into other pages that share .panel /
+   .metric-card / .data-table.
+   =========================================================================== */
+/* Step cards: solid-blue numbered badge, tighter head, 15px/800 title. */
+.va-page .va-step-head { padding: 14px 20px; }
+.va-page .va-body { padding: 20px; }
+.va-page .va-step-title { font-size: 15px; font-weight: 800; gap: 11px; }
+.va-page .va-step-num { width: 22px; height: 22px; border-radius: 7px; background: #1d4ed8;
+  color: #fff; font-size: 12px; font-weight: 800; }
+.va-page .va-microlabel { font-size: 11.5px; letter-spacing: 0.09em; font-weight: 800; color: var(--text-dim); }
+
+/* Assumption groups: two cards side by side, each a panel-toned tile. */
+.va-page .assumption-groups { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 900px) { .va-page .assumption-groups { grid-template-columns: 1fr; } }
+.va-page .assumption-group { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+.va-page .assumption-group-title { font-size: 11.5px; letter-spacing: 0.09em; font-weight: 800; color: var(--text-dim); margin-bottom: 13px; }
+.va-page .assumption-grid { display: flex; flex-wrap: wrap; gap: 14px; }
+
+/* Number fields: micro label, compact input on the darker inset, unit beside. */
+.va-page .va-num > label { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--text-faint); margin-bottom: 6px; }
+.va-num-row { display: flex; align-items: center; gap: 6px; }
+.va-page .va-num-row input { height: 36px; padding: 0 10px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; font-size: 13.5px; font-weight: 700; color: var(--text); }
+.va-page .va-num-row input:focus { border-color: var(--accent); outline: none; box-shadow: none; }
+.va-num-unit { font-size: 12px; color: var(--text-faint); white-space: nowrap; }
+
+/* Advanced disclosure: dashed inset card, arrow marker on the summary. */
+.va-advanced { margin-top: 16px; }
+.va-advanced > summary { font-size: 12.5px; font-weight: 600; color: var(--text-dim); cursor: pointer;
+  user-select: none; list-style: none; }
+.va-advanced > summary::-webkit-details-marker { display: none; }
+.va-advanced > summary::before { content: "▶ "; font-size: 9px; }
+.va-advanced[open] > summary::before { content: "▼ "; }
+.va-advanced > summary:hover { color: var(--text); }
+.va-advanced-grid { margin-top: 12px; background: var(--bg); border: 1px dashed var(--border);
+  border-radius: 12px; padding: 14px 16px; }
+
+/* KPI row: 5 across with the reference's compact type scale. */
+.va-page .metrics-row { grid-template-columns: repeat(5, 1fr); gap: 12px; }
+@media (max-width: 1100px) { .va-page .metrics-row { grid-template-columns: repeat(2, 1fr); } }
+.va-page .metric-card { border-radius: 12px; padding: 14px 15px; }
+.va-page .metric-label { font-size: 11px; font-weight: 700; letter-spacing: 0.07em; color: var(--text-faint); }
+.va-page .metric-value { font-size: 21px; font-weight: 800; margin-top: 6px; letter-spacing: -0.01em; }
+.va-page .metric-hint { font-size: 11.5px; color: var(--text-dim); margin-top: 4px; }
+
+/* Wells table + section titles. */
+.va-page .panel > .panel-title h3 { font-size: 15px; font-weight: 800; }
+.va-page .data-table th { font-size: 11px; font-weight: 700; letter-spacing: 0.06em; padding: 11px 14px; }
+.va-page .data-table td { font-size: 12.5px; padding: 11px 14px; }
+
+/* Import row: micro labels, 38px controls, dashed drop target (reference). */
+.va-page .field > label { font-size: 11px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--text-faint); }
+.va-page .dropzone { min-height: 38px; padding: 0 14px; display: flex; align-items: center; justify-content: center;
+  border: 1.5px dashed var(--border); border-radius: 9px; font-size: 13px; color: var(--text-dim); }
+.va-page .dropzone:hover { border-color: var(--accent); color: var(--text); }
