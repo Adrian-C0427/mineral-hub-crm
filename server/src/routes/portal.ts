@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
-import { randomBytes } from "node:crypto";
+import { randomBytes, createHmac } from "node:crypto";
 import { prisma } from "../db.js";
+import { env } from "../config.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { normalizeCompany } from "../serializers.js";
 import { normalizePhone } from "../domain/phone.js";
@@ -27,18 +28,26 @@ export const newPortalSlug = (): string => randomBytes(12).toString("base64url")
 // ---------------------------------------------------------------------------
 // Listing analytics — anonymous view/download events.
 //
-// The public portal client generates a random per-browser id and sends it as
-// the `x-mh-visitor` header; no personal data is involved. Views are deduped
-// per visitor per 30 minutes so refresh loops don't inflate the numbers.
-// Recording is fire-and-forget: analytics must never break a public page.
+// Visitor identity is an HMAC of the source IP, NOT the client-supplied
+// `x-mh-visitor` header. That header is attacker-controlled and can be rotated
+// freely, so counting distinct header values let a single scripted client mint
+// unlimited bogus "unique visitors" on any public offering. Keying on the IP
+// caps a client to one identity no matter how many values it sends, and storing
+// only the HMAC (never the raw IP) keeps this table free of PII — while the
+// keyed hash stops the tiny IPv4 space from being reversed by brute force.
+// Views are deduped per visitor per 30 minutes so refresh loops don't inflate
+// the numbers. Recording is fire-and-forget: analytics must never break a
+// public page.
 // ---------------------------------------------------------------------------
 
 const VIEW_DEDUPE_MS = 30 * 60 * 1000;
 
-function visitorIdFrom(req: { headers: Record<string, unknown> }): string | null {
-  const raw = req.headers["x-mh-visitor"];
-  const v = typeof raw === "string" ? raw.trim() : "";
-  return /^[A-Za-z0-9_-]{8,64}$/.test(v) ? v : null;
+// `trust proxy` is set in app.ts, so req.ip is the real client address behind
+// Railway's TLS proxy rather than the proxy's own.
+function visitorKeyFrom(req: import("express").Request): string | null {
+  const ip = req.ip?.trim();
+  if (!ip) return null;
+  return createHmac("sha256", env.JWT_SECRET).update(ip).digest("base64url").slice(0, 32);
 }
 
 function recordPortalEvent(dealId: string, kind: "VIEW" | "DOWNLOAD", visitorId: string | null, fileId?: string) {
@@ -310,7 +319,7 @@ portalRouter.get(
     if (!deal || !deal.publishedToPortal || !deal.organization?.portalEnabled) {
       throw new HttpError(404, "Offering not found");
     }
-    recordPortalEvent(deal.id, "VIEW", visitorIdFrom(req));
+    recordPortalEvent(deal.id, "VIEW", visitorKeyFrom(req));
     // Abstract/survey labels for the info grid (numbers alone mean little).
     const abstracts = deal.abstractIds.length
       ? await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string }[]>(
@@ -426,7 +435,7 @@ portalRouter.get(
       throw new HttpError(404, "Document not found");
     }
     const url = await getDownloadUrl(file.s3Key, file.filename, req.query.inline === "1");
-    if (file.dealId) recordPortalEvent(file.dealId, "DOWNLOAD", visitorIdFrom(req), file.id);
+    if (file.dealId) recordPortalEvent(file.dealId, "DOWNLOAD", visitorKeyFrom(req), file.id);
     res.json({ url });
   }),
 );
