@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Info } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
@@ -23,20 +23,30 @@ import { ChainSection, ClassBadge, PartyColumn, RelStat, type ChainEntry, type R
  */
 
 interface AliasActivity { norm: string; name: string; acquisitions: number; dispositions: number }
-interface Network {
+export interface BuyerNetwork {
   norm: string; name: string; klass: string; classLabel: string;
   acquisitions: number; dispositions: number;
   topGrantors: RelParty[]; topGrantees: RelParty[]; coBuyers: RelParty[];
   chains: ChainEntry[];
   classLabels: Record<string, string>;
   aliasBreakdown: AliasActivity[];
+  /** Profile intelligence, derived server-side from the same transaction set. */
+  counties: { county: string; state: string; count: number; pct: number }[];
+  lastActivity: { date: string; kind: "acquired" | "sold"; counterparty: string; tracts: number } | null;
+  hold: { medianMonths: number; fastestMonths: number; slowestMonths: number; samples: number } | null;
 }
+type Network = BuyerNetwork;
 interface AliasSuggestion {
   norm: string; name: string; confidence: number; txCount: number;
   asGrantee: number; asGrantor: number; buyerId: string | null; buyerName: string | null;
 }
 
-export function BuyerRelationships({ buyerId }: { buyerId: string }) {
+export function BuyerRelationships({ buyerId, onNetwork }: {
+  buyerId: string;
+  /** Reports the loaded network up to the profile (header pills + intelligence
+   *  strip read the same payload, so nothing is fetched twice). */
+  onNetwork?: (n: BuyerNetwork | null) => void;
+}) {
   const { can } = useAuth();
   const nav = useNavigate();
   const [net, setNet] = useState<Network | null>(null);
@@ -48,12 +58,15 @@ export function BuyerRelationships({ buyerId }: { buyerId: string }) {
   const [reviewing, setReviewing] = useState<AliasSuggestion | null>(null);
   const [confirmMerge, setConfirmMerge] = useState<AliasSuggestion | null>(null);
   const [aliasBusy, setAliasBusy] = useState(false);
+  // Held in a ref so a parent's inline callback never re-triggers the fetch.
+  const onNetworkRef = useRef(onNetwork);
+  onNetworkRef.current = onNetwork;
 
   useEffect(() => {
     setLoading(true);
     api.get<{ network: Network | null; reason?: string }>(`/buyers/${buyerId}/relationships`)
-      .then((d) => { setNet(d.network); setReason(d.reason ?? null); })
-      .catch(() => { setNet(null); setReason("error"); })
+      .then((d) => { setNet(d.network); setReason(d.reason ?? null); onNetworkRef.current?.(d.network); })
+      .catch(() => { setNet(null); setReason("error"); onNetworkRef.current?.(null); })
       .finally(() => setLoading(false));
     api.get<{ suggestions: AliasSuggestion[] }>(`/buyers/${buyerId}/alias-suggestions`)
       .then((d) => setSuggestions(d.suggestions))

@@ -3617,3 +3617,60 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .pi-chip:hover { border-color: var(--accent); }
 .pi-chip.active { background: rgba(59, 130, 246, 0.14); border-color: var(--accent); color: var(--accent); }
 .mf-v.dim { color: var(--text-faint); }
+
+/* ===========================================================================
+   Buyer Profile (Buyer Profile.html reference) — breadcrumb, title row with
+   pills + meta, intelligence strip, follow-up alert, deal-history empty state.
+   =========================================================================== */
+.bp-crumbs { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: var(--text-faint); padding: 0 0 10px; }
+.bp-crumb-link { background: none; border: none; padding: 0; font: inherit; color: var(--text-dim); cursor: pointer; }
+.bp-crumb-link:hover { color: var(--accent); }
+.bp-crumb-cur { color: var(--text-mid, #c3c9d6); }
+:root[data-theme="light"] .bp-crumb-cur { color: #475467; }
+
+.bp-titlerow { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; padding-bottom: 18px; }
+.bp-titleline { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }
+.bp-title { margin: 0; font-size: 25px; font-weight: 800; letter-spacing: -0.015em; }
+.bp-meta { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--text-dim); font-weight: 600; margin-top: 9px; }
+.bp-meta-div { width: 1px; height: 12px; background: var(--border); }
+
+/* Intelligence strip: hairline-separated cells in one card. */
+.bp-intel { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); background: var(--panel);
+  border: 1px solid var(--border); border-radius: 14px; overflow: hidden; margin-bottom: 16px; }
+.bp-intel-cell { padding: 16px 20px; box-shadow: -1px 0 0 var(--hairline, var(--border)); }
+.bp-intel-l { font-size: 10px; letter-spacing: 0.09em; text-transform: uppercase; color: var(--text-faint); font-weight: 800; }
+.bp-intel-v { font-size: 15px; font-weight: 800; margin-top: 7px; letter-spacing: -0.01em; line-height: 1.3; }
+.bp-intel-s { font-size: 11.5px; color: var(--text-faint); font-weight: 600; margin-top: 3px; }
+
+/* Amber follow-up alert inside Contact Tracking. */
+.bp-alert { display: flex; align-items: center; gap: 11px; padding: 11px 12px; margin-bottom: 14px;
+  background: color-mix(in srgb, var(--amber) 6%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 22%, transparent); border-radius: 11px; color: var(--amber); }
+.bp-alert-t { font-size: 12.5px; font-weight: 700; }
+.bp-alert-s { font-size: 11.5px; color: var(--text-dim); margin-top: 1px; }
+
+.bp-sub { font-size: 12px; color: var(--text-dim); margin-top: 3px; }
+
+/* Deal-history empty state: icon tile + copy + CTA on a dashed card. */
+.bp-empty { display: flex; align-items: center; gap: 16px; margin-top: 14px; padding: 20px;
+  background: var(--control, var(--panel-2)); border: 1px dashed var(--border); border-radius: 12px; }
+.bp-empty-ico { width: 38px; height: 38px; border-radius: 11px; background: var(--panel); display: flex;
+  align-items: center; justify-content: center; flex: none; color: var(--text-faint); }
+.bp-empty-t { font-size: 13px; font-weight: 700; }
+.bp-empty-s { font-size: 12px; color: var(--text-dim); margin-top: 3px; line-height: 1.45; }
+
+/* Deal picker rows inside "Send a Deal". */
+.bp-pick { display: flex; flex-direction: column; max-height: 340px; overflow-y: auto; }
+.bp-pick-row { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 10px 8px;
+  background: none; border: none; border-top: 1px solid var(--hairline, var(--border)); cursor: pointer; color: var(--text); }
+.bp-pick-row:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.bp-pick-name { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-pick-meta { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+/* Three profile cards side by side, wrapping on narrow viewports (reference). */
+.bp-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap: 16px; align-items: stretch; margin-bottom: 16px; }
+.bp-cards > .panel { margin-bottom: 0; display: flex; flex-direction: column; }
+/* Field grids inside the profile cards flow to the available width instead of
+   forcing three columns into a narrow card (reference: auto-fit minmax). */
+.bp-cards .dd-grid { grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: 15px 18px; }
+.bp-cards .kv .k { font-size: 10px; letter-spacing: 0.07em; font-weight: 700; color: var(--text-faint); white-space: nowrap; }
+.bp-cards .kv .v { font-size: 13px; font-weight: 600; margin-top: 4px; overflow-wrap: anywhere; }

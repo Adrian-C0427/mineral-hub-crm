@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, RelationshipDot, StageBadge, StatusBadge, OverflowMenu, ConfirmDelete } from "../components/ui";
+import { Spinner, RelationshipDot, StageBadge, StatusBadge, OverflowMenu, ConfirmDelete, CtPill, Modal } from "../components/ui";
+import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { Select } from "../components/Select";
 import { AssigneePicker } from "../components/AssigneePicker";
 import { GeoFields } from "../components/GeoFields";
 import { StateSelect } from "../components/StateSelect";
-import { BuyerRelationships } from "../components/BuyerRelationships";
+import { BuyerRelationships, type BuyerNetwork } from "../components/BuyerRelationships";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
 import { money, pct, fmtDate, toInputDate } from "../lib/format";
 import { formatPhone } from "../lib/phone";
@@ -36,6 +37,8 @@ interface BuyerProfileData {
   lastContactDate: string | null;
   nextFollowUpDate: string | null;
   notes: string | null;
+  aliases: string[];
+  createdAt: string;
   owners: { id: string; name: string }[];
   buyBox: BuyBox;
   closeRate: number;
@@ -57,6 +60,15 @@ function fmtRange(min: number | null, max: number | null, fmt: (n: number) => st
 // number can never accidentally disturb the buy box, and vice versa.
 type Section = "contact" | "buybox" | "tracking";
 
+/** What each behavior class means in plain terms (profile intelligence strip). */
+const BEHAVIOR_BLURB: Record<string, string> = {
+  TERMINAL_HOLD: "Buys and holds — rarely resells",
+  DISTRIBUTOR: "Buys and resells quickly",
+  AGGREGATOR: "Accumulates from many sources",
+  FEEDER: "Sources tracts and passes them upstream",
+  TRADER: "Buys and sells in similar volume",
+};
+
 export function BuyerProfile() {
   const { id } = useParams<{ id: string }>();
   const nav = useNavigate();
@@ -68,6 +80,10 @@ export function BuyerProfile() {
   const [draft, setDraft] = useState<BuyerProfileData | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Reported up by BuyerRelationships — the header pills and intelligence strip
+  // read the same payload the section already fetched (no duplicate request).
+  const [net, setNet] = useState<BuyerNetwork | null>(null);
+  const [sendDeal, setSendDeal] = useState(false);
 
   function load() { api.get<BuyerProfileData>(`/buyers/${id}`).then(setB); }
   useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers); }, [id]);
@@ -147,21 +163,88 @@ export function BuyerProfile() {
   const editBox = editing === "buybox";
   const editTracking = editing === "tracking";
 
+  const contactPerson = [view.contactFirstName, view.contactLastName].filter(Boolean).join(" ") || view.contactName;
+  // Header meta (reference): geography · transactions on record · aliases · added.
+  const geo = (() => {
+    const st = [...new Set(net?.counties.map((c) => c.state) ?? [])];
+    const co = (net?.counties ?? []).slice(0, 3).map((c) => c.county);
+    if (co.length === 0) return view.buyBox.states.length ? view.buyBox.states.join(", ") : null;
+    return `${st.join(", ")} · ${co.join(", ")}`;
+  })();
+  const txOnRecord = net ? net.acquisitions + net.dispositions : 0;
+
   return (
-    <div className="page">
-      <button className="link-btn" onClick={backToBuyers} style={{ marginBottom: 10 }}>← Back to Buyers</button>
-      <div className="page-header">
-        <div className="row">
-          <h1 style={{ marginBottom: 0 }}>{view.companyName}</h1>
-          {(view.contactFirstName || view.contactLastName || view.contactName) && (
-            <span className="muted">{[view.contactFirstName, view.contactLastName].filter(Boolean).join(" ") || view.contactName}</span>
-          )}
-          <RelationshipDot status={view.relationshipStatus} />
+    <div className="page bp-page">
+      {/* Breadcrumb (reference) — keeps the browser-back behavior that preserves
+          the list's filters/scroll. */}
+      <div className="bp-crumbs">
+        <button type="button" className="bp-crumb-link" onClick={backToBuyers}>Buyers</button>
+        <span>/</span>
+        <span className="bp-crumb-cur">{view.companyName}</span>
+      </div>
+
+      <div className="bp-titlerow">
+        <div style={{ minWidth: 0 }}>
+          <div className="bp-titleline">
+            <h1 className="bp-title">{view.companyName}</h1>
+            <RelationshipDot status={view.relationshipStatus} />
+            {net && <CtPill color="var(--accent)">{net.classLabel}</CtPill>}
+          </div>
+          <div className="bp-meta">
+            {contactPerson && <><span>{contactPerson}</span><span className="bp-meta-div" /></>}
+            {geo && <><span>{geo}</span><span className="bp-meta-div" /></>}
+            {txOnRecord > 0 && <><span>{txOnRecord.toLocaleString("en-US")} transactions on record</span><span className="bp-meta-div" /></>}
+            {view.aliases.length > 0 && <><span>{view.aliases.length} recorded alias{view.aliases.length === 1 ? "" : "es"}</span><span className="bp-meta-div" /></>}
+            <span>Added {fmtDate(view.createdAt)}</span>
+          </div>
         </div>
-        <div className="row">
+        <div className="row" style={{ gap: 9 }}>
+          {can("editBuyers") && (
+            <button className="ct-btn" onClick={() => setSendDeal(true)} title="Email one of your deals to this buyer">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M22 2L11 13" /><path d="M22 2l-7 20-4-9-9-4 20-7z" /></svg>
+              Send a Deal
+            </button>
+          )}
           {can("deleteBuyers") && !editing && <OverflowMenu items={[{ label: "Delete buyer…", danger: true, onClick: () => setConfirmDelete(true) }]} />}
         </div>
       </div>
+
+      {/* Intelligence strip (reference) — everything the research network knows
+          about how this buyer behaves, in one scan. */}
+      {net && (
+        <div className="bp-intel">
+          <div className="bp-intel-cell">
+            <div className="bp-intel-l">Behavior</div>
+            <div className="bp-intel-v" style={{ color: "var(--accent)" }}>{net.classLabel}</div>
+            <div className="bp-intel-s">{BEHAVIOR_BLURB[net.klass] ?? "Classified from its transaction flow"}</div>
+          </div>
+          <div className="bp-intel-cell">
+            <div className="bp-intel-l">Median hold</div>
+            <div className="bp-intel-v">{net.hold ? `${net.hold.medianMonths} months` : "—"}</div>
+            <div className="bp-intel-s">
+              {net.hold
+                ? `Fastest ${net.hold.fastestMonths} mo · slowest ${net.hold.slowestMonths} mo`
+                : net.dispositions === 0 ? "Never resold — holds what it buys" : "No acquire-then-sell round trip on record"}
+            </div>
+          </div>
+          <div className="bp-intel-cell">
+            <div className="bp-intel-l">Concentration</div>
+            <div className="bp-intel-v">{net.counties[0] ? `${Math.round(net.counties[0].pct * 100)}% ${net.counties[0].county}` : "—"}</div>
+            <div className="bp-intel-s">
+              {net.counties.slice(1, 3).map((c) => `${c.county} ${Math.round(c.pct * 100)}%`).join(" · ") || "Single county on record"}
+            </div>
+          </div>
+          <div className="bp-intel-cell">
+            <div className="bp-intel-l">Last activity</div>
+            <div className="bp-intel-v" style={{ color: net.lastActivity ? "var(--green)" : undefined }}>{net.lastActivity ? fmtDate(net.lastActivity.date) : "—"}</div>
+            <div className="bp-intel-s">
+              {net.lastActivity
+                ? `${net.lastActivity.kind === "sold" ? "Sold" : "Acquired"} ${net.lastActivity.tracts} tract${net.lastActivity.tracts === 1 ? "" : "s"} ${net.lastActivity.kind === "sold" ? "to" : "from"} ${net.lastActivity.counterparty}`
+                : "No recorded transactions"}
+            </div>
+          </div>
+        </div>
+      )}
 
       {confirmDelete && (
         <ConfirmDelete
@@ -173,7 +256,8 @@ export function BuyerProfile() {
       )}
       {err && <div className="error-text">{err}</div>}
 
-      <div className="grid-2">
+      {/* Contact Info · Buy Box · Contact Tracking, side by side (reference). */}
+      <div className="bp-cards">
         {/* Contact Info */}
         <div className="panel">
           <SectionHead title="Contact Info" section="contact" />
@@ -242,11 +326,34 @@ export function BuyerProfile() {
             </div>
           )}
         </div>
-      </div>
 
       {/* Contact Tracking */}
       <div className="panel">
         <SectionHead title="Contact Tracking" section="tracking" />
+        {/* Follow-up alert (reference): amber when due today or overdue. */}
+        {(() => {
+          if (!view.nextFollowUpDate) return null;
+          // Follow-up dates are calendar days stored at UTC midnight — compare
+          // day KEYS (as the dashboard's task list does), never local
+          // timestamps, or a date due today reads as a day overdue.
+          const dayKey = (d: string) => d.slice(0, 10);
+          const todayKey = new Date().toISOString().slice(0, 10);
+          const dueKey = dayKey(view.nextFollowUpDate);
+          if (dueKey > todayKey) return null;
+          const days = Math.round((Date.parse(`${dueKey}T00:00:00Z`) - Date.parse(`${todayKey}T00:00:00Z`)) / 86400000);
+          const since = view.lastContactDate
+            ? Math.round((Date.parse(`${todayKey}T00:00:00Z`) - Date.parse(`${dayKey(view.lastContactDate)}T00:00:00Z`)) / 86400000)
+            : null;
+          return (
+            <div className="bp-alert">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5" /><path d="M12 7.5V12l3 1.8" /></svg>
+              <div style={{ minWidth: 0 }}>
+                <div className="bp-alert-t">{days === 0 ? "Follow-up due today" : `Follow-up ${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} overdue`}</div>
+                <div className="bp-alert-s">{fmtDate(view.nextFollowUpDate)}{since != null && ` · ${since} days since last contact`}</div>
+              </div>
+            </div>
+          );
+        })()}
         <div className="dd-grid">
           <KV k="Close rate (computed)" v={view.closedDeals > 0 ? `${pct(view.closeRate)} · ${view.closedDeals} closed` : "No closed deals yet"} />
           {editTracking ? (
@@ -267,13 +374,39 @@ export function BuyerProfile() {
         </Fld>
       </div>
 
-      {/* Relationships — transaction-network intelligence from research data */}
-      {!editing && <BuyerRelationships buyerId={b.id} />}
+      </div>
+
+      {/* Relationships — transaction-network intelligence from research data.
+          Mounted even while a section is being edited so the header strip keeps
+          its data; the section itself hides its body during edits. */}
+      <div style={editing ? { display: "none" } : undefined}>
+        <BuyerRelationships buyerId={b.id} onNetwork={setNet} />
+      </div>
 
       {/* Deal History — every row clickable */}
       <div className="panel">
-        <h3>Deal History</h3>
-        {view.dealHistory.length === 0 ? <p className="muted">No deal activity yet.</p> : (
+        <div className="section-head">
+          <div>
+            <h3 style={{ margin: 0 }}>Deal History</h3>
+            <div className="bp-sub">Deals you've sent to this buyer</div>
+          </div>
+        </div>
+        {view.dealHistory.length === 0 ? (
+          <div className="bp-empty">
+            <span className="bp-empty-ico">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M14 3h6a1 1 0 0 1 1 1v6L11 20l-7-7L14 3z" /><circle cx="16.5" cy="7.5" r="1.6" /></svg>
+            </span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="bp-empty-t">No deals sent yet</div>
+              <div className="bp-empty-s">
+                {net && net.acquisitions > 0
+                  ? `Public records show ${net.acquisitions} acquisition${net.acquisitions === 1 ? "" : "s"} — this buyer is active but has never seen one of your packages.`
+                  : "Send this buyer one of your packages to start the history."}
+              </div>
+            </div>
+            {can("editBuyers") && <button className="primary" style={{ flexShrink: 0 }} onClick={() => setSendDeal(true)}>Send first deal</button>}
+          </div>
+        ) : (
           <div className="table-scroll">
             <table className="data-table">
               <thead><tr><th>Deal</th><th>Stage</th><th>Status</th><th className="right">Amount</th><th>Date</th></tr></thead>
@@ -292,7 +425,54 @@ export function BuyerProfile() {
           </div>
         )}
       </div>
+
+      {sendDeal && <SendDealPicker buyerId={b.id} buyerName={view.companyName} onClose={() => setSendDeal(false)} onSent={load} />}
     </div>
+  );
+}
+
+/**
+ * "Send a Deal" from the buyer side: pick one of your deals, then hand off to
+ * the same email composer the deal page uses (templates, tokens, send log).
+ */
+function SendDealPicker({ buyerId, buyerName, onClose, onSent }: {
+  buyerId: string; buyerName: string; onClose: () => void; onSent: () => void;
+}) {
+  const [deals, setDeals] = useState<{ id: string; name: string; stage: string; counties: string[] }[] | null>(null);
+  const [picked, setPicked] = useState<{ id: string; name: string } | null>(null);
+  const [q, setQ] = useState("");
+
+  useEffect(() => {
+    api.get<{ id: string; name: string; stage: string; counties: string[] }[]>("/deals?recordType=OPPORTUNITY")
+      .then((rows) => setDeals(rows.filter((d) => d.stage !== "CLOSED" && d.stage !== "DEAD")))
+      .catch(() => setDeals([]));
+  }, []);
+
+  if (picked) {
+    return <SendDealEmailModal dealId={picked.id} buyerIds={[buyerId]} dealName={picked.name}
+      onClose={onClose} onSent={() => { onSent(); onClose(); }} />;
+  }
+
+  const needle = q.trim().toLowerCase();
+  const shown = (deals ?? []).filter((d) => !needle || d.name.toLowerCase().includes(needle) || d.counties.some((c) => c.toLowerCase().includes(needle)));
+
+  return (
+    <Modal title={`Send a deal to ${buyerName}`} subtitle="Pick the package to email — the composer opens next." onClose={onClose}>
+      <div className="field"><input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search your active deals…" /></div>
+      {deals == null ? <Spinner /> : shown.length === 0 ? (
+        <p className="muted" style={{ margin: 0 }}>{deals.length === 0 ? "No active deals to send yet." : "No deals match your search."}</p>
+      ) : (
+        <div className="bp-pick">
+          {shown.map((d) => (
+            <button key={d.id} type="button" className="bp-pick-row" onClick={() => setPicked({ id: d.id, name: d.name })}>
+              <span className="bp-pick-name">{d.name}</span>
+              <span className="bp-pick-meta">{d.counties.join(", ") || "—"}</span>
+              <StageBadge stage={d.stage} />
+            </button>
+          ))}
+        </div>
+      )}
+    </Modal>
   );
 }
 

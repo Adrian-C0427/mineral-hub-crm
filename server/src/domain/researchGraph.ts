@@ -684,6 +684,19 @@ export interface EntityNetwork {
   chains: { chain: AcquisitionChain; position: number; role: EntityClass }[];
   graph: RelationshipGraph;
   /**
+   * Where this entity concentrates, by county, ranked. Powers the profile's
+   * "Concentration" read — computed over every transaction it participated in.
+   */
+  counties: { county: string; state: string; count: number; pct: number }[];
+  /** Most recent recorded transaction: when, which side, and the counterparty. */
+  lastActivity: { date: string; kind: "acquired" | "sold"; counterparty: string; tracts: number } | null;
+  /**
+   * How long the entity typically holds a tract before passing it on: median
+   * (plus fastest/slowest) months between acquiring and selling the SAME
+   * abstract. Null when no acquire→sell round trip exists in the records.
+   */
+  hold: { medianMonths: number; fastestMonths: number; slowestMonths: number; samples: number } | null;
+  /**
    * Per-alias attribution: how much of the focus entity's activity each
    * normalized key (primary name or confirmed alias) contributed — so a merged
    * profile keeps visibility into which historical alias did what.
@@ -812,7 +825,74 @@ export function entityNetwork(edges: TxEdge[], focusNorms: string[], displayName
   const focusStats = stats.get(primary);
   const klass = classifyEntity({ acquisitions, dispositions, distinctGrantors: grantorAgg.size, distinctGrantees: granteeAgg.size });
 
+  // --- Profile intelligence: concentration, last activity, typical hold -----
+  // All three read only the edges this entity participated in, so they describe
+  // the entity itself rather than the surrounding graph.
+  const own = edges.filter((e) => focus.has(e.granteeNorm) || focus.has(e.grantorNorm));
+
+  // Concentration — share of transactions per county (deduped by transaction).
+  const countyTx = new Map<string, { county: string; state: string; tx: Set<string> }>();
+  for (const e of own) {
+    if (!e.county) continue;
+    const key = `${e.state}|${e.county}`;
+    const c = countyTx.get(key) ?? { county: e.county, state: e.state, tx: new Set<string>() };
+    c.tx.add(e.id); countyTx.set(key, c);
+  }
+  const countyTotal = [...countyTx.values()].reduce((s, c) => s + c.tx.size, 0);
+  const counties = [...countyTx.values()]
+    .map((c) => ({ county: c.county, state: c.state, count: c.tx.size, pct: countyTotal > 0 ? c.tx.size / countyTotal : 0 }))
+    .sort((a, b) => b.count - a.count || a.county.localeCompare(b.county));
+
+  // Last activity — the most recent recording, which side of it the entity was
+  // on, and who the counterparty was (grouped as recorded).
+  let lastActivity: EntityNetwork["lastActivity"] = null;
+  if (own.length > 0) {
+    const latest = own.reduce((m, e) => (e.date.getTime() > m.date.getTime() ? e : m));
+    const sold = focus.has(latest.grantorNorm) && !focus.has(latest.granteeNorm);
+    const sameDay = own.filter((e) => e.date.getTime() === latest.date.getTime());
+    lastActivity = {
+      date: latest.date.toISOString(),
+      kind: sold ? "sold" : "acquired",
+      counterparty: sold ? (latest.granteeGroupName ?? latest.grantee) : (latest.grantorGroupName ?? latest.grantor),
+      tracts: new Set(sameDay.map((e) => e.id)).size,
+    };
+  }
+
+  // Typical hold — months between acquiring and later selling the SAME
+  // abstract. Only round trips count; an abstract still held contributes
+  // nothing (we can't know its exit yet).
+  const boughtAt = new Map<string, Date>(), soldAt = new Map<string, Date>();
+  for (const e of own) {
+    if (!e.abstractId) continue;
+    if (focus.has(e.granteeNorm) && !focus.has(e.grantorNorm)) {
+      const prev = boughtAt.get(e.abstractId);
+      if (!prev || e.date < prev) boughtAt.set(e.abstractId, e.date); // first acquisition
+    }
+    if (focus.has(e.grantorNorm) && !focus.has(e.granteeNorm)) {
+      const prev = soldAt.get(e.abstractId);
+      if (!prev || e.date > prev) soldAt.set(e.abstractId, e.date); // last disposition
+    }
+  }
+  const MONTH_MS = 30.44 * 24 * 3600 * 1000;
+  const holds: number[] = [];
+  for (const [abs, bought] of boughtAt) {
+    const sold = soldAt.get(abs);
+    if (sold && sold.getTime() > bought.getTime()) holds.push((sold.getTime() - bought.getTime()) / MONTH_MS);
+  }
+  holds.sort((a, b) => a - b);
+  const hold = holds.length > 0
+    ? {
+        medianMonths: Number(holds[Math.floor(holds.length / 2)]!.toFixed(1)),
+        fastestMonths: Number(holds[0]!.toFixed(1)),
+        slowestMonths: Number(holds[holds.length - 1]!.toFixed(1)),
+        samples: holds.length,
+      }
+    : null;
+
   return {
+    counties,
+    lastActivity,
+    hold,
     norm: primary,
     name: displayName ?? focusStats?.name ?? primary,
     klass,
