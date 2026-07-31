@@ -173,6 +173,9 @@ buyersRouter.get(
       lastContactDate: b.lastContactDate,
       nextFollowUpDate: b.nextFollowUpDate,
       notes: b.notes,
+      // Profile header context: recorded aliases and when the buyer entered the CRM.
+      aliases: b.aliases,
+      createdAt: b.createdAt,
       active: b.active,
       owners: b.owners.map((o) => ({ id: o.user.id, name: o.user.name })),
       tags: b.tags.map((t) => ({ id: t.tag.id, name: t.tag.name })),
