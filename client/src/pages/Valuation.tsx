@@ -258,7 +258,7 @@ export function Valuation() {
 
 
   return (
-    <div className="page">
+    <div className="page va-page">
       <div className="page-header">
         <div>
           <h2 style={{ margin: 0 }}>Well Analysis &amp; Valuation</h2>
@@ -695,7 +695,7 @@ function WellDossier({ wells }: { wells: WellRow[] }) {
 
 // --- Assumptions form ------------------------------------------------------
 
-function NumField({ label, value, onChange, step = 1, prefix, suffix, width = 150, allowNull, hint }: {
+function NumField({ label, value, onChange, step = 1, prefix, suffix, width = 96, allowNull, hint }: {
   label: string;
   value: number | null;
   onChange: (v: number | null) => void;
@@ -706,14 +706,17 @@ function NumField({ label, value, onChange, step = 1, prefix, suffix, width = 15
   allowNull?: boolean;
   hint?: string;
 }) {
+  // Reference shape: uppercase micro-label, a plain compact input, and the unit
+  // as quiet text BESIDE the box (never a bordered segment inside it).
+  const unit = suffix ?? prefix;
   return (
-    <div className="va-num" style={{ width }}>
+    <div className="va-num">
       <label title={hint}>{label}</label>
-      <div className="va-num-box">
-        {prefix && <span className="va-num-affix va-num-prefix">{prefix}</span>}
+      <div className="va-num-row">
         <input
           type="number"
           step={step}
+          style={{ width }}
           value={value ?? ""}
           placeholder={allowNull ? "—" : undefined}
           onChange={(e) => {
@@ -723,7 +726,7 @@ function NumField({ label, value, onChange, step = 1, prefix, suffix, width = 15
             if (Number.isFinite(n)) onChange(n);
           }}
         />
-        {suffix && <span className="va-num-affix va-num-suffix">{suffix}</span>}
+        {unit && <span className="va-num-unit">{unit}</span>}
       </div>
     </div>
   );
@@ -753,16 +756,13 @@ function AssumptionsForm({ a, onChange }: { a: Assumptions; onChange: (a: Assump
             <NumField label="Price escalation" value={a.priceEscalationPct} onChange={(v) => set("priceEscalationPct", v ?? 0)} step={0.5} suffix="%/yr" />
           </div>
         </div>
+        {/* Reference groups acquisition inputs and return targets in ONE card
+            ("Acquisition & Returns") beside commodity prices. */}
         <div className="assumption-group">
-          <div className="assumption-group-title"><span className="va-dot" style={{ background: "#3b82f6" }} />Acquisition</div>
+          <div className="assumption-group-title"><span className="va-dot" style={{ background: "#3b82f6" }} />Acquisition &amp; returns</div>
           <div className="assumption-grid">
             <NumField label="Asking price" value={a.askingPrice} onChange={(v) => set("askingPrice", v ?? 0)} step={1000} prefix="$" />
             <NumField label="Closing costs" value={a.closingCosts} onChange={(v) => set("closingCosts", v ?? 0)} step={500} prefix="$" />
-          </div>
-        </div>
-        <div className="assumption-group">
-          <div className="assumption-group-title"><span className="va-dot" style={{ background: "#f59e0b" }} />Return targets</div>
-          <div className="assumption-grid">
             <NumField label="Discount rate" value={a.discountRatePct} onChange={(v) => set("discountRatePct", v ?? 10)} step={0.5} suffix="%" />
             <NumField label="Target ROI" value={a.targetRoiPct} onChange={(v) => set("targetRoiPct", v)} step={5} suffix="%" allowNull hint="Total return on investment over the property's life (blank = no constraint)" />
             <NumField label="Target profit ($)" value={a.targetProfitAmount} onChange={(v) => set("targetProfitAmount", v)} step={5000} prefix="$" allowNull />
@@ -772,9 +772,9 @@ function AssumptionsForm({ a, onChange }: { a: Assumptions; onChange: (a: Assump
         </div>
       </div>
 
-      <details style={{ marginTop: 10 }}>
-        <summary className="muted" style={{ cursor: "pointer" }}>Advanced: forecast controls &amp; manual decline override</summary>
-        <div className="assumption-grid" style={{ marginTop: 10 }}>
+      <details className="va-advanced">
+        <summary>Advanced: forecast controls &amp; manual decline override</summary>
+        <div className="assumption-grid va-advanced-grid">
           <NumField label="Max forecast" value={a.maxForecastMonths} onChange={(v) => set("maxForecastMonths", v ?? 360)} step={12} suffix="mo" />
           <NumField label="Economic limit" value={a.economicLimitNetCashFlow} onChange={(v) => set("economicLimitNetCashFlow", v ?? 0)} step={50} prefix="$" suffix="/mo" hint="Stop the forecast when monthly net cash flow falls below this" />
           <NumField label="Oil decline (Di)" value={a.declineOverride?.oil?.diAnnual != null ? round4(a.declineOverride.oil.diAnnual * 100) : null} onChange={(v) => setOverride("oil", "diAnnual", v == null ? null : v / 100)} step={5} suffix="%/yr" allowNull hint="Manual nominal annual decline (blank = fit from data)" />
