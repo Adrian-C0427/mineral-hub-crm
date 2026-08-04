@@ -14,6 +14,7 @@
     "prisma:migrate:dev": "node scripts/prisma.mjs migrate dev",
     "bootstrap:admin": "tsx src/scripts/bootstrapAdmin.ts",
     "research:sample": "tsx src/scripts/seedResearchSample.ts",
+    "records:import": "tsx src/scripts/importRecords.ts",
     "wells:sample": "tsx src/scripts/seedWellsSample.ts",
     "ingest:rrc": "tsx src/ingest/run.ts",
     "db:search-indexes": "tsx src/scripts/ensureSearchIndexes.ts",
