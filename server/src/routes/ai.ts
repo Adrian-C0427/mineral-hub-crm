@@ -17,12 +17,18 @@ import { summarizeDeal, draftOutreach, type DealContext } from "../services/ai.j
 export const aiRouter = Router();
 aiRouter.use(requireAuth, requireOrg, requirePermission("useAiFeatures"));
 
-// AI calls cost money and hit provider rate limits — cap per user/IP.
+// AI calls cost money and hit provider rate limits — cap per authenticated user.
+// Keyed on the user id, NOT req.ip: the caller is always logged in here
+// (requireAuth + requireOrg run above), and the org's Anthropic budget is the
+// thing being protected, so an IP-based bucket would let one user rotate egress
+// addresses (mobile switch, VPN, second device) to blow past the cap and run up
+// spend. Mirrors the twoFactorLimiter keying in auth.ts.
 aiRouter.use(rateLimit({
   windowMs: 5 * 60 * 1000,
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => (req as AuthedRequest).user?.id ?? req.ip ?? "unknown",
   message: { error: "Too many AI requests. Wait a few minutes and try again." },
 }));
 

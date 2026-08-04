@@ -4,7 +4,7 @@ import { z } from "zod";
 import { parse } from "csv-parse/sync";
 import type { Prisma, WellStatus, WellTrajectory } from "@prisma/client";
 import { prisma } from "../db.js";
-import { asyncHandler } from "../middleware/errors.js";
+import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { normalizeAssumptions, runValuation, type MonthVolumes } from "../domain/valuation.js";
 import { monthKey } from "../domain/dates.js";
@@ -901,11 +901,26 @@ wellsRouter.get(
   }),
 );
 
+/**
+ * Reject a saved analysis that references a well the caller's org doesn't own.
+ * Without this, POST/PATCH /analyses would persist arbitrary foreign well ids —
+ * harmless today (the list/detail reads re-resolve names org-scoped), but a
+ * latent IDOR the moment any future feature re-fetches production from a stored
+ * analysis' wellIds. Mirrors the ownership check loadMergedProduction already
+ * applies on /analyze.
+ */
+async function assertOwnWells(org: string, wellIds: string[]): Promise<void> {
+  const distinct = [...new Set(wellIds)];
+  const owned = await prisma.researchWell.count({ where: { id: { in: distinct }, organizationId: org } });
+  if (owned !== distinct.length) throw new HttpError(404, "One or more wells were not found");
+}
+
 wellsRouter.post(
   "/analyses",
   requirePermission("manageWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const body = analysisBodySchema.parse(req.body);
+    await assertOwnWells(orgId(req), body.wellIds);
     const row = await prisma.wellAnalysis.create({
       data: {
         organizationId: orgId(req),
@@ -947,6 +962,7 @@ wellsRouter.patch(
     const body = analysisBodySchema.partial().parse(req.body);
     const existing = await prisma.wellAnalysis.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!existing) { res.status(404).json({ error: "Analysis not found" }); return; }
+    if (body.wellIds != null) await assertOwnWells(orgId(req), body.wellIds);
     const row = await prisma.wellAnalysis.update({
       where: { id: existing.id },
       data: {

@@ -71,8 +71,15 @@ const assetFields = {
   taxInfo: z.string().max(10_000).nullish(),
 };
 // Scalar asset keys copied straight into a Prisma patch (arrays/scalars only).
+// Editable asset value/interest fields, copied straight through by the generic
+// PATCH /:id. The lifecycle DISCRIMINATORS (recordType, assetMode) are
+// deliberately NOT here: flipping them changes a deal's lifecycle and must go
+// through POST /:id/convert and POST /:id/asset-mode, which apply the required
+// stage transitions and clear/derive dependent fields. Copying them via the
+// generic PATCH would skip those side effects and leave a deal in an
+// inconsistent state (e.g. an OWNED_ASSET with a stale opportunity stage).
 const ASSET_SCALAR_KEYS = [
-  "recordType", "assetMode", "purchasePrice", "currentValue", "bookValue",
+  "purchasePrice", "currentValue", "bookValue",
   "ownershipStatus", "ownershipType", "workingInterest", "netRevenueInterest",
   "surveys", "wells", "producingStatus", "royaltyIncomeAnnual",
   "leaseStatuses", "royaltyRate",

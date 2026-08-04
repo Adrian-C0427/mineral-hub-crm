@@ -11,6 +11,7 @@
  * Google-native files (Docs/Sheets/Slides) have no raw bytes; they are
  * exported as PDF, which is what a deal room wants anyway.
  */
+import { Readable } from "node:stream";
 import type { Integration } from "@prisma/client";
 import { prisma } from "../db.js";
 import { env } from "../config.js";
@@ -101,11 +102,34 @@ export async function listProviderFiles(row: Integration, q: string): Promise<Cl
 async function downloadBytes(url: string, token: string): Promise<Buffer> {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!res.ok) throw new HttpError(502, `Provider download failed (HTTP ${res.status}).`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  if (buf.length > env.MAX_UPLOAD_BYTES) {
-    throw new HttpError(413, `File exceeds the ${Math.round(env.MAX_UPLOAD_BYTES / (1024 * 1024))} MB import limit.`);
+  const limit = env.MAX_UPLOAD_BYTES;
+  const tooBig = () => new HttpError(413, `File exceeds the ${Math.round(limit / (1024 * 1024))} MB import limit.`);
+  // Reject an over-cap file as early as the provider reveals its size. The
+  // Content-Length header lets us bail before reading a byte when it's present
+  // and honest — but we never trust it alone: a Google-native PDF export reports
+  // no size ahead of time, and a missing/lying header must not let an unbounded
+  // body stream into memory. So we also count bytes as they arrive and abort the
+  // moment the running total crosses the cap, rather than buffering the whole
+  // response first and checking its length after the fact.
+  const declared = Number(res.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > limit) throw tooBig();
+  if (!res.body) {
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > limit) throw tooBig();
+    return buf;
   }
-  return buf;
+  const chunks: Buffer[] = [];
+  let total = 0;
+  const stream = Readable.fromWeb(res.body as unknown as import("node:stream/web").ReadableStream<Uint8Array>);
+  for await (const chunk of stream) {
+    total += (chunk as Buffer).length;
+    if (total > limit) {
+      stream.destroy(); // stop pulling from the provider; frees the connection
+      throw tooBig();
+    }
+    chunks.push(chunk as Buffer);
+  }
+  return Buffer.concat(chunks);
 }
 
 interface DriveMeta { name: string; mimeType: string; size: number | null }
