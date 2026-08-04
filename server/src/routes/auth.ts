@@ -4,7 +4,7 @@ import { z } from "zod";
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
 import { prisma } from "../db.js";
-import { verifyPassword, hashPassword } from "../auth/password.js";
+import { verifyPassword, hashPassword, dummyVerifyPassword } from "../auth/password.js";
 import { signSession, setSessionCookie, clearSessionCookie } from "../auth/session.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
@@ -123,8 +123,12 @@ authRouter.post(
     const { email, password, totpCode } = loginSchema.parse(req.body);
     const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
 
-    // Constant-ish response — don't reveal whether the email exists.
+    // Constant-ish response — don't reveal whether the email exists. Spend a
+    // throwaway bcrypt comparison so the no-such-user path takes the same time
+    // as a real wrong-password check; without it, response latency alone leaks
+    // which emails have accounts (user enumeration).
     if (!user || user.status !== "ACTIVE") {
+      await dummyVerifyPassword(password);
       res.status(401).json({ error: "Invalid email or password" });
       return;
     }
@@ -294,10 +298,26 @@ authRouter.patch(
   }),
 );
 
+// Throttle join-token guesses. A Team ID (~30 bits, permanent, reusable) or an
+// invite code (~40 bits) is guessable given enough attempts, and a successful
+// guess auto-joins the caller into another org as a MEMBER — so this needs the
+// same brute-force cap as /register (which shares resolveJoinToken). Keyed on the
+// authenticated user, since requireAuth runs first and the account is what's
+// spending guesses; an IP key would let one user rotate addresses to keep trying.
+const joinLimiter = rateLimit({
+  windowMs: LOGIN_RATE_LIMIT.WINDOW_MS,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as AuthedRequest).user?.id ?? req.ip ?? "unknown",
+  message: { error: "Too many attempts. Try again later." },
+});
+
 // Join an organization from account settings (existing user).
 authRouter.post(
   "/join",
   requireAuth,
+  joinLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const { token } = z.object({ token: z.string().min(1) }).parse(req.body);
     const join = await resolveJoinToken(token);
@@ -432,8 +452,12 @@ authRouter.post(
 
       // An org-connected Resend integration can deliver even when no
       // instance-wide transport (Resend env / SMTP) is configured.
+      // Fire-and-forget (NOT awaited): awaiting the outbound send made the
+      // account-exists branch measurably slower than the no-account branch,
+      // which returns immediately — a timing side-channel for user enumeration
+      // that defeats the whole point of the uniform 200 response below.
       if (emailConfigured() || user.organizationId) {
-        await sendEmail({
+        void sendEmail({
           organizationId: user.organizationId ?? undefined,
           to: user.email,
           subject: "Reset your Mineral Hub password",
