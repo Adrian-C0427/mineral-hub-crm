@@ -199,7 +199,7 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     selectedOfferId: deal.selectedOfferId,
     relationshipOwnerId: deal.relationshipOwnerId,
     relationshipOwner: deal.relationshipOwner
-      ? { id: deal.relationshipOwner.id, name: deal.relationshipOwner.name }
+      ? { id: deal.relationshipOwner.id, name: deal.relationshipOwner.name, avatarColor: deal.relationshipOwner.avatarColor }
       : null,
     assignees: deal.assignees ?? [],
     priority,

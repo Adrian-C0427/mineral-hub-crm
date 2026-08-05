@@ -19,6 +19,8 @@ export interface CurrentUser {
    *  The client only adopts a non-null value, so it never clobbers the local
    *  theme with a default. */
   themePreference?: "dark" | "light" | null;
+  accentColor?: string | null;
+  avatarColor?: string | null;
 }
 
 export interface RegisterPayload {

@@ -150,7 +150,7 @@ function serializeExpense(e: {
   categoryId: string | null;
   category: { id: string; name: string } | null;
   userId: string | null;
-  user: { id: string; name: string } | null;
+  user: { id: string; name: string; avatarColor?: string | null } | null;
   createdAt: Date;
 }) {
   return {
@@ -164,11 +164,12 @@ function serializeExpense(e: {
     categoryName: e.category?.name ?? null,
     userId: e.userId,
     userName: e.user?.name ?? null,
+    userAvatarColor: e.user?.avatarColor ?? null,
     createdAt: e.createdAt,
   };
 }
 
-const withRefs = { category: { select: { id: true, name: true } }, user: { select: { id: true, name: true } } };
+const withRefs = { category: { select: { id: true, name: true } }, user: { select: { id: true, name: true, avatarColor: true } } };
 
 expensesRouter.get(
   "/",

@@ -30,6 +30,7 @@ import { OfferRowActions } from "../components/OfferActions";
 import type { AssetChild, BuyerActivityRow, DealSummary, MatchRec, Seller, UserLite } from "../types";
 import { NewDealModal } from "../components/NewDealModal";
 import { MoneyInput } from "../components/MoneyInput";
+import { MarketingFunnel } from "../components/MarketingFunnel";
 import { DateField } from "../components/DateField";
 // MapLibre is heavy; only load it when a deal detail page is viewed.
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
@@ -244,6 +245,10 @@ export function DealDetail() {
         <MetricCard label="Highest Offer" value={money(deal.metrics.highOffer)} />
         <EstimatedProfitCard highOffer={deal.metrics.highOffer} basis={deal.ourPrice ?? deal.askPrice} />
       </div>
+
+      {/* Marketing funnel — same shared component/design as the Mineral Assets
+          Sell tab; cost basis for a deal is our contracted price. */}
+      <MarketingFunnel metrics={deal.metrics} matchCount={matches?.length ?? 0} askPrice={deal.askPrice} costBasis={deal.ourPrice} />
 
       {deal.selectedBuyer && (
         <div className="dd-selected-banner">

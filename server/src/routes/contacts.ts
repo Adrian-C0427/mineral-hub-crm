@@ -24,7 +24,7 @@ contactsRouter.use(requireAuth, requireOrg);
 export const CONTACT_TYPES = ["SELLER", "PROSPECT", "LEAD", "REFERRAL", "OTHER"] as const;
 export const CONTACT_STATUSES = ["NEW", "CONTACTED", "ENGAGED", "NEGOTIATING", "CONVERTED", "NOT_INTERESTED"] as const;
 
-type ContactWithOwner = Contact & { owner: Pick<User, "id" | "name"> | null; lists?: { id: string }[] };
+type ContactWithOwner = Contact & { owner: Pick<User, "id" | "name" | "avatarColor"> | null; lists?: { id: string }[] };
 
 const serialize = (c: ContactWithOwner) => ({
   id: c.id,
@@ -41,7 +41,7 @@ const serialize = (c: ContactWithOwner) => ({
   counties: c.counties,
   notes: c.notes,
   tags: c.tags,
-  owner: c.owner ? { id: c.owner.id, name: c.owner.name } : null,
+  owner: c.owner ? { id: c.owner.id, name: c.owner.name, avatarColor: c.owner.avatarColor } : null,
   lastContactedAt: c.lastContactedAt,
   nextFollowUpDate: c.nextFollowUpDate,
   createdAt: c.createdAt,
@@ -77,7 +77,7 @@ async function validateOwner(org: string, ownerId: string | null | undefined): P
   return u.id;
 }
 
-const ownerInclude = { owner: { select: { id: true, name: true } }, lists: { select: { id: true } } } as const;
+const ownerInclude = { owner: { select: { id: true, name: true, avatarColor: true } }, lists: { select: { id: true } } } as const;
 
 /** All contacts (org-scoped). Filtering/search is client-side for now. */
 contactsRouter.get(
@@ -179,6 +179,10 @@ export const CALL_DISPOSITIONS = ["Connected", "No Answer", "Voicemail", "Bad Nu
 
 export const TASK_PRIORITIES = ["LOW", "MEDIUM", "HIGH"] as const;
 
+// Optional note background colors (soft pastels in the client). Named keys, not
+// hex — the client owns the exact per-theme shades.
+export const NOTE_COLORS = ["yellow", "blue", "green", "purple", "pink", "orange"] as const;
+
 type ActivityWithAuthor = ContactActivity & {
   createdBy: Pick<User, "id" | "name"> | null;
   assignedTo: Pick<User, "id" | "name"> | null;
@@ -195,6 +199,7 @@ const serializeActivity = (a: ActivityWithAuthor) => ({
   priority: a.priority,
   assignedTo: a.assignedTo ? { id: a.assignedTo.id, name: a.assignedTo.name } : null,
   pinned: a.pinned,
+  color: a.color,
   createdBy: a.createdBy ? { id: a.createdBy.id, name: a.createdBy.name } : null,
   createdAt: a.createdAt,
 });
@@ -251,6 +256,7 @@ const activitySchema = z.object({
   dueDate: dateField,
   priority: z.enum(TASK_PRIORITIES).nullish(),
   assignedToId: z.string().nullish(),
+  color: z.enum(NOTE_COLORS).nullish(),
 });
 
 contactsRouter.post(
@@ -276,6 +282,7 @@ contactsRouter.post(
         dueDate: isDated ? data.dueDate : null,
         priority: data.kind === "TASK" ? data.priority ?? "MEDIUM" : null,
         assignedToId: isDated ? data.assignedToId ?? req.user?.id ?? null : null,
+        color: data.color ?? null,
         createdById: req.user?.id ?? null,
       },
       include: authorInclude,
@@ -304,6 +311,7 @@ contactsRouter.patch(
       dueDate: dateField.optional(),
       priority: z.enum(TASK_PRIORITIES).nullish(),
       assignedToId: z.string().nullish().optional(),
+      color: z.enum(NOTE_COLORS).nullish().optional(),
     }).parse(req.body);
     if (data.assignedToId !== undefined) await checkAssignee(orgId(req), data.assignedToId);
     const updated = await prisma.contactActivity.update({
@@ -316,6 +324,7 @@ contactsRouter.patch(
         ...(data.dueDate !== undefined ? { dueDate: data.dueDate } : {}),
         ...(data.priority !== undefined ? { priority: data.priority } : {}),
         ...(data.assignedToId !== undefined ? { assignedToId: data.assignedToId } : {}),
+        ...(data.color !== undefined ? { color: data.color } : {}),
       },
       include: authorInclude,
     });

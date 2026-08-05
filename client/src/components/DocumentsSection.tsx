@@ -5,6 +5,7 @@ import { Banner, EmptyState, Modal, OverflowMenu, Spinner, showToast } from "./u
 import { Select } from "./Select";
 import { SortableTable, type Column } from "./SortableTable";
 import { fmtDateLocal } from "../lib/format";
+import { avatarColor } from "../lib/avatarColor";
 
 /**
  * The single, shared Documents section used everywhere documents are managed
@@ -211,7 +212,7 @@ export function DocumentsSection({
     {
       key: "uploadedBy", header: "Uploaded By", value: (f) => f.uploadedBy ?? "",
       render: (f) => f.uploadedBy
-        ? <span className="docx-by"><span className="docx-avatar" aria-hidden="true">{initialsOf(f.uploadedBy)}</span>{f.uploadedBy}</span>
+        ? <span className="docx-by"><span className="docx-avatar" aria-hidden="true" style={{ background: avatarColor(f.uploadedBy), color: "#fff" }}>{initialsOf(f.uploadedBy)}</span>{f.uploadedBy}</span>
         : "—",
     },
     { key: "type", header: "File Type", value: (f) => fileType(f), render: (f) => <span className={`docx-type ${typeTone(fileType(f))}`}>{fileType(f)}</span> },

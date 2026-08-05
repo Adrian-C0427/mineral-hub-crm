@@ -314,7 +314,7 @@ orgRouter.get(
   asyncHandler(async (req: AuthedRequest, res) => {
     const members = await prisma.user.findMany({
       where: { organizationId: orgId(req) },
-      select: { id: true, name: true, email: true, phone: true, orgRole: true, status: true, lastActiveAt: true, createdAt: true },
+      select: { id: true, name: true, email: true, phone: true, orgRole: true, status: true, lastActiveAt: true, createdAt: true, avatarColor: true },
       orderBy: { createdAt: "asc" },
     });
     res.json(members);
