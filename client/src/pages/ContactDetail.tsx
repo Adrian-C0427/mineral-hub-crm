@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft, Bell, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
-  Mail, MapPin, MessageSquare, Pencil, Phone, Pin, Plus, Search, Send, StickyNote, Trash2, X,
+  Mail, MapPin, MessageSquare, Palette, Pencil, Phone, Pin, Plus, Search, Send, StickyNote, Trash2, X,
 } from "lucide-react";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
@@ -34,11 +34,24 @@ export interface ContactActivityRow {
   priority: "LOW" | "MEDIUM" | "HIGH" | string | null;
   assignedTo: { id: string; name: string } | null;
   pinned: boolean;
+  color?: string | null;
   createdBy: { id: string; name: string } | null;
   createdAt: string;
 }
 
 const DISPOSITIONS = ["Connected", "No Answer", "Voicemail", "Bad Number", "Callback Requested"];
+
+// Optional note background colors — soft pastels, keyed by name (the server
+// stores the key; per-theme shades live in styles.css). Swatch hex is only the
+// picker preview.
+const NOTE_COLORS: { key: string; label: string; hex: string }[] = [
+  { key: "yellow", label: "Yellow", hex: "#eab308" },
+  { key: "blue", label: "Blue", hex: "#3b82f6" },
+  { key: "green", label: "Green", hex: "#22c55e" },
+  { key: "purple", label: "Purple", hex: "#8b5cf6" },
+  { key: "pink", label: "Pink", hex: "#ec4899" },
+  { key: "orange", label: "Orange", hex: "#f97316" },
+];
 
 const initialsOf = (name: string): string =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
@@ -594,6 +607,10 @@ function SidePanel({ contact, activities, canManage, onChanged, users }: {
   const [priority, setPriority] = useState("MEDIUM");
   const [assignee, setAssignee] = useState("");
   const [busy, setBusy] = useState(false);
+  // Optional background color for the note being composed (null = default).
+  const [noteColor, setNoteColor] = useState<string | null>(null);
+  // Note id whose inline color palette is open (edit-in-place).
+  const [colorPickFor, setColorPickFor] = useState<string | null>(null);
 
   const notes = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -611,8 +628,9 @@ function SidePanel({ contact, activities, canManage, onChanged, users }: {
       await api.post(`/contacts/${contact.id}/activities`, {
         kind, title: draft.trim(), body: note.trim(), dueDate: due || null,
         ...(kind === "TASK" ? { priority, assignedToId: assignee || null } : {}),
+        ...(kind === "NOTE" ? { color: noteColor } : {}),
       });
-      setDraft(""); setNote(""); setDue(""); setPriority("MEDIUM"); setAssignee("");
+      setDraft(""); setNote(""); setDue(""); setPriority("MEDIUM"); setAssignee(""); setNoteColor(null);
       onChanged();
     } finally { setBusy(false); }
   };
@@ -648,11 +666,21 @@ function SidePanel({ contact, activities, canManage, onChanged, users }: {
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add("NOTE"); } }} />
                   <button className="primary small" disabled={!draft.trim() || !note.trim() || busy} onClick={() => void add("NOTE")}><Plus size={11} /> Add</button>
                 </div>
+                {/* Optional background color for the new note. */}
+                <div className="note-swatches" role="radiogroup" aria-label="Note color">
+                  <button type="button" role="radio" aria-checked={noteColor == null} title="No color"
+                    className={`note-swatch none ${noteColor == null ? "active" : ""}`} onClick={() => setNoteColor(null)} />
+                  {NOTE_COLORS.map((c) => (
+                    <button key={c.key} type="button" role="radio" aria-checked={noteColor === c.key} title={c.label}
+                      className={`note-swatch ${noteColor === c.key ? "active" : ""}`} style={{ background: c.hex }}
+                      onClick={() => setNoteColor(noteColor === c.key ? null : c.key)} />
+                  ))}
+                </div>
               </div>
             )}
             {notes.length === 0 && <p className="muted" style={{ fontSize: 12.5 }}>No notes yet.</p>}
             {notes.map((a) => (
-              <div key={a.id} className={`cw-note ${a.pinned ? "pinned" : ""}`}>
+              <div key={a.id} className={`cw-note ${a.pinned ? "pinned" : ""}`} data-note-color={a.color ?? undefined}>
                 <div className="cw-note-head">
                   <span className="cw-kind-ico sm" style={{
                     color: a.kind === "CALL" ? "var(--amber)" : "var(--accent)",
@@ -661,11 +689,29 @@ function SidePanel({ contact, activities, canManage, onChanged, users }: {
                   <span style={{ fontSize: 13, fontWeight: 700, flex: 1 }}>{a.title ?? (a.kind === "CALL" ? `Call · ${a.disposition ?? "Logged"}` : "Note")}</span>
                   {canManage && (
                     <span className="row" style={{ gap: 2 }}>
+                      {a.kind === "NOTE" && (
+                        <button className="icon-btn" title="Note color"
+                          onClick={() => setColorPickFor((cur) => (cur === a.id ? null : a.id))}>
+                          <Palette size={12} />
+                        </button>
+                      )}
                       <button className="icon-btn" title={a.pinned ? "Unpin" : "Pin"} onClick={() => void update(a, { pinned: !a.pinned })}><Pin size={12} /></button>
                       <button className="icon-btn" title="Delete" onClick={() => void remove(a)}><X size={12} /></button>
                     </span>
                   )}
                 </div>
+                {colorPickFor === a.id && (
+                  <div className="note-swatches" role="radiogroup" aria-label="Note color">
+                    <button type="button" role="radio" aria-checked={!a.color} title="No color"
+                      className={`note-swatch none ${!a.color ? "active" : ""}`}
+                      onClick={() => { setColorPickFor(null); void update(a, { color: null }); }} />
+                    {NOTE_COLORS.map((c) => (
+                      <button key={c.key} type="button" role="radio" aria-checked={a.color === c.key} title={c.label}
+                        className={`note-swatch ${a.color === c.key ? "active" : ""}`} style={{ background: c.hex }}
+                        onClick={() => { setColorPickFor(null); void update(a, { color: c.key }); }} />
+                    ))}
+                  </div>
+                )}
                 <div className="cw-note-body">{a.body}</div>
                 <div className="cw-note-foot"><span className="cw-mono">{fmtDate(a.createdAt)}, {fmtTime(a.createdAt)}</span><span>{a.createdBy?.name ?? ""}</span></div>
               </div>

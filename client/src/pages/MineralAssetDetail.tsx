@@ -24,6 +24,7 @@ import { money, num, fmtDate, toInputDate, prettyEnum } from "../lib/format";
 import { OWNERSHIP_TYPES, OWNERSHIP_STATUSES, PRODUCING_STATUSES } from "./MineralAssets";
 import type { BuyerActivityRow, DealSummary, MatchRec, RevenueEntry, Seller, UserLite } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
+import { MarketingFunnel } from "../components/MarketingFunnel";
 import { useUnsavedSection } from "../lib/unsaved";
 import { DateField } from "../components/DateField";
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
@@ -730,37 +731,9 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
         );
       })()}
 
-      {/* Marketing funnel (reference): Contacted → Interested → Offers →
-          Highest Offer, with conversion bars and the proceeds target. */}
-      {(() => {
-        const matchCount = matches?.length ?? 0;
-        const contacted = asset.metrics.buyersContacted;
-        const proceeds = asset.askPrice != null ? Math.round(asset.askPrice * 0.97) - (asset.purchasePrice ?? 0) : null;
-        const pctOf = (v: number, of: number) => (of > 0 ? Math.min(100, Math.round((v / of) * 100)) : 0);
-        const stages = [
-          { label: "Contacted", value: String(contacted), hint: matchCount ? `of ${matchCount} matches` : "no matches yet", dim: !contacted, bar: "var(--accent)", w: pctOf(contacted, matchCount) },
-          { label: "Interested", value: String(asset.metrics.interested), hint: "replied positively", dim: !asset.metrics.interested, bar: "var(--accent)", w: pctOf(asset.metrics.interested, contacted) },
-          { label: "Offers", value: String(asset.metrics.offers), hint: "received", dim: !asset.metrics.offers, bar: "#f5b04b", w: pctOf(asset.metrics.offers, contacted) },
-          { label: "Highest Offer", value: asset.metrics.highOffer != null ? money(asset.metrics.highOffer) : "—", hint: asset.metrics.highOffer != null && proceeds != null ? `vs ${money(proceeds)} target` : proceeds != null ? `${money(proceeds)} target` : "no offers yet", dim: asset.metrics.highOffer == null, bar: "var(--green)", w: asset.metrics.highOffer != null && proceeds ? Math.min(100, Math.round((asset.metrics.highOffer / proceeds) * 100)) : 0 },
-        ];
-        return (
-          <div className="panel">
-            <div className="section-head" style={{ alignItems: "baseline" }}>
-              <h3 style={{ margin: 0 }}>Marketing Funnel</h3>
-              <span className="muted" style={{ fontSize: 12 }}>Updates as you contact buyers below</span>
-            </div>
-            <div className="mf-grid">
-              {stages.map((st) => (
-                <div key={st.label} className="mf-stage">
-                  <div className="ddx-label">{st.label}</div>
-                  <div className="mf-row"><span className={`mf-v ${st.dim ? "dim" : ""}`}>{st.value}</span><span className="mf-h">{st.hint}</span></div>
-                  <div className="mf-bar"><div style={{ width: `${st.w}%`, background: st.bar }} /></div>
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
+      {/* Marketing funnel (shared with the Deal Profile Buyers tab):
+          Contacted → Interested → Offers → Highest Offer. */}
+      <MarketingFunnel metrics={asset.metrics} matchCount={matches?.length ?? 0} askPrice={asset.askPrice} costBasis={asset.purchasePrice} />
 
       {asset.offers.length > 0 && (
         <div className="panel">

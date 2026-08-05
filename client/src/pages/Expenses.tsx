@@ -9,6 +9,7 @@ import { MetricCard, Spinner, Banner, Modal, ConfirmDelete } from "../components
 import { Select } from "../components/Select";
 import { money, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
+import { userAvatarColor } from "../lib/avatarColor";
 import { CHART_COLORS, COLOR_EXPENSE, monthLabel, chartTooltip } from "../lib/charts";
 import type { UserLite } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
@@ -19,7 +20,7 @@ interface Expense {
   id: string; date: string; amount: number; notes: string | null;
   reimbursed: boolean; reimbursementDate: string | null;
   categoryId: string | null; categoryName: string | null;
-  userId: string | null; userName: string | null; createdAt: string;
+  userId: string | null; userName: string | null; userAvatarColor?: string | null; createdAt: string;
 }
 interface Dashboard {
   totals: { totalExpenses: number; totalReimbursed: number; totalOutstanding: number; companyOutstanding: number; count: number };
@@ -586,7 +587,7 @@ function ExpMonthGroup({
           </td>
           {has("date") && <td className="xp-num">{fmtDate(e.date)}</td>}
           {has("user") && <td>{e.userName
-            ? <span className="xp-user"><span className="xp-avatar" aria-hidden="true">{e.userName.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "•"}</span>{e.userName}</span>
+            ? <span className="xp-user"><span className="xp-avatar" aria-hidden="true" style={{ background: userAvatarColor({ name: e.userName, avatarColor: e.userAvatarColor }), color: "#fff" }}>{e.userName.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "•"}</span>{e.userName}</span>
             : "—"}</td>}
           {has("category") && <td>{e.categoryName ? <span className="xp-cat" style={{ color: catColor(e.categoryName) }}>{e.categoryName}</span> : "—"}</td>}
           {has("amount") && <td className="right xp-num xp-amount">{money(e.amount, { cents: true })}</td>}

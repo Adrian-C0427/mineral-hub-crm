@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ChevronDown, LogOut, Settings } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
+import { userAvatarColor } from "../lib/avatarColor";
 import { NotificationsBell } from "./NotificationsBell";
 import { ROLE_LABEL } from "../lib/roles";
 
@@ -41,7 +42,7 @@ export function TopBar() {
       <span className="topbar-div" aria-hidden="true" />
       <div className="topbar-userwrap" ref={wrapRef}>
         <button type="button" className={`topbar-user ${open ? "open" : ""}`} onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}>
-          <span className="topbar-avatar" aria-hidden="true">{initialsOf(user?.name)}</span>
+          <span className="topbar-avatar" aria-hidden="true" style={{ background: userAvatarColor(user) }}>{initialsOf(user?.name)}</span>
           <span className="topbar-user-meta">
             <span className="topbar-user-name">{user?.name}</span>
             <span className="topbar-user-role">{user?.orgRole ? ROLE_LABEL[user.orgRole] ?? user.orgRole : ""}</span>
@@ -51,7 +52,7 @@ export function TopBar() {
         {open && (
           <div className="topbar-menu" role="menu">
             <div className="topbar-menu-id">
-              <span className="topbar-avatar" aria-hidden="true">{initialsOf(user?.name)}</span>
+              <span className="topbar-avatar" aria-hidden="true" style={{ background: userAvatarColor(user) }}>{initialsOf(user?.name)}</span>
               <span className="topbar-user-meta">
                 <span className="topbar-user-name">{user?.name}</span>
                 <span className="topbar-user-role">{user?.email}</span>

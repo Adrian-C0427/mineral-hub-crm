@@ -6,6 +6,7 @@ import { SortableTable, type Column } from "../components/SortableTable";
 import { NewDealModal } from "../components/NewDealModal";
 import { useRowSelection, BulkActionsBar } from "../components/bulk";
 import { money, num, fmtDate } from "../lib/format";
+import { userAvatarColor } from "../lib/avatarColor";
 import { dealSearchHaystack } from "../lib/dealSearch";
 import { downloadCsv } from "../lib/csv";
 import { Tabs } from "../components/Tabs";
@@ -95,7 +96,7 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
     { key: "owner", header: "Owner", type: "text", value: (d) => d.relationshipOwner?.name ?? null,
       render: (d) => d.relationshipOwner ? (
         <span className="ct-owner">
-          <span className="ct-owner-av">{initialsOf(d.relationshipOwner.name)}</span>
+          <span className="ct-owner-av" style={{ background: userAvatarColor(d.relationshipOwner), color: "#fff" }}>{initialsOf(d.relationshipOwner.name)}</span>
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shortName(d.relationshipOwner.name)}</span>
         </span>
       ) : "—" },

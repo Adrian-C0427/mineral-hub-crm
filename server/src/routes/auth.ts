@@ -248,17 +248,28 @@ authRouter.post("/logout", (_req, res) => {
 const THEMES = ["dark", "light"] as const;
 type Theme = (typeof THEMES)[number];
 
+// Hex color as stored for accent/avatar preferences ("#rrggbb").
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
 /**
- * The user's EXPLICITLY chosen theme, or null when unset/unavailable. Null (not
- * a default) is important: the client only adopts a non-null value, so an unset
- * choice — or a DB that predates the column — never overrides the local theme.
+ * The user's EXPLICITLY chosen prefs, or nulls when unset/unavailable. Null
+ * (not a default) is important: the client only adopts non-null values, so an
+ * unset choice — or a DB that predates a column — never overrides the local
+ * device state.
  */
-async function readTheme(userId: string): Promise<Theme | null> {
+async function readPrefs(userId: string): Promise<{ themePreference: Theme | null; accentColor: string | null; avatarColor: string | null }> {
   try {
-    const row = await prisma.user.findUnique({ where: { id: userId }, select: { themePreference: true } });
-    return row?.themePreference === "light" || row?.themePreference === "dark" ? row.themePreference : null;
+    const row = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { themePreference: true, accentColor: true, avatarColor: true },
+    });
+    return {
+      themePreference: row?.themePreference === "light" || row?.themePreference === "dark" ? row.themePreference : null,
+      accentColor: row?.accentColor && HEX_COLOR.test(row.accentColor) ? row.accentColor : null,
+      avatarColor: row?.avatarColor && HEX_COLOR.test(row.avatarColor) ? row.avatarColor : null,
+    };
   } catch {
-    return null; // column not pushed yet — never break /me
+    return { themePreference: null, accentColor: null, avatarColor: null }; // columns not pushed yet — never break /me
   }
 }
 
@@ -266,35 +277,67 @@ authRouter.get(
   "/me",
   requireAuth,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const [org, themePreference] = await Promise.all([
+    const [org, prefs] = await Promise.all([
       req.user!.organizationId
         ? prisma.organization.findUnique({
             where: { id: req.user!.organizationId },
             select: { id: true, name: true, teamId: true, fullLogo: true, compactLogo: true },
           })
         : Promise.resolve(null),
-      readTheme(req.user!.id),
+      readPrefs(req.user!.id),
     ]);
-    res.json({ user: { ...req.user, organization: org, themePreference } });
+    res.json({ user: { ...req.user, organization: org, ...prefs } });
   }),
 );
 
-// Lightweight per-user preferences (theme today). No password step-up — this is
-// a low-risk personalization, unlike the identity fields in PATCH /me. Best
-// effort: if the column hasn't been pushed yet, report persisted:false so the
-// client keeps its local copy instead of erroring.
+// Lightweight per-user preferences (theme, accent color, avatar color). No
+// password step-up — these are low-risk personalizations, unlike the identity
+// fields in PATCH /me. Best effort: if a column hasn't been pushed yet, report
+// persisted:false so the client keeps its local copy instead of erroring.
+// Explicit null clears a color back to the app default.
 authRouter.patch(
   "/preferences",
   requireAuth,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { theme } = z.object({ theme: z.enum(THEMES) }).parse(req.body);
+    const { theme, accentColor, avatarColor } = z.object({
+      theme: z.enum(THEMES).optional(),
+      accentColor: z.string().regex(HEX_COLOR).nullish(),
+      avatarColor: z.string().regex(HEX_COLOR).nullish(),
+    }).parse(req.body);
     let persisted = true;
     try {
-      await prisma.user.update({ where: { id: req.user!.id }, data: { themePreference: theme } });
+      await prisma.user.update({
+        where: { id: req.user!.id },
+        data: {
+          ...(theme !== undefined ? { themePreference: theme } : {}),
+          ...(accentColor !== undefined ? { accentColor } : {}),
+          ...(avatarColor !== undefined ? { avatarColor } : {}),
+        },
+      });
     } catch {
       persisted = false;
     }
-    res.json({ theme, persisted });
+    res.json({ theme, accentColor, avatarColor, persisted });
+  }),
+);
+
+// Avatar colors already claimed by OTHER members of the caller's org — lets the
+// picker steer users away from duplicates ("unique where feasible"). Open to
+// any authenticated member (colors aren't sensitive; /org/members is not).
+authRouter.get(
+  "/avatar-colors",
+  requireAuth,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    if (!req.user!.organizationId) { res.json({ taken: [] }); return; }
+    try {
+      const rows = await prisma.user.findMany({
+        where: { organizationId: req.user!.organizationId, id: { not: req.user!.id }, avatarColor: { not: null } },
+        select: { avatarColor: true },
+      });
+      res.json({ taken: [...new Set(rows.map((r) => r.avatarColor).filter((c): c is string => !!c))] });
+    } catch {
+      res.json({ taken: [] }); // column not pushed yet
+    }
   }),
 );
 

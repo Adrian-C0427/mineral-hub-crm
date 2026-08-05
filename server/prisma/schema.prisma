@@ -356,6 +356,10 @@ model User {
   // overrides the device's local theme. Read defensively so a database that
   // hasn't had `prisma db push` run yet still logs users in.
   themePreference   String?
+  // Per-user accent color (hex) applied app-wide; null = the built-in blue.
+  accentColor       String?
+  // Per-user initials-avatar color (hex); null = auto (name-hash palette).
+  avatarColor       String?
 
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -1486,6 +1490,10 @@ model ContactActivity {
   assignedTo   User?   @relation("ContactActivityAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
 
   pinned Boolean @default(false)
+
+  // Optional note background color (named key: yellow|blue|green|purple|pink|
+  // orange); null = the default card surface. Visual organization only.
+  color String?
 
   createdById String?
   createdBy   User?   @relation("ContactActivityAuthor", fields: [createdById], references: [id], onDelete: SetNull)

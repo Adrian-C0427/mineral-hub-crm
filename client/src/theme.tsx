@@ -13,6 +13,66 @@ import { useAuth } from "./auth/AuthContext";
 export type Theme = "dark" | "light";
 
 const STORAGE_KEY = "mh-theme";
+const ACCENT_KEY = "mh-accent";
+
+/**
+ * Accent presets offered in Settings. The default (null accent) keeps the
+ * stylesheet's built-in blue — including its deeper light-theme variant — so
+ * users who never touch the setting see exactly the current design.
+ */
+export const ACCENT_PRESETS: { key: string; label: string; hex: string }[] = [
+  { key: "blue", label: "Blue", hex: "#3b82f6" },
+  { key: "indigo", label: "Indigo", hex: "#6366f1" },
+  { key: "violet", label: "Violet", hex: "#8b5cf6" },
+  { key: "teal", label: "Teal", hex: "#14b8a6" },
+  { key: "emerald", label: "Emerald", hex: "#10b981" },
+  { key: "amber", label: "Amber", hex: "#f59e0b" },
+  { key: "rose", label: "Rose", hex: "#f43f5e" },
+  { key: "slate", label: "Slate", hex: "#64748b" },
+];
+
+const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+
+/** Darken a #rrggbb color by a factor (hover shade for a custom accent). */
+function darken(hex: string, factor = 0.85): string {
+  const n = parseInt(hex.slice(1), 16);
+  const c = (v: number) => Math.max(0, Math.min(255, Math.round(v * factor)));
+  const r = c((n >> 16) & 255), g = c((n >> 8) & 255), b = c(n & 255);
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, "0")}`;
+}
+
+function readStoredAccent(): string | null {
+  try {
+    const v = localStorage.getItem(ACCENT_KEY);
+    return v && HEX_COLOR.test(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Apply an accent to the DOM + persist locally. Setting the two tokens on the
+ * root element overrides both theme blocks at once, so every accent-derived
+ * style (buttons, links, focus rings, color-mix tints, chart fills that read
+ * var(--accent)) updates instantly — no refresh. Null clears back to the
+ * stylesheet default.
+ */
+function applyAccent(hex: string | null): void {
+  const root = document.documentElement.style;
+  if (hex && HEX_COLOR.test(hex)) {
+    root.setProperty("--accent", hex);
+    root.setProperty("--accent-hover", darken(hex));
+  } else {
+    root.removeProperty("--accent");
+    root.removeProperty("--accent-hover");
+  }
+  try {
+    if (hex) localStorage.setItem(ACCENT_KEY, hex);
+    else localStorage.removeItem(ACCENT_KEY);
+  } catch {
+    /* private mode — DOM still updates */
+  }
+}
 
 function readStored(): Theme {
   try {
@@ -41,6 +101,9 @@ interface ThemeState {
   theme: Theme;
   setTheme: (t: Theme) => void;
   toggleTheme: () => void;
+  /** Custom accent hex, or null for the built-in blue. */
+  accent: string | null;
+  setAccent: (hex: string | null) => void;
 }
 
 const ThemeContext = createContext<ThemeState | undefined>(undefined);
@@ -48,6 +111,11 @@ const ThemeContext = createContext<ThemeState | undefined>(undefined);
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
   const [theme, setThemeState] = useState<Theme>(readStored);
+  const [accent, setAccentState] = useState<string | null>(readStoredAccent);
+
+  // Re-apply the locally stored accent on mount (the theme boot script only
+  // handles data-theme; accent tokens are inline style properties).
+  useEffect(() => { applyAccent(readStoredAccent()); }, []);
 
   // User-initiated change: apply immediately, then persist to the profile so it
   // follows them to other devices. Server write is best-effort (offline, or the
@@ -62,6 +130,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setTheme(theme === "dark" ? "light" : "dark");
   }, [theme, setTheme]);
 
+  const setAccent = useCallback((hex: string | null) => {
+    setAccentState(hex);
+    applyAccent(hex);
+    api.patch("/auth/preferences", { accentColor: hex }).catch(() => {});
+  }, []);
+
   // When the profile loads (login / refresh), the server is authoritative — adopt
   // its saved theme so a preference set on another device wins over this device's
   // stale local copy. Only applies when it actually differs, to avoid churn.
@@ -74,7 +148,17 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.themePreference]);
 
-  return <ThemeContext.Provider value={{ theme, setTheme, toggleTheme }}>{children}</ThemeContext.Provider>;
+  // Same adoption for the saved accent (non-null only, mirroring the theme).
+  useEffect(() => {
+    const server = user?.accentColor;
+    if (server && HEX_COLOR.test(server) && server !== accent) {
+      setAccentState(server);
+      applyAccent(server);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.accentColor]);
+
+  return <ThemeContext.Provider value={{ theme, setTheme, toggleTheme, accent, setAccent }}>{children}</ThemeContext.Provider>;
 }
 
 export function useTheme(): ThemeState {

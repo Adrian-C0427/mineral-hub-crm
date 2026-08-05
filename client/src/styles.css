@@ -677,6 +677,20 @@ button.match-log { flex: none; margin-left: auto; padding: 3px 10px; font-size: 
 
 /* --- Appearance theme picker --- */
 .theme-picker { display: flex; gap: 12px; flex-wrap: wrap; }
+/* Appearance rows below the theme picker: accent + avatar color pickers. */
+.pref-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  border-top: 1px solid var(--hairline, var(--border)); margin-top: 16px; padding-top: 14px; }
+.pref-title { font-size: 13.5px; font-weight: 700; }
+.swatch-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.color-swatch { position: relative; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border);
+  padding: 0; cursor: pointer; flex: none; display: inline-flex; align-items: center; justify-content: center; }
+.color-swatch.active { outline: 2px solid var(--text); outline-offset: 2px; }
+.color-swatch .swatch-check { color: #fff; font-size: 12px; font-weight: 800; line-height: 1; }
+.color-swatch .swatch-auto { color: #fff; font-size: 10px; font-weight: 800; line-height: 1; }
+.color-swatch .swatch-auto + .swatch-check { position: absolute; right: -3px; bottom: -3px; font-size: 10px;
+  background: var(--panel); color: var(--text); border-radius: 50%; padding: 1px; }
+.color-swatch.taken { opacity: 0.35; }
+.color-swatch.taken .swatch-taken { color: #fff; font-size: 12px; font-weight: 800; line-height: 1; }
 .theme-option {
   display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
   flex: 1 1 200px; min-width: 180px; text-align: left;
@@ -2667,6 +2681,27 @@ input.stage-color, .stage-color { width: 18px !important; min-width: 18px; heigh
 .cw-rbody { padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
 .cw-note { border: 1px solid var(--border); border-radius: 12px; background: color-mix(in srgb, var(--text) 1.5%, transparent); padding: 12px 14px; }
 .cw-note.pinned { border-color: color-mix(in srgb, var(--amber) 30%, transparent); background: color-mix(in srgb, var(--amber) 5%, transparent); }
+/* Optional per-note background colors (soft pastels, high text contrast).
+   Placed after .pinned so a colored note keeps its color when pinned. Dark
+   theme tints the panel; light theme uses true pastel fills with dark text. */
+.cw-note[data-note-color="yellow"] { background: color-mix(in srgb, #eab308 14%, var(--panel)); border-color: color-mix(in srgb, #eab308 35%, var(--border)); }
+.cw-note[data-note-color="blue"]   { background: color-mix(in srgb, #3b82f6 14%, var(--panel)); border-color: color-mix(in srgb, #3b82f6 35%, var(--border)); }
+.cw-note[data-note-color="green"]  { background: color-mix(in srgb, #22c55e 14%, var(--panel)); border-color: color-mix(in srgb, #22c55e 35%, var(--border)); }
+.cw-note[data-note-color="purple"] { background: color-mix(in srgb, #8b5cf6 14%, var(--panel)); border-color: color-mix(in srgb, #8b5cf6 35%, var(--border)); }
+.cw-note[data-note-color="pink"]   { background: color-mix(in srgb, #ec4899 14%, var(--panel)); border-color: color-mix(in srgb, #ec4899 35%, var(--border)); }
+.cw-note[data-note-color="orange"] { background: color-mix(in srgb, #f97316 14%, var(--panel)); border-color: color-mix(in srgb, #f97316 35%, var(--border)); }
+:root[data-theme="light"] .cw-note[data-note-color="yellow"] { background: #fef9c3; border-color: #fde047; }
+:root[data-theme="light"] .cw-note[data-note-color="blue"]   { background: #dbeafe; border-color: #93c5fd; }
+:root[data-theme="light"] .cw-note[data-note-color="green"]  { background: #dcfce7; border-color: #86efac; }
+:root[data-theme="light"] .cw-note[data-note-color="purple"] { background: #f3e8ff; border-color: #d8b4fe; }
+:root[data-theme="light"] .cw-note[data-note-color="pink"]   { background: #fce7f3; border-color: #f9a8d4; }
+:root[data-theme="light"] .cw-note[data-note-color="orange"] { background: #ffedd5; border-color: #fdba74; }
+/* Composer / in-card color pickers. */
+.note-swatches { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.note-swatch { width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border); padding: 0; cursor: pointer; flex: none; }
+.note-swatch.none { background: transparent; position: relative; }
+.note-swatch.none::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; border: 1px dashed var(--text-faint); }
+.note-swatch.active { outline: 2px solid var(--text); outline-offset: 1px; }
 .cw-note-head { display: flex; align-items: center; gap: 9px; }
 .cw-note-body { font-size: 12.5px; margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .cw-note-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 10px; font-size: 11px; color: var(--text-dim); }

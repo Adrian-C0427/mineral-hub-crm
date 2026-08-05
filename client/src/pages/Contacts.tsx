@@ -13,6 +13,7 @@ import { PhoneInput } from "../components/PhoneInput";
 import { DateField } from "../components/DateField";
 import { fmtDate, toInputDate } from "../lib/format";
 import { formatPhone } from "../lib/phone";
+import { userAvatarColor } from "../lib/avatarColor";
 import type { UserLite } from "../types";
 
 /**
@@ -42,7 +43,7 @@ export interface ContactRow {
   notes: string | null;
   tags?: string[];
   listIds?: string[];
-  owner: { id: string; name: string } | null;
+  owner: { id: string; name: string; avatarColor?: string | null } | null;
   lastContactedAt: string | null;
   nextFollowUpDate: string | null;
   createdAt: string;
@@ -143,7 +144,7 @@ export function Contacts() {
     { key: "owner", header: "Owner", type: "text", value: (r) => r.owner?.name ?? null,
       render: (r) => r.owner ? (
         <span className="ct-owner">
-          <span className="ct-owner-av">{initialsOf(r.owner.name)}</span>
+          <span className="ct-owner-av" style={{ background: userAvatarColor(r.owner), color: "#fff" }}>{initialsOf(r.owner.name)}</span>
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shortName(r.owner.name)}</span>
         </span>
       ) : "—" },
