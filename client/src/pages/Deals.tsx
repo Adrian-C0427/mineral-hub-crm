@@ -148,6 +148,23 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
         </Banner>
       )}
 
+      <BulkActionsBar
+        selectedIds={[...sel.selected]}
+        onClear={sel.clear}
+        onDone={load}
+        users={users}
+        itemLabel="deal"
+        deleteUrl={can("deleteDeals") ? "/deals/bulk-delete" : undefined}
+        assign={can("editDeals") ? { url: "/deals/bulk-assign", key: "assigneeIds" } : undefined}
+        archiveUrl={can("editDeals") ? "/deals/bulk-archive" : undefined}
+        onExport={() => {
+          const rows = filtered.filter((d) => sel.selected.has(d.id));
+          downloadCsv(`deals-${new Date().toISOString().slice(0, 10)}.csv`,
+            ["Deal", "Priority", "Stage", "NMA", "Profit Est.", "Under Contract", "Find Buyer By", "Current Buyer", "Owner"],
+            rows.map((d) => [d.name, d.priority, d.stage, d.acreageNma ?? "", d.profitEst ?? "", d.dateUnderContract ?? "", d.findBuyerByDate ?? "", d.selectedBuyer?.name ?? "", d.relationshipOwner?.name ?? ""]));
+        }}
+      />
+
       <div className="ct-card" style={{ marginTop: 0 }}>
         <SortableTable
           customizeId={`deals-list:${scope}`}
@@ -170,33 +187,10 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
               : `No ${scope} deals yet.`)
             : "No deals match your search."}
           selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
+          rowsPerPage={[20, 50, 100, 200]}
+          paginationNoun="deal"
         />
-        <div className="ct-foot">
-          <span>{filtered.length} deal{filtered.length === 1 ? "" : "s"}</span>
-          <span className="ct-pages">
-            <button className="ct-pgbtn" disabled aria-label="Previous page">‹</button>
-            <span className="ct-pgcur">1</span>
-            <button className="ct-pgbtn" disabled aria-label="Next page">›</button>
-          </span>
-        </div>
       </div>
-
-      <BulkActionsBar
-        selectedIds={[...sel.selected]}
-        onClear={sel.clear}
-        onDone={load}
-        users={users}
-        itemLabel="deal"
-        deleteUrl={can("deleteDeals") ? "/deals/bulk-delete" : undefined}
-        assign={can("editDeals") ? { url: "/deals/bulk-assign", key: "assigneeIds" } : undefined}
-        archiveUrl={can("editDeals") ? "/deals/bulk-archive" : undefined}
-        onExport={() => {
-          const rows = filtered.filter((d) => sel.selected.has(d.id));
-          downloadCsv(`deals-${new Date().toISOString().slice(0, 10)}.csv`,
-            ["Deal", "Priority", "Stage", "NMA", "Profit Est.", "Under Contract", "Find Buyer By", "Current Buyer", "Owner"],
-            rows.map((d) => [d.name, d.priority, d.stage, d.acreageNma ?? "", d.profitEst ?? "", d.dateUnderContract ?? "", d.findBuyerByDate ?? "", d.selectedBuyer?.name ?? "", d.relationshipOwner?.name ?? ""]));
-        }}
-      />
 
       {showNew && (
         <NewDealModal onClose={closeNew} onCreated={(d) => { closeNew(); nav(`/deals/${d.id}`); }} />

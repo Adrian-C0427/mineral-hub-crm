@@ -121,6 +121,17 @@ export function MineralAssets() {
           valueColor={totals.royalty ? "var(--green)" : undefined} />
       </div>
 
+      <BulkActionsBar
+        selectedIds={[...sel.selected]}
+        onClear={sel.clear}
+        onDone={load}
+        users={users}
+        itemLabel="asset"
+        deleteUrl={can("deleteDeals") ? "/deals/bulk-delete" : undefined}
+        assign={can("editDeals") ? { url: "/deals/bulk-assign", key: "assigneeIds" } : undefined}
+        onExport={exportSelected}
+      />
+
       <div className="ct-card">
         {assets.length === 0 ? (
           <p className="muted" style={{ padding: "18px 20px", margin: 0 }}>No mineral assets yet. Add one here, or convert a closed deal into an owned asset from its detail page.</p>
@@ -141,30 +152,12 @@ export function MineralAssets() {
             defaultSort={{ key: "currentValue", dir: "desc" }}
             empty="No assets match your search."
             selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
+            rowsPerPage={[20, 50, 100, 200]}
+            paginationNoun="asset"
+            footerExtra={totals.currentValue > 0 ? ` · ${money(totals.currentValue)} total value` : ""}
           />
         )}
-        {assets.length > 0 && (
-          <div className="ct-foot">
-            <span>{filtered.length} asset{filtered.length === 1 ? "" : "s"}{totals.currentValue > 0 ? ` · ${money(totals.currentValue)} total value` : ""}</span>
-            <span className="ct-pages">
-              <button className="ct-pgbtn" disabled aria-label="Previous page">‹</button>
-              <span className="ct-pgcur">1</span>
-              <button className="ct-pgbtn" disabled aria-label="Next page">›</button>
-            </span>
-          </div>
-        )}
       </div>
-
-      <BulkActionsBar
-        selectedIds={[...sel.selected]}
-        onClear={sel.clear}
-        onDone={load}
-        users={users}
-        itemLabel="asset"
-        deleteUrl={can("deleteDeals") ? "/deals/bulk-delete" : undefined}
-        assign={can("editDeals") ? { url: "/deals/bulk-assign", key: "assigneeIds" } : undefined}
-        onExport={exportSelected}
-      />
 
       {showNew && <NewAssetModal onClose={() => setShowNew(false)} onCreated={(d) => { setShowNew(false); nav(`/assets/${d.id}`); }} />}
     </div>

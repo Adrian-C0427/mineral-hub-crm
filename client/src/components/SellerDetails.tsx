@@ -6,6 +6,7 @@ import { Select } from "./Select";
 import { StateSelect } from "./StateSelect";
 import { formatPhone } from "../lib/phone";
 import { fmtDate, fmtDateLocal } from "../lib/format";
+import { avatarColor } from "../lib/avatarColor";
 import type { Seller, SellerType, UserLite } from "../types";
 
 /**
@@ -87,7 +88,7 @@ function SellerCard({ s, canEdit, onEdit, onRemove }: { s: Seller; canEdit: bool
     <div className="seller-card">
       <div className="seller-card-head">
         <div className="row" style={{ gap: 11, alignItems: "center", minWidth: 0 }}>
-          <span className="seller-avatar">{initials}</span>
+          <span className="seller-avatar" style={{ background: avatarColor(name), color: "#fff" }}>{initials}</span>
           <strong style={{ fontSize: 14.5, fontWeight: 800 }}>{name}</strong>
           <span className="ct-pill seller-type-pill">{prettyType(s.sellerType)}</span>
           {s.preferredContactMethod && (

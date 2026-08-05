@@ -108,6 +108,22 @@ export function Buyers() {
         </div>
       </div>
 
+      <BulkActionsBar
+        selectedIds={[...sel.selected]}
+        onClear={sel.clear}
+        onDone={load}
+        users={users}
+        itemLabel="buyer"
+        deleteUrl={can("deleteBuyers") ? "/buyers/bulk-delete" : undefined}
+        assign={can("editBuyers") ? { url: "/buyers/bulk-assign", key: "ownerIds" } : undefined}
+        onExport={() => {
+          const rows = buyers.filter((b) => sel.selected.has(b.id));
+          downloadCsv(`buyers-${new Date().toISOString().slice(0, 10)}.csv`,
+            ["Company", "First Name", "Last Name", "Focus Area", "Relationship", "Close %", "Closed Deals"],
+            rows.map((b) => [b.companyName, b.contactFirstName ?? "", b.contactLastName ?? "", b.focusArea, b.relationshipStatus, b.closeRate, b.closedDeals]));
+        }}
+      />
+
       <div className="ct-card" style={{ marginTop: 0 }}>
       <SortableTable
         customizeId="buyers-list"
@@ -127,32 +143,10 @@ export function Buyers() {
         defaultSort={{ key: "buyer", dir: "asc" }}
         empty={buyers.length === 0 ? "No buyers yet. Import a CSV or add one manually." : "No buyers match your search."}
         selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
+        rowsPerPage={[20, 50, 100, 200]}
+        paginationNoun="buyer"
       />
-      <div className="ct-foot">
-        <span>{filtered.length} buyer{filtered.length === 1 ? "" : "s"}</span>
-        <span className="ct-pages">
-          <button className="ct-pgbtn" disabled aria-label="Previous page">‹</button>
-          <span className="ct-pgcur">1</span>
-          <button className="ct-pgbtn" disabled aria-label="Next page">›</button>
-        </span>
       </div>
-      </div>
-
-      <BulkActionsBar
-        selectedIds={[...sel.selected]}
-        onClear={sel.clear}
-        onDone={load}
-        users={users}
-        itemLabel="buyer"
-        deleteUrl={can("deleteBuyers") ? "/buyers/bulk-delete" : undefined}
-        assign={can("editBuyers") ? { url: "/buyers/bulk-assign", key: "ownerIds" } : undefined}
-        onExport={() => {
-          const rows = buyers.filter((b) => sel.selected.has(b.id));
-          downloadCsv(`buyers-${new Date().toISOString().slice(0, 10)}.csv`,
-            ["Company", "First Name", "Last Name", "Focus Area", "Relationship", "Close %", "Closed Deals"],
-            rows.map((b) => [b.companyName, b.contactFirstName ?? "", b.contactLastName ?? "", b.focusArea, b.relationshipStatus, b.closeRate, b.closedDeals]));
-        }}
-      />
 
       {/* The import wizard runs in a standard modal — the user stays in context
           instead of scrolling to a bottom-of-page panel. */}

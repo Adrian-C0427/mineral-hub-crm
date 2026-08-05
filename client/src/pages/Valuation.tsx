@@ -6,6 +6,7 @@ import {
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Banner, CtPill, MetricCard, Modal, Spinner } from "../components/ui";
+import { Select } from "../components/Select";
 import { WellImport } from "../components/WellImport";
 import { money, num, prettyEnum, fmtDate, fmtDateTime, fmtDateLocal } from "../lib/format";
 import { monthLabel, chartTooltip } from "../lib/charts";
@@ -1589,15 +1590,16 @@ function SaveModal({ existingId, existingName, wellIds, assumptions, result, onC
 function WellData({ canManage }: { canManage: boolean }) {
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(50);
   const [data, setData] = useState<Paged<WellRow> | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     const t = setTimeout(() => {
-      api.get<Paged<WellRow>>(`/wells?q=${encodeURIComponent(q)}&page=${page}&pageSize=25`).then(setData).catch(() => {});
+      api.get<Paged<WellRow>>(`/wells?q=${encodeURIComponent(q)}&page=${page}&pageSize=${pageSize}`).then(setData).catch(() => {});
     }, 250);
     return () => clearTimeout(t);
-  }, [q, page, reloadKey]);
+  }, [q, page, pageSize, reloadKey]);
 
   async function del(w: WellRow) {
     if (!window.confirm(`Delete ${w.name} and all its production data?`)) return;
@@ -1637,13 +1639,16 @@ function WellData({ canManage }: { canManage: boolean }) {
                 ))}
               </tbody>
             </table></div>
-            {pages > 1 && (
-              <div className="row" style={{ marginTop: 10, justifyContent: "flex-end" }}>
-                <button className="small" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>‹ Prev</button>
-                <span className="muted">Page {page} of {pages}</span>
-                <button className="small" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>Next ›</button>
-              </div>
-            )}
+            <div className="row" style={{ marginTop: 10, justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
+              <span className="ct-rpp"><Select value={String(pageSize)} onChange={(v) => { setPageSize(Number(v)); setPage(1); }} options={["20", "50", "100", "200"]} width={68} ariaLabel="Rows per page" /></span>
+              {pages > 1 && (
+                <>
+                  <button className="small" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>‹ Prev</button>
+                  <span className="muted">Page {page} of {pages}</span>
+                  <button className="small" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>Next ›</button>
+                </>
+              )}
+            </div>
           </>
         )}
       </div>

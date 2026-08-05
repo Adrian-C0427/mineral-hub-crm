@@ -729,7 +729,7 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
           <div className="panel-title" style={{ alignItems: "flex-start" }}>
             <div>
               <h3 style={{ margin: 0 }}>Texas Activity Map</h3>
-              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>Blue = hotspot · click a county to zoom into its abstracts</div>
+              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>Red = hotspot · click a county to zoom into its abstracts</div>
             </div>
             <div className="seg-control">
               <span className={`seg ${metric === "activity" ? "active" : ""}`} onClick={() => setMetric("activity")}>Volume</span>
@@ -1635,7 +1635,7 @@ function RecordsTab({ qs }: { qs: string }) {
   const [confirmDel, setConfirmDel] = useState(false);
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
-  const pageSize = 50;
+  const [pageSize, setPageSize] = useState(50);
 
   // Records-level filters. Options are DYNAMIC — distinct values from the data
   // currently loaded into Research (under the page's active filters/window),
@@ -1681,13 +1681,13 @@ function RecordsTab({ qs }: { qs: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recQs, kind]);
 
-  useEffect(() => { setPage(1); sel.clear(); }, [recQs, kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setPage(1); sel.clear(); }, [recQs, kind, pageSize]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setLoading(true);
     const url = `/research/${kind}?${recQs}&page=${page}&pageSize=${pageSize}`;
     if (kind === "documents") api.get<Paged<DocRecord>>(url).then(setDocs).catch(() => setDocs(null)).finally(() => setLoading(false));
     else api.get<Paged<PermitRecord>>(url).then(setPermits).catch(() => setPermits(null)).finally(() => setLoading(false));
-  }, [recQs, kind, page, reloadKey]);
+  }, [recQs, kind, page, pageSize, reloadKey]);
 
   // Deletion is permanent — removed records can never resurface as phantom
   // duplicates in a later import.
@@ -1871,13 +1871,16 @@ function RecordsTab({ qs }: { qs: string }) {
               : <SortableTable customizeId="research-records-permits" columns={permitColumns} rows={permits!.rows} rowKey={(r) => r.id} toolbar={toolbarContent} subToolbar={filterStrip} defaultSort={{ key: "activityDate", dir: "desc" }} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />}
             <div className="rec-foot">
               <span>Showing {num(active.rows.length)} of {num(active.total)} records · sorted by {kind === "documents" ? "recorded" : ""} date, newest first</span>
-              {totalPages > 1 && (
-                <span className="row" style={{ gap: 8, alignItems: "center" }}>
-                  <button className="small" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Prev</button>
-                  <span className="muted" style={{ fontSize: 12 }}>Page {page} of {num(totalPages)}</span>
-                  <button className="small" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next →</button>
-                </span>
-              )}
+              <span className="row" style={{ gap: 10, alignItems: "center" }}>
+                <span className="ct-rpp"><Select value={String(pageSize)} onChange={(v) => setPageSize(Number(v))} options={["20", "50", "100", "200"]} width={68} ariaLabel="Rows per page" /></span>
+                {totalPages > 1 && (
+                  <span className="row" style={{ gap: 8, alignItems: "center" }}>
+                    <button className="small" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Prev</button>
+                    <span className="muted" style={{ fontSize: 12 }}>Page {page} of {num(totalPages)}</span>
+                    <button className="small" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next →</button>
+                  </span>
+                )}
+              </span>
             </div>
           </>
         )}

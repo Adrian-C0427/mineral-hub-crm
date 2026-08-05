@@ -189,6 +189,17 @@ export function Contacts() {
         <MetricCard label="Follow-ups Due" value={followUpsDue} valueColor={followUpsDue > 0 ? "var(--amber)" : undefined} />
       </div>
 
+      {canManage && (
+        <ContactsBulkBar
+          selectedIds={[...sel.selected]}
+          users={users}
+          lists={lists}
+          onClear={sel.clear}
+          onDone={() => { load(); loadLists(); }}
+          onExport={() => setShowExport("selected")}
+        />
+      )}
+
       <div className="ct-card">
         <SortableTable
           customizeId="contacts-list"
@@ -224,27 +235,10 @@ export function Contacts() {
             ? (canManage ? "No contacts yet — click “+ New Contact” to start building your acquisitions network." : "No contacts yet.")
             : "No contacts match your filters."}
           selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
+          rowsPerPage={[20, 50, 100, 200]}
+          paginationNoun="contact"
         />
-        <div className="ct-foot">
-          <span>{filtered.length} contact{filtered.length === 1 ? "" : "s"}</span>
-          <span className="ct-pages">
-            <button className="ct-pgbtn" disabled aria-label="Previous page">‹</button>
-            <span className="ct-pgcur">1</span>
-            <button className="ct-pgbtn" disabled aria-label="Next page">›</button>
-          </span>
-        </div>
       </div>
-
-      {canManage && (
-        <ContactsBulkBar
-          selectedIds={[...sel.selected]}
-          users={users}
-          lists={lists}
-          onClear={sel.clear}
-          onDone={() => { load(); loadLists(); }}
-          onExport={() => setShowExport("selected")}
-        />
-      )}
 
 
       {editing && (

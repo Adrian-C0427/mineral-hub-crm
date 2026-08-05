@@ -121,8 +121,12 @@ body {
   line-height: 1.5;
 }
 
-a { color: var(--accent); text-decoration: none; }
-a:hover { text-decoration: underline; }
+/* Clickable text reads in the normal text color; the accent affordance appears
+   only on hover/focus (cursor + underline still signal clickability). Filled
+   link-buttons (a.primary, .btn-primary-link) set their own #fff and are
+   unaffected; active nav states keep their accent below. */
+a { color: var(--text); text-decoration: none; }
+a:hover { color: var(--accent); text-decoration: underline; }
 /* In-content record links (buyer names etc.): normal text color, no hyperlink
    look — the accent only appears on hover/focus so it still reads clickable. */
 a.subtle-link { color: var(--text); }
@@ -408,7 +412,8 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .timeline-act:hover { opacity: 1; }
 .timeline-act.danger:hover { color: var(--red); }
 @media (hover: none) { .timeline-act { opacity: 0.6; } }
-.link-btn { background: none; border: none; color: var(--accent); padding: 0 4px; font-size: 12px; cursor: pointer; }
+.link-btn { background: none; border: none; color: var(--text); padding: 0 4px; font-size: 12px; cursor: pointer; }
+.link-btn:hover { color: var(--accent); }
 .match-selected { outline: 2px solid var(--accent); }
 /* Per-field copy-to-clipboard: icon fades in on hover of the key/value row. */
 .kv-copy-btn { opacity: 0; background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 12px; margin-left: 5px; padding: 0 2px; line-height: 1; transition: opacity .12s, color .12s; }
@@ -806,10 +811,13 @@ body.modal-open { overflow: hidden; }
 .chart-tip-total { border-top: 1px solid var(--border); margin-top: 3px; padding-top: 4px; }
 .bar-chart { display:flex; align-items:flex-end; gap: 8px; height: 178px; }
 .bar-col { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height: 100%; gap: 7px; }
-.bar-zone { display:flex; align-items:flex-end; gap: 2px; width: 100%; height: 130px; justify-content: center; }
-/* Value label riding above each bar (design): green realized / blue projected. */
-.bar-val { font-size: 10px; font-weight: 800; font-variant-numeric: tabular-nums; height: 13px; line-height: 13px; white-space: nowrap; }
-:root[data-theme="light"] .bar-val { filter: saturate(1.1) brightness(0.82); }
+.bar-zone { position: relative; display:flex; align-items:flex-end; gap: 2px; width: 100%; height: 130px; justify-content: center; }
+/* The month's total floats directly above the tallest bar: absolutely placed
+   inside the zone, its bottom pinned to the bar's top (set inline as `bottom`),
+   then lifted a few px for a clean gap. */
+.bar-val { position: absolute; left: 0; right: 0; text-align: center; transform: translateY(-4px);
+  font-size: 10px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 12px; white-space: nowrap;
+  color: var(--text); pointer-events: none; }
 /* Design bars: rounded caps, translucent dashed outline for projected. */
 .bar { flex: 1; max-width: 34px; background: var(--green); border-radius: 5px 5px 2px 2px; }
 .bar-projected { background: color-mix(in srgb, var(--accent) 22%, transparent); opacity: 1;
@@ -1245,7 +1253,7 @@ input[type="range"] { -webkit-appearance: none; appearance: none; height: 4px; p
 input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); cursor: pointer; }
 
 /* --- Bulk actions --- */
-.bulk-bar { position: sticky; bottom: 16px; z-index: 20; display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius); padding: 10px 16px; margin-top: 14px; box-shadow: var(--shadow); }
+.bulk-bar { position: sticky; top: 16px; z-index: 20; display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius); padding: 10px 16px; margin-bottom: 14px; box-shadow: var(--shadow); }
 tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 
 /* ===========================================================================
@@ -1434,8 +1442,8 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
   padding: 4px 0; border-bottom: 1px solid var(--border); }
 .rel-party-name { background: none; border: none; padding: 0; text-align: left; font-size: 13px;
   color: var(--text); cursor: default; }
-.rel-party-name.link { color: var(--accent); cursor: pointer; text-decoration: none; }
-.rel-party-name.link:hover { text-decoration: underline; }
+.rel-party-name.link { color: var(--text); cursor: pointer; text-decoration: none; }
+.rel-party-name.link:hover { color: var(--accent); text-decoration: underline; }
 .rel-party-name:disabled { color: var(--text); opacity: 1; }
 .rel-party-meta { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .rel-count-mini { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
@@ -2242,8 +2250,8 @@ body.pipeline-dragging, body.pipeline-dragging * { user-select: none !important;
 .rel2-row:last-child { border-bottom: none; }
 .rel2-name { flex: 1; min-width: 0; background: none; border: none; padding: 0; text-align: left; font-size: 13px;
   font-weight: 600; color: var(--text); cursor: default; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rel2-name.link { color: var(--accent); cursor: pointer; }
-.rel2-name.link:hover { text-decoration: underline; }
+.rel2-name.link { color: var(--text); cursor: pointer; }
+.rel2-name.link:hover { color: var(--accent); text-decoration: underline; }
 .rel2-name:disabled { color: var(--text); opacity: 1; }
 .rel2-bar { width: 64px; height: 5px; border-radius: 3px; flex: none;
   background: color-mix(in srgb, var(--border) 60%, transparent); overflow: hidden; }
@@ -2529,7 +2537,8 @@ body.pipeline-dragging, body.pipeline-dragging * { user-select: none !important;
   margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
 }
 .dc2-days { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-dim); }
-.dc2-open { display: flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 700; color: var(--accent); }
+.dc2-open { display: flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 700; color: var(--text-dim); }
+.deal-card:hover .dc2-open, .dc2-open:hover { color: var(--accent); }
 
 .transition-bar { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 4px 0 0; }
 .transition-zone {
@@ -3267,6 +3276,11 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .ct-pgcur { width: 28px; height: 28px; border-radius: 7px; background: #1a2233; border: 1px solid #2b3444;
   display: inline-flex; align-items: center; justify-content: center; color: var(--text); font-weight: 700; }
 :root[data-theme="light"] .ct-pgcur { background: color-mix(in srgb, var(--accent) 10%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+/* Footer controls: compact rows-per-page selector (numbers only) + pager. */
+.ct-foot-controls { display: flex; align-items: center; gap: 12px; }
+.ct-pgof { color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.ct-rpp .msel-box { min-height: 28px; height: 28px; padding: 0 8px; }
+.ct-rpp .msel-box .msel-val { font-size: 12px; }
 
 /* --- Contact profile (reference refinement) ------------------------------- */
 .cw-wrap { display: flex; flex-direction: column; min-height: calc(100vh - 55px); }
@@ -3286,9 +3300,9 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .cw-left { width: 300px; }
 .cw-left, .cw-right { background: transparent; }
 .cw-ident { padding: 20px; border-bottom: none; }
-.cw-avatar { background: #1a2233; border: 1px solid #2b3444; color: var(--text-dim); border-radius: 10px; }
+.cw-avatar { background: #1a2233; border: 1px solid #2b3444; color: var(--text-dim); border-radius: 50%; }
 :root[data-theme="light"] .cw-avatar { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); color: var(--accent); }
-.cw-avatar.lg { width: 46px; height: 46px; border-radius: 12px; font-size: 15px; }
+.cw-avatar.lg { width: 46px; height: 46px; border-radius: 50%; font-size: 15px; }
 .cw-name { font-size: 16px; font-weight: 800; letter-spacing: -0.01em; }
 .cw-pills { display: flex; gap: 6px; margin-top: 6px; }
 .cw-pills .ct-pill { height: 20px; padding: 0 8px; font-size: 11px; }
@@ -3317,7 +3331,7 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .cw-meta { color: var(--text-faint); margin-top: 10px; }
 
 .cw-chead { padding: 14px 22px; }
-.cw-chead .cw-avatar { width: 38px; height: 38px; border-radius: 10px; font-size: 13px; }
+.cw-chead .cw-avatar { width: 38px; height: 38px; border-radius: 50%; font-size: 13px; }
 .cw-act { width: auto; height: 32px; padding: 0 12px; border-radius: 9px; display: inline-flex; gap: 6px;
   background: transparent; font: 600 12.5px var(--font-sans); color: color-mix(in srgb, var(--text) 72%, var(--text-dim)); }
 .cw-act:hover { border-color: #323b4b; }
@@ -3507,8 +3521,10 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .seller-head-add { position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
 .seller-card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px; padding: 16px; }
 .seller-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.seller-avatar { width: 34px; height: 34px; border-radius: 50%; background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent); font-size: 12.5px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+/* Matches the header avatar (.topbar-avatar): 32px circle, white initials;
+   the background color is assigned per-name inline (see lib/avatarColor). */
+.seller-avatar { width: 32px; height: 32px; border-radius: 50%; background: #1d4ed8;
+  color: #fff; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .seller-type-pill { color: color-mix(in srgb, var(--text) 72%, var(--text-dim)); background: var(--panel); border: 1px solid var(--border); }
 .seller-pref-pill { color: var(--green); background: rgba(34, 197, 94, 0.10); border: 1px solid rgba(34, 197, 94, 0.25); font-size: 11px; }
 .seller-act { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; background: transparent;

@@ -942,7 +942,7 @@ export function MapView() {
 
         {/* Overlap chooser */}
         {choices && (
-          <div style={{ position: "absolute", top: 12, right: 12, width: 300, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "var(--shadow)", padding: 16 }}>
+          <div style={{ position: "absolute", top: 12, left: 52, width: 300, maxWidth: "calc(100% - 310px)", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "var(--shadow)", padding: 16 }}>
             <div className="section-head"><h3 style={{ margin: 0 }}>{choices.length} wells here</h3><button className="icon-btn" onClick={() => setChoices(null)}>×</button></div>
             <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Pick the well you meant:</p>
             {choices.map((w) => (
@@ -954,7 +954,7 @@ export function MapView() {
         )}
 
         {selected && !choices && (
-          <div style={{ position: "absolute", top: 12, right: 12, width: 320, maxHeight: "calc(100% - 24px)", overflowY: "auto", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "var(--shadow)", padding: 16 }}>
+          <div style={{ position: "absolute", top: 12, left: 52, width: 320, maxWidth: "calc(100% - 310px)", maxHeight: "calc(100% - 24px)", overflowY: "auto", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "var(--shadow)", padding: 16 }}>
             {selected.kind === "well" ? (
               <>
                 <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.leaseName || "Well"} {selected.wellNo ? `#${selected.wellNo}` : ""}</h3><div className="muted" style={{ fontSize: 12 }}>{selected.symbol}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
