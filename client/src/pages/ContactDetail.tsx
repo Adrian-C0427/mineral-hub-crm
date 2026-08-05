@@ -10,6 +10,7 @@ import { Spinner, Banner, ConfirmDelete, EmptyState, showToast } from "../compon
 import { Select } from "../components/Select";
 import { DateField } from "../components/DateField";
 import { fmtDate } from "../lib/format";
+import { avatarColor } from "../lib/avatarColor";
 import { type ContactRow, TYPES, STATUSES, typeLabel, statusLabel, CtPill, TYPE_COLORS, STATUS_COLORS } from "./Contacts";
 import { formatPhone, formatPhoneAsYouType, normalizePhone } from "../lib/phone";
 import type { UserLite } from "../types";
@@ -115,7 +116,7 @@ export function ContactDetail() {
       <aside className="cw-left">
         <div className="cw-ident">
           <div className="cw-ident-row">
-            <span className="cw-avatar lg">{initialsOf(contact.name)}</span>
+            <span className="cw-avatar lg" style={{ background: avatarColor(contact.name), color: "#fff", borderColor: "transparent" }}>{initialsOf(contact.name)}</span>
             <div style={{ flex: 1, minWidth: 0 }}>
               <NameField contact={contact} canEdit={canManage} onSave={patch} />
               <div className="cw-pills">
@@ -153,7 +154,7 @@ export function ContactDetail() {
       <section className="cw-center">
         <div className="cw-chead">
           <div className="row" style={{ gap: 12, alignItems: "center" }}>
-            <span className="cw-avatar">{initialsOf(contact.name)}</span>
+            <span className="cw-avatar" style={{ background: avatarColor(contact.name), color: "#fff", borderColor: "transparent" }}>{initialsOf(contact.name)}</span>
             <div>
               <div style={{ fontSize: 15, fontWeight: 700 }}>{contact.name}</div>
               {contact.phone && <div className="cw-mono muted">{formatPhone(contact.phone)}</div>}

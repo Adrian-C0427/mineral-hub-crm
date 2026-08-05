@@ -258,11 +258,11 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
               // Drilled in, the county's own choropleth wash disappears — the
               // abstract mesh alone shows where the activity is.
               fill={isFocus && abstractShapes?.length ? "rgba(148,163,184,0.05)" : fillFor(sh.name)}
-              // The focused county keeps its hotspot blue outline through the
+              // The focused county keeps its hotspot red outline through the
               // drill-down; selection blue applies only at the overview.
               stroke={isFocus
-                ? (st?.isHotspot ? "#60a5fa" : "var(--accent, #3b82f6)")
-                : isSel ? "var(--accent, #3b82f6)" : st?.isHotspot ? "#60a5fa" : "rgba(148,163,184,0.35)"}
+                ? (st?.isHotspot ? "var(--red, #ef4444)" : "var(--accent, #3b82f6)")
+                : isSel ? "var(--accent, #3b82f6)" : st?.isHotspot ? "var(--red, #ef4444)" : "rgba(148,163,184,0.35)"}
               strokeWidth={isFocus ? sw(2.2) : isSel ? sw(2) : st?.isHotspot ? sw(1.6) : sw(0.5)}
               // While drilled in, the abstract layer owns interaction inside the
               // county; other counties stay clickable to hop directly between them.
@@ -279,7 +279,7 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
                 { text: `${st.total.toLocaleString()} records` },
                 ...(st.pctChange != null ? [{ text: `${st.pctChange >= 0 ? "+" : ""}${Math.round(st.pctChange * 100)}% vs prior` }] : []),
                 ...(st.pctChange == null && st.total > 0 ? [{ text: "new activity" }] : []),
-                ...(st.isHotspot ? [{ text: "● Hotspot", color: "#60a5fa" }] : []),
+                ...(st.isHotspot ? [{ text: "● Hotspot", color: "var(--red, #ef4444)" }] : []),
                 ...(!focused ? [{ text: "Click to zoom in" }] : []),
               ] : [{ text: "No data" }])}
               onMouseLeave={() => setTip(null)}
@@ -287,7 +287,7 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
           );
         })}
 
-        {/* Drilled-in abstract layer: activity fill + blue hotspot outlines. */}
+        {/* Drilled-in abstract layer: activity fill + red hotspot outlines. */}
         {focused && abstractShapes && (
           <g style={{ opacity: abstractsVisible ? 1 : 0, transition: "opacity 350ms ease" }}>
             {abstractShapes.map((ab) => {
@@ -299,7 +299,7 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
                   key={ab.abstract}
                   d={ab.d}
                   fill={abstractFill(stat, ab.count)}
-                  stroke={hot ? "#60a5fa" : "rgba(148,163,184,0.4)"}
+                  stroke={hot ? "var(--red, #ef4444)" : "rgba(148,163,184,0.4)"}
                   strokeWidth={hot ? sw(1.4) : sw(0.35)}
                   style={{ cursor: active && onAbstractClick ? "pointer" : "default" }}
                   onClick={() => active && onAbstractClick?.(stat?.abstractId ?? ab.abstract)}
@@ -307,7 +307,7 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
                     ...(ab.survey ? [{ text: ab.survey }] : []),
                     { text: active ? `${(stat?.total ?? ab.count).toLocaleString()} records` : "No activity in period" },
                     ...(ab.amount > 0 ? [{ text: `$${Math.round(ab.amount).toLocaleString()} in transactions` }] : []),
-                    ...(hot ? [{ text: "● Hotspot", color: "#60a5fa" }] : []),
+                    ...(hot ? [{ text: "● Hotspot", color: "var(--red, #ef4444)" }] : []),
                     ...(active && onAbstractClick ? [{ text: "Click to view records" }] : []),
                   ])}
                   onMouseLeave={() => setTip(null)}
@@ -318,7 +318,7 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
                 stays crisp above the abstract mesh. */}
             {focusShape && (
               <path d={focusShape.d} fill="none"
-                stroke={statMap.get(focusShape.name.toUpperCase())?.isHotspot ? "#60a5fa" : "var(--accent, #3b82f6)"}
+                stroke={statMap.get(focusShape.name.toUpperCase())?.isHotspot ? "var(--red, #ef4444)" : "var(--accent, #3b82f6)"}
                 strokeWidth={sw(2.2)} pointerEvents="none" />
             )}
           </g>

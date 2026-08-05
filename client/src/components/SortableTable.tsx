@@ -1,5 +1,6 @@
 import { fmtDate } from "../lib/format";
 import { Req } from "./ui";
+import { Select } from "./Select";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
@@ -54,6 +55,18 @@ interface Props<T> {
   /** Rendered between the toolbar row and the table — e.g. an expandable
    *  filter strip that must sit under the toolbar but above the columns. */
   subToolbar?: ReactNode;
+  /** Enables client-side pagination with a compact rows-per-page selector.
+   *  Pass the selectable page sizes (e.g. [20, 50, 100, 200]); rows are sorted
+   *  across the full set FIRST, then the current page is sliced for display, so
+   *  sorting is never limited to one page. Omit to render every row (no footer). */
+  rowsPerPage?: number[];
+  /** Default page size when pagination is on (defaults to 50, or the first
+   *  option if 50 isn't offered). */
+  defaultPageSize?: number;
+  /** Singular noun for the footer count ("deal" → "12 deals"). */
+  paginationNoun?: string;
+  /** Extra content appended to the footer count (e.g. "· $1.2M total value"). */
+  footerExtra?: ReactNode;
 }
 
 function compareValues(a: unknown, b: unknown, type: SortType): number {
@@ -225,6 +238,10 @@ export function SortableTable<T>({
   customizeId,
   toolbar,
   subToolbar,
+  rowsPerPage,
+  defaultPageSize,
+  paginationNoun,
+  footerExtra,
 }: Props<T>) {
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(defaultSort ?? null);
   const { ordered, visible, hidden, widths, pinnedKeys, pinnedSet, toggle, reorder, setWidth, togglePin, reset, isDefault } = useColumnPrefs(customizeId, columns);
@@ -279,6 +296,19 @@ export function SortableTable<T>({
     });
   }
 
+  // Pagination (opt-in via rowsPerPage). Rows are sorted across the FULL set
+  // above, then the current page is sliced here — so sorting/select-all reflect
+  // the whole list, not just the visible page.
+  const paginated = !!rowsPerPage && rowsPerPage.length > 0;
+  const initialPageSize = defaultPageSize ?? (rowsPerPage?.includes(50) ? 50 : rowsPerPage?.[0] ?? 50);
+  const [pageSize, setPageSize] = useState(initialPageSize);
+  const [page, setPage] = useState(1);
+  const totalPages = paginated ? Math.max(1, Math.ceil(sorted.length / pageSize)) : 1;
+  const curPage = Math.min(page, totalPages);
+  // Snap back to a valid page when the row set shrinks or the page size changes.
+  useEffect(() => { setPage(1); }, [pageSize, sorted.length]);
+  const paged = paginated ? sorted.slice((curPage - 1) * pageSize, curPage * pageSize) : sorted;
+
   // Right-edge fade: a visible cue that more columns exist off-screen. (The
   // pinned lead column already anchors the left edge, so no left fade.)
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -304,7 +334,7 @@ export function SortableTable<T>({
         <thead>
           <tr>
             {selection && (() => {
-              const ids = sorted.map(rowKey);
+              const ids = paged.map(rowKey);
               const allSelected = ids.length > 0 && ids.every((id) => selection.selected.has(id));
               return (
                 <th className="center" style={{ width: 36, ...(hasPins ? { position: "sticky", left: 0, zIndex: 4, background: "var(--panel-2)" } : {}) }}>
@@ -351,7 +381,7 @@ export function SortableTable<T>({
               </td>
             </tr>
           ) : (
-            sorted.map((row) => {
+            paged.map((row) => {
               const id = rowKey(row);
               return (
               <tr
@@ -388,7 +418,34 @@ export function SortableTable<T>({
     </div>
   );
 
-  if (!customizeId) return table;
+  const footer = paginated ? (
+    <div className="ct-foot">
+      <span>
+        {sorted.length}
+        {paginationNoun ? ` ${paginationNoun}${sorted.length === 1 ? "" : "s"}` : ""}
+        {footerExtra}
+      </span>
+      <span className="ct-foot-controls">
+        <span className="ct-rpp">
+          <Select
+            value={String(pageSize)}
+            onChange={(v) => setPageSize(Number(v))}
+            options={rowsPerPage!.map((n) => String(n))}
+            width={68}
+            ariaLabel="Rows per page"
+          />
+        </span>
+        <span className="ct-pages">
+          <button className="ct-pgbtn" disabled={curPage <= 1} onClick={() => setPage(curPage - 1)} aria-label="Previous page">‹</button>
+          <span className="ct-pgcur">{curPage}</span>
+          <span className="ct-pgof">/ {totalPages}</span>
+          <button className="ct-pgbtn" disabled={curPage >= totalPages} onClick={() => setPage(curPage + 1)} aria-label="Next page">›</button>
+        </span>
+      </span>
+    </div>
+  ) : null;
+
+  if (!customizeId) return <>{table}{footer}</>;
   return (
     <div className="cv-table">
       <div className="cv-toolbar">
@@ -397,6 +454,7 @@ export function SortableTable<T>({
       </div>
       {subToolbar}
       {table}
+      {footer}
     </div>
   );
 }

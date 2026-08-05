@@ -321,8 +321,10 @@ export function Dashboard() {
         <div className="panel-title" style={{ marginBottom: 0 }}>
           <div>
             <h3 className="dash-h3">Profit by month</h3>
+            {/* Per-month totals now sit above each bar (see .bar-val); the header
+                keeps just the title + period so the number lives on the chart. */}
             <div className="dash-panel-sub">
-              {fmtCompact(d.profitByMonth.reduce((s, m) => s + m.profit + m.projected, 0))} realized + projected{d.metrics.periodLabel ? ` · ${d.metrics.periodLabel}` : ` in ${new Date().getFullYear()}`}
+              Realized + projected{d.metrics.periodLabel ? ` · ${d.metrics.periodLabel}` : ` in ${new Date().getFullYear()}`}
             </div>
           </div>
           {d.profitByMonth.some((m) => m.profit > 0 || m.projected > 0) && (
@@ -359,12 +361,15 @@ export function Dashboard() {
                     onClick={clickable ? () => setProfitDrill(i) : undefined}
                     onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setProfitDrill(i); } } : undefined}
                   >
-                    {/* Value label above the bar (design): green for realized,
-                        soft blue for projected; blank keeps rows aligned. */}
-                    <div className="bar-val" style={{ color: m.projected > m.profit ? "var(--dash-proj-text, #93b4f8)" : "var(--green)" }}>
-                      {empty ? "" : fmtCompact(Math.max(m.profit, m.projected))}
-                    </div>
                     <div className="bar-zone">
+                      {/* The month's total (realized + projected) floats directly
+                          above the taller of the two bars — the highest point of
+                          the month's graph. */}
+                      {!empty && (
+                        <div className="bar-val" style={{ bottom: `${(Math.max(m.profit, m.projected) / niceMax) * 100}%` }}>
+                          {fmtCompact(m.profit + m.projected)}
+                        </div>
+                      )}
                       {empty ? (
                         <div className="bar bar-zero" />
                       ) : (
