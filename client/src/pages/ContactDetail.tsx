@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, Banner, ConfirmDelete, EmptyState, showToast } from "../components/ui";
+import { Spinner, Banner, ConfirmDelete, EmptyState, showToast, UserChip } from "../components/ui";
 import { Select } from "../components/Select";
 import { DateField } from "../components/DateField";
 import { fmtDate } from "../lib/format";
@@ -32,7 +32,7 @@ export interface ContactActivityRow {
   dueDate: string | null;
   completedAt: string | null;
   priority: "LOW" | "MEDIUM" | "HIGH" | string | null;
-  assignedTo: { id: string; name: string } | null;
+  assignedTo: { id: string; name: string; avatarColor?: string | null } | null;
   pinned: boolean;
   color?: string | null;
   createdBy: { id: string; name: string } | null;
@@ -770,7 +770,7 @@ function SidePanel({ contact, activities, canManage, onChanged, users }: {
                           const p = TASK_PRIORITIES.find((x) => x.v === a.priority);
                           return p ? <span style={{ fontSize: 10.5, fontWeight: 700, color: p.color, background: `color-mix(in srgb, ${p.color} 13%, transparent)`, borderRadius: 999, padding: "1px 7px" }}>{p.label}</span> : null;
                         })()}
-                        {a.assignedTo && <span className="muted" style={{ fontSize: 11 }}>{a.assignedTo.name}</span>}
+                        {a.assignedTo && <span className="muted" style={{ fontSize: 11 }}><UserChip user={a.assignedTo} size={15} /></span>}
                       </div>
                     </div>
                     {canManage && <button className="icon-btn" title="Delete" onClick={() => void remove(a)}><X size={12} /></button>}

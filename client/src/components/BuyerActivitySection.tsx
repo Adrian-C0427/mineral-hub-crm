@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { Handshake, Inbox, Pencil, Phone, RefreshCw, Send, StickyNote, Trash2, Users, type LucideIcon } from "lucide-react";
 import { api, ApiError } from "../api/client";
-import { ConfirmDialog, StatusBadge, EmptyState } from "./ui";
+import { ConfirmDialog, StatusBadge, EmptyState, UserChip } from "./ui";
 import { Select } from "./Select";
 import { money, fmtDate } from "../lib/format";
 import { BUYER_STATUS_RANK, buyerStatusLabel } from "../lib/buyerStatus";
@@ -76,7 +76,7 @@ export function BuyerActivitySection({
             {isOpen && (
               <div className="ba-body">
                 <div className="dd-grid" style={{ marginBottom: 8 }}>
-                  <div className="kv"><span className="k">Assigned</span><span className="v">{r.assignedTeamMember?.name ?? "—"}</span></div>
+                  <div className="kv"><span className="k">Assigned</span><span className="v">{r.assignedTeamMember ? <UserChip user={r.assignedTeamMember} size={16} /> : "—"}</span></div>
                   <div className="kv"><span className="k">Response received</span><span className="v">{r.responseReceived ? "Yes" : "No"}</span></div>
                   <div className="kv"><span className="k">Next follow-up</span><span className="v">{fmtDate(r.nextFollowUpDate)}</span></div>
                   <div className="kv"><span className="k">Notes</span><span className="v">{r.notes || "—"}</span></div>

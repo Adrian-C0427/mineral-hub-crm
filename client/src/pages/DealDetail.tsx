@@ -4,7 +4,7 @@ import { api, ApiError } from "../api/client";
 import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
 import {
-  Spinner, PriorityBadge, StageBadge, MetricCard, EstimatedProfitCard, Modal,
+  Spinner, PriorityBadge, StageBadge, Modal, UserChip,
   Banner, ConfirmDelete, ConfirmDialog, BackLink, OverflowMenu, showToast, CtPill,
 } from "../components/ui";
 import { Pencil } from "lucide-react";
@@ -192,7 +192,12 @@ export function DealDetail() {
         onSelect={setTab}
       />
 
-      {tab === "general" && <>
+      {/* Tab panels stay MOUNTED and toggle with `hidden` instead of
+          unmounting: switching is instant, the map/marketplace stats don't
+          re-fetch or re-initialize on every visit, section open/closed state
+          survives, and the page height never collapses mid-switch (the old
+          source of layout jumping and flicker). */}
+      <div hidden={tab !== "general"}>
       <SellerDetails
         dealId={deal.id}
         sellers={deal.sellers ?? []}
@@ -216,14 +221,15 @@ export function DealDetail() {
       </div>
 
       {/* Legal tract descriptions → parsed calls → mapped polygons + exports. */}
-      <Suspense fallback={<Spinner label="Loading tract descriptions…" />}>
+      <Suspense fallback={<div className="panel"><Spinner label="Loading tract descriptions…" /></div>}>
         <TractSection dealId={deal.id} dealName={deal.name} canEdit={can("editDeals")} abstractIds={deal.abstractIds} />
       </Suspense>
-      </>}
+      </div>
 
       {/* Additional Deals: the extra deals grouped under this seller. Hidden on a
           child deal (which is itself one of these — the tab is hidden too). */}
-      {tab === "additional" && !deal.parent && (
+      <div hidden={tab !== "additional"}>
+      {!deal.parent && (
         <AssetsSection
           deal={deal}
           canEdit={can("editDeals")}
@@ -232,22 +238,14 @@ export function DealDetail() {
           onChanged={loadDeal}
         />
       )}
-
-      {tab === "marketplace" && <DealPortalPanel dealId={deal.id} />}
-
-      {tab === "buyers" && <>
-      {/* Buyer summary — the same KPI card row as the Mineral Assets Sell tab,
-          fed by the same server-computed deal.metrics. */}
-      <div className="metrics-row" style={{ gridTemplateColumns: "repeat(5,1fr)" }}>
-        <MetricCard label="Buyers Contacted" value={deal.metrics.buyersContacted} />
-        <MetricCard label="Interested" value={deal.metrics.interested} />
-        <MetricCard label="Offers" value={deal.metrics.offers} />
-        <MetricCard label="Highest Offer" value={money(deal.metrics.highOffer)} />
-        <EstimatedProfitCard highOffer={deal.metrics.highOffer} basis={deal.ourPrice ?? deal.askPrice} />
       </div>
 
-      {/* Marketing funnel — same shared component/design as the Mineral Assets
-          Sell tab; cost basis for a deal is our contracted price. */}
+      <div hidden={tab !== "marketplace"}><DealPortalPanel dealId={deal.id} /></div>
+
+      <div hidden={tab !== "buyers"}>
+      {/* Marketing funnel — the single buyer-marketing summary (contacted →
+          interested → offers → highest offer → estimated profit), shared with
+          the Mineral Assets Sell tab; cost basis for a deal is our price. */}
       <MarketingFunnel metrics={deal.metrics} matchCount={matches?.length ?? 0} askPrice={deal.askPrice} costBasis={deal.ourPrice} />
 
       {deal.selectedBuyer && (
@@ -267,22 +265,29 @@ export function DealDetail() {
             <table className="data-table">
               <thead><tr><th>Buyer</th><th className="right">Amount</th><th>Status</th><th>Expires</th><th>Conditions</th><th></th></tr></thead>
               <tbody>
-                {deal.offers.map((o) => (
+                {deal.offers.map((o) => {
+                  // One source of truth for acceptance: the offer's own status
+                  // OR the deal's selection — either one means accepted, so no
+                  // surface can show "Accept" next to an accepted offer or let
+                  // the edit modal silently downgrade it.
+                  const accepted = o.status === "ACCEPTED" || deal.selectedOfferId === o.id;
+                  return (
                   <tr key={o.id}>
                     <td><Link to={`/buyers/${o.buyer.id}`} className="dd-offer-buyer">{o.buyer.name}</Link></td>
                     <td className="right" style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{money(o.amount)}</td>
-                    <td>{o.status === "ACCEPTED" || deal.selectedOfferId === o.id ? "Accepted Offer" : prettyEnum(o.status)}</td>
+                    <td>{accepted ? "Accepted Offer" : prettyEnum(o.status)}</td>
                     <td>{fmtDate(o.expirationDate)}</td>
                     <td className="cell-clamp" title={o.conditions ?? undefined}>{o.conditions ?? "—"}</td>
                     <td className="right">
                       <span className="row" style={{ gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
-                        {deal.selectedOfferId === o.id ? <CtPill color="#22c55e">Accepted Offer</CtPill> :
+                        {accepted ? <CtPill color="#22c55e">Accepted Offer</CtPill> :
                           can("editDeals") ? <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button> : null}
-                        {can("editDeals") && <OfferRowActions offer={o} accepted={deal.selectedOfferId === o.id} onChanged={refreshAll} />}
+                        {can("editDeals") && <OfferRowActions offer={o} accepted={accepted} onChanged={refreshAll} />}
                       </span>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -381,14 +386,14 @@ export function DealDetail() {
           </>
         )}
       </CollapsibleSection>
-      </>}
+      </div>
 
       {/* Documents */}
-      {tab === "documents" && (
-        can("viewDocuments")
-          ? <DocumentsSection ownerType="deal" ownerId={deal.id} files={deal.files} folders={deal.docFolders?.length ? deal.docFolders : DEAL_DOC_FOLDERS} onChanged={loadDeal} canEdit={can("manageDocuments")} canDelete={can("manageDocuments")} />
-          : <div className="panel muted">You do not have permission to view documents.</div>
-      )}
+      <div hidden={tab !== "documents"}>
+      {can("viewDocuments")
+        ? <DocumentsSection ownerType="deal" ownerId={deal.id} files={deal.files} folders={deal.docFolders?.length ? deal.docFolders : DEAL_DOC_FOLDERS} onChanged={loadDeal} canEdit={can("manageDocuments")} canDelete={can("manageDocuments")} />
+        : <div className="panel muted">You do not have permission to view documents.</div>}
+      </div>
 
       {renaming && (
         <RenameDealModal dealId={deal.id} current={deal.name} onClose={() => setRenaming(false)}
@@ -620,26 +625,12 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
     onSaved(); // editing characteristics auto-refreshes matches
   }
 
-  // "N/12 filled" completeness meter (the 12 characteristics shown below).
-  const filled = [
-    (deal.states?.length ?? 0) > 0 || !!deal.state, deal.counties.length > 0, deal.basins.length > 0,
-    deal.formations.length > 0, deal.assetTypes.length > 0, deal.acreageNma != null,
-    deal.nra != null, deal.ourPrice != null, deal.askPrice != null,
-    !!deal.operator, !!deal.rrc, deal.abstractIds.length > 0,
-  ].filter(Boolean).length;
-
   return (
     <div className="panel">
       <div className="section-head">
         <h3>Deal characteristics</h3>
         {edit ? <div className="row"><button className="small" onClick={() => { setF(deal); setEdit(false); }}>Cancel</button><button className="small primary" onClick={save}>Save</button></div>
-          : (
-            <div className="row" style={{ gap: 10, alignItems: "center" }}>
-              <span className="ddc-meter-n">{filled}/12 filled</span>
-              <span className="ddc-meter"><span className={`ddc-meter-fill ${filled === 12 ? "full" : ""}`} style={{ width: `${Math.round((filled / 12) * 100)}%` }} /></span>
-              <button className="small" onClick={() => setEdit(true)}>Edit</button>
-            </div>
-          )}
+          : <button className="small" onClick={() => setEdit(true)}>Edit</button>}
       </div>
       {!edit ? (<>
         <div className="ddc-grid">
@@ -722,7 +713,7 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
           <AssigneePicker users={users} value={assigneeIds} onChange={saveAssignees} />
         ) : (
           <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-            {assigneeIds.length === 0 ? <span className="muted">Unassigned</span> : (deal.assignees ?? []).map((a) => <span key={a.id} className="badge resp-pending">{a.name}</span>)}
+            {assigneeIds.length === 0 ? <span className="muted">Unassigned</span> : (deal.assignees ?? []).map((a) => <UserChip key={a.id} user={a} />)}
           </div>
         )}
       </div>
@@ -854,29 +845,6 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
         </div>
       )}
 
-      {/* Contract window — where today sits between Under Contract and Final
-          Closing (shown once both anchor dates exist). */}
-      {!edit && deal.dateUnderContract && deal.finalClosingDate && (() => {
-        const start = new Date(deal.dateUnderContract).getTime();
-        const end = new Date(deal.finalClosingDate).getTime();
-        const total = Math.max(1, Math.round((end - start) / 86_400_000));
-        const day = Math.round((Date.now() - start) / 86_400_000) + 1;
-        const pct = Math.min(100, Math.max(0, Math.round(((day - 1) / total) * 100)));
-        const left = Math.max(0, Math.ceil((end - Date.now()) / 86_400_000));
-        const overdue = Date.now() > end && deal.stage !== "CLOSED";
-        return (
-          <div className="ctl-window">
-            <div className="ctl-window-head">
-              <span className="ddx-label">Contract Window</span>
-              <span className="ctl-window-n">Day {Math.min(day, total)} of {total} · {pct}%</span>
-            </div>
-            <div className="ctl-window-bar"><div style={{ width: `${pct}%` }} className={overdue ? "over" : ""} /></div>
-            <div className="ctl-window-sub">
-              {overdue ? `${Math.ceil((Date.now() - end) / 86_400_000)} days past final closing` : `${left} days until final closing · on pace`}
-            </div>
-          </div>
-        );
-      })()}
     </div>
   );
 }

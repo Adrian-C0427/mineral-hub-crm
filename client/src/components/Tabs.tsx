@@ -30,10 +30,16 @@ export function Tabs<K extends string>({ tabs, active, onSelect, style }: {
     <div className="asset-tabs" role="tablist" style={style}>
       {tabs.filter((t) => !t.hidden).map((t) => {
         const cls = `tab ${active === t.key ? "active" : ""}`;
+        // String labels get a hidden bold ghost (CSS ::after on .tab-lbl) that
+        // reserves the active-weight width, so switching tabs never reflows
+        // the strip horizontally.
+        const label = typeof t.label === "string"
+          ? <span className="tab-lbl" data-label={t.label}>{t.label}</span>
+          : t.label;
         return t.to ? (
-          <NavLink key={t.key} to={t.to} end className={cls} role="tab" aria-selected={active === t.key} title={t.title}>{t.label}</NavLink>
+          <NavLink key={t.key} to={t.to} end className={cls} role="tab" aria-selected={active === t.key} title={t.title}>{label}</NavLink>
         ) : (
-          <button key={t.key} type="button" className={cls} role="tab" aria-selected={active === t.key} title={t.title} onClick={() => onSelect?.(t.key)}>{t.label}</button>
+          <button key={t.key} type="button" className={cls} role="tab" aria-selected={active === t.key} title={t.title} onClick={() => onSelect?.(t.key)}>{label}</button>
         );
       })}
     </div>

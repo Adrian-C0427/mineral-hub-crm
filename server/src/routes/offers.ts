@@ -157,11 +157,18 @@ offersRouter.patch(
       }
     }
     // Offers and Buyer Activity share one truth: an offer marked ACCEPTED (by
-    // any path) advances that buyer's activity status to Accepted Offer.
+    // any path, including API callers that skip POST /deals/:id/accept-offer)
+    // advances that buyer's activity status AND records the deal's selection,
+    // so every surface keyed on selectedOfferId/selectedBuyerId (dashboard,
+    // buyer close rate, "Selected buyer" banner, portal visibility) agrees.
     if (data.status === "ACCEPTED") {
       await prisma.dealBuyerActivity.updateMany({
         where: { dealId: owned.dealId, buyerId: owned.buyerId },
         data: { status: "ACCEPTED", responseReceived: true, lastActivityDate: new Date() },
+      });
+      await prisma.deal.update({
+        where: { id: owned.dealId },
+        data: { selectedOfferId: offer.id, selectedBuyerId: owned.buyerId, publishedToPortal: false },
       });
     }
     res.json(offer);
@@ -181,7 +188,7 @@ offersRouter.delete(
     if (!owned) throw new HttpError(404, "Offer not found");
     await prisma.$transaction(async (tx) => {
       if (owned.deal.selectedOfferId === owned.id) {
-        await tx.deal.update({ where: { id: owned.deal.id }, data: { selectedOfferId: null } });
+        await tx.deal.update({ where: { id: owned.deal.id }, data: { selectedOfferId: null, selectedBuyerId: null } });
       }
       // Counters that pointed at this offer survive as stand-alone offers.
       await tx.offer.updateMany({ where: { parentOfferId: owned.id }, data: { parentOfferId: null } });
@@ -197,6 +204,14 @@ offersRouter.delete(
         where: { dealId: owned.dealId, buyerId: owned.buyerId },
         data: { offerAmount: remaining?.amount ?? null },
       });
+      // Deleting the accepted offer un-accepts the buyer everywhere — their
+      // activity can't keep reading "Accepted Offer" once the offer is gone.
+      if (owned.deal.selectedOfferId === owned.id || owned.status === "ACCEPTED") {
+        await tx.dealBuyerActivity.updateMany({
+          where: { dealId: owned.dealId, buyerId: owned.buyerId, status: "ACCEPTED" },
+          data: { status: remaining ? "OFFER_RECEIVED" : "NEGOTIATING" },
+        });
+      }
       await logActivity(
         {
           eventType: "OFFER_DELETED",

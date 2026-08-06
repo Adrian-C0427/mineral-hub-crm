@@ -10,8 +10,8 @@ export type DealWithRels = Prisma.DealGetPayload<{
     relationshipOwner: true;
   };
 }> & {
-  offers?: { amount: number }[];
-  assignees?: { id: string; name: string }[];
+  offers?: { id?: string; amount: number; status?: string }[];
+  assignees?: { id: string; name: string; avatarColor?: string | null }[];
   // Multi-asset grouping (optional, populated by list/detail queries). `assets`
   // carries only the scalars needed to roll a package's aggregate up for display;
   // the full child-asset cards are emitted by the detail route via serializeAssetChild.
@@ -70,10 +70,17 @@ export function serializeAssetChild(a: AssetChild) {
 export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
   const dates = resolveDealDates(deal);
   const priority = computePriority({ ...deal, selectedBuyerId: deal.selectedBuyerId }, now);
-  // Profit Est. = best offer − ask − closing costs (null when no offers logged yet).
-  const bestOffer = deal.offers && deal.offers.length
-    ? deal.offers.reduce((m, o) => (o.amount > m ? o.amount : m), -Infinity)
-    : null;
+  // Profit Est. = best offer − ask − closing costs (null when no offers logged
+  // yet). Once an offer is ACCEPTED (the deal's selection, or the offer's own
+  // status), IT is the deal's number everywhere — a higher rejected offer must
+  // not keep inflating profit on lists, pipeline cards, or dashboards.
+  const acceptedOffer = deal.offers?.find((o) => o.id === deal.selectedOfferId)
+    ?? deal.offers?.find((o) => o.status === "ACCEPTED");
+  const bestOffer = acceptedOffer
+    ? acceptedOffer.amount
+    : deal.offers && deal.offers.length
+      ? deal.offers.reduce((m, o) => (o.amount > m ? o.amount : m), -Infinity)
+      : null;
   // Cost basis is Our Price (acquisition cost); fall back to askPrice for
   // pre-Our-Price deals so historical profit stays correct.
   const costBasis = deal.ourPrice ?? deal.askPrice;
