@@ -185,7 +185,7 @@ export const NOTE_COLORS = ["yellow", "blue", "green", "purple", "pink", "orange
 
 type ActivityWithAuthor = ContactActivity & {
   createdBy: Pick<User, "id" | "name"> | null;
-  assignedTo: Pick<User, "id" | "name"> | null;
+  assignedTo: Pick<User, "id" | "name" | "avatarColor"> | null;
 };
 const serializeActivity = (a: ActivityWithAuthor) => ({
   id: a.id,
@@ -197,7 +197,7 @@ const serializeActivity = (a: ActivityWithAuthor) => ({
   dueDate: a.dueDate,
   completedAt: a.completedAt,
   priority: a.priority,
-  assignedTo: a.assignedTo ? { id: a.assignedTo.id, name: a.assignedTo.name } : null,
+  assignedTo: a.assignedTo ? { id: a.assignedTo.id, name: a.assignedTo.name, avatarColor: a.assignedTo.avatarColor } : null,
   pinned: a.pinned,
   color: a.color,
   createdBy: a.createdBy ? { id: a.createdBy.id, name: a.createdBy.name } : null,
@@ -206,7 +206,7 @@ const serializeActivity = (a: ActivityWithAuthor) => ({
 
 const authorInclude = {
   createdBy: { select: { id: true, name: true } },
-  assignedTo: { select: { id: true, name: true } },
+  assignedTo: { select: { id: true, name: true, avatarColor: true } },
 } as const;
 
 /** Validate an (optional) task assignee is a member of this organization. */

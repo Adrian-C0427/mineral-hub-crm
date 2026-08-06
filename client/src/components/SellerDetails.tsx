@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api } from "../api/client";
-import { Modal, Banner, ConfirmDelete } from "./ui";
+import { Modal, Banner, ConfirmDelete, UserChip } from "./ui";
 import { PhoneInput } from "./PhoneInput";
 import { Select } from "./Select";
 import { StateSelect } from "./StateSelect";
@@ -124,7 +124,7 @@ function SellerCard({ s, canEdit, onEdit, onRemove }: { s: Seller; canEdit: bool
         <KV k="Primary Phone" v={s.primaryPhone ? formatPhone(s.primaryPhone) : null} />
         <KV k="Email" v={s.email} />
         <KV k="Preferred Contact" v={s.preferredContactMethod} />
-        <KV k="Assigned To" v={s.assignedTeamMember?.name} />
+        <KV k="Assigned To" v={s.assignedTeamMember ? <UserChip user={s.assignedTeamMember} size={16} /> : null} />
         <KV k="Physical Address" v={physical} />
         <KV k="Mailing Address" v={sameAddr ? "Same as physical" : mailing} />
         <KV k="Date Added" v={fmtDateLocal(s.dateAdded)} />

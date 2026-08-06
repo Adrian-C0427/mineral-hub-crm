@@ -1689,6 +1689,8 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 
 /* Characteristics + timeline top grid (1.35fr / 1fr like the mockup) */
 .dd-top-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 16px; }
+/* Column-flex the two cards so the timeline can stretch to the full height. */
+.dd-top-grid > .panel { display: flex; flex-direction: column; }
 @media (max-width: 1000px) { .dd-top-grid { grid-template-columns: 1fr; } }
 
 /* Characteristics: 3-col micro-label grid */
@@ -1701,7 +1703,11 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .ddx-val.dim { color: var(--text-dim); }
 
 /* Contract timeline: vertical milestone rail */
-.ctl { display: flex; flex-direction: column; }
+/* The timeline fills its card and distributes milestone spacing evenly, so
+   the events expand/rebalance to the available height (no pinned footer). */
+.ctl { display: flex; flex-direction: column; flex: 1; }
+.ctl .ctl-item { flex: 1; }
+.ctl .ctl-item:last-child { flex: 0; }
 /* A single continuous rail runs through the centre of the dots: each row draws
    the line full-height behind its dot, so adjacent rows' lines meet seamlessly.
    The first row starts the line at its dot; the last row ends it at its dot. */
@@ -3464,8 +3470,6 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 
 /* Documents section — reference refinements. */
 .dpp-title { display: flex; align-items: center; gap: 12px; }
-.docx-htile { width: 34px; height: 34px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent); display: inline-flex; align-items: center; justify-content: center; flex: none; }
 .docx-upload { background: var(--surface); border: 1px dashed color-mix(in srgb, var(--text-dim) 45%, var(--border));
   border-radius: 9px; padding: 9px 16px; }
 .doc-section .table-scroll { border: 1px solid var(--hairline); border-radius: 12px; }
@@ -3485,12 +3489,6 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 :root[data-theme="light"] .dd-alert-msg b { color: #b45309; }
 .dd-alert-link { margin-left: auto; font-size: 12.5px; font-weight: 700; white-space: nowrap; }
 
-/* Characteristics completeness meter */
-.ddc-meter-n { font-size: 11.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ddc-meter { width: 56px; height: 4px; border-radius: 99px; background: var(--hairline); overflow: hidden; display: inline-block; }
-.ddc-meter-fill { display: block; height: 100%; background: #f5b04b; }
-.ddc-meter-fill.full { background: var(--green); }
-
 /* Derived economics strip */
 .ddc-strip { margin-top: 16px; background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px;
   padding: 12px 14px; display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
@@ -3507,14 +3505,6 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .ctl-lbl.next { color: #f5b04b; }
 :root[data-theme="light"] .ctl-lbl.next { color: #b45309; }
 .ctl-date.next { color: inherit; }
-.ctl-window { margin-top: auto; padding-top: 12px; border-top: 1px solid var(--hairline); }
-.ctl-window-head { display: flex; align-items: baseline; justify-content: space-between; }
-.ctl-window-n { font-size: 11.5px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
-.ctl-window-bar { height: 5px; border-radius: 99px; background: var(--hairline); margin-top: 8px; overflow: hidden; }
-.ctl-window-bar > div { height: 100%; border-radius: 99px; background: var(--accent); }
-.ctl-window-bar > div.over { background: var(--red); }
-.ctl-window-sub { font-size: 11.5px; color: var(--text-faint); margin-top: 7px; }
-
 /* Buyers tab — selected-buyer banner + offers table + match cards */
 .dd-selected-banner { display: flex; align-items: center; gap: 11px; background: rgba(34, 197, 94, 0.06);
   border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 12px; padding: 13px 16px; color: var(--green);
@@ -3599,16 +3589,6 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .doc-chip-new { background: transparent; border: 1.5px dashed color-mix(in srgb, var(--text-dim) 45%, var(--border)); font-weight: 600; color: var(--text-dim); }
 .doc-section .empty-state { border: 1.5px dashed color-mix(in srgb, var(--text-dim) 45%, var(--border)); border-radius: 12px; padding: 36px 20px; }
 /* Buyer Portal listing analytics KPI row (reference) */
-.dpp-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: var(--block-gap, 16px); }
-.dpp-stat { background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 16px;
-  min-height: 92px; display: flex; flex-direction: column; }
-.dpp-stat:hover { border-color: color-mix(in srgb, var(--text-dim) 45%, var(--border)); }
-.dpp-stat-top { display: flex; align-items: center; justify-content: space-between; }
-.dpp-stat-trend { font-size: 11px; font-weight: 700; color: var(--green); white-space: nowrap; }
-.dpp-stat-v { font-size: 24px; font-weight: 700; letter-spacing: -0.01em; margin-top: 7px; font-variant-numeric: tabular-nums; }
-.dpp-stat-v.pos { color: var(--green); }
-.dpp-stat-hint { font-size: 12px; color: var(--text-faint); margin-top: auto; padding-top: 6px; }
-@media (max-width: 900px) { .dpp-stats { grid-template-columns: 1fr 1fr; } }
 
 /* Mineral asset detail (reference: Owned Asset Detail) */
 .fin-kpis .metric-card, .fin-insight, .mf-stage { background: var(--surface); border: 1px solid var(--hairline); border-radius: 12px; }
@@ -3636,14 +3616,28 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .sr-cta { margin-left: auto; font-size: 12px; font-weight: 700; }
 
 /* Marketing funnel */
-.mf-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.mf-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; }
 .mf-stage { padding: 13px 15px; }
 .mf-row { display: flex; align-items: baseline; gap: 8px; margin-top: 6px; }
 .mf-v { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .mf-h { font-size: 11.5px; color: var(--text-faint); }
 .mf-bar { height: 3px; border-radius: 99px; background: var(--hairline); margin-top: 10px; overflow: hidden; }
 .mf-bar > div { height: 100%; border-radius: 99px; }
+.mf-trend { font-size: 11px; font-weight: 700; color: var(--green); white-space: nowrap; }
+.mf-grid-4 { grid-template-columns: repeat(4, 1fr); }
+.mf-toprow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 @media (max-width: 900px) { .fin-insights, .mf-grid { grid-template-columns: 1fr 1fr; } }
+
+/* Compact user chip — small circular initials avatar beside the name; the one
+   way assigned users / team members render anywhere in the app. */
+.user-chip { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; }
+.user-chip-av { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%;
+  color: #fff; font-weight: 700; flex: none; letter-spacing: 0.02em; }
+
+/* Tab strips: a hidden bold ghost reserves the active-weight width so the
+   600↔700 weight change never reflows the strip on switch. */
+.tab-lbl { display: inline-flex; flex-direction: column; align-items: center; }
+.tab-lbl::after { content: attr(data-label); font-weight: 700; height: 0; overflow: hidden; visibility: hidden; pointer-events: none; }
 /* Sale Readiness + Pricing Intelligence grid (reference: Owned Asset Detail) */
 .sr-grid { display: grid; grid-template-columns: 0.9fr 1.5fr; gap: 14px; margin-bottom: var(--block-gap, 16px); align-items: stretch; }
 @media (max-width: 900px) { .sr-grid { grid-template-columns: 1fr; } }

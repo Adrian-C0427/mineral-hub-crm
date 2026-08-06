@@ -32,7 +32,7 @@ function toDate(v: unknown): Date | null | undefined {
   return new Date(v as string);
 }
 
-const dealInclude = { selectedBuyer: true, relationshipOwner: true, assignees: { select: { id: true, name: true } } } as const;
+const dealInclude = { selectedBuyer: true, relationshipOwner: true, assignees: { select: { id: true, name: true, avatarColor: true } } } as const;
 
 /** Validate that every id is a user in the caller's org; returns the clean list. */
 async function validateOrgUsers(org: string, ids: string[]): Promise<string[]> {
@@ -416,11 +416,11 @@ dealsRouter.get(
           include: {
             buyer: { include: { buyBox: true } },
             sentBy: { select: { name: true } },
-            assignedTeamMember: { select: { id: true, name: true } },
+            assignedTeamMember: { select: { id: true, name: true, avatarColor: true } },
             messages: { orderBy: { occurredAt: "desc" }, include: { createdBy: { select: { name: true } } } },
           },
         },
-        sellers: { include: { assignedTeamMember: { select: { id: true, name: true } } }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+        sellers: { include: { assignedTeamMember: { select: { id: true, name: true, avatarColor: true } } }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
         revenueEntries: { orderBy: { month: "asc" } },
         // Multi-asset: the parent package (if this deal is a child asset) and the
         // child assets grouped under this deal (if it is a package).
@@ -1338,7 +1338,7 @@ const sellerSchema = z.object({
   assignedTeamMemberId: z.string().max(10_000).nullish(),
 });
 
-const sellerInclude = { assignedTeamMember: { select: { id: true, name: true } } } as const;
+const sellerInclude = { assignedTeamMember: { select: { id: true, name: true, avatarColor: true } } } as const;
 
 async function ownDealOr404(req: AuthedRequest): Promise<string> {
   const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true } });

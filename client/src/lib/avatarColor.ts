@@ -38,3 +38,8 @@ export function userAvatarColor(u: { name?: string | null; avatarColor?: string 
   if (u?.avatarColor && /^#[0-9a-fA-F]{6}$/.test(u.avatarColor)) return u.avatarColor;
   return avatarColor(u?.name);
 }
+
+/** Initials for an avatar chip — first letters of the first two name words. */
+export function initialsOf(name: string | null | undefined): string {
+  return (name ?? "").trim().split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
+}

@@ -109,35 +109,44 @@ export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string
 
   return (
     <>
-    {/* Listing analytics (reference KPI row) — shown once the listing has ever
-        been published or has any recorded traffic. Real events only. */}
-    {stats && (p.publishedToPortal || stats.views > 0 || stats.inquiries > 0) && (
-      <div className="dpp-stats">
-        <div className="dpp-stat">
-          <div className="dpp-stat-top">
-            <span className="ddx-label">Listing Views</span>
-            {stats.viewsThisWeek > 0 && <span className="dpp-stat-trend">+{stats.viewsThisWeek} this week</span>}
+    {/* Listing analytics — same visual system as the Marketing Funnel (one
+        panel, mf-stage tiles with conversion bars). Same metrics as before;
+        presentation only. Shown once the listing has ever been published or
+        has any recorded traffic. Real events only. */}
+    {stats && (p.publishedToPortal || stats.views > 0 || stats.inquiries > 0) && (() => {
+      const pctOf = (v: number, of: number) => (of > 0 ? Math.min(100, Math.round((v / of) * 100)) : 0);
+      const tiles = [
+        { label: "Listing Views", trend: stats.viewsThisWeek > 0 ? `+${stats.viewsThisWeek} this week` : null,
+          value: String(stats.views), hint: stats.firstViewAt ? `since ${fmtShort(stats.firstViewAt)}` : "no views yet",
+          dim: !stats.views, bar: "var(--accent)", w: stats.views > 0 ? 100 : 0 },
+        { label: "Unique Visitors", trend: null, value: String(stats.uniqueVisitors),
+          hint: stats.returningVisitors > 0 ? `${stats.returningVisitors} returned twice+` : "—",
+          dim: !stats.uniqueVisitors, bar: "var(--accent)", w: pctOf(stats.uniqueVisitors, stats.views) },
+        { label: "Doc Downloads", trend: null, value: String(stats.downloads),
+          hint: stats.topDownload ? stats.topDownload.folder : "—",
+          dim: !stats.downloads, bar: "#f5b04b", w: pctOf(stats.downloads, stats.views) },
+        { label: "Inquiries", trend: null, value: String(stats.inquiries),
+          hint: stats.lastInquiry ? `${stats.lastInquiry.name} · ${fmtShort(stats.lastInquiry.date)}` : "—",
+          dim: !stats.inquiries, bar: "var(--green)", w: pctOf(stats.inquiries, stats.uniqueVisitors) },
+      ];
+      return (
+        <div className="panel">
+          <div className="section-head" style={{ alignItems: "baseline" }}>
+            <h3 style={{ margin: 0 }}>Listing Analytics</h3>
+            <span className="muted" style={{ fontSize: 12 }}>Real marketplace traffic on this listing</span>
           </div>
-          <div className="dpp-stat-v">{stats.views}</div>
-          <div className="dpp-stat-hint">{stats.firstViewAt ? `since ${fmtShort(stats.firstViewAt)}` : "no views yet"}</div>
+          <div className="mf-grid mf-grid-4">
+            {tiles.map((t) => (
+              <div key={t.label} className="mf-stage">
+                <div className="mf-toprow"><span className="ddx-label">{t.label}</span>{t.trend && <span className="mf-trend">{t.trend}</span>}</div>
+                <div className="mf-row"><span className={`mf-v ${t.dim ? "dim" : ""}`}>{t.value}</span><span className="mf-h">{t.hint}</span></div>
+                <div className="mf-bar"><div style={{ width: `${t.w}%`, background: t.bar }} /></div>
+              </div>
+            ))}
+          </div>
         </div>
-        <div className="dpp-stat">
-          <div className="dpp-stat-top"><span className="ddx-label">Unique Visitors</span></div>
-          <div className="dpp-stat-v">{stats.uniqueVisitors}</div>
-          <div className="dpp-stat-hint">{stats.returningVisitors > 0 ? `${stats.returningVisitors} returned twice+` : "—"}</div>
-        </div>
-        <div className="dpp-stat">
-          <div className="dpp-stat-top"><span className="ddx-label">Doc Downloads</span></div>
-          <div className="dpp-stat-v">{stats.downloads}</div>
-          <div className="dpp-stat-hint">{stats.topDownload ? stats.topDownload.folder : "—"}</div>
-        </div>
-        <div className="dpp-stat">
-          <div className="dpp-stat-top"><span className="ddx-label">Inquiries</span></div>
-          <div className={`dpp-stat-v ${stats.inquiries > 0 ? "pos" : ""}`}>{stats.inquiries}</div>
-          <div className="dpp-stat-hint">{stats.lastInquiry ? `${stats.lastInquiry.name} · ${fmtShort(stats.lastInquiry.date)}` : "—"}</div>
-        </div>
-      </div>
-    )}
+      );
+    })()}
     <div className={`panel dpp-panel ${open ? "open" : ""}`}>
       <div
         className="dpp-head"

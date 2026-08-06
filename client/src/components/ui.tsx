@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
-import { prettyEnum, money } from "../lib/format";
+import { prettyEnum } from "../lib/format";
+import { userAvatarColor, initialsOf } from "../lib/avatarColor";
 import { useStages } from "../stages";
 
 /**
@@ -182,20 +183,22 @@ export function MetricCard({ label, value, hint, valueColor }: { label: string; 
 }
 
 /**
- * Live projected-profit KPI: Highest Offer − Our Price (falls back to Ask when
- * Our Price is unset, matching the server's netProfit basis). Recomputed on
- * every render, so it tracks offer and price edits immediately; green/red per
- * the app's standard money conventions.
+ * Compact user chip: small circular initials avatar (the user's chosen avatar
+ * color, name-hash fallback) beside the name. The single way assigned users /
+ * team members render anywhere in the app.
  */
-export function EstimatedProfitCard({ highOffer, basis }: { highOffer: number | null; basis: number | null }) {
-  const v = highOffer != null && basis != null ? highOffer - basis : null;
+export function UserChip({ user, size = 18 }: { user: { name: string; avatarColor?: string | null }; size?: number }) {
   return (
-    <MetricCard
-      label="Estimated Profit"
-      value={v != null ? money(v) : "—"}
-      valueColor={v == null ? undefined : v >= 0 ? "var(--green)" : "var(--red)"}
-      hint="Highest Offer − Our Price"
-    />
+    <span className="user-chip">
+      <span
+        className="user-chip-av"
+        aria-hidden="true"
+        style={{ width: size, height: size, fontSize: Math.round(size * 0.42), background: userAvatarColor(user) }}
+      >
+        {initialsOf(user.name)}
+      </span>
+      {user.name}
+    </span>
   );
 }
 

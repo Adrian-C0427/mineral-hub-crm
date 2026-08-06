@@ -58,7 +58,7 @@ export interface DealSummary {
   selectedBuyer: { id: string; name: string; companyName: string } | null;
   selectedOfferId: string | null;
   relationshipOwner: { id: string; name: string; avatarColor?: string | null } | null;
-  assignees: { id: string; name: string }[];
+  assignees: { id: string; name: string; avatarColor?: string | null }[];
   estimatedClosingCosts: number | null;
   // Record discriminator + owned-asset fields (null/undefined for opportunities).
   recordType: RecordType;
@@ -168,7 +168,7 @@ export interface BuyerActivityRow {
   nextFollowUpDate: string | null;
   notes: string | null;
   sentBy: string | null;
-  assignedTeamMember: { id: string; name: string } | null;
+  assignedTeamMember: { id: string; name: string; avatarColor?: string | null } | null;
   timeline: TimelineEntry[];
 }
 
@@ -200,7 +200,7 @@ export interface Seller {
   physicalZip: string | null;
   internalNotes: string | null;
   preferredCommunicationNotes: string | null;
-  assignedTeamMember: { id: string; name: string } | null;
+  assignedTeamMember: { id: string; name: string; avatarColor?: string | null } | null;
   dateAdded: string;
   updatedAt: string;
 }

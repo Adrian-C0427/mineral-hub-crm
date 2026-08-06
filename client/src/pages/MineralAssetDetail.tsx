@@ -6,7 +6,7 @@ import {
 import { api } from "../api/client";
 import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, MetricCard, EstimatedProfitCard, Banner, Modal, ConfirmDialog, BackLink, CtPill } from "../components/ui";
+import { Spinner, MetricCard, Banner, Modal, ConfirmDialog, BackLink, CtPill } from "../components/ui";
 import { Select } from "../components/Select";
 import { BuyerActivitySection } from "../components/BuyerActivitySection";
 import { CollapsibleSection } from "../components/CollapsibleSection";
@@ -119,11 +119,14 @@ export function MineralAssetDetail() {
         onSelect={setTab}
       />
 
-      {tab === "hold" ? (
+      {/* Both tab panels stay mounted (toggled with `hidden`) so switching is
+          instant with no layout collapse — same pattern as the Deal Profile. */}
+      <div hidden={tab !== "hold"}>
         <HoldTab asset={asset} canEdit={canEdit} onChanged={load} />
-      ) : (
+      </div>
+      <div hidden={tab !== "sell"}>
         <SellTab asset={asset} matches={matches} users={users} canEdit={canEdit} onChanged={refresh} onSetSell={() => setMode("SELL")} />
-      )}
+      </div>
     </div>
   );
 }
@@ -159,22 +162,14 @@ function HoldTab({ asset, canEdit, onChanged }: { asset: AssetDetail; canEdit: b
   );
 }
 
-function EditCard({ title, children, editing, onEdit, onCancel, onSave, canEdit, meter }: {
+function EditCard({ title, children, editing, onEdit, onCancel, onSave, canEdit }: {
   title: string; children: React.ReactNode; editing: boolean; onEdit: () => void; onCancel: () => void; onSave: () => void; canEdit: boolean;
-  /** Completeness meter (reference): "N/M filled" + mini progress bar. */
-  meter?: { filled: number; total: number };
 }) {
   return (
     <div className="panel">
       <div className="section-head">
         <h3 style={{ margin: 0 }}>{title}</h3>
         <div className="row" style={{ gap: 10, alignItems: "center" }}>
-          {meter && !editing && (
-            <>
-              <span className="ddc-meter-n">{meter.filled}/{meter.total} filled</span>
-              <span className="ddc-meter"><span className={`ddc-meter-fill ${meter.filled === meter.total ? "full" : ""}`} style={{ width: `${Math.round((meter.filled / meter.total) * 100)}%` }} /></span>
-            </>
-          )}
           {canEdit && (editing
             ? <><button className="small" onClick={onCancel}>Cancel</button><button className="small primary" onClick={onSave}>Save</button></>
             : <button className="small" onClick={onEdit}>Edit</button>)}
@@ -230,15 +225,8 @@ function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdi
     setEdit(false); onSaved();
   }
 
-  const ownFilled = [
-    asset.assetTypes.length > 0 || !!asset.ownershipType, !!asset.ownershipStatus, !!asset.acquisitionDate,
-    asset.purchasePrice != null, asset.currentValue != null, !!asset.rrc,
-    asset.acreageNma != null, asset.nra != null, asset.netRevenueInterest != null,
-  ].filter(Boolean).length;
-
   return (
-    <EditCard title="Ownership" canEdit={canEdit} editing={edit} onEdit={() => setEdit(true)} onCancel={() => { setF(asset); setEdit(false); }} onSave={save}
-      meter={{ filled: ownFilled, total: 9 }}>
+    <EditCard title="Ownership" canEdit={canEdit} editing={edit} onEdit={() => setEdit(true)} onCancel={() => { setF(asset); setEdit(false); }} onSave={save}>
       {!edit ? (
         <div className="dd-grid">
           <KV k="Asset Type" v={asset.assetTypes.map((t) => ASSET_TYPE_LABELS[t] ?? t).join(", ") || asset.ownershipType} />
@@ -286,15 +274,8 @@ function PropertyCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit
     setEdit(false); onSaved();
   }
 
-  const propFilled = [
-    (asset.states?.length ?? 0) > 0 || !!asset.state, asset.counties.length > 0, !!asset.producingStatus,
-    asset.basins.length > 0, asset.formations.length > 0, !!asset.operator,
-    (asset.surveys?.length ?? 0) > 0, asset.abstractIds.length > 0, (asset.wells?.length ?? 0) > 0, !!asset.notes,
-  ].filter(Boolean).length;
-
   return (
-    <EditCard title="Property" canEdit={canEdit} editing={edit} onEdit={() => setEdit(true)} onCancel={() => { setF(asset); setEdit(false); }} onSave={save}
-      meter={{ filled: propFilled, total: 10 }}>
+    <EditCard title="Property" canEdit={canEdit} editing={edit} onEdit={() => setEdit(true)} onCancel={() => { setF(asset); setEdit(false); }} onSave={save}>
       {!edit ? (
         <div className="dd-grid">
           <KV k="State" v={(asset.states?.length ? asset.states : (asset.state ? [asset.state] : [])).join(", ")} />
@@ -745,9 +726,9 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
                 <td>{o.buyer.name}</td><td className="right">{money(o.amount)}</td><td>{o.status === "ACCEPTED" || asset.selectedOfferId === o.id ? "Accepted Offer" : prettyEnum(o.status)}</td><td>{fmtDate(o.expirationDate)}</td>
                 <td className="right">
                   <span className="row" style={{ gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
-                    {asset.selectedOfferId === o.id ? <span className="badge resp-offer">Accepted Offer</span> :
+                    {o.status === "ACCEPTED" || asset.selectedOfferId === o.id ? <span className="badge resp-offer">Accepted Offer</span> :
                       canEdit && <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button>}
-                    {canEdit && <OfferRowActions offer={o} accepted={asset.selectedOfferId === o.id} onChanged={onChanged} />}
+                    {canEdit && <OfferRowActions offer={o} accepted={o.status === "ACCEPTED" || asset.selectedOfferId === o.id} onChanged={onChanged} />}
                   </span>
                 </td>
               </tr>

@@ -93,16 +93,22 @@ dashboardRouter.get(
           where: { stage: "CLOSED", organizationId: org, ...IN_PIPELINE },
           include: { ...dealInclude, selectedOffer: true },
         }),
-        prisma.offer.count({ where: { status: "ACTIVE", deal: { organizationId: org, ...IN_PIPELINE } } }),
+        // "Offers Pending" = active offers on deals that haven't accepted one
+        // yet. Once a deal selects its offer, the losing ACTIVE offers are no
+        // longer pending decisions and must drop out of the KPI.
+        prisma.offer.count({ where: { status: "ACTIVE", deal: { organizationId: org, selectedOfferId: null, ...IN_PIPELINE } } }),
       ]),
     );
 
     // Metrics row
     const activeDeals = allActive.length;
 
-    // Projected profit: best offer − ask − costs across active deals that have offers.
+    // Projected profit: best offer − ask − costs across active deals that have
+    // offers. A deal with an ACCEPTED offer projects THAT offer (same rule as
+    // the monthly chart and the deal serializer), never a higher rejected one.
     const projectedProfit = allActive.reduce((sum, d) => {
-      const best = d.offers.reduce<number | null>((m, o) => (m == null || o.amount > m ? o.amount : m), null);
+      const accepted = d.offers.find((o) => o.id === d.selectedOfferId) ?? d.offers.find((o) => o.status === "ACCEPTED");
+      const best = accepted?.amount ?? d.offers.reduce<number | null>((m, o) => (m == null || o.amount > m ? o.amount : m), null);
       if (best == null) return sum;
       return sum + netProfit(best, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts);
     }, 0);
