@@ -137,7 +137,7 @@ function Kpi({ label, value, valueColor, delta, series, spark, title }: {
         <span className="dash-kpi-value" style={valueColor ? { color: valueColor } : undefined}>{value}</span>
         <Delta pct={delta ?? null} />
       </div>
-      {series ? <Spark data={series} color={spark ?? "var(--accent)"} /> : <div style={{ height: 26, marginTop: 8 }} />}
+      {series ? <Spark data={series} color={spark ?? "var(--accent2)"} /> : <div style={{ height: 26, marginTop: 8 }} />}
     </div>
   );
 }
@@ -308,8 +308,8 @@ export function Dashboard() {
   const widgetNodes: Record<WidgetId, ReactNode> = {
     kpis: (
       <div className="metrics-row dash-kpis">
-        <Kpi label="Active Deals" value={d.metrics.activeDeals} delta={activeDelta} series={t?.activeDealsWeekly} spark="var(--accent)" title="Sparkline: active deals per week (8 weeks)" />
-        <Kpi label="Projected Profit" value={fmtCompact(d.metrics.projectedProfit)} series={projectedSeries} spark="var(--accent)" title="Best (or accepted) offer minus cost basis across active deals with offers — the same series as the Projected bars below." />
+        <Kpi label="Active Deals" value={d.metrics.activeDeals} delta={activeDelta} series={t?.activeDealsWeekly} spark="var(--accent2)" title="Sparkline: active deals per week (8 weeks)" />
+        <Kpi label="Projected Profit" value={fmtCompact(d.metrics.projectedProfit)} series={projectedSeries} spark="var(--accent2)" title="Best (or accepted) offer minus cost basis across active deals with offers — the same series as the Projected bars below." />
         <Kpi label={`Closed ${d.metrics.periodLabel ?? "YTD"}`} value={fmtCompact(d.metrics.closedProfitYtd)} valueColor={d.metrics.closedProfitYtd > 0 ? "var(--green)" : undefined} delta={closedDelta} series={curIdx >= 0 ? realized.slice(0, curIdx + 1) : realized} spark="var(--green)" title="Sparkline: realized profit by month" />
         <Kpi label="Closed Deals" value={d.metrics.closedDealsCount} delta={closedCountDelta} series={t?.closedWeekly} spark="var(--green)" title="Deals moved to Closed within the selected range, by Contract Timeline Closed Date. Δ vs the previous equal-length period. Sparkline: closes per week (8 weeks)." />
         <Kpi label="Avg Profit per Deal" value={fmtCompact(d.metrics.avgProfitPerDeal)} delta={avgDelta} series={t?.avgProfitPerDeal} spark="var(--text-dim)" title="Realized profit per closed deal in the selected range (Closed Date). Sparkline: running average across recent closes." />

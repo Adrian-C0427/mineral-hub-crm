@@ -104,7 +104,9 @@ function EditOfferModal({ offer, accepted, onClose, onSaved }: { offer: OfferRow
       }
     >
       {err && <div className="error-text">{err}</div>}
-      <div className="dd-grid">
+      {/* Standard sectioned layout (same system as New Deal / New Buyer). */}
+      <div className="modal-sec">Offer</div>
+      <div className="nd-basics">
         <div className="field"><label>Offer amount</label><MoneyInput value={amount} onChange={setAmount} ariaLabel="Offer amount" /></div>
         <div className="field"><label>Status</label>
           {/* The accepted offer's status is managed by the accept flow. */}

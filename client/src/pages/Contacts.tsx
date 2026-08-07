@@ -331,28 +331,49 @@ export function ContactModal({ contact, users, onClose, onSaved, onDeleted }: {
   return (
     <Modal
       title={contact ? "Edit Contact" : "New Contact"}
+      subtitle="Sellers, prospects, and inbound leads for the acquisitions side"
       onClose={onClose}
+      wide
       footer={<>
-        {contact && <button className="danger" disabled={busy} onClick={() => setConfirmDelete(true)} style={{ marginRight: "auto" }}>Delete</button>}
+        <span className="modal-req-note"><Req /> Required</span>
+        {contact && <button className="danger" disabled={busy} onClick={() => setConfirmDelete(true)}>Delete</button>}
         <button className="small" onClick={onClose} disabled={busy}>Cancel</button>
         <button className="primary" disabled={busy} onClick={save}>{busy ? "Saving…" : contact ? "Save changes" : "Create contact"}</button>
       </>}
     >
-      <div className="grid-2">
+      {/* Standard sectioned creation layout (same system as New Deal / New Buyer). */}
+      <div className="modal-sec">Identity</div>
+      <div className="nd-grid3">
         <div className="field"><label>First name <Req /></label><input value={f.firstName} onChange={(e) => set("firstName")(e.target.value)} autoFocus /></div>
         <div className="field"><label>Last name <Req /></label><input value={f.lastName} onChange={(e) => set("lastName")(e.target.value)} /></div>
         <div className="field"><label>Company / entity</label><input value={f.entityName} onChange={(e) => set("entityName")(e.target.value)} placeholder="Trust, LLC, family entity…" /></div>
-        <div className="field"><label>Source</label><input value={f.source} onChange={(e) => set("source")(e.target.value)} placeholder="Mailer, cold call, referral, web…" /></div>
+      </div>
+
+      <div className="modal-sec">Classification</div>
+      <div className="nd-grid3">
         <div className="field"><label>Type</label><Select ariaLabel="Contact type" value={f.type} onChange={(v) => v && set("type")(v)} options={TYPES.map(([v, l]) => ({ value: v, label: l }))} /></div>
         <div className="field"><label>Status</label><Select ariaLabel="Contact status" value={f.status} onChange={(v) => v && set("status")(v)} options={STATUSES.map(([v, l]) => ({ value: v, label: l }))} /></div>
+        <div className="field"><label>Owner</label><Select ariaLabel="Owner" clearable value={f.ownerId} onChange={(v) => set("ownerId")(v ?? "")} placeholder="Unassigned" options={users.map((u) => ({ value: u.id, label: u.name }))} searchable /></div>
+      </div>
+
+      <div className="modal-sec">Contact information</div>
+      <div className="nd-grid3">
         <div className="field"><label>Email</label><input type="email" value={f.email} onChange={(e) => set("email")(e.target.value)} /></div>
         <div className="field"><label>Phone</label><PhoneInput value={f.phone} onChange={set("phone")} /></div>
+        <div className="field"><label>Source</label><input value={f.source} onChange={(e) => set("source")(e.target.value)} placeholder="Mailer, cold call, referral, web…" /></div>
+      </div>
+
+      <div className="modal-sec">Coverage <span className="modal-sec-hint">— where this contact's minerals are</span></div>
+      <div className="nd-grid3">
         <GeoFields states={states} onStatesChange={setStates} counties={counties} onCountiesChange={setCounties} />
-        <div className="field"><label>Owner</label><Select ariaLabel="Owner" clearable value={f.ownerId} onChange={(v) => set("ownerId")(v ?? "")} placeholder="Unassigned" options={users.map((u) => ({ value: u.id, label: u.name }))} searchable /></div>
+      </div>
+
+      <div className="modal-sec">Follow-up & notes</div>
+      <div className="nd-grid3">
         <div className="field"><label>Last contacted</label><DateField value={f.lastContactedAt} onChange={set("lastContactedAt")} /></div>
         <div className="field"><label>Next follow-up</label><DateField value={f.nextFollowUpDate} onChange={set("nextFollowUpDate")} /></div>
+        <div className="field" style={{ gridColumn: "1 / -1" }}><label>Notes</label><textarea rows={3} value={f.notes} onChange={(e) => set("notes")(e.target.value)} placeholder="Ownership details, conversation history, interests…" /></div>
       </div>
-      <div className="field"><label>Notes</label><textarea rows={3} value={f.notes} onChange={(e) => set("notes")(e.target.value)} placeholder="Ownership details, conversation history, interests…" /></div>
       {error && <Banner kind="error">{error}</Banner>}
 
       {confirmDelete && contact && (

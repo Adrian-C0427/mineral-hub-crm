@@ -215,20 +215,36 @@ function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onCreated:
   return (
     <Modal
       title="New Mineral Asset"
+      subtitle="An owned mineral or royalty interest added to your portfolio"
       onClose={onClose}
-      footer={<><button className="small" onClick={onClose}>Cancel</button><button className="primary" disabled={busy} onClick={create}>{busy ? "Creating…" : "Create asset"}</button></>}
+      wide
+      footer={<>
+        <span className="modal-req-note"><Req /> Required</span>
+        <button className="small" onClick={onClose}>Cancel</button>
+        <button className="primary" disabled={busy} onClick={create}>{busy ? "Creating…" : "Create asset"}</button>
+      </>}
     >
-      <div className="field"><label>Asset name <Req /></label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Smith Unit Royalty — Midland Co." autoFocus /></div>
-      <div className="grid-2">
+      {/* Standard sectioned creation layout (same system as New Deal / New Buyer). */}
+      <div className="modal-sec">Basics</div>
+      <div className="nd-grid3">
+        <div className="field" style={{ gridColumn: "1 / -1" }}><label>Asset name <Req /></label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Smith Unit Royalty — Midland Co." autoFocus /></div>
+        <div className="field"><label>Asset type <Req /></label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
+        <div className="field"><label>Producing status</label><Select value={producingStatus} onChange={setProducingStatus} ariaLabel="Producing status" options={PRODUCING_STATUSES.map((t) => ({ value: t, label: t }))} /></div>
+      </div>
+
+      <div className="modal-sec">Location</div>
+      <div className="nd-grid3">
         <GeoFields states={states} onStatesChange={setStates} counties={counties} onCountiesChange={setCounties} abstractIds={abstractIds} onAbstractsChange={setAbstractIds}
           labels={{ state: <>State <Req /></>, county: <>County <Req /></>, abstract: <>Abstract <Req /></> }} />
         <div className="field"><label>Survey name <Req /></label><SurveyMultiPicker value={surveys} onChange={setSurveys} abstractIds={abstractIds} /></div>
-        <div className="field"><label>Asset type <Req /></label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
-        <div className="field"><label>Producing status</label><Select value={producingStatus} onChange={setProducingStatus} ariaLabel="Producing status" options={PRODUCING_STATUSES.map((t) => ({ value: t, label: t }))} /></div>
-        <div className="field"><label>Acquisition date</label><DateField value={acquisitionDate} onChange={(v) => setAcquisitionDate(v)} /></div>
+      </div>
+
+      <div className="modal-sec">Economics</div>
+      <div className="nd-grid3">
         <div className="field"><label>Net Revenue Acres (NRA)</label><input type="number" value={nra} onChange={(e) => setNra(e.target.value)} /></div>
         <div className="field"><label>Purchase price</label><MoneyInput value={purchasePrice} onChange={setPurchasePrice} ariaLabel="Purchase price" /></div>
         <div className="field"><label>Current estimated value</label><input type="number" value={currentValue} onChange={(e) => setCurrentValue(e.target.value)} /></div>
+        <div className="field"><label>Acquisition date</label><DateField value={acquisitionDate} onChange={(v) => setAcquisitionDate(v)} /></div>
       </div>
       {error && <Banner kind="error">{error}</Banner>}
     </Modal>

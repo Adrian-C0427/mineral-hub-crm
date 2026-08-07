@@ -12,7 +12,7 @@ const OPTIONS: { value: Theme; label: string; hint: string }[] = [
 ];
 
 export function AppearanceSettings() {
-  const { theme, setTheme, accent, setAccent } = useTheme();
+  const { theme, setTheme, accent, setAccent, accent2, setAccent2 } = useTheme();
   const { user, refresh } = useAuth();
 
   // Colors already claimed by teammates — shown as taken so avatar colors stay
@@ -66,11 +66,13 @@ export function AppearanceSettings() {
       </div>
 
       <div className="pref-row">
-        <div>
-          <div className="pref-title">Accent color</div>
-          <div className="muted" style={{ fontSize: 12 }}>Buttons, highlights, links, and charts across the app. Blue is the default.</div>
+        <div className="pref-desc">
+          <div className="pref-title">Primary accent color</div>
+          <div className="muted" style={{ fontSize: 12 }}>
+            Controls primary interactive elements — buttons, active navigation items, links, primary highlights, and selected states. Blue is the default.
+          </div>
         </div>
-        <div className="swatch-row" role="radiogroup" aria-label="Accent color">
+        <div className="swatch-row" role="radiogroup" aria-label="Primary accent color">
           {ACCENT_PRESETS.map((p) => {
             const active = p.hex === "#3b82f6" ? accent == null || accent === p.hex : accent === p.hex;
             return (
@@ -83,6 +85,46 @@ export function AppearanceSettings() {
                 className={`color-swatch ${active ? "active" : ""}`}
                 style={{ background: p.hex }}
                 onClick={() => setAccent(p.hex === "#3b82f6" ? null : p.hex)}
+              >
+                {active && <span className="swatch-check" aria-hidden="true">✓</span>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="pref-row">
+        <div className="pref-desc">
+          <div className="pref-title">Secondary accent color</div>
+          <div className="muted" style={{ fontSize: 12 }}>
+            Controls secondary interface elements — charts and graphs, status indicators, progress bars, and supporting visual accents. By default it follows the primary accent.
+          </div>
+        </div>
+        <div className="swatch-row" role="radiogroup" aria-label="Secondary accent color">
+          <button
+            type="button"
+            role="radio"
+            aria-checked={accent2 == null}
+            title="Follow the primary accent"
+            className={`color-swatch ${accent2 == null ? "active" : ""}`}
+            style={{ background: accent ?? "#3b82f6" }}
+            onClick={() => setAccent2(null)}
+          >
+            <span className="swatch-auto" aria-hidden="true">A</span>
+            {accent2 == null && <span className="swatch-check" aria-hidden="true">✓</span>}
+          </button>
+          {ACCENT_PRESETS.map((p) => {
+            const active = accent2 === p.hex;
+            return (
+              <button
+                key={p.key}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                title={p.label}
+                className={`color-swatch ${active ? "active" : ""}`}
+                style={{ background: p.hex }}
+                onClick={() => setAccent2(p.hex)}
               >
                 {active && <span className="swatch-check" aria-hidden="true">✓</span>}
               </button>
