@@ -604,7 +604,7 @@ function CloudImportModal({ provider, folder, ownerField, ownerId, onClose, onIm
       {files === null ? <Spinner label="Loading files…" /> : files.length === 0 ? (
         <EmptyState title={q ? "No matches" : "No files found"}>{q ? "Try a different search." : "Recent files appear here once the account has some."}</EmptyState>
       ) : (
-        <div style={{ maxHeight: 320, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 8 }}>
+        <div style={{ maxHeight: 320, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6 }}>
           {files.map((f) => (
             <label key={f.id} className="row" style={{ gap: 10, padding: "8px 10px", borderBottom: "1px solid var(--border)", cursor: "pointer", alignItems: "center" }}>
               <input type="checkbox" checked={selected.has(f.id)} onChange={() => toggle(f.id)} />
