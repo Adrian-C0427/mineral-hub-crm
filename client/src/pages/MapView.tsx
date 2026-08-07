@@ -56,6 +56,9 @@ const RECENTS_KEY = "mh_map_recents";
 // Map view personalization: the user's default visible layers, last camera
 // position, and named filter presets — all remembered locally per browser.
 const MAP_LAYERS_KEY = "mh-map-layers:v1";
+// Which side the Filters / Heat panel docks on. Persisted so the choice
+// survives closing the app.
+const MAP_DOCK_KEY = "mh-map-dock:v1";
 const MAP_VIEW_KEY = "mh-map-view:v1";
 const MAP_FILTERS_KEY = "mh-map-filters:v1";
 type MapLayers = { boundaries: boolean; absNums: boolean; surveyNames: boolean; deals: boolean; wells: boolean; wellbores: boolean };
@@ -119,6 +122,8 @@ export function MapView() {
   const [selected, setSelected] = useState<Selected>(null);
   const [choices, setChoices] = useState<WellProps[] | null>(null); // overlap disambiguation
   const [layers, setLayers] = useState<MapLayers>(() => ({ ...DEFAULT_MAP_LAYERS, ...loadJson<Partial<MapLayers>>(MAP_LAYERS_KEY, {}) }));
+  const [dock, setDock] = useState<"left" | "right">(() => (loadJson<string>(MAP_DOCK_KEY, "left") === "right" ? "right" : "left"));
+  useEffect(() => { saveJson(MAP_DOCK_KEY, dock); }, [dock]);
   const layersRef = useRef(layers); layersRef.current = layers;
   useEffect(() => { saveJson(MAP_LAYERS_KEY, layers); }, [layers]);
   // Saved filter presets (named filter combinations), remembered per browser.
@@ -196,7 +201,7 @@ export function MapView() {
     const savedCam = loadJson<MapCam | null>(MAP_VIEW_KEY, null);
     const map = new maplibregl.Map({ container: mapContainer.current, style: styleWithGlyphs(), center: savedCam?.center ?? LEON_CENTER, zoom: savedCam?.zoom ?? 10, attributionControl: { compact: true } });
     watchGisHealth(map);
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
     mapRef.current = map;
 
     map.on("load", async () => {
@@ -778,7 +783,15 @@ export function MapView() {
           shrink the map vertically. */}
       <div className="mc-layout">
       {(showFilters || showHeat) && (
-        <aside className="mc-side" style={{ height: mapH ? `${mapH}px` : undefined }}>
+        <aside className="mc-side" style={{ height: mapH ? `${mapH}px` : undefined, order: dock === "left" ? 0 : 2 }}>
+          {/* Dock-side preference — remembered across sessions. */}
+          <div className="mc-dock-row">
+            <span className="ddx-label">Panel position</span>
+            <span className="mc-dock-btns">
+              <button type="button" className={`mc-dock-btn ${dock === "left" ? "on" : ""}`} title="Dock panel on the left" aria-pressed={dock === "left"} onClick={() => setDock("left")}>⇤ Left</button>
+              <button type="button" className={`mc-dock-btn ${dock === "right" ? "on" : ""}`} title="Dock panel on the right" aria-pressed={dock === "right"} onClick={() => setDock("right")}>Right ⇥</button>
+            </span>
+          </div>
       {showFilters && (
         <div className="panel mc-panel" style={{ marginBottom: 12 }}>
           <div className="mc-grid">
@@ -894,11 +907,11 @@ export function MapView() {
 
       {/* Height is measured to fill down to the footer (no blank space below);
           dvh fallback tracks the real visible viewport before the first measure. */}
-      <div ref={mapWrap} style={{ position: "relative", flex: 1, minWidth: 0, height: mapH ? `${mapH}px` : "calc(100dvh - 250px)", minHeight: 320, borderRadius: 6, overflow: "hidden", border: "1px solid var(--border)" }}>
+      <div ref={mapWrap} style={{ position: "relative", flex: 1, minWidth: 0, order: 1, height: mapH ? `${mapH}px` : "calc(100dvh - 250px)", minHeight: 320, borderRadius: 6, overflow: "hidden", border: "1px solid var(--border)" }}>
         <div ref={mapContainer} style={{ position: "absolute", inset: 0 }} />
         {/* Same collapsible floating Layers control as the Marketplace map —
             one shared component, identical interaction on every map. */}
-        <div className="portal-map-controls">
+        <div className="portal-map-controls mc-controls-left">
           <MapLayersPanel
             variant="floating"
             collapsible
@@ -950,7 +963,7 @@ export function MapView() {
 
         {/* Overlap chooser */}
         {choices && (
-          <div style={{ position: "absolute", top: 12, left: 52, width: 300, maxWidth: "calc(100% - 310px)", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, boxShadow: "var(--shadow)", padding: 16 }}>
+          <div style={{ position: "absolute", top: 12, right: 12, width: 300, maxWidth: "calc(100% - 320px)", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, boxShadow: "var(--shadow)", padding: 16 }}>
             <div className="section-head"><h3 style={{ margin: 0 }}>{choices.length} wells here</h3><button className="icon-btn" onClick={() => setChoices(null)}>×</button></div>
             <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Pick the well you meant:</p>
             {choices.map((w) => (
@@ -962,7 +975,7 @@ export function MapView() {
         )}
 
         {selected && !choices && (
-          <div style={{ position: "absolute", top: 12, left: 52, width: 320, maxWidth: "calc(100% - 310px)", maxHeight: "calc(100% - 190px)", overflowY: "auto", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, boxShadow: "var(--shadow)", padding: 16 }}>
+          <div style={{ position: "absolute", top: 12, right: 12, width: 320, maxWidth: "calc(100% - 320px)", maxHeight: "calc(100% - 190px)", overflowY: "auto", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, boxShadow: "var(--shadow)", padding: 16 }}>
             {selected.kind === "well" ? (
               <>
                 <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.leaseName || "Well"} {selected.wellNo ? `#${selected.wellNo}` : ""}</h3><div className="muted" style={{ fontSize: 12 }}>{selected.symbol}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
