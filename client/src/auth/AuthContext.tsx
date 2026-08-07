@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { api, setAuthToken, getAuthToken } from "../api/client";
+import { api, ApiError, setAuthToken, getAuthToken } from "../api/client";
+import { saveBranding } from "../lib/branding";
 
 export type OrgRole = "OWNER" | "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER";
 
@@ -73,12 +74,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Only attempt to restore a session if we have a stored token.
     if (!getAuthToken()) { setLoading(false); return; }
-    api
-      .get<{ user: CurrentUser }>("/auth/me")
-      .then((r) => setUser(r.user))
-      .catch(() => { setAuthToken(null); setUser(null); })
-      .finally(() => setLoading(false));
+    let alive = true;
+    // Session restore must survive transient failures: only a real auth
+    // rejection (401/403) invalidates the token. A network blip or a 5xx
+    // (e.g. a serverless DB cold-start hiccup) gets a couple of quick
+    // retries and otherwise leaves the session intact for the next load —
+    // previously ANY error here silently logged the user out.
+    const boot = async (attempt = 0): Promise<void> => {
+      try {
+        const r = await api.get<{ user: CurrentUser }>("/auth/me");
+        if (alive) adopt(r.user);
+      } catch (e) {
+        const status = e instanceof ApiError ? e.status : 0;
+        if (status === 401 || status === 403) {
+          setAuthToken(null);
+          if (alive) setUser(null);
+          return;
+        }
+        if (attempt < 2 && alive) {
+          await new Promise((r) => setTimeout(r, 700 * (attempt + 1)));
+          return boot(attempt + 1);
+        }
+      }
+    };
+    void boot().finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
   }, []);
+
+  /** Install the fresh profile + persist org branding for instant next-boot paint. */
+  const adopt = (u: CurrentUser) => {
+    setUser(u);
+    saveBranding(u.organization
+      ? { name: u.organization.name, fullLogo: u.organization.fullLogo ?? null, compactLogo: u.organization.compactLogo ?? null }
+      : null);
+  };
 
   const login = async (email: string, password: string, totpCode?: string): Promise<LoginResult> => {
     const r = await api.post<{ token?: string; twoFactorRequired?: boolean }>("/auth/login", { email, password, ...(totpCode ? { totpCode } : {}) });
@@ -105,12 +134,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await api.post("/auth/logout").catch(() => {});
     setAuthToken(null);
     setUser(null);
+    saveBranding(null); // another account must never inherit this org's mark
     resetLocation(); // back to the marketing site, not a stale in-app URL
   };
 
   const refresh = async () => {
     const r = await api.get<{ user: CurrentUser }>("/auth/me");
-    setUser(r.user);
+    adopt(r.user);
   };
 
   const can = (permission: string): boolean =>
