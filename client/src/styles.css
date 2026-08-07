@@ -15,7 +15,7 @@
   /* Global interface scale — the whole UI renders slightly smaller (more
      information on screen) without changing any component's design or
      proportions. Layout-affecting (not transform), so everything stays crisp. */
-  zoom: 0.92;
+  zoom: 0.95;
   --bg: #0b0e14;
   --panel: #12161f;
   --panel-2: #1a2030;
