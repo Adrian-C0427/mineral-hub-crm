@@ -108,7 +108,7 @@ export function TwoFactorSettings() {
           <ol className="twofa-steps">
             <li>
               Scan this QR code with your authenticator app (Google Authenticator, Authy, 1Password, etc.):
-              {qr && <div style={{ margin: "10px 0" }}><img src={qr} alt="Two-factor QR code" width={200} height={200} style={{ background: "#fff", borderRadius: 6, padding: 8 }} /></div>}
+              {qr && <div style={{ margin: "10px 0" }}><img src={qr} alt="Two-factor QR code" width={200} height={200} style={{ background: "#fff", borderRadius: 4, padding: 8 }} /></div>}
               <div className="muted" style={{ fontSize: 12 }}>Can’t scan? Enter this key manually instead:</div>
               <div className="twofa-secret">
                 <code>{setup.secret.replace(/(.{4})/g, "$1 ").trim()}</code>

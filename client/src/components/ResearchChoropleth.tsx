@@ -334,7 +334,7 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
         <div style={{
           position: "absolute", left: tip.x, top: tip.y, pointerEvents: "none", zIndex: 5,
           background: "var(--panel, #1f2937)", border: "1px solid var(--border, #374151)",
-          borderRadius: 6, padding: "6px 9px", fontSize: 12, whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
+          borderRadius: 4, padding: "6px 9px", fontSize: 12, whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
         }}>
           <strong>{tip.title}</strong>
           {tip.lines.map((l, i) => <div key={i} style={l.color ? { color: l.color } : undefined}>{l.text}</div>)}

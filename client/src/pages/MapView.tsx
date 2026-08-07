@@ -894,7 +894,7 @@ export function MapView() {
 
       {/* Height is measured to fill down to the footer (no blank space below);
           dvh fallback tracks the real visible viewport before the first measure. */}
-      <div ref={mapWrap} style={{ position: "relative", flex: 1, minWidth: 0, height: mapH ? `${mapH}px` : "calc(100dvh - 250px)", minHeight: 320, borderRadius: 6, overflow: "hidden", border: "1px solid var(--border)" }}>
+      <div ref={mapWrap} style={{ position: "relative", flex: 1, minWidth: 0, height: mapH ? `${mapH}px` : "calc(100dvh - 250px)", minHeight: 320, borderRadius: 4, overflow: "hidden", border: "1px solid var(--border)" }}>
         <div ref={mapContainer} style={{ position: "absolute", inset: 0 }} />
         {/* Same collapsible floating Layers control as the Marketplace map —
             one shared component, identical interaction on every map. */}
@@ -914,7 +914,7 @@ export function MapView() {
         </div>
         {!deals && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}><Spinner label="Loading map…" /></div>}
 
-        <div style={{ position: "absolute", left: 12, bottom: 26, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, padding: "8px 12px", fontSize: 12 }}>
+        <div style={{ position: "absolute", left: 12, bottom: 26, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 4, padding: "8px 12px", fontSize: 12 }}>
           {heatActive ? (
             <div style={{ minWidth: 160 }}>
               <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 4 }}>Production intensity · {periodLabelRef.current}</div>
@@ -950,7 +950,7 @@ export function MapView() {
 
         {/* Overlap chooser */}
         {choices && (
-          <div style={{ position: "absolute", top: 12, left: 52, width: 300, maxWidth: "calc(100% - 310px)", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, boxShadow: "var(--shadow)", padding: 16 }}>
+          <div style={{ position: "absolute", top: 12, left: 52, width: 300, maxWidth: "calc(100% - 310px)", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 4, boxShadow: "var(--shadow)", padding: 16 }}>
             <div className="section-head"><h3 style={{ margin: 0 }}>{choices.length} wells here</h3><button className="icon-btn" onClick={() => setChoices(null)}>×</button></div>
             <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Pick the well you meant:</p>
             {choices.map((w) => (
@@ -962,7 +962,7 @@ export function MapView() {
         )}
 
         {selected && !choices && (
-          <div style={{ position: "absolute", top: 12, left: 52, width: 320, maxWidth: "calc(100% - 310px)", maxHeight: "calc(100% - 190px)", overflowY: "auto", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, boxShadow: "var(--shadow)", padding: 16 }}>
+          <div style={{ position: "absolute", top: 12, left: 52, width: 320, maxWidth: "calc(100% - 310px)", maxHeight: "calc(100% - 190px)", overflowY: "auto", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 4, boxShadow: "var(--shadow)", padding: 16 }}>
             {selected.kind === "well" ? (
               <>
                 <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.leaseName || "Well"} {selected.wellNo ? `#${selected.wellNo}` : ""}</h3><div className="muted" style={{ fontSize: 12 }}>{selected.symbol}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
@@ -1026,7 +1026,7 @@ export function MapView() {
                 {/* fid resolves the exact rrc well (production is read live from
                     the centralized dataset); the API label is a readable fallback. */}
                 <Link className="primary" to={`/valuation?fid=${selected.fid}&well=${encodeURIComponent(selected.api || selected.api8 || "")}`}
-                  style={{ display: "flex", justifyContent: "center", marginTop: 12, padding: "8px 12px", borderRadius: 6 }}>
+                  style={{ display: "flex", justifyContent: "center", marginTop: 12, padding: "8px 12px", borderRadius: 4 }}>
                   Open in Well Analysis →
                 </Link>
                 <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Operator, lease, field, dates, permits, and completions are from RRC records (lease-level; oil is reported per lease). Formation shows where a W-2 was filed.</p>
