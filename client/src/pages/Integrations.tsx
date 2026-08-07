@@ -278,7 +278,7 @@ function IntegrationCard({ p, busy, result, onConnect, onOAuth, onDisconnect, on
 
       <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
         {needsSetup ? (
-          p.setupUrl && <a className="small" role="button" style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", borderRadius: 4, padding: "6px 10px", textDecoration: "none", color: "var(--text)" }} href={p.setupUrl} target="_blank" rel="noreferrer">Setup guide ↗</a>
+          p.setupUrl && <a className="small" role="button" style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 10px", textDecoration: "none", color: "var(--text)" }} href={p.setupUrl} target="_blank" rel="noreferrer">Setup guide ↗</a>
         ) : p.implementation === "env" ? (
           <button className="small" disabled={busy} onClick={onTest}>{busy ? "Testing…" : "Test connection"}</button>
         ) : connected || errored ? (

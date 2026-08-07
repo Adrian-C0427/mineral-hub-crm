@@ -217,7 +217,7 @@ export function TractMap({ tracts, selectedId, abstractIds = [], placingPob, onP
         {/* Same collapsible floating Layers control as the Marketplace map;
             the reset button sits beside it, exactly like the portal maps. */}
         <div className="portal-map-controls">
-          {placingPob && <span className="muted" style={{ fontSize: 12, alignSelf: "center", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 4, padding: "4px 8px" }}>Click the map to place the Point of Beginning</span>}
+          {placingPob && <span className="muted" style={{ fontSize: 12, alignSelf: "center", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, padding: "4px 8px" }}>Click the map to place the Point of Beginning</span>}
           <button className="small portal-map-reset" onClick={() => { fitted.current = false; fitToTracts(true); }} title="Zoom back to the full tract extent">⌂ Reset view</button>
           <MapLayersPanel
             variant="floating"

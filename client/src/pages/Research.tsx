@@ -1815,7 +1815,7 @@ function RecordsTab({ qs }: { qs: string }) {
     <>
       {kind === "documents" && selAbstracts.length > 0 && absBuyers && absBuyers.buyers.length > 0 && (
         <div style={{
-          border: "1px solid var(--border)", borderRadius: 4, padding: "10px 12px", marginBottom: 12,
+          border: "1px solid var(--border)", borderRadius: 6, padding: "10px 12px", marginBottom: 12,
           background: "color-mix(in srgb, var(--accent) 4%, transparent)",
         }}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>

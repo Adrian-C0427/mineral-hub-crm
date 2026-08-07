@@ -634,9 +634,9 @@ export function Dashboard() {
           </p>
           <div className="row">
             {/* ?new=1 opens the New Deal modal immediately — one click, not two. */}
-            <Link to="/deals/active?new=1" className="primary" style={{ padding: "8px 14px", borderRadius: 4 }}>1 · Create your first deal</Link>
-            <Link to="/buyers" style={{ padding: "8px 14px", border: "1px solid var(--border)", borderRadius: 4 }}>2 · Add or import buyers</Link>
-            <Link to="/valuation" style={{ padding: "8px 14px", border: "1px solid var(--border)", borderRadius: 4 }}>3 · Import well production data</Link>
+            <Link to="/deals/active?new=1" className="primary" style={{ padding: "8px 14px", borderRadius: 6 }}>1 · Create your first deal</Link>
+            <Link to="/buyers" style={{ padding: "8px 14px", border: "1px solid var(--border)", borderRadius: 6 }}>2 · Add or import buyers</Link>
+            <Link to="/valuation" style={{ padding: "8px 14px", border: "1px solid var(--border)", borderRadius: 6 }}>3 · Import well production data</Link>
           </div>
         </div>
       )}
