@@ -3,7 +3,7 @@ import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
-import { prisma } from "../db.js";
+import { prisma, withDbRetry } from "../db.js";
 import { verifyPassword, hashPassword, dummyVerifyPassword } from "../auth/password.js";
 import { signSession, setSessionCookie, clearSessionCookie } from "../auth/session.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
@@ -278,7 +278,10 @@ authRouter.get(
   "/me",
   requireAuth,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const [org, prefs] = await Promise.all([
+    // Session restore is the one request that must not fail on a transient
+    // Neon reconnect blip (P1001/P1017) — a 500 here looks like a random
+    // logout / missing branding to the user. Retry the read batch briefly.
+    const [org, prefs] = await withDbRetry(() => Promise.all([
       req.user!.organizationId
         ? prisma.organization.findUnique({
             where: { id: req.user!.organizationId },
@@ -286,7 +289,7 @@ authRouter.get(
           })
         : Promise.resolve(null),
       readPrefs(req.user!.id),
-    ]);
+    ]));
     res.json({ user: { ...req.user, organization: org, ...prefs } });
   }),
 );

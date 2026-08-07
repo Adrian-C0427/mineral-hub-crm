@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { NavLink, useLocation } from "react-router-dom";
 import { Workflow, ChevronRight, ChevronDown } from "lucide-react";
@@ -7,6 +7,7 @@ import {
   ResearchIcon, WellsIcon, ReportsIcon, ExpensesIcon, PortalIcon, SettingsGearIcon,
 } from "./navIcons";
 import { useAuth } from "../auth/AuthContext";
+import { loadBranding } from "../lib/branding";
 import { ThemedLogo } from "./ThemedLogo";
 
 interface NavItem {
@@ -54,6 +55,8 @@ const NAV: NavItem[] = [
 
 export function Sidebar() {
   const { user, can } = useAuth();
+  // Last-known org branding, read once per mount (see lib/branding).
+  const cachedBranding = useMemo(() => loadBranding(), []);
   const location = useLocation();
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
@@ -84,9 +87,16 @@ export function Sidebar() {
       </button>
       <div className="sidebar-brand">
         {(() => {
-          const org = user?.organization;
-          const full = org?.fullLogo ?? null;
-          const compact = org?.compactLogo ?? full;
+          // While /auth/me is still in flight (fresh page load, slow or
+          // briefly-failing API) render the last-known branding from the local
+          // cache so the logo is present from the first paint — it never
+          // "pops in" late or drops to the text fallback mid-session.
+          const org = user ? user.organization : cachedBranding;
+          // Each variant falls back to the other, so an org that uploaded only
+          // ONE logo still shows it in BOTH sidebar states (previously an org
+          // with just a compact mark rendered an empty brand row when expanded).
+          const full = org?.fullLogo ?? org?.compactLogo ?? null;
+          const compact = org?.compactLogo ?? org?.fullLogo ?? null;
           if (!full && !compact) return <span className="brand">{collapsed ? "MH" : <>Mineral Hub<span className="dot">.</span></>}</span>;
           // BOTH variants stay mounted at all times; collapse only toggles CSS
           // visibility. Nothing remounts, reloads, or reprocesses on expand/
