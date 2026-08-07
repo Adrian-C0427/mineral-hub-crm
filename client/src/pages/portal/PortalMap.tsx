@@ -107,7 +107,7 @@ export function PortalMap({ features, height = 420, onSelect }: {
   const toggle = (k: keyof LayerState) => setLayers((p) => ({ ...p, [k]: !p[k] }));
 
   return (
-    <div className="portal-map" style={{ position: "relative", height, borderRadius: 10, overflow: "hidden", border: "1px solid var(--border)" }}>
+    <div className="portal-map" style={{ position: "relative", height, borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
       <div ref={container} style={{ position: "absolute", inset: 0 }} />
       {/* Both floating controls share one top-right flex container so they can
           never overlap — the reset button sits beside the Layers panel and
