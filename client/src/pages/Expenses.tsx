@@ -655,30 +655,38 @@ function ExpenseForm({
       footer={<><button className="small" onClick={onClose}>Cancel</button><button className="primary" disabled={busy} onClick={save}>{busy ? "Saving…" : "Save"}</button></>}
     >
       <form onSubmit={save}>
-        <div className="grid-2">
+        {/* Standard sectioned creation layout (same system as New Deal / New Buyer). */}
+        <div className="modal-sec">Expense</div>
+        <div className="nd-basics">
           <div className="field"><label>Date</label><DateField value={f.date} onChange={(v) => setF((p) => ({ ...p, date: v }))} /></div>
           <div className="field"><label>Amount</label><MoneyInput decimals={2} value={f.amount} onChange={(v) => setF((p) => ({ ...p, amount: v }))} placeholder="0.00" ariaLabel="Expense amount" /></div>
+          <div className="field">
+            <label>Category</label>
+            <Select value={f.categoryId} onChange={(v) => setF((p) => ({ ...p, categoryId: v }))}
+              placeholder="Uncategorized" clearable ariaLabel="Category"
+              options={categories.filter((c) => c.active || c.id === f.categoryId).map((c) => ({ value: c.id, label: c.name }))} />
+          </div>
+          <div className="field">
+            <label>User</label>
+            {/* Auto-populated with the current user and not editable. */}
+            <input value={currentUserName} disabled readOnly />
+          </div>
         </div>
-        <div className="field">
-          <label>User</label>
-          {/* Auto-populated with the current user and not editable. */}
-          <input value={currentUserName} disabled readOnly />
-        </div>
-        <div className="field">
-          <label>Category</label>
-          <Select value={f.categoryId} onChange={(v) => setF((p) => ({ ...p, categoryId: v }))}
-            placeholder="Uncategorized" clearable ariaLabel="Category"
-            options={categories.filter((c) => c.active || c.id === f.categoryId).map((c) => ({ value: c.id, label: c.name }))} />
-        </div>
+
+        <div className="modal-sec">Details</div>
         <div className="field"><label>Notes</label><textarea value={f.notes} onChange={(e) => setF((p) => ({ ...p, notes: e.target.value }))} rows={3} /></div>
-        <div className="field">
-          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <input type="checkbox" checked={f.reimbursed} onChange={(e) => setF((p) => ({ ...p, reimbursed: e.target.checked }))} /> Reimbursed
-          </label>
+
+        <div className="modal-sec">Reimbursement</div>
+        <div className="nd-basics">
+          <div className="field">
+            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input type="checkbox" checked={f.reimbursed} onChange={(e) => setF((p) => ({ ...p, reimbursed: e.target.checked }))} /> Reimbursed
+            </label>
+          </div>
+          {f.reimbursed && (
+            <div className="field"><label>Reimbursement date</label><DateField value={f.reimbursementDate} onChange={(v) => setF((p) => ({ ...p, reimbursementDate: v }))} /></div>
+          )}
         </div>
-        {f.reimbursed && (
-          <div className="field"><label>Reimbursement date</label><DateField value={f.reimbursementDate} onChange={(v) => setF((p) => ({ ...p, reimbursementDate: v }))} /></div>
-        )}
         {error && <div className="error-text">{error}</div>}
       </form>
     </Modal>

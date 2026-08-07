@@ -21,8 +21,8 @@ export function MarketingFunnel({ metrics, matchCount, askPrice, costBasis }: {
   const profit = metrics.highOffer != null && basis != null ? metrics.highOffer - basis : null;
   const pctOf = (v: number, of: number) => (of > 0 ? Math.min(100, Math.round((v / of) * 100)) : 0);
   const stages: { label: string; value: string; hint: string; dim: boolean; bar: string; w: number; color?: string }[] = [
-    { label: "Contacted", value: String(contacted), hint: matchCount ? `of ${matchCount} matches` : "no matches yet", dim: !contacted, bar: "var(--accent)", w: pctOf(contacted, matchCount) },
-    { label: "Interested", value: String(metrics.interested), hint: "replied positively", dim: !metrics.interested, bar: "var(--accent)", w: pctOf(metrics.interested, contacted) },
+    { label: "Contacted", value: String(contacted), hint: matchCount ? `of ${matchCount} matches` : "no matches yet", dim: !contacted, bar: "var(--accent2)", w: pctOf(contacted, matchCount) },
+    { label: "Interested", value: String(metrics.interested), hint: "replied positively", dim: !metrics.interested, bar: "var(--accent2)", w: pctOf(metrics.interested, contacted) },
     { label: "Offers", value: String(metrics.offers), hint: "received", dim: !metrics.offers, bar: "#f5b04b", w: pctOf(metrics.offers, contacted) },
     { label: "Highest Offer", value: metrics.highOffer != null ? money(metrics.highOffer) : "—", hint: metrics.highOffer != null && proceeds != null ? `vs ${money(proceeds)} target` : proceeds != null ? `${money(proceeds)} target` : "no offers yet", dim: metrics.highOffer == null, bar: "var(--green)", w: metrics.highOffer != null && proceeds ? Math.min(100, Math.round((metrics.highOffer / proceeds) * 100)) : 0 },
     { label: "Estimated Profit", value: profit != null ? money(profit) : "—", hint: "highest offer − cost basis", dim: profit == null,

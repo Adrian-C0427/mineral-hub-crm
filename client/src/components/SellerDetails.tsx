@@ -327,12 +327,14 @@ function SellerFormModal({ dealId, seller, users, onClose, onSaved }: {
   );
 }
 
+/** Labeled form section — renders the app's standard `.modal-sec` header so the
+ *  seller form matches the New Deal / New Buyer creation layout exactly. */
 function FormGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="seller-form-group">
-      <div className="assumption-group-title">{title}</div>
+    <>
+      <div className="modal-sec">{title}</div>
       {children}
-    </div>
+    </>
   );
 }
 

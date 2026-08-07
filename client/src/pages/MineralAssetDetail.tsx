@@ -13,7 +13,7 @@ import { CollapsibleSection } from "../components/CollapsibleSection";
 import { LogContactModal } from "../components/LogContactModal";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { DealPortalPanel } from "../components/DealPortalPanel";
-import { DocumentsSection, DEAL_DOC_FOLDERS, type DocFile } from "../components/DocumentsSection";
+import { DocumentsSection, type DocFile } from "../components/DocumentsSection";
 import { OfferRowActions } from "../components/OfferActions";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
@@ -125,7 +125,7 @@ export function MineralAssetDetail() {
         <HoldTab asset={asset} canEdit={canEdit} onChanged={load} />
       </div>
       <div hidden={tab !== "sell"}>
-        <SellTab asset={asset} matches={matches} users={users} canEdit={canEdit} onChanged={refresh} onSetSell={() => setMode("SELL")} />
+        <SellTab asset={asset} matches={matches} users={users} canEdit={canEdit} onChanged={refresh} onSetSell={() => setMode("SELL")} onGoHold={() => setTab("hold")} />
       </div>
     </div>
   );
@@ -526,7 +526,9 @@ function AddRevenueModal({ assetId, onClose, onSaved }: { assetId: string; onClo
 
   return (
     <Modal title="Add Revenue Entry" onClose={onClose} footer={<><button className="small" onClick={onClose}>Cancel</button><button className="primary" disabled={busy} onClick={save}>{busy ? "Saving…" : "Add"}</button></>}>
-      <div className="grid-2">
+      {/* Standard sectioned layout (same system as New Deal / New Buyer). */}
+      <div className="modal-sec">Revenue entry</div>
+      <div className="nd-basics">
         <div className="field"><label>Month</label>
           <Select value={monthNum} onChange={setMonthNum} ariaLabel="Month"
             options={MONTHS.map(([v, l]) => ({ value: v, label: l }))} />
@@ -550,8 +552,8 @@ function AddRevenueModal({ assetId, onClose, onSaved }: { assetId: string; onClo
 // Sell tab — reuses the deal marketing machinery (matches, activity, offers, email)
 // ---------------------------------------------------------------------------
 
-function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
-  asset: AssetDetail; matches: MatchRec[] | null; users: UserLite[]; canEdit: boolean; onChanged: () => void; onSetSell: () => void;
+function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHold }: {
+  asset: AssetDetail; matches: MatchRec[] | null; users: UserLite[]; canEdit: boolean; onChanged: () => void; onSetSell: () => void; onGoHold: () => void;
 }) {
   const { can } = useAuth();
   const [logBuyer, setLogBuyer] = useState<{ id: string; name: string } | null>(null);
@@ -813,22 +815,13 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell }: {
         )}
       </CollapsibleSection>
 
-      {/* Location map + documents — identical to a standard deal. */}
-      <div className="panel">
-        <div className="section-head"><h3>Location</h3><span className="muted">This asset's abstracts and geographic extent</span></div>
-        {asset.abstractIds.length === 0
-          ? <p className="muted" style={{ marginBottom: 0 }}>No abstracts linked yet — add them to see the property on the map.</p>
-          : <Suspense fallback={<Spinner label="Loading map…" />}><DealMap abstractIds={asset.abstractIds} /></Suspense>}
-      </div>
-
-      {/* Legal tract descriptions — identical to the Deal page and the Hold tab. */}
-      <Suspense fallback={<div className="panel"><Spinner label="Loading tract descriptions…" /></div>}>
-        <TractSection dealId={asset.id} dealName={asset.name} canEdit={canEdit} abstractIds={asset.abstractIds} />
-      </Suspense>
-
-      {/* Sell mode markets the asset like a deal, so it gets the Active Deal's
-          default folder set (Hold keeps the asset-specific folders). */}
-      {can("viewDocuments") && <DocumentsSection ownerType="deal" ownerId={asset.id} files={asset.files} folders={asset.docFolders?.length ? asset.docFolders : DEAL_DOC_FOLDERS} onChanged={onChanged} canEdit={canEdit} canDelete={canEdit} />}
+      {/* Location, Tract Descriptions, and Documents live ONLY on the Hold tab
+          (the single source of truth) — the Sell tab points there instead of
+          duplicating the sections. */}
+      <p className="muted" style={{ fontSize: 12.5, margin: "0 0 4px" }}>
+        Looking for the property map, tract descriptions, or documents? They live on the{" "}
+        <button className="link-btn" style={{ padding: 0, fontSize: 12.5, fontWeight: 700 }} onClick={onGoHold}>Hold tab</button>.
+      </p>
 
       {logBuyer && <LogContactModal dealId={asset.id} buyerId={logBuyer.id} buyerName={logBuyer.name} users={users} dealNra={asset.nra} dealNma={asset.acreageNma} onClose={() => setLogBuyer(null)} onLogged={() => { setLogBuyer(null); onChanged(); }} />}
       {showEmail && <SendDealEmailModal dealId={asset.id} dealName={asset.name} buyerIds={[...selected]} onClose={() => setShowEmail(false)} onSent={() => { setSelected(new Set()); setShowEmail(false); onChanged(); }} />}

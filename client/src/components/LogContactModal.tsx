@@ -97,19 +97,23 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, dealNra, de
         </>
       }
     >
-      <div className="field">
-        <label>Status</label>
-        <Select value={status} onChange={(v) => setStatus(v as BuyerStatus)} ariaLabel="Status"
-          options={BUYER_STATUS_OPTIONS.map((s) => ({ value: s.v, label: s.label }))} />
-      </div>
-      <div className="field">
-        <label>Assigned team member</label>
-        <Select value={assignee} onChange={setAssignee} placeholder="Unassigned" clearable searchable ariaLabel="Assigned team member"
-          options={users.map((u) => ({ value: u.id, label: u.name }))} />
+      {/* Standard sectioned layout (same system as New Deal / New Buyer). */}
+      <div className="modal-sec">Status & owner</div>
+      <div className="nd-basics">
+        <div className="field">
+          <label>Status</label>
+          <Select value={status} onChange={(v) => setStatus(v as BuyerStatus)} ariaLabel="Status"
+            options={BUYER_STATUS_OPTIONS.map((s) => ({ value: s.v, label: s.label }))} />
+        </div>
+        <div className="field">
+          <label>Assigned team member</label>
+          <Select value={assignee} onChange={setAssignee} placeholder="Unassigned" clearable searchable ariaLabel="Assigned team member"
+            options={users.map((u) => ({ value: u.id, label: u.name }))} />
+        </div>
       </div>
       {status === "OFFER_RECEIVED" && (
         <>
-          <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Enter an amount to record a formal offer, or leave blank to just set the status.</p>
+          <div className="modal-sec">Offer <span className="modal-sec-hint">— enter an amount to record a formal offer, or leave blank to just set the status</span></div>
           <div className="grid-2">
             <div className="field">
               <label>Price per NRA <span className="muted" style={{ textTransform: "none" }}>(optional)</span></label>
@@ -136,7 +140,8 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, dealNra, de
           <div className="field"><label>Conditions</label><textarea rows={2} value={conditions} onChange={(e) => setConditions(e.target.value)} /></div>
         </>
       )}
-      <div className="grid-2">
+      <div className="modal-sec">Follow-up & notes</div>
+      <div className="nd-basics">
         <div className="field"><label>Date sent</label><DateField value={dateSent} onChange={(v) => setDateSent(v)} /></div>
         <div className="field"><label>Next follow-up</label><DateField value={nextFollowUp} onChange={(v) => setNextFollowUp(v)} /></div>
       </div>

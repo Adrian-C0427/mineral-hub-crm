@@ -12,6 +12,10 @@
 
 /* Dark is the default theme (data-theme unset or "dark"). */
 :root {
+  /* Global interface scale — the whole UI renders slightly smaller (more
+     information on screen) without changing any component's design or
+     proportions. Layout-affecting (not transform), so everything stays crisp. */
+  zoom: 0.95;
   --bg: #0b0e14;
   --panel: #12161f;
   --panel-2: #1a2030;
@@ -20,6 +24,7 @@
   --text-dim: #8b93a7;
   --accent: #3b82f6;
   --accent-hover: #2563eb;
+  --accent2: var(--accent);
   --green: #22c55e;
   --amber: #f59e0b;
   --red: #ef4444;
@@ -46,6 +51,7 @@
   --text-dim: #667085;  /* secondary text — passes AA on white */
   --accent: #2563eb;    /* deeper blue reads better on light surfaces */
   --accent-hover: #1d4ed8;
+  --accent2: var(--accent);
   --green: #16a34a;
   --amber: #d97706;
   --red: #dc2626;
@@ -510,7 +516,10 @@ a.tab { text-decoration: none; display: inline-block; }
 /* --- Universal tables ---
    border-collapse: separate, generous padding so headers/data never overlap,
    wrap the table in an overflow-x container. */
-.table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius);
+  /* Long lists scroll inside the card so the sticky header + footer/pager stay
+     visible; short tables are unaffected (no inner scrollbar appears). */
+  max-height: max(420px, calc(100dvh - 210px)); overflow-y: auto; }
 /* Always-visible slim scrollbar = the cue that more columns exist off-screen. */
 .table-scroll, .kanban { scrollbar-width: thin; scrollbar-color: var(--text-dim) transparent; }
 .table-scroll::-webkit-scrollbar, .kanban::-webkit-scrollbar { height: 8px; }
@@ -530,6 +539,7 @@ table.data-table {
   vertical-align: middle;
 }
 .data-table thead th {
+  z-index: 5;
   background: var(--panel-2);
   color: var(--text-dim);
   font-size: 12px;
@@ -681,6 +691,7 @@ button.match-log { flex: none; margin-left: auto; padding: 3px 10px; font-size: 
 .pref-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
   border-top: 1px solid var(--hairline, var(--border)); margin-top: 16px; padding-top: 14px; }
 .pref-title { font-size: 13.5px; font-weight: 700; }
+.pref-desc { flex: 1 1 320px; max-width: 520px; min-width: 260px; }
 .swatch-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .color-swatch { position: relative; width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--border);
   padding: 0; cursor: pointer; flex: none; display: inline-flex; align-items: center; justify-content: center; }
@@ -834,7 +845,7 @@ body.modal-open { overflow: hidden; }
   color: var(--text); pointer-events: none; }
 /* Design bars: rounded caps, translucent dashed outline for projected. */
 .bar { flex: 1; max-width: 34px; background: var(--green); border-radius: 5px 5px 2px 2px; }
-.bar-projected { background: color-mix(in srgb, var(--accent) 22%, transparent); opacity: 1;
+.bar-projected { background: color-mix(in srgb, var(--accent2) 22%, transparent); opacity: 1;
   border: 1.5px dashed color-mix(in srgb, var(--accent) 75%, transparent); }
 /* Zero placeholder: a faint baseline stub so months with no profit still appear
    on the chart (keeps all twelve months visible with consistent spacing). */
@@ -1012,7 +1023,7 @@ body.modal-open { overflow: hidden; }
 .dash-cz-btn:hover { color: var(--text); border-color: var(--text-dim); }
 
 .dash-swatch { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
-.dash-swatch-proj { background: var(--accent); opacity: 0.55; }
+.dash-swatch-proj { background: var(--accent2); opacity: 0.55; }
 :root[data-theme="light"] .dash-swatch-proj { opacity: 0.45; }
 
 /* Stage funnel (design): colored dot + name, tabular count, slim colored track. */
@@ -1068,7 +1079,7 @@ body.modal-open { overflow: hidden; }
 .dash-rank-amt { color: var(--text); font-weight: 600; }
 .error-text { color: var(--red); font-size: 13px; margin-top: 8px; }
 .progress { height: 8px; background: var(--bg); border-radius: 100px; overflow: hidden; margin: 10px 0; }
-.progress-fill { height: 100%; background: var(--accent); }
+.progress-fill { height: 100%; background: var(--accent2); }
 .status-chips { display:flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .dd-grid { display:grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; }
 /* Editing grids: bottom-align each field's control so a long label that wraps
@@ -1267,7 +1278,7 @@ input[type="range"] { -webkit-appearance: none; appearance: none; height: 4px; p
 input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--accent); cursor: pointer; }
 
 /* --- Bulk actions --- */
-.bulk-bar { position: sticky; top: 16px; z-index: 20; display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius); padding: 10px 16px; margin-bottom: 14px; box-shadow: var(--shadow); }
+.bulk-bar { position: sticky; top: 66px; z-index: 20; display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius); padding: 10px 16px; margin-bottom: 14px; box-shadow: var(--shadow); }
 tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
 
 /* ===========================================================================
@@ -1856,6 +1867,15 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .mc-btn.hot:not(.active) { color: #f59e0b; border-color: rgba(245, 158, 11, 0.45); }
 
 .mc-panel { padding: 0; border-radius: 16px; }
+/* GIS layout: open panels dock as a left column; the map fills the rest. */
+.mc-layout { display: flex; gap: 12px; align-items: stretch; }
+.mc-side { width: 360px; flex: none; overflow-y: auto; min-height: 320px; }
+.mc-side .mc-panel { margin-bottom: 12px !important; }
+.mc-side .mc-grid { grid-template-columns: 1fr; gap: 12px; padding: 16px 18px; }
+.mc-side .mc-heat { grid-template-columns: 1fr; }
+.mc-side .mc-heat-mid { border-left: none; border-right: none; border-top: 1px solid var(--hairline); border-bottom: 1px solid var(--hairline); padding: 14px 0; }
+.mc-side .dd-grid { grid-template-columns: 1fr; }
+@media (max-width: 900px) { .mc-layout { flex-direction: column; } .mc-side { width: 100%; height: auto !important; max-height: 45vh; } }
 .mc-note { padding: 13px 24px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-dim); }
 .mc-note b { color: var(--text); }
 .mc-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px 20px; padding: 20px 24px; }
@@ -3338,20 +3358,25 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .cw-pgbtn:not(:disabled):hover { color: var(--text); }
 .cw { min-height: 0; flex: 1; }
 
-.cw-left { width: 300px; }
+.cw-left { width: 320px; }
 .cw-left, .cw-right { background: transparent; }
 .cw-ident { padding: 20px; border-bottom: none; }
 .cw-avatar { background: #1a2233; border: 1px solid #2b3444; color: var(--text-dim); border-radius: 50%; }
 :root[data-theme="light"] .cw-avatar { background: color-mix(in srgb, var(--accent) 8%, var(--panel)); border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); color: var(--accent); }
 .cw-avatar.lg { width: 46px; height: 46px; border-radius: 50%; font-size: 15px; }
 .cw-name { font-size: 16px; font-weight: 800; letter-spacing: -0.01em; }
-.cw-pills { display: flex; gap: 6px; margin-top: 6px; }
+.cw-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
 .cw-pills .ct-pill { height: 20px; padding: 0 8px; font-size: 11px; }
 .cw-pills .ct-pill-dot { width: 4px; height: 4px; }
 .cw-del { width: 30px; height: 30px; border-radius: 8px; background: transparent; border: 1px solid var(--border);
   color: var(--text-faint); }
 .cw-del:hover { border-color: var(--red); color: var(--red); }
 .cw-two { gap: 12px; margin-top: 18px; }
+/* Grid items must be allowed to shrink or a long owner name blows the grid out
+   and pushes/clips the Status select. */
+.cw-two > * { min-width: 0; }
+.cw-ident-row { align-items: flex-start; }
+.cw-ident-row .cw-avatar.lg { margin-top: 1px; }
 .cw-lbl { font-size: 11px; letter-spacing: 0.07em; font-weight: 800; color: var(--text-faint); }
 .cw-two .msel-box { height: 34px; min-height: 34px; background: var(--surface); border-radius: 9px; font: 600 12.5px var(--font-sans); }
 .cw-tag-add { width: auto; height: 24px; padding: 0 9px; border-radius: 99px; background: transparent;
@@ -3627,6 +3652,16 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .mf-grid-4 { grid-template-columns: repeat(4, 1fr); }
 .mf-toprow { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 @media (max-width: 900px) { .fin-insights, .mf-grid { grid-template-columns: 1fr 1fr; } }
+/* Mid-width desktop windows: metric/funnel rows step down to 3-up instead of
+   crushing five tiles; toolbars wrap as grouped rows rather than shattering. */
+@media (max-width: 1180px) {
+  .metrics-row { grid-template-columns: repeat(3, 1fr) !important; }
+  .mf-grid:not(.mf-grid-4) { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 1000px) {
+  .dpp-head { flex-wrap: wrap; }
+  .cv-toolbar { flex-wrap: wrap; }
+}
 
 /* Compact user chip — small circular initials avatar beside the name; the one
    way assigned users / team members render anywhere in the app. */

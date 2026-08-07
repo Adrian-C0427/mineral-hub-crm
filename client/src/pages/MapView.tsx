@@ -88,7 +88,7 @@ const HEAT_GAS_COLOR = ["interpolate", ["linear"], ["heatmap-density"],
 const HEAT_STOPS: [number, string][] = [[0, "#eef2ff"], [0.2, "#fde68a"], [0.45, "#f59e0b"], [0.7, "#ea580c"], [1, "#7f1d1d"]];
 
 interface HeatState { oil: boolean; gas: boolean; intensity: number; radius: number; opacity: number; min: number; max: number; period: HeatPeriod; from: string; to: string; topProducers: boolean; hotspots: boolean }
-const DEFAULT_HEAT: HeatState = { oil: false, gas: false, intensity: 1, radius: 32, opacity: 0.85, min: 0, max: 0, period: "12m", from: "", to: "", topProducers: false, hotspots: true };
+const DEFAULT_HEAT: HeatState = { oil: false, gas: false, intensity: 1.6, radius: 48, opacity: 0.85, min: 0, max: 0, period: "12m", from: "", to: "", topProducers: false, hotspots: true };
 
 const STATUS_OPTIONS = [
   ["ACTIVE", "Active deals"], ["ALL", "All linked deals"], ["UNDER_CONTRACT", "Under Contract"],
@@ -769,6 +769,16 @@ export function MapView() {
         </button>
       </div>
 
+      <div className="row" style={{ marginBottom: 8 }}>
+        <span className="muted">{deals == null ? "…" : `${deals.length} deal${deals.length === 1 ? "" : "s"} · ${abstractCount} deal tract${abstractCount === 1 ? "" : "s"} · ${num(gisOptions.wellCount)} wells`}</span>
+      </div>
+
+      {/* GIS-style layout: an open Filters / Heat panel docks as a LEFT column
+          and the map keeps its full height beside it — panels never overlay or
+          shrink the map vertically. */}
+      <div className="mc-layout">
+      {(showFilters || showHeat) && (
+        <aside className="mc-side" style={{ height: mapH ? `${mapH}px` : undefined }}>
       {showFilters && (
         <div className="panel mc-panel" style={{ marginBottom: 12 }}>
           <div className="mc-grid">
@@ -854,8 +864,8 @@ export function MapView() {
             </div>
             <div className="mc-heat-mid">
               <div className="mc-dot-lbl"><span className="va-dot" style={{ background: "var(--accent)" }} /><span className="ddx-label">Appearance</span></div>
-              <Slider label="Intensity" min={0.2} max={3} step={0.1} value={heat.intensity} onChange={(v) => setHeatK("intensity", v)} />
-              <Slider label="Radius" min={8} max={80} step={1} value={heat.radius} onChange={(v) => setHeatK("radius", v)} suffix="px" />
+              <Slider label="Intensity" min={0.2} max={6} step={0.1} value={heat.intensity} onChange={(v) => setHeatK("intensity", v)} />
+              <Slider label="Radius" min={8} max={160} step={1} value={heat.radius} onChange={(v) => setHeatK("radius", v)} suffix="px" />
               <Slider label="Opacity" min={0.1} max={1} step={0.05} value={heat.opacity} onChange={(v) => setHeatK("opacity", v)} />
             </div>
             <div>
@@ -879,14 +889,12 @@ export function MapView() {
           )}
         </div>
       )}
-
-      <div className="row" style={{ marginBottom: 8 }}>
-        <span className="muted">{deals == null ? "…" : `${deals.length} deal${deals.length === 1 ? "" : "s"} · ${abstractCount} deal tract${abstractCount === 1 ? "" : "s"} · ${num(gisOptions.wellCount)} wells`}</span>
-      </div>
+        </aside>
+      )}
 
       {/* Height is measured to fill down to the footer (no blank space below);
           dvh fallback tracks the real visible viewport before the first measure. */}
-      <div ref={mapWrap} style={{ position: "relative", height: mapH ? `${mapH}px` : "calc(100dvh - 250px)", minHeight: 320, borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
+      <div ref={mapWrap} style={{ position: "relative", flex: 1, minWidth: 0, height: mapH ? `${mapH}px` : "calc(100dvh - 250px)", minHeight: 320, borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
         <div ref={mapContainer} style={{ position: "absolute", inset: 0 }} />
         {/* Same collapsible floating Layers control as the Marketplace map —
             one shared component, identical interaction on every map. */}
@@ -954,7 +962,7 @@ export function MapView() {
         )}
 
         {selected && !choices && (
-          <div style={{ position: "absolute", top: 12, left: 52, width: 320, maxWidth: "calc(100% - 310px)", maxHeight: "calc(100% - 24px)", overflowY: "auto", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "var(--shadow)", padding: 16 }}>
+          <div style={{ position: "absolute", top: 12, left: 52, width: 320, maxWidth: "calc(100% - 310px)", maxHeight: "calc(100% - 190px)", overflowY: "auto", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 8, boxShadow: "var(--shadow)", padding: 16 }}>
             {selected.kind === "well" ? (
               <>
                 <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.leaseName || "Well"} {selected.wellNo ? `#${selected.wellNo}` : ""}</h3><div className="muted" style={{ fontSize: 12 }}>{selected.symbol}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
@@ -1075,6 +1083,7 @@ export function MapView() {
             )}
           </div>
         )}
+      </div>
       </div>
     </div>
   );

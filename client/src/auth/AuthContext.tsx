@@ -20,6 +20,7 @@ export interface CurrentUser {
    *  theme with a default. */
   themePreference?: "dark" | "light" | null;
   accentColor?: string | null;
+  accentColor2?: string | null;
   avatarColor?: string | null;
 }
 

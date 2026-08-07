@@ -358,6 +358,8 @@ model User {
   themePreference   String?
   // Per-user accent color (hex) applied app-wide; null = the built-in blue.
   accentColor       String?
+  // Secondary accent (charts, indicators, progress); null = follows accent.
+  accentColor2      String?
   // Per-user initials-avatar color (hex); null = auto (name-hash palette).
   avatarColor       String?
 

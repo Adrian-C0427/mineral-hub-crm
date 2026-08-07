@@ -317,9 +317,9 @@ function NameField({ contact, canEdit, onSave }: { contact: ContactRow; canEdit:
   };
   return (
     <div className="cw-fedit" style={{ flexWrap: "wrap" }}>
-      <input autoFocus value={first} onChange={(e) => setFirst(e.target.value)} placeholder="First" aria-label="First name" style={{ width: 90 }}
+      <input autoFocus value={first} onChange={(e) => setFirst(e.target.value)} placeholder="First" aria-label="First name" style={{ flex: "1 1 90px", minWidth: 0 }}
         onKeyDown={(e) => { if (e.key === "Enter") void save(); if (e.key === "Escape") setEditing(false); }} />
-      <input value={last} onChange={(e) => setLast(e.target.value)} placeholder="Last" aria-label="Last name" style={{ width: 90 }}
+      <input value={last} onChange={(e) => setLast(e.target.value)} placeholder="Last" aria-label="Last name" style={{ flex: "1 1 90px", minWidth: 0 }}
         onKeyDown={(e) => { if (e.key === "Enter") void save(); if (e.key === "Escape") setEditing(false); }} />
       <button className="small primary" disabled={!dirty || !valid || busy} onClick={() => void save()}>Save</button>
       <button className="icon-btn" title="Cancel" aria-label="Cancel name edit" onClick={() => setEditing(false)}><X size={12} /></button>

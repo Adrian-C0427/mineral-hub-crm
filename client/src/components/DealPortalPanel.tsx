@@ -118,10 +118,10 @@ export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string
       const tiles = [
         { label: "Listing Views", trend: stats.viewsThisWeek > 0 ? `+${stats.viewsThisWeek} this week` : null,
           value: String(stats.views), hint: stats.firstViewAt ? `since ${fmtShort(stats.firstViewAt)}` : "no views yet",
-          dim: !stats.views, bar: "var(--accent)", w: stats.views > 0 ? 100 : 0 },
+          dim: !stats.views, bar: "var(--accent2)", w: stats.views > 0 ? 100 : 0 },
         { label: "Unique Visitors", trend: null, value: String(stats.uniqueVisitors),
           hint: stats.returningVisitors > 0 ? `${stats.returningVisitors} returned twice+` : "—",
-          dim: !stats.uniqueVisitors, bar: "var(--accent)", w: pctOf(stats.uniqueVisitors, stats.views) },
+          dim: !stats.uniqueVisitors, bar: "var(--accent2)", w: pctOf(stats.uniqueVisitors, stats.views) },
         { label: "Doc Downloads", trend: null, value: String(stats.downloads),
           hint: stats.topDownload ? stats.topDownload.folder : "—",
           dim: !stats.downloads, bar: "#f5b04b", w: pctOf(stats.downloads, stats.views) },
