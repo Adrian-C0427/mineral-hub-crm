@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
@@ -552,9 +553,37 @@ const sendEmailSchema = z.object({
   body: z.string().min(1).max(100_000),
 });
 
+/**
+ * The only user-triggered outbound email path in the app, and the one endpoint
+ * here that spends a resource the org cannot get back: a send burns the
+ * organization's Resend/SMTP quota and, more durably, its sending domain's
+ * reputation. One call already fans out to as many as 1,000 buyers (see
+ * sendEmailSchema), so an unthrottled loop is a bulk mailer pointed at the CRM's
+ * real business contacts — quota exhaustion and a blacklisted domain, not just
+ * wasted cycles. Recipients are org-scoped below, so this is never an open relay.
+ *
+ * Keyed on the authenticated user, NOT req.ip: requireAuth + requireOrg run
+ * above, so the caller is always known, and the org's sending budget is the
+ * thing being protected — an IP bucket would let one user rotate egress
+ * addresses (mobile switch, VPN, second device) to keep sending. Mirrors the
+ * keying in aiRouter and twoFactorLimiter.
+ *
+ * The ceiling clears real outreach comfortably: a batch send is one request, and
+ * working through even a dozen deals in a quarter hour stays well inside it.
+ */
+const sendEmailLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as AuthedRequest).user?.id ?? req.ip ?? "unknown",
+  message: { error: "Too many email sends. Wait a few minutes and try again." },
+});
+
 dealsRouter.post(
   "/:id/email",
   requirePermission("sendEmail"),
+  sendEmailLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const { buyerIds, subject, body } = sendEmailSchema.parse(req.body);
     const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
