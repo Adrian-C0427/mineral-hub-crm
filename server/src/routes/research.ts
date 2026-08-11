@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import type { Prisma, ResearchDocClass, ResearchDocType, ResearchPermitStatus, WellTrajectory } from "@prisma/client";
 import { prisma } from "../db.js";
@@ -35,6 +36,37 @@ import { normalizeCompany } from "../serializers.js";
  */
 export const researchRouter = Router();
 researchRouter.use(requireAuth, requireOrg);
+
+/**
+ * This was the last router with no replay ceiling — import, contacts' import
+ * paths, wells, gis, ai, integrations' POSTs and the whole portal all carry one.
+ *
+ * Two exposures here. The analytics endpoints load the org's ENTIRE
+ * `TRANSACTION` corpus per request and expand it to a per-party-pair edge list
+ * in process (see loadTxEdges → expandDocToEdges, and the chain/co-buyer
+ * aggregations built on top of it) — all behind `viewResearch`, a READ
+ * permission, so a read-only member could loop any of them and saturate the
+ * pool. And `/ingest/analyze` is a full CSV parse that writes nothing, which
+ * makes it free for the caller to repeat; its 50,000-row cap bounds one call,
+ * not the rate of calls.
+ *
+ * Keyed on the authenticated user, not req.ip: requireAuth + requireOrg run
+ * above so the caller is always known, and an IP bucket would let one account
+ * rotate egress addresses to keep going. Mirrors aiRouter and twoFactorLimiter.
+ *
+ * Sized like the wells and gis routers, whose read endpoints have the same
+ * shape: the Research workspace fires several requests per page load and its
+ * filters re-query on change, so the ceiling has to clear real interactive use
+ * while still bounding a script to roughly one heavy query a second.
+ */
+researchRouter.use(rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as AuthedRequest).user?.id ?? req.ip ?? "unknown",
+  message: { error: "Too many research requests. Wait a moment and try again." },
+}));
 
 const DAY = 86400000;
 
