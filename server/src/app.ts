@@ -58,9 +58,34 @@ export function createApp() {
     }),
   );
 
-  // 25mb accommodates research CSV imports (county recording indexes / permit
-  // exports posted as JSON strings); other payloads stay small in practice.
-  app.use(express.json({ limit: "25mb" }));
+  // Body parsing runs BEFORE authentication (attachUser, below) and before every
+  // router's rate limiter, so the JSON limit is the only thing standing between an
+  // unauthenticated caller and the cost of parsing their payload. A blanket 25mb
+  // therefore let anyone — no session needed — make the process buffer and
+  // JSON.parse 25 MB per request on the public routes (portal lead/offer capture,
+  // /auth/login, the OAuth callbacks); the limiters on those paths cannot help,
+  // because they only run once parsing has already finished.
+  //
+  // Only the four CSV importers legitimately post multi-megabyte JSON (a whole
+  // recording index / permit export as one string, bounded at MAX_CSV_CHARS).
+  // They get the large limit on their own paths; everything else gets 2mb, which
+  // clears the biggest ordinary payload — PATCH /api/org/branding, two logos at
+  // ~700 KB of base64 each (LOGO_MAX_BYTES) — with room to spare.
+  //
+  // body-parser no-ops when a body has already been parsed (`req._body`), so the
+  // path-scoped parsers must be mounted first; the general one then only sees
+  // requests they didn't claim. File UPLOADS are unaffected either way: those are
+  // multipart, handled by multer under MAX_UPLOAD_BYTES, not by express.json.
+  const csvJson = express.json({ limit: "25mb" });
+  for (const csvPath of [
+    "/api/buyers/import",
+    "/api/contacts/import",
+    "/api/research/ingest",
+    "/api/wells/import",
+  ]) {
+    app.use(csvPath, csvJson);
+  }
+  app.use(express.json({ limit: "2mb" }));
   app.use(cookieParser());
   app.use(attachUser);
 

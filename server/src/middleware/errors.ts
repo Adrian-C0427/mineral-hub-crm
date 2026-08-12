@@ -39,6 +39,26 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     res.status(403).json({ error: "This app's address isn't allowed to call the API (CORS). Check the server's CORS_ORIGINS setting." });
     return;
   }
+  // body-parser (express.json) signals a rejected payload — over the size limit,
+  // or malformed JSON — by throwing an Error that carries an HTTP status instead
+  // of extending HttpError. Those fell through to the 500 branch below, so a
+  // caller who simply posted too much data was told the SERVER had failed, and a
+  // plain client mistake was logged as an internal fault. Only 4xx statuses are
+  // honoured here: anything else is a real fault and must not be able to
+  // downgrade itself out of the 500 path by carrying a status field.
+  const declared = Number(
+    (err as { status?: number }).status ?? (err as { statusCode?: number }).statusCode ?? 0,
+  );
+  if (err instanceof Error && Number.isInteger(declared) && declared >= 400 && declared < 500) {
+    const tooLarge = (err as { type?: string }).type === "entity.too.large";
+    res.status(declared).json({
+      error: tooLarge
+        ? "Request payload is too large."
+        : "The request could not be read. Check the request body and try again.",
+    });
+    return;
+  }
+
   // Never leak internals; passwords/secrets are never logged.
   console.error("Unhandled error:", err instanceof Error ? err.message : err);
   res.status(500).json({ error: "Internal server error" });
