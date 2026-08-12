@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { prettyEnum } from "../lib/format";
 import { userAvatarColor, initialsOf } from "../lib/avatarColor";
-import { layoutRect } from "../lib/viewport";
+import { layoutRect, layoutViewport } from "../lib/viewport";
 import { useStages } from "../stages";
 
 /**
@@ -412,9 +412,9 @@ export function OverflowMenu({ items, ariaLabel = "More actions" }: {
     const place = () => {
       const r = ref.current ? layoutRect(ref.current) : null; // zoom-aware
       if (!r) return;
-      // documentElement.clientWidth/Height = the CSS viewport, which stays
-      // correct inside embedded/zoomed contexts where window.inner* can lie.
-      const vw = document.documentElement.clientWidth, vh = document.documentElement.clientHeight;
+      // Viewport in layout px — same coordinate space as layoutRect and the
+      // fixed portal, so edge math is exact under the interface zoom.
+      const { vw, vh } = layoutViewport();
       const menuH = menuRef.current?.offsetHeight ?? Math.min(items.length, 8) * 36 + 12;
       const openUp = r.bottom + 6 + menuH > vh - 8 && r.top - 6 - menuH >= 8;
       setPos({
