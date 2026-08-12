@@ -74,8 +74,22 @@ const DAY = 86400000;
 // Query parsing
 // ---------------------------------------------------------------------------
 
+/**
+ * Ceiling on the number of values accepted for ONE filter. Every list parsed
+ * here becomes a Prisma `IN (…)` (or, for the RRC path, an `ANY($n::text[])`),
+ * so an uncapped list is an uncapped query: repeated params (`?survey=a&survey=b…`)
+ * let one request build a predicate with tens of thousands of bound values, which
+ * costs planning time on every table it touches and eventually trips Postgres's
+ * 65,535-parameter limit — a 500 out of a read endpoint. gis.ts already slices
+ * its equivalent filter lists at the same bound (see /options and planExtentQuery);
+ * this brings the research filters in line. 500 is far above any real selection —
+ * Texas has 254 counties.
+ */
+export const MAX_FILTER_VALUES = 500;
+
 const arr = (v: unknown): string[] =>
-  v == null ? [] : Array.isArray(v) ? v.map(String).filter(Boolean) : [String(v)].filter(Boolean);
+  (v == null ? [] : Array.isArray(v) ? v.map(String).filter(Boolean) : [String(v)].filter(Boolean))
+    .slice(0, MAX_FILTER_VALUES);
 
 /** Parse YYYY-MM-DD (or ISO) as UTC midnight. */
 export function parseDay(s: string | undefined): Date | null {
@@ -92,7 +106,7 @@ export function parseDay(s: string | undefined): Date | null {
   return d;
 }
 
-interface ResearchFilters {
+export interface ResearchFilters {
   states: string[];
   counties: string[];
   docClass?: ResearchDocClass;
@@ -108,7 +122,7 @@ interface ResearchFilters {
 
 interface Window { from: Date; to: Date } // [from, to] inclusive days
 
-function parseFilters(q: Record<string, unknown>): ResearchFilters {
+export function parseFilters(q: Record<string, unknown>): ResearchFilters {
   return {
     states: arr(q.state),
     counties: arr(q.county),
@@ -119,8 +133,9 @@ function parseFilters(q: Record<string, unknown>): ResearchFilters {
     operators: arr(q.operator),
     surveys: arr(q.survey),
     // Both spellings are accepted (?abstractId=…&abstractId=… and ?abstract=…)
-    // — different callers grew up on different sides of a merge.
-    abstractIds: [...arr(q.abstractId), ...arr(q.abstract)],
+    // — different callers grew up on different sides of a merge. Re-sliced after
+    // the merge so the two spellings together can't double the cap.
+    abstractIds: [...arr(q.abstractId), ...arr(q.abstract)].slice(0, MAX_FILTER_VALUES),
     statuses: arr(q.permitStatus),
     trajectories: arr(q.trajectory),
   };
