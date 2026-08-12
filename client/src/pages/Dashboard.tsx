@@ -13,6 +13,7 @@ import { useStages } from "../stages";
 import { PeriodSegmented } from "../components/PeriodSegmented";
 import { DateField } from "../components/DateField";
 import { useTheme } from "../theme";
+import { layoutRect } from "../lib/viewport";
 
 // Global dashboard period (default YTD). Drives all period-scoped widgets.
 type DashPeriod = "THIS_MONTH" | "LAST_MONTH" | "THIS_QUARTER" | "YTD" | "CUSTOM";
@@ -254,7 +255,7 @@ export function Dashboard() {
     const el = wrapRef.current;
     if (!el) return;
     const measure = () => {
-      const w = Math.round(el.getBoundingClientRect().width);
+      const w = Math.round(layoutRect(el).width); // zoom-aware layout width
       if (w >= 320) setGridW(w);
     };
     const ro = new ResizeObserver(measure);

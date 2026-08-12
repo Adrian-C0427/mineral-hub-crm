@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { ChevronDown } from "lucide-react";
+import { layoutRect } from "../lib/viewport";
 
 /**
  * Shared internals for the app's ONE dropdown family (Select +
@@ -29,7 +30,9 @@ export function useMenuPosition(anchorRef: RefObject<HTMLElement | null>, open: 
   useLayoutEffect(() => {
     if (!open) { setPos(null); return; }
     const place = () => {
-      const r = anchorRef.current?.getBoundingClientRect();
+      // layoutRect converts to layout-space px so the fixed portal lands
+      // exactly on the anchor even under the global interface zoom.
+      const r = anchorRef.current ? layoutRect(anchorRef.current) : null;
       if (!r) return;
       // documentElement.clientWidth/Height = the CSS viewport, which stays
       // correct inside embedded/zoomed contexts where window.inner* can lie.

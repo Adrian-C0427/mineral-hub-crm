@@ -208,12 +208,20 @@ export const STATE_COUNTIES: Record<string, readonly string[]> = {
   TX: TEXAS_COUNTY_OPTIONS,
 };
 
-/** Union of counties for the selected states (sorted, de-duplicated). Empty
- * until at least one state is chosen — prevents invalid county selections. */
+/** States the platform actively supports today. County pickers default to
+ * these when NO state is selected, so users go straight to County → Abstract
+ * without a redundant State step. When more states come online, extending this
+ * list (or selecting states explicitly) reintroduces state-based scoping with
+ * no structural change. */
+export const SUPPORTED_STATES = ["TX"] as const;
+
+/** Union of counties for the selected states (sorted, de-duplicated). With no
+ * state selected, falls back to the supported states' counties — County is the
+ * primary geographic selection; State remains an optional narrower. */
 export function countiesForStates(states: string[]): string[] {
-  if (!states.length) return [];
+  const source = states.length ? states : [...SUPPORTED_STATES];
   const out = new Set<string>();
-  for (const s of states) for (const c of STATE_COUNTIES[s] ?? []) out.add(c);
+  for (const s of source) for (const c of STATE_COUNTIES[s] ?? []) out.add(c);
   return [...out].sort();
 }
 

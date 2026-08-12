@@ -8,6 +8,7 @@ import {
 } from "./navIcons";
 import { useAuth } from "../auth/AuthContext";
 import { loadBranding } from "../lib/branding";
+import { layoutRect } from "../lib/viewport";
 import { ThemedLogo } from "./ThemedLogo";
 
 interface NavItem {
@@ -141,7 +142,7 @@ function SidebarItem({ item, collapsed, allowed, pathname }: { item: NavItem; co
   const closeTimer = useRef<number | null>(null);
   const openFlyout = () => {
     if (closeTimer.current) { window.clearTimeout(closeTimer.current); closeTimer.current = null; }
-    const r = groupRef.current?.getBoundingClientRect();
+    const r = groupRef.current ? layoutRect(groupRef.current) : null; // zoom-aware
     if (r) setFlyout({ top: r.top, left: r.right + 6 });
   };
   const scheduleClose = () => { closeTimer.current = window.setTimeout(() => setFlyout(null), 140); };
