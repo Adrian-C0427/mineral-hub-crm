@@ -1049,8 +1049,26 @@ function guessImportMapping(headers: string[]): Record<string, string> {
   return mapping;
 }
 
-function parseCsv(csv: string): { headers: string[]; rows: Record<string, string>[] } {
+/**
+ * Upper bound on rows per production import. `MAX_CSV_CHARS` (15M) bounds the
+ * raw body, but a production row is tiny — `WELL-000001,2024-01` is ~20 bytes —
+ * so the character limit alone permits roughly 750k rows. Every row becomes a
+ * live object three times over below (`parsed`, `byWellMonth`, `batch`) on top
+ * of csv-parse's own record array, and each DISTINCT well costs its own DB
+ * round-trip in the resolve pass. Without a row bound one request could exhaust
+ * the heap or hold a pooled Neon connection for the length of the import.
+ *
+ * 20,000 matches the buyer and contact importers (import.ts, contacts.ts);
+ * research ingest allows 50,000. All four CSV paths are now bounded.
+ */
+export const MAX_PRODUCTION_IMPORT_ROWS = 20_000;
+
+/** Exported for the row-cap regression test in routes/security.audit.test.ts. */
+export function parseCsv(csv: string): { headers: string[]; rows: Record<string, string>[] } {
   const records = parse(csv, { columns: true, skip_empty_lines: true, trim: true, bom: true, relax_column_count: true }) as Record<string, string>[];
+  if (records.length > MAX_PRODUCTION_IMPORT_ROWS) {
+    throw new HttpError(400, `This file has too many rows (${records.length}). Split it into files of ${MAX_PRODUCTION_IMPORT_ROWS.toLocaleString()} rows or fewer.`);
+  }
   const headers = records.length ? Object.keys(records[0]) : [];
   return { headers, rows: records };
 }
@@ -1082,6 +1100,8 @@ const importCommitSchema = z.object({
 });
 
 const CHUNK = 500;
+/** Wells whose month-deletes are folded into one statement (see the delete pass). */
+const DELETE_WELLS_PER_QUERY = 100;
 
 wellsRouter.post(
   "/import/commit",
@@ -1181,8 +1201,18 @@ wellsRouter.post(
       arr.push(ymToDate(r.month));
       monthsByWell.set(r.wellId, arr);
     }
-    for (const wid of wellIds) {
-      await prisma.wellProductionMonth.deleteMany({ where: { wellId: wid, month: { in: monthsByWell.get(wid)! } } });
+    // One deleteMany per well was a round-trip per DISTINCT well — up to
+    // MAX_PRODUCTION_IMPORT_ROWS of them on a file where every row is its own
+    // well, all serial, all holding the same pooled connection. An OR of the
+    // per-well predicates is the exact same set of rows (the union of what the
+    // individual deletes matched), so batching is semantics-preserving; the
+    // month list still varies per well, which is why this can't collapse into a
+    // single `wellId in (…) AND month in (…)` (that would over-delete).
+    for (let i = 0; i < wellIds.length; i += DELETE_WELLS_PER_QUERY) {
+      const slice = wellIds.slice(i, i + DELETE_WELLS_PER_QUERY);
+      await prisma.wellProductionMonth.deleteMany({
+        where: { OR: slice.map((wid) => ({ wellId: wid, month: { in: monthsByWell.get(wid)! } })) },
+      });
     }
     const batch: Prisma.WellProductionMonthCreateManyInput[] = finalRows.map((r) => ({
       wellId: r.wellId, month: ymToDate(r.month), oilBbl: r.oilBbl, gasMcf: r.gasMcf,

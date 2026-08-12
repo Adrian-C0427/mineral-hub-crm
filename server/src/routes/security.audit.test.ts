@@ -1,13 +1,17 @@
 /**
- * Regression tests for the 2026-07-22 API security audit fixes.
+ * Regression tests for the API security audit fixes.
  *
- * Two of those fixes changed behaviour rather than just tightening a gate, so
- * they are pinned here: the rewritten buyer-import dedup pass, and the
- * magic-byte validation now applied to branding/photo data URLs.
+ * Only fixes that changed BEHAVIOUR are pinned here — tightening a gate is
+ * covered by the gate itself. From 2026-07-22: the rewritten buyer-import dedup
+ * pass, and the magic-byte validation on branding/photo data URLs. From
+ * 2026-08-11: the production importer's row cap.
  */
 import { describe, it, expect } from "vitest";
 import { classifyParsed, REASON_IN_FILE, REASON_EXISTING, REASON_MISSING_COMPANY } from "./import.js";
 import { isDeclaredRaster, LOGO_MIME } from "./org.js";
+import { parseCsv as parseProductionCsv, MAX_PRODUCTION_IMPORT_ROWS } from "./wells.js";
+import { MAX_INGEST_ROWS } from "../domain/researchIngest.js";
+import { MAX_IMPORT_ROWS } from "./import.js";
 import { normalizeCompany } from "../serializers.js";
 import { DEFAULT_ROLE_PERMISSIONS } from "../domain/permissions.js";
 import { cardSafeText } from "../services/notifyPush.js";
@@ -199,6 +203,37 @@ describe("Teams card text sanitization", () => {
 
   it("leaves ordinary notification text readable", () => {
     expect(cardSafeText("New portal lead", big)).toBe("New portal lead");
+  });
+});
+
+describe("production import row cap", () => {
+  // wells.ts was the one CSV path bounded only by MAX_CSV_CHARS (15M). A
+  // production row is ~20 bytes, so that permitted ~750k rows — each held three
+  // times over in memory, each DISTINCT well costing its own DB round-trip.
+  const csv = (n: number) =>
+    ["wellName,month", ...Array.from({ length: n }, (_, i) => `WELL-${i},2024-01`)].join("\n");
+
+  it("rejects a file over the cap instead of parsing it", () => {
+    expect(() => parseProductionCsv(csv(MAX_PRODUCTION_IMPORT_ROWS + 1))).toThrow(/too many rows/);
+  });
+
+  it("accepts a file exactly at the cap", () => {
+    expect(parseProductionCsv(csv(MAX_PRODUCTION_IMPORT_ROWS)).rows).toHaveLength(MAX_PRODUCTION_IMPORT_ROWS);
+  });
+
+  it("still parses an ordinary file", () => {
+    const { headers, rows } = parseProductionCsv("wellName,month,oilBbl\nSMITH 1H,2024-01,120");
+    expect(headers).toEqual(["wellName", "month", "oilBbl"]);
+    expect(rows).toEqual([{ wellName: "SMITH 1H", month: "2024-01", oilBbl: "120" }]);
+  });
+
+  it("leaves every CSV entry point bounded", () => {
+    // The gap this closed was a MISSING bound, not a wrong number — so the
+    // invariant worth guarding is that all four importers still have one.
+    for (const cap of [MAX_PRODUCTION_IMPORT_ROWS, MAX_IMPORT_ROWS, MAX_INGEST_ROWS]) {
+      expect(cap).toBeGreaterThan(0);
+      expect(cap).toBeLessThanOrEqual(50_000);
+    }
   });
 });
 
