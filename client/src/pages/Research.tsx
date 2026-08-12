@@ -61,6 +61,7 @@ interface Signal {
 interface FilterOpts {
   states: string[]; counties: { state: string; county: string }[]; docTypes: string[];
   abstracts: { state: string; county: string; abstractId: string }[];
+  surveys: { state: string; county: string; survey: string }[];
   buyers: { value: string; label: string }[]; sellers: { value: string; label: string }[]; operators: { value: string; label: string }[];
 }
 interface DocRecord {
@@ -132,12 +133,13 @@ interface Filters {
   states: string[];
   counties: string[];
   abstracts: string[];
+  surveys: string[];
   docTypes: string[];
   buyers: string[];
   sellers: string[];
   operators: string[];
 }
-const EMPTY_FILTERS: Filters = { states: [], counties: [], abstracts: [], docTypes: [], buyers: [], sellers: [], operators: [] };
+const EMPTY_FILTERS: Filters = { states: [], counties: [], abstracts: [], surveys: [], docTypes: [], buyers: [], sellers: [], operators: [] };
 
 // Customize View — which Overview KPIs show + their order (saved per user).
 type ResMetricId = "transactions" | "leases" | "permits" | "horizontalPermits" | "uniqueBuyers" | "uniqueOperators";
@@ -213,6 +215,7 @@ export function Research() {
     for (const s of filters.states) q.append("state", s);
     for (const c of filters.counties) q.append("county", c);
     for (const a of filters.abstracts) q.append("abstractId", a);
+    for (const sv of filters.surveys) q.append("survey", sv);
     for (const t of filters.docTypes) q.append("docType", t);
     for (const b of filters.buyers) q.append("buyer", b);
     for (const s of filters.sellers) q.append("seller", s);
@@ -228,7 +231,7 @@ export function Research() {
 
 
   const activeFilterCount =
-    filters.states.length + filters.counties.length + filters.abstracts.length + filters.docTypes.length +
+    filters.states.length + filters.counties.length + filters.abstracts.length + filters.surveys.length + filters.docTypes.length +
     filters.buyers.length + filters.sellers.length + filters.operators.length;
   const compareOff = compare === "NONE";
 
@@ -318,6 +321,13 @@ export function Research() {
                 are the research data's abstract ids; options narrow to the
                 selected counties/states (all abstracts with activity when no
                 county is picked). */}
+            <ResearchSurveyFilter
+              options={opts.surveys ?? []}
+              states={filters.states}
+              counties={filters.counties}
+              value={filters.surveys}
+              onChange={(surveys) => setFilters((f) => ({ ...f, surveys }))}
+            />
             <ResearchAbstractFilter
               options={opts.abstracts ?? []}
               states={filters.states}
@@ -567,6 +577,43 @@ function ResearchMetricsCustomize({ prefs, onChange }: { prefs: ResMetricPrefs; 
  * currently selected counties (or states), and selections invalidated by a
  * county change are auto-pruned like the county/state cascade.
  */
+/** Survey-name filter — same dynamic, county/state-scoped searchable pattern
+ *  as the Abstract filter; options come from the imported data itself. */
+function ResearchSurveyFilter({ options, states, counties, value, onChange }: {
+  options: { state: string; county: string; survey: string }[];
+  states: string[]; counties: string[];
+  value: string[]; onChange: (v: string[]) => void;
+}) {
+  const scoped = useMemo(() => {
+    const cs = new Set(counties.map((c) => c.toUpperCase()));
+    const ss = new Set(states.map((s) => s.toUpperCase()));
+    return options.filter((o) =>
+      (!counties.length || cs.has(o.county.toUpperCase())) &&
+      (!states.length || ss.has(o.state.toUpperCase())));
+  }, [options, states.join("|"), counties.join("|")]); // eslint-disable-line react-hooks/exhaustive-deps
+  const names = useMemo(() => [...new Set(scoped.map((o) => o.survey))], [scoped]);
+
+  // Cascade pruning, mirroring the Abstract filter.
+  useEffect(() => {
+    if (!counties.length && !states.length) return;
+    const valid = new Set(names);
+    const pruned = value.filter((v) => valid.has(v));
+    if (pruned.length !== value.length) onChange(pruned);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [names.join("|")]);
+
+  return (
+    <div className="field" style={{ marginBottom: 0, minWidth: 190, flex: 1 }}><label>Surveys</label>
+      <SearchableMultiSelect
+        options={names}
+        value={value}
+        onChange={onChange}
+        placeholder={names.length ? "Search surveys…" : "No surveys in the data"}
+      />
+    </div>
+  );
+}
+
 function ResearchAbstractFilter({ options, states, counties, value, onChange }: {
   options: { state: string; county: string; abstractId: string }[];
   states: string[]; counties: string[];
@@ -1461,8 +1508,23 @@ function EntityModal({ norm, data, onClose, onOpenEntity, onViewTx }: {
         <div className="ent-sec">
           <div className="ent-sec-label">Appears in Chains</div>
           {/* The same compact ChainSection used on Buyer Profiles — collapsed
-              summary rows that expand on demand. */}
-          <ChainSection chains={chainRowsToEntries(chains, norm)} classLabels={data.classLabels} focusNorm={norm} />
+              summary rows that expand on demand, with the standard chain
+              actions (supporting transactions + date range) for full parity
+              with the Chains view. */}
+          <ChainSection
+            chains={chainRowsToEntries(chains, norm)}
+            classLabels={data.classLabels}
+            focusNorm={norm}
+            renderActions={(_entry, i) => {
+              const c = chains[i];
+              return (
+                <>
+                  <button className="small" onClick={() => onViewTx(`Chain: ${c.path}`, { path: c.nodes.map((n) => n.norm) })}>View supporting transactions →</button>
+                  {c.firstDate && c.lastDate && <span className="muted" style={{ fontSize: 12 }}>{fmtDate(c.firstDate)} – {fmtDate(c.lastDate)}</span>}
+                </>
+              );
+            }}
+          />
         </div>
       )}
 
@@ -1619,9 +1681,9 @@ interface AbstractBuyer {
   amount: number; acreage: number; firstSeen: string; lastSeen: string;
 }
 
-interface RecFilters { abstracts: string[]; counties: string[]; docClass: string; docTypes: string[]; statuses: string[]; trajectories: string[]; from: string; to: string }
-const EMPTY_REC_FILTERS: RecFilters = { abstracts: [], counties: [], docClass: "", docTypes: [], statuses: [], trajectories: [], from: "", to: "" };
-interface RecOptions { counties: string[]; abstracts: string[]; docTypes?: string[]; docClasses?: string[]; statuses?: string[]; trajectories?: string[] }
+interface RecFilters { abstracts: string[]; counties: string[]; surveys: string[]; docClass: string; docTypes: string[]; statuses: string[]; trajectories: string[]; from: string; to: string }
+const EMPTY_REC_FILTERS: RecFilters = { abstracts: [], counties: [], surveys: [], docClass: "", docTypes: [], statuses: [], trajectories: [], from: "", to: "" };
+interface RecOptions { counties: string[]; abstracts: string[]; surveys?: string[]; docTypes?: string[]; docClasses?: string[]; statuses?: string[]; trajectories?: string[] }
 
 function RecordsTab({ qs }: { qs: string }) {
   const { can } = useAuth();
@@ -1652,6 +1714,7 @@ function RecordsTab({ qs }: { qs: string }) {
     const p = new URLSearchParams(qs);
     for (const a of rf.abstracts) p.append("abstract", a);
     for (const c of rf.counties) p.append("county", c);
+    for (const sv of rf.surveys) p.append("survey", sv);
     for (const t of rf.docTypes) p.append("docType", t);
     if (rf.docClass) p.set("docClass", rf.docClass);
     for (const s of rf.statuses) p.append("permitStatus", s);
@@ -1660,7 +1723,7 @@ function RecordsTab({ qs }: { qs: string }) {
     if (rf.to) p.set("to", rf.to);
     return p.toString();
   }, [qs, rf]);
-  const activeFilterCount = rf.abstracts.length + rf.counties.length + rf.docTypes.length +
+  const activeFilterCount = rf.abstracts.length + rf.counties.length + rf.surveys.length + rf.docTypes.length +
     rf.statuses.length + rf.trajectories.length + (rf.docClass ? 1 : 0) + (rf.from ? 1 : 0) + (rf.to ? 1 : 0);
 
   // Abstract Buyer Preview: whenever an abstract is selected (page-level drill
@@ -1781,6 +1844,8 @@ function RecordsTab({ qs }: { qs: string }) {
       <div className="rec-fgrid">
         <div><div className="rec-flabel">County</div>
           <SearchableMultiSelect options={opts.counties} value={rf.counties} onChange={(v) => setRf((p) => ({ ...p, counties: v }))} placeholder="Counties…" /></div>
+        <div><div className="rec-flabel">Survey</div>
+          <SearchableMultiSelect options={opts.surveys ?? []} value={rf.surveys} onChange={(v) => setRf((p) => ({ ...p, surveys: v }))} placeholder="Surveys…" /></div>
         <div><div className="rec-flabel">Abstract</div>
           <SearchableMultiSelect options={opts.abstracts} value={rf.abstracts} onChange={(v) => setRf((p) => ({ ...p, abstracts: v }))} placeholder="Abstracts…" /></div>
         {kind === "documents" ? (

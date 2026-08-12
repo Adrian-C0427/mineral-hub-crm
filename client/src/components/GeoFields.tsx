@@ -49,7 +49,8 @@ export function GeoFields({
   // Cascade pruning: drop any selected county no longer valid for the chosen
   // states (unless the caller supplies its own option list).
   useEffect(() => {
-    if (countyOptions) return;
+    // No pruning when no state is chosen — counties stand on their own now.
+    if (countyOptions || !states.length) return;
     const valid = new Set(availableCounties);
     const pruned = counties.filter((c) => valid.has(c));
     if (pruned.length !== counties.length) {
@@ -84,7 +85,7 @@ export function GeoFields({
           options={availableCounties}
           value={counties}
           onChange={disabled ? () => {} : onCountiesChange}
-          placeholder={states.length || countyOptions ? "Search counties…" : "Select a state first"}
+          placeholder="Search counties…"
         />
         {prunedNote && <span className="muted" style={{ fontSize: 12 }}>{prunedNote}</span>}
       </div>

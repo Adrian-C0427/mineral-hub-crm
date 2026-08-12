@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { prettyEnum } from "../lib/format";
 import { userAvatarColor, initialsOf } from "../lib/avatarColor";
+import { layoutRect } from "../lib/viewport";
 import { useStages } from "../stages";
 
 /**
@@ -409,7 +410,7 @@ export function OverflowMenu({ items, ariaLabel = "More actions" }: {
   useLayoutEffect(() => {
     if (!open) { setPos(null); return; }
     const place = () => {
-      const r = ref.current?.getBoundingClientRect();
+      const r = ref.current ? layoutRect(ref.current) : null; // zoom-aware
       if (!r) return;
       // documentElement.clientWidth/Height = the CSS viewport, which stays
       // correct inside embedded/zoomed contexts where window.inner* can lie.

@@ -68,6 +68,7 @@ interface ResearchFilters {
   buyers: string[];   // granteeNorm keys
   sellers: string[];  // grantorNorm keys
   operators: string[]; // operatorNorm keys
+  surveys: string[];
   abstractIds: string[];
   statuses: string[];
   trajectories: string[];
@@ -84,6 +85,7 @@ function parseFilters(q: Record<string, unknown>): ResearchFilters {
     buyers: arr(q.buyer),
     sellers: arr(q.seller),
     operators: arr(q.operator),
+    surveys: arr(q.survey),
     // Both spellings are accepted (?abstractId=…&abstractId=… and ?abstract=…)
     // — different callers grew up on different sides of a merge.
     abstractIds: [...arr(q.abstractId), ...arr(q.abstract)],
@@ -133,6 +135,7 @@ function docWhere(org: string, f: ResearchFilters, win?: Window): Prisma.Researc
   if (f.docTypes.length) w.docType = { in: f.docTypes as ResearchDocType[] };
   if (f.buyers.length) w.granteeNorm = { in: f.buyers };
   if (f.sellers.length) w.grantorNorm = { in: f.sellers };
+  if (f.surveys.length) w.survey = { in: f.surveys };
   if (f.abstractIds.length) w.abstractId = { in: f.abstractIds };
   return w;
 }
@@ -143,6 +146,7 @@ function permitWhere(org: string, f: ResearchFilters, win?: Window): Prisma.Rese
   if (f.states.length) w.state = { in: f.states };
   if (f.counties.length) w.county = { in: f.counties };
   if (f.operators.length) w.operatorNorm = { in: f.operators };
+  if (f.surveys.length) w.survey = { in: f.surveys };
   if (f.abstractIds.length) w.abstractId = { in: f.abstractIds };
   if (f.statuses.length) w.status = { in: f.statuses as ResearchPermitStatus[] };
   if (f.trajectories.length) w.trajectory = { in: f.trajectories as WellTrajectory[] };
@@ -213,6 +217,7 @@ async function loadRrcPermits(f: ResearchFilters, win: Window): Promise<RrcPermi
       const trajectory: WellTrajectory = /H[A-Z]?$/.test((r.wellNo ?? "").trim().toUpperCase()) ? "HORIZONTAL" : "UNKNOWN";
       if (f.trajectories.length && !f.trajectories.includes(trajectory)) continue;
       if (f.abstractIds.length && !(r.abstract && f.abstractIds.includes(r.abstract))) continue;
+      if (f.surveys.length && !(r.survey && f.surveys.includes(r.survey))) continue;
       out.push({
         activityDate: r.permitDate, state: "TX", county: r.county,
         operator: r.operator ?? "Unknown", operatorNorm,
@@ -235,7 +240,7 @@ researchRouter.get(
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
-    const [states, counties, docTypes, buyers, sellers, operators, permitGeo, docAbstracts, permitAbstracts] = await Promise.all([
+    const [states, counties, docTypes, buyers, sellers, operators, permitGeo, docAbstracts, permitAbstracts, docSurveys, permitSurveys] = await Promise.all([
       prisma.researchDocument.groupBy({ by: ["state"], where: { organizationId: org } }),
       prisma.researchDocument.groupBy({ by: ["state", "county"], where: { organizationId: org } }),
       prisma.researchDocument.groupBy({ by: ["docType"], where: { organizationId: org } }),
@@ -254,6 +259,8 @@ researchRouter.get(
       prisma.researchPermit.groupBy({ by: ["state", "county"], where: { organizationId: org } }),
       prisma.researchDocument.groupBy({ by: ["state", "county", "abstractId"], where: { organizationId: org, abstractId: { not: null } } }),
       prisma.researchPermit.groupBy({ by: ["state", "county", "abstractId"], where: { organizationId: org, abstractId: { not: null } } }),
+      prisma.researchDocument.groupBy({ by: ["state", "county", "survey"], where: { organizationId: org, survey: { not: null } } }),
+      prisma.researchPermit.groupBy({ by: ["state", "county", "survey"], where: { organizationId: org, survey: { not: null } } }),
     ]);
 
     // Imported RRC permits (B3) contribute their counties + operators to the
@@ -291,11 +298,17 @@ researchRouter.get(
     for (const a of [...docAbstracts, ...permitAbstracts]) {
       if (a.abstractId) abstractSet.set(`${a.state}|${a.county}|${a.abstractId}`, { state: a.state, county: a.county, abstractId: a.abstractId });
     }
+    // Survey names, dynamically from the imported data (documents + permits).
+    const surveySet = new Map<string, { state: string; county: string; survey: string }>();
+    for (const sv of [...docSurveys, ...permitSurveys]) {
+      if (sv.survey) surveySet.set(`${sv.state}|${sv.county}|${sv.survey}`, { state: sv.state, county: sv.county, survey: sv.survey });
+    }
 
     res.json({
       states: [...stateSet].sort(),
       counties: [...countySet.values()].sort((a, b) => a.county.localeCompare(b.county)),
       abstracts: [...abstractSet.values()].sort((a, b) => a.abstractId.localeCompare(b.abstractId, undefined, { numeric: true }) || a.county.localeCompare(b.county)),
+      surveys: [...surveySet.values()].sort((a, b) => a.survey.localeCompare(b.survey) || a.county.localeCompare(b.county)),
       docTypes: docTypes.map((d) => d.docType).sort(),
       buyers: entityOptions(buyers.map((b) => ({ norm: b.granteeNorm, raw: b.grantee }))),
       sellers: entityOptions(sellers.map((s) => ({ norm: s.grantorNorm, raw: s.grantor }))),
@@ -1039,29 +1052,33 @@ researchRouter.get(
     // narrow the base filters only (the client omits panel params here).
     if (kind === "documents") {
       const where = docWhere(org, f, win);
-      const [counties, abstracts, docTypes, docClasses] = await Promise.all([
+      const [counties, abstracts, surveys, docTypes, docClasses] = await Promise.all([
         prisma.researchDocument.groupBy({ by: ["county"], where, orderBy: { county: "asc" } }),
         prisma.researchDocument.groupBy({ by: ["abstractId"], where, orderBy: { abstractId: "asc" } }),
+        prisma.researchDocument.groupBy({ by: ["survey"], where, orderBy: { survey: "asc" } }),
         prisma.researchDocument.groupBy({ by: ["docType"], where, orderBy: { docType: "asc" } }),
         prisma.researchDocument.groupBy({ by: ["docClass"], where, orderBy: { docClass: "asc" } }),
       ]);
       return res.json({
         counties: counties.map((r) => r.county).filter(Boolean),
         abstracts: abstracts.map((r) => r.abstractId).filter((v): v is string => !!v),
+        surveys: surveys.map((r) => r.survey).filter((v): v is string => !!v),
         docTypes: docTypes.map((r) => r.docType).filter(Boolean),
         docClasses: docClasses.map((r) => r.docClass).filter(Boolean),
       });
     }
     const where = permitWhere(org, f, win);
-    const [counties, abstracts, statuses, trajectories] = await Promise.all([
+    const [counties, abstracts, surveys, statuses, trajectories] = await Promise.all([
       prisma.researchPermit.groupBy({ by: ["county"], where, orderBy: { county: "asc" } }),
       prisma.researchPermit.groupBy({ by: ["abstractId"], where, orderBy: { abstractId: "asc" } }),
+      prisma.researchPermit.groupBy({ by: ["survey"], where, orderBy: { survey: "asc" } }),
       prisma.researchPermit.groupBy({ by: ["status"], where, orderBy: { status: "asc" } }),
       prisma.researchPermit.groupBy({ by: ["trajectory"], where, orderBy: { trajectory: "asc" } }),
     ]);
     res.json({
       counties: counties.map((r) => r.county).filter(Boolean),
       abstracts: abstracts.map((r) => r.abstractId).filter((v): v is string => !!v),
+      surveys: surveys.map((r) => r.survey).filter((v): v is string => !!v),
       statuses: statuses.map((r) => r.status).filter(Boolean),
       trajectories: trajectories.map((r) => r.trajectory).filter(Boolean),
     });
