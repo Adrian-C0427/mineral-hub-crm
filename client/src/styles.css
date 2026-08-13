@@ -3350,6 +3350,8 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .ct-foot-controls { display: flex; align-items: center; gap: 12px; }
 .ct-pgof { color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .ct-rpp .msel-box { min-height: 28px; height: 28px; padding: 0 8px; }
+/* Records-per-page bar for paginated tables without a toolbar row. */
+.ct-topbar { display: flex; justify-content: flex-end; margin-bottom: 6px; }
 .ct-rpp .msel-box .msel-val { font-size: 12px; }
 
 /* --- Contact profile (reference refinement) ------------------------------- */

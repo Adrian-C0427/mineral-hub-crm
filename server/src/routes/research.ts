@@ -1097,7 +1097,16 @@ const pageSchema = z.object({
   pageSize: z.coerce.number().int().min(1).max(1000).default(50),
   sortBy: z.string().optional(),
   sortDir: z.enum(["asc", "desc"]).default("desc"),
+  // Free-text record search + dedicated instrument-number filter. Both run in
+  // the DATABASE over the whole filtered dataset (case-insensitive contains),
+  // so matches surface from any page. Length-capped: they land in LIKE
+  // patterns, and an unbounded string is an unbounded pattern.
+  q: z.string().trim().max(200).optional(),
+  instrument: z.string().trim().max(100).optional(),
 });
+
+/** Case-insensitive contains, with LIKE wildcards in user input neutralized. */
+const contains = (v: string) => ({ contains: v.replace(/[%_\\]/g, "\\$&"), mode: "insensitive" as const });
 
 /**
  * Whole-dataset sorting: the ORDER BY runs in the database over every row
@@ -1319,8 +1328,19 @@ researchRouter.get(
     const org = orgId(req);
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
-    const { page, pageSize, sortBy, sortDir } = pageSchema.parse(req.query);
+    const { page, pageSize, sortBy, sortDir, q, instrument } = pageSchema.parse(req.query);
     const where = docWhere(org, f, win);
+    if (instrument) where.instrumentNumber = contains(instrument);
+    if (q) {
+      // One free-text term matched against every user-visible record field.
+      where.OR = [
+        { grantor: contains(q) }, { grantee: contains(q) },
+        { instrumentNumber: contains(q) }, { docTypeRaw: contains(q) },
+        { county: contains(q) }, { abstractId: contains(q) },
+        { survey: contains(q) }, { legalDescription: contains(q) },
+        { volume: contains(q) }, { page: contains(q) },
+      ];
+    }
     const [total, rows] = await Promise.all([
       prisma.researchDocument.count({ where }),
       prisma.researchDocument.findMany({
@@ -1340,8 +1360,17 @@ researchRouter.get(
     const org = orgId(req);
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
-    const { page, pageSize, sortBy, sortDir } = pageSchema.parse(req.query);
+    const { page, pageSize, sortBy, sortDir, q, instrument } = pageSchema.parse(req.query);
     const where = permitWhere(org, f, win);
+    if (instrument) where.permitNumber = contains(instrument);
+    if (q) {
+      where.OR = [
+        { operator: contains(q) }, { leaseName: contains(q) }, { wellName: contains(q) },
+        { apiNumber: contains(q) }, { permitNumber: contains(q) },
+        { county: contains(q) }, { abstractId: contains(q) }, { survey: contains(q) },
+        { formation: contains(q) },
+      ];
+    }
     const [total, rows] = await Promise.all([
       prisma.researchPermit.count({ where }),
       prisma.researchPermit.findMany({
