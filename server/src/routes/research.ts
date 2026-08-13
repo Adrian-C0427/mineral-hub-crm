@@ -1474,8 +1474,11 @@ researchRouter.get(
   "/ingest/runs",
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
+    // Import history is the USER'S upload log. Scheduled county-scan syncs
+    // (automated=true) import through the same pipeline — their records appear
+    // everywhere in Research — but the runs themselves stay out of this list.
     const runs = await prisma.researchIngestRun.findMany({
-      where: { organizationId: orgId(req) },
+      where: { organizationId: orgId(req), automated: false },
       orderBy: { createdAt: "desc" },
       take: 50,
     });

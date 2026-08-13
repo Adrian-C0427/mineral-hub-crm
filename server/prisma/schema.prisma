@@ -1353,6 +1353,10 @@ model ResearchIngestRun {
   status          ResearchIngestStatus @default(COMPLETED)
   error           String?
   createdByUserId String?
+  // Scheduled/headless syncs (county scan routines, CLI imports). Their
+  // records flow into Research like any other, but the runs stay out of the
+  // user-facing Import history — that list is for uploads users made.
+  automated       Boolean              @default(false)
   createdAt       DateTime             @default(now())
 
   rows ResearchIngestRow[]

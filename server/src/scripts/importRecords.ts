@@ -161,6 +161,9 @@ async function main(): Promise<number> {
     prisma,
     organizationId: organization.id,
     createdByUserId: null, // headless/automation run — no acting user
+    // CLI imports are the scheduled county-scan syncs: their records blend
+    // into Research, but the run is hidden from the Import history UI.
+    automated: true,
     category,
     csv,
     mapping,
