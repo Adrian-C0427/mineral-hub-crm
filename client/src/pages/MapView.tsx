@@ -130,6 +130,10 @@ export function MapView() {
   const [filterPresets, setFilterPresets] = useState<FilterPreset[]>(() => loadJson<FilterPreset[]>(MAP_FILTERS_KEY, []));
   const [filterName, setFilterName] = useState("");
   const [showFilters, setShowFilters] = useState(false);
+  // Full-screen viewing mode: the page becomes a fixed overlay filling the
+  // viewport. Nothing remounts — search, filters, hotspots, layers, zoom,
+  // position, and popups all carry across the toggle untouched.
+  const [fullscreen, setFullscreen] = useState(false);
   const [statusFilter, setStatusFilter] = useState("ACTIVE");
   const [fStates, setFStates] = useState<string[]>([]);
   const [fCounties, setFCounties] = useState<string[]>([]);
@@ -696,11 +700,29 @@ export function MapView() {
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
-  }, [showFilters, showHeat]);
+  }, [showFilters, showHeat, fullscreen]);
   useEffect(() => { mapRef.current?.resize(); }, [mapH]);
 
+  // Full-screen is a pure CSS re-layout of the SAME mounted tree — the map,
+  // its panels, search, filters, and every piece of user state persist across
+  // the toggle; MapLibre only receives a resize(). Escape also exits.
+  useEffect(() => {
+    if (!fullscreen) return;
+    // The container height changes without a window resize event — re-measure
+    // and resize the canvas on both enter and exit.
+    mapRef.current?.resize();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      // Let open menus/search consume their own Escape first.
+      if (document.querySelector(".msel-menu")) return;
+      setFullscreen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("keydown", onKey); mapRef.current?.resize(); };
+  }, [fullscreen]);
+
   return (
-    <div className="page" style={{ maxWidth: 1400 }}>
+    <div className={`page ${fullscreen ? "mc-fullscreen" : ""}`} style={fullscreen ? undefined : { maxWidth: 1400 }}>
       <div className="page-header"><div className="row"><h1 style={{ marginBottom: 0 }}>Map</h1><span className="muted">Texas · {COUNTIES.length} counties · abstracts stream as you pan &amp; zoom</span></div></div>
 
       <div className="row" style={{ marginBottom: 12, gap: 10, position: "relative" }}>
@@ -771,6 +793,17 @@ export function MapView() {
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
           Export
+        </button>
+        <button
+          className={`mc-btn ${fullscreen ? "active" : ""}`}
+          title={fullscreen ? "Exit full screen (Esc)" : "View the map full screen"}
+          aria-pressed={fullscreen}
+          onClick={() => setFullscreen((f) => !f)}
+        >
+          {fullscreen
+            ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3" /></svg>
+            : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>}
+          Full screen
         </button>
       </div>
 
@@ -926,6 +959,15 @@ export function MapView() {
           />
         </div>
         {!deals && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}><Spinner label="Loading map…" /></div>}
+
+        {/* Compact exit control, bottom-right just above the zoom buttons —
+            minimal, consistent, and never covering map data. */}
+        {fullscreen && (
+          <button type="button" className="mc-fs-exit" title="Exit full screen (Esc)" aria-label="Exit full screen"
+            onClick={() => setFullscreen(false)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3" /></svg>
+          </button>
+        )}
 
         <div style={{ position: "absolute", left: 12, bottom: 26, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, padding: "8px 12px", fontSize: 12 }}>
           {heatActive ? (

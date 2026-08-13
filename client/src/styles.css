@@ -1871,6 +1871,27 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .mc-panel { padding: 0; border-radius: 12px; }
 /* GIS layout: open panels dock as a left column; the map fills the rest. */
 .mc-layout { display: flex; gap: 12px; align-items: stretch; }
+
+/* Full-screen map mode: the SAME page tree re-laid as a fixed overlay — the
+   map never remounts, so zoom/position/filters/search/popups all persist.
+   Sits below dropdown portals (search results, filter menus keep working)
+   and above the app chrome. */
+.mc-fullscreen {
+  position: fixed; inset: 0; z-index: calc(var(--z-dropdown) - 1);
+  max-width: none; margin: 0; padding: 12px 18px 14px;
+  background: var(--bg); overflow: auto;
+}
+.mc-fullscreen .page-header { display: none; } /* every pixel goes to the map */
+
+/* Compact exit control — bottom-right, above the zoom buttons, matching the
+   floating-control language used by the map's other corner widgets. */
+.mc-fs-exit {
+  position: absolute; right: 10px; bottom: 108px; z-index: 6;
+  width: 29px; height: 29px; display: grid; place-items: center; padding: 0;
+  background: var(--panel); color: var(--text); border: 1px solid var(--border);
+  border-radius: 6px; box-shadow: var(--shadow); cursor: pointer;
+}
+.mc-fs-exit:hover { background: var(--panel-2); }
 .mc-side { width: 360px; flex: none; overflow-y: auto; min-height: 320px; }
 .mc-side .mc-panel { margin-bottom: 12px !important; }
 .mc-dock-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
