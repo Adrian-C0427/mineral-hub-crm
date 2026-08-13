@@ -91,6 +91,12 @@ export interface IngestArgs {
   assignedCounty?: string | null;
   /** Parse + classify + dedup with NO database writes (no run, no rows). */
   dryRun?: boolean;
+  /**
+   * Scheduled/headless sync (county scan routines, CLI). The records import
+   * exactly like any other, but the run stays out of the user-facing Import
+   * history — that list is reserved for uploads users made themselves.
+   */
+  automated?: boolean;
 }
 
 export interface IngestSummary {
@@ -124,7 +130,7 @@ export interface IngestSummary {
 export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary> {
   const {
     prisma, organizationId: org, createdByUserId, category, csv, mapping,
-    filename, assignedState, assignedCounty, dryRun = false,
+    filename, assignedState, assignedCounty, dryRun = false, automated = false,
   } = args;
   const { kind, source, docClass: wantClass } = resolveCategory(category);
   const fallbackState = assignedState ? normState(assignedState) : null;
@@ -151,7 +157,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
     : await prisma.researchIngestRun.create({
         data: {
           organizationId: org, kind, source, state: fallbackState, county: fallbackCounty, filename: filename ?? null,
-          rowsTotal: rows.length, status: "COMPLETED", createdByUserId,
+          rowsTotal: rows.length, status: "COMPLETED", createdByUserId, automated,
         },
       });
   const runId = run?.id ?? "";
