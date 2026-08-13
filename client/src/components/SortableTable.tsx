@@ -434,6 +434,21 @@ export function SortableTable<T>({
     </div>
   );
 
+  // Records-per-page lives ABOVE the table, aligned with the toolbar's other
+  // controls, so it stays visible while scanning rows; the footer keeps the
+  // count and page navigation.
+  const rppControl = paginated ? (
+    <span className="ct-rpp" title="Records per page">
+      <Select
+        value={String(pageSize)}
+        onChange={(v) => setPageSize(Number(v))}
+        options={rowsPerPage!.map((n) => String(n))}
+        width={68}
+        ariaLabel="Records per page"
+      />
+    </span>
+  ) : null;
+
   const footer = paginated ? (
     <div className="ct-foot">
       <span>
@@ -442,15 +457,6 @@ export function SortableTable<T>({
         {footerExtra}
       </span>
       <span className="ct-foot-controls">
-        <span className="ct-rpp">
-          <Select
-            value={String(pageSize)}
-            onChange={(v) => setPageSize(Number(v))}
-            options={rowsPerPage!.map((n) => String(n))}
-            width={68}
-            ariaLabel="Rows per page"
-          />
-        </span>
         <span className="ct-pages">
           <button className="ct-pgbtn" disabled={curPage <= 1} onClick={() => setPage(curPage - 1)} aria-label="Previous page">‹</button>
           <span className="ct-pgcur">{curPage}</span>
@@ -461,11 +467,20 @@ export function SortableTable<T>({
     </div>
   ) : null;
 
-  if (!customizeId) return <>{table}{footer}</>;
+  if (!customizeId) {
+    return (
+      <>
+        {rppControl && <div className="ct-topbar">{rppControl}</div>}
+        {table}
+        {footer}
+      </>
+    );
+  }
   return (
     <div className="cv-table">
       <div className="cv-toolbar">
         <div className="cv-toolbar-left">{toolbar}</div>
+        {rppControl}
         <ColumnCustomizer ordered={ordered} hidden={hidden} pinnedSet={pinnedSet} onToggle={toggle} onReorder={reorder} onPin={togglePin} onReset={reset} isDefault={isDefault} />
       </div>
       {subToolbar}

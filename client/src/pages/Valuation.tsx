@@ -1614,7 +1614,10 @@ function WellData({ canManage }: { canManage: boolean }) {
       <div className="panel">
         <div className="panel-title">
           <h3 style={{ margin: 0 }}>Wells ({data?.total ?? "…"})</h3>
-          <input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search wells…" style={{ width: 260 }} />
+          <div className="row" style={{ gap: 10, alignItems: "center" }}>
+            <input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search wells…" style={{ width: 260 }} />
+            <span className="ct-rpp" title="Records per page"><Select value={String(pageSize)} onChange={(v) => { setPageSize(Number(v)); setPage(1); }} options={["20", "50", "100", "200"]} width={68} ariaLabel="Records per page" /></span>
+          </div>
         </div>
         {!data ? <Spinner /> : (
           <>
@@ -1640,7 +1643,6 @@ function WellData({ canManage }: { canManage: boolean }) {
               </tbody>
             </table></div>
             <div className="row" style={{ marginTop: 10, justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
-              <span className="ct-rpp"><Select value={String(pageSize)} onChange={(v) => { setPageSize(Number(v)); setPage(1); }} options={["20", "50", "100", "200"]} width={68} ariaLabel="Rows per page" /></span>
               {pages > 1 && (
                 <>
                   <button className="small" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>‹ Prev</button>

@@ -6,7 +6,7 @@ import {
 import { ArrowRight, Heart, Lock, Search, Share2, TrendingUp } from "lucide-react";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, Banner, Modal, ConfirmDelete } from "../components/ui";
+import { Spinner, Banner, Modal, ConfirmDelete, SearchInput } from "../components/ui";
 import { useRowSelection, BulkBar } from "../components/bulk";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { Select } from "../components/Select";
@@ -1733,8 +1733,8 @@ interface AbstractBuyer {
 
 // docClass is NOT a records-level filter — the page-level dataset toggle
 // (Transactions/Deeds vs Leases) owns record-class separation for every view.
-interface RecFilters { abstracts: string[]; counties: string[]; surveys: string[]; docTypes: string[]; statuses: string[]; trajectories: string[]; from: string; to: string }
-const EMPTY_REC_FILTERS: RecFilters = { abstracts: [], counties: [], surveys: [], docTypes: [], statuses: [], trajectories: [], from: "", to: "" };
+interface RecFilters { abstracts: string[]; counties: string[]; surveys: string[]; docTypes: string[]; statuses: string[]; trajectories: string[]; instrument: string; from: string; to: string }
+const EMPTY_REC_FILTERS: RecFilters = { abstracts: [], counties: [], surveys: [], docTypes: [], statuses: [], trajectories: [], instrument: "", from: "", to: "" };
 interface RecOptions { counties: string[]; abstracts: string[]; surveys?: string[]; docTypes?: string[]; docClasses?: string[]; statuses?: string[]; trajectories?: string[] }
 
 function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
@@ -1753,6 +1753,12 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   const [busy, setBusy] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
   const [pageSize, setPageSize] = useState(50);
+  // Free-text search over the WHOLE dataset (matched in the database, so a
+  // hit on page 8 surfaces immediately). Debounced so results update as the
+  // user types without a request per keystroke; combines with all filters.
+  const [search, setSearch] = useState("");
+  const [searchQ, setSearchQ] = useState("");
+  useEffect(() => { const t = window.setTimeout(() => setSearchQ(search.trim()), 250); return () => window.clearTimeout(t); }, [search]);
 
   // Records-level filters. Options are DYNAMIC — distinct values from the data
   // currently loaded into Research (under the page's active filters/window),
@@ -1760,8 +1766,13 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   const [showFilters, setShowFilters] = useState(false);
   const [rf, setRf] = useState<RecFilters>(EMPTY_REC_FILTERS);
   const [opts, setOpts] = useState<RecOptions>({ counties: [], abstracts: [] });
+  // The instrument filter is typed too — same debounce so it re-queries
+  // smoothly instead of once per keystroke.
+  const [instrumentQ, setInstrumentQ] = useState("");
+  useEffect(() => { const t = window.setTimeout(() => setInstrumentQ(rf.instrument.trim()), 250); return () => window.clearTimeout(t); }, [rf.instrument]);
   useEffect(() => {
     setRf(EMPTY_REC_FILTERS);
+    setSearch(""); setSearchQ("");
     setSort(kind === "documents" ? { key: "recordingDate", dir: "desc" } : { key: "activityDate", dir: "desc" });
   }, [kind]);
   useEffect(() => {
@@ -1776,12 +1787,14 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
     for (const t of rf.docTypes) p.append("docType", t);
     for (const s of rf.statuses) p.append("permitStatus", s);
     for (const t of rf.trajectories) p.append("trajectory", t);
+    if (instrumentQ) p.set("instrument", instrumentQ);
     if (rf.from) p.set("from", rf.from);
     if (rf.to) p.set("to", rf.to);
+    if (searchQ) p.set("q", searchQ);
     return p.toString();
-  }, [qs, rf]);
+  }, [qs, rf, searchQ, instrumentQ]);
   const activeFilterCount = rf.abstracts.length + rf.counties.length + rf.surveys.length + rf.docTypes.length +
-    rf.statuses.length + rf.trajectories.length + (rf.from ? 1 : 0) + (rf.to ? 1 : 0);
+    rf.statuses.length + rf.trajectories.length + (rf.instrument.trim() ? 1 : 0) + (rf.from ? 1 : 0) + (rf.to ? 1 : 0);
 
   // Abstract Buyer Preview: whenever an abstract is selected (page-level drill
   // or the records Abstract filter), summarize its top 5 buyers above the table
@@ -1879,8 +1892,12 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
         <span className={`seg ${kind === "documents" ? "active" : ""}`} onClick={() => setKind("documents")}>{dataset === "LEASE" ? "Lease Documents" : "Transaction / Deed Documents"}</span>
         <span className={`seg ${kind === "permits" ? "active" : ""}`} onClick={() => setKind("permits")}>Drilling Permits</span>
       </div>
+      <SearchInput value={search} onChange={setSearch}
+        placeholder={kind === "documents" ? "Search grantor, grantee, instrument #, abstract, survey…" : "Search operator, lease, well, API #, permit #…"}
+        ariaLabel="Search records" />
       <span className="spacer" />
       {active && <span className="muted" style={{ fontSize: 12.5, whiteSpace: "nowrap" }}><b style={{ color: "var(--text)" }}>{num(active.total)}</b> records</span>}
+      <span className="ct-rpp" title="Records per page"><Select value={String(pageSize)} onChange={(v) => setPageSize(Number(v))} options={["20", "50", "100", "200"]} width={68} ariaLabel="Records per page" /></span>
       <button
         className={`rbtn ${showFilters ? "on" : activeFilterCount > 0 ? "active" : ""}`}
         onClick={() => setShowFilters((s) => !s)}
@@ -1920,6 +1937,15 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
               <SearchableMultiSelect options={opts.trajectories ?? []} labels={Object.fromEntries((opts.trajectories ?? []).map((t) => [t, prettyEnum(t)]))}
                 value={rf.trajectories} onChange={(v) => setRf((p) => ({ ...p, trajectories: v }))} placeholder="Trajectories…" /></div>
           </>
+        )}
+        {kind === "documents" && (
+          <div><div className="rec-flabel">Instrument #</div>
+            <div className="msel msel-single"><div className="msel-box">
+              <input className="datef-input" value={rf.instrument} onChange={(e) => setRf((p) => ({ ...p, instrument: e.target.value }))}
+                placeholder="e.g. 2026-1038 or partial" aria-label="Filter by instrument number" />
+              {rf.instrument && <button type="button" className="msel-clear" aria-label="Clear instrument filter"
+                onMouseDown={(e) => { e.preventDefault(); setRf((p) => ({ ...p, instrument: "" })); }}>×</button>}
+            </div></div></div>
         )}
         <div><div className="rec-flabel">From</div><DateField value={rf.from} onChange={(v) => setRf((p) => ({ ...p, from: v }))} ariaLabel="Records from date" /></div>
         <div><div className="rec-flabel">To</div><DateField value={rf.to} onChange={(v) => setRf((p) => ({ ...p, to: v }))} ariaLabel="Records to date" /></div>
@@ -1991,7 +2017,6 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
             <div className="rec-foot">
               <span>Showing {num(active.rows.length)} of {num(active.total)} records · sorted across all pages by {(kind === "documents" ? docColumns : (permitColumns as Column<never>[])).find((c) => c.key === sort.key)?.header.toLowerCase() ?? sort.key}, {sort.dir === "asc" ? "ascending" : "descending"}</span>
               <span className="row" style={{ gap: 10, alignItems: "center" }}>
-                <span className="ct-rpp"><Select value={String(pageSize)} onChange={(v) => setPageSize(Number(v))} options={["20", "50", "100", "200"]} width={68} ariaLabel="Rows per page" /></span>
                 {totalPages > 1 && (
                   <span className="row" style={{ gap: 8, alignItems: "center" }}>
                     <button className="small" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Prev</button>
