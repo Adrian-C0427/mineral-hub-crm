@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { useDismiss, useMenuPosition } from "./dropdownCore";
+import { layoutViewport } from "../lib/viewport";
 
 /**
  * The application's standard DATE control, replacing raw <input type="date">
@@ -79,7 +80,9 @@ export function DateField({ value, onChange, ariaLabel, disabled, placeholder = 
   const [vm, setVm] = useState(parsed ? parsed[1] : now.getMonth());
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-  const { menuRef, pos } = useMenuPosition(ref, open);
+  // fitContent: the calendar renders whole (no internal scroll), so it is
+  // never height-clamped and flips above only when the full grid fits there.
+  const { menuRef, pos } = useMenuPosition(ref, open, { fitContent: true });
 
   // Keep the typed text and the visible month in sync with outside changes.
   useEffect(() => { setText(fmtDisplay(value)); }, [value]);
@@ -118,8 +121,11 @@ export function DateField({ value, onChange, ariaLabel, disabled, placeholder = 
   const today = todayIso();
   const yearsBase = Math.floor(vy / 12) * 12;
 
+  // Calendar is wider than most anchor fields — re-clamp its left edge against
+  // the layout viewport (NOT clientWidth, which under-reports under the
+  // interface zoom and would push right-edge calendars off their field).
   const popupStyle = pos
-    ? { ...pos, width: 268, left: Math.max(8, Math.min(Number(pos.left ?? 8), document.documentElement.clientWidth - 276)), maxHeight: undefined }
+    ? { ...pos, width: 268, left: Math.max(8, Math.min(Number(pos.left ?? 8), layoutViewport().vw - 276)) }
     : undefined;
 
   return (

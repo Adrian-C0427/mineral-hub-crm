@@ -63,6 +63,14 @@ interface Props<T> {
   /** Default page size when pagination is on (defaults to 50, or the first
    *  option if 50 isn't offered). */
   defaultPageSize?: number;
+  /** Sorting runs on the SERVER across the whole filtered dataset — `rows` is
+   *  one already-sorted page. Header clicks report the next sort through
+   *  `onSort` (the caller re-queries) instead of sorting the page locally,
+   *  so ordering is never limited to the rows currently in the browser. */
+  serverSort?: {
+    sort: { key: string; dir: "asc" | "desc" } | null;
+    onSort: (s: { key: string; dir: "asc" | "desc" }) => void;
+  };
   /** Singular noun for the footer count ("deal" → "12 deals"). */
   paginationNoun?: string;
   /** Extra content appended to the footer count (e.g. "· $1.2M total value"). */
@@ -240,10 +248,13 @@ export function SortableTable<T>({
   subToolbar,
   rowsPerPage,
   defaultPageSize,
+  serverSort,
   paginationNoun,
   footerExtra,
 }: Props<T>) {
-  const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(defaultSort ?? null);
+  const [localSort, setLocalSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(defaultSort ?? null);
+  // Server-sort mode: the caller owns the sort state and re-queries on change.
+  const sort = serverSort ? serverSort.sort : localSort;
   const { ordered, visible, hidden, widths, pinnedKeys, pinnedSet, toggle, reorder, setWidth, togglePin, reset, isDefault } = useColumnPrefs(customizeId, columns);
   const cols = visible;
 
@@ -273,6 +284,9 @@ export function SortableTable<T>({
   }
 
   const sorted = useMemo(() => {
+    // Server-sorted pages arrive in their final order — sorting the visible
+    // page locally would only ever reorder ONE page, so it is skipped.
+    if (serverSort) return rows;
     const copy = [...rows];
     if (!sort) {
       if (defaultCompare) copy.sort(defaultCompare);
@@ -286,14 +300,16 @@ export function SortableTable<T>({
       return sort.dir === "asc" ? cmp : -cmp;
     });
     return copy;
-  }, [rows, sort, columns, defaultCompare]);
+  }, [rows, sort, columns, defaultCompare, serverSort]);
 
   function onHeaderClick(key: string) {
-    setSort((prev) => {
+    const next = (prev: { key: string; dir: "asc" | "desc" } | null): { key: string; dir: "asc" | "desc" } => {
       if (!prev || prev.key !== key) return { key, dir: "asc" };
       if (prev.dir === "asc") return { key, dir: "desc" };
       return { key, dir: "asc" }; // toggle back to asc on third click
-    });
+    };
+    if (serverSort) serverSort.onSort(next(serverSort.sort));
+    else setLocalSort(next);
   }
 
   // Pagination (opt-in via rowsPerPage). Rows are sorted across the FULL set

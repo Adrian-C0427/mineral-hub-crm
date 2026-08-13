@@ -158,6 +158,19 @@ function loadResMetricPrefs(): ResMetricPrefs {
 
 type Tab = "overview" | "geography" | "rankings" | "relationships" | "opportunities" | "records" | "data";
 
+/**
+ * The Research module analyzes TWO distinct datasets that must never mix:
+ * ownership transfers (deeds/conveyances — docClass TRANSACTION) and leasing
+ * activity (docClass LEASE). The page-level toggle drives every request's
+ * `docClass` param, so records, analytics, rankings, relationships, maps, and
+ * filter options are all computed server-side from one dataset at a time.
+ */
+type Dataset = "TRANSACTION" | "LEASE";
+const DATASET_KEY = "mh-research-dataset:v1";
+const loadDataset = (): Dataset => {
+  try { return localStorage.getItem(DATASET_KEY) === "LEASE" ? "LEASE" : "TRANSACTION"; } catch { return "TRANSACTION"; }
+};
+
 // ---------------------------------------------------------------------------
 // Relationship-intelligence API types
 // ---------------------------------------------------------------------------
@@ -203,11 +216,21 @@ export function Research() {
   const [showFilters, setShowFilters] = useState(false);
   const [tab, setTab] = useState<Tab>("overview");
   const [opts, setOpts] = useState<FilterOpts | null>(null);
+  const [dataset, setDatasetState] = useState<Dataset>(loadDataset);
   const captureRef = useRef<HTMLDivElement>(null);
+
+  const setDataset = useCallback((d: Dataset) => {
+    setDatasetState(d);
+    try { localStorage.setItem(DATASET_KEY, d); } catch { /* ignore */ }
+    // Entity/doc-type selections belong to one dataset (a deed buyer isn't a
+    // lessee); geography and dates carry over.
+    setFilters((f) => ({ ...f, buyers: [], sellers: [], docTypes: [] }));
+  }, []);
 
   const range = useMemo(() => rangeFor(period, custom), [period, custom]);
   const qs = useMemo(() => {
     const q = new URLSearchParams();
+    q.set("docClass", dataset);
     if (range.from) q.set("from", range.from);
     if (range.to) q.set("to", range.to);
     const cp = compareParams(compare, range.from, range.to);
@@ -221,9 +244,11 @@ export function Research() {
     for (const s of filters.sellers) q.append("seller", s);
     for (const o of filters.operators) q.append("operator", o);
     return q.toString();
-  }, [range.from, range.to, compare, filters]);
+  }, [range.from, range.to, compare, filters, dataset]);
 
-  const loadOpts = useCallback(() => { api.get<FilterOpts>("/research/filters").then(setOpts).catch(() => {}); }, []);
+  // Filter options are dataset-scoped: buyers/sellers/doc types offered come
+  // only from the active class's documents.
+  const loadOpts = useCallback(() => { api.get<FilterOpts>(`/research/filters?docClass=${dataset}`).then(setOpts).catch(() => {}); }, [dataset]);
   useEffect(loadOpts, [loadOpts]);
 
   const hasAnyData = opts != null && (opts.states.length > 0 || opts.counties.length > 0);
@@ -269,6 +294,12 @@ export function Research() {
           </div>
         </div>
         <div className="reports-toolbar">
+          {/* Dataset switch — Transactions/Deeds vs Leases. Drives docClass on
+              every request so the two record classes never mix in any view. */}
+          <div className="seg-control" role="tablist" aria-label="Dataset">
+            <span className={`seg ${dataset === "TRANSACTION" ? "active" : ""}`} onClick={() => setDataset("TRANSACTION")}>Transactions / Deeds</span>
+            <span className={`seg ${dataset === "LEASE" ? "active" : ""}`} onClick={() => setDataset("LEASE")}>Leases</span>
+          </div>
           <div className="seg-control">
             {CHIPS.map(([p, label]) => (
               <span key={p} className={`seg ${period === p ? "active" : ""}`} onClick={() => setPeriod(p)}>
@@ -373,13 +404,13 @@ export function Research() {
       </div>
 
       <div ref={captureRef} className="report-capture">
-        {tab === "overview" && <OverviewTab qs={qs} compareOff={compareOff} />}
+        {tab === "overview" && <OverviewTab qs={qs} compareOff={compareOff} dataset={dataset} />}
         {tab === "geography" && <GeographyTab qs={qs} filters={filters} compareOff={compareOff} onDrill={drillToRecords}
           onSetCounties={(counties) => setFilters((f) => ({ ...f, counties }))} />}
-        {tab === "rankings" && <RankingsTab qs={qs} opts={opts} compareOff={compareOff} onDrill={drillToRecords} />}
-        {tab === "relationships" && <RelationshipsTab qs={qs} onDrill={drillToRecords} />}
+        {tab === "rankings" && <RankingsTab qs={qs} opts={opts} compareOff={compareOff} onDrill={drillToRecords} dataset={dataset} />}
+        {tab === "relationships" && <RelationshipsTab qs={qs} onDrill={drillToRecords} dataset={dataset} />}
         {tab === "opportunities" && <OpportunitiesTab qs={qs} onDrill={drillToRecords} />}
-        {tab === "records" && <RecordsTab qs={qs} />}
+        {tab === "records" && <RecordsTab qs={qs} dataset={dataset} />}
         {tab === "data" && canManage && <ResearchImport onDataChanged={loadOpts} />}
       </div>
     </div>
@@ -390,7 +421,7 @@ export function Research() {
 // Overview
 // ---------------------------------------------------------------------------
 
-function OverviewTab({ qs, compareOff }: { qs: string; compareOff: boolean }) {
+function OverviewTab({ qs, compareOff, dataset }: { qs: string; compareOff: boolean; dataset: Dataset }) {
   const [data, setData] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [metricPrefs, setMetricPrefs] = useState<ResMetricPrefs>(loadResMetricPrefs);
@@ -412,8 +443,13 @@ function OverviewTab({ qs, compareOff }: { qs: string; compareOff: boolean }) {
       ? new Date(`${k}-01T00:00:00Z`).toLocaleDateString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" })
       : new Date(`${k}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 
+  // The off-dataset KPI is structurally zero (the server excludes that class),
+  // so it never renders — a Leases view shows lease metrics, not empty deed ones.
+  const offDataset: ResMetricId = dataset === "TRANSACTION" ? "leases" : "transactions";
+  const kpiLabel = (id: ResMetricId): string =>
+    dataset === "LEASE" && id === "uniqueBuyers" ? "Active Lessees" : RES_METRIC_LABEL[id];
   const orderedMetrics: ResMetricId[] = [...metricPrefs.order.filter((id) => DEFAULT_RES_METRICS.includes(id)), ...DEFAULT_RES_METRICS.filter((id) => !metricPrefs.order.includes(id))];
-  const visibleMetrics = orderedMetrics.filter((id) => !metricPrefs.hidden.includes(id));
+  const visibleMetrics = orderedMetrics.filter((id) => !metricPrefs.hidden.includes(id) && id !== offDataset);
 
   return (
     <>
@@ -421,7 +457,7 @@ function OverviewTab({ qs, compareOff }: { qs: string; compareOff: boolean }) {
         <ResearchMetricsCustomize prefs={metricPrefs} onChange={setMetricPrefs} />
       </div>
       <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
-        {visibleMetrics.map((id) => <TrendKpi key={id} label={RES_METRIC_LABEL[id]} t={t[id]} compareOff={compareOff} />)}
+        {visibleMetrics.map((id) => <TrendKpi key={id} label={kpiLabel(id)} t={t[id]} compareOff={compareOff} />)}
         {!compareOff && (
           <div className="metric-card">
             <div className="metric-label">Comparison Window</div>
@@ -443,16 +479,20 @@ function OverviewTab({ qs, compareOff }: { qs: string; compareOff: boolean }) {
               <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
               <Tooltip {...chartTooltip} />
               <Legend />
+              {/* One document series per view — the off-dataset class is
+                  excluded server-side, so its series would just be zeros. */}
               {trendType === "line" ? (
                 <>
-                  <Line type="monotone" dataKey="transactions" name="Transactions" stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} />
-                  <Line type="monotone" dataKey="leases" name="Leases" stroke={CHART_COLORS[1]} strokeWidth={2} dot={false} />
+                  {dataset === "TRANSACTION"
+                    ? <Line type="monotone" dataKey="transactions" name="Transactions" stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} />
+                    : <Line type="monotone" dataKey="leases" name="Leases" stroke={CHART_COLORS[1]} strokeWidth={2} dot={false} />}
                   <Line type="monotone" dataKey="permits" name="Permits" stroke={CHART_COLORS[3]} strokeWidth={2} dot={false} />
                 </>
               ) : (
                 <>
-                  <Bar dataKey="transactions" name="Transactions" stackId="a" fill={CHART_COLORS[0]} />
-                  <Bar dataKey="leases" name="Leases" stackId="a" fill={CHART_COLORS[1]} />
+                  {dataset === "TRANSACTION"
+                    ? <Bar dataKey="transactions" name="Transactions" stackId="a" fill={CHART_COLORS[0]} />
+                    : <Bar dataKey="leases" name="Leases" stackId="a" fill={CHART_COLORS[1]} />}
                   <Bar dataKey="permits" name="Permits" stackId="a" fill={CHART_COLORS[3]} radius={[3, 3, 0, 0]} />
                 </>
               )}
@@ -490,8 +530,9 @@ function OverviewTab({ qs, compareOff }: { qs: string; compareOff: boolean }) {
           <h3>Period vs Prior</h3>
           <ResponsiveContainer width="100%" height={240}>
             <BarChart data={[
-              { name: "Transactions", Current: data.kpis.transactions, Prior: data.previous.transactions },
-              { name: "Leases", Current: data.kpis.leases, Prior: data.previous.leases },
+              dataset === "TRANSACTION"
+                ? { name: "Transactions", Current: data.kpis.transactions, Prior: data.previous.transactions }
+                : { name: "Leases", Current: data.kpis.leases, Prior: data.previous.leases },
               { name: "Permits", Current: data.kpis.permits, Prior: data.previous.permits },
             ]}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
@@ -871,7 +912,7 @@ interface PreviewItem {
 }
 type Decision = { key: string; action: "create" | "merge" | "skip"; mergeIntoBuyerId?: string };
 
-function RankingsTab({ qs, opts, compareOff, onDrill }: { qs: string; opts: FilterOpts | null; compareOff: boolean; onDrill: (patch: Partial<Filters>) => void }) {
+function RankingsTab({ qs, opts, compareOff, onDrill, dataset }: { qs: string; opts: FilterOpts | null; compareOff: boolean; onDrill: (patch: Partial<Filters>) => void; dataset: Dataset }) {
   const [role, setRole] = useState<"buyers" | "sellers" | "operators">("buyers");
   const [data, setData] = useState<{ role: string; rows: EntityRow[] } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -886,7 +927,14 @@ function RankingsTab({ qs, opts, compareOff, onDrill }: { qs: string; opts: Filt
     api.get<{ role: string; rows: EntityRow[] }>(`/research/entities?role=${role}&${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
   }, [qs, role]);
 
-  const ROLE_LABEL = { buyers: "Most Active Buyers", sellers: "Most Active Sellers", operators: "Most Active Operators" } as const;
+  // In the Leases dataset the grantee/grantor roles are lessees/lessors — the
+  // ranking math is identical, only the vocabulary changes.
+  const ROLE_LABEL = dataset === "LEASE"
+    ? ({ buyers: "Most Active Lessees", sellers: "Most Active Lessors", operators: "Most Active Operators" } as const)
+    : ({ buyers: "Most Active Buyers", sellers: "Most Active Sellers", operators: "Most Active Operators" } as const);
+  const ROLE_SEG = dataset === "LEASE"
+    ? ({ buyers: "Lessees", sellers: "Lessors", operators: "Operators" } as const)
+    : ({ buyers: "Buyers", sellers: "Sellers", operators: "Operators" } as const);
   const isBuyers = role === "buyers";
   const rows = data?.rows ?? [];
   const allSelected = rows.length > 0 && selected.size === rows.length;
@@ -956,7 +1004,7 @@ function RankingsTab({ qs, opts, compareOff, onDrill }: { qs: string; opts: Filt
           <div className="res-card-tools">
             <div className="seg-control">
               {(["buyers", "sellers", "operators"] as const).map((r) => (
-                <span key={r} className={`seg ${role === r ? "active" : ""}`} onClick={() => setRole(r)}>{r[0].toUpperCase() + r.slice(1)}</span>
+                <span key={r} className={`seg ${role === r ? "active" : ""}`} onClick={() => setRole(r)}>{ROLE_SEG[r]}</span>
               ))}
             </div>
             <button className="rbtn" disabled={!rows.length} onClick={() => data && downloadCsv(
@@ -1141,7 +1189,7 @@ const CLASS_DESC: Record<string, string> = {
   UNCLASSIFIED: "Not enough activity to classify",
 };
 
-function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partial<Filters>) => void }) {
+function RelationshipsTab({ qs, onDrill, dataset }: { qs: string; onDrill: (patch: Partial<Filters>) => void; dataset: Dataset }) {
   const [data, setData] = useState<RelationshipsData | null>(null);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<RelView>("relationships");
@@ -1195,10 +1243,12 @@ function RelationshipsTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
   return (
     <>
       <div className="metrics-row" style={{ gridTemplateColumns: "repeat(5,1fr)" }}>
-        <MiniKpi label="Transactions" value={data.totals.transactions} />
+        {/* In the Leases dataset the graph runs over lease instruments — the
+            counts are lease documents, never transactions, and say so. */}
+        <MiniKpi label={dataset === "LEASE" ? "Lease Documents" : "Transactions"} value={data.totals.transactions} />
         <MiniKpi label="Relationships" value={data.totals.relationships} />
         <MiniKpi label="Entities" value={data.totals.entities} />
-        <MiniKpi label="Co-Buyer Groups" value={data.totals.partnerships} />
+        <MiniKpi label={dataset === "LEASE" ? "Co-Lessee Groups" : "Co-Buyer Groups"} value={data.totals.partnerships} />
         <MiniKpi label="Chains" value={data.totals.chains} />
       </div>
 
@@ -1681,15 +1731,20 @@ interface AbstractBuyer {
   amount: number; acreage: number; firstSeen: string; lastSeen: string;
 }
 
-interface RecFilters { abstracts: string[]; counties: string[]; surveys: string[]; docClass: string; docTypes: string[]; statuses: string[]; trajectories: string[]; from: string; to: string }
-const EMPTY_REC_FILTERS: RecFilters = { abstracts: [], counties: [], surveys: [], docClass: "", docTypes: [], statuses: [], trajectories: [], from: "", to: "" };
+// docClass is NOT a records-level filter — the page-level dataset toggle
+// (Transactions/Deeds vs Leases) owns record-class separation for every view.
+interface RecFilters { abstracts: string[]; counties: string[]; surveys: string[]; docTypes: string[]; statuses: string[]; trajectories: string[]; from: string; to: string }
+const EMPTY_REC_FILTERS: RecFilters = { abstracts: [], counties: [], surveys: [], docTypes: [], statuses: [], trajectories: [], from: "", to: "" };
 interface RecOptions { counties: string[]; abstracts: string[]; surveys?: string[]; docTypes?: string[]; docClasses?: string[]; statuses?: string[]; trajectories?: string[] }
 
-function RecordsTab({ qs }: { qs: string }) {
+function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   const { can } = useAuth();
   const canManage = can("manageResearchData");
   const [kind, setKind] = useState<"documents" | "permits">("documents");
   const [page, setPage] = useState(1);
+  // Whole-dataset ordering: the sort runs in the DATABASE across every
+  // matching record, then the page is cut — never a per-page shuffle.
+  const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "recordingDate", dir: "desc" });
   const [docs, setDocs] = useState<Paged<DocRecord> | null>(null);
   const [permits, setPermits] = useState<Paged<PermitRecord> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1705,7 +1760,10 @@ function RecordsTab({ qs }: { qs: string }) {
   const [showFilters, setShowFilters] = useState(false);
   const [rf, setRf] = useState<RecFilters>(EMPTY_REC_FILTERS);
   const [opts, setOpts] = useState<RecOptions>({ counties: [], abstracts: [] });
-  useEffect(() => { setRf(EMPTY_REC_FILTERS); }, [kind]);
+  useEffect(() => {
+    setRf(EMPTY_REC_FILTERS);
+    setSort(kind === "documents" ? { key: "recordingDate", dir: "desc" } : { key: "activityDate", dir: "desc" });
+  }, [kind]);
   useEffect(() => {
     api.get<RecOptions>(`/research/records/options?kind=${kind}&${qs}`).then(setOpts)
       .catch(() => setOpts({ counties: [], abstracts: [] }));
@@ -1716,7 +1774,6 @@ function RecordsTab({ qs }: { qs: string }) {
     for (const c of rf.counties) p.append("county", c);
     for (const sv of rf.surveys) p.append("survey", sv);
     for (const t of rf.docTypes) p.append("docType", t);
-    if (rf.docClass) p.set("docClass", rf.docClass);
     for (const s of rf.statuses) p.append("permitStatus", s);
     for (const t of rf.trajectories) p.append("trajectory", t);
     if (rf.from) p.set("from", rf.from);
@@ -1724,7 +1781,7 @@ function RecordsTab({ qs }: { qs: string }) {
     return p.toString();
   }, [qs, rf]);
   const activeFilterCount = rf.abstracts.length + rf.counties.length + rf.surveys.length + rf.docTypes.length +
-    rf.statuses.length + rf.trajectories.length + (rf.docClass ? 1 : 0) + (rf.from ? 1 : 0) + (rf.to ? 1 : 0);
+    rf.statuses.length + rf.trajectories.length + (rf.from ? 1 : 0) + (rf.to ? 1 : 0);
 
   // Abstract Buyer Preview: whenever an abstract is selected (page-level drill
   // or the records Abstract filter), summarize its top 5 buyers above the table
@@ -1744,13 +1801,13 @@ function RecordsTab({ qs }: { qs: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recQs, kind]);
 
-  useEffect(() => { setPage(1); sel.clear(); }, [recQs, kind, pageSize]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setPage(1); sel.clear(); }, [recQs, kind, pageSize, sort]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setLoading(true);
-    const url = `/research/${kind}?${recQs}&page=${page}&pageSize=${pageSize}`;
+    const url = `/research/${kind}?${recQs}&page=${page}&pageSize=${pageSize}&sortBy=${encodeURIComponent(sort.key)}&sortDir=${sort.dir}`;
     if (kind === "documents") api.get<Paged<DocRecord>>(url).then(setDocs).catch(() => setDocs(null)).finally(() => setLoading(false));
     else api.get<Paged<PermitRecord>>(url).then(setPermits).catch(() => setPermits(null)).finally(() => setLoading(false));
-  }, [recQs, kind, page, pageSize, reloadKey]);
+  }, [recQs, kind, page, pageSize, sort, reloadKey]);
 
   // Deletion is permanent — removed records can never resurface as phantom
   // duplicates in a later import.
@@ -1796,8 +1853,8 @@ function RecordsTab({ qs }: { qs: string }) {
   const docColumns: Column<DocRecord>[] = [
     { key: "recordingDate", header: "Recorded", value: (r) => r.recordingDate, render: (r) => <span className="rec-mid rec-nowrap">{fmtDate(r.recordingDate)}</span>, type: "date" },
     { key: "docType", header: "Type", value: (r) => r.docTypeRaw, render: (r) => <span className="rec-type" title={r.docTypeRaw}>{prettyDocType(r.docType)}</span> },
-    { key: "grantor", header: "Grantor (Seller)", value: (r) => r.grantor, render: (r) => <span className="rec-name">{r.grantor ?? "—"}</span> },
-    { key: "grantee", header: "Grantee (Buyer)", value: (r) => r.grantee, render: (r) => <span className="rec-name">{r.grantee ?? "—"}</span> },
+    { key: "grantor", header: dataset === "LEASE" ? "Grantor (Lessor)" : "Grantor (Seller)", value: (r) => r.grantor, render: (r) => <span className="rec-name">{r.grantor ?? "—"}</span> },
+    { key: "grantee", header: dataset === "LEASE" ? "Grantee (Lessee)" : "Grantee (Buyer)", value: (r) => r.grantee, render: (r) => <span className="rec-name">{r.grantee ?? "—"}</span> },
     { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}`, render: (r) => <span className="rec-mid rec-nowrap">{r.county}, {r.state}</span> },
     { key: "abstractId", header: "Abstract", value: (r) => r.abstractId, align: "right", render: (r) => r.abstractId ? <span className="rec-mid">{r.abstractId}</span> : <span className="rec-faint">—</span> },
     { key: "instrumentNumber", header: "Instr #", value: (r) => r.instrumentNumber, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{r.instrumentNumber ?? "—"}</span> },
@@ -1819,7 +1876,7 @@ function RecordsTab({ qs }: { qs: string }) {
   const toolbarContent = (
     <>
       <div className="seg-control">
-        <span className={`seg ${kind === "documents" ? "active" : ""}`} onClick={() => setKind("documents")}>Recorded Documents</span>
+        <span className={`seg ${kind === "documents" ? "active" : ""}`} onClick={() => setKind("documents")}>{dataset === "LEASE" ? "Lease Documents" : "Transaction / Deed Documents"}</span>
         <span className={`seg ${kind === "permits" ? "active" : ""}`} onClick={() => setKind("permits")}>Drilling Permits</span>
       </div>
       <span className="spacer" />
@@ -1850,9 +1907,6 @@ function RecordsTab({ qs }: { qs: string }) {
           <SearchableMultiSelect options={opts.abstracts} value={rf.abstracts} onChange={(v) => setRf((p) => ({ ...p, abstracts: v }))} placeholder="Abstracts…" /></div>
         {kind === "documents" ? (
           <>
-            <div><div className="rec-flabel">Record type</div>
-              <Select value={rf.docClass} onChange={(v) => setRf((p) => ({ ...p, docClass: v }))} clearable placeholder="All record types" ariaLabel="Record type"
-                options={(opts.docClasses ?? []).map((c) => ({ value: c, label: prettyEnum(c) }))} /></div>
             <div><div className="rec-flabel">Document type</div>
               <SearchableMultiSelect options={opts.docTypes ?? []} labels={Object.fromEntries((opts.docTypes ?? []).map((t) => [t, prettyDocType(t)]))}
                 value={rf.docTypes} onChange={(v) => setRf((p) => ({ ...p, docTypes: v }))} placeholder="Document types…" /></div>
@@ -1932,10 +1986,10 @@ function RecordsTab({ qs }: { qs: string }) {
         ) : (
           <>
             {kind === "documents"
-              ? <SortableTable customizeId="research-records-docs" columns={docColumns} rows={docs!.rows} rowKey={(r) => r.id} toolbar={toolbarContent} subToolbar={filterStrip} defaultSort={{ key: "recordingDate", dir: "desc" }} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />
-              : <SortableTable customizeId="research-records-permits" columns={permitColumns} rows={permits!.rows} rowKey={(r) => r.id} toolbar={toolbarContent} subToolbar={filterStrip} defaultSort={{ key: "activityDate", dir: "desc" }} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />}
+              ? <SortableTable customizeId="research-records-docs" columns={docColumns} rows={docs!.rows} rowKey={(r) => r.id} toolbar={toolbarContent} subToolbar={filterStrip} serverSort={{ sort, onSort: setSort }} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />
+              : <SortableTable customizeId="research-records-permits" columns={permitColumns} rows={permits!.rows} rowKey={(r) => r.id} toolbar={toolbarContent} subToolbar={filterStrip} serverSort={{ sort, onSort: setSort }} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />}
             <div className="rec-foot">
-              <span>Showing {num(active.rows.length)} of {num(active.total)} records · sorted by {kind === "documents" ? "recorded" : ""} date, newest first</span>
+              <span>Showing {num(active.rows.length)} of {num(active.total)} records · sorted across all pages by {(kind === "documents" ? docColumns : (permitColumns as Column<never>[])).find((c) => c.key === sort.key)?.header.toLowerCase() ?? sort.key}, {sort.dir === "asc" ? "ascending" : "descending"}</span>
               <span className="row" style={{ gap: 10, alignItems: "center" }}>
                 <span className="ct-rpp"><Select value={String(pageSize)} onChange={(v) => setPageSize(Number(v))} options={["20", "50", "100", "200"]} width={68} ariaLabel="Rows per page" /></span>
                 {totalPages > 1 && (
