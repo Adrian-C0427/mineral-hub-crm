@@ -1166,7 +1166,9 @@ tr.row-base td { background: var(--panel-2); font-weight: 600; }
   color: var(--text); font: inherit; font-size: 13.5px; }
 .datef-input:focus { outline: none; box-shadow: none; border: none; }
 .datef-icon { color: var(--text-dim); flex: none; }
-.datef-pop { padding: 10px; overflow: visible; }
+/* The calendar sizes to its content — .msel-menu's 240px scroll cap would
+   clip the 5th/6th week rows (days 30/31 rendering past the border). */
+.datef-pop { padding: 10px; overflow: visible; max-height: none; }
 .datef-head { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
 .datef-nav { flex: none; display: inline-flex; align-items: center; justify-content: center;
   width: 26px; height: 26px; min-height: 0; padding: 0; border: none; background: none;

@@ -287,16 +287,21 @@ researchRouter.get(
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
+    // Filter options are scoped to the active dataset (Transactions/Deeds vs
+    // Leases) so the Buyers/Sellers/Doc-type dropdowns never offer parties or
+    // instrument types from the other class.
+    const { docClass } = parseFilters(req.query as Record<string, unknown>);
+    const cls = docClass ? { docClass } : {};
     const [states, counties, docTypes, buyers, sellers, operators, permitGeo, docAbstracts, permitAbstracts, docSurveys, permitSurveys] = await Promise.all([
-      prisma.researchDocument.groupBy({ by: ["state"], where: { organizationId: org } }),
-      prisma.researchDocument.groupBy({ by: ["state", "county"], where: { organizationId: org } }),
-      prisma.researchDocument.groupBy({ by: ["docType"], where: { organizationId: org } }),
+      prisma.researchDocument.groupBy({ by: ["state"], where: { organizationId: org, ...cls } }),
+      prisma.researchDocument.groupBy({ by: ["state", "county"], where: { organizationId: org, ...cls } }),
+      prisma.researchDocument.groupBy({ by: ["docType"], where: { organizationId: org, ...cls } }),
       prisma.researchDocument.groupBy({
-        by: ["granteeNorm", "grantee"], where: { organizationId: org, granteeNorm: { not: null } },
+        by: ["granteeNorm", "grantee"], where: { organizationId: org, granteeNorm: { not: null }, ...cls },
         _count: true, orderBy: { _count: { granteeNorm: "desc" } }, take: 500,
       }),
       prisma.researchDocument.groupBy({
-        by: ["grantorNorm", "grantor"], where: { organizationId: org, grantorNorm: { not: null } },
+        by: ["grantorNorm", "grantor"], where: { organizationId: org, grantorNorm: { not: null }, ...cls },
         _count: true, orderBy: { _count: { grantorNorm: "desc" } }, take: 500,
       }),
       prisma.researchPermit.groupBy({
@@ -304,9 +309,9 @@ researchRouter.get(
         _count: true, orderBy: { _count: { operatorNorm: "desc" } }, take: 500,
       }),
       prisma.researchPermit.groupBy({ by: ["state", "county"], where: { organizationId: org } }),
-      prisma.researchDocument.groupBy({ by: ["state", "county", "abstractId"], where: { organizationId: org, abstractId: { not: null } } }),
+      prisma.researchDocument.groupBy({ by: ["state", "county", "abstractId"], where: { organizationId: org, abstractId: { not: null }, ...cls } }),
       prisma.researchPermit.groupBy({ by: ["state", "county", "abstractId"], where: { organizationId: org, abstractId: { not: null } } }),
-      prisma.researchDocument.groupBy({ by: ["state", "county", "survey"], where: { organizationId: org, survey: { not: null } } }),
+      prisma.researchDocument.groupBy({ by: ["state", "county", "survey"], where: { organizationId: org, survey: { not: null }, ...cls } }),
       prisma.researchPermit.groupBy({ by: ["state", "county", "survey"], where: { organizationId: org, survey: { not: null } } }),
     ]);
 
@@ -389,7 +394,9 @@ researchRouter.get(
       leases: ds.filter((d) => d.docClass === "LEASE").length,
       permits: ps.length,
       horizontalPermits: ps.filter((p) => p.trajectory === "HORIZONTAL").length,
-      uniqueBuyers: new Set(ds.filter((d) => d.docClass === "TRANSACTION" && d.granteeNorm).map((d) => d.granteeNorm)).size,
+      // Grantee count within the ACTIVE dataset only: deed buyers in
+      // Transactions mode, lessees in Leases mode — never a mix.
+      uniqueBuyers: new Set(ds.filter((d) => d.docClass === (f.docClass ?? "TRANSACTION") && d.granteeNorm).map((d) => d.granteeNorm)).size,
       uniqueOperators: new Set(ps.map((p) => p.operatorNorm)).size,
       acreage: Math.round(ds.reduce((s, d) => s + (d.acreage ?? 0), 0)),
     });
@@ -552,7 +559,11 @@ researchRouter.get(
       const permits = await loadPermits(org, f, span);
       for (const p of permits) bump(p.operatorNorm, p.operator, p.activityDate, p.county, null, p.trajectory === "HORIZONTAL");
     } else {
-      const docs = await loadDocs(org, f, span);
+      // Party rankings are computed within ONE document class: deed/transaction
+      // buyers must never be inflated by lease parties (the "operators showing
+      // up as Top Buyers" bug) and vice versa. The page always sends docClass;
+      // default to TRANSACTION so an unscoped call still can't mix datasets.
+      const docs = await loadDocs(org, { ...f, docClass: f.docClass ?? "TRANSACTION" }, span);
       for (const d of docs) {
         if (role === "buyers") bump(d.granteeNorm, d.grantee, d.recordingDate, d.county, d.acreage);
         else bump(d.grantorNorm, d.grantor, d.recordingDate, d.county, d.acreage);
@@ -590,7 +601,11 @@ async function loadTxEdges(org: string, f: ResearchFilters, win: Window): Promis
   const rows = await prisma.researchDocument.findMany({
     where: {
       ...docWhere(org, f, win),
-      docClass: "TRANSACTION",
+      // One class per graph: acquisition chains and grantor→grantee analytics
+      // come from deed/transaction instruments; in Leases mode the same graph
+      // machinery runs over lease instruments (lessor→lessee) instead. The
+      // two datasets never mix inside one graph.
+      docClass: f.docClass ?? "TRANSACTION",
       grantorNorm: { not: null },
       granteeNorm: { not: null },
     },
@@ -1080,7 +1095,58 @@ researchRouter.get(
 const pageSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(1000).default(50),
+  sortBy: z.string().optional(),
+  sortDir: z.enum(["asc", "desc"]).default("desc"),
 });
+
+/**
+ * Whole-dataset sorting: the ORDER BY runs in the database over every row
+ * matching the filters, THEN the page is cut — a sort by amount surfaces the
+ * top record on page 1 no matter which page it previously sat on. Sortable
+ * columns are whitelisted per endpoint; anything else falls back to the
+ * default date column. Nullable columns sort nulls last in both directions
+ * so empty cells never crowd out real values at the top.
+ */
+const DOC_SORT_COLUMNS: Record<string, { column: string; nullable?: boolean }> = {
+  recordingDate: { column: "recordingDate" },
+  effectiveDate: { column: "effectiveDate", nullable: true },
+  county: { column: "county" },
+  docType: { column: "docType" },
+  grantor: { column: "grantor", nullable: true },
+  grantee: { column: "grantee", nullable: true },
+  acreage: { column: "acreage", nullable: true },
+  consideration: { column: "consideration", nullable: true },
+  instrumentNumber: { column: "instrumentNumber", nullable: true },
+  abstractId: { column: "abstractId", nullable: true },
+  survey: { column: "survey", nullable: true },
+};
+const PERMIT_SORT_COLUMNS: Record<string, { column: string; nullable?: boolean }> = {
+  activityDate: { column: "activityDate" },
+  county: { column: "county" },
+  operator: { column: "operator" },
+  status: { column: "status" },
+  trajectory: { column: "trajectory" },
+  abstractId: { column: "abstractId", nullable: true },
+  survey: { column: "survey", nullable: true },
+  leaseName: { column: "leaseName", nullable: true },
+  formation: { column: "formation", nullable: true },
+  apiNumber: { column: "apiNumber", nullable: true },
+};
+
+function sortOrder(
+  columns: Record<string, { column: string; nullable?: boolean }>,
+  sortBy: string | undefined,
+  sortDir: "asc" | "desc",
+  fallback: string,
+): Record<string, unknown>[] {
+  const spec = (sortBy && columns[sortBy]) || columns[fallback];
+  const dir = spec.nullable ? { sort: sortDir, nulls: "last" } : sortDir;
+  const order: Record<string, unknown>[] = [{ [spec.column]: dir }];
+  // Stable tiebreaker so pagination never shows a row twice across pages.
+  if (spec.column !== fallback) order.push({ [fallback]: "desc" });
+  order.push({ id: "asc" });
+  return order;
+}
 
 /**
  * Dynamic option lists for the Records filter panel — distinct values drawn
@@ -1253,12 +1319,14 @@ researchRouter.get(
     const org = orgId(req);
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
-    const { page, pageSize } = pageSchema.parse(req.query);
+    const { page, pageSize, sortBy, sortDir } = pageSchema.parse(req.query);
     const where = docWhere(org, f, win);
     const [total, rows] = await Promise.all([
       prisma.researchDocument.count({ where }),
       prisma.researchDocument.findMany({
-        where, orderBy: { recordingDate: "desc" }, skip: (page - 1) * pageSize, take: pageSize,
+        where,
+        orderBy: sortOrder(DOC_SORT_COLUMNS, sortBy, sortDir, "recordingDate") as Prisma.ResearchDocumentOrderByWithRelationInput[],
+        skip: (page - 1) * pageSize, take: pageSize,
       }),
     ]);
     res.json({ total, page, pageSize, rows });
@@ -1272,12 +1340,14 @@ researchRouter.get(
     const org = orgId(req);
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
-    const { page, pageSize } = pageSchema.parse(req.query);
+    const { page, pageSize, sortBy, sortDir } = pageSchema.parse(req.query);
     const where = permitWhere(org, f, win);
     const [total, rows] = await Promise.all([
       prisma.researchPermit.count({ where }),
       prisma.researchPermit.findMany({
-        where, orderBy: { activityDate: "desc" }, skip: (page - 1) * pageSize, take: pageSize,
+        where,
+        orderBy: sortOrder(PERMIT_SORT_COLUMNS, sortBy, sortDir, "activityDate") as Prisma.ResearchPermitOrderByWithRelationInput[],
+        skip: (page - 1) * pageSize, take: pageSize,
       }),
     ]);
     res.json({ total, page, pageSize, rows });

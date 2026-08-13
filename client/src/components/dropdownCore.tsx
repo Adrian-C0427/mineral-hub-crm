@@ -23,9 +23,21 @@ import { layoutRect, layoutViewport } from "../lib/viewport";
 const MENU_MAX_H = 240;
 const EDGE = 8; // minimum breathing room from viewport edges
 
-export function useMenuPosition(anchorRef: RefObject<HTMLElement | null>, open: boolean) {
+export function useMenuPosition(
+  anchorRef: RefObject<HTMLElement | null>,
+  open: boolean,
+  opts?: {
+    /**
+     * The popup renders its FULL content with no internal scrolling (the
+     * DateField calendar). Flip decisions use the content's real height and
+     * no maxHeight clamp is applied — the popup must never be clipped.
+     */
+    fitContent?: boolean;
+  },
+) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<CSSProperties | null>(null);
+  const fitContent = opts?.fitContent ?? false;
 
   useLayoutEffect(() => {
     if (!open) { setPos(null); return; }
@@ -46,6 +58,17 @@ export function useMenuPosition(anchorRef: RefObject<HTMLElement | null>, open: 
       // space above is meaningfully larger — this keeps every dropdown in the
       // app opening down by default (the direction users expect), including
       // controls that sit low inside modals.
+      if (fitContent) {
+        // Full-content popup (calendar): never clamp its height — flip above
+        // only when the whole popup can't fit below but CAN fit above.
+        const contentH = menuRef.current?.scrollHeight ?? MENU_MAX_H;
+        if (below >= contentH || above < contentH || below >= above) {
+          setPos({ position: "fixed", top: r.bottom + 4, left, width: r.width });
+        } else {
+          setPos({ position: "fixed", bottom: vh - r.top + 4, left, width: r.width });
+        }
+        return;
+      }
       const MIN_USABLE = 160; // a menu this tall scrolls comfortably
       const fitsBelow = below >= Math.min(MENU_MAX_H, menuRef.current?.scrollHeight ?? MENU_MAX_H);
       if (fitsBelow || below >= MIN_USABLE || below >= above) {
