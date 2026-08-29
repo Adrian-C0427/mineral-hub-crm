@@ -34,6 +34,15 @@ describe("withDbRetry", () => {
     expect(op).toHaveBeenCalledTimes(2);
   });
 
+  it("retries P2024 (timed out fetching a connection from the pool)", async () => {
+    const op = vi
+      .fn()
+      .mockRejectedValueOnce(prismaError("P2024"))
+      .mockResolvedValue("ok");
+    await expect(withDbRetry(op, 2, 0)).resolves.toBe("ok");
+    expect(op).toHaveBeenCalledTimes(2);
+  });
+
   it("gives up after exhausting retries and rethrows the last error", async () => {
     const err = prismaError("P1001");
     const op = vi.fn().mockRejectedValue(err);
