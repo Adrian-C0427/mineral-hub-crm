@@ -85,7 +85,7 @@ export function SearchableMultiSelect({ options, value, onChange, placeholder = 
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
         />
-        <Caret open={open} />
+        <Caret open={open} onToggle={() => { if (open) close(); else { setOpen(true); inputRef.current?.focus(); } }} />
       </div>
       {open && pos && createPortal(
         <div

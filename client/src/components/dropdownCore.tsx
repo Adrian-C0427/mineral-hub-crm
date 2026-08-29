@@ -38,9 +38,14 @@ export function useMenuPosition(
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<CSSProperties | null>(null);
   const fitContent = opts?.fitContent ?? false;
+  // The open direction is decided ONCE per open and then locked. Re-deciding
+  // on every reposition made menus flip mid-interaction (picking an option
+  // shrinks the list → the flip math changes → the menu jumps). Locked, the
+  // menu stays anchored to its field for the whole interaction.
+  const dirRef = useRef<"down" | "up" | null>(null);
 
   useLayoutEffect(() => {
-    if (!open) { setPos(null); return; }
+    if (!open) { setPos(null); dirRef.current = null; return; }
     const place = () => {
       // layoutRect converts to layout-space px so the fixed portal lands
       // exactly on the anchor even under the global interface zoom.
@@ -62,7 +67,8 @@ export function useMenuPosition(
         // Full-content popup (calendar): never clamp its height — flip above
         // only when the whole popup can't fit below but CAN fit above.
         const contentH = menuRef.current?.scrollHeight ?? MENU_MAX_H;
-        if (below >= contentH || above < contentH || below >= above) {
+        if (dirRef.current == null) dirRef.current = below >= contentH || above < contentH || below >= above ? "down" : "up";
+        if (dirRef.current === "down") {
           setPos({ position: "fixed", top: r.bottom + 4, left, width: r.width });
         } else {
           setPos({ position: "fixed", bottom: vh - r.top + 4, left, width: r.width });
@@ -71,7 +77,8 @@ export function useMenuPosition(
       }
       const MIN_USABLE = 160; // a menu this tall scrolls comfortably
       const fitsBelow = below >= Math.min(MENU_MAX_H, menuRef.current?.scrollHeight ?? MENU_MAX_H);
-      if (fitsBelow || below >= MIN_USABLE || below >= above) {
+      if (dirRef.current == null) dirRef.current = fitsBelow || below >= MIN_USABLE || below >= above ? "down" : "up";
+      if (dirRef.current === "down") {
         setPos({ position: "fixed", top: r.bottom + 4, left, width: r.width, maxHeight: Math.max(80, Math.min(MENU_MAX_H, below)) });
       } else {
         setPos({ position: "fixed", bottom: vh - r.top + 4, left, width: r.width, maxHeight: Math.max(80, Math.min(MENU_MAX_H, above)) });
@@ -84,8 +91,18 @@ export function useMenuPosition(
     };
     window.addEventListener("resize", place);
     window.addEventListener("scroll", onScroll, true);
-    return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", onScroll, true); };
-  }, [open, anchorRef]);
+    // Track the ANCHOR's own size: selecting options grows/shrinks the field
+    // (chips wrap, value text changes), and without re-placing here the menu
+    // would detach from — or overlap — its field. With the direction locked
+    // above, this keeps the menu glued to the field with no flip-jumps.
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(place) : null;
+    if (ro && anchorRef.current) ro.observe(anchorRef.current);
+    return () => {
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", onScroll, true);
+      ro?.disconnect();
+    };
+  }, [open, anchorRef, fitContent]);
 
   return { menuRef, pos };
 }
@@ -118,8 +135,28 @@ export function useDismiss(
   }, [open]);
 }
 
-export function Caret({ open }: { open: boolean }) {
-  return <ChevronDown size={15} className={`msel-caret ${open ? "open" : ""}`} aria-hidden strokeWidth={2.2} />;
+/**
+ * The field's chevron. With `onToggle` it is a real control: clicking it
+ * closes an open menu (or opens a closed one) immediately — no clicking
+ * outside required — always preserving the field's entered/selected value.
+ * mousedown is used (and suppressed) so the click neither re-focuses the
+ * field's input (which would re-open the menu) nor reaches box handlers.
+ */
+export function Caret({ open, onToggle }: { open: boolean; onToggle?: () => void }) {
+  const chevron = <ChevronDown size={15} className={`msel-caret ${open ? "open" : ""}`} aria-hidden strokeWidth={2.2} />;
+  if (!onToggle) return chevron;
+  return (
+    <button
+      type="button"
+      className="msel-caret-btn"
+      aria-label={open ? "Close options" : "Open options"}
+      tabIndex={-1}
+      onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onToggle(); }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {chevron}
+    </button>
+  );
 }
 
 /** Keep the active option visible while arrowing through a long menu. */

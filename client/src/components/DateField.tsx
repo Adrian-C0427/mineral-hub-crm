@@ -151,7 +151,14 @@ export function DateField({ value, onChange, ariaLabel, disabled, placeholder = 
           <button type="button" className="msel-clear" aria-label="Clear date" tabIndex={-1}
             onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); onChange(""); setText(""); }}>×</button>
         )}
-        <CalendarDays size={15} className="datef-icon" aria-hidden strokeWidth={2} />
+        {/* The field icon is a real toggle: clicking it closes an open
+            calendar immediately (value untouched) instead of doing nothing. */}
+        <button type="button" className="msel-caret-btn" tabIndex={-1}
+          aria-label={open ? "Close calendar" : "Open calendar"}
+          onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); if (disabled) return; if (open) close(); else { setOpen(true); inputRef.current?.focus(); } }}
+          onClick={(e) => e.stopPropagation()}>
+          <CalendarDays size={15} className="datef-icon" aria-hidden strokeWidth={2} />
+        </button>
       </div>
       {open && !disabled && pos && createPortal(
         <div className="msel-menu msel-menu-portal datef-pop" ref={menuRef} style={popupStyle} role="dialog" aria-label="Choose date"
