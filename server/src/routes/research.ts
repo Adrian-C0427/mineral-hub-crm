@@ -2,7 +2,7 @@ import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import type { Prisma, ResearchDocClass, ResearchDocType, ResearchPermitStatus, WellTrajectory } from "@prisma/client";
-import { prisma } from "../db.js";
+import { prisma, withDbRetry } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import {
@@ -201,18 +201,20 @@ function permitWhere(org: string, f: ResearchFilters, win?: Window): Prisma.Rese
 }
 
 async function loadDocs(org: string, f: ResearchFilters, win: Window): Promise<DocRow[]> {
-  return prisma.researchDocument.findMany({
-    where: docWhere(org, f, win),
-    select: {
-      recordingDate: true, docClass: true, docType: true, state: true, county: true,
-      abstractId: true, survey: true, grantee: true, granteeNorm: true, grantor: true,
-      grantorNorm: true, acreage: true,
-    },
-  });
+  return withDbRetry(() =>
+    prisma.researchDocument.findMany({
+      where: docWhere(org, f, win),
+      select: {
+        recordingDate: true, docClass: true, docType: true, state: true, county: true,
+        abstractId: true, survey: true, grantee: true, granteeNorm: true, grantor: true,
+        grantorNorm: true, acreage: true,
+      },
+    }),
+  );
 }
 
 async function loadPermits(org: string, f: ResearchFilters, win: Window): Promise<PermitRow[]> {
-  const [orgRows, rrcRows] = await Promise.all([
+  const [orgRows, rrcRows] = await withDbRetry(() => Promise.all([
     prisma.researchPermit.findMany({
       where: permitWhere(org, f, win),
       select: {
@@ -221,7 +223,7 @@ async function loadPermits(org: string, f: ResearchFilters, win: Window): Promis
       },
     }),
     loadRrcPermits(f, win),
-  ]);
+  ]));
   // The platform's imported RRC drilling permits (B3, rrc.permits) participate
   // in every research analytic automatically — no manual Research-page import.
   // Dedupe by 8-digit API so a CSV-imported permit isn't double counted.
@@ -292,7 +294,7 @@ researchRouter.get(
     // instrument types from the other class.
     const { docClass } = parseFilters(req.query as Record<string, unknown>);
     const cls = docClass ? { docClass } : {};
-    const [states, counties, docTypes, buyers, sellers, operators, permitGeo, docAbstracts, permitAbstracts, docSurveys, permitSurveys] = await Promise.all([
+    const [states, counties, docTypes, buyers, sellers, operators, permitGeo, docAbstracts, permitAbstracts, docSurveys, permitSurveys] = await withDbRetry(() => Promise.all([
       prisma.researchDocument.groupBy({ by: ["state"], where: { organizationId: org, ...cls } }),
       prisma.researchDocument.groupBy({ by: ["state", "county"], where: { organizationId: org, ...cls } }),
       prisma.researchDocument.groupBy({ by: ["docType"], where: { organizationId: org, ...cls } }),
@@ -313,7 +315,7 @@ researchRouter.get(
       prisma.researchPermit.groupBy({ by: ["state", "county", "abstractId"], where: { organizationId: org, abstractId: { not: null } } }),
       prisma.researchDocument.groupBy({ by: ["state", "county", "survey"], where: { organizationId: org, survey: { not: null }, ...cls } }),
       prisma.researchPermit.groupBy({ by: ["state", "county", "survey"], where: { organizationId: org, survey: { not: null } } }),
-    ]);
+    ]));
 
     // Imported RRC permits (B3) contribute their counties + operators to the
     // filter lists so the whole platform dataset is filterable, not just files

@@ -13,14 +13,23 @@ export const prisma = new PrismaClient({
  * surface immediately.
  *   P1001 — can't reach database server
  *   P1017 — server has closed the connection
+ *   P2024 — timed out fetching a connection from the pool. Fired when Neon
+ *           terminates connections en masse (E57P01, "administrator command":
+ *           an autosuspend or maintenance restart) and a request briefly finds
+ *           the pool drained. It is transient like the two above, and the
+ *           exponential backoff below is what makes retrying it safe — the
+ *           retry lands *after* the churn window, once connections free up,
+ *           rather than piling more concurrent demand onto an exhausted pool.
  */
-const RETRYABLE_DB_ERROR_CODES = new Set(["P1001", "P1017"]);
+const RETRYABLE_DB_ERROR_CODES = new Set(["P1001", "P1017", "P2024"]);
 
 /**
  * Run a DB operation, retrying only on transient connection errors. The happy
  * path is unchanged (the op runs once and returns); retries kick in solely for
- * the Neon reconnect blips seen on hot, unauthenticated routes (the vector-tile
- * fetch). Backoff is exponential from `baseDelayMs` (100ms, 200ms by default).
+ * the Neon reconnect/pool blips seen on hot routes — the vector-tile fetch, the
+ * dashboard read batch, and the wide fan-out Research analytics queries. Wrap an
+ * idempotent read (or a whole `Promise.all` batch of them) so a re-run is safe.
+ * Backoff is exponential from `baseDelayMs` (100ms, 200ms by default).
  */
 export async function withDbRetry<T>(
   op: () => Promise<T>,
