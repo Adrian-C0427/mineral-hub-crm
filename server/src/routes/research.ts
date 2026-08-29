@@ -1321,6 +1321,63 @@ researchRouter.get(
   }),
 );
 
+/**
+ * Records search predicates, shared by the paginated list endpoints and
+ * /records/ids (whole-dataset selection) so "what matches" is defined once.
+ */
+function applyDocSearch(where: Prisma.ResearchDocumentWhereInput, q?: string, instrument?: string): void {
+  if (instrument) where.instrumentNumber = contains(instrument);
+  if (q) {
+    // One free-text term matched against every user-visible record field.
+    where.OR = [
+      { grantor: contains(q) }, { grantee: contains(q) },
+      { instrumentNumber: contains(q) }, { docTypeRaw: contains(q) },
+      { county: contains(q) }, { abstractId: contains(q) },
+      { survey: contains(q) }, { legalDescription: contains(q) },
+      { volume: contains(q) }, { page: contains(q) },
+    ];
+  }
+}
+function applyPermitSearch(where: Prisma.ResearchPermitWhereInput, q?: string, instrument?: string): void {
+  if (instrument) where.permitNumber = contains(instrument);
+  if (q) {
+    where.OR = [
+      { operator: contains(q) }, { leaseName: contains(q) }, { wellName: contains(q) },
+      { apiNumber: contains(q) }, { permitNumber: contains(q) },
+      { county: contains(q) }, { abstractId: contains(q) }, { survey: contains(q) },
+      { formation: contains(q) },
+    ];
+  }
+}
+
+/**
+ * Every id matching the current filters/search — powers "Select all" across
+ * ALL pages: the client swaps its selection for this list, so bulk actions
+ * operate on the whole filtered dataset, never just the visible page.
+ */
+researchRouter.get(
+  "/records/ids",
+  requirePermission("viewResearch"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const f = parseFilters(req.query as Record<string, unknown>);
+    const win = parseWindow(req.query as Record<string, unknown>);
+    const { q, instrument } = pageSchema.parse(req.query);
+    const kind = req.query.kind === "permits" ? "permits" : "documents";
+    let ids: { id: string }[];
+    if (kind === "documents") {
+      const where = docWhere(org, f, win);
+      applyDocSearch(where, q, instrument);
+      ids = await prisma.researchDocument.findMany({ where, select: { id: true } });
+    } else {
+      const where = permitWhere(org, f, win);
+      applyPermitSearch(where, q, instrument);
+      ids = await prisma.researchPermit.findMany({ where, select: { id: true } });
+    }
+    res.json({ total: ids.length, ids: ids.map((r) => r.id) });
+  }),
+);
+
 researchRouter.get(
   "/documents",
   requirePermission("viewResearch"),
@@ -1330,17 +1387,7 @@ researchRouter.get(
     const win = parseWindow(req.query as Record<string, unknown>);
     const { page, pageSize, sortBy, sortDir, q, instrument } = pageSchema.parse(req.query);
     const where = docWhere(org, f, win);
-    if (instrument) where.instrumentNumber = contains(instrument);
-    if (q) {
-      // One free-text term matched against every user-visible record field.
-      where.OR = [
-        { grantor: contains(q) }, { grantee: contains(q) },
-        { instrumentNumber: contains(q) }, { docTypeRaw: contains(q) },
-        { county: contains(q) }, { abstractId: contains(q) },
-        { survey: contains(q) }, { legalDescription: contains(q) },
-        { volume: contains(q) }, { page: contains(q) },
-      ];
-    }
+    applyDocSearch(where, q, instrument);
     const [total, rows] = await Promise.all([
       prisma.researchDocument.count({ where }),
       prisma.researchDocument.findMany({
@@ -1362,15 +1409,7 @@ researchRouter.get(
     const win = parseWindow(req.query as Record<string, unknown>);
     const { page, pageSize, sortBy, sortDir, q, instrument } = pageSchema.parse(req.query);
     const where = permitWhere(org, f, win);
-    if (instrument) where.permitNumber = contains(instrument);
-    if (q) {
-      where.OR = [
-        { operator: contains(q) }, { leaseName: contains(q) }, { wellName: contains(q) },
-        { apiNumber: contains(q) }, { permitNumber: contains(q) },
-        { county: contains(q) }, { abstractId: contains(q) }, { survey: contains(q) },
-        { formation: contains(q) },
-      ];
-    }
+    applyPermitSearch(where, q, instrument);
     const [total, rows] = await Promise.all([
       prisma.researchPermit.count({ where }),
       prisma.researchPermit.findMany({

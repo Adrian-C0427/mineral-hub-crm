@@ -297,7 +297,7 @@ export function Research() {
           {/* Dataset switch — Transactions/Deeds vs Leases. Drives docClass on
               every request so the two record classes never mix in any view. */}
           <div className="seg-control" role="tablist" aria-label="Dataset">
-            <span className={`seg ${dataset === "TRANSACTION" ? "active" : ""}`} onClick={() => setDataset("TRANSACTION")}>Transactions / Deeds</span>
+            <span className={`seg ${dataset === "TRANSACTION" ? "active" : ""}`} onClick={() => setDataset("TRANSACTION")}>Transactions</span>
             <span className={`seg ${dataset === "LEASE" ? "active" : ""}`} onClick={() => setDataset("LEASE")}>Leases</span>
           </div>
           <div className="seg-control">
@@ -1823,42 +1823,70 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   }, [recQs, kind, page, pageSize, sort, reloadKey]);
 
   // Deletion is permanent — removed records can never resurface as phantom
-  // duplicates in a later import.
+  // duplicates in a later import. Ids are sent in chunks under the server's
+  // per-request cap, so a whole-dataset selection deletes completely.
+  const BULK_CHUNK = 5000;
   async function bulkDelete() {
     setBusy(true);
     try {
-      await api.post("/research/records/bulk", { kind: kind.toUpperCase(), ids: [...sel.selected], action: "delete" });
+      const ids = [...sel.selected];
+      for (let i = 0; i < ids.length; i += BULK_CHUNK) {
+        await api.post("/research/records/bulk", { kind: kind.toUpperCase(), ids: ids.slice(i, i + BULK_CHUNK), action: "delete" });
+      }
       sel.clear(); setConfirmDel(false); setReloadKey((k) => k + 1);
     } finally { setBusy(false); }
   }
-  function exportSelected() {
-    if (kind === "documents") {
-      const rows = (docs?.rows ?? []).filter((r) => sel.selected.has(r.id));
-      downloadCsv("research-documents-selected.csv",
-        ["Recording Date", "Type", "Class", "Grantor", "Grantee", "Instrument #", "State", "County", "Abstract"],
-        rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.docClass, r.grantor, r.grantee, r.instrumentNumber, r.state, r.county, r.abstractId]));
-    } else {
-      const rows = (permits?.rows ?? []).filter((r) => sel.selected.has(r.id));
-      downloadCsv("research-permits-selected.csv",
-        ["Date", "Operator", "Lease", "Well", "API #", "Permit #", "Status", "Trajectory", "State", "County", "Formation", "Source"],
-        rows.map((r) => [r.activityDate.slice(0, 10), r.operator, r.leaseName, r.wellName, r.apiNumber, r.permitNumber, r.status, r.trajectory, r.state, r.county, r.formation, r.source]));
-    }
+
+  // Select EVERY record matching the current search/filters — across all
+  // pages, not just the visible ones — so bulk actions cover the whole
+  // filtered dataset.
+  const [selectingAll, setSelectingAll] = useState(false);
+  async function selectAllMatching() {
+    setSelectingAll(true);
+    try {
+      const d = await api.get<{ total: number; ids: string[] }>(`/research/records/ids?kind=${kind}&${recQs}`);
+      sel.toggleAll(d.ids.filter((id) => !sel.selected.has(id))); // additive: selects every not-yet-selected match
+    } finally { setSelectingAll(false); }
   }
 
-  async function exportAll() {
-    // Export up to 2000 most-recent matching rows.
-    if (kind === "documents") {
-      const d = await api.get<Paged<DocRecord>>(`/research/documents?${recQs}&page=1&pageSize=1000`);
-      downloadCsv("research-documents.csv",
-        ["Recording Date", "Type", "Class", "Grantor", "Grantee", "Instrument #", "State", "County", "Abstract"],
-        d.rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.docClass, r.grantor, r.grantee, r.instrumentNumber, r.state, r.county, r.abstractId]));
-    } else {
-      const d = await api.get<Paged<PermitRecord>>(`/research/permits?${recQs}&page=1&pageSize=1000`);
-      downloadCsv("research-permits.csv",
-        ["Date", "Operator", "Lease", "Well", "API #", "Permit #", "Status", "Trajectory", "State", "County", "Formation", "Source"],
-        d.rows.map((r) => [r.activityDate.slice(0, 10), r.operator, r.leaseName, r.wellName, r.apiNumber, r.permitNumber, r.status, r.trajectory, r.state, r.county, r.formation, r.source]));
+  /**
+   * Every row matching the current filters/search, fetched page by page in
+   * server-sorted order. No arbitrary cap: exports cover the entire matching
+   * dataset regardless of pagination, and the sequential 1,000-row pages keep
+   * memory and request size bounded so large exports don't freeze or fail.
+   */
+  async function fetchAllRows<T>(base: "documents" | "permits"): Promise<T[]> {
+    const out: T[] = [];
+    const pageSize = 1000;
+    for (let p = 1; ; p++) {
+      const d = await api.get<Paged<T>>(`/research/${base}?${recQs}&page=${p}&pageSize=${pageSize}&sortBy=${encodeURIComponent(sort.key)}&sortDir=${sort.dir}`);
+      out.push(...d.rows);
+      if (out.length >= d.total || d.rows.length === 0) break;
     }
+    return out;
   }
+
+  const [exporting, setExporting] = useState(false);
+  async function exportRows(onlySelected: boolean) {
+    setExporting(true);
+    try {
+      if (kind === "documents") {
+        let rows = await fetchAllRows<DocRecord>("documents");
+        if (onlySelected) rows = rows.filter((r) => sel.selected.has(r.id));
+        downloadCsv(onlySelected ? "research-documents-selected.csv" : "research-documents.csv",
+          ["Recording Date", "Type", "Class", "Grantor", "Grantee", "Instrument #", "State", "County", "Abstract"],
+          rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.docClass, r.grantor, r.grantee, r.instrumentNumber, r.state, r.county, r.abstractId]));
+      } else {
+        let rows = await fetchAllRows<PermitRecord>("permits");
+        if (onlySelected) rows = rows.filter((r) => sel.selected.has(r.id));
+        downloadCsv(onlySelected ? "research-permits-selected.csv" : "research-permits.csv",
+          ["Date", "Operator", "Lease", "Well", "API #", "Permit #", "Status", "Trajectory", "State", "County", "Formation", "Source"],
+          rows.map((r) => [r.activityDate.slice(0, 10), r.operator, r.leaseName, r.wellName, r.apiNumber, r.permitNumber, r.status, r.trajectory, r.state, r.county, r.formation, r.source]));
+      }
+    } finally { setExporting(false); }
+  }
+  const exportSelected = () => exportRows(true);
+  const exportAll = () => exportRows(false);
 
   const active = kind === "documents" ? docs : permits;
   const totalPages = active ? Math.max(1, Math.ceil(active.total / pageSize)) : 1;
@@ -1889,7 +1917,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   const toolbarContent = (
     <>
       <div className="seg-control">
-        <span className={`seg ${kind === "documents" ? "active" : ""}`} onClick={() => setKind("documents")}>{dataset === "LEASE" ? "Lease Documents" : "Transaction / Deed Documents"}</span>
+        <span className={`seg ${kind === "documents" ? "active" : ""}`} onClick={() => setKind("documents")}>{dataset === "LEASE" ? "Lease Documents" : "Transaction Documents"}</span>
         <span className={`seg ${kind === "permits" ? "active" : ""}`} onClick={() => setKind("permits")}>Drilling Permits</span>
       </div>
       <SearchInput value={search} onChange={setSearch}
@@ -1905,9 +1933,9 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
       >
         Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
       </button>
-      <button className="rbtn" onClick={exportAll} disabled={!active?.total}>
+      <button className="rbtn" onClick={exportAll} disabled={!active?.total || exporting}>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
-        Export CSV
+        {exporting ? "Exporting…" : "Export CSV"}
       </button>
     </>
   );
@@ -1992,7 +2020,14 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
       )}
       {canManage && sel.selected.size > 0 && (
         <BulkBar count={sel.selected.size} onClear={sel.clear}>
-          <button className="small" onClick={exportSelected}>Export</button>
+          {/* Selects every record matching the current search/filters across
+              ALL pages — bulk actions then cover the whole dataset. */}
+          {active != null && sel.selected.size < active.total && (
+            <button className="small" onClick={selectAllMatching} disabled={selectingAll}>
+              {selectingAll ? "Selecting…" : `Select all ${num(active.total)}`}
+            </button>
+          )}
+          <button className="small" onClick={exportSelected} disabled={exporting}>{exporting ? "Exporting…" : "Export"}</button>
           <button className="small danger" onClick={() => setConfirmDel(true)} disabled={busy}>Delete</button>
         </BulkBar>
       )}

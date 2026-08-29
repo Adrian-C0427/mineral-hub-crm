@@ -1141,6 +1141,12 @@ tr.row-base td { background: var(--panel-2); font-weight: 600; }
 .msel-single-value.placeholder { color: var(--text-dim); }
 .msel-caret { flex: none; color: var(--text-dim); transition: transform 0.15s ease; pointer-events: none; }
 .msel-caret.open { transform: rotate(180deg); }
+/* Clickable chevron wrapper: the arrow is a real close/open control (the bare
+   .msel-caret svg keeps pointer-events:none; the button receives the click). */
+.msel-caret-btn { flex: none; display: inline-flex; align-items: center; justify-content: center;
+  margin: -4px -4px -4px 0; padding: 4px; border: none; background: none; cursor: pointer; border-radius: 4px; }
+.msel-caret-btn:hover { background: var(--panel-2); }
+.msel-caret-btn:hover .msel-caret { color: var(--text); }
 .msel-box.open { border-color: var(--accent); }
 /* Keyboard/hover active row — one highlight for both dropdown variants. */
 .msel-opt.active { background: var(--panel-2); }

@@ -123,7 +123,7 @@ export function Select({
         {clearable && selected && !disabled && (
           <button type="button" className="msel-clear" aria-label="Clear" onClick={(e) => { e.stopPropagation(); pick(""); }}>×</button>
         )}
-        <Caret open={open} />
+        <Caret open={open} onToggle={() => { if (disabled) return; if (open) { close(); boxRef.current?.focus(); } else setOpen(true); }} />
       </div>
       {open && !disabled && pos && createPortal(
         <div
