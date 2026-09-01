@@ -12,6 +12,7 @@ import { isDeclaredRaster, LOGO_MIME } from "./org.js";
 import { parseCsv as parseProductionCsv, MAX_PRODUCTION_IMPORT_ROWS } from "./wells.js";
 import { MAX_INGEST_ROWS } from "../domain/researchIngest.js";
 import { MAX_IMPORT_ROWS } from "./import.js";
+import { MAX_SELECTABLE_IDS } from "./research.js";
 import { normalizeCompany } from "../serializers.js";
 import { DEFAULT_ROLE_PERMISSIONS } from "../domain/permissions.js";
 import { cardSafeText } from "../services/notifyPush.js";
@@ -234,6 +235,17 @@ describe("production import row cap", () => {
       expect(cap).toBeGreaterThan(0);
       expect(cap).toBeLessThanOrEqual(50_000);
     }
+  });
+});
+
+describe("whole-dataset selection cap", () => {
+  // /research/records/ids ("Select all") returned an UNBOUNDED findMany — the
+  // pattern the rest of the API caps. The invariant worth guarding is that the
+  // ceiling exists, stays bounded, and stays above the 5000-id bulk-delete cap
+  // the client chunks a large selection into, so select-all remains usable.
+  it("keeps the id selection bounded and chunk-compatible", () => {
+    expect(MAX_SELECTABLE_IDS).toBeGreaterThan(5_000);
+    expect(MAX_SELECTABLE_IDS).toBeLessThanOrEqual(500_000);
   });
 });
 
