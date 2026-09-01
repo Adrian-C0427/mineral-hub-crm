@@ -5,7 +5,7 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Banner, CtPill, MetricCard, Modal, Spinner } from "../components/ui";
+import { Banner, CtPill, MetricCard, Modal, Spinner, ChipList } from "../components/ui";
 import { Select } from "../components/Select";
 import { WellImport } from "../components/WellImport";
 import { money, num, prettyEnum, fmtDate, fmtDateTime, fmtDateLocal } from "../lib/format";
@@ -565,8 +565,8 @@ function DossierCard({ well, open, onToggle }: { well: WellRow; open: boolean; o
                 <Kv label="Plug date" value={d.status.plugDate && fmtDate(d.status.plugDate)} />
                 <Kv label="Last production" value={d.status.lastProd} />
                 <Kv label="Field" value={d.field.fieldName && `${d.field.fieldName}${d.field.fieldNo ? ` (#${d.field.fieldNo})` : ""}`} />
-                <Kv label="Reservoir(s)" value={d.field.reservoirs.length ? d.field.reservoirs.map((r) => `${r.name}${r.type ? ` (${r.type})` : ""}`).join("; ") : null} />
-                <Kv label="Formations" value={d.formations.length ? d.formations.join(", ") : null} />
+                <Kv label="Reservoir(s)" value={d.field.reservoirs.length ? <ChipList items={d.field.reservoirs.map((r) => `${r.name}${r.type ? ` (${r.type})` : ""}`)} /> : null} />
+                <Kv label="Formations" value={d.formations.length ? <ChipList items={d.formations} /> : null} />
                 <Kv label="Operator (current)" value={d.operators.current.name && `${d.operators.current.name}${d.operators.current.operatorNo ? ` · P-5 #${d.operators.current.operatorNo}` : ""}`} />
                 <Kv label="Wellbore" value={d.wellbore.laterals.length ? `${d.wellbore.laterals.length} lateral${d.wellbore.laterals.length > 1 ? "s" : ""} · ${fmtVol(d.wellbore.totalLateralFt)} ft mapped` : null} />
                 <Kv label="RRC cumulative" value={d.cumulative ? `${fmtVol(d.cumulative.oilBbl)} bbl oil · ${fmtVol(d.cumulative.gasMcf)} mcf gas` : null} />
@@ -644,7 +644,7 @@ function DossierCard({ well, open, onToggle }: { well: WellRow; open: boolean; o
                     </table>
                   </div>
                   {d.offsetOperators.length > 0 && (
-                    <div style={{ fontSize: 13, marginTop: 4 }}><span className="muted">Offset operators: </span>{d.offsetOperators.join(", ")}</div>
+                    <div style={{ fontSize: 13, marginTop: 4 }}><span className="muted">Offset operators: </span><ChipList items={d.offsetOperators} max={6} /></div>
                   )}
                 </div>
               )}

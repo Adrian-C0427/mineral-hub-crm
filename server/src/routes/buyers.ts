@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
@@ -403,6 +404,44 @@ buyersRouter.post(
       },
       select: { id: true, aliases: true },
     });
+    // Audit trail: which name was associated, to which canonical buyer, by
+    // whom, and when (createdAt).
+    if (aliases.length !== buyer.aliases.length) {
+      await prisma.activityLog.create({
+        data: {
+          organizationId: orgId(req), eventType: "BUYER_ALIAS_ADDED", buyerId: buyer.id, actorUserId: req.user!.id,
+          summary: `Alias "${name}" added to ${buyer.companyName}`,
+          metadata: { name },
+        },
+      });
+    }
+    res.json(updated);
+  }),
+);
+
+/** Remove an alias (also the "undo" for an incorrect alias association). */
+buyersRouter.delete(
+  "/:id/aliases",
+  requirePermission("editBuyers"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { name } = z.object({ name: z.string().trim().min(1).max(200) }).parse(req.body);
+    const buyer = await prisma.buyer.findFirst({
+      where: { id: req.params.id, organizationId: orgId(req) },
+      select: { id: true, companyName: true, aliases: true },
+    });
+    if (!buyer) throw new HttpError(404, "Buyer not found");
+    const aliases = buyer.aliases.filter((a) => a.toUpperCase() !== name.toUpperCase());
+    if (aliases.length === buyer.aliases.length) throw new HttpError(404, "Alias not found on this buyer");
+    const updated = await prisma.buyer.update({
+      where: { id: buyer.id }, data: { aliases }, select: { id: true, aliases: true },
+    });
+    await prisma.activityLog.create({
+      data: {
+        organizationId: orgId(req), eventType: "BUYER_ALIAS_REMOVED", buyerId: buyer.id, actorUserId: req.user!.id,
+        summary: `Alias "${name}" removed from ${buyer.companyName}`,
+        metadata: { name },
+      },
+    });
     res.json(updated);
   }),
 );
@@ -515,11 +554,160 @@ buyersRouter.post(
         },
       });
 
+      // Audit trail with a full snapshot of the absorbed record: names
+      // merged, canonical buyer, actor, timestamp — and enough of the source
+      // to let an administrator undo an incorrect merge later.
+      await tx.activityLog.create({
+        data: {
+          organizationId: org, eventType: "BUYER_MERGE", buyerId: target.id, actorUserId: req.user!.id,
+          summary: `Merged "${source.companyName}" into "${target.companyName}" (canonical)`,
+          metadata: {
+            targetId: target.id,
+            targetName: target.companyName,
+            addedAliases: uniqCI([source.companyName, ...source.aliases])
+              .filter((a) => a.toUpperCase() !== target.companyName.trim().toUpperCase() &&
+                             !target.aliases.some((t) => t.toUpperCase() === a.toUpperCase())),
+            sourceSnapshot: {
+              companyName: source.companyName, name: source.name, aliases: source.aliases,
+              contactName: source.contactName, contactFirstName: source.contactFirstName,
+              contactLastName: source.contactLastName, email: source.email, phone: source.phone,
+              website: source.website, notes: source.notes, source: source.source,
+              relationshipStatus: source.relationshipStatus,
+              researchSummary: source.researchSummary ?? null,
+              buyBox: source.buyBox ? {
+                states: source.buyBox.states, counties: source.buyBox.counties,
+                basins: source.buyBox.basins, formations: source.buyBox.formations,
+                assetTypes: source.buyBox.assetTypes,
+                minAcreage: source.buyBox.minAcreage, maxAcreage: source.buyBox.maxAcreage,
+                minPrice: source.buyBox.minPrice, maxPrice: source.buyBox.maxPrice,
+              } : null,
+              ownerUserIds: source.owners.map((o) => o.userId),
+              tagIds: source.tags.map((t) => t.tagId),
+            },
+          } as unknown as Prisma.InputJsonValue,
+        },
+      });
+
       await tx.buyer.delete({ where: { id: source.id } });
     });
 
     const merged = await prisma.buyer.findUnique({ where: { id: target.id }, select: { id: true, companyName: true, aliases: true } });
     res.json({ ok: true, buyer: merged });
+  }),
+);
+
+/**
+ * Alias/merge audit trail for one buyer: who associated which names, when,
+ * and whether a merge is still undoable (snapshot present, not yet undone).
+ */
+buyersRouter.get(
+  "/:id/merge-history",
+  requirePermission("viewBuyers"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const buyer = await prisma.buyer.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true } });
+    if (!buyer) throw new HttpError(404, "Buyer not found");
+    const events = await prisma.activityLog.findMany({
+      where: {
+        buyerId: buyer.id,
+        eventType: { in: ["BUYER_MERGE", "BUYER_MERGE_UNDONE", "BUYER_ALIAS_ADDED", "BUYER_ALIAS_REMOVED"] },
+      },
+      orderBy: { createdAt: "desc" },
+      take: 100,
+      include: { actor: { select: { name: true } } },
+    });
+    res.json({
+      events: events.map((e) => {
+        const meta = (e.metadata ?? {}) as Record<string, unknown>;
+        return {
+          id: e.id, eventType: e.eventType, summary: e.summary,
+          actorName: e.actor?.name ?? null, createdAt: e.createdAt,
+          undoable: e.eventType === "BUYER_MERGE" && meta.sourceSnapshot != null && meta.undoneAt == null,
+        };
+      }),
+    });
+  }),
+);
+
+/**
+ * Administrator undo of an incorrect merge. Recreates the absorbed buyer from
+ * the snapshot stored at merge time (identity, contact info, notes, buy box,
+ * owners, tags) and removes the aliases that merge added from the canonical
+ * buyer. Relational history that moved during the merge (offers, messages,
+ * documents, activity) REMAINS on the canonical buyer — nothing is deleted or
+ * lost; the restored record starts from its own identity again.
+ */
+buyersRouter.post(
+  "/merge-undo/:logId",
+  requirePermission("deleteBuyers"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const log = await prisma.activityLog.findFirst({
+      where: { id: req.params.logId, organizationId: org, eventType: "BUYER_MERGE" },
+    });
+    if (!log) throw new HttpError(404, "Merge record not found");
+    const meta = (log.metadata ?? {}) as {
+      targetId?: string; targetName?: string; addedAliases?: string[]; undoneAt?: string;
+      sourceSnapshot?: {
+        companyName: string; name: string; aliases: string[];
+        contactName: string | null; contactFirstName: string | null; contactLastName: string | null;
+        email: string | null; phone: string | null; website: string | null; notes: string | null;
+        source: string; relationshipStatus: string | null; researchSummary: unknown;
+        buyBox: { states: string[]; counties: string[]; basins: string[]; formations: string[]; assetTypes: string[]; minAcreage: number | null; maxAcreage: number | null; minPrice: number | null; maxPrice: number | null } | null;
+        ownerUserIds: string[]; tagIds: string[];
+      };
+    };
+    if (meta.undoneAt) throw new HttpError(400, "This merge has already been undone");
+    const snap = meta.sourceSnapshot;
+    if (!snap || !meta.targetId) throw new HttpError(400, "This merge predates undo support (no snapshot was stored)");
+
+    const target = await prisma.buyer.findFirst({ where: { id: meta.targetId, organizationId: org } });
+    if (!target) throw new HttpError(404, "The canonical buyer no longer exists");
+
+    // Only restore owners/tags that still exist.
+    const [validOwners, validTags] = await Promise.all([
+      prisma.user.findMany({ where: { id: { in: snap.ownerUserIds }, organizationId: org }, select: { id: true } }),
+      prisma.buyerTag.findMany({ where: { id: { in: snap.tagIds }, organizationId: org }, select: { id: true } }),
+    ]);
+
+    const restored = await prisma.$transaction(async (tx) => {
+      const recreated = await tx.buyer.create({
+        data: {
+          organizationId: org,
+          name: snap.name, companyName: snap.companyName,
+          normalizedCompany: normalizeCompany(snap.companyName),
+          aliases: snap.aliases,
+          contactName: snap.contactName, contactFirstName: snap.contactFirstName, contactLastName: snap.contactLastName,
+          email: snap.email, phone: snap.phone, website: snap.website, notes: snap.notes,
+          source: snap.source,
+          ...(snap.relationshipStatus ? { relationshipStatus: snap.relationshipStatus as never } : {}),
+          ...(snap.researchSummary != null ? { researchSummary: snap.researchSummary as Prisma.InputJsonValue } : {}),
+          ...(snap.buyBox ? { buyBox: { create: snap.buyBox } } : {}),
+          owners: { create: validOwners.map((u) => ({ userId: u.id })) },
+          tags: { create: validTags.map((t) => ({ tagId: t.id })) },
+        },
+        select: { id: true, companyName: true },
+      });
+      // The canonical buyer loses exactly the aliases this merge added.
+      const removed = new Set((meta.addedAliases ?? []).map((a) => a.toUpperCase()));
+      await tx.buyer.update({
+        where: { id: target.id },
+        data: { aliases: target.aliases.filter((a) => !removed.has(a.toUpperCase())) },
+      });
+      await tx.activityLog.update({
+        where: { id: log.id },
+        data: { metadata: { ...meta, undoneAt: new Date().toISOString() } as unknown as Prisma.InputJsonValue },
+      });
+      await tx.activityLog.create({
+        data: {
+          organizationId: org, eventType: "BUYER_MERGE_UNDONE", buyerId: target.id, actorUserId: req.user!.id,
+          summary: `Undid merge of "${snap.companyName}" — profile restored (deal/offer history remains on ${target.companyName})`,
+          metadata: { restoredBuyerId: recreated.id, mergeLogId: log.id },
+        },
+      });
+      return recreated;
+    });
+
+    res.json({ ok: true, restoredBuyer: restored });
   }),
 );
 

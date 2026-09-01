@@ -6,7 +6,7 @@ import {
 import { ArrowRight, Heart, Lock, Search, Share2, TrendingUp } from "lucide-react";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, Banner, Modal, ConfirmDelete, SearchInput } from "../components/ui";
+import { Spinner, Banner, Modal, ConfirmDelete, SearchInput, ChipList } from "../components/ui";
 import { useRowSelection, BulkBar } from "../components/bulk";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { Select } from "../components/Select";
@@ -67,6 +67,9 @@ interface FilterOpts {
 interface DocRecord {
   id: string; state: string; county: string; docTypeRaw: string; docType: string; docClass: string;
   instrumentNumber: string | null; recordingDate: string; grantor: string | null; grantee: string | null;
+  /** Individual participants split from multi-party cells at import (may be
+   *  empty on legacy rows — display falls back to the raw cell). */
+  grantorParties?: string[]; granteeParties?: string[];
   abstractId: string | null; survey: string | null; acreage: number | null; consideration: number | null; source: string;
 }
 interface PermitRecord {
@@ -981,7 +984,7 @@ function RankingsTab({ qs, opts, compareOff, onDrill, dataset }: { qs: string; o
     ...(role === "operators"
       ? ([{ key: "horizontal", header: "Horizontal", value: (r) => r.horizontal, align: "right" }] as Column<EntityRow>[])
       : []),
-    { key: "counties", header: "Counties", value: (r) => r.counties.length, render: (r) => r.counties.join(", ") || "—" },
+    { key: "counties", header: "Counties", value: (r) => r.counties.length, render: (r) => <ChipList items={r.counties} max={4} /> },
   ];
 
   const top = rows.slice(0, 10);
@@ -1894,10 +1897,10 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   const docColumns: Column<DocRecord>[] = [
     { key: "recordingDate", header: "Recorded", value: (r) => r.recordingDate, render: (r) => <span className="rec-mid rec-nowrap">{fmtDate(r.recordingDate)}</span>, type: "date" },
     { key: "docType", header: "Type", value: (r) => r.docTypeRaw, render: (r) => <span className="rec-type" title={r.docTypeRaw}>{prettyDocType(r.docType)}</span> },
-    { key: "grantor", header: dataset === "LEASE" ? "Grantor (Lessor)" : "Grantor (Seller)", value: (r) => r.grantor, render: (r) => <span className="rec-name">{r.grantor ?? "—"}</span> },
-    { key: "grantee", header: dataset === "LEASE" ? "Grantee (Lessee)" : "Grantee (Buyer)", value: (r) => r.grantee, render: (r) => <span className="rec-name">{r.grantee ?? "—"}</span> },
+    { key: "grantor", header: dataset === "LEASE" ? "Grantor (Lessor)" : "Grantor (Seller)", value: (r) => r.grantor, render: (r) => <span className="rec-name"><ChipList items={r.grantorParties?.length ? r.grantorParties : [r.grantor]} max={3} /></span> },
+    { key: "grantee", header: dataset === "LEASE" ? "Grantee (Lessee)" : "Grantee (Buyer)", value: (r) => r.grantee, render: (r) => <span className="rec-name"><ChipList items={r.granteeParties?.length ? r.granteeParties : [r.grantee]} max={3} /></span> },
     { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}`, render: (r) => <span className="rec-mid rec-nowrap">{r.county}, {r.state}</span> },
-    { key: "abstractId", header: "Abstract", value: (r) => r.abstractId, align: "right", render: (r) => r.abstractId ? <span className="rec-mid">{r.abstractId}</span> : <span className="rec-faint">—</span> },
+    { key: "abstractId", header: "Abstract", value: (r) => r.abstractId, align: "right", render: (r) => r.abstractId ? <span className="rec-mid"><ChipList items={r.abstractId.split(",").map((a) => a.trim())} max={3} /></span> : <span className="rec-faint">—</span> },
     { key: "instrumentNumber", header: "Instr #", value: (r) => r.instrumentNumber, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{r.instrumentNumber ?? "—"}</span> },
   ];
   const permitColumns: Column<PermitRecord>[] = [

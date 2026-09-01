@@ -116,6 +116,32 @@ export function SearchInput({ value, onChange, placeholder, ariaLabel }: {
   );
 }
 
+/**
+ * The application's ONE way to display a multi-value field: each value as an
+ * individual chip — `[15] [47] [209]` — never a comma-joined string, and a
+ * single value gets the same treatment (`[15]`). Display-only (the values stay
+ * separate in the data/filter layer; this is presentation). `max` collapses a
+ * long list behind a "+N" chip whose tooltip lists the rest.
+ */
+export function ChipList({ items, max, empty = "—" }: {
+  items: readonly (string | null | undefined)[];
+  /** Show at most this many chips; the rest collapse into "+N". */
+  max?: number;
+  /** Rendered when there are no values (default an em dash). */
+  empty?: ReactNode;
+}) {
+  const vals = items.filter((v): v is string => v != null && v.trim() !== "");
+  if (vals.length === 0) return <>{empty}</>;
+  const shown = max != null && vals.length > max ? vals.slice(0, max) : vals;
+  const extra = vals.length - shown.length;
+  return (
+    <span className="vchips">
+      {shown.map((v, i) => <span className="vchip" key={`${v}-${i}`}>{v}</span>)}
+      {extra > 0 && <span className="vchip vchip-more" title={vals.slice(shown.length).join(", ")}>+{extra}</span>}
+    </span>
+  );
+}
+
 /** Design-system pill (reference spec): 22px tinted capsule, optional leading
  *  status dot. The one pill used for types, statuses, stages, and priorities. */
 export function CtPill({ color, dot, title, children }: { color: string; dot?: boolean; title?: string; children: ReactNode }) {
