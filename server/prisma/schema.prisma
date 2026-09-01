@@ -1017,6 +1017,9 @@ model ActivityLog {
   actorUserId    String?
   actor          User?         @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
   summary        String
+  // Structured event payload. Buyer merges store a full snapshot of the
+  // absorbed record here, which is what makes an admin "undo merge" possible.
+  metadata       Json?
   createdAt      DateTime      @default(now())
 
   @@index([createdAt])

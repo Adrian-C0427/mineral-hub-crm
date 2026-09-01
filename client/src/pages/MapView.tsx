@@ -10,7 +10,7 @@ import { downloadCsv } from "../lib/csv";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION } from "../lib/counties";
 import { addCadastralLayers, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
 import { MapLayersPanel } from "../components/MapLayersPanel";
-import { Spinner, StageBadge, PriorityBadge } from "../components/ui";
+import { Spinner, StageBadge, PriorityBadge, ChipList } from "../components/ui";
 import { money, num } from "../lib/format";
 import {
   extractWells, wellsPerLease, buildPoints, latestMonth, periodWindow, metricGeojson,
@@ -1131,7 +1131,7 @@ export function MapView() {
                   <div key={d.id} style={{ borderTop: "1px solid var(--border)", padding: "10px 0" }}>
                     <div className="row" style={{ justifyContent: "space-between" }}><Link to={`/deals/${d.id}`} style={{ fontWeight: 600 }}>{d.name}</Link><PriorityBadge priority={d.priority} /></div>
                     <div className="row" style={{ gap: 6, margin: "6px 0" }}><StageBadge stage={d.stage} />{d.selectedBuyer && <span className="muted" style={{ fontSize: 12 }}>→ {d.selectedBuyer.name}</span>}</div>
-                    <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}><KV k="Operator" v={d.operator} /><KV k="Asset Type" v={d.assetTypes.join(", ")} /><KV k="NMA" v={num(d.acreageNma)} /><KV k="Profit est." v={money(d.profitEst)} /></div>
+                    <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}><KV k="Operator" v={d.operator} /><KV k="Asset Type" v={d.assetTypes.length ? <ChipList items={d.assetTypes} /> : null} /><KV k="NMA" v={num(d.acreageNma)} /><KV k="Profit est." v={money(d.profitEst)} /></div>
                   </div>
                 ))}
               </>

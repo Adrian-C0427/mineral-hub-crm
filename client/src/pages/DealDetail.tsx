@@ -5,7 +5,7 @@ import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
 import {
   Spinner, PriorityBadge, StageBadge, Modal, UserChip,
-  Banner, ConfirmDelete, ConfirmDialog, BackLink, OverflowMenu, showToast, CtPill,
+  Banner, ConfirmDelete, ConfirmDialog, BackLink, OverflowMenu, showToast, CtPill, ChipList,
 } from "../components/ui";
 import { Pencil } from "lucide-react";
 import { useUnsavedSection } from "../lib/unsaved";
@@ -368,7 +368,7 @@ export function DealDetail() {
                   {m.nonMatching.map((c) => <span key={c.key} className="crit-tag crit-no">{c.label}</span>)}
                 </div>
                 <div className="mr-meta">
-                  Owner(s): {m.owners.length ? m.owners.join(", ") : "—"} · {m.previousDealsClosed} closed together · Last contact: {m.lastContactDate ? fmtDate(m.lastContactDate) : "never"}
+                  Owner(s): {m.owners.length ? <ChipList items={m.owners} max={3} /> : "—"} · {m.previousDealsClosed} closed together · Last contact: {m.lastContactDate ? fmtDate(m.lastContactDate) : "never"}
                   {/* "stale" only makes sense for aged contact — a never-contacted buyer isn't stale. */}
                   {m.stale && m.lastContactDate && <span className="stale-flag" title="No contact in a while — worth a follow-up"> · stale</span>}
                 </div>
@@ -555,9 +555,9 @@ function AssetsSection({ deal, canEdit, canPublish, onAdd, onChanged }: {
                 <StageBadge stage={a.stage} />
               </div>
               <div className="asset-card-facts">
-                {a.counties.length > 0 && <span>{a.counties.join(", ")}{a.states.length ? ` · ${a.states.join(", ")}` : ""}</span>}
+                {(a.counties.length > 0 || a.states.length > 0) && <span><ChipList items={[...a.counties, ...a.states]} max={4} /></span>}
                 {a.nra != null && <span><strong>{num(a.nra)}</strong> NRA</span>}
-                {a.assetTypes.length > 0 && <span>{a.assetTypes.join("/")}</span>}
+                {a.assetTypes.length > 0 && <span><ChipList items={a.assetTypes} /></span>}
                 {a.operator && <span>{a.operator}</span>}
                 {a.rrc && <span>RRC {a.rrc}</span>}
               </div>
@@ -634,11 +634,11 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
       </div>
       {!edit ? (<>
         <div className="ddc-grid">
-          <DKV k="State" v={(deal.states?.length ? deal.states : (deal.state ? [deal.state] : [])).join(", ") || null} />
-          <DKV k="County" v={deal.counties.join(", ") || null} />
-          <DKV k="Basin" v={deal.basins.join(", ") || null} />
-          <DKV k="Formation" v={deal.formations.join(", ") || null} />
-          <DKV k="Asset Type" v={deal.assetTypes.join(", ") || null} />
+          <DKV k="State" v={(deal.states?.length || deal.state) ? <ChipList items={deal.states?.length ? deal.states : [deal.state]} /> : null} />
+          <DKV k="County" v={deal.counties.length ? <ChipList items={deal.counties} /> : null} />
+          <DKV k="Basin" v={deal.basins.length ? <ChipList items={deal.basins} /> : null} />
+          <DKV k="Formation" v={deal.formations.length ? <ChipList items={deal.formations} /> : null} />
+          <DKV k="Asset Type" v={deal.assetTypes.length ? <ChipList items={deal.assetTypes} /> : null} />
           <DKV k="NMA" v={deal.acreageNma != null ? num(deal.acreageNma) : null} mono />
           <DKV k="NRA" v={deal.nra != null ? num(deal.nra) : null} mono />
           <DKV k="Our Price" v={deal.ourPrice != null ? money(deal.ourPrice) : null} mono />

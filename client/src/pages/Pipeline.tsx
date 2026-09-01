@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
-import { Modal, Spinner, showToast } from "../components/ui";
+import { Modal, Spinner, showToast, ChipList } from "../components/ui";
 import { Select } from "../components/Select";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { dealSearchHaystack } from "../lib/dealSearch";
@@ -430,7 +430,7 @@ function CardBody({ deal, fields }: { deal: DealSummary; fields: Record<CardFiel
       </div>
       {fields.location && (
         <div className="dc-meta">
-          <span>{[deal.counties.join(", "), deal.state].filter(Boolean).join(", ") || "—"}</span>
+          <span><ChipList items={[...deal.counties, deal.state]} max={3} /></span>
         </div>
       )}
       {(showNra || fields.profit) && (

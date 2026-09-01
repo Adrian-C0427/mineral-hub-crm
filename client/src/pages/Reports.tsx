@@ -6,7 +6,7 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, Banner, Modal, EmptyState } from "../components/ui";
+import { Spinner, Banner, Modal, EmptyState, ChipList } from "../components/ui";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { Select } from "../components/Select";
 import { GeoFields } from "../components/GeoFields";
@@ -570,7 +570,7 @@ function DrillTable({ rows, onOpen }: { rows: DealSummary[]; onOpen: (id: string
   const cols: Column<DealSummary>[] = [
     { key: "name", header: "Deal", type: "text", value: (r) => r.name, render: (r) => <strong>{r.name}</strong> },
     { key: "stage", header: "Stage", type: "text", value: (r) => r.stage, render: (r) => stageLabel(r.stage) },
-    { key: "loc", header: "Counties", type: "text", value: (r) => r.counties.join(", "), render: (r) => r.counties.join(", ") || "—" },
+    { key: "loc", header: "Counties", type: "text", value: (r) => r.counties.join(", "), render: (r) => <ChipList items={r.counties} max={4} /> },
     { key: "ask", header: "Ask", type: "number", align: "right", value: (r) => r.askPrice, render: (r) => money(r.askPrice) },
     { key: "buyer", header: "Buyer", type: "text", value: (r) => r.selectedBuyer?.name ?? "" },
   ];

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, MetricCard, Modal, Banner, SearchInput, Req, CtPill } from "../components/ui";
+import { Spinner, MetricCard, Modal, Banner, SearchInput, Req, CtPill, ChipList } from "../components/ui";
 import { dealSearchHaystack } from "../lib/dealSearch";
 import { Select } from "../components/Select";
 import { SortableTable, type Column } from "../components/SortableTable";
@@ -71,10 +71,10 @@ export function MineralAssets() {
     { key: "name", header: "Asset", value: (d) => d.name, render: (d) => (
       <div className="row" style={{ gap: 8, alignItems: "center" }}><strong>{d.name}</strong>{d.assetMode === "SELL" && <CtPill color="#f5b04b">For sale</CtPill>}</div>
     ) },
-    { key: "location", header: "Location", value: (d) => d.counties.join(", "), render: (d) => [d.counties.join(", "), d.state].filter(Boolean).join(", ") || "—" },
+    { key: "location", header: "Location", value: (d) => d.counties.join(", "), render: (d) => <ChipList items={[...d.counties, d.state]} max={4} /> },
     // Standardized asset type (RI/ORRI/…); legacy rows created before the
     // rename still show their old free-text ownershipType.
-    { key: "ownershipType", header: "Asset Type", value: (d) => d.assetTypes.join("/") || d.ownershipType, render: (d) => d.assetTypes.join("/") || d.ownershipType || "—" },
+    { key: "ownershipType", header: "Asset Type", value: (d) => d.assetTypes.join("/") || d.ownershipType, render: (d) => <ChipList items={d.assetTypes.length ? d.assetTypes : [d.ownershipType]} /> },
     { key: "producing", header: "Producing", value: (d) => d.producingStatus,
       render: (d) => d.producingStatus
         ? <CtPill dot color={d.producingStatus === "Producing" ? "#22c55e" : "#8b93a7"}>{d.producingStatus}</CtPill>

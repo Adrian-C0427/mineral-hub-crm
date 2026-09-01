@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, RelationshipDot, StageBadge, StatusBadge, OverflowMenu, ConfirmDelete, CtPill, Modal } from "../components/ui";
+import { Spinner, RelationshipDot, StageBadge, StatusBadge, OverflowMenu, ConfirmDelete, CtPill, Modal, ChipList } from "../components/ui";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { Select } from "../components/Select";
@@ -10,6 +10,7 @@ import { AssigneePicker } from "../components/AssigneePicker";
 import { GeoFields } from "../components/GeoFields";
 import { StateSelect } from "../components/StateSelect";
 import { BuyerRelationships, type BuyerNetwork } from "../components/BuyerRelationships";
+import { BuyerAliasManager } from "../components/BuyerAliasManager";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
 import { money, pct, fmtDate, toInputDate } from "../lib/format";
 import { formatPhone } from "../lib/phone";
@@ -290,7 +291,7 @@ export function BuyerProfile() {
               <KV k="Website" v={view.website} />
               <KV k="Address" v={view.mailingAddress} />
               <KV k="City / State / ZIP" v={[view.mailingCity, view.mailingState, view.mailingZip].filter(Boolean).join(", ")} />
-              <KV k="Owner(s)" v={view.owners.map((o) => o.name).join(", ")} />
+              <KV k="Owner(s)" v={view.owners.length ? <ChipList items={view.owners.map((o) => o.name)} /> : null} />
             </div>
           )}
         </div>
@@ -320,7 +321,7 @@ export function BuyerProfile() {
           ) : (
             <div className="dd-grid">
               {/* Friendly display names — the raw key rendered "ASSETTYPES". */}
-              {ARRAY_KEYS.map((k) => <KV key={k} k={k === "assetTypes" ? "Asset types" : k} v={(view.buyBox[k] as string[]).join(", ")} />)}
+              {ARRAY_KEYS.map((k) => <KV key={k} k={k === "assetTypes" ? "Asset types" : k} v={(view.buyBox[k] as string[]).length ? <ChipList items={view.buyBox[k] as string[]} /> : null} />)}
               <KV k="Acreage" v={fmtRange(view.buyBox.minAcreage, view.buyBox.maxAcreage, (n) => n.toLocaleString("en-US"))} />
               <KV k="Price" v={fmtRange(view.buyBox.minPrice, view.buyBox.maxPrice, (n) => money(n))} />
             </div>
@@ -380,6 +381,9 @@ export function BuyerProfile() {
           Mounted even while a section is being edited so the header strip keeps
           its data; the section itself hides its body during edits. */}
       <div style={editing ? { display: "none" } : undefined}>
+        {/* Aliases & merges — canonical identity, manual alias/merge tools,
+            and the audit trail (with admin undo). */}
+        <BuyerAliasManager buyerId={b.id} companyName={view.companyName} aliases={view.aliases} onChanged={load} />
         <BuyerRelationships buyerId={b.id} onNetwork={setNet} />
       </div>
 
@@ -466,7 +470,7 @@ function SendDealPicker({ buyerId, buyerName, onClose, onSent }: {
           {shown.map((d) => (
             <button key={d.id} type="button" className="bp-pick-row" onClick={() => setPicked({ id: d.id, name: d.name })}>
               <span className="bp-pick-name">{d.name}</span>
-              <span className="bp-pick-meta">{d.counties.join(", ") || "—"}</span>
+              <span className="bp-pick-meta"><ChipList items={d.counties} max={3} /></span>
               <StageBadge stage={d.stage} />
             </button>
           ))}

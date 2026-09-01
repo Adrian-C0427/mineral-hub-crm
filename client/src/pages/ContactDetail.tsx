@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, Banner, ConfirmDelete, EmptyState, showToast, UserChip } from "../components/ui";
+import { Spinner, Banner, ConfirmDelete, EmptyState, showToast, UserChip, ChipList } from "../components/ui";
 import { Select } from "../components/Select";
 import { DateField } from "../components/DateField";
 import { fmtDate } from "../lib/format";
@@ -439,11 +439,11 @@ function FieldSections({ contact, canManage, onSave }: { contact: ContactRow; ca
           edit: { kind: "text", value: contact.entityName ?? "", body: (v) => ({ entityName: v.trim() || null }) },
         },
         {
-          label: "Counties", display: contact.counties.length ? contact.counties.join(", ") : null,
+          label: "Counties", display: contact.counties.length ? <ChipList items={contact.counties} /> : null,
           edit: { kind: "list", value: contact.counties.join(", "), placeholder: "Comma-separated", body: (v) => ({ counties: list(v) }) },
         },
         {
-          label: "State", display: contact.states.length ? contact.states.join(", ") : null,
+          label: "State", display: contact.states.length ? <ChipList items={contact.states} /> : null,
           edit: { kind: "list", value: contact.states.join(", "), placeholder: "Comma-separated", body: (v) => ({ states: list(v) }) },
         },
       ],
