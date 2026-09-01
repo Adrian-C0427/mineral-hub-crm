@@ -87,6 +87,19 @@ const DAY = 86400000;
  */
 export const MAX_FILTER_VALUES = 500;
 
+/**
+ * Hard ceiling on the ids returned by /records/ids (whole-dataset "Select all").
+ * Without it that endpoint ran an UNBOUNDED findMany — the one pattern the rest
+ * of the API deliberately caps (LIST_LIMIT in config.ts) — so a filter-less call
+ * on a tenant carrying county-scan data (hundreds of thousands to millions of
+ * rows) would materialize the entire id set and serialize a multi-MB array.
+ * 100k clears any realistic interactive selection while bounding the response to
+ * ~3 MB of ids; past it the client is told the selection was truncated rather
+ * than silently under-selecting. Comfortably above the 5000-id bulk-delete cap,
+ * which the client already chunks a large selection into.
+ */
+export const MAX_SELECTABLE_IDS = 100_000;
+
 const arr = (v: unknown): string[] =>
   (v == null ? [] : Array.isArray(v) ? v.map(String).filter(Boolean) : [String(v)].filter(Boolean))
     .slice(0, MAX_FILTER_VALUES);
@@ -1366,17 +1379,28 @@ researchRouter.get(
     const win = parseWindow(req.query as Record<string, unknown>);
     const { q, instrument } = pageSchema.parse(req.query);
     const kind = req.query.kind === "permits" ? "permits" : "documents";
+    // Bounded id fetch: `count` gives the accurate total for the "Select all N"
+    // label, while `findMany` is capped at MAX_SELECTABLE_IDS so the response
+    // can never materialize an entire tenant's table. `truncated` lets the
+    // client warn when the selection didn't reach every matching row.
+    let total: number;
     let ids: { id: string }[];
     if (kind === "documents") {
       const where = docWhere(org, f, win);
       applyDocSearch(where, q, instrument);
-      ids = await prisma.researchDocument.findMany({ where, select: { id: true } });
+      [total, ids] = await Promise.all([
+        prisma.researchDocument.count({ where }),
+        prisma.researchDocument.findMany({ where, select: { id: true }, take: MAX_SELECTABLE_IDS }),
+      ]);
     } else {
       const where = permitWhere(org, f, win);
       applyPermitSearch(where, q, instrument);
-      ids = await prisma.researchPermit.findMany({ where, select: { id: true } });
+      [total, ids] = await Promise.all([
+        prisma.researchPermit.count({ where }),
+        prisma.researchPermit.findMany({ where, select: { id: true }, take: MAX_SELECTABLE_IDS }),
+      ]);
     }
-    res.json({ total: ids.length, ids: ids.map((r) => r.id) });
+    res.json({ total, ids: ids.map((r) => r.id), truncated: total > ids.length });
   }),
 );
 
