@@ -17,13 +17,30 @@ export interface SessionPayload {
   epoch?: number;
 }
 
+/**
+ * Sessions are signed with a symmetric secret, so HS256 is the only algorithm
+ * that can ever be correct here. Pinning it on BOTH ends — rather than relying
+ * on the library's inference from the key type — means a future migration to an
+ * asymmetric key can't silently open an algorithm-confusion hole (a token
+ * re-signed as HMAC using the public key as the secret). jsonwebtoken v9
+ * already rejects `alg: none`, so this changes nothing today; it is the
+ * constraint that keeps that true later. HS256 is also what `sign` defaults to,
+ * so every session token already in the wild keeps verifying.
+ */
+const SESSION_ALGORITHM = "HS256" as const;
+
 export function signSession(payload: SessionPayload): string {
-  return jwt.sign(payload, env.JWT_SECRET, { expiresIn: `${env.SESSION_TTL_HOURS}h` });
+  return jwt.sign(payload, env.JWT_SECRET, {
+    algorithm: SESSION_ALGORITHM,
+    expiresIn: `${env.SESSION_TTL_HOURS}h`,
+  });
 }
 
 export function verifySession(token: string): Required<SessionPayload> | null {
   try {
-    const decoded = jwt.verify(token, env.JWT_SECRET) as jwt.JwtPayload & SessionPayload;
+    const decoded = jwt.verify(token, env.JWT_SECRET, {
+      algorithms: [SESSION_ALGORITHM],
+    }) as jwt.JwtPayload & SessionPayload;
     if (!decoded.userId || !decoded.role) return null;
     return { userId: decoded.userId, role: decoded.role, epoch: decoded.epoch ?? 0 };
   } catch {

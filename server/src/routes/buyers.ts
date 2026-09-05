@@ -608,6 +608,12 @@ buyersRouter.get(
     if (!buyer) throw new HttpError(404, "Buyer not found");
     const events = await prisma.activityLog.findMany({
       where: {
+        // Scoped by org as well as buyer. The buyer lookup above already
+        // establishes the org, so this is redundant TODAY — but it was the only
+        // ActivityLog query in the codebase reading rows without naming an org,
+        // and that invariant is what keeps a nullable/reused buyerId, or a
+        // refactor of the lookup above, from turning this into a cross-org read.
+        organizationId: orgId(req),
         buyerId: buyer.id,
         eventType: { in: ["BUYER_MERGE", "BUYER_MERGE_UNDONE", "BUYER_ALIAS_ADDED", "BUYER_ALIAS_REMOVED"] },
       },

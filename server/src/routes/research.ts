@@ -70,6 +70,16 @@ researchRouter.use(rateLimit({
 
 const DAY = 86400000;
 
+/**
+ * True if the caller may see CRM buyer records. Research routes are gated on
+ * `viewResearch`; where a response would carry buyer identity rather than
+ * research data, that part answers to `viewBuyers` instead. Mirrors
+ * `canApprove` in routes/expenses.ts.
+ */
+export function canViewBuyers(req: AuthedRequest): boolean {
+  return req.user!.orgRole === "OWNER" || req.user!.permissions.includes("viewBuyers");
+}
+
 // ---------------------------------------------------------------------------
 // Query parsing
 // ---------------------------------------------------------------------------
@@ -847,6 +857,20 @@ researchRouter.post(
         mergePreview: null as null | { addCounties: string[]; addStates: string[]; addAliases: string[] },
       };
       if (match.outcome !== "new") {
+        if (match.outcome === "possible") base.confidence = match.confidence;
+        // `existing` and `mergePreview` describe a CRM BUYER, not research data,
+        // so they answer to `viewBuyers` — this route's own gate is
+        // `viewResearch`, and the two are independently assignable. Without this
+        // check a custom role holding research access but explicitly denied
+        // buyer access could read back buyer names, aliases and buy-box
+        // geography by posting candidate keys. `mergePreview` is withheld for
+        // the same reason it would leak: its add* arrays are the proposal minus
+        // the existing record, so the diff reveals what that record already
+        // holds. `outcome`/`confidence` stay — the caller supplied the research
+        // entity and needs to know a match exists to work the queue; neither
+        // names the buyer. Every default role with viewResearch also has
+        // viewBuyers, so this is inert unless an owner has drawn that line.
+        if (!canViewBuyers(req)) return base;
         const eb = buyers.find((b) => b.id === match.buyerId)!;
         const plan = mergePlan(
           { aliases: eb.aliases, source: eb.source, researchSummary: (eb.researchSummary as never) ?? null, buyBoxCounties: eb.buyBox?.counties ?? [], buyBoxStates: eb.buyBox?.states ?? [] },
@@ -854,7 +878,6 @@ researchRouter.post(
         );
         base.existing = { id: eb.id, companyName: eb.companyName, counties: eb.buyBox?.counties ?? [], states: eb.buyBox?.states ?? [], aliases: eb.aliases };
         base.mergePreview = { addCounties: plan.addCounties, addStates: plan.addStates, addAliases: plan.addAliases };
-        if (match.outcome === "possible") base.confidence = match.confidence;
       }
       return base;
     }).filter((x): x is NonNullable<typeof x> => x != null);

@@ -4,7 +4,9 @@
  * Only fixes that changed BEHAVIOUR are pinned here — tightening a gate is
  * covered by the gate itself. From 2026-07-22: the rewritten buyer-import dedup
  * pass, and the magic-byte validation on branding/photo data URLs. From
- * 2026-08-11: the production importer's row cap.
+ * 2026-08-11: the production importer's row cap. From 2026-09-05: the
+ * buyer-identity redaction on the research preview (an in-handler check, which
+ * no route gate covers).
  */
 import { describe, it, expect } from "vitest";
 import { classifyParsed, REASON_IN_FILE, REASON_EXISTING, REASON_MISSING_COMPANY } from "./import.js";
@@ -12,10 +14,11 @@ import { isDeclaredRaster, LOGO_MIME } from "./org.js";
 import { parseCsv as parseProductionCsv, MAX_PRODUCTION_IMPORT_ROWS } from "./wells.js";
 import { MAX_INGEST_ROWS } from "../domain/researchIngest.js";
 import { MAX_IMPORT_ROWS } from "./import.js";
-import { MAX_SELECTABLE_IDS } from "./research.js";
+import { MAX_SELECTABLE_IDS, canViewBuyers } from "./research.js";
 import { normalizeCompany } from "../serializers.js";
-import { DEFAULT_ROLE_PERMISSIONS } from "../domain/permissions.js";
+import { DEFAULT_ROLE_PERMISSIONS, type Permission, type OrgRole } from "../domain/permissions.js";
 import { cardSafeText } from "../services/notifyPush.js";
+import type { AuthedRequest } from "../middleware/auth.js";
 
 const rows = (...buyers: { companyName: string; email?: string | null }[]) =>
   buyers.map((buyer, index) => ({ index, buyer }));
@@ -246,6 +249,41 @@ describe("whole-dataset selection cap", () => {
   it("keeps the id selection bounded and chunk-compatible", () => {
     expect(MAX_SELECTABLE_IDS).toBeGreaterThan(5_000);
     expect(MAX_SELECTABLE_IDS).toBeLessThanOrEqual(500_000);
+  });
+});
+
+describe("research preview buyer redaction", () => {
+  // POST /research/buyers/preview is gated on viewResearch, but its `existing`
+  // and `mergePreview` fields describe a CRM BUYER, not research data. The two
+  // permissions are independently assignable, so the identity half of that
+  // response needs its own check — and because it is an in-handler conditional
+  // rather than a route gate, nothing else pins it.
+  const req = (orgRole: OrgRole, permissions: Permission[]) =>
+    ({ user: { orgRole, permissions } }) as unknown as AuthedRequest;
+
+  it("withholds buyer identity from a research-only role", () => {
+    expect(canViewBuyers(req("MEMBER", ["viewResearch"]))).toBe(false);
+  });
+
+  it("releases it to a role that also holds viewBuyers", () => {
+    expect(canViewBuyers(req("MEMBER", ["viewResearch", "viewBuyers"]))).toBe(true);
+  });
+
+  it("lets the owner through on orgRole alone", () => {
+    // OWNER holds every permission implicitly, so the role check — not the
+    // list — is what must cover it. Mirrors requirePermission.
+    expect(canViewBuyers(req("OWNER", []))).toBe(true);
+  });
+
+  it("stays inert for every shipped role", () => {
+    // The redaction should only ever bite a CUSTOM role. If a default role were
+    // given viewResearch without viewBuyers, the Research workspace would start
+    // hiding matches for it — a product decision, and not one to make silently.
+    for (const [role, perms] of Object.entries(DEFAULT_ROLE_PERMISSIONS)) {
+      if (perms.includes("viewResearch")) {
+        expect(perms, `${role} holds viewResearch`).toContain("viewBuyers");
+      }
+    }
   });
 });
 
