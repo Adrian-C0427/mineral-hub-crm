@@ -6,6 +6,7 @@ import { AuthProvider } from "./auth/AuthContext";
 import { ThemeProvider } from "./theme";
 import { StagesProvider } from "./stages";
 import { App } from "./App";
+import { ApiError } from "./api/client";
 import "./styles.css";
 
 // Front-end error monitoring — inert until VITE_SENTRY_DSN is set at build time.
@@ -17,6 +18,14 @@ if (import.meta.env.VITE_SENTRY_DSN) {
     dsn: import.meta.env.VITE_SENTRY_DSN,
     environment: import.meta.env.MODE,
     tracesSampleRate: 0.1,
+    beforeSend(event, hint) {
+      // A 401 is expected user state (an expired session), not a bug: the auth
+      // layer clears the session and redirects to login. Don't report it — this
+      // is what surfaced as the uncaught MINERAL-HUB-WEB-1.
+      const err = hint?.originalException;
+      if (err instanceof ApiError && err.status === 401) return null;
+      return event;
+    },
   });
 } else if (import.meta.env.PROD) {
   console.warn(
