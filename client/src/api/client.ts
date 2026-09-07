@@ -35,6 +35,20 @@ export class ApiError extends Error {
   }
 }
 
+// Global session-expiry handler. When an *authenticated* request comes back 401,
+// the stored token is invalid/expired and every in-flight call will fail the same
+// way — so instead of relying on each call site to catch (some background pollers
+// and stale-tab refetches don't), the auth layer registers one handler here that
+// clears the session and returns the user to login. A 401 on the /auth/* routes is
+// the expected "bad credentials" response and must NOT trip this.
+let onUnauthorized: (() => void) | null = null;
+export function setUnauthorizedHandler(fn: (() => void) | null): void {
+  onUnauthorized = fn;
+}
+function signalUnauthorizedIfSession(status: number, path: string): void {
+  if (status === 401 && !path.startsWith("/auth/") && getAuthToken()) onUnauthorized?.();
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${BASE}/api${path}`, {
     method,
@@ -45,6 +59,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   if (res.status === 204) return undefined as T;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
+    signalUnauthorizedIfSession(res.status, path);
     throw new ApiError(res.status, (data as { error?: string }).error || res.statusText, (data as { details?: unknown }).details);
   }
   return data as T;
@@ -60,7 +75,10 @@ export const api = {
   upload: async <T>(path: string, form: FormData): Promise<T> => {
     const res = await fetch(`${BASE}/api${path}`, { method: "POST", credentials: "include", headers: authHeaders(), body: form });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new ApiError(res.status, (data as { error?: string }).error || res.statusText);
+    if (!res.ok) {
+      signalUnauthorizedIfSession(res.status, path);
+      throw new ApiError(res.status, (data as { error?: string }).error || res.statusText);
+    }
     return data as T;
   },
   base: BASE,

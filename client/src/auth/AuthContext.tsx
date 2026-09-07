@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { api, ApiError, setAuthToken, getAuthToken } from "../api/client";
+import { api, ApiError, setAuthToken, getAuthToken, setUnauthorizedHandler } from "../api/client";
 import { saveBranding } from "../lib/branding";
 
 export type OrgRole = "OWNER" | "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER";
@@ -99,6 +99,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
     void boot().finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
+  }, []);
+
+  // Centralized session-expiry handling. Any authenticated request that comes
+  // back 401 means the token is dead; drop the session and return to login
+  // rather than letting the rejection surface as an uncaught error (which is
+  // what a stale-tab background refetch did — Sentry MINERAL-HUB-WEB-1). This
+  // mirrors logout() minus the server call, which a dead session can't make.
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      setAuthToken(null);
+      setUser(null);
+      saveBranding(null);
+      resetLocation();
+    });
+    return () => setUnauthorizedHandler(null);
   }, []);
 
   /** Install the fresh profile + persist org branding for instant next-boot paint. */
