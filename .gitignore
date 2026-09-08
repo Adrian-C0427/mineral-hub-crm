@@ -28,3 +28,10 @@ client/public/data/*-abstracts-index.json
 data/rrc/
 tools/rrc/work*/
 .design-ref/
+
+# Weekly county mineral-sale scan CSVs (scheduled task output). Matches both
+# naming shapes the scans have used — data/<county>-scans/ and
+# data/<county>-lease-scans/ — so a new county never needs a rule of its own.
+# These hold county-clerk grantor/grantee names and addresses; they are working
+# data, not source, and must never be committed.
+data/*-scans/

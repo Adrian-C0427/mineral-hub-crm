@@ -72,11 +72,15 @@ filesRouter.post(
 );
 
 // Only files whose parent deal/buyer is in the caller's org are accessible.
+// Exposed as its own predicate so every FileAttachment read here can name the
+// org, including the ones that look up a row by something other than its id.
+const fileOrgScope = (organizationId: string) => [
+  { deal: { organizationId } },
+  { buyer: { organizationId } },
+];
+
 function fileOrgWhere(id: string, organizationId: string) {
-  return {
-    id,
-    OR: [{ deal: { organizationId } }, { buyer: { organizationId } }],
-  };
+  return { id, OR: fileOrgScope(organizationId) };
 }
 
 // Reading a document is its own permission. Org scoping (fileOrgWhere) has
@@ -180,7 +184,13 @@ filesRouter.get(
     let currentId = file.id;
     for (;;) {
       const prior = await prisma.fileAttachment.findFirst({
-        where: { supersededById: currentId },
+        // Scoped by org as well as by the chain link. Redundant TODAY —
+        // supersededById is only ever set in /replace, between two files on the
+        // same parent record — but this was the one FileAttachment read in this
+        // router that didn't name an org, and that invariant is what keeps a
+        // future write path to that column (a bulk re-link, an import that
+        // reuses ids) from turning this walk into a cross-org read.
+        where: { supersededById: currentId, OR: fileOrgScope(orgId(req)) },
         include: { uploadedBy: { select: { name: true } } },
       });
       if (!prior) break;
