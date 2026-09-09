@@ -7,7 +7,9 @@ import { fmtDate, fmtDateLocal } from "../lib/format";
 import { formatPhone } from "../lib/phone";
 import { ROLE_LABEL } from "../lib/roles";
 
-interface OrgInfo { id: string; name: string; teamId: string; memberCount: number; yourRole: OrgRole | null; yourPermissions: string[] }
+// teamId is null for roles that don't manage membership — it is a join
+// credential, and the API withholds it rather than showing it to everyone.
+interface OrgInfo { id: string; name: string; teamId: string | null; memberCount: number; yourRole: OrgRole | null; yourPermissions: string[] }
 interface Member { id: string; name: string; email: string; phone: string | null; orgRole: OrgRole | null; status: string; lastActiveAt: string | null }
 interface Invite { id: string; code: string; reusable: boolean; active: boolean; maxUses: number | null; uses: number; createdAt: string }
 interface RoleRow { role: OrgRole; permissions: string[]; defaults: string[]; editable: boolean; customized: boolean }
@@ -45,7 +47,7 @@ export function OrgSettings({ initialTab }: { initialTab?: Tab } = {}) {
         {showOwner && <button className={`tab ${tab === "owner" ? "active" : ""}`} onClick={() => setTab("owner")}>Owner controls</button>}
       </div>
 
-      {tab === "org" && org && <OrgTab org={org} canEdit={can("manageOrgSettings")} onSaved={() => { loadOrg(); refresh(); flash("Saved."); }} onJoined={() => { refresh(); loadOrg(); }} onError={fail} />}
+      {tab === "org" && org && <OrgTab org={org} canEdit={can("manageOrgSettings")} isOwner={isOrgOwner} onSaved={() => { loadOrg(); refresh(); flash("Saved."); }} onJoined={() => { refresh(); loadOrg(); }} onError={fail} />}
       {tab === "users" && showUsers && <UsersTab onFlash={flash} onError={fail} />}
       {tab === "roles" && showRoles && <RolesTab onFlash={flash} onError={fail} />}
       {tab === "owner" && showOwner && <OwnerTab onFlash={flash} onError={fail} onTransferred={() => { refresh(); loadOrg(); }} />}
@@ -53,7 +55,7 @@ export function OrgSettings({ initialTab }: { initialTab?: Tab } = {}) {
   );
 }
 
-function OrgTab({ org, canEdit, onSaved, onJoined, onError }: { org: OrgInfo; canEdit: boolean; onSaved: () => void; onJoined: () => void; onError: (e: unknown) => void }) {
+function OrgTab({ org, canEdit, isOwner, onSaved, onJoined, onError }: { org: OrgInfo; canEdit: boolean; isOwner: boolean; onSaved: () => void; onJoined: () => void; onError: (e: unknown) => void }) {
   // The company name is read-only until an intentional Edit; saving requires
   // an explicit confirmation, and Cancel restores the original value.
   const [editingName, setEditingName] = useState(false);
@@ -83,6 +85,17 @@ function OrgTab({ org, canEdit, onSaved, onJoined, onError }: { org: OrgInfo; ca
     catch (e2) { setConfirmingJoin(false); onError(e2); }
     finally { setJoining(false); }
   }
+  // Resetting the Team ID invalidates the old one for everyone holding it —
+  // that's the point (it's how a leaked or departed-member key gets revoked),
+  // but it also breaks any invite in flight, so it always confirms.
+  const [confirmingRotate, setConfirmingRotate] = useState(false);
+  const [rotating, setRotating] = useState(false);
+  async function rotateTeamId() {
+    setRotating(true);
+    try { await api.post("/org/team-id/rotate", {}); setConfirmingRotate(false); onSaved(); }
+    catch (e) { setConfirmingRotate(false); onError(e); }
+    finally { setRotating(false); }
+  }
   function copy(text: string) { navigator.clipboard?.writeText(text); }
 
   return (
@@ -102,7 +115,15 @@ function OrgTab({ org, canEdit, onSaved, onJoined, onError }: { org: OrgInfo; ca
             </span>
           )}
         </span></div>
-        <div className="kv"><span className="k">Team ID</span><span className="v"><code>{org.teamId}</code> <button className="small" onClick={() => copy(org.teamId)}>Copy</button></span></div>
+        {/* Only shown to roles that manage membership — the API withholds it
+            from everyone else, since holding it is enough to join the org. */}
+        {org.teamId && (
+          <div className="kv"><span className="k">Team ID</span><span className="v">
+            <code>{org.teamId}</code>{" "}
+            <button className="small" onClick={() => copy(org.teamId!)}>Copy</button>
+            {isOwner && <button className="small" onClick={() => setConfirmingRotate(true)}>Reset</button>}
+          </span></div>
+        )}
         <div className="kv"><span className="k">Your role</span><span className="v">{ROLE_LABEL[org.yourRole ?? ""] ?? "—"}</span></div>
         <div className="kv"><span className="k">Members</span><span className="v">{org.memberCount}</span></div>
       </div>
@@ -133,6 +154,17 @@ function OrgTab({ org, canEdit, onSaved, onJoined, onError }: { org: OrgInfo; ca
           busy={joining}
           onCancel={() => setConfirmingJoin(false)}
           onConfirm={join}
+        />
+      )}
+      {confirmingRotate && (
+        <ConfirmDialog
+          title="Reset the Team ID?"
+          message={<>Anyone still holding <code>{org.teamId}</code> — including people who have left — will no longer be able to join {org.name} with it. Everyone you've given it to will need the new one. Existing members are unaffected.</>}
+          confirmLabel="Reset Team ID"
+          danger
+          busy={rotating}
+          onCancel={() => setConfirmingRotate(false)}
+          onConfirm={rotateTeamId}
         />
       )}
     </>
@@ -168,7 +200,15 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
   }
   async function removeMember(m: Member) {
     setActionBusy(true);
-    try { await api.del(`/org/members/${m.id}`); setRemovingMember(null); load(); }
+    try {
+      // Removal rotates the org's Team ID (the departing member knew the old
+      // one and could otherwise re-join with it). Surface the new value —
+      // a join code that silently stops working is worse than one that changed.
+      const r = await api.del<{ teamId?: string | null }>(`/org/members/${m.id}`);
+      setRemovingMember(null);
+      load();
+      onFlash(r?.teamId ? `${m.name} removed. New Team ID: ${r.teamId}` : `${m.name} removed.`);
+    }
     catch (e) { onError(e); } finally { setActionBusy(false); }
   }
   async function genInvite(reusable: boolean) { try { await api.post("/org/invites", { reusable }); load(); } catch (e) { onError(e); } }
@@ -302,7 +342,7 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
       {removingMember && (
         <ConfirmDialog
           title="Remove member?"
-          message={<>Remove <strong>{removingMember.name}</strong> from the organization? They lose access to this workspace immediately. This can't be undone.</>}
+          message={<>Remove <strong>{removingMember.name}</strong> from the organization? They lose access to this workspace immediately. The company's Team ID is reset too, so they can't re-join with it — anyone else you've given it to will need the new one. This can't be undone.</>}
           confirmLabel="Remove member"
           danger
           busy={actionBusy}
