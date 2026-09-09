@@ -13,10 +13,19 @@ function randomCode(len: number): string {
   return out;
 }
 
-export async function generateTeamId(): Promise<string> {
+/**
+ * `tx` is threaded through rather than defaulting to the base client at the
+ * point of use: both callers can run inside an interactive transaction, and
+ * probing on the base client from in there occupies a SECOND pooled connection
+ * for the life of the transaction — the shape that deadlocks a small pgbouncer
+ * pool under concurrency. Same client in, same connection used.
+ */
+export async function generateTeamId(
+  tx: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<string> {
   for (let i = 0; i < 10; i++) {
     const candidate = `TEAM-${randomCode(6)}`;
-    const exists = await prisma.organization.findUnique({ where: { teamId: candidate } });
+    const exists = await tx.organization.findUnique({ where: { teamId: candidate } });
     if (!exists) return candidate;
   }
   throw new Error("Could not generate a unique Team ID");
@@ -36,8 +45,29 @@ export async function createOrganization(
   name: string,
   tx: Prisma.TransactionClient | typeof prisma = prisma,
 ) {
-  const teamId = await generateTeamId();
+  const teamId = await generateTeamId(tx);
   return tx.organization.create({ data: { name, teamId } });
+}
+
+/**
+ * Issue a NEW Team ID for an org, invalidating the previous one.
+ *
+ * The Team ID is an always-valid reusable join key (see resolveJoinToken): it
+ * never expires and, unlike an invite code, has no active flag and no use cap.
+ * Without rotation there was no way to revoke it at all, so removing a member
+ * did not actually revoke their ability to re-enter — they simply re-joined
+ * with the value they had already read. This is the missing remedy, and it is
+ * what member removal calls.
+ *
+ * Returns the new Team ID.
+ */
+export async function rotateTeamId(
+  organizationId: string,
+  tx: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<string> {
+  const teamId = await generateTeamId(tx);
+  await tx.organization.update({ where: { id: organizationId }, data: { teamId } });
+  return teamId;
 }
 
 export interface ResolvedJoin {

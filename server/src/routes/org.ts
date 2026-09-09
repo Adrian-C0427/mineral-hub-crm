@@ -3,8 +3,8 @@ import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requireOrgOwner, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
-import { generateInviteCode } from "../services/org.js";
+import { requireAuth, requireOrg, requireOrgOwner, requirePermission, orgId, canSeeTeamId, type AuthedRequest } from "../middleware/auth.js";
+import { generateInviteCode, rotateTeamId } from "../services/org.js";
 import { normalizePhone } from "../domain/phone.js";
 import { invalidateRoleCache } from "../services/rolePermCache.js";
 import {
@@ -25,7 +25,31 @@ orgRouter.get(
       select: { id: true, name: true, teamId: true, createdAt: true, fullLogo: true, compactLogo: true },
     });
     const memberCount = await prisma.user.count({ where: { organizationId: orgId(req) } });
-    res.json({ ...org, memberCount, yourRole: req.user!.orgRole, yourPermissions: req.user!.permissions });
+    res.json({
+      ...org,
+      teamId: org && canSeeTeamId(req) ? org.teamId : null,
+      memberCount,
+      yourRole: req.user!.orgRole,
+      yourPermissions: req.user!.permissions,
+    });
+  }),
+);
+
+/**
+ * Issue a new Team ID, invalidating the old one. Owner-only.
+ *
+ * Rotation is the only way to revoke a Team ID that has leaked — it has no
+ * expiry, no active flag and no use cap, unlike an invite code. Member removal
+ * rotates automatically (see DELETE /members/:userId); this endpoint covers the
+ * cases removal doesn't: a code posted somewhere public, a departed contractor
+ * whose account was never in the org, or plain periodic hygiene.
+ */
+orgRouter.post(
+  "/team-id/rotate",
+  requireOrgOwner,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const teamId = await rotateTeamId(orgId(req));
+    res.json({ teamId });
   }),
 );
 
@@ -90,7 +114,9 @@ orgRouter.patch(
     const org = await prisma.organization.update({
       where: { id: orgId(req) },
       data,
-      select: { id: true, name: true, teamId: true, fullLogo: true, compactLogo: true },
+      // No teamId: this is a logo write, and the Team ID is a join credential
+      // (see canSeeTeamId) that `manageOrgSettings` alone shouldn't hand out.
+      select: { id: true, name: true, fullLogo: true, compactLogo: true },
     });
     res.json(org);
   }),
@@ -301,7 +327,8 @@ orgRouter.patch(
     const org = await prisma.organization.update({
       where: { id: orgId(req) },
       data: { name },
-      select: { id: true, name: true, teamId: true },
+      // No teamId — see the branding route above.
+      select: { id: true, name: true },
     });
     res.json(org);
   }),
@@ -374,11 +401,23 @@ orgRouter.delete(
       throw new HttpError(403, "Only the owner can remove an administrator");
     }
     // Removing a member detaches them; their org-scoped records stay with the org.
-    await prisma.user.update({
-      where: { id: member.id },
-      data: { organizationId: null, orgRole: null },
+    //
+    // Detaching alone did not revoke access. The member had already read the
+    // org's Team ID (it was returned to every role), it never expires, and
+    // nothing rotated it — so the removed user could call POST /auth/join with
+    // it and walk straight back in as a MEMBER. Their session also survived,
+    // since nothing bumped sessionEpoch, so they didn't even need to log in
+    // again. Close both halves: evict the live session, and rotate the join key
+    // they know. `teamId` is returned so the caller can show the owner the new
+    // one instead of discovering the old one silently stopped working.
+    const teamId = await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: member.id },
+        data: { organizationId: null, orgRole: null, sessionEpoch: { increment: 1 } },
+      });
+      return rotateTeamId(orgId(req), tx);
     });
-    res.json({ ok: true });
+    res.json({ ok: true, teamId: canSeeTeamId(req) ? teamId : null });
   }),
 );
 

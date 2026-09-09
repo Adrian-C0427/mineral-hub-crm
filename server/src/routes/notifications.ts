@@ -15,7 +15,14 @@ function visibleWhere(req: AuthedRequest) {
   // Gate on the RBAC field (orgRole), NOT the legacy per-account `role` — that
   // field was historically OWNER for every workspace creator and stays OWNER
   // even after a demotion, so it must never grant admin-level visibility.
-  const admin = req.user!.orgRole === "OWNER";
+  //
+  // ADMIN counts alongside OWNER, as the comment on this router always said it
+  // did: untargeted rows (userId null) are the unassigned portal leads, and the
+  // promise is that they always reach someone. Checking OWNER alone meant an
+  // org whose owner was inactive silently accumulated leads no one could see.
+  // ADMIN holds every permission by default (DEFAULT_ROLE_PERMISSIONS), so this
+  // grants no visibility that role didn't already have everywhere else.
+  const admin = req.user!.orgRole === "OWNER" || req.user!.orgRole === "ADMIN";
   return {
     organizationId: orgId(req),
     OR: admin ? [{ userId: req.user!.id }, { userId: null }] : [{ userId: req.user!.id }],

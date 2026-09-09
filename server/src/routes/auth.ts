@@ -7,7 +7,7 @@ import { prisma, withDbRetry } from "../db.js";
 import { verifyPassword, hashPassword, dummyVerifyPassword } from "../auth/password.js";
 import { signSession, setSessionCookie, clearSessionCookie } from "../auth/session.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, canSeeTeamId, type AuthedRequest } from "../middleware/auth.js";
 import { LOGIN_RATE_LIMIT, env, isProd, emailConfigured } from "../config.js";
 import { createOrganization, resolveJoinToken, consumeInvite } from "../services/org.js";
 import { normalizePhone } from "../domain/phone.js";
@@ -290,7 +290,13 @@ authRouter.get(
         : Promise.resolve(null),
       readPrefs(req.user!.id),
     ]));
-    res.json({ user: { ...req.user, organization: org, ...prefs } });
+    // Session restore ran for every role, so this was the widest leak of the
+    // Team ID — a join credential anyone can redeem at POST /auth/join. Gate it
+    // the same way GET /api/org does (routes/org.canSeeTeamId).
+    const organization = org
+      ? { ...org, teamId: canSeeTeamId(req) ? org.teamId : null }
+      : null;
+    res.json({ user: { ...req.user, organization, ...prefs } });
   }),
 );
 
@@ -380,9 +386,13 @@ authRouter.post(
         data: { organizationId: join.organizationId, orgRole: "MEMBER" },
       });
     });
+    // No teamId in the response. The caller joins as a MEMBER, which is not a
+    // role that gets the join key — and when they redeemed a single-use INVITE
+    // code rather than the Team ID, echoing it here would upgrade that one-shot
+    // code into the org's permanent one.
     const org = await prisma.organization.findUnique({
       where: { id: join.organizationId },
-      select: { id: true, name: true, teamId: true },
+      select: { id: true, name: true },
     });
     res.json({ organization: org, orgRole: "MEMBER" });
   }),

@@ -6,6 +6,7 @@ import { asyncHandler, HttpError } from "../middleware/errors.js";
 import crypto from "node:crypto";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { normalizePhone } from "../domain/phone.js";
+import { rotateTeamId } from "../services/org.js";
 
 export const usersRouter = Router();
 
@@ -175,11 +176,17 @@ usersRouter.delete(
     }
     // Detach the member rather than hard-deleting the account: their org-scoped
     // records (deals, activity, documents) stay attributed to the org instead of
-    // being null'd/cascade-deleted. Mirrors DELETE /org/members/:userId.
-    await prisma.user.update({
-      where: { id: req.params.id },
-      data: { organizationId: null, orgRole: null },
+    // being null'd/cascade-deleted. Mirrors DELETE /org/members/:userId —
+    // including the session eviction and Team ID rotation, without which a
+    // removed member simply re-joined with the key they already knew. See that
+    // route for the full reasoning.
+    const teamId = await prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { id: req.params.id },
+        data: { organizationId: null, orgRole: null, sessionEpoch: { increment: 1 } },
+      });
+      return rotateTeamId(orgId(req), tx);
     });
-    res.json({ ok: true });
+    res.json({ ok: true, teamId });
   }),
 );

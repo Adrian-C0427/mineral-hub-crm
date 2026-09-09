@@ -163,3 +163,21 @@ export function requireOrgOwner(req: AuthedRequest, res: Response, next: NextFun
 export function orgId(req: AuthedRequest): string {
   return req.user!.organizationId as string;
 }
+
+/**
+ * May this caller see the org's Team ID?
+ *
+ * The Team ID is a JOIN CREDENTIAL, not a display field: anyone holding it can
+ * attach themselves to the org as a MEMBER (services/org.resolveJoinToken →
+ * POST /auth/join). It has no expiry, no active flag and no use cap, so until
+ * it is rotated it is a permanent key. It used to be returned to every member
+ * regardless of role, which meant a VIEWER — or a contractor who left — walked
+ * away with one.
+ *
+ * Scope it to the people whose job is admitting and removing members. OWNER and
+ * ADMIN hold `inviteRemoveUsers` by default, so nothing changes for the roles
+ * that actually manage membership.
+ */
+export function canSeeTeamId(req: AuthedRequest): boolean {
+  return req.user!.orgRole === "OWNER" || req.user!.permissions.includes("inviteRemoveUsers");
+}
