@@ -1129,6 +1129,11 @@ tr.row-base td { background: var(--panel-2); font-weight: 600; }
 /* Display-only value chips (ChipList): the one presentation for every
    multi-value field — same capsule language as the filter chips. */
 .vchips { display: inline-flex; flex-wrap: wrap; gap: 4px; vertical-align: middle; }
+/* Single-line chip cells (Records → Abstract): the full list stays on one
+   horizontal line — the column widens to fit (the table scrolls sideways if
+   needed) instead of the row growing taller. */
+.chips-oneline .vchips { flex-wrap: nowrap; }
+.data-table td:has(.chips-oneline) { white-space: nowrap; }
 .vchip { display: inline-flex; align-items: center; background: var(--panel-2); border: 1px solid var(--border);
   border-radius: 100px; padding: 1px 8px; font-size: 12px; line-height: 1.5; white-space: nowrap; color: var(--text); }
 .vchip-more { color: var(--text-dim); cursor: default; }
