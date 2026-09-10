@@ -427,7 +427,7 @@ gisRouter.get(
     const well = rows[0];
     const [permits, completions, unitAcresRow] = await Promise.all([
       prisma.$queryRawUnsafe<Record<string, unknown>[]>(
-        `SELECT status_no AS "statusNo", permit_date AS "permitDate", operator, lease_name AS "leaseName", well_no AS "wellNo", acres::float8 AS acres
+        `SELECT status_no AS "statusNo", permit_date AS "permitDate", operator, lease_name AS "leaseName", well_no AS "wellNo", acres::float8 AS acres, survey, abstract
            FROM rrc.permits WHERE api8 = $1 ORDER BY permit_date DESC NULLS LAST LIMIT 12`,
         String(well.api8 ?? "")),
       prisma.$queryRawUnsafe<Record<string, unknown>[]>(

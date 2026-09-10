@@ -32,11 +32,15 @@ export async function ensureRegulatoryTables(): Promise<void> {
       operator_no text,
       permit_date date,
       acres       numeric(8,2),
+      survey      text,
+      abstract    text,
       PRIMARY KEY (status_no, api8)
     )`);
-  // W-1 lease/pooled-unit acreage (daf802 02-line DA-SURFACE-ACRES) — added
-  // 2026-09-10; older deployments gain the column in place.
+  // W-1 lease/pooled-unit acreage + surface location (daf802 02-line) — added
+  // 2026-09-10; older deployments gain the columns in place.
   await prisma.$executeRawUnsafe(`ALTER TABLE rrc.permits ADD COLUMN IF NOT EXISTS acres numeric(8,2)`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE rrc.permits ADD COLUMN IF NOT EXISTS survey text`);
+  await prisma.$executeRawUnsafe(`ALTER TABLE rrc.permits ADD COLUMN IF NOT EXISTS abstract text`);
   await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS permits_api8_idx ON rrc.permits (api8)`);
   await prisma.$executeRawUnsafe(`
     CREATE TABLE IF NOT EXISTS rrc.completions (

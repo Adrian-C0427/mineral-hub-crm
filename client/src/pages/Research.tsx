@@ -78,6 +78,13 @@ interface PermitRecord {
   activityDate: string; formation: string | null; field: string | null; source: string;
 }
 interface Paged<T> { total: number; page: number; pageSize: number; rows: T[] }
+// Platform RRC W-1 permits (rrc.permits) — read-only public-record rows,
+// browsed in their own Records section, never mixed with org imports.
+interface RrcPermitRecord {
+  id: string; statusNo: string; api8: string | null; county: string; district: string | null;
+  leaseName: string | null; wellNo: string | null; operator: string | null;
+  permitDate: string | null; acres: number | null; survey: string | null; abstract: string | null;
+}
 
 // ---------------------------------------------------------------------------
 // Period helpers
@@ -1745,13 +1752,14 @@ interface RecOptions { counties: string[]; abstracts: string[]; surveys?: string
 function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   const { can } = useAuth();
   const canManage = can("manageResearchData");
-  const [kind, setKind] = useState<"documents" | "permits">("documents");
+  const [kind, setKind] = useState<"documents" | "permits" | "rrcPermits">("documents");
   const [page, setPage] = useState(1);
   // Whole-dataset ordering: the sort runs in the DATABASE across every
   // matching record, then the page is cut — never a per-page shuffle.
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" }>({ key: "recordingDate", dir: "desc" });
   const [docs, setDocs] = useState<Paged<DocRecord> | null>(null);
   const [permits, setPermits] = useState<Paged<PermitRecord> | null>(null);
+  const [rrcPermits, setRrcPermits] = useState<Paged<RrcPermitRecord> | null>(null);
   const [loading, setLoading] = useState(true);
   const sel = useRowSelection();
   const [confirmDel, setConfirmDel] = useState(false);
@@ -1778,7 +1786,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   useEffect(() => {
     setRf(EMPTY_REC_FILTERS);
     setSearch(""); setSearchQ("");
-    setSort(kind === "documents" ? { key: "recordingDate", dir: "desc" } : { key: "activityDate", dir: "desc" });
+    setSort(kind === "documents" ? { key: "recordingDate", dir: "desc" } : kind === "rrcPermits" ? { key: "permitDate", dir: "desc" } : { key: "activityDate", dir: "desc" });
   }, [kind]);
   useEffect(() => {
     api.get<RecOptions>(`/research/records/options?kind=${kind}&${qs}`).then(setOpts)
@@ -1825,8 +1833,10 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   useEffect(() => { setPage(1); sel.clear(); }, [recQs, kind, pageSize, sort]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     setLoading(true);
-    const url = `/research/${kind}?${recQs}&page=${page}&pageSize=${pageSize}&sortBy=${encodeURIComponent(sort.key)}&sortDir=${sort.dir}`;
+    const base = kind === "rrcPermits" ? "rrc-permits" : kind;
+    const url = `/research/${base}?${recQs}&page=${page}&pageSize=${pageSize}&sortBy=${encodeURIComponent(sort.key)}&sortDir=${sort.dir}`;
     if (kind === "documents") api.get<Paged<DocRecord>>(url).then(setDocs).catch(() => setDocs(null)).finally(() => setLoading(false));
+    else if (kind === "rrcPermits") api.get<Paged<RrcPermitRecord>>(url).then(setRrcPermits).catch(() => setRrcPermits(null)).finally(() => setLoading(false));
     else api.get<Paged<PermitRecord>>(url).then(setPermits).catch(() => setPermits(null)).finally(() => setLoading(false));
   }, [recQs, kind, page, pageSize, sort, reloadKey]);
 
@@ -1863,7 +1873,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
    * dataset regardless of pagination, and the sequential 1,000-row pages keep
    * memory and request size bounded so large exports don't freeze or fail.
    */
-  async function fetchAllRows<T>(base: "documents" | "permits"): Promise<T[]> {
+  async function fetchAllRows<T>(base: "documents" | "permits" | "rrc-permits"): Promise<T[]> {
     const out: T[] = [];
     const pageSize = 1000;
     for (let p = 1; ; p++) {
@@ -1884,6 +1894,11 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
         downloadCsv(onlySelected ? "research-documents-selected.csv" : "research-documents.csv",
           ["Recording Date", "Type", "Class", "Grantor", "Grantee", "Instrument #", "State", "County", "Abstract"],
           rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.docClass, r.grantor, r.grantee, r.instrumentNumber, r.state, r.county, r.abstractId]));
+      } else if (kind === "rrcPermits") {
+        const rows = await fetchAllRows<RrcPermitRecord>("rrc-permits");
+        downloadCsv("rrc-permits.csv",
+          ["Permit Date", "Operator", "Lease", "Well #", "County", "Abstract", "Survey", "Unit Acres", "API #", "Permit #"],
+          rows.map((r) => [r.permitDate?.slice(0, 10) ?? "", r.operator, r.leaseName, r.wellNo, r.county, r.abstract, r.survey, r.acres != null ? String(r.acres) : "", r.api8 ? `42-${r.api8}` : "", r.statusNo]));
       } else {
         let rows = await fetchAllRows<PermitRecord>("permits");
         if (onlySelected) rows = rows.filter((r) => sel.selected.has(r.id));
@@ -1896,7 +1911,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   const exportSelected = () => exportRows(true);
   const exportAll = () => exportRows(false);
 
-  const active = kind === "documents" ? docs : permits;
+  const active = kind === "documents" ? docs : kind === "rrcPermits" ? rrcPermits : permits;
   const totalPages = active ? Math.max(1, Math.ceil(active.total / pageSize)) : 1;
 
   const docColumns: Column<DocRecord>[] = [
@@ -1921,6 +1936,17 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
     { key: "apiNumber", header: "API #", value: (r) => r.apiNumber, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{r.apiNumber ?? "—"}</span> },
   ];
 
+  const rrcPermitColumns: Column<RrcPermitRecord>[] = [
+    { key: "permitDate", header: "Permit Date", value: (r) => r.permitDate, render: (r) => <span className="rec-mid rec-nowrap">{r.permitDate ? fmtDate(r.permitDate) : "—"}</span>, type: "date" },
+    { key: "operator", header: "Operator", value: (r) => r.operator, render: (r) => <span className="rec-name">{r.operator ?? "—"}</span> },
+    { key: "leaseName", header: "Lease / Well", value: (r) => `${r.leaseName ?? ""} ${r.wellNo ?? ""}`.trim() || null, render: (r) => <span>{r.leaseName ?? "—"}{r.wellNo ? ` #${r.wellNo}` : ""}</span> },
+    { key: "county", header: "County", value: (r) => r.county, render: (r) => <span className="rec-mid rec-nowrap">{r.county}, TX</span> },
+    { key: "abstract", header: "Abstract", value: (r) => r.abstract, align: "right", render: (r) => r.abstract ? <span className="rec-mid chips-oneline"><ChipList items={[r.abstract]} /></span> : <span className="rec-faint">—</span> },
+    { key: "survey", header: "Survey", value: (r) => r.survey },
+    { key: "acres", header: "Unit (ac)", value: (r) => r.acres, align: "right", type: "number", render: (r) => <span className="rec-mid rec-nowrap">{r.acres != null ? num(r.acres) : "—"}</span> },
+    { key: "apiNumber", header: "API #", value: (r) => r.api8, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{r.api8 ? `42-${r.api8.slice(0, 3)}-${r.api8.slice(3)}` : "—"}</span> },
+  ];
+
   // Toolbar row (reference order): source segmented control · count · Filters
   // (fills accent while open) · Export CSV — Customize View joins on the right
   // via the table's own toolbar row.
@@ -1929,9 +1955,10 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
       <div className="seg-control">
         <span className={`seg ${kind === "documents" ? "active" : ""}`} onClick={() => setKind("documents")}>{dataset === "LEASE" ? "Lease Documents" : "Transaction Documents"}</span>
         <span className={`seg ${kind === "permits" ? "active" : ""}`} onClick={() => setKind("permits")}>Drilling Permits</span>
+        <span className={`seg ${kind === "rrcPermits" ? "active" : ""}`} onClick={() => setKind("rrcPermits")}>RRC Permits (W-1)</span>
       </div>
       <SearchInput value={search} onChange={setSearch}
-        placeholder={kind === "documents" ? "Search grantor, grantee, instrument #, abstract, survey…" : "Search operator, lease, well, API #, permit #…"}
+        placeholder={kind === "documents" ? "Search grantor, grantee, instrument #, abstract, survey…" : kind === "rrcPermits" ? "Search operator, lease, API #, abstract, survey…" : "Search operator, lease, well, API #, permit #…"}
         ariaLabel="Search records" />
       <span className="spacer" />
       {active && <span className="muted" style={{ fontSize: 12.5, whiteSpace: "nowrap" }}><b style={{ color: "var(--text)" }}>{num(active.total)}</b> records</span>}
@@ -1960,7 +1987,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
           <SearchableMultiSelect options={opts.surveys ?? []} value={rf.surveys} onChange={(v) => setRf((p) => ({ ...p, surveys: v }))} placeholder="Surveys…" /></div>
         <div><div className="rec-flabel">Abstract</div>
           <SearchableMultiSelect options={opts.abstracts} value={rf.abstracts} onChange={(v) => setRf((p) => ({ ...p, abstracts: v }))} placeholder="Abstracts…" /></div>
-        {kind === "documents" ? (
+        {kind === "rrcPermits" ? null : kind === "documents" ? (
           <>
             <div><div className="rec-flabel">Document type</div>
               <SearchableMultiSelect options={opts.docTypes ?? []} labels={Object.fromEntries((opts.docTypes ?? []).map((t) => [t, prettyDocType(t)]))}
@@ -2066,9 +2093,11 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
           <>
             {kind === "documents"
               ? <SortableTable customizeId="research-records-docs" columns={docColumns} rows={docs!.rows} rowKey={(r) => r.id} toolbar={toolbarContent} subToolbar={filterStrip} serverSort={{ sort, onSort: setSort }} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />
+              : kind === "rrcPermits"
+              ? <SortableTable customizeId="research-records-rrc-permits" columns={rrcPermitColumns} rows={rrcPermits!.rows} rowKey={(r) => r.id} toolbar={toolbarContent} subToolbar={filterStrip} serverSort={{ sort, onSort: setSort }} />
               : <SortableTable customizeId="research-records-permits" columns={permitColumns} rows={permits!.rows} rowKey={(r) => r.id} toolbar={toolbarContent} subToolbar={filterStrip} serverSort={{ sort, onSort: setSort }} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />}
             <div className="rec-foot">
-              <span>Showing {num(active.rows.length)} of {num(active.total)} records · sorted across all pages by {(kind === "documents" ? docColumns : (permitColumns as Column<never>[])).find((c) => c.key === sort.key)?.header.toLowerCase() ?? sort.key}, {sort.dir === "asc" ? "ascending" : "descending"}</span>
+              <span>Showing {num(active.rows.length)} of {num(active.total)} records · sorted across all pages by {(kind === "documents" ? (docColumns as Column<never>[]) : kind === "rrcPermits" ? (rrcPermitColumns as Column<never>[]) : (permitColumns as Column<never>[])).find((c) => c.key === sort.key)?.header.toLowerCase() ?? sort.key}, {sort.dir === "asc" ? "ascending" : "descending"}</span>
               <span className="row" style={{ gap: 10, alignItems: "center" }}>
                 {totalPages > 1 && (
                   <span className="row" style={{ gap: 8, alignItems: "center" }}>

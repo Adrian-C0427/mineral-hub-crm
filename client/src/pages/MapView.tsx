@@ -28,7 +28,7 @@ interface MapDeal {
 type FC = { type: "FeatureCollection"; features: GeoFeature[] };
 type GeoFeature = { type: "Feature"; id?: number; properties: Record<string, unknown>; geometry: { type: string; coordinates: unknown } };
 type SelAbstract = { kind: "abstract"; id: string; abstract: string; survey: string; county: string };
-type WellPermit = { statusNo: string; permitDate: string | null; operator: string | null; leaseName: string | null; wellNo: string | null; acres: number | null };
+type WellPermit = { statusNo: string; permitDate: string | null; operator: string | null; leaseName: string | null; wellNo: string | null; acres: number | null; survey: string | null; abstract: string | null };
 type WellCompletion = { trackingNo: string; filingType: string | null; status: string | null; filedDate: string | null; completionDate: string | null; fieldName: string | null };
 type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; operator: string | null; leaseName: string | null; leaseNo: string | null; field: string | null; oilGas: string | null; district: string | null; cumOil: number | null; cumGas: number | null; lastProd: string | null; formations: string | null; unitAcres?: number | null; spudDate?: string | null; plugDate?: string | null; permits?: WellPermit[]; completions?: WellCompletion[] };
 type SelWell = { kind: "well" } & WellProps;
