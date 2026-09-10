@@ -337,9 +337,13 @@ async function loadRrcPermits(f: ResearchFilters, win: Window): Promise<RrcPermi
   const params: unknown[] = [win.from, win.to];
   if (f.counties.length) { params.push(f.counties); conds.push(`p.county = ANY($${params.length}::text[])`); }
   try {
+    // Location comes from the permit's own W-1 filing first (p.abstract /
+    // p.survey — present even before the well is drilled or plotted), with
+    // the well's assignment as fallback for the few pre-acreage-era permits.
     const rows = await prisma.$queryRawUnsafe<{ permitDate: Date; county: string; operator: string | null; api8: string | null; wellNo: string | null; abstract: string | null; survey: string | null }[]>(
       `SELECT p.permit_date AS "permitDate", p.county, p.operator, p.api8, p.well_no AS "wellNo",
-              w.abstract, w.survey
+              COALESCE(p.abstract, replace(w.abstract, '?', '')) AS abstract,
+              COALESCE(p.survey, w.survey) AS survey
          FROM rrc.permits p
          LEFT JOIN rrc.wells w ON w.api8 = p.api8
         WHERE ${conds.join(" AND ")}`,
@@ -400,13 +404,18 @@ researchRouter.get(
     // imported through the Research page.
     let rrcGeo: { county: string }[] = [];
     let rrcOps: { operatorNorm: string; operator: string }[] = [];
+    let rrcLoc: { county: string; abstract: string | null; survey: string | null }[] = [];
     try {
-      [rrcGeo, rrcOps] = await Promise.all([
+      [rrcGeo, rrcOps, rrcLoc] = await Promise.all([
         prisma.$queryRawUnsafe<{ county: string }[]>(`SELECT DISTINCT county FROM rrc.permits WHERE county IS NOT NULL`),
         prisma.$queryRawUnsafe<{ operator: string }[]>(`SELECT operator, count(*) n FROM rrc.permits WHERE operator IS NOT NULL GROUP BY operator ORDER BY n DESC LIMIT 500`)
           .then((rows) => rows.map((r) => ({ operator: r.operator, operatorNorm: normalizeEntity(r.operator) ?? "" })).filter((r) => r.operatorNorm)),
+        // Each permit's own W-1 abstract/survey, so the location filters can
+        // reach permit activity even where the well isn't plotted yet.
+        prisma.$queryRawUnsafe<{ county: string; abstract: string | null; survey: string | null }[]>(
+          `SELECT DISTINCT county, abstract, survey FROM rrc.permits WHERE abstract IS NOT NULL OR survey IS NOT NULL`),
       ]);
-    } catch { /* rrc schema absent */ }
+    } catch { /* rrc schema absent (or pre-abstract-column deploy) */ }
 
     // Merge doc + permit geographies; dedupe entity display names per norm key.
     const stateSet = docVals.states;
@@ -435,6 +444,11 @@ researchRouter.get(
     const surveySet = docVals.surveys;
     for (const sv of permitSurveys) {
       if (sv.survey) surveySet.set(`${sv.state}|${sv.county}|${sv.survey}`, { state: sv.state, county: sv.county, survey: sv.survey });
+    }
+    // RRC permits' own W-1 locations (Texas-only source).
+    for (const l of rrcLoc) {
+      if (l.abstract) abstractSet.set(`TX|${l.county}|${l.abstract}`, { state: "TX", county: l.county, abstractId: l.abstract });
+      if (l.survey) surveySet.set(`TX|${l.county}|${l.survey}`, { state: "TX", county: l.county, survey: l.survey });
     }
 
     res.json({
