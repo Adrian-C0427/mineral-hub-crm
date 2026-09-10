@@ -10,7 +10,7 @@ import { API_BASE } from "../api/client";
  * an hour keyed by full URL, so a new value makes every client abandon its
  * stale tiles immediately; the server ignores the query param (its own LRU
  * clears on the deploy that ships the bump). */
-export const TILE_DATA_VERSION = "2026-09-10";
+export const TILE_DATA_VERSION = "2026-09-10b";
 
 /** Cadastral vector tiles from PostGIS (/api/gis/tiles). Absolute URL required
  * by MapLibre; falls back to the page origin in dev (Vite proxies /api). */
@@ -128,6 +128,21 @@ export function addCadastralLayers(map: maplibregl.Map, countyLabels: GeoJSON.Fe
   map.addLayer({ id: "wells", type: "circle", source: "abstracts", "source-layer": "wells", minzoom: 9, paint: {
     "circle-color": STATUS_COLOR,
     ...wellsPaint() } });
+  // East Texas Basin salt domes (approximate extent, BEG RI-140): a subtle
+  // warm wash with a dashed ring so they read as a geologic overlay, never as
+  // cadastral or well data. Rendered under wells so well dots stay clickable.
+  map.addLayer({ id: "salt-domes-fill", type: "fill", source: "abstracts", "source-layer": "saltdomes", paint: {
+    "fill-color": "#d97706", "fill-opacity": 0.10 } }, "wells");
+  map.addLayer({ id: "salt-domes-line", type: "line", source: "abstracts", "source-layer": "saltdomes", paint: {
+    "line-color": "#b45309", "line-dasharray": [3, 2],
+    "line-width": ["interpolate", ["linear"], ["zoom"], 7, 1, 11, 2, 14, 2.5] as unknown as Expr,
+    "line-opacity": 0.85 } }, "wells");
+  map.addLayer({ id: "salt-domes-label", type: "symbol", source: "abstracts", "source-layer": "saltdomes", minzoom: 8, layout: {
+    "text-field": ["concat", ["get", "name"], " Salt Dome"] as unknown as Expr, "text-font": ["Noto Sans Regular"],
+    "text-size": ["interpolate", ["linear"], ["zoom"], 8, 10, 12, 14] as unknown as Expr,
+    "text-letter-spacing": 0.05, "text-allow-overlap": false, "text-optional": true },
+    paint: { "text-color": "#92400e", "text-halo-color": "#ffffff", "text-halo-width": 1.4 } });
+
   map.addLayer({ id: "abstracts-num", type: "symbol", source: "abstracts", "source-layer": "abstracts", minzoom: 9, layout: {
     "symbol-sort-key": ["*", -1, ["get", "area"]], "text-field": ["get", "abstract"], "text-font": ["Noto Sans Regular"],
     "text-size": ["interpolate", ["linear"], ["zoom"], 9, 10, 14, 13], "text-padding": 2, "text-allow-overlap": false, "text-optional": true },
