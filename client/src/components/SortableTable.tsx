@@ -92,12 +92,15 @@ function compareValues(a: unknown, b: unknown, type: SortType): number {
 // Customize View — persisted per-table column layout (order + hidden columns).
 // ---------------------------------------------------------------------------
 
-interface ColPrefs { order: string[]; hidden: string[]; widths: Record<string, number>; pinned: string[] }
+// Column WIDTHS are deliberately absent here: columns auto-size to their data
+// on every load, and manual header-drag resizes live only for the session, so
+// widths are never saved. (Old stored `widths` are simply ignored.)
+interface ColPrefs { order: string[]; hidden: string[]; pinned: string[] }
 const colKey = (id: string) => `mh-cols:v1:${id}`;
 /** Returns null when the user has never customized this table — callers fall
  *  back to the columns' declared defaults (defaultHidden). */
 function loadColPrefs(id: string): ColPrefs | null {
-  try { const raw = localStorage.getItem(colKey(id)); if (raw) { const p = JSON.parse(raw) as Partial<ColPrefs>; return { order: p.order ?? [], hidden: p.hidden ?? [], widths: p.widths ?? {}, pinned: p.pinned ?? [] }; } } catch { /* ignore */ }
+  try { const raw = localStorage.getItem(colKey(id)); if (raw) { const p = JSON.parse(raw) as Partial<ColPrefs>; return { order: p.order ?? [], hidden: p.hidden ?? [], pinned: p.pinned ?? [] }; } } catch { /* ignore */ }
   return null;
 }
 const MIN_COL_W = 64;
@@ -106,8 +109,11 @@ const PIN_DEFAULT_W = 160;
 
 function useColumnPrefs<T>(customizeId: string | undefined, columns: Column<T>[]) {
   // Fresh tables start from the columns' declared defaults; saved prefs win.
-  const defaults = (): ColPrefs => ({ order: [], hidden: columns.filter((c) => c.defaultHidden && !c.required).map((c) => c.key), widths: {}, pinned: [] });
-  const [prefs, setPrefs] = useState<ColPrefs>(() => (customizeId ? loadColPrefs(customizeId) ?? defaults() : { order: [], hidden: [], widths: {}, pinned: [] }));
+  const defaults = (): ColPrefs => ({ order: [], hidden: columns.filter((c) => c.defaultHidden && !c.required).map((c) => c.key), pinned: [] });
+  const [prefs, setPrefs] = useState<ColPrefs>(() => (customizeId ? loadColPrefs(customizeId) ?? defaults() : { order: [], hidden: [], pinned: [] }));
+  // Session-only manual widths: dropped on reload/remount so every fresh view
+  // starts from automatic content-based sizing.
+  const [widths, setWidths] = useState<Record<string, number>>({});
   // Reload when the table identity changes (e.g. remounted for another list).
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { if (customizeId) setPrefs(loadColPrefs(customizeId) ?? defaults()); }, [customizeId]);
@@ -144,19 +150,24 @@ function useColumnPrefs<T>(customizeId: string | undefined, columns: Column<T>[]
     keys.splice(ti, 0, fromKey);
     return { ...p, order: keys };
   });
-  const setWidth = (key: string, w: number) => setPrefs((p) => ({ ...p, widths: { ...p.widths, [key]: Math.max(MIN_COL_W, Math.round(w)) } }));
-  const togglePin = (key: string) => setPrefs((p) => {
-    if (p.pinned.includes(key)) return { ...p, pinned: p.pinned.filter((k) => k !== key) };
-    // Pin: give the column a fixed width (if none yet) so sticky offsets are exact.
-    return { ...p, pinned: [...p.pinned, key], widths: p.widths[key] != null ? p.widths : { ...p.widths, [key]: PIN_DEFAULT_W } };
-  });
-  const reset = () => setPrefs(defaults());
+  const setWidth = (key: string, w: number) => setWidths((ws) => ({ ...ws, [key]: Math.max(MIN_COL_W, Math.round(w)) }));
+  const togglePin = (key: string) => {
+    // Pin: give the column a session width (if none yet) so sticky offsets are
+    // exact; unpinning releases it back to automatic sizing.
+    setWidths((ws) => prefs.pinned.includes(key)
+      ? (() => { const { [key]: _drop, ...rest } = ws; return rest; })()
+      : ws[key] != null ? ws : { ...ws, [key]: PIN_DEFAULT_W });
+    setPrefs((p) => p.pinned.includes(key)
+      ? { ...p, pinned: p.pinned.filter((k) => k !== key) }
+      : { ...p, pinned: [...p.pinned, key] });
+  };
+  const reset = () => { setPrefs(defaults()); setWidths({}); };
   const defaultHiddenKeys = columns.filter((c) => c.defaultHidden && !c.required).map((c) => c.key);
   const isDefault = prefs.order.length === 0
     && prefs.hidden.length === defaultHiddenKeys.length && defaultHiddenKeys.every((k) => prefs.hidden.includes(k))
-    && Object.keys(prefs.widths).length === 0 && prefs.pinned.length === 0;
+    && Object.keys(widths).length === 0 && prefs.pinned.length === 0;
 
-  return { ordered, visible, hidden, widths: prefs.widths, pinnedKeys, pinnedSet, toggle, reorder, setWidth, togglePin, reset, isDefault };
+  return { ordered, visible, hidden, widths, pinnedKeys, pinnedSet, toggle, reorder, setWidth, togglePin, reset, isDefault };
 }
 
 function ColumnCustomizer<T>({ ordered, hidden, pinnedSet, onToggle, onReorder, onPin, onReset, isDefault }: {
@@ -223,7 +234,7 @@ function ColumnCustomizer<T>({ ordered, hidden, pinnedSet, onToggle, onReorder, 
             })}
           </div>
           <div className="cv-foot">
-            <span className="cv-hint">Drag a header edge to resize</span>
+            <span className="cv-hint">Drag a header edge to resize (this session only — widths auto-fit the data on reload)</span>
             <button type="button" className="small" disabled={isDefault} onClick={onReset}>Restore default</button>
           </div>
         </div>
@@ -360,11 +371,14 @@ export function SortableTable<T>({
             })()}
             {cols.map((c) => {
               const active = sort?.key === c.key;
-              const w = widths[c.key];
+              const pinned = pinnedSet.has(c.key);
+              // Pinned columns need a fixed width even after a reload (sticky
+              // offsets assume one); everything else auto-sizes to its data
+              // unless the user dragged a session width.
+              const w = widths[c.key] ?? (pinned ? PIN_DEFAULT_W : undefined);
               const wStyle = w != null
                 ? { width: w, minWidth: Math.max(w, c.minWidth ?? 0), maxWidth: Math.max(w, c.minWidth ?? 0) }
                 : { ...(c.width ? { width: c.width } : {}), ...(c.minWidth ? { minWidth: c.minWidth } : {}) };
-              const pinned = pinnedSet.has(c.key);
               return (
                 <th
                   key={c.key}
@@ -412,11 +426,11 @@ export function SortableTable<T>({
                 )}
                 {cols.map((c, ci) => {
                   const cell = c.render ? c.render(row) : displayDefault(c.value(row));
-                  const w = widths[c.key];
+                  const pinned = pinnedSet.has(c.key);
+                  const w = widths[c.key] ?? (pinned ? PIN_DEFAULT_W : undefined);
                   const wStyle = w != null
                     ? { width: w, minWidth: Math.max(w, c.minWidth ?? 0), maxWidth: Math.max(w, c.minWidth ?? 0) }
                     : (c.minWidth ? { minWidth: c.minWidth } : undefined);
-                  const pinned = pinnedSet.has(c.key);
                   return (
                     <td key={c.key} className={`${c.align ?? "left"} ${pinned ? "cv-pin" : ""} ${pinned && c.key === pinnedKeys[pinnedKeys.length - 1] ? "cv-pin-last" : ""}`} style={{ ...wStyle, ...pinStyle(c.key, false) }}>
                       {rowHref && ci === 0
