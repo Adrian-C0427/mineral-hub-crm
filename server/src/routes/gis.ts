@@ -128,8 +128,16 @@ gisTilesRouter.get(
            FROM rrc.wellbores b
            LEFT JOIN rrc.wells sw ON sw.fid = b.surface_fid, wanted w
           WHERE b.geom && w.box
+       ),
+       dome_mvt AS (
+         -- East Texas Basin salt dome outlines (approximate extent, BEG RI-140).
+         SELECT ST_AsMVTGeom(ST_Transform(sd.geom, 3857), w.env, ${TILE_EXTENT}, ${TILE_BUFFER}, true) AS geom,
+                sd.id, sd.name, sd.county, sd.crest_ft AS "crestFt",
+                sd.major_mi AS "majorMi", sd.minor_mi AS "minorMi"
+           FROM gis.salt_domes sd, wanted w WHERE sd.geom && w.box
        )
        SELECT coalesce((SELECT ST_AsMVT(cty_mvt, 'counties', ${TILE_EXTENT}, 'geom') FROM cty_mvt WHERE geom IS NOT NULL), ''::bytea)
+           || coalesce((SELECT ST_AsMVT(dome_mvt, 'saltdomes', ${TILE_EXTENT}, 'geom') FROM dome_mvt WHERE geom IS NOT NULL), ''::bytea)
            || CASE WHEN $1::int >= ${ABSTRACTS_MIN_ZOOM} THEN coalesce((SELECT ST_AsMVT(abs_mvt, 'abstracts', ${TILE_EXTENT}, 'geom') FROM abs_mvt WHERE geom IS NOT NULL), ''::bytea) ELSE ''::bytea END
            || CASE WHEN $1::int >= ${WELLS_MIN_ZOOM} THEN coalesce((SELECT ST_AsMVT(well_mvt, 'wells', ${TILE_EXTENT}, 'geom') FROM well_mvt WHERE geom IS NOT NULL), ''::bytea) ELSE ''::bytea END
            || CASE WHEN $1::int >= ${BORES_MIN_ZOOM} THEN coalesce((SELECT ST_AsMVT(bore_mvt, 'wellbores', ${TILE_EXTENT}, 'geom') FROM bore_mvt WHERE geom IS NOT NULL), ''::bytea) ELSE ''::bytea END AS tile`,
