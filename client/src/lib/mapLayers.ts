@@ -5,9 +5,16 @@ import { API_BASE } from "../api/client";
 // and the per-deal map (DealMap), so the two can never visually drift. Callers
 // add their own extras (heat, deal highlight) on top via addLayer beforeId.
 
+/** Tile data version — BUMP THIS whenever the underlying map data changes
+ * (county scope edits, well re-imports, deletions). Browsers cache tiles for
+ * an hour keyed by full URL, so a new value makes every client abandon its
+ * stale tiles immediately; the server ignores the query param (its own LRU
+ * clears on the deploy that ships the bump). */
+export const TILE_DATA_VERSION = "2026-09-10";
+
 /** Cadastral vector tiles from PostGIS (/api/gis/tiles). Absolute URL required
  * by MapLibre; falls back to the page origin in dev (Vite proxies /api). */
-export const ABSTRACT_TILES = `${API_BASE || window.location.origin}/api/gis/tiles/{z}/{x}/{y}.pbf`;
+export const ABSTRACT_TILES = `${API_BASE || window.location.origin}/api/gis/tiles/{z}/{x}/{y}.pbf?v=${TILE_DATA_VERSION}`;
 
 /** Abstract fills/lines and their labels start here; below this only county
  * boundaries + names carry the view. */
