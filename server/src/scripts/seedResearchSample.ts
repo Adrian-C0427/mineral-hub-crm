@@ -19,7 +19,7 @@
  */
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
-import { classifyDocType, normalizeEntity } from "../domain/research.js";
+import { classifyDocType, normalizeEntity, splitAbstracts, splitParties } from "../domain/research.js";
 
 const SOURCE = "sample";
 const DAY = 86400000;
@@ -115,8 +115,10 @@ async function main() {
         const docTypeRaw = isLease ? DOC_TYPES[7 + Math.floor(rnd() * 5)] : DOC_TYPES[Math.floor(rnd() * 7)];
         const cls = classifyDocType(docTypeRaw);
         if (!cls) continue;
-        const grantee = pick(BUYERS);
-        const grantor = pick(SELLERS);
+        // ~1 in 6 records is a multi-party instrument ("A; B") so per-party
+        // filtering/search has something to prove against.
+        const grantee = chance(0.15) ? `${pick(BUYERS)}; ${pick(BUYERS)}` : pick(BUYERS);
+        const grantor = chance(0.15) ? `${pick(SELLERS)}; ${pick(SELLERS)}` : pick(SELLERS);
         // Robertson storyline: concentrate recent buys into two abstracts.
         const abstractId = county === "Robertson" && daysAgo < 75 && chance(0.5)
           ? pick(["A-112", "A-287"])
@@ -128,7 +130,10 @@ async function main() {
           recordingDate: date,
           grantor, grantee,
           grantorNorm: normalizeEntity(grantor), granteeNorm: normalizeEntity(grantee),
-          abstractId, survey: chance(0.7) ? pick(SURVEYS) : null,
+          grantorParties: splitParties(grantor), granteeParties: splitParties(grantee),
+          grantorNorms: splitParties(grantor).map((p) => normalizeEntity(p)!).filter(Boolean),
+          granteeNorms: splitParties(grantee).map((p) => normalizeEntity(p)!).filter(Boolean),
+          abstractId, abstractIds: splitAbstracts(abstractId), survey: chance(0.7) ? pick(SURVEYS) : null,
           acreage: chance(0.7) ? Math.round(rnd() * 320 + 10) : null,
           consideration: chance(0.3) ? Math.round((rnd() * 900 + 100)) * 1000 : null,
           source: SOURCE,
