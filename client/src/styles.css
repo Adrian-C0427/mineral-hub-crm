@@ -579,6 +579,10 @@ table.data-table {
 .data-table.lead-sticky tbody tr.row-selected td:nth-child(1),
 .data-table.lead-sticky.has-sel tbody tr.row-selected td:nth-child(2) { background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
 .data-table td { max-width: 320px; overflow: hidden; text-overflow: ellipsis; }
+/* Cells holding value chips are exempt from the clamp: the full set must be
+   visible, so the column sizes to its data and chips wrap onto extra lines
+   instead of collapsing behind an ellipsis. */
+.data-table td:has(.vchips) { max-width: none; overflow: visible; white-space: normal; }
 .data-table td .wrap { white-space: normal; }
 .empty-cell { text-align: center; color: var(--text-dim); padding: 32px; }
 /* Overdue: a 3px left accent instead of a full-row wash — the row reads as
