@@ -28,9 +28,9 @@ interface MapDeal {
 type FC = { type: "FeatureCollection"; features: GeoFeature[] };
 type GeoFeature = { type: "Feature"; id?: number; properties: Record<string, unknown>; geometry: { type: string; coordinates: unknown } };
 type SelAbstract = { kind: "abstract"; id: string; abstract: string; survey: string; county: string };
-type WellPermit = { statusNo: string; permitDate: string | null; operator: string | null; leaseName: string | null; wellNo: string | null };
+type WellPermit = { statusNo: string; permitDate: string | null; operator: string | null; leaseName: string | null; wellNo: string | null; acres: number | null };
 type WellCompletion = { trackingNo: string; filingType: string | null; status: string | null; filedDate: string | null; completionDate: string | null; fieldName: string | null };
-type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; operator: string | null; leaseName: string | null; leaseNo: string | null; field: string | null; oilGas: string | null; district: string | null; cumOil: number | null; cumGas: number | null; lastProd: string | null; formations: string | null; spudDate?: string | null; plugDate?: string | null; permits?: WellPermit[]; completions?: WellCompletion[] };
+type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; operator: string | null; leaseName: string | null; leaseNo: string | null; field: string | null; oilGas: string | null; district: string | null; cumOil: number | null; cumGas: number | null; lastProd: string | null; formations: string | null; unitAcres?: number | null; spudDate?: string | null; plugDate?: string | null; permits?: WellPermit[]; completions?: WellCompletion[] };
 type SelWell = { kind: "well" } & WellProps;
 type SelHotspot = { kind: "hotspot"; summary: AreaSummary; periodLabel: string };
 type Selected = SelAbstract | SelWell | SelHotspot | null;
@@ -374,6 +374,7 @@ export function MapView() {
         formations: Array.isArray(d.formations) ? (d.formations as string[]).join(", ") : null,
         spudDate: (d.spudDate as string | null)?.slice(0, 10) ?? null,
         plugDate: (d.plugDate as string | null)?.slice(0, 10) ?? null,
+        unitAcres: d.unitAcres != null ? Number(d.unitAcres) : null,
         permits: (d.permits as WellPermit[]) ?? [],
         completions: (d.completions as WellCompletion[]) ?? [],
       } as WellProps);
@@ -1029,6 +1030,7 @@ export function MapView() {
                   <KV k="Status" v={selected.status} /><KV k="County" v={selected.county} />
                   <KV k="Abstract" v={selected.abstract} /><KV k="Survey" v={selected.survey} />
                   <KV k="Spud/permit" v={selected.spudDate} /><KV k="Plugged" v={selected.plugDate} />
+                  <KV k="Unit size" v={selected.unitAcres != null ? `${num(selected.unitAcres)} ac` : null} />
                 </div>
                 {selected.formations && (
                   <div className="kv" style={{ marginTop: 8 }}><span className="k">Formations (RRC W-2)</span><span className="v wrap">{selected.formations}</span></div>
@@ -1062,7 +1064,7 @@ export function MapView() {
                     {selected.permits!.slice(0, 5).map((p) => (
                       <div key={p.statusNo} className="row" style={{ justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}>
                         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.operator || "—"}{p.wellNo ? ` #${p.wellNo}` : ""}</span>
-                        <span className="muted" style={{ whiteSpace: "nowrap" }}>{p.permitDate?.slice(0, 10) ?? "—"}</span>
+                        <span className="muted" style={{ whiteSpace: "nowrap" }}>{p.acres != null ? `${num(p.acres)} ac · ` : ""}{p.permitDate?.slice(0, 10) ?? "—"}</span>
                       </div>
                     ))}
                   </>

@@ -8,7 +8,11 @@
  *   type "01" root : permit key 2:14 (API county code at 11:14), lease name
  *                    14:46, district 46:48, operator no 48:54, permit date
  *                    58:66 (yyyymmdd), operator name 66:98
- *   type "02"      : same key 2:14; api8 = the line's LAST 8 characters
+ *   type "02" (510c): same key 2:14; api8 = the line's LAST 8 characters;
+ *                    surface acres 325:333 (DA-SURFACE-ACRES, 9(6)V9(2) —
+ *                    the W-1's lease/pooled-unit acreage, two implied
+ *                    decimals; verified against real Freestone units, e.g.
+ *                    "00064000" = the section-sized 640.00-acre gas unit)
  * A permit row is emitted when a root and its api8 trailer have both been
  * seen. Operator here is the operator AT PERMIT TIME (historic by design).
  */
@@ -20,10 +24,10 @@ import { mergeRows, ensureRegulatoryTables, yyyymmddToIso } from "./util.js";
 export const PERMITS_SPEC: MergeSpec = {
   schema: "rrc",
   table: "permits",
-  columns: ["status_no", "api8", "county", "district", "lease_name", "operator", "operator_no", "permit_date"],
+  columns: ["status_no", "api8", "county", "district", "lease_name", "operator", "operator_no", "permit_date", "acres"],
   conflict: ["status_no", "api8"],
-  update: ["county", "district", "lease_name", "operator", "operator_no", "permit_date"],
-  casts: { permit_date: "date" },
+  update: ["county", "district", "lease_name", "operator", "operator_no", "permit_date", "acres"],
+  casts: { permit_date: "date", acres: "numeric" },
 };
 
 export interface PermitRoot {
@@ -46,12 +50,15 @@ export function parsePermitRoot(line: string): PermitRoot | null {
   };
 }
 
-export function parsePermitApi(line: string): { key: string; api8: string } | null {
+export function parsePermitApi(line: string): { key: string; api8: string; acres: number | null } | null {
   if (!line.startsWith("02") || line.length < 22) return null;
   const key = line.slice(2, 14);
   const api8 = line.slice(line.length - 8).trim();
   if (!/^\d{8}$/.test(api8)) return null;
-  return { key, api8 };
+  // DA-SURFACE-ACRES: 8 zoned digits, two implied decimals; zero = unreported.
+  const rawAcres = line.slice(325, 333);
+  const acres = /^\d{8}$/.test(rawAcres) && Number(rawAcres) > 0 ? Number(rawAcres) / 100 : null;
+  return { key, api8, acres };
 }
 
 export interface PermitLoadStats { rootsSeen: number; merged: number; filteredOut: number }
@@ -89,6 +96,7 @@ export async function loadPermits(
     rows.push([
       r.key, trailer.api8, countyByCode.get(r.countyCode)!, r.district || null,
       r.leaseName || null, r.operatorName || null, r.operatorNo || null, r.permitDate,
+      trailer.acres,
     ]);
     if (rows.length >= 1000) await flush();
   }

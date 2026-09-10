@@ -425,9 +425,9 @@ gisRouter.get(
     );
     if (!rows.length) return res.status(404).json({ error: "well not found" });
     const well = rows[0];
-    const [permits, completions] = await Promise.all([
+    const [permits, completions, unitAcresRow] = await Promise.all([
       prisma.$queryRawUnsafe<Record<string, unknown>[]>(
-        `SELECT status_no AS "statusNo", permit_date AS "permitDate", operator, lease_name AS "leaseName", well_no AS "wellNo"
+        `SELECT status_no AS "statusNo", permit_date AS "permitDate", operator, lease_name AS "leaseName", well_no AS "wellNo", acres::float8 AS acres
            FROM rrc.permits WHERE api8 = $1 ORDER BY permit_date DESC NULLS LAST LIMIT 12`,
         String(well.api8 ?? "")),
       prisma.$queryRawUnsafe<Record<string, unknown>[]>(
@@ -435,8 +435,15 @@ gisRouter.get(
                 filed_date AS "filedDate", completion_date AS "completionDate", field_name AS "fieldName"
            FROM rrc.completions WHERE api8 = $1 ORDER BY filed_date DESC NULLS LAST LIMIT 12`,
         String(well.api8 ?? "")),
+      // Unit size: the W-1 lease/pooled-unit acreage from the well's most
+      // recent permit that reported one (older filings often left it zero).
+      prisma.$queryRawUnsafe<{ acres: number }[]>(
+        `SELECT acres::float8 AS acres FROM rrc.permits
+          WHERE api8 = $1 AND acres IS NOT NULL
+          ORDER BY permit_date DESC NULLS LAST LIMIT 1`,
+        String(well.api8 ?? "")),
     ]);
-    res.json({ ...well, permits, completions });
+    res.json({ ...well, permits, completions, unitAcres: unitAcresRow[0]?.acres ?? null });
   }),
 );
 
