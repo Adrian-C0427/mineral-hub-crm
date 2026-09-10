@@ -984,7 +984,7 @@ function RankingsTab({ qs, opts, compareOff, onDrill, dataset }: { qs: string; o
     ...(role === "operators"
       ? ([{ key: "horizontal", header: "Horizontal", value: (r) => r.horizontal, align: "right" }] as Column<EntityRow>[])
       : []),
-    { key: "counties", header: "Counties", value: (r) => r.counties.length, render: (r) => <ChipList items={r.counties} max={4} /> },
+    { key: "counties", header: "Counties", value: (r) => r.counties.length, render: (r) => <ChipList items={r.counties} /> },
   ];
 
   const top = rows.slice(0, 10);
@@ -1902,10 +1902,12 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   const docColumns: Column<DocRecord>[] = [
     { key: "recordingDate", header: "Recorded", value: (r) => r.recordingDate, render: (r) => <span className="rec-mid rec-nowrap">{fmtDate(r.recordingDate)}</span>, type: "date" },
     { key: "docType", header: "Type", value: (r) => r.docTypeRaw, render: (r) => <span className="rec-type" title={r.docTypeRaw}>{prettyDocType(r.docType)}</span> },
-    { key: "grantor", header: dataset === "LEASE" ? "Grantor (Lessor)" : "Grantor (Seller)", value: (r) => r.grantor, render: (r) => <span className="rec-name"><ChipList items={r.grantorParties?.length ? r.grantorParties : [r.grantor]} max={3} /></span> },
-    { key: "grantee", header: dataset === "LEASE" ? "Grantee (Lessee)" : "Grantee (Buyer)", value: (r) => r.grantee, render: (r) => <span className="rec-name"><ChipList items={r.granteeParties?.length ? r.granteeParties : [r.grantee]} max={3} /></span> },
+    // No `max` on the records chip columns: every party/abstract renders (chips
+    // wrap onto extra lines) — nothing hides behind a "+N" indicator.
+    { key: "grantor", header: dataset === "LEASE" ? "Grantor (Lessor)" : "Grantor (Seller)", value: (r) => r.grantor, minWidth: 180, render: (r) => <span className="rec-name"><ChipList items={r.grantorParties?.length ? r.grantorParties : [r.grantor]} /></span> },
+    { key: "grantee", header: dataset === "LEASE" ? "Grantee (Lessee)" : "Grantee (Buyer)", value: (r) => r.grantee, minWidth: 180, render: (r) => <span className="rec-name"><ChipList items={r.granteeParties?.length ? r.granteeParties : [r.grantee]} /></span> },
     { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}`, render: (r) => <span className="rec-mid rec-nowrap">{r.county}, {r.state}</span> },
-    { key: "abstractId", header: "Abstract", value: (r) => r.abstractId, align: "right", render: (r) => r.abstractId ? <span className="rec-mid"><ChipList items={r.abstractId.split(",").map((a) => a.trim())} max={3} /></span> : <span className="rec-faint">—</span> },
+    { key: "abstractId", header: "Abstract", value: (r) => r.abstractId, align: "right", render: (r) => r.abstractId ? <span className="rec-mid"><ChipList items={r.abstractId.split(",").map((a) => a.trim())} /></span> : <span className="rec-faint">—</span> },
     { key: "instrumentNumber", header: "Instr #", value: (r) => r.instrumentNumber, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{r.instrumentNumber ?? "—"}</span> },
   ];
   const permitColumns: Column<PermitRecord>[] = [
