@@ -19,7 +19,20 @@
  *                    "G. LEFFEL SUR. A-498" (abstract regexed out of it)
  * A permit row is emitted when a root and its api8 trailer have both been
  * seen. Operator here is the operator AT PERMIT TIME (historic by design).
+ *
+ * Retention (2026-09-10, user decision): only the most recent
+ * PERMIT_RETENTION_YEARS of permits are kept — older roots are skipped at
+ * parse time so a full-history master file never resurrects trimmed rows.
+ * The raw file (~/rrc-data/daf802-2026-09/daf802.txt.gz) keeps the full
+ * 1976+ history if it's ever wanted back.
  */
+const PERMIT_RETENTION_YEARS = Number(process.env.RRC_PERMIT_RETENTION_YEARS ?? 6);
+/** Oldest permit date to keep (rolling window from today). */
+export function permitRetentionCutoff(now = new Date()): string {
+  const d = new Date(now);
+  d.setUTCFullYear(d.getUTCFullYear() - PERMIT_RETENTION_YEARS);
+  return d.toISOString().slice(0, 10);
+}
 import fs from "node:fs";
 import readline from "node:readline";
 import type { MergeSpec } from "../merge.js";
@@ -98,6 +111,7 @@ export async function loadPermits(
 ): Promise<PermitLoadStats> {
   await ensureRegulatoryTables();
 
+  const cutoff = permitRetentionCutoff();
   const roots = new Map<string, PermitRoot>();
   const rows: (string | number | null)[][] = [];
   const stats: PermitLoadStats = { rootsSeen: 0, merged: 0, filteredOut: 0 };
@@ -113,7 +127,7 @@ export async function loadPermits(
     const root = parsePermitRoot(line);
     if (root) {
       stats.rootsSeen++;
-      if (countyByCode.has(root.countyCode)) roots.set(root.key, root);
+      if (countyByCode.has(root.countyCode) && root.permitDate != null && root.permitDate >= cutoff) roots.set(root.key, root);
       else stats.filteredOut++;
       continue;
     }
