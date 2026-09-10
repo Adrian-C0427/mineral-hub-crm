@@ -1,17 +1,35 @@
 /**
- * RRC ingestion scope + tunables. Start scoped to a single county to prove the
- * pipeline end-to-end, then widen COUNTIES (or later add a STATEWIDE flag) once
- * verified. RRC county codes are 3-digit and are NOT FIPS (Freestone = 161).
+ * RRC ingestion scope + tunables. Proved end-to-end on Freestone alone; now
+ * widened to the user's three target counties (2026-09-09) rather than going
+ * statewide — statewide production is a storage/cost decision (100M+ rows,
+ * needs a paid Neon tier) that stays deferred. RRC county codes are 3-digit
+ * and are NOT FIPS (Freestone = 161, Leon = 289, Cherokee = 073); codes and
+ * B1-B4 coverage confirmed against importRrcRegulatory.ts's county table.
  */
 export interface CountyScope {
   name: string;    // display + rrc.production.county key (matches existing loader)
   rrcCode: string; // 3-digit RRC county code (API prefix)
-  district: string; // RRC district the county reports under
+  district: string; // RRC district the county reports under (display only —
+                     // production filtering keys on rrcCode; each row's own
+                     // district comes from the PDQ data, not this field)
 }
 
 export const COUNTIES: CountyScope[] = [
   { name: "Freestone", rrcCode: "161", district: "05" },
+  { name: "Leon", rrcCode: "289", district: "05" },
+  { name: "Cherokee", rrcCode: "073", district: "06" },
 ];
+
+/**
+ * Production history retention (2026-09-10): rrc.production holds the PAST 5
+ * YEARS per county (cycle_ym >= 202106 at trim time), fitting the Neon free
+ * tier's 512MB project cap — full 1993+ history for even these three counties
+ * exceeded it. Monthly runs keep this shape on their own (the watermark +
+ * restate window only appends new/restated recent months; trimmed history is
+ * never re-sent). Only a from-scratch reload of an EMPTIED table would
+ * resurrect full history — if that's ever needed, pre-filter the extracted
+ * county TSVs to the retention window first (awk on cycle_ym, column 4).
+ */
 
 export const ingestConfig = {
   counties: COUNTIES,
