@@ -1277,7 +1277,7 @@ researchRouter.get(
     const org = orgId(req);
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
-    const kind = req.query.kind === "permits" ? "permits" : "documents";
+    const kind = req.query.kind === "permits" ? "permits" : req.query.kind === "rrcPermits" ? "rrcPermits" : "documents";
     // Options describe the dataset BEFORE the panel's own selections, so
     // narrow the base filters only (the client omits panel params here).
     if (kind === "documents") {
@@ -1298,6 +1298,26 @@ researchRouter.get(
         grantors: docVals.grantors,
         grantees: docVals.grantees,
       });
+    }
+    if (kind === "rrcPermits") {
+      // Platform RRC permits: distinct values straight from rrc.permits under
+      // the page's window + county scope.
+      const conds: string[] = ["permit_date >= $1", "permit_date <= $2"];
+      const params: unknown[] = [win.from, win.to];
+      if (f.counties.length) { params.push(f.counties); conds.push(`county = ANY($${params.length}::text[])`); }
+      const where = conds.join(" AND ");
+      try {
+        const [counties, abstracts, surveys] = await Promise.all([
+          prisma.$queryRawUnsafe<{ v: string }[]>(`SELECT DISTINCT county v FROM rrc.permits WHERE ${where} ORDER BY 1`, ...params),
+          prisma.$queryRawUnsafe<{ v: string }[]>(`SELECT DISTINCT abstract v FROM rrc.permits WHERE abstract IS NOT NULL AND ${where} ORDER BY 1`, ...params),
+          prisma.$queryRawUnsafe<{ v: string }[]>(`SELECT DISTINCT survey v FROM rrc.permits WHERE survey IS NOT NULL AND ${where} ORDER BY 1`, ...params),
+        ]);
+        return res.json({
+          counties: counties.map((r) => r.v),
+          abstracts: abstracts.map((r) => r.v).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+          surveys: surveys.map((r) => r.v),
+        });
+      } catch { return res.json({ counties: [], abstracts: [], surveys: [] }); } // rrc schema absent
     }
     const where = permitWhere(org, f, win);
     const [counties, abstracts, surveys, statuses, trajectories] = await Promise.all([
@@ -1540,6 +1560,67 @@ researchRouter.get(
       }),
     ]);
     res.json({ total, page, pageSize, rows });
+  }),
+);
+
+/**
+ * RRC drilling permits (rrc.permits — the platform's B3 import, statewide
+ * public-record W-1 filings) as a browsable Records source. Their OWN section:
+ * platform data, not org imports, so no bulk edit/delete applies and rows
+ * never mix into the documents or imported-permits lists. Same whole-dataset
+ * server-side search/sort/pagination contract as /documents and /permits.
+ */
+const RRC_PERMIT_SORT: Record<string, string> = {
+  permitDate: "permit_date", county: "county", operator: "operator",
+  leaseName: "lease_name", wellNo: "well_no", abstract: "abstract",
+  survey: "survey", acres: "acres", apiNumber: "api8",
+};
+
+researchRouter.get(
+  "/rrc-permits",
+  requirePermission("viewResearch"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const f = parseFilters(req.query as Record<string, unknown>);
+    const win = parseWindow(req.query as Record<string, unknown>);
+    const { page, pageSize, sortBy, sortDir, q } = pageSchema.parse(req.query);
+
+    const conds: string[] = ["p.permit_date >= $1", "p.permit_date <= $2"];
+    const params: unknown[] = [win.from, win.to];
+    const add = (cond: string, value: unknown) => { params.push(value); conds.push(cond.replace("?", `$${params.length}`)); };
+    if (f.counties.length) add(`p.county = ANY(?::text[])`, f.counties);
+    if (f.abstractIds.length) add(`p.abstract = ANY(?::text[])`, f.abstractIds);
+    if (f.surveys.length) add(`p.survey = ANY(?::text[])`, f.surveys);
+    if (q) {
+      params.push(`%${q.replace(/[%_\\]/g, "\\$&")}%`);
+      const i = `$${params.length}`;
+      conds.push(
+        `(p.operator ILIKE ${i} ESCAPE '\\' OR p.lease_name ILIKE ${i} ESCAPE '\\' OR p.api8 LIKE ${i} ESCAPE '\\'
+          OR p.abstract ILIKE ${i} ESCAPE '\\' OR p.survey ILIKE ${i} ESCAPE '\\'
+          OR p.well_no ILIKE ${i} ESCAPE '\\' OR p.status_no LIKE ${i} ESCAPE '\\')`,
+      );
+    }
+    const sortCol = RRC_PERMIT_SORT[sortBy ?? ""] ?? "permit_date";
+    const dir = sortDir === "asc" ? "ASC" : "DESC";
+    const where = conds.join(" AND ");
+
+    try {
+      const [countRows, rows] = await withDbRetry(() => Promise.all([
+        prisma.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*) n FROM rrc.permits p WHERE ${where}`, ...params),
+        prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+          `SELECT p.status_no AS "statusNo", p.api8, p.county, p.district, p.lease_name AS "leaseName",
+                  p.well_no AS "wellNo", p.operator, p.permit_date AS "permitDate",
+                  p.acres::float8 AS acres, p.survey, p.abstract
+             FROM rrc.permits p WHERE ${where}
+            ORDER BY ${sortCol} ${dir} NULLS LAST, p.permit_date DESC NULLS LAST, p.status_no ASC
+            LIMIT ${pageSize} OFFSET ${(page - 1) * pageSize}`,
+          ...params,
+        ),
+      ]));
+      res.json({
+        total: Number(countRows[0]?.n ?? 0), page, pageSize,
+        rows: rows.map((r) => ({ id: `${r.statusNo}|${r.api8}`, ...r })),
+      });
+    } catch { res.json({ total: 0, page, pageSize, rows: [] }); } // rrc schema absent
   }),
 );
 
