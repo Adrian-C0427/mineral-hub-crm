@@ -1168,7 +1168,11 @@ model ResearchDocument {
 
   // Geography below county level. TX: abstract/survey. Elsewhere: trs
   // ("Sec 12 T2N R3W") or whatever the state's cadastral unit is.
+  // `abstractId` keeps the cell EXACTLY as recorded (possibly "15, 47, 209");
+  // `abstractIds` holds the individual abstract numbers split from it so each
+  // one is independently filterable while the record stays one transaction.
   abstractId       String?
+  abstractIds      String[] @default([])
   survey           String?
   trs              String?
   legalDescription String?

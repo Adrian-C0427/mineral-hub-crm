@@ -7,7 +7,7 @@ import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import {
   autoGranularity, bucketKey, bucketRange, detectHotspot, historyWindows,
-  normalizeEntity, rollingAverage, surgeSeverity, trend, type Trend,
+  normalizeEntity, rollingAverage, splitAbstracts, splitParties, surgeSeverity, trend, type Trend,
 } from "../domain/research.js";
 import { MAX_CSV_CHARS } from "../config.js";
 import { fieldsFor, guessMapping, sourceFor } from "../domain/researchSources.js";
@@ -196,6 +196,18 @@ interface PermitRow {
   abstractId: string | null; survey: string | null;
 }
 
+/**
+ * Document predicate for every research analytic and the records table.
+ *
+ * Multi-value cells filter on their INDIVIDUAL values while the record stays
+ * one transaction: a buyer/seller filter matches a record when the party is
+ * the whole cell (`granteeNorm`) OR any one participant of a multi-party cell
+ * (`granteeNorms`); an abstract filter matches any one abstract of a
+ * multi-abstract cell (`abstractIds`, with the raw cell as fallback for the
+ * single-value case). These OR groups are AND-ed together — and kept out of a
+ * top-level `OR` so the records search (which sets `where.OR`) composes on
+ * top of them without clobbering.
+ */
 function docWhere(org: string, f: ResearchFilters, win?: Window): Prisma.ResearchDocumentWhereInput {
   const w: Prisma.ResearchDocumentWhereInput = { organizationId: org };
   if (win) w.recordingDate = { gte: win.from, lt: new Date(win.to.getTime() + DAY) };
@@ -203,11 +215,62 @@ function docWhere(org: string, f: ResearchFilters, win?: Window): Prisma.Researc
   if (f.counties.length) w.county = { in: f.counties };
   if (f.docClass) w.docClass = f.docClass;
   if (f.docTypes.length) w.docType = { in: f.docTypes as ResearchDocType[] };
-  if (f.buyers.length) w.granteeNorm = { in: f.buyers };
-  if (f.sellers.length) w.grantorNorm = { in: f.sellers };
   if (f.surveys.length) w.survey = { in: f.surveys };
-  if (f.abstractIds.length) w.abstractId = { in: f.abstractIds };
+  const and: Prisma.ResearchDocumentWhereInput[] = [];
+  if (f.buyers.length) and.push({ OR: [{ granteeNorm: { in: f.buyers } }, { granteeNorms: { hasSome: f.buyers } }] });
+  if (f.sellers.length) and.push({ OR: [{ grantorNorm: { in: f.sellers } }, { grantorNorms: { hasSome: f.sellers } }] });
+  if (f.abstractIds.length) and.push({ OR: [{ abstractIds: { hasSome: f.abstractIds } }, { abstractId: { in: f.abstractIds } }] });
+  if (and.length) w.AND = and;
   return w;
+}
+
+/**
+ * Distinct INDIVIDUAL filter values across a set of documents — the option
+ * lists the dropdowns offer. Abstracts and parties are expanded from their
+ * per-value arrays (falling back to the raw cell on legacy rows), so a record
+ * holding "15, 47, 209" contributes [15], [47], [209] as separate options
+ * and a multi-party grantor cell contributes each grantor by name.
+ */
+async function docFilterValues(where: Prisma.ResearchDocumentWhereInput) {
+  const rows = await withDbRetry(() => prisma.researchDocument.findMany({
+    where,
+    select: {
+      state: true, county: true, survey: true, docType: true,
+      abstractId: true, abstractIds: true,
+      grantor: true, grantorNorm: true, grantorParties: true, grantorNorms: true,
+      grantee: true, granteeNorm: true, granteeParties: true, granteeNorms: true,
+    },
+  }));
+  const abstracts = new Map<string, { state: string; county: string; abstractId: string }>();
+  const surveys = new Map<string, { state: string; county: string; survey: string }>();
+  const counties = new Map<string, { state: string; county: string }>();
+  const states = new Set<string>();
+  const docTypes = new Set<string>();
+  const grantors = new Map<string, string>(); // norm → display name (first seen)
+  const grantees = new Map<string, string>();
+  const addParties = (into: Map<string, string>, norms: string[], names: string[], cellNorm: string | null, cell: string | null) => {
+    if (norms.length) norms.forEach((n, i) => { if (n && !into.has(n)) into.set(n, names[i] ?? n); });
+    else if (cellNorm) {
+      // Legacy row without split participants: split the raw cell now.
+      for (const p of splitParties(cell)) { const n = normalizeEntity(p); if (n && !into.has(n)) into.set(n, p); }
+    }
+  };
+  for (const r of rows) {
+    states.add(r.state);
+    counties.set(`${r.state}|${r.county}`, { state: r.state, county: r.county });
+    docTypes.add(r.docType);
+    if (r.survey) surveys.set(`${r.state}|${r.county}|${r.survey}`, { state: r.state, county: r.county, survey: r.survey });
+    const ids = r.abstractIds.length ? r.abstractIds : splitAbstracts(r.abstractId);
+    for (const a of ids) abstracts.set(`${r.state}|${r.county}|${a}`, { state: r.state, county: r.county, abstractId: a });
+    addParties(grantors, r.grantorNorms, r.grantorParties, r.grantorNorm, r.grantor);
+    addParties(grantees, r.granteeNorms, r.granteeParties, r.granteeNorm, r.grantee);
+  }
+  const entityOptions = (m: Map<string, string>) =>
+    [...m.entries()].map(([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label));
+  return {
+    states, counties, docTypes, abstracts, surveys,
+    grantors: entityOptions(grantors), grantees: entityOptions(grantees),
+  };
 }
 
 function permitWhere(org: string, f: ResearchFilters, win?: Window): Prisma.ResearchPermitWhereInput {
@@ -317,26 +380,18 @@ researchRouter.get(
     // instrument types from the other class.
     const { docClass } = parseFilters(req.query as Record<string, unknown>);
     const cls = docClass ? { docClass } : {};
-    const [states, counties, docTypes, buyers, sellers, operators, permitGeo, docAbstracts, permitAbstracts, docSurveys, permitSurveys] = await withDbRetry(() => Promise.all([
-      prisma.researchDocument.groupBy({ by: ["state"], where: { organizationId: org, ...cls } }),
-      prisma.researchDocument.groupBy({ by: ["state", "county"], where: { organizationId: org, ...cls } }),
-      prisma.researchDocument.groupBy({ by: ["docType"], where: { organizationId: org, ...cls } }),
-      prisma.researchDocument.groupBy({
-        by: ["granteeNorm", "grantee"], where: { organizationId: org, granteeNorm: { not: null }, ...cls },
-        _count: true, orderBy: { _count: { granteeNorm: "desc" } }, take: 500,
-      }),
-      prisma.researchDocument.groupBy({
-        by: ["grantorNorm", "grantor"], where: { organizationId: org, grantorNorm: { not: null }, ...cls },
-        _count: true, orderBy: { _count: { grantorNorm: "desc" } }, take: 500,
-      }),
+    // Documents: one scan that expands multi-value cells (parties, abstracts)
+    // into their individual values, so every participant of a multi-party
+    // instrument and every abstract of a multi-abstract cell is offered as its
+    // own option. Permits still use per-column groupBy (their cells are scalar).
+    const [docVals, operators, permitGeo, permitAbstracts, permitSurveys] = await withDbRetry(() => Promise.all([
+      docFilterValues({ organizationId: org, ...cls }),
       prisma.researchPermit.groupBy({
         by: ["operatorNorm", "operator"], where: { organizationId: org },
         _count: true, orderBy: { _count: { operatorNorm: "desc" } }, take: 500,
       }),
       prisma.researchPermit.groupBy({ by: ["state", "county"], where: { organizationId: org } }),
-      prisma.researchDocument.groupBy({ by: ["state", "county", "abstractId"], where: { organizationId: org, abstractId: { not: null }, ...cls } }),
       prisma.researchPermit.groupBy({ by: ["state", "county", "abstractId"], where: { organizationId: org, abstractId: { not: null } } }),
-      prisma.researchDocument.groupBy({ by: ["state", "county", "survey"], where: { organizationId: org, survey: { not: null }, ...cls } }),
       prisma.researchPermit.groupBy({ by: ["state", "county", "survey"], where: { organizationId: org, survey: { not: null } } }),
     ]));
 
@@ -354,9 +409,8 @@ researchRouter.get(
     } catch { /* rrc schema absent */ }
 
     // Merge doc + permit geographies; dedupe entity display names per norm key.
-    const stateSet = new Set<string>(states.map((s) => s.state));
-    const countySet = new Map<string, { state: string; county: string }>();
-    for (const c of counties) countySet.set(`${c.state}|${c.county}`, { state: c.state, county: c.county });
+    const stateSet = docVals.states;
+    const countySet = docVals.counties;
     for (const p of permitGeo) {
       stateSet.add(p.state);
       countySet.set(`${p.state}|${p.county}`, { state: p.state, county: p.county });
@@ -371,13 +425,15 @@ researchRouter.get(
 
     // Abstracts with research activity, keyed to their state+county so the
     // client can cascade State → County → Abstract like every other selector.
-    const abstractSet = new Map<string, { state: string; county: string; abstractId: string }>();
-    for (const a of [...docAbstracts, ...permitAbstracts]) {
+    // Document abstracts arrive pre-expanded (each abstract of a multi-abstract
+    // cell separately); permit cells are scalar and merge in as-is.
+    const abstractSet = docVals.abstracts;
+    for (const a of permitAbstracts) {
       if (a.abstractId) abstractSet.set(`${a.state}|${a.county}|${a.abstractId}`, { state: a.state, county: a.county, abstractId: a.abstractId });
     }
     // Survey names, dynamically from the imported data (documents + permits).
-    const surveySet = new Map<string, { state: string; county: string; survey: string }>();
-    for (const sv of [...docSurveys, ...permitSurveys]) {
+    const surveySet = docVals.surveys;
+    for (const sv of permitSurveys) {
       if (sv.survey) surveySet.set(`${sv.state}|${sv.county}|${sv.survey}`, { state: sv.state, county: sv.county, survey: sv.survey });
     }
 
@@ -386,9 +442,9 @@ researchRouter.get(
       counties: [...countySet.values()].sort((a, b) => a.county.localeCompare(b.county)),
       abstracts: [...abstractSet.values()].sort((a, b) => a.abstractId.localeCompare(b.abstractId, undefined, { numeric: true }) || a.county.localeCompare(b.county)),
       surveys: [...surveySet.values()].sort((a, b) => a.survey.localeCompare(b.survey) || a.county.localeCompare(b.county)),
-      docTypes: docTypes.map((d) => d.docType).sort(),
-      buyers: entityOptions(buyers.map((b) => ({ norm: b.granteeNorm, raw: b.grantee }))),
-      sellers: entityOptions(sellers.map((s) => ({ norm: s.grantorNorm, raw: s.grantor }))),
+      docTypes: [...docVals.docTypes].sort(),
+      buyers: docVals.grantees,
+      sellers: docVals.grantors,
       operators: entityOptions([
         ...operators.map((o) => ({ norm: o.operatorNorm, raw: o.operator })),
         ...rrcOps.map((o) => ({ norm: o.operatorNorm, raw: o.operator })),
@@ -1212,19 +1268,21 @@ researchRouter.get(
     // narrow the base filters only (the client omits panel params here).
     if (kind === "documents") {
       const where = docWhere(org, f, win);
-      const [counties, abstracts, surveys, docTypes, docClasses] = await Promise.all([
-        prisma.researchDocument.groupBy({ by: ["county"], where, orderBy: { county: "asc" } }),
-        prisma.researchDocument.groupBy({ by: ["abstractId"], where, orderBy: { abstractId: "asc" } }),
-        prisma.researchDocument.groupBy({ by: ["survey"], where, orderBy: { survey: "asc" } }),
-        prisma.researchDocument.groupBy({ by: ["docType"], where, orderBy: { docType: "asc" } }),
+      // Individual values: a "15, 47, 209" abstract cell offers 15, 47 and 209
+      // as separate options (same for multi-party grantors/grantees).
+      const [docVals, docClasses] = await Promise.all([
+        docFilterValues(where),
         prisma.researchDocument.groupBy({ by: ["docClass"], where, orderBy: { docClass: "asc" } }),
       ]);
       return res.json({
-        counties: counties.map((r) => r.county).filter(Boolean),
-        abstracts: abstracts.map((r) => r.abstractId).filter((v): v is string => !!v),
-        surveys: surveys.map((r) => r.survey).filter((v): v is string => !!v),
-        docTypes: docTypes.map((r) => r.docType).filter(Boolean),
+        counties: [...new Set([...docVals.counties.values()].map((c) => c.county))].sort((a, b) => a.localeCompare(b)),
+        abstracts: [...new Set([...docVals.abstracts.values()].map((a) => a.abstractId))]
+          .sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+        surveys: [...new Set([...docVals.surveys.values()].map((s) => s.survey))].sort((a, b) => a.localeCompare(b)),
+        docTypes: [...docVals.docTypes].sort(),
         docClasses: docClasses.map((r) => r.docClass).filter(Boolean),
+        grantors: docVals.grantors,
+        grantees: docVals.grantees,
       });
     }
     const where = permitWhere(org, f, win);

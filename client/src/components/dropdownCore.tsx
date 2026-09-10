@@ -57,6 +57,17 @@ export function useMenuPosition(
       const left = Math.max(EDGE, Math.min(r.left, vw - r.width - EDGE));
       const below = vh - r.bottom - 4 - EDGE;
       const above = r.top - 4 - EDGE;
+      // The direction can only be decided from the menu's REAL height, and the
+      // menu hasn't rendered on the first pass (menuRef is null then — flip
+      // math would assume a full-height menu and send short lists upward for
+      // no reason). Place provisionally downward, un-locked; the post-render
+      // pass below re-runs place() with the menu measurable and locks then.
+      if (dirRef.current == null && !menuRef.current) {
+        setPos(fitContent
+          ? { position: "fixed", top: r.bottom + 4, left, width: r.width }
+          : { position: "fixed", top: r.bottom + 4, left, width: r.width, maxHeight: Math.max(80, Math.min(MENU_MAX_H, below)) });
+        return;
+      }
       // Open downward whenever space permits: the full menu fits below, OR
       // there's enough room below for a usable (scrollable) menu. Only flip
       // above the anchor when the space below is genuinely cramped AND the
@@ -85,6 +96,9 @@ export function useMenuPosition(
       }
     };
     place();
+    // Post-render pass: the provisional placement above rendered the menu, so
+    // this call can measure it and lock the true open direction.
+    const raf = requestAnimationFrame(place);
     const onScroll = (e: Event) => {
       if (menuRef.current && e.target instanceof Node && menuRef.current.contains(e.target)) return;
       place();
@@ -98,6 +112,7 @@ export function useMenuPosition(
     const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(place) : null;
     if (ro && anchorRef.current) ro.observe(anchorRef.current);
     return () => {
+      cancelAnimationFrame(raf);
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", onScroll, true);
       ro?.disconnect();

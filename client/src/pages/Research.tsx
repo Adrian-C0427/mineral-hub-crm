@@ -1736,9 +1736,11 @@ interface AbstractBuyer {
 
 // docClass is NOT a records-level filter — the page-level dataset toggle
 // (Transactions/Deeds vs Leases) owns record-class separation for every view.
-interface RecFilters { abstracts: string[]; counties: string[]; surveys: string[]; docTypes: string[]; statuses: string[]; trajectories: string[]; instrument: string; from: string; to: string }
-const EMPTY_REC_FILTERS: RecFilters = { abstracts: [], counties: [], surveys: [], docTypes: [], statuses: [], trajectories: [], instrument: "", from: "", to: "" };
-interface RecOptions { counties: string[]; abstracts: string[]; surveys?: string[]; docTypes?: string[]; docClasses?: string[]; statuses?: string[]; trajectories?: string[] }
+interface RecFilters { abstracts: string[]; counties: string[]; surveys: string[]; docTypes: string[]; grantors: string[]; grantees: string[]; statuses: string[]; trajectories: string[]; instrument: string; from: string; to: string }
+const EMPTY_REC_FILTERS: RecFilters = { abstracts: [], counties: [], surveys: [], docTypes: [], grantors: [], grantees: [], statuses: [], trajectories: [], instrument: "", from: "", to: "" };
+// grantors/grantees are {value: normalized key, label: display name} — a
+// multi-party cell contributes each participant as its own option.
+interface RecOptions { counties: string[]; abstracts: string[]; surveys?: string[]; docTypes?: string[]; docClasses?: string[]; grantors?: { value: string; label: string }[]; grantees?: { value: string; label: string }[]; statuses?: string[]; trajectories?: string[] }
 
 function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   const { can } = useAuth();
@@ -1788,6 +1790,8 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
     for (const c of rf.counties) p.append("county", c);
     for (const sv of rf.surveys) p.append("survey", sv);
     for (const t of rf.docTypes) p.append("docType", t);
+    for (const g of rf.grantors) p.append("seller", g);
+    for (const g of rf.grantees) p.append("buyer", g);
     for (const s of rf.statuses) p.append("permitStatus", s);
     for (const t of rf.trajectories) p.append("trajectory", t);
     if (instrumentQ) p.set("instrument", instrumentQ);
@@ -1797,6 +1801,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
     return p.toString();
   }, [qs, rf, searchQ, instrumentQ]);
   const activeFilterCount = rf.abstracts.length + rf.counties.length + rf.surveys.length + rf.docTypes.length +
+    rf.grantors.length + rf.grantees.length +
     rf.statuses.length + rf.trajectories.length + (rf.instrument.trim() ? 1 : 0) + (rf.from ? 1 : 0) + (rf.to ? 1 : 0);
 
   // Abstract Buyer Preview: whenever an abstract is selected (page-level drill
@@ -1958,6 +1963,14 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
             <div><div className="rec-flabel">Document type</div>
               <SearchableMultiSelect options={opts.docTypes ?? []} labels={Object.fromEntries((opts.docTypes ?? []).map((t) => [t, prettyDocType(t)]))}
                 value={rf.docTypes} onChange={(v) => setRf((p) => ({ ...p, docTypes: v }))} placeholder="Document types…" /></div>
+            <div><div className="rec-flabel">Grantor</div>
+              <SearchableMultiSelect options={(opts.grantors ?? []).map((g) => g.value)}
+                labels={Object.fromEntries((opts.grantors ?? []).map((g) => [g.value, g.label]))}
+                value={rf.grantors} onChange={(v) => setRf((p) => ({ ...p, grantors: v }))} placeholder="Grantors…" /></div>
+            <div><div className="rec-flabel">Grantee</div>
+              <SearchableMultiSelect options={(opts.grantees ?? []).map((g) => g.value)}
+                labels={Object.fromEntries((opts.grantees ?? []).map((g) => [g.value, g.label]))}
+                value={rf.grantees} onChange={(v) => setRf((p) => ({ ...p, grantees: v }))} placeholder="Grantees…" /></div>
           </>
         ) : (
           <>

@@ -17,7 +17,7 @@ import { parse } from "csv-parse/sync";
 import { HttpError } from "../middleware/errors.js";
 import {
   classifyDocType, classifyPermitStatus, classifyTrajectory,
-  documentDedupeKey, normalizeEntity, splitParties, normField,
+  documentDedupeKey, normalizeEntity, splitParties, splitAbstracts, normField,
 } from "./research.js";
 
 // Cap rows per ingest so a single file can't drive an unbounded parse/insert
@@ -252,6 +252,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
         grantorNorms: grantorParties.map((p) => normalizeEntity(p)!).filter(Boolean),
         granteeNorms: granteeParties.map((p) => normalizeEntity(p)!).filter(Boolean),
         abstractId,
+        abstractIds: splitAbstracts(abstractId), // each abstract independently filterable
         source, ingestRunId: runId,
       });
     }
