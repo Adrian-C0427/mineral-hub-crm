@@ -10,7 +10,7 @@ import { API_BASE } from "../api/client";
  * an hour keyed by full URL, so a new value makes every client abandon its
  * stale tiles immediately; the server ignores the query param (its own LRU
  * clears on the deploy that ships the bump). */
-export const TILE_DATA_VERSION = "2026-09-10b";
+export const TILE_DATA_VERSION = "2026-09-11";
 
 /** Cadastral vector tiles from PostGIS (/api/gis/tiles). Absolute URL required
  * by MapLibre; falls back to the page origin in dev (Vite proxies /api). */

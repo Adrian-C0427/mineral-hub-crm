@@ -130,10 +130,10 @@ gisTilesRouter.get(
           WHERE b.geom && w.box
        ),
        dome_mvt AS (
-         -- East Texas Basin salt dome outlines (approximate extent, BEG RI-140).
+         -- East Texas Basin salt dome outlines, digitized from BEG RI-140's
+         -- per-dome structure-contour maps (basis = which contour was traced).
          SELECT ST_AsMVTGeom(ST_Transform(sd.geom, 3857), w.env, ${TILE_EXTENT}, ${TILE_BUFFER}, true) AS geom,
-                sd.id, sd.name, sd.county, sd.crest_ft AS "crestFt",
-                sd.major_mi AS "majorMi", sd.minor_mi AS "minorMi"
+                sd.id, sd.name, sd.county, sd.crest_ft AS "crestFt", sd.basis
            FROM gis.salt_domes sd, wanted w WHERE sd.geom && w.box
        )
        SELECT coalesce((SELECT ST_AsMVT(cty_mvt, 'counties', ${TILE_EXTENT}, 'geom') FROM cty_mvt WHERE geom IS NOT NULL), ''::bytea)

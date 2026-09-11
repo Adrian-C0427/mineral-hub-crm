@@ -2,74 +2,61 @@
  * CLI: load East Texas Basin salt dome outlines into gis.salt_domes.
  *
  * Source: BEG Report of Investigations No. 140 — Jackson & Seni (1984),
- * "Atlas of Salt Domes in the East Texas Basin" (public; store.beg.utexas.edu
- * BEG-RI0140D.pdf). For each of the basin's 15 shallow (<4,000 ft) piercement
- * domes the atlas publishes the dome center (lat/long DMS), the salt stock's
- * maximum lateral major/minor axes at a reference depth, and the major-axis
- * azimuth. The outlines below are ellipses built from exactly those published
- * numbers — an APPROXIMATE plan-view extent of the salt stock, not a digitized
- * structure contour — and the layer is labeled accordingly in the app.
+ * "Atlas of Salt Domes in the East Texas Basin" (public, store.beg.utexas.edu
+ * BEG-RI0140D.pdf). Each outline below was DIGITIZED from the atlas's
+ * per-dome salt structure-contour map (figures 20-73): pages were rendered
+ * from the PDF, georeferenced by their printed graticule lines and scale bars
+ * (cross-checked against each other where both existed), and the outermost
+ * closed structure contour drawn on the salt stock was traced point by point,
+ * then visually QA'd by overlaying the trace back onto the source figure.
+ * `basis` records which contour that was for each dome. Positional accuracy
+ * is roughly 100-300 m — the outlines depict the salt stock's maximum mapped
+ * plan-view extent, not a property-level boundary.
  *
- * OCR notes: Bethel's longitude prints as 96°54'54"W in the scanned atlas
- * text layer — a 5→6 misread; 95°54'54"W is used (NW Anderson Co., matching
- * the atlas county and every other Bethel reference). Butler's seconds print
- * as "OT" → 07. Mount Sylvan's and Butler's azimuths did not OCR; their
- * ellipses are near-circular so orientation matters little (0° used).
- *
- * The atlas names three deeper diapirs it does not map (crests below 4,000 ft):
- * La Rue, Concord (Leon Co.), and Girlie Caldwell. No published coordinates in
- * the atlas text — deliberately omitted here rather than guessed.
+ * Notes: the atlas's Bethel coordinates/graticule carry a printed 5→6
+ * longitude misprint (96° for 95°) — georeferencing follows the map's actual
+ * terrain (NW Anderson Co.). The atlas omits the deep La Rue, Concord, and
+ * Girlie Caldwell diapirs (no maps, no coordinates) — so does this dataset.
  *
  * Idempotent: full replace on re-run (15 rows).
  * Usage: npx tsx src/scripts/importSaltDomes.ts
  */
 import { prisma } from "../db.js";
 
-interface Dome {
-  name: string; county: string; lat: number; lon: number;
-  majorMi: number; minorMi: number; azimuthDeg: number;
-  crestFt: number; // depth to salt stock, ft below surface
-}
-
-const dms = (d: number, m: number, s: number) => d + m / 60 + s / 3600;
+interface Dome { name: string; county: string; crestFt: number; basis: string; ring: [number, number][] }
 
 const DOMES: Dome[] = [
-  { name: "Bethel", county: "Anderson", lat: dms(31, 53, 23), lon: -dms(95, 54, 54), majorMi: 2.3, minorMi: 1.9, azimuthDeg: 15, crestFt: 1600 },
-  { name: "Boggy Creek", county: "Anderson/Cherokee", lat: dms(31, 58, 7), lon: -dms(95, 26, 26), majorMi: 9.0, minorMi: 2.5, azimuthDeg: 35, crestFt: 330 },
-  { name: "Brooks", county: "Smith", lat: dms(32, 9, 42), lon: -dms(95, 26, 38), majorMi: 3.5, minorMi: 3.3, azimuthDeg: 42, crestFt: 1140 },
-  { name: "Brushy Creek", county: "Anderson", lat: dms(31, 55, 27), lon: -dms(95, 35, 50), majorMi: 1.56, minorMi: 1.56, azimuthDeg: 0, crestFt: 2800 },
-  { name: "Bullard", county: "Smith", lat: dms(32, 9, 20), lon: -dms(95, 17, 38), majorMi: 1.0, minorMi: 0.5, azimuthDeg: 95, crestFt: 3060 },
-  { name: "Butler", county: "Freestone", lat: dms(31, 40, 7), lon: -dms(95, 51, 52), majorMi: 2.5, minorMi: 2.2, azimuthDeg: 0, crestFt: 460 },
-  { name: "East Tyler", county: "Smith", lat: dms(32, 22, 30), lon: -dms(95, 15, 45), majorMi: 3.3, minorMi: 2.9, azimuthDeg: 80, crestFt: 1130 },
-  { name: "Grand Saline", county: "Van Zandt", lat: dms(32, 39, 58), lon: -dms(95, 42, 34), majorMi: 1.6, minorMi: 1.5, azimuthDeg: 50, crestFt: 215 },
-  { name: "Hainesville", county: "Wood", lat: dms(32, 41, 40), lon: -dms(95, 22, 20), majorMi: 4.3, minorMi: 3.2, azimuthDeg: 40, crestFt: 1080 },
-  { name: "Keechi", county: "Anderson", lat: dms(31, 50, 19), lon: -dms(95, 42, 20), majorMi: 4.6, minorMi: 1.7, azimuthDeg: 15, crestFt: 400 },
-  { name: "Mount Sylvan", county: "Smith", lat: dms(32, 23, 9), lon: -dms(95, 26, 55), majorMi: 2.3, minorMi: 1.5, azimuthDeg: 0, crestFt: 1440 },
-  { name: "Oakwood", county: "Freestone/Leon", lat: dms(31, 32, 10), lon: -dms(95, 58, 13), majorMi: 2.5, minorMi: 2.0, azimuthDeg: 120, crestFt: 160 },
-  { name: "Palestine", county: "Anderson", lat: dms(31, 44, 13), lon: -dms(95, 43, 41), majorMi: 3.4, minorMi: 2.7, azimuthDeg: 170, crestFt: 150 },
-  { name: "Steen", county: "Smith", lat: dms(32, 31, 0), lon: -dms(95, 19, 30), majorMi: 2.2, minorMi: 2.1, azimuthDeg: 45, crestFt: 1200 },
-  { name: "Whitehouse", county: "Smith", lat: dms(32, 13, 27), lon: -dms(95, 17, 3), majorMi: 2.6, minorMi: 1.3, azimuthDeg: 15, crestFt: 1520 },
+  { name: "Bethel", county: "Anderson", crestFt: 1600, basis: "-12,500 ft contour (fig. 20)",
+    ring: [[-95.914123, 31.902951], [-95.920407, 31.901681], [-95.924896, 31.898887], [-95.927589, 31.894823], [-95.928636, 31.889997], [-95.927888, 31.885171], [-95.925644, 31.880853], [-95.922203, 31.877297], [-95.917714, 31.874757], [-95.912627, 31.873741], [-95.90769, 31.874503], [-95.903201, 31.876662], [-95.900059, 31.880091], [-95.897964, 31.884282], [-95.897515, 31.888981], [-95.898264, 31.893807], [-95.900657, 31.897871], [-95.904548, 31.900919], [-95.909036, 31.902697], [-95.914123, 31.902951]] },
+  { name: "Boggy Creek", county: "Anderson/Cherokee", crestFt: 330, basis: "-10,000 ft contour (fig. 24)",
+    ring: [[-95.440085, 32.028482], [-95.433166, 32.028708], [-95.426779, 32.026901], [-95.421457, 32.023738], [-95.417731, 32.01922], [-95.415336, 32.013799], [-95.414139, 32.007474], [-95.414005, 32.001036], [-95.41507, 31.994824], [-95.417199, 31.988274], [-95.420126, 31.982175], [-95.423852, 31.97585], [-95.42811, 31.969412], [-95.432767, 31.962974], [-95.43769, 31.956649], [-95.442747, 31.95055], [-95.447803, 31.944903], [-95.452593, 31.939933], [-95.456319, 31.93519], [-95.459246, 31.930672], [-95.460311, 31.926493], [-95.46244, 31.922314], [-95.465899, 31.918248], [-95.47069, 31.914747], [-95.476012, 31.912601], [-95.482, 31.911471], [-95.487987, 31.911923], [-95.49331, 31.913617], [-95.497701, 31.91678], [-95.500362, 31.921184], [-95.50156, 31.926719], [-95.501294, 31.932479], [-95.499697, 31.937787], [-95.497302, 31.940385], [-95.494907, 31.94287], [-95.491979, 31.948743], [-95.488254, 31.954729], [-95.484262, 31.960715], [-95.48027, 31.966588], [-95.476278, 31.9728], [-95.472286, 31.978786], [-95.468028, 31.985224], [-95.464036, 31.991436], [-95.460045, 31.998213], [-95.456053, 32.004425], [-95.452061, 32.010637], [-95.448069, 32.016284], [-95.445674, 32.020576], [-95.443013, 32.024416], [-95.440085, 32.028482]] },
+  { name: "Brooks", county: "Smith", crestFt: 1140, basis: "-5,500 ft contour (fig. 28)",
+    ring: [[-95.445732, 32.186565], [-95.453837, 32.185585], [-95.460785, 32.18333], [-95.466807, 32.179998], [-95.470975, 32.176077], [-95.473523, 32.171862], [-95.474912, 32.167255], [-95.47526, 32.16255], [-95.474681, 32.157845], [-95.472944, 32.153238], [-95.470049, 32.149023], [-95.465996, 32.145396], [-95.461364, 32.142455], [-95.456153, 32.140201], [-95.450364, 32.138828], [-95.444342, 32.13824], [-95.438205, 32.138828], [-95.432068, 32.140201], [-95.426278, 32.142749], [-95.421646, 32.146082], [-95.418172, 32.150003], [-95.416204, 32.154218], [-95.415393, 32.158825], [-95.415625, 32.16353], [-95.417014, 32.168235], [-95.41933, 32.172548], [-95.422804, 32.176469], [-95.427204, 32.179704], [-95.432415, 32.18235], [-95.438205, 32.184311], [-95.442026, 32.185585], [-95.445732, 32.186565]] },
+  { name: "Brushy Creek", county: "Anderson", crestFt: 2800, basis: "-4,000 ft contour (fig. 32)",
+    ring: [[-95.593731, 31.937361], [-95.599468, 31.93655], [-95.604487, 31.934521], [-95.608312, 31.931275], [-95.610463, 31.927014], [-95.610702, 31.922449], [-95.609029, 31.918391], [-95.605682, 31.915348], [-95.600902, 31.913319], [-95.595404, 31.912609], [-95.589907, 31.913319], [-95.585604, 31.915348], [-95.582736, 31.918391], [-95.581541, 31.922145], [-95.582019, 31.926203], [-95.583931, 31.929855], [-95.587277, 31.932898], [-95.590624, 31.935333], [-95.593731, 31.937361]] },
+  { name: "Bullard", county: "Smith", crestFt: 3060, basis: "-4,000 ft contour (fig. 36)",
+    ring: [[-95.297612, 32.161738], [-95.302315, 32.16079], [-95.305898, 32.158799], [-95.308138, 32.15605], [-95.30881, 32.153017], [-95.30769, 32.150173], [-95.305002, 32.147993], [-95.301419, 32.146666], [-95.297388, 32.146192], [-95.293132, 32.146761], [-95.289437, 32.148277], [-95.286862, 32.150647], [-95.285742, 32.153396], [-95.286414, 32.15624], [-95.288429, 32.158799], [-95.291677, 32.160695], [-95.2947, 32.161548], [-95.297612, 32.161738]] },
+  { name: "Butler", county: "Freestone", crestFt: 460, basis: "-6,000 ft contour (fig. 40)",
+    ring: [[-95.866184, 31.686121], [-95.870755, 31.685565], [-95.874543, 31.684287], [-95.877808, 31.682452], [-95.88042, 31.680118], [-95.88238, 31.67745], [-95.88349, 31.67456], [-95.883947, 31.671503], [-95.883686, 31.668446], [-95.882837, 31.665389], [-95.8814, 31.662609], [-95.879375, 31.659997], [-95.876763, 31.657774], [-95.873694, 31.65594], [-95.870233, 31.654661], [-95.86651, 31.653994], [-95.862592, 31.653994], [-95.858674, 31.654661], [-95.855082, 31.65594], [-95.851947, 31.657774], [-95.849335, 31.659997], [-95.847376, 31.662609], [-95.84607, 31.665555], [-95.845417, 31.668557], [-95.845417, 31.671669], [-95.84607, 31.674671], [-95.847376, 31.67745], [-95.849335, 31.680007], [-95.851947, 31.682063], [-95.854951, 31.683731], [-95.858347, 31.685009], [-95.862135, 31.685787], [-95.866184, 31.686121]] },
+  { name: "East Tyler", county: "Smith", crestFt: 1130, basis: "-6,000 ft contour (fig. 44)",
+    ring: [[-95.257132, 32.392087], [-95.262837, 32.391364], [-95.268542, 32.390039], [-95.273535, 32.388051], [-95.277671, 32.385461], [-95.280666, 32.382449], [-95.282449, 32.379196], [-95.283376, 32.375702], [-95.283376, 32.372209], [-95.282592, 32.368775], [-95.281023, 32.365582], [-95.278669, 32.362571], [-95.275674, 32.35992], [-95.272108, 32.357631], [-95.268043, 32.355824], [-95.263693, 32.354439], [-95.259129, 32.353535], [-95.254422, 32.353113], [-95.249643, 32.353294], [-95.245008, 32.354017], [-95.240871, 32.355342], [-95.237306, 32.357149], [-95.234453, 32.359438], [-95.232313, 32.362149], [-95.23103, 32.365161], [-95.230602, 32.368353], [-95.230887, 32.371606], [-95.231957, 32.374799], [-95.23374, 32.377811], [-95.236093, 32.380521], [-95.238946, 32.38281], [-95.242298, 32.384738], [-95.246078, 32.386424], [-95.250143, 32.388834], [-95.253566, 32.390762], [-95.257132, 32.392087]] },
+  { name: "Grand Saline", county: "Van Zandt", crestFt: 215, basis: "-6,500 ft contour (fig. 48)",
+    ring: [[-95.707868, 32.675148], [-95.713593, 32.674377], [-95.718401, 32.672642], [-95.721607, 32.67004], [-95.723324, 32.666667], [-95.723668, 32.663004], [-95.722752, 32.659438], [-95.720691, 32.656258], [-95.7176, 32.653655], [-95.713593, 32.652017], [-95.709013, 32.651246], [-95.704205, 32.651632], [-95.699625, 32.652981], [-95.695847, 32.655294], [-95.693214, 32.658185], [-95.69184, 32.661655], [-95.692069, 32.665221], [-95.693557, 32.668594], [-95.696419, 32.671486], [-95.700083, 32.673606], [-95.704205, 32.674763], [-95.707868, 32.675148]] },
+  { name: "Hainesville", county: "Wood", crestFt: 1080, basis: "-15,000 ft contour (fig. 52)",
+    ring: [[-95.377387, 32.719811], [-95.382929, 32.718592], [-95.387788, 32.716942], [-95.392307, 32.714574], [-95.395973, 32.71192], [-95.398872, 32.708692], [-95.400833, 32.705105], [-95.401941, 32.70116], [-95.402111, 32.697071], [-95.401429, 32.693053], [-95.39998, 32.689323], [-95.397678, 32.68588], [-95.394609, 32.682723], [-95.391028, 32.680141], [-95.386765, 32.678204], [-95.382076, 32.676769], [-95.376961, 32.676195], [-95.371846, 32.676267], [-95.36673, 32.676984], [-95.361871, 32.678419], [-95.357352, 32.680571], [-95.353516, 32.683225], [-95.350276, 32.686454], [-95.347974, 32.69004], [-95.346525, 32.693771], [-95.345843, 32.697573], [-95.346013, 32.701518], [-95.346866, 32.705464], [-95.348826, 32.709051], [-95.35181, 32.712279], [-95.355647, 32.715148], [-95.360336, 32.7173], [-95.365622, 32.718592], [-95.37159, 32.719596], [-95.377387, 32.719811]] },
+  { name: "Keechi", county: "Anderson", crestFt: 400, basis: "-20,000 ft contour (fig. 57)",
+    ring: [[-95.701625, 31.877684], [-95.704793, 31.876389], [-95.70796, 31.873897], [-95.710541, 31.870409], [-95.712652, 31.866123], [-95.714764, 31.861439], [-95.716875, 31.856456], [-95.718987, 31.851472], [-95.721099, 31.846489], [-95.722976, 31.841506], [-95.724618, 31.836523], [-95.725791, 31.831539], [-95.72626, 31.826855], [-95.725908, 31.822569], [-95.724383, 31.818882], [-95.721802, 31.816091], [-95.718283, 31.814297], [-95.714177, 31.813899], [-95.710071, 31.814895], [-95.706552, 31.817088], [-95.703971, 31.820277], [-95.702094, 31.824064], [-95.700452, 31.82825], [-95.69881, 31.832835], [-95.697167, 31.837519], [-95.695525, 31.842502], [-95.694117, 31.847785], [-95.692944, 31.853167], [-95.69224, 31.858748], [-95.69224, 31.864429], [-95.693413, 31.869711], [-95.69576, 31.874096], [-95.698575, 31.876688], [-95.701625, 31.877684]] },
+  { name: "Mount Sylvan", county: "Smith", crestFt: 1440, basis: "-15,000 ft contour (fig. 61)",
+    ring: [[-95.440699, 32.414616], [-95.44417, 32.414206], [-95.448334, 32.413151], [-95.453887, 32.410807], [-95.458746, 32.407585], [-95.462563, 32.403776], [-95.46534, 32.399381], [-95.466936, 32.394518], [-95.467214, 32.38942], [-95.466034, 32.38444], [-95.463257, 32.379752], [-95.458746, 32.375944], [-95.452846, 32.373307], [-95.445558, 32.372135], [-95.437923, 32.372428], [-95.430287, 32.374186], [-95.423346, 32.377409], [-95.417447, 32.382096], [-95.413629, 32.387955], [-95.411894, 32.394401], [-95.413282, 32.40026], [-95.417447, 32.40612], [-95.424041, 32.410807], [-95.43237, 32.413737], [-95.440699, 32.414616]] },
+  { name: "Oakwood", county: "Freestone/Leon", crestFt: 160, basis: "-3,000 ft contour (fig. 65)",
+    ring: [[-95.974798, 31.551837], [-95.979962, 31.551641], [-95.983978, 31.550859], [-95.987133, 31.54949], [-95.989428, 31.547632], [-95.99069, 31.545236], [-95.991321, 31.542547], [-95.991321, 31.539613], [-95.99069, 31.536924], [-95.989428, 31.534479], [-95.987534, 31.532279], [-95.98524, 31.530714], [-95.982543, 31.529345], [-95.979503, 31.528123], [-95.976233, 31.526999], [-95.972504, 31.526021], [-95.968775, 31.525189], [-95.965332, 31.524847], [-95.96189, 31.525043], [-95.958448, 31.525825], [-95.955293, 31.527145], [-95.952711, 31.528857], [-95.950818, 31.53091], [-95.949556, 31.533159], [-95.948867, 31.535604], [-95.948638, 31.538146], [-95.948867, 31.540689], [-95.94967, 31.543231], [-95.951162, 31.545725], [-95.953285, 31.547925], [-95.955981, 31.549734], [-95.959194, 31.551103], [-95.962751, 31.551543], [-95.966767, 31.551934], [-95.970782, 31.552032], [-95.974798, 31.551837]] },
+  { name: "Palestine", county: "Anderson", crestFt: 150, basis: "-20,000 ft contour (fig. 69)",
+    ring: [[-95.733862, 31.761959], [-95.741355, 31.760488], [-95.747118, 31.757548], [-95.751383, 31.753137], [-95.754611, 31.747745], [-95.75634, 31.741864], [-95.756916, 31.735983], [-95.75634, 31.730101], [-95.754611, 31.72471], [-95.751729, 31.719809], [-95.747695, 31.715398], [-95.742507, 31.712261], [-95.736744, 31.710301], [-95.730404, 31.709713], [-95.724064, 31.710497], [-95.717954, 31.712654], [-95.712536, 31.715888], [-95.708271, 31.720103], [-95.705274, 31.725004], [-95.70366, 31.730298], [-95.70343, 31.735983], [-95.704467, 31.741668], [-95.706773, 31.746961], [-95.710231, 31.751666], [-95.714842, 31.755587], [-95.72026, 31.758528], [-95.726715, 31.760684], [-95.733862, 31.761959]] },
+  { name: "Steen", county: "Smith", crestFt: 1200, basis: "-6,000 ft contour (fig. 73)",
+    ring: [[-95.327918, 32.534634], [-95.331528, 32.534139], [-95.335048, 32.533111], [-95.338207, 32.531475], [-95.341005, 32.529305], [-95.343035, 32.526755], [-95.344344, 32.523863], [-95.34484, 32.520818], [-95.344525, 32.517774], [-95.343487, 32.514843], [-95.341682, 32.512065], [-95.3392, 32.509629], [-95.336131, 32.507612], [-95.332656, 32.506204], [-95.328911, 32.505442], [-95.32512, 32.505404], [-95.32151, 32.506089], [-95.318216, 32.507498], [-95.315509, 32.509515], [-95.313478, 32.511989], [-95.312124, 32.514843], [-95.311447, 32.517888], [-95.311447, 32.521047], [-95.312214, 32.524167], [-95.313703, 32.527022], [-95.315824, 32.529496], [-95.318442, 32.531589], [-95.32151, 32.533111], [-95.324669, 32.534139], [-95.327918, 32.534634]] },
+  { name: "Whitehouse", county: "Smith", crestFt: 1520, basis: "-12,500 ft contour (fig. 36)",
+    ring: [[-95.293692, 32.243258], [-95.298172, 32.24231], [-95.301867, 32.240414], [-95.304554, 32.237571], [-95.30601, 32.234158], [-95.30657, 32.230367], [-95.306346, 32.226385], [-95.30545, 32.222404], [-95.303771, 32.218612], [-95.301195, 32.214821], [-95.298172, 32.211693], [-95.294812, 32.209323], [-95.291117, 32.207901], [-95.286974, 32.207901], [-95.283054, 32.209133], [-95.279471, 32.211408], [-95.276895, 32.214536], [-95.27544, 32.218044], [-95.274992, 32.22212], [-95.27544, 32.226385], [-95.276895, 32.230651], [-95.279471, 32.234727], [-95.28283, 32.238519], [-95.286974, 32.241362], [-95.290669, 32.242689], [-95.293692, 32.243258]] },
 ];
-
-const MI_M = 1609.344;
-
-/** WKT ellipse polygon: published axes (semi = length/2), azimuth clockwise from north. */
-function ellipseWkt(d: Dome, points = 48): string {
-  const a = (d.majorMi * MI_M) / 2, b = (d.minorMi * MI_M) / 2;
-  const az = (d.azimuthDeg * Math.PI) / 180;
-  const mPerDegLat = 111320;
-  const mPerDegLon = 111320 * Math.cos((d.lat * Math.PI) / 180);
-  const coords: string[] = [];
-  for (let i = 0; i <= points; i++) {
-    const t = (i / points) * 2 * Math.PI;
-    // Ellipse local coords: x east, y north; major axis along azimuth.
-    const px = a * Math.cos(t), py = b * Math.sin(t);
-    const east = px * Math.sin(az) + py * Math.cos(az);
-    const north = px * Math.cos(az) - py * Math.sin(az);
-    coords.push(`${(d.lon + east / mPerDegLon).toFixed(6)} ${(d.lat + north / mPerDegLat).toFixed(6)}`);
-  }
-  return `POLYGON((${coords.join(",")}))`;
-}
 
 async function main() {
   await prisma.$executeRawUnsafe(`
@@ -77,26 +64,37 @@ async function main() {
       id          serial PRIMARY KEY,
       name        text NOT NULL UNIQUE,
       county      text NOT NULL,
-      major_mi    numeric(4,2) NOT NULL,
-      minor_mi    numeric(4,2) NOT NULL,
-      azimuth_deg integer NOT NULL,
       crest_ft    integer NOT NULL,
+      basis       text NOT NULL,
       source      text NOT NULL,
       geom        geometry(Polygon, 4326) NOT NULL
     )`);
-  await prisma.$executeRawUnsafe(`CREATE INDEX IF NOT EXISTS salt_domes_geom_idx ON gis.salt_domes USING GIST (geom)`);
-  await prisma.$executeRawUnsafe(`TRUNCATE gis.salt_domes RESTART IDENTITY`);
-  for (const d of DOMES) {
+  // Digitized outlines replaced the launch ellipses (2026-09-11): axis columns
+  // are gone, `basis` records the traced contour.
+  await prisma.$executeRawUnsafe(`DROP TABLE IF EXISTS gis.salt_domes`);
+  await prisma.$executeRawUnsafe(`
+    CREATE TABLE gis.salt_domes (
+      id          serial PRIMARY KEY,
+      name        text NOT NULL UNIQUE,
+      county      text NOT NULL,
+      crest_ft    integer NOT NULL,
+      basis       text NOT NULL,
+      source      text NOT NULL,
+      geom        geometry(Polygon, 4326) NOT NULL
+    )`);
+  await prisma.$executeRawUnsafe(`CREATE INDEX salt_domes_geom_idx ON gis.salt_domes USING GIST (geom)`);
+  for (const dome of DOMES) {
+    const wkt = `POLYGON((${dome.ring.map(([lon, lat]) => `${lon} ${lat}`).join(",")}))`;
     await prisma.$executeRawUnsafe(
-      `INSERT INTO gis.salt_domes (name, county, major_mi, minor_mi, azimuth_deg, crest_ft, source, geom)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, ST_GeomFromText($8, 4326))`,
-      d.name, d.county, d.majorMi, d.minorMi, d.azimuthDeg, d.crestFt,
-      "BEG RI-140 (Jackson & Seni 1984) — approximate extent from published axes",
-      ellipseWkt(d),
+      `INSERT INTO gis.salt_domes (name, county, crest_ft, basis, source, geom)
+       VALUES ($1, $2, $3, $4, $5, ST_MakeValid(ST_GeomFromText($6, 4326)))`,
+      dome.name, dome.county, dome.crestFt, dome.basis,
+      "Digitized from BEG RI-140 (Jackson & Seni 1984) structure-contour maps",
+      wkt,
     );
   }
   const [{ n }] = await prisma.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*) n FROM gis.salt_domes`);
-  console.log(`gis.salt_domes loaded: ${n} domes`);
+  console.log(`gis.salt_domes loaded: ${n} domes (digitized outlines)`);
   await prisma.$disconnect();
 }
 
