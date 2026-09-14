@@ -118,6 +118,14 @@ export function fieldsFor(kind: "DOCUMENTS" | "PERMITS"): ResearchField[] {
 /**
  * Guess a header mapping for a kind: exact match against the adapter's aliases
  * first, then a contains-match, then the canonical field key itself.
+ *
+ * The contains-match direction where a short alias is checked for being a
+ * substring of the (longer) header is gated to aliases of 3+ chars — a 2-char
+ * alias like "st" (state) or "td" (totalDepth) is too short to mean anything
+ * as a raw substring and will coincidentally appear inside unrelated headers
+ * (e.g. "st" inside "Abstract"), silently mismapping the field. The reverse
+ * direction (header contained within alias, for abbreviated headers) has no
+ * such false-positive risk since header text is user-authored, not incidental.
  */
 export function guessMapping(source: ResearchSource, headers: string[]): Record<string, string> {
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -126,7 +134,7 @@ export function guessMapping(source: ResearchSource, headers: string[]): Record<
   for (const field of fieldsFor(source.kind)) {
     const aliases = [...(source.aliases[field.key] ?? []), norm(field.key)];
     const exact = normalized.find((h) => aliases.includes(h.n));
-    const partial = exact ?? normalized.find((h) => aliases.some((a) => h.n.includes(a) || a.includes(h.n)));
+    const partial = exact ?? normalized.find((h) => aliases.some((a) => (a.length >= 3 && h.n.includes(a)) || a.includes(h.n)));
     if (partial) mapping[field.key] = partial.raw;
   }
   return mapping;
