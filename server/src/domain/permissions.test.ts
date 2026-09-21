@@ -60,8 +60,12 @@ describe("permission migration (preserve access on stored overrides)", () => {
   });
 
   it("drops obsolete/owner-only keys from stored overrides", () => {
-    const p = resolvePermissions("MEMBER", ["editMapData", "accessAdminSettings", "manageRoles", "viewBuyers"]);
+    const p = resolvePermissions("MEMBER", ["accessAdminSettings", "manageRoles", "viewBuyers"]);
     expect(p).toEqual(["viewBuyers"]);
+  });
+
+  it("legacy editMapData migrates to manageMapData (2026-09 shapefile imports)", () => {
+    expect(resolvePermissions("MEMBER", ["editMapData", "viewMap"])).toEqual(expect.arrayContaining(["manageMapData", "viewMap"]));
   });
 });
 

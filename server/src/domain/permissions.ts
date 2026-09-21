@@ -42,7 +42,7 @@ export const PERMISSIONS = [
   // Well Analysis
   "viewWellAnalysis", "manageWellAnalysis",
   // Maps
-  "viewMap",
+  "viewMap", "manageMapData",
   // Reports
   "viewReports",
   // Expenses
@@ -84,6 +84,7 @@ export const PERMISSION_META: Record<Permission, { label: string; group: string 
   manageWellAnalysis: { label: "Run & save well analyses", group: "Well Analysis" },
 
   viewMap: { label: "View the interactive map", group: "Maps" },
+  manageMapData: { label: "Import & manage map boundary data", group: "Maps" },
 
   viewReports: { label: "View reports", group: "Reports" },
 
@@ -143,7 +144,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<OrgRole, Permission[]> = {
     "viewContacts", "manageContacts",
     "publishOfferings", "viewDocuments", "manageDocuments",
     "viewResearch", "viewWellAnalysis", "manageWellAnalysis",
-    "viewMap", "viewReports", "manageExpenses", "useAiFeatures",
+    "viewMap", "manageMapData", "viewReports", "manageExpenses", "useAiFeatures",
   ],
   MEMBER: [
     "viewDeals", "createDeals", "editDeals", "sendEmail",
@@ -151,7 +152,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<OrgRole, Permission[]> = {
     "viewContacts", "manageContacts",
     "publishOfferings", "viewDocuments", "manageDocuments",
     "viewResearch", "viewWellAnalysis", "manageWellAnalysis",
-    "viewMap", "viewReports", "manageExpenses", "useAiFeatures",
+    "viewMap", "manageMapData", "viewReports", "manageExpenses", "useAiFeatures",
   ],
   // Read-only: viewing across modules, no mutations, no AI spend.
   VIEWER: ["viewDeals", "viewBuyers", "viewContacts", "viewDocuments", "viewResearch", "viewWellAnalysis", "viewMap", "viewReports"],
@@ -208,8 +209,10 @@ function applyImplications(out: Set<Permission>): void {
  * to []) are dropped either way, since `isPermission` rejects them too.
  */
 const PERMISSION_MIGRATIONS: Record<string, Permission[]> = {
+  // Resurrected 2026-09 as manageMapData (shapefile tract imports): a legacy
+  // override that could edit map data regains the equivalent modern key.
+  editMapData: ["manageMapData"],
   // Removed permissions (no current equivalent).
-  editMapData: [],
   accessAdminSettings: [],
   // 2026-07 audit: seller tax/entity IDs are no longer stored or displayed
   // anywhere, and the only export (PDF) was removed app-wide.
