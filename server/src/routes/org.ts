@@ -4,7 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requireOrgOwner, requirePermission, orgId, canSeeTeamId, type AuthedRequest } from "../middleware/auth.js";
-import { generateInviteCode, rotateTeamId } from "../services/org.js";
+import { generateInviteCode, rotateTeamId, revokeInvitesKnownTo } from "../services/org.js";
 import { normalizePhone } from "../domain/phone.js";
 import { invalidateRoleCache } from "../services/rolePermCache.js";
 import {
@@ -410,14 +410,16 @@ orgRouter.delete(
     // again. Close both halves: evict the live session, and rotate the join key
     // they know. `teamId` is returned so the caller can show the owner the new
     // one instead of discovering the old one silently stopped working.
-    const teamId = await prisma.$transaction(async (tx) => {
+    // Also burn the invite codes they could still redeem (see revokeInvitesKnownTo).
+    const { teamId, invitesRevoked } = await prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: member.id },
         data: { organizationId: null, orgRole: null, sessionEpoch: { increment: 1 } },
       });
-      return rotateTeamId(orgId(req), tx);
+      const invitesRevoked = await revokeInvitesKnownTo(orgId(req), member, tx);
+      return { teamId: await rotateTeamId(orgId(req), tx), invitesRevoked };
     });
-    res.json({ ok: true, teamId: canSeeTeamId(req) ? teamId : null });
+    res.json({ ok: true, teamId: canSeeTeamId(req) ? teamId : null, invitesRevoked });
   }),
 );
 

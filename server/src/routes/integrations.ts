@@ -283,8 +283,9 @@ integrationsRouter.post(
 // --- OAuth authorization flow -------------------------------------------------
 
 // Begin authorization: returns the provider URL the browser should navigate to.
-// Org/user context rides in a signed, short-lived state token (verified by the
-// public callback), so no session cookie is needed at the callback.
+// Org/user context rides in a signed, short-lived state token. The provider
+// sends the browser back to the public callback below, which hands the code to
+// the SPA; the SPA then finishes via the AUTHED /oauth/complete route.
 integrationsRouter.get(
   "/:provider/oauth/start",
   asyncHandler(async (req: AuthedRequest, res) => {
@@ -299,15 +300,98 @@ integrationsRouter.get(
 );
 
 /**
+ * Finish an authorization: exchange the code and store the tokens.
+ *
+ * This used to happen inside the PUBLIC callback, trusting the signed state
+ * alone. Nothing tied that state to the person who started the flow, so an
+ * admin could send their own authorize link to someone else — anyone who had
+ * already consented to the app bounced straight through, and THEIR mailbox or
+ * calendar tokens landed on the admin's org row, where the hourly sync reads
+ * them. Completing here instead requires a live session that is the SAME user
+ * (and org) the state was minted for, still holding manageApiIntegrations
+ * (enforced router-wide). A victim who follows a planted link either has no
+ * Mineral Hub session or is a different user, and the code is never redeemed.
+ */
+integrationsRouter.post(
+  "/:provider/oauth/complete",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { code, state: stateToken } = z.object({ code: z.string().min(1).max(4096), state: z.string().min(1).max(4096) }).parse(req.body);
+    const provider = req.params.provider;
+    let state: { orgId: string; userId: string; provider: string };
+    try {
+      state = verifyState(stateToken);
+    } catch {
+      throw new HttpError(400, "Authorization link expired or was tampered with. Try connecting again.");
+    }
+    if (state.provider !== provider || !isOAuthProvider(provider)) {
+      throw new HttpError(400, "Provider mismatch in authorization callback.");
+    }
+    if (!stateMatchesCaller(state, req)) {
+      throw new HttpError(403, "This authorization was started by a different user. Start the connection again from your own account.");
+    }
+    try {
+      await completeOAuthConnection(provider, code, state.orgId, state.userId);
+    } catch (e) {
+      console.warn(`[oauth-complete] ${provider} token exchange failed: ${e instanceof Error ? e.message : e}`);
+      throw new HttpError(502, "Could not complete the connection. Please try again.");
+    }
+    res.json({ connected: provider });
+  }),
+);
+
+/** Only the user (and org) the state was minted for may redeem it. */
+export function stateMatchesCaller(state: { orgId: string; userId: string }, req: AuthedRequest): boolean {
+  return !!req.user && state.userId === req.user.id && state.orgId === req.user.organizationId;
+}
+
+async function completeOAuthConnection(provider: string, code: string, orgIdForRow: string, userId: string): Promise<void> {
+  const bundle = await exchangeCode(provider, code);
+  const existing = await prisma.integration.findUnique({
+    where: { organizationId_provider: { organizationId: orgIdForRow, provider } },
+  });
+  const row = existing ?? await prisma.integration.create({
+    data: { organizationId: orgIdForRow, provider, status: "NOT_CONNECTED" },
+  });
+  await persistBundle(row, bundle);
+  // Sync-driven integrations get a sensible default schedule so they work
+  // without the user knowing to pick one (still changeable): mailboxes
+  // hourly (replies should surface fast), calendar daily (deadlines move
+  // slowly).
+  const defaultSchedule = isInboundEmailProvider(provider) ? "hourly"
+    : provider === "outlookcalendar" ? "daily"
+    : null;
+  if (defaultSchedule) {
+    const fresh = await prisma.integration.findUnique({ where: { id: row.id }, select: { config: true } });
+    const cfg = (fresh?.config ?? {}) as Record<string, unknown>;
+    if (!cfg.schedule) {
+      await prisma.integration.update({ where: { id: row.id }, data: { config: { ...cfg, schedule: defaultSchedule } as never } });
+    }
+  }
+  await prisma.integration.update({
+    where: { id: row.id },
+    data: { status: "CONNECTED", connectedAt: new Date(), lastSyncAt: new Date(), lastError: null },
+  });
+  const def = providerByKey(provider);
+  await logActivity({
+    eventType: "integration.connected",
+    summary: `Integration ${def?.name ?? provider} connected (OAuth)`,
+    organizationId: orgIdForRow, actorUserId: userId,
+  });
+}
+
+/**
  * Public OAuth callback router — NO session auth (the provider redirects the
- * browser here without our cookie). Trust is established by the signed state.
+ * browser here without our cookie). It does NOT redeem the code: it only
+ * sanity-checks the state and forwards code + state to the SPA in the URL
+ * FRAGMENT (never sent to servers or leaked via Referer), where the signed-in
+ * user finishes through POST /:provider/oauth/complete.
  * Mounted before the authed router so it handles only this exact path.
  */
 export const integrationsOAuthCallbackRouter = Router();
 
 // `actionLimiter` above is attached to the AUTHED router and only for POST, so
 // this public GET had no throttle at all — the one unauthenticated entry point
-// into the integrations surface, and the one that drives a token exchange.
+// into the integrations surface.
 const callbackLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
   max: 30,
@@ -326,17 +410,16 @@ integrationsOAuthCallbackRouter.get(
 
     const code = typeof req.query.code === "string" ? req.query.code : "";
     const stateToken = typeof req.query.state === "string" ? req.query.state : "";
-    // Do NOT reflect the provider's raw `error` (or, below, the token
-    // endpoint's response text) into the redirect: both are attacker- or
-    // third-party-controlled strings that end up rendered by the SPA. Log the
-    // detail server-side and hand the client a fixed message instead.
+    // Do NOT reflect the provider's raw `error` into the redirect: it is an
+    // attacker- or third-party-controlled string that ends up rendered by the
+    // SPA. Log the detail server-side and hand the client a fixed message.
     if (req.query.error) {
       console.warn(`[oauth-callback] ${provider} returned error: ${String(req.query.error).slice(0, 200)}`);
       return back({ error: "The provider declined the connection.", provider });
     }
     if (!code || !stateToken) return back({ error: "Missing authorization code or state.", provider });
 
-    let state: { orgId: string; userId: string; provider: string };
+    let state: { provider: string };
     try {
       state = verifyState(stateToken);
     } catch {
@@ -345,44 +428,7 @@ integrationsOAuthCallbackRouter.get(
     if (state.provider !== provider || !isOAuthProvider(provider)) {
       return back({ error: "Provider mismatch in authorization callback.", provider });
     }
-
-    try {
-      const bundle = await exchangeCode(provider, code);
-      const existing = await prisma.integration.findUnique({
-        where: { organizationId_provider: { organizationId: state.orgId, provider } },
-      });
-      const row = existing ?? await prisma.integration.create({
-        data: { organizationId: state.orgId, provider, status: "NOT_CONNECTED" },
-      });
-      await persistBundle(row, bundle);
-      // Sync-driven integrations get a sensible default schedule so they work
-      // without the user knowing to pick one (still changeable): mailboxes
-      // hourly (replies should surface fast), calendar daily (deadlines move
-      // slowly).
-      const defaultSchedule = isInboundEmailProvider(provider) ? "hourly"
-        : provider === "outlookcalendar" ? "daily"
-        : null;
-      if (defaultSchedule) {
-        const fresh = await prisma.integration.findUnique({ where: { id: row.id }, select: { config: true } });
-        const cfg = (fresh?.config ?? {}) as Record<string, unknown>;
-        if (!cfg.schedule) {
-          await prisma.integration.update({ where: { id: row.id }, data: { config: { ...cfg, schedule: defaultSchedule } as never } });
-        }
-      }
-      await prisma.integration.update({
-        where: { id: row.id },
-        data: { status: "CONNECTED", connectedAt: new Date(), lastSyncAt: new Date(), lastError: null },
-      });
-      const def = providerByKey(provider);
-      await logActivity({
-        eventType: "integration.connected",
-        summary: `Integration ${def?.name ?? provider} connected (OAuth)`,
-        organizationId: state.orgId, actorUserId: state.userId,
-      });
-      return back({ connected: provider });
-    } catch (e) {
-      console.warn(`[oauth-callback] ${provider} token exchange failed: ${e instanceof Error ? e.message : e}`);
-      return back({ error: "Could not complete the connection. Please try again.", provider });
-    }
+    const frag = new URLSearchParams({ oauth: provider, code, state: stateToken }).toString();
+    return res.redirect(`${env.APP_URL}/settings/integrations#${frag}`);
   }),
 );

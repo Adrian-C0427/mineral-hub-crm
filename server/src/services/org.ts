@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { HttpError } from "../middleware/errors.js";
+import { resolvePermissions, type OrgRole } from "../domain/permissions.js";
+import { getRoleOverride } from "./rolePermCache.js";
 
 // Unambiguous alphabet (no 0/O/1/I) for human-shareable codes.
 const ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -68,6 +70,36 @@ export async function rotateTeamId(
   const teamId = await generateTeamId(tx);
   await tx.organization.update({ where: { id: organizationId }, data: { teamId } });
   return teamId;
+}
+
+/**
+ * Deactivate every invite code a departing member could still redeem.
+ *
+ * Rotating the Team ID alone left invite codes live: they never expire, and a
+ * reusable one keeps working until someone disables it. A removed admin who had
+ * read GET /org/invites could log back in (their account stays ACTIVE, just
+ * org-less) and POST /auth/join with one of them to walk straight back in.
+ *
+ * Anyone who held `inviteRemoveUsers` could list ALL of the org's codes, so for
+ * them every active code is burned. Everyone else can only know codes they
+ * created themselves. Returns how many codes were deactivated so the caller can
+ * tell the owner to issue fresh ones.
+ *
+ * Must be passed the member row as it was BEFORE detaching (orgRole intact).
+ */
+export async function revokeInvitesKnownTo(
+  organizationId: string,
+  member: { id: string; orgRole: string | null },
+  tx: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<number> {
+  const role = member.orgRole as OrgRole | null;
+  const perms = role ? resolvePermissions(role, await getRoleOverride(organizationId, role)) : [];
+  const sawAllCodes = role === "OWNER" || perms.includes("inviteRemoveUsers");
+  const { count } = await tx.inviteCode.updateMany({
+    where: { organizationId, active: true, ...(sawAllCodes ? {} : { createdByUserId: member.id }) },
+    data: { active: false },
+  });
+  return count;
 }
 
 export interface ResolvedJoin {

@@ -6,7 +6,7 @@ import { asyncHandler, HttpError } from "../middleware/errors.js";
 import crypto from "node:crypto";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { normalizePhone } from "../domain/phone.js";
-import { rotateTeamId } from "../services/org.js";
+import { rotateTeamId, revokeInvitesKnownTo } from "../services/org.js";
 
 export const usersRouter = Router();
 
@@ -93,9 +93,16 @@ usersRouter.patch(
     const target = await prisma.user.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!target) throw new HttpError(404, "User not found in your organization");
     assertCanTouchTarget(req, target);
-    // Resetting someone else's password is an owner-only action (self-service
-    // password changes go through PATCH /auth/me).
-    if (data.password && target.id !== req.user!.id && req.user!.orgRole !== "OWNER") {
+    // Your OWN password only changes through POST /auth/change-password, which
+    // demands the current one. Accepting it here let a stolen session (anyone
+    // holding manageMembers) set a new password with no proof of identity —
+    // turning a borrowed token into a permanent takeover that also logs the
+    // real owner out.
+    if (data.password && target.id === req.user!.id) {
+      throw new HttpError(400, "Change your own password from your account settings (your current password is required).");
+    }
+    // Resetting someone else's password is an owner-only action.
+    if (data.password && req.user!.orgRole !== "OWNER") {
       throw new HttpError(403, "Only the organization owner can reset another user's password");
     }
     const patch: Record<string, unknown> = {};
@@ -180,13 +187,15 @@ usersRouter.delete(
     // including the session eviction and Team ID rotation, without which a
     // removed member simply re-joined with the key they already knew. See that
     // route for the full reasoning.
-    const teamId = await prisma.$transaction(async (tx) => {
+    // Also burn the invite codes they could still redeem (see revokeInvitesKnownTo).
+    const { teamId, invitesRevoked } = await prisma.$transaction(async (tx) => {
       await tx.user.update({
         where: { id: req.params.id },
         data: { organizationId: null, orgRole: null, sessionEpoch: { increment: 1 } },
       });
-      return rotateTeamId(orgId(req), tx);
+      const invitesRevoked = await revokeInvitesKnownTo(orgId(req), target, tx);
+      return { teamId: await rotateTeamId(orgId(req), tx), invitesRevoked };
     });
-    res.json({ ok: true, teamId });
+    res.json({ ok: true, teamId, invitesRevoked });
   }),
 );

@@ -204,10 +204,14 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
       // Removal rotates the org's Team ID (the departing member knew the old
       // one and could otherwise re-join with it). Surface the new value —
       // a join code that silently stops working is worse than one that changed.
-      const r = await api.del<{ teamId?: string | null }>(`/org/members/${m.id}`);
+      // Invite codes the member could still redeem are deactivated too.
+      const r = await api.del<{ teamId?: string | null; invitesRevoked?: number }>(`/org/members/${m.id}`);
       setRemovingMember(null);
       load();
-      onFlash(r?.teamId ? `${m.name} removed. New Team ID: ${r.teamId}` : `${m.name} removed.`);
+      const revoked = r?.invitesRevoked
+        ? ` ${r.invitesRevoked} invite code${r.invitesRevoked === 1 ? " was" : "s were"} deactivated — generate new ones if needed.`
+        : "";
+      onFlash(`${m.name} removed.${r?.teamId ? ` New Team ID: ${r.teamId}.` : ""}${revoked}`);
     }
     catch (e) { onError(e); } finally { setActionBusy(false); }
   }
