@@ -116,11 +116,23 @@ export function Integrations() {
   useEffect(load, []);
 
   // Surface the outcome of an OAuth round-trip (provider redirected back here).
+  // A successful authorization arrives as #oauth=<provider>&code=…&state=… in
+  // the fragment; we finish it through the authed /oauth/complete route, which
+  // checks this session is the user who started the flow.
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
+    const h = new URLSearchParams(window.location.hash.slice(1));
+    const provider = h.get("oauth"), code = h.get("code"), state = h.get("state");
     if (q.get("connected")) setFlash(`${q.get("connected")} connected.`);
     else if (q.get("error")) setErr(decodeURIComponent(q.get("error")!));
-    if (q.get("connected") || q.get("error")) window.history.replaceState({}, "", window.location.pathname);
+    if (q.get("connected") || q.get("error") || provider) window.history.replaceState({}, "", window.location.pathname);
+    if (provider && code && state) {
+      setBusyKey(provider);
+      api.post<{ connected: string }>(`/integrations/${encodeURIComponent(provider)}/oauth/complete`, { code, state })
+        .then(() => { setFlash(`${provider} connected.`); load(); })
+        .catch((e) => setErr(e instanceof ApiError ? e.message : "Could not complete the connection"))
+        .finally(() => setBusyKey(null));
+    }
   }, []);
 
   // Begin an OAuth authorization: fetch the provider URL, then hand the browser off.

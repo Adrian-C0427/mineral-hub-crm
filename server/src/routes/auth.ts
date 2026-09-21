@@ -737,14 +737,15 @@ authRouter.get(
 
     let profile;
     try {
-      const accessToken = await exchangeCode(provider, code);
-      profile = await fetchProfile(provider, accessToken);
+      const { accessToken, idClaims } = await exchangeCode(provider, code);
+      profile = await fetchProfile(provider, accessToken, idClaims);
     } catch (e) {
       return fail(e instanceof Error ? e.message : "Sign-in failed");
     }
-    if (!profile.email || !profile.emailVerified) return fail("Your provider account has no verified email");
 
     // Resolve the user: existing OAuth link → existing email → brand-new account.
+    // An existing link is keyed on the provider's stable subject id, so it needs
+    // no email at all.
     const linked = await prisma.oAuthAccount.findUnique({
       where: { provider_providerAccountId: { provider: provider.key, providerAccountId: profile.providerAccountId } },
       include: { user: true },
@@ -752,6 +753,12 @@ authRouter.get(
     let user = linked?.user ?? null;
 
     if (!user) {
+      // Matching by email (auto-link) or provisioning a new account both trust
+      // the address, so it must be one the provider actually verified — see
+      // parseProfile in services/oauth.ts for the takeover this prevents.
+      if (!profile.email || !profile.emailVerified) {
+        return fail("Microsoft didn't confirm this account's email address, so it can't be matched to a Mineral Hub account. Sign in with your email and password instead, or ask your administrator.");
+      }
       const byEmail = await prisma.user.findUnique({ where: { email: profile.email } });
       if (byEmail) {
         user = byEmail;
