@@ -428,6 +428,7 @@ function WellPicker({ selected, setSelected }: { selected: WellRow[]; setSelecte
       const d = await api.post<{ well: WellRow }>(`/wells/import-rrc`, { fid: c.fid });
       if (!selected.some((s) => s.id === d.well.id)) setSelected([...selected, d.well]);
       setQ("");
+      setOpen(false); // selection made — close, like every dropdown in the app
     } catch { /* surfaced by empty state */ }
     finally { setImporting(null); }
   }
@@ -467,7 +468,7 @@ function WellPicker({ selected, setSelected }: { selected: WellRow[]; setSelecte
             {searching && <div className="msel-empty">Searching…</div>}
             {!searching && addable.length === 0 && rrc.length === 0 && <div className="msel-empty">{total === 0 ? "No wells found in your list or the imported RRC data." : "All matching wells already selected."}</div>}
             {!searching && addable.map((w) => (
-              <div className="msel-opt" key={w.id} onClick={() => { setSelected([...selected, w]); setQ(""); }}>
+              <div className="msel-opt" key={w.id} onClick={() => { setSelected([...selected, w]); setQ(""); setOpen(false); }}>
                 <strong>{w.name}</strong>{w.apiNumber && <span className="muted"> · API {w.apiNumber}</span>}
                 <div className="muted" style={{ fontSize: 12 }}>
                   {w.operator ?? "Unknown operator"} · {w.county} Co, {w.state}

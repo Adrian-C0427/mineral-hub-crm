@@ -11,10 +11,9 @@ interface Props {
    *  Search matches BOTH the stored value and the label, so typing "Texas"
    *  finds TX and typing "royalty" finds RI. Stored values never change. */
   labels?: Record<string, string>;
-  /** Close the menu immediately after each pick. For semantically single-value
-   *  wrappers (StateSelect): a plain multi-select keeps the menu open so users
-   *  can keep adding values in one session. */
-  closeOnSelect?: boolean;
+  /** Semantically single-value wrapper (StateSelect): hides the bulk
+   *  select-all/deselect-all row, which has no meaning for one value. */
+  single?: boolean;
 }
 
 /**
@@ -24,8 +23,12 @@ interface Props {
  * modals), same chevron, same keyboard model: arrows move the active option,
  * Enter adds it, Backspace on an empty query removes the last chip, Escape
  * closes the menu only.
+ *
+ * Every pick closes the menu immediately (app-wide dropdown rule) — adding
+ * another value is one click/keystroke away: clicking the field or typing
+ * reopens it with the previous selections intact as chips.
  */
-export function SearchableMultiSelect({ options, value, onChange, placeholder = "Search…", labels, closeOnSelect = false }: Props) {
+export function SearchableMultiSelect({ options, value, onChange, placeholder = "Search…", labels, single = false }: Props) {
   const show = (v: string) => labels?.[v] ?? v;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -55,11 +58,9 @@ export function SearchableMultiSelect({ options, value, onChange, placeholder = 
 
   function add(opt: string) {
     onChange([...value, opt]);
-    // closeOnSelect must NOT refocus the input — its onFocus would reopen the
-    // menu in the same click, exactly the "reopens unexpectedly" bug.
-    if (closeOnSelect) { close(); return; }
-    setQuery("");
-    inputRef.current?.focus();
+    // Close WITHOUT refocusing the input — its onFocus would reopen the menu
+    // in the same click, exactly the "reopens unexpectedly" bug.
+    close();
   }
   function remove(opt: string) {
     onChange(value.filter((v) => v !== opt));
@@ -101,18 +102,18 @@ export function SearchableMultiSelect({ options, value, onChange, placeholder = 
         >
           {/* Bulk row: select everything that matches the current search, or
               clear the whole selection in one click — no unchecking one by one. */}
-          {/* Bulk actions make no sense on a close-on-select (single-value) field. */}
-          {!closeOnSelect && (filtered.length > 1 || value.length > 1) && (
+          {/* Bulk actions make no sense on a single-value field. */}
+          {!single && (filtered.length > 1 || value.length > 1) && (
             <div className="msel-bulk">
               {filtered.length > 1 && (
                 <button type="button" onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => { onChange([...value, ...filtered]); setQuery(""); inputRef.current?.focus(); }}>
+                  onClick={() => { onChange([...value, ...filtered]); close(); }}>
                   Select all{query ? " matching" : ""} ({filtered.length})
                 </button>
               )}
               {value.length > 1 && (
                 <button type="button" onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => { onChange([]); inputRef.current?.focus(); }}>
+                  onClick={() => { onChange([]); close(); }}>
                   Deselect all
                 </button>
               )}
