@@ -203,7 +203,7 @@ dealsRouter.post(
     // asset flow and are exempt). Child assets — created directly (parentDealId)
     // or in the assets[] batch below — behave exactly like a standalone deal and
     // require the same fields.
-    const dealRequired = (d: { states?: string[]; state?: string | null; counties?: string[]; nra?: number | null; assetTypes?: string[]; ourPrice?: number | null; dateUnderContract?: unknown; name?: string }): string[] => {
+    const dealRequired = (d: { states?: string[]; state?: string | null; counties?: string[]; nra?: number | null; acreageNma?: number | null; assetTypes?: string[]; ourPrice?: number | null; dateUnderContract?: unknown; name?: string }): string[] => {
       const states = d.states ?? (d.state ? [d.state] : []);
       const req_: [boolean, string][] = [
         [!!d.name?.trim(), "Deal Name"],
@@ -211,7 +211,10 @@ dealsRouter.post(
         // Abstract is intentionally NOT required: cadastral coverage only exists
         // for GIS-imported counties, and deals elsewhere must still be creatable.
         [(d.counties ?? []).length > 0, "County"],
-        [d.nra != null, "NRA"],
+        // Either acreage measurement satisfies the requirement: unleased
+        // acreage has no royalty interest, so NRA may not apply — NMA stands
+        // in for it there.
+        [d.nra != null || d.acreageNma != null, "NRA or NMA"],
         [(d.assetTypes ?? []).length > 0, "Asset Type"],
         [d.ourPrice != null, "Our Price"],
         [d.dateUnderContract != null, "Date Under Contract"],

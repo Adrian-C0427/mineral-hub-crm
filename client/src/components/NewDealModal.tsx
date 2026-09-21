@@ -29,7 +29,9 @@ function assetMissing(a: AssetRow): string[] {
   if (!a.counties.length) m.push("County");
   if (!a.abstractIds.length) m.push("Abstract");
   if (!a.assetTypes.length) m.push("Asset Type");
-  if (a.nra.trim() === "") m.push("NRA");
+  // Either acreage measurement satisfies the requirement — unleased acreage
+  // has no lease royalty interest, so NRA may not apply and NMA stands in.
+  if (a.nra.trim() === "" && a.acreageNma.trim() === "") m.push("NRA or NMA");
   if (a.ourPrice.trim() === "") m.push("Our Price");
   if (!a.sameTimeline && !a.dateUnderContract) m.push("Date Under Contract");
   return m;
@@ -77,7 +79,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
   if (!counties.length) missing.push("County");
   if (!abstractIds.length) missing.push("Abstract");
   if (!assetTypes.length) missing.push("Asset Type");
-  if (f.nra.trim() === "") missing.push("NRA");
+  if (f.nra.trim() === "" && f.acreageNma.trim() === "") missing.push("NRA or NMA");
   if (f.ourPrice.trim() === "") missing.push("Our Price");
   if (!f.dateUnderContract) missing.push("Date Under Contract");
 
@@ -182,10 +184,10 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
         <div className="field"><label>Operator</label><input value={f.operator} onChange={set("operator")} placeholder="Operator name" /></div>
       </div>
 
-      <div className="modal-sec">Economics</div>
+      <div className="modal-sec">Economics <span className="modal-sec-hint">— NRA or NMA: at least one required (NMA alone for unleased acreage)</span></div>
       <div className="nd-grid3">
-        <div className="field"><label>NRA {req}</label><input type="number" value={f.nra} onChange={set("nra")} placeholder="0.00" /></div>
-        <div className="field"><label>NMA</label><input type="number" value={f.acreageNma} onChange={set("acreageNma")} placeholder="0.00" /></div>
+        <div className="field"><label title="Net Royalty Acres — required unless NMA is provided">NRA {req}</label><input type="number" value={f.nra} onChange={set("nra")} placeholder="0.00" /></div>
+        <div className="field"><label title="Net Mineral Acres — required unless NRA is provided">NMA {req}</label><input type="number" value={f.acreageNma} onChange={set("acreageNma")} placeholder="0.00" /></div>
         <div className="field"><label>RRC</label><input value={f.rrc} onChange={set("rrc")} placeholder="RRC Number" /></div>
         <div className="field"><label>Our price (acquisition cost) {req}</label><MoneyInput value={f.ourPrice} onChange={(v) => setF((p) => ({ ...p, ourPrice: v }))} ariaLabel="Our price" /></div>
         <div className="field"><label>Ask price (to buyers)</label><MoneyInput value={f.askPrice} onChange={(v) => setF((p) => ({ ...p, askPrice: v }))} ariaLabel="Ask price" /></div>
@@ -246,13 +248,13 @@ function AssetCard({ index, a, req, onPatch, onRemove }: {
           labels={{ state: <>State {req}</>, county: <>County {req}</>, abstract: <>Abstract {req}</> }}
         />
         <div className="field"><label>Asset Type {req}</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={a.assetTypes} onChange={(v) => onPatch({ assetTypes: v })} placeholder="Search asset types…" /></div>
-        <div className="field"><label>NRA {req}</label><input type="number" value={a.nra} onChange={(e) => onPatch({ nra: e.target.value })} /></div>
+        <div className="field"><label title="Net Royalty Acres — required unless NMA is provided">NRA {req}</label><input type="number" value={a.nra} onChange={(e) => onPatch({ nra: e.target.value })} /></div>
         <div className="field"><label>Our Price {req}</label><input type="number" value={a.ourPrice} onChange={(e) => onPatch({ ourPrice: e.target.value })} /></div>
         <div className="field"><label>Basin</label><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(a.counties))} value={a.basins} onChange={(v) => onPatch({ basins: v })} placeholder="Search basins…" /></div>
         <div className="field"><label>Formation</label><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(a.counties))} value={a.formations} onChange={(v) => onPatch({ formations: v })} placeholder="Search formations…" /></div>
         <div className="field"><label>Operator</label><input value={a.operator} onChange={(e) => onPatch({ operator: e.target.value })} /></div>
         <div className="field"><label>RRC</label><input value={a.rrc} onChange={(e) => onPatch({ rrc: e.target.value })} placeholder="RRC Number" /></div>
-        <div className="field"><label>NMA</label><input type="number" value={a.acreageNma} onChange={(e) => onPatch({ acreageNma: e.target.value })} /></div>
+        <div className="field"><label title="Net Mineral Acres — required unless NRA is provided">NMA {req}</label><input type="number" value={a.acreageNma} onChange={(e) => onPatch({ acreageNma: e.target.value })} /></div>
         <div className="field"><label>Ask Price (to buyers)</label><input type="number" value={a.askPrice} onChange={(e) => onPatch({ askPrice: e.target.value })} /></div>
       </div>
       {/* Contract timeline: shared with the deal by default; untick for its own. */}

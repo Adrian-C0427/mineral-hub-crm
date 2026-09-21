@@ -83,6 +83,9 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
       render: (d) => <PriorityBadge priority={d.priority} /> },
     { key: "stage", header: "Stage", type: "text", value: (d) => d.stage, render: (d) => <StageBadge stage={d.stage} pipelineId={d.pipelineId} /> },
     { key: "nma", header: "NMA", type: "number", align: "right", value: (d) => d.aggAcreageNma ?? d.acreageNma, render: (d) => num(d.aggAcreageNma ?? d.acreageNma) },
+    // Available via Customize View (hidden by default to keep the standing
+    // default view unchanged); same rollup-then-own-value logic as NMA.
+    { key: "nra", header: "NRA", type: "number", align: "right", value: (d) => d.aggNra ?? d.nra, render: (d) => num(d.aggNra ?? d.nra), defaultHidden: true },
     { key: "profit", header: "Profit Est.", type: "number", align: "right", value: (d) => d.profitEst, render: (d) => money(d.profitEst) },
     // Secondary date columns start hidden (Customize View re-enables them):
     // the default view keeps the columns that drive weekly decisions.
@@ -161,8 +164,8 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
         onExport={() => {
           const rows = filtered.filter((d) => sel.selected.has(d.id));
           downloadCsv(`deals-${new Date().toISOString().slice(0, 10)}.csv`,
-            ["Deal", "Priority", "Stage", "NMA", "Profit Est.", "Under Contract", "Find Buyer By", "Current Buyer", "Owner"],
-            rows.map((d) => [d.name, d.priority, d.stage, d.acreageNma ?? "", d.profitEst ?? "", d.dateUnderContract ?? "", d.findBuyerByDate ?? "", d.selectedBuyer?.name ?? "", d.relationshipOwner?.name ?? ""]));
+            ["Deal", "Priority", "Stage", "NMA", "NRA", "Profit Est.", "Under Contract", "Find Buyer By", "Current Buyer", "Owner"],
+            rows.map((d) => [d.name, d.priority, d.stage, d.acreageNma ?? "", d.nra ?? "", d.profitEst ?? "", d.dateUnderContract ?? "", d.findBuyerByDate ?? "", d.selectedBuyer?.name ?? "", d.relationshipOwner?.name ?? ""]));
         }}
       />
 
