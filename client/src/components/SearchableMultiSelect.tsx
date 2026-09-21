@@ -11,6 +11,10 @@ interface Props {
    *  Search matches BOTH the stored value and the label, so typing "Texas"
    *  finds TX and typing "royalty" finds RI. Stored values never change. */
   labels?: Record<string, string>;
+  /** Close the menu immediately after each pick. For semantically single-value
+   *  wrappers (StateSelect): a plain multi-select keeps the menu open so users
+   *  can keep adding values in one session. */
+  closeOnSelect?: boolean;
 }
 
 /**
@@ -21,7 +25,7 @@ interface Props {
  * Enter adds it, Backspace on an empty query removes the last chip, Escape
  * closes the menu only.
  */
-export function SearchableMultiSelect({ options, value, onChange, placeholder = "Search…", labels }: Props) {
+export function SearchableMultiSelect({ options, value, onChange, placeholder = "Search…", labels, closeOnSelect = false }: Props) {
   const show = (v: string) => labels?.[v] ?? v;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -51,6 +55,9 @@ export function SearchableMultiSelect({ options, value, onChange, placeholder = 
 
   function add(opt: string) {
     onChange([...value, opt]);
+    // closeOnSelect must NOT refocus the input — its onFocus would reopen the
+    // menu in the same click, exactly the "reopens unexpectedly" bug.
+    if (closeOnSelect) { close(); return; }
     setQuery("");
     inputRef.current?.focus();
   }
@@ -94,7 +101,8 @@ export function SearchableMultiSelect({ options, value, onChange, placeholder = 
         >
           {/* Bulk row: select everything that matches the current search, or
               clear the whole selection in one click — no unchecking one by one. */}
-          {(filtered.length > 1 || value.length > 1) && (
+          {/* Bulk actions make no sense on a close-on-select (single-value) field. */}
+          {!closeOnSelect && (filtered.length > 1 || value.length > 1) && (
             <div className="msel-bulk">
               {filtered.length > 1 && (
                 <button type="button" onMouseDown={(e) => e.preventDefault()}
