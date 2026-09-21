@@ -3885,3 +3885,17 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .va-page .dropzone { min-height: 38px; padding: 0 14px; display: flex; align-items: center; justify-content: center;
   border: 1.5px dashed var(--border); border-radius: 7px; font-size: 13px; color: var(--text-dim); }
 .va-page .dropzone:hover { border-color: var(--accent); color: var(--text); }
+
+/* ===========================================================================
+   Map — shapefile tract import (Import SHP control + modal).
+   =========================================================================== */
+.mshp-btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 13px; font-size: 12.5px; font-weight: 600;
+  color: var(--text); background: var(--control); border: 1px solid #2a3242; border-radius: 9px; cursor: pointer;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45); }
+:root[data-theme="light"] .mshp-btn { border-color: var(--border); box-shadow: var(--shadow); }
+.mshp-btn:hover { border-color: var(--accent); }
+.mshp-drop { display: grid; justify-items: center; gap: 6px; padding: 22px 16px; border: 1.5px dashed var(--border);
+  border-radius: 8px; cursor: pointer; text-align: center; color: var(--text); }
+.mshp-drop:hover { border-color: var(--accent); }
+.mshp-drop.busy { opacity: 0.6; pointer-events: none; }
+.mshp-done { margin-top: 10px; font-size: 13px; color: var(--green); }

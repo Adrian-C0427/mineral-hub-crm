@@ -10,6 +10,8 @@ import { downloadCsv } from "../lib/csv";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION } from "../lib/counties";
 import { addCadastralLayers, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
 import { MapLayersPanel } from "../components/MapLayersPanel";
+import { MapShpImport } from "../components/MapShpImport";
+import { useAuth } from "../auth/AuthContext";
 import { Spinner, StageBadge, PriorityBadge, ChipList } from "../components/ui";
 import { money, num } from "../lib/format";
 import {
@@ -33,7 +35,8 @@ type WellCompletion = { trackingNo: string; filingType: string | null; status: s
 type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; operator: string | null; leaseName: string | null; leaseNo: string | null; field: string | null; oilGas: string | null; district: string | null; cumOil: number | null; cumGas: number | null; lastProd: string | null; formations: string | null; unitAcres?: number | null; spudDate?: string | null; plugDate?: string | null; permits?: WellPermit[]; completions?: WellCompletion[] };
 type SelWell = { kind: "well" } & WellProps;
 type SelHotspot = { kind: "hotspot"; summary: AreaSummary; periodLabel: string };
-type Selected = SelAbstract | SelWell | SelHotspot | null;
+type SelTract = { kind: "tract"; id: string; name: string; sourceFile: string; attrs: [string, string][] };
+type Selected = SelAbstract | SelWell | SelHotspot | SelTract | null;
 
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
 
@@ -61,8 +64,8 @@ const MAP_LAYERS_KEY = "mh-map-layers:v1";
 const MAP_DOCK_KEY = "mh-map-dock:v1";
 const MAP_VIEW_KEY = "mh-map-view:v1";
 const MAP_FILTERS_KEY = "mh-map-filters:v1";
-type MapLayers = { boundaries: boolean; absNums: boolean; surveyNames: boolean; deals: boolean; wells: boolean; wellbores: boolean };
-const DEFAULT_MAP_LAYERS: MapLayers = { boundaries: true, absNums: true, surveyNames: true, deals: true, wells: true, wellbores: true };
+type MapLayers = { boundaries: boolean; absNums: boolean; surveyNames: boolean; deals: boolean; wells: boolean; wellbores: boolean; tracts: boolean };
+const DEFAULT_MAP_LAYERS: MapLayers = { boundaries: true, absNums: true, surveyNames: true, deals: true, wells: true, wellbores: true, tracts: true };
 interface MapCam { center: [number, number]; zoom: number }
 /** A named, reusable combination of every filter on the Filters panel. */
 interface MapFilterState {
@@ -100,6 +103,7 @@ const STATUS_OPTIONS = [
 ] as const;
 
 export function MapView() {
+  const { can } = useAuth();
   const mapContainer = useRef<HTMLDivElement>(null);
   // The map fills all vertical space from its top down to the footer — measured
   // (not a fixed offset) so there's never blank space below it.
@@ -239,6 +243,25 @@ export function MapView() {
       // wellbores, labels) — identical to the deal map via lib/mapLayers.
       addCadastralLayers(map, countyLabels as unknown as GeoJSON.FeatureCollection);
 
+      // Imported tract boundaries (user-uploaded shapefiles, org-scoped).
+      // Served as an authed GeoJSON overlay — org data never rides the public
+      // cached tile pipeline. Drawn under wells so well dots stay clickable.
+      map.addSource("org-tracts", { type: "geojson", data: EMPTY_FC });
+      map.addLayer({ id: "tracts-fill", type: "fill", source: "org-tracts", paint: {
+        "fill-color": "#0d9488", "fill-opacity": 0.16 } }, "wells");
+      map.addLayer({ id: "tracts-line", type: "line", source: "org-tracts", paint: {
+        "line-color": "#0f766e",
+        "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.2, 13, 2.4] as unknown as maplibregl.ExpressionSpecification,
+        "line-opacity": 0.9 } }, "wells");
+      map.addLayer({ id: "tracts-label", type: "symbol", source: "org-tracts", minzoom: 9, layout: {
+        "text-field": ["get", "__name"] as unknown as maplibregl.ExpressionSpecification, "text-font": ["Noto Sans Regular"],
+        "text-size": ["interpolate", ["linear"], ["zoom"], 9, 10, 13, 13] as unknown as maplibregl.ExpressionSpecification,
+        "text-allow-overlap": false, "text-optional": true },
+        paint: { "text-color": "#115e59", "text-halo-color": "#ffffff", "text-halo-width": 1.4 } }, "wells");
+      void loadTracts();
+      map.on("mouseenter", "tracts-fill", () => (map.getCanvas().style.cursor = "pointer"));
+      map.on("mouseleave", "tracts-fill", () => (map.getCanvas().style.cursor = ""));
+
       // Production heat map — inserted below the cadastral fill so parcels and
       // labels stay readable over it. Weight `w` is pre-normalized to [0,1] per
       // extent so the gradient rescales with zoom; oil/gas are separate sources.
@@ -288,6 +311,20 @@ export function MapView() {
             return Math.hypot(sp.x - e.point.x, sp.y - e.point.y) <= 48;
           });
           if (near.length) { clearSelection(); setSelected({ kind: "hotspot", summary: summarize(near), periodLabel: periodLabelRef.current }); return; }
+        }
+        // An imported tract boundary (its name + shapefile attributes).
+        if (layersRef.current.tracts && map.getLayer("tracts-fill")) {
+          const tf = map.queryRenderedFeatures(e.point, { layers: ["tracts-fill"] });
+          if (tf.length) {
+            const p = tf[0].properties as Record<string, unknown>;
+            clearSelection();
+            const attrs = Object.entries(p)
+              .filter(([k, v]) => !k.startsWith("__") && v != null && String(v).trim() !== "")
+              .slice(0, 14)
+              .map(([k, v]) => [k, String(v)] as [string, string]);
+            setSelected({ kind: "tract", id: String(p.__id ?? ""), name: String(p.__name ?? "Tract"), sourceFile: String(p.__source ?? ""), attrs });
+            return;
+          }
         }
         // Otherwise an abstract (toggle).
         const feats = map.queryRenderedFeatures(e.point, { layers: ["abstracts-fill"] });
@@ -415,6 +452,7 @@ export function MapView() {
     vis("abstracts-fill", L.boundaries); vis("abstracts-line", L.boundaries);
     vis("abstracts-num", L.absNums); vis("abstracts-survey", L.surveyNames);
     vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores);
+    vis("tracts-fill", L.tracts); vis("tracts-line", L.tracts); vis("tracts-label", L.tracts);
     applyHighlight();
   }
   // Filter behavior: filters never restyle the map — instead the map zooms to
@@ -654,6 +692,15 @@ export function MapView() {
   const panelDeals = selected?.kind === "abstract" ? dealsByAbstract.get(selected.id) ?? [] : [];
   const abstractCount = dealsByAbstract.size;
   const toggle = (k: keyof typeof layers) => setLayers((p) => ({ ...p, [k]: !p[k] }));
+
+  // Imported tract boundaries (shapefile uploads) — fetched on load and after
+  // every import/delete so the overlay always mirrors the stored set.
+  async function loadTracts() {
+    try {
+      const fc = await api.get<GeoJSON.FeatureCollection>("/map/tracts");
+      (mapRef.current?.getSource("org-tracts") as maplibregl.GeoJSONSource | undefined)?.setData(fc);
+    } catch { /* overlay is optional — the map works without it */ }
+  }
 
   // Saved filters: name the current filter combination, reload it later,
   // overwrite it with the current filters, or delete it. Saving with an
@@ -954,10 +1001,18 @@ export function MapView() {
               { key: "boundaries", label: "Abstract boundaries" }, { key: "absNums", label: "Abstract numbers" },
               { key: "surveyNames", label: "Survey names" }, { key: "deals", label: "Active deals" },
               { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores (laterals)" },
+              { key: "tracts", label: "Imported tracts" },
             ]}
             layers={layers}
             onToggle={(k) => toggle(k as keyof typeof layers)}
           />
+          {can("manageMapData") && (
+            <MapShpImport onChanged={(bbox) => {
+              void loadTracts();
+              setLayers((p) => ({ ...p, tracts: true }));
+              if (bbox) mapRef.current?.fitBounds(bbox as maplibregl.LngLatBoundsLike, { padding: 60, duration: 800, maxZoom: 14 });
+            }} />
+          )}
         </div>
         {!deals && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}><Spinner label="Loading map…" /></div>}
 
@@ -1123,6 +1178,18 @@ export function MapView() {
                 </div>
                 {selected.summary.surveys.length > 0 && <div className="kv" style={{ marginTop: 6 }}><span className="k">Surveys</span><span className="v wrap">{selected.summary.surveys.slice(0, 8).join(", ")}</span></div>}
                 <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Totals attribute each lease's production evenly across its wells. BOE = oil + gas/6. Click elsewhere to summarize another area.</p>
+              </>
+            ) : selected.kind === "tract" ? (
+              <>
+                <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.name}</h3><div className="muted" style={{ fontSize: 12 }}>Imported tract · {selected.sourceFile}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
+                {selected.attrs.length > 0 ? (
+                  <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
+                    {selected.attrs.map(([k, v]) => <KV key={k} k={k} v={v} />)}
+                  </div>
+                ) : (
+                  <p className="muted" style={{ fontSize: 12 }}>The shapefile carried no attributes for this boundary.</p>
+                )}
+                <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Boundary and attributes come from the uploaded shapefile. Manage uploads via “Import SHP”.</p>
               </>
             ) : (
               <>

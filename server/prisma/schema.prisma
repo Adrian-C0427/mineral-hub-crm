@@ -190,6 +190,27 @@ model Organization {
   notifications     Notification[]
   portalContacts    PortalContact[]
   buyerTags         BuyerTag[]
+  mapTracts         MapTract[]
+}
+
+// A tract boundary imported from a user-uploaded shapefile (.shp), rendered as
+// the "Imported tracts" overlay on the org's map. One row per polygon feature,
+// already reprojected to WGS84 at import time; importId groups the features of
+// one upload so it can be listed and removed as a unit.
+model MapTract {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  name       String // display label (best DBF attribute, else "<file> <n>")
+  sourceFile String // original upload filename
+  importId   String // one upload = one importId
+  properties Json? // the feature's full DBF attribute row (map popup detail)
+  geometry   Json // GeoJSON Polygon/MultiPolygon geometry, WGS84
+
+  createdAt DateTime @default(now())
+
+  @@index([organizationId, importId])
 }
 
 // A publishable contact card shown on the Buyer Offering Portal. An org can
