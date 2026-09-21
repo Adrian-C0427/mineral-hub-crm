@@ -456,14 +456,18 @@ export function MapView() {
     applyHighlight();
   }
   // Filter behavior: filters never restyle the map — instead the map zooms to
-  // frame the matching results (see the extent effect below). The one
-  // exception: Well type / Well status show ONLY matching wells, hiding the
+  // frame the matching results (see the extent effect below). The exceptions:
+  // Well type / Well status / Operator show ONLY matching wells, hiding the
   // rest via a layer filter.
   function applyWellFilter() {
     const map = mapRef.current; if (!map || !styleReady.current || !map.getLayer("wells")) return;
     const cl: unknown[] = [];
     if (fWellTypes.length) cl.push(["in", ["get", "type"], ["literal", fWellTypes]]);
     if (fWellStatuses.length) cl.push(["in", ["get", "status"], ["literal", fWellStatuses]]);
+    // Operator filters HIDE, exactly like type/status: only wells operated by
+    // the selected operator(s) stay on the map (a null-operator well is not
+    // "associated" with any selection, so it hides too).
+    if (fOperators.length) cl.push(["in", ["get", "operator"], ["literal", fOperators]]);
     const expr = cl.length ? (["all", ...cl] as unknown as maplibregl.ExpressionSpecification) : null;
     map.setFilter("wells", expr);
     // Wellbore tile features carry their surface well's attributes (joined
@@ -599,7 +603,7 @@ export function MapView() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
-  useEffect(applyWellFilter, [fWellTypes, fWellStatuses]);
+  useEffect(applyWellFilter, [fWellTypes, fWellStatuses, fOperators]);
   // Zoom to the filtered results: whenever filters change, ask the server for
   // the bounding box of everything matching and frame it. Debounced so rapid
   // edits coalesce; sequence-guarded so a slow response can't zoom late; the
