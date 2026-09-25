@@ -247,10 +247,24 @@ export function MapView() {
       // Served as an authed GeoJSON overlay — org data never rides the public
       // cached tile pipeline. Drawn under wells so well dots stay clickable.
       map.addSource("org-tracts", { type: "geojson", data: EMPTY_FC });
+      // Tracts whose DBF carries a STATUS attribute (title-work exports use
+      // LEASED / UNLEASED / SOLD …) are color-coded and fill more opaquely;
+      // untagged imports keep the original faint teal. UNLEASED is tested
+      // before LEASED because "in" is a substring match.
+      const tractStatus = ["to-string", ["coalesce", ["get", "STATUS"], ["get", "Status"], ["get", "status"], ""]];
+      const hasStatus = (needle: string) => ["any", ["in", needle, tractStatus], ["in", needle.toLowerCase(), tractStatus], ["in", needle[0] + needle.slice(1).toLowerCase(), tractStatus]];
+      const byStatus = (unleased: string, leased: string, sold: string, fallback: string) => [
+        "case",
+        hasStatus("UNLEASED"), unleased,
+        hasStatus("LEASED"), leased,
+        hasStatus("SOLD"), sold,
+        fallback,
+      ] as unknown as maplibregl.ExpressionSpecification;
       map.addLayer({ id: "tracts-fill", type: "fill", source: "org-tracts", paint: {
-        "fill-color": "#0d9488", "fill-opacity": 0.16 } }, "wells");
+        "fill-color": byStatus("#d21f1f", "#2e8b57", "#8c8c8c", "#0d9488"),
+        "fill-opacity": ["case", ["!=", tractStatus, ""], 0.45, 0.16] as unknown as maplibregl.ExpressionSpecification } }, "wells");
       map.addLayer({ id: "tracts-line", type: "line", source: "org-tracts", paint: {
-        "line-color": "#0f766e",
+        "line-color": byStatus("#a01818", "#1e6b41", "#6e6e6e", "#0f766e"),
         "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.2, 13, 2.4] as unknown as maplibregl.ExpressionSpecification,
         "line-opacity": 0.9 } }, "wells");
       map.addLayer({ id: "tracts-label", type: "symbol", source: "org-tracts", minzoom: 9, layout: {
