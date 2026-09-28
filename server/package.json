@@ -27,6 +27,7 @@
     "@prisma/client": "^5.18.0",
     "@sentry/node": "^10.63.0",
     "@types/compression": "^1.8.1",
+    "but-unzip": "^0.1.10",
     "bcryptjs": "^2.4.3",
     "compression": "^1.8.1",
     "cookie-parser": "^1.4.6",

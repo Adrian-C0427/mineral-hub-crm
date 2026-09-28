@@ -1,3 +1,5 @@
+import { inflateRawSync } from "node:zlib";
+import { iter as iterZip } from "but-unzip";
 import { HttpError } from "../middleware/errors.js";
 
 /**
@@ -27,6 +29,12 @@ export interface ShpParseResult {
 
 /** Hard cap per upload — protects the row store and the client render. */
 export const MAX_TRACT_FEATURES = 5000;
+
+/** Decompressed-size budget for a zipped upload — a real tract shapefile is a
+ *  few MB; this stops a zip bomb from inflating into GBs of heap. */
+export const MAX_UNZIPPED_BYTES = 200 * 1024 * 1024;
+const MAX_ZIP_ENTRIES = 50;
+const ZIP_SIDECAR = /\.(shp|dbf|prj|cpg)$/i;
 
 /** DBF attribute keys commonly used as the feature's display name. */
 const NAME_KEYS = ["name", "tract", "tract_name", "tractname", "label", "title", "lease", "unit", "owner", "id"];
@@ -69,6 +77,55 @@ function extendBbox(bbox: [number, number, number, number] | null, g: GeoJSON.Po
   return [minX, minY, maxX, maxY];
 }
 
+/**
+ * Unzip only the shapefile sidecars, inflating under a shared output budget.
+ * Entry sizes in the zip header are attacker-controlled, so the cap is enforced
+ * on the actual inflate output (zlib maxOutputLength), not on declared sizes.
+ */
+async function unzipShapefiles(buffer: Buffer): Promise<Map<string, Buffer>> {
+  let remaining = MAX_UNZIPPED_BYTES;
+  const tooBig = () => new HttpError(400, `Shapefile zip expands to more than ${MAX_UNZIPPED_BYTES / 1024 / 1024} MB — split it into smaller files`);
+  const inflate = (raw: Uint8Array): Uint8Array => {
+    try {
+      return inflateRawSync(raw, { maxOutputLength: Math.max(remaining, 1) });
+    } catch (err) {
+      if ((err as { code?: string }).code === "ERR_BUFFER_TOO_LARGE") throw tooBig();
+      throw err;
+    }
+  };
+  const out = new Map<string, Buffer>();
+  let entries = 0;
+  for (const entry of iterZip(new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength), inflate)) {
+    if (entry.filename.includes("__MACOSX") || !ZIP_SIDECAR.test(entry.filename)) continue;
+    if (++entries > MAX_ZIP_ENTRIES) throw new HttpError(400, `Shapefile zip has more than ${MAX_ZIP_ENTRIES} files — split it into smaller uploads`);
+    const bytes = await entry.read();
+    remaining -= bytes.byteLength;
+    if (remaining < 0) throw tooBig();
+    out.set(entry.filename, Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
+  }
+  return out;
+}
+
+/** Group unzipped sidecars into one FeatureCollection per .shp layer. */
+function collectionsFromZip(shp: Awaited<ReturnType<typeof loadShpjs>>, entries: Map<string, Buffer>): FC[] {
+  const layers = new Map<string, Partial<Record<"shp" | "dbf" | "prj" | "cpg", Buffer>>>();
+  for (const [name, buf] of entries) {
+    const dot = name.lastIndexOf(".");
+    const base = name.slice(0, dot);
+    const ext = name.slice(dot + 1).toLowerCase() as "shp" | "dbf" | "prj" | "cpg";
+    layers.set(base, { ...layers.get(base), [ext]: buf });
+  }
+  const out: FC[] = [];
+  for (const layer of layers.values()) {
+    if (!layer.shp) continue;
+    const geoms = shp.parseShp(toArrayBuffer(layer.shp), layer.prj?.toString("latin1"));
+    const attrs = layer.dbf ? shp.parseDbf(toArrayBuffer(layer.dbf), layer.cpg?.toString("latin1")) : [];
+    out.push(shp.combine([geoms, attrs]));
+  }
+  if (!out.length) throw new HttpError(400, "No .shp file found in the zip");
+  return out;
+}
+
 /** Parse the upload (one .zip, or loose .shp/.dbf/.prj) into polygon features. */
 export async function parseShapefileUpload(files: UploadedFile[], baseName: string): Promise<ShpParseResult> {
   if (!files.length) throw new HttpError(400, "No files uploaded");
@@ -80,8 +137,7 @@ export async function parseShapefileUpload(files: UploadedFile[], baseName: stri
   let collections: FC[];
   try {
     if (zip) {
-      const parsed = await shp.default(toArrayBuffer(zip.buffer));
-      collections = Array.isArray(parsed) ? parsed : [parsed];
+      collections = collectionsFromZip(shp, await unzipShapefiles(zip.buffer));
     } else {
       const shpFile = byExt(".shp");
       if (!shpFile) throw new HttpError(400, "Upload a zipped shapefile, or the .shp file (with its .dbf and .prj alongside)");

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import multer from "multer";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
@@ -115,6 +116,16 @@ mapRouter.get(
 // Shapefile sidecars: at most one .zip, or .shp + .dbf/.prj/.shx/.cpg.
 const shpUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: env.MAX_UPLOAD_BYTES, files: 6 } });
 
+// Each import parses and reprojects up to 150 MB of uploads; cap replays.
+const tractImportLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as AuthedRequest).user?.id ?? req.ip ?? "unknown",
+  message: { error: "Too many shapefile imports. Wait a few minutes and try again." },
+});
+
 /** Every imported tract as one FeatureCollection (map source + panel detail). */
 mapRouter.get(
   "/tracts",
@@ -159,6 +170,7 @@ mapRouter.get(
 mapRouter.post(
   "/tracts/import",
   requirePermission("manageMapData"),
+  tractImportLimiter,
   shpUpload.array("files", 6),
   asyncHandler(async (req: AuthedRequest, res) => {
     const files = (req.files as Express.Multer.File[] | undefined ?? [])
