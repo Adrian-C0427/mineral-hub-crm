@@ -1355,8 +1355,7 @@ researchRouter.get(
     const org = orgId(req);
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
-    const county = String(req.query.mapCounty ?? "").trim();
-    if (!county) throw new HttpError(400, "mapCounty is required");
+    const county = z.string().trim().min(1, "mapCounty is required").max(100).parse(req.query.mapCounty ?? "");
 
     const docs = await prisma.researchDocument.findMany({
       where: { ...docWhere(org, { ...f, counties: [county] }, win), abstractId: { not: null } },
