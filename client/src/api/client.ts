@@ -49,8 +49,22 @@ function signalUnauthorizedIfSession(status: number, path: string): void {
   if (status === 401 && !path.startsWith("/auth/") && getAuthToken()) onUnauthorized?.();
 }
 
+// fetch() rejects with a native TypeError ("Failed to fetch" in Chrome, "Load
+// failed" in Safari) when the request never reaches the API — a transient blip:
+// Railway cold start, a dropped connection, a pooled-endpoint hiccup. Surface it
+// as a typed, catchable ApiError(0) instead of a raw TypeError, so call sites can
+// treat it as expected network state and Sentry can filter it in beforeSend
+// (see MINERAL-HUB-WEB-2 / WEB-3). status 0 = no HTTP response was received.
+async function fetchOrThrow(input: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (e) {
+    throw new ApiError(0, "Network error", e);
+  }
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${BASE}/api${path}`, {
+  const res = await fetchOrThrow(`${BASE}/api${path}`, {
     method,
     credentials: "include",
     headers: authHeaders(body !== undefined ? { "Content-Type": "application/json" } : undefined),
@@ -73,7 +87,7 @@ export const api = {
   del: <T>(path: string, body?: unknown) => request<T>("DELETE", path, body),
   // Multipart upload (files) — let the browser set the Content-Type/boundary.
   upload: async <T>(path: string, form: FormData): Promise<T> => {
-    const res = await fetch(`${BASE}/api${path}`, { method: "POST", credentials: "include", headers: authHeaders(), body: form });
+    const res = await fetchOrThrow(`${BASE}/api${path}`, { method: "POST", credentials: "include", headers: authHeaders(), body: form });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       signalUnauthorizedIfSession(res.status, path);

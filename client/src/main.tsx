@@ -19,11 +19,15 @@ if (import.meta.env.VITE_SENTRY_DSN) {
     environment: import.meta.env.MODE,
     tracesSampleRate: 0.1,
     beforeSend(event, hint) {
-      // A 401 is expected user state (an expired session), not a bug: the auth
-      // layer clears the session and redirects to login. Don't report it — this
-      // is what surfaced as the uncaught MINERAL-HUB-WEB-1.
+      // Don't report expected, environmental states that aren't app bugs:
+      //  - 401: an expired session; the auth layer clears it and redirects to
+      //    login (this is what surfaced as the uncaught MINERAL-HUB-WEB-1).
+      //  - status 0: a network failure where the request never reached the API
+      //    (Railway cold start / connectivity blip), typed as ApiError(0) by the
+      //    client (this is MINERAL-HUB-WEB-2 / WEB-3). A real API/CORS break would
+      //    show as a flood in the app, not one transient unhandled rejection.
       const err = hint?.originalException;
-      if (err instanceof ApiError && err.status === 401) return null;
+      if (err instanceof ApiError && (err.status === 401 || err.status === 0)) return null;
       return event;
     },
   });
