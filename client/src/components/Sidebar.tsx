@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { NavLink, useLocation } from "react-router-dom";
-import { Workflow, ChevronRight, ChevronDown } from "lucide-react";
+import { Workflow, ChevronRight, ChevronDown, X } from "lucide-react";
 import {
   DashboardIcon, DealsIcon, MineralsIcon, BuyersIcon, ContactsIcon, MapPinIcon,
   ResearchIcon, WellsIcon, ReportsIcon, ExpensesIcon, PortalIcon, SettingsGearIcon,
@@ -10,6 +10,7 @@ import { useAuth } from "../auth/AuthContext";
 import { loadBranding } from "../lib/branding";
 import { layoutRect } from "../lib/viewport";
 import { ThemedLogo } from "./ThemedLogo";
+import { revealActiveStripItems, setMobileNavOpen, useIsPhone, useMobileNavOpen } from "../lib/mobile";
 
 interface NavItem {
   label: string;
@@ -79,13 +80,39 @@ export function Sidebar() {
 
   const allowed = (item: NavItem): boolean => !item.perm || can(item.perm);
 
+  // Phones: the navigation is an off-canvas drawer (full labels) opened from
+  // the top bar's menu button, so the page gets the whole screen width. It
+  // closes on navigation, backdrop tap, or Escape. Desktop is unaffected.
+  const phone = useIsPhone();
+  const drawerOpen = useMobileNavOpen();
+  useEffect(() => { setMobileNavOpen(false); return revealActiveStripItems(); }, [location.pathname, location.search]);
+  useEffect(() => { if (!phone) setMobileNavOpen(false); }, [phone]);
+  useEffect(() => {
+    if (!phone || !drawerOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setMobileNavOpen(false); };
+    document.addEventListener("keydown", onKey);
+    document.body.classList.add("mobile-nav-open");
+    return () => { document.removeEventListener("keydown", onKey); document.body.classList.remove("mobile-nav-open"); };
+  }, [phone, drawerOpen]);
+  const railCollapsed = phone ? false : collapsed;
+
   return (
-    <aside className={`sidebar ${collapsed ? "collapsed" : ""}`}>
+    <>
+    {phone && drawerOpen && <div className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />}
+    <aside className={`sidebar ${railCollapsed ? "collapsed" : ""} ${phone ? `mobile-drawer ${drawerOpen ? "open" : ""}` : ""}`}
+      aria-label="Main navigation" aria-hidden={phone && !drawerOpen ? true : undefined}>
       {/* Collapse control: a tiny chevron riding the panel's edge — half in,
           half out — so the brand row belongs entirely to the logo. */}
-      <button className="sidebar-edge-toggle" onClick={toggleCollapsed} title={collapsed ? "Expand navigation" : "Collapse navigation"} aria-label={collapsed ? "Expand navigation" : "Collapse navigation"} aria-expanded={!collapsed}>
-        <ChevronRight size={13} strokeWidth={2.5} className={collapsed ? "" : "flipped"} />
-      </button>
+      {!phone && (
+        <button className="sidebar-edge-toggle" onClick={toggleCollapsed} title={collapsed ? "Expand navigation" : "Collapse navigation"} aria-label={collapsed ? "Expand navigation" : "Collapse navigation"} aria-expanded={!collapsed}>
+          <ChevronRight size={13} strokeWidth={2.5} className={collapsed ? "" : "flipped"} />
+        </button>
+      )}
+      {phone && (
+        <button type="button" className="mobile-nav-close icon-btn" onClick={() => setMobileNavOpen(false)} aria-label="Close navigation">
+          <X size={18} />
+        </button>
+      )}
       <div className="sidebar-brand">
         {(() => {
           // While /auth/me is still in flight (fresh page load, slow or
@@ -98,7 +125,7 @@ export function Sidebar() {
           // with just a compact mark rendered an empty brand row when expanded).
           const full = org?.fullLogo ?? org?.compactLogo ?? null;
           const compact = org?.compactLogo ?? org?.fullLogo ?? null;
-          if (!full && !compact) return <span className="brand">{collapsed ? "MH" : <>Mineral Hub<span className="dot">.</span></>}</span>;
+          if (!full && !compact) return <span className="brand">{railCollapsed ? "MH" : <>Mineral Hub<span className="dot">.</span></>}</span>;
           // BOTH variants stay mounted at all times; collapse only toggles CSS
           // visibility. Nothing remounts, reloads, or reprocesses on expand/
           // collapse, navigation, or theme change — the logo is a persistent
@@ -114,13 +141,14 @@ export function Sidebar() {
 
       <nav className="sidebar-nav">
         {NAV.filter(allowed).map((item) => (
-          <SidebarItem key={item.label} item={item} collapsed={collapsed} allowed={allowed} pathname={location.pathname} />
+          <SidebarItem key={item.label} item={item} collapsed={railCollapsed} allowed={allowed} pathname={location.pathname} />
         ))}
       </nav>
 
       {/* Notifications, user identity, and Sign out live in the fixed top
           navigation bar (TopBar) — the sidebar is pure navigation. */}
     </aside>
+    </>
   );
 }
 

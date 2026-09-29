@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ChevronDown, LogOut, Settings } from "lucide-react";
+import { ChevronDown, LogOut, Menu, Settings } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { userAvatarColor } from "../lib/avatarColor";
 import { NotificationsBell } from "./NotificationsBell";
 import { ROLE_LABEL } from "../lib/roles";
+import { setMobileNavOpen, useIsPhone } from "../lib/mobile";
 
 /** Initials for the avatar chip — first letters of the first two name words. */
 const initialsOf = (name: string | undefined): string =>
@@ -36,8 +37,16 @@ export function TopBar() {
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
   }, [open]);
 
+  // Phones: the sidebar is a drawer, opened from here.
+  const phone = useIsPhone();
+
   return (
     <header className="topbar">
+      {phone && (
+        <button type="button" className="topbar-nav-btn icon-btn" onClick={() => setMobileNavOpen(true)} aria-label="Open navigation">
+          <Menu size={20} />
+        </button>
+      )}
       <NotificationsBell collapsed />
       <span className="topbar-div" aria-hidden="true" />
       <div className="topbar-userwrap" ref={wrapRef}>

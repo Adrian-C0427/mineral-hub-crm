@@ -8,6 +8,8 @@ import { StagesProvider } from "./stages";
 import { App } from "./App";
 import { ApiError } from "./api/client";
 import "./styles.css";
+// Phone-only overrides (every rule is inside a phone media query) — after styles.css so they win.
+import "./mobile.css";
 
 // Front-end error monitoring — inert until VITE_SENTRY_DSN is set at build time.
 // The var is inlined by Vite during the build, so an unset DSN means this whole
