@@ -1,6 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { ChevronDown } from "lucide-react";
 import { layoutRect, layoutViewport } from "../lib/viewport";
+import { PHONE_QUERY } from "../lib/mobile";
+
+/** Phones only: the visible viewport (it shrinks when the on-screen keyboard
+ *  opens), so menus never open underneath the keyboard. Null on desktop. */
+function phoneVisualViewport(): VisualViewport | null {
+  try { return window.matchMedia(PHONE_QUERY).matches ? window.visualViewport ?? null : null; } catch { return null; }
+}
 
 /**
  * Shared internals for the app's ONE dropdown family (Select +
@@ -66,8 +73,11 @@ export function useMenuPosition(
       // fixed portal, so edge clamping is exact under the interface zoom.
       const { vw, vh } = layoutViewport();
       const left = Math.max(EDGE, Math.min(r.left, vw - r.width - EDGE));
-      const below = vh - r.bottom - 4 - EDGE;
-      const above = r.top - 4 - EDGE;
+      const vv = phoneVisualViewport(); // phones render unzoomed, so vv px = layout px
+      const visTop = vv ? vv.offsetTop : 0;
+      const visBottom = vv ? Math.min(vh, vv.offsetTop + vv.height) : vh;
+      const below = visBottom - r.bottom - 4 - EDGE;
+      const above = r.top - visTop - 4 - EDGE;
       // The direction can only be decided from the menu's REAL height, and the
       // menu hasn't rendered on the first pass (menuRef is null then — flip
       // math would assume a full-height menu and send short lists upward for
@@ -122,7 +132,15 @@ export function useMenuPosition(
     // above, this keeps the menu glued to the field with no flip-jumps.
     const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(place) : null;
     if (ro && anchorRef.current) ro.observe(anchorRef.current);
+    // Phones: the keyboard sliding in/out changes the visible area — re-decide
+    // the direction then (the one time it may legitimately change mid-open).
+    const vv = phoneVisualViewport();
+    const onVisual = () => { dirRef.current = null; place(); requestAnimationFrame(place); };
+    vv?.addEventListener("resize", onVisual);
+    vv?.addEventListener("scroll", onVisual);
     return () => {
+      vv?.removeEventListener("resize", onVisual);
+      vv?.removeEventListener("scroll", onVisual);
       cancelAnimationFrame(raf);
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", onScroll, true);

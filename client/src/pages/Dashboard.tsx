@@ -15,6 +15,7 @@ import { PeriodSegmented } from "../components/PeriodSegmented";
 import { DateField } from "../components/DateField";
 import { useTheme } from "../theme";
 import { layoutRect } from "../lib/viewport";
+import { useIsPhonePortrait } from "../lib/mobile";
 
 // Global dashboard period (default YTD). Drives all period-scoped widgets.
 type DashPeriod = "THIS_MONTH" | "LAST_MONTH" | "THIS_QUARTER" | "YTD" | "CUSTOM";
@@ -262,6 +263,9 @@ export function Dashboard() {
   // whole canvas into an overlapping mess if honored.
   const wrapRef = useRef<HTMLDivElement>(null);
   const [gridW, setGridW] = useState(0);
+  // Portrait phones stack the widgets in one column (saved-layout order)
+  // instead of the 12-column canvas; the desktop layout is never rewritten.
+  const phoneStack = useIsPhonePortrait();
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
@@ -274,11 +278,15 @@ export function Dashboard() {
     measure();
     window.addEventListener("resize", measure);
     return () => { ro.disconnect(); window.removeEventListener("resize", measure); };
-  }, [d == null]);
+  }, [d == null, phoneStack]);
 
   const visibleIds = useMemo(() => ALL_WIDGETS.filter((id) => !prefs.hidden.includes(id)), [prefs.hidden]);
   const gridLayout: Layout[] = useMemo(
     () => visibleIds.map((id) => ({ i: id, ...prefs.layout[id], minW: MIN_W, minH: MIN_H })),
+    [visibleIds, prefs.layout],
+  );
+  const stackIds = useMemo(
+    () => [...visibleIds].sort((a, b) => prefs.layout[a].y - prefs.layout[b].y || prefs.layout[a].x - prefs.layout[b].x),
     [visibleIds, prefs.layout],
   );
 
@@ -657,7 +665,9 @@ export function Dashboard() {
       {customizing && (
         <div className="panel dash-cz-banner">
           <span className="dash-cz-banner-text">
-            <strong>Customizing dashboard</strong> — drag a widget anywhere, resize from its edges or corner, or hide it. Everything saves automatically.
+            {phoneStack
+              ? <><strong>Customizing dashboard</strong> — hide or show widgets here; arrange and resize them on a larger screen. Everything saves automatically.</>
+              : <><strong>Customizing dashboard</strong> — drag a widget anywhere, resize from its edges or corner, or hide it. Everything saves automatically.</>}
           </span>
           <span className="row" style={{ gap: 8, marginLeft: "auto" }}>
             <button type="button" className="small" disabled={isDefaultLayout} onClick={() => setPrefs({ layout: { ...DEFAULT_LAYOUT }, hidden: [] })}>Restore default</button>
@@ -677,6 +687,22 @@ export function Dashboard() {
 
       {visibleIds.length === 0 && !customizing ? (
         <div className="panel"><p className="muted" style={{ margin: 0 }}>All widgets are hidden. Use <strong>Customize</strong> to bring them back.</p></div>
+      ) : phoneStack ? (
+        <div className={`dash-stack ${customizing ? "customizing" : ""}`}>
+          {stackIds.map((id) => (
+            <div key={id} className={`dash-w dash-w-${id} ${customizing ? "cz" : ""}`}>
+              {customizing && (
+                <div className="dash-cz-bar">
+                  <span className="dash-cz-name">{WIDGET_LABELS[id]}</span>
+                  <span className="dash-cz-actions">
+                    <button type="button" className="dash-cz-btn" onClick={() => hideWidget(id)} title="Hide widget">✕ Hide</button>
+                  </span>
+                </div>
+              )}
+              <div className="dash-w-body">{widgetNodes[id]}</div>
+            </div>
+          ))}
+        </div>
       ) : (
         // width:100% so the measuring wrapper never collapses while the grid
         // inside it is still waiting for its first measured width.

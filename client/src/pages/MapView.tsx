@@ -12,6 +12,7 @@ import { addCadastralLayers, addTractLayers, tractInfo, TRACT_SOURCE, type Tract
 import { MapLayersPanel } from "../components/MapLayersPanel";
 import { MapShpImport } from "../components/MapShpImport";
 import { useAbstractIndex } from "../components/AbstractPicker";
+import { PHONE_QUERY, useIsPhone } from "../lib/mobile";
 import { countyStateLabel, formatAbstract, rankAbstracts, surveyLabel } from "../lib/abstracts";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, StageBadge, PriorityBadge, ChipList } from "../components/ui";
@@ -149,6 +150,9 @@ export function MapView() {
   // viewport. Nothing remounts — search, filters, hotspots, layers, zoom,
   // position, and popups all carry across the toggle untouched.
   const [fullscreen, setFullscreen] = useState(false);
+  // Phones: the legend folds into a small button so it doesn't cover the map.
+  const phone = useIsPhone();
+  const [legendOpen, setLegendOpen] = useState(() => !window.matchMedia(PHONE_QUERY).matches);
   const [statusFilter, setStatusFilter] = useState("ACTIVE");
   const [fStates, setFStates] = useState<string[]>([]);
   const [fCounties, setFCounties] = useState<string[]>([]);
@@ -1006,7 +1010,7 @@ export function MapView() {
 
       {/* Height is measured to fill down to the footer (no blank space below);
           dvh fallback tracks the real visible viewport before the first measure. */}
-      <div ref={mapWrap} style={{ position: "relative", flex: 1, minWidth: 0, order: 1, height: mapH ? `${mapH}px` : "calc(100dvh - 250px)", minHeight: 320, borderRadius: 6, overflow: "hidden", border: "1px solid var(--border)" }}>
+      <div ref={mapWrap} className="mc-map" style={{ position: "relative", flex: 1, minWidth: 0, order: 1, height: mapH ? `${mapH}px` : "calc(100dvh - 250px)", minHeight: 320, borderRadius: 6, overflow: "hidden", border: "1px solid var(--border)" }}>
         <div ref={mapContainer} style={{ position: "absolute", inset: 0 }} />
         {/* Same collapsible floating Layers control as the Marketplace map —
             one shared component, identical interaction on every map. */}
@@ -1044,7 +1048,11 @@ export function MapView() {
           </button>
         )}
 
-        <div style={{ position: "absolute", left: 12, bottom: 26, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, padding: "8px 12px", fontSize: 12 }}>
+        {phone && !legendOpen ? (
+          <button type="button" className="mc-legend-btn" onClick={() => setLegendOpen(true)} aria-expanded={false}>Legend</button>
+        ) : (
+        <div className="mc-legend" style={{ position: "absolute", left: 12, bottom: 26, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, padding: "8px 12px", fontSize: 12 }}
+          onClick={phone ? () => setLegendOpen(false) : undefined} title={phone ? "Tap to hide the legend" : undefined}>
           {heatActive ? (
             <div style={{ minWidth: 160 }}>
               <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 4 }}>Production intensity · {periodLabelRef.current}</div>
@@ -1067,6 +1075,7 @@ export function MapView() {
             </>
           )}
         </div>
+        )}
 
         {/* Heat hover tooltip — what the colors under the cursor represent. */}
         {heatActive && heatHover && (
@@ -1080,7 +1089,7 @@ export function MapView() {
 
         {/* Overlap chooser */}
         {choices && (
-          <div style={{ position: "absolute", top: 12, right: 12, width: 300, maxWidth: "calc(100% - 320px)", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, boxShadow: "var(--shadow)", padding: 16 }}>
+          <div className="mc-float-panel" style={{ position: "absolute", top: 12, right: 12, width: 300, maxWidth: "calc(100% - 320px)", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, boxShadow: "var(--shadow)", padding: 16 }}>
             <div className="section-head"><h3 style={{ margin: 0 }}>{choices.length} wells here</h3><button className="icon-btn" onClick={() => setChoices(null)}>×</button></div>
             <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Pick the well you meant:</p>
             {choices.map((w) => (
@@ -1092,7 +1101,7 @@ export function MapView() {
         )}
 
         {selected && !choices && (
-          <div style={{ position: "absolute", top: 12, right: 12, width: 320, maxWidth: "calc(100% - 320px)", maxHeight: "calc(100% - 190px)", overflowY: "auto", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, boxShadow: "var(--shadow)", padding: 16 }}>
+          <div className="mc-float-panel" style={{ position: "absolute", top: 12, right: 12, width: 320, maxWidth: "calc(100% - 320px)", maxHeight: "calc(100% - 190px)", overflowY: "auto", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, boxShadow: "var(--shadow)", padding: 16 }}>
             {selected.kind === "well" ? (
               <>
                 <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.leaseName || "Well"} {selected.wellNo ? `#${selected.wellNo}` : ""}</h3><div className="muted" style={{ fontSize: 12 }}>{selected.symbol}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>

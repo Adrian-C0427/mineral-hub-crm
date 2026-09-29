@@ -26,6 +26,11 @@ const TRANSITIONS: { stage: Stage; label: string; hint: string }[] = [
 // Distance (px) the pointer must travel before a press becomes a drag — below it
 // the gesture is treated as a click (navigate to the deal).
 const DRAG_THRESHOLD = 5;
+// Touch: a card only picks up after a press-and-hold, so swiping across cards
+// still scrolls the board and its columns. Moving further than the slop before
+// the hold completes is treated as a scroll.
+const TOUCH_HOLD_MS = 350;
+const TOUCH_SLOP = 10;
 
 
 interface DragState { id: string; w: number; offX: number; offY: number; moved: boolean }
@@ -211,28 +216,60 @@ export function Pipeline() {
     setDrag({ id: deal.id, w: card.width, offX, offY, moved: false });
     if (autoScrollTimer.current == null) autoScrollTimer.current = window.setInterval(autoScrollTick, 16);
 
+    const touch = e.pointerType === "touch";
+    // Mouse/pen drags are live immediately; touch waits for the hold.
+    let armed = !touch;
+    let holdTimer: number | null = null;
+    const promote = () => {
+      document.body.classList.add("pipeline-dragging");
+      setDrag((prev) => (prev ? { ...prev, moved: true } : prev));
+    };
+    // Once a touch drag is armed, stop the page from scrolling under the finger.
+    const blockScroll = (ev: TouchEvent) => { if (armed) ev.preventDefault(); };
+    if (touch) {
+      holdTimer = window.setTimeout(() => {
+        holdTimer = null;
+        armed = true;
+        const el = cloneRef.current;
+        if (el) { el.style.left = `${posRef.current.x - offX}px`; el.style.top = `${posRef.current.y - offY}px`; }
+        promote();
+      }, TOUCH_HOLD_MS);
+      window.addEventListener("touchmove", blockScroll, { passive: false });
+    }
+
+    const cleanup = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      window.removeEventListener("touchmove", blockScroll);
+      if (holdTimer != null) { window.clearTimeout(holdTimer); holdTimer = null; }
+      if (autoScrollTimer.current != null) { window.clearInterval(autoScrollTimer.current); autoScrollTimer.current = null; }
+      document.body.classList.remove("pipeline-dragging");
+    };
     const onMove = (ev: PointerEvent) => {
       const d = dragRef.current;
       if (!d) return;
       posRef.current = { x: ev.clientX, y: ev.clientY };
+      const dist = Math.hypot(ev.clientX - start.x, ev.clientY - start.y);
+      // An un-armed touch that travels is a scroll/swipe — let it go.
+      if (!armed) {
+        if (dist > TOUCH_SLOP) { cleanup(); setDrag(null); setOverCol(null); }
+        return;
+      }
       // Move the floating clone directly — no React re-render of the board.
       const el = cloneRef.current;
       if (el) { el.style.left = `${ev.clientX - d.offX}px`; el.style.top = `${ev.clientY - d.offY}px`; }
       // Promote press → drag once, past the threshold (one state update, then none).
-      if (!d.moved && Math.hypot(ev.clientX - start.x, ev.clientY - start.y) > DRAG_THRESHOLD) {
-        document.body.classList.add("pipeline-dragging");
-        setDrag((prev) => (prev ? { ...prev, moved: true } : prev));
-      }
+      if (!d.moved && dist > DRAG_THRESHOLD) promote();
       // Re-render only when the hovered column/transition actually changes.
       const under = document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null;
       const stage = (under?.closest("[data-stage]")?.getAttribute("data-stage") as Stage | null) ?? null;
       if (stage !== overRef.current) setOverCol(stage);
     };
+    // The browser took the gesture (native scroll) — abandon without opening.
+    const onCancel = () => { cleanup(); setDrag(null); setOverCol(null); };
     const onUp = () => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      if (autoScrollTimer.current != null) { window.clearInterval(autoScrollTimer.current); autoScrollTimer.current = null; }
-      document.body.classList.remove("pipeline-dragging");
+      cleanup();
       window.getSelection()?.removeAllRanges(); // clear any stray text selection from the drag
       const d = dragRef.current;
       const target = overRef.current;
@@ -243,6 +280,7 @@ export function Pipeline() {
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
   }
 
   async function commitMove(deal: DealSummary, col: Stage) {
