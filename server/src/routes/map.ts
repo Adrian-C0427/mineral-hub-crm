@@ -9,7 +9,7 @@ import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal } from "../serializers.js";
 import { TERMINAL_STAGE_KEYS } from "../domain/stages.js";
-import { parseShapefileUpload, MAX_TRACT_FEATURES, type UploadedFile } from "../domain/shpImport.js";
+import { parseShapefileUpload, MAX_TRACT_FEATURES, MAX_ORG_TRACT_BYTES, type UploadedFile } from "../domain/shpImport.js";
 import { env } from "../config.js";
 
 export const mapRouter = Router();
@@ -213,6 +213,16 @@ mapRouter.post(
     const existing = await prisma.mapTract.count({ where: { organizationId: orgId(req) } });
     if (existing + parsed.features.length > MAX_TRACT_FEATURES * 4) {
       throw new HttpError(400, "Imported-tract limit reached for this workspace — delete an older import first");
+    }
+    // …and its stored bytes: GET /tracts ships every row to every map viewer,
+    // so the feature count alone doesn't bound the response (vertex-dense
+    // polygons do).
+    const [{ bytes }] = await prisma.$queryRaw<{ bytes: bigint | null }[]>`
+      SELECT SUM(octet_length(geometry::text) + COALESCE(octet_length(properties::text), 0))::bigint AS bytes
+      FROM "MapTract" WHERE "organizationId" = ${orgId(req)}`;
+    const incoming = parsed.features.reduce((n, f) => n + JSON.stringify(f.geometry).length + JSON.stringify(f.properties).length, 0);
+    if (Number(bytes ?? 0) + incoming > MAX_ORG_TRACT_BYTES) {
+      throw new HttpError(400, "Imported-tract storage limit reached for this workspace — delete an older import or simplify the shapefile");
     }
 
     const importId = randomUUID();
