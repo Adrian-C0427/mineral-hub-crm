@@ -497,6 +497,12 @@ model Deal {
   // Our Price = our acquisition cost (what the property is under contract for).
   // Cost basis for profit: profit = accepted offer - ourPrice - closing costs.
   ourPrice       Float?
+  // Per-acre pricing entered at deal creation. When the matching total above
+  // is left blank, it is derived from these × the deal's NMA/NRA (NMA first).
+  ourCostPerNma  Float?
+  ourCostPerNra  Float?
+  askPricePerNma Float?
+  askPricePerNra Float?
   assetTypes     String[]
   basins         String[]
   formations     String[]
@@ -515,6 +521,9 @@ model Deal {
   originalClosingDate      DateTime?
   findBuyerByDateOverride  DateTime?
   finalClosingDateOverride DateTime?
+  // Contracted days from Date Under Contract to closing. Beyond 30 days, the
+  // extra time extends the auto Find-Buyer-By deadline (see domain/dates.ts).
+  daysToClose              Int?
   // Auto-set when the deal moves to CLOSED; user-editable afterward.
   closedDate               DateTime?
 

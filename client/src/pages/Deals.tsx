@@ -32,6 +32,22 @@ const shortName = (name: string): string => {
   return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1]![0]}.` : name;
 };
 
+/** Numeric sort key for a royalty fraction/percent ("3/16", "1/4", "25%", "0.1875"). */
+function royaltySortValue(r: string | null): number | null {
+  if (!r) return null;
+  const t = r.trim();
+  const frac = t.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
+  if (frac) return Number(frac[2]) ? Number(frac[1]) / Number(frac[2]) : null;
+  const pct = t.match(/^(\d+(?:\.\d+)?)\s*%$/);
+  if (pct) return Number(pct[1]) / 100;
+  const n = Number(t);
+  return Number.isFinite(n) ? (n > 1 ? n / 100 : n) : null;
+}
+
+/** Profit reads green (a loss reads red) wherever it appears in the table. */
+const profitCell = (v: number | null) =>
+  v == null ? "—" : <span className={v < 0 ? "profit-neg" : "profit-pos"}>{money(v)}</span>;
+
 /** Active = still in play; Closed = won; Archived = dead. */
 function inScope(d: DealSummary, scope: Scope): boolean {
   if (scope === "active") return d.stage !== "CLOSED" && d.stage !== "DEAD";
@@ -86,7 +102,13 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
     // Available via Customize View (hidden by default to keep the standing
     // default view unchanged); same rollup-then-own-value logic as NMA.
     { key: "nra", header: "NRA", type: "number", align: "right", value: (d) => d.aggNra ?? d.nra, render: (d) => num(d.aggNra ?? d.nra), defaultHidden: true },
-    { key: "profit", header: "Profit Est.", type: "number", align: "right", value: (d) => d.profitEst, render: (d) => money(d.profitEst) },
+    // Financial columns, available via Customize View. Our Cost uses the package
+    // rollup like NMA/NRA; Buyer Purchase Price is the offer Profit Est. is
+    // computed from (accepted, else best), so the three reconcile.
+    { key: "ourCost", header: "Our Cost", type: "number", align: "right", value: (d) => d.aggOurPrice ?? d.ourPrice, render: (d) => money(d.aggOurPrice ?? d.ourPrice), defaultHidden: true, newlyAdded: true },
+    { key: "buyerPrice", header: "Buyer Purchase Price", type: "number", align: "right", value: (d) => d.buyerPurchasePrice ?? null, render: (d) => money(d.buyerPurchasePrice), defaultHidden: true, newlyAdded: true },
+    { key: "royaltyRate", header: "Royalty Rate", type: "number", align: "right", value: (d) => royaltySortValue(d.royaltyRate), render: (d) => d.royaltyRate || "—", defaultHidden: true, newlyAdded: true },
+    { key: "profit", header: "Profit Est.", type: "number", align: "right", value: (d) => d.profitEst, render: (d) => profitCell(d.profitEst) },
     // Secondary date columns start hidden (Customize View re-enables them):
     // the default view keeps the columns that drive weekly decisions.
     { key: "uc", header: "Under Contract", type: "date", value: (d) => d.dateUnderContract, render: (d) => fmtDate(d.dateUnderContract), defaultHidden: true },
@@ -164,8 +186,8 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
         onExport={() => {
           const rows = filtered.filter((d) => sel.selected.has(d.id));
           downloadCsv(`deals-${new Date().toISOString().slice(0, 10)}.csv`,
-            ["Deal", "Priority", "Stage", "NMA", "NRA", "Profit Est.", "Under Contract", "Find Buyer By", "Current Buyer", "Owner"],
-            rows.map((d) => [d.name, d.priority, d.stage, d.acreageNma ?? "", d.nra ?? "", d.profitEst ?? "", d.dateUnderContract ?? "", d.findBuyerByDate ?? "", d.selectedBuyer?.name ?? "", d.relationshipOwner?.name ?? ""]));
+            ["Deal", "Priority", "Stage", "NMA", "NRA", "Our Cost", "Buyer Purchase Price", "Royalty Rate", "Profit Est.", "Under Contract", "Find Buyer By", "Current Buyer", "Owner"],
+            rows.map((d) => [d.name, d.priority, d.stage, d.acreageNma ?? "", d.nra ?? "", d.aggOurPrice ?? d.ourPrice ?? "", d.buyerPurchasePrice ?? "", d.royaltyRate ?? "", d.profitEst ?? "", d.dateUnderContract ?? "", d.findBuyerByDate ?? "", d.selectedBuyer?.name ?? "", d.relationshipOwner?.name ?? ""]));
         }}
       />
 

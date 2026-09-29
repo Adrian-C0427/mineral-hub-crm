@@ -34,16 +34,19 @@ interface DragState { id: string; w: number; offX: number; offY: number; moved: 
 // Customize View — the buyer tailors what deal cards show + how dense they are.
 // Persisted locally (per user/browser) like the rest of the app's view prefs.
 // ---------------------------------------------------------------------------
-type CardField = "location" | "nra" | "priority" | "profit" | "days" | "buyer" | "dates";
-type CardSort = "priority" | "days" | "profit" | "name";
+type CardField = "location" | "nra" | "nma" | "priority" | "profit" | "ourPrice" | "buyerPrice" | "days" | "buyer" | "dates";
+type CardSort = "priority" | "days" | "profit" | "nma" | "ourPrice" | "buyerPrice" | "name";
 interface PipelinePrefs { density: "comfortable" | "compact"; fields: Record<CardField, boolean>; sort: CardSort }
 const CARD_FIELDS: [CardField, string][] = [
-  ["location", "Location"], ["nra", "NRA"], ["priority", "Priority"], ["profit", "Est. profit"],
+  ["location", "Location"], ["nra", "NRA"], ["nma", "NMA"], ["priority", "Priority"], ["profit", "Est. profit"],
+  ["ourPrice", "Our price"], ["buyerPrice", "Buyer purchase price"],
   ["days", "Days in stage"], ["buyer", "Selected buyer"], ["dates", "Key dates"],
 ];
+// NMA / Our price / Buyer purchase price are opt-in so existing boards keep
+// their current look (loadPrefs merges these defaults into saved prefs).
 const DEFAULT_PREFS: PipelinePrefs = {
   density: "comfortable",
-  fields: { location: true, nra: true, priority: true, profit: true, days: true, buyer: true, dates: true },
+  fields: { location: true, nra: true, nma: false, priority: true, profit: true, ourPrice: false, buyerPrice: false, days: true, buyer: true, dates: true },
   sort: "priority",
 };
 const PREFS_KEY = "mh-pipeline-view:v1";
@@ -64,14 +67,20 @@ interface PipelineFilterState {
   buyerId: string;
   assigneeId: string;
   overdueOnly: boolean;
-  // Acreage ranges (inclusive); empty string = unbounded.
+  // Acreage / price ranges (inclusive); empty string = unbounded.
   nraMin: string; nraMax: string;
   nmaMin: string; nmaMax: string;
+  ourMin: string; ourMax: string;
+  buyerMin: string; buyerMax: string;
 }
 const EMPTY_FILTERS: PipelineFilterState = {
   q: "", priority: "", states: [], counties: [], buyerId: "", assigneeId: "", overdueOnly: false,
-  nraMin: "", nraMax: "", nmaMin: "", nmaMax: "",
+  nraMin: "", nraMax: "", nmaMin: "", nmaMax: "", ourMin: "", ourMax: "", buyerMin: "", buyerMax: "",
 };
+// Package rollups (agg*) represent the card the user sees — display, sort, and filter on those.
+const cardNma = (d: DealSummary) => d.aggAcreageNma ?? d.acreageNma;
+const cardOur = (d: DealSummary) => d.aggOurPrice ?? d.ourPrice;
+const cardBuyer = (d: DealSummary) => d.buyerPurchasePrice ?? null;
 const bound = (s: string): number | null => { const n = Number(s); return s.trim() !== "" && isFinite(n) ? n : null; };
 /** Inclusive range test; deals without the metric are excluded once a bound is set. */
 function inRange(v: number | null | undefined, min: number | null, max: number | null): boolean {
@@ -83,7 +92,9 @@ function activeFilterCount(f: PipelineFilterState): number {
   return (f.q.trim() ? 1 : 0) + (f.priority ? 1 : 0) + (f.states.length ? 1 : 0) +
     (f.counties.length ? 1 : 0) + (f.buyerId ? 1 : 0) + (f.assigneeId ? 1 : 0) + (f.overdueOnly ? 1 : 0) +
     (bound(f.nraMin) !== null || bound(f.nraMax) !== null ? 1 : 0) +
-    (bound(f.nmaMin) !== null || bound(f.nmaMax) !== null ? 1 : 0);
+    (bound(f.nmaMin) !== null || bound(f.nmaMax) !== null ? 1 : 0) +
+    (bound(f.ourMin) !== null || bound(f.ourMax) !== null ? 1 : 0) +
+    (bound(f.buyerMin) !== null || bound(f.buyerMax) !== null ? 1 : 0);
 }
 function applyPipelineFilters(rows: DealSummary[], f: PipelineFilterState): DealSummary[] {
   const needle = f.q.trim().toLowerCase();
@@ -95,17 +106,27 @@ function applyPipelineFilters(rows: DealSummary[], f: PipelineFilterState): Deal
     (!f.buyerId || d.selectedBuyer?.id === f.buyerId) &&
     (!f.assigneeId || d.assignees.some((a) => a.id === f.assigneeId) || d.relationshipOwner?.id === f.assigneeId) &&
     (!f.overdueOnly || d.isOverdue) &&
-    // Package rollups (agg*) represent the card the user sees — filter on those.
     inRange(d.aggNra ?? d.nra, bound(f.nraMin), bound(f.nraMax)) &&
-    inRange(d.aggAcreageNma ?? d.acreageNma, bound(f.nmaMin), bound(f.nmaMax)));
+    inRange(cardNma(d), bound(f.nmaMin), bound(f.nmaMax)) &&
+    inRange(cardOur(d), bound(f.ourMin), bound(f.ourMax)) &&
+    inRange(cardBuyer(d), bound(f.buyerMin), bound(f.buyerMax)));
 }
 
 const PRIORITY_RANK: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
+/** Largest first; deals without the value sink to the bottom. */
+const byDesc = (pick: (d: DealSummary) => number | null | undefined) => (a: DealSummary, b: DealSummary) => {
+  const x = pick(a), y = pick(b);
+  if (x == null || y == null) return x == null ? (y == null ? 0 : 1) : -1;
+  return y - x;
+};
 function sortDeals(rows: DealSummary[], sort: CardSort): DealSummary[] {
   const cmp: Record<CardSort, (a: DealSummary, b: DealSummary) => number> = {
     priority: (a, b) => (PRIORITY_RANK[a.priority] ?? 9) - (PRIORITY_RANK[b.priority] ?? 9) || b.daysInStage - a.daysInStage,
     days: (a, b) => b.daysInStage - a.daysInStage,
     profit: (a, b) => (b.profitEst ?? 0) - (a.profitEst ?? 0),
+    nma: byDesc(cardNma),
+    ourPrice: byDesc(cardOur),
+    buyerPrice: byDesc(cardBuyer),
     name: (a, b) => a.name.localeCompare(b.name),
   };
   return [...rows].sort(cmp[sort]);
@@ -420,6 +441,7 @@ function CardBody({ deal, fields }: { deal: DealSummary; fields: Record<CardFiel
   const isClosing = deal.stage === "CLOSING";
   const isDead = deal.stage === "DEAD";
   const showNra = fields.nra && (deal.aggNra ?? deal.nra) != null;
+  const showNma = fields.nma && cardNma(deal) != null;
   // Short uppercase tag for the head chip (e.g. Minerals → MI), reference-style.
   const typeTag = deal.assetTypes?.[0] ? deal.assetTypes[0].slice(0, 2).toUpperCase() : null;
   return (
@@ -433,11 +455,19 @@ function CardBody({ deal, fields }: { deal: DealSummary; fields: Record<CardFiel
           <span><ChipList items={[...deal.counties, deal.state]} max={3} /></span>
         </div>
       )}
-      {(showNra || fields.profit) && (
+      {(showNra || showNma || fields.profit) && (
         <div className="dc2-nums">
           {showNra && <span className="dc2-nra"><b>{num((deal.aggNra ?? deal.nra)!)}</b> NRA</span>}
-          {showNra && fields.profit && <span className="dc2-sep">·</span>}
+          {showNra && showNma && <span className="dc2-sep">·</span>}
+          {showNma && <span className="dc2-nra"><b>{num(cardNma(deal)!)}</b> NMA</span>}
+          {(showNra || showNma) && fields.profit && <span className="dc2-sep">·</span>}
           {fields.profit && <span className="dc2-money">{money(deal.profitEst)}</span>}
+        </div>
+      )}
+      {(fields.ourPrice || fields.buyerPrice) && (
+        <div className="dc-meta dc2-prices">
+          {fields.ourPrice && <span title="Our price (acquisition cost)">Our: <b>{money(cardOur(deal))}</b></span>}
+          {fields.buyerPrice && <span title="Buyer purchase price — accepted offer, else best offer">Buyer: <b>{money(cardBuyer(deal))}</b></span>}
         </div>
       )}
       {fields.priority && (
@@ -547,6 +577,8 @@ function PipelineFilters({ deals, filters, onChange }: {
                 <input type="number" min={0} style={{ flex: 1, minWidth: 0 }} value={filters.nmaMax} onChange={(e) => onChange({ ...filters, nmaMax: e.target.value })} placeholder="To" aria-label="Maximum NMA" />
               </div>
             </div>
+            <RangeFilter label="Our price range" min={filters.ourMin} max={filters.ourMax} onChange={(ourMin, ourMax) => onChange({ ...filters, ourMin, ourMax })} />
+            <RangeFilter label="Buyer purchase price range" min={filters.buyerMin} max={filters.buyerMax} onChange={(buyerMin, buyerMax) => onChange({ ...filters, buyerMin, buyerMax })} />
             <label className="cv-row cv-check" style={{ justifyContent: "flex-start", padding: 0 }}>
               <input type="checkbox" checked={filters.overdueOnly} onChange={() => onChange({ ...filters, overdueOnly: !filters.overdueOnly })} /> <span>Overdue only</span>
             </label>
@@ -556,6 +588,19 @@ function PipelineFilters({ deals, filters, onChange }: {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** From/To dollar range, laid out like the acreage ranges. */
+function RangeFilter({ label, min, max, onChange }: { label: string; min: string; max: string; onChange: (min: string, max: string) => void }) {
+  return (
+    <div className="field" style={{ marginBottom: 0 }}><label>{label}</label>
+      <div className="row" style={{ gap: 6, flexWrap: "nowrap", alignItems: "center" }}>
+        <input type="number" min={0} style={{ flex: 1, minWidth: 0 }} value={min} onChange={(e) => onChange(e.target.value, max)} placeholder="From $" aria-label={`Minimum ${label.replace(/ range$/, "")}`} />
+        <span className="muted">–</span>
+        <input type="number" min={0} style={{ flex: 1, minWidth: 0 }} value={max} onChange={(e) => onChange(min, e.target.value)} placeholder="To $" aria-label={`Maximum ${label.replace(/ range$/, "")}`} />
+      </div>
     </div>
   );
 }
@@ -603,6 +648,9 @@ function PipelineCustomize({ prefs, onChange }: { prefs: PipelinePrefs; onChange
                 { value: "priority", label: "Priority" },
                 { value: "days", label: "Days in stage" },
                 { value: "profit", label: "Est. profit" },
+                { value: "nma", label: "NMA" },
+                { value: "ourPrice", label: "Our price" },
+                { value: "buyerPrice", label: "Buyer purchase price" },
                 { value: "name", label: "Name A–Z" },
               ]} />
           </div>

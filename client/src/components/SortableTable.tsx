@@ -24,6 +24,10 @@ export interface Column<T> {
   /** Hidden until the user enables it via Customize View. Keeps the default
    *  view scannable while every column stays one click away. */
   defaultHidden?: boolean;
+  /** Added after users may already have saved a layout for this table. With
+   *  defaultHidden, it then starts hidden for them too, instead of appearing
+   *  in a layout saved before the column existed. */
+  newlyAdded?: boolean;
 }
 
 interface Props<T> {
@@ -95,13 +99,23 @@ function compareValues(a: unknown, b: unknown, type: SortType): number {
 // Column WIDTHS are deliberately absent here: columns auto-size to their data
 // on every load, and manual header-drag resizes live only for the session, so
 // widths are never saved. (Old stored `widths` are simply ignored.)
-interface ColPrefs { order: string[]; hidden: string[]; pinned: string[] }
+// `known` = every column key the saved layout has seen, so a column added later
+// can start hidden (its defaultHidden) rather than silently appear.
+interface ColPrefs { order: string[]; hidden: string[]; pinned: string[]; known?: string[] }
 const colKey = (id: string) => `mh-cols:v1:${id}`;
 /** Returns null when the user has never customized this table — callers fall
  *  back to the columns' declared defaults (defaultHidden). */
 function loadColPrefs(id: string): ColPrefs | null {
-  try { const raw = localStorage.getItem(colKey(id)); if (raw) { const p = JSON.parse(raw) as Partial<ColPrefs>; return { order: p.order ?? [], hidden: p.hidden ?? [], pinned: p.pinned ?? [] }; } } catch { /* ignore */ }
+  try { const raw = localStorage.getItem(colKey(id)); if (raw) { const p = JSON.parse(raw) as Partial<ColPrefs>; return { order: p.order ?? [], hidden: p.hidden ?? [], pinned: p.pinned ?? [], known: p.known }; } } catch { /* ignore */ }
   return null;
+}
+/** Hide default-hidden columns the saved layout has never seen. Layouts saved
+ *  before `known` existed are assumed to have seen every column except the
+ *  ones flagged newlyAdded. */
+function reconcileColPrefs<T>(p: ColPrefs, columns: Column<T>[]): ColPrefs {
+  const known = new Set(p.known ?? columns.filter((c) => !c.newlyAdded).map((c) => c.key));
+  const unseenHidden = columns.filter((c) => c.defaultHidden && !c.required && !known.has(c.key) && !p.hidden.includes(c.key)).map((c) => c.key);
+  return { ...p, hidden: [...p.hidden, ...unseenHidden], known: [...new Set([...known, ...columns.map((c) => c.key)])] };
 }
 const MIN_COL_W = 64;
 // Pinned columns get a fixed width so their sticky left-offsets are exact.
@@ -109,14 +123,15 @@ const PIN_DEFAULT_W = 160;
 
 function useColumnPrefs<T>(customizeId: string | undefined, columns: Column<T>[]) {
   // Fresh tables start from the columns' declared defaults; saved prefs win.
-  const defaults = (): ColPrefs => ({ order: [], hidden: columns.filter((c) => c.defaultHidden && !c.required).map((c) => c.key), pinned: [] });
-  const [prefs, setPrefs] = useState<ColPrefs>(() => (customizeId ? loadColPrefs(customizeId) ?? defaults() : { order: [], hidden: [], pinned: [] }));
+  const defaults = (): ColPrefs => ({ order: [], hidden: columns.filter((c) => c.defaultHidden && !c.required).map((c) => c.key), pinned: [], known: columns.map((c) => c.key) });
+  const load = (id: string): ColPrefs => { const saved = loadColPrefs(id); return saved ? reconcileColPrefs(saved, columns) : defaults(); };
+  const [prefs, setPrefs] = useState<ColPrefs>(() => (customizeId ? load(customizeId) : { order: [], hidden: [], pinned: [] }));
   // Session-only manual widths: dropped on reload/remount so every fresh view
   // starts from automatic content-based sizing.
   const [widths, setWidths] = useState<Record<string, number>>({});
   // Reload when the table identity changes (e.g. remounted for another list).
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (customizeId) setPrefs(loadColPrefs(customizeId) ?? defaults()); }, [customizeId]);
+  useEffect(() => { if (customizeId) setPrefs(load(customizeId)); }, [customizeId]);
   useEffect(() => { if (customizeId) { try { localStorage.setItem(colKey(customizeId), JSON.stringify(prefs)); } catch { /* ignore */ } } }, [customizeId, prefs]);
 
   // Apply the saved order (unknown/new columns keep their natural position at the end).

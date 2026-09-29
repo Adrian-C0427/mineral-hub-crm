@@ -4,6 +4,8 @@ import { DEADLINE_RULES } from "../config.js";
  * SINGLE SOURCE OF TRUTH for deadline math.
  *
  * Find Buyer By  = Date Under Contract + 15 calendar days  (override wins)
+ *                  + every contracted day to close beyond 30
+ *                  (Days to Close 60 → contract + 45: still 15 days before closing)
  * Final Closing  = Original Closing    + 15 calendar days  (override wins)
  *
  * Every consumer (priority calc, banners, tables, cards, reports) MUST call
@@ -15,6 +17,8 @@ export interface DealDateInputs {
   originalClosingDate: Date | null;
   findBuyerByDateOverride: Date | null;
   finalClosingDateOverride: Date | null;
+  /** Contracted days to close; null/absent = the standard 30-day close. */
+  daysToClose?: number | null;
 }
 
 export interface ResolvedDealDates {
@@ -37,9 +41,15 @@ export function addCalendarDays(date: Date, days: number): Date {
   return d;
 }
 
+/** Calendar days from contract to the auto Find-Buyer-By for a given close window. */
+export function findBuyerByOffsetDays(daysToClose: number | null | undefined): number {
+  const extra = daysToClose != null ? Math.max(0, daysToClose - DEADLINE_RULES.STANDARD_DAYS_TO_CLOSE) : 0;
+  return DEADLINE_RULES.FIND_BUYER_BY_DAYS_AFTER_CONTRACT + extra;
+}
+
 export function resolveDealDates(deal: DealDateInputs): ResolvedDealDates {
   const findBuyerByAuto = deal.dateUnderContract
-    ? addCalendarDays(deal.dateUnderContract, DEADLINE_RULES.FIND_BUYER_BY_DAYS_AFTER_CONTRACT)
+    ? addCalendarDays(deal.dateUnderContract, findBuyerByOffsetDays(deal.daysToClose))
     : null;
 
   const finalClosingAuto = deal.originalClosingDate

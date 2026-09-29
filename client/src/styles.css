@@ -2638,6 +2638,8 @@ body.pipeline-dragging, body.pipeline-dragging * { user-select: none !important;
 }
 .dc2-nums { display: flex; align-items: center; gap: 10px; margin-top: 9px; font-size: 11.5px; color: var(--text-dim); }
 .dc2-nums b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
+.dc2-prices { margin-top: 5px; }
+.dc2-prices b { color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
 .dc2-sep { opacity: .5; }
 .dc2-money { font-size: 12.5px; font-weight: 600; color: var(--green); font-variant-numeric: tabular-nums; }
 .dc2-foot {
@@ -3551,6 +3553,19 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .nd-timeline { display: grid; grid-template-columns: 1fr 2fr; gap: 14px; }
 .nd-basics .field, .nd-grid3 .field, .nd-timeline .field { margin: 0; }
 @media (max-width: 700px) { .nd-grid3 { grid-template-columns: 1fr; } .nd-basics, .nd-timeline { grid-template-columns: 1fr; } }
+/* Profit figures in tables: green for a gain, red for a loss. */
+.profit-pos { color: var(--green); font-weight: 600; font-variant-numeric: tabular-nums; }
+.profit-neg { color: var(--red); font-weight: 600; font-variant-numeric: tabular-nums; }
+/* New Deal: per-acre pricing note, Days to Close presets + custom, derived Find Buyer By. */
+.nd-calc { font-size: 11.5px; color: var(--text-faint); margin-top: 5px; line-height: 1.35; }
+.nd-calc.auto { color: var(--green); }
+.nd-dtc { display: flex; flex-direction: column; gap: 6px; }
+.nd-dtc .seg-control { padding: 2px; justify-content: space-between; }
+.nd-dtc .seg { padding: 5px 0; flex: 1; justify-content: center; font-size: 12px; }
+.nd-dtc .seg:hover:not(.active) { background: transparent; }
+.nd-dtc .seg.active:hover { background: var(--accent); }
+.nd-derived { min-height: 38px; display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 8px 12px;
+  border: 1px dashed var(--border); border-radius: var(--radius); background: var(--panel-2); font-size: 13px; }
 /* Contract timeline — relative-time indicators (reference). */
 .ctl-row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex: 1; min-width: 0; }
 .ctl-when { font-size: 11px; color: var(--text-faint); white-space: nowrap; }

@@ -36,6 +36,14 @@ export interface DealSummary {
   docFolders?: string[];
   askPrice: number | null;
   ourPrice: number | null;
+  ourCostPerNma?: number | null;
+  ourCostPerNra?: number | null;
+  askPricePerNma?: number | null;
+  askPricePerNra?: number | null;
+  /** Contracted days to close; beyond 30 extends the auto Find Buyer By. */
+  daysToClose?: number | null;
+  /** Accepted offer, else best offer (the basis of profitEst); null = no offers. */
+  buyerPurchasePrice?: number | null;
   assetTypes: string[];
   basins: string[];
   formations: string[];

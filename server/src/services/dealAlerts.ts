@@ -36,7 +36,7 @@ export async function runDealAlertSweep(now = new Date()): Promise<{ overdue: nu
     where: { stage: { notIn: [...TERMINAL_STAGE_KEYS] }, organizationId: { not: null } },
     select: {
       id: true, name: true, organizationId: true, relationshipOwnerId: true, selectedBuyerId: true,
-      dateUnderContract: true, originalClosingDate: true, findBuyerByDateOverride: true, finalClosingDateOverride: true,
+      dateUnderContract: true, originalClosingDate: true, findBuyerByDateOverride: true, finalClosingDateOverride: true, daysToClose: true,
     },
   });
   let overdue = 0;
