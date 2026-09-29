@@ -11,16 +11,8 @@ import { OperatorSelect } from "./OperatorSelect";
 import { Select } from "./Select";
 import { royaltyOptions } from "../lib/royalty";
 import { totalFromPerAcre, findBuyerByOffsetDays } from "../lib/perAcre";
-import { money, fmtDate } from "../lib/format";
-
-const DAYS_TO_CLOSE_PRESETS = [30, 40, 50, 60, 75] as const;
-
-/** YYYY-MM-DD + n calendar days (UTC, matching the server's date math). */
-function addDaysIso(iso: string, n: number): string {
-  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + n);
-  return d.toISOString().slice(0, 10);
-}
+import { fmtDate } from "../lib/format";
+import { addDaysIso, applyAcreageEdit, AcreageNote, DaysToCloseField, PerAcreNote, type AcreSource } from "./DealEconomics";
 
 // An additional asset behaves exactly like a standalone deal record — the same
 // fields, dependencies, and required fields. Its contract timeline defaults to
@@ -45,7 +37,7 @@ function assetMissing(a: AssetRow): string[] {
   if (!a.assetTypes.length) m.push("Asset Type");
   // Either acreage measurement satisfies the requirement — unleased acreage
   // has no lease royalty interest, so NRA may not apply and NMA stands in.
-  if (a.nra.trim() === "" && a.acreageNma.trim() === "") m.push("NRA or NMA");
+  if (a.nra.trim() === "" && a.acreageNma.trim() === "") m.push("NMA or NRA");
   if (a.ourPrice.trim() === "") m.push("Our Price");
   if (!a.sameTimeline && !a.dateUnderContract) m.push("Date Under Contract");
   return m;
@@ -76,6 +68,15 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
   // Original closing follows Date Under Contract + Days to Close until the user
   // picks a closing date themselves.
   const [closingManual, setClosingManual] = useState(false);
+  // NMA ↔ NRA follow each other through the royalty rate; this is the one the
+  // user typed (the other is calculated).
+  const [acreSource, setAcreSource] = useState<AcreSource>(null);
+  const acre = { nma: f.acreageNma, nra: f.nra, royaltyRate: f.royaltyRate, source: acreSource };
+  const editAcreage = (edit: { nma?: string; nra?: string; royaltyRate?: string }) => {
+    const next = applyAcreageEdit(acre, edit);
+    setAcreSource(next.source);
+    setF((p) => ({ ...p, acreageNma: next.nma, nra: next.nra, royaltyRate: next.royaltyRate }));
+  };
   const [states, setStates] = useState<string[]>([]);
   const [counties, setCounties] = useState<string[]>([]);
   const [basins, setBasins] = useState<string[]>([]);
@@ -113,7 +114,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
   if (!counties.length) missing.push("County");
   if (!abstractIds.length) missing.push("Abstract");
   if (!assetTypes.length) missing.push("Asset Type");
-  if (f.nra.trim() === "" && f.acreageNma.trim() === "") missing.push("NRA or NMA");
+  if (f.nra.trim() === "" && f.acreageNma.trim() === "") missing.push("NMA or NRA");
   if (ourPrice == null) missing.push("Acquisition Cost");
   if (!f.dateUnderContract) missing.push("Date Under Contract");
 
@@ -206,7 +207,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
     >
       <div className="modal-sec">Basics</div>
       <div className="nd-basics">
-        <div className="field" style={{ gridColumn: "1 / -1" }}><label>Deal name {req}</label><input value={f.name} onChange={set("name")} autoFocus placeholder="e.g. Terry Casey — Reeves Co." /></div>
+        <div className="field" style={{ gridColumn: "1 / -1" }}><label>Deal name {req}</label><input value={f.name} onChange={set("name")} autoFocus placeholder="e.g. Terry Casey · Reeves Co." /></div>
         <div className="field"><label>Asset type {req}</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
         <div className="field"><label>Date under contract {req}</label><DateField value={f.dateUnderContract} onChange={(v) => setF((p) => ({ ...p, dateUnderContract: v }))} /></div>
       </div>
@@ -226,17 +227,23 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
         </div>
       </div>
 
-      <div className="modal-sec">Economics <span className="modal-sec-hint">— NRA or NMA: at least one required (NMA alone for unleased acreage)</span></div>
+      <div className="modal-sec">Economics <span className="modal-sec-hint">· NMA or NRA: at least one required (NMA alone for unleased acreage); with a royalty rate, either one calculates the other</span></div>
       <div className="nd-grid3">
-        <div className="field"><label title="Net Royalty Acres — required unless NMA is provided">NRA {req}</label><input type="number" value={f.nra} onChange={set("nra")} placeholder="0.00" /></div>
-        <div className="field"><label title="Net Mineral Acres — required unless NRA is provided">NMA {req}</label><input type="number" value={f.acreageNma} onChange={set("acreageNma")} placeholder="0.00" /></div>
-        <div className="field"><label>RRC</label><input value={f.rrc} onChange={set("rrc")} placeholder="RRC Number" /></div>
-        <div className="field"><label>Royalty rate</label>
-          <Select value={f.royaltyRate} onChange={(v) => setF((p) => ({ ...p, royaltyRate: v }))} options={royaltyOptions()} clearable placeholder="Select royalty rate…" ariaLabel="Royalty rate" />
+        <div className="field"><label title="Converts between NMA and NRA (NRA = NMA × royalty ÷ 1/8)">Royalty rate</label>
+          <Select value={f.royaltyRate} onChange={(v) => editAcreage({ royaltyRate: v })} options={royaltyOptions()} clearable placeholder="Select royalty rate…" ariaLabel="Royalty rate" />
         </div>
+        <div className="field"><label title="Net Mineral Acres · required unless NRA is provided">NMA {req}</label>
+          <input type="number" value={f.acreageNma} onChange={(e) => editAcreage({ nma: e.target.value })} placeholder="0.00" aria-label="NMA" />
+          <AcreageNote s={acre} field="nma" />
+        </div>
+        <div className="field"><label title="Net Royalty Acres · required unless NMA is provided">NRA {req}</label>
+          <input type="number" value={f.nra} onChange={(e) => editAcreage({ nra: e.target.value })} placeholder="0.00" aria-label="NRA" />
+          <AcreageNote s={acre} field="nra" />
+        </div>
+        <div className="field"><label>RRC</label><input value={f.rrc} onChange={set("rrc")} placeholder="RRC Number" /></div>
       </div>
 
-      <div className="modal-sec">Acquisition cost <span className="modal-sec-hint">— enter the total, or a per-acre cost and it's calculated from the acreage above</span></div>
+      <div className="modal-sec">Acquisition cost <span className="modal-sec-hint">· enter the total, or a per-acre cost and it's calculated from the acreage above</span></div>
       <div className="nd-grid3">
         <div className="field"><label>Our cost per NMA</label><MoneyInput decimals={2} value={f.ourCostPerNma} onChange={(v) => setF((p) => ({ ...p, ourCostPerNma: v }))} ariaLabel="Our cost per NMA" placeholder="0.00" /></div>
         <div className="field"><label>Our cost per NRA</label><MoneyInput decimals={2} value={f.ourCostPerNra} onChange={(v) => setF((p) => ({ ...p, ourCostPerNra: v }))} ariaLabel="Our cost per NRA" placeholder="0.00" /></div>
@@ -246,7 +253,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
         </div>
       </div>
 
-      <div className="modal-sec">Asking price <span className="modal-sec-hint">— to buyers; enter the total, or a per-acre price</span></div>
+      <div className="modal-sec">Asking price <span className="modal-sec-hint">· to buyers; enter the total, or a per-acre price</span></div>
       <div className="nd-grid3">
         <div className="field"><label>Asking price per NMA</label><MoneyInput decimals={2} value={f.askPricePerNma} onChange={(v) => setF((p) => ({ ...p, askPricePerNma: v }))} ariaLabel="Asking price per NMA" placeholder="0.00" /></div>
         <div className="field"><label>Asking price per NRA</label><MoneyInput decimals={2} value={f.askPricePerNra} onChange={(v) => setF((p) => ({ ...p, askPricePerNra: v }))} ariaLabel="Asking price per NRA" placeholder="0.00" /></div>
@@ -259,22 +266,14 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
 
       <div className="modal-sec">Timeline &amp; notes</div>
       <div className="nd-grid3">
-        <div className="field"><label title="Days from Date Under Contract to closing — pick a preset or type any number">Days to close</label>
-          <div className="nd-dtc">
-            <div className="seg-control" role="group" aria-label="Days to close presets">
-              {DAYS_TO_CLOSE_PRESETS.map((d) => (
-                <button type="button" key={d} className={`seg ${daysToClose === d ? "active" : ""}`} aria-pressed={daysToClose === d}
-                  onClick={() => setF((p) => ({ ...p, daysToClose: daysToClose === d ? "" : String(d) }))}>{d}</button>
-              ))}
-            </div>
-            <input type="number" min={1} max={3650} step={1} value={f.daysToClose} onChange={set("daysToClose")} placeholder="Other" aria-label="Days to close" />
-          </div>
+        <div className="field"><label title="Days from Date Under Contract to closing · pick a preset or type any number">Days to close</label>
+          <DaysToCloseField value={f.daysToClose} onChange={(v) => setF((p) => ({ ...p, daysToClose: v }))} />
         </div>
-        <div className="field"><label title="Deadline to secure a buyer: Date Under Contract + 15 days, plus every day to close beyond 30">Find buyer by</label>
+        <div className="field"><label title="Deadline to secure a buyer: Date Under Contract + every day to close beyond 30 (30 → 0 days, 60 → 30 days, 75 → 45 days)">Find buyer by</label>
           <div className="nd-derived" aria-live="polite">
             {findBuyerBy
               ? <><strong>{fmtDate(findBuyerBy)}</strong><span className="muted"> · contract + {findBuyerByOffsetDays(daysToClose)} days</span></>
-              : <span className="muted">Set Date Under Contract to calculate</span>}
+              : <span className="muted">{daysToClose ? "Set Date Under Contract to calculate" : "Set Date Under Contract and Days to Close"}</span>}
           </div>
         </div>
         <div className="field"><label title={closingManual ? undefined : "Follows Date Under Contract + Days to Close until you pick a date"}>Original closing date</label>
@@ -334,7 +333,8 @@ function AssetCard({ index, a, req, parentStates, parentCounties, onPatch, onRem
           labels={{ state: <>State {req}</>, county: <>County {req}</>, abstract: <>Abstract {req}</> }}
         />
         <div className="field"><label>Asset Type {req}</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={a.assetTypes} onChange={(v) => onPatch({ assetTypes: v })} placeholder="Search asset types…" /></div>
-        <div className="field"><label title="Net Royalty Acres — required unless NMA is provided">NRA {req}</label><input type="number" value={a.nra} onChange={(e) => onPatch({ nra: e.target.value })} /></div>
+        <div className="field"><label title="Net Mineral Acres · required unless NRA is provided">NMA {req}</label><input type="number" value={a.acreageNma} onChange={(e) => onPatch({ acreageNma: e.target.value })} /></div>
+        <div className="field"><label title="Net Royalty Acres · required unless NMA is provided">NRA {req}</label><input type="number" value={a.nra} onChange={(e) => onPatch({ nra: e.target.value })} /></div>
         <div className="field"><label>Our Price {req}</label><input type="number" value={a.ourPrice} onChange={(e) => onPatch({ ourPrice: e.target.value })} /></div>
         <div className="field"><label>Basin</label><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(a.counties))} value={a.basins} onChange={(v) => onPatch({ basins: v })} placeholder="Search basins…" /></div>
         <div className="field"><label>Formation</label><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(a.counties))} value={a.formations} onChange={(v) => onPatch({ formations: v })} placeholder="Search formations…" /></div>
@@ -343,7 +343,6 @@ function AssetCard({ index, a, req, parentStates, parentCounties, onPatch, onRem
           <OperatorSelect states={a.states.length ? a.states : parentStates} counties={a.counties.length ? a.counties : parentCounties} value={a.operator} onChange={(v) => onPatch({ operator: v })} ariaLabel={`Deal ${index + 1} operator`} />
         </div>
         <div className="field"><label>RRC</label><input value={a.rrc} onChange={(e) => onPatch({ rrc: e.target.value })} placeholder="RRC Number" /></div>
-        <div className="field"><label title="Net Mineral Acres — required unless NRA is provided">NMA {req}</label><input type="number" value={a.acreageNma} onChange={(e) => onPatch({ acreageNma: e.target.value })} /></div>
         <div className="field"><label>Ask Price (to buyers)</label><input type="number" value={a.askPrice} onChange={(e) => onPatch({ askPrice: e.target.value })} /></div>
       </div>
       {/* Contract timeline: shared with the deal by default; untick for its own. */}
@@ -356,19 +355,6 @@ function AssetCard({ index, a, req, parentStates, parentCounties, onPatch, onRem
           <div className="field" style={{ marginBottom: 0 }}><label>Date Under Contract {req}</label><DateField value={a.dateUnderContract} onChange={(v) => onPatch({ dateUnderContract: v })} /></div>
         )}
       </div>
-    </div>
-  );
-}
-
-/** Explains an auto-calculated total, or that a typed total overrides it. */
-function PerAcreNote({ auto, manual, acres, rate }: {
-  auto: { total: number; basis: "NMA" | "NRA" } | null; manual: boolean; acres: number | null; rate: number | null;
-}) {
-  if (!auto) return null;
-  if (manual) return <div className="nd-calc">Manual total — overrides the per-acre {money(auto.total)}</div>;
-  return (
-    <div className="nd-calc auto">
-      Auto: {acres?.toLocaleString("en-US")} {auto.basis} × {money(rate, { cents: true })} = <strong>{money(auto.total)}</strong>
     </div>
   );
 }

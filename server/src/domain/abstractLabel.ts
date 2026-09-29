@@ -1,6 +1,8 @@
 /**
- * The one way the app identifies an abstract to a person:
- *   "Abstract 15 — J Smith Survey — Leon County, Texas"
+ * How the app identifies an abstract to a person:
+ *   "Abstract 15 · J Smith Survey · Leon County, Texas"   (formatAbstract)
+ *   "A-15 · J Smith Survey"   (abstractShortLabel — pickers/selectors, where
+ *                              the county is already chosen)
  * Abstract numbers arrive in several shapes ("A-15" GIS labels, "15" research
  * cells, "ABST 015"), so everything goes through abstractNumber() first.
  * Mirrors client/src/lib/abstracts.ts — keep the two in step.
@@ -38,11 +40,12 @@ export function abstractSortKey(raw: string | null | undefined): number {
 
 // Grantee names that are organizations/grants, not "Last, First" people.
 const NON_PERSON = /\b(SURVEY|SURV|LEAGUE|LABOR|GRANT|SECTION|SEC|BLOCK|BLK|RR|RY|CO|INC|CSL|SCH|SCHOOL|LAND|CITY|COUNTY|STATE|UNIV|UNIVERSITY|HEIRS|ESTATE)\b/i;
-const titleWord = (w: string) => (w.length <= 1 || /^[A-Z]\.?$/i.test(w) ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1).toLowerCase());
+// A lone initial reads as one: "W" → "W.".
+const titleWord = (w: string) => (/^[A-Z]\.?$/i.test(w) ? `${w[0].toUpperCase()}.` : w.length <= 1 ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1).toLowerCase());
 
 /**
  * Survey names are stored as recorded — "WOODS, R", "S SANCHEZ SUR",
- * "SA&MG RR CO". People read "R Woods Survey": flip "Last, First" names,
+ * "SA&MG RR CO". People read "R. Woods Survey": flip "Last, First" names,
  * title-case them, and make every name read as a survey.
  */
 export function surveyLabel(survey: string | null | undefined): string {
@@ -68,12 +71,18 @@ export function countyStateLabel(county: string | null | undefined, state: strin
 
 export interface AbstractParts { abstract: string | null | undefined; survey?: string | null; county?: string | null; state?: string | null }
 
-/** "Abstract 15 — J Dunn Survey — Leon County, Texas" (parts that are unknown are omitted). */
+/** "Abstract 15 · J Dunn Survey · Leon County, Texas" (parts that are unknown are omitted). */
 export function formatAbstract(p: AbstractParts): string {
   const num = abstractNumber(p.abstract);
   return [num ? `Abstract ${num}` : "Abstract", surveyLabel(p.survey), countyStateLabel(p.county, p.state)]
     .filter(Boolean)
-    .join(" — ");
+    .join(" · ");
+}
+
+/** "A-3 · W Dwight Survey" — abstract selectors, where the county is already chosen. */
+export function abstractShortLabel(p: { abstract: string | null | undefined; survey?: string | null }): string {
+  const num = abstractNumber(p.abstract);
+  return [num ? `A-${num}` : "Abstract", surveyLabel(p.survey)].filter(Boolean).join(" · ");
 }
 
 /**
@@ -89,7 +98,7 @@ export function rankAbstracts<T>(items: readonly T[], query: string, get: (t: T)
   const q = query.trim().toLowerCase();
   const digits = q.match(/\d+/)?.[0]?.replace(/^0+(?=\d)/, "") ?? "";
   // Words other than an "abstract"/"a-" prefix must also match the item's text.
-  const words = q.replace(/\d+[a-z]?/g, " ").split(/[\s,.#—-]+/)
+  const words = q.replace(/\d+[a-z]?/g, " ").split(/[\s,.#—·-]+/)
     .filter((w) => w && !/^(a|ab|abs|abst|abstr|abstra|abstrac|abstract)$/.test(w));
   const scored: { t: T; tier: number; key: number; text: string }[] = [];
   for (const t of items) {

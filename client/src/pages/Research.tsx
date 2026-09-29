@@ -690,7 +690,7 @@ function ResearchAbstractFilter({ options, states, counties, value, onChange }: 
       if (locs.length === 1) { m[id] = absIndex.label(id, locs[0].county, locs[0].state); continue; }
       const cs = [...new Set(locs.map((l) => l.county))].sort();
       const ss = [...new Set(locs.map((l) => stateName(l.state)))];
-      m[id] = `Abstract ${id.replace(/^a\s*-\s*/i, "")} — ${cs.length <= 3 ? `${cs.join(", ")} Counties` : `${cs.length} counties`}, ${ss.join(" / ")}`;
+      m[id] = `Abstract ${id.replace(/^a\s*-\s*/i, "")} · ${cs.length <= 3 ? `${cs.join(", ")} Counties` : `${cs.length} counties`}, ${ss.join(" / ")}`;
     }
     return m;
   }, [scoped, absIndex]);
@@ -1043,7 +1043,7 @@ function RankingsTab({ qs, opts, compareOff, onDrill, dataset }: { qs: string; o
         {loading && !data ? <Spinner /> : top.length === 0 ? <p className="muted">No activity in this period.</p> : (
           <div className="rk-bars">
             {top.map((r) => (
-              <div key={r.key} className="rk-bar-row" onClick={() => drillKey(r.key)} title={`${r.name} — ${r.count}`}>
+              <div key={r.key} className="rk-bar-row" onClick={() => drillKey(r.key)} title={`${r.name} · ${r.count}`}>
                 <div className="rk-bar-name">{r.name}</div>
                 <div className="rk-bar-track">
                   <div className="rk-bar-fill" style={{ width: `${(r.count / niceMax) * 100}%`, background: barColor }} />

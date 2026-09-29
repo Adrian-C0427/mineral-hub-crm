@@ -1002,7 +1002,7 @@ researchRouter.post(
         await prisma.activityLog.create({
           data: {
             organizationId: org, eventType: "BUYER_RESEARCH_IMPORT", buyerId: buyer.id, actorUserId: req.user!.id,
-            summary: `Buyer created from research: ${proposal.companyName} — ${proposal.transactionCount} transaction(s) across ${proposal.counties.join(", ") || "—"}`,
+            summary: `Buyer created from research: ${proposal.companyName} · ${proposal.transactionCount} transaction(s) across ${proposal.counties.join(", ") || "—"}`,
           },
         });
         created++;

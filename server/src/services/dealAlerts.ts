@@ -111,7 +111,7 @@ export async function runDealAlertSweep(now = new Date()): Promise<{ overdue: nu
         userId: t.assignedToId ?? t.createdById,
         type: "task_due",
         title: overdueDays > 0 ? `Task overdue: ${(t.title ?? t.body).slice(0, 80)}` : `Task due: ${(t.title ?? t.body).slice(0, 80)}`,
-        body: `On ${who}${overdueDays > 0 ? ` — ${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue.` : " — due today."}`,
+        body: `On ${who}${overdueDays > 0 ? ` · ${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue.` : " · due today."}`,
         link,
       },
     });

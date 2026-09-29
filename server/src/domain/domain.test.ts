@@ -7,10 +7,10 @@ import { winRate, netProfit, grossFee, closeRate } from "./metrics.js";
 const d = (s: string) => new Date(s + "T00:00:00Z");
 
 describe("dates resolver", () => {
-  it("auto-computes Find Buyer By as contract + 15 days", () => {
+  it("auto-computes Find Buyer By as contract + days to close beyond 30", () => {
     const r = resolveDealDates({
       dateUnderContract: d("2026-06-01"),
-      originalClosingDate: null,
+      originalClosingDate: d("2026-07-16"), // 45-day close → contract + 15
       findBuyerByDateOverride: null,
       finalClosingDateOverride: null,
     });
@@ -32,6 +32,7 @@ describe("dates resolver", () => {
     const r = resolveDealDates({
       dateUnderContract: d("2026-06-01"),
       originalClosingDate: null,
+      daysToClose: 45,
       findBuyerByDateOverride: d("2026-06-10"),
       finalClosingDateOverride: null,
     });

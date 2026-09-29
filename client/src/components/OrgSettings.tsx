@@ -394,7 +394,7 @@ function ResetPasswordModal({ member, onClose, onDone, onError }: { member: Memb
 
   return (
     <ConfirmDialog
-      title={`Reset password — ${member.name}`}
+      title={`Reset password · ${member.name}`}
       message={temp ? (
         <div>
           <p style={{ marginTop: 0 }}>Temporary password created. Share it securely with <strong>{member.name}</strong>; they'll be required to change it at next login.</p>

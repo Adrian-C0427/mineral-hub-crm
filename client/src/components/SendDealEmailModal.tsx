@@ -71,7 +71,7 @@ export function SendDealEmailModal({
           {result.skipped.length > 0 && (
             <div style={{ marginTop: 8 }}>
               <strong>Skipped ({result.skipped.length}):</strong>
-              <ul>{result.skipped.map((s, i) => <li key={i}>{s.buyer} — {s.reason}</li>)}</ul>
+              <ul>{result.skipped.map((s, i) => <li key={i}>{s.buyer} · {s.reason}</li>)}</ul>
             </div>
           )}
         </>

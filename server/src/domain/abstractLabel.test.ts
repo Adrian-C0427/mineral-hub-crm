@@ -1,14 +1,21 @@
 import { describe, it, expect } from "vitest";
-import { abstractNumber, formatAbstract, rankAbstracts, surveyLabel } from "./abstractLabel.js";
+import { abstractNumber, abstractShortLabel, formatAbstract, rankAbstracts, surveyLabel } from "./abstractLabel.js";
 
 describe("formatAbstract", () => {
   it("identifies an abstract by number, survey, county and state", () => {
     expect(formatAbstract({ abstract: "A-15", survey: "SMITH, J", county: "Leon", state: "TX" }))
-      .toBe("Abstract 15 — J Smith Survey — Leon County, Texas");
+      .toBe("Abstract 15 · J. Smith Survey · Leon County, Texas");
   });
   it("omits unknown parts but never shows a bare number", () => {
-    expect(formatAbstract({ abstract: "15", county: "Freestone", state: "TX" })).toBe("Abstract 15 — Freestone County, Texas");
+    expect(formatAbstract({ abstract: "15", county: "Freestone", state: "TX" })).toBe("Abstract 15 · Freestone County, Texas");
     expect(formatAbstract({ abstract: "15" })).toBe("Abstract 15");
+  });
+});
+
+describe("abstractShortLabel", () => {
+  it("reads A-number · survey, without the county", () => {
+    expect(abstractShortLabel({ abstract: "3", survey: "DWIGHT, W" })).toBe("A-3 · W. Dwight Survey");
+    expect(abstractShortLabel({ abstract: "A-015" })).toBe("A-15");
   });
 });
 
@@ -22,9 +29,9 @@ describe("abstractNumber", () => {
 
 describe("surveyLabel", () => {
   it("flips Last, First names and reads as a survey", () => {
-    expect(surveyLabel("WOODS, R")).toBe("R Woods Survey");
-    expect(surveyLabel("S SANCHEZ SUR")).toBe("S Sanchez Survey");
-    expect(surveyLabel("SANCHEZ, S LEAGUE")).toBe("S Sanchez League");
+    expect(surveyLabel("WOODS, R")).toBe("R. Woods Survey");
+    expect(surveyLabel("S SANCHEZ SUR")).toBe("S. Sanchez Survey");
+    expect(surveyLabel("SANCHEZ, S LEAGUE")).toBe("S. Sanchez League");
     expect(surveyLabel("SA&MG RR CO")).toBe("SA&MG RR CO Survey");
   });
 });

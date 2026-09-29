@@ -13,14 +13,14 @@ export function royaltyValue(r: string | null | undefined): number | null {
   return Number.isFinite(n) ? (n > 1 ? n / 100 : n) : null;
 }
 
-/** "3/16 — 18.75%" (the fraction alone when it can't be read as a number). */
+/** "3/16 · 18.75%" (the fraction alone when it can't be read as a number). */
 export function royaltyLabel(r: string | null | undefined): string {
   const t = (r ?? "").trim();
   if (!t) return "";
   const v = royaltyValue(t);
   if (v == null) return t;
   const pct = `${Number((v * 100).toFixed(2))}%`;
-  return t.endsWith("%") ? pct : `${t} — ${pct}`;
+  return t.endsWith("%") ? pct : `${t} · ${pct}`;
 }
 
 /** Select options for a royalty-rate dropdown; keeps a stored non-standard value selectable. */

@@ -3,13 +3,12 @@ import dotenv from "dotenv";
 dotenv.config();
 
 /**
- * Business constants. Deliberately centralized so the 5/10/15-day rules are not
+ * Business constants. Deliberately centralized so the deadline/priority rules are not
  * scattered magic numbers across the codebase.
  */
 export const DEADLINE_RULES = {
-  /** Find Buyer By = Date Under Contract + N calendar days. */
-  FIND_BUYER_BY_DAYS_AFTER_CONTRACT: 15,
-  /** The close window the 15-day rule assumes; longer closes extend Find Buyer By. */
+  /** Find Buyer By = Date Under Contract + (Days to Close − N): a buyer must be
+   *  secured N days before closing (30 → 0 days, 60 → 30 days, 75 → 45 days). */
   STANDARD_DAYS_TO_CLOSE: 30,
   /** Final Closing = Original Closing + N calendar days. */
   FINAL_CLOSING_DAYS_AFTER_ORIGINAL: 15,

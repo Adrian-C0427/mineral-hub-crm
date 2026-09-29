@@ -363,7 +363,7 @@ export function ContactModal({ contact, users, onClose, onSaved, onDeleted }: {
         <div className="field"><label>Source</label><input value={f.source} onChange={(e) => set("source")(e.target.value)} placeholder="Mailer, cold call, referral, web…" /></div>
       </div>
 
-      <div className="modal-sec">Coverage <span className="modal-sec-hint">— where this contact's minerals are</span></div>
+      <div className="modal-sec">Coverage <span className="modal-sec-hint">· where this contact's minerals are</span></div>
       <div className="nd-grid3">
         <GeoFields states={states} onStatesChange={setStates} counties={counties} onCountiesChange={setCounties} />
       </div>
