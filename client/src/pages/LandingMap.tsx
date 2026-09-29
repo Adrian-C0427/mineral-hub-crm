@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { addCadastralLayers, styleWithGlyphs } from "../lib/mapLayers";
+import { countyStateLabel, formatAbstract, surveyLabel } from "../lib/abstracts";
 
 const LEON: [number, number] = [-95.99, 31.29];
 
@@ -40,7 +41,7 @@ export default function LandingMap() {
         const abs = map.queryRenderedFeatures(ev.point, { layers: map.getLayer("abstracts-fill") ? ["abstracts-fill"] : [] });
         if (abs.length) {
           const p = abs[0].properties as Record<string, unknown>;
-          setPicked({ title: String(p.abstract ?? "Abstract"), sub: [p.survey, p.county ? `${p.county} County` : ""].filter(Boolean).join(" · ") });
+          setPicked({ title: formatAbstract({ abstract: p.abstract as string | null }), sub: [surveyLabel(p.survey as string | null), countyStateLabel(p.county as string | null, "TX")].filter(Boolean).join(" — ") });
         } else setPicked(null);
       });
     });

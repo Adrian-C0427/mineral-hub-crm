@@ -6,7 +6,6 @@ import "../landing.css";
 
 // MapLibre is heavy; the live map demos mount only when needed.
 const LandingMap = lazy(() => import("./LandingMap"));
-const TractMapDemo = lazy(() => import("./TractMapDemo"));
 
 const CONTACT_EMAIL = "adrian@aamjsolutions.com";
 const waitlistHref = (email: string) =>
@@ -84,7 +83,7 @@ export function Landing() {
       const m = document.createElement("meta"); m.setAttribute("name", "description"); document.head.appendChild(m); return m;
     })();
     meta.setAttribute("content",
-      "Mineral Hub is the CRM for mineral and royalty buyers and flippers: deal pipeline, buyer matching, GIS mapping, tract parsing, well valuation, and a public buyer portal.");
+      "Mineral Hub is the CRM for mineral and royalty buyers and flippers: deal pipeline, buyer matching, GIS mapping with shapefile tract import, well valuation, and a public buyer portal.");
   }, []);
 
   useReveal();
@@ -96,7 +95,6 @@ export function Landing() {
       <Comparison />
       <PipelineDemo deals={deals} onChange={setDeals} onMoved={logMove} />
       <MatchDemo />
-      <TractDemo />
       <MapSection />
       <ResearchDemo />
       <ValuationDemo />
@@ -299,7 +297,7 @@ function Comparison() {
           <div className="lp-eyebrow blue">Mineral Hub</div>
           <span><b className="ck">✓</b>Mineral deal stages, ready on day one</span>
           <span><b className="ck">✓</b>Every buyer matched and ranked against every deal by their buy box</span>
-          <span><b className="ck">✓</b>Every tract drawn on the live county survey map — abstracts, wells, and all</span>
+          <span><b className="ck">✓</b>Every tract (imported from your shapefiles) on the live county survey map — abstracts, wells, and all</span>
           <span><b className="ck">✓</b>Decline curves, PV-10, and a defensible offer number built in</span>
         </div>
       </div>
@@ -429,95 +427,6 @@ function MatchDemo() {
               </button>
             </div>
           ))}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-/* ---------------------------- tract parser demo ---------------------------- */
-
-const DEFAULT_LEGAL = `BEGINNING at a stake at the northeast corner of said survey;
-THENCE S 45°00' W 1000 feet to a point for corner;
-THENCE S 45°00' E 1000 feet to a point for corner;
-THENCE N 45°00' E 1000 feet to a point for corner;
-THENCE N 45°00' W 1000 feet to the PLACE OF BEGINNING, containing 22.96 acres of land, more or less.`;
-
-interface Call { brg: string; deg: number; ns: 1 | -1; ew: 1 | -1; dist: number }
-
-function parseCalls(text: string): Call[] {
-  const re = /([NS])\s*(\d{1,3})(?:°|\s+deg\S*)\s*(\d{1,2})?['′]?\s*([EW])[\s,.]+([\d,.]+)\s*(feet|ft|varas|vrs)/gi;
-  const calls: Call[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text))) {
-    const deg = Number(m[2]) + (m[3] ? Number(m[3]) / 60 : 0);
-    let dist = Number(m[5].replace(/,/g, ""));
-    if (/^v/i.test(m[6])) dist *= 2.7778; // varas → feet (TX standard)
-    calls.push({
-      brg: `${m[1].toUpperCase()} ${m[2]}°${m[3] ? `${m[3]}'` : ""} ${m[4].toUpperCase()}`,
-      deg, ns: m[1].toUpperCase() === "N" ? 1 : -1, ew: m[4].toUpperCase() === "E" ? 1 : -1, dist,
-    });
-  }
-  return calls;
-}
-
-function TractDemo() {
-  const [text, setText] = useState(DEFAULT_LEGAL);
-  const [result, setResult] = useState<{ calls: Call[]; pts: [number, number][]; acres: number; gapFt: number } | null>(null);
-
-  function run() {
-    const calls = parseCalls(text);
-    let x = 0, y = 0;
-    const pts: [number, number][] = [[0, 0]];
-    for (const c of calls) {
-      const rad = (c.deg * Math.PI) / 180;
-      x += c.ew * Math.sin(rad) * c.dist;
-      y += c.ns * Math.cos(rad) * c.dist;
-      pts.push([x, y]);
-    }
-    // Shoelace on the traversed ring (auto-closed for area purposes).
-    let area2 = 0;
-    for (let i = 0; i < pts.length - 1; i++) area2 += pts[i][0] * pts[i + 1][1] - pts[i + 1][0] * pts[i][1];
-    area2 += pts[pts.length - 1][0] * pts[0][1] - pts[0][0] * pts[pts.length - 1][1];
-    const acres = Math.abs(area2 / 2) / 43_560;
-    const gapFt = Math.hypot(x, y);
-    setResult({ calls, pts, acres, gapFt });
-  }
-
-  const ok = result != null && result.calls.length >= 3;
-
-  return (
-    <section className="lp-section">
-      <div className="lp-section-head rv">
-        <div className="lp-try">TRY IT — paste any Texas legal description</div>
-        <h2>From "THENCE N 45° E…" to a mapped tract in one click.</h2>
-        <p>Mineral Hub parses metes-and-bounds calls, checks that the boundary closes, computes acreage, and anchors the polygon to the survey abstract on the real county map — the same cadastral stack your deals live on. Edit the calls and re-parse to watch it move.</p>
-      </div>
-      <div className="lp-tract rv">
-        <div className="lp-tract-left">
-          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={9} spellCheck={false} aria-label="Legal description" />
-          <button className="lp-btn" onClick={run}>Parse legal description</button>
-          {ok && (
-            <div className="lp-verdict">
-              <span className="ok">✓ {result!.calls.length} calls parsed</span>
-              <span>{result!.acres.toFixed(2)} acres</span>
-              <span className={result!.gapFt < 1 ? "ok" : "warn"}>
-                {result!.gapFt < 1 ? "boundary closes" : `closure gap ${result!.gapFt.toFixed(1)} ft`}
-              </span>
-            </div>
-          )}
-          {result && !ok && (
-            <div className="lp-verdict"><span className="warn">Couldn't find at least 3 bearing-distance calls — e.g. “THENCE N 45°00' E 1000 feet”.</span></div>
-          )}
-        </div>
-        <div className="lp-tract-map">
-          {ok ? (
-            <Suspense fallback={<div className="lp-tract-empty">Loading county map…</div>}>
-              <TractMapDemo ring={result!.pts} />
-            </Suspense>
-          ) : (
-            <div className="lp-tract-empty">Parse the description — the tract draws on the live Leon County survey map, over real abstracts and wells.</div>
-          )}
         </div>
       </div>
     </section>

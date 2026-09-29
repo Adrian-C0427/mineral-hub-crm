@@ -14,6 +14,9 @@ interface Props {
   /** Semantically single-value wrapper (StateSelect): hides the bulk
    *  select-all/deselect-all row, which has no meaning for one value. */
   single?: boolean;
+  /** Custom match + order for a typed query (e.g. abstracts ranked by number).
+   *  Receives the unselected options; returns those to show, in order. */
+  filterOptions?: (options: readonly string[], query: string) => string[];
 }
 
 /**
@@ -28,7 +31,7 @@ interface Props {
  * another value is one click/keystroke away: clicking the field or typing
  * reopens it with the previous selections intact as chips.
  */
-export function SearchableMultiSelect({ options, value, onChange, placeholder = "Search…", labels, single = false }: Props) {
+export function SearchableMultiSelect({ options, value, onChange, placeholder = "Search…", labels, single = false, filterOptions }: Props) {
   const show = (v: string) => labels?.[v] ?? v;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -41,10 +44,11 @@ export function SearchableMultiSelect({ options, value, onChange, placeholder = 
   useDismiss([ref, menuRef], open, close);
 
   const filtered = useMemo(() => {
+    const unselected = options.filter((o) => !value.includes(o));
+    if (filterOptions) return filterOptions(unselected, query);
     const q = query.trim().toLowerCase();
-    return options.filter((o) =>
-      !value.includes(o) && (q === "" || o.toLowerCase().includes(q) || (labels?.[o]?.toLowerCase().includes(q) ?? false)));
-  }, [options, value, query, labels]);
+    return unselected.filter((o) => q === "" || o.toLowerCase().includes(q) || (labels?.[o]?.toLowerCase().includes(q) ?? false));
+  }, [options, value, query, labels, filterOptions]);
 
   const shown = filtered.slice(0, 50);
 

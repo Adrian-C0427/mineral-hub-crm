@@ -34,7 +34,6 @@ import { MarketingFunnel } from "../components/MarketingFunnel";
 import { DateField } from "../components/DateField";
 // MapLibre is heavy; only load it when a deal detail page is viewed.
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
-const TractSection = lazy(() => import("../components/TractSection").then((m) => ({ default: m.TractSection })));
 
 interface DealDetailData extends DealSummary {
   operator: string | null;
@@ -206,24 +205,17 @@ export function DealDetail() {
         onChanged={loadDeal}
       />
 
-      {/* Embedded, isolated map showing only this deal's extent. Without any
-          abstracts there is nothing to draw, so a compact empty state replaces
-          the map instead of a large blank canvas. */}
+      {/* Embedded, isolated map showing this deal's abstracts plus any tract
+          boundaries imported onto it (shapefiles — also shown on the main map). */}
       <div className="panel">
-        <div className="section-head"><h3>Location</h3><span className="muted">This deal's abstracts and geographic extent</span></div>
-        {deal.abstractIds.length > 0 ? (
-          <Suspense fallback={<Spinner label="Loading map…" />}><DealMap abstractIds={deal.abstractIds} /></Suspense>
-        ) : (
-          <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+        <div className="section-head"><h3>Location</h3><span className="muted">This deal's abstracts, imported tracts, and geographic extent</span></div>
+        <Suspense fallback={<Spinner label="Loading map…" />}><DealMap dealId={deal.id} abstractIds={deal.abstractIds} /></Suspense>
+        {deal.abstractIds.length === 0 && (
+          <p className="muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
             No abstracts linked yet — add them under <strong>Deal characteristics → Edit → Abstract</strong> and the map will draw this deal's extent.
           </p>
         )}
       </div>
-
-      {/* Legal tract descriptions → parsed calls → mapped polygons + exports. */}
-      <Suspense fallback={<div className="panel"><Spinner label="Loading tract descriptions…" /></div>}>
-        <TractSection dealId={deal.id} dealName={deal.name} canEdit={can("editDeals")} abstractIds={deal.abstractIds} />
-      </Suspense>
       </div>
 
       {/* Additional Deals: the extra deals grouped under this seller. Hidden on a
@@ -282,7 +274,7 @@ export function DealDetail() {
                       <span className="row" style={{ gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
                         {accepted ? <CtPill color="#22c55e">Accepted Offer</CtPill> :
                           can("editDeals") ? <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button> : null}
-                        {can("editDeals") && <OfferRowActions offer={o} accepted={accepted} onChanged={refreshAll} />}
+                        {can("editDeals") && <OfferRowActions offer={o} accepted={accepted} onChanged={refreshAll} dealNma={deal.acreageNma} dealNra={deal.nra} />}
                       </span>
                     </td>
                   </tr>
@@ -646,7 +638,7 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
           <DKV k="Operator" v={deal.operator} />
           <DKV k="RRC" v={deal.rrc} />
           {/* Label the abstract with its county only when unambiguous. */}
-          <DKV k={deal.counties.length === 1 ? `Abstract (${deal.counties[0]} Co.)` : "Abstract"} v={abstractLabel || null} span2 />
+          <DKV k={deal.abstractIds.length > 1 ? "Abstracts" : "Abstract"} v={abstractLabel || null} span2 />
         </div>
         {/* Derived economics — per-NRA figures and the implied ask-over-cost
             margin, computed from the deal's own numbers (shown when they exist). */}

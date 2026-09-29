@@ -9,6 +9,8 @@ import { useAuth } from "../auth/AuthContext";
 import { Spinner, Banner, Modal, ConfirmDelete, SearchInput, ChipList } from "../components/ui";
 import { useRowSelection, BulkBar } from "../components/bulk";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
+import { useAbstractIndex } from "../components/AbstractPicker";
+import { rankAbstracts, stateName } from "../lib/abstracts";
 import { Select } from "../components/Select";
 import { GeoFields } from "../components/GeoFields";
 import { SortableTable, type Column } from "../components/SortableTable";
@@ -677,16 +679,25 @@ function ResearchAbstractFilter({ options, states, counties, value, onChange }: 
       (!counties.length || cs.has(o.county.toUpperCase())) &&
       (!states.length || ss.has(o.state.toUpperCase())));
   }, [options, states.join("|"), counties.join("|")]); // eslint-disable-line react-hooks/exhaustive-deps
+  const absIndex = useAbstractIndex();
   const labels = useMemo(() => {
+    // The same abstract number can exist in several counties; show each once
+    // with every county it's in so the choice stays unambiguous.
+    const where = new Map<string, { county: string; state: string }[]>();
+    for (const o of scoped) where.set(o.abstractId, [...(where.get(o.abstractId) ?? []), o]);
     const m: Record<string, string> = {};
-    for (const o of scoped) {
-      // The same abstract number can exist in several counties; show each once
-      // with its counties listed so the choice stays unambiguous.
-      m[o.abstractId] = m[o.abstractId] ? `${m[o.abstractId].split(" (")[0]} (multiple counties)` : `${o.abstractId} (${o.county} Co)`;
+    for (const [id, locs] of where) {
+      if (locs.length === 1) { m[id] = absIndex.label(id, locs[0].county, locs[0].state); continue; }
+      const cs = [...new Set(locs.map((l) => l.county))].sort();
+      const ss = [...new Set(locs.map((l) => stateName(l.state)))];
+      m[id] = `Abstract ${id.replace(/^a\s*-\s*/i, "")} — ${cs.length <= 3 ? `${cs.join(", ")} Counties` : `${cs.length} counties`}, ${ss.join(" / ")}`;
     }
     return m;
-  }, [scoped]);
+  }, [scoped, absIndex]);
   const ids = useMemo(() => [...new Set(scoped.map((o) => o.abstractId))], [scoped]);
+  // Number-first ranking as you type; numeric order when the box is empty.
+  const rank = useCallback((opts: readonly string[], q: string) =>
+    rankAbstracts(opts, q, (id) => ({ abstract: id, text: labels[id] ?? id })), [labels]);
 
   // Cascade pruning, mirroring GeoFields' county behavior.
   useEffect(() => {
@@ -702,9 +713,10 @@ function ResearchAbstractFilter({ options, states, counties, value, onChange }: 
       <SearchableMultiSelect
         options={ids}
         labels={labels}
+        filterOptions={rank}
         value={value}
         onChange={onChange}
-        placeholder={ids.length ? "Search abstracts…" : counties.length ? "No abstracts with activity" : "Select a county first"}
+        placeholder={ids.length ? "Search abstract # or survey…" : counties.length ? "No abstracts with activity" : "Select a county first"}
       />
     </div>
   );
@@ -782,10 +794,11 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [qs, focusCounty, countyRows.length]);
 
+  const absIndex = useAbstractIndex();
   const geoName = (r: GeoRow) =>
     shownLevel === "state" ? r.state
       : shownLevel === "county" ? `${r.county}, ${r.state}`
-        : `${r.abstractId} (${r.county} Co)`;
+        : absIndex.label(r.abstractId, r.county, r.state);
 
   const columns: Column<GeoRow>[] = [
     { key: "name", header: shownLevel === "state" ? "State" : shownLevel === "county" ? "County" : "Abstract", value: geoName,
@@ -1608,6 +1621,7 @@ function TxDrillModal({ qs, title, selector, onClose }: {
   qs: string; title: string; selector: TxSelector;
   onClose: () => void; onDrillRecords: (patch: Partial<Filters>) => void;
 }) {
+  const absIndex = useAbstractIndex();
   const [rows, setRows] = useState<DocRecord[] | null>(null);
   useEffect(() => {
     api.post<{ rows: DocRecord[] }>(`/research/relationships/transactions?${qs}`, selector)
@@ -1635,7 +1649,7 @@ function TxDrillModal({ qs, title, selector, onClose }: {
                     <td>{r.grantor ?? "—"}</td>
                     <td>{r.grantee ?? "—"}</td>
                     <td>{r.county}, {r.state}</td>
-                    <td>{r.abstractId ?? "—"}</td>
+                    <td>{r.abstractId ? r.abstractId.split(",").map((a) => absIndex.label(a.trim(), r.county, r.state)).join("; ") : "—"}</td>
                     <td>{r.instrumentNumber ?? "—"}</td>
                   </tr>
                 ))}
@@ -1751,6 +1765,7 @@ interface RecOptions { counties: string[]; abstracts: string[]; surveys?: string
 
 function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   const { can } = useAuth();
+  const absIndex = useAbstractIndex();
   const canManage = can("manageResearchData");
   const [kind, setKind] = useState<"documents" | "permits" | "rrcPermits">("documents");
   const [page, setPage] = useState(1);
@@ -1779,6 +1794,12 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   const [showFilters, setShowFilters] = useState(false);
   const [rf, setRf] = useState<RecFilters>(EMPTY_REC_FILTERS);
   const [opts, setOpts] = useState<RecOptions>({ counties: [], abstracts: [] });
+  const recAbstractLabels = useMemo(
+    () => Object.fromEntries(opts.abstracts.map((a) => [a, absIndex.labelAmong(a, rf.counties)])),
+    [opts.abstracts, absIndex, rf.counties],
+  );
+  const rankRecAbstracts = useCallback((o: readonly string[], q: string) =>
+    rankAbstracts(o, q, (a) => ({ abstract: a, text: recAbstractLabels[a] ?? a })), [recAbstractLabels]);
   // The instrument filter is typed too — same debounce so it re-queries
   // smoothly instead of once per keystroke.
   const [instrumentQ, setInstrumentQ] = useState("");
@@ -1922,7 +1943,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
     { key: "grantor", header: dataset === "LEASE" ? "Grantor (Lessor)" : "Grantor (Seller)", value: (r) => r.grantor, minWidth: 180, render: (r) => <span className="rec-name"><ChipList items={r.grantorParties?.length ? r.grantorParties : [r.grantor]} /></span> },
     { key: "grantee", header: dataset === "LEASE" ? "Grantee (Lessee)" : "Grantee (Buyer)", value: (r) => r.grantee, minWidth: 180, render: (r) => <span className="rec-name"><ChipList items={r.granteeParties?.length ? r.granteeParties : [r.grantee]} /></span> },
     { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}`, render: (r) => <span className="rec-mid rec-nowrap">{r.county}, {r.state}</span> },
-    { key: "abstractId", header: "Abstract", value: (r) => r.abstractId, align: "right", render: (r) => r.abstractId ? <span className="rec-mid chips-oneline"><ChipList items={r.abstractId.split(",").map((a) => a.trim())} /></span> : <span className="rec-faint">—</span> },
+    { key: "abstractId", header: "Abstract", value: (r) => r.abstractId, align: "right", render: (r) => r.abstractId ? <span className="rec-mid chips-oneline"><ChipList items={r.abstractId.split(",").map((a) => absIndex.label(a.trim(), r.county, r.state))} /></span> : <span className="rec-faint">—</span> },
     { key: "instrumentNumber", header: "Instr #", value: (r) => r.instrumentNumber, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{r.instrumentNumber ?? "—"}</span> },
   ];
   const permitColumns: Column<PermitRecord>[] = [
@@ -1941,7 +1962,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
     { key: "operator", header: "Operator", value: (r) => r.operator, render: (r) => <span className="rec-name">{r.operator ?? "—"}</span> },
     { key: "leaseName", header: "Lease / Well", value: (r) => `${r.leaseName ?? ""} ${r.wellNo ?? ""}`.trim() || null, render: (r) => <span>{r.leaseName ?? "—"}{r.wellNo ? ` #${r.wellNo}` : ""}</span> },
     { key: "county", header: "County", value: (r) => r.county, render: (r) => <span className="rec-mid rec-nowrap">{r.county}, TX</span> },
-    { key: "abstract", header: "Abstract", value: (r) => r.abstract, align: "right", render: (r) => r.abstract ? <span className="rec-mid chips-oneline"><ChipList items={[r.abstract]} /></span> : <span className="rec-faint">—</span> },
+    { key: "abstract", header: "Abstract", value: (r) => r.abstract, align: "right", render: (r) => r.abstract ? <span className="rec-mid chips-oneline"><ChipList items={[absIndex.label(r.abstract, r.county, "TX")]} /></span> : <span className="rec-faint">—</span> },
     { key: "survey", header: "Survey", value: (r) => r.survey },
     { key: "acres", header: "Unit (ac)", value: (r) => r.acres, align: "right", type: "number", render: (r) => <span className="rec-mid rec-nowrap">{r.acres != null ? num(r.acres) : "—"}</span> },
     { key: "apiNumber", header: "API #", value: (r) => r.api8, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{r.api8 ? `42-${r.api8.slice(0, 3)}-${r.api8.slice(3)}` : "—"}</span> },
@@ -1986,7 +2007,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
         <div><div className="rec-flabel">Survey</div>
           <SearchableMultiSelect options={opts.surveys ?? []} value={rf.surveys} onChange={(v) => setRf((p) => ({ ...p, surveys: v }))} placeholder="Surveys…" /></div>
         <div><div className="rec-flabel">Abstract</div>
-          <SearchableMultiSelect options={opts.abstracts} value={rf.abstracts} onChange={(v) => setRf((p) => ({ ...p, abstracts: v }))} placeholder="Abstracts…" /></div>
+          <SearchableMultiSelect options={opts.abstracts} labels={recAbstractLabels} filterOptions={rankRecAbstracts} value={rf.abstracts} onChange={(v) => setRf((p) => ({ ...p, abstracts: v }))} placeholder="Abstract # or survey…" /></div>
         {kind === "rrcPermits" ? null : kind === "documents" ? (
           <>
             <div><div className="rec-flabel">Document type</div>
@@ -2038,7 +2059,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
         }}>
           <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
             <strong style={{ fontSize: 13 }}>
-              Top Buyers — Abstract {selAbstracts.join(", ")}
+              Top Buyers — {selAbstracts.map((a) => absIndex.labelAmong(a, rf.counties)).join("; ")}
             </strong>
             <span className="muted" style={{ fontSize: 12 }}>
               {num(absBuyers.total)} buyer{absBuyers.total === 1 ? "" : "s"} in this period

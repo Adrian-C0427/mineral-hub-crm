@@ -167,9 +167,6 @@ export async function summarizeDeal(organizationId: string, deal: DealContext): 
   return complete(client, SUMMARY_SYSTEM, user, 700);
 }
 
-// Note: tract-description parsing no longer uses Claude — it runs entirely on
-// the deterministic engine in domain/tractParser.ts (no API key required).
-
 export async function draftOutreach(
   organizationId: string,
   deal: DealContext,

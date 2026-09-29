@@ -24,6 +24,7 @@ import {
   buildChains, chainTableRows, expandDocToEdges, ENTITY_CLASS_LABEL, type TxEdge,
 } from "../domain/researchGraph.js";
 import { normalizeCompany } from "../serializers.js";
+import { formatAbstract } from "../domain/abstractLabel.js";
 
 /**
  * Research & Market Intelligence API.
@@ -1161,7 +1162,7 @@ researchRouter.get(
           id: `ABSTRACT:${a.state}|${a.county}|${a.abstractId}`,
           kind: "ABSTRACT_CONCENTRATION",
           severity: Math.min(100, 40 + a.cur * 8),
-          title: `Abstract ${a.abstractId} (${a.county} Co, ${a.state}): concentrated buying`,
+          title: `${formatAbstract({ abstract: a.abstractId, county: a.county, state: a.state })}: concentrated buying`,
           detail: `${a.cur} mineral transactions recorded in this abstract during the period — someone may be assembling a position.`,
           state: a.state, county: a.county, abstractId: a.abstractId,
           metrics: { current: a.cur, previous: a.prevCnt, pctChange: null, zScore: null },

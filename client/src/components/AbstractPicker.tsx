@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
 import { api } from "../api/client";
+import { abstractNumber, formatAbstract, rankAbstracts, stateName, surveyLabel } from "../lib/abstracts";
 
-interface AbstractEntry { id: string; abstract: string; survey: string; county: string; countyFips: string }
+export interface AbstractEntry { id: string; abstract: string; survey: string; county: string; countyFips: string; state?: string }
 
 // Module-level cache so the index loads at most once per session. Served from
 // PostGIS via the GIS API (see docs/architecture/0003-gis-scale-architecture.md).
@@ -18,26 +19,71 @@ function loadIndex(): Promise<AbstractEntry[]> {
   return inflight;
 }
 
-function display(e: AbstractEntry): string {
-  return e.survey ? `${e.abstract} · ${e.survey}` : e.abstract;
+/** Full identification label for a GIS abstract entry. */
+export function abstractEntryLabel(e: AbstractEntry): string {
+  return formatAbstract({ abstract: e.abstract, survey: e.survey, county: e.county, state: e.state ?? "TX" });
 }
 
-export function useAbstractLabels(ids: string[] | null | undefined): string {
+/**
+ * The GIS abstract index, for labelling abstracts known only by id or by
+ * county + number (research records, map filters, well identities).
+ */
+export function useAbstractIndex() {
   const [entries, setEntries] = useState<AbstractEntry[]>(cache ?? []);
   useEffect(() => { if (!cache) loadIndex().then(setEntries); }, []);
   return useMemo(() => {
+    const byId = new Map(entries.map((e) => [e.id, e]));
+    const byCountyNum = new Map<string, AbstractEntry>();
+    const byNum = new Map<string, AbstractEntry[]>();
+    for (const e of entries) {
+      const n = abstractNumber(e.abstract);
+      byCountyNum.set(`${e.county.toLowerCase()}|${n}`, e);
+      byNum.set(n, [...(byNum.get(n) ?? []), e]);
+    }
+    /** The entry for an abstract number in a county (research cells carry no GIS id). */
+    const find = (abstract: string | null | undefined, county?: string | null): AbstractEntry | undefined => {
+      const n = abstractNumber(abstract);
+      if (county) return byCountyNum.get(`${county.toLowerCase()}|${n}`);
+      const hits = byNum.get(n);
+      return hits && hits.length === 1 ? hits[0] : undefined;
+    };
+    /** Label an abstract by number (+ county/state when known), filling in the survey from the index. */
+    const label = (abstract: string | null | undefined, county?: string | null, state?: string | null): string => {
+      const e = find(abstract, county);
+      return formatAbstract({ abstract, survey: e?.survey, county: county ?? e?.county, state: state ?? e?.state ?? (e ? "TX" : null) });
+    };
+    /**
+     * Label a bare abstract number/label that may exist in several counties
+     * (map filter options): the full label when one entry matches within
+     * `counties` (all counties when empty), else the number with where it occurs.
+     */
+    const labelAmong = (abstract: string, counties: string[] = []): string => {
+      const n = abstractNumber(abstract);
+      const cset = new Set(counties.map((c) => c.toLowerCase()));
+      const hits = (byNum.get(n) ?? []).filter((e) => cset.size === 0 || cset.has(e.county.toLowerCase()));
+      if (hits.length === 1) return abstractEntryLabel(hits[0]);
+      if (hits.length === 0) return formatAbstract({ abstract });
+      const cs = [...new Set(hits.map((e) => e.county))].sort();
+      const where = cs.length <= 3 ? `${cs.join(", ")} ${cs.length === 1 ? "County" : "Counties"}` : `${cs.length} counties`;
+      return `Abstract ${n} — ${hits.length} surveys — ${where}, ${stateName(hits[0].state ?? "TX")}`;
+    };
+    return { entries, byId, find, label, labelAmong };
+  }, [entries]);
+}
+
+/** Full labels for GIS abstract ids, "; "-separated (the raw id while the index loads). */
+export function useAbstractLabels(ids: string[] | null | undefined): string {
+  const { byId } = useAbstractIndex();
+  return useMemo(() => {
     if (!ids || ids.length === 0) return "—";
-    return ids.map((id) => {
-      const e = entries.find((x) => x.id === id);
-      return e ? e.abstract : id;
-    }).join(", ");
-  }, [ids, entries]);
+    return ids.map((id) => { const e = byId.get(id); return e ? abstractEntryLabel(e) : id; }).join("; ");
+  }, [ids, byId]);
 }
 
 /**
  * Cascading Survey selector — the last step of State → County → Abstract →
  * Survey. Options are the surveys of the currently-selected abstract(s) only.
- * While editing, each survey shows as "Survey — Abstract#" so similarly-named
+ * While editing, each survey shows with its abstract so similarly-named
  * surveys are distinguishable; the stored value is just the survey name (so the
  * saved record displays the name alone).
  */
@@ -46,49 +92,36 @@ export function SurveyMultiPicker({ value, onChange, abstractIds }: {
   onChange: (surveys: string[]) => void;
   abstractIds: string[];
 }) {
-  const [entries, setEntries] = useState<AbstractEntry[]>(cache ?? []);
-  useEffect(() => { loadIndex().then(setEntries); }, []);
+  const { entries } = useAbstractIndex();
   const idSet = useMemo(() => new Set(abstractIds), [abstractIds]);
 
-  const { options, surveyByDisplay, displayBySurvey } = useMemo(() => {
-    const options: string[] = [];
-    const surveyByDisplay = new Map<string, string>();
-    const displayBySurvey = new Map<string, string>();
-    const seen = new Set<string>();
+  const labels = useMemo(() => {
+    const out: Record<string, string> = {};
     for (const e of entries) {
-      if (!idSet.has(e.id) || !e.survey) continue;
-      const disp = `${e.survey} — ${e.abstract}`;
-      if (!seen.has(disp)) { seen.add(disp); options.push(disp); surveyByDisplay.set(disp, e.survey); }
-      if (!displayBySurvey.has(e.survey)) displayBySurvey.set(e.survey, disp);
+      if (!idSet.has(e.id) || !e.survey || out[e.survey]) continue;
+      out[e.survey] = `${surveyLabel(e.survey)} — Abstract ${abstractNumber(e.abstract)}, ${e.county} County`;
     }
-    return { options, surveyByDisplay, displayBySurvey };
+    return out;
   }, [entries, idSet]);
-
-  // The multi-select works in display strings; map to/from survey names. A
-  // previously-saved survey whose abstract is no longer selected stays selected
-  // (shown by its plain name).
-  const selectedDisplays = value.map((s) => displayBySurvey.get(s) ?? s);
-  const allOptions = useMemo(() => [...new Set([...options, ...selectedDisplays])], [options, selectedDisplays]);
-
-  function onSel(nextDisplays: string[]) {
-    const surveys = nextDisplays.map((d) => surveyByDisplay.get(d) ?? d);
-    onChange([...new Set(surveys)]);
-  }
+  // A previously-saved survey whose abstract is no longer selected stays selected.
+  const options = useMemo(() => [...new Set([...Object.keys(labels), ...value])], [labels, value]);
 
   return (
     <SearchableMultiSelect
-      options={allOptions}
-      value={selectedDisplays}
-      onChange={onSel}
+      options={options}
+      labels={labels}
+      value={value}
+      onChange={(next) => onChange([...new Set(next)])}
       placeholder={abstractIds.length === 0 ? "Select abstract(s) first" : "Select surveys…"}
     />
   );
 }
 
 /**
- * Searchable multi-select of abstracts, filtered by the deal's selected counties.
- * (For the Leon POC every abstract is Leon; when no county is chosen we show all
- * available so the picker still works. Statewide, options narrow to selected counties.)
+ * Searchable multi-select of abstracts, filtered by the deal's selected
+ * counties (all available when no county is chosen). Stores GIS ids; shows
+ * each as "Abstract 15 — J Dunn Survey — Leon County, Texas", and ranks typed
+ * searches by abstract number (exact match first, then ascending).
  */
 export function AbstractMultiPicker({
   value,
@@ -99,48 +132,36 @@ export function AbstractMultiPicker({
   onChange: (ids: string[]) => void;
   counties: string[];
 }) {
-  const [entries, setEntries] = useState<AbstractEntry[]>(cache ?? []);
-  useEffect(() => { loadIndex().then(setEntries); }, []);
-
+  const { entries, byId } = useAbstractIndex();
   const countySet = useMemo(() => new Set(counties.map((c) => c.toLowerCase())), [counties]);
 
-  // Options shown to the user: display strings, filtered by selected counties.
-  const { options, idByDisplay, displayById } = useMemo(() => {
-    const filtered = counties.length === 0 ? entries : entries.filter((e) => countySet.has(e.county.toLowerCase()));
-    const options: string[] = [];
-    const idByDisplay = new Map<string, string>();
-    const displayById = new Map<string, string>();
-    for (const e of filtered) {
-      const d = display(e);
-      options.push(d);
-      idByDisplay.set(d, e.id);
-    }
-    // include already-selected values' displays even if outside current county filter
-    for (const e of entries) displayById.set(e.id, display(e));
-    return { options, idByDisplay, displayById };
+  // The statewide index is large (300k+), so labels are built once per index
+  // load and the scoped list is pre-sorted numerically once per county change.
+  const labels = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const e of entries) out[e.id] = abstractEntryLabel(e);
+    return out;
+  }, [entries]);
+  const scopedIds = useMemo(() => {
+    const scoped = counties.length === 0 ? entries : entries.filter((e) => countySet.has(e.county.toLowerCase()));
+    return rankAbstracts(scoped, "", (e) => ({ abstract: e.abstract, text: e.county })).map((e) => e.id);
   }, [entries, counties, countySet]);
+  // Already-selected abstracts stay valid options even outside the county scope.
+  const options = useMemo(() => [...new Set([...scopedIds, ...value])], [scopedIds, value]);
 
-  // The multi-select works in display strings; map to/from ids.
-  const selectedDisplays = value.map((id) => displayById.get(id) ?? id);
-
-  function onSelChange(nextDisplays: string[]) {
-    const ids = nextDisplays.map((d) => idByDisplay.get(d)).filter((x): x is string => !!x);
-    onChange(ids);
-  }
-
-  // Ensure currently-selected displays are always valid options too.
-  const allOptions = useMemo(() => {
-    const set = new Set(options);
-    for (const d of selectedDisplays) set.add(d);
-    return [...set];
-  }, [options, selectedDisplays]);
+  const filterOptions = useCallback((opts: readonly string[], query: string) =>
+    query.trim()
+      ? rankAbstracts(opts, query, (id) => ({ abstract: byId.get(id)?.abstract ?? id, text: labels[id] ?? id }))
+      : [...opts], [byId, labels]);
 
   return (
     <SearchableMultiSelect
-      options={allOptions}
-      value={selectedDisplays}
-      onChange={onSelChange}
-      placeholder={counties.length === 0 ? "Search abstracts…" : "Search abstracts in selected county…"}
+      options={options}
+      labels={labels}
+      value={value}
+      onChange={onChange}
+      filterOptions={filterOptions}
+      placeholder={counties.length === 0 ? "Search abstract # or survey…" : "Search abstract # or survey in selected county…"}
     />
   );
 }

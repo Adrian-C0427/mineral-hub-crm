@@ -10,6 +10,7 @@ import { Select } from "../components/Select";
 import { WellImport } from "../components/WellImport";
 import { money, num, prettyEnum, fmtDate, fmtDateTime, fmtDateLocal } from "../lib/format";
 import { monthLabel, chartTooltip } from "../lib/charts";
+import { formatAbstract } from "../lib/abstracts";
 
 /**
  * Well Production Analysis & Valuation — the single comprehensive view of
@@ -557,7 +558,7 @@ function DossierCard({ well, open, onToggle }: { well: WellRow; open: boolean; o
                 <Kv label="Well no" value={d.identity.wellNo} />
                 <Kv label="District" value={d.identity.district} />
                 <Kv label="County" value={`${d.identity.county}, ${d.identity.state}`} />
-                <Kv label="Abstract" value={d.identity.abstract} />
+                <Kv label="Abstract" value={d.identity.abstract ? formatAbstract({ abstract: d.identity.abstract, survey: d.identity.survey, county: d.identity.county, state: d.identity.state }) : null} />
                 <Kv label="Survey" value={d.identity.survey} />
                 <Kv label="Surface location" value={d.identity.latitude != null ? `${d.identity.latitude.toFixed(5)}, ${d.identity.longitude?.toFixed(5)}` : null} />
                 <Kv label="Well type" value={[d.status.oilGas, d.status.type].filter(Boolean).join(" · ") || null} />
