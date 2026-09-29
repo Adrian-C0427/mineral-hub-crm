@@ -19,7 +19,6 @@ import { useAbstractLabels } from "../components/AbstractPicker";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
-import { operatorsForCounties } from "../lib/operators";
 import { money, num, fmtDate, toInputDate, prettyEnum } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { SellerDetails } from "../components/SellerDetails";
@@ -34,6 +33,9 @@ import { MarketingFunnel } from "../components/MarketingFunnel";
 import { DateField } from "../components/DateField";
 import { royaltyLabel, royaltyOptions } from "../lib/royalty";
 import { Select } from "../components/Select";
+import { OperatorSelect } from "../components/OperatorSelect";
+import { totalFromPerAcre } from "../lib/perAcre";
+import { addDaysIso, applyAcreageEdit, AcreageNote, DaysToCloseField, PerAcreNote, type AcreageState } from "../components/DealEconomics";
 // MapLibre is heavy; only load it when a deal detail page is viewed.
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
 
@@ -570,6 +572,45 @@ function AssetsSection({ deal, canEdit, canPublish, onAdd, onChanged }: {
   );
 }
 
+/**
+ * The deal's economics as edited in Deal Characteristics — the same fields as
+ * New Deal (strings while editing). A total follows its per-acre rate × acreage
+ * unless the user typed a total (…Manual).
+ */
+interface EconForm extends AcreageState {
+  ourCostPerNma: string; ourCostPerNra: string; ourPrice: string; costManual: boolean;
+  askPricePerNma: string; askPricePerNra: string; askPrice: string; askManual: boolean;
+  estimatedClosingCosts: string; daysToClose: string;
+}
+const numStr = (v: number | null | undefined) => (v == null ? "" : String(v));
+const numOrNull = (v: string) => (v.trim() === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+function econFromDeal(d: DealDetailData): EconForm {
+  // A stored total that isn't simply rate × acreage was typed by the user.
+  const isManual = (total: number | null, auto: { total: number } | null) =>
+    total != null && (auto == null || Math.abs(auto.total - total) > 0.005);
+  const costAuto = totalFromPerAcre(d.ourCostPerNma ?? null, d.acreageNma, d.ourCostPerNra ?? null, d.nra);
+  const askAuto = totalFromPerAcre(d.askPricePerNma ?? null, d.acreageNma, d.askPricePerNra ?? null, d.nra);
+  const costManual = isManual(d.ourPrice, costAuto), askManual = isManual(d.askPrice, askAuto);
+  return {
+    royaltyRate: d.royaltyRate ?? "", nma: numStr(d.acreageNma), nra: numStr(d.nra), source: null,
+    ourCostPerNma: numStr(d.ourCostPerNma), ourCostPerNra: numStr(d.ourCostPerNra), ourPrice: costManual ? numStr(d.ourPrice) : "", costManual,
+    askPricePerNma: numStr(d.askPricePerNma), askPricePerNra: numStr(d.askPricePerNra), askPrice: askManual ? numStr(d.askPrice) : "", askManual,
+    estimatedClosingCosts: numStr(d.estimatedClosingCosts), daysToClose: numStr(d.daysToClose),
+  };
+}
+/** Effective totals + day count for an economics form. */
+function econTotals(e: EconForm) {
+  const nma = numOrNull(e.nma), nra = numOrNull(e.nra);
+  const costAuto = totalFromPerAcre(numOrNull(e.ourCostPerNma), nma, numOrNull(e.ourCostPerNra), nra);
+  const askAuto = totalFromPerAcre(numOrNull(e.askPricePerNma), nma, numOrNull(e.askPricePerNra), nra);
+  const dtc = e.daysToClose.trim() !== "" && Number(e.daysToClose) > 0 ? Math.round(Number(e.daysToClose)) : null;
+  return {
+    nma, nra, costAuto, askAuto, daysToClose: dtc,
+    ourPrice: e.costManual ? numOrNull(e.ourPrice) : costAuto?.total ?? null,
+    askPrice: e.askManual ? numOrNull(e.askPrice) : askAuto?.total ?? null,
+  };
+}
+
 function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDetailData; users: UserLite[]; canEdit: boolean; onSaved: () => void }) {
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState(deal);
@@ -592,29 +633,41 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
   // seed is also the dirty baseline for the unsaved-changes guard.
   const seed = useMemo(() => ({ ...deal, states: deal.states?.length ? deal.states : (deal.state ? [deal.state] : []) }), [deal]);
   useEffect(() => setF(seed), [seed]);
+  // Economics are edited as strings, exactly like New Deal.
+  const econSeed = useMemo(() => econFromDeal(deal), [deal]);
+  const [econ, setEcon] = useState<EconForm>(econSeed);
+  useEffect(() => setEcon(econSeed), [econSeed]);
+  const discard = () => { setF(seed); setEcon(econSeed); setEdit(false); };
   // Leaving the page with unsaved characteristic edits triggers the standard
   // Save / Discard / Cancel dialog.
-  useUnsavedSection(edit, f, seed, save, () => { setF(seed); setEdit(false); });
+  useUnsavedSection(edit, { f, econ }, { f: seed, econ: econSeed }, save, discard);
 
-  // Operator suggestions come from the deal's counties (same source as the Map
-  // page), recomputed whenever the selected counties change.
-  const [operatorOptions, setOperatorOptions] = useState<string[]>([]);
-  useEffect(() => {
-    let live = true;
-    operatorsForCounties(f.counties).then((ops) => { if (live) setOperatorOptions(ops); });
-    return () => { live = false; };
-  }, [f.counties]);
   const set = (k: keyof DealDetailData) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setF((p) => ({ ...p, [k]: e.target.value === "" ? null : e.target.value } as DealDetailData));
-  const setNum = (k: keyof DealDetailData) => (e: React.ChangeEvent<HTMLInputElement>) =>
-    setF((p) => ({ ...p, [k]: e.target.value === "" ? null : Number(e.target.value) } as DealDetailData));
   const setArr = (k: keyof DealDetailData) => (v: string[]) => setF((p) => ({ ...p, [k]: v } as DealDetailData));
+  const setE = (patch: Partial<EconForm>) => setEcon((p) => ({ ...p, ...patch }));
+  const editAcreage = (edit: { nma?: string; nra?: string; royaltyRate?: string }) => setEcon((p) => ({ ...p, ...applyAcreageEdit(p, edit) }));
+  const t = econTotals(econ);
+
+  // Original closing follows Date Under Contract + Days to Close (as in New
+  // Deal) unless it was set independently of the stored window.
+  const contractIso = deal.dateUnderContract ? toInputDate(deal.dateUnderContract) : "";
+  const closingIso = deal.originalClosingDate ? toInputDate(deal.originalClosingDate) : "";
+  const closingFollows = !closingIso || deal.daysToClose == null || closingIso === addDaysIso(contractIso, deal.daysToClose);
+  const nextClosing = contractIso && t.daysToClose && t.daysToClose !== (deal.daysToClose ?? null) && closingFollows
+    ? addDaysIso(contractIso, t.daysToClose) : null;
 
   async function save() {
     await api.patch(`/deals/${deal.id}`, {
       states: f.states, counties: f.counties, basins: f.basins, formations: f.formations,
-      assetTypes: f.assetTypes, acreageNma: f.acreageNma, nra: f.nra, abstractIds: f.abstractIds, askPrice: f.askPrice, ourPrice: f.ourPrice, operator: f.operator, rrc: f.rrc,
-      royaltyRate: f.royaltyRate ?? null,
+      assetTypes: f.assetTypes, abstractIds: f.abstractIds, operator: f.operator || null, rrc: f.rrc,
+      royaltyRate: econ.royaltyRate || null,
+      acreageNma: t.nma, nra: t.nra,
+      ourCostPerNma: numOrNull(econ.ourCostPerNma), ourCostPerNra: numOrNull(econ.ourCostPerNra), ourPrice: t.ourPrice,
+      askPricePerNma: numOrNull(econ.askPricePerNma), askPricePerNra: numOrNull(econ.askPricePerNra), askPrice: t.askPrice,
+      estimatedClosingCosts: numOrNull(econ.estimatedClosingCosts),
+      daysToClose: t.daysToClose,
+      ...(nextClosing ? { originalClosingDate: nextClosing } : {}),
     });
     setEdit(false);
     onSaved(); // editing characteristics auto-refreshes matches
@@ -624,7 +677,7 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
     <div className="panel">
       <div className="section-head">
         <h3>Deal characteristics</h3>
-        {edit ? <div className="row"><button className="small" onClick={() => { setF(deal); setEdit(false); }}>Cancel</button><button className="small primary" onClick={save}>Save</button></div>
+        {edit ? <div className="row"><button className="small" onClick={discard}>Cancel</button><button className="small primary" onClick={save}>Save</button></div>
           : <button className="small" onClick={() => setEdit(true)}>Edit</button>}
       </div>
       {!edit ? (<>
@@ -634,13 +687,19 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
           <DKV k="Basin" v={deal.basins.length ? <ChipList items={deal.basins} /> : null} />
           <DKV k="Formation" v={deal.formations.length ? <ChipList items={deal.formations} /> : null} />
           <DKV k="Asset Type" v={deal.assetTypes.length ? <ChipList items={deal.assetTypes} /> : null} />
+          <DKV k="Royalty Rate" v={royaltyLabel(deal.royaltyRate) || null} mono />
           <DKV k="NMA" v={deal.acreageNma != null ? num(deal.acreageNma) : null} mono />
           <DKV k="NRA" v={deal.nra != null ? num(deal.nra) : null} mono />
-          <DKV k="Our Price" v={deal.ourPrice != null ? money(deal.ourPrice) : null} mono />
-          <DKV k="Ask Price (to buyers)" v={deal.askPrice != null ? money(deal.askPrice) : null} mono accent />
+          <DKV k="Our Cost" v={deal.ourPrice != null ? money(deal.ourPrice) : null} mono />
+          <DKV k="Our Cost per NMA" v={deal.ourCostPerNma != null ? money(deal.ourCostPerNma, { cents: true }) : null} mono />
+          <DKV k="Our Cost per NRA" v={deal.ourCostPerNra != null ? money(deal.ourCostPerNra, { cents: true }) : null} mono />
+          <DKV k="Asking Price (to buyers)" v={deal.askPrice != null ? money(deal.askPrice) : null} mono accent />
+          <DKV k="Asking Price per NMA" v={deal.askPricePerNma != null ? money(deal.askPricePerNma, { cents: true }) : null} mono />
+          <DKV k="Asking Price per NRA" v={deal.askPricePerNra != null ? money(deal.askPricePerNra, { cents: true }) : null} mono />
+          <DKV k="Est. Closing Costs" v={deal.estimatedClosingCosts != null ? money(deal.estimatedClosingCosts) : null} mono />
+          <DKV k="Days to Close" v={deal.daysToClose != null ? `${deal.daysToClose} days` : null} mono />
           <DKV k="Operator" v={deal.operator} />
           <DKV k="RRC" v={deal.rrc} />
-          <DKV k="Royalty Rate" v={royaltyLabel(deal.royaltyRate) || null} mono />
           {/* Label the abstract with its county only when unambiguous. */}
           <DKV k={deal.abstractIds.length > 1 ? "Abstracts" : "Abstract"} v={abstractLabel || null} span2 />
         </div>
@@ -668,7 +727,7 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
             )}
           </div>
         ) : null}
-      </>) : (
+      </>) : (<>
         <div className="dd-grid">
           <GeoFields
             states={f.states ?? []} onStatesChange={setArr("states")}
@@ -678,30 +737,43 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
           <Fld l="Basin"><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(f.counties))} value={f.basins} onChange={setArr("basins")} placeholder="Search basins…" /></Fld>
           <Fld l="Formation"><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(f.counties))} value={f.formations} onChange={setArr("formations")} placeholder="Search formations…" /></Fld>
           <Fld l="Asset Type"><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={f.assetTypes} onChange={setArr("assetTypes")} placeholder="Search asset types…" /></Fld>
-          <Fld l="NMA"><input type="number" value={f.acreageNma ?? ""} onChange={setNum("acreageNma")} /></Fld>
-          <Fld l="NRA"><input type="number" value={f.nra ?? ""} onChange={setNum("nra")} /></Fld>
-          <Fld l="Our Price"><MoneyInput value={f.ourPrice != null ? String(f.ourPrice) : ""} onChange={(v) => setF((p) => ({ ...p, ourPrice: v === "" ? null : Number(v) }))} ariaLabel="Our price" /></Fld>
-          <Fld l="Ask Price (to buyers)"><MoneyInput value={f.askPrice != null ? String(f.askPrice) : ""} onChange={(v) => setF((p) => ({ ...p, askPrice: v === "" ? null : Number(v) }))} ariaLabel="Ask price" /></Fld>
-          <Fld l="Operator">
-            <input
-              list="deal-operator-options"
-              value={f.operator ?? ""}
-              onChange={set("operator")}
-              placeholder={operatorOptions.length ? `Search ${operatorOptions.length} operators in these counties…` : (f.counties.length ? "No operator data for these counties" : "Add a county to see operators")}
-            />
-            <datalist id="deal-operator-options">
-              {operatorOptions.map((o) => <option key={o} value={o} />)}
-            </datalist>
-          </Fld>
+          {/* Operator names run long — give the picker two columns. */}
+          <div className="field" style={{ gridColumn: "span 2" }}>
+            <label>Operator</label>
+            <OperatorSelect states={f.states ?? []} counties={f.counties} value={f.operator ?? ""} onChange={(v) => setF((p) => ({ ...p, operator: v || null }))} />
+          </div>
           <Fld l="RRC">
             <input value={f.rrc ?? ""} onChange={set("rrc")} placeholder="RRC Number" />
           </Fld>
+        </div>
+        <div className="modal-sec">Economics <span className="modal-sec-hint">· with a royalty rate, NMA and NRA calculate each other</span></div>
+        <div className="dd-grid">
           <Fld l="Royalty Rate">
-            <Select value={f.royaltyRate ?? ""} onChange={(v) => setF((p) => ({ ...p, royaltyRate: v || null }))} options={royaltyOptions(f.royaltyRate)}
+            <Select value={econ.royaltyRate} onChange={(v) => editAcreage({ royaltyRate: v })} options={royaltyOptions(econ.royaltyRate || null)}
               clearable placeholder="Select royalty rate…" ariaLabel="Royalty rate" />
           </Fld>
+          <Fld l="NMA"><input type="number" value={econ.nma} onChange={(e) => editAcreage({ nma: e.target.value })} aria-label="NMA" /><AcreageNote s={econ} field="nma" /></Fld>
+          <Fld l="NRA"><input type="number" value={econ.nra} onChange={(e) => editAcreage({ nra: e.target.value })} aria-label="NRA" /><AcreageNote s={econ} field="nra" /></Fld>
+          <Fld l="Our Cost per NMA"><MoneyInput decimals={2} value={econ.ourCostPerNma} onChange={(v) => setE({ ourCostPerNma: v })} ariaLabel="Our cost per NMA" placeholder="0.00" /></Fld>
+          <Fld l="Our Cost per NRA"><MoneyInput decimals={2} value={econ.ourCostPerNra} onChange={(v) => setE({ ourCostPerNra: v })} ariaLabel="Our cost per NRA" placeholder="0.00" /></Fld>
+          <Fld l="Our Cost">
+            <MoneyInput value={econ.ourPrice} onChange={(v) => setE({ ourPrice: v, costManual: v !== "" })} ariaLabel="Our cost" placeholder={t.costAuto ? t.costAuto.total.toLocaleString("en-US") : "0"} />
+            <PerAcreNote auto={t.costAuto} manual={econ.costManual} acres={t.costAuto?.basis === "NRA" ? t.nra : t.nma} rate={t.costAuto?.basis === "NRA" ? numOrNull(econ.ourCostPerNra) : numOrNull(econ.ourCostPerNma)} />
+          </Fld>
+          <Fld l="Asking Price per NMA"><MoneyInput decimals={2} value={econ.askPricePerNma} onChange={(v) => setE({ askPricePerNma: v })} ariaLabel="Asking price per NMA" placeholder="0.00" /></Fld>
+          <Fld l="Asking Price per NRA"><MoneyInput decimals={2} value={econ.askPricePerNra} onChange={(v) => setE({ askPricePerNra: v })} ariaLabel="Asking price per NRA" placeholder="0.00" /></Fld>
+          <Fld l="Asking Price (to buyers)">
+            <MoneyInput value={econ.askPrice} onChange={(v) => setE({ askPrice: v, askManual: v !== "" })} ariaLabel="Asking price" placeholder={t.askAuto ? t.askAuto.total.toLocaleString("en-US") : "0"} />
+            <PerAcreNote auto={t.askAuto} manual={econ.askManual} acres={t.askAuto?.basis === "NRA" ? t.nra : t.nma} rate={t.askAuto?.basis === "NRA" ? numOrNull(econ.askPricePerNra) : numOrNull(econ.askPricePerNma)} />
+          </Fld>
+          <Fld l="Est. Closing Costs"><MoneyInput value={econ.estimatedClosingCosts} onChange={(v) => setE({ estimatedClosingCosts: v })} ariaLabel="Estimated closing costs" /></Fld>
+          <div className="field" style={{ gridColumn: "span 2" }}>
+            <label title="Days from Date Under Contract to closing · Find Buyer By gets every day beyond 30">Days to Close</label>
+            <DaysToCloseField value={econ.daysToClose} onChange={(v) => setE({ daysToClose: v })} />
+            {nextClosing && <div className="nd-calc auto">Original closing moves to {fmtDate(nextClosing)}</div>}
+          </div>
         </div>
-      )}
+      </>)}
 
       {/* Assigned Team Members — a core deal attribute, kept inside this card. */}
       <div className="ddc-assignees">

@@ -121,7 +121,7 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
         <div className="field"><label>ZIP code</label><input value={f.mailingZip} onChange={set("mailingZip")} placeholder="75201" /></div>
       </div>
 
-      <div className="modal-sec">Buy box <span className="modal-sec-hint">— what this buyer wants; drives deal matching</span></div>
+      <div className="modal-sec">Buy box <span className="modal-sec-hint">· what this buyer wants; drives deal matching</span></div>
       <div className="nd-grid3">
         <GeoFields
           states={states} onStatesChange={setStates}

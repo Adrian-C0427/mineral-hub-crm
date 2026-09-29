@@ -37,7 +37,7 @@ export function StageChangeModal({ deal, initialStage, directTerminal, hasUnreso
   // uses the note as the whole reason).
   const deadReason = deadCategory === "Other"
     ? deadNotes.trim()
-    : [deadCategory, deadNotes.trim()].filter(Boolean).join(" — ");
+    : [deadCategory, deadNotes.trim()].filter(Boolean).join(" · ");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const isTerminal = toStage === "CLOSED" || toStage === "DEAD";

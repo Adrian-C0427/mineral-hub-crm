@@ -350,7 +350,7 @@ function Workspace(props: {
         <div className="va-step-head" onClick={() => setSetupOpen((o) => !o)}>
           <div className="va-step-title">
             <span className="va-step-num">1</span>
-            <span>Wells &amp; Assumptions{openAnalysisName && <span className="muted" style={{ fontWeight: 400 }}> — {openAnalysisName}</span>}</span>
+            <span>Wells &amp; Assumptions{openAnalysisName && <span className="muted" style={{ fontWeight: 400 }}> · {openAnalysisName}</span>}</span>
           </div>
           <span className="va-step-toggle">{setupOpen ? "Hide" : `${selected.length} wells selected · Show`} <span className={`va-chev ${setupOpen ? "" : "down"}`}>⌃</span></span>
         </div>
@@ -1015,7 +1015,7 @@ function DeclineFitCard({ phase, unit, fit }: { phase: string; unit: string; fit
   );
   return (
     <div className="fit-card">
-      <div className="fit-title">{phase} — {prettyEnum(fit.model)}{fit.manual ? " (manual)" : ""} <ConfBadge c={fit.confidence} /></div>
+      <div className="fit-title">{phase} · {prettyEnum(fit.model)}{fit.manual ? " (manual)" : ""} <ConfBadge c={fit.confidence} /></div>
       <div className="fit-grid">
         <div className="kv"><span className="k">Effective decline</span><span className="v">{(fit.diAnnualEffective * 100).toFixed(1)}%/yr</span></div>
         <div className="kv"><span className="k">Nominal Di</span><span className="v">{(fit.diAnnualNominal * 100).toFixed(1)}%/yr</span></div>
@@ -1353,7 +1353,7 @@ function FullReport({ analysis, analysisName }: { analysis: AnalyzeResponse; ana
   return (
     <div>
       <div className="panel report-header">
-        <h2 style={{ margin: 0 }}>Well Production &amp; Valuation Report{analysisName ? ` — ${analysisName}` : ""}</h2>
+        <h2 style={{ margin: 0 }}>Well Production &amp; Valuation Report{analysisName ? ` · ${analysisName}` : ""}</h2>
         <p className="muted" style={{ margin: "4px 0 0" }}>
           Generated {fmtDateTime(r.runAt)} · Forecast confidence: {CONF_LABEL[r.forecast.confidence]} ·
           Historical data and forecast estimates are labeled throughout.

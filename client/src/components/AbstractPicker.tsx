@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
 import { api } from "../api/client";
-import { abstractNumber, formatAbstract, rankAbstracts, stateName, surveyLabel } from "../lib/abstracts";
+import { abstractNumber, abstractShortLabel, formatAbstract, rankAbstracts, stateName, surveyLabel } from "../lib/abstracts";
 
 export interface AbstractEntry { id: string; abstract: string; survey: string; county: string; countyFips: string; state?: string }
 
@@ -19,9 +19,9 @@ function loadIndex(): Promise<AbstractEntry[]> {
   return inflight;
 }
 
-/** Full identification label for a GIS abstract entry. */
-export function abstractEntryLabel(e: AbstractEntry): string {
-  return formatAbstract({ abstract: e.abstract, survey: e.survey, county: e.county, state: e.state ?? "TX" });
+/** Selector label for a GIS abstract entry: "A-3 · W. Dwight Survey" (the county is already chosen). */
+export function abstractEntryShortLabel(e: AbstractEntry): string {
+  return abstractShortLabel({ abstract: e.abstract, survey: e.survey });
 }
 
 /**
@@ -61,22 +61,24 @@ export function useAbstractIndex() {
       const n = abstractNumber(abstract);
       const cset = new Set(counties.map((c) => c.toLowerCase()));
       const hits = (byNum.get(n) ?? []).filter((e) => cset.size === 0 || cset.has(e.county.toLowerCase()));
-      if (hits.length === 1) return abstractEntryLabel(hits[0]);
-      if (hits.length === 0) return formatAbstract({ abstract });
+      if (hits.length === 1) return abstractEntryShortLabel(hits[0]);
+      if (hits.length === 0) return abstractShortLabel({ abstract });
+      // The same number in several counties: say where, since it's ambiguous.
       const cs = [...new Set(hits.map((e) => e.county))].sort();
       const where = cs.length <= 3 ? `${cs.join(", ")} ${cs.length === 1 ? "County" : "Counties"}` : `${cs.length} counties`;
-      return `Abstract ${n} — ${hits.length} surveys — ${where}, ${stateName(hits[0].state ?? "TX")}`;
+      return `A-${n} · ${hits.length} surveys · ${where}, ${stateName(hits[0].state ?? "TX")}`;
     };
     return { entries, byId, find, label, labelAmong };
   }, [entries]);
 }
 
-/** Full labels for GIS abstract ids, "; "-separated (the raw id while the index loads). */
+/** Selector labels ("A-3 · W. Dwight Survey") for GIS abstract ids, "; "-separated
+ *  (the raw id while the index loads). Shown beside the record's County. */
 export function useAbstractLabels(ids: string[] | null | undefined): string {
   const { byId } = useAbstractIndex();
   return useMemo(() => {
     if (!ids || ids.length === 0) return "—";
-    return ids.map((id) => { const e = byId.get(id); return e ? abstractEntryLabel(e) : id; }).join("; ");
+    return ids.map((id) => { const e = byId.get(id); return e ? abstractEntryShortLabel(e) : id; }).join("; ");
   }, [ids, byId]);
 }
 
@@ -99,7 +101,7 @@ export function SurveyMultiPicker({ value, onChange, abstractIds }: {
     const out: Record<string, string> = {};
     for (const e of entries) {
       if (!idSet.has(e.id) || !e.survey || out[e.survey]) continue;
-      out[e.survey] = `${surveyLabel(e.survey)} — Abstract ${abstractNumber(e.abstract)}, ${e.county} County`;
+      out[e.survey] = `${surveyLabel(e.survey)} · A-${abstractNumber(e.abstract)}`;
     }
     return out;
   }, [entries, idSet]);
@@ -118,10 +120,11 @@ export function SurveyMultiPicker({ value, onChange, abstractIds }: {
 }
 
 /**
- * Searchable multi-select of abstracts, filtered by the deal's selected
- * counties (all available when no county is chosen). Stores GIS ids; shows
- * each as "Abstract 15 — J Dunn Survey — Leon County, Texas", and ranks typed
- * searches by abstract number (exact match first, then ascending).
+ * Searchable multi-select of abstracts, limited to the selected counties and
+ * locked until at least one county is chosen. Stores GIS ids; shows each as
+ * "A-3 · W. Dwight Survey" (the county is already chosen — it's appended only
+ * when several counties are selected, to tell same-numbered abstracts apart),
+ * and ranks typed searches by abstract number (exact match first, then ascending).
  */
 export function AbstractMultiPicker({
   value,
@@ -137,13 +140,14 @@ export function AbstractMultiPicker({
 
   // The statewide index is large (300k+), so labels are built once per index
   // load and the scoped list is pre-sorted numerically once per county change.
+  const multiCounty = counties.length > 1;
   const labels = useMemo(() => {
     const out: Record<string, string> = {};
-    for (const e of entries) out[e.id] = abstractEntryLabel(e);
+    for (const e of entries) out[e.id] = multiCounty ? `${abstractEntryShortLabel(e)} · ${e.county}` : abstractEntryShortLabel(e);
     return out;
-  }, [entries]);
+  }, [entries, multiCounty]);
   const scopedIds = useMemo(() => {
-    const scoped = counties.length === 0 ? entries : entries.filter((e) => countySet.has(e.county.toLowerCase()));
+    const scoped = counties.length === 0 ? [] : entries.filter((e) => countySet.has(e.county.toLowerCase()));
     return rankAbstracts(scoped, "", (e) => ({ abstract: e.abstract, text: e.county })).map((e) => e.id);
   }, [entries, counties, countySet]);
   // Already-selected abstracts stay valid options even outside the county scope.
@@ -161,7 +165,8 @@ export function AbstractMultiPicker({
       value={value}
       onChange={onChange}
       filterOptions={filterOptions}
-      placeholder={counties.length === 0 ? "Search abstract # or survey…" : "Search abstract # or survey in selected county…"}
+      disabled={counties.length === 0}
+      placeholder={counties.length === 0 ? "Select a county first" : "Search abstract # or survey…"}
     />
   );
 }

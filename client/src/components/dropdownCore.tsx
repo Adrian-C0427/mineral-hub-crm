@@ -22,6 +22,17 @@ import { layoutRect, layoutViewport } from "../lib/viewport";
 /** Matches .msel-menu's max-height so flip decisions agree with rendering. */
 const MENU_MAX_H = 240;
 const EDGE = 8; // minimum breathing room from viewport edges
+/** Widest a list menu grows to fit long option names (operators, surveys). */
+const MENU_MAX_W = 520;
+
+/**
+ * List menus start at the field's width and grow to fit their longest option
+ * (up to MENU_MAX_W and the viewport's right edge), so long names are never
+ * clipped; still left-aligned with the field.
+ */
+function grow(fieldW: number, left: number, vw: number): CSSProperties {
+  return { minWidth: fieldW, width: "max-content", maxWidth: Math.max(fieldW, Math.min(MENU_MAX_W, vw - left - EDGE)) };
+}
 
 export function useMenuPosition(
   anchorRef: RefObject<HTMLElement | null>,
@@ -65,7 +76,7 @@ export function useMenuPosition(
       if (dirRef.current == null && !menuRef.current) {
         setPos(fitContent
           ? { position: "fixed", top: r.bottom + 4, left, width: r.width }
-          : { position: "fixed", top: r.bottom + 4, left, width: r.width, maxHeight: Math.max(80, Math.min(MENU_MAX_H, below)) });
+          : { position: "fixed", top: r.bottom + 4, left, ...grow(r.width, left, vw), maxHeight: Math.max(80, Math.min(MENU_MAX_H, below)) });
         return;
       }
       // Open downward whenever space permits: the full menu fits below, OR
@@ -90,9 +101,9 @@ export function useMenuPosition(
       const fitsBelow = below >= Math.min(MENU_MAX_H, menuRef.current?.scrollHeight ?? MENU_MAX_H);
       if (dirRef.current == null) dirRef.current = fitsBelow || below >= MIN_USABLE || below >= above ? "down" : "up";
       if (dirRef.current === "down") {
-        setPos({ position: "fixed", top: r.bottom + 4, left, width: r.width, maxHeight: Math.max(80, Math.min(MENU_MAX_H, below)) });
+        setPos({ position: "fixed", top: r.bottom + 4, left, ...grow(r.width, left, vw), maxHeight: Math.max(80, Math.min(MENU_MAX_H, below)) });
       } else {
-        setPos({ position: "fixed", bottom: vh - r.top + 4, left, width: r.width, maxHeight: Math.max(80, Math.min(MENU_MAX_H, above)) });
+        setPos({ position: "fixed", bottom: vh - r.top + 4, left, ...grow(r.width, left, vw), maxHeight: Math.max(80, Math.min(MENU_MAX_H, above)) });
       }
     };
     place();

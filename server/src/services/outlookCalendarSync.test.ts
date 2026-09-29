@@ -9,13 +9,14 @@ const deal = (over: Partial<Parameters<typeof planDeadlineEvents>[0][number]> = 
 });
 
 describe("planDeadlineEvents", () => {
-  it("derives find-buyer-by (+15d) and closing events from anchor dates", () => {
+  it("derives find-buyer-by (days to close beyond 30) and closing events from anchor dates", () => {
     const events = planDeadlineEvents([deal({
       dateUnderContract: new Date("2026-08-01T00:00:00Z"),
       originalClosingDate: new Date("2026-09-01T00:00:00Z"),
+      daysToClose: 45,
     })]);
     const byKey = new Map(events.map((e) => [e.key, e]));
-    expect(byKey.get("deal1:findBuyerBy")?.date).toBe("2026-08-16"); // +15 calendar days
+    expect(byKey.get("deal1:findBuyerBy")?.date).toBe("2026-08-16"); // 45-day close → +15 calendar days
     expect(byKey.get("deal1:originalClosing")?.date).toBe("2026-09-01");
     expect(byKey.get("deal1:finalClosing")?.date).toBe("2026-09-16"); // +15 calendar days
     expect(byKey.get("deal1:findBuyerBy")?.subject).toBe("Smith Ranch — Find buyer by (Mineral Hub)");

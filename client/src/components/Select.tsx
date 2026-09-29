@@ -15,7 +15,8 @@ interface Props {
   onChange: (value: string) => void;
   placeholder?: string;
   disabled?: boolean;
-  /** Show a type-to-filter input in the dropdown (for long option lists). */
+  /** Type to filter right in the field (for long option lists): clicking or
+   *  typing on the control turns it into the search box. */
   searchable?: boolean;
   /** Allow clearing back to "" via an inline ✕ (adds a "— none —" affordance). */
   clearable?: boolean;
@@ -63,7 +64,13 @@ export function Select({
   const selected = baseOpts.find((o) => o.value === value)
     ?? (creatable && value ? { value, label: value } : null);
 
-  useEffect(() => { if (open && searchable) inputRef.current?.focus(); }, [open, searchable]);
+  // Focus the in-field search with the caret after any character that opened it.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!open || !searchable || !el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, [open, searchable]);
 
   const typed = query.trim();
   const filtered = useMemo(() => {
@@ -94,6 +101,8 @@ export function Select({
     if (disabled) return;
     if (!open) {
       if (e.key === "Enter" || e.key === " " || e.key === "ArrowDown" || e.key === "ArrowUp") { e.preventDefault(); setOpen(true); }
+      // A searchable field starts searching on the first typed character.
+      else if (searchable && e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) { e.preventDefault(); setQuery(e.key); setOpen(true); }
       return;
     }
     switch (e.key) {
@@ -129,9 +138,29 @@ export function Select({
         onClick={() => !disabled && (open ? close() : setOpen(true))}
         onKeyDown={onTriggerKeyDown}
       >
-        <span className={`msel-single-value ${selected ? "" : "placeholder"}`}>
-          {selected ? selected.label : placeholder}
-        </span>
+        {searchable && open ? (
+          // The field itself is the search box — no separate input in the menu.
+          <input
+            ref={inputRef}
+            className="msel-input msel-single-input"
+            value={query}
+            placeholder={selected ? selected.label : searchPlaceholder}
+            aria-label={ariaLabel ? `Search ${ariaLabel}` : "Search"}
+            onChange={(e) => setQuery(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
+              else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
+              else if (e.key === "Enter") { e.preventDefault(); if (active >= 0 && filtered[active]) pick(filtered[active].value); }
+              else if (e.key === "Tab") close();
+            }}
+          />
+        ) : (
+          <span className={`msel-single-value ${selected ? "" : "placeholder"}`}>
+            {selected ? selected.label : placeholder}
+          </span>
+        )}
         {clearable && selected && !disabled && (
           <button type="button" className="msel-clear" aria-label="Clear" onClick={(e) => { e.stopPropagation(); pick(""); }}>×</button>
         )}
@@ -142,21 +171,6 @@ export function Select({
           className="msel-menu msel-menu-portal" role="listbox" ref={menuRef}
           style={pos}
         >
-          {searchable && (
-            <input
-              ref={inputRef}
-              className="msel-search"
-              value={query}
-              placeholder={searchPlaceholder}
-              onChange={(e) => setQuery(e.target.value)}
-              onClick={(e) => e.stopPropagation()}
-              onKeyDown={(e) => {
-                if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
-                else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
-                else if (e.key === "Enter") { e.preventDefault(); if (active >= 0 && filtered[active]) pick(filtered[active].value); }
-              }}
-            />
-          )}
           {filtered.length === 0 ? (
             <div className="msel-empty">{emptyText}</div>
           ) : (

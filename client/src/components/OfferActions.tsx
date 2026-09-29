@@ -120,7 +120,7 @@ function EditOfferModal({ offer, accepted, dealNma, dealNra, onClose, onSaved }:
 
   return (
     <Modal
-      title={`Edit offer — ${offer.buyer.name}`}
+      title={`Edit offer · ${offer.buyer.name}`}
       onClose={onClose}
       footer={
         <>

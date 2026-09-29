@@ -105,7 +105,7 @@ export function BuyerAliasManager({ buyerId, companyName, aliases, onChanged }: 
             <div className="alias-history-row" key={e.id}>
               <span className="alias-history-text">
                 {e.summary}
-                <span className="muted"> — {e.actorName ?? "system"}, {fmtDate(e.createdAt)}</span>
+                <span className="muted"> · {e.actorName ?? "system"}, {fmtDate(e.createdAt)}</span>
               </span>
               {e.undoable && canMerge && (
                 <button type="button" className="small" onClick={() => setUndoEvent(e)}>Undo merge</button>

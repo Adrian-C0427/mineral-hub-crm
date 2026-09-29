@@ -11,8 +11,8 @@ import { US_STATE_OPTIONS, US_STATE_LABELS, countiesForStates } from "../lib/opt
  * - State: searchable multi-select over all 50 U.S. states (+ DC).
  * - County: searchable multi-select, options limited to the selected states;
  *   selections outside those states are auto-pruned when the states change.
- * - Abstract: searchable multi-select limited to the selected counties;
- *   auto-pruned by AbstractMultiPicker as counties change. Optional — omit
+ * - Abstract: searchable multi-select limited to the selected counties and
+ *   locked until one is chosen ("A-3 · W. Dwight Survey"). Optional — omit
  *   `onAbstractsChange` to hide it (buy-boxes/filters that don't scope to a
  *   single abstract).
  *

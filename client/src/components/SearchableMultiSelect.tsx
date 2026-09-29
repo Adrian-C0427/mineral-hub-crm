@@ -17,6 +17,8 @@ interface Props {
   /** Custom match + order for a typed query (e.g. abstracts ranked by number).
    *  Receives the unselected options; returns those to show, in order. */
   filterOptions?: (options: readonly string[], query: string) => string[];
+  /** Locked (e.g. until a parent field is chosen): won't open; chips stay removable. */
+  disabled?: boolean;
 }
 
 /**
@@ -31,7 +33,7 @@ interface Props {
  * another value is one click/keystroke away: clicking the field or typing
  * reopens it with the previous selections intact as chips.
  */
-export function SearchableMultiSelect({ options, value, onChange, placeholder = "Search…", labels, single = false, filterOptions }: Props) {
+export function SearchableMultiSelect({ options, value, onChange, placeholder = "Search…", labels, single = false, filterOptions, disabled = false }: Props) {
   const show = (v: string) => labels?.[v] ?? v;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -79,8 +81,8 @@ export function SearchableMultiSelect({ options, value, onChange, placeholder = 
   }
 
   return (
-    <div className="msel" ref={ref}>
-      <div className={`msel-box ${open ? "open" : ""}`} onClick={() => { setOpen(true); inputRef.current?.focus(); }}>
+    <div className={`msel ${disabled ? "is-disabled" : ""}`} ref={ref}>
+      <div className={`msel-box ${open ? "open" : ""}`} onClick={() => { if (disabled) return; setOpen(true); inputRef.current?.focus(); }}>
         {value.map((v) => (
           <span className="msel-chip" key={v}>
             {show(v)}
@@ -93,13 +95,14 @@ export function SearchableMultiSelect({ options, value, onChange, placeholder = 
           role="combobox" aria-expanded={open} aria-haspopup="listbox"
           value={query}
           placeholder={value.length === 0 ? placeholder : ""}
+          disabled={disabled}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
           onFocus={() => setOpen(true)}
           onKeyDown={onKeyDown}
         />
-        <Caret open={open} onToggle={() => { if (open) close(); else { setOpen(true); inputRef.current?.focus(); } }} />
+        <Caret open={open} onToggle={() => { if (disabled) return; if (open) close(); else { setOpen(true); inputRef.current?.focus(); } }} />
       </div>
-      {open && pos && createPortal(
+      {open && !disabled && pos && createPortal(
         <div
           className="msel-menu msel-menu-portal" role="listbox" ref={menuRef}
           style={pos}

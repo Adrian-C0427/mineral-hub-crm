@@ -273,7 +273,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
           </>
         )}
         {reviewRun && (
-          <Modal title={`Import review — ${reviewRun.filename ?? runTypeLabel(reviewRun.source)} (${fmtDate(reviewRun.createdAt)})`} wide onClose={() => setReviewRun(null)}
+          <Modal title={`Import review · ${reviewRun.filename ?? runTypeLabel(reviewRun.source)} (${fmtDate(reviewRun.createdAt)})`} wide onClose={() => setReviewRun(null)}
             footer={<button className="primary" onClick={() => setReviewRun(null)}>Done</button>}>
             <ImportReview runId={reviewRun.id} />
           </Modal>

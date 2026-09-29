@@ -363,7 +363,7 @@ gisRouter.get(
         .map((a) => ({
           id: a.id,
           label: `Abstract ${abstractNumber(a.abstract ?? a.id)}`,
-          sub: [surveyLabel(a.survey), countyStateLabel(a.county, a.state ?? "TX")].filter(Boolean).join(" — "),
+          sub: [surveyLabel(a.survey), countyStateLabel(a.county, a.state ?? "TX")].filter(Boolean).join(" · "),
         })),
       wells: wells.map((w) => ({
         fid: w.fid,

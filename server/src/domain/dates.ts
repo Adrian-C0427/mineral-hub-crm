@@ -3,9 +3,10 @@ import { DEADLINE_RULES } from "../config.js";
 /**
  * SINGLE SOURCE OF TRUTH for deadline math.
  *
- * Find Buyer By  = Date Under Contract + 15 calendar days  (override wins)
- *                  + every contracted day to close beyond 30
- *                  (Days to Close 60 → contract + 45: still 15 days before closing)
+ * Find Buyer By  = Date Under Contract + (Days to Close − 30)  (override wins)
+ *                  (30 → contract + 0, 40 → +10, 60 → +30, 75 → +45)
+ *                  Without a stored Days to Close, the window is read from
+ *                  Original Closing − Date Under Contract; failing that, 30.
  * Final Closing  = Original Closing    + 15 calendar days  (override wins)
  *
  * Every consumer (priority calc, banners, tables, cards, reports) MUST call
@@ -17,7 +18,7 @@ export interface DealDateInputs {
   originalClosingDate: Date | null;
   findBuyerByDateOverride: Date | null;
   finalClosingDateOverride: Date | null;
-  /** Contracted days to close; null/absent = the standard 30-day close. */
+  /** Contracted days to close; null/absent = derived from the closing date. */
   daysToClose?: number | null;
 }
 
@@ -41,15 +42,25 @@ export function addCalendarDays(date: Date, days: number): Date {
   return d;
 }
 
-/** Calendar days from contract to the auto Find-Buyer-By for a given close window. */
+/** Calendar days from contract to the auto Find-Buyer-By for a given close
+ *  window: every contracted day beyond 30 (never negative). */
 export function findBuyerByOffsetDays(daysToClose: number | null | undefined): number {
-  const extra = daysToClose != null ? Math.max(0, daysToClose - DEADLINE_RULES.STANDARD_DAYS_TO_CLOSE) : 0;
-  return DEADLINE_RULES.FIND_BUYER_BY_DAYS_AFTER_CONTRACT + extra;
+  return Math.max(0, (daysToClose ?? DEADLINE_RULES.STANDARD_DAYS_TO_CLOSE) - DEADLINE_RULES.STANDARD_DAYS_TO_CLOSE);
+}
+
+/** The deal's close window: stored Days to Close, else Original Closing − Date Under Contract. */
+export function effectiveDaysToClose(deal: Pick<DealDateInputs, "daysToClose" | "dateUnderContract" | "originalClosingDate">): number | null {
+  if (deal.daysToClose != null) return deal.daysToClose;
+  if (deal.dateUnderContract && deal.originalClosingDate) {
+    const d = daysUntil(deal.originalClosingDate, deal.dateUnderContract);
+    return d > 0 ? d : null;
+  }
+  return null;
 }
 
 export function resolveDealDates(deal: DealDateInputs): ResolvedDealDates {
   const findBuyerByAuto = deal.dateUnderContract
-    ? addCalendarDays(deal.dateUnderContract, findBuyerByOffsetDays(deal.daysToClose))
+    ? addCalendarDays(deal.dateUnderContract, findBuyerByOffsetDays(effectiveDaysToClose(deal)))
     : null;
 
   const finalClosingAuto = deal.originalClosingDate

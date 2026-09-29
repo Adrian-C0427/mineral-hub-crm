@@ -1212,7 +1212,7 @@ export function MapView() {
               </>
             ) : (
               <>
-                <div className="section-head"><div><h3 style={{ margin: 0 }}>{formatAbstract({ abstract: selected.abstract })}</h3><div className="muted" style={{ fontSize: 12 }}>{[surveyLabel(selected.survey), countyStateLabel(selected.county, "TX")].filter(Boolean).join(" — ")}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
+                <div className="section-head"><div><h3 style={{ margin: 0 }}>{formatAbstract({ abstract: selected.abstract })}</h3><div className="muted" style={{ fontSize: 12 }}>{[surveyLabel(selected.survey), countyStateLabel(selected.county, "TX")].filter(Boolean).join(" · ")}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
                 <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}><KV k="Abstract" v={formatAbstract({ abstract: selected.abstract, survey: selected.survey, county: selected.county, state: "TX" })} /><KV k="Survey" v={selected.survey} /><KV k="County" v={selected.county} /></div>
                 {/* Owned mineral assets (HOLD) are identified as Mineral Assets —
                     no stage, priority, buyer, or other deal workflow. */}

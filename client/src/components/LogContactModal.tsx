@@ -87,7 +87,7 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, dealNra, de
 
   return (
     <Modal
-      title={`Update buyer — ${buyerName}`}
+      title={`Update buyer · ${buyerName}`}
       onClose={onClose}
       dirty={notes.trim() !== (initial?.notes ?? "").trim() || amount.trim() !== "" || conditions.trim() !== ""}
       footer={
@@ -113,7 +113,7 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, dealNra, de
       </div>
       {status === "OFFER_RECEIVED" && (
         <>
-          <div className="modal-sec">Offer <span className="modal-sec-hint">— enter an amount to record a formal offer, or leave blank to just set the status</span></div>
+          <div className="modal-sec">Offer <span className="modal-sec-hint">· enter an amount to record a formal offer, or leave blank to just set the status</span></div>
           <div className="grid-2">
             <div className="field">
               <label>Price per NRA <span className="muted" style={{ textTransform: "none" }}>(optional)</span></label>
