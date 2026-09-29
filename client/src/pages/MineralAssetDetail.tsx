@@ -28,7 +28,6 @@ import { MarketingFunnel } from "../components/MarketingFunnel";
 import { useUnsavedSection } from "../lib/unsaved";
 import { DateField } from "../components/DateField";
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
-const TractSection = lazy(() => import("../components/TractSection").then((m) => ({ default: m.TractSection })));
 
 // Mineral-asset document categories (module-specific; the shared DocumentsSection
 // provides the identical Deal-page interface around them).
@@ -147,15 +146,9 @@ function HoldTab({ asset, canEdit, onChanged }: { asset: AssetDetail; canEdit: b
       <FinancialsCard asset={asset} canEdit={canEdit} onSaved={onChanged} />
 
       <div className="panel">
-        <div className="section-head"><h3>Location</h3><span className="muted">This asset's abstracts and geographic extent</span></div>
-        <Suspense fallback={<Spinner label="Loading map…" />}><DealMap abstractIds={asset.abstractIds} /></Suspense>
+        <div className="section-head"><h3>Location</h3><span className="muted">This asset's abstracts, imported tracts, and geographic extent</span></div>
+        <Suspense fallback={<Spinner label="Loading map…" />}><DealMap dealId={asset.id} abstractIds={asset.abstractIds} /></Suspense>
       </div>
-
-      {/* Legal tract descriptions → parsed calls → mapped polygons + exports —
-          identical to the Deal page. */}
-      <Suspense fallback={<div className="panel"><Spinner label="Loading tract descriptions…" /></div>}>
-        <TractSection dealId={asset.id} dealName={asset.name} canEdit={canEdit} abstractIds={asset.abstractIds} />
-      </Suspense>
 
       {can("viewDocuments") && <DocumentsSection ownerType="deal" ownerId={asset.id} files={asset.files} folders={asset.docFolders?.length ? asset.docFolders : ASSET_DOC_FOLDERS} onChanged={onChanged} canEdit={canEdit} canDelete={canEdit} />}
     </div>
@@ -730,7 +723,7 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
                   <span className="row" style={{ gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
                     {o.status === "ACCEPTED" || asset.selectedOfferId === o.id ? <span className="badge resp-offer">Accepted Offer</span> :
                       canEdit && <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button>}
-                    {canEdit && <OfferRowActions offer={o} accepted={o.status === "ACCEPTED" || asset.selectedOfferId === o.id} onChanged={onChanged} />}
+                    {canEdit && <OfferRowActions offer={o} accepted={o.status === "ACCEPTED" || asset.selectedOfferId === o.id} onChanged={onChanged} dealNma={asset.acreageNma} dealNra={asset.nra} />}
                   </span>
                 </td>
               </tr>
@@ -815,11 +808,10 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
         )}
       </CollapsibleSection>
 
-      {/* Location, Tract Descriptions, and Documents live ONLY on the Hold tab
-          (the single source of truth) — the Sell tab points there instead of
-          duplicating the sections. */}
+      {/* Location and Documents live ONLY on the Hold tab (the single source of
+          truth) — the Sell tab points there instead of duplicating the sections. */}
       <p className="muted" style={{ fontSize: 12.5, margin: "0 0 4px" }}>
-        Looking for the property map, tract descriptions, or documents? They live on the{" "}
+        Looking for the property map, imported tracts, or documents? They live on the{" "}
         <button className="link-btn" style={{ padding: 0, fontSize: 12.5, fontWeight: 700 }} onClick={onGoHold}>Hold tab</button>.
       </p>
 

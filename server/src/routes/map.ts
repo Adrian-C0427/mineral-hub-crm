@@ -126,13 +126,28 @@ const tractImportLimiter = rateLimit({
   message: { error: "Too many shapefile imports. Wait a few minutes and try again." },
 });
 
+// ?dealId= scopes a list to one deal's imports (the deal map); omitted = every
+// org tract, deal-linked ones included (the main map).
+const dealScopeSchema = z.object({ dealId: z.string().min(1).max(200).optional() });
+
+/** The deal an import attaches to — must be in the caller's org. */
+async function orgDealId(req: AuthedRequest, raw: unknown): Promise<string | null> {
+  if (raw == null || raw === "") return null;
+  const id = z.string().min(1).max(200).parse(raw);
+  const deal = await prisma.deal.findFirst({ where: { id, organizationId: orgId(req) }, select: { id: true } });
+  if (!deal) throw new HttpError(404, "Deal not found");
+  return deal.id;
+}
+
 /** Every imported tract as one FeatureCollection (map source + panel detail). */
 mapRouter.get(
   "/tracts",
   asyncHandler(async (req: AuthedRequest, res) => {
+    const { dealId } = dealScopeSchema.parse(req.query);
     const rows = await prisma.mapTract.findMany({
-      where: { organizationId: orgId(req) },
+      where: { organizationId: orgId(req), ...(dealId ? { dealId } : {}) },
       orderBy: { createdAt: "asc" },
+      include: { deal: { select: { id: true, name: true } } },
     });
     res.json({
       type: "FeatureCollection",
@@ -143,6 +158,7 @@ mapRouter.get(
         properties: {
           ...(r.properties as Record<string, unknown> | null ?? {}),
           __id: r.id, __name: r.name, __source: r.sourceFile, __importId: r.importId,
+          __dealId: r.deal?.id ?? null, __dealName: r.deal?.name ?? null,
         },
         geometry: r.geometry,
       })),
@@ -154,14 +170,23 @@ mapRouter.get(
 mapRouter.get(
   "/tracts/imports",
   asyncHandler(async (req: AuthedRequest, res) => {
+    const { dealId } = dealScopeSchema.parse(req.query);
     const groups = await prisma.mapTract.groupBy({
-      by: ["importId", "sourceFile"],
-      where: { organizationId: orgId(req) },
+      by: ["importId", "sourceFile", "dealId"],
+      where: { organizationId: orgId(req), ...(dealId ? { dealId } : {}) },
       _count: { _all: true },
       _min: { createdAt: true },
     });
+    const dealIds = [...new Set(groups.map((g) => g.dealId).filter((v): v is string => !!v))];
+    const deals = dealIds.length
+      ? await prisma.deal.findMany({ where: { id: { in: dealIds }, organizationId: orgId(req) }, select: { id: true, name: true } })
+      : [];
+    const dealName = new Map(deals.map((d) => [d.id, d.name]));
     res.json(groups
-      .map((g) => ({ importId: g.importId, sourceFile: g.sourceFile, count: g._count._all, createdAt: g._min.createdAt }))
+      .map((g) => ({
+        importId: g.importId, sourceFile: g.sourceFile, count: g._count._all, createdAt: g._min.createdAt,
+        dealId: g.dealId, dealName: g.dealId ? dealName.get(g.dealId) ?? null : null,
+      }))
       .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))));
   }),
 );
@@ -180,6 +205,8 @@ mapRouter.post(
     const sourceFile = primary.originalname.slice(0, 300);
     const baseName = sourceFile.replace(/\.[^.]+$/, "");
 
+    // Imported from a deal's map: link every feature to that deal.
+    const dealId = await orgDealId(req, (req.body as Record<string, unknown> | undefined)?.dealId);
     const parsed = await parseShapefileUpload(files, baseName);
 
     // Guard the org's total row count too, not just the single upload.
@@ -192,6 +219,7 @@ mapRouter.post(
     await prisma.mapTract.createMany({
       data: parsed.features.map((f) => ({
         organizationId: orgId(req),
+        dealId,
         importId,
         sourceFile,
         name: f.name,
@@ -199,7 +227,7 @@ mapRouter.post(
         geometry: f.geometry as unknown as Prisma.InputJsonValue,
       })),
     });
-    res.status(201).json({ importId, sourceFile, count: parsed.features.length, skipped: parsed.skipped, bbox: parsed.bbox });
+    res.status(201).json({ importId, sourceFile, dealId, count: parsed.features.length, skipped: parsed.skipped, bbox: parsed.bbox });
   }),
 );
 

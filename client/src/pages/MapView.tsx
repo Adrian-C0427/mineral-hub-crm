@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Link } from "react-router-dom";
@@ -8,9 +8,11 @@ import { US_STATE_OPTIONS, US_STATE_LABELS } from "../lib/options";
 import { Select } from "../components/Select";
 import { downloadCsv } from "../lib/csv";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION } from "../lib/counties";
-import { addCadastralLayers, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
+import { addCadastralLayers, addTractLayers, tractInfo, TRACT_SOURCE, type TractInfo, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
 import { MapLayersPanel } from "../components/MapLayersPanel";
 import { MapShpImport } from "../components/MapShpImport";
+import { useAbstractIndex } from "../components/AbstractPicker";
+import { countyStateLabel, formatAbstract, rankAbstracts, surveyLabel } from "../lib/abstracts";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, StageBadge, PriorityBadge, ChipList } from "../components/ui";
 import { money, num } from "../lib/format";
@@ -35,7 +37,7 @@ type WellCompletion = { trackingNo: string; filingType: string | null; status: s
 type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; operator: string | null; leaseName: string | null; leaseNo: string | null; field: string | null; oilGas: string | null; district: string | null; cumOil: number | null; cumGas: number | null; lastProd: string | null; formations: string | null; unitAcres?: number | null; spudDate?: string | null; plugDate?: string | null; permits?: WellPermit[]; completions?: WellCompletion[] };
 type SelWell = { kind: "well" } & WellProps;
 type SelHotspot = { kind: "hotspot"; summary: AreaSummary; periodLabel: string };
-type SelTract = { kind: "tract"; id: string; name: string; sourceFile: string; attrs: [string, string][] };
+type SelTract = { kind: "tract" } & TractInfo;
 type Selected = SelAbstract | SelWell | SelHotspot | SelTract | null;
 
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
@@ -153,6 +155,16 @@ export function MapView() {
   // Survey/abstract filter options come from the GIS API (PostGIS), scoped to the
   // selected counties — no abstract data needs to be downloaded to filter it.
   const [gisOptions, setGisOptions] = useState<{ surveys: string[]; abstracts: string[]; wellTypes: string[]; wellStatuses: string[]; operators: string[]; wellCount: number }>({ surveys: [], abstracts: [], wellTypes: [], wellStatuses: [], operators: [], wellCount: 0 });
+  // Abstract filter values stay the bare GIS labels the extent API expects;
+  // they DISPLAY with survey + county + state and rank by number as you type.
+  const absIndex = useAbstractIndex();
+  const abstractFilterLabels = useMemo(
+    () => Object.fromEntries(gisOptions.abstracts.map((a) => [a, absIndex.labelAmong(a, fCounties)])),
+    [gisOptions.abstracts, absIndex, fCounties],
+  );
+  const rankAbstractFilter = useCallback((opts: readonly string[], q: string) =>
+    q.trim() ? rankAbstracts(opts, q, (a) => ({ abstract: a, text: abstractFilterLabels[a] ?? a })) : [...opts],
+  [abstractFilterLabels]);
   const [sug, setSug] = useState<Suggest | null>(null);
   const [searchFocus, setSearchFocus] = useState(false);
   const searchBoxRef = useRef<HTMLDivElement>(null);
@@ -243,35 +255,9 @@ export function MapView() {
       // wellbores, labels) — identical to the deal map via lib/mapLayers.
       addCadastralLayers(map, countyLabels as unknown as GeoJSON.FeatureCollection);
 
-      // Imported tract boundaries (user-uploaded shapefiles, org-scoped).
-      // Served as an authed GeoJSON overlay — org data never rides the public
-      // cached tile pipeline. Drawn under wells so well dots stay clickable.
-      map.addSource("org-tracts", { type: "geojson", data: EMPTY_FC });
-      // Tracts whose DBF carries a STATUS attribute (title-work exports use
-      // LEASED / UNLEASED / SOLD …) are color-coded and fill more opaquely;
-      // untagged imports keep the original faint teal. UNLEASED is tested
-      // before LEASED because "in" is a substring match.
-      const tractStatus = ["to-string", ["coalesce", ["get", "STATUS"], ["get", "Status"], ["get", "status"], ""]];
-      const hasStatus = (needle: string) => ["any", ["in", needle, tractStatus], ["in", needle.toLowerCase(), tractStatus], ["in", needle[0] + needle.slice(1).toLowerCase(), tractStatus]];
-      const byStatus = (unleased: string, leased: string, sold: string, fallback: string) => [
-        "case",
-        hasStatus("UNLEASED"), unleased,
-        hasStatus("LEASED"), leased,
-        hasStatus("SOLD"), sold,
-        fallback,
-      ] as unknown as maplibregl.ExpressionSpecification;
-      map.addLayer({ id: "tracts-fill", type: "fill", source: "org-tracts", paint: {
-        "fill-color": byStatus("#d21f1f", "#2e8b57", "#8c8c8c", "#0d9488"),
-        "fill-opacity": ["case", ["!=", tractStatus, ""], 0.45, 0.16] as unknown as maplibregl.ExpressionSpecification } }, "wells");
-      map.addLayer({ id: "tracts-line", type: "line", source: "org-tracts", paint: {
-        "line-color": byStatus("#a01818", "#1e6b41", "#6e6e6e", "#0f766e"),
-        "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.2, 13, 2.4] as unknown as maplibregl.ExpressionSpecification,
-        "line-opacity": 0.9 } }, "wells");
-      map.addLayer({ id: "tracts-label", type: "symbol", source: "org-tracts", minzoom: 9, layout: {
-        "text-field": ["get", "__name"] as unknown as maplibregl.ExpressionSpecification, "text-font": ["Noto Sans Regular"],
-        "text-size": ["interpolate", ["linear"], ["zoom"], 9, 10, 13, 13] as unknown as maplibregl.ExpressionSpecification,
-        "text-allow-overlap": false, "text-optional": true },
-        paint: { "text-color": "#115e59", "text-halo-color": "#ffffff", "text-halo-width": 1.4 } }, "wells");
+      // Imported tract boundaries (user-uploaded shapefiles, org-scoped) —
+      // the same overlay the deal maps draw (see addTractLayers).
+      addTractLayers(map, "wells");
       void loadTracts();
       map.on("mouseenter", "tracts-fill", () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", "tracts-fill", () => (map.getCanvas().style.cursor = ""));
@@ -330,13 +316,8 @@ export function MapView() {
         if (layersRef.current.tracts && map.getLayer("tracts-fill")) {
           const tf = map.queryRenderedFeatures(e.point, { layers: ["tracts-fill"] });
           if (tf.length) {
-            const p = tf[0].properties as Record<string, unknown>;
             clearSelection();
-            const attrs = Object.entries(p)
-              .filter(([k, v]) => !k.startsWith("__") && v != null && String(v).trim() !== "")
-              .slice(0, 14)
-              .map(([k, v]) => [k, String(v)] as [string, string]);
-            setSelected({ kind: "tract", id: String(p.__id ?? ""), name: String(p.__name ?? "Tract"), sourceFile: String(p.__source ?? ""), attrs });
+            setSelected({ kind: "tract", ...tractInfo(tf[0].properties as Record<string, unknown>) });
             return;
           }
         }
@@ -716,7 +697,7 @@ export function MapView() {
   async function loadTracts() {
     try {
       const fc = await api.get<GeoJSON.FeatureCollection>("/map/tracts");
-      (mapRef.current?.getSource("org-tracts") as maplibregl.GeoJSONSource | undefined)?.setData(fc);
+      (mapRef.current?.getSource(TRACT_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(fc);
     } catch { /* overlay is optional — the map works without it */ }
   }
 
@@ -900,7 +881,7 @@ export function MapView() {
             <div><div className="ddx-label mc-lbl">State</div><SearchableMultiSelect options={[...US_STATE_OPTIONS]} labels={US_STATE_LABELS} value={fStates} onChange={setFStates} placeholder="States…" /></div>
             <div><div className="ddx-label mc-lbl">County</div><SearchableMultiSelect options={fStates.length && !fStates.includes("TX") ? [] : meta.counties} value={fCounties} onChange={setFCounties} placeholder="Counties…" /></div>
             <div><div className="ddx-label mc-lbl">Survey</div><SearchableMultiSelect options={gisOptions.surveys} value={fSurveys} onChange={setFSurveys} placeholder="Surveys…" /></div>
-            <div><div className="ddx-label mc-lbl">Abstract</div><SearchableMultiSelect options={gisOptions.abstracts} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstracts…" /></div>
+            <div><div className="ddx-label mc-lbl">Abstract</div><SearchableMultiSelect options={gisOptions.abstracts} labels={abstractFilterLabels} filterOptions={rankAbstractFilter} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstract # or survey…" /></div>
             <div><div className="ddx-label mc-lbl">Well type</div><SearchableMultiSelect options={gisOptions.wellTypes} value={fWellTypes} onChange={setFWellTypes} placeholder="Well types…" /></div>
             <div><div className="ddx-label mc-lbl">Well status</div><SearchableMultiSelect options={gisOptions.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} placeholder="Well statuses…" /></div>
             <div><div className="ddx-label mc-lbl">Operator <span className="mc-count">({gisOptions.operators.length})</span></div><SearchableMultiSelect options={gisOptions.operators} value={fOperators} onChange={setFOperators} placeholder="Operators…" /></div>
@@ -1101,7 +1082,7 @@ export function MapView() {
                   <KV k="Field" v={selected.field} /><KV k="API" v={selected.api} />
                   <KV k="Well No." v={selected.wellNo} /><KV k="Type" v={selected.type} />
                   <KV k="Status" v={selected.status} /><KV k="County" v={selected.county} />
-                  <KV k="Abstract" v={selected.abstract} /><KV k="Survey" v={selected.survey} />
+                  <KV k="Abstract" v={selected.abstract ? formatAbstract({ abstract: selected.abstract, survey: selected.survey, county: selected.county, state: "TX" }) : null} /><KV k="Survey" v={selected.survey} />
                   <KV k="Spud/permit" v={selected.spudDate} /><KV k="Plugged" v={selected.plugDate} />
                   <KV k="Unit size" v={selected.unitAcres != null ? `${num(selected.unitAcres)} ac` : null} />
                 </div>
@@ -1192,14 +1173,14 @@ export function MapView() {
                 )}
                 <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 10 }}>
                   <KV k="Counties" v={selected.summary.counties.join(", ")} />
-                  <KV k="Abstracts" v={selected.summary.abstracts.slice(0, 8).join(", ")} />
+                  <KV k="Abstracts" v={selected.summary.abstracts.slice(0, 8).map((a) => absIndex.labelAmong(a, fCounties)).join("; ")} />
                 </div>
                 {selected.summary.surveys.length > 0 && <div className="kv" style={{ marginTop: 6 }}><span className="k">Surveys</span><span className="v wrap">{selected.summary.surveys.slice(0, 8).join(", ")}</span></div>}
                 <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Totals attribute each lease's production evenly across its wells. BOE = oil + gas/6. Click elsewhere to summarize another area.</p>
               </>
             ) : selected.kind === "tract" ? (
               <>
-                <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.name}</h3><div className="muted" style={{ fontSize: 12 }}>Imported tract · {selected.sourceFile}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
+                <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.name}</h3><div className="muted" style={{ fontSize: 12 }}>Imported tract · {selected.sourceFile}</div>{selected.dealId && <div style={{ fontSize: 12, marginTop: 2 }}>From deal <Link to={`/deals/${selected.dealId}`}>{selected.dealName ?? "Open deal"}</Link></div>}</div><button className="icon-btn" onClick={clearSelection}>×</button></div>
                 {selected.attrs.length > 0 ? (
                   <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
                     {selected.attrs.map(([k, v]) => <KV key={k} k={k} v={v} />)}
@@ -1211,8 +1192,8 @@ export function MapView() {
               </>
             ) : (
               <>
-                <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.abstract}</h3><div className="muted" style={{ fontSize: 12 }}>{[selected.survey, selected.county ? `${selected.county} County` : ""].filter(Boolean).join(" · ")}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
-                <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}><KV k="Abstract" v={selected.abstract} /><KV k="Survey" v={selected.survey} /><KV k="County" v={selected.county} /></div>
+                <div className="section-head"><div><h3 style={{ margin: 0 }}>{formatAbstract({ abstract: selected.abstract })}</h3><div className="muted" style={{ fontSize: 12 }}>{[surveyLabel(selected.survey), countyStateLabel(selected.county, "TX")].filter(Boolean).join(" — ")}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
+                <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}><KV k="Abstract" v={formatAbstract({ abstract: selected.abstract, survey: selected.survey, county: selected.county, state: "TX" })} /><KV k="Survey" v={selected.survey} /><KV k="County" v={selected.county} /></div>
                 <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 10 }}>{panelDeals.length} active deal{panelDeals.length === 1 ? "" : "s"}</div>
                 {panelDeals.length === 0 ? <p className="muted">No active deals in this abstract.</p> : panelDeals.map((d) => (
                   <div key={d.id} style={{ borderTop: "1px solid var(--border)", padding: "10px 0" }}>

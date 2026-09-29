@@ -172,3 +172,61 @@ export function watchGisHealth(map: maplibregl.Map): void {
     map.getContainer().appendChild(el);
   });
 }
+
+/** Source id of the imported-tract (shapefile) overlay. */
+export const TRACT_SOURCE = "org-tracts";
+export const TRACT_LAYERS = ["tracts-fill", "tracts-line", "tracts-label"] as const;
+
+/**
+ * Imported tract boundaries (user-uploaded shapefiles, org-scoped), drawn the
+ * same way on the main map and every deal map. Served as an authed GeoJSON
+ * overlay — org data never rides the public cached tile pipeline — and
+ * inserted under `beforeId` (wells) so well dots stay clickable.
+ */
+export function addTractLayers(map: maplibregl.Map, beforeId?: string): void {
+  map.addSource(TRACT_SOURCE, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  // Tracts whose DBF carries a STATUS attribute (title-work exports use
+  // LEASED / UNLEASED / SOLD …) are color-coded and fill more opaquely;
+  // untagged imports keep the original faint teal. UNLEASED is tested
+  // before LEASED because "in" is a substring match.
+  const tractStatus = ["to-string", ["coalesce", ["get", "STATUS"], ["get", "Status"], ["get", "status"], ""]];
+  const hasStatus = (needle: string) => ["any", ["in", needle, tractStatus], ["in", needle.toLowerCase(), tractStatus], ["in", needle[0] + needle.slice(1).toLowerCase(), tractStatus]];
+  const byStatus = (unleased: string, leased: string, sold: string, fallback: string) => [
+    "case",
+    hasStatus("UNLEASED"), unleased,
+    hasStatus("LEASED"), leased,
+    hasStatus("SOLD"), sold,
+    fallback,
+  ] as unknown as maplibregl.ExpressionSpecification;
+  const before = beforeId && map.getLayer(beforeId) ? beforeId : undefined;
+  map.addLayer({ id: "tracts-fill", type: "fill", source: TRACT_SOURCE, paint: {
+    "fill-color": byStatus("#d21f1f", "#2e8b57", "#8c8c8c", "#0d9488"),
+    "fill-opacity": ["case", ["!=", tractStatus, ""], 0.45, 0.16] as unknown as maplibregl.ExpressionSpecification } }, before);
+  map.addLayer({ id: "tracts-line", type: "line", source: TRACT_SOURCE, paint: {
+    "line-color": byStatus("#a01818", "#1e6b41", "#6e6e6e", "#0f766e"),
+    "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.2, 13, 2.4] as unknown as maplibregl.ExpressionSpecification,
+    "line-opacity": 0.9 } }, before);
+  map.addLayer({ id: "tracts-label", type: "symbol", source: TRACT_SOURCE, minzoom: 9, layout: {
+    "text-field": ["get", "__name"] as unknown as maplibregl.ExpressionSpecification, "text-font": ["Noto Sans Regular"],
+    "text-size": ["interpolate", ["linear"], ["zoom"], 9, 10, 13, 13] as unknown as maplibregl.ExpressionSpecification,
+    "text-allow-overlap": false, "text-optional": true },
+    paint: { "text-color": "#115e59", "text-halo-color": "#ffffff", "text-halo-width": 1.4 } }, before);
+}
+
+/** A clicked imported tract: its name, source file, owning deal, and attributes. */
+export interface TractInfo {
+  id: string; name: string; sourceFile: string;
+  dealId: string | null; dealName: string | null;
+  attrs: [string, string][];
+}
+export function tractInfo(p: Record<string, unknown>): TractInfo {
+  const attrs = Object.entries(p)
+    .filter(([k, v]) => !k.startsWith("__") && v != null && String(v).trim() !== "")
+    .slice(0, 14)
+    .map(([k, v]) => [k, String(v)] as [string, string]);
+  return {
+    id: String(p.__id ?? ""), name: String(p.__name ?? "Tract"), sourceFile: String(p.__source ?? ""),
+    dealId: p.__dealId ? String(p.__dealId) : null, dealName: p.__dealName ? String(p.__dealName) : null,
+    attrs,
+  };
+}

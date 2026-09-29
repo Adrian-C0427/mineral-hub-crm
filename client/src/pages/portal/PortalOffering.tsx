@@ -8,6 +8,7 @@ import { formatPhone } from "../../lib/phone";
 import { MoneyInput } from "../../components/MoneyInput";
 import { PhoneInput } from "../../components/PhoneInput";
 import { DateField } from "../../components/DateField";
+import { formatAbstract } from "../../lib/abstracts";
 
 const EMPTY_FC: FC = { type: "FeatureCollection", features: [] };
 
@@ -140,7 +141,7 @@ export function PortalOffering() {
             <>
               <div className="portal-sec">Abstracts</div>
               <div className="row" style={{ gap: 8, flexWrap: "wrap" }}>
-                {abstracts.map((a) => <span key={a.id} className="mp-chip">{a.abstract ?? a.id}{a.survey ? ` · ${a.survey}` : ""} · {a.county}</span>)}
+                {abstracts.map((a) => <span key={a.id} className="mp-chip">{formatAbstract({ abstract: (a.abstract ?? a.id).replace(/\?/g, ""), survey: a.survey, county: a.county, state: "TX" })}</span>)}
               </div>
             </>
           )}

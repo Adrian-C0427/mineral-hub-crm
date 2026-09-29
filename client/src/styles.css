@@ -14,8 +14,11 @@
 :root {
   /* Global interface scale — the whole UI renders slightly smaller (more
      information on screen) without changing any component's design or
-     proportions. Layout-affecting (not transform), so everything stays crisp. */
-  zoom: 0.95;
+     proportions. Layout-affecting (not transform), so everything stays crisp.
+     Viewport units inside the zoomed root shrink with it, so full-height
+     chrome divides by --ui-zoom to still reach the screen's bottom edge. */
+  --ui-zoom: 0.95;
+  zoom: var(--ui-zoom);
   --bg: #0b0e14;
   --panel: #12161f;
   --panel-2: #1a2030;
@@ -249,7 +252,7 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .field { margin-bottom: 14px; }
 
 /* --- Layout --- */
-.app-shell { min-height: 100vh; }
+.app-shell { min-height: calc(100vh / var(--ui-zoom, 1)); min-height: calc(100dvh / var(--ui-zoom, 1)); }
 .app-shell.with-sidebar { display: flex; align-items: stretch; }
 .brand { font-weight: 700; font-size: 16px; color: var(--text); }
 .brand .dot { color: var(--accent); }
@@ -258,7 +261,8 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .sidebar {
   position: relative; z-index: 50;
   width: 220px; flex: 0 0 220px; background: var(--panel); border-right: 1px solid var(--border);
-  position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column;
+  position: sticky; top: 0; display: flex; flex-direction: column;
+  height: calc(100vh / var(--ui-zoom, 1)); height: calc(100dvh / var(--ui-zoom, 1));
   transition: width 0.15s, flex-basis 0.15s;
   /* Above the main column so the edge toggle's outer half stays clickable. */
   z-index: 40;
@@ -881,32 +885,8 @@ body.modal-open { overflow: hidden; }
 .doc-chip.drop-target { outline: 2px dashed var(--accent); outline-offset: 1px; }
 .doc-chip[draggable="true"] { cursor: grab; }
 
-/* Tract results: one expandable card per tract — name + acreage hierarchy,
-   status chips, Generate as the primary CTA, overflow for the rest. */
-.tract-cards { display: flex; flex-direction: column; gap: 12px; margin-top: 14px; }
-.tract-card { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); transition: border-color 150ms ease; }
-.tract-card.expanded, .tract-card:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
-.tract-card-head { display: flex; align-items: center; gap: 14px; padding: 14px 16px; cursor: pointer; flex-wrap: wrap; }
-.tract-card-title { min-width: 200px; flex: 1 1 220px; }
-.tract-card-title h4 { margin: 0; font-size: 15px; font-weight: 700; }
-.tract-card-sub { font-size: 12.5px; color: var(--text-dim); margin-top: 3px; }
-.tract-card-sub strong { color: var(--text); font-variant-numeric: tabular-nums; }
+/* Research page separator dot. */
 .tract-dot { margin: 0 6px; opacity: 0.6; }
-.tract-card-chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.tract-chip-good { background: rgba(34,197,94,.15); color: #15803d; }
-.tract-chip-bad { background: rgba(239,68,68,.15); color: #dc2626; }
-.tract-chip-warn { background: rgba(245,158,11,.15); color: #b45309; }
-.tract-chip-neutral { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
-.tract-chip-dim { opacity: 0.7; }
-.tract-card-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.tract-card-chevron { display: inline-flex; color: var(--text-dim); transition: transform 180ms ease; }
-.tract-card-chevron.open { transform: rotate(180deg); }
-.tract-card-placing { padding: 0 16px 10px; font-size: 12.5px; }
-.tract-card-body { border-top: 1px solid var(--border); padding: 14px 16px 16px; }
-@media (max-width: 720px) {
-  .tract-card-head { align-items: flex-start; }
-  .tract-card-actions { margin-left: 0; width: 100%; justify-content: flex-end; }
-}
 
 /* Month drill-down: a floating, NON-blocking panel — no backdrop, no scroll
    lock, so the dashboard behind it stays fully interactive. Its own body
@@ -2105,12 +2085,6 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 .data-table th .col-resize { position: absolute; top: 0; right: 0; width: 9px; height: 100%; cursor: col-resize; z-index: 5; touch-action: none; }
 .data-table th .col-resize::after { content: ""; position: absolute; top: 25%; bottom: 25%; right: 3px; width: 2px; border-radius: 2px; background: transparent; transition: background 0.12s; }
 .data-table th:hover .col-resize::after, .data-table th .col-resize:hover::after { background: var(--accent); }
-
-/* Tract Descriptions editor: open, well-spaced fields (was cramped). */
-.tract-editor { display: flex; flex-direction: column; gap: 18px; margin-top: 4px; }
-.tract-editor .field { margin-bottom: 0; }
-.tract-editor .field > label { display: block; margin-bottom: 6px; }
-.tract-editor .field > span.muted { display: block; margin-top: 6px; }
 
 /* Deal Buyer Portal: per-deal contact cards (multi-contact editor). */
 .dpp-contact { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; background: var(--panel-2); }
@@ -3909,6 +3883,7 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.45); }
 :root[data-theme="light"] .mshp-btn { border-color: var(--border); box-shadow: var(--shadow); }
 .mshp-btn:hover { border-color: var(--accent); }
+.mshp-btn.compact { padding: 7px 10px; font-size: 12px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.3); }
 .mshp-drop { display: grid; justify-items: center; gap: 6px; padding: 22px 16px; border: 1.5px dashed var(--border);
   border-radius: 8px; cursor: pointer; text-align: center; color: var(--text); }
 .mshp-drop:hover { border-color: var(--accent); }

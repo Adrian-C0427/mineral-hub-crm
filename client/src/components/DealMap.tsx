@@ -4,24 +4,39 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { collectCoords, bboxOfPoints } from "../lib/geo";
 import { num } from "../lib/format";
 import { api } from "../api/client";
-import { addCadastralLayers, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
+import { addCadastralLayers, addTractLayers, tractInfo, TRACT_SOURCE, type TractInfo, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
+import { formatAbstract } from "../lib/abstracts";
+import { useAuth } from "../auth/AuthContext";
 import { MapLayersPanel } from "./MapLayersPanel";
+import { MapShpImport } from "./MapShpImport";
 
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
 
 type FC = { type: "FeatureCollection"; features: { type: "Feature"; id?: string | number; properties: Record<string, unknown>; geometry: { type: string; coordinates: unknown } }[] };
-type Sel = { kind: "abstract"; abstract: string; survey: string; county: string } | { kind: "well"; api: string; wellNo: string; operator: string; leaseName: string; status: string; type: string } | null;
+type Sel =
+  | { kind: "abstract"; abstract: string; survey: string; county: string }
+  | { kind: "well"; api: string; wellNo: string; operator: string; leaseName: string; status: string; type: string }
+  | ({ kind: "tract" } & TractInfo)
+  | null;
 
 // Same layer set the main map exposes (minus the always-on county boundaries /
 // names); no filters, no heat map — just the layer toggles.
-const DEFAULT_LAYERS = { boundaries: true, numbers: true, surveys: true, wells: true, wellbores: true };
+const DEFAULT_LAYERS = { boundaries: true, numbers: true, surveys: true, wells: true, wellbores: true, tracts: true };
+const EMPTY: FC = { type: "FeatureCollection", features: [] };
 
 /**
  * Compact per-deal map. Renders the identical cadastral stack as the main map
  * (lib/mapLayers) — county boundaries + names, abstracts, wells, laterals,
  * labels — with the deal's own abstracts highlighted on top. No filters/heat.
+ * Shapefile tracts imported here are linked to the deal (`dealId`) and drawn
+ * with the main map's exact tract styling; the main map shows them too.
  */
-export function DealMap({ abstractIds }: { abstractIds: string[] }) {
+export function DealMap({ abstractIds, dealId }: { abstractIds: string[]; dealId?: string }) {
+  const { can } = useAuth();
+  const [tractCount, setTractCount] = useState(0);
+  // This deal's imported tracts, fetched on mount (independent of the map
+  // finishing its style load) and handed to the map source once it exists.
+  const tractsRef = useRef<Promise<FC> | null>(null);
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const ready = useRef(false);
@@ -54,8 +69,14 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
       ]);
       const dealFeats = dealFC.features;
 
-      // Identical cadastral source + layers as the main map.
+      // Identical cadastral source + layers as the main map, plus the same
+      // imported-tract overlay (scoped to this deal's imports).
       addCadastralLayers(map, countyLabels as unknown as GeoJSON.FeatureCollection);
+      addTractLayers(map, "wells");
+      const tracts = await (tractsRef.current ?? loadTracts());
+      (map.getSource(TRACT_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(tracts as unknown as GeoJSON.FeatureCollection);
+      map.on("mouseenter", "tracts-fill", () => (map.getCanvas().style.cursor = "pointer"));
+      map.on("mouseleave", "tracts-fill", () => (map.getCanvas().style.cursor = ""));
 
       // Highlight this deal's abstracts the same way the main map does: via
       // feature-state on the SHARED tile layers (abstractsPaint reacts to
@@ -66,7 +87,8 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
       // No extra outline layer on top: the feature-state highlight above is the
       // whole treatment, exactly like the main Map page. (The old dashed convex
       // hull doubled the abstract boundary whenever a deal had one parcel.)
-      const pts = dealFeats.flatMap((f) => collectCoords(f.geometry));
+      // Frame the deal's abstracts and its imported tracts together.
+      const pts = [...dealFeats, ...tracts.features].flatMap((f) => collectCoords(f.geometry));
 
       ready.current = true;
       applyVis();
@@ -80,6 +102,10 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
         if (layersRef.current.wells) {
           const wh = map.queryRenderedFeatures([[ev.point.x - 5, ev.point.y - 5], [ev.point.x + 5, ev.point.y + 5]], { layers: map.getLayer("wells") ? ["wells"] : [] });
           if (wh.length) { const p = wh[0].properties as Record<string, unknown>; setSelected({ kind: "well", api: String(p.api8 ?? p.api ?? ""), wellNo: String(p.wellNo ?? ""), operator: String(p.operator ?? ""), leaseName: String(p.leaseName ?? ""), status: String(p.status ?? ""), type: String(p.type ?? "") }); return; }
+        }
+        if (layersRef.current.tracts && map.getLayer("tracts-fill")) {
+          const tf = map.queryRenderedFeatures(ev.point, { layers: ["tracts-fill"] });
+          if (tf.length) { setSelected({ kind: "tract", ...tractInfo(tf[0].properties as Record<string, unknown>) }); return; }
         }
         const ah = map.queryRenderedFeatures(ev.point, { layers: map.getLayer("abstracts-fill") ? ["abstracts-fill"] : [] });
         if (ah.length) { const p = ah[0].properties as Record<string, unknown>; setSelected({ kind: "abstract", abstract: String(p.abstract ?? ""), survey: String(p.survey ?? ""), county: String(p.county ?? "") }); }
@@ -97,7 +123,26 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
     vis("abstracts-fill", L.boundaries); vis("abstracts-line", L.boundaries);
     vis("abstracts-num", L.numbers); vis("abstracts-survey", L.surveys);
     vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores);
+    vis("tracts-fill", L.tracts); vis("tracts-line", L.tracts); vis("tracts-label", L.tracts);
   }
+
+  // This deal's imported tracts (none without a dealId): refetched after every
+  // import/removal, pushed into the map source when it's ready. Returns the
+  // data so the load handler can frame it.
+  function loadTracts(): Promise<FC> {
+    const p = (dealId
+      ? api.get<FC>(`/map/tracts?dealId=${encodeURIComponent(dealId)}`).catch(() => EMPTY)
+      : Promise.resolve(EMPTY)
+    ).then((fc) => {
+      (mapRef.current?.getSource(TRACT_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(fc as unknown as GeoJSON.FeatureCollection);
+      setTractCount(fc.features.length);
+      return fc;
+    });
+    tractsRef.current = p;
+    return p;
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { void loadTracts(); }, [dealId]);
   useEffect(applyVis, [layers]);
 
   // Keep the highlighted deal geometry in sync when abstracts are edited on
@@ -143,16 +188,32 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
               { key: "boundaries", label: "Abstract boundaries" }, { key: "numbers", label: "Abstract numbers" },
               { key: "surveys", label: "Survey names" }, { key: "wells", label: "Wells" },
               { key: "wellbores", label: "Wellbores (laterals)" },
+              ...(dealId ? [{ key: "tracts", label: "Imported tracts" }] : []),
             ]}
             layers={layers}
             onToggle={(k) => toggle(k as keyof typeof layers)}
           />
+          {dealId && can("manageMapData") && (
+            <MapShpImport
+              dealId={dealId}
+              compact
+              onChanged={(bbox) => {
+                void loadTracts();
+                setLayers((p) => ({ ...p, tracts: true }));
+                if (bbox) mapRef.current?.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 40, duration: 800, maxZoom: 14 });
+              }}
+            />
+          )}
         </div>
         {selected && (
           <div className="dm-info">
             <button className="icon-btn" style={{ float: "right" }} onClick={() => setSelected(null)}>×</button>
             {selected.kind === "abstract" ? (
-              <><strong>{selected.abstract}</strong><div className="muted" style={{ fontSize: 12 }}>{[selected.survey, selected.county ? `${selected.county} County` : ""].filter(Boolean).join(" · ")}</div></>
+              <><strong>{formatAbstract({ abstract: selected.abstract, survey: selected.survey, county: selected.county, state: "TX" })}</strong></>
+            ) : selected.kind === "tract" ? (
+              <><strong>{selected.name}</strong>
+                <div className="muted" style={{ fontSize: 12 }}>Imported tract · {selected.sourceFile}</div>
+                {selected.attrs.slice(0, 6).map(([k, v]) => <div key={k} style={{ fontSize: 12 }}><span className="muted">{k}:</span> {v}</div>)}</>
             ) : (
               <><strong>{selected.leaseName || "Well"} {selected.wellNo ? `#${selected.wellNo}` : ""}</strong>
                 <div className="muted" style={{ fontSize: 12 }}>API {selected.api} · {selected.type} · {selected.status}</div>
@@ -160,9 +221,13 @@ export function DealMap({ abstractIds }: { abstractIds: string[] }) {
             )}
           </div>
         )}
-        {abstractIds.length === 0 && <div className="dm-empty">No abstracts linked to this deal yet. Add abstracts in Deal Characteristics to see it on the map.</div>}
+        {abstractIds.length === 0 && tractCount === 0 && (
+          <div className="dm-empty">No abstracts or imported tracts on this deal yet. Add abstracts in Deal Characteristics{dealId && can("manageMapData") ? ", or import a shapefile," : ""} to see it on the map.</div>
+        )}
       </div>
-      <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{num(abstractIds.length)} abstract(s) · zoomed to the full deal extent</div>
+      <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+        {num(abstractIds.length)} abstract(s){dealId ? ` · ${num(tractCount)} imported tract(s)` : ""} · zoomed to the full deal extent
+      </div>
     </div>
   );
 }

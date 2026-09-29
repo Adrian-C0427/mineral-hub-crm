@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
+import { formatAbstract } from "../lib/abstracts";
 
 /**
  * Lightweight SVG choropleth of Texas counties (no MapLibre — the boundaries
@@ -303,8 +304,7 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
                   strokeWidth={hot ? sw(1.4) : sw(0.35)}
                   style={{ cursor: active && onAbstractClick ? "pointer" : "default" }}
                   onClick={() => active && onAbstractClick?.(stat?.abstractId ?? ab.abstract)}
-                  onMouseMove={(e) => moveTip(e, `Abstract ${ab.abstract || "?"}`, [
-                    ...(ab.survey ? [{ text: ab.survey }] : []),
+                  onMouseMove={(e) => moveTip(e, formatAbstract({ abstract: ab.abstract, survey: ab.survey, county: focusCounty, state: "TX" }), [
                     { text: active ? `${(stat?.total ?? ab.count).toLocaleString()} records` : "No activity in period" },
                     ...(ab.amount > 0 ? [{ text: `$${Math.round(ab.amount).toLocaleString()} in transactions` }] : []),
                     ...(hot ? [{ text: "● Hotspot", color: "var(--red, #ef4444)" }] : []),

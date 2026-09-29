@@ -31,7 +31,7 @@ export interface DocFile {
 
 /** Deal document folders — the reference set (kept here so Deals and the shared
  *  component never drift). Other modules pass their own via `folders`. */
-export const DEAL_DOC_FOLDERS = ["Seller PSA", "Wholesale PSA", "Check Stubs", "Division Orders", "Deeds", "Title", "Other"];
+export const DEAL_DOC_FOLDERS = ["Seller PSA", "Buyer PSA", "Check Stubs", "Division Orders", "Deeds", "Title", "Other"];
 
 function humanSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;

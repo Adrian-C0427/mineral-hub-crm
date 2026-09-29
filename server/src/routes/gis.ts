@@ -5,6 +5,7 @@ import { prisma, withDbRetry } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { escapeLike, rankRefEntries, MIN_SEARCH_CHARS, type RefEntry } from "../domain/search.js";
+import { abstractNumber, countyStateLabel, rankAbstracts, surveyLabel } from "../domain/abstractLabel.js";
 
 /**
  * GIS Phase A (see docs/architecture/0003-gis-scale-architecture.md).
@@ -314,12 +315,18 @@ gisRouter.get(
           ORDER BY similarity(name, $2) DESC, name LIMIT 254`, like, q),
       // Abstract number OR survey name (both live on gis.abstracts). Labels are
       // matched and returned with the source data's stray '?' stripped.
-      prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string; score: number }[]>(
-        `SELECT id, replace(abstract, '?', '') AS abstract, survey, county,
+      prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string; state: string | null; score: number }[]>(
+        `SELECT id, replace(abstract, '?', '') AS abstract, survey, county, state,
                 GREATEST(similarity(replace(coalesce(abstract,''), '?', ''), $2), similarity(coalesce(survey,''), $2)) AS score
            FROM gis.abstracts
           WHERE replace(abstract, '?', '') ILIKE $1 ESCAPE '\\' OR survey ILIKE $1 ESCAPE '\\'
-          ORDER BY score DESC, county, abstract LIMIT 200`, like, q),
+          -- Exact abstract numbers, then numbers starting with the typed digits,
+          -- survive the LIMIT ahead of mere trigram similarity ($3 = digits typed).
+          ORDER BY CASE WHEN $3 = '' THEN 2
+                        WHEN ltrim(regexp_replace(coalesce(abstract,''), '[^0-9]', '', 'g'), '0') = $3 THEN 0
+                        WHEN ltrim(regexp_replace(coalesce(abstract,''), '[^0-9]', '', 'g'), '0') LIKE $3 || '%' THEN 1
+                        ELSE 2 END,
+                   score DESC, county, abstract LIMIT 200`, like, q, (q.match(/\d+/)?.[0] ?? "").replace(/^0+(?=\d)/, "")),
       // Wells: API number, well number, well ID, lease name, RRC lease number.
       prisma.$queryRawUnsafe<{ fid: number; api8: string | null; wellNo: string | null; leaseName: string | null; leaseNo: string | null; operator: string | null; type: string | null; county: string; score: number }[]>(
         `SELECT fid, api8, well_no AS "wellNo", lease_name AS "leaseName", lease_no AS "leaseNo",
@@ -350,7 +357,14 @@ gisRouter.get(
 
     res.json({
       counties: counties.map((c) => ({ label: `${c.name} County`, bbox: [c.minx, c.miny, c.maxx, c.maxy] })),
-      abstracts: abstracts.map((a) => ({ id: a.id, label: a.abstract ?? a.id, sub: [a.survey, `${a.county} County`].filter(Boolean).join(" · ") })),
+      // Number-first ranking (exact abstract # → prefix → contains → survey
+      // text, ascending by number within each) so "15" puts Abstract 15 on top.
+      abstracts: rankAbstracts(abstracts, q, (a) => ({ abstract: a.abstract ?? a.id, text: `${a.abstract ?? ""} ${a.survey ?? ""} ${a.county}` }))
+        .map((a) => ({
+          id: a.id,
+          label: `Abstract ${abstractNumber(a.abstract ?? a.id)}`,
+          sub: [surveyLabel(a.survey), countyStateLabel(a.county, a.state ?? "TX")].filter(Boolean).join(" — "),
+        })),
       wells: wells.map((w) => ({
         fid: w.fid,
         label: `${w.leaseName ?? "Well"}${w.wellNo ? ` #${w.wellNo}` : ""}`,
@@ -591,8 +605,8 @@ gisRouter.get(
 gisRouter.get(
   "/abstracts-index",
   asyncHandler(async (_req, res) => {
-    const rows = await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string; countyFips: string }[]>(
-      `SELECT id, replace(abstract, '?', '') AS abstract, survey, county, county_fips AS "countyFips" FROM gis.abstracts ORDER BY county, abstract`,
+    const rows = await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string; countyFips: string; state: string | null }[]>(
+      `SELECT id, replace(abstract, '?', '') AS abstract, survey, county, county_fips AS "countyFips", state FROM gis.abstracts ORDER BY county, abstract`,
     );
     // Shared, org-independent reference geometry — safe to cache so this full
     // ~11k-row fetch isn't repeated on every map load.
