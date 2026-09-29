@@ -3,6 +3,7 @@ import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import crypto from "node:crypto";
 import jwt from "jsonwebtoken";
+import type { Prisma } from "@prisma/client";
 import { prisma, withDbRetry } from "../db.js";
 import { verifyPassword, hashPassword, dummyVerifyPassword } from "../auth/password.js";
 import { signSession, setSessionCookie, clearSessionCookie } from "../auth/session.js";
@@ -297,6 +298,53 @@ authRouter.get(
       ? { ...org, teamId: canSeeTeamId(req) ? org.teamId : null }
       : null;
     res.json({ user: { ...req.user, organization, ...prefs } });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Saved table layouts (Customize View) — per user, keyed by table id. Only
+// tables the user actually customized are stored, so everyone else keeps
+// getting the current default layout (including newly added columns).
+// ---------------------------------------------------------------------------
+const tableIdSchema = z.string().min(1).max(120).regex(/^[\w:.-]+$/);
+const colKeys = z.array(z.string().min(1).max(100)).max(200);
+const tablePrefsSchema = z.object({
+  order: colKeys.default([]),
+  hidden: colKeys.default([]),
+  pinned: colKeys.default([]),
+  known: colKeys.optional(),
+}).strict();
+const MAX_SAVED_TABLES = 200;
+type SavedTablePrefs = Record<string, z.infer<typeof tablePrefsSchema>>;
+
+async function readTablePrefs(userId: string): Promise<SavedTablePrefs> {
+  const row = await prisma.user.findUnique({ where: { id: userId }, select: { tablePrefs: true } });
+  const v = row?.tablePrefs;
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as SavedTablePrefs) : {};
+}
+
+authRouter.get(
+  "/table-prefs",
+  requireAuth,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    res.json(await readTablePrefs(req.user!.id));
+  }),
+);
+
+/** Save one table's layout ({ prefs }), or clear it back to the default ({ prefs: null }). */
+authRouter.put(
+  "/table-prefs/:tableId",
+  requireAuth,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const tableId = tableIdSchema.parse(req.params.tableId);
+    const { prefs } = z.object({ prefs: tablePrefsSchema.nullable() }).parse(req.body);
+    const all = await readTablePrefs(req.user!.id);
+    if (prefs) {
+      if (!(tableId in all) && Object.keys(all).length >= MAX_SAVED_TABLES) throw new HttpError(400, "Too many saved table layouts");
+      all[tableId] = prefs;
+    } else delete all[tableId];
+    await prisma.user.update({ where: { id: req.user!.id }, data: { tablePrefs: all as Prisma.InputJsonValue } });
+    res.json({ ok: true });
   }),
 );
 

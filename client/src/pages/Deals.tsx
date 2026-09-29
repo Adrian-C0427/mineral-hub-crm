@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api } from "../api/client";
-import { Banner, PriorityBadge, StageBadge, Spinner, SearchInput } from "../components/ui";
+import { api, ApiError } from "../api/client";
+import { Banner, PriorityBadge, StageBadge, Spinner, SearchInput, showToast } from "../components/ui";
+import { Select } from "../components/Select";
+import { royaltyLabel, royaltyOptions, royaltyValue } from "../lib/royalty";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { NewDealModal } from "../components/NewDealModal";
 import { useRowSelection, BulkActionsBar } from "../components/bulk";
@@ -32,16 +34,36 @@ const shortName = (name: string): string => {
   return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1]![0]}.` : name;
 };
 
-/** Numeric sort key for a royalty fraction/percent ("3/16", "1/4", "25%", "0.1875"). */
-function royaltySortValue(r: string | null): number | null {
-  if (!r) return null;
-  const t = r.trim();
-  const frac = t.match(/^(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)$/);
-  if (frac) return Number(frac[2]) ? Number(frac[1]) / Number(frac[2]) : null;
-  const pct = t.match(/^(\d+(?:\.\d+)?)\s*%$/);
-  if (pct) return Number(pct[1]) / 100;
-  const n = Number(t);
-  return Number.isFinite(n) ? (n > 1 ? n / 100 : n) : null;
+/**
+ * Inline Royalty Rate editor for a Deals-table row: the same single value as
+ * Deal Characteristics (Deal.royaltyRate), saved immediately. Clicks stay
+ * inside the cell so they never open the deal.
+ */
+function RoyaltyCell({ deal, canEdit, onSaved }: { deal: DealSummary; canEdit: boolean; onSaved: (v: string | null) => void }) {
+  const [busy, setBusy] = useState(false);
+  if (!canEdit) return <>{royaltyLabel(deal.royaltyRate) || "—"}</>;
+  return (
+    <span className="deal-royalty-cell" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
+      <Select
+        value={deal.royaltyRate ?? ""}
+        options={royaltyOptions(deal.royaltyRate)}
+        clearable
+        disabled={busy}
+        placeholder="—"
+        width={150}
+        ariaLabel={`Royalty rate for ${deal.name}`}
+        onChange={(v) => {
+          const next = v || null;
+          if (next === (deal.royaltyRate ?? null)) return;
+          setBusy(true);
+          api.patch(`/deals/${deal.id}`, { royaltyRate: next })
+            .then(() => onSaved(next))
+            .catch((e) => showToast(e instanceof ApiError ? e.message : "Could not update the royalty rate", "error"))
+            .finally(() => setBusy(false));
+        }}
+      />
+    </span>
+  );
 }
 
 /** Profit reads green (a loss reads red) wherever it appears in the table. */
@@ -99,22 +121,25 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
       render: (d) => <PriorityBadge priority={d.priority} /> },
     { key: "stage", header: "Stage", type: "text", value: (d) => d.stage, render: (d) => <StageBadge stage={d.stage} pipelineId={d.pipelineId} /> },
     { key: "nma", header: "NMA", type: "number", align: "right", value: (d) => d.aggAcreageNma ?? d.acreageNma, render: (d) => num(d.aggAcreageNma ?? d.acreageNma) },
-    // Available via Customize View (hidden by default to keep the standing
-    // default view unchanged); same rollup-then-own-value logic as NMA.
-    { key: "nra", header: "NRA", type: "number", align: "right", value: (d) => d.aggNra ?? d.nra, render: (d) => num(d.aggNra ?? d.nra), defaultHidden: true },
-    // Financial columns, available via Customize View. Our Cost uses the package
-    // rollup like NMA/NRA; Buyer Purchase Price is the offer Profit Est. is
-    // computed from (accepted, else best), so the three reconcile.
-    { key: "ourCost", header: "Our Cost", type: "number", align: "right", value: (d) => d.aggOurPrice ?? d.ourPrice, render: (d) => money(d.aggOurPrice ?? d.ourPrice), defaultHidden: true, newlyAdded: true },
-    { key: "buyerPrice", header: "Buyer Purchase Price", type: "number", align: "right", value: (d) => d.buyerPurchasePrice ?? null, render: (d) => money(d.buyerPurchasePrice), defaultHidden: true, newlyAdded: true },
-    { key: "royaltyRate", header: "Royalty Rate", type: "number", align: "right", value: (d) => royaltySortValue(d.royaltyRate), render: (d) => d.royaltyRate || "—", defaultHidden: true, newlyAdded: true },
+    // Every column is shown by default; users hide what they don't need via
+    // Customize View (saved to their profile). `legacyDefaultHidden` marks the
+    // columns an older version hid by default, so a browser layout that merely
+    // held those old defaults isn't mistaken for a user's choice.
+    // Same rollup-then-own-value logic as NMA.
+    { key: "nra", header: "NRA", type: "number", align: "right", value: (d) => d.aggNra ?? d.nra, render: (d) => num(d.aggNra ?? d.nra), legacyDefaultHidden: true },
+    // Financial columns. Our Cost uses the package rollup like NMA/NRA; Buyer
+    // Purchase Price is the offer Profit Est. is computed from (accepted, else
+    // best), so the three reconcile.
+    { key: "ourCost", header: "Our Cost", type: "number", align: "right", value: (d) => d.aggOurPrice ?? d.ourPrice, render: (d) => money(d.aggOurPrice ?? d.ourPrice), legacyDefaultHidden: true, newlyAdded: true },
+    { key: "buyerPrice", header: "Buyer Purchase Price", type: "number", align: "right", value: (d) => d.buyerPurchasePrice ?? null, render: (d) => money(d.buyerPurchasePrice), legacyDefaultHidden: true, newlyAdded: true },
+    { key: "royaltyRate", header: "Royalty Rate", type: "number", align: "right", value: (d) => royaltyValue(d.royaltyRate),
+      render: (d) => <RoyaltyCell deal={d} canEdit={can("editDeals")} onSaved={(v) => setDeals((prev) => prev?.map((x) => (x.id === d.id ? { ...x, royaltyRate: v } : x)) ?? prev)} />,
+      legacyDefaultHidden: true, newlyAdded: true },
     { key: "profit", header: "Profit Est.", type: "number", align: "right", value: (d) => d.profitEst, render: (d) => profitCell(d.profitEst) },
-    // Secondary date columns start hidden (Customize View re-enables them):
-    // the default view keeps the columns that drive weekly decisions.
-    { key: "uc", header: "Under Contract", type: "date", value: (d) => d.dateUnderContract, render: (d) => fmtDate(d.dateUnderContract), defaultHidden: true },
+    { key: "uc", header: "Under Contract", type: "date", value: (d) => d.dateUnderContract, render: (d) => fmtDate(d.dateUnderContract), legacyDefaultHidden: true },
     { key: "fbb", header: "Find Buyer By", type: "date", value: (d) => d.findBuyerByDate,
       render: (d) => <span style={d.isOverdue ? { color: "var(--red)" } : undefined}>{fmtDate(d.findBuyerByDate)}</span> },
-    { key: "oc", header: "Orig. Closing", type: "date", value: (d) => d.originalClosingDate, render: (d) => fmtDate(d.originalClosingDate), defaultHidden: true },
+    { key: "oc", header: "Orig. Closing", type: "date", value: (d) => d.originalClosingDate, render: (d) => fmtDate(d.originalClosingDate), legacyDefaultHidden: true },
     { key: "fc", header: "Final Closing", type: "date", value: (d) => d.finalClosingDate, render: (d) => fmtDate(d.finalClosingDate) },
     { key: "buyer", header: "Current Buyer", type: "text", value: (d) => d.selectedBuyer?.name ?? null,
       render: (d) => <span className="ct-dim">{d.selectedBuyer?.name ?? "—"}</span> },
@@ -187,7 +212,7 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
           const rows = filtered.filter((d) => sel.selected.has(d.id));
           downloadCsv(`deals-${new Date().toISOString().slice(0, 10)}.csv`,
             ["Deal", "Priority", "Stage", "NMA", "NRA", "Our Cost", "Buyer Purchase Price", "Royalty Rate", "Profit Est.", "Under Contract", "Find Buyer By", "Current Buyer", "Owner"],
-            rows.map((d) => [d.name, d.priority, d.stage, d.acreageNma ?? "", d.nra ?? "", d.aggOurPrice ?? d.ourPrice ?? "", d.buyerPurchasePrice ?? "", d.royaltyRate ?? "", d.profitEst ?? "", d.dateUnderContract ?? "", d.findBuyerByDate ?? "", d.selectedBuyer?.name ?? "", d.relationshipOwner?.name ?? ""]));
+            rows.map((d) => [d.name, d.priority, d.stage, d.acreageNma ?? "", d.nra ?? "", d.aggOurPrice ?? d.ourPrice ?? "", d.buyerPurchasePrice ?? "", royaltyLabel(d.royaltyRate), d.profitEst ?? "", d.dateUnderContract ?? "", d.findBuyerByDate ?? "", d.selectedBuyer?.name ?? "", d.relationshipOwner?.name ?? ""]));
         }}
       />
 

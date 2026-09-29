@@ -27,6 +27,7 @@ import { MoneyInput } from "../components/MoneyInput";
 import { MarketingFunnel } from "../components/MarketingFunnel";
 import { useUnsavedSection } from "../lib/unsaved";
 import { DateField } from "../components/DateField";
+import { ROYALTY_RATE_OPTIONS, royaltyLabel } from "../lib/royalty";
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
 
 // Mineral-asset document categories (module-specific; the shared DocumentsSection
@@ -35,7 +36,6 @@ const ASSET_DOC_FOLDERS = ["Division Orders", "Deeds", "Leases", "Check Stubs", 
 
 // Current-lease selectors.
 const LEASE_STATUS_OPTIONS = ["Leased", "Held By Production", "Expired", "In Negotiation", "Unleased", "Top Lease", "Shut-in"];
-const ROYALTY_RATE_OPTIONS = ["1/16", "1/8", "3/16", "1/6", "1/5", "1/4"];
 
 interface AssetDetail extends DealSummary {
   operator: string | null;
@@ -183,14 +183,14 @@ function Fld({ l, children }: { l: string; children: React.ReactNode }) {
 // Royalty rate = a common fraction from the preset list, or a custom value via
 // "Other". Stored as a plain string ("1/8", "3/16", or whatever's typed).
 function RoyaltyRateField({ value, onChange }: { value: string | null; onChange: (v: string | null) => void }) {
-  const preset = value != null && value !== "" && ROYALTY_RATE_OPTIONS.includes(value);
+  const preset = value != null && value !== "" && (ROYALTY_RATE_OPTIONS as readonly string[]).includes(value);
   const [other, setOther] = useState<boolean>(value != null && value !== "" && !preset);
   const selectValue = other ? "__other__" : preset ? value! : "";
   return (
     <>
       <Select
         value={selectValue} clearable placeholder="—" ariaLabel="Royalty rate"
-        options={[...ROYALTY_RATE_OPTIONS.map((o) => ({ value: o, label: o })), { value: "__other__", label: "Other (custom)" }]}
+        options={[...ROYALTY_RATE_OPTIONS.map((o) => ({ value: o, label: royaltyLabel(o) })), { value: "__other__", label: "Other (custom)" }]}
         onChange={(v) => {
           if (v === "__other__") { setOther(true); onChange(value && !preset ? value : ""); }
           else { setOther(false); onChange(v === "" ? null : v); }
@@ -416,7 +416,7 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
             hasLease ? (
             <div className="dd-grid" style={{ gridTemplateColumns: "1fr" }}>
               <KV k="Lease Status" v={asset.leaseStatuses?.length ? asset.leaseStatuses.join(", ") : null} />
-              <KV k="Royalty Rate" v={asset.royaltyRate} />
+              <KV k="Royalty Rate" v={royaltyLabel(asset.royaltyRate) || null} />
               <KV k="Lease Effective Date" v={fmtDate(asset.leaseEffectiveDate)} />
               <KV k="Lease Expiration Date" v={fmtDate(asset.leaseExpirationDate)} />
             </div>

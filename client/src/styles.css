@@ -581,7 +581,10 @@ table.data-table {
 }
 .data-table.lead-sticky.has-sel th:nth-child(1), .data-table.lead-sticky.has-sel td:nth-child(1) { width: 44px; min-width: 44px; max-width: 44px; padding-left: 10px; padding-right: 10px; }
 .data-table.lead-sticky.has-sel th:nth-child(2), .data-table.lead-sticky.has-sel td:nth-child(2) { position: sticky; left: 44px; z-index: 3; background: var(--panel); }
-.data-table.lead-sticky thead th:nth-child(1), .data-table.lead-sticky.has-sel thead th:nth-child(2) { z-index: 4; background: var(--panel-2); }
+/* Frozen header cells sit ABOVE the scrolling header cells (z-index 5) —
+   otherwise the scrolling headers slide over them and the frozen Deal header
+   appears to scroll away while its column stays put. */
+.data-table.lead-sticky thead th:nth-child(1), .data-table.lead-sticky.has-sel thead th:nth-child(2) { z-index: 7; background: var(--panel-2); }
 .data-table.lead-sticky tbody tr.clickable:hover td:nth-child(1),
 .data-table.lead-sticky.has-sel tbody tr.clickable:hover td:nth-child(2) { background: var(--panel-2); }
 .data-table.lead-sticky tbody tr.row-selected td:nth-child(1),
@@ -592,6 +595,11 @@ table.data-table {
    wrap so no column can force horizontal overflow. Deliberate clamps
    (.cell-clamp and friends) still apply their own truncation. */
 .data-table td { overflow-wrap: anywhere; }
+/* SortableTable (auto-cols): values stay on one line and columns widen to fit
+   the current data (the table scrolls horizontally when needed), keeping rows
+   compact. Only columns detected as long text wrap, inside a width band. */
+.data-table.auto-cols td { white-space: nowrap; overflow-wrap: normal; }
+.data-table.auto-cols td.col-long { white-space: normal; overflow-wrap: anywhere; max-width: 420px; }
 .data-table td .wrap { white-space: normal; }
 .empty-cell { text-align: center; color: var(--text-dim); padding: 32px; }
 /* Overdue: a 3px left accent instead of a full-row wash — the row reads as
@@ -3535,6 +3543,10 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .nd-timeline { display: grid; grid-template-columns: 1fr 2fr; gap: 14px; }
 .nd-basics .field, .nd-grid3 .field, .nd-timeline .field { margin: 0; }
 @media (max-width: 700px) { .nd-grid3 { grid-template-columns: 1fr; } .nd-basics, .nd-timeline { grid-template-columns: 1fr; } }
+/* Deals table: inline Royalty Rate editor sized to the row. */
+.deal-royalty-cell { display: inline-block; text-align: left; }
+.deal-royalty-cell .msel-box { min-height: 30px; padding-top: 3px; padding-bottom: 3px; }
+.deal-royalty-cell .msel-single-value { font-size: 13px; }
 /* Profit figures in tables: green for a gain, red for a loss. */
 .profit-pos { color: var(--green); font-weight: 600; font-variant-numeric: tabular-nums; }
 .profit-neg { color: var(--red); font-weight: 600; font-variant-numeric: tabular-nums; }
