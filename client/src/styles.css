@@ -171,6 +171,10 @@ a.subtle-link:hover, a.subtle-link:focus-visible { color: var(--accent); text-de
 /* Amber count badge + green all-clear footer (design's Priorities card). */
 .dash-task-badge { font-size: 11px; font-weight: 800; color: var(--amber); background: color-mix(in srgb, var(--amber) 10%, transparent);
   padding: 2px 8px; border-radius: 99px; }
+/* Main map: owned (HOLD) mineral asset tag — matches the asset highlight color. */
+.map-asset-badge { color: #7c3aed; background: rgba(139, 92, 246, 0.14); }
+/* "Show tasks for" user filter, pinned to the right of the Tasks header. */
+.dash-task-filter { margin-left: auto; font-size: 12.5px; }
 .dash-task-clear { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-faint); margin-top: auto; padding-top: 12px; }
 
 h1, h2, h3, h4 { margin: 0 0 12px; font-weight: 600; }
@@ -387,7 +391,7 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 /* --- Metrics --- */
 .metrics-row { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--grid-gap); margin-bottom: var(--block-gap); }
 /* Dashboard KPI row has six cards (Closed Deals joined the lineup). */
-.metrics-row.dash-kpis { grid-template-columns: repeat(6, 1fr); }
+.metrics-row.dash-kpis { grid-template-columns: repeat(7, 1fr); }
 .metric-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 16px; }
 .metric-label { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
 .metric-value { font-size: 24px; font-weight: 700; margin-top: 6px; }
@@ -964,7 +968,7 @@ body.modal-open { overflow: hidden; }
 .dash-rgl .dash-w { display: flex; flex-direction: column; min-width: 0; overflow: hidden; border-radius: var(--radius-lg); }
 .dash-rgl .dash-w-body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .dash-rgl .dash-w-body > .panel { flex: 1; min-height: 0; margin-bottom: 0; overflow: auto; display: flex; flex-direction: column; }
-.dash-rgl .dash-w-body > .metrics-row { flex: 1; min-height: 0; margin: 0; }
+.dash-rgl .dash-w-body > .metrics-row { flex: 1; min-height: 0; margin: 0; overflow: auto; }
 /* Widget motion: RGL animates via transform; keep it crisp and GPU-friendly. */
 .dash-rgl .react-grid-item { transition: transform 180ms cubic-bezier(0.2, 0, 0, 1), width 180ms cubic-bezier(0.2, 0, 0, 1), height 180ms cubic-bezier(0.2, 0, 0, 1); }
 .dash-rgl .react-grid-item.react-draggable-dragging { transition: none; z-index: 10; cursor: grabbing;
@@ -1309,11 +1313,13 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
    =========================================================================== */
 @media (max-width: 1100px) {
   .metrics-row { grid-template-columns: repeat(3, 1fr) !important; }
+  /* Seven dashboard KPIs: 4 + 3 keeps them in two rows inside the widget. */
+  .metrics-row.dash-kpis { grid-template-columns: repeat(4, 1fr) !important; }
 }
 @media (max-width: 760px) {
   .page { padding: 14px; }
   .page-header { flex-wrap: wrap; }
-  .metrics-row { grid-template-columns: repeat(2, 1fr) !important; }
+  .metrics-row, .metrics-row.dash-kpis { grid-template-columns: repeat(2, 1fr) !important; }
   .dd-grid { grid-template-columns: 1fr 1fr; }
   .grid-2, .grid-3 { grid-template-columns: 1fr; }
 }
@@ -2980,6 +2986,8 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .pl2-page .kanban-col { background: var(--board-col); border-color: var(--board-col-border); }
 .pl2-page .kanban-col-head { border-bottom: none; padding-bottom: 4px; }
 .pl2-page .pl2-colsum { border-bottom: none; padding-top: 2px; padding-bottom: 10px; font-size: 12px; font-weight: 700; }
+.pl2-page .pl2-colsum.pl2-colsum-uc { margin-top: -8px; color: var(--text-dim); font-weight: 600; }
+.pl2-colsum-uc > span { font-weight: 500; color: var(--text-faint); }
 /* Raised cards with a soft lift (dark only — light keeps the token shadow). */
 .pl2-page .deal-card { background: var(--panel); border-color: var(--border); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.30); }
 :root[data-theme="light"] .pl2-page .deal-card { box-shadow: 0 1px 2px rgba(19, 23, 34, 0.06); }

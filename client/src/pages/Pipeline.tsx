@@ -36,7 +36,11 @@ interface DragState { id: string; w: number; offX: number; offY: number; moved: 
 // ---------------------------------------------------------------------------
 type CardField = "location" | "nra" | "nma" | "priority" | "profit" | "ourPrice" | "buyerPrice" | "days" | "buyer" | "dates";
 type CardSort = "priority" | "days" | "profit" | "nma" | "ourPrice" | "buyerPrice" | "name";
-interface PipelinePrefs { density: "comfortable" | "compact"; fields: Record<CardField, boolean>; sort: CardSort }
+interface PipelinePrefs {
+  density: "comfortable" | "compact"; fields: Record<CardField, boolean>; sort: CardSort;
+  /** Show each stage's Under Contract total (acquisition cost of its deals) in the column header. */
+  underContract: boolean;
+}
 const CARD_FIELDS: [CardField, string][] = [
   ["location", "Location"], ["nra", "NRA"], ["nma", "NMA"], ["priority", "Priority"], ["profit", "Est. profit"],
   ["ourPrice", "Our price"], ["buyerPrice", "Buyer purchase price"],
@@ -48,6 +52,7 @@ const DEFAULT_PREFS: PipelinePrefs = {
   density: "comfortable",
   fields: { location: true, nra: true, nma: false, priority: true, profit: true, ourPrice: false, buyerPrice: false, days: true, buyer: true, dates: true },
   sort: "priority",
+  underContract: false,
 };
 const PREFS_KEY = "mh-pipeline-view:v1";
 function loadPrefs(): PipelinePrefs {
@@ -324,6 +329,9 @@ export function Pipeline() {
           const color = stageColor(allStages, col);
           const colDeals = sortDeals(boardDeals.filter((d) => d.stage === col), prefs.sort);
           const colTotal = colDeals.reduce((sum, d) => sum + (d.profitEst ?? 0), 0);
+          // Under Contract for THIS stage only: what we owe sellers for its
+          // deals (owned assets for sale have no seller contract).
+          const colUnderContract = colDeals.filter((d) => d.recordType !== "OWNED_ASSET").reduce((sum, d) => sum + (cardOur(d) ?? 0), 0);
           return (
             <div
               key={col} data-stage={col}
@@ -335,6 +343,11 @@ export function Pipeline() {
                 <span className={`pl2-count ${colDeals.length ? "on" : ""}`}>{colDeals.length}</span>
               </div>
               <div className={`pl2-colsum ${colTotal > 0 ? "pos" : ""}`}>{money(colTotal) === "—" ? "$0" : money(colTotal)}</div>
+              {prefs.underContract && (
+                <div className="pl2-colsum pl2-colsum-uc" title={`Acquisition cost of the deals in ${stage.label}`}>
+                  <span>Under contract</span> {money(colUnderContract) === "—" ? "$0" : money(colUnderContract)}
+                </div>
+              )}
               <div className="kanban-col-body">
                 {colDeals.map((d) => (
                   <Card key={d.id} deal={d} color={color} canMove={canMove} fields={prefs.fields} dragging={drag?.id === d.id && drag.moved}
@@ -640,6 +653,12 @@ function PipelineCustomize({ prefs, onChange }: { prefs: PipelinePrefs; onChange
                 <input type="checkbox" checked={prefs.fields[k]} onChange={() => toggleField(k)} /> <span>{label}</span>
               </label>
             ))}
+          </div>
+          <div className="cv-head" style={{ borderTop: "1px solid var(--border)" }}><strong>Stage totals</strong></div>
+          <div className="cv-fields-2">
+            <label className="cv-check" style={{ justifyContent: "flex-start" }} title="Each stage's own total acquisition cost (Our Cost) — never the company-wide figure">
+              <input type="checkbox" checked={prefs.underContract} onChange={() => onChange({ ...prefs, underContract: !prefs.underContract })} /> <span>Under Contract</span>
+            </label>
           </div>
           <div className="cv-head" style={{ borderTop: "1px solid var(--border)" }}><strong>Sort within a stage</strong></div>
           <div style={{ padding: "8px 12px" }}>

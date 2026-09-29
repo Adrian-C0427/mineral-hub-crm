@@ -8,6 +8,7 @@ import "react-resizable/css/styles.css";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, StageBadge } from "../components/ui";
+import { Select } from "../components/Select";
 import { money, fmtDate, fmtDateLocal } from "../lib/format";
 import { useStages } from "../stages";
 import { PeriodSegmented } from "../components/PeriodSegmented";
@@ -29,6 +30,8 @@ interface DashTask {
 interface DashboardData {
   metrics: {
     activeDeals: number; projectedProfit: number; closedProfitYtd: number; closedDealsCount: number; avgProfitPerDeal: number; offersPending: number; periodLabel?: string;
+    /** Total acquisition cost (Our Cost) of active seller deals — what we're under contract for. */
+    underContract?: number;
     /** Prior equal-length window (Closed Date keyed) — delta baselines. */
     closedProfitPrev?: number; closedDealsPrev?: number; avgProfitPrev?: number;
   };
@@ -242,7 +245,15 @@ export function Dashboard() {
       if (!customFrom || !customTo || customFrom > customTo) return; // wait for a complete range
       qs.set("from", customFrom); qs.set("to", customTo);
     }
-    api.get<DashboardData>(`/dashboard?${qs.toString()}`).then(setD);
+    const load = () => { void api.get<DashboardData>(`/dashboard?${qs.toString()}`).then(setD).catch(() => {}); };
+    load();
+    // Deals are created, edited, moved and removed on other pages (or in other
+    // tabs) — refresh when the user comes back so totals like Under Contract
+    // are never stale.
+    const onVisible = () => { if (document.visibilityState === "visible") load(); };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => { document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("focus", onVisible); };
   }, [period, customFrom, customTo]);
 
   // Grid width tracks the CONTAINER (not the window), so collapsing/expanding
@@ -310,6 +321,7 @@ export function Dashboard() {
     kpis: (
       <div className="metrics-row dash-kpis">
         <Kpi label="Active Deals" value={d.metrics.activeDeals} delta={activeDelta} series={t?.activeDealsWeekly} spark="var(--accent2)" title="Sparkline: active deals per week (8 weeks)" />
+        <Kpi label="Under Contract" value={fmtCompact(d.metrics.underContract ?? 0)} title="Total acquisition cost (Our Cost) of every active deal we're under contract with sellers for. Excludes closed and dead deals and owned mineral assets." />
         <Kpi label="Projected Profit" value={fmtCompact(d.metrics.projectedProfit)} series={projectedSeries} spark="var(--accent2)" title="Best (or accepted) offer minus cost basis across active deals with offers — the same series as the Projected bars below." />
         <Kpi label={`Closed ${d.metrics.periodLabel ?? "YTD"}`} value={fmtCompact(d.metrics.closedProfitYtd)} valueColor={d.metrics.closedProfitYtd > 0 ? "var(--green)" : undefined} delta={closedDelta} series={curIdx >= 0 ? realized.slice(0, curIdx + 1) : realized} spark="var(--green)" title="Sparkline: realized profit by month" />
         <Kpi label="Closed Deals" value={d.metrics.closedDealsCount} delta={closedCountDelta} series={t?.closedWeekly} spark="var(--green)" title="Deals moved to Closed within the selected range, by Contract Timeline Closed Date. Δ vs the previous equal-length period. Sparkline: closes per week (8 weeks)." />
@@ -556,7 +568,7 @@ export function Dashboard() {
         ))}
       </div>
     ),
-    tasks: <TasksWidget tasks={d.tasks ?? []} onCompleted={(id) => setD((prev) => (prev ? { ...prev, tasks: (prev.tasks ?? []).filter((x) => x.id !== id) } : prev))} />,
+    tasks: <TasksWidget initial={d.tasks ?? []} />,
   };
 
   const hiddenIds = ALL_WIDGETS.filter((id) => prefs.hidden.includes(id));
@@ -725,10 +737,43 @@ const TASK_PRIORITY_META: Record<string, { label: string; color: string }> = {
   LOW: { label: "Low", color: "var(--green)" },
 };
 
-function TasksWidget({ tasks, onCompleted }: { tasks: DashTask[]; onCompleted: (id: string) => void }) {
-  const { can } = useAuth();
+/**
+ * Whose tasks the widget lists: "me" (default — My Tasks), "all" users, or one
+ * user's id. The list refetches as soon as the selection changes.
+ */
+function TasksWidget({ initial }: { initial: DashTask[] }) {
+  const { can, user } = useAuth();
   const canManage = can("manageContacts");
   const [busy, setBusy] = useState<string | null>(null);
+  const [whose, setWhose] = useState("me");
+  const [tasks, setTasks] = useState<DashTask[]>(initial);
+  const [loading, setLoading] = useState(false);
+  const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => { api.get<{ id: string; name: string }[]>("/users").then(setUsers).catch(() => {}); }, []);
+  // The dashboard payload already carries My Tasks; refetch for any change
+  // after that (and when the user returns to the tab).
+  const first = useRef(true);
+  useEffect(() => {
+    let live = true;
+    const load = () => {
+      setLoading(true);
+      api.get<DashTask[]>(`/dashboard/tasks?assignee=${encodeURIComponent(whose)}`)
+        .then((rows) => { if (live) setTasks(rows); })
+        .catch(() => {})
+        .finally(() => { if (live) setLoading(false); });
+    };
+    if (first.current && whose === "me") first.current = false; else load();
+    const onVisible = () => { if (document.visibilityState === "visible") load(); };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { live = false; document.removeEventListener("visibilitychange", onVisible); };
+  }, [whose]);
+  const onCompleted = (id: string) => setTasks((prev) => prev.filter((x) => x.id !== id));
+  const userOptions = [
+    { value: "me", label: "Me / My Tasks" },
+    { value: "all", label: "All Users" },
+    ...users.filter((u) => u.id !== user?.id).map((u) => ({ value: u.id, label: u.name })),
+  ];
+  const showOwner = whose !== "me";
   // Due dates are calendar days stored at UTC midnight — compare day keys, not
   // timestamps, so a task due today never shows as overdue mid-morning.
   const todayKey = new Date().toISOString().slice(0, 10);
@@ -747,11 +792,15 @@ function TasksWidget({ tasks, onCompleted }: { tasks: DashTask[]; onCompleted: (
       <div className="panel-title" style={{ marginBottom: 12 }}>
         <h3 className="dash-h3">Tasks</h3>
         {tasks.length > 0 && <span className="dash-task-badge">{tasks.length} due</span>}
+        <span className="dash-task-filter">
+          <Select value={whose} onChange={(v) => setWhose(v || "me")} options={userOptions} searchable={userOptions.length > 8}
+            width={170} ariaLabel="Show tasks for" />
+        </span>
       </div>
       {tasks.length === 0 ? (
         <div className="dash-task-clear">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>
-          No overdue tasks or follow-ups
+          {loading ? "Loading tasks…" : whose === "me" ? "You have no overdue or upcoming tasks" : whose === "all" ? "No overdue or upcoming tasks for anyone" : "No overdue or upcoming tasks for this user"}
         </div>
       ) : tasks.map((t) => {
         const dayKey = t.dueDate ? t.dueDate.slice(0, 10) : null;
@@ -766,7 +815,7 @@ function TasksWidget({ tasks, onCompleted }: { tasks: DashTask[]; onCompleted: (
             )}
             <Link to={`/contacts/${t.contactId}?task=${t.id}`} className="dash-task-main" title="Open this task on the contact's workspace">
               <span className="dash-task-title">{t.title}</span>
-              <span className="dash-task-meta">{t.contactName}{t.assignedTo ? ` · ${t.assignedTo.name}` : ""}</span>
+              <span className="dash-task-meta">{t.contactName}{showOwner && t.assignedTo ? ` · ${t.assignedTo.name}` : ""}</span>
             </Link>
             <span className="dash-task-pr" style={{ color: pr.color, background: `color-mix(in srgb, ${pr.color} 13%, transparent)` }}>{pr.label}</span>
             <span className={`dash-task-due ${overdue ? "overdue" : ""}`}>

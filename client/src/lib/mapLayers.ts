@@ -31,6 +31,8 @@ export const STATUS_COLOR = [
 type Expr = maplibregl.ExpressionSpecification;
 const SEL = ["boolean", ["feature-state", "selected"], false] as unknown as Expr;
 const ACT = ["boolean", ["feature-state", "active"], false] as unknown as Expr;
+// Owned mineral assets on HOLD — highlighted distinctly from active deals.
+const OWN = ["boolean", ["feature-state", "owned"], false] as unknown as Expr;
 
 /**
  * Paint for the abstract fill/line/label layers. Emphasis is reserved for
@@ -41,8 +43,8 @@ const ACT = ["boolean", ["feature-state", "active"], false] as unknown as Expr;
 export function abstractsPaint() {
   return {
     fill: {
-      "fill-color": ["case", SEL, "#f59e0b", ACT, "#ef4444", "#3b82f6"] as unknown as Expr,
-      "fill-opacity": ["case", SEL, 0.55, ACT, 0.45, 0.05] as unknown as Expr,
+      "fill-color": ["case", SEL, "#f59e0b", ACT, "#ef4444", OWN, "#8b5cf6", "#3b82f6"] as unknown as Expr,
+      "fill-opacity": ["case", SEL, 0.55, ACT, 0.45, OWN, 0.4, 0.05] as unknown as Expr,
     },
     line: {
       "line-color": ["case", SEL, "#b45309", "#6b7280"] as unknown as Expr,

@@ -24,10 +24,17 @@ import {
 
 interface MapDeal {
   id: string; abstractIds: string[]; name: string; stage: string;
+  /** OWNED_ASSET here is always an asset actively marketed for sale. */
+  recordType?: "OPPORTUNITY" | "OWNED_ASSET";
   priority: "HIGH" | "MEDIUM" | "LOW"; counties: string[]; state: string | null;
   operator: string | null; assetTypes: string[]; basins: string[]; formations: string[];
   acreageNma: number | null; nra: number | null; askPrice: number | null;
   profitEst: number | null; selectedBuyer: { id: string; name: string } | null;
+}
+/** An owned mineral asset on HOLD — shown as a Mineral Asset, never a deal. */
+interface MapAsset {
+  id: string; abstractIds: string[]; name: string; operator: string | null; assetTypes: string[];
+  acreageNma: number | null; nra: number | null; counties: string[]; state: string | null;
 }
 type FC = { type: "FeatureCollection"; features: GeoFeature[] };
 type GeoFeature = { type: "Feature"; id?: number; properties: Record<string, unknown>; geometry: { type: string; coordinates: unknown } };
@@ -66,8 +73,8 @@ const MAP_LAYERS_KEY = "mh-map-layers:v1";
 const MAP_DOCK_KEY = "mh-map-dock:v1";
 const MAP_VIEW_KEY = "mh-map-view:v1";
 const MAP_FILTERS_KEY = "mh-map-filters:v1";
-type MapLayers = { boundaries: boolean; absNums: boolean; surveyNames: boolean; deals: boolean; wells: boolean; wellbores: boolean; tracts: boolean };
-const DEFAULT_MAP_LAYERS: MapLayers = { boundaries: true, absNums: true, surveyNames: true, deals: true, wells: true, wellbores: true, tracts: true };
+type MapLayers = { boundaries: boolean; absNums: boolean; surveyNames: boolean; deals: boolean; assets: boolean; wells: boolean; wellbores: boolean; tracts: boolean };
+const DEFAULT_MAP_LAYERS: MapLayers = { boundaries: true, absNums: true, surveyNames: true, deals: true, assets: true, wells: true, wellbores: true, tracts: true };
 interface MapCam { center: [number, number]; zoom: number }
 /** A named, reusable combination of every filter on the Filters panel. */
 interface MapFilterState {
@@ -114,6 +121,7 @@ export function MapView() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const styleReady = useRef(false);
   const activeIds = useRef<string[]>([]);
+  const ownedIds = useRef<string[]>([]);
   const selAbstractRef = useRef<string | null>(null);
   const selWellRef = useRef<number | null>(null);
   const wellsFC = useRef<FC | null>(null);
@@ -125,6 +133,7 @@ export function MapView() {
   const periodLabelRef = useRef("");
 
   const [deals, setDeals] = useState<MapDeal[] | null>(null);
+  const [assets, setAssets] = useState<MapAsset[]>([]);
   const [selected, setSelected] = useState<Selected>(null);
   const [choices, setChoices] = useState<WellProps[] | null>(null); // overlap disambiguation
   const [layers, setLayers] = useState<MapLayers>(() => ({ ...DEFAULT_MAP_LAYERS, ...loadJson<Partial<MapLayers>>(MAP_LAYERS_KEY, {}) }));
@@ -203,6 +212,11 @@ export function MapView() {
     for (const d of deals ?? []) for (const aid of d.abstractIds) { const a = m.get(aid) ?? []; a.push(d); m.set(aid, a); }
     return m;
   }, [deals]);
+  const assetsByAbstract = useMemo(() => {
+    const m = new Map<string, MapAsset[]>();
+    for (const a of assets) for (const aid of a.abstractIds) { const l = m.get(aid) ?? []; l.push(a); m.set(aid, l); }
+    return m;
+  }, [assets]);
 
   // Formation options come from the heat-map wells (static Leon/Freestone
   // production data — the formation filter only affects the heat layer until
@@ -436,9 +450,11 @@ export function MapView() {
   function applyHighlight() {
     const map = mapRef.current; if (!map || !styleReady.current) return;
     for (const id of activeIds.current) map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id }, { active: false });
-    if (!layersRef.current.deals) { activeIds.current = []; return; }
-    activeIds.current = [...dealsByAbstract.keys()];
+    for (const id of ownedIds.current) map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id }, { owned: false });
+    activeIds.current = layersRef.current.deals ? [...dealsByAbstract.keys()] : [];
+    ownedIds.current = layersRef.current.assets ? [...assetsByAbstract.keys()] : [];
     for (const id of activeIds.current) map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id }, { active: true });
+    for (const id of ownedIds.current) map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id }, { owned: true });
   }
   function applyLayerVisibility() {
     const map = mapRef.current; if (!map || !styleReady.current) return;
@@ -550,6 +566,8 @@ export function MapView() {
 
   function loadDeals() { const qs = new URLSearchParams(); qs.set("status", statusFilter); api.get<MapDeal[]>(`/map/deals?${qs.toString()}`).then(setDeals); }
   useEffect(loadDeals, [statusFilter]);
+  // Owned (HOLD) mineral assets: not deals, so the deal-status filter doesn't apply.
+  useEffect(() => { api.get<MapAsset[]>("/map/assets").then(setAssets).catch(() => setAssets([])); }, []);
   useEffect(() => {
     // Merge every county's monthly production. Keys are og|district|leaseNo and
     // RRC lease numbers are unique within a district, so counties don't collide.
@@ -568,7 +586,7 @@ export function MapView() {
       }),
     ).then((parts) => setProd(Object.assign({}, ...parts))).catch(() => {});
   }, []);
-  useEffect(applyHighlight, [dealsByAbstract]);
+  useEffect(applyHighlight, [dealsByAbstract, assetsByAbstract]);
   useEffect(applyLayerVisibility, [layers]);
   // Survey/abstract filter option lists from the GIS API, scoped to the selected
   // counties. Nothing needs to be on-screen (or downloaded) to be filterable.
@@ -689,6 +707,7 @@ export function MapView() {
   }, [sug]);
 
   const panelDeals = selected?.kind === "abstract" ? dealsByAbstract.get(selected.id) ?? [] : [];
+  const panelAssets = selected?.kind === "abstract" ? assetsByAbstract.get(selected.id) ?? [] : [];
   const abstractCount = dealsByAbstract.size;
   const toggle = (k: keyof typeof layers) => setLayers((p) => ({ ...p, [k]: !p[k] }));
 
@@ -855,7 +874,7 @@ export function MapView() {
       </div>
 
       <div className="row" style={{ marginBottom: 8 }}>
-        <span className="muted">{deals == null ? "…" : `${deals.length} deal${deals.length === 1 ? "" : "s"} · ${abstractCount} deal tract${abstractCount === 1 ? "" : "s"} · ${num(gisOptions.wellCount)} wells`}</span>
+        <span className="muted">{deals == null ? "…" : `${deals.length} deal${deals.length === 1 ? "" : "s"} · ${abstractCount} deal tract${abstractCount === 1 ? "" : "s"} · ${assets.length} mineral asset${assets.length === 1 ? "" : "s"} · ${num(gisOptions.wellCount)} wells`}</span>
       </div>
 
       {/* GIS-style layout: an open Filters / Heat panel docks as a LEFT column
@@ -999,6 +1018,7 @@ export function MapView() {
             defs={[
               { key: "boundaries", label: "Abstract boundaries" }, { key: "absNums", label: "Abstract numbers" },
               { key: "surveyNames", label: "Survey names" }, { key: "deals", label: "Active deals" },
+              { key: "assets", label: "Mineral assets (owned)" },
               { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores (laterals)" },
               { key: "tracts", label: "Imported tracts" },
             ]}
@@ -1194,10 +1214,31 @@ export function MapView() {
               <>
                 <div className="section-head"><div><h3 style={{ margin: 0 }}>{formatAbstract({ abstract: selected.abstract })}</h3><div className="muted" style={{ fontSize: 12 }}>{[surveyLabel(selected.survey), countyStateLabel(selected.county, "TX")].filter(Boolean).join(" — ")}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
                 <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}><KV k="Abstract" v={formatAbstract({ abstract: selected.abstract, survey: selected.survey, county: selected.county, state: "TX" })} /><KV k="Survey" v={selected.survey} /><KV k="County" v={selected.county} /></div>
-                <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 10 }}>{panelDeals.length} active deal{panelDeals.length === 1 ? "" : "s"}</div>
-                {panelDeals.length === 0 ? <p className="muted">No active deals in this abstract.</p> : panelDeals.map((d) => (
+                {/* Owned mineral assets (HOLD) are identified as Mineral Assets —
+                    no stage, priority, buyer, or other deal workflow. */}
+                {panelAssets.length > 0 && (
+                  <>
+                    <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 10 }}>{panelAssets.length} mineral asset{panelAssets.length === 1 ? "" : "s"} (owned)</div>
+                    {panelAssets.map((a) => (
+                      <div key={a.id} style={{ borderTop: "1px solid var(--border)", padding: "10px 0" }}>
+                        <div className="row" style={{ justifyContent: "space-between" }}><Link to={`/assets/${a.id}`} style={{ fontWeight: 600 }}>{a.name}</Link><span className="badge map-asset-badge">Mineral Asset</span></div>
+                        <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}><KV k="Operator" v={a.operator} /><KV k="Asset Type" v={a.assetTypes.length ? <ChipList items={a.assetTypes} /> : null} /><KV k="NMA" v={num(a.acreageNma)} /><KV k="NRA" v={num(a.nra)} /></div>
+                      </div>
+                    ))}
+                  </>
+                )}
+                {(panelDeals.length > 0 || panelAssets.length === 0) && (
+                  <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 10 }}>{panelDeals.length} active deal{panelDeals.length === 1 ? "" : "s"}</div>
+                )}
+                {panelDeals.length === 0 ? (panelAssets.length === 0 && <p className="muted">No active deals in this abstract.</p>) : panelDeals.map((d) => (
                   <div key={d.id} style={{ borderTop: "1px solid var(--border)", padding: "10px 0" }}>
-                    <div className="row" style={{ justifyContent: "space-between" }}><Link to={`/deals/${d.id}`} style={{ fontWeight: 600 }}>{d.name}</Link><PriorityBadge priority={d.priority} /></div>
+                    <div className="row" style={{ justifyContent: "space-between" }}>
+                      <span className="row" style={{ gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                        <Link to={d.recordType === "OWNED_ASSET" ? `/assets/${d.id}` : `/deals/${d.id}`} style={{ fontWeight: 600 }}>{d.name}</Link>
+                        {d.recordType === "OWNED_ASSET" && <span className="badge resp-interested" title="An owned mineral asset actively marketed for sale">Mineral asset · For sale</span>}
+                      </span>
+                      <PriorityBadge priority={d.priority} />
+                    </div>
                     <div className="row" style={{ gap: 6, margin: "6px 0" }}><StageBadge stage={d.stage} />{d.selectedBuyer && <span className="muted" style={{ fontSize: 12 }}>→ {d.selectedBuyer.name}</span>}</div>
                     <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}><KV k="Operator" v={d.operator} /><KV k="Asset Type" v={d.assetTypes.length ? <ChipList items={d.assetTypes} /> : null} /><KV k="NMA" v={num(d.acreageNma)} /><KV k="Profit est." v={money(d.profitEst)} /></div>
                   </div>

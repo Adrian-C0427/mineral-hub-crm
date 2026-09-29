@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { z } from "zod";
 import { prisma, withDbRetry } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
@@ -102,6 +103,14 @@ dashboardRouter.get(
 
     // Metrics row
     const activeDeals = allActive.length;
+
+    // Under Contract: what we're currently committed to pay sellers — the
+    // acquisition cost (Our Price) of every active seller deal. Owned assets
+    // marketed for sale are already ours (no seller contract), so they're
+    // excluded; child assets count individually (each carries its own cost).
+    const underContract = allActive
+      .filter((d) => d.recordType === "OPPORTUNITY")
+      .reduce((sum, d) => sum + (d.ourPrice ?? 0), 0);
 
     // Projected profit: best offer − ask − costs across active deals that have
     // offers. A deal with an ACCEPTED offer projects THAT offer (same rule as
@@ -289,30 +298,7 @@ dashboardRouter.get(
       return offersRecent.filter((o) => o.dateSubmitted > from && o.dateSubmitted <= t).length;
     });
 
-    // Tasks widget feed: incomplete contact tasks that are overdue, due today,
-    // or coming due within the next 7 days (the same near-future horizon the
-    // notification sweep leads into), soonest first.
-    const taskHorizon = new Date(now.getTime() + 7 * 86_400_000);
-    const taskRows = await prisma.contactActivity.findMany({
-      where: { organizationId: org, kind: "TASK", completedAt: null, dueDate: { not: null, lte: taskHorizon } },
-      select: {
-        id: true, title: true, body: true, dueDate: true, priority: true,
-        assignedTo: { select: { id: true, name: true } },
-        createdBy: { select: { id: true, name: true } },
-        contact: { select: { id: true, firstName: true, lastName: true, entityName: true } },
-      },
-      orderBy: { dueDate: "asc" },
-      take: 50,
-    });
-    const dueSoonTasks = taskRows.map((t) => ({
-      id: t.id,
-      title: t.title ?? t.body,
-      dueDate: t.dueDate,
-      priority: t.priority ?? "MEDIUM",
-      assignedTo: t.assignedTo ?? t.createdBy,
-      contactId: t.contact.id,
-      contactName: [t.contact.firstName, t.contact.lastName].filter(Boolean).join(" ") || t.contact.entityName || "Contact",
-    }));
+    const dueSoonTasks = await dueSoonTasksFor(org, req.user!.id, String(req.query.tasksFor ?? "me"), now);
 
     res.json({
       metrics: {
@@ -322,6 +308,7 @@ dashboardRouter.get(
         closedDealsCount,
         avgProfitPerDeal,
         offersPending: activeOffers,
+        underContract,
         periodLabel: win.label,
         // Prior equal-length window (Closed Date keyed) — delta baselines.
         closedProfitPrev,
@@ -342,5 +329,51 @@ dashboardRouter.get(
       profitByMonth,
       trends: { activeDealsWeekly, avgProfitPerDeal: avgProfitTrend, closedWeekly, offersWeekly },
     });
+  }),
+);
+
+/**
+ * Tasks widget feed: incomplete contact tasks that are overdue, due today, or
+ * coming due within the next 7 days (the same near-future horizon the
+ * notification sweep leads into), soonest first — for `me` (default), `all`
+ * users, or one user id. A task belongs to its assignee, or to its author when
+ * unassigned (the same owner the due-task notification goes to).
+ */
+async function dueSoonTasksFor(org: string, meId: string, whose: string, now: Date = new Date()) {
+  const taskHorizon = new Date(now.getTime() + 7 * 86_400_000);
+  const owner = whose === "all" ? null : whose === "me" ? meId : whose;
+  const taskRows = await prisma.contactActivity.findMany({
+    where: {
+      organizationId: org, kind: "TASK", completedAt: null, dueDate: { not: null, lte: taskHorizon },
+      ...(owner ? { OR: [{ assignedToId: owner }, { assignedToId: null, createdById: owner }] } : {}),
+    },
+    select: {
+      id: true, title: true, body: true, dueDate: true, priority: true,
+      assignedTo: { select: { id: true, name: true } },
+      createdBy: { select: { id: true, name: true } },
+      contact: { select: { id: true, firstName: true, lastName: true, entityName: true } },
+    },
+    orderBy: { dueDate: "asc" },
+    take: 50,
+  });
+  return taskRows.map((t) => ({
+    id: t.id,
+    title: t.title ?? t.body,
+    dueDate: t.dueDate,
+    priority: t.priority ?? "MEDIUM",
+    assignedTo: t.assignedTo ?? t.createdBy,
+    contactId: t.contact.id,
+    contactName: [t.contact.firstName, t.contact.lastName].filter(Boolean).join(" ") || t.contact.entityName || "Contact",
+  }));
+}
+
+const tasksForSchema = z.object({ assignee: z.string().min(1).max(200).default("me") });
+
+/** The Tasks widget's user filter: Me (default), All users, or one user. */
+dashboardRouter.get(
+  "/tasks",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { assignee } = tasksForSchema.parse(req.query);
+    res.json(await dueSoonTasksFor(orgId(req), req.user!.id, assignee));
   }),
 );
