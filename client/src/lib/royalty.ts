@@ -1,5 +1,5 @@
 /** The app's standard lease royalty rates, stored as fractions ("3/16"). */
-export const ROYALTY_RATE_OPTIONS = ["1/16", "1/8", "3/16", "1/6", "1/5", "1/4"] as const;
+export const ROYALTY_RATE_OPTIONS = ["1/16", "1/8", "3/16", "1/6", "1/5", "9/40", "1/4"] as const;
 
 /** Decimal value of a royalty rate ("3/16" → 0.1875, "25%" → 0.25, "0.1875"); null if unreadable. */
 export function royaltyValue(r: string | null | undefined): number | null {
