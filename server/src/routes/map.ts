@@ -20,6 +20,14 @@ mapRouter.use(requireAuth, requireOrg, requirePermission("viewMap"));
 // "Active" = any non-terminal stage (robust to custom stages).
 const ACTIVE_FILTER = { notIn: [...TERMINAL_STAGE_KEYS] };
 
+// Deal workflow on the map = acquisition opportunities + owned assets actively
+// marketed for sale (assetMode SELL). An owned asset on HOLD is not a deal —
+// its parked "Closing" stage and computed priority mean nothing — so it's
+// served separately as a Mineral Asset (GET /map/assets).
+const DEAL_WORKFLOW: Prisma.DealWhereInput = {
+  OR: [{ recordType: "OPPORTUNITY" }, { recordType: "OWNED_ASSET", assetMode: "SELL" }],
+};
+
 const filterSchema = z.object({
   status: z.string().optional(), // "ACTIVE" (default) | "ALL" | a specific Stage
   county: z.string().optional(),
@@ -42,6 +50,7 @@ mapRouter.get(
     const where: Prisma.DealWhereInput = {
       organizationId: orgId(req),
       abstractIds: { isEmpty: false },
+      ...DEAL_WORKFLOW,
     };
     if (f.status && f.status !== "ALL") {
       where.stage = f.status === "ACTIVE" ? ACTIVE_FILTER : f.status;
@@ -70,6 +79,8 @@ mapRouter.get(
           id: s.id,
           abstractIds: s.abstractIds,
           name: s.name,
+          // OWNED_ASSET here is always one marketed for sale.
+          recordType: s.recordType,
           stage: s.stage,
           priority: s.priority,
           counties: s.counties,
@@ -86,6 +97,31 @@ mapRouter.get(
         };
       }),
     );
+  }),
+);
+
+/**
+ * Owned mineral assets NOT marketed for sale (HOLD), linked to abstracts — shown
+ * on the map as Mineral Assets, never as deals (no stage, priority, or buyer).
+ * Sold assets (a CLOSED sale) have left the portfolio and are excluded.
+ */
+mapRouter.get(
+  "/assets",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const assets = await prisma.deal.findMany({
+      where: {
+        organizationId: orgId(req),
+        abstractIds: { isEmpty: false },
+        recordType: "OWNED_ASSET",
+        // HOLD, or no mode recorded (assets default to HOLD).
+        OR: [{ assetMode: "HOLD" }, { assetMode: null }],
+        stage: { notIn: [...TERMINAL_STAGE_KEYS] },
+      },
+      select: { id: true, abstractIds: true, name: true, operator: true, assetTypes: true, acreageNma: true, nra: true, counties: true, state: true },
+      orderBy: { createdAt: "desc" },
+      take: 5000,
+    });
+    res.json(assets);
   }),
 );
 
