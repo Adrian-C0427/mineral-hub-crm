@@ -1,31 +1,37 @@
 import { describe, expect, it } from "vitest";
 import { crc32, deflateRawSync } from "node:zlib";
-import { parseShapefileUpload, MAX_UNZIPPED_BYTES } from "./shpImport.js";
+import { parseShapefileUpload, MAX_UNZIPPED_BYTES, MAX_TRACT_VERTICES } from "./shpImport.js";
 
-/** One-square-polygon .shp in lon/lat (shapefile spec: mixed-endian header). */
-function squareShp(): Buffer {
-  const pts: [number, number][] = [[-96, 31], [-96, 31.1], [-95.9, 31.1], [-95.9, 31], [-96, 31]];
-  const content = Buffer.alloc(4 + 32 + 8 + 4 + pts.length * 16);
-  let o = 0;
-  content.writeInt32LE(5, o); o += 4;
-  for (const v of [-96, 31, -95.9, 31.1]) { content.writeDoubleLE(v, o); o += 8; }
-  content.writeInt32LE(1, o); o += 4;
-  content.writeInt32LE(pts.length, o); o += 4;
-  content.writeInt32LE(0, o); o += 4;
-  for (const [x, y] of pts) { content.writeDoubleLE(x, o); content.writeDoubleLE(y, o + 8); o += 16; }
+type Ring = [number, number][];
+const SQUARE: Ring = [[-96, 31], [-96, 31.1], [-95.9, 31.1], [-95.9, 31], [-96, 31]];
 
-  const recHeader = Buffer.alloc(8);
-  recHeader.writeInt32BE(1, 0);
-  recHeader.writeInt32BE(content.length / 2, 4);
-
+/** Polygon .shp, one single-ring record per polygon (shapefile spec: mixed-endian). */
+function polygonsShp(polys: Ring[]): Buffer {
+  const box = polys.flat().reduce((b, [x, y]) => [Math.min(b[0], x), Math.min(b[1], y), Math.max(b[2], x), Math.max(b[3], y)], [Infinity, Infinity, -Infinity, -Infinity]);
+  const records = polys.map((pts, i) => {
+    const content = Buffer.alloc(4 + 32 + 8 + 4 + pts.length * 16);
+    let o = 0;
+    content.writeInt32LE(5, o); o += 4;
+    for (const v of box) { content.writeDoubleLE(v, o); o += 8; }
+    content.writeInt32LE(1, o); o += 4;
+    content.writeInt32LE(pts.length, o); o += 4;
+    content.writeInt32LE(0, o); o += 4;
+    for (const [x, y] of pts) { content.writeDoubleLE(x, o); content.writeDoubleLE(y, o + 8); o += 16; }
+    const recHeader = Buffer.alloc(8);
+    recHeader.writeInt32BE(i + 1, 0);
+    recHeader.writeInt32BE(content.length / 2, 4);
+    return Buffer.concat([recHeader, content]);
+  });
+  const body = Buffer.concat(records);
   const header = Buffer.alloc(100);
   header.writeInt32BE(9994, 0);
-  header.writeInt32BE((100 + 8 + content.length) / 2, 24);
+  header.writeInt32BE((100 + body.length) / 2, 24);
   header.writeInt32LE(1000, 28);
   header.writeInt32LE(5, 32);
-  [-96, 31, -95.9, 31.1].forEach((v, i) => header.writeDoubleLE(v, 36 + i * 8));
-  return Buffer.concat([header, recHeader, content]);
+  box.forEach((v, i) => header.writeDoubleLE(v, 36 + i * 8));
+  return Buffer.concat([header, body]);
 }
+const squareShp = () => polygonsShp([SQUARE]);
 
 /** Minimal deflate zip writer (local headers + central directory + EOCD). */
 function zip(entries: { name: string; data: Buffer }[]): Buffer {
@@ -76,5 +82,34 @@ describe("parseShapefileUpload (zip)", () => {
     const many = zip(Array.from({ length: 51 }, (_, i) => ({ name: `l${i}.prj`, data: Buffer.from("x") })));
     await expect(parseShapefileUpload([{ originalname: "many.zip", buffer: many }], "many"))
       .rejects.toMatchObject({ status: 400, message: expect.stringMatching(/more than 50 files/) });
+  });
+});
+
+describe("parseShapefileUpload (validation, 2026-09-29 audit)", () => {
+  const loose = (shp: Buffer) => parseShapefileUpload([{ originalname: "t.shp", buffer: shp }], "t");
+
+  it("parses a loose .shp off the event loop and rounds coordinates to 1e-6", async () => {
+    const r = await loose(polygonsShp([[[-96.123456789, 31], [-96, 31.1], [-95.9, 31.1], [-96.123456789, 31]]]));
+    expect(r.features).toHaveLength(1);
+    expect((r.features[0].geometry as GeoJSON.Polygon).coordinates[0][0]).toEqual([-96.123457, 31]);
+  });
+
+  it("rejects projected coordinates in ANY feature, not just the first", async () => {
+    const projected: Ring = [[3_000_000, 10_000_000], [3_000_100, 10_000_000], [3_000_100, 10_000_100], [3_000_000, 10_000_000]];
+    await expect(loose(polygonsShp([SQUARE, projected])))
+      .rejects.toMatchObject({ status: 400, message: expect.stringMatching(/not geographic/) });
+  });
+
+  it("rejects an upload over the vertex budget", async () => {
+    const n = MAX_TRACT_VERTICES + 10;
+    const ring: Ring = Array.from({ length: n }, (_, i) => [-96 + (i / n) * 0.1, 31 + ((i % 2) * 0.01)]);
+    ring.push(ring[0]);
+    await expect(loose(polygonsShp([ring])))
+      .rejects.toMatchObject({ status: 400, message: expect.stringMatching(/boundary points/) });
+  }, 60_000);
+
+  it("turns a garbage .shp into a 400, not a crash", async () => {
+    await expect(loose(Buffer.from("definitely not a shapefile")))
+      .rejects.toMatchObject({ status: 400, message: expect.stringMatching(/Could not read the shapefile/) });
   });
 });
