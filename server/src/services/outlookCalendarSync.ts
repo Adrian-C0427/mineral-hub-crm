@@ -40,7 +40,7 @@ const isoDay = (d: Date): string => d.toISOString().slice(0, 10);
 export function planDeadlineEvents(
   deals: {
     id: string; name: string; dateUnderContract: Date | null; originalClosingDate: Date | null;
-    findBuyerByDateOverride: Date | null; finalClosingDateOverride: Date | null;
+    findBuyerByDateOverride: Date | null; finalClosingDateOverride: Date | null; daysToClose?: number | null;
   }[],
 ): DeadlineEvent[] {
   const out: DeadlineEvent[] = [];
@@ -99,7 +99,7 @@ export async function syncOutlookCalendar(row: Integration, appUrl: string): Pro
     where: { organizationId: row.organizationId, stage: { notIn: [...TERMINAL_STAGE_KEYS] } },
     select: {
       id: true, name: true, dateUnderContract: true, originalClosingDate: true,
-      findBuyerByDateOverride: true, finalClosingDateOverride: true,
+      findBuyerByDateOverride: true, finalClosingDateOverride: true, daysToClose: true,
     },
   });
   const wanted = planDeadlineEvents(deals);

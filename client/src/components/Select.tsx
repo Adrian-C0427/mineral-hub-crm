@@ -23,6 +23,13 @@ interface Props {
   width?: number | string;
   ariaLabel?: string;
   id?: string;
+  /** With `searchable`: offer the typed text as a value when no option matches
+   *  it exactly, and display a stored value that isn't among the options. */
+  creatable?: boolean;
+  /** Text shown when the list is empty (defaults to "No matches"). */
+  emptyText?: string;
+  /** Placeholder for the search input (defaults to "Search…"). */
+  searchPlaceholder?: string;
 }
 
 const toOpt = (o: SelectOption | string): SelectOption => (typeof o === "string" ? { value: o, label: o } : o);
@@ -38,8 +45,9 @@ const toOpt = (o: SelectOption | string): SelectOption => (typeof o === "string"
 export function Select({
   options, value, onChange, placeholder = "Select…", disabled,
   searchable = false, clearable = false, width, ariaLabel, id,
+  creatable = false, emptyText = "No matches", searchPlaceholder = "Search…",
 }: Props) {
-  const opts = useMemo(() => options.map(toOpt), [options]);
+  const baseOpts = useMemo(() => options.map(toOpt), [options]);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(-1);
@@ -52,15 +60,19 @@ export function Select({
   const close = () => { setOpen(false); setQuery(""); setActive(-1); };
   useDismiss([ref, menuRef], open, () => { close(); boxRef.current?.focus(); });
 
-  const selected = opts.find((o) => o.value === value) ?? null;
+  const selected = baseOpts.find((o) => o.value === value)
+    ?? (creatable && value ? { value, label: value } : null);
 
   useEffect(() => { if (open && searchable) inputRef.current?.focus(); }, [open, searchable]);
 
+  const typed = query.trim();
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return opts;
-    return opts.filter((o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q));
-  }, [opts, query]);
+    const q = typed.toLowerCase();
+    const hits = q ? baseOpts.filter((o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q)) : baseOpts;
+    // The typed text leads the list as its own choice unless it's already an option.
+    const exact = baseOpts.some((o) => o.value.toLowerCase() === q || o.label.toLowerCase() === q);
+    return creatable && searchable && q && !exact ? [{ value: typed, label: `Use “${typed}”`, hint: "not in list" }, ...hits] : hits;
+  }, [baseOpts, typed, creatable, searchable]);
 
   // Reset the active row whenever the visible list changes.
   useEffect(() => {
@@ -99,7 +111,7 @@ export function Select({
           t.buf = now - t.at > 700 ? e.key : t.buf + e.key;
           t.at = now;
           const q = t.buf.toLowerCase();
-          const idx = opts.findIndex((o) => o.label.toLowerCase().startsWith(q));
+          const idx = baseOpts.findIndex((o) => o.label.toLowerCase().startsWith(q));
           if (idx >= 0) setActive(idx);
         }
       }
@@ -135,7 +147,7 @@ export function Select({
               ref={inputRef}
               className="msel-search"
               value={query}
-              placeholder="Search…"
+              placeholder={searchPlaceholder}
               onChange={(e) => setQuery(e.target.value)}
               onClick={(e) => e.stopPropagation()}
               onKeyDown={(e) => {
@@ -146,7 +158,7 @@ export function Select({
             />
           )}
           {filtered.length === 0 ? (
-            <div className="msel-empty">No matches</div>
+            <div className="msel-empty">{emptyText}</div>
           ) : (
             filtered.map((o, i) => (
               <div

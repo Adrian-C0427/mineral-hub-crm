@@ -158,6 +158,15 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     rrc: deal.rrc,
     askPrice: deal.askPrice,
     ourPrice: deal.ourPrice,
+    ourCostPerNma: deal.ourCostPerNma,
+    ourCostPerNra: deal.ourCostPerNra,
+    askPricePerNma: deal.askPricePerNma,
+    askPricePerNra: deal.askPricePerNra,
+    daysToClose: deal.daysToClose,
+    // The buyer's price: the accepted offer once there is one, else the best
+    // offer so far — the same figure Profit Est. is computed from, so
+    // Buyer Purchase Price − Our Cost − closing costs reconciles to it.
+    buyerPurchasePrice: bestOffer,
     assetTypes: deal.assetTypes,
     basins: deal.basins,
     formations: deal.formations,

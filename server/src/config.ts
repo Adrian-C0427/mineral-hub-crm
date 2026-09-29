@@ -9,6 +9,8 @@ dotenv.config();
 export const DEADLINE_RULES = {
   /** Find Buyer By = Date Under Contract + N calendar days. */
   FIND_BUYER_BY_DAYS_AFTER_CONTRACT: 15,
+  /** The close window the 15-day rule assumes; longer closes extend Find Buyer By. */
+  STANDARD_DAYS_TO_CLOSE: 30,
   /** Final Closing = Original Closing + N calendar days. */
   FINAL_CLOSING_DAYS_AFTER_ORIGINAL: 15,
 } as const;

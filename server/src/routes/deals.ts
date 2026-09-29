@@ -9,6 +9,7 @@ import { computeMatch } from "../domain/matching.js";
 import { normalizePhone } from "../domain/phone.js";
 import { STALE_CONTACT_DAYS, LIST_LIMIT } from "../config.js";
 import { daysUntil } from "../domain/dates.js";
+import { totalFromPerAcre } from "../domain/perAcre.js";
 import { logActivity } from "../services/activityLog.js";
 import { effectiveStatus, ENGAGED_STATUSES, BUYER_STATUSES } from "../domain/buyerStatus.js";
 import { sendEmail, personalize, renderEmailBody } from "../services/email.js";
@@ -71,6 +72,16 @@ const assetFields = {
   divisionOrdersNote: z.string().max(10_000).nullish(),
   taxInfo: z.string().max(10_000).nullish(),
 };
+/** Per-acre pricing + contracted close window, shared by create/update. */
+const pricingFields = {
+  ourCostPerNma: z.number().nonnegative().nullish(),
+  ourCostPerNra: z.number().nonnegative().nullish(),
+  askPricePerNma: z.number().nonnegative().nullish(),
+  askPricePerNra: z.number().nonnegative().nullish(),
+  daysToClose: z.number().int().min(1).max(3650).nullish(),
+};
+const PRICING_KEYS = ["ourCostPerNma", "ourCostPerNra", "askPricePerNma", "askPricePerNra", "daysToClose"] as const;
+
 // Scalar asset keys copied straight into a Prisma patch (arrays/scalars only).
 // Editable asset value/interest fields, copied straight through by the generic
 // PATCH /:id. The lifecycle DISCRIMINATORS (recordType, assetMode) are
@@ -116,11 +127,78 @@ dealsRouter.get(
       : {};
     const deals = await prisma.deal.findMany({
       where,
-      include: { ...dealInclude, offers: { select: { amount: true } }, _count: { select: { assets: true } }, assets: { select: { nra: true, acreageNma: true, ourPrice: true, askPrice: true } }, ...revenueInclude },
+      include: { ...dealInclude, offers: { select: { id: true, amount: true, status: true } }, _count: { select: { assets: true } }, assets: { select: { nra: true, acreageNma: true, ourPrice: true, askPrice: true } }, ...revenueInclude },
       orderBy: { createdAt: "desc" },
       take: LIST_LIMIT,
     });
     res.json(deals.map((d) => serializeDeal(d)));
+  }),
+);
+
+// --------------------------------------------------------------------------
+// Operator options for the deal form — operators with activity in the selected
+// state(s) AND county(ies). Sources: RRC wells (Texas only — rrc.wells carries
+// no state column), the org's imported drilling permits, and operators already
+// recorded on the org's deals there. No county → no options.
+// --------------------------------------------------------------------------
+const operatorOptionsSchema = z.object({
+  states: z.string().max(2_000).optional(),
+  counties: z.string().max(8_000).optional(),
+});
+const csvList = (s: string | undefined, max: number) =>
+  [...new Set((s ?? "").split(",").map((v) => v.trim()).filter(Boolean))].slice(0, max);
+
+dealsRouter.get(
+  "/operator-options",
+  requirePermission("viewDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const q = operatorOptionsSchema.parse(req.query);
+    const states = csvList(q.states, 60).map((s) => s.toUpperCase());
+    const counties = csvList(q.counties, 300);
+    if (!states.length || !counties.length) { res.json([]); return; }
+    const countiesLc = counties.map((c) => c.toLowerCase());
+
+    const [wells, permits, deals] = await Promise.all([
+      states.includes("TX")
+        ? prisma.$queryRawUnsafe<{ name: string; n: number }[]>(
+            `SELECT operator AS name, count(*)::int AS n FROM rrc.wells
+              WHERE county = ANY($1::text[]) AND operator IS NOT NULL AND operator <> ''
+              GROUP BY operator`,
+            counties,
+          ).catch(() => [] as { name: string; n: number }[]) // rrc schema absent (dev DBs)
+        : Promise.resolve([] as { name: string; n: number }[]),
+      prisma.researchPermit.findMany({
+        where: {
+          organizationId: orgId(req),
+          state: { in: states, mode: "insensitive" },
+          county: { in: counties, mode: "insensitive" },
+        },
+        select: { operator: true },
+        distinct: ["operator"],
+        take: 2_000,
+      }),
+      prisma.deal.findMany({
+        where: { organizationId: orgId(req), operator: { not: null }, states: { hasSome: states }, counties: { hasSome: counties } },
+        select: { operator: true, counties: true },
+        take: 2_000,
+      }),
+    ]);
+
+    // Dedupe case-insensitively; keep the first spelling seen (RRC's canonical
+    // name first) and the well count as a hint.
+    const byKey = new Map<string, { name: string; wells: number }>();
+    const add = (name: string | null | undefined, wellCount = 0) => {
+      const n = name?.trim();
+      if (!n) return;
+      const k = n.toUpperCase();
+      const cur = byKey.get(k);
+      if (cur) cur.wells += wellCount;
+      else byKey.set(k, { name: n, wells: wellCount });
+    };
+    for (const w of wells) add(w.name, w.n);
+    for (const p of permits) add(p.operator);
+    for (const d of deals) if (d.counties.some((c) => countiesLc.includes(c.toLowerCase()))) add(d.operator);
+    res.json([...byKey.values()].sort((a, b) => a.name.localeCompare(b.name)));
   }),
 );
 
@@ -180,6 +258,7 @@ const createSchema = z.object({
   parentDealId: z.string().max(10_000).nullish(),
   // Or create additional child assets under THIS new deal in one shot.
   assets: z.array(assetChildSchema).max(100).optional(),
+  ...pricingFields,
   ...assetFields,
 });
 
@@ -188,6 +267,10 @@ dealsRouter.post(
   requirePermission("createDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = createSchema.parse(req.body);
+    // A manually entered total always wins; otherwise derive it from the
+    // per-acre rate × the deal's acreage (so it also satisfies "Our Price").
+    data.ourPrice ??= totalFromPerAcre(data.ourCostPerNma, data.acreageNma, data.ourCostPerNra, data.nra);
+    data.askPrice ??= totalFromPerAcre(data.askPricePerNma, data.acreageNma, data.askPricePerNra, data.nra);
     const isAsset = data.recordType === "OWNED_ASSET";
     // Creating this deal as a child asset: the parent must be an existing
     // top-level deal in this org (assets nest only one level deep).
@@ -286,6 +369,11 @@ dealsRouter.post(
           rrc: data.rrc ?? null,
           askPrice: data.askPrice ?? null,
           ourPrice: data.ourPrice ?? null,
+          ourCostPerNma: data.ourCostPerNma ?? null,
+          ourCostPerNra: data.ourCostPerNra ?? null,
+          askPricePerNma: data.askPricePerNma ?? null,
+          askPricePerNra: data.askPricePerNra ?? null,
+          daysToClose: data.daysToClose ?? null,
           assetTypes: data.assetTypes ?? [],
           basins: data.basins ?? [],
           formations: data.formations ?? [],
@@ -391,7 +479,7 @@ dealsRouter.post(
     // Reload so assetCount reflects any children just created.
     const full = await prisma.deal.findUnique({
       where: { id: deal.id },
-      include: { ...dealInclude, offers: { select: { amount: true } }, _count: { select: { assets: true } }, assets: { select: { nra: true, acreageNma: true, ourPrice: true, askPrice: true } } },
+      include: { ...dealInclude, offers: { select: { id: true, amount: true, status: true } }, _count: { select: { assets: true } }, assets: { select: { nra: true, acreageNma: true, ourPrice: true, askPrice: true } } },
     });
     res.status(201).json(serializeDeal(full ?? deal));
   }),
@@ -735,6 +823,7 @@ const updateSchema = z.object({
   relationshipOwnerId: z.string().max(10_000).nullish(),
   assigneeIds: z.array(z.string().max(200)).max(500).optional(),
   notes: z.string().max(10_000).nullish(),
+  ...pricingFields,
   ...assetFields,
 });
 
@@ -906,7 +995,7 @@ dealsRouter.patch(
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = updateSchema.parse(req.body);
     const patch: Record<string, unknown> = {};
-    for (const k of ["name", "sellerNames", "counties", "state", "states", "acreageNma", "nra", "abstractIds", "operator", "rrc", "askPrice", "ourPrice", "assetTypes", "basins", "formations", "estimatedClosingCosts", "relationshipOwnerId", "notes", ...ASSET_SCALAR_KEYS] as const) {
+    for (const k of ["name", "sellerNames", "counties", "state", "states", "acreageNma", "nra", "abstractIds", "operator", "rrc", "askPrice", "ourPrice", "assetTypes", "basins", "formations", "estimatedClosingCosts", "relationshipOwnerId", "notes", ...PRICING_KEYS, ...ASSET_SCALAR_KEYS] as const) {
       if (k in data) patch[k] = (data as Record<string, unknown>)[k];
     }
     for (const k of ["dateUnderContract", "originalClosingDate", "findBuyerByDateOverride", "finalClosingDateOverride", "closedDate", "acquisitionDate", "leaseEffectiveDate", "leaseExpirationDate"] as const) {
