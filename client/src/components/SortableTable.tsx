@@ -1,7 +1,9 @@
 import { fmtDate } from "../lib/format";
+import { useAuth } from "../auth/AuthContext";
+import { loadProfileTablePrefs, saveProfileTablePrefs } from "../lib/tablePrefs";
 import { Req } from "./ui";
 import { Select } from "./Select";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 export type SortType = "text" | "number" | "date";
@@ -24,10 +26,13 @@ export interface Column<T> {
   /** Hidden until the user enables it via Customize View. Keeps the default
    *  view scannable while every column stays one click away. */
   defaultHidden?: boolean;
-  /** Added after users may already have saved a layout for this table. With
-   *  defaultHidden, it then starts hidden for them too, instead of appearing
-   *  in a layout saved before the column existed. */
+  /** Added after users may already have saved a layout for this table: a
+   *  browser layout saved before `known` was tracked never saw it. */
   newlyAdded?: boolean;
+  /** Was hidden by default in an earlier version. A browser layout hiding
+   *  exactly those columns held the old defaults — not a user choice — so it
+   *  is treated as never customized (the current defaults apply). */
+  legacyDefaultHidden?: boolean;
 }
 
 interface Props<T> {
@@ -93,46 +98,117 @@ function compareValues(a: unknown, b: unknown, type: SortType): number {
 }
 
 // ---------------------------------------------------------------------------
-// Customize View — persisted per-table column layout (order + hidden columns).
+// Customize View — per-table column layout (order + hidden + pinned columns).
 // ---------------------------------------------------------------------------
+//
+// Until the user changes something, a table shows its DEFAULT layout, live —
+// nothing is stored, so columns added to the app later simply appear. The
+// first change marks the layout customized and saves it to the user's profile
+// (server; mirrored in localStorage for an instant first paint). A customized
+// layout is kept exactly as chosen: columns added afterwards are listed in the
+// customizer but start hidden. "Restore default" clears the saved layout.
+//
+// Column WIDTHS are deliberately absent: columns auto-size to their data on
+// every load, and manual header-drag resizes live only for the session.
+// `known` = every column key the saved layout has seen.
+interface ColPrefs { order: string[]; hidden: string[]; pinned: string[]; known?: string[]; customized?: boolean }
+const legacyKey = (id: string) => `mh-cols:v1:${id}`;
+const localKey = (userId: string, id: string) => `mh-cols:v2:${userId}:${id}`;
+const sameSet = (a: string[], b: string[]) => a.length === b.length && a.every((k) => b.includes(k));
 
-// Column WIDTHS are deliberately absent here: columns auto-size to their data
-// on every load, and manual header-drag resizes live only for the session, so
-// widths are never saved. (Old stored `widths` are simply ignored.)
-// `known` = every column key the saved layout has seen, so a column added later
-// can start hidden (its defaultHidden) rather than silently appear.
-interface ColPrefs { order: string[]; hidden: string[]; pinned: string[]; known?: string[] }
-const colKey = (id: string) => `mh-cols:v1:${id}`;
-/** Returns null when the user has never customized this table — callers fall
- *  back to the columns' declared defaults (defaultHidden). */
-function loadColPrefs(id: string): ColPrefs | null {
-  try { const raw = localStorage.getItem(colKey(id)); if (raw) { const p = JSON.parse(raw) as Partial<ColPrefs>; return { order: p.order ?? [], hidden: p.hidden ?? [], pinned: p.pinned ?? [], known: p.known }; } } catch { /* ignore */ }
-  return null;
+function readLocal(key: string): ColPrefs | null {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const p = JSON.parse(raw) as Partial<ColPrefs>;
+    return { order: p.order ?? [], hidden: p.hidden ?? [], pinned: p.pinned ?? [], known: p.known, customized: p.customized };
+  } catch { return null; }
 }
-/** Hide default-hidden columns the saved layout has never seen. Layouts saved
- *  before `known` existed are assumed to have seen every column except the
- *  ones flagged newlyAdded. */
+
+/** A pre-profile browser layout, or null when it only held the old defaults. */
+function legacyCustomized<T>(id: string, columns: Column<T>[]): ColPrefs | null {
+  const p = readLocal(legacyKey(id));
+  if (!p) return null;
+  const known = new Set(p.known ?? columns.filter((c) => !c.newlyAdded).map((c) => c.key));
+  const oldDefaults = columns.filter((c) => (c.defaultHidden || c.legacyDefaultHidden) && !c.required && known.has(c.key)).map((c) => c.key);
+  const untouched = p.order.length === 0 && p.pinned.length === 0 && sameSet(p.hidden, oldDefaults);
+  return untouched ? null : { ...p, known: p.known ?? [...known], customized: true };
+}
+
+/** A customized layout keeps its choices; columns it has never seen start hidden. */
 function reconcileColPrefs<T>(p: ColPrefs, columns: Column<T>[]): ColPrefs {
   const known = new Set(p.known ?? columns.filter((c) => !c.newlyAdded).map((c) => c.key));
-  const unseenHidden = columns.filter((c) => c.defaultHidden && !c.required && !known.has(c.key) && !p.hidden.includes(c.key)).map((c) => c.key);
-  return { ...p, hidden: [...p.hidden, ...unseenHidden], known: [...new Set([...known, ...columns.map((c) => c.key)])] };
+  const unseen = columns.filter((c) => !c.required && !known.has(c.key) && !p.hidden.includes(c.key)).map((c) => c.key);
+  return { ...p, customized: true, hidden: [...p.hidden, ...unseen], known: [...new Set([...known, ...columns.map((c) => c.key)])] };
 }
 const MIN_COL_W = 64;
+// A column whose longest value exceeds this many characters wraps (within a
+// width band) instead of stretching the table; everything else stays on one
+// line and the column widens to fit its data.
+const LONG_TEXT_CHARS = 64;
+// Long-text columns wrap within [LONG_COL_MIN_W, 420px] (max in CSS), so they
+// stay ~2 lines instead of collapsing to a narrow multi-line sliver.
+const LONG_COL_MIN_W = 320;
 // Pinned columns get a fixed width so their sticky left-offsets are exact.
 const PIN_DEFAULT_W = 160;
 
 function useColumnPrefs<T>(customizeId: string | undefined, columns: Column<T>[]) {
-  // Fresh tables start from the columns' declared defaults; saved prefs win.
-  const defaults = (): ColPrefs => ({ order: [], hidden: columns.filter((c) => c.defaultHidden && !c.required).map((c) => c.key), pinned: [], known: columns.map((c) => c.key) });
-  const load = (id: string): ColPrefs => { const saved = loadColPrefs(id); return saved ? reconcileColPrefs(saved, columns) : defaults(); };
-  const [prefs, setPrefs] = useState<ColPrefs>(() => (customizeId ? load(customizeId) : { order: [], hidden: [], pinned: [] }));
+  const { user } = useAuth();
+  const userId = user?.id ?? "anon";
+  const defaults = (): ColPrefs => ({ order: [], hidden: columns.filter((c) => c.defaultHidden && !c.required).map((c) => c.key), pinned: [], known: columns.map((c) => c.key), customized: false });
+  // First paint: this user's local mirror, else a customized legacy browser layout, else defaults.
+  const initial = (id: string): ColPrefs => {
+    const local = readLocal(localKey(userId, id));
+    if (local?.customized) return reconcileColPrefs(local, columns);
+    const legacy = legacyCustomized(id, columns);
+    return legacy ? reconcileColPrefs(legacy, columns) : defaults();
+  };
+  const [prefs, setPrefs] = useState<ColPrefs>(() => (customizeId ? initial(customizeId) : { order: [], hidden: [], pinned: [] }));
+  // Set by user actions; the persist effect below saves only then.
+  const dirty = useRef(false);
   // Session-only manual widths: dropped on reload/remount so every fresh view
   // starts from automatic content-based sizing.
   const [widths, setWidths] = useState<Record<string, number>>({});
-  // Reload when the table identity changes (e.g. remounted for another list).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { if (customizeId) setPrefs(load(customizeId)); }, [customizeId]);
-  useEffect(() => { if (customizeId) { try { localStorage.setItem(colKey(customizeId), JSON.stringify(prefs)); } catch { /* ignore */ } } }, [customizeId, prefs]);
+
+  // The profile is the source of truth: adopt its layout, or upload a
+  // customized layout that only existed in this browser (one-time migration).
+  useEffect(() => {
+    if (!customizeId) return;
+    dirty.current = false;
+    const start = initial(customizeId);
+    setPrefs(start);
+    let live = true;
+    void loadProfileTablePrefs(userId).then((saved) => {
+      if (!live || dirty.current) return; // the user already changed something
+      const s = saved[customizeId];
+      if (s) {
+        const next = reconcileColPrefs({ ...s, customized: true }, columns);
+        setPrefs(next);
+        try { localStorage.setItem(localKey(userId, customizeId), JSON.stringify(next)); } catch { /* ignore */ }
+      } else if (start.customized && user) {
+        saveProfileTablePrefs(userId, customizeId, { order: start.order, hidden: start.hidden, pinned: start.pinned, known: start.known });
+      }
+    });
+    return () => { live = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customizeId, userId]);
+
+  useEffect(() => {
+    if (!customizeId || !dirty.current) return;
+    dirty.current = false;
+    try {
+      if (prefs.customized) localStorage.setItem(localKey(userId, customizeId), JSON.stringify(prefs));
+      else localStorage.removeItem(localKey(userId, customizeId));
+      localStorage.removeItem(legacyKey(customizeId)); // superseded by the profile copy
+    } catch { /* ignore */ }
+    if (user) saveProfileTablePrefs(userId, customizeId, prefs.customized ? { order: prefs.order, hidden: prefs.hidden, pinned: prefs.pinned, known: prefs.known } : null);
+  }, [customizeId, prefs, userId, user]);
+
+  // Every user change marks the layout customized and persists it.
+  const change = (fn: (p: ColPrefs) => ColPrefs) => {
+    dirty.current = true;
+    setPrefs((p) => ({ ...fn(p), customized: true, known: [...new Set([...(p.known ?? []), ...columns.map((c) => c.key)])] }));
+  };
 
   // Apply the saved order (unknown/new columns keep their natural position at the end).
   const ordered = useMemo(() => {
@@ -154,17 +230,17 @@ function useColumnPrefs<T>(customizeId: string | undefined, columns: Column<T>[]
     ? [...pinnedKeys.map((k) => orderedVisible.find((c) => c.key === k)!).filter(Boolean), ...orderedVisible.filter((c) => !pinnedSet.has(c.key))]
     : orderedVisible;
 
-  const toggle = (key: string) => setPrefs((p) => ({ ...p, hidden: p.hidden.includes(key) ? p.hidden.filter((k) => k !== key) : [...p.hidden, key] }));
+  const toggle = (key: string) => change((p) => ({ ...p, hidden: p.hidden.includes(key) ? p.hidden.filter((k) => k !== key) : [...p.hidden, key] }));
   // Drag-and-drop reorder: move `fromKey` to `toKey`'s position within the full
   // column order (hidden columns keep their relative slots).
-  const reorder = (fromKey: string, toKey: string) => setPrefs((p) => {
+  const reorder = (fromKey: string, toKey: string) => {
     const keys = ordered.map((c) => c.key);
     const fi = keys.indexOf(fromKey), ti = keys.indexOf(toKey);
-    if (fi < 0 || ti < 0 || fi === ti) return p;
+    if (fi < 0 || ti < 0 || fi === ti) return;
     keys.splice(fi, 1);
     keys.splice(ti, 0, fromKey);
-    return { ...p, order: keys };
-  });
+    change((p) => ({ ...p, order: keys }));
+  };
   const setWidth = (key: string, w: number) => setWidths((ws) => ({ ...ws, [key]: Math.max(MIN_COL_W, Math.round(w)) }));
   const togglePin = (key: string) => {
     // Pin: give the column a session width (if none yet) so sticky offsets are
@@ -172,15 +248,12 @@ function useColumnPrefs<T>(customizeId: string | undefined, columns: Column<T>[]
     setWidths((ws) => prefs.pinned.includes(key)
       ? (() => { const { [key]: _drop, ...rest } = ws; return rest; })()
       : ws[key] != null ? ws : { ...ws, [key]: PIN_DEFAULT_W });
-    setPrefs((p) => p.pinned.includes(key)
+    change((p) => p.pinned.includes(key)
       ? { ...p, pinned: p.pinned.filter((k) => k !== key) }
       : { ...p, pinned: [...p.pinned, key] });
   };
-  const reset = () => { setPrefs(defaults()); setWidths({}); };
-  const defaultHiddenKeys = columns.filter((c) => c.defaultHidden && !c.required).map((c) => c.key);
-  const isDefault = prefs.order.length === 0
-    && prefs.hidden.length === defaultHiddenKeys.length && defaultHiddenKeys.every((k) => prefs.hidden.includes(k))
-    && Object.keys(widths).length === 0 && prefs.pinned.length === 0;
+  const reset = () => { dirty.current = true; setPrefs(defaults()); setWidths({}); };
+  const isDefault = !prefs.customized && Object.keys(widths).length === 0;
 
   return { ordered, visible, hidden, widths, pinnedKeys, pinnedSet, toggle, reorder, setWidth, togglePin, reset, isDefault };
 }
@@ -295,7 +368,7 @@ export function SortableTable<T>({
     for (const key of pinnedKeys) { pinLeft[key] = acc; acc += widths[key] ?? PIN_DEFAULT_W; }
   }
   const pinStyle = (key: string, head: boolean): React.CSSProperties | undefined =>
-    pinnedSet.has(key) ? { position: "sticky", left: pinLeft[key], zIndex: head ? 4 : 3, background: head ? "var(--panel-2)" : "var(--panel)" } : undefined;
+    pinnedSet.has(key) ? { position: "sticky", left: pinLeft[key], zIndex: head ? 7 : 3, background: head ? "var(--panel-2)" : "var(--panel)" } : undefined;
 
   // Drag a header's right edge to resize the column (Customize View only).
   function startResize(e: React.PointerEvent, key: string) {
@@ -366,20 +439,39 @@ export function SortableTable<T>({
     return () => { el.removeEventListener("scroll", update); ro.disconnect(); };
   }, [sorted.length, cols.length]);
 
+  // Dynamic column sizing: after every render (data, filters, edits, paging),
+  // re-check which columns hold long text. Those wrap inside a width band;
+  // the rest never wrap, so their width follows the current data.
+  const tableRef = useRef<HTMLTableElement>(null);
+  const [longCols, setLongCols] = useState<Set<string>>(() => new Set());
+  useLayoutEffect(() => {
+    const t = tableRef.current;
+    if (!t) return;
+    const off = selection ? 1 : 0;
+    const bodyRows = Array.from(t.tBodies[0]?.rows ?? []);
+    const next = new Set<string>();
+    cols.forEach((c, i) => {
+      let max = 0;
+      for (const r of bodyRows) { const cell = r.cells[i + off]; if (cell) max = Math.max(max, (cell.textContent ?? "").length); }
+      if (max > LONG_TEXT_CHARS) next.add(c.key);
+    });
+    if (next.size !== longCols.size || [...next].some((k) => !longCols.has(k))) setLongCols(next);
+  });
+
   const table = (
     <div className="table-edge-wrap">
       {moreRight && <div className="table-fade-r" aria-hidden="true" />}
     <div className="table-scroll" ref={scrollRef}>
       {/* lead-sticky pins the identifying column while wide tables scroll; when
           the user pins columns explicitly, we drive stickiness inline instead. */}
-      <table className={`data-table${hasPins ? "" : " lead-sticky"}${selection ? " has-sel" : ""}`}>
+      <table ref={tableRef} className={`data-table auto-cols${hasPins ? "" : " lead-sticky"}${selection ? " has-sel" : ""}`}>
         <thead>
           <tr>
             {selection && (() => {
               const ids = paged.map(rowKey);
               const allSelected = ids.length > 0 && ids.every((id) => selection.selected.has(id));
               return (
-                <th className="center" style={{ width: 36, ...(hasPins ? { position: "sticky", left: 0, zIndex: 4, background: "var(--panel-2)" } : {}) }}>
+                <th className="center" style={{ width: 36, ...(hasPins ? { position: "sticky", left: 0, zIndex: 7, background: "var(--panel-2)" } : {}) }}>
                   <input type="checkbox" checked={allSelected} onChange={() => selection.onToggleAll(ids)} aria-label="Select all" />
                 </th>
               );
@@ -443,11 +535,14 @@ export function SortableTable<T>({
                   const cell = c.render ? c.render(row) : displayDefault(c.value(row));
                   const pinned = pinnedSet.has(c.key);
                   const w = widths[c.key] ?? (pinned ? PIN_DEFAULT_W : undefined);
+                  // A width the user dragged is honored: content wraps inside it.
                   const wStyle = w != null
-                    ? { width: w, minWidth: Math.max(w, c.minWidth ?? 0), maxWidth: Math.max(w, c.minWidth ?? 0) }
-                    : (c.minWidth ? { minWidth: c.minWidth } : undefined);
+                    ? { width: w, minWidth: Math.max(w, c.minWidth ?? 0), maxWidth: Math.max(w, c.minWidth ?? 0), whiteSpace: "normal" as const, overflowWrap: "anywhere" as const }
+                    : longCols.has(c.key)
+                      ? { minWidth: Math.max(c.minWidth ?? 0, LONG_COL_MIN_W) }
+                      : (c.minWidth ? { minWidth: c.minWidth } : undefined);
                   return (
-                    <td key={c.key} className={`${c.align ?? "left"} ${pinned ? "cv-pin" : ""} ${pinned && c.key === pinnedKeys[pinnedKeys.length - 1] ? "cv-pin-last" : ""}`} style={{ ...wStyle, ...pinStyle(c.key, false) }}>
+                    <td key={c.key} className={`${c.align ?? "left"} ${longCols.has(c.key) ? "col-long" : ""} ${pinned ? "cv-pin" : ""} ${pinned && c.key === pinnedKeys[pinnedKeys.length - 1] ? "cv-pin-last" : ""}`} style={{ ...wStyle, ...pinStyle(c.key, false) }}>
                       {rowHref && ci === 0
                         ? <Link to={rowHref(row)} className="row-link" onClick={(e) => e.stopPropagation()}>{cell}</Link>
                         : cell}

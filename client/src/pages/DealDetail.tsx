@@ -32,6 +32,8 @@ import { NewDealModal } from "../components/NewDealModal";
 import { MoneyInput } from "../components/MoneyInput";
 import { MarketingFunnel } from "../components/MarketingFunnel";
 import { DateField } from "../components/DateField";
+import { royaltyLabel, royaltyOptions } from "../lib/royalty";
+import { Select } from "../components/Select";
 // MapLibre is heavy; only load it when a deal detail page is viewed.
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
 
@@ -612,6 +614,7 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
     await api.patch(`/deals/${deal.id}`, {
       states: f.states, counties: f.counties, basins: f.basins, formations: f.formations,
       assetTypes: f.assetTypes, acreageNma: f.acreageNma, nra: f.nra, abstractIds: f.abstractIds, askPrice: f.askPrice, ourPrice: f.ourPrice, operator: f.operator, rrc: f.rrc,
+      royaltyRate: f.royaltyRate ?? null,
     });
     setEdit(false);
     onSaved(); // editing characteristics auto-refreshes matches
@@ -637,6 +640,7 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
           <DKV k="Ask Price (to buyers)" v={deal.askPrice != null ? money(deal.askPrice) : null} mono accent />
           <DKV k="Operator" v={deal.operator} />
           <DKV k="RRC" v={deal.rrc} />
+          <DKV k="Royalty Rate" v={royaltyLabel(deal.royaltyRate) || null} mono />
           {/* Label the abstract with its county only when unambiguous. */}
           <DKV k={deal.abstractIds.length > 1 ? "Abstracts" : "Abstract"} v={abstractLabel || null} span2 />
         </div>
@@ -691,6 +695,10 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
           </Fld>
           <Fld l="RRC">
             <input value={f.rrc ?? ""} onChange={set("rrc")} placeholder="RRC Number" />
+          </Fld>
+          <Fld l="Royalty Rate">
+            <Select value={f.royaltyRate ?? ""} onChange={(v) => setF((p) => ({ ...p, royaltyRate: v || null }))} options={royaltyOptions(f.royaltyRate)}
+              clearable placeholder="Select royalty rate…" ariaLabel="Royalty rate" />
           </Fld>
         </div>
       )}

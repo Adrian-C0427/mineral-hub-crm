@@ -8,6 +8,8 @@ import type { DealSummary } from "../types";
 import { MoneyInput } from "./MoneyInput";
 import { DateField } from "./DateField";
 import { OperatorSelect } from "./OperatorSelect";
+import { Select } from "./Select";
+import { royaltyOptions } from "../lib/royalty";
 import { totalFromPerAcre, findBuyerByOffsetDays } from "../lib/perAcre";
 import { money, fmtDate } from "../lib/format";
 
@@ -68,7 +70,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
     name: "", operator: "", rrc: "",
     acreageNma: "", nra: "", askPrice: "", ourPrice: "", estimatedClosingCosts: "",
     ourCostPerNma: "", ourCostPerNra: "", askPricePerNma: "", askPricePerNra: "",
-    daysToClose: "",
+    daysToClose: "", royaltyRate: "",
     dateUnderContract: "", originalClosingDate: "", notes: "",
   });
   // Original closing follows Date Under Contract + Days to Close until the user
@@ -147,6 +149,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
         askPricePerNma: numOrNull(f.askPricePerNma),
         askPricePerNra: numOrNull(f.askPricePerNra),
         daysToClose,
+        royaltyRate: f.royaltyRate || null,
         estimatedClosingCosts: numOrNull(f.estimatedClosingCosts),
         // Seller info is captured in the structured Seller Details section on the
         // deal page (the single source of truth) — not here.
@@ -228,6 +231,9 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
         <div className="field"><label title="Net Royalty Acres — required unless NMA is provided">NRA {req}</label><input type="number" value={f.nra} onChange={set("nra")} placeholder="0.00" /></div>
         <div className="field"><label title="Net Mineral Acres — required unless NRA is provided">NMA {req}</label><input type="number" value={f.acreageNma} onChange={set("acreageNma")} placeholder="0.00" /></div>
         <div className="field"><label>RRC</label><input value={f.rrc} onChange={set("rrc")} placeholder="RRC Number" /></div>
+        <div className="field"><label>Royalty rate</label>
+          <Select value={f.royaltyRate} onChange={(v) => setF((p) => ({ ...p, royaltyRate: v }))} options={royaltyOptions()} clearable placeholder="Select royalty rate…" ariaLabel="Royalty rate" />
+        </div>
       </div>
 
       <div className="modal-sec">Acquisition cost <span className="modal-sec-hint">— enter the total, or a per-acre cost and it's calculated from the acreage above</span></div>
