@@ -112,4 +112,11 @@ describe("parseShapefileUpload (validation, 2026-09-29 audit)", () => {
     await expect(loose(Buffer.from("definitely not a shapefile")))
       .rejects.toMatchObject({ status: 400, message: expect.stringMatching(/Could not read the shapefile/) });
   });
+
+  it("does not echo parser internals back to the client", async () => {
+    const err = await loose(Buffer.from("definitely not a shapefile")).catch((e: Error) => e);
+    expect((err as Error).message).toBe(
+      "Could not read the shapefile — check that it is a valid polygon shapefile (.shp with its .dbf and .prj)",
+    );
+  });
 });

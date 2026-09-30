@@ -247,7 +247,10 @@ export async function parseShapefileUpload(files: UploadedFile[], baseName: stri
     }
   } catch (err) {
     if (err instanceof HttpError) throw err;
-    throw new HttpError(400, `Could not read the shapefile: ${err instanceof Error ? err.message : "unrecognized format"}`);
+    // Parser internals (shpjs/proj4 messages, stack-ish text) stay in the
+    // server log; the client gets a stable, generic reason.
+    console.warn("[shpImport] parse failed:", err instanceof Error ? err.message : err);
+    throw new HttpError(400, "Could not read the shapefile — check that it is a valid polygon shapefile (.shp with its .dbf and .prj)");
   }
 
   const out: ParsedTractFeature[] = [];
