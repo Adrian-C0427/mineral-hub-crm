@@ -13,7 +13,7 @@ import { MapLayersPanel } from "../components/MapLayersPanel";
 import { MapShpImport } from "../components/MapShpImport";
 import { useAbstractIndex } from "../components/AbstractPicker";
 import { PHONE_QUERY, useIsPhone } from "../lib/mobile";
-import { countyStateLabel, formatAbstract, rankAbstracts, surveyLabel } from "../lib/abstracts";
+import { abstractShortLabel, countyStateLabel, formatAbstract, rankAbstracts, surveyLabel } from "../lib/abstracts";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, StageBadge, PriorityBadge, ChipList } from "../components/ui";
 import { money, num } from "../lib/format";
@@ -1111,7 +1111,7 @@ export function MapView() {
                   <KV k="Field" v={selected.field} /><KV k="API" v={selected.api} />
                   <KV k="Well No." v={selected.wellNo} /><KV k="Type" v={selected.type} />
                   <KV k="Status" v={selected.status} /><KV k="County" v={selected.county} />
-                  <KV k="Abstract" v={selected.abstract ? formatAbstract({ abstract: selected.abstract, survey: selected.survey, county: selected.county, state: "TX" }) : null} /><KV k="Survey" v={selected.survey} />
+                  <KV k="Abstract" v={selected.abstract ? abstractShortLabel({ abstract: selected.abstract }) : null} /><KV k="Survey" v={selected.survey} />
                   <KV k="Spud/permit" v={selected.spudDate} /><KV k="Plugged" v={selected.plugDate} />
                   <KV k="Unit size" v={selected.unitAcres != null ? `${num(selected.unitAcres)} ac` : null} />
                 </div>
@@ -1222,7 +1222,7 @@ export function MapView() {
             ) : (
               <>
                 <div className="section-head"><div><h3 style={{ margin: 0 }}>{formatAbstract({ abstract: selected.abstract })}</h3><div className="muted" style={{ fontSize: 12 }}>{[surveyLabel(selected.survey), countyStateLabel(selected.county, "TX")].filter(Boolean).join(" · ")}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
-                <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}><KV k="Abstract" v={formatAbstract({ abstract: selected.abstract, survey: selected.survey, county: selected.county, state: "TX" })} /><KV k="Survey" v={selected.survey} /><KV k="County" v={selected.county} /></div>
+                <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}><KV k="Abstract" v={abstractShortLabel({ abstract: selected.abstract })} /><KV k="Survey" v={selected.survey} /><KV k="County" v={selected.county} /></div>
                 {/* Owned mineral assets (HOLD) are identified as Mineral Assets —
                     no stage, priority, buyer, or other deal workflow. */}
                 {panelAssets.length > 0 && (

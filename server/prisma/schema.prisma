@@ -1487,8 +1487,9 @@ model ContactList {
 model ContactActivity {
   id             String       @id @default(cuid())
   organizationId String
-  contactId      String
-  contact        Contact      @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  // Null for a standalone task created from the Dashboard (not tied to a contact).
+  contactId      String?
+  contact        Contact?     @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
   kind String // NOTE | CALL | EMAIL | SMS | TASK | REMINDER
   // Concise summary shown as the entry's heading (required in the UI for

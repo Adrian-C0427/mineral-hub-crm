@@ -34,8 +34,10 @@ import { DateField } from "../components/DateField";
 import { royaltyLabel, royaltyOptions } from "../lib/royalty";
 import { Select } from "../components/Select";
 import { OperatorSelect } from "../components/OperatorSelect";
-import { totalFromPerAcre } from "../lib/perAcre";
-import { addDaysIso, applyAcreageEdit, AcreageNote, DaysToCloseField, PerAcreNote, type AcreageState } from "../components/DealEconomics";
+import {
+  addDaysIso, applyAcreageEdit, AcreageNote, DaysToCloseField, editPriceGroup, priceGroupFromStored, PriceNote, syncPriceGroup,
+  type AcreageState, type PriceField, type PriceGroup,
+} from "../components/DealEconomics";
 // MapLibre is heavy; only load it when a deal detail page is viewed.
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
 
@@ -573,42 +575,29 @@ function AssetsSection({ deal, canEdit, canPublish, onAdd, onChanged }: {
 }
 
 /**
- * The deal's economics as edited in Deal Characteristics — the same fields as
- * New Deal (strings while editing). A total follows its per-acre rate × acreage
- * unless the user typed a total (…Manual).
+ * The deal's economics as edited in Deal Characteristics — the same fields and
+ * the same automatic calculations as New Deal (strings while editing):
+ * NMA ↔ NRA through the royalty rate, and each price's total / per NMA /
+ * per NRA from whichever of the three the user typed.
  */
 interface EconForm extends AcreageState {
-  ourCostPerNma: string; ourCostPerNra: string; ourPrice: string; costManual: boolean;
-  askPricePerNma: string; askPricePerNra: string; askPrice: string; askManual: boolean;
+  cost: PriceGroup; ask: PriceGroup;
   estimatedClosingCosts: string; daysToClose: string;
 }
 const numStr = (v: number | null | undefined) => (v == null ? "" : String(v));
 const numOrNull = (v: string) => (v.trim() === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 function econFromDeal(d: DealDetailData): EconForm {
-  // A stored total that isn't simply rate × acreage was typed by the user.
-  const isManual = (total: number | null, auto: { total: number } | null) =>
-    total != null && (auto == null || Math.abs(auto.total - total) > 0.005);
-  const costAuto = totalFromPerAcre(d.ourCostPerNma ?? null, d.acreageNma, d.ourCostPerNra ?? null, d.nra);
-  const askAuto = totalFromPerAcre(d.askPricePerNma ?? null, d.acreageNma, d.askPricePerNra ?? null, d.nra);
-  const costManual = isManual(d.ourPrice, costAuto), askManual = isManual(d.askPrice, askAuto);
   return {
     royaltyRate: d.royaltyRate ?? "", nma: numStr(d.acreageNma), nra: numStr(d.nra), source: null,
-    ourCostPerNma: numStr(d.ourCostPerNma), ourCostPerNra: numStr(d.ourCostPerNra), ourPrice: costManual ? numStr(d.ourPrice) : "", costManual,
-    askPricePerNma: numStr(d.askPricePerNma), askPricePerNra: numStr(d.askPricePerNra), askPrice: askManual ? numStr(d.askPrice) : "", askManual,
+    cost: priceGroupFromStored(d.ourCostPerNma, d.ourCostPerNra, d.ourPrice, d.acreageNma, d.nra),
+    ask: priceGroupFromStored(d.askPricePerNma, d.askPricePerNra, d.askPrice, d.acreageNma, d.nra),
     estimatedClosingCosts: numStr(d.estimatedClosingCosts), daysToClose: numStr(d.daysToClose),
   };
 }
-/** Effective totals + day count for an economics form. */
+/** Acreage + day count for an economics form. */
 function econTotals(e: EconForm) {
-  const nma = numOrNull(e.nma), nra = numOrNull(e.nra);
-  const costAuto = totalFromPerAcre(numOrNull(e.ourCostPerNma), nma, numOrNull(e.ourCostPerNra), nra);
-  const askAuto = totalFromPerAcre(numOrNull(e.askPricePerNma), nma, numOrNull(e.askPricePerNra), nra);
   const dtc = e.daysToClose.trim() !== "" && Number(e.daysToClose) > 0 ? Math.round(Number(e.daysToClose)) : null;
-  return {
-    nma, nra, costAuto, askAuto, daysToClose: dtc,
-    ourPrice: e.costManual ? numOrNull(e.ourPrice) : costAuto?.total ?? null,
-    askPrice: e.askManual ? numOrNull(e.askPrice) : askAuto?.total ?? null,
-  };
+  return { nma: numOrNull(e.nma), nra: numOrNull(e.nra), daysToClose: dtc };
 }
 
 function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDetailData; users: UserLite[]; canEdit: boolean; onSaved: () => void }) {
@@ -646,7 +635,15 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
     setF((p) => ({ ...p, [k]: e.target.value === "" ? null : e.target.value } as DealDetailData));
   const setArr = (k: keyof DealDetailData) => (v: string[]) => setF((p) => ({ ...p, [k]: v } as DealDetailData));
   const setE = (patch: Partial<EconForm>) => setEcon((p) => ({ ...p, ...patch }));
-  const editAcreage = (edit: { nma?: string; nra?: string; royaltyRate?: string }) => setEcon((p) => ({ ...p, ...applyAcreageEdit(p, edit) }));
+  // A new NMA / NRA / royalty rate re-derives the other acreage figure, then
+  // both prices' calculated fields (never the figure the user typed).
+  const editAcreage = (edit: { nma?: string; nra?: string; royaltyRate?: string }) => setEcon((p) => {
+    const a = applyAcreageEdit(p, edit);
+    const m = numOrNull(a.nma), r = numOrNull(a.nra);
+    return { ...p, ...a, cost: syncPriceGroup(p.cost, m, r), ask: syncPriceGroup(p.ask, m, r) };
+  });
+  const editPrice = (group: "cost" | "ask", field: PriceField) => (v: string) =>
+    setEcon((p) => ({ ...p, [group]: editPriceGroup(p[group], field, v, numOrNull(p.nma), numOrNull(p.nra)) }));
   const t = econTotals(econ);
 
   // Original closing follows Date Under Contract + Days to Close (as in New
@@ -663,8 +660,8 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
       assetTypes: f.assetTypes, abstractIds: f.abstractIds, operator: f.operator || null, rrc: f.rrc,
       royaltyRate: econ.royaltyRate || null,
       acreageNma: t.nma, nra: t.nra,
-      ourCostPerNma: numOrNull(econ.ourCostPerNma), ourCostPerNra: numOrNull(econ.ourCostPerNra), ourPrice: t.ourPrice,
-      askPricePerNma: numOrNull(econ.askPricePerNma), askPricePerNra: numOrNull(econ.askPricePerNra), askPrice: t.askPrice,
+      ourCostPerNma: numOrNull(econ.cost.perNma), ourCostPerNra: numOrNull(econ.cost.perNra), ourPrice: numOrNull(econ.cost.total),
+      askPricePerNma: numOrNull(econ.ask.perNma), askPricePerNra: numOrNull(econ.ask.perNra), askPrice: numOrNull(econ.ask.total),
       estimatedClosingCosts: numOrNull(econ.estimatedClosingCosts),
       daysToClose: t.daysToClose,
       ...(nextClosing ? { originalClosingDate: nextClosing } : {}),
@@ -746,7 +743,7 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
             <input value={f.rrc ?? ""} onChange={set("rrc")} placeholder="RRC Number" />
           </Fld>
         </div>
-        <div className="modal-sec">Economics <span className="modal-sec-hint">· with a royalty rate, NMA and NRA calculate each other</span></div>
+        <div className="modal-sec">Economics <span className="modal-sec-hint">· with a royalty rate, NMA and NRA calculate each other; enter any one of a price's total, per NMA or per NRA</span></div>
         <div className="dd-grid">
           <Fld l="Royalty Rate">
             <Select value={econ.royaltyRate} onChange={(v) => editAcreage({ royaltyRate: v })} options={royaltyOptions(econ.royaltyRate || null)}
@@ -754,17 +751,17 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
           </Fld>
           <Fld l="NMA"><input type="number" value={econ.nma} onChange={(e) => editAcreage({ nma: e.target.value })} aria-label="NMA" /><AcreageNote s={econ} field="nma" /></Fld>
           <Fld l="NRA"><input type="number" value={econ.nra} onChange={(e) => editAcreage({ nra: e.target.value })} aria-label="NRA" /><AcreageNote s={econ} field="nra" /></Fld>
-          <Fld l="Our Cost per NMA"><MoneyInput decimals={2} value={econ.ourCostPerNma} onChange={(v) => setE({ ourCostPerNma: v })} ariaLabel="Our cost per NMA" placeholder="0.00" /></Fld>
-          <Fld l="Our Cost per NRA"><MoneyInput decimals={2} value={econ.ourCostPerNra} onChange={(v) => setE({ ourCostPerNra: v })} ariaLabel="Our cost per NRA" placeholder="0.00" /></Fld>
+          <Fld l="Our Cost per NMA"><MoneyInput decimals={2} value={econ.cost.perNma} onChange={editPrice("cost", "perNma")} ariaLabel="Our cost per NMA" placeholder="0.00" /></Fld>
+          <Fld l="Our Cost per NRA"><MoneyInput decimals={2} value={econ.cost.perNra} onChange={editPrice("cost", "perNra")} ariaLabel="Our cost per NRA" placeholder="0.00" /></Fld>
           <Fld l="Our Cost">
-            <MoneyInput value={econ.ourPrice} onChange={(v) => setE({ ourPrice: v, costManual: v !== "" })} ariaLabel="Our cost" placeholder={t.costAuto ? t.costAuto.total.toLocaleString("en-US") : "0"} />
-            <PerAcreNote auto={t.costAuto} manual={econ.costManual} acres={t.costAuto?.basis === "NRA" ? t.nra : t.nma} rate={t.costAuto?.basis === "NRA" ? numOrNull(econ.ourCostPerNra) : numOrNull(econ.ourCostPerNma)} />
+            <MoneyInput value={econ.cost.total} onChange={editPrice("cost", "total")} ariaLabel="Our cost" placeholder="0" />
+            <PriceNote g={econ.cost} />
           </Fld>
-          <Fld l="Asking Price per NMA"><MoneyInput decimals={2} value={econ.askPricePerNma} onChange={(v) => setE({ askPricePerNma: v })} ariaLabel="Asking price per NMA" placeholder="0.00" /></Fld>
-          <Fld l="Asking Price per NRA"><MoneyInput decimals={2} value={econ.askPricePerNra} onChange={(v) => setE({ askPricePerNra: v })} ariaLabel="Asking price per NRA" placeholder="0.00" /></Fld>
+          <Fld l="Asking Price per NMA"><MoneyInput decimals={2} value={econ.ask.perNma} onChange={editPrice("ask", "perNma")} ariaLabel="Asking price per NMA" placeholder="0.00" /></Fld>
+          <Fld l="Asking Price per NRA"><MoneyInput decimals={2} value={econ.ask.perNra} onChange={editPrice("ask", "perNra")} ariaLabel="Asking price per NRA" placeholder="0.00" /></Fld>
           <Fld l="Asking Price (to buyers)">
-            <MoneyInput value={econ.askPrice} onChange={(v) => setE({ askPrice: v, askManual: v !== "" })} ariaLabel="Asking price" placeholder={t.askAuto ? t.askAuto.total.toLocaleString("en-US") : "0"} />
-            <PerAcreNote auto={t.askAuto} manual={econ.askManual} acres={t.askAuto?.basis === "NRA" ? t.nra : t.nma} rate={t.askAuto?.basis === "NRA" ? numOrNull(econ.askPricePerNra) : numOrNull(econ.askPricePerNma)} />
+            <MoneyInput value={econ.ask.total} onChange={editPrice("ask", "total")} ariaLabel="Asking price" placeholder="0" />
+            <PriceNote g={econ.ask} />
           </Fld>
           <Fld l="Est. Closing Costs"><MoneyInput value={econ.estimatedClosingCosts} onChange={(v) => setE({ estimatedClosingCosts: v })} ariaLabel="Estimated closing costs" /></Fld>
           <div className="field" style={{ gridColumn: "span 2" }}>

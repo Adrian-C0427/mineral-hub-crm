@@ -10,9 +10,14 @@ import { DateField } from "./DateField";
 import { OperatorSelect } from "./OperatorSelect";
 import { Select } from "./Select";
 import { royaltyOptions } from "../lib/royalty";
-import { totalFromPerAcre, findBuyerByOffsetDays } from "../lib/perAcre";
+import { findBuyerByOffsetDays } from "../lib/perAcre";
 import { fmtDate } from "../lib/format";
-import { addDaysIso, applyAcreageEdit, AcreageNote, DaysToCloseField, PerAcreNote, type AcreSource } from "./DealEconomics";
+import {
+  addDaysIso, applyAcreageEdit, AcreageNote, DaysToCloseField, editPriceGroup, emptyPriceGroup, PriceNote, syncPriceGroup,
+  type AcreSource, type PriceField, type PriceGroup,
+} from "./DealEconomics";
+
+const numOrNull = (v: string) => (v.trim() === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 
 // An additional asset behaves exactly like a standalone deal record — the same
 // fields, dependencies, and required fields. Its contract timeline defaults to
@@ -60,8 +65,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
   const asset = !!parentDealId;
   const [f, setF] = useState({
     name: "", operator: "", rrc: "",
-    acreageNma: "", nra: "", askPrice: "", ourPrice: "", estimatedClosingCosts: "",
-    ourCostPerNma: "", ourCostPerNra: "", askPricePerNma: "", askPricePerNra: "",
+    acreageNma: "", nra: "", estimatedClosingCosts: "",
     daysToClose: "", royaltyRate: "",
     dateUnderContract: "", originalClosingDate: "", notes: "",
   });
@@ -72,10 +76,17 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
   // user typed (the other is calculated).
   const [acreSource, setAcreSource] = useState<AcreSource>(null);
   const acre = { nma: f.acreageNma, nra: f.nra, royaltyRate: f.royaltyRate, source: acreSource };
+  // Our Cost / Asking Price: total, per NMA and per NRA stay in step — the
+  // figure the user typed drives the other two (see DealEconomics).
+  const [cost, setCost] = useState<PriceGroup>(emptyPriceGroup);
+  const [ask, setAsk] = useState<PriceGroup>(emptyPriceGroup);
   const editAcreage = (edit: { nma?: string; nra?: string; royaltyRate?: string }) => {
     const next = applyAcreageEdit(acre, edit);
     setAcreSource(next.source);
     setF((p) => ({ ...p, acreageNma: next.nma, nra: next.nra, royaltyRate: next.royaltyRate }));
+    const m = numOrNull(next.nma), r = numOrNull(next.nra);
+    setCost((g) => syncPriceGroup(g, m, r));
+    setAsk((g) => syncPriceGroup(g, m, r));
   };
   const [states, setStates] = useState<string[]>([]);
   const [counties, setCounties] = useState<string[]>([]);
@@ -89,14 +100,12 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
 
   const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
     setF((p) => ({ ...p, [k]: e.target.value }));
-  const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
 
-  // A manually entered total wins; otherwise per-acre rate × the deal's acreage.
   const nma = numOrNull(f.acreageNma), nra = numOrNull(f.nra);
-  const autoCost = totalFromPerAcre(numOrNull(f.ourCostPerNma), nma, numOrNull(f.ourCostPerNra), nra);
-  const autoAsk = totalFromPerAcre(numOrNull(f.askPricePerNma), nma, numOrNull(f.askPricePerNra), nra);
-  const ourPrice = f.ourPrice.trim() !== "" ? numOrNull(f.ourPrice) : autoCost?.total ?? null;
-  const askPrice = f.askPrice.trim() !== "" ? numOrNull(f.askPrice) : autoAsk?.total ?? null;
+  const ourPrice = numOrNull(cost.total);
+  const askPrice = numOrNull(ask.total);
+  const editCost = (field: PriceField) => (v: string) => setCost((g) => editPriceGroup(g, field, v, nma, nra));
+  const editAsk = (field: PriceField) => (v: string) => setAsk((g) => editPriceGroup(g, field, v, nma, nra));
 
   const daysToClose = f.daysToClose.trim() !== "" && Number(f.daysToClose) > 0 ? Math.round(Number(f.daysToClose)) : null;
   const findBuyerBy = f.dateUnderContract ? addDaysIso(f.dateUnderContract, findBuyerByOffsetDays(daysToClose)) : null;
@@ -145,10 +154,10 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
         nra: numOrNull(f.nra),
         askPrice,
         ourPrice,
-        ourCostPerNma: numOrNull(f.ourCostPerNma),
-        ourCostPerNra: numOrNull(f.ourCostPerNra),
-        askPricePerNma: numOrNull(f.askPricePerNma),
-        askPricePerNra: numOrNull(f.askPricePerNra),
+        ourCostPerNma: numOrNull(cost.perNma),
+        ourCostPerNra: numOrNull(cost.perNra),
+        askPricePerNma: numOrNull(ask.perNma),
+        askPricePerNra: numOrNull(ask.perNra),
         daysToClose,
         royaltyRate: f.royaltyRate || null,
         estimatedClosingCosts: numOrNull(f.estimatedClosingCosts),
@@ -193,7 +202,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
         : <>Starts in <strong>Under Contract</strong> · add sellers later in Seller Details</>}
       onClose={onClose}
       wide
-      dirty={Object.values(f).some((v) => v.trim() !== "") || states.length > 0 || counties.length > 0 || assetTypes.length > 0}
+      dirty={Object.values(f).some((v) => v.trim() !== "") || [cost.perNma, cost.perNra, cost.total, ask.perNma, ask.perNra, ask.total].some((v) => v !== "") || states.length > 0 || counties.length > 0 || assetTypes.length > 0}
       footer={
         <>
           <span className="modal-req-note"><Req /> Required</span>
@@ -243,23 +252,23 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
         <div className="field"><label>RRC</label><input value={f.rrc} onChange={set("rrc")} placeholder="RRC Number" /></div>
       </div>
 
-      <div className="modal-sec">Acquisition cost <span className="modal-sec-hint">· enter the total, or a per-acre cost and it's calculated from the acreage above</span></div>
+      <div className="modal-sec">Acquisition cost <span className="modal-sec-hint">· enter any one: the total, per NMA or per NRA; the others are calculated from the acreage above</span></div>
       <div className="nd-grid3">
-        <div className="field"><label>Our cost per NMA</label><MoneyInput decimals={2} value={f.ourCostPerNma} onChange={(v) => setF((p) => ({ ...p, ourCostPerNma: v }))} ariaLabel="Our cost per NMA" placeholder="0.00" /></div>
-        <div className="field"><label>Our cost per NRA</label><MoneyInput decimals={2} value={f.ourCostPerNra} onChange={(v) => setF((p) => ({ ...p, ourCostPerNra: v }))} ariaLabel="Our cost per NRA" placeholder="0.00" /></div>
+        <div className="field"><label>Our cost per NMA</label><MoneyInput decimals={2} value={cost.perNma} onChange={editCost("perNma")} ariaLabel="Our cost per NMA" placeholder="0.00" /></div>
+        <div className="field"><label>Our cost per NRA</label><MoneyInput decimals={2} value={cost.perNra} onChange={editCost("perNra")} ariaLabel="Our cost per NRA" placeholder="0.00" /></div>
         <div className="field"><label title="Our price — what the property is under contract for">Acquisition cost {req}</label>
-          <MoneyInput value={f.ourPrice} onChange={(v) => setF((p) => ({ ...p, ourPrice: v }))} ariaLabel="Acquisition cost" placeholder={autoCost ? autoCost.total.toLocaleString("en-US") : "0"} />
-          <PerAcreNote auto={autoCost} manual={f.ourPrice.trim() !== ""} acres={autoCost?.basis === "NRA" ? nra : nma} rate={autoCost?.basis === "NRA" ? numOrNull(f.ourCostPerNra) : numOrNull(f.ourCostPerNma)} />
+          <MoneyInput value={cost.total} onChange={editCost("total")} ariaLabel="Acquisition cost" placeholder="0" />
+          <PriceNote g={cost} />
         </div>
       </div>
 
-      <div className="modal-sec">Asking price <span className="modal-sec-hint">· to buyers; enter the total, or a per-acre price</span></div>
+      <div className="modal-sec">Asking price <span className="modal-sec-hint">· to buyers; enter any one of the total, per NMA or per NRA</span></div>
       <div className="nd-grid3">
-        <div className="field"><label>Asking price per NMA</label><MoneyInput decimals={2} value={f.askPricePerNma} onChange={(v) => setF((p) => ({ ...p, askPricePerNma: v }))} ariaLabel="Asking price per NMA" placeholder="0.00" /></div>
-        <div className="field"><label>Asking price per NRA</label><MoneyInput decimals={2} value={f.askPricePerNra} onChange={(v) => setF((p) => ({ ...p, askPricePerNra: v }))} ariaLabel="Asking price per NRA" placeholder="0.00" /></div>
+        <div className="field"><label>Asking price per NMA</label><MoneyInput decimals={2} value={ask.perNma} onChange={editAsk("perNma")} ariaLabel="Asking price per NMA" placeholder="0.00" /></div>
+        <div className="field"><label>Asking price per NRA</label><MoneyInput decimals={2} value={ask.perNra} onChange={editAsk("perNra")} ariaLabel="Asking price per NRA" placeholder="0.00" /></div>
         <div className="field"><label>Asking price</label>
-          <MoneyInput value={f.askPrice} onChange={(v) => setF((p) => ({ ...p, askPrice: v }))} ariaLabel="Asking price" placeholder={autoAsk ? autoAsk.total.toLocaleString("en-US") : "0"} />
-          <PerAcreNote auto={autoAsk} manual={f.askPrice.trim() !== ""} acres={autoAsk?.basis === "NRA" ? nra : nma} rate={autoAsk?.basis === "NRA" ? numOrNull(f.askPricePerNra) : numOrNull(f.askPricePerNma)} />
+          <MoneyInput value={ask.total} onChange={editAsk("total")} ariaLabel="Asking price" placeholder="0" />
+          <PriceNote g={ask} />
         </div>
         <div className="field"><label>Est. closing costs</label><MoneyInput value={f.estimatedClosingCosts} onChange={(v) => setF((p) => ({ ...p, estimatedClosingCosts: v }))} ariaLabel="Estimated closing costs" /></div>
       </div>

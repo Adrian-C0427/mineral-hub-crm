@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
 import { prisma, withDbRetry } from "../db.js";
-import { asyncHandler } from "../middleware/errors.js";
+import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal } from "../serializers.js";
 import { netProfit, avg } from "../domain/metrics.js";
@@ -13,6 +13,14 @@ export const dashboardRouter = Router();
 // behind the SAME permission — otherwise removing "View reports" from a role
 // leaves the numbers readable here. Keep this gate in lockstep with reports.ts.
 dashboardRouter.use(requireAuth, requireOrg, requirePermission("viewReports"));
+
+/**
+ * Tasks (the Dashboard Tasks widget, task notifications). Deliberately NOT
+ * behind "View reports": tasks carry no financials, and a teammate assigned a
+ * task must always be able to open and complete it.
+ */
+export const tasksRouter = Router();
+tasksRouter.use(requireAuth, requireOrg);
 
 const dealInclude = { selectedBuyer: true, relationshipOwner: true } as const;
 
@@ -298,7 +306,7 @@ dashboardRouter.get(
       return offersRecent.filter((o) => o.dateSubmitted > from && o.dateSubmitted <= t).length;
     });
 
-    const dueSoonTasks = await dueSoonTasksFor(org, req.user!.id, String(req.query.tasksFor ?? "me"), now);
+    const dueSoonTasks = await dueSoonTasksFor(org, req.user!.id, String(req.query.tasksFor ?? "me"), canManageTasks(req), now);
 
     res.json({
       metrics: {
@@ -333,13 +341,14 @@ dashboardRouter.get(
 );
 
 /**
- * Tasks widget feed: incomplete contact tasks that are overdue, due today, or
- * coming due within the next 7 days (the same near-future horizon the
- * notification sweep leads into), soonest first — for `me` (default), `all`
- * users, or one user id. A task belongs to its assignee, or to its author when
- * unassigned (the same owner the due-task notification goes to).
+ * Tasks widget feed: incomplete tasks (contact tasks and standalone Dashboard
+ * tasks) that are overdue, due today, or coming due within the next 7 days
+ * (the same near-future horizon the notification sweep leads into), soonest
+ * first — for `me` (default), `all` users, or one user id. A task belongs to
+ * its assignee, or to its author when unassigned (the same owner the due-task
+ * notification goes to).
  */
-async function dueSoonTasksFor(org: string, meId: string, whose: string, now: Date = new Date()) {
+async function dueSoonTasksFor(org: string, meId: string, whose: string, manageAll: boolean, now: Date = new Date()) {
   const taskHorizon = new Date(now.getTime() + 7 * 86_400_000);
   const owner = whose === "all" ? null : whose === "me" ? meId : whose;
   const taskRows = await prisma.contactActivity.findMany({
@@ -347,33 +356,151 @@ async function dueSoonTasksFor(org: string, meId: string, whose: string, now: Da
       organizationId: org, kind: "TASK", completedAt: null, dueDate: { not: null, lte: taskHorizon },
       ...(owner ? { OR: [{ assignedToId: owner }, { assignedToId: null, createdById: owner }] } : {}),
     },
-    select: {
-      id: true, title: true, body: true, dueDate: true, priority: true,
-      assignedTo: { select: { id: true, name: true } },
-      createdBy: { select: { id: true, name: true } },
-      contact: { select: { id: true, firstName: true, lastName: true, entityName: true } },
-    },
+    select: taskSelect,
     orderBy: { dueDate: "asc" },
     take: 50,
   });
-  return taskRows.map((t) => ({
+  return taskRows.map((t) => serializeTask(t, meId, manageAll));
+}
+
+const taskSelect = {
+  id: true, title: true, body: true, dueDate: true, priority: true, completedAt: true, createdAt: true,
+  assignedTo: { select: { id: true, name: true } },
+  createdBy: { select: { id: true, name: true } },
+  contact: { select: { id: true, firstName: true, lastName: true, entityName: true } },
+} as const;
+type TaskRow = {
+  id: string; title: string | null; body: string; dueDate: Date | null; priority: string | null; completedAt: Date | null; createdAt: Date;
+  assignedTo: { id: string; name: string } | null; createdBy: { id: string; name: string } | null;
+  contact: { id: string; firstName: string | null; lastName: string | null; entityName: string | null } | null;
+};
+function serializeTask(t: TaskRow, meId: string, manageAll: boolean) {
+  const owner = t.assignedTo ?? t.createdBy;
+  return {
     id: t.id,
     title: t.title ?? t.body,
+    // The title doubles as the body when no details were given.
+    details: t.title && t.body && t.body !== t.title ? t.body : null,
     dueDate: t.dueDate,
     priority: t.priority ?? "MEDIUM",
-    assignedTo: t.assignedTo ?? t.createdBy,
-    contactId: t.contact.id,
-    contactName: [t.contact.firstName, t.contact.lastName].filter(Boolean).join(" ") || t.contact.entityName || "Contact",
-  }));
+    assignedTo: owner,
+    createdBy: t.createdBy,
+    completedAt: t.completedAt,
+    createdAt: t.createdAt,
+    contactId: t.contact?.id ?? null,
+    contactName: t.contact ? [t.contact.firstName, t.contact.lastName].filter(Boolean).join(" ") || t.contact.entityName || "Contact" : null,
+    // Anyone who manages contacts can close any task; otherwise only its owner or author.
+    canComplete: manageAll || owner?.id === meId || t.createdBy?.id === meId,
+  };
+}
+
+/** Contact managers (and owners) can complete anyone's task. */
+function canManageTasks(req: AuthedRequest): boolean {
+  return req.user?.orgRole === "OWNER" || (req.user?.permissions ?? []).includes("manageContacts");
 }
 
 const tasksForSchema = z.object({ assignee: z.string().min(1).max(200).default("me") });
 
 /** The Tasks widget's user filter: Me (default), All users, or one user. */
-dashboardRouter.get(
-  "/tasks",
+tasksRouter.get(
+  "/",
   asyncHandler(async (req: AuthedRequest, res) => {
     const { assignee } = tasksForSchema.parse(req.query);
-    res.json(await dueSoonTasksFor(orgId(req), req.user!.id, assignee));
+    res.json(await dueSoonTasksFor(orgId(req), req.user!.id, assignee, canManageTasks(req)));
+  }),
+);
+
+const TASK_PRIORITIES = ["LOW", "MEDIUM", "HIGH"] as const;
+const createTaskSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  details: z.string().trim().max(10_000).nullish(),
+  priority: z.enum(TASK_PRIORITIES).default("MEDIUM"),
+  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  /** Omitted/null = the creator's own task. */
+  assignedToId: z.string().min(1).max(200).nullish(),
+});
+
+/**
+ * Create a standalone task from the Dashboard — for yourself or assigned to a
+ * teammate. Assigning it to someone else notifies them in-app with a link that
+ * opens the task (`/?task=<id>`).
+ */
+tasksRouter.post(
+  "/",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const me = req.user!;
+    const data = createTaskSchema.parse(req.body);
+    const due = parseDayUTC(data.dueDate);
+    if (!due) throw new HttpError(400, "Enter a valid due date");
+    const assigneeId = data.assignedToId || me.id;
+    const assignee = await prisma.user.findFirst({ where: { id: assigneeId, organizationId: org }, select: { id: true, name: true } });
+    if (!assignee) throw new HttpError(400, "Assignee is not in your organization");
+    const created = await prisma.contactActivity.create({
+      data: {
+        organizationId: org,
+        contactId: null,
+        kind: "TASK",
+        title: data.title,
+        body: data.details || data.title,
+        dueDate: due,
+        priority: data.priority,
+        assignedToId: assignee.id,
+        createdById: me.id,
+      },
+      select: taskSelect,
+    });
+    let notified = false;
+    if (assignee.id !== me.id) {
+      const pr = data.priority[0] + data.priority.slice(1).toLowerCase();
+      await prisma.notification.create({
+        data: {
+          organizationId: org,
+          userId: assignee.id,
+          type: "task_assigned",
+          title: `New task: ${data.title.slice(0, 80)}`,
+          body: `${me.name} assigned you a task · ${pr} priority · due ${data.dueDate.slice(5, 7)}/${data.dueDate.slice(8, 10)}/${data.dueDate.slice(0, 4)}.`,
+          link: `/?task=${created.id}`,
+        },
+      });
+      notified = true;
+    }
+    res.status(201).json({ ...serializeTask(created, me.id, canManageTasks(req)), notified });
+  }),
+);
+
+async function findTask(org: string, id: string) {
+  const t = await prisma.contactActivity.findFirst({ where: { id, organizationId: org, kind: "TASK" }, select: taskSelect });
+  if (!t) throw new HttpError(404, "Task not found");
+  return t;
+}
+
+/** One task — what a task notification opens. */
+tasksRouter.get(
+  "/:id",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    res.json(serializeTask(await findTask(orgId(req), req.params.id), req.user!.id, canManageTasks(req)));
+  }),
+);
+
+/** Complete / reopen a task from the Dashboard (contact or standalone). */
+tasksRouter.patch(
+  "/:id",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const { completed } = z.object({ completed: z.boolean() }).parse(req.body);
+    const t = await findTask(org, req.params.id);
+    const view = serializeTask(t, req.user!.id, canManageTasks(req));
+    if (!view.canComplete) throw new HttpError(403, "Only the task's owner or a contact manager can complete it");
+    const updated = await prisma.contactActivity.update({
+      where: { id: t.id },
+      data: { completedAt: completed ? new Date() : null },
+      select: taskSelect,
+    });
+    // Completing a task retires its due-alert from every bell immediately.
+    if (completed) {
+      await prisma.notification.deleteMany({ where: { organizationId: org, type: "task_due", link: { contains: `task=${t.id}` } } });
+    }
+    res.json(serializeTask(updated, req.user!.id, canManageTasks(req)));
   }),
 );
