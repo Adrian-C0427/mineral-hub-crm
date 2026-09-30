@@ -87,9 +87,10 @@ export async function runDealAlertSweep(now = new Date()): Promise<{ overdue: nu
   }
 
   // --- Tasks due -----------------------------------------------------------
-  // Incomplete contact tasks whose due date has arrived. The link carries the
-  // task id (`?task=<id>`) so completing the task can retire its alert exactly,
-  // and so each task dedupes independently of its siblings on the same contact.
+  // Incomplete tasks whose due date has arrived. The link carries the task id
+  // (`?task=<id>`) so completing the task can retire its alert exactly, and so
+  // each task dedupes independently of its siblings on the same contact.
+  // Standalone (Dashboard) tasks have no contact and open on the Dashboard.
   const dueTasks = await prisma.contactActivity.findMany({
     where: { kind: "TASK", completedAt: null, dueDate: { lte: now } },
     select: {
@@ -100,10 +101,10 @@ export async function runDealAlertSweep(now = new Date()): Promise<{ overdue: nu
   });
   let tasks = 0;
   for (const t of dueTasks) {
-    const link = `/contacts/${t.contact.id}?task=${t.id}`;
+    const link = t.contact ? `/contacts/${t.contact.id}?task=${t.id}` : `/?task=${t.id}`;
     const key = `${t.organizationId}|task_due|${link}`;
     if (seen.has(key)) continue;
-    const who = [t.contact.firstName, t.contact.lastName].filter(Boolean).join(" ") || t.contact.entityName || "contact";
+    const who = t.contact ? [t.contact.firstName, t.contact.lastName].filter(Boolean).join(" ") || t.contact.entityName || "contact" : null;
     const overdueDays = Math.floor((now.getTime() - t.dueDate!.getTime()) / 86_400_000);
     await prisma.notification.create({
       data: {
@@ -111,7 +112,10 @@ export async function runDealAlertSweep(now = new Date()): Promise<{ overdue: nu
         userId: t.assignedToId ?? t.createdById,
         type: "task_due",
         title: overdueDays > 0 ? `Task overdue: ${(t.title ?? t.body).slice(0, 80)}` : `Task due: ${(t.title ?? t.body).slice(0, 80)}`,
-        body: `On ${who}${overdueDays > 0 ? ` · ${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue.` : " · due today."}`,
+        body: (() => {
+          const when = overdueDays > 0 ? `${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue.` : "due today.";
+          return who ? `On ${who} · ${when}` : when[0].toUpperCase() + when.slice(1);
+        })(),
         link,
       },
     });

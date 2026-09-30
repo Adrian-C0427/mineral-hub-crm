@@ -1,9 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { api, ApiError } from "../api/client";
-import { Banner, PriorityBadge, StageBadge, Spinner, SearchInput, showToast } from "../components/ui";
-import { Select } from "../components/Select";
-import { royaltyLabel, royaltyOptions, royaltyValue } from "../lib/royalty";
+import { api } from "../api/client";
+import { Banner, PriorityBadge, StageBadge, Spinner, SearchInput } from "../components/ui";
+import { royaltyLabel, royaltyValue } from "../lib/royalty";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { NewDealModal } from "../components/NewDealModal";
 import { useRowSelection, BulkActionsBar } from "../components/bulk";
@@ -35,35 +34,14 @@ const shortName = (name: string): string => {
 };
 
 /**
- * Inline Royalty Rate editor for a Deals-table row: the same single value as
- * Deal Characteristics (Deal.royaltyRate), saved immediately. Clicks stay
- * inside the cell so they never open the deal.
+ * Per-acre cost for a row: the deal's stored rate, or — for a multi-deal
+ * package (rolled-up totals) or a deal priced only by total — the displayed
+ * Our Cost ÷ the displayed acreage, so the columns always reconcile.
  */
-function RoyaltyCell({ deal, canEdit, onSaved }: { deal: DealSummary; canEdit: boolean; onSaved: (v: string | null) => void }) {
-  const [busy, setBusy] = useState(false);
-  if (!canEdit) return <>{royaltyLabel(deal.royaltyRate) || "—"}</>;
-  return (
-    <span className="deal-royalty-cell" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
-      <Select
-        value={deal.royaltyRate ?? ""}
-        options={royaltyOptions(deal.royaltyRate)}
-        clearable
-        disabled={busy}
-        placeholder="—"
-        width={150}
-        ariaLabel={`Royalty rate for ${deal.name}`}
-        onChange={(v) => {
-          const next = v || null;
-          if (next === (deal.royaltyRate ?? null)) return;
-          setBusy(true);
-          api.patch(`/deals/${deal.id}`, { royaltyRate: next })
-            .then(() => onSaved(next))
-            .catch((e) => showToast(e instanceof ApiError ? e.message : "Could not update the royalty rate", "error"))
-            .finally(() => setBusy(false));
-        }}
-      />
-    </span>
-  );
+function costPerAcre(d: DealSummary, stored: number | null | undefined, acres: number | null | undefined): number | null {
+  if (!d.assetCount && stored != null) return stored;
+  const cost = d.aggOurPrice ?? d.ourPrice;
+  return cost != null && acres ? Math.round((cost / acres) * 100) / 100 : null;
 }
 
 /** Profit reads green (a loss reads red) wherever it appears in the table. */
@@ -132,9 +110,15 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
     // best), so the three reconcile.
     { key: "ourCost", header: "Our Cost", type: "number", align: "right", value: (d) => d.aggOurPrice ?? d.ourPrice, render: (d) => money(d.aggOurPrice ?? d.ourPrice), legacyDefaultHidden: true, newlyAdded: true },
     { key: "buyerPrice", header: "Buyer Purchase Price", type: "number", align: "right", value: (d) => d.buyerPurchasePrice ?? null, render: (d) => money(d.buyerPurchasePrice), legacyDefaultHidden: true, newlyAdded: true },
+    { key: "ourCostPerNma", header: "Our Cost per NMA", type: "number", align: "right",
+      value: (d) => costPerAcre(d, d.ourCostPerNma, d.aggAcreageNma ?? d.acreageNma),
+      render: (d) => money(costPerAcre(d, d.ourCostPerNma, d.aggAcreageNma ?? d.acreageNma), { cents: true }), newlyAdded: true },
+    { key: "ourCostPerNra", header: "Our Cost per NRA", type: "number", align: "right",
+      value: (d) => costPerAcre(d, d.ourCostPerNra, d.aggNra ?? d.nra),
+      render: (d) => money(costPerAcre(d, d.ourCostPerNra, d.aggNra ?? d.nra), { cents: true }), newlyAdded: true },
+    // Display-only: every deal field is edited on the Deal page (Deal Characteristics).
     { key: "royaltyRate", header: "Royalty Rate", type: "number", align: "right", value: (d) => royaltyValue(d.royaltyRate),
-      render: (d) => <RoyaltyCell deal={d} canEdit={can("editDeals")} onSaved={(v) => setDeals((prev) => prev?.map((x) => (x.id === d.id ? { ...x, royaltyRate: v } : x)) ?? prev)} />,
-      legacyDefaultHidden: true, newlyAdded: true },
+      render: (d) => royaltyLabel(d.royaltyRate) || "—", legacyDefaultHidden: true, newlyAdded: true },
     { key: "profit", header: "Profit Est.", type: "number", align: "right", value: (d) => d.profitEst, render: (d) => profitCell(d.profitEst) },
     { key: "uc", header: "Under Contract", type: "date", value: (d) => d.dateUnderContract, render: (d) => fmtDate(d.dateUnderContract), legacyDefaultHidden: true },
     { key: "fbb", header: "Find Buyer By", type: "date", value: (d) => d.findBuyerByDate,
@@ -211,8 +195,10 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
         onExport={() => {
           const rows = filtered.filter((d) => sel.selected.has(d.id));
           downloadCsv(`deals-${new Date().toISOString().slice(0, 10)}.csv`,
-            ["Deal", "Priority", "Stage", "NMA", "NRA", "Our Cost", "Buyer Purchase Price", "Royalty Rate", "Profit Est.", "Under Contract", "Find Buyer By", "Current Buyer", "Owner"],
-            rows.map((d) => [d.name, d.priority, d.stage, d.acreageNma ?? "", d.nra ?? "", d.aggOurPrice ?? d.ourPrice ?? "", d.buyerPurchasePrice ?? "", royaltyLabel(d.royaltyRate), d.profitEst ?? "", d.dateUnderContract ?? "", d.findBuyerByDate ?? "", d.selectedBuyer?.name ?? "", d.relationshipOwner?.name ?? ""]));
+            ["Deal", "Priority", "Stage", "NMA", "NRA", "Our Cost", "Our Cost per NMA", "Our Cost per NRA", "Buyer Purchase Price", "Royalty Rate", "Profit Est.", "Under Contract", "Find Buyer By", "Current Buyer", "Owner"],
+            rows.map((d) => [d.name, d.priority, d.stage, d.acreageNma ?? "", d.nra ?? "", d.aggOurPrice ?? d.ourPrice ?? "",
+              costPerAcre(d, d.ourCostPerNma, d.aggAcreageNma ?? d.acreageNma) ?? "", costPerAcre(d, d.ourCostPerNra, d.aggNra ?? d.nra) ?? "",
+              d.buyerPurchasePrice ?? "", royaltyLabel(d.royaltyRate), d.profitEst ?? "", d.dateUnderContract ?? "", d.findBuyerByDate ?? "", d.selectedBuyer?.name ?? "", d.relationshipOwner?.name ?? ""]));
         }}
       />
 

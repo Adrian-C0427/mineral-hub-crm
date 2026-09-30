@@ -18,7 +18,7 @@ import { contactsRouter } from "./routes/contacts.js";
 import { offersRouter } from "./routes/offers.js";
 import { filesRouter } from "./routes/files.js";
 import { reportsRouter } from "./routes/reports.js";
-import { dashboardRouter } from "./routes/dashboard.js";
+import { dashboardRouter, tasksRouter } from "./routes/dashboard.js";
 import { orgRouter } from "./routes/org.js";
 import { mapRouter } from "./routes/map.js";
 import { expensesRouter } from "./routes/expenses.js";
@@ -101,6 +101,7 @@ export function createApp() {
   app.use("/api/files", filesRouter);
   app.use("/api/reports", reportsRouter);
   app.use("/api/dashboard", dashboardRouter);
+  app.use("/api/tasks", tasksRouter);
   app.use("/api/map", mapRouter);
   app.use("/api/expenses", expensesRouter);
   app.use("/api/email-templates", emailTemplatesRouter);

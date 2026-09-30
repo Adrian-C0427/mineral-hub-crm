@@ -153,14 +153,19 @@ a.subtle-link:hover, a.subtle-link:focus-visible { color: var(--accent); text-de
 .cw-addcol { display: flex; flex-direction: column; gap: 6px; }
 
 /* Dashboard Tasks widget rows */
-/* Task items as soft tiles (design's Priorities card). */
-.dash-task-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; margin-bottom: 9px;
+/* Task items as soft, compact two-line tiles (design's Priorities card):
+   title + priority on top, contact/owner + due date beneath — the title keeps
+   its width even when the widget is narrow. */
+.dash-task-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; column-gap: 9px; row-gap: 3px; align-items: center;
+  padding: 8px 11px; margin-bottom: 7px;
   background: var(--control, var(--panel-2)); border: 1px solid var(--hairline, var(--border)); border-radius: 8px;
   transition: border-color .15s; }
 .dash-task-row:hover { border-color: color-mix(in srgb, var(--text) 18%, transparent); }
 .dash-task-row:last-child { margin-bottom: 0; }
-.dash-task-row input[type="checkbox"] { flex: none; }
-.dash-task-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; color: var(--text); }
+.dash-task-row input[type="checkbox"] { grid-column: 1; grid-row: 1 / span 2; margin: 0; }
+.dash-task-main { grid-column: 2; grid-row: 1 / span 2; min-width: 0; display: flex; flex-direction: column; gap: 3px; color: var(--text); }
+.dash-task-row > .dash-task-pr { grid-column: 3; grid-row: 1; justify-self: end; }
+.dash-task-row > .dash-task-due { grid-column: 3; grid-row: 2; justify-self: end; }
 .dash-task-main:hover { text-decoration: none; }
 .dash-task-main:hover .dash-task-title { color: var(--accent); }
 .dash-task-title { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -170,11 +175,29 @@ a.subtle-link:hover, a.subtle-link:focus-visible { color: var(--accent); text-de
 .dash-task-due.overdue { color: var(--red); font-weight: 600; }
 /* Amber count badge + green all-clear footer (design's Priorities card). */
 .dash-task-badge { font-size: 11px; font-weight: 800; color: var(--amber); background: color-mix(in srgb, var(--amber) 10%, transparent);
-  padding: 2px 8px; border-radius: 99px; }
+  padding: 2px 8px; border-radius: 99px; white-space: nowrap; margin-left: 6px; }
+/* Tasks header: title + badge, then the compact filter and "+" on the right. */
+.dash-task-head { justify-content: flex-start; gap: 0; }
+.dash-task-head h3 { margin: 0; }
 /* Main map: owned (HOLD) mineral asset tag — matches the asset highlight color. */
 .map-asset-badge { color: #7c3aed; background: rgba(139, 92, 246, 0.14); }
 /* "Show tasks for" user filter, pinned to the right of the Tasks header. */
 .dash-task-filter { margin-left: auto; font-size: 12.5px; }
+/* Compact user filter: a slim pill-height control beside the title. */
+.dash-task-filter .msel-box { min-height: 28px; padding: 1px 4px 1px 9px; border-radius: 7px; }
+.dash-task-filter .msel-single-value { font-size: 12px; font-weight: 600; }
+.dash-task-filter .msel-caret-btn { width: 20px; }
+.dash-task-add { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 28px; height: 28px; padding: 0;
+  margin-left: 6px; border-radius: 7px; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent); }
+.dash-task-add:hover { background: color-mix(in srgb, var(--accent) 16%, transparent); }
+/* Standalone tasks open in place (a button styled like the contact-task link). */
+.dash-task-open { background: none; border: none; padding: 0; text-align: left; cursor: pointer; font: inherit; }
+.dash-task-open:hover .dash-task-title { color: var(--accent); }
+.dash-task-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.dash-task-details { margin: 0 0 16px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.dash-task-done-note { display: inline-block; margin-bottom: 12px; font-size: 12px; font-weight: 700; color: var(--green);
+  background: color-mix(in srgb, var(--green) 12%, transparent); padding: 3px 9px; border-radius: 999px; }
 .dash-task-clear { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-faint); margin-top: auto; padding-top: 12px; }
 
 h1, h2, h3, h4 { margin: 0 0 12px; font-weight: 600; }
@@ -3546,10 +3569,6 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .nd-timeline { display: grid; grid-template-columns: 1fr 2fr; gap: 14px; }
 .nd-basics .field, .nd-grid3 .field, .nd-timeline .field { margin: 0; }
 @media (max-width: 700px) { .nd-grid3 { grid-template-columns: 1fr; } .nd-basics, .nd-timeline { grid-template-columns: 1fr; } }
-/* Deals table: inline Royalty Rate editor sized to the row. */
-.deal-royalty-cell { display: inline-block; text-align: left; }
-.deal-royalty-cell .msel-box { min-height: 30px; padding-top: 3px; padding-bottom: 3px; }
-.deal-royalty-cell .msel-single-value { font-size: 13px; }
 /* Profit figures in tables: green for a gain, red for a loss. */
 .profit-pos { color: var(--green); font-weight: 600; font-variant-numeric: tabular-nums; }
 .profit-neg { color: var(--red); font-weight: 600; font-variant-numeric: tabular-nums; }

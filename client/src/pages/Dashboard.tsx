@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { Sun, Moon, X } from "lucide-react";
 import GridLayout, { type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, StageBadge } from "../components/ui";
+import { Modal, Req, Spinner, StageBadge, showToast } from "../components/ui";
+import { ApiError } from "../api/client";
 import { Select } from "../components/Select";
 import { money, fmtDate, fmtDateLocal } from "../lib/format";
 import { useStages } from "../stages";
@@ -24,8 +25,13 @@ const DASH_PERIODS: readonly (readonly [DashPeriod, string])[] = [
 ];
 
 interface DashTask {
-  id: string; title: string; dueDate: string | null; priority: "LOW" | "MEDIUM" | "HIGH" | string;
-  assignedTo: { id: string; name: string } | null; contactId: string; contactName: string;
+  id: string; title: string; details?: string | null; dueDate: string | null; priority: "LOW" | "MEDIUM" | "HIGH" | string;
+  assignedTo: { id: string; name: string } | null; createdBy?: { id: string; name: string } | null;
+  /** Null for a standalone task created from the Dashboard. */
+  contactId: string | null; contactName: string | null;
+  completedAt?: string | null; createdAt?: string;
+  /** The viewer may complete it (its owner/author, or a contact manager). */
+  canComplete?: boolean;
 }
 
 interface DashboardData {
@@ -223,6 +229,16 @@ export function Dashboard() {
   const { label: stageLabel, colorOf: stageColorOf } = useStages();
   const [prefs, setPrefs] = useState<DashPrefs>(loadDashPrefs);
   const [customizing, setCustomizing] = useState(false);
+  // A task opened from a notification (or a standalone task's row) —
+  // `?task=<id>` in the URL, so the link is shareable and survives reloads.
+  const [params, setParams] = useSearchParams();
+  const openTaskId = params.get("task");
+  const openTask = (id: string) => { const next = new URLSearchParams(params); next.set("task", id); setParams(next); };
+  const closeTask = () => { const next = new URLSearchParams(params); next.delete("task"); setParams(next, { replace: true }); };
+  const [taskRefresh, setTaskRefresh] = useState(0);
+  // The metrics need "View reports"; without it the page explains instead of
+  // spinning forever (a task opened from a notification still shows).
+  const [denied, setDenied] = useState(false);
   // Profit chart interactivity: hovered bucket (rich tooltip) + clicked bucket
   // (drill-down modal listing the deals behind that bar).
   const [profitHover, setProfitHover] = useState<number | null>(null);
@@ -246,7 +262,11 @@ export function Dashboard() {
       if (!customFrom || !customTo || customFrom > customTo) return; // wait for a complete range
       qs.set("from", customFrom); qs.set("to", customTo);
     }
-    const load = () => { void api.get<DashboardData>(`/dashboard?${qs.toString()}`).then(setD).catch(() => {}); };
+    const load = () => {
+      void api.get<DashboardData>(`/dashboard?${qs.toString()}`)
+        .then((data) => { setD(data); setDenied(false); })
+        .catch((e) => { if (e instanceof ApiError && e.status === 403) setDenied(true); });
+    };
     load();
     // Deals are created, edited, moved and removed on other pages (or in other
     // tabs) — refresh when the user comes back so totals like Under Contract
@@ -290,7 +310,19 @@ export function Dashboard() {
     [visibleIds, prefs.layout],
   );
 
-  if (!d) return <Spinner />;
+  const taskModal = openTaskId ? <TaskDetailModal id={openTaskId} onClose={closeTask} onChanged={() => setTaskRefresh((n) => n + 1)} /> : null;
+  if (!d) {
+    return (
+      <>
+        {taskModal}
+        {denied ? (
+          <div className="page">
+            <div className="panel"><p className="muted" style={{ margin: 0 }}>Your role doesn't include the dashboard's business metrics. Ask an owner or admin for "View reports" access.</p></div>
+          </div>
+        ) : <Spinner />}
+      </>
+    );
+  }
 
   // Paired bars (design): realized and projected render side by side, so the
   // y-scale is driven by the single largest monthly value of either series.
@@ -328,8 +360,8 @@ export function Dashboard() {
   const widgetNodes: Record<WidgetId, ReactNode> = {
     kpis: (
       <div className="metrics-row dash-kpis">
-        <Kpi label="Active Deals" value={d.metrics.activeDeals} delta={activeDelta} series={t?.activeDealsWeekly} spark="var(--accent2)" title="Sparkline: active deals per week (8 weeks)" />
         <Kpi label="Under Contract" value={fmtCompact(d.metrics.underContract ?? 0)} title="Total acquisition cost (Our Cost) of every active deal we're under contract with sellers for. Excludes closed and dead deals and owned mineral assets." />
+        <Kpi label="Active Deals" value={d.metrics.activeDeals} delta={activeDelta} series={t?.activeDealsWeekly} spark="var(--accent2)" title="Sparkline: active deals per week (8 weeks)" />
         <Kpi label="Projected Profit" value={fmtCompact(d.metrics.projectedProfit)} series={projectedSeries} spark="var(--accent2)" title="Best (or accepted) offer minus cost basis across active deals with offers — the same series as the Projected bars below." />
         <Kpi label={`Closed ${d.metrics.periodLabel ?? "YTD"}`} value={fmtCompact(d.metrics.closedProfitYtd)} valueColor={d.metrics.closedProfitYtd > 0 ? "var(--green)" : undefined} delta={closedDelta} series={curIdx >= 0 ? realized.slice(0, curIdx + 1) : realized} spark="var(--green)" title="Sparkline: realized profit by month" />
         <Kpi label="Closed Deals" value={d.metrics.closedDealsCount} delta={closedCountDelta} series={t?.closedWeekly} spark="var(--green)" title="Deals moved to Closed within the selected range, by Contract Timeline Closed Date. Δ vs the previous equal-length period. Sparkline: closes per week (8 weeks)." />
@@ -576,7 +608,7 @@ export function Dashboard() {
         ))}
       </div>
     ),
-    tasks: <TasksWidget initial={d.tasks ?? []} />,
+    tasks: <TasksWidget initial={d.tasks ?? []} refreshKey={taskRefresh} onOpenTask={openTask} onChanged={() => setTaskRefresh((n) => n + 1)} />,
   };
 
   const hiddenIds = ALL_WIDGETS.filter((id) => prefs.hidden.includes(id));
@@ -618,6 +650,7 @@ export function Dashboard() {
 
   return (
     <div className="page">
+      {taskModal}
       <div className="page-header">
         <div>
           <h1 className="dash-title">Good {daypart}, {firstName}</h1>
@@ -765,25 +798,28 @@ const TASK_PRIORITY_META: Record<string, { label: string; color: string }> = {
 
 /**
  * Whose tasks the widget lists: "me" (default — My Tasks), "all" users, or one
- * user's id. The list refetches as soon as the selection changes.
+ * user's id. The list refetches as soon as the selection changes. Tasks can be
+ * created here (for yourself or a teammate) and completed in place.
  */
-function TasksWidget({ initial }: { initial: DashTask[] }) {
-  const { can, user } = useAuth();
-  const canManage = can("manageContacts");
+function TasksWidget({ initial, refreshKey, onOpenTask, onChanged }: {
+  initial: DashTask[]; refreshKey: number; onOpenTask: (id: string) => void; onChanged: () => void;
+}) {
+  const { user } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
   const [whose, setWhose] = useState("me");
   const [tasks, setTasks] = useState<DashTask[]>(initial);
   const [loading, setLoading] = useState(false);
+  const [creating, setCreating] = useState(false);
   const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
   useEffect(() => { api.get<{ id: string; name: string }[]>("/users").then(setUsers).catch(() => {}); }, []);
   // The dashboard payload already carries My Tasks; refetch for any change
-  // after that (and when the user returns to the tab).
+  // after that (a new filter, a created/completed task, returning to the tab).
   const first = useRef(true);
   useEffect(() => {
     let live = true;
     const load = () => {
       setLoading(true);
-      api.get<DashTask[]>(`/dashboard/tasks?assignee=${encodeURIComponent(whose)}`)
+      api.get<DashTask[]>(`/tasks?assignee=${encodeURIComponent(whose)}`)
         .then((rows) => { if (live) setTasks(rows); })
         .catch(() => {})
         .finally(() => { if (live) setLoading(false); });
@@ -792,10 +828,9 @@ function TasksWidget({ initial }: { initial: DashTask[] }) {
     const onVisible = () => { if (document.visibilityState === "visible") load(); };
     document.addEventListener("visibilitychange", onVisible);
     return () => { live = false; document.removeEventListener("visibilitychange", onVisible); };
-  }, [whose]);
-  const onCompleted = (id: string) => setTasks((prev) => prev.filter((x) => x.id !== id));
+  }, [whose, refreshKey]);
   const userOptions = [
-    { value: "me", label: "Me / My Tasks" },
+    { value: "me", label: "My Tasks" },
     { value: "all", label: "All Users" },
     ...users.filter((u) => u.id !== user?.id).map((u) => ({ value: u.id, label: u.name })),
   ];
@@ -808,20 +843,25 @@ function TasksWidget({ initial }: { initial: DashTask[] }) {
     if (busy) return;
     setBusy(t.id);
     try {
-      await api.patch(`/contacts/${t.contactId}/activities/${t.id}`, { completed: true });
-      onCompleted(t.id);
+      await api.patch(`/tasks/${t.id}`, { completed: true });
+      setTasks((prev) => prev.filter((x) => x.id !== t.id));
+    } catch (e) {
+      showToast(e instanceof ApiError ? e.message : "Could not complete the task", "error");
     } finally { setBusy(null); }
   };
 
   return (
     <div className="panel">
-      <div className="panel-title" style={{ marginBottom: 12 }}>
+      <div className="panel-title dash-task-head" style={{ marginBottom: 12 }}>
         <h3 className="dash-h3">Tasks</h3>
         {tasks.length > 0 && <span className="dash-task-badge">{tasks.length} due</span>}
         <span className="dash-task-filter">
           <Select value={whose} onChange={(v) => setWhose(v || "me")} options={userOptions} searchable={userOptions.length > 8}
-            width={170} ariaLabel="Show tasks for" />
+            width={116} ariaLabel="Show tasks for" />
         </span>
+        <button type="button" className="dash-task-add" onClick={() => setCreating(true)} title="Create a task for yourself or a teammate" aria-label="New task">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+        </button>
       </div>
       {tasks.length === 0 ? (
         <div className="dash-task-clear">
@@ -833,16 +873,24 @@ function TasksWidget({ initial }: { initial: DashTask[] }) {
         const overdue = dayKey != null && dayKey < todayKey;
         const dueToday = dayKey === todayKey;
         const pr = TASK_PRIORITY_META[t.priority] ?? TASK_PRIORITY_META.MEDIUM;
+        const meta = [t.contactName, showOwner && t.assignedTo ? t.assignedTo.name : null].filter(Boolean).join(" · ");
+        const body = (
+          <>
+            <span className="dash-task-title">{t.title}</span>
+            {meta && <span className="dash-task-meta">{meta}</span>}
+          </>
+        );
         return (
           <div className="dash-task-row" key={t.id}>
-            {canManage && (
+            {t.canComplete && (
               <input type="checkbox" checked={false} disabled={busy === t.id} onChange={() => void complete(t)}
                 title="Mark complete" aria-label={`Complete task: ${t.title}`} />
             )}
-            <Link to={`/contacts/${t.contactId}?task=${t.id}`} className="dash-task-main" title="Open this task on the contact's workspace">
-              <span className="dash-task-title">{t.title}</span>
-              <span className="dash-task-meta">{t.contactName}{showOwner && t.assignedTo ? ` · ${t.assignedTo.name}` : ""}</span>
-            </Link>
+            {t.contactId ? (
+              <Link to={`/contacts/${t.contactId}?task=${t.id}`} className="dash-task-main" title="Open this task on the contact's workspace">{body}</Link>
+            ) : (
+              <button type="button" className="dash-task-main dash-task-open" onClick={() => onOpenTask(t.id)} title="Open this task">{body}</button>
+            )}
             <span className="dash-task-pr" style={{ color: pr.color, background: `color-mix(in srgb, ${pr.color} 13%, transparent)` }}>{pr.label}</span>
             <span className={`dash-task-due ${overdue ? "overdue" : ""}`}>
               {dayKey == null ? "—" : overdue ? `Overdue · ${fmtDate(t.dueDate!)}` : dueToday ? "Due today" : fmtDate(t.dueDate!)}
@@ -850,6 +898,153 @@ function TasksWidget({ initial }: { initial: DashTask[] }) {
           </div>
         );
       })}
+      {creating && (
+        <CreateTaskModal users={users} onClose={() => setCreating(false)}
+          onCreated={() => { setCreating(false); onChanged(); }} />
+      )}
     </div>
+  );
+}
+
+const PRIORITY_CHOICES = [
+  { key: "LOW", label: "Low" }, { key: "MEDIUM", label: "Medium" }, { key: "HIGH", label: "High" },
+] as const;
+
+/**
+ * New task from the Dashboard: for yourself or assigned to a teammate (who is
+ * notified, with a link that opens the task).
+ */
+function CreateTaskModal({ users, onClose, onCreated }: {
+  users: { id: string; name: string }[]; onClose: () => void; onCreated: () => void;
+}) {
+  const { user } = useAuth();
+  const [title, setTitle] = useState("");
+  const [details, setDetails] = useState("");
+  const [assignee, setAssignee] = useState(user?.id ?? "");
+  const [priority, setPriority] = useState<"LOW" | "MEDIUM" | "HIGH">("MEDIUM");
+  const [due, setDue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const options = [
+    { value: user?.id ?? "", label: `Me (${user?.name ?? "you"})` },
+    ...users.filter((u) => u.id !== user?.id).map((u) => ({ value: u.id, label: u.name })),
+  ];
+  const ready = title.trim() !== "" && due !== "";
+
+  async function submit() {
+    if (!ready || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await api.post<DashTask & { notified: boolean }>("/tasks", {
+        title: title.trim(), details: details.trim() || null, priority, dueDate: due,
+        assignedToId: assignee && assignee !== user?.id ? assignee : null,
+      });
+      showToast(created.notified
+        ? `Task created and assigned to ${created.assignedTo?.name ?? "your teammate"} — they've been notified.`
+        : "Task created.");
+      onCreated();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : "Could not create the task");
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <Modal title="New task" subtitle={<>For you or a teammate · assigned teammates are notified</>} onClose={onClose}
+      dirty={title.trim() !== "" || details.trim() !== "" || due !== ""}
+      footer={
+        <>
+          <span className="modal-req-note"><Req /> Required</span>
+          <button onClick={onClose}>Cancel</button>
+          <button className="primary" onClick={() => void submit()} disabled={!ready || busy}>{busy ? "Creating…" : "Create task"}</button>
+        </>
+      }>
+      <div className="field"><label>Task {<Req />}</label>
+        <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus maxLength={200} placeholder="e.g. Call the title company about the Leon closing" />
+      </div>
+      <div className="field"><label>Details</label>
+        <textarea rows={3} value={details} onChange={(e) => setDetails(e.target.value)} placeholder="Anything the assignee should know…" />
+      </div>
+      <div className="dash-task-form-row">
+        <div className="field"><label>Assign to</label>
+          <Select value={assignee} onChange={(v) => setAssignee(v || user?.id || "")} options={options} searchable={options.length > 8} ariaLabel="Assign to" />
+        </div>
+        <div className="field"><label>Due date {<Req />}</label>
+          <DateField value={due} onChange={setDue} ariaLabel="Due date" />
+        </div>
+      </div>
+      <div className="field" style={{ marginBottom: 0 }}><label>Priority</label>
+        <div className="seg-control" role="group" aria-label="Priority">
+          {PRIORITY_CHOICES.map((p) => (
+            <button type="button" key={p.key} className={`seg ${priority === p.key ? "active" : ""}`} aria-pressed={priority === p.key}
+              onClick={() => setPriority(p.key)}>{p.label}</button>
+          ))}
+        </div>
+      </div>
+      {error && <div className="error-text" style={{ marginTop: 12 }}>{error}</div>}
+    </Modal>
+  );
+}
+
+/** One task, opened from a notification or a standalone task's row. */
+function TaskDetailModal({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
+  const [task, setTask] = useState<DashTask | null>(null);
+  const [missing, setMissing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let live = true;
+    setTask(null); setMissing(false);
+    api.get<DashTask>(`/tasks/${encodeURIComponent(id)}`)
+      .then((t) => { if (live) setTask(t); })
+      .catch(() => { if (live) setMissing(true); });
+    return () => { live = false; };
+  }, [id]);
+
+  async function setCompleted(completed: boolean) {
+    if (!task || busy) return;
+    setBusy(true);
+    try {
+      setTask(await api.patch<DashTask>(`/tasks/${task.id}`, { completed }));
+      onChanged();
+      showToast(completed ? "Task completed." : "Task reopened.");
+    } catch (e) {
+      showToast(e instanceof ApiError ? e.message : "Could not update the task", "error");
+    } finally { setBusy(false); }
+  }
+
+  const pr = task ? TASK_PRIORITY_META[task.priority] ?? TASK_PRIORITY_META.MEDIUM : null;
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const overdue = !!task?.dueDate && !task.completedAt && task.dueDate.slice(0, 10) < todayKey;
+  return (
+    <Modal title={task?.title ?? (missing ? "Task not found" : "Task")} onClose={onClose}
+      footer={
+        <>
+          {task?.contactId && <Link to={`/contacts/${task.contactId}?task=${task.id}`} className="btn-ghost-link" style={{ marginRight: "auto" }}>Open contact</Link>}
+          <button onClick={onClose}>Close</button>
+          {task?.canComplete && (
+            task.completedAt
+              ? <button onClick={() => void setCompleted(false)} disabled={busy}>Reopen task</button>
+              : <button className="primary" onClick={() => void setCompleted(true)} disabled={busy}>{busy ? "Saving…" : "Mark complete"}</button>
+          )}
+        </>
+      }>
+      {missing ? (
+        <p className="muted" style={{ margin: 0 }}>This task no longer exists — it may have been deleted.</p>
+      ) : !task ? (
+        <Spinner label="Loading task…" />
+      ) : (
+        <div className="dash-task-detail">
+          {task.completedAt && <div className="dash-task-done-note">Completed {fmtDateLocal(task.completedAt)}</div>}
+          {task.details && <p className="dash-task-details">{task.details}</p>}
+          <div className="ddc-grid">
+            <div><div className="ddx-label">Due</div><div className={`ddx-val ${overdue ? "neg" : ""}`}>{task.dueDate ? fmtDate(task.dueDate) : "—"}{overdue ? " · overdue" : ""}</div></div>
+            <div><div className="ddx-label">Priority</div><div className="ddx-val"><span className="dash-task-pr" style={{ color: pr!.color, background: `color-mix(in srgb, ${pr!.color} 13%, transparent)` }}>{pr!.label}</span></div></div>
+            <div><div className="ddx-label">Assigned to</div><div className="ddx-val">{task.assignedTo?.name ?? "—"}</div></div>
+            <div><div className="ddx-label">Created by</div><div className="ddx-val">{task.createdBy?.name ?? "—"}{task.createdAt ? ` · ${fmtDateLocal(task.createdAt)}` : ""}</div></div>
+            {task.contactName && <div><div className="ddx-label">Contact</div><div className="ddx-val">{task.contactName}</div></div>}
+          </div>
+        </div>
+      )}
+    </Modal>
   );
 }
