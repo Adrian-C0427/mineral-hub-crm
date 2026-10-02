@@ -44,6 +44,49 @@ describe("computeKpis", () => {
     expect(fallback.revenue).toBe(30000); // falls back to askPrice 100k
   });
 
+  it("Cost per Deal = period expenses ÷ deals closed; ROI = net profit ÷ expenses", () => {
+    const deals = [
+      deal({ id: "1", ourPrice: 100000, acceptedAmount: 160000, estimatedClosingCosts: 4000, closedAt: new Date("2026-03-01") }),
+      deal({ id: "2", ourPrice: 50000, acceptedAmount: 70000, closedAt: new Date("2026-05-01") }),
+      deal({ id: "3", ourPrice: 90000, acceptedAmount: 200000, closedAt: new Date("2025-12-31") }), // outside the period
+    ];
+    const expenses = [
+      { amount: 6000, date: new Date("2026-02-10"), reimbursed: true },
+      { amount: 4000, date: new Date("2026-06-10"), reimbursed: false },
+      { amount: 9999, date: new Date("2025-11-01"), reimbursed: false }, // outside the period
+    ];
+    const k = computeKpis(deals, expenses, [], [], range);
+    // revenue 60k + 20k = 80k; closing costs 4k; expenses 10k → net 66k
+    expect(k.dealsClosed).toBe(2);
+    expect(k.expenses).toBe(10000);
+    expect(k.netProfit).toBe(66000);
+    expect(k.costPerDeal).toBe(5000);   // 10k ÷ 2
+    expect(k.roiMultiple).toBeCloseTo(6.6); // 66k ÷ 10k
+    expect(k.closedWithoutPrice).toBe(0);
+  });
+
+  it("Cost per Deal / ROI are N/A (null) when they can't be computed reliably", () => {
+    const spend = [{ amount: 5000, date: new Date("2026-02-10"), reimbursed: false }];
+    // No closed deals → no cost per deal; ROI is the (fully lost) spend.
+    const none = computeKpis([], spend, [], [], range);
+    expect(none.costPerDeal).toBeNull();
+    expect(none.roiMultiple).toBeCloseTo(-1);
+    // No expenses → no ROI, cost per deal is $0.
+    const free = computeKpis([deal({ ourPrice: 1, acceptedAmount: 2, closedAt: new Date("2026-03-01") })], [], [], [], range);
+    expect(free.roiMultiple).toBeNull();
+    expect(free.costPerDeal).toBe(0);
+    // Closed deals but none priced → revenue unknown → ROI N/A.
+    const unpriced = computeKpis([deal({ ourPrice: 1, closedAt: new Date("2026-03-01") })], spend, [], [], range);
+    expect(unpriced.closedWithoutPrice).toBe(1);
+    expect(unpriced.roiMultiple).toBeNull();
+    expect(unpriced.costPerDeal).toBe(5000);
+  });
+
+  it("delta is null for an N/A side", () => {
+    expect(delta(null, 5)).toBeNull();
+    expect(delta(5, null)).toBeNull();
+  });
+
   it("delta returns null when previous is zero and nonzero now", () => {
     expect(delta(10, 0)).toBeNull();
     expect(delta(0, 0)).toBe(0);

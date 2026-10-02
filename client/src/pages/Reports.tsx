@@ -13,7 +13,7 @@ import { GeoFields } from "../components/GeoFields";
 import { PeriodSegmented } from "../components/PeriodSegmented";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { ChartTypeToggle, useChartType } from "../components/ChartTypeToggle";
-import { money, pct, num, fmtDate, prettyStage } from "../lib/format";
+import { money, pct, num, fmtDate, fmtDateLocal, prettyStage } from "../lib/format";
 import { useStages } from "../stages";
 import { CHART_COLORS, COLOR_REVENUE, COLOR_PROFIT, COLOR_FORECAST, monthLabel, chartTooltip } from "../lib/charts";
 import type { DealSummary } from "../types";
@@ -24,6 +24,32 @@ interface Kpis {
   totalDealValue: number; avgDealSize: number; avgTimeToClose: number; revenue: number; grossProfit: number;
   netProfit: number; expenses: number; closingCosts: number; reimbursementsOutstanding: number;
   activeBuyers: number; newBuyers: number; buyerActivity: number;
+  /** Realized; null = N/A (no deals closed). */
+  costPerDeal: number | null;
+  /** Realized net profit ÷ expenses; null = N/A (no expenses / no priced closed deal). */
+  roiMultiple: number | null;
+  closedWithoutPrice: number;
+}
+
+/** The records behind Cost per Deal and ROI (GET /reports/analytics/financials). */
+interface Financials {
+  range: { from: string; to: string };
+  totals: {
+    revenue: number; closingCosts: number; grossProfit: number; expenses: number; netProfit: number;
+    dealsClosed: number; costPerDeal: number | null; roiMultiple: number | null; closedWithoutPrice: number;
+  };
+  closedDeals: {
+    id: string; name: string; closedAt: string | null; counties: string[]; acceptedAmount: number | null;
+    costBasis: number | null; revenue: number | null; closingCosts: number | null; grossProfit: number | null;
+  }[];
+  expenses: { id: string; date: string; amount: number; category: string | null; notes: string | null; submittedBy: string | null; reimbursed: boolean }[];
+}
+
+/** ROI shown as a multiple ("2.5x", "-0.4x"); N/A when it can't be computed. */
+function fmtMultiple(m: number | null | undefined): string {
+  if (m == null || !Number.isFinite(m)) return "N/A";
+  const digits = Math.abs(m) >= 10 ? 1 : 2;
+  return `${Number(m.toFixed(digits))}x`;
 }
 interface MonthPoint { month: string; dealsAdded: number; dealsClosed: number; dealsLost: number; revenue: number; netProfit: number; expenses: number; forecast?: boolean }
 interface Analytics {
@@ -85,17 +111,18 @@ const EMPTY_FILTERS: Record<string, string[]> = { states: [], counties: [], basi
 
 // Customize View — which KPI metrics show, and in what order (saved per user).
 type MetricId =
-  | "revenue" | "netProfit" | "grossProfit" | "expenses" | "dealsClosed" | "dealsAdded"
+  | "revenue" | "netProfit" | "grossProfit" | "expenses" | "costPerDeal" | "roi" | "dealsClosed" | "dealsAdded"
   | "dealsLost" | "winRate" | "totalDeals" | "totalDealValue" | "avgDealSize" | "avgTimeToClose"
   | "activeBuyers" | "newBuyers" | "buyerActivity" | "reimbursementsOutstanding";
 const METRIC_LABELS: Record<MetricId, string> = {
   revenue: "Revenue (Gross Fees)", netProfit: "Net Profit", grossProfit: "Gross Profit", expenses: "Expenses",
+  costPerDeal: "Cost per Deal", roi: "Return on Investment (ROI)",
   dealsClosed: "Deals Closed", dealsAdded: "Deals Added", dealsLost: "Deals Lost", winRate: "Win Rate",
   totalDeals: "Total Deals", totalDealValue: "Total Deal Value", avgDealSize: "Avg Deal Size", avgTimeToClose: "Avg Time to Close",
   activeBuyers: "Active Buyers", newBuyers: "New Buyers", buyerActivity: "Buyer Activity", reimbursementsOutstanding: "Reimbursements Outstanding",
 };
 const DEFAULT_METRICS: MetricId[] = [
-  "revenue", "netProfit", "grossProfit", "expenses", "dealsClosed", "dealsAdded", "dealsLost", "winRate",
+  "revenue", "netProfit", "grossProfit", "expenses", "costPerDeal", "roi", "dealsClosed", "dealsAdded", "dealsLost", "winRate",
   "totalDeals", "totalDealValue", "avgDealSize", "avgTimeToClose", "activeBuyers", "newBuyers", "buyerActivity", "reimbursementsOutstanding",
 ];
 interface MetricPrefs { order: MetricId[]; hidden: MetricId[] }
@@ -155,20 +182,28 @@ export function Reports() {
     api.get<FilterOpts>("/reports/filters").then(setOpts).catch(() => {});
   }, []);
 
+  // One query string (period, comparison, filters) for every analytics call,
+  // so the KPI tiles and their drill-downs always read the same records.
+  const query = useMemo(() => {
+    const qs = new URLSearchParams();
+    qs.set("from", range.from); qs.set("to", range.to);
+    if (cmp) { qs.set("compareFrom", cmp.from); qs.set("compareTo", cmp.to); }
+    for (const [key, vals] of Object.entries(filters)) for (const v of vals) qs.append(key, v);
+    return qs.toString();
+  }, [range.from, range.to, cmp?.from, cmp?.to, filters]);
+
   useEffect(() => {
     if (!range.from || !range.to) return;
     setLoading(true);
     // Debounced: rapid filter clicks (each multi-select pick fires this
     // effect) coalesce into one analytics request instead of a burst.
     const t = window.setTimeout(() => {
-      const qs = new URLSearchParams();
-      qs.set("from", range.from); qs.set("to", range.to);
-      if (cmp) { qs.set("compareFrom", cmp.from); qs.set("compareTo", cmp.to); }
-      for (const [key, vals] of Object.entries(filters)) for (const v of vals) qs.append(key, v);
-      api.get<Analytics>(`/reports/analytics?${qs.toString()}`).then(setData).finally(() => setLoading(false));
+      api.get<Analytics>(`/reports/analytics?${query}`).then(setData).finally(() => setLoading(false));
     }, 300);
     return () => window.clearTimeout(t);
-  }, [range.from, range.to, cmp?.from, cmp?.to, filters]);
+  }, [query, range.from, range.to]);
+  // Cost per Deal / ROI drill-down (which section opens first).
+  const [finDrill, setFinDrill] = useState<"cost" | "roi" | null>(null);
 
 
   const activeFilterChips = Object.entries(filters).flatMap(([key, vals]) =>
@@ -292,7 +327,9 @@ export function Reports() {
                 <b>Executive summary.</b> Over this period the team closed <b>{num(k.dealsClosed)}</b> {k.dealsClosed === 1 ? "deal" : "deals"}{" "}
                 generating <b>{money(k.revenue)}</b> in revenue and <b style={{ color: k.netProfit >= 0 ? "var(--green)" : "var(--red)" }}>{money(k.netProfit)}</b> net profit,
                 added <b>{num(k.dealsAdded)}</b> new {k.dealsAdded === 1 ? "deal" : "deals"}, and maintained a <b>{pct(k.winRate)}</b> win rate.
-                Total company expenses were <b>{money(k.expenses, { cents: true })}</b> with <b style={k.reimbursementsOutstanding > 0 ? { color: "var(--amber)" } : undefined}>{money(k.reimbursementsOutstanding, { cents: true })}</b> outstanding in reimbursements.
+                Total company expenses were <b>{money(k.expenses, { cents: true })}</b> with <b style={k.reimbursementsOutstanding > 0 ? { color: "var(--amber)" } : undefined}>{money(k.reimbursementsOutstanding, { cents: true })}</b> outstanding in reimbursements
+                {k.costPerDeal != null && <> — <b>{money(k.costPerDeal, { cents: true })}</b> per closed deal</>}
+                {k.roiMultiple != null && <>, a <b style={{ color: k.roiMultiple >= 0 ? "var(--green)" : "var(--red)" }}>{fmtMultiple(k.roiMultiple)}</b> return on spend</>}.
                 {data.compare && <> Compared to {fmtDate(data.compare.from)} – {fmtDate(data.compare.to)}.</>}
               </p>
               {activeFilterChips.length > 0 && (
@@ -317,6 +354,16 @@ export function Reports() {
                 netProfit: <Kpi label="Net Profit" value={money(k.netProfit)} d={data.deltas?.netProfit} valueColor={k.netProfit >= 0 ? "var(--green)" : "var(--red)"} />,
                 grossProfit: <Kpi label="Gross Profit" value={money(k.grossProfit)} d={data.deltas?.grossProfit} valueColor={k.grossProfit >= 0 ? "var(--green)" : "var(--red)"} />,
                 expenses: <Kpi label="Expenses" value={money(k.expenses)} d={data.deltas?.expenses} invert onClick={() => nav("/expenses")} />,
+                costPerDeal: <Kpi label="Cost per Deal" realized value={k.costPerDeal == null ? "N/A" : money(k.costPerDeal, { cents: true })}
+                  valueColor={k.costPerDeal == null ? "var(--text-faint)" : undefined}
+                  hint={k.costPerDeal == null ? "No deals closed in this period" : `${money(k.expenses, { cents: true })} expenses ÷ ${num(k.dealsClosed)} closed`}
+                  d={data.deltas?.costPerDeal} invert onClick={() => setFinDrill("cost")} />,
+                roi: <Kpi label="Return on Investment" realized value={fmtMultiple(k.roiMultiple)}
+                  valueColor={k.roiMultiple == null ? "var(--text-faint)" : k.roiMultiple >= 0 ? "var(--green)" : "var(--red)"}
+                  hint={k.roiMultiple == null
+                    ? (k.expenses <= 0 ? "No expenses recorded in this period" : "Closed deals have no accepted price yet")
+                    : `${money(k.netProfit)} net profit ÷ ${money(k.expenses)} expenses`}
+                  d={data.deltas?.roiMultiple} onClick={() => setFinDrill("roi")} />,
                 dealsClosed: <Kpi label="Deals Closed" value={num(k.dealsClosed)} d={data.deltas?.dealsClosed} onClick={() => drillByDeal("Closed deals", (dd) => dd.stage === "CLOSED")} />,
                 dealsAdded: <Kpi label="Deals Added" value={num(k.dealsAdded)} d={data.deltas?.dealsAdded} />,
                 dealsLost: <Kpi label="Deals Lost" value={num(k.dealsLost)} d={data.deltas?.dealsLost} invert valueColor={k.dealsLost === 0 ? "var(--text-faint)" : undefined} onClick={() => drillByDeal("Lost (dead) deals", (dd) => dd.stage === "DEAD")} />,
@@ -435,6 +482,10 @@ export function Reports() {
         </div>
       )}
 
+      {finDrill && (
+        <FinancialsDrill query={query} focus={finDrill} onClose={() => setFinDrill(null)}
+          onOpenDeal={(id) => { setFinDrill(null); nav(`/deals/${id}`); }} onOpenExpenses={() => { setFinDrill(null); nav("/expenses"); }} />
+      )}
       {drill && (
         <Modal title={`${drill.title} (${drill.rows.length})`} onClose={() => setDrill(null)} wide>
           <DrillTable rows={drill.rows} onOpen={(id) => { setDrill(null); nav(`/deals/${id}`); }} />
@@ -506,7 +557,13 @@ function MetricsCustomize({ prefs, onChange }: { prefs: MetricPrefs; onChange: (
   );
 }
 
-function Kpi({ label, value, d, invert, valueColor, onClick }: { label: string; value: string; d?: number | null; invert?: boolean; valueColor?: string; onClick?: () => void }) {
+function Kpi({ label, value, d, invert, valueColor, onClick, hint, realized }: {
+  label: string; value: string; d?: number | null; invert?: boolean; valueColor?: string; onClick?: () => void;
+  /** One-line explanation under the value (e.g. the formula's inputs). */
+  hint?: string;
+  /** Tag the tile as a realized (closed-deal) figure, not a projection. */
+  realized?: boolean;
+}) {
   const hasDelta = d !== undefined && d !== null;
   const up = hasDelta && (d as number) > 0;
   const flat = hasDelta && (d as number) === 0;
@@ -516,8 +573,9 @@ function Kpi({ label, value, d, invert, valueColor, onClick }: { label: string; 
   const arrow = flat ? "→" : up ? "▲" : "▼";
   return (
     <div className={`kpi-card ${onClick ? "clickable" : ""}`} onClick={onClick}>
-      <div className="kpi-label">{label}</div>
+      <div className="kpi-label">{label}{realized && <span className="kpi-tag" title="Realized: closed deals and recorded expenses only — no projections">Realized</span>}</div>
       <div className="kpi-value" style={valueColor ? { color: valueColor } : undefined}>{value}</div>
+      {hint && <div className="kpi-hint">{hint}</div>}
       {hasDelta && <div className={`kpi-sub ${deltaClass}`}>{arrow} {pct(Math.abs(d as number))} vs prior</div>}
     </div>
   );
@@ -575,4 +633,91 @@ function DrillTable({ rows, onOpen }: { rows: DealSummary[]; onOpen: (id: string
     { key: "buyer", header: "Buyer", type: "text", value: (r) => r.selectedBuyer?.name ?? "" },
   ];
   return <SortableTable columns={cols} rows={rows} rowKey={(r) => r.id} onRowClick={(r) => onOpen(r.id)} empty="No matching deals." />;
+}
+
+/**
+ * Cost per Deal & ROI drill-down: the formula with its inputs, then the exact
+ * records behind it — every deal closed in the period and every expense dated
+ * in it — for the report's current period and filters. Realized results only.
+ */
+function FinancialsDrill({ query, focus, onClose, onOpenDeal, onOpenExpenses }: {
+  query: string; focus: "cost" | "roi"; onClose: () => void; onOpenDeal: (id: string) => void; onOpenExpenses: () => void;
+}) {
+  const [data, setData] = useState<Financials | null>(null);
+  const [error, setError] = useState(false);
+  const [tab, setTab] = useState<"deals" | "expenses">(focus === "cost" ? "expenses" : "deals");
+  useEffect(() => {
+    let live = true;
+    api.get<Financials>(`/reports/analytics/financials?${query}`)
+      .then((d) => { if (live) setData(d); })
+      .catch(() => { if (live) setError(true); });
+    return () => { live = false; };
+  }, [query]);
+
+  const t = data?.totals;
+  const dealCols: Column<Financials["closedDeals"][number]>[] = [
+    { key: "name", header: "Deal", type: "text", value: (r) => r.name, render: (r) => <strong>{r.name}</strong> },
+    { key: "closed", header: "Closed", type: "date", value: (r) => r.closedAt, render: (r) => fmtDateLocal(r.closedAt) },
+    { key: "accepted", header: "Accepted", type: "number", align: "right", value: (r) => r.acceptedAmount, render: (r) => r.acceptedAmount == null ? <span className="muted">No accepted offer</span> : money(r.acceptedAmount) },
+    { key: "cost", header: "Cost Basis", type: "number", align: "right", value: (r) => r.costBasis, render: (r) => money(r.costBasis) },
+    { key: "revenue", header: "Revenue", type: "number", align: "right", value: (r) => r.revenue, render: (r) => money(r.revenue) },
+    { key: "closing", header: "Closing Costs", type: "number", align: "right", value: (r) => r.closingCosts, render: (r) => money(r.closingCosts) },
+    { key: "gross", header: "Gross Profit", type: "number", align: "right", value: (r) => r.grossProfit,
+      render: (r) => r.grossProfit == null ? "—" : <span className={r.grossProfit < 0 ? "profit-neg" : "profit-pos"}>{money(r.grossProfit)}</span> },
+  ];
+  const expenseCols: Column<Financials["expenses"][number]>[] = [
+    { key: "date", header: "Date", type: "date", value: (r) => r.date, render: (r) => fmtDate(r.date) },
+    { key: "category", header: "Category", type: "text", value: (r) => r.category ?? "", render: (r) => r.category ?? <span className="muted">Uncategorized</span> },
+    { key: "notes", header: "Notes", type: "text", value: (r) => r.notes ?? "", render: (r) => <span className="exp-notes">{r.notes ?? "—"}</span> },
+    { key: "by", header: "Submitted By", type: "text", value: (r) => r.submittedBy ?? "" },
+    { key: "reimbursed", header: "Reimbursed", type: "text", value: (r) => (r.reimbursed ? "Yes" : "No") },
+    { key: "amount", header: "Amount", type: "number", align: "right", value: (r) => r.amount, render: (r) => money(r.amount, { cents: true }) },
+  ];
+
+  return (
+    <Modal title="Cost per Deal & Return on Investment" wide onClose={onClose}
+      subtitle={data ? <>{fmtDate(data.range.from)} – {fmtDate(data.range.to)} · realized results with the report's filters</> : undefined}>
+      {error ? <Banner kind="error">Could not load the financial records for this period.</Banner> : !data || !t ? <Spinner label="Loading financial records…" /> : (
+        <>
+          <div className="fin-formulas">
+            <div className="fin-formula">
+              <div className="ddx-label">Cost per Deal</div>
+              <div className="fin-formula-v">{t.costPerDeal == null ? "N/A" : money(t.costPerDeal, { cents: true })}</div>
+              <div className="fin-formula-x">
+                {t.costPerDeal == null
+                  ? <>No deals closed in this period, so there is nothing to divide {money(t.expenses, { cents: true })} of expenses across.</>
+                  : <>{money(t.expenses, { cents: true })} total expenses ÷ {num(t.dealsClosed)} {t.dealsClosed === 1 ? "deal" : "deals"} closed</>}
+              </div>
+            </div>
+            <div className="fin-formula">
+              <div className="ddx-label">Return on Investment</div>
+              <div className="fin-formula-v" style={{ color: t.roiMultiple == null ? undefined : t.roiMultiple >= 0 ? "var(--green)" : "var(--red)" }}>{fmtMultiple(t.roiMultiple)}</div>
+              <div className="fin-formula-x">
+                {t.roiMultiple == null
+                  ? (t.expenses <= 0 ? <>No expenses recorded in this period — a multiple can't be calculated.</> : <>No closed deal has an accepted price, so revenue can't be measured yet.</>)
+                  : <>{money(t.netProfit)} net profit after expenses ÷ {money(t.expenses)} total expenses</>}
+              </div>
+            </div>
+          </div>
+          <div className="fin-recon" aria-label="Net profit reconciliation">
+            <span>Revenue (Gross Fees) <b>{money(t.revenue)}</b></span>
+            <span>− Closing Costs <b>{money(t.closingCosts)}</b></span>
+            <span>− Expenses <b>{money(t.expenses, { cents: true })}</b></span>
+            <span>= Net Profit <b className={t.netProfit < 0 ? "profit-neg" : "profit-pos"}>{money(t.netProfit)}</b></span>
+          </div>
+          <p className="muted fin-note">
+            Realized results only: deals closed in this period and expenses dated in it. Open deals, projected profit and forecasts are excluded.
+            {t.closedWithoutPrice > 0 && <> <b style={{ color: "var(--amber)" }}>{num(t.closedWithoutPrice)} closed {t.closedWithoutPrice === 1 ? "deal has" : "deals have"} no accepted offer</b> and {t.closedWithoutPrice === 1 ? "adds" : "add"} no revenue.</>}
+          </p>
+          <div className="seg-control subtle" role="tablist" aria-label="Records" style={{ marginBottom: 12 }}>
+            <button role="tab" aria-selected={tab === "deals"} className={`seg ${tab === "deals" ? "active" : ""}`} onClick={() => setTab("deals")}>Closed deals ({data.closedDeals.length})</button>
+            <button role="tab" aria-selected={tab === "expenses"} className={`seg ${tab === "expenses" ? "active" : ""}`} onClick={() => setTab("expenses")}>Expenses ({data.expenses.length})</button>
+          </div>
+          {tab === "deals"
+            ? <SortableTable columns={dealCols} rows={data.closedDeals} rowKey={(r) => r.id} onRowClick={(r) => onOpenDeal(r.id)} empty="No deals closed in this period." />
+            : <SortableTable columns={expenseCols} rows={data.expenses} rowKey={(r) => r.id} onRowClick={() => onOpenExpenses()} empty="No expenses recorded in this period." />}
+        </>
+      )}
+    </Modal>
+  );
 }
