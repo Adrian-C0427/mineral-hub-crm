@@ -96,10 +96,24 @@ export function Sidebar() {
   }, [phone, drawerOpen]);
   const railCollapsed = phone ? false : collapsed;
 
+  // Publish the sidebar's live width so dialogs (portaled to <body>) center in
+  // the content area beside it — expanded, collapsed, or mid-transition. On
+  // phones the sidebar is an off-canvas drawer and takes no width.
+  const asideRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const root = document.documentElement;
+    const el = asideRef.current;
+    const publish = () => root.style.setProperty("--app-sidebar-w", phone || !el ? "0px" : `${Math.round(layoutRect(el).width)}px`);
+    publish();
+    const ro = el && !phone && typeof ResizeObserver !== "undefined" ? new ResizeObserver(publish) : null;
+    if (ro && el) ro.observe(el);
+    return () => { ro?.disconnect(); root.style.removeProperty("--app-sidebar-w"); };
+  }, [phone]);
+
   return (
     <>
     {phone && drawerOpen && <div className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />}
-    <aside className={`sidebar ${railCollapsed ? "collapsed" : ""} ${phone ? `mobile-drawer ${drawerOpen ? "open" : ""}` : ""}`}
+    <aside ref={asideRef} className={`sidebar ${railCollapsed ? "collapsed" : ""} ${phone ? `mobile-drawer ${drawerOpen ? "open" : ""}` : ""}`}
       aria-label="Main navigation" aria-hidden={phone && !drawerOpen ? true : undefined}>
       {/* Collapse control: a tiny chevron riding the panel's edge — half in,
           half out — so the brand row belongs entirely to the logo. */}

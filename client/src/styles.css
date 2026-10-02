@@ -772,6 +772,11 @@ button.match-log { flex: none; margin-left: auto; padding: 3px 10px; font-size: 
 
 /* --- Modal --- */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index: var(--z-modal); padding: 20px; }
+/* Dialogs are portaled to <body>; the dimmed overlay covers the whole app (the
+   sidebar included, so the background stays visible but inactive) while the
+   dialog itself centers in the content area beside the sidebar. The sidebar
+   publishes its live width (0 when absent, e.g. signed out or on phones). */
+.modal-overlay { padding-left: calc(20px + var(--app-sidebar-w, 0px)); }
 .modal { background: var(--panel); border:1px solid var(--border); border-radius: var(--radius-lg); width: 480px; max-width: 100%; max-height: 90vh; display:flex; flex-direction:column; box-shadow: var(--shadow); }
 .modal-wide { width: 720px; }
 .modal-header { display:flex; justify-content:space-between; align-items:center; padding: 16px 20px; border-bottom: 1px solid var(--border); }

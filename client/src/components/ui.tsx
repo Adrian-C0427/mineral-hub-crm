@@ -16,6 +16,20 @@ import { useStages } from "../stages";
  */
 const MODAL_STACK: symbol[] = [];
 
+/**
+ * Every dialog renders into <body>, never inside the section that opened it.
+ * A dialog nested in a transformed / clipped / scrolling container (a dashboard
+ * widget, a map panel) would otherwise inherit that box: `position: fixed`
+ * resolves against a transformed ancestor, so the overlay shrank to the widget
+ * and the dialog rendered cramped inside it. From <body> the overlay always
+ * covers the viewport, and .modal-overlay centers the dialog in the app's
+ * content area beside the sidebar (--app-sidebar-w, kept live by Sidebar).
+ * React events still bubble through the component tree as before.
+ */
+function DialogLayer({ children }: { children: ReactNode }) {
+  return createPortal(children, document.body);
+}
+
 function useDialogChrome(onClose: () => void, dirty?: boolean) {
   const id = useRef(Symbol("dialog")).current;
   const [attn, setAttn] = useState(0);
@@ -271,6 +285,7 @@ export function Modal({
 }) {
   const { requestClose, attn } = useDialogChrome(onClose, dirty);
   return (
+    <DialogLayer>
     <div className="modal-overlay" onClick={() => requestClose("backdrop")}>
       <div
         key={attn} /* re-triggers the pulse animation on each blocked close */
@@ -292,6 +307,7 @@ export function Modal({
         {footer && <div className="modal-footer">{footer}</div>}
       </div>
     </div>
+    </DialogLayer>
   );
 }
 
@@ -324,6 +340,7 @@ export function ConfirmDialog({
 }) {
   const { requestClose } = useDialogChrome(onCancel);
   return (
+    <DialogLayer>
     <div className="modal-overlay" onClick={() => requestClose("backdrop")}>
       <div className="modal" role="alertdialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
@@ -339,6 +356,7 @@ export function ConfirmDialog({
         </div>
       </div>
     </div>
+    </DialogLayer>
   );
 }
 
@@ -370,6 +388,7 @@ export function ConfirmDelete({
   // Typed text counts as dirty — a stray backdrop click shouldn't eat it.
   const { requestClose, attn } = useDialogChrome(onCancel, typed.length > 0);
   return (
+    <DialogLayer>
     <div className="modal-overlay" onClick={() => requestClose("backdrop")}>
       <div key={attn} className={`modal ${attn ? "modal-attn" : ""}`} role="alertdialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
@@ -401,6 +420,7 @@ export function ConfirmDelete({
         </div>
       </div>
     </div>
+    </DialogLayer>
   );
 }
 
