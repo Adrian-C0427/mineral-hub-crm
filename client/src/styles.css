@@ -2996,6 +2996,18 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .kpi-card { transition: border-color 0.12s; }
 .kpi-card.clickable { cursor: pointer; }
 .kpi-card:hover { border-color: color-mix(in srgb, var(--text-dim) 40%, var(--border)); }
+/* Formula inputs under a KPI value + the "Realized" tag (Cost per Deal / ROI). */
+.kpi-hint { font-size: 11.5px; color: var(--text-dim); margin-top: 4px; line-height: 1.35; }
+.kpi-tag { margin-left: 6px; padding: 1px 6px; border-radius: 99px; font-size: 9.5px; letter-spacing: 0.05em; vertical-align: 1px;
+  color: var(--green); background: color-mix(in srgb, var(--green) 12%, transparent); }
+/* Cost per Deal & ROI drill-down. */
+.fin-formulas { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px; }
+.fin-formula { border: 1px solid var(--hairline, var(--border)); border-radius: 9px; padding: 12px 14px; background: var(--surface, var(--panel-2)); }
+.fin-formula-v { font-size: 22px; font-weight: 800; margin-top: 4px; font-variant-numeric: tabular-nums; }
+.fin-formula-x { font-size: 12.5px; color: var(--text-dim); margin-top: 3px; }
+.fin-recon { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 13px; color: var(--text-dim); margin-bottom: 6px; }
+.fin-recon b { color: var(--text); font-variant-numeric: tabular-nums; }
+.fin-note { font-size: 12.5px; margin: 0 0 12px; }
 .kpi-sub.delta-up { color: var(--green); }
 .kpi-sub.delta-down { color: var(--red); }
 

@@ -32,7 +32,8 @@ export interface AnalyticsBuyer { id: string; createdAt: Date; active: boolean }
 export interface AnalyticsActivity { date: Date | null; sentByUserId: string | null }
 export interface Range { from: Date; to: Date }
 
-const inRange = (d: Date | null, r: Range): boolean => d != null && d >= r.from && d <= r.to;
+/** Inclusive period test — the one date boundary every report metric uses. */
+export const inRange = (d: Date | null, r: Range): boolean => d != null && d >= r.from && d <= r.to;
 const avg = (xs: number[]): number => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 const daysBetween = (a: Date, b: Date): number => Math.round((b.getTime() - a.getTime()) / 86400000);
 
@@ -54,6 +55,30 @@ export interface Kpis {
   activeBuyers: number;
   newBuyers: number;
   buyerActivity: number;
+  /** Realized: period expenses ÷ deals closed in the period; null when none closed. */
+  costPerDeal: number | null;
+  /** Realized: net profit (after expenses) ÷ period expenses, as a multiple;
+   *  null when there are no expenses or no closed deal has a price. */
+  roiMultiple: number | null;
+  /** Closed deals in the period with no accepted offer — revenue they can't contribute. */
+  closedWithoutPrice: number;
+}
+
+/**
+ * Cost per Deal and ROI, from the same realized figures as the rest of the
+ * report (closed deals + recorded expenses in one period):
+ *   Cost per Deal = Total Expenses ÷ Deals Closed
+ *   ROI multiple  = Net Profit After Expenses ÷ Total Expenses
+ * where Net Profit After Expenses is the report's Net Profit (revenue − deal
+ * closing costs − expenses). Either is null ("N/A") when it can't be computed
+ * reliably: no closed deals / no expenses / no priced closed deal.
+ */
+export function costAndRoi(dealsClosed: number, closedWithoutPrice: number, expenses: number, netProfit: number): { costPerDeal: number | null; roiMultiple: number | null } {
+  const revenueUnknown = dealsClosed > 0 && closedWithoutPrice === dealsClosed;
+  return {
+    costPerDeal: dealsClosed > 0 ? expenses / dealsClosed : null,
+    roiMultiple: expenses > 0 && !revenueUnknown ? netProfit / expenses : null,
+  };
 }
 
 export function computeKpis(
@@ -84,6 +109,8 @@ export function computeKpis(
     .map((d) => daysBetween(d.dateUnderContract!, d.closedAt!));
 
   const grossProfit = grossFees - closingCosts;
+  const netProfit = grossProfit - expenseTotal;
+  const closedWithoutPrice = closed.filter((d) => d.acceptedAmount == null).length;
 
   return {
     totalDeals: existedByEnd.length,
@@ -96,18 +123,22 @@ export function computeKpis(
     avgTimeToClose: avg(closeDurations),
     revenue: grossFees,
     grossProfit,
-    netProfit: grossProfit - expenseTotal,
+    netProfit,
     expenses: expenseTotal,
     closingCosts,
     reimbursementsOutstanding: outstanding,
     activeBuyers: buyers.filter((b) => b.active).length,
     newBuyers: buyers.filter((b) => inRange(b.createdAt, range)).length,
     buyerActivity: activities.filter((a) => inRange(a.date, range)).length,
+    ...costAndRoi(closed.length, closedWithoutPrice, expenseTotal, netProfit),
+    closedWithoutPrice,
   };
 }
 
-/** Percentage change from previous → current; null when previous is 0. */
-export function delta(current: number, previous: number): number | null {
+/** Percentage change from previous → current; null when previous is 0 or
+ *  either side is unavailable (an "N/A" metric). */
+export function delta(current: number | null, previous: number | null): number | null {
+  if (current == null || previous == null) return null;
   if (previous === 0) return current === 0 ? 0 : null;
   return (current - previous) / Math.abs(previous);
 }

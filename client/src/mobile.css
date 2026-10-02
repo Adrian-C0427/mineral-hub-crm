@@ -248,6 +248,7 @@
 
   /* --- Detail pages --- */
   .seller-head { flex-direction: column; gap: 10px; }
+  .fin-formulas { grid-template-columns: minmax(0, 1fr); }
   .seller-head-add { position: static; transform: none; align-self: stretch; }
   .ddc-strip { flex-wrap: wrap; gap: 12px 18px; }
   .seller-grid, .pls-grid, .dpp-price, .dpp-sumgrid, .mc-grid, .mc-heat, .rel-columns, .rel2-cols { grid-template-columns: minmax(0, 1fr) !important; }

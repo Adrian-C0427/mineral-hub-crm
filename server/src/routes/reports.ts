@@ -6,7 +6,7 @@ import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest }
 import { ensureStages } from "../domain/stages.js";
 import { netProfit, grossFee, avg, winRate } from "../domain/metrics.js";
 import {
-  computeKpis, delta, buildMonthlySeries, buildBreakdowns,
+  computeKpis, delta, buildMonthlySeries, buildBreakdowns, inRange,
   type AnalyticsDeal, type Range,
 } from "../domain/analytics.js";
 
@@ -170,37 +170,61 @@ async function loadAnalyticsDeals(organizationId: string): Promise<AnalyticsDeal
   });
 }
 
+// Parse a caller-supplied day as UTC, rejecting malformed/array-valued input
+// (a bare `new Date("garbage")` yields an Invalid Date that silently makes
+// every comparison false and returns misleading empty analytics).
+function parseDay(v: unknown, endOfDay = false): Date | null {
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
+  const d = new Date(`${v}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/** The report's period (default: this calendar year), comparison window and
+ *  deal filters — shared by every analytics endpoint so they always agree. */
+function analyticsQuery(q: AuthedRequest["query"]) {
+  const now = new Date();
+  const from = parseDay(q.from) ?? new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+  const to = parseDay(q.to, true) ?? new Date(Date.UTC(now.getUTCFullYear(), 11, 31, 23, 59, 59));
+  const range: Range = { from, to };
+  const cmpFrom = parseDay(q.compareFrom), cmpTo = parseDay(q.compareTo, true);
+  const compare: Range | null = cmpFrom && cmpTo ? { from: cmpFrom, to: cmpTo } : null;
+  const filters = {
+    states: arrParam(q.states),
+    counties: arrParam(q.counties),
+    basins: arrParam(q.basins),
+    formations: arrParam(q.formations),
+    assetTypes: arrParam(q.assetTypes),
+    operators: arrParam(q.operators),
+    stages: arrParam(q.stages),
+    users: arrParam(q.users),
+    buyers: arrParam(q.buyers),
+  };
+  return { range, compare, filters };
+}
+type AnalyticsFilters = ReturnType<typeof analyticsQuery>["filters"];
+
+/** Apply deal-characteristic filters in memory (org deal volumes are small). */
+function filterDeals(all: AnalyticsDeal[], filters: AnalyticsFilters): AnalyticsDeal[] {
+  return all.filter(
+    (d) =>
+      intersects(d.states, filters.states) &&
+      intersects(d.counties, filters.counties) &&
+      intersects(d.basins, filters.basins) &&
+      intersects(d.formations, filters.formations) &&
+      intersects(d.assetTypes, filters.assetTypes) &&
+      (filters.operators.length === 0 || (d.operator != null && filters.operators.includes(d.operator))) &&
+      (filters.stages.length === 0 || filters.stages.includes(d.stage)) &&
+      (filters.users.length === 0 || (d.relationshipOwnerId != null && filters.users.includes(d.relationshipOwnerId))) &&
+      (filters.buyers.length === 0 || (d.selectedBuyerId != null && filters.buyers.includes(d.selectedBuyerId))),
+  );
+}
+
 reportsRouter.get(
   "/analytics",
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
-    const q = req.query;
-    const now = new Date();
-    // Parse a caller-supplied day as UTC, rejecting malformed/array-valued input
-    // (a bare `new Date("garbage")` yields an Invalid Date that silently makes
-    // every comparison false and returns misleading empty analytics).
-    const day = (v: unknown, endOfDay = false): Date | null => {
-      if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
-      const d = new Date(`${v}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
-      return isNaN(d.getTime()) ? null : d;
-    };
-    const from = day(q.from) ?? new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
-    const to = day(q.to, true) ?? new Date(Date.UTC(now.getUTCFullYear(), 11, 31, 23, 59, 59));
-    const range: Range = { from, to };
-    const cmpFrom = day(q.compareFrom), cmpTo = day(q.compareTo, true);
-    const compare: Range | null = cmpFrom && cmpTo ? { from: cmpFrom, to: cmpTo } : null;
-
-    const filters = {
-      states: arrParam(q.states),
-      counties: arrParam(q.counties),
-      basins: arrParam(q.basins),
-      formations: arrParam(q.formations),
-      assetTypes: arrParam(q.assetTypes),
-      operators: arrParam(q.operators),
-      stages: arrParam(q.stages),
-      users: arrParam(q.users),
-      buyers: arrParam(q.buyers),
-    };
+    const { range, compare, filters } = analyticsQuery(req.query);
+    const { from, to } = range;
 
     // NOTE: these four loads are deliberately uncapped. They feed org-wide
     // aggregates (KPIs, deltas, breakdowns), so a `take` would not bound the
@@ -219,19 +243,7 @@ reportsRouter.get(
       prisma.user.findMany({ where: { organizationId: org }, select: { id: true, name: true } }),
     ]);
 
-    // Apply deal-characteristic filters in memory (org deal volumes are small).
-    const deals = allDeals.filter(
-      (d) =>
-        intersects(d.states, filters.states) &&
-        intersects(d.counties, filters.counties) &&
-        intersects(d.basins, filters.basins) &&
-        intersects(d.formations, filters.formations) &&
-        intersects(d.assetTypes, filters.assetTypes) &&
-        (filters.operators.length === 0 || (d.operator != null && filters.operators.includes(d.operator))) &&
-        (filters.stages.length === 0 || filters.stages.includes(d.stage)) &&
-        (filters.users.length === 0 || (d.relationshipOwnerId != null && filters.users.includes(d.relationshipOwnerId))) &&
-        (filters.buyers.length === 0 || (d.selectedBuyerId != null && filters.buyers.includes(d.selectedBuyerId))),
-    );
+    const deals = filterDeals(allDeals, filters);
 
     const expenses = expensesRaw.map((e) => ({ amount: e.amount, date: e.date, reimbursed: e.reimbursed }));
     const buyers = buyersRaw.map((b) => ({ id: b.id, createdAt: b.createdAt, active: b.active }));
@@ -258,6 +270,72 @@ reportsRouter.get(
       deltas,
       series,
       breakdowns: { ...breakdowns, perUser },
+    });
+  }),
+);
+
+/**
+ * The records behind Cost per Deal and ROI for the report's period + filters:
+ * every closed deal (its revenue, closing costs, contribution) and every
+ * expense, with the totals computed by the SAME computeKpis the KPI tiles use.
+ * Realized results only — open deals and forecasts are never included.
+ */
+reportsRouter.get(
+  "/analytics/financials",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const { range, filters } = analyticsQuery(req.query);
+    const [allDeals, expensesRaw] = await Promise.all([
+      loadAnalyticsDeals(org),
+      prisma.expense.findMany({
+        where: { organizationId: org, date: { gte: range.from, lte: range.to } },
+        select: {
+          id: true, date: true, amount: true, notes: true, reimbursed: true,
+          category: { select: { name: true } }, user: { select: { name: true } },
+        },
+        orderBy: { date: "desc" },
+      }),
+    ]);
+    const deals = filterDeals(allDeals, filters);
+    const expenses = expensesRaw.filter((e) => inRange(e.date, range));
+    const kpis = computeKpis(deals, expenses.map((e) => ({ amount: e.amount, date: e.date, reimbursed: e.reimbursed })), [], [], range);
+
+    const closed = deals.filter((d) => inRange(d.closedAt, range));
+    const names = new Map((await prisma.deal.findMany({
+      where: { id: { in: closed.map((d) => d.id) }, organizationId: org },
+      select: { id: true, name: true },
+    })).map((d) => [d.id, d.name]));
+    const closedDeals = closed
+      .map((d) => {
+        const costBasis = d.ourPrice ?? d.askPrice ?? 0;
+        // Same per-deal math as computeKpis: revenue = accepted − cost basis.
+        const revenue = d.acceptedAmount != null ? d.acceptedAmount - costBasis : null;
+        return {
+          id: d.id,
+          name: names.get(d.id) ?? "Deal",
+          closedAt: d.closedAt,
+          counties: d.counties,
+          acceptedAmount: d.acceptedAmount,
+          costBasis: d.ourPrice ?? d.askPrice,
+          revenue,
+          closingCosts: d.estimatedClosingCosts,
+          grossProfit: revenue != null ? revenue - (d.estimatedClosingCosts ?? 0) : null,
+        };
+      })
+      .sort((a, b) => (b.closedAt?.getTime() ?? 0) - (a.closedAt?.getTime() ?? 0));
+
+    res.json({
+      range,
+      totals: {
+        revenue: kpis.revenue, closingCosts: kpis.closingCosts, grossProfit: kpis.grossProfit,
+        expenses: kpis.expenses, netProfit: kpis.netProfit, dealsClosed: kpis.dealsClosed,
+        costPerDeal: kpis.costPerDeal, roiMultiple: kpis.roiMultiple, closedWithoutPrice: kpis.closedWithoutPrice,
+      },
+      closedDeals,
+      expenses: expenses.map((e) => ({
+        id: e.id, date: e.date, amount: e.amount, category: e.category?.name ?? null,
+        notes: e.notes, submittedBy: e.user?.name ?? null, reimbursed: e.reimbursed,
+      })),
     });
   }),
 );
