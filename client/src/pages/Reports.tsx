@@ -42,7 +42,8 @@ interface Financials {
     id: string; name: string; closedAt: string | null; counties: string[]; acceptedAmount: number | null;
     costBasis: number | null; revenue: number | null; closingCosts: number | null; grossProfit: number | null;
   }[];
-  expenses: { id: string; date: string; amount: number; category: string | null; notes: string | null; submittedBy: string | null; reimbursed: boolean }[];
+  /** null when the caller lacks manageExpenses — totals only, no individual rows. */
+  expenses: { id: string; date: string; amount: number; category: string | null; notes: string | null; submittedBy: string | null; reimbursed: boolean }[] | null;
 }
 
 /** ROI shown as a multiple ("2.5x", "-0.4x"); N/A when it can't be computed. */
@@ -665,7 +666,7 @@ function FinancialsDrill({ query, focus, onClose, onOpenDeal, onOpenExpenses }: 
     { key: "gross", header: "Gross Profit", type: "number", align: "right", value: (r) => r.grossProfit,
       render: (r) => r.grossProfit == null ? "—" : <span className={r.grossProfit < 0 ? "profit-neg" : "profit-pos"}>{money(r.grossProfit)}</span> },
   ];
-  const expenseCols: Column<Financials["expenses"][number]>[] = [
+  const expenseCols: Column<NonNullable<Financials["expenses"]>[number]>[] = [
     { key: "date", header: "Date", type: "date", value: (r) => r.date, render: (r) => fmtDate(r.date) },
     { key: "category", header: "Category", type: "text", value: (r) => r.category ?? "", render: (r) => r.category ?? <span className="muted">Uncategorized</span> },
     { key: "notes", header: "Notes", type: "text", value: (r) => r.notes ?? "", render: (r) => <span className="exp-notes">{r.notes ?? "—"}</span> },
@@ -711,9 +712,9 @@ function FinancialsDrill({ query, focus, onClose, onOpenDeal, onOpenExpenses }: 
           </p>
           <div className="seg-control subtle" role="tablist" aria-label="Records" style={{ marginBottom: 12 }}>
             <button role="tab" aria-selected={tab === "deals"} className={`seg ${tab === "deals" ? "active" : ""}`} onClick={() => setTab("deals")}>Closed deals ({data.closedDeals.length})</button>
-            <button role="tab" aria-selected={tab === "expenses"} className={`seg ${tab === "expenses" ? "active" : ""}`} onClick={() => setTab("expenses")}>Expenses ({data.expenses.length})</button>
+            {data.expenses && <button role="tab" aria-selected={tab === "expenses"} className={`seg ${tab === "expenses" ? "active" : ""}`} onClick={() => setTab("expenses")}>Expenses ({data.expenses.length})</button>}
           </div>
-          {tab === "deals"
+          {tab === "deals" || !data.expenses
             ? <SortableTable columns={dealCols} rows={data.closedDeals} rowKey={(r) => r.id} onRowClick={(r) => onOpenDeal(r.id)} empty="No deals closed in this period." />
             : <SortableTable columns={expenseCols} rows={data.expenses} rowKey={(r) => r.id} onRowClick={() => onOpenExpenses()} empty="No expenses recorded in this period." />}
         </>
