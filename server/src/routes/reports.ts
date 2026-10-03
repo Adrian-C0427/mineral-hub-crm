@@ -285,6 +285,9 @@ reportsRouter.get(
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
     const { range, filters } = analyticsQuery(req.query);
+    // Individual expense rows (notes, submitter) are gated by manageExpenses
+    // everywhere else; viewReports alone only earns the totals.
+    const canSeeExpenses = req.user!.orgRole === "OWNER" || req.user!.permissions.includes("manageExpenses");
     const [allDeals, expensesRaw] = await Promise.all([
       loadAnalyticsDeals(org),
       prisma.expense.findMany({
@@ -332,7 +335,7 @@ reportsRouter.get(
         costPerDeal: kpis.costPerDeal, roiMultiple: kpis.roiMultiple, closedWithoutPrice: kpis.closedWithoutPrice,
       },
       closedDeals,
-      expenses: expenses.map((e) => ({
+      expenses: !canSeeExpenses ? null : expenses.map((e) => ({
         id: e.id, date: e.date, amount: e.amount, category: e.category?.name ?? null,
         notes: e.notes, submittedBy: e.user?.name ?? null, reimbursed: e.reimbursed,
       })),
