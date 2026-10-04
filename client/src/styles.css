@@ -10,93 +10,117 @@
   --z-flyout: 3000;    /* collapsed-nav flyouts — always on top while open */
 }
 
-/* Dark is the default theme (data-theme unset or "dark"). */
+/* ===========================================================================
+   Design tokens — six appearance themes.
+   Dark is the default (data-theme unset or "dark"); every other theme
+   overrides only the tokens that change. Dim / Slate / Dusk / Neutral are
+   dark-family themes and inherit color-scheme: dark.
+   =========================================================================== */
 :root {
-  /* Global interface scale — the whole UI renders slightly smaller (more
-     information on screen) without changing any component's design or
-     proportions. Layout-affecting (not transform), so everything stays crisp.
-     Viewport units inside the zoomed root shrink with it, so full-height
-     chrome divides by --ui-zoom to still reach the screen's bottom edge. */
-  --ui-zoom: 0.95;
+  /* Interface scale. The design's own sizes are used at true size. */
+  --ui-zoom: 1;
   zoom: var(--ui-zoom);
-  --bg: #0b0e14;
-  --panel: #12161f;
-  --panel-2: #1a2030;
-  --border: #232a36;
-  --text: #e7eaf0;
-  --text-dim: #8b93a7;
-  --accent: #3b82f6;
-  --accent-hover: #2563eb;
-  --accent2: var(--accent);
-  --green: #22c55e;
-  --amber: #f59e0b;
-  --red: #ef4444;
+  color-scheme: dark;
+  --bg:#000000; --input:#050505; --surface-inset:#070707; --surface:#0A0A0A; --surface-1:#0D0D0D; --popover:#0E0E0E;
+  --surface-2:#111111; --raised:#121212; --surface-3:#141414; --hover:#161616; --hover-strong:#1A1A1A;
+  --selected:#1E1E1E; --chip:#202020; --track:#2A2A2A; --board-col:#050505; --line-faint:#161616; --line-soft:#1A1A1A;
+  --line:#1E1E1E; --line-2:#222222; --line-strong:#262626; --line-3:#2A2A2A; --line-hover:#333333;
+  --line-hover-strong:#3C3C3C; --ink-strong:#FFFFFF; --ink:#EDEDED; --ink-1:#D4D4D4; --ink-soft:#C9C9C9;
+  --ink-2:#A6A6A6; --ink-3:#8A8A8A; --ink-4:#6E6E6E; --ink-placeholder:#5C5C5C; --ink-5:#4A4A4A; --on-accent:#FFFFFF;
+  --accent:#3B82F6; --accent-hover:#2563EB; --accent2:var(--accent); --accent-ink:#7AAEFF; --accent-ink-hover:#A9CBFF;
+  --success:#22C55E; --success-ink:#4ADE80; --warn:#F59E0B; --warn-ink:#FBBF24;
+  --danger:#EF4444; --danger-ink:#F87171; --danger-strong:#DC2626;
   --gray: #6b7280;
   --font-sans: "Manrope", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  --radius: 6px;      /* controls: buttons, inputs, chips */
-  --radius-lg: 10px;  /* surfaces: cards, panels, modals */
-  --shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-  color-scheme: dark;
-}
 
-/* ===========================================================================
-   Light theme — a purpose-built palette (not an inversion). White cards on a
-   soft neutral canvas, near-black slate text, and slightly deeper accent hues
-   that hold contrast on white. Every token below has a light-tuned value so
-   the whole app, driven by these variables, reads correctly in light mode.
-   =========================================================================== */
+  /* Names used throughout the existing stylesheet, mapped onto the tokens above. */
+  --panel:var(--surface); --panel-2:var(--surface-2); --border:var(--line); --text:var(--ink); --text-dim:var(--ink-3);
+  --text-faint:var(--ink-4); --text-mid:var(--ink-1); --hairline:var(--line-soft); --green:var(--success);
+  --amber:var(--warn); --red:var(--danger); --ok:var(--success); --gold:var(--warn-ink); --gold-tint:var(--warn-tint);
+  --gold-border:var(--warn-border); --control:var(--surface-3); --control-active:var(--selected);
+  --board-col-border:var(--line-faint); --border-hover:var(--line-hover); --input-bg:var(--input); --shadow:var(--shadow-pop);
+
+  /* Accent- and status-derived tints (follow a custom accent automatically). */
+  --accent-tint:color-mix(in srgb,var(--accent) 14%,transparent); --accent-ring:color-mix(in srgb,var(--accent) 22%,transparent);
+  --accent-soft:color-mix(in srgb,var(--accent) 6%,transparent); --accent-border:color-mix(in srgb,var(--accent) 45%,transparent);
+  --accent-row:color-mix(in srgb,var(--accent) 9%,var(--surface)); --accent-row-hover:color-mix(in srgb,var(--accent) 12%,var(--surface));
+  --accent-line:color-mix(in srgb,var(--accent) 28%,var(--surface)); --proj:color-mix(in srgb,var(--accent2) 35%,var(--surface));
+  --success-tint:color-mix(in srgb,var(--success) 12%,transparent); --success-border:color-mix(in srgb,var(--success) 25%,transparent);
+  --warn-tint:color-mix(in srgb,var(--warn) 12%,transparent); --warn-border:color-mix(in srgb,var(--warn) 30%,transparent);
+  --danger-tint:color-mix(in srgb,var(--danger) 12%,transparent); --danger-hover:color-mix(in srgb,var(--danger) 10%,transparent);
+  --danger-line:color-mix(in srgb,var(--danger) 21%,var(--surface)); --danger-field:color-mix(in srgb,var(--danger) 45%,var(--surface));
+  --neutral-tint:color-mix(in srgb,var(--ink-3) 14%,transparent); --chart-col-hover:color-mix(in srgb,var(--ink) 3%,transparent);
+  --glass:color-mix(in srgb,var(--surface) 92%,transparent); --glass-bar:color-mix(in srgb,var(--bg) 88%,transparent);
+  --accent-glow:0 0 10px color-mix(in srgb,var(--accent) 40%,transparent);
+
+  /* Overlays and shadows (dark-family values; Light overrides below). */
+  --scrim:rgba(0,0,0,.74); --scrim-soft:rgba(0,0,0,.6);
+  --shadow-card:0 1px 2px rgba(0,0,0,.03); --shadow-btn:0 1px 2px rgba(0,0,0,.4); --shadow-btn-2:0 1px 2px rgba(0,0,0,.04);
+  --shadow-pop:0 18px 40px -10px rgba(0,0,0,.8); --shadow-menu:0 24px 60px -12px rgba(0,0,0,.9);
+  --shadow-modal:0 40px 120px -20px rgba(0,0,0,.9); --shadow-toast:0 18px 40px -12px rgba(0,0,0,.8);
+  --shadow-tip:0 8px 24px -6px rgba(0,0,0,.55),0 2px 6px rgba(0,0,0,.05); --shadow-drawer:0 0 60px rgba(0,0,0,.8);
+  --shadow-sheet:0 -20px 60px -20px rgba(0,0,0,.9); --shadow-segment:0 1px 2px rgba(0,0,0,.08),0 0 0 1px rgba(0,0,0,.04);
+
+  /* Corner radii by role. */
+  --radius-xs:4px; --radius-pill-sm:5px; --radius-sm:6px; --radius-nav:7px; --radius:8px; --radius-chip:9px;
+  --radius-md:10px; --radius-lg:12px; --radius-xl:14px; --radius-pill:999px;
+}
 :root[data-theme="light"] {
-  --bg: #f4f5f7;        /* app canvas — soft cool gray */
-  --panel: #ffffff;     /* cards / surfaces */
-  --panel-2: #eef1f5;   /* elevated rows, hovers, table headers */
-  --border: #e4e7ec;
-  --text: #131722;      /* near-black slate — strong contrast on white */
-  --text-dim: #667085;  /* secondary text — passes AA on white */
-  --accent: #2563eb;    /* deeper blue reads better on light surfaces */
-  --accent-hover: #1d4ed8;
-  --accent2: var(--accent);
-  --green: #16a34a;
-  --amber: #d97706;
-  --red: #dc2626;
-  --gray: #6b7280;
-  /* Subtle card lift + a soft ambient shadow, per the design. */
-  --shadow: 0 1px 2px rgba(19, 23, 34, 0.05), 0 4px 16px rgba(19, 23, 34, 0.06);
   color-scheme: light;
+  --bg:#F5F6F8; --input:#FFFFFF; --surface-inset:#F8F9FB; --surface:#FFFFFF; --surface-1:#F7F8FA; --popover:#FFFFFF;
+  --surface-2:#F1F3F6; --raised:#FFFFFF; --surface-3:#EFF1F4; --hover:#F1F3F6; --hover-strong:#EEF0F3;
+  --selected:#E3E6EB; --chip:#E6E9EE; --track:#D3D8DF; --board-col:#EEF1F5; --line-faint:#EEF0F3; --line-soft:#EEF0F3;
+  --line:#E3E6EB; --line-2:#DCE0E6; --line-strong:#D3D8DF; --line-3:#CBD1D9; --line-hover:#B9C0CA;
+  --line-hover-strong:#A3ABB7; --ink-strong:#0B1220; --ink:#111827; --ink-1:#374151; --ink-soft:#414B5A;
+  --ink-2:#4B5563; --ink-3:#6B7280; --ink-4:#8B93A1; --ink-placeholder:#9CA3AF; --ink-5:#C3C9D2; --accent-ink:#1D4ED8;
+  --accent-ink-hover:#1E40AF; --success:#16A34A; --success-ink:#15803D; --warn:#D97706; --warn-ink:#B45309;
+  --danger:#DC2626; --danger-ink:#B91C1C;
+  --scrim:rgba(15,23,42,.40); --scrim-soft:rgba(15,23,42,.32);
+  --shadow-card:0 1px 2px rgba(16,24,40,.05); --shadow-btn:0 1px 2px rgba(16,24,40,.12); --shadow-btn-2:0 1px 2px rgba(16,24,40,.05);
+  --shadow-pop:0 12px 32px -8px rgba(16,24,40,.16); --shadow-menu:0 16px 40px -12px rgba(16,24,40,.20);
+  --shadow-modal:0 24px 64px -16px rgba(16,24,40,.28); --shadow-toast:0 12px 28px -10px rgba(16,24,40,.22);
+  --shadow-tip:0 8px 24px -6px rgba(16,24,40,.18),0 2px 6px rgba(16,24,40,.05); --shadow-drawer:0 0 40px rgba(16,24,40,.18);
+  --shadow-sheet:0 -12px 40px -16px rgba(16,24,40,.22);
 }
+:root[data-theme="dim"] {
+  --bg:#111318; --input:#14161A; --surface-inset:#14161C; --surface:#16181D; --surface-1:#191C22; --popover:#1A1D23;
+  --surface-2:#1B1E24; --raised:#1B1E24; --surface-3:#1C1F25; --hover:#1E2128; --hover-strong:#22252C;
+  --selected:#2A2E36; --chip:#2C3038; --track:#3A3F49; --board-col:#14161A; --line-faint:#22252C; --line-soft:#262A31;
+  --line:#2A2E36; --line-2:#2E323A; --line-strong:#343842; --line-3:#3A3F49; --line-hover:#484F59;
+  --line-hover-strong:#555E68; --ink-4:#747679; --ink-placeholder:#626467; --ink-5:#505155;
+}
+:root[data-theme="slate"] {
+  --bg:#0F172A; --input:#121A2E; --surface-inset:#121B2F; --surface:#141D31; --surface-1:#172136; --popover:#182238;
+  --surface-2:#1A2438; --raised:#1B2539; --surface-3:#1C2639; --hover:#1E293B; --hover-strong:#243049;
+  --selected:#2B3850; --chip:#2D3A52; --track:#3B4A61; --board-col:#121A2E; --line-faint:#1E293B; --line-soft:#243049;
+  --line:#2B3850; --line-2:#2F3C55; --line-strong:#334155; --line-3:#3B4A61; --line-hover:#4D5E7C;
+  --line-hover-strong:#5F7297; --ink-4:#747A85; --ink-placeholder:#616774; --ink-5:#4E5564;
+}
+:root[data-theme="dusk"] {
+  --bg:#26272B; --input:#292A2E; --surface-inset:#2A2B30; --surface:#2C2D32; --surface-1:#2F3035; --popover:#303136;
+  --surface-2:#323238; --raised:#323339; --surface-3:#33343A; --hover:#35363C; --hover-strong:#393A40;
+  --selected:#3D3E44; --chip:#3F4046; --track:#4C4D54; --board-col:#292A2E; --line-faint:#35363C; --line-soft:#393A40;
+  --line:#3D3E44; --line-2:#414249; --line-strong:#46474E; --line-3:#4C4D54; --line-hover:#5A5A62;
+  --line-hover-strong:#67686F; --ink-1:#E0E0E2; --ink-soft:#D6D6D9; --ink-2:#BDBEC2; --ink-3:#A3A4A9; --ink-4:#88898E;
+  --ink-placeholder:#77787D; --ink-5:#636469;
+}
+:root[data-theme="neutral"] {
+  --bg:#3F3C36; --input:#44423B; --surface-inset:#47443D; --surface:#4A4740; --surface-1:#4E4B44; --popover:#4F4C45;
+  --surface-2:#524E48; --raised:#524F48; --surface-3:#54514A; --hover:#57544C; --hover-strong:#5C5951;
+  --selected:#625F57; --chip:#64625A; --track:#747168; --board-col:#44423B; --line-faint:#57544C; --line-soft:#5C5951;
+  --line:#625F57; --line-2:#67645C; --line-strong:#6D6A61; --line-3:#747168; --line-hover:#848178;
+  --line-hover-strong:#949088; --ink-strong:#F6F3ED; --ink:#ECE8E0; --ink-1:#E3DED5; --ink-soft:#DED9CF;
+  --ink-2:#DAD4C9; --ink-3:#CFC8BC; --ink-4:#B8B0A3; --ink-placeholder:#A39B8F; --ink-5:#8F887C; --accent-ink:#A9CBFF;
+  --accent-ink-hover:#CFE0FF; --success-ink:#86EFAC; --warn-ink:#FCD34D; --danger-ink:#FCA5A5;
+}
+/* Exact design values while the default accent is active. */
+:root:not([data-accent]):not([data-theme="light"]):not([data-theme="dim"]):not([data-theme="slate"]):not([data-theme="dusk"]):not([data-theme="neutral"]) {
+  --accent-row:#0C1424; --accent-row-hover:#0F1A2E; --accent-line:#23324F; --proj:#1E3157; --danger-line:#3A1A1A; --danger-field:#7F1D1D;
+}
+:root[data-theme="light"]:not([data-accent]) { --proj:#BCD0F4; }
+:root[data-accent="custom"] { --accent-ink:color-mix(in srgb,var(--accent) 62%,#fff); --accent-ink-hover:color-mix(in srgb,var(--accent) 45%,#fff); }
+:root[data-theme="light"][data-accent="custom"] { --accent-ink:color-mix(in srgb,var(--accent) 78%,#000); --accent-ink-hover:color-mix(in srgb,var(--accent) 65%,#000); }
 
-/* Status badges / pills / banners are pastel-on-tint, tuned for dark surfaces.
-   In light mode the pale text washes out, so each gets a darker foreground on a
-   lighter tint — designed for the theme, not inverted. */
-/* ---------------------------------------------------------------------------
-   Refined surface / typography scale for the premium design system. These
-   layer on top of the base palette above and are shared by every redesigned
-   page so the same card, hairline, faint-label and "featured" tones read
-   identically app-wide. Dark values here; light overrides in the block below.
-   =========================================================================== */
-:root {
-  --surface: #0e121b;       /* card / section surface — one step above --bg */
-  --hairline: #1a202c;      /* subtle internal divider / card border */
-  --text-faint: #5a6274;    /* dimmest labels & de-emphasized numerals */
-  --gold: #f5b04b;          /* "featured" accent */
-  --gold-tint: rgba(245, 158, 11, 0.10);
-  --gold-border: rgba(245, 158, 11, 0.30);
-  --control: #12161f;       /* inset control track (segmented tabs, search) */
-  --control-active: #232a36;/* selected segment fill */
-  --board-col: #10141d;     /* kanban column — recessed below the cards */
-  --board-col-border: #1e2530;
-}
-:root[data-theme="light"] {
-  --surface: #ffffff;
-  --hairline: var(--border);
-  --text-faint: #8a93a5;
-  --gold: #b45309;
-  --gold-tint: rgba(180, 83, 9, 0.10);
-  --gold-border: rgba(180, 83, 9, 0.28);
-  --control: #eef1f5;
-  --control-active: #ffffff;
-  --board-col: #eef1f5;
-  --board-col-border: var(--border);
-}
 
 :root[data-theme="light"] .priority-high { color: #b91c1c; }
 :root[data-theme="light"] .priority-medium { color: #92400e; }

@@ -20,7 +20,7 @@ export interface CurrentUser {
   /** Persisted UI theme, or null when the user hasn't explicitly chosen one.
    *  The client only adopts a non-null value, so it never clobbers the local
    *  theme with a default. */
-  themePreference?: "dark" | "light" | null;
+  themePreference?: string | null;
   accentColor?: string | null;
   accentColor2?: string | null;
   avatarColor?: string | null;

@@ -3,18 +3,24 @@ import { api } from "./api/client";
 import { useAuth } from "./auth/AuthContext";
 
 /**
- * App theme (light / dark). Three layers keep the choice consistent:
+ * App theme (six appearance themes). Three layers keep the choice consistent:
  *  - <html data-theme> drives every CSS token (set pre-render by the inline
  *    script in index.html, so there's no flash).
  *  - localStorage mirrors it for instant application on the next load.
  *  - the user profile (PATCH /auth/preferences) is the cross-device source of
  *    truth; on login we reconcile to whatever the server has.
  */
-export type Theme = "dark" | "light";
+export const THEMES = ["light", "dark", "dim", "slate", "dusk", "neutral"] as const;
+export type Theme = (typeof THEMES)[number];
+/** Only Light uses light surfaces; the other five are dark-family themes. */
+export const isLightTheme = (t: Theme): boolean => t === "light";
+const isTheme = (v: unknown): v is Theme => (THEMES as readonly string[]).includes(v as string);
 
 const STORAGE_KEY = "mh-theme";
 const ACCENT_KEY = "mh-accent";
 const ACCENT2_KEY = "mh-accent2";
+/** Last dark-family theme, so the quick light/dark toggle returns to it. */
+const DARK_KEY = "mh-theme-dark";
 
 /**
  * Accent presets offered in Settings. The default (null accent) keeps the
@@ -26,7 +32,7 @@ export const ACCENT_PRESETS: { key: string; label: string; hex: string }[] = [
   { key: "indigo", label: "Indigo", hex: "#6366f1" },
   { key: "violet", label: "Violet", hex: "#8b5cf6" },
   { key: "teal", label: "Teal", hex: "#14b8a6" },
-  { key: "emerald", label: "Emerald", hex: "#10b981" },
+  { key: "green", label: "Green", hex: "#22c55e" },
   { key: "amber", label: "Amber", hex: "#f59e0b" },
   { key: "rose", label: "Rose", hex: "#f43f5e" },
   { key: "slate", label: "Slate", hex: "#64748b" },
@@ -63,9 +69,11 @@ function applyAccent(hex: string | null): void {
   if (hex && HEX_COLOR.test(hex)) {
     root.setProperty("--accent", hex);
     root.setProperty("--accent-hover", darken(hex));
+    document.documentElement.dataset.accent = "custom";
   } else {
     root.removeProperty("--accent");
     root.removeProperty("--accent-hover");
+    delete document.documentElement.dataset.accent;
   }
   try {
     if (hex) localStorage.setItem(ACCENT_KEY, hex);
@@ -93,10 +101,10 @@ function applyAccent2(hex: string | null): void {
 function readStored(): Theme {
   try {
     const t = localStorage.getItem(STORAGE_KEY);
-    if (t === "light" || t === "dark") return t;
+    if (isTheme(t)) return t;
     // Fall back to whatever the boot script already applied.
     const attr = document.documentElement.dataset.theme;
-    return attr === "light" ? "light" : "dark";
+    return isTheme(attr) ? attr : "dark";
   } catch {
     return "dark";
   }
@@ -105,9 +113,10 @@ function readStored(): Theme {
 /** Apply to the DOM + persist locally. Server persistence is handled separately. */
 function applyTheme(theme: Theme): void {
   document.documentElement.dataset.theme = theme;
-  document.documentElement.style.colorScheme = theme;
+  document.documentElement.style.colorScheme = isLightTheme(theme) ? "light" : "dark";
   try {
     localStorage.setItem(STORAGE_KEY, theme);
+    if (!isLightTheme(theme)) localStorage.setItem(DARK_KEY, theme);
   } catch {
     /* private mode / storage disabled — DOM still updates */
   }
@@ -147,7 +156,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const toggleTheme = useCallback(() => {
-    setTheme(theme === "dark" ? "light" : "dark");
+    if (!isLightTheme(theme)) { setTheme("light"); return; }
+    let back: Theme = "dark";
+    try { const d = localStorage.getItem(DARK_KEY); if (isTheme(d) && !isLightTheme(d)) back = d; } catch { /* storage disabled */ }
+    setTheme(back);
   }, [theme, setTheme]);
 
   const setAccent = useCallback((hex: string | null) => {
@@ -167,7 +179,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // stale local copy. Only applies when it actually differs, to avoid churn.
   useEffect(() => {
     const server = user?.themePreference;
-    if ((server === "light" || server === "dark") && server !== theme) {
+    if (isTheme(server) && server !== theme) {
       setThemeState(server);
       applyTheme(server);
     }

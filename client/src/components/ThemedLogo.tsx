@@ -25,7 +25,9 @@ export const ThemedLogo = memo(function ThemedLogo({ src, alt, className, style 
   className?: string;
   style?: React.CSSProperties;
 }) {
-  const { theme } = useTheme();
+  // Logos have two variants; every theme except Light sits on a dark ground.
+  const { theme: appTheme } = useTheme();
+  const theme = appTheme === "light" ? "light" : "dark";
   // Re-render trigger for when background processing completes; the displayed
   // value itself always comes straight from the cache at render time.
   const [, bump] = useReducer((c: number) => c + 1, 0);

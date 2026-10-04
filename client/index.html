@@ -15,9 +15,9 @@
       (function () {
         try {
           var t = localStorage.getItem("mh-theme");
-          if (t !== "light" && t !== "dark") t = "dark";
+          if (["light", "dark", "dim", "slate", "dusk", "neutral"].indexOf(t) < 0) t = "dark";
           document.documentElement.dataset.theme = t;
-          document.documentElement.style.colorScheme = t;
+          document.documentElement.style.colorScheme = t === "light" ? "light" : "dark";
         } catch (e) {}
       })();
     </script>
