@@ -356,22 +356,28 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .sidebar-edge-toggle svg.flipped { transform: rotate(180deg); }
 /* Brand header: the full row belongs to the logo — the collapse control now
    rides the panel edge instead of competing for header space. */
-.sidebar-brand { display: flex; align-items: center; gap: 8px; height: 60px; padding: 0 14px; border-bottom: 1px solid var(--border); }
+.sidebar-brand { display: flex; align-items: center; gap: 10px; height: 60px; flex: none; padding: 0 20px; }
 .sidebar-brand .brand, .sidebar-brand .sidebar-logo { margin-right: auto; }
-.sidebar-nav { flex: 1; overflow-y: auto; padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.sidebar-nav { flex: 1; overflow-y: auto; padding: 10px 12px 16px; display: flex; flex-direction: column; gap: 20px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .sidebar-nav::-webkit-scrollbar { width: 6px; }
 .sidebar-nav::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 .sidebar-nav::-webkit-scrollbar-track { background: transparent; }
 .sidebar-link {
-  display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 7px;
-  color: var(--text-dim); font-weight: 500; cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 7px;
+  color: var(--ink-2); font-size: 13.5px; font-weight: 500; cursor: pointer; user-select: none;
 }
-.sidebar-link:hover { background: var(--panel-2); color: var(--text); text-decoration: none; }
+.sidebar-link:hover { color: var(--ink); text-decoration: none; }
+.sidebar-section { display: flex; flex-direction: column; gap: 2px; }
+.sidebar-section-label { padding: 0 10px 6px; font-size: 11.5px; font-weight: 600; color: var(--ink-3); }
+.sidebar-foot { flex: none; padding: 10px 12px 14px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.sidebar.collapsed .sidebar-foot { padding: 10px 8px 14px; }
+.sidebar.collapsed .sidebar-nav { padding: 10px 8px 16px; }
 /* Single shared active style for BOTH sidebar states: accent-tinted pill, no
    edge stripe — identical to the collapsed rail's treatment. */
-.sidebar-link.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.sidebar-link.active { color: var(--ink-strong); font-weight: 600; background: var(--accent-tint); box-shadow: inset 0 0 0 1px var(--accent-ring); }
+.sidebar-link.active .sidebar-icon { color: var(--accent); }
 .sidebar-group.within > .group-head { color: var(--text); }
-.sidebar-icon { display: flex; align-items: center; justify-content: center; width: 20px; flex: 0 0 20px; }
+.sidebar-icon { display: flex; align-items: center; justify-content: center; width: 17px; flex: 0 0 17px; color: var(--ink-3); }
 .sidebar-label { flex: 1; white-space: nowrap; overflow: hidden; }
 .group-caret { color: var(--text-dim); display: flex; align-items: center; }
 .sidebar-sub { display: flex; flex-direction: column; margin: 2px 0 4px 30px; border-left: 1px solid var(--border); }
@@ -387,27 +393,6 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 .data-table .row-link:hover { text-decoration: underline; }
 
 /* Notifications bell (sidebar footer) — visible from every page. */
-.notif-wrap { position: relative; }
-.notif-bell { position: relative; display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px; border-radius: 6px; }
-.notif-bell:hover { background: var(--panel-2); }
-.notif-label { font-size: 13px; }
-.notif-badge {
-  position: absolute; top: 0; left: 16px; min-width: 16px; height: 16px; padding: 0 4px;
-  border-radius: 6px; background: var(--red); color: #fff; font-size: 10px; font-weight: 700;
-  display: flex; align-items: center; justify-content: center; line-height: 1;
-}
-.notif-panel {
-  position: fixed; bottom: 64px; left: 12px; width: 320px; max-height: 60vh; overflow: auto; z-index: var(--z-notif);
-  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 12px 32px rgba(0, 0, 0, .35);
-}
-.notif-head { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--border); }
-.notif-item { display: block; width: 100%; text-align: left; padding: 10px 12px; border: 0; border-top: 1px solid var(--border); background: transparent; color: inherit; cursor: pointer; }
-.notif-item:first-of-type { border-top: 0; }
-.notif-item:hover { background: var(--panel-2); }
-.notif-item.unread { border-left: 3px solid var(--accent); }
-.notif-title { display: block; font-weight: 600; font-size: 13px; }
-.notif-body { display: block; font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-.notif-time { display: block; font-size: 11px; color: var(--text-dim); margin-top: 4px; }
 /* Collapsed rail: stack the compact logo above a centered toggle so both read
    as intentional rather than crammed onto one 60px row. */
 .sidebar.collapsed .sidebar-brand { flex-direction: column; gap: 6px; height: auto; padding: 10px 0 8px; }
@@ -2603,51 +2588,103 @@ body.pipeline-dragging, body.pipeline-dragging * { user-select: none !important;
    --------------------------------------------------------------------------- */
 .app-col { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .topbar {
-  display: flex; align-items: center; justify-content: flex-end; gap: 10px;
-  padding: 4px 18px; min-height: 44px; background: var(--panel); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: flex-end; gap: 4px;
+  height: 60px; flex: none; padding: 0 32px; background: var(--bg); border-bottom: 1px solid var(--line);
   position: sticky; top: 0; z-index: 40;
 }
+@keyframes cmRise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .topbar .notif-wrap { position: relative; }
 .topbar .notif-bell {
-  width: 30px; height: 30px; padding: 0; justify-content: center; border-radius: 6px;
-  background: var(--panel-2); border: 1px solid var(--border); color: var(--text-dim);
+  position: relative; width: 34px; height: 34px; padding: 0; display: flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); box-shadow: none;
 }
-.topbar .notif-bell:hover { color: var(--text); background: var(--panel-2); }
-.topbar .notif-badge { top: -4px; left: auto; right: -4px; }
-/* In the top bar the panel drops DOWN from the bell, hugging the right edge. */
-.topbar .notif-panel { position: absolute; top: calc(100% + 8px); right: 0; bottom: auto; left: auto; }
-.topbar-div { width: 1px; height: 18px; background: var(--border); }
+.topbar .notif-bell:hover, .topbar .notif-bell.open { color: var(--ink); background: var(--hover-strong); }
+.topbar .notif-badge {
+  position: absolute; top: 1px; right: 0; left: auto; min-width: 15px; height: 15px; padding: 0 3px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center; box-shadow: 0 0 0 2px var(--bg);
+  background: var(--danger); color: var(--on-accent); font-size: 9.5px; line-height: 1; font-weight: 800;
+}
+.topbar .notif-panel {
+  position: absolute; top: calc(100% + 8px); right: -8px; bottom: auto; left: auto; width: 400px; max-width: calc(100vw - 24px);
+  padding: 0; background: var(--popover); border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: var(--shadow-menu);
+  overflow: hidden; animation: cmRise 140ms ease-out; z-index: var(--z-notif);
+}
+.notif-head { display: flex; align-items: center; gap: 8px; padding: 14px 14px 10px 16px; border-bottom: 0; }
+.notif-head-title { flex: 1; font-size: 15px; font-weight: 600; color: var(--ink); }
+.notif-markall { height: 28px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--accent-ink); font-size: 12.5px; font-weight: 600; box-shadow: none; }
+.notif-markall:hover { background: var(--hover-strong); }
+.notif-gear { width: 28px; height: 28px; padding: 0; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); box-shadow: none; }
+.notif-gear:hover { background: var(--hover-strong); color: var(--ink); }
+.notif-tabs { display: flex; gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--line-soft); }
+.notif-tab { height: 34px; padding: 0; display: flex; align-items: center; gap: 6px; border: 0; border-bottom: 2px solid transparent; border-radius: 0; margin-bottom: -1px; background: transparent; color: var(--ink-3); font-size: 13px; font-weight: 600; box-shadow: none; }
+.notif-tab:hover { background: transparent; color: var(--ink); }
+.notif-tab.active { color: var(--ink); border-bottom-color: var(--ink); }
+.notif-tab span { font-size: 11.5px; font-weight: 500; color: var(--ink-4); }
+.notif-list { max-height: min(520px, calc(100vh - 160px)); overflow: auto; padding: 4px 0 8px; }
+.notif-day { padding: 12px 16px 6px; font-size: 12px; font-weight: 600; color: var(--ink-4); }
+.notif-item, .notif-item:first-of-type {
+  display: flex; align-items: flex-start; gap: 12px; width: calc(100% - 12px); margin: 0 6px; padding: 10px; text-align: left;
+  border: 0; border-radius: 9px; background: transparent; color: inherit; cursor: pointer; box-shadow: none;
+}
+.notif-item:hover { background: var(--hover); }
+.notif-item.unread { border-left: 0; }
+.notif-tile { flex: none; width: 32px; height: 32px; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+.notif-tile.tone-danger { background: var(--danger-tint); color: var(--danger-ink); }
+.notif-tile.tone-accent { background: var(--accent-tint); color: var(--accent-ink); }
+.notif-tile.tone-warn { background: var(--warn-tint); color: var(--warn-ink); }
+.notif-tile.tone-success { background: var(--success-tint); color: var(--success-ink); }
+.notif-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.notif-title { display: block; font-size: 13px; line-height: 1.4; font-weight: 500; color: var(--ink-soft); }
+.notif-item.unread .notif-title { font-weight: 600; color: var(--ink-strong); }
+.notif-body { display: block; margin: 0; font-size: 12.5px; line-height: 1.45; color: var(--ink-3); }
+.notif-side { flex: none; display: flex; flex-direction: column; align-items: flex-end; gap: 8px; padding-top: 1px; }
+.notif-time { display: block; margin: 0; font-size: 12px; color: var(--ink-4); }
+.notif-dot { width: 8px; height: 8px; border-radius: 50%; background: transparent; }
+.notif-item.unread .notif-dot { background: var(--accent); }
+.notif-empty { padding: 40px 24px; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.notif-empty strong { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.notif-empty span { font-size: 12.5px; color: var(--ink-3); }
+.topbar-div { width: 1px; height: 22px; background: var(--line); margin: 0 8px; }
 .topbar-userwrap { position: relative; }
-.topbar-user { display: flex; align-items: center; gap: 8px; border-radius: 6px; padding: 3px 8px 3px 4px; border: 1px solid transparent; background: transparent; }
-.topbar-user:hover, .topbar-user.open { background: var(--panel-2); border-color: var(--border); }
-/* Reference user chip: solid deep-blue 32px circle with white initials,
-   13.5px/700 name over an 11.5px dim role line. */
+.topbar-user { flex: none; display: flex; align-items: center; gap: 10px; height: 42px; padding: 0 8px 0 5px; border: 0; border-radius: 9px; background: transparent; text-align: left; box-shadow: none; }
+.topbar-user:hover, .topbar-user.open { background: var(--hover-strong); border: 0; }
 .topbar-avatar {
-  width: 32px; height: 32px; border-radius: 50%; flex: none;
-  background: #1d4ed8; color: #fff;
-  display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
+  width: 30px; height: 30px; border-radius: 50%; flex: none; color: var(--on-accent);
+  display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700;
 }
-.topbar-user-meta { display: flex; flex-direction: column; line-height: 1.2; text-align: left; min-width: 0; }
-.topbar-user-name { font-size: 13.5px; font-weight: 700; white-space: nowrap; }
-.topbar-user-role { font-size: 11.5px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.topbar-caret { color: var(--text-dim); transition: transform .12s ease; }
+.topbar-avatar.lg { width: 40px; height: 40px; font-size: 13px; }
+.topbar-user-meta { display: flex; flex-direction: column; gap: 1px; line-height: 1.2; text-align: left; min-width: 0; }
+.topbar-user-name { font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; }
+.topbar-user-role { font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-caret { color: var(--ink-3); transition: transform 150ms; }
 .topbar-caret.up { transform: rotate(180deg); }
-/* User menu — same dropdown language as the rest of the app. */
+/* Account menu. */
 .topbar-menu {
-  position: absolute; top: calc(100% + 8px); right: 0; min-width: 220px; z-index: 60;
-  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-  box-shadow: 0 12px 32px rgba(0, 0, 0, .35); padding: 6px; display: flex; flex-direction: column;
+  position: absolute; top: calc(100% + 8px); right: 0; width: 280px; z-index: var(--z-dropdown);
+  display: flex; flex-direction: column; padding: 0; overflow: hidden; animation: cmRise 140ms ease-out;
+  background: var(--popover); border: 1px solid var(--line-strong); border-radius: 12px; box-shadow: var(--shadow-menu);
 }
-.topbar-menu-id { display: flex; align-items: center; gap: 9px; padding: 8px 10px 10px; border-bottom: 1px solid var(--border); margin-bottom: 6px; }
+.topbar-menu-id { display: flex; align-items: center; gap: 12px; padding: 14px; margin: 0; border-bottom: 1px solid var(--line-soft); }
+.topbar-menu-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.topbar-menu-name { font-size: 14px; font-weight: 600; color: var(--ink); }
+.topbar-menu-email { font-size: 12.5px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-menu-org { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line-soft); font-size: 12.5px; color: var(--ink-3); }
+.topbar-menu-org > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar-role-pill { flex: none; height: 20px; padding: 0 7px; display: inline-flex; align-items: center; border-radius: 5px; background: var(--accent-tint); color: var(--accent-ink); font-size: 11.5px; font-weight: 700; }
+.topbar-menu-group { display: flex; flex-direction: column; gap: 1px; padding: 6px; border-bottom: 1px solid var(--line-soft); }
+.topbar-menu-group.last { border-bottom: 0; }
 .topbar-menu-item {
-  display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 7px;
-  font-size: 12.5px; font-weight: 600; color: var(--text); background: transparent; border: none;
+  display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 9px; border-radius: 7px;
+  font-size: 13px; font-weight: 500; color: var(--ink); background: transparent; border: none; box-shadow: none;
   text-decoration: none; text-align: left; width: 100%;
 }
-.topbar-menu-item:hover { background: var(--panel-2); text-decoration: none; color: var(--text); }
-.topbar-menu-item.danger { color: var(--red); }
-.topbar-menu-item.danger:hover { background: color-mix(in srgb, var(--red) 10%, transparent); }
-.topbar-menu-div { height: 1px; background: var(--border); margin: 6px 0; }
+.topbar-menu-item svg { flex: none; color: var(--ink-3); }
+.topbar-menu-item span { flex: 1; }
+.topbar-menu-item em { font-style: normal; font-size: 12px; color: var(--ink-4); }
+.topbar-menu-item:hover { background: var(--hover-strong); text-decoration: none; color: var(--ink); }
+.topbar-menu-item.danger { color: var(--danger-ink); font-weight: 600; }
+.topbar-menu-item.danger svg { color: currentColor; }
+.topbar-menu-item.danger:hover { background: var(--danger-hover); color: var(--danger-ink); }
 
 /* ---------------------------------------------------------------------------
    Pipeline board redesign (reference layout): flexible columns with colored

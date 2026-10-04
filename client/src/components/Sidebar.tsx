@@ -1,11 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { NavLink, useLocation } from "react-router-dom";
-import { Workflow, ChevronRight, ChevronDown, X } from "lucide-react";
-import {
-  DashboardIcon, DealsIcon, MineralsIcon, BuyersIcon, ContactsIcon, MapPinIcon,
-  ResearchIcon, WellsIcon, ReportsIcon, ExpensesIcon, PortalIcon, SettingsGearIcon,
-} from "./navIcons";
+import { ChevronRight, ChevronDown, X } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { loadBranding } from "../lib/branding";
 import { layoutRect } from "../lib/viewport";
@@ -14,9 +10,6 @@ import { revealActiveStripItems, setMobileNavOpen, useIsPhone, useMobileNavOpen 
 
 interface NavItem {
   label: string;
-  // Both lucide icons (Pipeline keeps its original) and the custom navIcons
-  // set satisfy this shape — lucide's `size` also admits strings, hence the
-  // widened prop type.
   icon: React.ElementType<{ size?: number | string }>;
   to?: string;
   end?: boolean;
@@ -30,30 +23,49 @@ interface NavItem {
   match?: string;
 }
 
+/** Line icon from a single SVG path (the redesign's navigation icon set). */
+const pathIcon = (d: string) => function NavIcon({ size = 17 }: { size?: number | string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d={d} />
+    </svg>
+  );
+};
+const BUYERS_PATH = "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 4.5a3.5 3.5 0 0 1 0 6.5M21 20c0-2.6-1.6-4.9-4-5.7";
+
 // Config-driven so new modules are added here without touching layout code.
-const NAV: NavItem[] = [
-  { label: "Dashboard", icon: DashboardIcon, to: "/", end: true, desc: "Today's acquisition snapshot — active deals, profit, follow-ups" },
-  // Single entry landing on ACTIVE deals (the working set); All/Closed/
-  // Archived remain reachable via the tabs on the Deals pages themselves.
-  { label: "Deals", icon: DealsIcon, to: "/deals/active", match: "/deals", perm: "viewDeals", desc: "Acquisition opportunities you're working" },
-  { label: "Mineral Assets", icon: MineralsIcon, to: "/assets", perm: "viewDeals", desc: "Your owned mineral & royalty portfolio" },
-  { label: "Pipeline", icon: Workflow, to: "/pipeline", perm: "viewDeals", desc: "Drag deals through the acquisition stages" },
-  { label: "Buyers", icon: BuyersIcon, to: "/buyers", perm: "viewBuyers", desc: "Buyer list, buy boxes, and relationships" },
-  // Acquisitions module — sourcing side of the CRM.
-  { label: "Contacts", icon: ContactsIcon, to: "/contacts", perm: "viewContacts", desc: "Acquisitions — sellers, prospects, and inbound leads" },
-  { label: "Map", icon: MapPinIcon, to: "/map", perm: "viewMap", desc: "Wells, abstracts, and deals on the Texas map" },
-  { label: "Research", icon: ResearchIcon, to: "/research", perm: "viewResearch", desc: "Market intelligence — county transactions, permits, operators" },
-  { label: "Well Analysis", icon: WellsIcon, to: "/valuation", perm: "viewWellAnalysis", desc: "Value specific wells — decline curves, forecasts, offer prices" },
-  { label: "Reports", icon: ReportsIcon, to: "/reports", perm: "viewReports", desc: "Your business performance — closed deals, profit, win rate" },
-  { label: "Expenses", icon: ExpensesIcon, to: "/expenses", perm: "manageExpenses", desc: "Company spend and reimbursements" },
-  // Buyer Portal is operational-only (the offerings marketplace); its
-  // configuration lives under Settings → Buyer Portal, so viewing settings
-  // never lights up this item.
-  { label: "Buyer Portal", icon: PortalIcon, to: "/portal-admin", perm: "publishOfferings", desc: "Your public offering marketplace" },
-  // Single entry — General/Organization/Portal/Integrations are tabs inside
-  // the Settings pages (SettingsNav), so the sidebar stays flat.
-  { label: "Settings", icon: SettingsGearIcon, to: "/settings", desc: "Account, organization, portal, and integrations" },
+// Groups render with a small label; a group whose items are all hidden by
+// permissions disappears with them.
+const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
+  { label: "", items: [
+    { label: "Dashboard", icon: pathIcon("M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"), to: "/", end: true, desc: "Today's acquisition snapshot — active deals, profit, follow-ups" },
+    // Single entry landing on ACTIVE deals (the working set); All/Closed/
+    // Archived remain reachable via the tabs on the Deals pages themselves.
+    { label: "Deals", icon: pathIcon("M4 8h16v11H4zM9 8V5h6v3M4 13h16"), to: "/deals/active", match: "/deals", perm: "viewDeals", desc: "Acquisition opportunities you're working" },
+    { label: "Pipeline", icon: pathIcon("M5 4v16M12 4v11M19 4v6"), to: "/pipeline", perm: "viewDeals", desc: "Drag deals through the acquisition stages" },
+    { label: "Mineral Assets", icon: pathIcon("M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5"), to: "/assets", perm: "viewDeals", desc: "Your owned mineral & royalty portfolio" },
+  ] },
+  { label: "Relationships", items: [
+    { label: "Buyers", icon: pathIcon(BUYERS_PATH), to: "/buyers", perm: "viewBuyers", desc: "Buyer list, buy boxes, and relationships" },
+    // Acquisitions module — sourcing side of the CRM.
+    { label: "Contacts", icon: pathIcon("M5 4h13a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H5zM9 4v16M13 10h3M13 14h3"), to: "/contacts", perm: "viewContacts", desc: "Acquisitions — sellers, prospects, and inbound leads" },
+    // Buyer Portal is operational-only (the offerings marketplace); its
+    // configuration lives under Settings → Buyer Portal.
+    { label: "Buyer Portal", icon: pathIcon("M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3z"), to: "/portal-admin", perm: "publishOfferings", desc: "Your public offering marketplace" },
+  ] },
+  { label: "Analysis", items: [
+    { label: "Map", icon: pathIcon("M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14"), to: "/map", perm: "viewMap", desc: "Wells, abstracts, and deals on the Texas map" },
+    { label: "Research", icon: pathIcon("M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4"), to: "/research", perm: "viewResearch", desc: "Market intelligence — county transactions, permits, operators" },
+    { label: "Well Analysis", icon: pathIcon("M12 3L7 21M12 3l5 18M8.6 15h6.8M10.2 9h3.6M5 21h14"), to: "/valuation", perm: "viewWellAnalysis", desc: "Value specific wells — decline curves, forecasts, offer prices" },
+    { label: "Reports", icon: pathIcon("M4 20h16M7 16v-5M12 16V6M17 16v-8"), to: "/reports", perm: "viewReports", desc: "Your business performance — closed deals, profit, win rate" },
+  ] },
+  { label: "Finance", items: [
+    { label: "Expenses", icon: pathIcon("M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6M9 16h3"), to: "/expenses", perm: "manageExpenses", desc: "Company spend and reimbursements" },
+  ] },
 ];
+// Pinned to the bottom of the sidebar. General/Organization/Portal/
+// Integrations are sections inside the Settings pages.
+const SETTINGS_ITEM: NavItem = { label: "Settings", icon: pathIcon("M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4"), to: "/settings", match: "/settings", desc: "Account, organization, portal, and integrations" };
 
 export function Sidebar() {
   const { user, can } = useAuth();
@@ -154,10 +166,22 @@ export function Sidebar() {
       </div>
 
       <nav className="sidebar-nav">
-        {NAV.filter(allowed).map((item) => (
-          <SidebarItem key={item.label} item={item} collapsed={railCollapsed} allowed={allowed} pathname={location.pathname} />
-        ))}
+        {NAV_GROUPS.map((g) => {
+          const items = g.items.filter(allowed);
+          if (items.length === 0) return null;
+          return (
+            <div className="sidebar-section" key={g.label || "main"}>
+              {g.label && !railCollapsed && <div className="sidebar-section-label">{g.label}</div>}
+              {items.map((item) => (
+                <SidebarItem key={item.label} item={item} collapsed={railCollapsed} allowed={allowed} pathname={location.pathname} />
+              ))}
+            </div>
+          );
+        })}
       </nav>
+      <div className="sidebar-foot">
+        <SidebarItem item={SETTINGS_ITEM} collapsed={railCollapsed} allowed={allowed} pathname={location.pathname} />
+      </div>
 
       {/* Notifications, user identity, and Sign out live in the fixed top
           navigation bar (TopBar) — the sidebar is pure navigation. */}
@@ -198,7 +222,7 @@ function SidebarItem({ item, collapsed, allowed, pathname }: { item: NavItem; co
   if (!hasChildren) {
     return (
       <NavLink to={item.to!} end={item.end} className={({ isActive }) => `sidebar-link ${isActive || (item.match && pathname.startsWith(item.match)) ? "active" : ""}`} title={collapsed ? item.label : item.desc}>
-        <span className="sidebar-icon"><Icon size={18} /></span>
+        <span className="sidebar-icon"><Icon size={17} /></span>
         {!collapsed && <span className="sidebar-label">{item.label}</span>}
       </NavLink>
     );
@@ -210,7 +234,7 @@ function SidebarItem({ item, collapsed, allowed, pathname }: { item: NavItem; co
         onMouseEnter={openFlyout} onMouseLeave={scheduleClose}>
         <button type="button" className={`sidebar-link group-head ${within ? "active" : ""}`} title={item.label}
           onClick={() => (flyout ? setFlyout(null) : openFlyout())}>
-          <span className="sidebar-icon"><Icon size={18} /></span>
+          <span className="sidebar-icon"><Icon size={17} /></span>
         </button>
         {/* Rendered into <body> so no ancestor stacking context (transforms on
             the app shell, a MapLibre canvas, sticky headers, etc.) can ever
@@ -236,7 +260,7 @@ function SidebarItem({ item, collapsed, allowed, pathname }: { item: NavItem; co
     <div className={`sidebar-group ${within ? "within" : ""}`}>
       <div className="sidebar-link group-head" onClick={() => setOpen((o) => !o)} title={item.desc}>
 
-        <span className="sidebar-icon"><Icon size={18} /></span>
+        <span className="sidebar-icon"><Icon size={17} /></span>
         <span className="sidebar-label">{item.label}</span><span className="group-caret">{open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}</span>
       </div>
       <div className="sidebar-sub" style={!open ? { display: "none" } : undefined}>
