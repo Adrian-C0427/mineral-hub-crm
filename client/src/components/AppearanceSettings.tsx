@@ -4,11 +4,16 @@ import { useAuth } from "../auth/AuthContext";
 import { api } from "../api/client";
 import { AVATAR_COLORS, avatarColor } from "../lib/avatarColor";
 
-// Appearance — light/dark theme picker. Applies instantly across the whole app
-// and saves to the user's profile so the choice follows them across devices.
-const OPTIONS: { value: Theme; label: string; hint: string }[] = [
-  { value: "light", label: "Light", hint: "Bright surfaces for well-lit rooms" },
-  { value: "dark", label: "Dark", hint: "Low-glare, the app's original look" },
+// Appearance — theme picker. Applies instantly across the whole app and saves
+// to the user's profile so the choice follows them across devices. Preview
+// colours are fixed per card (they depict that theme, not the active one).
+const OPTIONS: { value: Theme; label: string; hint: string; side: string; bg: string; line: string; card: string; frame: string }[] = [
+  { value: "light", label: "Light", hint: "Bright surfaces for well-lit rooms", side: "#0A0A0A", bg: "#FFFFFF", line: "#D4D4D8", card: "#EDEDED", frame: "#E4E4E7" },
+  { value: "dark", label: "Dark", hint: "Low glare, the original look", side: "#0A0A0A", bg: "#000000", line: "#2A2A2A", card: "#161616", frame: "#1E1E1E" },
+  { value: "dim", label: "Dim", hint: "Soft charcoal with a cool blue cast", side: "#16181D", bg: "#111318", line: "#2C3038", card: "#1A1D23", frame: "#262A31" },
+  { value: "slate", label: "Slate", hint: "Modern professional gray, built for dashboards", side: "#1E293B", bg: "#0F172A", line: "#475569", card: "#1E293B", frame: "#334155" },
+  { value: "dusk", label: "Dusk", hint: "Darker gray that stops short of black", side: "#2C2D32", bg: "#26272B", line: "#4C4D54", card: "#35363C", frame: "#3D3E44" },
+  { value: "neutral", label: "Neutral", hint: "Warm taupe and sage, no stark whites or deep blacks", side: "#3F3C36", bg: "#4A4740", line: "#8E9580", card: "#57544C", frame: "#625F57" },
 ];
 
 export function AppearanceSettings() {
@@ -49,18 +54,25 @@ export function AppearanceSettings() {
             className={`theme-option ${theme === o.value ? "active" : ""}`}
             onClick={() => setTheme(o.value)}
           >
-            <span className={`theme-swatch theme-swatch-${o.value}`} aria-hidden="true">
-              <span className="tsw-bar" />
-              <span className="tsw-body">
-                <span className="tsw-line" />
-                <span className="tsw-line short" />
+            <span className="theme-preview" style={{ borderColor: o.frame }} aria-hidden="true">
+              <span className="tpv-side" style={{ background: o.side }}>
+                <i style={{ background: o.value === "light" ? "#2A2A2A" : o.line }} />
+                <i style={{ background: o.value === "light" ? "#2A2A2A" : o.line, width: "70%" }} />
+                <i style={{ background: "var(--accent)" }} />
+              </span>
+              <span className="tpv-main" style={{ background: o.bg }}>
+                <i style={{ background: o.line, width: "60%" }} />
+                <b style={{ background: o.card }} />
+                <i style={{ background: "var(--accent)", width: "40%" }} />
               </span>
             </span>
-            <span className="theme-option-label">
-              {o.label}
-              {theme === o.value && <span className="theme-check" aria-hidden="true"> ✓</span>}
+            <span className="theme-option-foot">
+              <span className="theme-radio" />
+              <span className="theme-option-text">
+                <span className="theme-option-label">{o.label}</span>
+                <span className="theme-option-hint">{o.hint}</span>
+              </span>
             </span>
-            <span className="muted" style={{ fontSize: 12 }}>{o.hint}</span>
           </button>
         ))}
       </div>

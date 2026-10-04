@@ -120,6 +120,22 @@
 :root[data-theme="light"]:not([data-accent]) { --proj:#BCD0F4; }
 :root[data-accent="custom"] { --accent-ink:color-mix(in srgb,var(--accent) 62%,#fff); --accent-ink-hover:color-mix(in srgb,var(--accent) 45%,#fff); }
 :root[data-theme="light"][data-accent="custom"] { --accent-ink:color-mix(in srgb,var(--accent) 78%,#000); --accent-ink-hover:color-mix(in srgb,var(--accent) 65%,#000); }
+/* In Light the navigation stays dark: the sidebar (and its collapsed-rail
+   flyout, which renders outside it) re-declare the Dark tokens locally. The
+   old alias names are repeated because aliases resolve where they are declared. */
+:root[data-theme="light"] .sidebar,
+:root[data-theme="light"] .sidebar-flyout {
+  color-scheme: dark;
+  --bg:#000000; --input:#050505; --surface:#0A0A0A; --surface-2:#111111; --surface-3:#141414; --popover:#0E0E0E;
+  --hover:#161616; --hover-strong:#1A1A1A; --selected:#1E1E1E; --chip:#202020;
+  --line-faint:#161616; --line-soft:#1A1A1A; --line:#1E1E1E; --line-strong:#262626; --line-hover:#333333;
+  --ink-strong:#FFFFFF; --ink:#EDEDED; --ink-1:#D4D4D4; --ink-2:#A6A6A6; --ink-3:#8A8A8A; --ink-4:#6E6E6E; --ink-5:#4A4A4A;
+  --accent-ink:#7AAEFF; --accent-ink-hover:#A9CBFF;
+  --panel:var(--surface); --panel-2:var(--surface-2); --border:var(--line); --text:var(--ink); --text-dim:var(--ink-3);
+  --text-faint:var(--ink-4); --text-mid:var(--ink-1); --hairline:var(--line-soft);
+  --shadow-pop:0 18px 40px -10px rgba(0,0,0,.8);
+  color: var(--ink);
+}
 
 
 :root[data-theme="light"] .priority-high { color: #b91c1c; }
@@ -311,7 +327,7 @@ label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 
 /* --- Left sidebar navigation --- */
 .sidebar {
   position: relative; z-index: 50;
-  width: 220px; flex: 0 0 220px; background: var(--panel); border-right: 1px solid var(--border);
+  width: 236px; flex: 0 0 236px; background: var(--bg); border-right: 1px solid var(--line);
   position: sticky; top: 0; display: flex; flex-direction: column;
   height: calc(100vh / var(--ui-zoom, 1)); height: calc(100dvh / var(--ui-zoom, 1));
   transition: width 0.15s, flex-basis 0.15s;
@@ -754,7 +770,7 @@ button.match-log { flex: none; margin-left: auto; padding: 3px 10px; font-size: 
 .banner-info { background: rgba(59,130,246,0.12); border: 1px solid rgba(59,130,246,0.4); color: #93c5fd; }
 
 /* --- Appearance theme picker --- */
-.theme-picker { display: flex; gap: 12px; flex-wrap: wrap; }
+.theme-picker { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
 /* Appearance rows below the theme picker: accent + avatar color pickers. */
 .pref-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
   border-top: 1px solid var(--hairline, var(--border)); margin-top: 16px; padding-top: 14px; }
@@ -771,28 +787,24 @@ button.match-log { flex: none; margin-left: auto; padding: 3px 10px; font-size: 
 .color-swatch.taken { opacity: 0.35; }
 .color-swatch.taken .swatch-taken { color: #fff; font-size: 12px; font-weight: 800; line-height: 1; }
 .theme-option {
-  display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
-  flex: 1 1 200px; min-width: 180px; text-align: left;
-  padding: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
+  display: flex; flex-direction: column; gap: 10px; padding: 10px; text-align: left; cursor: pointer;
+  border: 1.5px solid var(--line); border-radius: var(--radius-lg); background: var(--bg); color: var(--ink);
 }
-.theme-option:hover { border-color: var(--text-dim); background: var(--panel-2); }
-.theme-option.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
-.theme-option-label { font-weight: 600; color: var(--text); }
-.theme-check { color: var(--accent); }
-/* Miniature app preview so each choice is recognizable at a glance. */
-.theme-swatch { width: 100%; height: 54px; border-radius: 7px; overflow: hidden; border: 1px solid var(--border); display: flex; }
-.theme-swatch .tsw-bar { width: 26%; height: 100%; }
-.theme-swatch .tsw-body { flex: 1; padding: 8px; display: flex; flex-direction: column; gap: 5px; }
-.theme-swatch .tsw-line { height: 6px; border-radius: 3px; width: 100%; }
-.theme-swatch .tsw-line.short { width: 55%; }
-.theme-swatch-light { background: #ffffff; }
-.theme-swatch-light .tsw-bar { background: #eef1f5; border-right: 1px solid #d7dee6; }
-.theme-swatch-light .tsw-line { background: #d7dee6; }
-.theme-swatch-light .tsw-line.short { background: #2563eb; }
-.theme-swatch-dark { background: #1a2129; }
-.theme-swatch-dark .tsw-bar { background: #0f1419; border-right: 1px solid #2d3742; }
-.theme-swatch-dark .tsw-line { background: #2d3742; }
-.theme-swatch-dark .tsw-line.short { background: #3b82f6; }
+.theme-option:hover { border-color: var(--line-hover); background: var(--bg); }
+.theme-option.active { border-color: var(--accent); }
+.theme-preview { height: 84px; display: grid; grid-template-columns: 28% 1fr; border-radius: 8px; overflow: hidden; border: 1px solid; }
+.theme-preview .tpv-side { padding: 8px 6px; display: flex; flex-direction: column; gap: 5px; }
+.theme-preview .tpv-main { padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.theme-preview i { display: block; height: 5px; border-radius: 3px; }
+.theme-preview .tpv-main i { height: 6px; }
+.theme-preview b { display: block; height: 22px; border-radius: 5px; }
+.theme-option-foot { display: flex; align-items: flex-start; gap: 8px; padding: 0 2px 2px; }
+.theme-radio { flex: none; width: 16px; height: 16px; margin-top: 2px; border-radius: 50%; border: 1.5px solid var(--line-hover-strong); display: flex; align-items: center; justify-content: center; }
+.theme-option.active .theme-radio { border-color: var(--accent); }
+.theme-option.active .theme-radio::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+.theme-option-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.theme-option-label { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.theme-option-hint { font-size: 12px; line-height: 1.4; color: var(--ink-3); }
 
 /* --- Modal --- */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); display:flex; align-items:center; justify-content:center; z-index: var(--z-modal); padding: 20px; }

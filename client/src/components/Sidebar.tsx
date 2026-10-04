@@ -146,8 +146,8 @@ export function Sidebar() {
           // element, never recreated (the recurring "logo disappears" bug).
           return (
             <>
-              {full && <ThemedLogo className="sidebar-logo logo-full" src={full} alt={org?.name ?? "Company logo"} />}
-              {compact && <ThemedLogo className="sidebar-logo compact logo-compact" src={compact} alt={org?.name ?? "Company logo"} />}
+              {full && <ThemedLogo variant="dark" className="sidebar-logo logo-full" src={full} alt={org?.name ?? "Company logo"} />}
+              {compact && <ThemedLogo variant="dark" className="sidebar-logo compact logo-compact" src={compact} alt={org?.name ?? "Company logo"} />}
             </>
           );
         })()}
