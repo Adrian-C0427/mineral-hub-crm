@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { api } from "../api/client";
+import { api, ApiError } from "../api/client";
 import { Spinner, showToast, ChipList } from "../components/ui";
 import { Select } from "../components/Select";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
@@ -24,6 +24,9 @@ const TRANSITIONS: { stage: Stage; label: string; hint: string }[] = [
   { stage: "CLOSED", label: "Closed", hint: "Drag a deal here to move it to Closed Deals" },
   { stage: "DEAD", label: "Dead", hint: "Drag a deal here to move it to Archived Deals" },
 ];
+
+/** Stage-change response: the deal plus a short-lived token that undoes the move. */
+type StageMoved = DealSummary & { undoToken?: string | null };
 
 // Distance (px) the pointer must travel before a press becomes a drag — below it
 // the gesture is treated as a click (navigate to the deal).
@@ -392,32 +395,50 @@ export function Pipeline() {
     window.addEventListener("pointercancel", onCancel);
   }
 
+  /** "Moved to X · Undo" toast. Undo redeems the server's short-lived token,
+   *  which restores the deal exactly as it was — stage, days in stage and, for
+   *  Closed/Dead, everything that move switched off. Without a token an
+   *  ordinary move falls back to moving the card back; Closed/Dead get no Undo. */
+  function offerUndo(deal: DealSummary, toStage: Stage, undoToken?: string | null) {
+    const fromStage = deal.stage;
+    const terminal = toStage === "CLOSED" || toStage === "DEAD";
+    let used = false; // one redemption per toast
+    const undo = () => {
+      if (used) return;
+      used = true;
+      const req = undoToken
+        ? api.post(`/deals/${deal.id}/stage/undo`, { undoToken })
+        : api.post(`/deals/${deal.id}/stage`, { toStage: fromStage });
+      void req
+        .then(() => { load(); showToast(`Moved back to ${label(fromStage)}.`); })
+        .catch((err) => {
+          // Expired, or the deal changed since: say why and show the real board.
+          load();
+          showToast(err instanceof ApiError && (err.status === 409 || err.status === 410 || err.status === 403) ? err.message : "Could not undo the move.", "error");
+        });
+    };
+    showToast(
+      <span>
+        <strong>{deal.name}</strong> moved to {label(toStage)}.
+        {(undoToken || !terminal) && <>{" "}<button className="link-btn" onClick={undo}>Undo</button></>}
+      </span>,
+      "success",
+      // Long enough to notice a mistaken Closed/Dead move and reach Undo.
+      undoToken || !terminal ? 10000 : undefined,
+    );
+  }
+
   async function commitMove(deal: DealSummary, col: Stage) {
     // Terminal stages carry downstream effects — confirm first (their move runs
     // through the modal). Normal stage moves are immediate + optimistic, with
     // an Undo in the toast: an accidental 20px drag shouldn't silently rewrite
     // stage history.
     if (col === "CLOSED" || col === "DEAD") { setPending({ deal, toStage: col }); return; }
-    const fromStage = deal.stage;
     setDeals((prev) => prev?.map((d) => (d.id === deal.id ? { ...d, stage: col } : d)) ?? prev);
     try {
-      await api.post(`/deals/${deal.id}/stage`, { toStage: col });
+      const moved = await api.post<StageMoved>(`/deals/${deal.id}/stage`, { toStage: col });
       load();
-      showToast(
-        <span>
-          <strong>{deal.name}</strong> moved to {label(col)}.{" "}
-          <button
-            className="link-btn"
-            onClick={() => {
-              void api.post(`/deals/${deal.id}/stage`, { toStage: fromStage })
-                .then(() => { load(); showToast(`Moved back to ${label(fromStage)}.`); })
-                .catch(() => showToast("Could not undo the move.", "error"));
-            }}
-          >
-            Undo
-          </button>
-        </span>,
-      );
+      offerUndo(deal, col, moved.undoToken);
     }
     catch { load(); }
   }
@@ -586,14 +607,14 @@ export function Pipeline() {
           initialStage={pending.toStage}
           directTerminal
           onClose={() => setPending(null)}
-          onChanged={() => { setPending(null); load(); }}
+          onChanged={(d) => { setPending(null); load(); offerUndo(pending.deal, d.stage, (d as StageMoved).undoToken); }}
         />
       )}
       {moving && (
         <StageChangeModal
           deal={moving}
           onClose={() => setMoving(null)}
-          onChanged={() => { setMoving(null); load(); }}
+          onChanged={(d) => { setMoving(null); load(); offerUndo(moving, d.stage, (d as StageMoved).undoToken); }}
         />
       )}
     </div>

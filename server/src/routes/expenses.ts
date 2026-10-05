@@ -62,8 +62,11 @@ expensesRouter.get(
     const cats = await prisma.expenseCategory.findMany({
       where: { organizationId: orgId(req) },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+      include: { _count: { select: { expenses: true } } },
     });
-    res.json(cats);
+    // expenseCount = how many of the org's expenses use the category (all
+    // dates), for the "N expenses" line in category management.
+    res.json(cats.map(({ _count, ...c }) => ({ ...c, expenseCount: _count.expenses })));
   }),
 );
 
@@ -374,18 +377,33 @@ expensesRouter.get(
     }
     const expenses = await prisma.expense.findMany({ where, include: withRefs });
 
-    res.json(
-      aggregateExpenseDashboard(
-        expenses.map((e) => ({
-          amount: e.amount,
-          date: e.date,
-          reimbursed: e.reimbursed,
-          reimbursementDate: e.reimbursementDate,
-          categoryName: e.category?.name ?? null,
-          userId: e.userId,
-          userName: e.user?.name ?? null,
-        })),
-      ),
+    const dash = aggregateExpenseDashboard(
+      expenses.map((e) => ({
+        amount: e.amount,
+        date: e.date,
+        reimbursed: e.reimbursed,
+        reimbursementDate: e.reimbursementDate,
+        categoryName: e.category?.name ?? null,
+        userId: e.userId,
+        userName: e.user?.name ?? null,
+      })),
     );
+    // Outstanding COUNTS beside the aggregate's outstanding amounts: the same
+    // rows, the same definition (not reimbursed) and the same "unknown" user
+    // bucket the aggregate uses. Additive — every existing field is unchanged.
+    let outstandingCount = 0;
+    const countByUser = new Map<string, number>();
+    for (const e of expenses) {
+      if (e.reimbursed) continue;
+      outstandingCount += 1;
+      const uid = e.userId ?? "unknown";
+      countByUser.set(uid, (countByUser.get(uid) ?? 0) + 1);
+    }
+    res.json({
+      ...dash,
+      totals: { ...dash.totals, outstandingCount },
+      byUser: dash.byUser.map((u) => ({ ...u, outstandingCount: countByUser.get(u.userId) ?? 0 })),
+      outstandingByUser: dash.outstandingByUser.map((u) => ({ ...u, outstandingCount: countByUser.get(u.userId) ?? 0 })),
+    });
   }),
 );

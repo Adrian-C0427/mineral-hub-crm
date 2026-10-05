@@ -70,13 +70,15 @@ function useDialogChrome(onClose: () => void, dirty?: boolean) {
  * from anywhere with showToast("Saved."); <ToastHost/> is mounted once in App.
  */
 type ToastKind = "success" | "error" | "info";
-interface ToastItem { id: number; kind: ToastKind; msg: ReactNode }
+interface ToastItem { id: number; kind: ToastKind; msg: ReactNode; ms?: number }
 
 let toastListener: ((t: ToastItem) => void) | null = null;
 let toastSeq = 0;
 
-export function showToast(msg: ReactNode, kind: ToastKind = "success") {
-  toastListener?.({ id: ++toastSeq, kind, msg });
+/** `ms` keeps the toast up longer than the default — for toasts that carry an
+ *  action such as Undo. */
+export function showToast(msg: ReactNode, kind: ToastKind = "success", ms?: number) {
+  toastListener?.({ id: ++toastSeq, kind, msg, ms });
 }
 
 export function ToastHost() {
@@ -84,7 +86,7 @@ export function ToastHost() {
   useEffect(() => {
     toastListener = (t) => {
       setToasts((l) => [...l.slice(-3), t]);
-      window.setTimeout(() => setToasts((l) => l.filter((x) => x.id !== t.id)), 4200);
+      window.setTimeout(() => setToasts((l) => l.filter((x) => x.id !== t.id)), t.ms ?? 4200);
     };
     return () => { toastListener = null; };
   }, []);

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { fmtDateTime } from "../lib/format";
+import { ConfirmDialog } from "./ui";
 
 interface Notification { id: string; type: string; title: string; body: string | null; link: string | null; readAt: string | null; createdAt: string }
 
@@ -48,6 +49,7 @@ export function NotificationsBell() {
   const [unread, setUnread] = useState(0);
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"all" | "unread">("all");
+  const [confirmClear, setConfirmClear] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
 
@@ -62,15 +64,30 @@ export function NotificationsBell() {
     return () => window.clearInterval(t);
   }, []);
 
-  // Close on outside click / Escape.
+  // Close on outside click / Escape. Paused while the clear-all confirmation is
+  // up: it renders outside the panel and handles its own Escape.
   useEffect(() => {
-    if (!open) return;
+    if (!open || confirmClear) return;
     const onDown = (e: MouseEvent) => { if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false); };
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
-  }, [open]);
+  }, [open, confirmClear]);
+
+  // Clearing updates the list and badge right away; the reload afterwards
+  // brings in older rows past the 50 shown (and restores the list on failure).
+  function clearOne(n: Notification) {
+    setItems((list) => list.filter((x) => x.id !== n.id));
+    if (!n.readAt) setUnread((u) => Math.max(0, u - 1));
+    void api.del(`/notifications/${n.id}`).catch(() => {}).then(load);
+  }
+  function clearAll() {
+    setConfirmClear(false);
+    setItems([]);
+    setUnread(0);
+    void api.del("/notifications").catch(() => {}).then(load);
+  }
 
   async function openItem(n: Notification) {
     if (!n.readAt) await api.post(`/notifications/${n.id}/read`, {}).catch(() => {});
@@ -113,6 +130,9 @@ export function NotificationsBell() {
             {unread > 0 && (
               <button type="button" className="notif-markall" onClick={() => api.post("/notifications/read-all", {}).then(load)}>Mark all read</button>
             )}
+            {items.length > 0 && (
+              <button type="button" className="notif-markall" onClick={() => (unread > 0 ? setConfirmClear(true) : clearAll())}>Clear all</button>
+            )}
             <button type="button" className="notif-gear" title="Notification settings" aria-label="Notification settings"
               onClick={() => { setOpen(false); nav("/settings/general"); }}>
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4" /></svg>
@@ -134,27 +154,42 @@ export function NotificationsBell() {
                 {g.rows.map((n) => {
                   const ts = TYPE_STYLE[n.type];
                   return (
-                    <button key={n.id} type="button" className={`notif-item ${n.readAt ? "" : "unread"}`} onClick={() => void openItem(n)}>
-                      <span className={`notif-tile tone-${ts?.tone ?? "accent"}`} aria-hidden="true">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
-                          {ts ? <path d={ts.d} /> : BELL_PATHS.map((d) => <path key={d} d={d} />)}
-                        </svg>
-                      </span>
-                      <span className="notif-text">
-                        <span className="notif-title">{n.title}</span>
-                        {n.body && <span className="notif-body">{n.body}</span>}
-                      </span>
-                      <span className="notif-side">
-                        <span className="notif-time" title={fmtDateTime(n.createdAt)}>{age(n.createdAt)}</span>
-                        <span className="notif-dot" />
-                      </span>
-                    </button>
+                    <div key={n.id} className="notif-row">
+                      <button type="button" className={`notif-item ${n.readAt ? "" : "unread"}`} onClick={() => void openItem(n)}>
+                        <span className={`notif-tile tone-${ts?.tone ?? "accent"}`} aria-hidden="true">
+                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+                            {ts ? <path d={ts.d} /> : BELL_PATHS.map((d) => <path key={d} d={d} />)}
+                          </svg>
+                        </span>
+                        <span className="notif-text">
+                          <span className="notif-title">{n.title}</span>
+                          {n.body && <span className="notif-body">{n.body}</span>}
+                        </span>
+                        <span className="notif-side">
+                          <span className="notif-time" title={fmtDateTime(n.createdAt)}>{age(n.createdAt)}</span>
+                          <span className="notif-dot" />
+                        </span>
+                      </button>
+                      <button type="button" className="notif-clear" title="Clear" aria-label={`Clear notification: ${n.title}`} onClick={() => clearOne(n)}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                      </button>
+                    </div>
                   );
                 })}
               </div>
             ))}
           </div>
         </div>
+      )}
+      {confirmClear && (
+        <ConfirmDialog
+          danger
+          title="Clear all notifications?"
+          message={`${unread} unread notification${unread === 1 ? "" : "s"} will be removed along with the rest. This cannot be undone.`}
+          confirmLabel="Clear all"
+          onCancel={() => setConfirmClear(false)}
+          onConfirm={clearAll}
+        />
       )}
     </div>
   );

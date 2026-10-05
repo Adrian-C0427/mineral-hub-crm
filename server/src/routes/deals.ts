@@ -16,6 +16,7 @@ import { sendEmail, personalize, renderEmailBody } from "../services/email.js";
 import { money as fmtMoney } from "../domain/format.js";
 import { newPortalSlug } from "./portal.js";
 import { ensureStages, activeStageKeys } from "../domain/stages.js";
+import { applyStageChange, applyStageUndo, signStageUndo, verifyStageUndo, STAGE_UNDO_MAX_TOKEN_BYTES } from "../services/stageUndo.js";
 
 export const dealsRouter = Router();
 // All deal routes require membership in an organization and are scoped to it.
@@ -1043,94 +1044,45 @@ dealsRouter.post(
       return;
     }
 
-    const terminal = toStage === "CLOSED" || toStage === "DEAD";
-    const updated = await prisma.$transaction(async (tx) => {
-      const u = await tx.deal.update({
-        where: { id: deal.id },
-        data: {
-          stage: toStage,
-          currentStageEnteredAt: new Date(),
-          deadReason: toStage === "DEAD" ? deadReason!.trim() : deal.deadReason,
-          // Auto-stamp the closed date on the first move to CLOSED (editable after).
-          ...(toStage === "CLOSED" && !deal.closedDate ? { closedDate: new Date() } : {}),
-          // A closed or dead deal is off the market — unpublish from the buyer portal.
-          ...(terminal ? { publishedToPortal: false } : {}),
-        },
-        include: dealInclude,
-      });
-      // Closed/Dead deals generate no further timeline activity: clear outstanding
-      // buyer follow-up reminders and mark this deal's pending notifications read.
-      if (terminal) {
-        await tx.dealBuyerActivity.updateMany({
-          where: { dealId: deal.id, nextFollowUpDate: { not: null } },
-          data: { nextFollowUpDate: null },
-        });
-        await tx.notification.updateMany({
-          where: { organizationId: orgId(req), readAt: null, link: { contains: deal.id } },
-          data: { readAt: new Date() },
-        });
-      }
-      // Closing a deal automatically marks the WINNING buyer's activity record
-      // CLOSED — the buyer whose offer was accepted (the deal's selected buyer,
-      // falling back to the selected/accepted offer). Every other buyer's
-      // record, and all communication history/notes/timeline, stay untouched.
-      if (toStage === "CLOSED") {
-        let winnerBuyerId: string | null = deal.selectedBuyerId ?? null;
-        if (!winnerBuyerId && deal.selectedOfferId) {
-          const off = await tx.offer.findUnique({ where: { id: deal.selectedOfferId }, select: { buyerId: true } });
-          winnerBuyerId = off?.buyerId ?? null;
-        }
-        if (!winnerBuyerId) {
-          const off = await tx.offer.findFirst({
-            where: { dealId: deal.id, status: "ACCEPTED" },
-            orderBy: { updatedAt: "desc" }, select: { buyerId: true },
-          });
-          winnerBuyerId = off?.buyerId ?? null;
-        }
-        if (winnerBuyerId) {
-          const act = await tx.dealBuyerActivity.findUnique({
-            where: { dealId_buyerId: { dealId: deal.id, buyerId: winnerBuyerId } },
-          });
-          if (act && act.status !== "CLOSED") {
-            await tx.dealBuyerActivity.update({
-              where: { id: act.id },
-              data: { status: "CLOSED", lastActivityDate: new Date() },
-            });
-            // The change shows up in the buyer's interaction log like any other
-            // status change, so the automation is visible and auditable.
-            await tx.dealBuyerMessage.create({
-              data: {
-                organizationId: orgId(req), dealId: deal.id, buyerId: winnerBuyerId, activityId: act.id,
-                kind: "STATUS_CHANGE",
-                body: "Status automatically set to Closed — this buyer's accepted offer closed the deal.",
-                createdByUserId: req.user!.id,
-              },
-            });
-          }
-        }
-      }
-      await tx.dealStageHistory.create({
-        data: {
-          dealId: deal.id,
-          fromStage: deal.stage,
-          toStage,
-          changedByUserId: req.user!.id,
-          deadReason: toStage === "DEAD" ? deadReason!.trim() : null,
-        },
-      });
-      await logActivity(
-        {
-          eventType: "STAGE_CHANGE",
-          summary: `${req.user!.name} moved "${deal.name}" to ${prettyStage(toStage)}${toStage === "DEAD" ? ` (${deadReason!.trim()})` : ""}`,
-          organizationId: orgId(req),
-          actorUserId: req.user!.id,
-          dealId: deal.id,
-        },
-        tx,
-      );
-      return u;
-    });
-    res.json(serializeDeal(updated));
+    // The move and all of its side effects (unpublish, cleared follow-ups, read
+    // notifications, closed date, winning buyer, history) live in applyStageChange,
+    // which also returns the "before" snapshot that makes the move undoable.
+    const snapshot = await prisma.$transaction((tx) =>
+      applyStageChange(tx, deal, {
+        toStage,
+        deadReason,
+        orgId: orgId(req),
+        user: { id: req.user!.id, name: req.user!.name },
+      }),
+    );
+    // Additive: a short-lived signed token for POST /:id/stage/undo (null when
+    // the snapshot is too large to carry).
+    res.json({ ...serializeDeal(await reload(deal.id)), undoToken: signStageUndo(snapshot) });
+  }),
+);
+
+// Undo the most recent stage change, restoring the deal exactly: previous
+// stage and stage-entered date, dead reason, closed date, portal publication,
+// cleared buyer follow-ups, read notifications, the winning buyer's status, and
+// the history/activity rows the move wrote. Only the user who made the move,
+// within the token's lifetime, and only while nothing has changed since (409).
+const stageUndoSchema = z.object({ undoToken: z.string().min(1).max(STAGE_UNDO_MAX_TOKEN_BYTES) });
+
+dealsRouter.post(
+  "/:id/stage/undo",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { undoToken } = stageUndoSchema.parse(req.body);
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true, pipelineId: true } });
+    if (!deal) throw new HttpError(404, "Deal not found");
+    const snap = verifyStageUndo(undoToken, { dealId: deal.id, orgId: orgId(req), userId: req.user!.id });
+    // The stage it came from must still exist on the deal's pipeline.
+    const stages = await ensureStages(prisma, orgId(req), deal.pipelineId);
+    if (!stages.some((s) => s.key === snap.fromStage)) {
+      throw new HttpError(409, "This move can no longer be undone — the stage it came from no longer exists.");
+    }
+    await prisma.$transaction((tx) => applyStageUndo(tx, snap));
+    res.json(serializeDeal(await reload(deal.id)));
   }),
 );
 
@@ -1806,6 +1758,3 @@ async function reload(id: string) {
   return d;
 }
 
-function prettyStage(s: string): string {
-  return s.split("_").map((w) => w[0] + w.slice(1).toLowerCase()).join(" ");
-}

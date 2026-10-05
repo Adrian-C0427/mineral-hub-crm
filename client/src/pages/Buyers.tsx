@@ -20,6 +20,8 @@ interface BuyerRow {
   contactFirstName: string | null;
   contactLastName: string | null;
   focusArea: string;
+  /** Every buy-box county (focusArea only names the first two). Optional: an older API omits it. */
+  focusCounties?: string[];
   relationshipStatus: "HOT" | "WARM" | "COLD";
   closeRate: number;
   closedDeals: number;
@@ -39,9 +41,19 @@ export function RelTag({ status }: { status: Rel }) {
 }
 
 /** The list API sends the focus area pre-joined ("Leon, Freestone…", or
- *  states / basins as a fallback). Display only: split it into chips and keep
- *  the server's trailing "…" as a "more" marker. */
-function FocusChips({ value }: { value: string }) {
+ *  states / basins as a fallback) plus the full county list. Display only:
+ *  two county chips and an exact "+N" naming the rest on hover. Without the
+ *  county list (state / basin fallback) the joined text is split as sent. */
+function FocusChips({ value, counties }: { value: string; counties?: string[] }) {
+  if (counties && counties.length > 0) {
+    const rest = counties.slice(2);
+    return (
+      <span className="bx-chips">
+        {counties.slice(0, 2).map((p) => <span key={p} className="bx-chip">{p}</span>)}
+        {rest.length > 0 && <span className="bx-more" title={rest.join(", ")}>+{rest.length}</span>}
+      </span>
+    );
+  }
   const more = value.endsWith("…");
   const parts = (more ? value.slice(0, -1) : value).split(",").map((p) => p.trim()).filter(Boolean);
   return (
@@ -103,7 +115,7 @@ export function Buyers() {
         </span>
       ) },
     { key: "focus", header: "Focus area", type: "text", value: (b) => b.focusArea,
-      render: (b) => (b.focusArea && b.focusArea !== "—" ? <FocusChips value={b.focusArea} /> : dash) },
+      render: (b) => (b.focusArea && b.focusArea !== "—" ? <FocusChips value={b.focusArea} counties={b.focusCounties} /> : dash) },
     { key: "rel", header: "Relationship", type: "text", value: (b) => ({ HOT: 0, WARM: 1, COLD: 2 }[b.relationshipStatus]),
       render: (b) => <RelTag status={b.relationshipStatus} /> },
     // New buyers show "—" rather than a discouraging 0% / 0 until they have history.

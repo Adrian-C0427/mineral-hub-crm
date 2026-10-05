@@ -1,0 +1,77 @@
+/* Contact Detail on a phone: the three desktop panes sit behind a five-tab
+   strip (Details / Activity / Tasks / Notes / Minerals) under the contact
+   header. ContactDetail.tsx sets data-mtab on .cw only on phones, so nothing
+   here can reach the desktop layout. Imported last: wins over
+   styles/buyers-contacts.css and mobile.css at equal specificity. */
+@media (max-width: 760px) {
+  /* The left rail dissolves so its header blocks, the strip and the panes are
+     siblings in one column: header, quick actions, strip, then the pane. */
+  .cw-wrap .cw[data-mtab] .cw-left { display: contents; }
+  .cw-wrap .cw[data-mtab] .cw-ident-row { margin: 18px 16px 0; }
+  .cw-wrap .cw[data-mtab] .cw-two { margin: 16px 16px 0; gap: 12px; }
+  .cw-wrap .cw[data-mtab] .cw-left > .cw-tags { margin: 14px 16px 0; }
+  .cw-ident-phone { font-size: 14px; color: var(--ink-3); }
+  .cw-wrap .cw[data-mtab] .cw-fields,
+  .cw-wrap .cw[data-mtab] .cw-center,
+  .cw-wrap .cw[data-mtab] .cw-right { order: 1; }
+
+  /* Quick actions: Call / Text / Email / Task / Note. */
+  .cw-quick { flex: none; display: flex; padding: 20px 12px 8px; }
+  .cw-wrap .cw-quick .cw-qa {
+    flex: 1; min-width: 0; width: auto; height: auto; min-height: 0; margin: 0; padding: 0;
+    display: flex; flex-direction: column; align-items: center; gap: 7px;
+    border: 0; border-radius: 0; background: transparent; box-shadow: none;
+    color: var(--ink-2); font: 600 11.5px var(--font-sans); text-decoration: none; cursor: pointer;
+  }
+  .cw-wrap .cw-quick .cw-qa > span {
+    width: 58px; height: 58px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    background: color-mix(in srgb, var(--accent) 22%, transparent); color: var(--accent-ink);
+  }
+
+  /* Tab strip: sticks under the top bar, scrolls sideways when it must. */
+  .cw-wrap .cw-mtabs {
+    flex: none; display: flex; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    padding: 6px 8px 0; border-bottom: 1px solid var(--line); background: var(--bg);
+    position: sticky; top: calc(var(--topbar-h, 52px) + env(safe-area-inset-top, 0px)); z-index: 5;
+  }
+  .cw-wrap .cw-mtabs::-webkit-scrollbar { display: none; }
+  .cw-wrap .cw-mtabs button {
+    flex: none; display: inline-flex; align-items: center; gap: 6px; width: auto; height: auto; min-height: 44px; margin: 0;
+    padding: 12px 12px 13px; border: 0; border-radius: 0; background: transparent;
+    box-shadow: inset 0 -2.5px 0 transparent; color: var(--ink-3); font: 600 15.5px var(--font-sans); white-space: nowrap;
+  }
+  .cw-wrap .cw-mtabs button:hover { background: transparent; }
+  .cw-wrap .cw-mtabs button.active { color: var(--accent-ink); box-shadow: inset 0 -2.5px 0 var(--accent); }
+  .cw-wrap .cw-mtabs button > span {
+    padding: 1px 6px; border-radius: var(--radius-sm); background: var(--hover); color: var(--ink-2); font-size: 11.5px; font-weight: 700;
+  }
+
+  /* One pane at a time. */
+  .cw-wrap .cw[data-mtab]:not([data-mtab="details"]) .cw-fields,
+  .cw-wrap .cw[data-mtab]:not([data-mtab="activity"]) .cw-center,
+  .cw-wrap .cw[data-mtab="details"] .cw-right,
+  .cw-wrap .cw[data-mtab="activity"] .cw-right { display: none; }
+
+  /* Details */
+  .cw-wrap .cw[data-mtab] .cw-fields { padding: 16px 16px 24px; gap: 12px; }
+
+  /* Activity: Call / Email live in the quick actions, the name in the header. */
+  .cw-wrap .cw[data-mtab] .cw-chead { display: none; }
+  .cw-wrap .cw[data-mtab] .cw-center { border-bottom: 0; }
+  .cw-wrap .cw[data-mtab] .cw-filters { padding-top: 14px; }
+
+  /* Tasks / Notes / Minerals: the page strip replaces the rail's own tabs.
+     Tasks keeps a Tasks / Reminders switch, since the tab holds both. */
+  .cw-wrap .cw[data-mtab] .cw-rtabs { display: none; position: static; }
+  .cw-wrap .cw[data-mtab="tasks"] .cw-rtabs { display: flex; gap: 8px; padding: 16px 16px 0; border-bottom: 0; background: transparent; }
+  .cw-wrap .cw[data-mtab="tasks"] .cw-rtabs button {
+    height: 40px; min-height: 40px; margin: 0; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); font-size: 14px;
+  }
+  .cw-wrap .cw[data-mtab="tasks"] .cw-rtabs button.active { border-color: var(--accent); background: var(--accent-tint); color: var(--accent-ink); }
+  .cw-wrap .cw[data-mtab="tasks"] .cw-rtabs button:not([data-k="tasks"]):not([data-k="reminders"]) { display: none; }
+  /* With the left rail flattened (display: contents) its children become flex
+     items of .cw; without this they size to their content and run wider than
+     the screen. */
+  .cw-wrap .cw[data-mtab] > *, .cw-wrap .cw[data-mtab] .cw-left > * { min-width: 0; max-width: 100%; }
+  .cw-wrap .cw[data-mtab] .cw-fields { width: 100%; }
+}

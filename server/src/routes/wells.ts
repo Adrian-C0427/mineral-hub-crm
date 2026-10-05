@@ -877,7 +877,15 @@ wellsRouter.get(
     const nameOf = new Map(wells.map((w) => [w.id, w.name]));
     res.json(
       rows.map((r) => {
-        const results = r.results as { valuation?: { recommendedOffer?: number; fairMarketValue?: number }; economics?: { npv?: number; irrAnnualPct?: number | null; roiPct?: number | null } } | null;
+        const results = r.results as { valuation?: { recommendedOffer?: number; fairMarketValue?: number }; economics?: { npv?: number; irrAnnualPct?: number | null; roiPct?: number | null }; assumptions?: { oilPrice?: unknown; gasPrice?: unknown } } | null;
+        // Price deck as stored, never recomputed: the snapshot's own
+        // (normalized) assumptions are what produced the headline figures;
+        // the saved input assumptions are the fallback for a row without one.
+        const input = r.assumptions as { oilPrice?: unknown; gasPrice?: unknown } | null;
+        const storedPrice = (k: "oilPrice" | "gasPrice"): number | null => {
+          for (const v of [results?.assumptions?.[k], input?.[k]]) if (typeof v === "number" && Number.isFinite(v)) return v;
+          return null;
+        };
         return {
           id: r.id,
           name: r.name,
@@ -886,6 +894,7 @@ wellsRouter.get(
           notes: r.notes,
           updatedAt: r.updatedAt.toISOString(),
           createdAt: r.createdAt.toISOString(),
+          priceDeck: { oilPrice: storedPrice("oilPrice"), gasPrice: storedPrice("gasPrice") },
           headline: results
             ? {
                 fairMarketValue: results.valuation?.fairMarketValue ?? null,

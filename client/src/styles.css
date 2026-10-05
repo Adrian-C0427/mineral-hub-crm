@@ -2619,7 +2619,7 @@ body.pipeline-dragging, body.pipeline-dragging * { user-select: none !important;
 }
 .notif-head { display: flex; align-items: center; gap: 8px; padding: 14px 14px 10px 16px; border-bottom: 0; }
 .notif-head-title { flex: 1; font-size: 15px; font-weight: 600; color: var(--ink); }
-.notif-markall { height: 28px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--accent-ink); font-size: 12.5px; font-weight: 600; box-shadow: none; }
+.notif-markall { height: 28px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--accent-ink); font-size: 12.5px; font-weight: 600; box-shadow: none; white-space: nowrap; }
 .notif-markall:hover { background: var(--hover-strong); }
 .notif-gear { width: 28px; height: 28px; padding: 0; display: flex; align-items: center; justify-content: center; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); box-shadow: none; }
 .notif-gear:hover { background: var(--hover-strong); color: var(--ink); }
@@ -2649,6 +2649,22 @@ body.pipeline-dragging, body.pipeline-dragging * { user-select: none !important;
 .notif-time { display: block; margin: 0; font-size: 12px; color: var(--ink-4); }
 .notif-dot { width: 8px; height: 8px; border-radius: 50%; background: transparent; }
 .notif-item.unread .notif-dot { background: var(--accent); }
+/* Per-row clear: sits over the unread dot on hover; always shown (in its own
+   column) where there is no hover. */
+.notif-row { position: relative; }
+.notif-row:hover .notif-item { background: var(--hover); }
+.notif-clear {
+  position: absolute; top: 29px; right: 9px; width: 22px; height: 22px; min-width: 0; min-height: 0; padding: 0;
+  display: flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm);
+  background: transparent; color: var(--ink-3); box-shadow: none; opacity: 0;
+}
+@media (hover: hover) { .notif-row:hover .notif-dot, .notif-row:focus-within .notif-dot { visibility: hidden; } }
+.notif-row:hover .notif-clear, .notif-row:focus-within .notif-clear { opacity: 1; }
+.notif-clear:hover { background: var(--hover-strong); color: var(--ink); }
+@media (hover: none) {
+  .notif-row .notif-item { padding-right: 44px; }
+  .notif-clear { opacity: 1; top: 50%; right: 12px; width: 32px; height: 32px; margin-top: -16px; background: transparent; }
+}
 .notif-empty { padding: 40px 24px; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
 .notif-empty strong { font-size: 13.5px; font-weight: 600; color: var(--ink); }
 .notif-empty span { font-size: 12.5px; color: var(--ink-3); }
