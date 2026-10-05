@@ -108,15 +108,6 @@ const HEAT_STOPS: [number, string][] = [[0, "#eef2ff"], [0.2, "#fde68a"], [0.45,
 interface HeatState { oil: boolean; gas: boolean; intensity: number; radius: number; opacity: number; min: number; max: number; period: HeatPeriod; from: string; to: string; topProducers: boolean; hotspots: boolean }
 const DEFAULT_HEAT: HeatState = { oil: false, gas: false, intensity: 1.6, radius: 48, opacity: 0.85, min: 0, max: 0, period: "12m", from: "", to: "", topProducers: false, hotspots: true };
 
-// Chip dots for the Well status filter — the same colours the wells are drawn
-// in (read from the shared STATUS_COLOR match expression).
-const STATUS_DOT: Record<string, string> = (() => {
-  const m: Record<string, string> = {};
-  const expr = STATUS_COLOR as unknown as unknown[];
-  for (let i = 2; i + 1 < expr.length; i += 2) m[String(expr[i])] = String(expr[i + 1]);
-  return m;
-})();
-const STATUS_DOT_FALLBACK = String((STATUS_COLOR as unknown as unknown[]).slice(-1)[0]);
 
 const STATUS_OPTIONS = [
   ["ACTIVE", "Active deals"], ["ALL", "All linked deals"], ["UNDER_CONTRACT", "Under Contract"],
@@ -1009,17 +1000,15 @@ export function MapView() {
               <>
                 <div className="mc-sheet-body">
                   <MapField label="Deal status"><Select value={statusFilter} onChange={setStatusFilter} ariaLabel="Deal status" options={STATUS_OPTIONS.map(([v, l]) => ({ value: v, label: l }))} /></MapField>
-                  {/* Cascading geography: State → County → Abstract → Survey. Map data
+                  {/* Cascading geography: State → County → Abstract → Survey, one per row. Map data
                       is Texas-only today, so counties empty out under a non-TX state. */}
-                  <div className="mc-two">
-                    <MapField label="State"><SearchableMultiSelect options={[...US_STATE_OPTIONS]} labels={US_STATE_LABELS} value={fStates} onChange={setFStates} placeholder="States…" /></MapField>
-                    <MapField label="County"><SearchableMultiSelect options={fStates.length && !fStates.includes("TX") ? [] : meta.counties} value={fCounties} onChange={setFCounties} placeholder="Counties…" /></MapField>
-                  </div>
-                  <MapField label="Survey"><SearchableMultiSelect options={gisOptions.surveys} value={fSurveys} onChange={setFSurveys} placeholder="Surveys…" /></MapField>
+                  <MapField label="State"><SearchableMultiSelect options={[...US_STATE_OPTIONS]} labels={US_STATE_LABELS} value={fStates} onChange={setFStates} placeholder="States…" /></MapField>
+                  <MapField label="County"><SearchableMultiSelect options={fStates.length && !fStates.includes("TX") ? [] : meta.counties} value={fCounties} onChange={setFCounties} placeholder="Counties…" /></MapField>
                   <MapField label="Abstract"><SearchableMultiSelect options={gisOptions.abstracts} labels={abstractFilterLabels} filterOptions={rankAbstractFilter} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstract # or survey…" /></MapField>
+                  <MapField label="Survey"><SearchableMultiSelect options={gisOptions.surveys} value={fSurveys} onChange={setFSurveys} placeholder="Surveys…" /></MapField>
                   <div className="mc-divider" />
-                  <MapField label="Well type"><ChipToggles options={gisOptions.wellTypes} value={fWellTypes} onChange={setFWellTypes} /></MapField>
-                  <MapField label="Well status"><ChipToggles options={gisOptions.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} dots={STATUS_DOT} /></MapField>
+                  <MapField label="Well type"><SearchableMultiSelect options={gisOptions.wellTypes} value={fWellTypes} onChange={setFWellTypes} placeholder="Well types…" /></MapField>
+                  <MapField label="Well status"><SearchableMultiSelect options={gisOptions.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} placeholder="Well statuses…" /></MapField>
                   <MapField label="Operator" count={gisOptions.operators.length}><SearchableMultiSelect options={gisOptions.operators} value={fOperators} onChange={setFOperators} placeholder="Operators…" /></MapField>
                   <MapField label="Formation" count={scoped.formations.length}><SearchableMultiSelect options={scoped.formations} value={fFormations} onChange={setFFormations} placeholder="Formations…" /></MapField>
                 </div>
@@ -1357,27 +1346,6 @@ function MapField({ label, count, children }: { label: string; count?: number; c
     <div className="mc-field">
       <div className="mc-label">{label}{count != null && <span className="mc-count">{num(count)}</span>}</div>
       {children}
-    </div>
-  );
-}
-/** Multi-select as toggle chips (Well type / Well status). Every value the
- *  data offers is a chip; values already selected (e.g. from a saved filter)
- *  stay visible even if the current county scope no longer lists them. */
-function ChipToggles({ options, value, onChange, dots }: { options: string[]; value: string[]; onChange: (v: string[]) => void; dots?: Record<string, string> }) {
-  const all = [...options, ...value.filter((v) => !options.includes(v))];
-  if (all.length === 0) return <div className="mc-chips-empty">—</div>;
-  return (
-    <div className="mc-chips">
-      {all.map((o) => {
-        const on = value.includes(o);
-        return (
-          <button key={o} type="button" className={`mc-chip ${on ? "on" : ""}`} aria-pressed={on}
-            onClick={() => onChange(on ? value.filter((v) => v !== o) : [...value, o])}>
-            {dots && <i style={{ background: dots[o] ?? STATUS_DOT_FALLBACK }} />}
-            {o}
-          </button>
-        );
-      })}
     </div>
   );
 }
