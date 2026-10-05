@@ -16,6 +16,7 @@ import { Avatar, Segmented, Tag } from "../components/kit";
 import type { DealSummary, UserLite } from "../types";
 
 type Scope = "all" | "active" | "closed" | "archived";
+const SCOPE_TITLE: Record<Scope, string> = { all: "Deals", active: "Active Deals", closed: "Closed Deals", archived: "Archived Deals" };
 
 /** Compact money for the header stat line — "$93.7K", "$1.2M". */
 function moneyCompact(v: number): string {
@@ -191,7 +192,7 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
     <div className="page deals-page">
       <div className="page-header">
         <div className="dl-head">
-          <h1>Deals</h1>
+          <h1>{SCOPE_TITLE[scope]}</h1>
           <div className="dl-stats">
             {stats.map((st, i) => <Fragment key={i}>{i > 0 && <span className="dl-stats-dot" aria-hidden="true" />}<span>{st}</span></Fragment>)}
           </div>
