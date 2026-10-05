@@ -29,6 +29,8 @@ const Reports = lazy(() => import("./pages/Reports").then((m) => ({ default: m.R
 const Research = lazy(() => import("./pages/Research").then((m) => ({ default: m.Research })));
 // Well valuation shares the recharts bundle profile; load on demand too.
 const Valuation = lazy(() => import("./pages/Valuation").then((m) => ({ default: m.Valuation })));
+// Calendar — events plus closings, follow-ups, and tasks drawn from existing records.
+const Calendar = lazy(() => import("./pages/Calendar").then((m) => ({ default: m.Calendar })));
 // Mineral Assets (portfolio) — the detail view pulls in recharts + MapLibre.
 const MineralAssets = lazy(() => import("./pages/MineralAssets").then((m) => ({ default: m.MineralAssets })));
 const MineralAssetDetail = lazy(() => import("./pages/MineralAssetDetail").then((m) => ({ default: m.MineralAssetDetail })));
@@ -124,6 +126,7 @@ export function App() {
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/pipeline" element={<Guard perm="viewDeals"><Pipeline /></Guard>} />
+          <Route path="/calendar" element={<Suspense fallback={<Spinner label="Loading calendar…" />}><Calendar /></Suspense>} />
           <Route path="/deals" element={<Guard perm="viewDeals"><Deals scope="all" /></Guard>} />
           <Route path="/deals/active" element={<Guard perm="viewDeals"><Deals scope="active" /></Guard>} />
           <Route path="/deals/closed" element={<Guard perm="viewDeals"><Deals scope="closed" /></Guard>} />

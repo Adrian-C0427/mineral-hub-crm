@@ -173,6 +173,8 @@ model Organization {
   buyers            Buyer[]
   activityLogs      ActivityLog[]
   inviteCodes       InviteCode[]
+  calendarEventTypes CalendarEventType[]
+  calendarEvents     CalendarEvent[]
   expenses          Expense[]
   expenseCategories ExpenseCategory[]
   rolePermissions   RolePermissions[]
@@ -421,6 +423,8 @@ model User {
   expenses           Expense[]
   sellerAssignments  DealSeller[]        @relation("SellerAssignments")
   assignedDeals      Deal[]              @relation("DealAssignees")
+  calendarAssigned   CalendarEvent[]     @relation("CalendarAssignee")
+  calendarCreated    CalendarEvent[]     @relation("CalendarCreator")
   notificationPreference NotificationPreference?
 
   @@index([organizationId])
@@ -626,6 +630,7 @@ model Deal {
   sellers        DealSeller[]
   revenueEntries AssetRevenueEntry[]
   mapTracts      MapTract[]
+  calendarEvents CalendarEvent[]
   // Team members assigned to this deal/asset (multi-assignee). relationshipOwner
   // is retained as the originating/primary owner for existing metrics & reports.
   assignees      User[]              @relation("DealAssignees")
@@ -834,6 +839,7 @@ model Buyer {
   selectedFor   Deal[]              @relation("SelectedBuyer")
   files         FileAttachment[]
   activityLogs  ActivityLog[]
+  calendarEvents CalendarEvent[]
 
   @@index([normalizedCompany])
   @@index([email])
@@ -1557,4 +1563,60 @@ model PortalEvent {
 
   @@index([dealId, kind, createdAt])
   @@index([dealId, visitorId])
+}
+
+// ---------------------------------------------------------------------------
+// Calendar. Events are entered by hand; deal closings, buyer follow-ups and
+// contact tasks/reminders are shown alongside them read-only, straight from
+// their own tables (never copied here).
+// ---------------------------------------------------------------------------
+
+// A colour-coded event type, per organization (rename / recolour / add / remove).
+model CalendarEventType {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  color          String // "#RRGGBB"
+  sortOrder      Int          @default(0)
+  // Set on the starter types ("closing", "follow") so the read-only entries
+  // drawn from deals and tasks keep their colour after a rename. Null on the rest.
+  systemKey      String?
+  createdAt      DateTime     @default(now())
+
+  events CalendarEvent[]
+
+  @@index([organizationId])
+}
+
+model CalendarEvent {
+  id             String             @id @default(cuid())
+  organizationId String
+  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  title          String
+  // Removing a type leaves its events in place, shown as "Other".
+  typeId         String?
+  type           CalendarEventType? @relation(fields: [typeId], references: [id], onDelete: SetNull)
+  // Calendar day, stored at UTC midnight (same convention as task due dates).
+  date           DateTime
+  allDay         Boolean            @default(false)
+  startTime      String? // "HH:MM" (24h), null when all-day
+  endTime        String? // "HH:MM" (24h)
+  // Optional link to one deal or one buyer.
+  dealId         String?
+  deal           Deal?              @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  buyerId        String?
+  buyer          Buyer?             @relation(fields: [buyerId], references: [id], onDelete: SetNull)
+  assignedToId   String?
+  assignedTo     User?              @relation("CalendarAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  notes          String?
+  completedAt    DateTime?
+  createdByUserId String?
+  createdBy      User?              @relation("CalendarCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+
+  @@index([organizationId, date])
+  @@index([dealId])
+  @@index([buyerId])
 }

@@ -30,6 +30,7 @@ import { aiRouter } from "./routes/ai.js";
 import { gisRouter, gisTilesRouter } from "./routes/gis.js";
 import { portalRouter } from "./routes/portal.js";
 import { notificationsRouter } from "./routes/notifications.js";
+import { calendarRouter } from "./routes/calendar.js";
 
 export function createApp() {
   const app = express();
@@ -112,6 +113,7 @@ export function createApp() {
   app.use("/api/wells", wellsRouter);
   app.use("/api/ai", aiRouter);
   app.use("/api/notifications", notificationsRouter);
+  app.use("/api/calendar", calendarRouter);
   // Buyer Offering Portal: public, unauthenticated — serves only whitelisted,
   // explicitly published data (see routes/portal.ts).
   app.use("/api/portal", portalRouter);
