@@ -13,6 +13,7 @@ import { Avatar, Segmented, Tag } from "../components/kit";
 import { fmtDate } from "../lib/format";
 import { type ContactRow, TYPES, STATUSES, typeLabel, TypeTag, StatusTag } from "./Contacts";
 import { formatPhone, formatPhoneAsYouType, normalizePhone } from "../lib/phone";
+import { useIsPhonePortrait } from "../lib/mobile";
 import type { UserLite } from "../types";
 
 /**
@@ -20,7 +21,13 @@ import type { UserLite } from "../types";
  * activity timeline + composer, right Notes / Tasks / Reminders / Minerals
  * panel. All data is real: contact fields, tags, and a persisted activity
  * timeline (notes, logged calls / emails / texts, tasks, reminders).
+ *
+ * Phones (≤760px) show the same panes one at a time behind a five-tab strip
+ * under the contact header (Details / Activity / Tasks / Notes / Minerals).
+ * The panes stay mounted; styles/contact-mobile.css hides the inactive ones.
  */
+
+type PhoneTab = "details" | "activity" | "tasks" | "notes" | "minerals";
 
 export interface ContactActivityRow {
   id: string;
@@ -102,6 +109,22 @@ export function ContactDetail() {
   const [users, setUsers] = useState<UserLite[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // Phone tab strip. A `?task=<id>` deep link lands on the Tasks tab.
+  const isPhone = useIsPhonePortrait();
+  const [mtab, setMtab] = useState<PhoneTab>(() => (new URLSearchParams(window.location.search).has("task") ? "tasks" : "details"));
+  // Bumped by the phone "Text" quick action: Activity shows logged texts and
+  // the composer switches to "Log text" (the app logs texts; it never sends).
+  const [textJump, setTextJump] = useState(0);
+  const mtabsRef = useRef<HTMLDivElement>(null);
+  const loaded = contact != null;
+  // The strip scrolls sideways on narrow phones: keep the selected tab in view.
+  useEffect(() => {
+    const strip = mtabsRef.current;
+    const active = strip?.querySelector<HTMLElement>(".active");
+    if (!strip || !active) return;
+    const a = active.getBoundingClientRect(), s = strip.getBoundingClientRect();
+    if (a.left < s.left || a.right > s.right) strip.scrollLeft += a.left - s.left - (s.width - a.width) / 2;
+  }, [mtab, isPhone, loaded]);
 
   const load = useCallback(() => {
     api.get<ContactRow>(`/contacts/${id}`).then(setContact).catch(() => setErr("Contact not found."));
@@ -133,6 +156,14 @@ export function ContactDetail() {
   const idx = all.findIndex((c) => c.id === contact.id);
   const go = (dir: -1 | 1) => { const n = all[idx + dir]; if (n) nav(`/contacts/${n.id}`); };
   const timeline = (activities ?? []).filter((a) => a.kind !== "TASK" && a.kind !== "REMINDER");
+  const acts = activities ?? [];
+  const phoneTabs: [PhoneTab, string, number][] = [
+    ["details", "Details", 0],
+    ["activity", "Activity", timeline.length],
+    ["tasks", "Tasks", acts.filter((a) => (a.kind === "TASK" || a.kind === "REMINDER") && !a.completedAt).length],
+    ["notes", "Notes", acts.filter((a) => a.kind === "NOTE" || a.kind === "CALL").length],
+    ["minerals", "Minerals", 0],
+  ];
 
   return (
     <div className="cw-wrap">
@@ -147,13 +178,14 @@ export function ContactDetail() {
         </span>
       </header>
 
-      <div className="cw">
+      <div className="cw" data-mtab={isPhone ? mtab : undefined}>
       {/* ============================================== left: contact details */}
       <aside className="cw-left">
         <div className="cw-ident-row">
           <Avatar name={contact.name} size={52} />
           <div className="cw-ident-main">
             <NameField contact={contact} canEdit={canManage} onSave={patch} />
+            {isPhone && contact.phone && <div className="cw-ident-phone">{formatPhone(contact.phone)}</div>}
             <div className="cw-pills">
               <TypeTag type={contact.type} />
               <StatusTag status={contact.status} />
@@ -184,6 +216,26 @@ export function ContactDetail() {
         <FieldSections contact={contact} canManage={canManage} onSave={patch} />
       </aside>
 
+      {/* Phones only: quick actions + the tab strip that picks the visible pane. */}
+      {isPhone && (
+        <>
+          <div className="cw-quick">
+            {contact.phone && <a className="cw-qa" href={`tel:${contact.phone}`}><span><Phone size={22} /></span>Call</a>}
+            <button type="button" className="cw-qa" onClick={() => { setMtab("activity"); setTextJump((n) => n + 1); }}><span><MessageSquare size={22} /></span>Text</button>
+            {contact.email && <a className="cw-qa" href={`mailto:${contact.email}`}><span><Mail size={22} /></span>Email</a>}
+            <button type="button" className="cw-qa" onClick={() => setMtab("tasks")}><span><CheckSquare size={22} /></span>Task</button>
+            <button type="button" className="cw-qa" onClick={() => setMtab("notes")}><span><StickyNote size={22} /></span>Note</button>
+          </div>
+          <div className="cw-mtabs" role="tablist" aria-label="Contact sections" ref={mtabsRef}>
+            {phoneTabs.map(([k, l, n]) => (
+              <button key={k} type="button" role="tab" aria-selected={mtab === k} className={mtab === k ? "active" : ""} onClick={() => setMtab(k)}>
+                {l}{n > 0 && <span>{n}</span>}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+
       {/* ============================================== center: timeline */}
       <section className="cw-center">
         <div className="cw-chead">
@@ -200,13 +252,13 @@ export function ContactDetail() {
           </div>
         </div>
 
-        <Timeline activities={activities} timeline={timeline} canManage={canManage} onUpdate={updateActivity} onRemove={removeActivity} />
+        <Timeline activities={activities} timeline={timeline} canManage={canManage} onUpdate={updateActivity} onRemove={removeActivity} textJump={textJump} />
 
-        {canManage && <Composer contactId={contact.id} onLogged={load} />}
+        {canManage && <Composer contactId={contact.id} onLogged={load} textJump={textJump} />}
       </section>
 
       {/* ============================================== right: notes/tasks/... */}
-      <SidePanel contact={contact} activities={activities ?? []} canManage={canManage} onChanged={load} users={users} />
+      <SidePanel contact={contact} activities={activities ?? []} canManage={canManage} onChanged={load} users={users} phoneTab={isPhone ? mtab : null} />
       </div>
 
       {confirmDelete && (
@@ -229,12 +281,14 @@ export function ContactDetail() {
  * offered on notes and logged calls — the same entries the Notes panel already
  * lets the team pin and delete; delete asks for a second click.
  */
-function Timeline({ activities, timeline, canManage, onUpdate, onRemove }: {
-  activities: ContactActivityRow[] | null; timeline: ContactActivityRow[]; canManage: boolean;
+function Timeline({ activities, timeline, canManage, onUpdate, onRemove, textJump }: {
+  activities: ContactActivityRow[] | null; timeline: ContactActivityRow[]; canManage: boolean; textJump: number;
   onUpdate: (a: ContactActivityRow, body: Record<string, unknown>) => Promise<void>;
   onRemove: (a: ContactActivityRow) => Promise<void>;
 }) {
   const [kind, setKind] = useState("ALL");
+  // Phone "Text" quick action: narrow the timeline to logged texts.
+  useEffect(() => { if (textJump) setKind("SMS"); }, [textJump]);
   const [armed, setArmed] = useState<string | null>(null);
   useEffect(() => {
     if (!armed) return;
@@ -589,7 +643,7 @@ function FieldSections({ contact, canManage, onSave }: { contact: ContactRow; ca
 
 /* --------------------------------------------------------------- composer */
 
-function Composer({ contactId, onLogged }: { contactId: string; onLogged: () => void }) {
+function Composer({ contactId, onLogged, textJump }: { contactId: string; onLogged: () => void; textJump: number }) {
   const [tab, setTab] = useState<"NOTE" | "CALL" | "EMAIL" | "SMS">("NOTE");
   const [title, setTitle] = useState("");
   const [body, setBody] = useState("");
@@ -597,6 +651,13 @@ function Composer({ contactId, onLogged }: { contactId: string; onLogged: () => 
   const [dur, setDur] = useState("");
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  // Phone "Text" quick action: switch to "Log text" and bring the form on screen.
+  useEffect(() => {
+    if (!textJump) return;
+    setTab("SMS");
+    boxRef.current?.scrollIntoView({ block: "center" });
+  }, [textJump]);
 
   // Internal notes require a concise Title above the detailed note; quick
   // call/email/text logs stay single-field.
@@ -619,7 +680,7 @@ function Composer({ contactId, onLogged }: { contactId: string; onLogged: () => 
   const TABS: [typeof tab, string][] = [["NOTE", "Internal note"], ["CALL", "Log call"], ["EMAIL", "Log email"], ["SMS", "Log text"]];
   const label = TABS.find(([k]) => k === tab)![1];
   return (
-    <div className="cw-composer">
+    <div className="cw-composer" ref={boxRef}>
       <div className="cw-comp-top">
         <Segmented accent ariaLabel="Entry type" value={tab}
           onChange={(k) => { setTab(k); inputRef.current?.focus(); }}
@@ -668,14 +729,21 @@ const TASK_PRIORITIES: { v: string; label: string; tone: "neutral" | "warn" | "d
   { v: "HIGH", label: "High", tone: "danger" },
 ];
 
-function SidePanel({ contact, activities, canManage, onChanged, users }: {
+function SidePanel({ contact, activities, canManage, onChanged, users, phoneTab }: {
   contact: ContactRow; activities: ContactActivityRow[]; canManage: boolean; onChanged: () => void; users: UserLite[];
+  /** Phone tab strip selection (null on desktop, where the rail's own tabs rule). */
+  phoneTab: PhoneTab | null;
 }) {
   // Deep link from the dashboard Tasks widget / task-due notifications:
   // `?task=<id>` opens straight onto the Tasks tab.
   const openedOnTask = useMemo(() => new URLSearchParams(window.location.search).has("task"), []);
   // Tasks is the default rail tab; ?task deep links land there too.
-  const [tab, setTab] = useState<"notes" | "tasks" | "reminders" | "minerals">(openedOnTask ? "tasks" : "tasks");
+  const [railTab, setTab] = useState<"notes" | "tasks" | "reminders" | "minerals">(openedOnTask ? "tasks" : "tasks");
+  // Phones: the page-level strip picks the pane. Its Tasks tab covers tasks and
+  // reminders, so the rail's own Tasks / Reminders switch stays in charge there.
+  const tab: typeof railTab = phoneTab === "notes" || phoneTab === "minerals" ? phoneTab
+    : phoneTab === "tasks" ? (railTab === "reminders" ? "reminders" : "tasks")
+    : railTab;
   const [q, setQ] = useState("");
   const [draft, setDraft] = useState("");   // Title — concise summary (required)
   const [note, setNote] = useState("");     // Note — detailed information (required)
@@ -752,7 +820,7 @@ function SidePanel({ contact, activities, canManage, onChanged, users }: {
     <aside className="cw-right">
       <div className="cw-rtabs" role="tablist">
         {TABS.map(([k, l, n]) => (
-          <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>
+          <button key={k} role="tab" data-k={k} aria-selected={tab === k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>
             {l}{n != null && <span className="cw-rtab-n">{n}</span>}
           </button>
         ))}

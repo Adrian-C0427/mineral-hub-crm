@@ -16,7 +16,7 @@ import type { UserLite } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
 import { DateField } from "../components/DateField";
 
-interface Category { id: string; name: string; active: boolean }
+interface Category { id: string; name: string; active: boolean; expenseCount?: number }
 interface Expense {
   id: string; date: string; amount: number; notes: string | null;
   reimbursed: boolean; reimbursementDate: string | null;
@@ -24,10 +24,10 @@ interface Expense {
   userId: string | null; userName: string | null; userAvatarColor?: string | null; createdAt: string;
 }
 interface Dashboard {
-  totals: { totalExpenses: number; totalReimbursed: number; totalOutstanding: number; companyOutstanding: number; count: number };
+  totals: { totalExpenses: number; totalReimbursed: number; totalOutstanding: number; companyOutstanding: number; count: number; outstandingCount?: number };
   byCategory: { name: string; amount: number }[];
   byMonth: { month: string; expenses: number; reimbursed: number }[];
-  byUser: { userId: string; name: string; total: number; outstanding: number }[];
+  byUser: { userId: string; name: string; total: number; outstanding: number; outstandingCount?: number }[];
   outstandingByUser: { userId: string; name: string; outstanding: number }[];
 }
 
@@ -47,6 +47,9 @@ const axisMoney = (v: number): string => {
   if (a >= 1000) return `$${Number((a / 1000).toFixed(a >= 10000 ? 0 : 1))}K`;
   return `$${Math.round(a)}`;
 };
+
+/** "1 expense" / "3 expenses". */
+const countNoun = (n: number): string => `${n} expense${n === 1 ? "" : "s"}`;
 
 const ICON = { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 
@@ -172,7 +175,8 @@ export function Expenses() {
             },
             {
               label: "Outstanding reimbursements", value: money(dash.totals.totalOutstanding, { cents: true }),
-              tone: dash.totals.totalOutstanding > 0 ? "warn" : "default", sub: "Awaiting payout",
+              tone: dash.totals.totalOutstanding > 0 ? "warn" : "default",
+              sub: dash.totals.outstandingCount != null ? `${countNoun(dash.totals.outstandingCount)} awaiting payout` : "Awaiting payout",
             },
             { label: "Company outstanding balance", value: money(dash.totals.companyOutstanding, { cents: true }), sub: "Owed to team" },
           ]}
@@ -257,7 +261,7 @@ export function Expenses() {
                           <span className={`xp-owed-amt ${u.outstanding > 0 ? "warn" : ""}`}>{money(u.outstanding, { cents: true })}</span>
                         </div>
                         <span className="xp-owed-bar"><i style={{ width: max > 0 ? `${(u.outstanding / max) * 100}%` : 0 }} /></span>
-                        <span className="xp-owed-sub">{u.outstanding > 0 ? "Awaiting payout" : "Nothing outstanding"}</span>
+                        <span className="xp-owed-sub">{u.outstandingCount ? `${countNoun(u.outstandingCount)} awaiting payout` : u.outstanding > 0 ? "Awaiting payout" : "Nothing outstanding"}</span>
                       </div>
                     );
                   })}
@@ -879,7 +883,10 @@ function CategoryManager({ categories, onClose, onChanged }: { categories: Categ
                   onKeyDown={(e) => { if (e.key === "Enter") saveRename(c); if (e.key === "Escape") setEditId(null); }}
                   onBlur={() => saveRename(c)} aria-label="Category name" />
               ) : (
-                <span className="clickable" title="Click to rename" onClick={() => { setEditId(c.id); setEditName(c.name); }}>{c.name}</span>
+                <>
+                  <span className="clickable" title="Click to rename" onClick={() => { setEditId(c.id); setEditName(c.name); }}>{c.name}</span>
+                  {c.expenseCount != null && <span className="xp-cat-meta">{countNoun(c.expenseCount)}</span>}
+                </>
               )}
             </span>
             <Tag tone={c.active ? "success" : "neutral"}>{c.active ? "Active" : "Hidden"}</Tag>

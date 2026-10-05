@@ -103,6 +103,9 @@ buyersRouter.get(
         contactFirstName: b.contactFirstName ?? splitContactName(b.contactName).first,
         contactLastName: b.contactLastName ?? splitContactName(b.contactName).last,
         focusArea: focusArea(b.buyBox),
+        // Full county list behind focusArea's truncated text, so the list can
+        // show an exact "+N" (focusArea itself is unchanged).
+        focusCounties: b.buyBox?.counties ?? [],
         relationshipStatus: b.relationshipStatus,
         closeRate: closeRate(cr.closedWon, cr.dealsWithOffer),
         closedDeals: cr.closedWon,

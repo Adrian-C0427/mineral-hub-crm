@@ -4,6 +4,7 @@ import { Menu } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { useTheme } from "../theme";
 import { userAvatarColor } from "../lib/avatarColor";
+import { api } from "../api/client";
 import { NotificationsBell } from "./NotificationsBell";
 import { ROLE_LABEL } from "../lib/roles";
 import { setMobileNavOpen, useHasTabBar, useIsPhone } from "../lib/mobile";
@@ -22,6 +23,20 @@ const MenuIcon = ({ d }: { d: string }) => (
 );
 const THEME_LABEL: Record<string, string> = { light: "Light", dark: "Dark", dim: "Dim", slate: "Slate", dusk: "Dusk", neutral: "Neutral" };
 
+// Team size for the account menu, fetched the first time the menu opens and
+// kept for the session (per organization). A failed request is not cached.
+const teamCountCache = new Map<string, Promise<number | null>>();
+function loadTeamCount(orgId: string): Promise<number | null> {
+  let p = teamCountCache.get(orgId);
+  if (!p) {
+    p = api.get<{ status?: string }[]>("/users")
+      .then((list) => (Array.isArray(list) ? list.filter((u) => u.status !== "DISABLED").length : null))
+      .catch(() => { teamCountCache.delete(orgId); return null; });
+    teamCountCache.set(orgId, p);
+  }
+  return p;
+}
+
 /**
  * Top navigation shown on every signed-in page: notifications and the account
  * menu (avatar + name opens a dropdown with shortcuts into Settings and Log out).
@@ -31,6 +46,15 @@ export function TopBar() {
   const { theme } = useTheme();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const [teamCount, setTeamCount] = useState<number | null>(null);
+  const orgId = user?.organization?.id;
+
+  useEffect(() => {
+    if (!open || !orgId) return;
+    let live = true;
+    void loadTeamCount(orgId).then((n) => { if (live) setTeamCount(n); });
+    return () => { live = false; };
+  }, [open, orgId]);
 
   // Close the user menu on outside click / Escape.
   useEffect(() => {
@@ -98,7 +122,7 @@ export function TopBar() {
                 <MenuIcon d="M4 21V7l8-4 8 4v14M9 21v-6h6v6" /><span>Organization</span>
               </Link>
               <Link to="/settings/organization" role="menuitem" className="topbar-menu-item" onClick={close}>
-                <MenuIcon d="M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 4.5a3.5 3.5 0 0 1 0 6.5M21 20c0-2.6-1.6-4.9-4-5.7" /><span>Team members</span>
+                <MenuIcon d="M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 4.5a3.5 3.5 0 0 1 0 6.5M21 20c0-2.6-1.6-4.9-4-5.7" /><span>Team members</span>{teamCount != null && <em>{teamCount}</em>}
               </Link>
               {can("manageApiIntegrations") && (
                 <Link to="/settings/integrations" role="menuitem" className="topbar-menu-item" onClick={close}>

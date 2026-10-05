@@ -1,0 +1,9 @@
+/* Expenses › category management: "N expenses" usage line under the name. */
+.xp-cat-meta { display: block; margin-top: 1px; font-size: 12px; font-weight: 400; color: var(--ink-3); }
+
+/* Well Analysis › Saved analyses: fifth figure column ("Price deck"). The
+   phone layout (two figures per line) is untouched. */
+@media (min-width: 761px) {
+  .va-saved-row { grid-template-columns: 16px minmax(220px, 1.4fr) repeat(5, minmax(90px, 0.8fr)) 110px auto; }
+}
+.va-saved-m.va-saved-deck b { font-size: 13px; font-weight: 400; color: var(--ink-2); white-space: nowrap; }

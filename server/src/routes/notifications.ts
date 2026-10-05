@@ -107,3 +107,35 @@ notificationsRouter.post(
     res.json({ ok: true });
   }),
 );
+
+/**
+ * Clearing = deleting the row, scoped by the same visibility rule as reading.
+ * Untargeted rows (userId null) are one shared row for every admin/owner, so
+ * clearing one clears it for the other admins too — the same way their read
+ * state is already shared.
+ */
+notificationsRouter.delete(
+  "/",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    // "Clear all" clears what the bell lists: muted types are hidden there, so
+    // they are left alone (un-muting a type still brings its history back).
+    // ?read=1 keeps the unread ones.
+    const readOnly = req.query.read === "1";
+    const muted = await mutedTypesFor(req.user!.id);
+    const mutedFilter = muted.length ? { type: { notIn: muted } } : {};
+    const { count } = await prisma.notification.deleteMany({
+      where: { ...visibleWhere(req), ...mutedFilter, ...(readOnly ? { readAt: { not: null } } : {}) },
+    });
+    res.json({ ok: true, cleared: count });
+  }),
+);
+
+notificationsRouter.delete(
+  "/:id",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    // deleteMany so the org + visibility scope is part of the delete itself.
+    const { count } = await prisma.notification.deleteMany({ where: { id: req.params.id, ...visibleWhere(req) } });
+    if (!count) throw new HttpError(404, "Notification not found");
+    res.json({ ok: true });
+  }),
+);

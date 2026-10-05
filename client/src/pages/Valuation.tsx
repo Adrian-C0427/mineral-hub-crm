@@ -116,6 +116,8 @@ interface Paged<T> { total: number; page: number; pageSize: number; rows: T[] }
 interface SavedAnalysisRow {
   id: string; name: string; wellIds: string[]; wellNames: string[]; notes: string | null;
   updatedAt: string; createdAt: string;
+  /** Oil $/bbl and gas $/mcf the saved snapshot was run at. Optional: an older API omits it. */
+  priceDeck?: { oilPrice: number | null; gasPrice: number | null };
   headline: { fairMarketValue: number | null; recommendedOffer: number | null; npv: number | null; irrAnnualPct: number | null; roiPct: number | null } | null;
 }
 
@@ -1477,6 +1479,14 @@ function FullReport({ analysis, analysisName }: { analysis: AnalyzeResponse; ana
 // Saved analyses tab
 // ---------------------------------------------------------------------------
 
+/** "$75 / $3.00" — oil $/bbl / gas $/mcf as stored on the saved analysis. */
+function fmtDeck(d: SavedAnalysisRow["priceDeck"]): string {
+  if (!d || (d.oilPrice == null && d.gasPrice == null)) return "—";
+  const oil = d.oilPrice == null ? "—" : `$${Number(d.oilPrice.toFixed(2))}`;
+  const gas = d.gasPrice == null ? "—" : `$${d.gasPrice.toFixed(2)}`;
+  return `${oil} / ${gas}`;
+}
+
 function SavedAnalyses({ onOpen, canManage }: { onOpen: (id: string) => void; canManage: boolean }) {
   const [rows, setRows] = useState<SavedAnalysisRow[] | null>(null);
   const [sel, setSel] = useState<string[]>([]);
@@ -1533,6 +1543,7 @@ function SavedAnalyses({ onOpen, canManage }: { onOpen: (id: string) => void; ca
               <span className="va-saved-m"><span>Rec. offer</span><b className="va-pos">{fmtMoneyC(r.headline?.recommendedOffer)}</b></span>
               <span className="va-saved-m"><span>NPV</span><b>{fmtMoneyC(r.headline?.npv)}</b></span>
               <span className="va-saved-m"><span>IRR</span><b>{fmtPct1(r.headline?.irrAnnualPct)}</b></span>
+              <span className="va-saved-m va-saved-deck" title="Oil $/bbl / gas $/mcf"><span>Price deck</span><b>{fmtDeck(r.priceDeck)}</b></span>
               <span className="va-saved-date" title="Last updated">{fmtDateLocal(r.updatedAt)}</span>
               <span className="va-saved-actions" onClick={(e) => e.stopPropagation()}>
                 <button className="link-btn" onClick={() => onOpen(r.id)}>Open</button>
