@@ -224,7 +224,7 @@ export function ContactDetail() {
 /* -------------------------------------------------------------- timeline */
 
 /**
- * Activity timeline, newest first: pinned entries on top, then day groups.
+ * Activity timeline in chronological order (oldest first, as logged), in day groups.
  * Filter chips narrow the view by kind (display only). Pin and delete are
  * offered on notes and logged calls — the same entries the Notes panel already
  * lets the team pin and delete; delete asks for a second click.
@@ -245,11 +245,9 @@ function Timeline({ activities, timeline, canManage, onUpdate, onRemove }: {
   if (activities === null) return <div className="cw-timeline"><Spinner /></div>;
 
   const shown = [...(kind === "ALL" ? timeline : timeline.filter((a) => a.kind === kind))]
-    .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+    .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
   const groups: { label: string; pinned?: boolean; items: ContactActivityRow[] }[] = [];
-  const pinned = shown.filter((a) => a.pinned);
-  if (pinned.length) groups.push({ label: "Pinned", pinned: true, items: pinned });
-  for (const a of shown.filter((x) => !x.pinned)) {
+  for (const a of shown) {
     const last = groups[groups.length - 1];
     if (last && !last.pinned && dayKey(last.items[0].createdAt) === dayKey(a.createdAt)) last.items.push(a);
     else groups.push({ label: dayLabel(a.createdAt), items: [a] });

@@ -51,11 +51,11 @@ export interface ContactRow {
 }
 
 export const TYPES: [string, string][] = [
-  ["SELLER", "Seller"], ["PROSPECT", "Prospect"], ["LEAD", "Inbound lead"], ["REFERRAL", "Referral"], ["OTHER", "Other"],
+  ["SELLER", "Seller"], ["PROSPECT", "Prospect"], ["LEAD", "Inbound Lead"], ["REFERRAL", "Referral"], ["OTHER", "Other"],
 ];
 export const STATUSES: [string, string][] = [
   ["NEW", "New"], ["CONTACTED", "Contacted"], ["ENGAGED", "Engaged"],
-  ["NEGOTIATING", "Negotiating"], ["CONVERTED", "Converted"], ["NOT_INTERESTED", "Not interested"],
+  ["NEGOTIATING", "Negotiating"], ["CONVERTED", "Converted"], ["NOT_INTERESTED", "Not Interested"],
 ];
 export const typeLabel = (v: string) => TYPES.find(([k]) => k === v)?.[1] ?? v;
 export const statusLabel = (v: string) => STATUSES.find(([k]) => k === v)?.[1] ?? v;

@@ -66,7 +66,7 @@ export function useMobileNavOpen(): boolean {
 export function revealActiveStripItems(): () => void {
   if (!window.matchMedia(PHONE_QUERY).matches) return () => {};
   const run = () => {
-    document.querySelectorAll<HTMLElement>(".seg-control, .tab-row, .asset-tabs").forEach((strip) => {
+    document.querySelectorAll<HTMLElement>(".seg-control, .seg, .tab-row, .asset-tabs").forEach((strip) => {
       if (strip.scrollWidth <= strip.clientWidth + 1) return;
       const active = strip.querySelector<HTMLElement>(".active, [aria-selected='true'], [aria-pressed='true']");
       if (!active) return;

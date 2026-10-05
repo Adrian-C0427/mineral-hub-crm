@@ -1668,11 +1668,11 @@ tr.row-selected td { background: color-mix(in srgb, var(--accent) 12%, transpare
 /* Segmented time-period control (Research) */
 .seg-control { display: flex; align-items: center; background: var(--panel-2); border: 1px solid var(--border);
   border-radius: 8px; padding: 3px; gap: 2px; font-size: 12.5px; font-weight: 600; flex-wrap: wrap; }
-.seg { padding: 7px 14px; border-radius: 6px; color: var(--text-dim); cursor: pointer;
+.seg-control > .seg { padding: 7px 14px; border-radius: 6px; color: var(--text-dim); cursor: pointer;
   background: transparent; border: none; font: inherit;
   display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; transition: background 0.12s, color 0.12s; user-select: none; }
-.seg:hover { color: var(--text); }
-.seg.active { color: #fff; background: var(--accent); }
+.seg-control > .seg:hover { color: var(--text); }
+.seg-control > .seg.active { color: var(--on-accent); background: var(--accent); }
 .q-hint { width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--border); color: var(--text-dim);
   display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; cursor: default; flex: none; }
 

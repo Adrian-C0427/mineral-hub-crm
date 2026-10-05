@@ -803,6 +803,14 @@ export function MapView() {
     return () => window.removeEventListener("resize", measure);
   }, [showFilters, showHeat, fullscreen]);
   useEffect(() => { mapRef.current?.resize(); }, [mapH]);
+  // Keep the canvas matched to its frame however the frame changes size.
+  useEffect(() => {
+    const el = mapContainer.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => mapRef.current?.resize());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Full-screen is a pure CSS re-layout of the SAME mounted tree — the map,
   // its panels, search, filters, and every piece of user state persist across

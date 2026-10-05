@@ -56,7 +56,8 @@
 
 /* Map box */
 .mc-map { position: relative; flex: none; min-height: 320px; border: 1px solid var(--line); border-radius: var(--radius-lg); overflow: hidden; background: var(--surface-inset); }
-.mc-canvas { position: absolute; inset: 0; z-index: 0; }
+/* MapLibre sets position:relative on its container; keep it filling the frame. */
+.mc-canvas, .mc-canvas.maplibregl-map { position: absolute !important; inset: 0; width: 100%; height: 100%; z-index: 0; }
 .mc-loading { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; color: var(--ink-4); font-size: 13px; }
 .mc-loading .spinner { background: none; }
 

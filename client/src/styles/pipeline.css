@@ -124,7 +124,7 @@ button.pl-link.muted:hover { color: var(--ink); }
 .pl-pri-chip i, .pl-pri i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
 .pri-high i { background: var(--danger); }
 .pri-medium i { background: var(--warn); }
-.pri-low i { background: var(--success); }
+.pri-low i { background: var(--ink-4); }
 
 .pl-range { display: flex; align-items: center; gap: 8px; }
 .pl-range-input { position: relative; flex: 1; min-width: 0; }
