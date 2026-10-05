@@ -522,3 +522,14 @@ tfoot td { background: var(--surface-1); border-top: 1px solid var(--line); font
 @media (pointer: coarse) and (max-height: 500px) {
   .bulk-bar { min-height: 0; padding: 8px 12px; }
 }
+
+/* Totals row (SortableTable `totalsLabel`): sums under the last row. */
+.data-table tfoot.dt-totals td {
+  padding-top: 14px; padding-bottom: 14px; border-top: 1px solid var(--line-faint); border-bottom: 0;
+  background: color-mix(in srgb, var(--surface-2) 45%, var(--surface)); color: var(--ink);
+  font-size: 13.5px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.data-table.lead-sticky tfoot.dt-totals td:nth-child(1), .data-table.lead-sticky.has-sel tfoot.dt-totals td:nth-child(2) { background: color-mix(in srgb, var(--surface-2) 45%, var(--surface)); }
+.dt-totals-label { font-size: 12.5px; font-weight: 600; color: var(--ink-3); }
+.dt-totals-pos { color: var(--success); }
+.dt-totals-neg { color: var(--danger-ink); }

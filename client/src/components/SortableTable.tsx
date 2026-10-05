@@ -32,11 +32,17 @@ export interface Column<T> {
    *  exactly those columns held the old defaults — not a user choice — so it
    *  is treated as never customized (the current defaults apply). */
   legacyDefaultHidden?: boolean;
+  /** This column's cell in the totals row (see `totalsLabel`), computed over
+   *  every row the table holds — not just the visible page. */
+  total?: (rows: T[]) => ReactNode;
 }
 
 interface Props<T> {
   columns: Column<T>[];
   rows: T[];
+  /** Adds a totals row under the last row: this label sits in the first
+   *  visible column that has no `total`, and each column with one shows it. */
+  totalsLabel?: (rows: T[]) => ReactNode;
   rowKey: (row: T) => string;
   onRowClick?: (row: T) => void;
   /** Route for the row's destination. Renders the first column as a real <Link>
@@ -352,6 +358,7 @@ export function SortableTable<T>({
   serverSort,
   paginationNoun,
   footerExtra,
+  totalsLabel,
 }: Props<T>) {
   const [localSort, setLocalSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(defaultSort ?? null);
   // Server-sort mode: the caller owns the sort state and re-queries on change.
@@ -557,6 +564,26 @@ export function SortableTable<T>({
             );})
           )}
         </tbody>
+        {totalsLabel && sorted.length > 0 && (() => {
+          const labelKey = cols.find((c) => !c.total)?.key;
+          return (
+            <tfoot className="dt-totals">
+              <tr>
+                {selection && <td style={hasPins ? { position: "sticky", left: 0, zIndex: 3 } : undefined} />}
+                {cols.map((c) => {
+                  const pinned = pinnedSet.has(c.key);
+                  const pin = pinStyle(c.key, false);
+                  return (
+                    <td key={c.key} className={`${c.align ?? "left"} ${pinned ? "cv-pin" : ""} ${pinned && c.key === pinnedKeys[pinnedKeys.length - 1] ? "cv-pin-last" : ""}`}
+                      style={pin ? { ...pin, background: undefined } : undefined}>
+                      {c.key === labelKey ? <span className="dt-totals-label">{totalsLabel(sorted)}</span> : c.total?.(sorted)}
+                    </td>
+                  );
+                })}
+              </tr>
+            </tfoot>
+          );
+        })()}
       </table>
     </div>
     </div>

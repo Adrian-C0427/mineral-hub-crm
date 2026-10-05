@@ -114,6 +114,10 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
 
   if (!deals) return <Spinner />;
 
+  // Totals row: plain sums of what each column shows, over the listed deals.
+  const sumOf = (rows: DealSummary[], pick: (d: DealSummary) => number | null | undefined) => rows.reduce((t, d) => t + (pick(d) ?? 0), 0);
+  const acres = (v: number) => v.toLocaleString("en-US", { maximumFractionDigits: 3 });
+
   const columns: Column<DealSummary>[] = [
     // The identifying column gets a width floor so names never wrap into a
     // 4-line sliver while less important columns spread out.
@@ -129,18 +133,22 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
       value: (d) => ({ HIGH: 0, MEDIUM: 1, LOW: 2 }[d.priority]),
       render: (d) => <span className="dl-priority"><PriorityBadge priority={d.priority} /></span> },
     { key: "stage", header: "Stage", type: "text", value: (d) => d.stage, render: (d) => <span className="dl-stage"><StageBadge stage={d.stage} pipelineId={d.pipelineId} /></span> },
-    { key: "nma", header: "NMA", type: "number", align: "right", value: (d) => d.aggAcreageNma ?? d.acreageNma, render: (d) => num(d.aggAcreageNma ?? d.acreageNma) },
+    { key: "nma", header: "NMA", type: "number", align: "right", value: (d) => d.aggAcreageNma ?? d.acreageNma, render: (d) => num(d.aggAcreageNma ?? d.acreageNma),
+      total: (rows) => acres(sumOf(rows, (d) => d.aggAcreageNma ?? d.acreageNma)) },
     // Every column is shown by default; users hide what they don't need via
     // Customize View (saved to their profile). `legacyDefaultHidden` marks the
     // columns an older version hid by default, so a browser layout that merely
     // held those old defaults isn't mistaken for a user's choice.
     // Same rollup-then-own-value logic as NMA.
-    { key: "nra", header: "NRA", type: "number", align: "right", value: (d) => d.aggNra ?? d.nra, render: (d) => num(d.aggNra ?? d.nra), legacyDefaultHidden: true },
+    { key: "nra", header: "NRA", type: "number", align: "right", value: (d) => d.aggNra ?? d.nra, render: (d) => num(d.aggNra ?? d.nra), legacyDefaultHidden: true,
+      total: (rows) => acres(sumOf(rows, (d) => d.aggNra ?? d.nra)) },
     // Financial columns. Our Cost uses the package rollup like NMA/NRA; Buyer
     // Purchase Price is the offer Profit Est. is computed from (accepted, else
     // best), so the three reconcile.
-    { key: "ourCost", header: "Our cost", type: "number", align: "right", value: (d) => d.aggOurPrice ?? d.ourPrice, render: (d) => money(d.aggOurPrice ?? d.ourPrice), legacyDefaultHidden: true, newlyAdded: true },
-    { key: "buyerPrice", header: "Buyer purchase price", type: "number", align: "right", value: (d) => d.buyerPurchasePrice ?? null, render: (d) => money(d.buyerPurchasePrice), legacyDefaultHidden: true, newlyAdded: true },
+    { key: "ourCost", header: "Our cost", type: "number", align: "right", value: (d) => d.aggOurPrice ?? d.ourPrice, render: (d) => money(d.aggOurPrice ?? d.ourPrice), legacyDefaultHidden: true, newlyAdded: true,
+      total: (rows) => money(sumOf(rows, (d) => d.aggOurPrice ?? d.ourPrice)) },
+    { key: "buyerPrice", header: "Buyer purchase price", type: "number", align: "right", value: (d) => d.buyerPurchasePrice ?? null, render: (d) => money(d.buyerPurchasePrice), legacyDefaultHidden: true, newlyAdded: true,
+      total: (rows) => money(sumOf(rows, (d) => d.buyerPurchasePrice)) },
     { key: "ourCostPerNma", header: "Our cost per NMA", type: "number", align: "right",
       value: (d) => costPerAcre(d, d.ourCostPerNma, d.aggAcreageNma ?? d.acreageNma),
       render: (d) => money(costPerAcre(d, d.ourCostPerNma, d.aggAcreageNma ?? d.acreageNma), { cents: true }), newlyAdded: true },
@@ -150,7 +158,8 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
     // Display-only: every deal field is edited on the Deal page (Deal Characteristics).
     { key: "royaltyRate", header: "Royalty rate", type: "number", align: "right", value: (d) => royaltyValue(d.royaltyRate),
       render: (d) => royaltyCell(d.royaltyRate), legacyDefaultHidden: true, newlyAdded: true },
-    { key: "profit", header: "Profit est.", type: "number", align: "right", value: (d) => d.profitEst, render: (d) => profitCell(d.profitEst) },
+    { key: "profit", header: "Profit est.", type: "number", align: "right", value: (d) => d.profitEst, render: (d) => profitCell(d.profitEst),
+      total: (rows) => { const t = sumOf(rows, (d) => d.profitEst); return <span className={t < 0 ? "dt-totals-neg" : "dt-totals-pos"}>{money(t)}</span>; } },
     { key: "uc", header: "Under contract", type: "date", value: (d) => d.dateUnderContract, render: (d) => dateCell(d.dateUnderContract), legacyDefaultHidden: true },
     { key: "fbb", header: "Find buyer by", type: "date", value: (d) => d.findBuyerByDate,
       render: (d) => dateCell(d.findBuyerByDate, d.isOverdue) },
@@ -264,6 +273,7 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
           }
           columns={columns}
           rows={filtered}
+          totalsLabel={(rows) => `Total · ${rows.length} deal${rows.length === 1 ? "" : "s"}`}
           rowKey={(d) => d.id}
           onRowClick={(d) => nav(`/deals/${d.id}`)}
           rowHref={(d) => `/deals/${d.id}`}
