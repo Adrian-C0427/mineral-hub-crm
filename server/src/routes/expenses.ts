@@ -54,6 +54,10 @@ function parseBound(v: string | undefined, endOfDay = false): Date | null {
 // Categories
 // ---------------------------------------------------------------------------
 
+// Saved category colour: "#RRGGBB", or null to clear it (the client then falls
+// back to colouring by list position, as before the column existed).
+const categoryColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, "Color must be a #RRGGBB hex value").nullable().optional();
+
 expensesRouter.get(
   "/categories",
   requirePermission("manageExpenses"),
@@ -74,13 +78,13 @@ expensesRouter.post(
   "/categories",
   requirePermission("manageExpenses"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { name } = z.object({ name: z.string().trim().min(1).max(200) }).parse(req.body);
+    const { name, color } = z.object({ name: z.string().trim().min(1).max(200), color: categoryColor }).parse(req.body);
     const existing = await prisma.expenseCategory.findFirst({
       where: { organizationId: orgId(req), name },
     });
     if (existing) throw new HttpError(409, "A category with that name already exists");
     const cat = await prisma.expenseCategory.create({
-      data: { organizationId: orgId(req), name },
+      data: { organizationId: orgId(req), name, color: color ?? null },
     });
     res.status(201).json(cat);
   }),
@@ -91,7 +95,7 @@ expensesRouter.patch(
   requirePermission("manageExpenses"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = z
-      .object({ name: z.string().trim().min(1).max(200).optional(), active: z.boolean().optional() })
+      .object({ name: z.string().trim().min(1).max(200).optional(), active: z.boolean().optional(), color: categoryColor })
       .parse(req.body);
     const cat = await prisma.expenseCategory.findFirst({
       where: { id: req.params.id, organizationId: orgId(req) },
@@ -151,7 +155,7 @@ function serializeExpense(e: {
   reimbursed: boolean;
   reimbursementDate: Date | null;
   categoryId: string | null;
-  category: { id: string; name: string } | null;
+  category: { id: string; name: string; color?: string | null } | null;
   userId: string | null;
   user: { id: string; name: string; avatarColor?: string | null } | null;
   createdAt: Date;
@@ -165,6 +169,7 @@ function serializeExpense(e: {
     reimbursementDate: e.reimbursementDate,
     categoryId: e.categoryId,
     categoryName: e.category?.name ?? null,
+    categoryColor: e.category?.color ?? null,
     userId: e.userId,
     userName: e.user?.name ?? null,
     userAvatarColor: e.user?.avatarColor ?? null,
@@ -172,7 +177,7 @@ function serializeExpense(e: {
   };
 }
 
-const withRefs = { category: { select: { id: true, name: true } }, user: { select: { id: true, name: true, avatarColor: true } } };
+const withRefs = { category: { select: { id: true, name: true, color: true } }, user: { select: { id: true, name: true, avatarColor: true } } };
 
 expensesRouter.get(
   "/",
@@ -391,6 +396,10 @@ expensesRouter.get(
     // Outstanding COUNTS beside the aggregate's outstanding amounts: the same
     // rows, the same definition (not reimbursed) and the same "unknown" user
     // bucket the aggregate uses. Additive — every existing field is unchanged.
+    // Saved colour per category name, for the by-category breakdown (null when
+    // none is saved, and for the "Uncategorized" bucket).
+    const colorByCategory = new Map<string, string | null>();
+    for (const e of expenses) if (e.category) colorByCategory.set(e.category.name, e.category.color ?? null);
     let outstandingCount = 0;
     const countByUser = new Map<string, number>();
     for (const e of expenses) {
@@ -402,6 +411,7 @@ expensesRouter.get(
     res.json({
       ...dash,
       totals: { ...dash.totals, outstandingCount },
+      byCategory: dash.byCategory.map((c) => ({ ...c, color: colorByCategory.get(c.name) ?? null })),
       byUser: dash.byUser.map((u) => ({ ...u, outstandingCount: countByUser.get(u.userId) ?? 0 })),
       outstandingByUser: dash.outstandingByUser.map((u) => ({ ...u, outstandingCount: countByUser.get(u.userId) ?? 0 })),
     });

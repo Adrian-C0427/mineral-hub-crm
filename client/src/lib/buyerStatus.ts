@@ -7,6 +7,7 @@ import type { BuyerStatus } from "../types";
  */
 export const BUYER_STATUS_OPTIONS: { v: BuyerStatus; label: string }[] = [
   { v: "CONTACTED", label: "Contacted" },
+  { v: "NO_RESPONSE", label: "No response" },
   { v: "INTERESTED", label: "Interested" },
   { v: "REVIEWING", label: "Reviewing" },
   { v: "OFFER_RECEIVED", label: "Offer Received" },
@@ -18,7 +19,7 @@ export const BUYER_STATUS_OPTIONS: { v: BuyerStatus; label: string }[] = [
 
 /** Sort rank: most-advanced statuses first, PASSED last. */
 export const BUYER_STATUS_RANK: Record<string, number> = {
-  CLOSED: 0, ACCEPTED: 1, NEGOTIATING: 2, OFFER_RECEIVED: 3, REVIEWING: 4, INTERESTED: 5, CONTACTED: 6, PASSED: 7,
+  CLOSED: 0, ACCEPTED: 1, NEGOTIATING: 2, OFFER_RECEIVED: 3, REVIEWING: 4, INTERESTED: 5, CONTACTED: 6, NO_RESPONSE: 7, PASSED: 8,
 };
 
 /** Display label for a buyer status ("ACCEPTED" → "Accepted Offer"). */

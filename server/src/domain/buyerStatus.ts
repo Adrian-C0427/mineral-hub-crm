@@ -4,10 +4,10 @@
  * use effectiveStatus so rows are correct even before the backfill runs.
  */
 export type BuyerStatus =
-  | "CONTACTED" | "INTERESTED" | "REVIEWING" | "OFFER_RECEIVED" | "NEGOTIATING" | "ACCEPTED" | "PASSED" | "CLOSED";
+  | "CONTACTED" | "NO_RESPONSE" | "INTERESTED" | "REVIEWING" | "OFFER_RECEIVED" | "NEGOTIATING" | "ACCEPTED" | "PASSED" | "CLOSED";
 
 export const BUYER_STATUSES: BuyerStatus[] = [
-  "CONTACTED", "INTERESTED", "REVIEWING", "OFFER_RECEIVED", "NEGOTIATING", "ACCEPTED", "PASSED", "CLOSED",
+  "CONTACTED", "NO_RESPONSE", "INTERESTED", "REVIEWING", "OFFER_RECEIVED", "NEGOTIATING", "ACCEPTED", "PASSED", "CLOSED",
 ];
 
 /** Legacy ResponseStatus → new BuyerStatus. */
@@ -25,10 +25,12 @@ export function effectiveStatus(a: { status?: string | null; responseStatus?: st
   return "CONTACTED";
 }
 
-/** Statuses that count as an engaged/interested buyer (for the deal metrics row). */
+/** Statuses that count as an engaged/interested buyer (for the deal metrics row).
+ *  NO_RESPONSE (contacted, never replied) is only ever set by hand and counts
+ *  exactly like CONTACTED: not engaged, not an offer, not a pass. */
 export const ENGAGED_STATUSES: BuyerStatus[] = ["INTERESTED", "REVIEWING", "OFFER_RECEIVED", "NEGOTIATING", "ACCEPTED", "CLOSED"];
 
 /** Sort order for the activity table (hottest first). */
 export const STATUS_ORDER: Record<BuyerStatus, number> = {
-  CLOSED: 0, ACCEPTED: 1, NEGOTIATING: 2, OFFER_RECEIVED: 3, REVIEWING: 4, INTERESTED: 5, CONTACTED: 6, PASSED: 7,
+  CLOSED: 0, ACCEPTED: 1, NEGOTIATING: 2, OFFER_RECEIVED: 3, REVIEWING: 4, INTERESTED: 5, CONTACTED: 6, NO_RESPONSE: 7, PASSED: 8,
 };

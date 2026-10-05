@@ -238,8 +238,13 @@ input.mono-input { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, 
 .member-role-locked { height: 32px; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--ink); }
 .member-role-locked svg { color: var(--ink-3); }
 .users-table tr.member-off td { opacity: .6; }
-.invite-head .set-head-aside button { min-height: 34px; padding: 0 12px; font-size: 12.5px; font-weight: 600; }
-.invite-table { min-width: 620px; }
+.invite-head .set-head-aside .row > button { min-height: 34px; padding: 0 12px; font-size: 12.5px; font-weight: 600; }
+.invite-role-pick { flex: none; width: 180px; }
+.invite-table { min-width: 760px; }
+.invite-role { font-size: 13px; color: var(--ink-2); }
+.invite-hidden { font-size: 12.5px; color: var(--ink-3); }
+.invite-status { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.invite-expiry { font-size: 12.5px; color: var(--ink-3); white-space: nowrap; }
 .invite-code { font-family: var(--set-mono); font-size: 14px; font-weight: 600; letter-spacing: 0.06em; color: var(--ink); background: none; padding: 0; }
 .invite-actions { display: inline-flex; gap: 6px; justify-content: flex-end; }
 
@@ -400,6 +405,8 @@ input.mono-input { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, 
   .set-head-aside { width: 100%; }
   .set-head-aside > button, .set-head-aside > .row { flex: 1; }
   .set-head-aside .row button { flex: 1; }
+  .invite-head .set-head-aside .row { flex-wrap: wrap; }
+  .invite-role-pick { flex: 1 0 100%; width: auto; }
   .notif-card .set-head-aside, .portal-head .set-head-aside { width: auto; }
   .set-search { width: 100%; height: 40px; }
 

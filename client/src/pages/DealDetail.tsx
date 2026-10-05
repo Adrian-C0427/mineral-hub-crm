@@ -98,8 +98,9 @@ export function DealDetail() {
   const refreshAll = () => { loadDeal(); loadMatches(); };
   // "Awaiting a response" means contacted AND no response yet — a buyer who
   // replied (responseReceived) isn't pending even if their status is still
-  // Contacted.
-  const hasUnresolved = deal.buyerActivity.some((a) => a.status === "CONTACTED" && !a.responseReceived);
+  // Contacted. "No response" is the same outreach with no reply, so it counts
+  // here exactly as Contacted does.
+  const hasUnresolved = deal.buyerActivity.some((a) => (a.status === "CONTACTED" || a.status === "NO_RESPONSE") && !a.responseReceived);
 
   const toggleMatch = (buyerId: string) =>
     setSelected((prev) => { const n = new Set(prev); n.has(buyerId) ? n.delete(buyerId) : n.add(buyerId); return n; });

@@ -4,7 +4,9 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requireOrgOwner, requirePermission, orgId, canSeeTeamId, type AuthedRequest } from "../middleware/auth.js";
-import { generateInviteCode, rotateTeamId, revokeInvitesKnownTo } from "../services/org.js";
+import {
+  generateInviteCode, rotateTeamId, revokeInvitesKnownTo, assertCanGrantRole, canGrantRole, inviteExpiryFrom,
+} from "../services/org.js";
 import { normalizePhone } from "../domain/phone.js";
 import { invalidateRoleCache } from "../services/rolePermCache.js";
 import {
@@ -370,7 +372,8 @@ orgRouter.patch(
     }
     // Only the owner can modify an owner, promote to admin, or (de)activate admins.
     if (target.orgRole === "OWNER" && !callerIsOwner) throw new HttpError(403, "Only the owner can modify the owner");
-    if (orgRole === "ADMIN" && !callerIsOwner) throw new HttpError(403, "Only the owner can designate administrators");
+    // Shared with invite codes, which grant a role the same way (services/org.ts).
+    if (orgRole) assertCanGrantRole(req.user!.orgRole, orgRole);
     if (target.orgRole === "ADMIN" && !callerIsOwner) throw new HttpError(403, "Only the owner can modify administrators");
 
     const data: Record<string, unknown> = {};
@@ -532,30 +535,54 @@ orgRouter.get(
       where: { organizationId: orgId(req) },
       orderBy: { createdAt: "desc" },
     });
+    const now = Date.now();
     res.json(
-      invites.map((i) => ({
-        id: i.id,
-        code: i.code,
-        reusable: i.reusable,
-        active: i.active,
-        maxUses: i.maxUses,
-        uses: i.uses,
-        createdAt: i.createdAt,
-      })),
+      invites.map((i) => {
+        const hidden = inviteCodeHiddenFrom(req, i.role);
+        return {
+          id: i.id,
+          code: hidden ? null : i.code,
+          codeHidden: hidden,
+          reusable: i.reusable,
+          active: i.active,
+          maxUses: i.maxUses,
+          uses: i.uses,
+          role: i.role ?? "MEMBER", // NULL = a code from before roles existed
+          expiresAt: i.expiresAt, // NULL = never expires
+          expired: i.expiresAt != null && i.expiresAt.getTime() <= now,
+          createdAt: i.createdAt,
+        };
+      }),
     );
   }),
 );
 
-const createInviteSchema = z.object({
+/**
+ * A code that grants a role is as good as the power to grant that role: whoever
+ * can read it can hand it to anyone (or leave and re-join with it themselves).
+ * So the code text is withheld from a caller who could not have created it —
+ * in practice an ADMIN-role code, from everyone but the owner. They still see
+ * the row and can disable or revoke it.
+ */
+function inviteCodeHiddenFrom(req: AuthedRequest, role: OrgRole | null): boolean {
+  return !canGrantRole(req.user!.orgRole, role ?? "MEMBER");
+}
+
+export const createInviteSchema = z.object({
   reusable: z.boolean().default(false),
   maxUses: z.number().int().positive().nullish(),
+  // Role the joiner receives. Same set a member can be changed to — OWNER is
+  // not in it. Omitted = MEMBER, which is what every code granted before.
+  role: z.enum(["ADMIN", "MEMBER", "VIEWER"]).default("MEMBER"),
 });
 
 orgRouter.post(
   "/invites",
   requirePermission("inviteRemoveUsers"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { reusable, maxUses } = createInviteSchema.parse(req.body);
+    const { reusable, maxUses, role } = createInviteSchema.parse(req.body);
+    // The creator can only hand out a role they could assign to a member directly.
+    assertCanGrantRole(req.user!.orgRole, role);
     const invite = await prisma.inviteCode.create({
       data: {
         organizationId: orgId(req),
@@ -563,6 +590,8 @@ orgRouter.post(
         reusable,
         // Single-use codes are capped at 1; reusable codes honor an optional cap.
         maxUses: reusable ? maxUses ?? null : 1,
+        role,
+        expiresAt: inviteExpiryFrom(),
         createdByUserId: req.user!.id,
       },
     });
@@ -579,8 +608,12 @@ orgRouter.patch(
       where: { id: req.params.id, organizationId: orgId(req) },
     });
     if (!invite) throw new HttpError(404, "Invite code not found");
+    // Re-enabling a code grants its role again, so it takes the same right as
+    // creating it. Disabling is always allowed.
+    if (active) assertCanGrantRole(req.user!.orgRole, invite.role ?? "MEMBER");
     const updated = await prisma.inviteCode.update({ where: { id: invite.id }, data: { active } });
-    res.json(updated);
+    const hidden = inviteCodeHiddenFrom(req, updated.role);
+    res.json({ ...updated, code: hidden ? null : updated.code, codeHidden: hidden });
   }),
 );
 

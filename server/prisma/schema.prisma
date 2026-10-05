@@ -106,6 +106,7 @@ enum BuyerStatus {
   ACCEPTED
   PASSED
   CLOSED
+  NO_RESPONSE
 }
 
 // Communication-history entry types for the per-buyer deal timeline.
@@ -333,6 +334,11 @@ model InviteCode {
   active          Boolean      @default(true)
   maxUses         Int? // null = unlimited (reusable only)
   uses            Int          @default(0)
+  // Role given to whoever joins with this code. Null = MEMBER (codes created
+  // before roles existed).
+  role            OrgRole?
+  // After this moment the code no longer works. Null = never expires (older codes).
+  expiresAt       DateTime?
   createdByUserId String?
   createdAt       DateTime     @default(now())
 
@@ -1046,6 +1052,8 @@ model ExpenseCategory {
   name           String
   active         Boolean      @default(true)
   sortOrder      Int          @default(0)
+  // Chosen chart/tag colour (#RRGGBB). Null = colour by position, as before.
+  color          String?
   createdAt      DateTime     @default(now())
 
   expenses Expense[]
@@ -1439,6 +1447,14 @@ model Contact {
 
   email String?
   phone String?
+  // How this person prefers to be reached: CALL | TEXT | EMAIL | MAIL.
+  preferredContact String?
+
+  // Mailing address (letters, offers by mail).
+  mailingStreet String?
+  mailingCity   String?
+  mailingState  String?
+  mailingZip    String?
 
   // Geography of interest (mirrors Deal geography fields).
   states   String[]

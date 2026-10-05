@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
   PieChart, Pie, Cell,
@@ -16,7 +17,7 @@ import type { UserLite } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
 import { DateField } from "../components/DateField";
 
-interface Category { id: string; name: string; active: boolean; expenseCount?: number }
+interface Category { id: string; name: string; active: boolean; color?: string | null; expenseCount?: number }
 interface Expense {
   id: string; date: string; amount: number; notes: string | null;
   reimbursed: boolean; reimbursementDate: string | null;
@@ -33,12 +34,20 @@ interface Dashboard {
 
 const EMPTY_FORM = { date: toInputDate(new Date()), amount: "", categoryId: "", notes: "", reimbursed: false, reimbursementDate: "" };
 
-/** Stable per-category accent color — same palette everywhere (donut, legend,
- *  table chips), keyed by the category's position in the org's list. */
-function catColorFor(name: string | null | undefined, categories: Category[]): string {
+/** Position colour — the category's place in the org's list picks a palette
+ *  entry. This is the fallback for a category with no saved colour. */
+function catPositionColor(name: string | null | undefined, categories: Category[]): string {
   if (!name) return "var(--ink-3)";
   const i = categories.findIndex((c) => c.name === name);
   return i >= 0 ? CHART_COLORS[i % CHART_COLORS.length] : "var(--ink-3)";
+}
+
+/** Per-category accent color — same everywhere (donut, legend, table chips,
+ *  category manager). The colour saved on the category wins; a category
+ *  without one keeps its position colour. */
+function catColorFor(name: string | null | undefined, categories: Category[]): string {
+  const saved = name ? categories.find((c) => c.name === name)?.color : null;
+  return saved && /^#[0-9a-f]{6}$/i.test(saved) ? saved : catPositionColor(name, categories);
 }
 
 /** Compact axis money: $950, $1.2K, $14K. */
@@ -828,6 +837,12 @@ function CategoryManager({ categories, onClose, onChanged }: { categories: Categ
     catch (e2) { setErr(e2 instanceof ApiError ? e2.message : "Something went wrong"); }
   }
   const add = (e: React.FormEvent) => { e.preventDefault(); if (name.trim()) run(async () => { await api.post("/expenses/categories", { name: name.trim() }); setName(""); }); };
+  // null clears the saved colour, so the category goes back to its position colour.
+  const setColor = (c: Category, color: string | null) => {
+    if ((c.color ?? null) === color) return;
+    setOrder((o) => o.map((x) => (x.id === c.id ? { ...x, color } : x)));
+    run(() => api.patch(`/expenses/categories/${c.id}`, { color }));
+  };
   const toggleActive = (c: Category) => run(() => api.patch(`/expenses/categories/${c.id}`, { active: !c.active }));
   function saveRename(c: Category) {
     const n = editName.trim();
@@ -876,7 +891,8 @@ function CategoryManager({ categories, onClose, onChanged }: { categories: Categ
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
               </button>
             </span>
-            <span className="xp-cat-swatch" style={{ background: catColorFor(c.name, order) }} />
+            <CategoryColorPicker label={c.name} saved={c.color ?? null} color={catColorFor(c.name, order)}
+              fallback={catPositionColor(c.name, order)} onPick={(col) => setColor(c, col)} />
             <span className="xp-cat-name">
               {editId === c.id ? (
                 <input autoFocus value={editName} onChange={(e) => setEditName(e.target.value)}
@@ -911,5 +927,64 @@ function CategoryManager({ categories, onClose, onChanged }: { categories: Categ
         />
       )}
     </Modal>
+  );
+}
+
+/** Category colour swatch that opens a small popover of preset swatches (the
+ *  chart palette) plus "Default", which clears the saved colour. Closes after
+ *  every pick. */
+function CategoryColorPicker({ label, saved, color, fallback, onPick }: {
+  label: string; saved: string | null; color: string; fallback: string; onPick: (c: string | null) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  // The swatches render in a portal at a fixed position so the dialog's
+  // scroll area cannot clip them; they open upward when there is no room below.
+  const popRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const toggle = () => {
+    if (open) { setOpen(false); return; }
+    const r = ref.current?.getBoundingClientRect();
+    if (r) {
+      const POP_H = 150, POP_W = 170;
+      const below = window.innerHeight - r.bottom > POP_H + 12;
+      setPos({ left: Math.max(8, Math.min(r.left, window.innerWidth - POP_W - 8)), top: below ? r.bottom + 6 : Math.max(8, r.top - POP_H - 6) });
+    }
+    setOpen(true);
+  };
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!ref.current?.contains(t) && !popRef.current?.contains(t)) setOpen(false);
+    };
+    // Capture + stop: Escape closes just the swatches, never the dialog.
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
+    document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onKey, true);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey, true); };
+  }, [open]);
+  const current = saved ? saved.toLowerCase() : null;
+  return (
+    <span className="xp-cat-color" ref={ref}>
+      <button type="button" className={`xp-cat-color-btn ${open ? "open" : ""}`} title="Category color"
+        aria-label={`${label} color`} aria-expanded={open} onClick={toggle}>
+        <span className="xp-cat-swatch" style={{ background: color }} />
+      </button>
+      {open && pos && createPortal(
+        <div className="xp-cat-color-pop" ref={popRef} style={{ left: pos.left, top: pos.top }} role="listbox" aria-label={`${label} color`}>
+          {CHART_COLORS.map((c) => (
+            <button key={c} type="button" role="option" aria-selected={c.toLowerCase() === current} aria-label={c}
+              className={`xp-cat-color-opt ${c.toLowerCase() === current ? "on" : ""}`} style={{ background: c, color: c }}
+              onClick={() => { setOpen(false); onPick(c); }} />
+          ))}
+          <button type="button" role="option" aria-selected={current === null}
+            className={`xp-cat-color-default ${current === null ? "on" : ""}`} title="Use the color for this category's position in the list"
+            onClick={() => { setOpen(false); onPick(null); }}>
+            <span className="xp-cat-swatch" style={{ background: fallback }} />Default
+          </button>
+        </div>,
+        document.body,
+      )}
+    </span>
   );
 }

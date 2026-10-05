@@ -38,6 +38,12 @@ export interface ContactRow {
   source: string | null;
   email: string | null;
   phone: string | null;
+  /** CALL | TEXT | EMAIL | MAIL, or null when no preference is recorded. */
+  preferredContact?: string | null;
+  mailingStreet?: string | null;
+  mailingCity?: string | null;
+  mailingState?: string | null;
+  mailingZip?: string | null;
   states: string[];
   counties: string[];
   notes: string | null;
@@ -57,6 +63,10 @@ export const STATUSES: [string, string][] = [
   ["NEW", "New"], ["CONTACTED", "Contacted"], ["ENGAGED", "Engaged"],
   ["NEGOTIATING", "Negotiating"], ["CONVERTED", "Converted"], ["NOT_INTERESTED", "Not Interested"],
 ];
+export const PREFERRED_CONTACTS: [string, string][] = [
+  ["CALL", "Phone"], ["TEXT", "Text"], ["EMAIL", "Email"], ["MAIL", "Mail"],
+];
+export const preferredContactLabel = (v: string | null | undefined) => (v ? PREFERRED_CONTACTS.find(([k]) => k === v)?.[1] ?? v : null);
 export const typeLabel = (v: string) => TYPES.find(([k]) => k === v)?.[1] ?? v;
 export const statusLabel = (v: string) => STATUSES.find(([k]) => k === v)?.[1] ?? v;
 /** Plural labels for the type filter segments (same server catalog). */
@@ -770,6 +780,12 @@ const EXPORT_COLUMNS: { key: string; label: string; value: (r: ContactRow, lists
   { key: "nextFollowUpDate", label: "Next Follow-up", value: (r) => r.nextFollowUpDate ? fmtDate(r.nextFollowUpDate) : null },
   { key: "notes", label: "Notes", value: (r) => r.notes },
   { key: "createdAt", label: "Created", value: (r) => fmtDate(r.createdAt) },
+  // Added last so existing column positions never move.
+  { key: "mailingStreet", label: "Mailing Street", value: (r) => r.mailingStreet ?? null },
+  { key: "mailingCity", label: "Mailing City", value: (r) => r.mailingCity ?? null },
+  { key: "mailingState", label: "Mailing State", value: (r) => r.mailingState ?? null },
+  { key: "mailingZip", label: "Mailing Zip", value: (r) => r.mailingZip ?? null },
+  { key: "preferredContact", label: "Preferred Contact", value: (r) => preferredContactLabel(r.preferredContact) },
 ];
 const DEFAULT_EXPORT_KEYS = ["firstName", "lastName", "entityName", "type", "status", "email", "phone", "counties", "owner"];
 
