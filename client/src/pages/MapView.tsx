@@ -116,7 +116,7 @@ const STATUS_DOT: Record<string, string> = (() => {
   for (let i = 2; i + 1 < expr.length; i += 2) m[String(expr[i])] = String(expr[i + 1]);
   return m;
 })();
-const STATUS_DOT_FALLBACK = String((STATUS_COLOR as unknown as unknown[]).at(-1));
+const STATUS_DOT_FALLBACK = String((STATUS_COLOR as unknown as unknown[]).slice(-1)[0]);
 
 const STATUS_OPTIONS = [
   ["ACTIVE", "Active deals"], ["ALL", "All linked deals"], ["UNDER_CONTRACT", "Under Contract"],
