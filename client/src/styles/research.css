@@ -1,0 +1,624 @@
+/* Redesign styles: research
+   Research & Market Intelligence (pages/Research.tsx, ResearchChoropleth,
+   ResearchImport) plus the shared relationship views (class badges, chain
+   pills) that the Buyer profile renders too. Page rules are scoped to
+   .research-page; dialogs render outside the page, so their rules use rs-*
+   class names only. Colours are theme tokens — the only literals left are
+   data colours (map fills, chart series). */
+
+/* ---------------------------------------------------------------------------
+   Page header
+   --------------------------------------------------------------------------- */
+.research-page .rs-header { align-items: flex-end; gap: 16px; margin-bottom: 18px; }
+.rs-title { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.rs-title h1 { margin: 0; }
+.research-page .rs-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0; font-size: 13px; color: var(--ink-3); }
+.rs-sub-cur { color: var(--ink); font-weight: 600; }
+.rs-sub-prior { color: var(--ink-soft); }
+.rs-sub-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--line-hover-strong); flex: none; }
+.research-page .rs-toolbar { gap: 8px; }
+
+/* Filters button with a count badge (header + Records toolbar). */
+.rs-filter-btn {
+  display: inline-flex; align-items: center; gap: 7px; height: 34px; min-height: 0; padding: 0 12px;
+  border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink);
+  font-size: 13px; font-weight: 500; white-space: nowrap; box-shadow: none;
+}
+.rs-filter-btn:hover { background: var(--surface); border-color: var(--line-hover); }
+.rs-filter-btn svg { color: var(--ink-2); flex: none; }
+.rs-filter-btn.on, .rs-filter-btn.on:hover { border-color: color-mix(in srgb, var(--accent) 60%, transparent); background: color-mix(in srgb, var(--accent) 10%, transparent); }
+.rs-filter-btn.sm { height: 32px; border-radius: 7px; font-size: 12.5px; }
+.rs-count-badge {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent); color: var(--on-accent); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+}
+
+/* Small buttons used across the page and its dialogs. */
+.rs-outline-btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 32px; min-height: 0; padding: 0 11px;
+  border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink);
+  font-size: 12.5px; font-weight: 500; white-space: nowrap; box-shadow: none;
+}
+.rs-outline-btn:hover:not(:disabled) { background: var(--surface); border-color: var(--line-hover); }
+.rs-outline-btn svg { color: var(--ink-2); flex: none; }
+.rs-outline-btn.sm { height: 28px; padding: 0 10px; font-size: 12px; }
+.rs-outline-btn.rs-danger:not(:disabled) { border-color: color-mix(in srgb, var(--danger) 45%, transparent); color: var(--danger-ink); }
+.rs-outline-btn.rs-danger:not(:disabled):hover { background: var(--danger-hover); border-color: var(--danger); color: var(--danger-ink); }
+.rs-text-btn {
+  min-height: 0; height: auto; padding: 2px 4px; border: 0; background: transparent; box-shadow: none;
+  color: var(--accent-ink); font-size: 12.5px; font-weight: 600;
+}
+.rs-text-btn:hover:not(:disabled) { background: transparent; border: 0; color: var(--accent-ink-hover); }
+.rs-text-btn:disabled { opacity: 1; color: var(--ink-placeholder); cursor: default; }
+.rs-text-btn.muted-btn { color: var(--ink-2); }
+.rs-text-btn.muted-btn:hover { color: var(--ink); }
+.rs-ghost-btn {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; min-height: 0; padding: 0 10px;
+  border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--ink-3);
+  font-size: 12.5px; font-weight: 500; box-shadow: none;
+}
+.rs-ghost-btn:hover, .rs-ghost-btn.active { background: var(--hover); border-color: var(--line); color: var(--ink); }
+.rs-btn-sm { height: 30px; min-height: 0; padding: 0 12px; border-radius: 7px; font-size: 12.5px; }
+.rs-icon-x {
+  width: 28px; height: 28px; min-height: 0; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--ink-3); box-shadow: none;
+}
+.rs-icon-x:hover { background: var(--hover-strong); border: 0; color: var(--ink); }
+
+/* ---------------------------------------------------------------------------
+   Filters panel
+   --------------------------------------------------------------------------- */
+.rs-filters {
+  display: flex; flex-direction: column; gap: 14px; margin-bottom: 18px; padding: 16px 18px 18px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  animation: rsRise 160ms ease-out;
+}
+@keyframes rsRise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.rs-filters-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.rs-filters-title { font-size: 14px; font-weight: 600; color: var(--ink); }
+.rs-filters-actions { display: flex; align-items: center; gap: 6px; }
+.research-page .rs-fgrid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px 12px; align-items: start; }
+.research-page .rs-fgrid > .field { flex: none; min-width: 0 !important; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.research-page .rs-fgrid > .field > label { margin: 0; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.research-page .rs-fgrid .msel-box { min-height: 34px; border-color: var(--line-strong); border-radius: 7px; background: var(--input); }
+
+/* ---------------------------------------------------------------------------
+   Tabs (main + Relationships sub-tabs)
+   --------------------------------------------------------------------------- */
+.research-page .rs-tabs {
+  gap: 24px; margin: 0 0 18px; border-bottom: 1px solid var(--line);
+  flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+}
+.research-page .rs-tabs::-webkit-scrollbar { display: none; }
+.research-page .rs-tabs .tab, .research-page .rs-subtabs .tab {
+  display: inline-flex; align-items: center; gap: 8px; flex: none; height: 40px; min-height: 0; margin: 0; padding: 0 2px;
+  border: 0; border-radius: 0; background: transparent; box-shadow: none;
+  color: var(--ink-3); font-size: 13.5px; font-weight: 500; white-space: nowrap;
+}
+.research-page .rs-tabs .tab:hover, .research-page .rs-subtabs .tab:hover { background: transparent; border: 0; color: var(--ink); }
+.research-page .rs-tabs .tab.active, .research-page .rs-subtabs .tab.active { color: var(--ink-strong); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+
+/* Tab content: one column of blocks 18px apart. */
+.research-page .rs-body { display: flex; flex-direction: column; gap: 18px; }
+.research-page .rs-body > * { margin-top: 0; margin-bottom: 0; }
+
+/* ---------------------------------------------------------------------------
+   Cards
+   --------------------------------------------------------------------------- */
+.rs-card { min-width: 0; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); }
+.rs-card-head {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px;
+  min-height: 61px; padding: 14px 16px 14px 20px; border-bottom: 1px solid var(--line);
+}
+.rs-card-titles { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1 1 320px; }
+.rs-card-titles h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--ink); }
+.rs-card-sub { max-width: 760px; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
+.rs-card-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rs-card-foot {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 10px 20px; border-top: 1px solid var(--line-faint); font-size: 12.5px; color: var(--ink-3);
+}
+.rs-card-banner { padding: 12px 20px 0; }
+.rs-card-banner .banner { margin: 0; }
+.rs-empty { margin: 0; padding: 28px 20px; text-align: center; font-size: 13px; color: var(--ink-3); }
+.rs-empty.flush { padding: 20px 0; }
+.rs-footnote { margin: -8px 0 0; font-size: 12px; color: var(--ink-4); }
+.rs-seg-sm .seg-item { height: 26px; }
+
+/* Panels (Overview charts) */
+.research-page .rs-panel { display: flex; flex-direction: column; gap: 16px; min-width: 0; margin: 0; padding: 20px 22px 18px; }
+.rs-panel-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 10px 16px; }
+.rs-panel-titles { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.rs-panel-titles h3 { margin: 0; font-size: 14px; font-weight: 600; }
+.rs-panel-sub { font-size: 12.5px; color: var(--ink-3); }
+.rs-panel-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.rs-panel-meta { font-size: 12.5px; color: var(--ink-3); }
+.rs-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; font-size: 12px; color: var(--ink-2); }
+.rs-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.rs-legend .sq { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.rs-legend .ln { width: 12px; height: 2px; border-radius: 1px; flex: none; }
+.rs-legend .sq.prior { background: var(--line-hover-strong); }
+
+/* Bars */
+.rs-bar { display: block; flex: 1; min-width: 0; height: 6px; border-radius: 3px; background: var(--hover); overflow: hidden; }
+.rs-bar > i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.rs-bar.thick { height: 8px; border-radius: 4px; }
+.rs-bar.prior > i { background: var(--line-hover-strong); }
+
+/* Shared text tones */
+.rs-strong { font-weight: 600; color: var(--ink); }
+.rs-mid { color: var(--ink-2); }
+.rs-zero { color: var(--ink-5); }
+.rs-small { font-size: 12px; }
+.rs-mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--ink-2); }
+.rs-sub-line { display: block; margin-top: 2px; font-size: 12px; color: var(--ink-3); }
+.rs-chg { font-weight: 600; }
+.rs-chg.up { color: var(--success-ink); }
+.rs-chg.down { color: var(--danger-ink); }
+.rs-chg.flat { color: var(--ink-3); font-weight: 500; }
+.rs-ok { color: var(--success-ink); }
+.rs-warn { color: var(--warn-ink); font-weight: 600; }
+.rs-bad { color: var(--danger-ink); font-weight: 600; }
+.rs-rank { color: var(--ink-4); font-size: 12.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.rs-mini-tag {
+  display: inline-flex; align-items: center; height: 18px; padding: 0 6px; border-radius: var(--radius-xs);
+  background: var(--hover); color: var(--ink-2); font-size: 11px; font-weight: 700; white-space: nowrap;
+}
+.rs-mini-tag.new { background: var(--success-tint); color: var(--success-ink); }
+
+/* ---------------------------------------------------------------------------
+   Tables inside Research cards
+   --------------------------------------------------------------------------- */
+.research-page .rs-table .table-scroll, .rs-flat-scroll { border: 0; border-radius: 0; }
+.research-page .rs-card .data-table thead th { padding: 10px 16px; font-size: 12px; font-weight: 600; color: var(--ink-3); background: var(--surface); }
+.research-page .rs-card .data-table thead th.active { color: var(--ink); }
+.research-page .rs-card .data-table td { font-size: 13.5px; }
+.research-page .rs-card .data-table tbody tr.clickable:hover td { background: var(--surface-2); }
+.research-page .data-table tbody tr.row-selected td,
+.research-page .data-table.lead-sticky tbody tr.row-selected td:nth-child(1),
+.research-page .data-table.lead-sticky.has-sel tbody tr.row-selected td:nth-child(2) { background: var(--accent-row); }
+.research-page .rs-card .data-table.lead-sticky thead th:nth-child(1),
+.research-page .rs-card .data-table.lead-sticky.has-sel thead th:nth-child(2) { background: var(--surface); }
+
+/* ---------------------------------------------------------------------------
+   Overview
+   --------------------------------------------------------------------------- */
+.rs-ov-tools { display: flex; justify-content: flex-end; }
+.research-page .rs-body > .rs-ov-tools { margin-bottom: -8px; }
+/* Connected strip: hairline dividers drawn per cell, so a wrapped last row
+   leaves card background (not divider colour) in the unused space. */
+.stat-strip.rs-kpis, .stat-strip.rs-dossier-stats { margin: 0; gap: 0; background: var(--surface); }
+.rs-kpis .stat-cell, .rs-dossier-stats .stat-cell { margin: -1px 0 0 -1px; box-shadow: inset 1px 0 0 var(--line-soft), inset 0 1px 0 var(--line-soft); }
+.rs-kpis .stat-cell { gap: 8px; padding: 18px 20px; }
+.rs-kpis .stat-label { color: var(--ink-2); }
+.rs-kpis .stat-value { font-size: 28px; font-weight: 500; line-height: 1.05; letter-spacing: -0.03em; }
+.rs-kpis-sm .stat-cell { padding: 16px 20px; }
+.rs-kpis-sm .stat-value { font-size: 26px; }
+.rs-delta-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-4); }
+.rs-delta {
+  display: inline-flex; align-items: center; height: 20px; padding: 0 6px; border-radius: 5px;
+  font-size: 12px; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums;
+}
+.rs-delta.up { background: var(--success-tint); color: var(--success-ink); }
+.rs-delta.down { background: var(--danger-tint); color: var(--danger-ink); }
+.rs-delta.flat { background: var(--hover); color: var(--ink-2); }
+.rs-delta-text { font-size: 12.5px; font-weight: 700; }
+.rs-delta-text.up { color: var(--success-ink); }
+.rs-delta-text.down { color: var(--danger-ink); }
+.rs-delta-text.flat { color: var(--ink-2); }
+.research-page .rs-ov-grid { gap: 18px; margin: 0; }
+.research-page .rs-ov-grid .rs-span { grid-column: 1 / -1; }
+.rs-doclist { display: flex; flex-direction: column; gap: 12px; }
+.rs-docrow { display: flex; flex-direction: column; gap: 6px; }
+.rs-docrow > .rs-bar { flex: none; }
+.rs-docrow-top { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--ink-1); }
+.rs-docrow-top b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.rs-pvp { display: flex; flex-direction: column; gap: 20px; }
+.rs-pvp-item { display: flex; flex-direction: column; gap: 8px; }
+.rs-pvp-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; font-size: 13px; font-weight: 600; color: var(--ink-1); }
+.rs-pvp-bars { display: grid; grid-template-columns: minmax(0, 1fr) 56px; gap: 5px 10px; align-items: center; }
+.rs-pvp-v { font-size: 12.5px; font-weight: 600; text-align: right; color: var(--ink); font-variant-numeric: tabular-nums; }
+.rs-pvp-v.prior { font-weight: 400; color: var(--ink-3); }
+
+/* ---------------------------------------------------------------------------
+   Geography — map card
+   --------------------------------------------------------------------------- */
+.rs-map-body { display: flex; flex-wrap: wrap; container-type: inline-size; }
+.rs-map { position: relative; flex: 1000 1 520px; min-width: 0; height: 560px; padding: 12px; }
+.rs-choro { position: relative; }
+.rs-choro-svg { display: block; width: 100%; height: auto; }
+.rs-map .rs-choro { height: 100%; }
+.rs-map .rs-choro-svg { height: 100%; }
+.rs-map-status { margin: 0; padding: 24px; font-size: 13px; color: var(--ink-3); }
+.rs-map-note { position: absolute; left: 8px; bottom: 8px; font-size: 12px; color: var(--ink-3); }
+.rs-choro-back {
+  position: absolute; top: 6px; left: 6px; z-index: 6; height: 28px; min-height: 0; padding: 0 10px;
+  border: 1px solid var(--line-strong); border-radius: 7px; background: var(--surface); color: var(--ink);
+  font-size: 12.5px; font-weight: 500; box-shadow: var(--shadow-btn);
+}
+.rs-choro-back:hover { background: var(--surface-2); border-color: var(--line-hover); }
+.rs-map-tip {
+  position: absolute; z-index: 5; display: flex; flex-direction: column; gap: 2px; padding: 9px 11px; pointer-events: none;
+  background: var(--raised); border: 1px solid var(--line-3); border-radius: 9px; box-shadow: var(--shadow-pop);
+  font-size: 12px; color: var(--ink); white-space: nowrap;
+}
+.rs-map-tip strong { margin-bottom: 2px; font-weight: 600; }
+.rs-map-tip .muted { color: var(--ink-3); }
+/* County / abstract outlines (fills are data colours, set inline). Order
+   matters: hotspot beats hover, selection beats hotspot, focus wins. */
+.rs-cty { stroke: var(--line-strong); }
+.rs-cty:hover, .rs-cty.hover { stroke: var(--ink-3); }
+.rs-cty.hot { stroke: var(--danger); }
+.rs-cty.sel { stroke: var(--accent); }
+.rs-cty.focus { stroke: var(--accent); }
+.rs-cty.focus.hot { stroke: var(--danger); }
+.rs-abs { stroke: var(--line-3); }
+.rs-abs.hot { stroke: var(--danger); }
+.rs-cty-ring { stroke: var(--accent); }
+.rs-cty-ring.hot { stroke: var(--danger); }
+
+.rs-map-side { display: flex; flex-direction: column; gap: 18px; flex: 1 1 280px; min-width: 240px; padding: 20px; border-left: 1px solid var(--line-soft); }
+/* Narrow cards: the side panel wraps below the map (full width, top border). */
+@container (max-width: 799px) {
+  .rs-map-side { border-left: 0; border-top: 1px solid var(--line-soft); }
+}
+.rs-side-title { font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.rs-legend-block { display: flex; flex-direction: column; gap: 8px; }
+.rs-grad { display: block; height: 8px; border-radius: 4px; }
+.rs-grad.vol { background: linear-gradient(90deg, rgba(59, 130, 246, 0.15), rgba(59, 130, 246, 0.95)); }
+.rs-grad.chg { background: linear-gradient(90deg, rgba(239, 68, 68, 0.9), rgba(239, 68, 68, 0.15) 48%, rgba(34, 197, 94, 0.15) 52%, rgba(34, 197, 94, 0.9)); }
+.rs-grad-labels { display: flex; justify-content: space-between; gap: 8px; font-size: 11.5px; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.rs-legend-keys { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 4px; font-size: 12px; color: var(--ink-2); }
+.rs-legend-keys span { display: inline-flex; align-items: center; gap: 6px; }
+.rs-legend-keys i { width: 12px; height: 10px; border-radius: 2px; flex: none; }
+.rs-key-hot { border: 1.5px solid var(--danger); }
+.rs-key-none { background: var(--surface-2); border: 1px solid var(--line-strong); }
+.rs-key-new { background: rgba(34, 197, 94, 0.85); }
+.rs-side-list { display: flex; flex-direction: column; gap: 2px; }
+.rs-side-list .rs-side-title { margin-bottom: 6px; }
+.rs-county-btn {
+  display: flex; align-items: center; gap: 10px; width: 100%; height: 36px; min-height: 0; padding: 0 10px;
+  border: 0; border-radius: 7px; background: transparent; box-shadow: none; color: var(--ink); font-size: 13px; text-align: left;
+}
+.rs-county-btn:hover { background: var(--hover); border: 0; }
+.rs-county-btn.sel { background: var(--hover); box-shadow: inset 0 0 0 1px var(--line-3); }
+.rs-county-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.rs-county-btn b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.rs-sw { width: 10px; height: 10px; border-radius: 3px; background: var(--accent); flex: none; }
+.rs-sw.hot { box-shadow: 0 0 0 1.5px var(--danger); }
+.rs-map-side .rs-outline-btn { align-self: flex-start; }
+
+/* Geography table */
+.rs-geo-name { font-weight: 600; color: var(--ink); cursor: pointer; }
+.rs-z { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.rs-z.mid { color: var(--ink); font-weight: 600; }
+.rs-z.hi { color: var(--warn-ink); font-weight: 600; }
+
+/* ---------------------------------------------------------------------------
+   Rankings
+   --------------------------------------------------------------------------- */
+.rs-card-head.rs-rank-head { min-height: 66px; }
+.rs-sel-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; flex: 1 1 320px; min-width: 0; }
+.research-page .rs-rank-chart { gap: 9px; margin: 0; padding: 16px 20px 18px; border-bottom: 1px solid var(--line); }
+.rs-chart-cap { margin-bottom: 4px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.research-page .rs-rank-chart .rk-bar-row { grid-template-columns: minmax(140px, 240px) minmax(0, 1fr) 104px; gap: 14px; }
+.research-page .rs-rank-chart .rk-bar-name { font-size: 12.5px; font-weight: 500; color: var(--ink-1); }
+.research-page .rs-rank-chart .rk-bar-track { display: block; height: 18px; border-radius: 4px; background: var(--surface-2); overflow: hidden; }
+.research-page .rs-rank-chart .rk-bar-fill { height: 100%; border-radius: 4px; background: var(--accent); }
+.research-page .rs-rank-chart .rk-bar-fill.new { background: var(--success); }
+.research-page .rs-rank-chart .rk-axis { padding-right: 0; font-size: 11px; color: var(--ink-4); }
+.rs-rank-end { display: flex; align-items: baseline; gap: 8px; font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.rs-rank-end b { font-weight: 700; color: var(--ink); }
+.rs-rk-name { display: inline-flex; align-items: center; gap: 8px; }
+.rs-count-bar { display: inline-flex; align-items: center; justify-content: flex-end; gap: 10px; }
+.rs-count-bar .rs-bar { flex: none; width: 64px; }
+.rs-count-bar b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.rs-count-bar.lead { justify-content: flex-start; }
+.rs-count-bar.lead .rs-bar { width: 56px; }
+
+/* Duplicate-buyer review dialog */
+.rs-dup-list { display: flex; flex-direction: column; gap: 10px; }
+.rs-dup {
+  display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 12px;
+  padding: 14px 16px; background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-md);
+}
+.rs-dup-info { display: flex; flex-direction: column; gap: 4px; flex: 1 1 260px; min-width: 0; }
+.rs-dup-name { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rs-dup-meta { font-size: 12px; color: var(--ink-3); }
+.rs-dup-merge { font-size: 12px; color: var(--success-ink); }
+
+/* ---------------------------------------------------------------------------
+   Relationships
+   --------------------------------------------------------------------------- */
+.research-page .rel-insights.rs-highlights { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin: 0; }
+.rs-hl {
+  display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-height: 0; padding: 14px 16px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: none;
+  color: var(--ink); text-align: left;
+}
+.rs-hl:hover { background: var(--surface-1); border-color: var(--line-hover); }
+.rs-hl-label { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.rs-hl-label i { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.rs-hl-title { font-size: 13.5px; font-weight: 600; line-height: 1.4; color: var(--ink); overflow-wrap: anywhere; }
+.rs-hl-sub { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; font-size: 12px; color: var(--ink-3); }
+.rs-hl-sub svg { flex: none; }
+
+.research-page .rs-subtabs { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 0; border-bottom: 1px solid var(--line); }
+.research-page .rs-subtabs .tab-row { gap: 22px; margin: 0; border: 0; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+.research-page .rs-subtabs .tab-row::-webkit-scrollbar { display: none; }
+.research-page .rs-subtabs .relv-count, .rs-dossier-sec-head .relv-count {
+  min-width: 20px; margin: 0; padding: 1px 6px; border-radius: 5px; background: var(--hover); color: var(--ink-3);
+  font-size: 11.5px; font-weight: 600; text-align: center; font-variant-numeric: tabular-nums;
+}
+.research-page .rs-subtabs .tab.active .relv-count { background: var(--accent-tint); color: var(--accent-ink); }
+.research-page .rs-search {
+  display: flex; align-items: center; gap: 8px; width: 280px; max-width: 100%; height: 32px; margin: 0 0 6px; padding: 0 10px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 7px; color: var(--ink-3);
+}
+.research-page .rs-search:focus-within { border-color: var(--accent); }
+.research-page .rs-search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; font-size: 13px; }
+
+.rs-parties { display: inline-flex; flex-direction: column; gap: 2px; }
+.research-page .rs-parties .rel-ent {
+  font-weight: 500; color: var(--ink); text-decoration: underline; text-decoration-color: var(--line-hover-strong);
+  text-underline-offset: 3px; cursor: pointer;
+}
+.research-page .rs-parties .rel-ent:hover { color: var(--accent-ink-hover); text-decoration-color: currentColor; }
+.research-page .relt-arrow { width: auto; height: auto; background: none; color: var(--accent); }
+.research-page .relt-counties { max-width: 170px; color: var(--ink-2); }
+.rs-switch { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 500; color: var(--ink-1); white-space: nowrap; }
+.rs-switch > span:last-child { cursor: pointer; }
+
+/* Co-buyers */
+.rs-cob-list { display: flex; flex-direction: column; }
+.rs-cob {
+  display: grid; grid-template-columns: 44px minmax(0, 1fr) 150px; align-items: center; gap: 12px; width: 100%; min-height: 0;
+  padding: 14px 20px; border: 0; border-bottom: 1px solid var(--line-faint); border-radius: 0; background: transparent;
+  box-shadow: none; color: var(--ink); text-align: left;
+}
+.rs-cob:hover { background: var(--surface-2); border-color: var(--line-faint); }
+.rs-cob:last-child { border-bottom: 0; }
+.rs-cob-body { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.rs-cob-members { display: flex; flex-wrap: wrap; gap: 6px; }
+.rs-member {
+  display: inline-flex; align-items: center; gap: 7px; max-width: 100%; height: 26px; padding: 0 9px;
+  border: 1px solid var(--line-2); border-radius: 6px; background: var(--surface-2);
+  font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rs-member i { width: 7px; height: 7px; border-radius: 2px; flex: none; }
+.rs-cob-meta { font-size: 12px; color: var(--ink-3); }
+.rs-cob-count { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; text-align: right; }
+.rs-cob-count b { font-size: 20px; font-weight: 500; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.rs-cob-count span { font-size: 12px; color: var(--ink-3); }
+
+/* Acquisition chains — flat rows inside the Research card; the node flow
+   wraps instead of scrolling sideways (Research views only). */
+.rs-chains .chain2-list { gap: 0; }
+.rs-chains .chain2 { border: 0; border-bottom: 1px solid var(--line-faint); border-radius: 0; background: transparent; }
+.rs-chains .chain2:hover { border-color: var(--line-faint); }
+.rs-chains .chain2.open { background: var(--surface-1); }
+.rs-chains .chain2-head { padding: 14px 20px; }
+.rs-chains .chain2-body { padding: 4px 20px 18px 78px; border-top: 0; }
+.rs-chains .chain2-foot { padding: 10px 20px; border-top: 1px solid var(--line-faint); }
+.rs-chains .chain2-foot .link-btn { color: var(--accent-ink); font-size: 12.5px; font-weight: 600; }
+.rs-chains .chain2-body, .rs-dossier .chain2-body { overflow-x: visible; }
+.rs-chains .chain2-flow, .rs-dossier .chain2-flow { flex-wrap: wrap; row-gap: 12px; min-width: 0; }
+
+/* Shared relationship-view colours (Research + Buyer profile): class tags,
+   chain endpoint pills and node boxes take the class colour from --c. */
+.class-badge {
+  display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 5px;
+  background: color-mix(in srgb, var(--c) 13%, transparent); color: color-mix(in srgb, var(--c) 72%, var(--ink-strong));
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.class-badge i { width: 6px; height: 6px; border-radius: 50%; background: var(--c); flex: none; }
+.chain2-pill:not(.focus) {
+  background: color-mix(in srgb, var(--c) 12%, transparent); border-color: color-mix(in srgb, var(--c) 33%, transparent);
+  color: color-mix(in srgb, var(--c) 72%, var(--ink-strong));
+}
+.chain2-box:not(.focus) { border-color: color-mix(in srgb, var(--c) 33%, transparent); }
+
+/* Entities */
+.rs-class-bar { display: flex; flex-direction: column; gap: 10px; padding: 14px 20px; border-bottom: 1px solid var(--line-faint); }
+.rs-class-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.rs-class-chip {
+  display: inline-flex; align-items: center; gap: 7px; height: 28px; min-height: 0; padding: 0 10px;
+  border: 1px solid var(--line-strong); border-radius: 7px; background: var(--input); box-shadow: none;
+  color: var(--ink-2); font-size: 12.5px; font-weight: 500;
+}
+.rs-class-chip:hover { background: var(--input); border-color: var(--line-hover); color: var(--ink); }
+.rs-class-chip.active, .rs-class-chip.active:hover { background: var(--accent-tint); border-color: color-mix(in srgb, var(--accent) 55%, transparent); color: var(--ink-strong); }
+.rs-class-chip i { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.rs-chip-count { font-weight: 500; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.rs-class-desc { margin: 0; font-size: 12.5px; color: var(--ink-3); }
+.rs-class-desc strong { color: var(--ink-1); }
+
+/* ---------------------------------------------------------------------------
+   Entity dossier + deeds dialogs (rendered outside .research-page)
+   --------------------------------------------------------------------------- */
+.modal:has(.rs-dossier) { width: 880px; }
+.modal:has(.rs-deeds), .modal:has(> .modal-body > .import-review) { width: 1080px; }
+.rs-dossier-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 6px; font-size: 13px; color: var(--ink-3); }
+.rs-dossier { display: flex; flex-direction: column; gap: 22px; }
+.stat-strip.rs-dossier-stats { margin: 0; border-radius: var(--radius-md); }
+.rs-dossier-stats .stat-value { font-size: 20px; }
+.rel2-cols.rs-dossier-cols { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 24px; margin: 0; }
+.rs-dossier-cols .rel2-col, .rs-dossier-cols .rel2-col + .rel2-col { padding: 0; border: 0; }
+.rs-dossier-cols .rel2-col:first-child { grid-column: 1 / -1; }
+.rs-dossier .rel2-col-head { margin-bottom: 6px; }
+.rs-dossier .rel2-label { font-size: 13px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--ink); }
+.rs-dossier .rel2-row { display: grid; grid-template-columns: minmax(0, 1fr) 56px 28px auto; gap: 10px; align-items: center; border-bottom-color: var(--line-faint); }
+.rs-dossier .rel2-bar { width: auto; }
+.rs-dossier .rel2-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rs-dossier .rel2-name.link:hover { color: var(--accent-ink-hover); text-decoration: none; }
+.rs-dossier .rel2-empty {
+  flex-direction: row; justify-content: center; padding: 16px; border: 1px dashed var(--line-strong);
+  border-radius: var(--radius-md); font-size: 12.5px; color: var(--ink-3);
+}
+.rs-dossier .rel2-empty svg { display: none; }
+.rs-deeds-btn {
+  height: 24px; min-height: 0; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 6px;
+  background: transparent; box-shadow: none; color: var(--ink-1); font-size: 11.5px; font-weight: 600;
+}
+.rs-deeds-btn:hover { background: transparent; border-color: var(--accent); color: var(--ink); }
+.rs-dossier-sec { display: flex; flex-direction: column; gap: 10px; }
+.rs-dossier-sec-head { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--ink); }
+.rs-dashed-empty { padding: 16px; border: 1px dashed var(--line-strong); border-radius: var(--radius-md); text-align: center; font-size: 12.5px; color: var(--ink-3); }
+.rs-dossier-status { margin-right: auto; font-size: 12.5px; color: var(--ink-3); }
+
+.rs-deeds { display: flex; flex-direction: column; gap: 12px; }
+.rs-deeds-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; font-size: 13px; }
+.rs-deeds-scroll { max-height: min(520px, 60vh); }
+.rs-sticky-head thead th { padding: 10px 14px; font-size: 12px; font-weight: 600; }
+.rs-sticky-head td { padding: 11px 14px; font-size: 13px; }
+
+/* ---------------------------------------------------------------------------
+   Opportunities
+   --------------------------------------------------------------------------- */
+.rs-opp-head { align-items: flex-start; }
+.rs-opp-list { display: flex; flex-direction: column; }
+.rs-opp { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center; gap: 18px; padding: 14px 20px; border-bottom: 1px solid var(--line-faint); }
+.rs-opp:last-child { border-bottom: 0; }
+.rs-opp:hover { background: var(--surface-1); }
+.rs-score { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.rs-ring { display: flex; align-items: center; justify-content: center; width: 46px; height: 46px; border-radius: 50%; }
+.rs-ring > span {
+  display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 50%;
+  background: var(--surface); font-size: 14px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums;
+}
+.rs-opp:hover .rs-ring > span { background: var(--surface-1); }
+.rs-score-tier { font-size: 10.5px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+.rs-opp-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.rs-opp-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.rs-opp-title strong { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.rs-kind {
+  display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 5px;
+  background: color-mix(in srgb, var(--c) 13%, transparent); color: color-mix(in srgb, var(--c) 72%, var(--ink-strong));
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+}
+.rs-kind i { width: 6px; height: 6px; border-radius: 50%; background: var(--c); flex: none; }
+.rs-opp-detail { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
+.rs-outline-btn.rs-opp-view { border-color: var(--line-strong); background: transparent; }
+.rs-outline-btn.rs-opp-view:hover:not(:disabled) { border-color: var(--accent); background: transparent; }
+
+/* ---------------------------------------------------------------------------
+   Records
+   --------------------------------------------------------------------------- */
+.research-page .rec-card.rs-records { margin: 0; overflow: visible; background: var(--surface); border-color: var(--line); border-radius: var(--radius-lg); box-shadow: none; }
+.research-page .rs-records .cv-toolbar { padding: 12px 14px; border-bottom: 1px solid var(--line); }
+.research-page .rs-records .cv-toolbar-left { gap: 8px; }
+.research-page .rs-records .cv-toolbar input:not([type="checkbox"]) { height: 32px; min-height: 0; border-color: var(--line); border-radius: 7px; background: var(--bg); font-size: 13px; }
+.rs-rec-count { font-size: 12.5px; color: var(--ink-3); white-space: nowrap; }
+.rs-rec-count b { color: var(--ink); font-weight: 600; }
+.research-page .rs-records .table-scroll { margin: 0; border: 0; border-radius: 0; }
+.research-page .rs-records .data-table thead th:first-child,
+.research-page .rs-records .data-table thead th:last-child { border-radius: 0; }
+.research-page .rs-records .data-table thead th { padding: 10px 14px; }
+.research-page .rs-records .data-table td { padding: 11px 14px; font-size: 13px; }
+.research-page .rs-rec-filters { display: flex; flex-direction: column; gap: 12px; padding: 14px 16px 16px; background: var(--surface-inset); border-bottom: 1px solid var(--line); }
+.research-page .rs-rec-filters .rec-fgrid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px 14px; }
+.research-page .rs-rec-filters .rec-flabel { margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.research-page .rs-rec-filters .msel-box { min-height: 34px; border-color: var(--line-strong); border-radius: 7px; background: var(--input); }
+.rs-rec-filters-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--ink-4); }
+.rs-pager { display: inline-flex; align-items: center; gap: 8px; color: var(--ink-3); }
+
+/* Top buyers for a selected abstract */
+.rs-topbuyers { padding: 12px 16px; }
+.rs-topbuyers-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 6px; font-size: 13px; }
+.rs-topbuyer { display: flex; justify-content: space-between; gap: 12px; padding: 6px 0; border-top: 1px solid var(--line-faint); font-size: 13px; }
+.rs-topbuyer-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.rs-topbuyer-name .rs-rank { margin-right: 8px; }
+
+/* ---------------------------------------------------------------------------
+   Data & imports
+   --------------------------------------------------------------------------- */
+.rs-imports { display: flex; flex-direction: column; gap: 18px; }
+.rs-import-card { display: flex; flex-direction: column; gap: 16px; padding: 20px; }
+.rs-import-card > .rs-card-titles { flex: none; }
+.rs-import-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; }
+.rs-import-field { display: flex; flex-direction: column; gap: 6px; }
+.rs-import-field .rec-flabel { margin: 0; font-size: 12px; font-weight: 600; color: var(--ink-2); }
+.rs-import-drop { flex: 1 1 320px; min-width: 0; }
+.rs-import-drop .dropzone {
+  display: flex; align-items: center; justify-content: center; gap: 10px; height: 64px; padding: 0 16px;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 35%, transparent); border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--accent) 2%, transparent); color: var(--ink-2); font-size: 13px;
+}
+.rs-import-drop .dropzone:hover, .rs-import-drop .dropzone.drag { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--ink); }
+.rs-import-drop .dropzone svg { box-sizing: border-box; width: 30px; height: 30px; padding: 8px; border-radius: var(--radius); background: var(--accent-tint); color: var(--accent-ink); flex: none; }
+.rs-import-file { font-size: 12.5px; color: var(--ink-3); }
+.rs-import-step { display: flex; flex-direction: column; gap: 12px; padding-top: 16px; border-top: 1px solid var(--line-faint); }
+.rs-step-head { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.rs-step-head span { font-weight: 400; color: var(--ink-3); }
+.rs-map-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.rs-import-step .banner { margin: 0; }
+.rs-assign-note { margin-bottom: 8px; font-size: 12.5px; color: var(--ink-3); }
+.rs-assign-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.rs-import-card .import-summary { margin-top: 0; background: var(--surface-1); border-color: var(--line); border-radius: var(--radius-md); }
+.rs-history { min-width: 1120px; }
+.rs-history thead th { padding: 10px 16px; font-size: 12px; font-weight: 600; color: var(--ink-3); background: var(--surface); }
+.rs-history thead th.active { color: var(--ink); }
+.rs-sort-ind { font-size: 11px; color: var(--accent); }
+.rs-file { display: inline-block; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; font-weight: 500; }
+.rs-history tbody tr.row-selected td { background: var(--accent-row); }
+
+/* Import review (inline after an import, and in the review dialog) */
+.rs-review-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 14px; }
+.rs-review-seg .seg-item:disabled { opacity: 0.4; cursor: not-allowed; }
+.rs-review-scroll { margin-top: 10px; max-height: 340px; }
+.rs-review-note { margin: 10px 0 0; font-size: 12.5px; color: var(--ink-3); }
+
+/* ---------------------------------------------------------------------------
+   Phones
+   --------------------------------------------------------------------------- */
+@media (max-width: 760px) {
+  .research-page .rs-header { margin-bottom: 14px; }
+  .research-page .rs-toolbar > .seg { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .research-page .rs-toolbar > .seg::-webkit-scrollbar { display: none; }
+  .research-page .rs-fgrid { grid-template-columns: minmax(0, 1fr); }
+  .rs-filters { padding: 14px 16px 16px; }
+
+  .research-page .rs-body { gap: 14px; }
+  .rs-card-head { padding: 14px 16px; }
+  .rs-card-foot { padding: 10px 16px; }
+  .research-page .rs-panel { padding: 16px; }
+
+  /* Map: the side panel drops below the map with a top border. */
+  .rs-map { flex: 1 1 100%; height: auto; padding: 8px; }
+  .rs-map .rs-choro, .rs-map .rs-choro-svg { height: auto; }
+  .rs-map-side { flex: 1 1 100%; min-width: 0; padding: 16px; border-left: 0; border-top: 1px solid var(--line-soft); }
+
+  .research-page .rs-rank-chart { padding: 14px 16px 16px; }
+  .research-page .rs-rank-chart .rk-bar-row { grid-template-columns: 110px minmax(0, 1fr) 64px; gap: 10px; }
+  .rs-rank-end { flex-direction: column; align-items: flex-end; gap: 0; }
+
+  .research-page .rs-subtabs .tab-row { flex: 1 1 100%; }
+  .research-page .rs-search { width: 100%; height: 40px; margin-bottom: 8px; }
+  .research-page .rs-search input, .research-page .rs-records .cv-toolbar input:not([type="checkbox"]) { font-size: 16px; }
+
+  .rs-cob { grid-template-columns: 32px minmax(0, 1fr); padding: 14px 16px; }
+  .rs-cob-count { grid-column: 2; flex-direction: row; align-items: baseline; justify-content: flex-start; gap: 6px; }
+  .rs-chains .chain2-head { padding: 12px 16px; }
+  .rs-chains .chain2-body { padding: 4px 16px 16px; }
+
+  .rs-opp { grid-template-columns: 52px minmax(0, 1fr); gap: 12px 14px; padding: 14px 16px; }
+  .rs-opp-view { grid-column: 2; justify-self: start; }
+
+  .rs-class-bar { padding: 12px 16px; }
+  .rel2-cols.rs-dossier-cols { gap: 18px; }
+  .rs-dossier .rel2-row { grid-template-columns: minmax(0, 1fr) 40px 28px auto; }
+
+  .rs-import-card { padding: 16px; }
+  .rs-import-row > * { flex: 1 1 100%; }
+  .rs-import-row > .rs-outline-btn { justify-content: center; }
+
+  /* Touch targets */
+  .rs-filter-btn, .rs-outline-btn, .rs-outline-btn.sm, .rs-ghost-btn, .rs-county-btn, .rs-class-chip,
+  .rs-deeds-btn, .rs-icon-x, .rs-choro-back, .rs-btn-sm { min-height: 40px; }
+  .rs-icon-x { min-width: 40px; }
+  .rs-text-btn { min-height: 40px; padding: 0 6px; }
+}
+@media (pointer: coarse) and (max-height: 500px) {
+  .rs-map { height: 360px; }
+  .rs-map-side { flex-basis: 220px; min-width: 200px; }
+}

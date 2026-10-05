@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Link } from "react-router-dom";
 import { Briefcase, ChevronRight, Store, TrendingUp } from "lucide-react";
 import { ResearchChoropleth, type CountyStat } from "../components/ResearchChoropleth";
@@ -93,7 +93,7 @@ export function Landing() {
       <Nav />
       <Hero deals={deals} events={events} />
       <Comparison />
-      <PipelineDemo deals={deals} onChange={setDeals} onMoved={logMove} />
+      <PipelineDemo deals={deals} onChange={setDeals} onMoved={logMove} onReset={() => setDeals(SEED_DEALS)} />
       <MatchDemo />
       <MapSection />
       <ResearchDemo />
@@ -101,11 +101,13 @@ export function Landing() {
       <FeatureTrio />
       <FinalCta />
       <footer className="lp-footer">
-        <span>© {new Date().getFullYear()} Mineral Hub</span>
-        <span className="lp-footer-links">
-          <a href={`mailto:${CONTACT_EMAIL}`}>Contact</a>
-          <Link to="/login">Sign in</Link>
-        </span>
+        <div className="lp-footer-inner">
+          <span>© {new Date().getFullYear()} Mineral Hub</span>
+          <span className="lp-footer-links">
+            <a href={`mailto:${CONTACT_EMAIL}`}>Contact</a>
+            <Link to="/login">Sign in</Link>
+          </span>
+        </div>
       </footer>
     </div>
   );
@@ -152,17 +154,21 @@ function Nav() {
   };
   return (
     <nav className="lp-nav">
-      <div className="lp-brand"><span className="lp-mark">MH</span><span>Mineral Hub</span></div>
-      <div className="lp-nav-links">
-        <a href="#pipeline" onClick={go("pipeline")}>Pipeline</a>
-        <a href="#buyers" onClick={go("buyers")}>Buyers</a>
-        <a href="#mapping" onClick={go("mapping")}>Mapping</a>
-        <a href="#research" onClick={go("research")}>Research</a>
-        <a href="#valuation" onClick={go("valuation")}>Valuation</a>
-      </div>
-      <div className="lp-nav-cta">
-        <Link className="lp-signin" to="/login">Sign in</Link>
-        <a className="lp-cta-pill" href={waitlistHref("")}>Join the waitlist</a>
+      <div className="lp-nav-inner">
+        <a className="lp-brand" href="#top" onClick={(e) => { e.preventDefault(); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
+          <span className="lp-mark">MH</span><span>Mineral Hub</span>
+        </a>
+        <div className="lp-nav-links">
+          <a href="#pipeline" onClick={go("pipeline")}>Pipeline</a>
+          <a href="#buyers" onClick={go("buyers")}>Buyers</a>
+          <a href="#mapping" onClick={go("mapping")}>Mapping</a>
+          <a href="#research" onClick={go("research")}>Research</a>
+          <a href="#valuation" onClick={go("valuation")}>Valuation</a>
+        </div>
+        <div className="lp-nav-cta">
+          <Link className="lp-signin" to="/login">Sign in</Link>
+          <a className="lp-cta-pill" href={waitlistHref("")}>Join the waitlist</a>
+        </div>
       </div>
     </nav>
   );
@@ -181,6 +187,19 @@ const FOLLOW_UPS = [
   { buyer: "Pine Prairie Royalty", deal: "Barnes A-537", when: "Jul 14" },
 ];
 
+// Navigation of the product shot — the app's real sections, neutral brand.
+const SHOT_NAV: { label: string; d: string }[] = [
+  { label: "Dashboard", d: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z" },
+  { label: "Deals", d: "M4 8h16v11H4zM9 8V5h6v3M4 13h16" },
+  { label: "Pipeline", d: "M5 4v16M12 4v11M19 4v6" },
+  { label: "Mineral Assets", d: "M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5" },
+  { label: "Buyers", d: "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 4.5a3.5 3.5 0 0 1 0 6.5M21 20c0-2.6-1.6-4.9-4-5.7" },
+  { label: "Contacts", d: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21c0-4 3.6-7 8-7s8 3 8 7" },
+  { label: "Map", d: "M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2zM9 4v14M15 6v14" },
+  { label: "Research", d: "M4 19h16M6 16l4-5 4 3 4-7" },
+  { label: "Reports", d: "M5 20V9M12 20V4M19 20v-7" },
+];
+
 function Hero({ deals, events }: { deals: DemoDeal[]; events: { text: string; when: string }[] }) {
   const active = deals.length;
   const projected = deals.reduce((s, d) => s + d.profit, 0);
@@ -189,77 +208,95 @@ function Hero({ deals, events }: { deals: DemoDeal[]; events: { text: string; wh
   const maxStage = Math.max(1, ...byStage);
   const bars = [36, 49, 41, 68, 55, 82]; // realized months (static)
   return (
-    <header className="lp-hero">
+    <header className="lp-hero" id="top">
       <h1 className="rv">A CRM that knows what a <em>net mineral acre</em> is</h1>
       <p className="lp-sub rv">
         The big platforms were built for software sales. Mineral Hub was built in the field —
         for buyers and flippers who live in counties, contracts, and closing timelines.
       </p>
-      <div className="rv" style={{ display: "flex", justifyContent: "center" }}><WaitlistPill /></div>
+      <div className="rv" style={{ display: "flex", justifyContent: "center", width: "100%" }}><WaitlistPill /></div>
       <div className="lp-fineprint rv">Free during beta · No card required · Founding pricing for waitlist members</div>
 
       {/* Dark product shot — LIVE: numbers below re-compute when you drag deals
           in the pipeline demo further down the page. */}
       <div className="lp-shot rv" aria-label="Mineral Hub dashboard preview">
-        <div className="lp-shot-bar">
-          <span>Dashboard · Acquisition snapshot</span>
-          <span className="lp-shot-live"><span className="lp-dot" /> live demo — drag deals in the pipeline below</span>
-        </div>
-        <div className="lp-shot-metrics">
-          <ShotMetric label="Active Deals" value={String(active)} delta="▲14%" />
-          <ShotMetric label="Projected Profit" value={money(projected)} delta="▲22%" />
-          <ShotMetric label="Closed YTD" value="$892K" delta="▲9%" green />
-          <ShotMetric label="In Closing" value={String(closing)} delta="▲40%" amber />
-        </div>
-        <div className="lp-shot-grid">
-          <div className="lp-shot-card">
-            <div className="lp-shot-h">Profit by month</div>
-            <div className="lp-shot-bars">
-              {bars.map((h, i) => <div key={i} style={{ height: `${h}%`, background: "#22c55e" }} />)}
-              {[60, 90, 100].map((h, i) => <div key={`p${i}`} style={{ height: `${h}%`, background: "#3b82f6", opacity: 0.55 }} />)}
-            </div>
+        <aside className="lp-shot-side" aria-hidden="true">
+          <div className="lp-shot-brand"><span className="lp-shot-mark">MH</span><span>Mineral Hub</span></div>
+          <div className="lp-shot-nav">
+            {SHOT_NAV.map((n, i) => (
+              <div key={n.label} className={i === 0 ? "on" : ""}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d={n.d} /></svg>
+                <span>{n.label}</span>
+              </div>
+            ))}
           </div>
-          <div className="lp-shot-card">
-            <div className="lp-shot-h">Active deals by stage</div>
-            <div className="lp-shot-stages">
-              {STAGES.map((s, i) => (
-                <div key={s.key} className="lp-shot-stagerow">
-                  <span>{s.label}</span>
-                  <div className="lp-shot-stage"><div style={{ width: `${(byStage[i] / maxStage) * 100}%`, background: STAGE_COLOR[s.key] }} /></div>
-                  <b>{byStage[i]}</b>
+        </aside>
+        <div className="lp-shot-main">
+          <div className="lp-shot-bar">
+            <span className="lp-shot-live"><span className="lp-dot" /> live demo — drag deals in the pipeline below</span>
+          </div>
+          <div className="lp-shot-body">
+            <div className="lp-shot-title"><strong>Dashboard</strong><span>Acquisition snapshot</span></div>
+            <div className="lp-shot-metrics">
+              <ShotMetric label="Active Deals" value={String(active)} delta="▲14%" />
+              <ShotMetric label="Projected Profit" value={money(projected)} delta="▲22%" />
+              <ShotMetric label="Closed YTD" value="$892K" delta="▲9%" green />
+              <ShotMetric label="In Closing" value={String(closing)} delta="▲40%" amber />
+            </div>
+            <div className="lp-shot-grid">
+              <div className="lp-shot-card">
+                <div className="lp-shot-h">
+                  <span>Profit by month</span>
+                  <span className="lp-shot-legend"><span><i className="g" />Realized</span><span><i className="b" />Projected</span></span>
                 </div>
-              ))}
+                <div className="lp-shot-bars">
+                  {bars.map((h, i) => <div key={i} className="real" style={{ height: `${h}%` }} />)}
+                  {[60, 90, 100].map((h, i) => <div key={`p${i}`} className="proj" style={{ height: `${h}%` }} />)}
+                </div>
+              </div>
+              <div className="lp-shot-card">
+                <div className="lp-shot-h"><span>Active deals by stage</span></div>
+                <div className="lp-shot-stages">
+                  {STAGES.map((s, i) => (
+                    <div key={s.key} className="lp-shot-stagerow">
+                      <span>{s.label}</span>
+                      <div className="lp-shot-stage"><div style={{ width: `${(byStage[i] / maxStage) * 100}%`, background: STAGE_COLOR[s.key] }} /></div>
+                      <b>{byStage[i]}</b>
+                    </div>
+                  ))}
+                </div>
+              </div>
             </div>
-          </div>
-        </div>
-        {/* Second row — the rest of the real Dashboard: follow-ups, activity, top buyers */}
-        <div className="lp-shot-grid three">
-          <div className="lp-shot-card">
-            <div className="lp-shot-h">Upcoming follow-ups</div>
-            {FOLLOW_UPS.map((f) => (
-              <div key={f.deal} className="lp-shot-row">
-                <span className="lp-shot-ell">{f.buyer} · <i>{f.deal}</i></span>
-                <span className="lp-shot-dim">{f.when}</span>
+            {/* Second row — the rest of the real Dashboard: follow-ups, activity, top buyers */}
+            <div className="lp-shot-grid three">
+              <div className="lp-shot-card">
+                <div className="lp-shot-h"><span>Upcoming follow-ups</span></div>
+                {FOLLOW_UPS.map((f) => (
+                  <div key={f.deal} className="lp-shot-row">
+                    <span className="lp-shot-ell">{f.buyer} · <i>{f.deal}</i></span>
+                    <span className="lp-shot-dim">{f.when}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <div className="lp-shot-card">
-            <div className="lp-shot-h">Recent activity</div>
-            {events.slice(0, 3).map((e, i) => (
-              <div key={`${e.text}${i}`} className={`lp-shot-row ${e.when === "just now" ? "new" : ""}`}>
-                <span className="lp-shot-ell">{e.text}</span>
-                <span className="lp-shot-dim">{e.when}</span>
+              <div className="lp-shot-card">
+                <div className="lp-shot-h"><span>Recent activity</span></div>
+                {events.slice(0, 3).map((e, i) => (
+                  <div key={`${e.text}${i}`} className={`lp-shot-row ${e.when === "just now" ? "new" : ""}`}>
+                    <span className="lp-shot-ell">{e.text}</span>
+                    <span className="lp-shot-dim">{e.when}</span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
-          <div className="lp-shot-card">
-            <div className="lp-shot-h">Top buyers YTD</div>
-            {TOP_BUYERS.map((b, i) => (
-              <div key={b.name} className="lp-shot-row">
-                <span className="lp-shot-ell">{i + 1}. {b.name}</span>
-                <span className="lp-shot-green">{money(b.volume)}</span>
+              <div className="lp-shot-card">
+                <div className="lp-shot-h"><span>Top buyers YTD</span></div>
+                {TOP_BUYERS.map((b, i) => (
+                  <div key={b.name} className="lp-shot-row">
+                    <span className="lp-shot-ell">{i + 1}. {b.name}</span>
+                    <span className="lp-shot-green">{money(b.volume)}</span>
+                  </div>
+                ))}
               </div>
-            ))}
+            </div>
           </div>
         </div>
       </div>
@@ -269,7 +306,7 @@ function Hero({ deals, events }: { deals: DemoDeal[]; events: { text: string; wh
 
 function ShotMetric({ label, value, delta, green, amber }: { label: string; value: string; delta: string; green?: boolean; amber?: boolean }) {
   return (
-    <div className="lp-shot-card">
+    <div className="lp-shot-card lp-shot-metric">
       <div className="lp-shot-label">{label}</div>
       <div className={`lp-shot-value ${green ? "green" : ""}`}>{value} <span className={amber ? "amber" : "green"}>{delta}</span></div>
     </div>
@@ -307,7 +344,7 @@ function Comparison() {
 
 /* ---------------------------- pipeline (demo) ---------------------------- */
 
-function PipelineDemo({ deals, onChange, onMoved }: { deals: DemoDeal[]; onChange: (d: DemoDeal[]) => void; onMoved: (deal: string, stage: string) => void }) {
+function PipelineDemo({ deals, onChange, onMoved, onReset }: { deals: DemoDeal[]; onChange: (d: DemoDeal[]) => void; onMoved: (deal: string, stage: string) => void; onReset: () => void }) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [over, setOver] = useState<Stage | null>(null);
 
@@ -329,34 +366,40 @@ function PipelineDemo({ deals, onChange, onMoved }: { deals: DemoDeal[]; onChang
         <h2>Drag a deal. Watch the dashboard follow.</h2>
         <p>This is Mineral Hub's actual pipeline with sample deals. Drag cards between stages (or tap ▸) — the hero dashboard above recalculates live, exactly like the app.</p>
       </div>
-      <div className="lp-board rv">
-        {STAGES.map((s) => (
-          <div
-            key={s.key}
-            className={`lp-col ${over === s.key ? "over" : ""}`}
-            onDragOver={(e) => { e.preventDefault(); setOver(s.key); }}
-            onDragLeave={() => setOver((o) => (o === s.key ? null : o))}
-            onDrop={() => { if (dragId) moveTo(dragId, s.key); setDragId(null); setOver(null); }}
-          >
-            <div className="lp-col-head">
-              <span className="lp-stage-dot" style={{ background: STAGE_COLOR[s.key] }} /> {s.label}
-              <span className="lp-col-n">{deals.filter((d) => d.stage === s.key).length}</span>
-            </div>
-            {deals.filter((d) => d.stage === s.key).map((d) => (
-              <div key={d.id} className="lp-card" draggable onDragStart={() => setDragId(d.id)}>
-                <div className="lp-card-top">
-                  <strong>{d.name}</strong>
-                  {s.key !== "CLOSING" && (
-                    <button aria-label={`Advance ${d.name}`} title="Advance stage" onClick={() => advance(d)}><ChevronRight size={13} /></button>
-                  )}
-                </div>
-                <div className="lp-card-meta">{d.county} Co. · {d.nra} NRA</div>
-                <div className="lp-card-meta"><span className="lp-profit">{money(d.profit)}</span> · {d.days}d in stage</div>
-                {d.buyer && <div className="lp-card-buyer">→ {d.buyer}</div>}
+      <div className="lp-panel rv">
+        <div className="lp-panel-head">
+          <span className="lp-panel-title">Pipeline</span>
+          <button type="button" className="lp-ghost" onClick={onReset}>Reset demo</button>
+        </div>
+        <div className="lp-board">
+          {STAGES.map((s) => (
+            <div
+              key={s.key}
+              className={`lp-col ${over === s.key ? "over" : ""}`}
+              onDragOver={(e) => { e.preventDefault(); setOver(s.key); }}
+              onDragLeave={() => setOver((o) => (o === s.key ? null : o))}
+              onDrop={() => { if (dragId) moveTo(dragId, s.key); setDragId(null); setOver(null); }}
+            >
+              <div className="lp-col-head">
+                <span className="lp-stage-dot" style={{ background: STAGE_COLOR[s.key] }} /> {s.label}
+                <span className="lp-col-n">{deals.filter((d) => d.stage === s.key).length}</span>
               </div>
-            ))}
-          </div>
-        ))}
+              {deals.filter((d) => d.stage === s.key).map((d) => (
+                <div key={d.id} className="lp-card" draggable onDragStart={() => setDragId(d.id)}>
+                  <div className="lp-card-top">
+                    <strong>{d.name}</strong>
+                    {s.key !== "CLOSING" && (
+                      <button aria-label={`Advance ${d.name}`} title="Advance stage" onClick={() => advance(d)}><ChevronRight size={13} /></button>
+                    )}
+                  </div>
+                  <div className="lp-card-meta">{d.county} Co. · {d.nra} NRA</div>
+                  <div className="lp-card-meta lp-card-split"><span className="lp-profit">{money(d.profit)}</span><span>{d.days}d in stage</span></div>
+                  {d.buyer && <div className="lp-card-buyer">→ {d.buyer}</div>}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -389,8 +432,11 @@ function MatchDemo() {
         <h2>Describe the deal. Get your buyer list, ranked.</h2>
         <p>Every buyer carries a buy box — counties, asset types, minimum size. Change the deal below and the match scores re-rank instantly, exactly as they do on a live deal page.</p>
       </div>
-      <div className="lp-match rv">
+      <div className="lp-panel lp-match rv">
         <div className="lp-match-form">
+          <div className="lp-field">
+            <span className="lp-field-l">Deal characteristics</span>
+          </div>
           <div className="lp-field">
             <label>County</label>
             <div className="lp-chips">{DEMO_COUNTIES.map((c) => (
@@ -404,21 +450,27 @@ function MatchDemo() {
             ))}</div>
           </div>
           <div className="lp-field">
-            <label>Size — {nra} NRA</label>
-            <input type="range" min={10} max={300} value={nra} onChange={(e) => setNra(Number(e.target.value))} />
+            <label className="lp-field-row"><span>Size</span><b>{nra} NRA</b></label>
+            <input type="range" min={10} max={300} value={nra} onChange={(e) => setNra(Number(e.target.value))} aria-label="Size in NRA" />
           </div>
         </div>
         <div className="lp-match-list">
+          <div className="lp-panel-head">
+            <span className="lp-panel-title">Buyer matches <span className="lp-dim">· {ranked.length} ranked</span></span>
+            <span className="lp-panel-note">Sorted by match score</span>
+          </div>
           {ranked.map(({ b, crit, pct }, i) => (
             <div key={b.name} className="lp-match-row">
               <span className="lp-rank">#{i + 1}</span>
+              <span className={`lp-ring ${pct === 100 ? "full" : pct >= 60 ? "mid" : "low"}`} style={{ "--p": pct } as CSSProperties} aria-label={`${pct}% match`}>
+                <span>{pct}</span>
+              </span>
               <div className="lp-match-main">
-                <div className="lp-match-name">{b.name} <span className="lp-closed">{b.closed} closed together</span></div>
+                <div className="lp-match-name">{b.name} <span className="lp-closed">· {b.closed} closed together</span></div>
                 <div className="lp-tags">{crit.map((c) => (
                   <span key={c.label} className={c.hit ? "hit" : "miss"}>{c.hit ? "✓" : "✕"} {c.label}</span>
                 ))}</div>
               </div>
-              <span className={`lp-pct ${pct === 100 ? "full" : pct >= 60 ? "mid" : "low"}`}>{pct}%</span>
               <button
                 className={`lp-log ${contacted.has(b.name) ? "done" : ""}`}
                 onClick={() => setContacted((p) => new Set(p).add(b.name))}
@@ -478,36 +530,42 @@ function ResearchDemo() {
         <h2>See where the market is moving before you drive there.</h2>
         <p>County recording indexes, lease assignments, and permits roll up into an activity map with hotspot detection. This is the real choropleth from the app, on sample data — switch metrics, hover any county, click to select.</p>
       </div>
-      <div className="lp-research rv">
-        <div className="lp-research-map">
-          <div className="lp-chips" style={{ marginBottom: 10 }}>
-            <button className={metric === "activity" ? "on" : ""} onClick={() => setMetric("activity")}>Activity volume</button>
-            <button className={metric === "change" ? "on" : ""} onClick={() => setMetric("change")}>Momentum vs prior period</button>
-          </div>
-          <ResearchChoropleth stats={stats} metric={metric} selected={selected} onSelect={toggle} />
-          <div className="lp-legend">
-            <span><i className="sw blue" /> more activity</span>
-            <span><i className="sw green" /> accelerating</span>
-            <span><i className="sw red-o" /> hotspot</span>
-            <span><i className="sw sel" /> selected</span>
+      <div className="lp-panel rv">
+        <div className="lp-panel-head">
+          <span className="lp-panel-title">Research</span>
+          <div className="lp-seg" role="tablist" aria-label="Metric">
+            <button role="tab" aria-selected={metric === "activity"} className={metric === "activity" ? "on" : ""} onClick={() => setMetric("activity")}>Activity volume</button>
+            <button role="tab" aria-selected={metric === "change"} className={metric === "change" ? "on" : ""} onClick={() => setMetric("change")}>Momentum vs prior period</button>
           </div>
         </div>
-        <div className="lp-research-rank">
-          <div className="lp-rank-h">{metric === "activity" ? "Most active counties" : "Fastest-moving counties"}</div>
-          {ranked.map((r, i) => {
-            const pct = r.prev ? Math.round(((r.tx - r.prev) / r.prev) * 100) : null;
-            return (
-              <button key={r.county} className={`lp-rank-row ${selected.includes(r.county) ? "sel" : ""}`} onClick={() => toggle(r.county)}>
-                <span className="lp-rank">#{i + 1}</span>
-                <span className="lp-rank-name">{r.county}{r.hotspot && <em> hotspot</em>}</span>
-                <span className="lp-rank-val">{r.tx.toLocaleString()} rec.</span>
-                <span className={`lp-rank-pct ${pct == null || pct >= 0 ? "up" : "down"}`}>
-                  {pct == null ? "new" : `${pct >= 0 ? "+" : ""}${pct}%`}
-                </span>
-              </button>
-            );
-          })}
-          <p className="lp-rank-note">Clicked counties highlight on the map — in the app this filters records, top buyers, and opportunity scores to your selection.</p>
+        <div className="lp-research">
+          <div className="lp-research-map">
+            <ResearchChoropleth stats={stats} metric={metric} selected={selected} onSelect={toggle} />
+            <div className="lp-legend">
+              <span><i className="sw blue" /> more activity</span>
+              <span><i className="sw green" /> accelerating</span>
+              <span><i className="sw red-o" /> hotspot</span>
+              <span><i className="sw sel" /> selected</span>
+            </div>
+          </div>
+          <div className="lp-research-rank">
+            <div className="lp-rank-h">{metric === "activity" ? "Most active counties" : "Fastest-moving counties"}</div>
+            <div className="lp-rank-cols" aria-hidden="true"><span>#</span><span>County</span><span>Records</span><span>vs prior</span></div>
+            {ranked.map((r, i) => {
+              const pct = r.prev ? Math.round(((r.tx - r.prev) / r.prev) * 100) : null;
+              return (
+                <button key={r.county} className={`lp-rank-row ${selected.includes(r.county) ? "sel" : ""}`} onClick={() => toggle(r.county)}>
+                  <span className="lp-rank">#{i + 1}</span>
+                  <span className="lp-rank-name">{r.county}{r.hotspot && <em> hotspot</em>}</span>
+                  <span className="lp-rank-val">{r.tx.toLocaleString()} rec.</span>
+                  <span className={`lp-rank-pct ${pct == null || pct >= 0 ? "up" : "down"}`}>
+                    {pct == null ? "new" : `${pct >= 0 ? "+" : ""}${pct}%`}
+                  </span>
+                </button>
+              );
+            })}
+            <p className="lp-rank-note">Clicked counties highlight on the map — in the app this filters records, top buyers, and opportunity scores to your selection.</p>
+          </div>
         </div>
       </div>
     </section>
@@ -532,13 +590,13 @@ function MapSection() {
     return () => { io.disconnect(); window.removeEventListener("scroll", near); };
   }, [on]);
   return (
-    <section className="lp-section alt" id="mapping">
+    <section className="lp-section" id="mapping">
       <div className="lp-section-head rv">
         <div className="lp-try">LIVE — real public cadastral data, not a screenshot</div>
         <h2>Your deals on the actual survey grid.</h2>
         <p>Abstracts, surveys, wells, and horizontal laterals — the same layer stack your team gets on day one. Zoom into Leon County and click anything.</p>
       </div>
-      <div className="lp-mapwrap rv" ref={ref}>
+      <div className="lp-panel lp-mapwrap rv" ref={ref}>
         {on ? (
           <Suspense fallback={<div className="lp-tract-empty">Loading map…</div>}>
             <LandingMap />
@@ -582,20 +640,26 @@ function ValuationDemo() {
         <h2>Know your number before you make the call.</h2>
         <p>Fit a decline curve to real production, forecast to economic limit, and get a defensible offer range. Drag the sliders — this is the live Arps engine at a 20% royalty, PV-10.</p>
       </div>
-      <div className="lp-val rv">
+      <div className="lp-panel lp-val rv">
         <div className="lp-val-controls">
-          <label>Current rate <b>{qi.toLocaleString()} bbl/mo</b>
+          <div className="lp-field"><span className="lp-field-l">Well analysis</span></div>
+          <label><span>Current rate</span><b>{qi.toLocaleString()} bbl/mo</b>
             <input type="range" min={500} max={8000} step={100} value={qi} onChange={(e) => setQi(Number(e.target.value))} /></label>
-          <label>Initial decline <b>{di}%/yr</b>
+          <label><span>Initial decline</span><b>{di}%/yr</b>
             <input type="range" min={10} max={90} value={di} onChange={(e) => setDi(Number(e.target.value))} /></label>
-          <label>b-factor <b>{b.toFixed(1)}</b>
+          <label><span>b-factor</span><b>{b.toFixed(1)}</b>
             <input type="range" min={0} max={2} step={0.1} value={b} onChange={(e) => setB(Number(e.target.value))} /></label>
-          <label>Oil price <b>${price}/bbl</b>
+          <label><span>Oil price</span><b>${price}/bbl</b>
             <input type="range" min={40} max={110} value={price} onChange={(e) => setPrice(Number(e.target.value))} /></label>
         </div>
         <div className="lp-val-out">
+          <div className="lp-val-head">
+            <span className="lp-panel-title">Forecast · 120 months</span>
+            <span className="lp-val-key"><i />Arps decline</span>
+          </div>
           <svg viewBox="0 0 100 42" className="lp-val-curve" preserveAspectRatio="none" aria-label="Decline curve">
-            <path d={path} />
+            <path className="area" d={`${path} L100,42 L0,42 Z`} />
+            <path className="line" d={path} />
           </svg>
           <div className="lp-val-nums">
             <div><span>PV-10 (10-yr, 20% NRI)</span><strong>{money(pv10)}</strong></div>
@@ -611,7 +675,7 @@ function ValuationDemo() {
 
 function FeatureTrio() {
   return (
-    <section className="lp-section">
+    <section className="lp-section lp-section-trio">
       <div className="lp-trio rv">
         <div><div className="lp-ico"><Briefcase size={22} strokeWidth={1.8} /></div><h3>Built for the deal flow</h3><p>From signed PSA to funded closing — every stage, document, seller, and dollar in one place. Offers, e-mail outreach, and follow-up alerts included.</p></div>
         <div><div className="lp-ico"><Store size={22} strokeWidth={1.8} /></div><h3>Your own buyer portal</h3><p>Publish offerings to a branded public marketplace. Buyers browse, filter the map, and submit their buy box — leads land in your CRM with a notification.</p></div>
@@ -623,7 +687,7 @@ function FeatureTrio() {
 
 function FinalCta() {
   return (
-    <section className="lp-final">
+    <section className="lp-final" id="waitlist">
       <h2 className="rv">The waitlist is open. The spreadsheet era is closing.</h2>
       <div className="rv" style={{ display: "flex", justifyContent: "center" }}><WaitlistPill dark /></div>
       <div className="lp-fineprint dark rv">Onboarding in small batches · Founding pricing locked for life</div>

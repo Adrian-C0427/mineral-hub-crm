@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
-import { Sun, Moon, X } from "lucide-react";
+import { X } from "lucide-react";
 import GridLayout, { type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
@@ -10,19 +10,54 @@ import { useAuth } from "../auth/AuthContext";
 import { Modal, Req, Spinner, StageBadge, showToast } from "../components/ui";
 import { ApiError } from "../api/client";
 import { Select } from "../components/Select";
+import { Segmented, StatStrip, Tag } from "../components/kit";
 import { money, fmtDate, fmtDateLocal } from "../lib/format";
 import { useStages } from "../stages";
-import { PeriodSegmented } from "../components/PeriodSegmented";
+import { CalendarGlyph } from "../components/PeriodSegmented";
 import { DateField } from "../components/DateField";
-import { useTheme } from "../theme";
+import { useTheme, isLightTheme } from "../theme";
 import { layoutRect } from "../lib/viewport";
 import { useIsPhonePortrait } from "../lib/mobile";
 
 // Global dashboard period (default YTD). Drives all period-scoped widgets.
 type DashPeriod = "THIS_MONTH" | "LAST_MONTH" | "THIS_QUARTER" | "YTD" | "CUSTOM";
 const DASH_PERIODS: readonly (readonly [DashPeriod, string])[] = [
-  ["THIS_MONTH", "This Month"], ["LAST_MONTH", "Last Month"], ["THIS_QUARTER", "This Quarter"], ["YTD", "YTD"], ["CUSTOM", "Custom"],
+  ["THIS_MONTH", "This month"], ["LAST_MONTH", "Last month"], ["THIS_QUARTER", "This quarter"], ["YTD", "YTD"], ["CUSTOM", "Custom"],
 ];
+
+const MONTHS_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/**
+ * Display name of the loaded reporting window, from the server's `periodLabel`
+ * ("This Month", "Last Month", "This Quarter", "Custom", "YTD"). Calendar math
+ * is in UTC, like the server's window. `year` is set when the window sits in
+ * one calendar year (chart title suffix).
+ */
+function periodDisplay(label: string | undefined, from: string, to: string): { long: string; year: number | null } {
+  const now = new Date();
+  const y = now.getUTCFullYear(), mo = now.getUTCMonth();
+  switch (label) {
+    case "This Month": return { long: `${MONTHS_LONG[mo]} ${y}`, year: y };
+    case "Last Month": {
+      const ly = mo === 0 ? y - 1 : y;
+      return { long: `${MONTHS_LONG[(mo + 11) % 12]} ${ly}`, year: ly };
+    }
+    case "This Quarter": return { long: `Q${Math.floor(mo / 3) + 1} ${y}`, year: y };
+    case "Custom":
+      return {
+        long: from && to ? `${fmtDate(from)} – ${fmtDate(to)}` : "Custom range",
+        year: from && to && from.slice(0, 4) === to.slice(0, 4) ? Number(from.slice(0, 4)) : null,
+      };
+    default: return { long: `Year to date, ${y}`, year: y };
+  }
+}
+
+const Chevron = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+);
+const CheckIcon = ({ size = 13 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+);
 
 interface DashTask {
   id: string; title: string; details?: string | null; dueDate: string | null; priority: "LOW" | "MEDIUM" | "HIGH" | string;
@@ -103,10 +138,10 @@ function niceAxis(peak: number): { max: number; ticks: number[] } {
 /** Design-spec mini trend line (88×28 viewBox, stretched, 2px stroke) with a
  *  soft gradient area fill fading to transparent beneath the line. */
 let sparkSeq = 0;
-function Spark({ data, color }: { data: number[]; color: string }) {
+function Spark({ data, color, height = 26, gap = 8 }: { data: number[]; color: string; height?: number; gap?: number }) {
   // Stable per-instance gradient id (colors repeat across KPI cards).
   const idRef = useRef(`dash-spark-${++sparkSeq}`);
-  if (data.length < 2 || !data.some((v) => v !== 0)) return <div style={{ height: 26, marginTop: 8 }} />;
+  if (data.length < 2 || !data.some((v) => v !== 0)) return <div style={{ height, marginTop: gap }} />;
   const min = Math.min(...data);
   const max = Math.max(...data);
   const pts = data
@@ -118,7 +153,7 @@ function Spark({ data, color }: { data: number[]; color: string }) {
     .join(" ");
   const id = idRef.current;
   return (
-    <svg width="100%" height="26" viewBox="0 0 88 28" preserveAspectRatio="none" style={{ marginTop: 8, display: "block" }}>
+    <svg width="100%" height={height} viewBox="0 0 88 28" preserveAspectRatio="none" style={{ marginTop: gap, display: "block" }}>
       <defs>
         <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" style={{ stopColor: color, stopOpacity: 0.22 }} />
@@ -134,22 +169,14 @@ function Spark({ data, color }: { data: number[]; color: string }) {
 function Delta({ pct }: { pct: number | null }) {
   if (pct == null || !isFinite(pct) || Math.round(pct) === 0) return null;
   const up = pct > 0;
-  return <span className={`dash-delta ${up ? "up" : "down"}`}>{up ? "▲" : "▼"} {Math.abs(Math.round(pct))}%</span>;
-}
-
-function Kpi({ label, value, valueColor, delta, series, spark, title }: {
-  label: string; value: string | number; valueColor?: string; delta?: number | null;
-  series?: number[]; spark?: string; title?: string;
-}) {
+  const n = Math.abs(Math.round(pct)).toLocaleString("en-US");
   return (
-    <div className="metric-card dash-kpi" title={title}>
-      <div className="dash-kpi-label">{label}</div>
-      <div className="dash-kpi-row">
-        <span className="dash-kpi-value" style={valueColor ? { color: valueColor } : undefined}>{value}</span>
-        <Delta pct={delta ?? null} />
-      </div>
-      {series ? <Spark data={series} color={spark ?? "var(--accent2)"} /> : <div style={{ height: 26, marginTop: 8 }} />}
-    </div>
+    <span className={`dash-delta ${up ? "up" : "down"}`} aria-label={`${up ? "Up" : "Down"} ${n}%`}>
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d={up ? "M12 19V5M6 11l6-6 6 6" : "M12 5v14M6 13l6 6 6-6"} />
+      </svg>
+      {n}%
+    </span>
   );
 }
 
@@ -161,9 +188,11 @@ function Kpi({ label, value, valueColor, delta, series, spark, title }: {
 // transforms) and resize from their edges/corner — the fully-freeform layout
 // found in premium analytics tools. Positions persist per browser.
 // ---------------------------------------------------------------------------
+// Widget ids are persisted in saved layouts — never rename them. "profit" is
+// the Profit overview (realized hero + chart); "kpis" is the KPI tile row.
 type WidgetId = "kpis" | "profit" | "stages" | "activity" | "buyers" | "followups" | "tasks";
 const WIDGET_LABELS: Record<WidgetId, string> = {
-  kpis: "Key metrics", profit: "Profit by month", stages: "Active deals by stage",
+  kpis: "Key metrics", profit: "Profit overview", stages: "Pipeline",
   activity: "Recent activity", buyers: "Top buyers", followups: "Upcoming follow-ups",
   tasks: "Tasks",
 };
@@ -171,23 +200,25 @@ const ALL_WIDGETS: WidgetId[] = ["kpis", "profit", "stages", "activity", "buyers
 
 const COLS = 12;
 const ROW_H = 30;      // px per grid row (small unit = fine-grained heights)
-const GAP = 14;
+const GAP = 16;
 const MIN_W = 3;
 const MIN_H = 4;
 
 interface Cell { x: number; y: number; w: number; h: number }
-// Default canvas mirrors the design reference: KPI strip, then the profit
-// chart (wide) beside the pipeline funnel, then a 3-up row of tasks / top
-// buyers / recent activity, with follow-ups full-width beneath.
+// Default canvas mirrors the design: the profit overview full width with the
+// KPI tiles beneath it, then pipeline beside top buyers, then recent activity
+// beside tasks and follow-ups.
 const DEFAULT_LAYOUT: Record<WidgetId, Cell> = {
-  kpis: { x: 0, y: 0, w: 12, h: 6 },
-  profit: { x: 0, y: 6, w: 7, h: 9 },
-  stages: { x: 7, y: 6, w: 5, h: 9 },
-  tasks: { x: 0, y: 15, w: 4, h: 9 },
-  buyers: { x: 4, y: 15, w: 4, h: 9 },
-  activity: { x: 8, y: 15, w: 4, h: 9 },
-  followups: { x: 0, y: 24, w: 12, h: 7 },
+  profit: { x: 0, y: 0, w: 12, h: 9 },
+  kpis: { x: 0, y: 9, w: 12, h: 4 },
+  stages: { x: 0, y: 13, w: 7, h: 7 },
+  buyers: { x: 7, y: 13, w: 5, h: 7 },
+  activity: { x: 0, y: 20, w: 6, h: 9 },
+  tasks: { x: 6, y: 20, w: 3, h: 9 },
+  followups: { x: 9, y: 20, w: 3, h: 9 },
 };
+/** Customize readout, e.g. "7 / 12 cols · 306px". */
+const sizeLabel = (c: Cell) => `${c.w} / ${COLS} cols · ${c.h * ROW_H + (c.h - 1) * GAP}px`;
 
 interface DashPrefs { layout: Record<WidgetId, Cell>; hidden: WidgetId[] }
 const DASH_KEY = "mh-dashboard:v2";
@@ -243,6 +274,9 @@ export function Dashboard() {
   // (drill-down modal listing the deals behind that bar).
   const [profitHover, setProfitHover] = useState<number | null>(null);
   const [profitDrill, setProfitDrill] = useState<number | null>(null);
+  // Chart view: each bucket on its own, or a running total across the window
+  // (derived from the same loaded series).
+  const [chartMode, setChartMode] = useState<"monthly" | "cumulative">("monthly");
   // The drill panel is non-modal (no backdrop / no focus trap), so wire up
   // Escape ourselves.
   useEffect(() => {
@@ -317,25 +351,31 @@ export function Dashboard() {
         {taskModal}
         {denied ? (
           <div className="page">
-            <div className="panel"><p className="muted" style={{ margin: 0 }}>Your role doesn't include the dashboard's business metrics. Ask an owner or admin for "View reports" access.</p></div>
+            <div className="panel dash-note"><p className="muted" style={{ margin: 0 }}>Your role doesn't include the dashboard's business metrics. Ask an owner or admin for "View reports" access.</p></div>
           </div>
         ) : <Spinner />}
       </>
     );
   }
 
-  // Paired bars (design): realized and projected render side by side, so the
-  // y-scale is driven by the single largest monthly value of either series.
-  // The axis is DYNAMIC — its max sits just above the tallest bar in the
-  // SELECTED range (rescales with the range) rather than on a fixed scale, so
-  // month-to-month differences stay proportional and readable.
-  const maxProfit = Math.max(1, ...d.profitByMonth.map((m) => Math.max(m.profit, m.projected)));
+  // Stacked bars (design): projected sits on top of realized, so the y-scale
+  // is driven by the tallest stack (the month total already shown above each
+  // bar). In Cumulative view each bucket shows the running total through it.
+  // The axis is DYNAMIC — its max sits just above the tallest stack in the
+  // SELECTED range (rescales with the range) rather than on a fixed scale.
+  let runR = 0, runP = 0;
+  const shown = d.profitByMonth.map((m) => {
+    if (chartMode === "cumulative") { runR += m.profit; runP += m.projected; return { r: runR, p: runP }; }
+    return { r: m.profit, p: m.projected };
+  });
+  const stackOf = (s: { r: number; p: number }) => Math.max(0, s.r) + Math.max(0, s.p);
+  const maxProfit = Math.max(1, ...shown.map(stackOf));
   const { max: niceMax, ticks: axisTicks } = niceAxis(maxProfit);
   // Index of the bucket containing today (-1 when the window is in the past).
   const curIdx = d.profitByMonth.findIndex((m) => m.isCurrent);
   const realized = d.profitByMonth.map((m) => m.profit);
   const projectedSeries = d.profitByMonth.map((m) => m.projected);
-  const maxStage = Math.max(1, ...d.stageCounts.map((s) => s.count));
+  const nBuckets = d.profitByMonth.length;
 
   // Deltas only where an honest baseline exists.
   const t = d.trends;
@@ -348,117 +388,204 @@ export function Dashboard() {
   const closedCountDelta = m.closedDealsPrev !== undefined ? pctChange(m.closedDealsCount, m.closedDealsPrev) : null;
   const avgDelta = m.avgProfitPrev !== undefined ? pctChange(m.avgProfitPerDeal, m.avgProfitPrev) : null;
 
+  // Full-year outlook = realized profit (closed deals) + projected profit
+  // (open deals); the split bar shows each one's share of that sum.
+  const outlook = m.closedProfitYtd + m.projectedProfit;
+  const splitOk = m.closedProfitYtd >= 0 && m.projectedProfit >= 0 && outlook > 0;
+  const realizedPct = splitOk ? Math.round((m.closedProfitYtd / outlook) * 100) : 0;
+
+  const pd = periodDisplay(m.periodLabel, customFrom, customTo);
+
   // Brand-new workspace: no active deals and nothing closed yet. Guide the
   // first steps instead of presenting a wall of zeros.
   const firstRun = d.metrics.activeDeals === 0 && d.metrics.closedProfitYtd === 0 && d.recentActivity.length === 0;
-  const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", year: "numeric" });
+  const today = new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
   // Time-of-day greeting (design): "Good evening, Adrian".
   const hour = new Date().getHours();
   const daypart = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
   const firstName = (user?.name ?? "").trim().split(/\s+/)[0] || "there";
+  const light = isLightTheme(theme);
+
+  // Recent activity grouped by local calendar day (newest first).
+  const thisYear = new Date().getFullYear();
+  const activityGroups: { key: string; label: string; rows: DashboardData["recentActivity"] }[] = [];
+  for (const a of d.recentActivity.slice(0, 8)) {
+    const at = new Date(a.createdAt);
+    const key = at.toDateString();
+    let g = activityGroups[activityGroups.length - 1];
+    if (!g || g.key !== key) {
+      g = {
+        key, rows: [],
+        label: at.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", ...(at.getFullYear() !== thisYear ? { year: "numeric" } : {}) }),
+      };
+      activityGroups.push(g);
+    }
+    g.rows.push(a);
+  }
 
   const widgetNodes: Record<WidgetId, ReactNode> = {
     kpis: (
-      <div className="metrics-row dash-kpis">
-        <Kpi label="Under Contract" value={fmtCompact(d.metrics.underContract ?? 0)} title="Total acquisition cost (Our Cost) of every active deal we're under contract with sellers for. Excludes closed and dead deals and owned mineral assets." />
-        <Kpi label="Active Deals" value={d.metrics.activeDeals} delta={activeDelta} series={t?.activeDealsWeekly} spark="var(--accent2)" title="Sparkline: active deals per week (8 weeks)" />
-        <Kpi label="Projected Profit" value={fmtCompact(d.metrics.projectedProfit)} series={projectedSeries} spark="var(--accent2)" title="Best (or accepted) offer minus cost basis across active deals with offers — the same series as the Projected bars below." />
-        <Kpi label={`Closed ${d.metrics.periodLabel ?? "YTD"}`} value={fmtCompact(d.metrics.closedProfitYtd)} valueColor={d.metrics.closedProfitYtd > 0 ? "var(--green)" : undefined} delta={closedDelta} series={curIdx >= 0 ? realized.slice(0, curIdx + 1) : realized} spark="var(--green)" title="Sparkline: realized profit by month" />
-        <Kpi label="Closed Deals" value={d.metrics.closedDealsCount} delta={closedCountDelta} series={t?.closedWeekly} spark="var(--green)" title="Deals moved to Closed within the selected range, by Contract Timeline Closed Date. Δ vs the previous equal-length period. Sparkline: closes per week (8 weeks)." />
-        <Kpi label="Avg Profit per Deal" value={fmtCompact(d.metrics.avgProfitPerDeal)} delta={avgDelta} series={t?.avgProfitPerDeal} spark="var(--text-dim)" title="Realized profit per closed deal in the selected range (Closed Date). Sparkline: running average across recent closes." />
-        <Kpi label="Offers Pending" value={d.metrics.offersPending} series={t?.offersWeekly} spark="var(--amber)" title="Sparkline: offers received per week (8 weeks)" />
-      </div>
+      <StatStrip className="dash-kpis-strip" min={190} cells={[
+        {
+          label: "Under contract", value: fmtCompact(d.metrics.underContract ?? 0),
+          title: "Total acquisition cost (Our Cost) of every active deal we're under contract with sellers for. Excludes closed and dead deals and owned mineral assets.",
+        },
+        {
+          label: "Active deals", value: <>{d.metrics.activeDeals}<Delta pct={activeDelta} /></>,
+          sub: t?.activeDealsWeekly ? <Spark data={t.activeDealsWeekly} color="var(--accent2)" /> : undefined,
+          title: "Sparkline: active deals per week (8 weeks)",
+        },
+        {
+          label: "Closed deals", value: <>{d.metrics.closedDealsCount}<Delta pct={closedCountDelta} /></>,
+          sub: t?.closedWeekly ? <Spark data={t.closedWeekly} color="var(--success)" /> : undefined,
+          title: "Deals moved to Closed within the selected range, by Contract Timeline Closed Date. Δ vs the previous equal-length period. Sparkline: closes per week (8 weeks).",
+        },
+        {
+          label: "Avg. profit per deal", value: <>{fmtCompact(d.metrics.avgProfitPerDeal)}<Delta pct={avgDelta} /></>,
+          sub: t?.avgProfitPerDeal ? <Spark data={t.avgProfitPerDeal} color="var(--ink-3)" /> : undefined,
+          title: "Realized profit per closed deal in the selected range (Closed Date). Sparkline: running average across recent closes.",
+        },
+        {
+          label: "Offers pending",
+          value: <span className={d.metrics.offersPending === 0 ? "dash-zero" : undefined}>{d.metrics.offersPending}</span>,
+          sub: t?.offersWeekly ? <Spark data={t.offersWeekly} color="var(--warn)" /> : undefined,
+          title: "Sparkline: offers received per week (8 weeks)",
+        },
+      ]} />
     ),
     profit: (
-      <div className="panel">
-        <div className="panel-title" style={{ marginBottom: 0 }}>
-          <div>
-            <h3 className="dash-h3">Profit by month</h3>
-            {/* Per-month totals now sit above each bar (see .bar-val); the header
-                keeps just the title + period so the number lives on the chart. */}
-            <div className="dash-panel-sub">
-              Realized + projected{d.metrics.periodLabel ? ` · ${d.metrics.periodLabel}` : ` in ${new Date().getFullYear()}`}
+      <div className="panel dash-card dash-ov">
+        <div className="dash-ov-main">
+          <div className="dash-ov-hero">
+            <div className="dash-ov-top" title="Sparkline: realized profit by month">
+              <div className="dash-ov-label">Realized profit</div>
+              <div className="dash-ov-valrow">
+                <span className="dash-ov-value">{fmtCompact(m.closedProfitYtd)}</span>
+                <Delta pct={closedDelta} />
+              </div>
+              <div className="dash-ov-period">{pd.long}</div>
+              <Spark data={curIdx >= 0 ? realized.slice(0, curIdx + 1) : realized} color="var(--success)" />
             </div>
-          </div>
-          {d.profitByMonth.some((m) => m.profit > 0 || m.projected > 0) && (
-            <div className="row" style={{ gap: 14, fontSize: 11.5, fontWeight: 600, color: "var(--text-dim)" }}>
-              <span className="row" style={{ gap: 6 }}><span className="dash-swatch" style={{ background: "var(--green)" }} /> Realized</span>
-              <span className="row" style={{ gap: 6 }}><span className="dash-swatch dash-swatch-proj" /> Projected</span>
-            </div>
-          )}
-        </div>
-        {/* The chart spans the SELECTED reporting period (every month of it,
-            yearly buckets for very long custom ranges). Buckets with no
-            realized or projected profit show a faint zero placeholder instead
-            of vanishing, so the x-axis spacing stays stable. A $-labeled
-            y-axis gives scale at a glance (no gridlines — kept minimal);
-            hovering shows the full breakdown; clicking a month opens a
-            non-blocking details panel. The axis renders ascending: the tick
-            array is $0→max and .bar-axis is column-reverse, so $0 sits at the
-            bottom. */}
-        <div className="bar-chart-wrap">
-          <div className="bar-axis" aria-hidden="true">
-            {axisTicks.map((tick) => <span key={tick}>{fmtCompact(tick)}</span>)}
-          </div>
-          <div className="bar-plot">
-            <div className="bar-chart">
-              {d.profitByMonth.map((m, i) => {
-                const empty = m.profit === 0 && m.projected === 0;
-                const clickable = (m.deals?.length ?? 0) > 0;
-                return (
-                  <div
-                    className={`bar-col ${m.isCurrent ? "current" : ""} ${clickable ? "clickable" : ""}`} key={m.month}
-                    role={clickable ? "button" : undefined} tabIndex={clickable ? 0 : undefined}
-                    aria-label={clickable ? `${m.month}: view ${m.deals!.length} deal${m.deals!.length === 1 ? "" : "s"}` : undefined}
-                    onMouseEnter={() => setProfitHover(i)} onMouseLeave={() => setProfitHover((h) => (h === i ? null : h))}
-                    onClick={clickable ? () => setProfitDrill(i) : undefined}
-                    onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setProfitDrill(i); } } : undefined}
-                  >
-                    <div className="bar-zone">
-                      {/* The month's total (realized + projected) floats directly
-                          above the taller of the two bars — the highest point of
-                          the month's graph. */}
-                      {!empty && (
-                        <div className="bar-val" style={{ bottom: `${(Math.max(m.profit, m.projected) / niceMax) * 100}%` }}>
-                          {fmtCompact(m.profit + m.projected)}
-                        </div>
-                      )}
-                      {empty ? (
-                        <div className="bar bar-zero" />
-                      ) : (
-                        <>
-                          {m.profit > 0 && <div className="bar" style={{ height: `${(m.profit / niceMax) * 100}%` }} />}
-                          {m.projected > 0 && <div className="bar bar-projected" style={{ height: `${(m.projected / niceMax) * 100}%` }} />}
-                        </>
-                      )}
-                    </div>
-                    <div className="bar-label">{m.month}</div>
-                  </div>
-                );
-              })}
-            </div>
-            {profitHover != null && d.profitByMonth[profitHover] && (() => {
-              const m = d.profitByMonth[profitHover];
-              const onRight = profitHover >= d.profitByMonth.length / 2;
-              return (
-                <div className="chart-tip" style={{
-                  [onRight ? "right" : "left"]: `${(onRight ? 1 - (profitHover + 0.5) / d.profitByMonth.length : (profitHover + 0.5) / d.profitByMonth.length) * 100}%`,
-                }}>
-                  <div className="chart-tip-title">{m.month}</div>
-                  <div className="chart-tip-row"><span className="dash-swatch" style={{ background: "var(--green)" }} /> Realized <strong>{money(m.profit)}</strong></div>
-                  {m.projected > 0 && <div className="chart-tip-row"><span className="dash-swatch dash-swatch-proj" /> Projected <strong>{money(m.projected)}</strong></div>}
-                  <div className="chart-tip-row chart-tip-total">Total <strong>{money(m.profit + m.projected)}</strong></div>
-                  {(m.deals?.length ?? 0) > 0 && <div className="muted" style={{ fontSize: 10.5, marginTop: 3 }}>Click for {m.deals!.length} deal{m.deals!.length === 1 ? "" : "s"}</div>}
+            <div className="dash-ov-bottom">
+              <div className="dash-ov-rows">
+                <div className="dash-ov-row" title="Best (or accepted) offer minus cost basis across active deals with offers — the same series as the Projected bars.">
+                  <span className="dash-ov-row-label">Projected profit</span>
+                  <span className="dash-ov-row-spark"><Spark data={projectedSeries} color="var(--accent2)" height={18} gap={0} /></span>
+                  <strong>{fmtCompact(m.projectedProfit)}</strong>
                 </div>
-              );
-            })()}
+                <div className="dash-ov-row" title="Realized profit (closed deals) plus projected profit (open deals).">
+                  <span className="dash-ov-row-label">Full-year outlook</span>
+                  <strong>{fmtCompact(outlook)}</strong>
+                </div>
+              </div>
+              <div className="dash-ov-split" aria-hidden="true">
+                {splitOk ? (
+                  <>
+                    {m.closedProfitYtd > 0 && <span className="real" style={{ width: `${(m.closedProfitYtd / outlook) * 100}%` }} />}
+                    {m.projectedProfit > 0 && <span className="proj" />}
+                  </>
+                ) : <span className="none" />}
+              </div>
+              {splitOk && (
+                <div className="dash-ov-split-legend">
+                  <span>{realizedPct}% realized</span>
+                  <span>{100 - realizedPct}% projected</span>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="dash-ov-chart">
+            <div className="dash-chart-head">
+              <div className="dash-chart-titles">
+                <h3 className="dash-card-title">{chartMode === "cumulative" ? "Cumulative profit" : "Profit by month"}{pd.year ? `, ${pd.year}` : ""}</h3>
+                {d.profitByMonth.some((b) => b.profit > 0 || b.projected > 0) && (
+                  <div className="dash-legend">
+                    <span><span className="dash-swatch" style={{ background: "var(--success)" }} />Realized</span>
+                    <span><span className="dash-swatch dash-swatch-proj" />Projected</span>
+                  </div>
+                )}
+              </div>
+              <Segmented className="dash-mode-seg" ariaLabel="Chart view" value={chartMode}
+                onChange={(v) => { setChartMode(v); setProfitHover(null); }}
+                options={[{ value: "monthly", label: "Monthly" }, { value: "cumulative", label: "Cumulative" }]} />
+            </div>
+            {/* The chart spans the SELECTED reporting period (every month of it,
+                yearly buckets for very long custom ranges). Buckets with no
+                realized or projected profit show a faint zero stub instead of
+                vanishing, so the x-axis spacing stays stable. Gridlines follow
+                the $-labeled axis ticks; hovering shows the full breakdown;
+                clicking a month opens a non-blocking details panel. */}
+            <div className="dash-chart">
+              <div className="dash-chart-body">
+                <div className="dash-chart-axis" aria-hidden="true">
+                  {axisTicks.map((tick) => <span key={tick} style={{ bottom: `${(tick / niceMax) * 100}%` }}>{fmtCompact(tick)}</span>)}
+                </div>
+                <div className="dash-chart-plot">
+                  {axisTicks.map((tick) => (
+                    <div key={tick} className={`dash-chart-grid ${tick === 0 ? "base" : ""}`} style={{ bottom: `${(tick / niceMax) * 100}%` }} />
+                  ))}
+                  {curIdx >= 0 && (
+                    <>
+                      <div className="dash-chart-today" style={{ left: `${(curIdx / nBuckets) * 100}%` }} />
+                      <div className="dash-chart-today-label" style={{ left: `${(curIdx / nBuckets) * 100}%` }}>Today</div>
+                    </>
+                  )}
+                  <div className="dash-chart-cols">
+                    {d.profitByMonth.map((b, i) => {
+                      const s = shown[i];
+                      const r = Math.max(0, s.r), p = Math.max(0, s.p);
+                      const stackPct = ((r + p) / niceMax) * 100;
+                      const own = !(b.profit === 0 && b.projected === 0);
+                      const clickable = (b.deals?.length ?? 0) > 0;
+                      const hovered = profitHover === i;
+                      const frac = (i + 0.5) / nBuckets;
+                      return (
+                        <div
+                          className={`dash-chart-col ${hovered ? "hover" : ""} ${clickable ? "clickable" : ""}`} key={b.month}
+                          role={clickable ? "button" : undefined} tabIndex={clickable ? 0 : undefined}
+                          aria-label={clickable ? `${b.month}: view ${b.deals!.length} deal${b.deals!.length === 1 ? "" : "s"}` : undefined}
+                          onMouseEnter={() => setProfitHover(i)} onMouseLeave={() => setProfitHover((h) => (h === i ? null : h))}
+                          onClick={clickable ? () => setProfitDrill(i) : undefined}
+                          onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setProfitDrill(i); } } : undefined}
+                        >
+                          {/* The bucket's total (realized + projected) floats
+                              above the stack; hidden while its tooltip shows. */}
+                          {own && !hovered && (
+                            <span className={`dash-chart-val ${s.r > 0 ? "" : "dim"}`} style={{ bottom: `${stackPct}%` }}>{fmtCompact(s.r + s.p)}</span>
+                          )}
+                          {p > 0 && <div className="dash-chart-bar proj" style={{ height: `${(p / niceMax) * 100}%` }} />}
+                          {r > 0 && <div className={`dash-chart-bar real ${p > 0 ? "under" : ""}`} style={{ height: `${(r / niceMax) * 100}%` }} />}
+                          {r + p === 0 && <div className="dash-chart-bar zero" />}
+                          {hovered && (
+                            <div className="dash-chart-tip" style={{
+                              bottom: `calc(${Math.min(stackPct, 40)}% + 12px)`,
+                              transform: `translateX(${frac < 0.17 ? "-25%" : frac > 0.83 ? "-80%" : "-50%"})`,
+                            }}>
+                              <div className="dash-chart-tip-title">{chartMode === "cumulative" ? `Through ${b.month}` : b.month}</div>
+                              <div className="dash-chart-tip-row"><span><span className="dash-swatch" style={{ background: "var(--success)" }} />Realized</span><strong>{money(s.r)}</strong></div>
+                              {s.p > 0 && <div className="dash-chart-tip-row"><span><span className="dash-swatch dash-swatch-proj" />Projected</span><strong>{money(s.p)}</strong></div>}
+                              <div className="dash-chart-tip-row total"><span>Total</span><strong>{money(s.r + s.p)}</strong></div>
+                              {clickable && <div className="dash-chart-tip-hint">Click for {b.deals!.length} deal{b.deals!.length === 1 ? "" : "s"}</div>}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+              <div className="dash-chart-x">
+                {d.profitByMonth.map((b) => <span key={b.month} className={b.isCurrent ? "current" : undefined}>{b.month}</span>)}
+              </div>
+            </div>
+            {d.profitByMonth.every((b) => b.profit === 0 && b.projected === 0) && (
+              <p className="dash-chart-empty">
+                No closed or projected profit in this period — bars fill in as deals close (with a Closed Date) or get an accepted offer with a closing date.
+              </p>
+            )}
           </div>
         </div>
-        {d.profitByMonth.every((m) => m.profit === 0 && m.projected === 0) && (
-          <p className="muted" style={{ margin: "10px 0 0", fontSize: 12 }}>
-            No closed or projected profit in this period — bars fill in as deals close (with a Closed Date) or get an accepted offer with a closing date.
-          </p>
-        )}
         {profitDrill != null && d.profitByMonth[profitDrill] && (() => {
           const m = d.profitByMonth[profitDrill];
           const closed = (m.deals ?? []).filter((x) => x.kind === "closed");
@@ -480,7 +607,7 @@ export function Dashboard() {
                   <div className="drill-row-meta">
                     <span className="muted">{fmtDate(x.date)}</span>
                     {x.amount != null && <span>{money(x.amount)}</span>}
-                    <span className="drill-profit" style={{ color: x.profit >= 0 ? "var(--green)" : "var(--red)" }}>{money(x.profit)}</span>
+                    <span className={`drill-profit ${x.profit >= 0 ? "pos" : "neg"}`}>{money(x.profit)}</span>
                   </div>
                 </div>
               ))}
@@ -495,14 +622,14 @@ export function Dashboard() {
             <aside className="drill-panel" role="dialog" aria-label={`${m.month} profit breakdown`}>
               <div className="drill-head">
                 <div style={{ minWidth: 0 }}>
-                  <h3 className="dash-h3" style={{ margin: 0 }}>{m.month} — profit breakdown</h3>
-                  <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>{total} deal{total === 1 ? "" : "s"} this month</div>
+                  <h3 className="drill-title">{m.month} — profit breakdown</h3>
+                  <div className="drill-sub">{total} deal{total === 1 ? "" : "s"} this month</div>
                 </div>
-                <button className="icon-btn" onClick={() => setProfitDrill(null)} aria-label="Close" style={{ marginLeft: "auto" }}><X size={16} /></button>
+                <button className="icon-btn drill-x" onClick={() => setProfitDrill(null)} aria-label="Close"><X size={16} /></button>
               </div>
               <div className="drill-summary">
                 <div className="drill-stat">
-                  <span className="drill-stat-label"><span className="dash-swatch" style={{ background: "var(--green)" }} /> Realized</span>
+                  <span className="drill-stat-label"><span className="dash-swatch" style={{ background: "var(--success)" }} /> Realized</span>
                   <strong>{money(m.profit)}</strong>
                 </div>
                 {m.projected > 0 && (
@@ -527,83 +654,94 @@ export function Dashboard() {
       </div>
     ),
     stages: (
-      <div className="panel">
-        <div className="panel-title" style={{ marginBottom: 14 }}>
-          <h3 className="dash-h3">Pipeline by stage</h3>
-          <Link to="/pipeline" className="dash-viewlink">View pipeline →</Link>
-        </div>
-        {d.stageCounts.every((s) => s.count === 0) ? <p className="muted">No active deals.</p> : (
-          <div className="dash-funnel">
-            {d.stageCounts.map((s) => (
-              <Link className="dash-fun-row" key={s.stage} to={`/pipeline?stage=${s.stage}`}>
-                <span className="dash-fun-head">
-                  <span className="dash-fun-name"><span className="dash-fun-dot" style={{ background: stageColorOf(s.stage) }} />{stageLabel(s.stage)}</span>
-                  <span className="dash-fun-count" style={{ color: s.count > 0 ? "var(--text)" : "var(--text-faint)" }}>{s.count}</span>
-                </span>
-                <span className="dash-fun-track">
-                  <span className="dash-fun-fill" style={{ width: `${(s.count / maxStage) * 100}%`, background: stageColorOf(s.stage) }} />
-                </span>
-              </Link>
-            ))}
+      <div className="panel dash-card">
+        <div className="dash-card-head">
+          <div className="dash-card-titles">
+            <h3 className="dash-card-title">Pipeline</h3>
+            <span className="dash-card-sub">{d.metrics.activeDeals} active deal{d.metrics.activeDeals === 1 ? "" : "s"}</span>
           </div>
+          <Link to="/pipeline" className="dash-viewlink">View pipeline <Chevron /></Link>
+        </div>
+        {d.stageCounts.every((s) => s.count === 0) ? <p className="dash-empty">No active deals.</p> : (
+          <>
+            <div className="dash-pipe-bar" aria-hidden="true">
+              {d.stageCounts.filter((s) => s.count > 0).map((s) => (
+                <span key={s.stage} style={{ flex: s.count, background: stageColorOf(s.stage) }} />
+              ))}
+            </div>
+            <div className="dash-pipe-grid">
+              {d.stageCounts.map((s) => (
+                <Link className="dash-pipe-cell" key={s.stage} to={`/pipeline?stage=${s.stage}`}>
+                  <span className="dash-pipe-name">
+                    <span className="dash-pipe-dot" style={s.count > 0 ? { background: stageColorOf(s.stage) } : undefined} />
+                    <span className="dash-pipe-label">{stageLabel(s.stage)}</span>
+                  </span>
+                  <span className={`dash-pipe-count ${s.count > 0 ? "" : "zero"}`}>{s.count}</span>
+                </Link>
+              ))}
+            </div>
+          </>
         )}
       </div>
     ),
     activity: (
-      <div className="panel">
-        <div className="panel-title" style={{ marginBottom: 14 }}>
-          <h3 className="dash-h3">Recent activity</h3>
+      <div className="panel dash-card">
+        <div className="dash-card-head">
+          <h3 className="dash-card-title">Recent activity</h3>
         </div>
-        {d.recentActivity.length === 0 ? <p className="muted">Nothing yet.</p> : (
-          <div className="dash-tl">
-            {d.recentActivity.slice(0, 8).map((a, i, arr) => (
-              <div className="dash-tl-row" key={a.id}>
-                <div className="dash-tl-rail">
-                  <span className="dash-tl-dot" />
-                  {i < arr.length - 1 && <span className="dash-tl-line" />}
-                </div>
-                <div className="dash-tl-body">
-                  <div className="dash-tl-text">{a.summary}</div>
-                  <div className="dash-tl-when">{fmtDateLocal(a.createdAt)}</div>
-                </div>
-              </div>
+        {d.recentActivity.length === 0 ? <p className="dash-empty">Nothing yet.</p> : activityGroups.map((g) => (
+          <div className="dash-act-group" key={g.key}>
+            <div className="dash-act-day">{g.label}</div>
+            {g.rows.map((a) => (
+              <div className="dash-act-row" key={a.id} title={fmtDateLocal(a.createdAt)}>{a.summary}</div>
             ))}
           </div>
-        )}
+        ))}
       </div>
     ),
     buyers: (
-      <div className="panel">
-        <div className="panel-title" style={{ marginBottom: 12 }}>
-          <h3 className="dash-h3">Top buyers YTD</h3>
-          <Link to="/buyers" className="dash-viewlink">View buyers →</Link>
+      <div className="panel dash-card">
+        <div className="dash-card-head">
+          <div className="dash-card-titles">
+            <h3 className="dash-card-title">Top buyers</h3>
+            <span className="dash-card-sub">{pd.long}</span>
+          </div>
+          <Link to="/buyers" className="dash-viewlink">View buyers <Chevron /></Link>
         </div>
-        {d.topBuyers.length === 0 ? <p className="muted">No closed volume yet.</p> : (() => {
+        {d.topBuyers.length === 0 ? <p className="dash-empty">No closed volume yet.</p> : (() => {
           const topVol = Math.max(1, ...d.topBuyers.map((b) => b.volume));
           const totalVol = Math.max(1, d.topBuyers.reduce((s, b) => s + b.volume, 0));
-          const BAR_COLORS = ["#3b82f6", "#a855f7", "#06b6d4", "#f59e0b", "#22c55e"];
+          const BAR_COLORS = ["#3b82f6", "#8b5cf6", "#06b6d4", "#f59e0b", "#22c55e"];
           return d.topBuyers.map((b, i) => (
-            <Link to={`/buyers/${b.id}`} className="dash-buyer-row" key={b.id}>
-              <span className="dash-buyer-top">
-                <span className="dash-buyer-name">{b.companyName || b.name}</span>
-                <span className="dash-buyer-amt">{fmtCompact(b.volume)}</span>
+            <Link to={`/buyers/${b.id}`} className="dash-tb" key={b.id}>
+              <span className="dash-tb-rank">{i + 1}</span>
+              <span className="dash-tb-main">
+                <span className="dash-tb-name">{b.companyName || b.name}</span>
+                <span className="dash-tb-track"><span style={{ width: `${(b.volume / topVol) * 100}%`, background: BAR_COLORS[i % BAR_COLORS.length] }} /></span>
               </span>
-              <span className="dash-buyer-bottom">
-                <span className="dash-buyer-track"><span className="dash-buyer-fill" style={{ width: `${(b.volume / topVol) * 100}%`, background: BAR_COLORS[i % BAR_COLORS.length] }} /></span>
-                <span className="dash-buyer-share">{Math.round((b.volume / totalVol) * 100)}%</span>
-              </span>
+              <span className="dash-tb-amt">{fmtCompact(b.volume)}</span>
+              <span className="dash-tb-share">{Math.round((b.volume / totalVol) * 100)}%</span>
             </Link>
           ));
         })()}
       </div>
     ),
     followups: (
-      <div className="panel">
-        <h3 className="dash-h3" style={{ marginBottom: 6 }}>Upcoming follow-ups</h3>
-        {d.upcomingFollowUps.length === 0 ? <p className="muted">No follow-ups scheduled.</p> : d.upcomingFollowUps.map((f, i) => (
-          <div className="dash-feed-row" key={i}>
-            <span className="dash-soft">{f.buyerName} · <Link to={`/deals/${f.dealId}`}>{f.dealName}</Link></span>
-            <span className="dash-faint" style={{ whiteSpace: "nowrap" }}>{fmtDate(f.date)}</span>
+      <div className="panel dash-card">
+        <div className="dash-card-head">
+          <h3 className="dash-card-title">Upcoming follow-ups</h3>
+        </div>
+        {d.upcomingFollowUps.length === 0 ? (
+          <div className="dash-empty-row">
+            <span className="dash-empty-icon">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8" /><path d="M12 8v4l2.5 2" /></svg>
+            </span>
+            <span className="dash-empty-line">No follow-ups scheduled.</span>
+          </div>
+        ) : d.upcomingFollowUps.map((f, i) => (
+          <div className="dash-fu-row" key={i}>
+            <span className="dash-fu-text"><span className="dash-fu-buyer">{f.buyerName}</span> · <Link to={`/deals/${f.dealId}`}>{f.dealName}</Link></span>
+            <span className="dash-fu-date">{fmtDate(f.date)}</span>
           </div>
         ))}
       </div>
@@ -647,91 +785,114 @@ export function Dashboard() {
         layout: { ...p.layout, [id]: { ...p.layout[id], x: 0, y: bottom } },
       };
     });
+  const restoreDefault = () => {
+    setPrefs({ layout: { ...DEFAULT_LAYOUT }, hidden: [] });
+    showToast("Default layout restored");
+  };
+
+  // Customize chrome above each widget: grip + name + size readout, and Hide.
+  // Phones only hide/show (no arranging), so they get the name and Hide only.
+  const czBar = (id: WidgetId, arrange: boolean) => (
+    <div className="dash-cz-bar">
+      <span className="dash-cz-name">
+        {arrange && (
+          <svg className="dash-cz-handle" width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <circle cx="9" cy="6" r="1.5" /><circle cx="15" cy="6" r="1.5" /><circle cx="9" cy="12" r="1.5" /><circle cx="15" cy="12" r="1.5" /><circle cx="9" cy="18" r="1.5" /><circle cx="15" cy="18" r="1.5" />
+          </svg>
+        )}
+        <span className="dash-cz-title">{WIDGET_LABELS[id]}</span>
+        {arrange && <span className="dash-cz-size">{sizeLabel(prefs.layout[id])}</span>}
+      </span>
+      <button type="button" className="dash-cz-btn" onClick={() => hideWidget(id)} title="Hide widget">Hide</button>
+    </div>
+  );
 
   return (
-    <div className="page">
+    <div className="page dash-page">
       {taskModal}
-      <div className="page-header">
-        <div>
+      <div className="page-header dash-header">
+        <div className="dash-greet">
+          <div className="dash-eyebrow">{today}</div>
           <h1 className="dash-title">Good {daypart}, {firstName}</h1>
-          <span className="dash-sub">Acquisition snapshot · {today}</span>
         </div>
-        <div className="row" style={{ gap: 10 }}>
-          <PeriodSegmented options={DASH_PERIODS} value={period} onChange={setPeriod} compact />
+        <div className="dash-actions">
+          <Segmented accent className="dash-period" ariaLabel="Reporting period" value={period} onChange={setPeriod}
+            options={DASH_PERIODS.map(([v, label]) => ({ value: v, label: v === "CUSTOM" ? <><CalendarGlyph size={13} />{label}</> : label }))} />
           {period === "CUSTOM" && (
-            <div className="row" style={{ gap: 6 }}>
-              <div style={{ width: 148 }}><DateField value={customFrom} onChange={setCustomFrom} ariaLabel="Custom range from" placeholder="From" /></div>
-              <span className="muted">–</span>
-              <div style={{ width: 148 }}><DateField value={customTo} onChange={setCustomTo} ariaLabel="Custom range to" placeholder="To" /></div>
+            <div className="dash-range">
+              <span>From</span>
+              <div className="dash-range-field"><DateField value={customFrom} onChange={setCustomFrom} ariaLabel="Custom range from" placeholder="From" /></div>
+              <span>to</span>
+              <div className="dash-range-field"><DateField value={customTo} onChange={setCustomTo} ariaLabel="Custom range to" placeholder="To" /></div>
             </div>
           )}
           <button type="button" className={`dash-cz-toggle ${customizing ? "active" : ""}`} onClick={() => setCustomizing((c) => !c)} title="Customize dashboard layout">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4" /></svg>
             <span>{customizing ? "Done" : "Customize"}</span>
           </button>
-          <button className="dash-icon-btn" title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} onClick={toggleTheme}>
-            {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+          <button type="button" className="dash-icon-btn" title={light ? "Switch to dark mode" : "Switch to light mode"} aria-label={light ? "Switch to dark mode" : "Switch to light mode"} onClick={toggleTheme}>
+            {light ? (
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" /></svg>
+            ) : (
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
+            )}
           </button>
           {/* ?new=1 opens the New Deal modal directly (design's header CTA). */}
-          <Link to="/deals/active?new=1" className="pbtn-primary dash-newdeal">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-            New Deal
+          <Link to="/deals/active?new=1" className="dash-newdeal">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+            New deal
           </Link>
         </div>
       </div>
 
       {firstRun && (
-        <div className="panel">
-          <div className="panel-title"><h3>Get started</h3></div>
-          <p className="muted" style={{ marginTop: 0 }}>
+        <div className="panel dash-card dash-start">
+          <h3 className="dash-card-title">Get started</h3>
+          <p className="dash-start-text">
             Welcome to Mineral Hub! These metrics fill in as you work — here's where most teams begin:
           </p>
-          <div className="row">
+          <div className="dash-start-links">
             {/* ?new=1 opens the New Deal modal immediately — one click, not two. */}
-            <Link to="/deals/active?new=1" className="primary" style={{ padding: "8px 14px", borderRadius: 6 }}>1 · Create your first deal</Link>
-            <Link to="/buyers" style={{ padding: "8px 14px", border: "1px solid var(--border)", borderRadius: 6 }}>2 · Add or import buyers</Link>
-            <Link to="/valuation" style={{ padding: "8px 14px", border: "1px solid var(--border)", borderRadius: 6 }}>3 · Import well production data</Link>
+            <Link to="/deals/active?new=1" className="primary dash-start-link">1 · Create your first deal</Link>
+            <Link to="/buyers" className="dash-start-link">2 · Add or import buyers</Link>
+            <Link to="/valuation" className="dash-start-link">3 · Import well production data</Link>
           </div>
         </div>
       )}
 
       {customizing && (
-        <div className="panel dash-cz-banner">
-          <span className="dash-cz-banner-text">
-            {phoneStack
-              ? <><strong>Customizing dashboard</strong> — hide or show widgets here; arrange and resize them on a larger screen. Everything saves automatically.</>
-              : <><strong>Customizing dashboard</strong> — drag a widget anywhere, resize from its edges or corner, or hide it. Everything saves automatically.</>}
-          </span>
-          <span className="row" style={{ gap: 8, marginLeft: "auto" }}>
-            <button type="button" className="small" disabled={isDefaultLayout} onClick={() => setPrefs({ layout: { ...DEFAULT_LAYOUT }, hidden: [] })}>Restore default</button>
+        <div className="dash-cz-banner">
+          <div className="dash-cz-banner-main">
+            <span className="dash-cz-banner-text">
+              <strong>Customizing dashboard.</strong>{" "}
+              {phoneStack
+                ? "Hide or show widgets here; arrange and resize them on a larger screen."
+                : "Drag a widget anywhere to move it, drag its edges or corner to resize, or hide it."}{" "}
+              Changes save automatically.
+            </span>
+            {hiddenIds.length > 0 && (
+              <div className="dash-cz-hidden">
+                <span>Hidden:</span>
+                {hiddenIds.map((id) => (
+                  <button key={id} type="button" className="dash-cz-chip" onClick={() => showWidget(id)}>+ {WIDGET_LABELS[id]}</button>
+                ))}
+              </div>
+            )}
+          </div>
+          <div className="dash-cz-banner-actions">
+            <button type="button" className="small" disabled={isDefaultLayout} onClick={restoreDefault}>Restore default</button>
             <button type="button" className="small primary" onClick={() => setCustomizing(false)}>Done</button>
-          </span>
-        </div>
-      )}
-
-      {customizing && hiddenIds.length > 0 && (
-        <div className="panel dash-cz-tray">
-          <span className="muted" style={{ fontSize: 13 }}>Hidden widgets:</span>
-          {hiddenIds.map((id) => (
-            <button key={id} type="button" className="dash-cz-chip" onClick={() => showWidget(id)}>+ {WIDGET_LABELS[id]}</button>
-          ))}
+          </div>
         </div>
       )}
 
       {visibleIds.length === 0 && !customizing ? (
-        <div className="panel"><p className="muted" style={{ margin: 0 }}>All widgets are hidden. Use <strong>Customize</strong> to bring them back.</p></div>
+        <div className="panel dash-note"><p className="muted" style={{ margin: 0 }}>All widgets are hidden. Use <strong>Customize</strong> to bring them back.</p></div>
       ) : phoneStack ? (
         <div className={`dash-stack ${customizing ? "customizing" : ""}`}>
           {stackIds.map((id) => (
             <div key={id} className={`dash-w dash-w-${id} ${customizing ? "cz" : ""}`}>
-              {customizing && (
-                <div className="dash-cz-bar">
-                  <span className="dash-cz-name">{WIDGET_LABELS[id]}</span>
-                  <span className="dash-cz-actions">
-                    <button type="button" className="dash-cz-btn" onClick={() => hideWidget(id)} title="Hide widget">✕ Hide</button>
-                  </span>
-                </div>
-              )}
+              {customizing && czBar(id, false)}
               <div className="dash-w-body">{widgetNodes[id]}</div>
             </div>
           ))}
@@ -764,16 +925,8 @@ export function Dashboard() {
           onLayoutChange={onLayoutChange}
         >
           {visibleIds.map((id) => (
-            <div key={id} className={`dash-w ${customizing ? "cz" : ""}`}>
-              {customizing && (
-                <div className="dash-cz-bar">
-                  <span className="dash-cz-handle" aria-hidden="true">⠿</span>
-                  <span className="dash-cz-name">{WIDGET_LABELS[id]}</span>
-                  <span className="dash-cz-actions">
-                    <button type="button" className="dash-cz-btn" onClick={() => hideWidget(id)} title="Hide widget">✕ Hide</button>
-                  </span>
-                </div>
-              )}
+            <div key={id} className={`dash-w dash-w-${id} ${customizing ? "cz" : ""}`}>
+              {customizing && czBar(id, true)}
               <div className="dash-w-body">{widgetNodes[id]}</div>
             </div>
           ))}
@@ -790,10 +943,10 @@ export function Dashboard() {
 // database and removes it from the widget instantly; clicking the row opens
 // the contact workspace with that task in focus.
 // ---------------------------------------------------------------------------
-const TASK_PRIORITY_META: Record<string, { label: string; color: string }> = {
-  HIGH: { label: "High", color: "var(--red)" },
-  MEDIUM: { label: "Medium", color: "var(--amber)" },
-  LOW: { label: "Low", color: "var(--green)" },
+const TASK_PRIORITY_META: Record<string, { label: string; tone: "danger" | "warn" | "neutral"; dot: string }> = {
+  HIGH: { label: "High", tone: "danger", dot: "var(--danger)" },
+  MEDIUM: { label: "Medium", tone: "warn", dot: "var(--warn)" },
+  LOW: { label: "Low", tone: "neutral", dot: "var(--ink-3)" },
 };
 
 /**
@@ -851,22 +1004,29 @@ function TasksWidget({ initial, refreshKey, onOpenTask, onChanged }: {
   };
 
   return (
-    <div className="panel">
-      <div className="panel-title dash-task-head" style={{ marginBottom: 12 }}>
-        <h3 className="dash-h3">Tasks</h3>
-        {tasks.length > 0 && <span className="dash-task-badge">{tasks.length} due</span>}
-        <span className="dash-task-filter">
-          <Select value={whose} onChange={(v) => setWhose(v || "me")} options={userOptions} searchable={userOptions.length > 8}
-            width={116} ariaLabel="Show tasks for" />
-        </span>
-        <button type="button" className="dash-task-add" onClick={() => setCreating(true)} title="Create a task for yourself or a teammate" aria-label="New task">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-        </button>
+    <div className="panel dash-card dash-tasks">
+      <div className="dash-card-head dash-tasks-head">
+        <div className="dash-card-titles">
+          <h3 className="dash-card-title">Tasks</h3>
+          {tasks.length > 0 && <Tag tone="warn">{tasks.length} due</Tag>}
+        </div>
+        <div className="dash-tasks-tools">
+          <span className="dash-task-filter">
+            <Select value={whose} onChange={(v) => setWhose(v || "me")} options={userOptions} searchable={userOptions.length > 8}
+              width={116} ariaLabel="Show tasks for" />
+          </span>
+          <button type="button" className="dash-task-add" onClick={() => setCreating(true)} title="Create a task for yourself or a teammate" aria-label="New task">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+          </button>
+        </div>
       </div>
       {tasks.length === 0 ? (
-        <div className="dash-task-clear">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--green)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>
-          {loading ? "Loading tasks…" : whose === "me" ? "You have no overdue or upcoming tasks" : whose === "all" ? "No overdue or upcoming tasks for anyone" : "No overdue or upcoming tasks for this user"}
+        <div className="dash-empty-row">
+          <span className="dash-empty-icon"><CheckIcon /></span>
+          <span className="dash-empty-text">
+            <strong>{loading ? "Loading tasks…" : whose === "me" ? "You're all caught up" : "All caught up"}</strong>
+            {!loading && <span>{whose === "me" ? "You have no overdue or upcoming tasks" : whose === "all" ? "No overdue or upcoming tasks for anyone" : "No overdue or upcoming tasks for this user"}</span>}
+          </span>
         </div>
       ) : tasks.map((t) => {
         const dayKey = t.dueDate ? t.dueDate.slice(0, 10) : null;
@@ -877,23 +1037,26 @@ function TasksWidget({ initial, refreshKey, onOpenTask, onChanged }: {
         const body = (
           <>
             <span className="dash-task-title">{t.title}</span>
+            {t.details && <span className="dash-task-sub">{t.details}</span>}
             {meta && <span className="dash-task-meta">{meta}</span>}
           </>
         );
         return (
-          <div className="dash-task-row" key={t.id}>
-            {t.canComplete && (
-              <input type="checkbox" checked={false} disabled={busy === t.id} onChange={() => void complete(t)}
+          <div className="dash-trow" key={t.id}>
+            {t.canComplete ? (
+              <input type="checkbox" className="dash-tcheck" checked={false} disabled={busy === t.id} onChange={() => void complete(t)}
                 title="Mark complete" aria-label={`Complete task: ${t.title}`} />
-            )}
+            ) : <span className="dash-tcheck-ph" aria-hidden="true" />}
             {t.contactId ? (
-              <Link to={`/contacts/${t.contactId}?task=${t.id}`} className="dash-task-main" title="Open this task on the contact's workspace">{body}</Link>
+              <Link to={`/contacts/${t.contactId}?task=${t.id}`} className="dash-tmain" title="Open this task on the contact's workspace">{body}</Link>
             ) : (
-              <button type="button" className="dash-task-main dash-task-open" onClick={() => onOpenTask(t.id)} title="Open this task">{body}</button>
+              <button type="button" className="dash-tmain" onClick={() => onOpenTask(t.id)} title="Open this task">{body}</button>
             )}
-            <span className="dash-task-pr" style={{ color: pr.color, background: `color-mix(in srgb, ${pr.color} 13%, transparent)` }}>{pr.label}</span>
-            <span className={`dash-task-due ${overdue ? "overdue" : ""}`}>
-              {dayKey == null ? "—" : overdue ? `Overdue · ${fmtDate(t.dueDate!)}` : dueToday ? "Due today" : fmtDate(t.dueDate!)}
+            <span className="dash-tside">
+              <Tag tone={pr.tone}>{pr.label}</Tag>
+              <span className={`dash-task-due ${overdue ? "overdue" : dueToday ? "today" : ""}`}>
+                {dayKey == null ? "—" : overdue ? `Overdue · ${fmtDate(t.dueDate!)}` : dueToday ? "Due today" : `Due ${fmtDate(t.dueDate!)}`}
+              </span>
             </span>
           </div>
         );
@@ -950,7 +1113,7 @@ function CreateTaskModal({ users, onClose, onCreated }: {
   }
 
   return (
-    <Modal title="New task" subtitle={<>For you or a teammate · assigned teammates are notified</>} onClose={onClose}
+    <Modal title="New task" subtitle={<>For you or a teammate. Assigned teammates are notified.</>} onClose={onClose}
       dirty={title.trim() !== "" || details.trim() !== "" || due !== ""}
       footer={
         <>
@@ -963,7 +1126,7 @@ function CreateTaskModal({ users, onClose, onCreated }: {
         <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus maxLength={200} placeholder="e.g. Call the title company about the Leon closing" />
       </div>
       <div className="field"><label>Details</label>
-        <textarea rows={3} value={details} onChange={(e) => setDetails(e.target.value)} placeholder="Anything the assignee should know…" />
+        <textarea rows={3} value={details} onChange={(e) => setDetails(e.target.value)} placeholder="Anything the assignee should know" />
       </div>
       <div className="dash-task-form-row">
         <div className="field"><label>Assign to</label>
@@ -974,12 +1137,8 @@ function CreateTaskModal({ users, onClose, onCreated }: {
         </div>
       </div>
       <div className="field" style={{ marginBottom: 0 }}><label>Priority</label>
-        <div className="seg-control" role="group" aria-label="Priority">
-          {PRIORITY_CHOICES.map((p) => (
-            <button type="button" key={p.key} className={`seg ${priority === p.key ? "active" : ""}`} aria-pressed={priority === p.key}
-              onClick={() => setPriority(p.key)}>{p.label}</button>
-          ))}
-        </div>
+        <Segmented accent className="dash-pri-seg" ariaLabel="Priority" value={priority} onChange={setPriority}
+          options={PRIORITY_CHOICES.map((p) => ({ value: p.key, label: p.label, dot: TASK_PRIORITY_META[p.key].dot }))} />
       </div>
       {error && <div className="error-text" style={{ marginTop: 12 }}>{error}</div>}
     </Modal>
@@ -1038,7 +1197,7 @@ function TaskDetailModal({ id, onClose, onChanged }: { id: string; onClose: () =
           {task.details && <p className="dash-task-details">{task.details}</p>}
           <div className="ddc-grid">
             <div><div className="ddx-label">Due</div><div className={`ddx-val ${overdue ? "neg" : ""}`}>{task.dueDate ? fmtDate(task.dueDate) : "—"}{overdue ? " · overdue" : ""}</div></div>
-            <div><div className="ddx-label">Priority</div><div className="ddx-val"><span className="dash-task-pr" style={{ color: pr!.color, background: `color-mix(in srgb, ${pr!.color} 13%, transparent)` }}>{pr!.label}</span></div></div>
+            <div><div className="ddx-label">Priority</div><div className="ddx-val"><Tag tone={pr!.tone}>{pr!.label}</Tag></div></div>
             <div><div className="ddx-label">Assigned to</div><div className="ddx-val">{task.assignedTo?.name ?? "—"}</div></div>
             <div><div className="ddx-label">Created by</div><div className="ddx-val">{task.createdBy?.name ?? "—"}{task.createdAt ? ` · ${fmtDateLocal(task.createdAt)}` : ""}</div></div>
             {task.contactName && <div><div className="ddx-label">Contact</div><div className="ddx-val">{task.contactName}</div></div>}

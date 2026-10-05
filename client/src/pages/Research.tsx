@@ -1,12 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
-  ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, Legend, BarChart,
-  LineChart, PieChart, Pie, Cell, LabelList,
+  ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell,
 } from "recharts";
-import { ArrowRight, Heart, Lock, Search, Share2, TrendingUp } from "lucide-react";
+import { ArrowRight, Search } from "lucide-react";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, Banner, Modal, ConfirmDelete, SearchInput, ChipList } from "../components/ui";
+import { Segmented, StatStrip, Tag, type StatCell } from "../components/kit";
+import { Toggle } from "../components/Toggle";
 import { useRowSelection, BulkBar } from "../components/bulk";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { useAbstractIndex } from "../components/AbstractPicker";
@@ -17,7 +18,7 @@ import { SortableTable, type Column } from "../components/SortableTable";
 import { ChartTypeToggle, useChartType } from "../components/ChartTypeToggle";
 import { ResearchImport } from "../components/ResearchImport";
 import { ResearchChoropleth, type CountyStat } from "../components/ResearchChoropleth";
-import { CLASS_COLORS } from "../lib/entityClasses";
+import { CLASS_COLORS, CLASS_FALLBACK_COLOR } from "../lib/entityClasses";
 import { downloadCsv } from "../lib/csv";
 import { fmtDate, num, prettyEnum, prettyDocType } from "../lib/format";
 import { CHART_COLORS, chartTooltip } from "../lib/charts";
@@ -156,8 +157,8 @@ const EMPTY_FILTERS: Filters = { states: [], counties: [], abstracts: [], survey
 // Customize View — which Overview KPIs show + their order (saved per user).
 type ResMetricId = "transactions" | "leases" | "permits" | "horizontalPermits" | "uniqueBuyers" | "uniqueOperators";
 const RES_METRICS: [ResMetricId, string][] = [
-  ["transactions", "Mineral Transactions"], ["leases", "Leasing Documents"], ["permits", "Drilling Permits"],
-  ["horizontalPermits", "Horizontal Permits"], ["uniqueBuyers", "Active Buyers"], ["uniqueOperators", "Active Operators"],
+  ["transactions", "Mineral transactions"], ["leases", "Leasing documents"], ["permits", "Drilling permits"],
+  ["horizontalPermits", "Horizontal permits"], ["uniqueBuyers", "Active buyers"], ["uniqueOperators", "Active operators"],
 ];
 const DEFAULT_RES_METRICS: ResMetricId[] = RES_METRICS.map(([id]) => id);
 const RES_METRIC_LABEL: Record<ResMetricId, string> = Object.fromEntries(RES_METRICS) as Record<ResMetricId, string>;
@@ -288,57 +289,59 @@ export function Research() {
   const TABS: [Tab, string][] = [
     ["overview", "Overview"], ["geography", "Geography"], ["rankings", "Rankings"],
     ["relationships", "Relationships"], ["opportunities", "Opportunities"], ["records", "Records"],
-    ...(canManage ? ([["data", "Data & Imports"]] as [Tab, string][]) : []),
+    ...(canManage ? ([["data", "Data & imports"]] as [Tab, string][]) : []),
   ];
+  const rangeLabel = range.from && range.to ? fmtRangeLabel(range.from, range.to) : "";
 
   return (
     <div className="page research-page">
-      <div className="page-header">
-        <div>
-          <h1 style={{ marginBottom: 0 }}>Research &amp; Market Intelligence</h1>
-          <div className="page-sub">
+      <div className="page-header rs-header">
+        <div className="rs-title">
+          <h1>Research &amp; Market Intelligence</h1>
+          <div className="page-sub rs-sub">
             {range.from && range.to ? (
               <>
-                <span style={{ color: "var(--text)", fontWeight: 600 }}>{fmtRangeLabel(range.from, range.to)}</span>
-                {cmpRange && <> &nbsp;vs&nbsp; {fmtRangeLabel(cmpRange.from, cmpRange.to, cmpWithYear)} · {compare === "PREV_YEAR" ? "Previous year" : "Previous period"}</>}
+                <span className="rs-sub-cur">{rangeLabel}</span>
+                {cmpRange ? (
+                  <>
+                    <span>compared with</span>
+                    <span className="rs-sub-prior">{fmtRangeLabel(cmpRange.from, cmpRange.to, cmpWithYear)}</span>
+                    <span>({compare === "PREV_YEAR" ? "previous year" : "previous period"})</span>
+                  </>
+                ) : <span>no comparison</span>}
               </>
-            ) : "Select a custom date range"}
+            ) : <span>Select a custom date range</span>}
+            <span className="rs-sub-dot" aria-hidden="true" />
+            <span>{dataset === "LEASE" ? "Leases" : "Transactions"}</span>
           </div>
         </div>
-        <div className="reports-toolbar">
+        <div className="reports-toolbar rs-toolbar">
           {/* Dataset switch — Transactions/Deeds vs Leases. Drives docClass on
               every request so the two record classes never mix in any view. */}
-          <div className="seg-control" role="tablist" aria-label="Dataset">
-            <span className={`seg ${dataset === "TRANSACTION" ? "active" : ""}`} onClick={() => setDataset("TRANSACTION")}>Transactions</span>
-            <span className={`seg ${dataset === "LEASE" ? "active" : ""}`} onClick={() => setDataset("LEASE")}>Leases</span>
-          </div>
-          <div className="seg-control">
-            {CHIPS.map(([p, label]) => (
-              <span key={p} className={`seg ${period === p ? "active" : ""}`} onClick={() => setPeriod(p)}>
-                {p === "CUSTOM" && (
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect x="3" y="4" width="18" height="18" rx="2" /><line x1="16" y1="2" x2="16" y2="6" /><line x1="8" y1="2" x2="8" y2="6" /><line x1="3" y1="10" x2="21" y2="10" />
-                  </svg>
-                )}
-                {label}
-              </span>
-            ))}
-          </div>
-          <button className={`rbtn ${showFilters ? "active" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
-            Filters{activeFilterCount > 0 && <span className="rbtn-count"> ({activeFilterCount})</span>}
+          <Segmented<Dataset> ariaLabel="Dataset" value={dataset} onChange={setDataset}
+            options={[{ value: "TRANSACTION", label: "Transactions" }, { value: "LEASE", label: "Leases" }]} />
+          <Segmented<Period> accent ariaLabel="Period" value={period} onChange={setPeriod}
+            options={CHIPS.map(([p, label]) => ({ value: p, label }))} />
+          <button type="button" className={`rs-filter-btn ${showFilters || activeFilterCount > 0 ? "on" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 5h16l-6 7.5V19l-4-2v-4.5z" /></svg>
+            Filters{activeFilterCount > 0 && <span className="rs-count-badge">{activeFilterCount}</span>}
           </button>
         </div>
       </div>
 
       {/* --- Filter controls --- */}
       {showFilters && opts && (
-        <div className="reports-filters">
-          <div className="filters-head">
-            <strong style={{ fontSize: 14 }}>Filters</strong>
-            {activeFilterCount > 0 && <button className="small" onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>}
+        <div className="rs-filters">
+          <div className="rs-filters-head">
+            <span className="rs-filters-title">Filters</span>
+            <div className="rs-filters-actions">
+              <button type="button" className="rs-text-btn" disabled={activeFilterCount === 0} onClick={() => setFilters(EMPTY_FILTERS)}>Clear all</button>
+              <button type="button" className="rs-icon-x" aria-label="Close filters" onClick={() => setShowFilters(false)}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              </button>
+            </div>
           </div>
-          <div className="filters-grid">
+          <div className="filters-grid rs-fgrid">
             {period === "CUSTOM" && (
               <>
                 <div className="field" style={{ marginBottom: 0 }}><label>From</label><DateField value={custom.from} onChange={(v) => setCustom((c) => ({ ...c, from: v }))} /></div>
@@ -406,20 +409,20 @@ export function Research() {
       {opts != null && !hasAnyData && tab !== "data" && (
         <Banner kind="info">
           No research data yet. {canManage
-            ? <>Head to the <a style={{ cursor: "pointer", textDecoration: "underline" }} onClick={() => setTab("data")}>Data & Imports</a> tab to load county recordings or drilling permits (or run the sample-data CLI to explore).</>
+            ? <>Head to the <a style={{ cursor: "pointer", textDecoration: "underline" }} onClick={() => setTab("data")}>Data &amp; imports</a> tab to load county recordings or drilling permits (or run the sample-data CLI to explore).</>
             : "Ask an administrator to import county recording or permit data."}
         </Banner>
       )}
 
-      <div className="tab-row">
-        {TABS.map(([t, label]) => <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{label}</button>)}
+      <div className="tab-row rs-tabs" role="tablist">
+        {TABS.map(([t, label]) => <button key={t} type="button" role="tab" aria-selected={tab === t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>{label}</button>)}
       </div>
 
-      <div ref={captureRef} className="report-capture">
+      <div ref={captureRef} className="report-capture rs-body">
         {tab === "overview" && <OverviewTab qs={qs} compareOff={compareOff} dataset={dataset} />}
         {tab === "geography" && <GeographyTab qs={qs} filters={filters} compareOff={compareOff} onDrill={drillToRecords}
           onSetCounties={(counties) => setFilters((f) => ({ ...f, counties }))} />}
-        {tab === "rankings" && <RankingsTab qs={qs} opts={opts} compareOff={compareOff} onDrill={drillToRecords} dataset={dataset} />}
+        {tab === "rankings" && <RankingsTab qs={qs} opts={opts} compareOff={compareOff} onDrill={drillToRecords} dataset={dataset} rangeLabel={rangeLabel} />}
         {tab === "relationships" && <RelationshipsTab qs={qs} onDrill={drillToRecords} dataset={dataset} />}
         {tab === "opportunities" && <OpportunitiesTab qs={qs} onDrill={drillToRecords} />}
         {tab === "records" && <RecordsTab qs={qs} dataset={dataset} />}
@@ -459,108 +462,153 @@ function OverviewTab({ qs, compareOff, dataset }: { qs: string; compareOff: bool
   // so it never renders — a Leases view shows lease metrics, not empty deed ones.
   const offDataset: ResMetricId = dataset === "TRANSACTION" ? "leases" : "transactions";
   const kpiLabel = (id: ResMetricId): string =>
-    dataset === "LEASE" && id === "uniqueBuyers" ? "Active Lessees" : RES_METRIC_LABEL[id];
+    dataset === "LEASE" && id === "uniqueBuyers" ? "Active lessees" : RES_METRIC_LABEL[id];
   const orderedMetrics: ResMetricId[] = [...metricPrefs.order.filter((id) => DEFAULT_RES_METRICS.includes(id)), ...DEFAULT_RES_METRICS.filter((id) => !metricPrefs.order.includes(id))];
   const visibleMetrics = orderedMetrics.filter((id) => !metricPrefs.hidden.includes(id) && id !== offDataset);
+  const kpiCells: StatCell[] = visibleMetrics.filter((id) => t[id]).map((id) => ({
+    label: kpiLabel(id),
+    value: num(t[id].current),
+    // Change tags are comparative — hidden when comparison is off.
+    sub: compareOff ? undefined : <span className="rs-delta-line"><DeltaTag t={t[id]} /><span>vs {num(t[id].previous)}</span></span>,
+  }));
+
+  // Series colours — one document series per view (the off-dataset class is
+  // excluded server-side, so its series would just be zeros).
+  const docKey = dataset === "TRANSACTION" ? "transactions" : "leases";
+  const docName = dataset === "TRANSACTION" ? "Transactions" : "Leases";
+  const docColor = dataset === "TRANSACTION" ? CHART_COLORS[0] : CHART_COLORS[1];
+  const permitColor = CHART_COLORS[3];
+  const avgColor = CHART_COLORS[2];
+  const axisTick = { fontSize: 11, fill: "var(--ink-4)" };
+
+  const docRows = data.docTypeBreakdown;
+  const docTotal = docRows.reduce((s, d) => s + d.count, 0);
+  const docMax = Math.max(1, ...docRows.map((d) => d.count));
+
+  // Period vs prior — every value comes straight from the summary payload.
+  const pvp: ResMetricId[] = [docKey, "permits", "uniqueBuyers", "uniqueOperators"];
 
   return (
     <>
-      <div className="row" style={{ justifyContent: "flex-end", marginBottom: 10 }}>
+      <div className="rs-ov-tools">
         <ResearchMetricsCustomize prefs={metricPrefs} onChange={setMetricPrefs} />
       </div>
-      <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
-        {visibleMetrics.map((id) => <TrendKpi key={id} label={kpiLabel(id)} t={t[id]} compareOff={compareOff} />)}
-        {!compareOff && (
-          <div className="metric-card">
-            <div className="metric-label">Comparison Window</div>
-            <div className="metric-value" style={{ fontSize: 15 }}>{fmtDate(data.compare.from)} – {fmtDate(data.compare.to)}</div>
-          </div>
-        )}
-      </div>
+      {kpiCells.length > 0 && <StatStrip className="rs-kpis" cells={kpiCells} />}
 
-      <div className="chart-grid">
-        <div className="panel" style={{ gridColumn: "1 / -1" }}>
-          <div className="panel-head">
-            <h3>Activity Trend <span className="muted" style={{ fontWeight: 400, fontSize: 12 }}>({trendType === "line" ? "lines" : "bars"} per {data.granularity}; grey line = rolling average of total)</span></h3>
-            <ChartTypeToggle type={trendType} options={["bar", "line"]} onChange={setTrendType} />
+      <div className="chart-grid rs-ov-grid">
+        <section className="panel rs-panel rs-span" >
+          <div className="rs-panel-head">
+            <div className="rs-panel-titles">
+              <h3>Activity trend</h3>
+              <span className="rs-panel-sub">Records per {data.granularity} · line is the rolling average of the total</span>
+            </div>
+            <div className="rs-panel-tools">
+              <div className="rs-legend">
+                <span><i className="sq" style={{ background: docColor }} />{docName}</span>
+                <span><i className="sq" style={{ background: permitColor }} />Permits</span>
+                <span><i className="ln" style={{ background: avgColor }} />Rolling avg</span>
+              </div>
+              <ChartTypeToggle type={trendType} options={["bar", "line"]} onChange={setTrendType} />
+            </div>
           </div>
-          <ResponsiveContainer width="100%" height={280}>
-            <ComposedChart data={data.series.map((s) => ({ ...s, label: label(s.key) }))}>
-              <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-              <XAxis dataKey="label" tick={{ fontSize: 11 }} minTickGap={24} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+          <ResponsiveContainer width="100%" height={260}>
+            <ComposedChart data={data.series.map((s) => ({ ...s, label: label(s.key) }))} margin={{ top: 4, right: 4, left: -8, bottom: 0 }} barCategoryGap="24%">
+              <CartesianGrid vertical={false} stroke="var(--line-faint)" />
+              <XAxis dataKey="label" tick={axisTick} minTickGap={24} tickLine={false} axisLine={{ stroke: "var(--line-strong)" }} />
+              <YAxis allowDecimals={false} tick={axisTick} tickLine={false} axisLine={false} width={36} />
               <Tooltip {...chartTooltip} />
-              <Legend />
-              {/* One document series per view — the off-dataset class is
-                  excluded server-side, so its series would just be zeros. */}
               {trendType === "line" ? (
                 <>
-                  {dataset === "TRANSACTION"
-                    ? <Line type="monotone" dataKey="transactions" name="Transactions" stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} />
-                    : <Line type="monotone" dataKey="leases" name="Leases" stroke={CHART_COLORS[1]} strokeWidth={2} dot={false} />}
-                  <Line type="monotone" dataKey="permits" name="Permits" stroke={CHART_COLORS[3]} strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey={docKey} name={docName} stroke={docColor} strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="permits" name="Permits" stroke={permitColor} strokeWidth={2} dot={false} />
                 </>
               ) : (
                 <>
-                  {dataset === "TRANSACTION"
-                    ? <Bar dataKey="transactions" name="Transactions" stackId="a" fill={CHART_COLORS[0]} />
-                    : <Bar dataKey="leases" name="Leases" stackId="a" fill={CHART_COLORS[1]} />}
-                  <Bar dataKey="permits" name="Permits" stackId="a" fill={CHART_COLORS[3]} radius={[3, 3, 0, 0]} />
+                  <Bar dataKey={docKey} name={docName} stackId="a" fill={docColor} />
+                  <Bar dataKey="permits" name="Permits" stackId="a" fill={permitColor} radius={[3, 3, 0, 0]} />
                 </>
               )}
-              <Line dataKey="rollingAvg" name="Rolling avg" stroke={CHART_COLORS[2]} strokeWidth={2} dot={false} />
+              <Line dataKey="rollingAvg" name="Rolling avg" stroke={avgColor} strokeWidth={2} dot={false} />
             </ComposedChart>
           </ResponsiveContainer>
-        </div>
-        <div className="panel">
-          <div className="panel-head">
-            <h3>Document Type Breakdown</h3>
-            {data.docTypeBreakdown.length > 0 && <ChartTypeToggle type={docType} options={["bar", "pie"]} onChange={setDocType} />}
+        </section>
+
+        <section className="panel rs-panel">
+          <div className="rs-panel-head">
+            <div className="rs-panel-titles"><h3>Document types</h3></div>
+            <div className="rs-panel-tools">
+              {docRows.length > 0 && <span className="rs-panel-meta">{num(docTotal)} records</span>}
+              {docRows.length > 0 && <ChartTypeToggle type={docType} options={["bar", "pie"]} onChange={setDocType} />}
+            </div>
           </div>
-          {data.docTypeBreakdown.length === 0 ? <p className="muted">No documents in this period.</p> : docType === "pie" ? (
-            <ResponsiveContainer width="100%" height={Math.max(220, data.docTypeBreakdown.length * 30)}>
+          {docRows.length === 0 ? <p className="rs-empty">No documents in this period.</p> : docType === "pie" ? (
+            <ResponsiveContainer width="100%" height={Math.max(220, docRows.length * 30)}>
               <PieChart>
-                <Pie data={data.docTypeBreakdown.map((d) => ({ name: prettyDocType(d.docType), count: d.count }))} dataKey="count" nameKey="name" cx="50%" cy="50%" outerRadius={85} label={(e: { name?: string }) => e.name ?? ""}>
-                  {data.docTypeBreakdown.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
+                <Pie data={docRows.map((d) => ({ name: prettyDocType(d.docType), count: d.count }))} dataKey="count" nameKey="name" cx="50%" cy="50%" outerRadius={85} stroke="var(--surface)" label={(e: { name?: string }) => e.name ?? ""}>
+                  {docRows.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
                 </Pie>
                 <Tooltip {...chartTooltip} />
               </PieChart>
             </ResponsiveContainer>
           ) : (
-            <ResponsiveContainer width="100%" height={Math.max(160, data.docTypeBreakdown.length * 30)}>
-              <BarChart data={data.docTypeBreakdown.map((d) => ({ name: prettyDocType(d.docType), count: d.count }))} layout="vertical" margin={{ left: 60 }}>
-                <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
-                <YAxis type="category" dataKey="name" width={130} tick={{ fontSize: 11 }} />
-                <Tooltip {...chartTooltip} />
-                <Bar dataKey="count" name="Documents" fill={CHART_COLORS[0]} radius={[0, 3, 3, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+            <div className="rs-doclist">
+              {docRows.map((d) => (
+                <div key={d.docType} className="rs-docrow" title={`${prettyDocType(d.docType)} · ${num(d.count)}`}>
+                  <div className="rs-docrow-top"><span>{prettyDocType(d.docType)}</span><b>{num(d.count)}</b></div>
+                  <span className="rs-bar"><i style={{ width: `${(d.count / docMax) * 100}%` }} /></span>
+                </div>
+              ))}
+            </div>
           )}
-        </div>
+        </section>
+
         {!compareOff && (
-        <div className="panel">
-          <h3>Period vs Prior</h3>
-          <ResponsiveContainer width="100%" height={240}>
-            <BarChart data={[
-              dataset === "TRANSACTION"
-                ? { name: "Transactions", Current: data.kpis.transactions, Prior: data.previous.transactions }
-                : { name: "Leases", Current: data.kpis.leases, Prior: data.previous.leases },
-              { name: "Permits", Current: data.kpis.permits, Prior: data.previous.permits },
-            ]}>
-              <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-              <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-              <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-              <Tooltip {...chartTooltip} />
-              <Legend />
-              <Bar dataKey="Prior" fill={CHART_COLORS[6]} radius={[3, 3, 0, 0]} />
-              <Bar dataKey="Current" fill={CHART_COLORS[0]} radius={[3, 3, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+          <section className="panel rs-panel">
+            <div className="rs-panel-head">
+              <div className="rs-panel-titles"><h3>Period vs prior</h3></div>
+              <div className="rs-legend">
+                <span><i className="sq prior" />Prior</span>
+                <span><i className="sq" style={{ background: "var(--accent)" }} />Current</span>
+              </div>
+            </div>
+            <div className="rs-pvp">
+              {pvp.map((id) => {
+                const cur = data.kpis[id] ?? 0, prev = data.previous[id] ?? 0;
+                const max = Math.max(1, cur, prev);
+                return (
+                  <div key={id} className="rs-pvp-item">
+                    <div className="rs-pvp-top">
+                      <span>{kpiLabel(id)}</span>
+                      {t[id] && <DeltaText t={t[id]} />}
+                    </div>
+                    <div className="rs-pvp-bars">
+                      <span className="rs-bar thick prior"><i style={{ width: `${(prev / max) * 100}%` }} /></span><span className="rs-pvp-v prior">{num(prev)}</span>
+                      <span className="rs-bar thick"><i style={{ width: `${(cur / max) * 100}%` }} /></span><span className="rs-pvp-v">{num(cur)}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
         )}
       </div>
     </>
   );
+}
+
+/** Change tag beside a KPI: arrow + percent, "New" when there was no prior activity. */
+function DeltaTag({ t }: { t: TrendT }) {
+  const arrow = t.direction === "flat" ? "→" : t.direction === "up" ? "▲" : "▼";
+  return (
+    <span className={`rs-delta ${t.direction}`}>
+      {t.pctChange == null ? "New" : `${arrow} ${fmtPct(t.pctChange).replace(/^[+-]/, "")}`}
+    </span>
+  );
+}
+
+/** Coloured change text ("+12%" / "New") used by Period vs prior. */
+function DeltaText({ t }: { t: TrendT }) {
+  return <span className={`rs-delta-text ${t.direction}`}>{t.pctChange == null ? "New" : fmtPct(t.pctChange)}</span>;
 }
 
 /** Customize View popover for the Research Overview KPIs (show/hide + reorder). */
@@ -590,9 +638,9 @@ function ResearchMetricsCustomize({ prefs, onChange }: { prefs: ResMetricPrefs; 
   const isDefault = prefs.order.length === 0 && prefs.hidden.length === 0;
   return (
     <div className="cv-wrap" ref={ref}>
-      <button type="button" className={`small cv-btn ${open ? "active" : ""}`} onClick={() => setOpen((o) => !o)} title="Customize metrics">
+      <button type="button" className={`rs-ghost-btn cv-btn ${open ? "active" : ""}`} onClick={() => setOpen((o) => !o)} title="Customize metrics" aria-expanded={open}>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
-        Customize View
+        Customize metrics
       </button>
       {open && (
         <div className="cv-menu" role="dialog" aria-label="Customize metrics">
@@ -722,23 +770,6 @@ function ResearchAbstractFilter({ options, states, counties, value, onChange }: 
   );
 }
 
-function TrendKpi({ label, t, compareOff }: { label: string; t?: TrendT; compareOff?: boolean }) {
-  if (!t) return null;
-  const color = t.direction === "flat" ? "var(--text-dim)" : t.direction === "up" ? "#22c55e" : "#ef4444";
-  const arrow = t.direction === "flat" ? "→" : t.direction === "up" ? "▲" : "▼";
-  return (
-    <div className="metric-card">
-      <div className="metric-label">{label}</div>
-      <div className="metric-value">{num(t.current)}</div>
-      {!compareOff && (
-        <div className="metric-hint" style={{ color }}>
-          {arrow} {fmtPct(t.pctChange)} vs prior ({num(t.previous)})
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Geography
 // ---------------------------------------------------------------------------
@@ -761,6 +792,8 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
   // earlier static single-county swap map.
   const [focusCounty, setFocusCounty] = useState<string | null>(null);
   const [focusAbstractRows, setFocusAbstractRows] = useState<GeoRow[]>([]);
+  // Hovering a county in the side list outlines it on the map.
+  const [hoverCounty, setHoverCounty] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -808,23 +841,24 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
               behind it — click opens Records filtered to that abstract. */}
           {shownLevel === "abstract" && r.abstractId
             // Standard text color (not link blue) — still clickable via the row.
-            ? <a style={{ cursor: "pointer", fontWeight: 600, color: "var(--text)" }} title={`View records for abstract ${r.abstractId}`}>{geoName(r)}</a>
-            : <span className="rec-name">{geoName(r)}</span>}
+            ? <a className="rs-geo-name" title={`View records for abstract ${r.abstractId}`}>{geoName(r)}</a>
+            : <span className="rs-geo-name">{geoName(r)}</span>}
         </>
       ) },
-    { key: "transactions", header: "Transactions", value: (r) => r.transactions, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{num(r.transactions)}</span> },
-    { key: "leases", header: "Leases", value: (r) => r.leases, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{num(r.leases)}</span> },
-    { key: "permits", header: "Permits", value: (r) => r.permits, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{num(r.permits)}</span> },
+    { key: "transactions", header: "Transactions", value: (r) => r.transactions, align: "right", render: (r) => <span className={`rec-nowrap ${r.transactions ? "" : "rs-zero"}`}>{num(r.transactions)}</span> },
+    { key: "leases", header: "Leases", value: (r) => r.leases, align: "right", render: (r) => <span className={`rec-nowrap ${r.leases ? "" : "rs-zero"}`}>{num(r.leases)}</span> },
+    { key: "permits", header: "Permits", value: (r) => r.permits, align: "right", render: (r) => <span className={`rec-nowrap ${r.permits ? "" : "rs-zero"}`}>{num(r.permits)}</span> },
     { key: "total", header: "Total", value: (r) => r.total, align: "right", render: (r) => <b className="rec-nowrap">{num(r.total)}</b> },
     // Prior/Change columns are comparative — hidden when comparison is off.
     ...(compareOff ? [] : ([
-      { key: "previous", header: "Prior", value: (r: GeoRow) => r.previous, align: "right", render: (r: GeoRow) => <span className="rec-mid rec-nowrap">{num(r.previous)}</span> },
+      { key: "previous", header: "Prior", value: (r: GeoRow) => r.previous, align: "right", render: (r: GeoRow) => <span className={`rec-nowrap ${r.previous ? "rs-mid" : "rs-zero"}`}>{num(r.previous)}</span> },
       {
         key: "pctChange", header: "Change", value: (r: GeoRow) => r.pctChange ?? Number.MAX_SAFE_INTEGER, align: "right",
-        render: (r: GeoRow) => <span className="rec-nowrap" style={{ color: r.absoluteChange > 0 ? "#22c55e" : r.absoluteChange < 0 ? "#ef4444" : "var(--text-dim)" }}>{fmtPct(r.pctChange)} ({r.absoluteChange >= 0 ? "+" : ""}{r.absoluteChange})</span>,
+        render: (r: GeoRow) => <span className={`rec-nowrap rs-chg ${r.absoluteChange > 0 ? "up" : r.absoluteChange < 0 ? "down" : "flat"}`}>{fmtPct(r.pctChange)} ({r.absoluteChange >= 0 ? "+" : ""}{r.absoluteChange})</span>,
       },
     ] as Column<GeoRow>[])),
-    { key: "zScore", header: "Z", value: (r) => r.zScore, align: "right", render: (r) => <span className="rec-mid">{r.zScore == null ? "—" : r.zScore.toFixed(1)}</span> },
+    { key: "zScore", header: "Z-score", value: (r) => r.zScore, align: "right",
+      render: (r) => <span className={`rs-z ${r.zScore != null && r.zScore >= 1.5 ? "hi" : r.zScore != null && r.zScore >= 1 ? "mid" : ""}`} title="Z-score vs county baseline">{r.zScore == null ? "—" : r.zScore.toFixed(1)}</span> },
   ];
 
   const countyStats: CountyStat[] = useMemo(
@@ -832,72 +866,124 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
     [countyRows],
   );
   const showMap = countyStats.length > 0 && (!filters.states.length || filters.states.includes("TX"));
+  // Side list: the most active counties on the map, busiest first.
+  const activeCounties = useMemo(
+    () => countyStats.filter((c) => c.total > 0).sort((a, b) => b.total - a.total).slice(0, 10),
+    [countyStats],
+  );
+
+  // Selecting a county — from the map or the side list — zooms the map into it
+  // and filters the whole Research page to it (every tab follows `qs`).
+  const selectCounty = (county: string) => {
+    const row = countyRows.find((r) => r.county && r.county.toUpperCase() === county.toUpperCase());
+    onSetCounties([row?.county ?? county]);
+  };
+  const onFocusChange = (c: string | null) => { setFocusCounty(c); if (c === null) onSetCounties([]); };
+  const isSelected = (county: string) => filters.counties.some((c) => c.toUpperCase() === county.toUpperCase());
+  const hasSelection = focusCounty != null || filters.counties.length > 0;
 
   return (
     <>
       {showMap && (
-        <div className="panel">
-          <div className="panel-title" style={{ alignItems: "flex-start" }}>
-            <div>
-              <h3 style={{ margin: 0 }}>Texas Activity Map</h3>
-              <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>Red = hotspot · click a county to zoom into its abstracts</div>
+        <section className="rs-card rs-map-card">
+          <div className="rs-card-head">
+            <div className="rs-card-titles">
+              <h3>Texas activity</h3>
+              <span className="rs-card-sub">
+                {metric === "activity"
+                  ? "Shaded by records in the period · red outline = hotspot · click a county to zoom into its abstracts"
+                  : "Green is up, red is down vs the prior period · click a county to zoom into its abstracts"}
+              </span>
             </div>
-            <div className="seg-control">
-              <span className={`seg ${metric === "activity" ? "active" : ""}`} onClick={() => setMetric("activity")}>Volume</span>
-              <span className={`seg ${metric === "change" ? "active" : ""}`} onClick={() => setMetric("change")}>Change</span>
+            <Segmented<"activity" | "change"> accent ariaLabel="Map metric" value={metric} onChange={setMetric}
+              options={[{ value: "activity", label: "Volume" }, { value: "change", label: "Change" }]} />
+          </div>
+          <div className="rs-map-body">
+            <div className="rs-map">
+              <ResearchChoropleth
+                stats={countyStats} metric={metric} selected={filters.counties} qs={qs}
+                // Clicking a county filters the whole Research page to it (every
+                // tab and visualization follows `qs`); "All counties"/Esc clears
+                // the filter and restores the statewide dataset.
+                onSelect={selectCounty}
+                focusCounty={focusCounty}
+                onFocusChange={onFocusChange}
+                highlightCounty={hoverCounty}
+                abstractStats={focusAbstractRows.filter((r) => r.abstractId).map((r) => ({ abstractId: r.abstractId!, total: r.total, isHotspot: r.isHotspot }))}
+                onAbstractClick={(abstractId) => onDrill({
+                  states: ["TX"],
+                  // Use the county name exactly as the stats row spells it (that's
+                  // what the documents store), not the map feature's casing.
+                  counties: (() => {
+                    const row = countyRows.find((r) => r.county && focusCounty && r.county.toUpperCase() === focusCounty.toUpperCase());
+                    return row?.county ? [row.county] : focusCounty ? [focusCounty] : [];
+                  })(),
+                  abstracts: [abstractId],
+                })}
+              />
             </div>
+            <aside className="rs-map-side">
+              {/* Legend — describes the map's real scales: log-scaled volume,
+                  and change saturating at ±200% (new activity = strong green). */}
+              <div className="rs-legend-block">
+                <span className="rs-side-title">{metric === "activity" ? "Records in period" : "Change vs prior period"}</span>
+                <span className={`rs-grad ${metric === "activity" ? "vol" : "chg"}`} aria-hidden="true" />
+                <span className="rs-grad-labels">
+                  {metric === "activity"
+                    ? <><span>1</span><span>log scale</span><span>{num(activeCounties[0]?.total ?? 0)}</span></>
+                    : <><span>−200%</span><span>0</span><span>+200%</span></>}
+                </span>
+                <span className="rs-legend-keys">
+                  <span><i className="rs-key-hot" />Hotspot</span>
+                  <span><i className="rs-key-none" />No activity</span>
+                  {metric === "change" && <span><i className="rs-key-new" />New activity</span>}
+                </span>
+              </div>
+              {activeCounties.length > 0 && (
+                <div className="rs-side-list">
+                  <span className="rs-side-title">Active counties</span>
+                  {activeCounties.map((c) => (
+                    <button key={c.county} type="button" className={`rs-county-btn ${isSelected(c.county) ? "sel" : ""}`}
+                      onClick={() => { onFocusChange(c.county); selectCounty(c.county); }}
+                      onMouseEnter={() => setHoverCounty(c.county)} onMouseLeave={() => setHoverCounty(null)}
+                      onFocus={() => setHoverCounty(c.county)} onBlur={() => setHoverCounty(null)}>
+                      <i className={`rs-sw ${c.isHotspot ? "hot" : ""}`} />
+                      <span className="rs-county-name">{c.county}</span>
+                      {metric === "activity"
+                        ? <b>{num(c.total)}</b>
+                        : <b className={`rs-chg ${c.pctChange == null || c.pctChange > 0 ? "up" : c.pctChange < 0 ? "down" : "flat"}`}>{fmtPct(c.pctChange)}</b>}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {hasSelection && (
+                <button type="button" className="rs-outline-btn sm" onClick={() => onFocusChange(null)}>Clear selection</button>
+              )}
+            </aside>
           </div>
-          <div style={{ maxWidth: 820, margin: "0 auto" }}>
-            <ResearchChoropleth
-              stats={countyStats} metric={metric} selected={filters.counties} qs={qs}
-              // Clicking a county filters the whole Research page to it (every
-              // tab and visualization follows `qs`); "All counties"/Esc clears
-              // the filter and restores the statewide dataset.
-              onSelect={(county) => {
-                const row = countyRows.find((r) => r.county && r.county.toUpperCase() === county.toUpperCase());
-                onSetCounties([row?.county ?? county]);
-              }}
-              focusCounty={focusCounty}
-              onFocusChange={(c) => { setFocusCounty(c); if (c === null) onSetCounties([]); }}
-              abstractStats={focusAbstractRows.filter((r) => r.abstractId).map((r) => ({ abstractId: r.abstractId!, total: r.total, isHotspot: r.isHotspot }))}
-              onAbstractClick={(abstractId) => onDrill({
-                states: ["TX"],
-                // Use the county name exactly as the stats row spells it (that's
-                // what the documents store), not the map feature's casing.
-                counties: (() => {
-                  const row = countyRows.find((r) => r.county && focusCounty && r.county.toUpperCase() === focusCounty.toUpperCase());
-                  return row?.county ? [row.county] : focusCounty ? [focusCounty] : [];
-                })(),
-                abstracts: [abstractId],
-              })}
-            />
-          </div>
-        </div>
+        </section>
       )}
 
-      <div className="rec-card">
-        <div className="geo-head">
-          <h3 style={{ margin: 0 }}>Activity by {shownLevel === "state" ? "State" : shownLevel === "county" ? "County" : "Abstract"}</h3>
-          <div className="res-card-tools">
-            <div className="seg-control">
-              {(["state", "county", "abstract"] as const).map((l) => (
-                <span key={l} className={`seg ${level === l ? "active" : ""}`} onClick={() => setLevel(l)}>{l[0].toUpperCase() + l.slice(1)}</span>
-              ))}
-            </div>
-            <button className="rbtn" disabled={!data?.rows.length} onClick={() => data && downloadCsv(
+      <section className="rs-card">
+        <div className="rs-card-head">
+          <div className="rs-card-titles"><h3>Activity by {shownLevel === "state" ? "state" : shownLevel === "county" ? "county" : "abstract"}</h3></div>
+          <div className="rs-card-tools">
+            <Segmented<"state" | "county" | "abstract"> accent className="rs-seg-sm" ariaLabel="Geography level" value={level} onChange={setLevel}
+              options={[{ value: "state", label: "State" }, { value: "county", label: "County" }, { value: "abstract", label: "Abstract" }]} />
+            <button type="button" className="rs-outline-btn" disabled={!data?.rows.length} onClick={() => data && downloadCsv(
               `research-geography-${shownLevel}.csv`,
               ["Name", "State", "County", "Transactions", "Leases", "Permits", "Total", "Prior", "Change %", "Hotspot"],
               data.rows.map((r) => [geoName(r), r.state, r.county, r.transactions, r.leases, r.permits, r.total, r.previous, r.pctChange == null ? "" : Math.round(r.pctChange * 100), r.isHotspot ? "YES" : ""]),
             )}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+              <DownloadIcon />
               Export CSV
             </button>
           </div>
         </div>
-        {loading && !data ? <Spinner /> : !data || data.rows.length === 0 ? <p className="muted" style={{ padding: "0 20px 16px", margin: 0 }}>No activity in this period.</p> : (
+        {loading && !data ? <Spinner /> : !data || data.rows.length === 0 ? <p className="rs-empty">No activity in this period.</p> : (
           // While a different level loads, the current table stays put and
           // gently dims — the new rows swap in without a spinner flash.
-          <div style={{ opacity: loading ? 0.55 : 1, transition: "opacity 160ms ease", pointerEvents: loading ? "none" : undefined }}>
+          <div className="rs-table" style={{ opacity: loading ? 0.55 : 1, transition: "opacity 160ms ease", pointerEvents: loading ? "none" : undefined }}>
             <SortableTable
               columns={columns}
               rows={data.rows}
@@ -911,14 +997,18 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
                 abstracts: shownLevel === "abstract" && r.abstractId ? [r.abstractId] : [],
               })}
             />
-            <div className="rec-foot">
+            <div className="rs-card-foot">
               <span>{num(data.rows.length)} {shownLevel === "state" ? "states" : shownLevel === "county" ? "counties" : "abstracts"} · sorted by total, descending</span>
             </div>
           </div>
         )}
-      </div>
+      </section>
     </>
   );
+}
+
+function DownloadIcon() {
+  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>;
 }
 
 // ---------------------------------------------------------------------------
@@ -935,7 +1025,7 @@ interface PreviewItem {
 }
 type Decision = { key: string; action: "create" | "merge" | "skip"; mergeIntoBuyerId?: string };
 
-function RankingsTab({ qs, opts, compareOff, onDrill, dataset }: { qs: string; opts: FilterOpts | null; compareOff: boolean; onDrill: (patch: Partial<Filters>) => void; dataset: Dataset }) {
+function RankingsTab({ qs, opts, compareOff, onDrill, dataset, rangeLabel }: { qs: string; opts: FilterOpts | null; compareOff: boolean; onDrill: (patch: Partial<Filters>) => void; dataset: Dataset; rangeLabel: string }) {
   const [role, setRole] = useState<"buyers" | "sellers" | "operators">("buyers");
   const [data, setData] = useState<{ role: string; rows: EntityRow[] } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -953,14 +1043,13 @@ function RankingsTab({ qs, opts, compareOff, onDrill, dataset }: { qs: string; o
   // In the Leases dataset the grantee/grantor roles are lessees/lessors — the
   // ranking math is identical, only the vocabulary changes.
   const ROLE_LABEL = dataset === "LEASE"
-    ? ({ buyers: "Most Active Lessees", sellers: "Most Active Lessors", operators: "Most Active Operators" } as const)
-    : ({ buyers: "Most Active Buyers", sellers: "Most Active Sellers", operators: "Most Active Operators" } as const);
+    ? ({ buyers: "Most active lessees", sellers: "Most active lessors", operators: "Most active operators" } as const)
+    : ({ buyers: "Most active buyers", sellers: "Most active sellers", operators: "Most active operators" } as const);
   const ROLE_SEG = dataset === "LEASE"
     ? ({ buyers: "Lessees", sellers: "Lessors", operators: "Operators" } as const)
     : ({ buyers: "Buyers", sellers: "Sellers", operators: "Operators" } as const);
   const isBuyers = role === "buyers";
   const rows = data?.rows ?? [];
-  const allSelected = rows.length > 0 && selected.size === rows.length;
   const toggle = (k: string) => setSelected((p) => { const n = new Set(p); n.has(k) ? n.delete(k) : n.add(k); return n; });
   const toggleAll = () => setSelected((p) => (p.size === rows.length ? new Set() : new Set(rows.map((r) => r.key))));
 
@@ -986,30 +1075,33 @@ function RankingsTab({ qs, opts, compareOff, onDrill, dataset }: { qs: string; o
     }
   }
 
+  // Rank = position in the server's ranking (busiest first).
+  const rankOf = useMemo(() => new Map(rows.map((r, i) => [r.key, i + 1])), [rows]);
+  const maxRowCount = Math.max(1, ...rows.map((r) => r.count));
+  const chgTone = (abs: number) => (abs > 0 ? "up" : abs < 0 ? "down" : "flat");
+
   const columns: Column<EntityRow>[] = [
-    ...(isBuyers ? ([{
-      key: "sel", header: "", value: () => "", width: "1%",
-      render: (r: EntityRow) => <input type="checkbox" checked={selected.has(r.key)} onClick={(e) => e.stopPropagation()} onChange={() => toggle(r.key)} />,
-    }] as Column<EntityRow>[]) : []),
-    { key: "name", header: "Name", value: (r) => r.name, render: (r) => <>{r.name} {r.newEntrant && <span className="badge" style={{ background: "rgba(34,197,94,0.15)", color: "#22c55e" }}>NEW</span>}</> },
-    { key: "count", header: role === "operators" ? "Permits" : "Records", value: (r) => r.count, align: "right" },
+    { key: "rank", header: "#", value: (r) => rankOf.get(r.key) ?? null, width: "1%", render: (r) => <span className="rs-rank">{rankOf.get(r.key)}</span> },
+    { key: "name", header: "Name", value: (r) => r.name, minWidth: 220,
+      render: (r) => <span className="rs-rk-name"><span className="rs-strong">{r.name}</span>{r.newEntrant && <span className="rs-mini-tag new" title="No activity in the prior 12 months">New</span>}</span> },
+    { key: "count", header: role === "operators" ? "Permits" : "Records", value: (r) => r.count, align: "right",
+      render: (r) => <span className="rs-count-bar"><span className="rs-bar"><i style={{ width: `${(r.count / maxRowCount) * 100}%` }} /></span><b>{num(r.count)}</b></span> },
     // Prior/Change columns are comparative — hidden when comparison is off.
     ...(compareOff ? [] : ([
-      { key: "previous", header: "Prior", value: (r: EntityRow) => r.previous, align: "right" },
+      { key: "previous", header: "Prior", value: (r: EntityRow) => r.previous, align: "right", render: (r: EntityRow) => <span className={r.previous ? "rs-mid" : "rs-zero"}>{num(r.previous)}</span> },
       {
         key: "pctChange", header: "Change", value: (r: EntityRow) => r.pctChange ?? Number.MAX_SAFE_INTEGER, align: "right",
-        render: (r: EntityRow) => <span style={{ color: r.absoluteChange > 0 ? "#22c55e" : r.absoluteChange < 0 ? "#ef4444" : "var(--text-dim)" }}>{fmtPct(r.pctChange)}</span>,
+        render: (r: EntityRow) => <span className={`rs-chg ${chgTone(r.absoluteChange)}`}>{fmtPct(r.pctChange)}</span>,
       },
     ] as Column<EntityRow>[])),
     ...(role === "operators"
       ? ([{ key: "horizontal", header: "Horizontal", value: (r) => r.horizontal, align: "right" }] as Column<EntityRow>[])
       : []),
-    { key: "counties", header: "Counties", value: (r) => r.counties.length, render: (r) => <ChipList items={r.counties} /> },
+    { key: "counties", header: "Counties", value: (r) => r.counties.length, render: (r) => <span className="chips-oneline"><ChipList items={r.counties} /></span> },
   ];
 
   const top = rows.slice(0, 10);
 
-  const barColor = CHART_COLORS[role === "buyers" ? 0 : role === "sellers" ? 4 : 3];
   const drillKey = (k: string) => onDrill(role === "buyers" ? { buyers: [k] } : role === "sellers" ? { sellers: [k] } : { operators: [k] });
   // Nice axis: a rounded maximum (with headroom) + evenly-spaced ticks, so the
   // horizontal bars read against a 0…max scale exactly like the reference.
@@ -1019,81 +1111,91 @@ function RankingsTab({ qs, opts, compareOff, onDrill, dataset }: { qs: string; o
   let niceMax = Math.ceil(maxCount / step) * step; if (niceMax <= maxCount) niceMax += step;
   const ticks: number[] = []; for (let v = 0; v <= niceMax + step * 0.001; v += step) ticks.push(Math.round(v));
 
+  const roleNoun = ROLE_SEG[role].toLowerCase();
+
   return (
     <>
-      <div className="rk-card">
-        <div className="rk-head">
-          <h3>{ROLE_LABEL[role]}</h3>
-          <div className="res-card-tools">
-            <div className="seg-control">
-              {(["buyers", "sellers", "operators"] as const).map((r) => (
-                <span key={r} className={`seg ${role === r ? "active" : ""}`} onClick={() => setRole(r)}>{ROLE_SEG[r]}</span>
-              ))}
+      <section className="rs-card rs-rank-card">
+        <div className="rs-card-head rs-rank-head">
+          {/* Selection swaps the title for the Add to Buyers actions —
+              turn active buyers into CRM Buyer profiles. */}
+          {isBuyers && selected.size > 0 ? (
+            <div className="rs-sel-bar">
+              <span className="rs-strong">{selected.size} selected</span>
+              <button type="button" className="primary rs-btn-sm" disabled={adding} onClick={addToBuyers}>
+                {adding ? "Preparing…" : `+ Add to Buyers (${selected.size})`}
+              </button>
+              <button type="button" className="rs-text-btn muted-btn" onClick={() => setSelected(new Set())}>Clear</button>
             </div>
-            <button className="rbtn" disabled={!rows.length} onClick={() => data && downloadCsv(
+          ) : (
+            <div className="rs-card-titles">
+              <h3>{ROLE_LABEL[role]}</h3>
+              {data && <span className="rs-card-sub">{rangeLabel ? `${rangeLabel} · ` : ""}{num(rows.length)} {roleNoun} with recorded activity</span>}
+            </div>
+          )}
+          <div className="rs-card-tools">
+            <Segmented<"buyers" | "sellers" | "operators"> accent className="rs-seg-sm" ariaLabel="Ranking role" value={role} onChange={setRole}
+              options={(["buyers", "sellers", "operators"] as const).map((r) => ({ value: r, label: ROLE_SEG[r] }))} />
+            <button type="button" className="rs-outline-btn" disabled={!rows.length} onClick={() => data && downloadCsv(
               `research-${role}.csv`,
               ["Name", "Count", "Prior", "Change %", "Counties", "New Entrant"],
               data.rows.map((r) => [r.name, r.count, r.previous, r.pctChange == null ? "" : Math.round(r.pctChange * 100), r.counties.join("; "), r.newEntrant ? "YES" : ""]),
             )}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+              <DownloadIcon />
               Export CSV
             </button>
           </div>
         </div>
-        {loading && !data ? <Spinner /> : top.length === 0 ? <p className="muted">No activity in this period.</p> : (
-          <div className="rk-bars">
-            {top.map((r) => (
-              <div key={r.key} className="rk-bar-row" onClick={() => drillKey(r.key)} title={`${r.name} · ${r.count}`}>
-                <div className="rk-bar-name">{r.name}</div>
-                <div className="rk-bar-track">
-                  <div className="rk-bar-fill" style={{ width: `${(r.count / niceMax) * 100}%`, background: barColor }} />
-                  <span className="rk-bar-val">{r.count}</span>
-                </div>
-              </div>
-            ))}
-            <div className="rk-bar-row rk-axis-row">
-              <div />
-              <div className="rk-axis">{ticks.map((t) => <span key={t}>{t}</span>)}</div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="panel rk-table-card">
-        {/* Selection + bulk actions — turn active buyers into CRM Buyer profiles. */}
-        {isBuyers && rows.length > 0 && (
-          <div className="row" style={{ gap: 10, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
-            <label style={{ fontSize: 13, textTransform: "none", display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <input type="checkbox" checked={allSelected} onChange={toggleAll} /> Select all
-            </label>
-            <span className="muted" style={{ fontSize: 13 }}>{selected.size} selected</span>
-            <button className="small primary" disabled={selected.size === 0 || adding} onClick={addToBuyers}>
-              {adding ? "Preparing…" : `Add to Buyers${selected.size ? ` (${selected.size})` : ""}`}
-            </button>
-            {selected.size > 0 && <button className="small" onClick={() => setSelected(new Set())}>Deselect all</button>}
-          </div>
-        )}
-        {err && <Banner kind="error">{err}</Banner>}
+        {err && <div className="rs-card-banner"><Banner kind="error">{err}</Banner></div>}
         {result && (
-          <Banner kind="info">
-            Added to Buyers — <strong>{result.created}</strong> created, <strong>{result.merged}</strong> enriched
-            {result.skipped > 0 && <>, {result.skipped} skipped</>}. New profiles are tagged “Research Imported”.
-          </Banner>
+          <div className="rs-card-banner">
+            <Banner kind="info">
+              Added to Buyers — <strong>{result.created}</strong> created, <strong>{result.merged}</strong> enriched
+              {result.skipped > 0 && <>, {result.skipped} skipped</>}. New profiles are tagged “Research Imported”.
+            </Banner>
+          </div>
         )}
-        {loading && !data ? <Spinner /> : rows.length > 0 ? (
+        {loading && !data ? <Spinner /> : top.length === 0 ? <p className="rs-empty">No activity in this period.</p> : (
           <>
-            <SortableTable
-              columns={columns}
-              rows={data!.rows}
-              rowKey={(r) => r.key}
-              defaultSort={{ key: "count", dir: "desc" }}
-              onRowClick={(r) => onDrill(role === "buyers" ? { buyers: [r.key] } : role === "sellers" ? { sellers: [r.key] } : { operators: [r.key] })}
-            />
-            <div className="rk-foot">{rows.length} {role} · sorted by {role === "operators" ? "permits" : "records"}, descending</div>
+            <div className="rk-bars rs-rank-chart">
+              <span className="rs-chart-cap">Top {top.length} by {role === "operators" ? "permits" : "records"}</span>
+              {top.map((r) => (
+                <div key={r.key} className="rk-bar-row" onClick={() => drillKey(r.key)} title={`${r.name} · ${r.count}`}>
+                  <div className="rk-bar-name">{r.name}</div>
+                  <div className="rk-bar-track">
+                    <div className={`rk-bar-fill ${r.newEntrant ? "new" : ""}`} style={{ width: `${(r.count / niceMax) * 100}%` }} />
+                  </div>
+                  <div className="rs-rank-end">
+                    <b>{num(r.count)}</b>
+                    {!compareOff && <span className={`rs-chg ${chgTone(r.absoluteChange)}`}>{fmtPct(r.pctChange)}</span>}
+                  </div>
+                </div>
+              ))}
+              <div className="rk-bar-row rk-axis-row">
+                <div />
+                <div className="rk-axis">{ticks.map((t) => <span key={t}>{t}</span>)}</div>
+                <div />
+              </div>
+            </div>
+            <div className="rs-table">
+              <SortableTable
+                columns={columns}
+                rows={rows}
+                rowKey={(r) => r.key}
+                defaultSort={{ key: "count", dir: "desc" }}
+                selection={isBuyers ? { selected, onToggle: toggle, onToggleAll: () => toggleAll() } : undefined}
+                onRowClick={(r) => onDrill(role === "buyers" ? { buyers: [r.key] } : role === "sellers" ? { sellers: [r.key] } : { operators: [r.key] })}
+              />
+            </div>
           </>
-        ) : null}
-      </div>
-      {opts && <p className="muted" style={{ fontSize: 12 }}>Names are grouped after normalizing punctuation and legal suffixes (LLC/LP/Inc), so filings under slightly different spellings roll up together.</p>}
+        )}
+        {rows.length > 0 && (
+          <div className="rs-card-foot">
+            <span>{rows.length} {role} · sorted by {role === "operators" ? "permits" : "records"}, descending{isBuyers ? " · select rows to add them to Buyers" : ""}</span>
+          </div>
+        )}
+      </section>
+      {opts && <p className="rs-footnote">Names are grouped after normalizing punctuation and legal suffixes (LLC/LP/Inc), so filings under slightly different spellings roll up together.</p>}
 
       {review && (
         <AddToBuyersReview
@@ -1127,27 +1229,30 @@ function AddToBuyersReview({ auto, possibles, onCancel, onConfirm }: {
   }
 
   return (
-    <Modal title="Review possible duplicate buyers" onClose={onCancel} wide>
-      <p className="muted" style={{ marginTop: 0 }}>
-        {auto.length > 0 && <>{auto.length} buyer(s) will be added automatically (new or exact matches). </>}
-        The following look similar to existing buyers — choose how to handle each.
-      </p>
-      {possibles.map((p) => (
-        <div key={p.key} className="panel" style={{ background: "var(--panel-2)" }}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 10 }}>
-            <div style={{ minWidth: 240, flex: 1 }}>
-              <strong>{p.proposal.companyName}</strong>
-              {p.confidence != null && <span className="chip-mini" style={{ marginLeft: 8 }}>{Math.round(p.confidence * 100)}% match</span>}
-              <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+    <Modal title="Review possible duplicate buyers" onClose={onCancel} wide
+      subtitle={<>{auto.length > 0 && <>{auto.length} buyer(s) will be added automatically (new or exact matches). </>}The following look similar to existing buyers — choose how to handle each.</>}
+      footer={<>
+        <button type="button" onClick={onCancel} disabled={busy}>Cancel</button>
+        <button type="button" className="primary" onClick={confirm} disabled={busy}>{busy ? "Applying…" : "Confirm & add"}</button>
+      </>}>
+      <div className="rs-dup-list">
+        {possibles.map((p) => (
+          <div key={p.key} className="rs-dup">
+            <div className="rs-dup-info">
+              <div className="rs-dup-name">
+                <span className="rs-strong">{p.proposal.companyName}</span>
+                {p.confidence != null && <span className="rs-mini-tag">{Math.round(p.confidence * 100)}% match</span>}
+              </div>
+              <div className="rs-dup-meta">
                 Imported: {p.proposal.transactionCount} txns · {p.proposal.counties.join(", ") || "—"} · {p.proposal.states.join(", ") || "—"}
               </div>
               {p.existing && (
-                <div className="muted" style={{ fontSize: 12, marginTop: 2 }}>
+                <div className="rs-dup-meta">
                   Existing “{p.existing.companyName}”: {p.existing.counties.join(", ") || "no counties"} · {p.existing.states.join(", ") || "no states"}
                 </div>
               )}
               {p.mergePreview && (p.mergePreview.addCounties.length + p.mergePreview.addStates.length + p.mergePreview.addAliases.length > 0) && (
-                <div style={{ fontSize: 12, marginTop: 4, color: "#22c55e" }}>
+                <div className="rs-dup-merge">
                   Merge would add: {[
                     p.mergePreview.addCounties.length ? `${p.mergePreview.addCounties.length} counties` : "",
                     p.mergePreview.addStates.length ? `${p.mergePreview.addStates.length} states` : "",
@@ -1156,19 +1261,11 @@ function AddToBuyersReview({ auto, possibles, onCancel, onConfirm }: {
                 </div>
               )}
             </div>
-            <div className="chip-row">
-              {(["merge", "create", "skip"] as const).map((c) => (
-                <span key={c} className={`chip ${choices[p.key] === c ? "active" : ""}`} onClick={() => setChoices((s) => ({ ...s, [p.key]: c }))}>
-                  {c === "merge" ? "Merge with existing" : c === "create" ? "Create new" : "Skip"}
-                </span>
-              ))}
-            </div>
+            <Segmented<"merge" | "create" | "skip"> ariaLabel={`How to add ${p.proposal.companyName}`} value={choices[p.key]}
+              onChange={(c) => setChoices((s) => ({ ...s, [p.key]: c }))}
+              options={[{ value: "merge", label: "Merge with existing" }, { value: "create", label: "Create new" }, { value: "skip", label: "Skip" }]} />
           </div>
-        </div>
-      ))}
-      <div className="row" style={{ justifyContent: "flex-end", gap: 8, marginTop: 8 }}>
-        <button className="small" onClick={onCancel} disabled={busy}>Cancel</button>
-        <button className="small primary" onClick={confirm} disabled={busy}>{busy ? "Applying…" : "Confirm & add"}</button>
+        ))}
       </div>
     </Modal>
   );
@@ -1258,69 +1355,81 @@ function RelationshipsTab({ qs, onDrill, dataset }: { qs: string; onDrill: (patc
 
   const VIEWS: [RelView, string, number][] = [
     ["relationships", "Relationships", data.totals.relationships],
-    ["cobuyers", "Co-Buyers", data.totals.partnerships],
-    ["chains", "Acquisition Chains", data.totals.chains],
+    ["cobuyers", "Co-buyers", data.totals.partnerships],
+    ["chains", "Acquisition chains", data.totals.chains],
     ["entities", "Entities", data.totals.entities],
   ];
 
+  // In the Leases dataset the graph runs over lease instruments — the counts
+  // are lease documents, never transactions, and say so.
+  const totalCells: StatCell[] = [
+    { label: dataset === "LEASE" ? "Lease documents" : "Transactions", value: num(data.totals.transactions) },
+    { label: "Relationships", value: num(data.totals.relationships) },
+    { label: "Entities", value: num(data.totals.entities) },
+    { label: dataset === "LEASE" ? "Co-lessee groups" : "Co-buyer groups", value: num(data.totals.partnerships) },
+    { label: "Chains", value: num(data.totals.chains) },
+  ];
+
+  // Group sides arrive as "A + B" — list one party per line; any part of the
+  // name opens the group's dossier.
+  const partyLines = (name: string, onOpen: () => void) => (
+    <span className="rs-parties">
+      {name.split(" + ").map((p, i) => (
+        <span key={i} className="rel-ent relt-name" onClick={(e) => { e.stopPropagation(); onOpen(); }}>{p}</span>
+      ))}
+    </span>
+  );
+
   return (
     <>
-      <div className="metrics-row" style={{ gridTemplateColumns: "repeat(5,1fr)" }}>
-        {/* In the Leases dataset the graph runs over lease instruments — the
-            counts are lease documents, never transactions, and say so. */}
-        <MiniKpi label={dataset === "LEASE" ? "Lease Documents" : "Transactions"} value={data.totals.transactions} />
-        <MiniKpi label="Relationships" value={data.totals.relationships} />
-        <MiniKpi label="Entities" value={data.totals.entities} />
-        <MiniKpi label={dataset === "LEASE" ? "Co-Lessee Groups" : "Co-Buyer Groups"} value={data.totals.partnerships} />
-        <MiniKpi label="Chains" value={data.totals.chains} />
-      </div>
+      <StatStrip className="rs-kpis rs-kpis-sm" min={160} cells={totalCells} />
 
       {/* Headline insights — the fastest read on who is driving this market. */}
       {(topRel || topHold || topMid || deepChain) != null && (
-        <div className="rel-insights">
+        <div className="rel-insights rs-highlights">
           {topRel && (
-            <button className="rel-insight" onClick={() => setTx({ title: `${topRel.grantor} → ${topRel.grantee}`, selector: { grantorNorm: topRel.grantorNorm, granteeNorm: topRel.granteeNorm } })}>
-              <div className="rel-insight-l"><Heart size={13} className="ri-ic-red" aria-hidden="true" /> Most Active Relationship</div>
-              <div className="rel-insight-v">{topRel.grantor} → {topRel.grantee}</div>
-              <div className="rel-insight-m"><b>{topRel.count}</b> transaction{topRel.count === 1 ? "" : "s"}</div>
+            <button type="button" className="rs-hl" onClick={() => setTx({ title: `${topRel.grantor} → ${topRel.grantee}`, selector: { grantorNorm: topRel.grantorNorm, granteeNorm: topRel.granteeNorm } })}>
+              <span className="rs-hl-label"><i style={{ background: "var(--accent)" }} />Most active relationship</span>
+              <span className="rs-hl-title">{topRel.grantor} → {topRel.grantee}</span>
+              <span className="rs-hl-sub"><span>{topRel.count} transaction{topRel.count === 1 ? "" : "s"}</span><ArrowRight size={13} aria-hidden="true" /></span>
             </button>
           )}
           {topHold && (
-            <button className="rel-insight" onClick={() => setEntity(topHold.norm)}>
-              <div className="rel-insight-l"><Lock size={12} className="ri-ic-green" aria-hidden="true" /> Largest Terminal Holder</div>
-              <div className="rel-insight-v">{topHold.name}</div>
-              <div className="rel-insight-m"><b>{topHold.acquisitions}</b> acquisitions · nothing resold</div>
+            <button type="button" className="rs-hl" onClick={() => setEntity(topHold.norm)}>
+              <span className="rs-hl-label"><i style={{ background: "var(--success)" }} />Largest terminal holder</span>
+              <span className="rs-hl-title">{topHold.name}</span>
+              <span className="rs-hl-sub"><span>{topHold.acquisitions} acquisitions · nothing resold</span><ArrowRight size={13} aria-hidden="true" /></span>
             </button>
           )}
           {topMid && (
-            <button className="rel-insight" onClick={() => setEntity(topMid.norm)}>
-              <div className="rel-insight-l"><TrendingUp size={12} className="ri-ic-amber" aria-hidden="true" /> Top Intermediary</div>
-              <div className="rel-insight-v">{topMid.name}</div>
-              <div className="rel-insight-m">{labelOf(topMid.klass)} · bought <b>{topMid.acquisitions}</b> / sold <b>{topMid.dispositions}</b></div>
+            <button type="button" className="rs-hl" onClick={() => setEntity(topMid.norm)}>
+              <span className="rs-hl-label"><i style={{ background: "var(--accent-ink)" }} />Top intermediary</span>
+              <span className="rs-hl-title">{topMid.name}</span>
+              <span className="rs-hl-sub"><span>{labelOf(topMid.klass)} · bought {topMid.acquisitions}, sold {topMid.dispositions}</span><ArrowRight size={13} aria-hidden="true" /></span>
             </button>
           )}
           {deepChain && (
-            <button className="rel-insight" onClick={() => setView("chains")}>
-              <div className="rel-insight-l"><Share2 size={12} className="ri-ic-violet" aria-hidden="true" /> Deepest Acquisition Chain</div>
-              <div className="rel-insight-v">{deepChain.path}</div>
-              <div className="rel-insight-m"><b>{deepChain.length}</b> hops · <b>{deepChain.totalCount}</b> transactions</div>
+            <button type="button" className="rs-hl" onClick={() => setView("chains")}>
+              <span className="rs-hl-label"><i style={{ background: CHART_COLORS[3] }} />Deepest acquisition chain</span>
+              <span className="rs-hl-title">{deepChain.path}</span>
+              <span className="rs-hl-sub"><span>{deepChain.length} hops · {deepChain.totalCount} transactions</span><ArrowRight size={13} aria-hidden="true" /></span>
             </button>
           )}
         </div>
       )}
 
-      <div className="res-subtabs">
-        <div className="tab-row" style={{ margin: 0 }}>
+      <div className="res-subtabs rs-subtabs">
+        <div className="tab-row" role="tablist">
           {VIEWS.map(([v, l, n]) => (
-            <button key={v} className={`tab ${view === v ? "active" : ""}`} onClick={() => setView(v)}>
-              {l} <span className={`relv-count ${view === v && n > 0 ? "hot" : ""}`}>{n}</span>
+            <button key={v} type="button" role="tab" aria-selected={view === v} className={`tab ${view === v ? "active" : ""}`} onClick={() => setView(v)}>
+              {l} <span className="relv-count">{num(n)}</span>
             </button>
           ))}
         </div>
-        <span className="relv-search">
-          <Search size={13} aria-hidden="true" />
+        <span className="relv-search rs-search">
+          <Search size={14} aria-hidden="true" />
           <input
-            placeholder="Search entities…"
+            placeholder="Search entities"
             aria-label="Search entities"
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -1329,145 +1438,183 @@ function RelationshipsTab({ qs, onDrill, dataset }: { qs: string; onDrill: (patc
       </div>
 
       {view === "relationships" && (
-        <div className="panel">
-          <div className="panel-title">
-            <h3 style={{ margin: 0 }}>Grantor → Grantee relationships</h3>
-            <div className="res-card-tools">
-              <label className="rel-repeat">
-                <input type="checkbox" checked={repeatOnly} onChange={(e) => setRepeatOnly(e.target.checked)} /> Repeat relationships only (2+)
-              </label>
-              <button className="rbtn" onClick={() => downloadCsv("research-relationships.csv",
+        <section className="rs-card">
+          <div className="rs-card-head">
+            <div className="rs-card-titles">
+              <h3>Grantor → grantee relationships</h3>
+              <span className="rs-card-sub">Repeated transfers between the same two parties roll up into one relationship with a transaction count. Click a row for the underlying deeds, or an entity name for its full dossier.</span>
+            </div>
+            <div className="rs-card-tools">
+              <span className="rs-switch">
+                <Toggle checked={repeatOnly} onChange={setRepeatOnly} ariaLabel="Repeat relationships only (2+)" />
+                <span onClick={() => setRepeatOnly((v) => !v)}>Repeat only (2+)</span>
+              </span>
+              <button type="button" className="rs-outline-btn" onClick={() => downloadCsv("research-relationships.csv",
                 ["Grantor", "Grantee", "Transactions", "Counties", "First", "Last"],
                 rels.map((r) => [r.grantor, r.grantee, r.count, r.counties.join("; "), r.firstDate, r.lastDate]))}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+                <DownloadIcon />
                 Export CSV
               </button>
             </div>
           </div>
-          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Repeated transfers between the same two parties roll up into one relationship with a transaction count. Click a row for the underlying deeds, or an entity name for its full dossier.</p>
-          {rels.length === 0 ? <p className="muted">No relationships match{q ? ` “${q}”` : ""}{repeatOnly ? " with 2+ transactions" : ""}.</p> : (
-            <SortableTable
-              columns={[
-                { key: "grantor", header: "Grantor (Seller)", value: (r: RelRow) => r.grantor, render: (r: RelRow) => <span className="rel-ent relt-name" onClick={(e) => { e.stopPropagation(); setEntity(r.grantorNorm); }}>{r.grantor}</span> },
-                { key: "arrow", header: "", value: () => "", width: "1%", render: () => <span className="relt-arrow" aria-hidden="true"><ArrowRight size={11} /></span> },
-                { key: "grantee", header: "Grantee (Buyer)", value: (r: RelRow) => r.grantee, render: (r: RelRow) => <span className="rel-ent relt-name" onClick={(e) => { e.stopPropagation(); setEntity(r.granteeNorm); }}>{r.grantee}</span> },
-                {
-                  key: "count", header: "Transactions", value: (r: RelRow) => r.count,
-                  // Count + a mini bar scaled to the strongest visible relationship.
-                  render: (r: RelRow) => (
-                    <span className="relt-count">
-                      <b>{r.count}</b>
-                      <span className="relt-bar" aria-hidden="true"><span style={{ width: `${Math.max(10, (r.count / maxRelCount) * 100)}%` }} /></span>
-                    </span>
-                  ),
-                },
-                // Counties read as plain text — pills added visual noise at a
-                // glance-density this table doesn't need.
-                { key: "counties", header: "Counties", value: (r: RelRow) => r.counties.length, render: (r: RelRow) => r.counties.length ? <span className="relt-counties" title={r.counties.join(", ")}>{r.counties.join(", ")}</span> : "—" },
-                { key: "abstracts", header: "Abstracts", value: (r: RelRow) => r.abstracts.length, align: "right" as const, render: (r: RelRow) => r.abstracts.length ? <span title={r.abstracts.join(", ")}><b>{r.abstracts.length}</b></span> : "—" },
-                { key: "lastDate", header: "Latest", value: (r: RelRow) => r.lastDate ?? "", align: "right" as const, render: (r: RelRow) => <span className="muted" style={{ whiteSpace: "nowrap" }}>{fmtDate(r.lastDate)}</span>, type: "date" as const },
-              ]}
-              rows={rels}
-              rowKey={(r) => `${r.grantorNorm}→${r.granteeNorm}`}
-              defaultSort={{ key: "count", dir: "desc" }}
-              onRowClick={(r) => setTx({ title: `${r.grantor} → ${r.grantee}: ${r.count} transaction${r.count === 1 ? "" : "s"}`, selector: { grantorNorm: r.grantorNorm, granteeNorm: r.granteeNorm } })}
-            />
+          {rels.length === 0 ? <p className="rs-empty">No relationships match{q ? ` “${q}”` : ""}{repeatOnly ? " with 2+ transactions" : ""}.</p> : (
+            <div className="rs-table">
+              <SortableTable
+                columns={[
+                  { key: "grantor", header: "Grantor (seller)", value: (r: RelRow) => r.grantor, minWidth: 200, render: (r: RelRow) => partyLines(r.grantor, () => setEntity(r.grantorNorm)) },
+                  { key: "arrow", header: "", value: () => "", width: "1%", render: () => <span className="relt-arrow" aria-hidden="true"><ArrowRight size={13} /></span> },
+                  { key: "grantee", header: "Grantee (buyer)", value: (r: RelRow) => r.grantee, minWidth: 220, render: (r: RelRow) => partyLines(r.grantee, () => setEntity(r.granteeNorm)) },
+                  {
+                    key: "count", header: "Transactions", value: (r: RelRow) => r.count,
+                    // Count + a mini bar scaled to the strongest visible relationship.
+                    render: (r: RelRow) => (
+                      <span className="rs-count-bar lead">
+                        <b>{r.count}</b>
+                        <span className="rs-bar" aria-hidden="true"><i style={{ width: `${Math.max(10, (r.count / maxRelCount) * 100)}%` }} /></span>
+                      </span>
+                    ),
+                  },
+                  // Counties read as plain text — pills added visual noise at a
+                  // glance-density this table doesn't need.
+                  { key: "counties", header: "Counties", value: (r: RelRow) => r.counties.length, render: (r: RelRow) => r.counties.length ? <span className="relt-counties" title={r.counties.join(", ")}>{r.counties.join(", ")}</span> : <span className="rs-zero">—</span> },
+                  { key: "abstracts", header: "Abstracts", value: (r: RelRow) => r.abstracts.length, align: "right" as const, render: (r: RelRow) => r.abstracts.length ? <span title={r.abstracts.join(", ")}><b>{r.abstracts.length}</b></span> : <span className="rs-zero">—</span> },
+                  { key: "lastDate", header: "Latest", value: (r: RelRow) => r.lastDate ?? "", align: "right" as const, render: (r: RelRow) => <span className="rs-mid rec-nowrap">{fmtDate(r.lastDate)}</span>, type: "date" as const },
+                ]}
+                rows={rels}
+                rowKey={(r) => `${r.grantorNorm}→${r.granteeNorm}`}
+                defaultSort={{ key: "count", dir: "desc" }}
+                onRowClick={(r) => setTx({ title: `${r.grantor} → ${r.grantee}: ${r.count} transaction${r.count === 1 ? "" : "s"}`, selector: { grantorNorm: r.grantorNorm, granteeNorm: r.granteeNorm } })}
+              />
+            </div>
           )}
-        </div>
+          <div className="rs-card-foot">
+            <span>{num(rels.length)} of {num(data.relationships.length)} relationships shown{repeatOnly ? " · repeat only" : ""}</span>
+          </div>
+        </section>
       )}
 
       {view === "cobuyers" && (
-        <div className="panel">
-          <h3 style={{ marginTop: 0 }}>Co-Buyer Partnerships</h3>
-          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Entities that acquired mineral interests together as co-grantees on the same recorded transaction, ranked by shared acquisitions. Click to view the shared purchases.</p>
-          {coBuyers.length === 0 ? <p className="muted">No co-buying partnerships {q ? `match “${q}”` : "detected — this needs multiple grantees acquiring on one recorded transaction"}.</p> : (
-            <div className="rel-list">
+        <section className="rs-card">
+          <div className="rs-card-head">
+            <div className="rs-card-titles">
+              <h3>Co-buyer partnerships</h3>
+              <span className="rs-card-sub">Entities that acquired mineral interests together as co-grantees on the same recorded transaction, ranked by shared acquisitions. Click to view the shared purchases.</span>
+            </div>
+          </div>
+          {coBuyers.length === 0 ? <p className="rs-empty">No co-buying partnerships {q ? `match “${q}”` : "detected — this needs multiple grantees acquiring on one recorded transaction"}.</p> : (
+            <div className="rs-cob-list">
               {coBuyers.map((p, i) => (
-                <button key={i} className="rel-card" onClick={() => setTx({ title: `Co-buyers: ${p.members.map((m) => m.name).join(", ")}`, selector: { members: p.members.map((m) => m.norm) } })}>
-                  <div className="row" style={{ gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-                    {p.members.map((m, j) => (
-                      <span key={m.norm} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        <span className="badge resp-pending">{m.name}</span>
-                        {j < p.members.length - 1 && <span className="muted">＋</span>}
-                      </span>
-                    ))}
-                  </div>
-                  <div className="row" style={{ gap: 10, marginTop: 6, flexWrap: "wrap" }}>
-                    <span className="rel-count">{p.count} shared acquisition{p.count === 1 ? "" : "s"}</span>
-                    {p.firstDate && <span className="muted" style={{ fontSize: 12 }}>First {fmtDate(p.firstDate)}{p.lastDate && p.lastDate !== p.firstDate ? ` · Latest ${fmtDate(p.lastDate)}` : ""}</span>}
-                    {p.counties.length > 0 && <span className="muted" style={{ fontSize: 12 }}>{p.counties.join(", ")}</span>}
-                  </div>
+                <button key={i} type="button" className="rs-cob" onClick={() => setTx({ title: `Co-buyers: ${p.members.map((m) => m.name).join(", ")}`, selector: { members: p.members.map((m) => m.norm) } })}>
+                  <span className="rs-rank">#{i + 1}</span>
+                  <span className="rs-cob-body">
+                    <span className="rs-cob-members">
+                      {p.members.map((m, j) => (
+                        <span key={m.norm} className="rs-member"><i style={{ background: MEMBER_COLORS[j % MEMBER_COLORS.length] }} />{m.name}</span>
+                      ))}
+                    </span>
+                    <span className="rs-cob-meta">
+                      {p.firstDate && <>First {fmtDate(p.firstDate)}{p.lastDate && p.lastDate !== p.firstDate ? ` · Latest ${fmtDate(p.lastDate)}` : ""}</>}
+                      {p.firstDate && p.counties.length > 0 && " · "}
+                      {p.counties.length > 0 && p.counties.join(", ")}
+                    </span>
+                  </span>
+                  <span className="rs-cob-count">
+                    <b>{num(p.count)}</b>
+                    <span>shared acquisition{p.count === 1 ? "" : "s"}</span>
+                  </span>
                 </button>
               ))}
             </div>
           )}
-        </div>
+          <div className="rs-card-foot"><span>Showing {num(coBuyers.length)} of {num(data.coBuyers.length)} groups</span></div>
+        </section>
       )}
 
       {view === "chains" && (
-        <div className="panel">
-          <h3 style={{ marginTop: 0 }}>Acquisition Chains</h3>
-          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>How interests move through multiple entities. Each row is a complete path; click to expand hops, counties, and supporting transactions.</p>
-          {chains.length === 0 ? <p className="muted">No multi-hop acquisition paths {q ? `match “${q}”` : "detected in this period"}.</p> : (
-            <ChainSection
-              chains={chainRowsToEntries(chains, "")}
-              classLabels={data.classLabels}
-              focusNorm=""
-              renderActions={(_entry, i) => {
-                const c = chains[i];
-                return (
-                  <>
-                    <button className="small" onClick={() => setTx({ title: `Chain: ${c.path}`, selector: { path: c.nodes.map((n) => n.norm) } })}>View supporting transactions →</button>
-                    {c.terminus && <button className="small" onClick={() => onDrill({ counties: c.counties })}>Filter records to these counties →</button>}
-                    {c.firstDate && c.lastDate && <span className="muted" style={{ fontSize: 12 }}>{fmtDate(c.firstDate)} – {fmtDate(c.lastDate)}</span>}
-                  </>
-                );
-              }}
-            />
+        <section className="rs-card">
+          <div className="rs-card-head">
+            <div className="rs-card-titles">
+              <h3>Acquisition chains</h3>
+              <span className="rs-card-sub">How interests move through multiple entities. Each row is a complete path; click to expand hops, counties, and supporting transactions.</span>
+            </div>
+          </div>
+          {chains.length === 0 ? <p className="rs-empty">No multi-hop acquisition paths {q ? `match “${q}”` : "detected in this period"}.</p> : (
+            <div className="rs-chains">
+              <ChainSection
+                chains={chainRowsToEntries(chains, "")}
+                classLabels={data.classLabels}
+                focusNorm=""
+                renderActions={(_entry, i) => {
+                  const c = chains[i];
+                  return (
+                    <>
+                      <button type="button" className="rs-outline-btn sm" onClick={() => setTx({ title: `Chain: ${c.path}`, selector: { path: c.nodes.map((n) => n.norm) } })}>View supporting transactions →</button>
+                      {c.terminus && <button type="button" className="rs-outline-btn sm" onClick={() => onDrill({ counties: c.counties })}>Filter records to these counties →</button>}
+                      {c.firstDate && c.lastDate && <span className="rs-mid rs-small">{fmtDate(c.firstDate)} – {fmtDate(c.lastDate)}</span>}
+                    </>
+                  );
+                }}
+              />
+            </div>
           )}
-        </div>
+        </section>
       )}
 
       {view === "entities" && (
-        <div className="panel">
-          <div className="panel-title">
-            <h3 style={{ margin: 0 }}>Market Participants</h3>
-            <button className="small" onClick={() => downloadCsv("research-entity-classes.csv",
-              ["Entity", "Class", "Acquired", "Sold", "Net", "Distinct Grantors", "Distinct Grantees"],
-              entities.map((r) => [r.name, r.classLabel, r.acquisitions, r.dispositions, r.acquisitions - r.dispositions, r.distinctGrantors, r.distinctGrantees]))}>Export CSV</button>
+        <section className="rs-card">
+          <div className="rs-card-head">
+            <div className="rs-card-titles">
+              <h3>Market participants</h3>
+              <span className="rs-card-sub">Every entity labelled by its acquisition behaviour. Click a class to filter; click an entity for its full dossier.</span>
+            </div>
+            <div className="rs-card-tools">
+              <button type="button" className="rs-outline-btn" onClick={() => downloadCsv("research-entity-classes.csv",
+                ["Entity", "Class", "Acquired", "Sold", "Net", "Distinct Grantors", "Distinct Grantees"],
+                entities.map((r) => [r.name, r.classLabel, r.acquisitions, r.dispositions, r.acquisitions - r.dispositions, r.distinctGrantors, r.distinctGrantees]))}>
+                <DownloadIcon />
+                Export CSV
+              </button>
+            </div>
           </div>
-          <p className="muted" style={{ marginTop: 0, fontSize: 12 }}>Every entity labelled by its acquisition behaviour. Click a class to filter; click an entity for its full dossier.</p>
-          <div className="chip-row" style={{ marginBottom: 10, flexWrap: "wrap" }}>
-            <span className={`chip ${classFilter == null ? "active" : ""}`} onClick={() => setClassFilter(null)}>All ({data.classifications.length})</span>
-            {[...classCounts.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => (
-              <span key={k} className={`chip ${classFilter === k ? "active" : ""}`} onClick={() => setClassFilter(classFilter === k ? null : k)}
-                title={CLASS_DESC[k]} style={{ borderColor: CLASS_COLORS[k] ?? undefined }}>
-                {labelOf(k)} ({n})
-              </span>
-            ))}
+          <div className="rs-class-bar">
+            <div className="rs-class-chips">
+              <button type="button" className={`rs-class-chip ${classFilter == null ? "active" : ""}`} onClick={() => setClassFilter(null)}>
+                All <span className="rs-chip-count">{num(data.classifications.length)}</span>
+              </button>
+              {[...classCounts.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => (
+                <button key={k} type="button" className={`rs-class-chip ${classFilter === k ? "active" : ""}`} onClick={() => setClassFilter(classFilter === k ? null : k)}
+                  title={CLASS_DESC[k]}>
+                  <i style={{ background: CLASS_COLORS[k] ?? CLASS_FALLBACK_COLOR }} />
+                  {labelOf(k)} <span className="rs-chip-count">{num(n)}</span>
+                </button>
+              ))}
+            </div>
+            {classFilter && <p className="rs-class-desc"><strong>{labelOf(classFilter)}:</strong> {CLASS_DESC[classFilter] ?? ""}</p>}
           </div>
-          {classFilter && <p className="muted" style={{ marginTop: 0, fontSize: 12 }}><strong>{labelOf(classFilter)}:</strong> {CLASS_DESC[classFilter] ?? ""}</p>}
-          {entities.length === 0 ? <p className="muted">No entities match.</p> : (
-            <SortableTable
-              columns={[
-                { key: "name", header: "Entity", value: (r: ClassRow) => r.name, render: (r: ClassRow) => <strong>{r.name}</strong> },
-                { key: "klass", header: "Class", value: (r: ClassRow) => r.classLabel, render: (r: ClassRow) => <span title={CLASS_DESC[r.klass]}><ClassBadge klass={r.klass} label={r.classLabel} /></span> },
-                { key: "acquisitions", header: "Acquired", value: (r: ClassRow) => r.acquisitions, align: "right" as const },
-                { key: "dispositions", header: "Sold", value: (r: ClassRow) => r.dispositions, align: "right" as const },
-                {
-                  key: "net", header: "Net Position", value: (r: ClassRow) => r.acquisitions - r.dispositions, align: "right" as const,
-                  render: (r: ClassRow) => { const n = r.acquisitions - r.dispositions; return <span style={{ color: n > 0 ? "#22c55e" : n < 0 ? "#ef4444" : "var(--text-dim)" }}>{n > 0 ? "+" : ""}{n}</span>; },
-                },
-                { key: "distinctGrantors", header: "Sources", value: (r: ClassRow) => r.distinctGrantors, align: "right" as const, render: (r: ClassRow) => <span title="distinct grantors acquired from">{r.distinctGrantors}</span> },
-                { key: "distinctGrantees", header: "Buyers", value: (r: ClassRow) => r.distinctGrantees, align: "right" as const, render: (r: ClassRow) => <span title="distinct grantees sold to">{r.distinctGrantees}</span> },
-              ]}
-              rows={entities}
-              rowKey={(r) => r.norm}
-              defaultSort={{ key: "acquisitions", dir: "desc" }}
-              onRowClick={(r) => setEntity(r.norm)}
-            />
+          {entities.length === 0 ? <p className="rs-empty">No entities match.</p> : (
+            <div className="rs-table">
+              <SortableTable
+                columns={[
+                  { key: "name", header: "Entity", value: (r: ClassRow) => r.name, minWidth: 240, render: (r: ClassRow) => <span className="rs-strong">{r.name}</span> },
+                  { key: "klass", header: "Class", value: (r: ClassRow) => r.classLabel, render: (r: ClassRow) => <span title={CLASS_DESC[r.klass]}><ClassBadge klass={r.klass} label={r.classLabel} /></span> },
+                  { key: "acquisitions", header: "Acquired", value: (r: ClassRow) => r.acquisitions, align: "right" as const },
+                  { key: "dispositions", header: "Sold", value: (r: ClassRow) => r.dispositions, align: "right" as const },
+                  {
+                    key: "net", header: "Net position", value: (r: ClassRow) => r.acquisitions - r.dispositions, align: "right" as const,
+                    render: (r: ClassRow) => { const n = r.acquisitions - r.dispositions; return <span className={`rs-chg ${n > 0 ? "up" : n < 0 ? "down" : "flat"}`}>{n > 0 ? "+" : ""}{n}</span>; },
+                  },
+                  { key: "distinctGrantors", header: "Sources", value: (r: ClassRow) => r.distinctGrantors, align: "right" as const, render: (r: ClassRow) => <span title="distinct grantors acquired from">{r.distinctGrantors}</span> },
+                  { key: "distinctGrantees", header: "Buyers", value: (r: ClassRow) => r.distinctGrantees, align: "right" as const, render: (r: ClassRow) => <span title="distinct grantees sold to">{r.distinctGrantees}</span> },
+                ]}
+                rows={entities}
+                rowKey={(r) => r.norm}
+                defaultSort={{ key: "acquisitions", dir: "desc" }}
+                onRowClick={(r) => setEntity(r.norm)}
+              />
+            </div>
           )}
-        </div>
+          <div className="rs-card-foot"><span>Showing {num(entities.length)} of {num(data.classifications.length)} entities</span></div>
+        </section>
       )}
 
       {entity && (
@@ -1482,6 +1629,9 @@ function RelationshipsTab({ qs, onDrill, dataset }: { qs: string; onDrill: (patc
     </>
   );
 }
+
+/** Member-square colours for co-buyer groups (order within the group). */
+const MEMBER_COLORS = [CHART_COLORS[0], CHART_COLORS[3], CHART_COLORS[5], CHART_COLORS[2], CHART_COLORS[6]];
 
 /**
  * Entity dossier — everything the dataset knows about one market participant:
@@ -1538,82 +1688,78 @@ function EntityModal({ norm, data, onClose, onOpenEntity, onViewTx }: {
   })();
 
   const deedsButton = (dir: "in" | "out") => (p: RelParty) => (
-    <button className="small" onClick={() => onViewTx(
+    <button type="button" className="rs-deeds-btn" onClick={() => onViewTx(
       dir === "in" ? `${p.name} → ${name}` : `${name} → ${p.name}`,
       dir === "in" ? { grantorNorm: p.norm, granteeNorm: norm } : { grantorNorm: norm, granteeNorm: p.norm },
-    )}>deeds</button>
+    )}>Deeds</button>
   );
 
-  return (
-    <Modal title={name} onClose={onClose} wide>
-      {/* Consistent section rhythm: header block, relationship columns, chains,
-          footer actions — uniform spacing/labels (the modal read cramped and
-          unevenly aligned before). Used by both the Largest Terminal Holder and
-          Top Intermediary insights. */}
-      <div className="ent-head">
-        <div className="row" style={{ gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          {info && <ClassBadge klass={info.klass} label={info.classLabel} />}
-          <span className="muted" style={{ fontSize: 13 }}>
-            Acquired <strong style={{ color: "var(--text)" }}>{info?.acquisitions ?? bought.reduce((s, r) => s + r.count, 0)}</strong>
-            <span className="tract-dot">·</span>
-            Sold <strong style={{ color: "var(--text)" }}>{info?.dispositions ?? sold.reduce((s, r) => s + r.count, 0)}</strong>
-          </span>
-        </div>
-        {info && <p className="ent-desc">{CLASS_DESC[info.klass]}</p>}
-      </div>
+  const acquired = info?.acquisitions ?? bought.reduce((s, r) => s + r.count, 0);
+  const disposed = info?.dispositions ?? sold.reduce((s, r) => s + r.count, 0);
+  const net = info ? info.acquisitions - info.dispositions : null;
+  const statCells: StatCell[] = [
+    { label: "Acquired", value: num(acquired) },
+    { label: "Sold", value: num(disposed) },
+    { label: "Net position", value: net == null ? "—" : `${net > 0 ? "+" : ""}${net}`, tone: net == null || net === 0 ? "default" : net > 0 ? "success" : "danger" },
+    { label: "Sources · buyers", value: info ? `${info.distinctGrantors} · ${info.distinctGrantees}` : "—" },
+  ];
 
-      <div className="ent-sec">
-        <div className="ent-sec-label">Relationships</div>
-        <div className="rel2-cols">
-          <PartyColumn title="Acquired From" tone="up" empty="No recorded acquisitions." parties={grantorParties}
+  return (
+    <Modal title={name} onClose={onClose} wide
+      subtitle={info && (
+        <span className="rs-dossier-sub">
+          <ClassBadge klass={info.klass} label={info.classLabel} />
+          <span>{CLASS_DESC[info.klass]}</span>
+        </span>
+      )}
+      footer={<>
+        {added && <span className="rs-dossier-status">{added}</span>}
+        <button type="button" onClick={() => onViewTx(`All transactions involving ${name}`, { entityNorm: norm })}>View all transactions →</button>
+        {can("createBuyers") && !added && (
+          <button type="button" className="primary" disabled={adding} onClick={addToBuyers}>{adding ? "Adding…" : "Add to Buyers"}</button>
+        )}
+      </>}>
+      <div className="rs-dossier">
+        <StatStrip className="rs-dossier-stats" min={150} cells={statCells} />
+
+        <div className="rel2-cols rs-dossier-cols">
+          <PartyColumn title="Acquired from" tone="up" empty="No recorded acquisitions in this period." parties={grantorParties}
             canCreate={false} adding={null} onAdd={() => {}} onOpen={(p) => onOpenEntity(p.norm)}
             alwaysOpenable openTitle="Open dossier" renderExtra={deedsButton("in")} />
-          <PartyColumn title="Sold To" tone="down" empty="No recorded dispositions." parties={granteeParties}
+          <PartyColumn title="Sold to" tone="down" empty="No recorded dispositions." parties={granteeParties}
             canCreate={false} adding={null} onAdd={() => {}} onOpen={(p) => onOpenEntity(p.norm)}
             alwaysOpenable openTitle="Open dossier" renderExtra={deedsButton("out")} />
-          <PartyColumn title="Frequent Co-Buyers" tone="co" empty="No shared acquisitions found." parties={coBuyerParties}
+          <PartyColumn title="Frequent co-buyers" tone="co" empty="No shared acquisitions found." parties={coBuyerParties}
             canCreate={false} adding={null} onAdd={() => {}} onOpen={(p) => onOpenEntity(p.norm)}
             alwaysOpenable openTitle="Open dossier" />
         </div>
-      </div>
 
-      {chains.length > 0 && (
-        <div className="ent-sec">
-          <div className="ent-sec-label">Appears in Chains</div>
-          {/* The same compact ChainSection used on Buyer Profiles — collapsed
-              summary rows that expand on demand, with the standard chain
-              actions (supporting transactions + date range) for full parity
-              with the Chains view. */}
-          <ChainSection
-            chains={chainRowsToEntries(chains, norm)}
-            classLabels={data.classLabels}
-            focusNorm={norm}
-            renderActions={(_entry, i) => {
-              const c = chains[i];
-              return (
-                <>
-                  <button className="small" onClick={() => onViewTx(`Chain: ${c.path}`, { path: c.nodes.map((n) => n.norm) })}>View supporting transactions →</button>
-                  {c.firstDate && c.lastDate && <span className="muted" style={{ fontSize: 12 }}>{fmtDate(c.firstDate)} – {fmtDate(c.lastDate)}</span>}
-                </>
-              );
-            }}
-          />
+        <div className="rs-dossier-sec">
+          <div className="rs-dossier-sec-head">Appears in chains <span className="relv-count">{chains.length}</span></div>
+          {chains.length === 0 ? <div className="rs-dashed-empty">Not part of any multi-hop chain in this period.</div> : (
+            /* The same compact ChainSection used on Buyer Profiles — collapsed
+               summary rows that expand on demand, with the standard chain
+               actions (supporting transactions + date range) for full parity
+               with the Chains view. */
+            <ChainSection
+              chains={chainRowsToEntries(chains, norm)}
+              classLabels={data.classLabels}
+              focusNorm={norm}
+              renderActions={(_entry, i) => {
+                const c = chains[i];
+                return (
+                  <>
+                    <button type="button" className="rs-outline-btn sm" onClick={() => onViewTx(`Chain: ${c.path}`, { path: c.nodes.map((n) => n.norm) })}>View supporting transactions →</button>
+                    {c.firstDate && c.lastDate && <span className="rs-mid rs-small">{fmtDate(c.firstDate)} – {fmtDate(c.lastDate)}</span>}
+                  </>
+                );
+              }}
+            />
+          )}
         </div>
-      )}
-
-      <div className="ent-foot">
-        <button className="small" onClick={() => onViewTx(`All transactions involving ${name}`, { entityNorm: norm })}>View all transactions →</button>
-        {can("createBuyers") && !added && (
-          <button className="small primary" disabled={adding} onClick={addToBuyers}>{adding ? "Adding…" : "Add to Buyers"}</button>
-        )}
-        {added && <span className="muted" style={{ fontSize: 12 }}>{added}</span>}
       </div>
     </Modal>
   );
-}
-
-function MiniKpi({ label, value }: { label: string; value: number }) {
-  return <div className="metric-card"><div className="metric-label">{label}</div><div className="metric-value">{num(value)}</div></div>;
 }
 
 /** Supporting-transactions drill-in for a relationship / co-buyer set / chain. */
@@ -1630,36 +1776,63 @@ function TxDrillModal({ qs, title, selector, onClose }: {
 
   return (
     <Modal title={title} onClose={onClose} wide>
-      {!rows ? <Spinner /> : rows.length === 0 ? <p className="muted">No supporting transactions in the current filters.</p> : (
-        <>
-          <div className="row" style={{ justifyContent: "space-between", marginBottom: 8 }}>
-            <span className="muted" style={{ fontSize: 13 }}>{rows.length} transaction{rows.length === 1 ? "" : "s"}</span>
-            <button className="small" onClick={() => downloadCsv("relationship-transactions.csv",
+      {!rows ? <Spinner /> : rows.length === 0 ? <p className="rs-empty flush">No supporting transactions in the current filters.</p> : (
+        <div className="rs-deeds">
+          <div className="rs-deeds-bar">
+            <span className="rs-mid">{rows.length} transaction{rows.length === 1 ? "" : "s"}</span>
+            <button type="button" className="rs-outline-btn" onClick={() => downloadCsv("relationship-transactions.csv",
               ["Recorded", "Type", "Grantor", "Grantee", "County", "Abstract", "Instrument #"],
-              rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.grantor, r.grantee, `${r.county}, ${r.state}`, r.abstractId, r.instrumentNumber]))}>Export CSV</button>
+              rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.grantor, r.grantee, `${r.county}, ${r.state}`, r.abstractId, r.instrumentNumber]))}>
+              <DownloadIcon />
+              Export CSV
+            </button>
           </div>
-          <div className="table-scroll" style={{ maxHeight: 420 }}>
-            <table className="data-table">
-              <thead><tr><th>Recorded</th><th>Type</th><th>Grantor</th><th>Grantee</th><th>County</th><th>Abstract</th><th>Instr #</th></tr></thead>
+          <div className="table-scroll rs-deeds-scroll">
+            <table className="data-table rs-sticky-head">
+              <thead><tr><th>Recorded</th><th>Type</th><th>Grantor</th><th>Grantee</th><th>County</th><th>Abstract</th><th>Instrument #</th></tr></thead>
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.id}>
-                    <td>{fmtDate(r.recordingDate)}</td>
-                    <td title={r.docTypeRaw}>{prettyDocType(r.docType)}</td>
-                    <td>{r.grantor ?? "—"}</td>
-                    <td>{r.grantee ?? "—"}</td>
-                    <td>{r.county}, {r.state}</td>
-                    <td>{r.abstractId ? r.abstractId.split(",").map((a) => absIndex.label(a.trim(), r.county, r.state)).join("; ") : "—"}</td>
-                    <td>{r.instrumentNumber ?? "—"}</td>
+                    <td className="rec-nowrap">{fmtDate(r.recordingDate)}</td>
+                    <td title={r.docTypeRaw}><DocTypeTag docType={r.docType} raw={r.docTypeRaw} /></td>
+                    <td>{r.grantor ?? <span className="rs-zero">—</span>}</td>
+                    <td>{r.grantee ?? <span className="rs-zero">—</span>}</td>
+                    <td className="rec-nowrap">{r.county}, {r.state}</td>
+                    <td>
+                      {r.abstractId ? <span className="rs-strong">{r.abstractId.split(",").map((a) => absIndex.label(a.trim(), r.county, r.state)).join("; ")}</span> : <span className="rs-zero">—</span>}
+                      {r.survey && <span className="rs-sub-line">{r.survey}</span>}
+                    </td>
+                    <td><span className="rs-mono">{r.instrumentNumber ?? "—"}</span></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </>
+        </div>
       )}
     </Modal>
   );
+}
+
+/** Document-type tag — colour by the normalized type, label as before. */
+type TagTone = "neutral" | "accent" | "success" | "warn" | "danger" | "violet" | "cyan";
+const DOC_TYPE_TONE: Record<string, TagTone> = {
+  ROYALTY_DEED: "accent", MINERAL_DEED: "violet", WARRANTY_MINERAL_DEED: "violet", QUITCLAIM_MINERAL_DEED: "violet",
+  MINERAL_CONVEYANCE: "cyan", OG_CONVEYANCE: "cyan", ASSIGNMENT: "cyan", RESERVATION: "warn",
+  OG_LEASE: "success", LEASE_MEMO: "success", LEASE_ASSIGNMENT: "cyan", LEASE_AMENDMENT: "accent",
+  LEASE_EXTENSION: "accent", LEASE_RATIFICATION: "accent", LEASE_RELEASE: "danger",
+};
+function DocTypeTag({ docType, raw }: { docType: string; raw?: string }) {
+  return <Tag tone={DOC_TYPE_TONE[docType] ?? "neutral"} title={raw}>{prettyDocType(docType)}</Tag>;
+}
+/** Permit status / trajectory tags. */
+const PERMIT_TONE: Record<string, TagTone> = {
+  APPROVED: "success", SUBMITTED: "warn", SPUDDED: "accent", COMPLETED: "violet", CANCELED: "danger",
+  HORIZONTAL: "success", DIRECTIONAL: "cyan", VERTICAL: "neutral", UNKNOWN: "neutral",
+};
+function EnumTag({ value }: { value: string | null | undefined }) {
+  if (!value) return <span className="rs-zero">—</span>;
+  return <Tag tone={PERMIT_TONE[value] ?? "neutral"}>{prettyEnum(value)}</Tag>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1667,13 +1840,14 @@ function TxDrillModal({ qs, title, selector, onClose }: {
 // ---------------------------------------------------------------------------
 
 const SIGNAL_META: Record<string, { label: string; color: string }> = {
-  CONFLUENCE: { label: "Multiple Signals", color: "#f59e0b" },
-  TRANSACTION_SURGE: { label: "Transaction Surge", color: "#3b82f6" },
-  LEASE_SURGE: { label: "Leasing Surge", color: "#22c55e" },
-  PERMIT_SURGE: { label: "Permitting Surge", color: "#8b5cf6" },
-  ABSTRACT_CONCENTRATION: { label: "Concentrated Buying", color: "#ec4899" },
-  NEW_OPERATOR: { label: "New Operator", color: "#06b6d4" },
+  CONFLUENCE: { label: "Multiple signals", color: "#F59E0B" },
+  TRANSACTION_SURGE: { label: "Transaction surge", color: "#3B82F6" },
+  LEASE_SURGE: { label: "Leasing surge", color: "#22C55E" },
+  PERMIT_SURGE: { label: "Permitting surge", color: "#8B5CF6" },
+  ABSTRACT_CONCENTRATION: { label: "Concentrated buying", color: "#EC4899" },
+  NEW_OPERATOR: { label: "New operator", color: "#06B6D4" },
 };
+const SIGNAL_FALLBACK_COLOR = "#A6A6A6";
 
 // Severity (0–100) → intuitive tier color: Low green, Moderate yellow,
 // Elevated orange, High red, Critical deep red. Colors are used on dark panel
@@ -1692,6 +1866,8 @@ const severityTier = (n: number) => SEVERITY_TIERS.find((t) => n >= t.min) ?? SE
 function OpportunitiesTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partial<Filters>) => void }) {
   const [data, setData] = useState<{ signals: Signal[] } | null>(null);
   const [loading, setLoading] = useState(true);
+  // Severity filter — "all" or one of the tier labels above.
+  const [sev, setSev] = useState<string>("all");
   useEffect(() => {
     setLoading(true);
     api.get<{ signals: Signal[] }>(`/research/opportunities?${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
@@ -1703,46 +1879,60 @@ function OpportunitiesTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
     return <Banner kind="info">No statistically significant surges detected in this period — try widening the date range or clearing filters.</Banner>;
   }
 
-  const criticalCount = data.signals.filter((s) => severityTier(s.severity).label === "Critical").length;
+  const tierCount = new Map<string, number>();
+  for (const s of data.signals) { const l = severityTier(s.severity).label; tierCount.set(l, (tierCount.get(l) ?? 0) + 1); }
+  const criticalCount = tierCount.get("Critical") ?? 0;
+  // Only tiers present in this period are offered; a filter whose tier has
+  // disappeared (new period/filters) falls back to All.
+  const activeSev = sev !== "all" && (tierCount.get(sev) ?? 0) > 0 ? sev : "all";
+  const shown = activeSev === "all" ? data.signals : data.signals.filter((s) => severityTier(s.severity).label === activeSev);
 
   return (
-    <div className="res-card">
-      <div className="res-card-head opp-head">
-        <div style={{ maxWidth: 760 }}>
+    <section className="rs-card">
+      <div className="rs-card-head rs-opp-head">
+        <div className="rs-card-titles">
           <h3>Buying signals</h3>
-          <div className="res-card-desc">
+          <span className="rs-card-sub">
             Signals are detected by comparing the selected period against six equal history windows (z-score ≥ 2 plus a
             material lift), clustering by geography, and flagging new entrants. Higher severity = stronger, higher-volume anomaly.
-          </div>
+          </span>
         </div>
-        {criticalCount > 0 && <span className="opp-crit-badge">{criticalCount} critical signal{criticalCount === 1 ? "" : "s"}</span>}
+        <Segmented<string> accent ariaLabel="Severity" value={activeSev} onChange={setSev}
+          options={[
+            { value: "all", label: "All", count: data.signals.length },
+            ...SEVERITY_TIERS.filter((t) => (tierCount.get(t.label) ?? 0) > 0).map((t) => ({ value: t.label, label: t.label, count: tierCount.get(t.label) })),
+          ]} />
       </div>
-      <div className="opp-list">
-        {data.signals.map((s) => {
-          const meta = SIGNAL_META[s.kind] ?? { label: s.kind, color: "#94a3b8" };
+      <div className="rs-opp-list">
+        {shown.map((s) => {
+          const meta = SIGNAL_META[s.kind] ?? { label: s.kind, color: SIGNAL_FALLBACK_COLOR };
           const tier = severityTier(s.severity);
           return (
-            <div key={s.id} className="opp-signal" style={{ borderLeftColor: tier.color }}>
-              <div className="opp-score">
-                <div className="opp-score-n" style={{ color: tier.color }}>{s.severity}</div>
-                <div className="opp-score-tier" style={{ color: tier.color }}>{tier.label}</div>
+            <div key={s.id} className="rs-opp">
+              <div className="rs-score">
+                <span className="rs-ring" style={{ background: `conic-gradient(${tier.color} ${Math.max(0, Math.min(100, s.severity)) * 3.6}deg, var(--hover-strong) 0)` }}>
+                  <span>{s.severity}</span>
+                </span>
+                <span className="rs-score-tier" style={{ color: tier.color }}>{tier.label}</span>
               </div>
-              <div className="opp-body">
-                <div className="opp-title-row">
-                  <span className="opp-kind" style={{ color: meta.color, background: `${meta.color}1A`, borderColor: `${meta.color}4D` }}>{meta.label}</span>
+              <div className="rs-opp-body">
+                <div className="rs-opp-title">
+                  <span className="rs-kind" style={{ "--c": meta.color } as CSSProperties}><i />{meta.label}</span>
                   <strong>{s.title}</strong>
                 </div>
-                <p className="opp-detail">{s.detail}</p>
+                <p className="rs-opp-detail">{s.detail}</p>
               </div>
-              <button className="opp-view" onClick={() => onDrill({ states: s.state ? [s.state] : [], counties: s.county ? [s.county] : [] })}>
-                View records →
+              <button type="button" className="rs-outline-btn rs-opp-view" onClick={() => onDrill({ states: s.state ? [s.state] : [], counties: s.county ? [s.county] : [] })}>
+                View records <ArrowRight size={12} aria-hidden="true" />
               </button>
             </div>
           );
         })}
-        <div className="opp-foot">{data.signals.length} signal{data.signals.length === 1 ? "" : "s"} in this period · sorted by severity</div>
       </div>
-    </div>
+      <div className="rs-card-foot">
+        <span>{shown.length} of {data.signals.length} signal{data.signals.length === 1 ? "" : "s"} in this period · {criticalCount} critical · sorted by severity</span>
+      </div>
+    </section>
   );
 }
 
@@ -1935,72 +2125,78 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   const active = kind === "documents" ? docs : kind === "rrcPermits" ? rrcPermits : permits;
   const totalPages = active ? Math.max(1, Math.ceil(active.total / pageSize)) : 1;
 
+  const dash = <span className="rs-zero">—</span>;
   const docColumns: Column<DocRecord>[] = [
-    { key: "recordingDate", header: "Recorded", value: (r) => r.recordingDate, render: (r) => <span className="rec-mid rec-nowrap">{fmtDate(r.recordingDate)}</span>, type: "date" },
-    { key: "docType", header: "Type", value: (r) => r.docTypeRaw, render: (r) => <span className="rec-type" title={r.docTypeRaw}>{prettyDocType(r.docType)}</span> },
+    { key: "recordingDate", header: "Recorded", value: (r) => r.recordingDate, render: (r) => <span className="rs-mid rec-nowrap">{fmtDate(r.recordingDate)}</span>, type: "date" },
+    { key: "docType", header: "Type", value: (r) => r.docTypeRaw, render: (r) => <DocTypeTag docType={r.docType} raw={r.docTypeRaw} /> },
     // No `max` on the records chip columns: every party/abstract renders (chips
     // wrap onto extra lines) — nothing hides behind a "+N" indicator.
-    { key: "grantor", header: dataset === "LEASE" ? "Grantor (Lessor)" : "Grantor (Seller)", value: (r) => r.grantor, minWidth: 180, render: (r) => <span className="rec-name"><ChipList items={r.grantorParties?.length ? r.grantorParties : [r.grantor]} /></span> },
-    { key: "grantee", header: dataset === "LEASE" ? "Grantee (Lessee)" : "Grantee (Buyer)", value: (r) => r.grantee, minWidth: 180, render: (r) => <span className="rec-name"><ChipList items={r.granteeParties?.length ? r.granteeParties : [r.grantee]} /></span> },
-    { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}`, render: (r) => <span className="rec-mid rec-nowrap">{r.county}, {r.state}</span> },
-    { key: "abstractId", header: "Abstract", value: (r) => r.abstractId, align: "right", render: (r) => r.abstractId ? <span className="rec-mid chips-oneline"><ChipList items={r.abstractId.split(",").map((a) => absIndex.label(a.trim(), r.county, r.state))} /></span> : <span className="rec-faint">—</span> },
-    { key: "instrumentNumber", header: "Instr #", value: (r) => r.instrumentNumber, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{r.instrumentNumber ?? "—"}</span> },
+    { key: "grantor", header: dataset === "LEASE" ? "Grantor (lessor)" : "Grantor (seller)", value: (r) => r.grantor, minWidth: 180, render: (r) => <span className="rec-name"><ChipList items={r.grantorParties?.length ? r.grantorParties : [r.grantor]} /></span> },
+    { key: "grantee", header: dataset === "LEASE" ? "Grantee (lessee)" : "Grantee (buyer)", value: (r) => r.grantee, minWidth: 180, render: (r) => <span className="rec-name"><ChipList items={r.granteeParties?.length ? r.granteeParties : [r.grantee]} /></span> },
+    { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}`, render: (r) => <span className="rs-mid rec-nowrap">{r.county}, {r.state}</span> },
+    { key: "abstractId", header: "Abstract", value: (r) => r.abstractId, align: "right", render: (r) => r.abstractId ? <span className="rs-mid chips-oneline"><ChipList items={r.abstractId.split(",").map((a) => absIndex.label(a.trim(), r.county, r.state))} /></span> : dash },
+    { key: "instrumentNumber", header: "Instrument #", value: (r) => r.instrumentNumber, align: "right", render: (r) => r.instrumentNumber ? <span className="rs-mono rec-nowrap">{r.instrumentNumber}</span> : dash },
   ];
   const permitColumns: Column<PermitRecord>[] = [
-    { key: "activityDate", header: "Date", value: (r) => r.activityDate, render: (r) => <span className="rec-mid rec-nowrap">{fmtDate(r.activityDate)}</span>, type: "date" },
-    { key: "operator", header: "Operator", value: (r) => r.operator, render: (r) => <span className="rec-name">{r.operator ?? "—"}</span> },
-    { key: "leaseName", header: "Lease / Well", value: (r) => `${r.leaseName ?? ""} ${r.wellName ?? ""}`.trim() || null },
-    { key: "status", header: "Status", value: (r) => r.status, render: (r) => prettyEnum(r.status) },
-    { key: "trajectory", header: "Trajectory", value: (r) => r.trajectory, render: (r) => prettyEnum(r.trajectory) },
-    { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}`, render: (r) => <span className="rec-mid rec-nowrap">{r.county}, {r.state}</span> },
+    { key: "activityDate", header: "Date", value: (r) => r.activityDate, render: (r) => <span className="rs-mid rec-nowrap">{fmtDate(r.activityDate)}</span>, type: "date" },
+    { key: "operator", header: "Operator", value: (r) => r.operator, render: (r) => r.operator ? <span className="rec-name">{r.operator}</span> : dash },
+    { key: "leaseName", header: "Lease / well", value: (r) => `${r.leaseName ?? ""} ${r.wellName ?? ""}`.trim() || null },
+    { key: "status", header: "Status", value: (r) => r.status, render: (r) => <EnumTag value={r.status} /> },
+    { key: "trajectory", header: "Trajectory", value: (r) => r.trajectory, render: (r) => <EnumTag value={r.trajectory} /> },
+    { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}`, render: (r) => <span className="rs-mid rec-nowrap">{r.county}, {r.state}</span> },
     { key: "formation", header: "Formation", value: (r) => r.formation },
-    { key: "apiNumber", header: "API #", value: (r) => r.apiNumber, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{r.apiNumber ?? "—"}</span> },
+    { key: "apiNumber", header: "API #", value: (r) => r.apiNumber, align: "right", render: (r) => r.apiNumber ? <span className="rs-mono rec-nowrap">{r.apiNumber}</span> : dash },
   ];
 
   const rrcPermitColumns: Column<RrcPermitRecord>[] = [
-    { key: "permitDate", header: "Permit Date", value: (r) => r.permitDate, render: (r) => <span className="rec-mid rec-nowrap">{r.permitDate ? fmtDate(r.permitDate) : "—"}</span>, type: "date" },
-    { key: "operator", header: "Operator", value: (r) => r.operator, render: (r) => <span className="rec-name">{r.operator ?? "—"}</span> },
-    { key: "leaseName", header: "Lease / Well", value: (r) => `${r.leaseName ?? ""} ${r.wellNo ?? ""}`.trim() || null, render: (r) => <span>{r.leaseName ?? "—"}{r.wellNo ? ` #${r.wellNo}` : ""}</span> },
-    { key: "county", header: "County", value: (r) => r.county, render: (r) => <span className="rec-mid rec-nowrap">{r.county}, TX</span> },
-    { key: "abstract", header: "Abstract", value: (r) => r.abstract, align: "right", render: (r) => r.abstract ? <span className="rec-mid chips-oneline"><ChipList items={[absIndex.label(r.abstract, r.county, "TX")]} /></span> : <span className="rec-faint">—</span> },
+    { key: "permitDate", header: "Permit date", value: (r) => r.permitDate, render: (r) => r.permitDate ? <span className="rs-mid rec-nowrap">{fmtDate(r.permitDate)}</span> : dash, type: "date" },
+    { key: "operator", header: "Operator", value: (r) => r.operator, render: (r) => r.operator ? <span className="rec-name">{r.operator}</span> : dash },
+    { key: "leaseName", header: "Lease / well", value: (r) => `${r.leaseName ?? ""} ${r.wellNo ?? ""}`.trim() || null, render: (r) => <span>{r.leaseName ?? "—"}{r.wellNo ? ` #${r.wellNo}` : ""}</span> },
+    { key: "county", header: "County", value: (r) => r.county, render: (r) => <span className="rs-mid rec-nowrap">{r.county}, TX</span> },
+    { key: "abstract", header: "Abstract", value: (r) => r.abstract, align: "right", render: (r) => r.abstract ? <span className="rs-mid chips-oneline"><ChipList items={[absIndex.label(r.abstract, r.county, "TX")]} /></span> : dash },
     { key: "survey", header: "Survey", value: (r) => r.survey },
-    { key: "acres", header: "Unit (ac)", value: (r) => r.acres, align: "right", type: "number", render: (r) => <span className="rec-mid rec-nowrap">{r.acres != null ? num(r.acres) : "—"}</span> },
-    { key: "apiNumber", header: "API #", value: (r) => r.api8, align: "right", render: (r) => <span className="rec-mid rec-nowrap">{r.api8 ? `42-${r.api8.slice(0, 3)}-${r.api8.slice(3)}` : "—"}</span> },
+    { key: "acres", header: "Unit (ac)", value: (r) => r.acres, align: "right", type: "number", render: (r) => r.acres != null ? <span className="rs-mid rec-nowrap">{num(r.acres)}</span> : dash },
+    { key: "apiNumber", header: "API #", value: (r) => r.api8, align: "right", render: (r) => r.api8 ? <span className="rs-mono rec-nowrap">{`42-${r.api8.slice(0, 3)}-${r.api8.slice(3)}`}</span> : dash },
   ];
 
-  // Toolbar row (reference order): source segmented control · count · Filters
-  // (fills accent while open) · Export CSV — Customize View joins on the right
+  const kindLabel = kind === "documents" ? (dataset === "LEASE" ? "lease documents" : "transaction documents") : kind === "permits" ? "drilling permits" : "RRC permits (W-1)";
+
+  // Toolbar row (reference order): source segmented control · search · Filters
+  // · count · rows per page · Export CSV — Customize View joins on the right
   // via the table's own toolbar row.
   const toolbarContent = (
     <>
-      <div className="seg-control">
-        <span className={`seg ${kind === "documents" ? "active" : ""}`} onClick={() => setKind("documents")}>{dataset === "LEASE" ? "Lease Documents" : "Transaction Documents"}</span>
-        <span className={`seg ${kind === "permits" ? "active" : ""}`} onClick={() => setKind("permits")}>Drilling Permits</span>
-        <span className={`seg ${kind === "rrcPermits" ? "active" : ""}`} onClick={() => setKind("rrcPermits")}>RRC Permits (W-1)</span>
-      </div>
+      <Segmented<"documents" | "permits" | "rrcPermits"> accent className="rs-seg-sm" ariaLabel="Record type" value={kind} onChange={setKind}
+        options={[
+          { value: "documents", label: dataset === "LEASE" ? "Lease documents" : "Transaction documents" },
+          { value: "permits", label: "Drilling permits" },
+          { value: "rrcPermits", label: "RRC permits (W-1)" },
+        ]} />
       <SearchInput value={search} onChange={setSearch}
         placeholder={kind === "documents" ? "Search grantor, grantee, instrument #, abstract, survey…" : kind === "rrcPermits" ? "Search operator, lease, API #, abstract, survey…" : "Search operator, lease, well, API #, permit #…"}
         ariaLabel="Search records" />
-      <span className="spacer" />
-      {active && <span className="muted" style={{ fontSize: 12.5, whiteSpace: "nowrap" }}><b style={{ color: "var(--text)" }}>{num(active.total)}</b> records</span>}
-      <span className="ct-rpp" title="Records per page"><Select value={String(pageSize)} onChange={(v) => setPageSize(Number(v))} options={["20", "50", "100", "200"]} width={68} ariaLabel="Records per page" /></span>
       <button
-        className={`rbtn ${showFilters ? "on" : activeFilterCount > 0 ? "active" : ""}`}
+        type="button"
+        className={`rs-filter-btn sm ${showFilters || activeFilterCount > 0 ? "on" : ""}`}
         onClick={() => setShowFilters((s) => !s)}
         aria-expanded={showFilters}
       >
-        Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 5h16l-6 7.5V19l-4-2v-4.5z" /></svg>
+        Filters{activeFilterCount > 0 && <span className="rs-count-badge">{activeFilterCount}</span>}
       </button>
-      <button className="rbtn" onClick={exportAll} disabled={!active?.total || exporting}>
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+      <span className="spacer" />
+      {active && <span className="rs-rec-count"><b>{num(active.total)}</b> records</span>}
+      <span className="ct-rpp" title="Records per page"><Select value={String(pageSize)} onChange={(v) => setPageSize(Number(v))} options={["20", "50", "100", "200"]} width={68} ariaLabel="Records per page" /></span>
+      <button type="button" className="rs-outline-btn" onClick={exportAll} disabled={!active?.total || exporting}>
+        <DownloadIcon />
         {exporting ? "Exporting…" : "Export CSV"}
       </button>
     </>
   );
 
-  // Recessed filter strip under the toolbar (reference: darker inset section).
+  // Recessed filter strip under the toolbar.
   const filterStrip = showFilters ? (
-    <div className="rec-filterbar">
+    <div className="rec-filterbar rs-rec-filters">
       <div className="rec-fgrid">
         <div><div className="rec-flabel">County</div>
           <SearchableMultiSelect options={opts.counties} value={rf.counties} onChange={(v) => setRf((p) => ({ ...p, counties: v }))} placeholder="Counties…" /></div>
@@ -2043,9 +2239,10 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
         )}
         <div><div className="rec-flabel">From</div><DateField value={rf.from} onChange={(v) => setRf((p) => ({ ...p, from: v }))} ariaLabel="Records from date" /></div>
         <div><div className="rec-flabel">To</div><DateField value={rf.to} onChange={(v) => setRf((p) => ({ ...p, to: v }))} ariaLabel="Records to date" /></div>
-        {activeFilterCount > 0 && (
-          <div style={{ alignSelf: "end" }}><button className="small" onClick={() => setRf(EMPTY_REC_FILTERS)}>Clear filters</button></div>
-        )}
+      </div>
+      <div className="rs-rec-filters-foot">
+        <span>Filters apply to the {kindLabel} list only.</span>
+        {activeFilterCount > 0 && <button type="button" className="rs-text-btn" onClick={() => setRf(EMPTY_REC_FILTERS)}>Clear filters</button>}
       </div>
     </div>
   ) : null;
@@ -2053,27 +2250,21 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   return (
     <>
       {kind === "documents" && selAbstracts.length > 0 && absBuyers && absBuyers.buyers.length > 0 && (
-        <div style={{
-          border: "1px solid var(--border)", borderRadius: 6, padding: "10px 12px", marginBottom: 12,
-          background: "color-mix(in srgb, var(--accent) 4%, transparent)",
-        }}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
-            <strong style={{ fontSize: 13 }}>
-              Top Buyers — {selAbstracts.map((a) => absIndex.labelAmong(a, rf.counties)).join("; ")}
-            </strong>
-            <span className="muted" style={{ fontSize: 12 }}>
+        <section className="rs-card rs-topbuyers">
+          <div className="rs-topbuyers-head">
+            <span className="rs-strong">
+              Top buyers — {selAbstracts.map((a) => absIndex.labelAmong(a, rf.counties)).join("; ")}
+            </span>
+            <span className="rs-mid rs-small">
               {num(absBuyers.total)} buyer{absBuyers.total === 1 ? "" : "s"} in this period
             </span>
           </div>
           {absBuyers.buyers.map((b, i) => (
-            <div key={b.norm} className="row" style={{
-              justifyContent: "space-between", gap: 12, padding: "4px 0", fontSize: 13,
-              borderTop: i > 0 ? "1px solid var(--border)" : "none",
-            }}>
-              <span style={{ fontWeight: 600, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                <span className="muted" style={{ fontWeight: 700, marginRight: 8 }}>{i + 1}.</span>{b.name}
+            <div key={b.norm} className="rs-topbuyer">
+              <span className="rs-topbuyer-name">
+                <span className="rs-rank">{i + 1}.</span>{b.name}
               </span>
-              <span className="muted" style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+              <span className="rs-mid rs-small rec-nowrap">
                 {num(b.count)} record{b.count === 1 ? "" : "s"}
                 {b.transactions > 0 && <> · {num(b.transactions)} transaction{b.transactions === 1 ? "" : "s"}</>}
                 {b.leases > 0 && <> · {num(b.leases)} lease{b.leases === 1 ? "" : "s"}</>}
@@ -2082,7 +2273,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
               </span>
             </div>
           ))}
-        </div>
+        </section>
       )}
       {canManage && sel.selected.size > 0 && (
         <BulkBar count={sel.selected.size} onClear={sel.clear}>
@@ -2097,7 +2288,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
           <button className="small danger" onClick={() => setConfirmDel(true)} disabled={busy}>Delete</button>
         </BulkBar>
       )}
-      <div className="rec-card">
+      <div className="rec-card rs-records">
         {loading && !active ? (
           <>
             <div className="cv-toolbar"><div className="cv-toolbar-left">{toolbarContent}</div></div>
@@ -2108,7 +2299,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
           <>
             <div className="cv-toolbar"><div className="cv-toolbar-left">{toolbarContent}</div></div>
             {filterStrip}
-            <p className="muted" style={{ padding: "4px 20px 16px", margin: 0 }}>No matching records.</p>
+            <p className="rs-empty">No records match these filters.</p>
           </>
         ) : (
           <>
@@ -2117,17 +2308,15 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
               : kind === "rrcPermits"
               ? <SortableTable customizeId="research-records-rrc-permits" columns={rrcPermitColumns} rows={rrcPermits!.rows} rowKey={(r) => r.id} toolbar={toolbarContent} subToolbar={filterStrip} serverSort={{ sort, onSort: setSort }} />
               : <SortableTable customizeId="research-records-permits" columns={permitColumns} rows={permits!.rows} rowKey={(r) => r.id} toolbar={toolbarContent} subToolbar={filterStrip} serverSort={{ sort, onSort: setSort }} selection={canManage ? { selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll } : undefined} />}
-            <div className="rec-foot">
-              <span>Showing {num(active.rows.length)} of {num(active.total)} records · sorted across all pages by {(kind === "documents" ? (docColumns as Column<never>[]) : kind === "rrcPermits" ? (rrcPermitColumns as Column<never>[]) : (permitColumns as Column<never>[])).find((c) => c.key === sort.key)?.header.toLowerCase() ?? sort.key}, {sort.dir === "asc" ? "ascending" : "descending"}</span>
-              <span className="row" style={{ gap: 10, alignItems: "center" }}>
-                {totalPages > 1 && (
-                  <span className="row" style={{ gap: 8, alignItems: "center" }}>
-                    <button className="small" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Prev</button>
-                    <span className="muted" style={{ fontSize: 12 }}>Page {page} of {num(totalPages)}</span>
-                    <button className="small" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next →</button>
-                  </span>
-                )}
-              </span>
+            <div className="rs-card-foot">
+              <span>{sel.selected.size > 0 ? `${num(sel.selected.size)} selected · ` : ""}Showing {num(active.rows.length)} of {num(active.total)} records · sorted across all pages by {(kind === "documents" ? (docColumns as Column<never>[]) : kind === "rrcPermits" ? (rrcPermitColumns as Column<never>[]) : (permitColumns as Column<never>[])).find((c) => c.key === sort.key)?.header.toLowerCase() ?? sort.key}, {sort.dir === "asc" ? "ascending" : "descending"}</span>
+              {totalPages > 1 && (
+                <span className="rs-pager">
+                  <button type="button" className="rs-outline-btn sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>← Prev</button>
+                  <span>Page {page} of {num(totalPages)}</span>
+                  <button type="button" className="rs-outline-btn sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>Next →</button>
+                </span>
+              )}
             </div>
           </>
         )}

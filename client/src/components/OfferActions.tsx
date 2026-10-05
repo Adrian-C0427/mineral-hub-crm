@@ -34,8 +34,8 @@ export function OfferRowActions({ offer, accepted, onChanged, dealNma, dealNra }
   const [busy, setBusy] = useState(false);
   return (
     <>
-      <button className="icon-btn" title="Edit offer" aria-label={`Edit ${offer.buyer.name}'s offer`} onClick={() => setEditing(true)}><Pencil size={14} /></button>
-      <button className="icon-btn" title="Delete offer" aria-label={`Delete ${offer.buyer.name}'s offer`} onClick={() => setDeleting(true)}><Trash2 size={14} /></button>
+      <button className="icon-btn offer-act" title="Edit offer" aria-label={`Edit ${offer.buyer.name}'s offer`} onClick={() => setEditing(true)}><Pencil size={14} /></button>
+      <button className="icon-btn offer-act danger" title="Delete offer" aria-label={`Delete ${offer.buyer.name}'s offer`} onClick={() => setDeleting(true)}><Trash2 size={14} /></button>
       {editing && <EditOfferModal offer={offer} accepted={accepted} dealNma={dealNma ?? null} dealNra={dealNra ?? null} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); onChanged(); }} />}
       {deleting && (
         <ConfirmDialog
@@ -136,12 +136,12 @@ function EditOfferModal({ offer, accepted, dealNma, dealNra, onClose, onSaved }:
         <div className="field">
           <label>Offer per NMA</label>
           <MoneyInput decimals={2} value={perNma} onChange={setFromNma} ariaLabel="Offer per NMA" disabled={dealNma == null} placeholder="0.00" />
-          <span className="muted" style={{ fontSize: 11.5 }}>{dealNma != null ? `× ${dealNma} NMA` : "Deal has no NMA set"}</span>
+          <span className="dd-hint">{dealNma != null ? `× ${dealNma} NMA` : "Deal has no NMA set"}</span>
         </div>
         <div className="field">
           <label>Offer per NRA</label>
           <MoneyInput decimals={2} value={perNra} onChange={setFromNra} ariaLabel="Offer per NRA" disabled={dealNra == null} placeholder="0.00" />
-          <span className="muted" style={{ fontSize: 11.5 }}>{dealNra != null ? `× ${dealNra} NRA` : "Deal has no NRA set"}</span>
+          <span className="dd-hint">{dealNra != null ? `× ${dealNra} NRA` : "Deal has no NRA set"}</span>
         </div>
         <div className="field"><label>Offer amount</label><MoneyInput value={amount} onChange={setFromAmount} ariaLabel="Offer amount" /></div>
         <div className="field"><label>Status</label>
@@ -153,7 +153,7 @@ function EditOfferModal({ offer, accepted, dealNma, dealNra, onClose, onSaved }:
         <div className="field"><label>Expiration date</label><DateField value={expiration} onChange={setExpiration} /></div>
         <div className="field"><label>Conditions</label><input value={conditions} onChange={(e) => setConditions(e.target.value)} placeholder="e.g. subject to title review" /></div>
       </div>
-      <p className="muted" style={{ marginBottom: 0, fontSize: 12.5 }}>
+      <p className="dd-hint offer-note">
         Changes apply immediately to the deal's metrics, profit estimates and reporting.
       </p>
     </Modal>

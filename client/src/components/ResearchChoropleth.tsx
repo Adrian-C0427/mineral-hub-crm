@@ -48,6 +48,8 @@ interface Props {
   onFocusChange?: (county: string | null) => void;
   /** Clicking an abstract in the drilled-in view (e.g. jump to its records). */
   onAbstractClick?: (abstractId: string) => void;
+  /** County to outline as hovered (e.g. while its row in a side list is hovered). */
+  highlightCounty?: string | null;
 }
 
 const W = 720, H = 680;
@@ -64,10 +66,11 @@ function normAbstract(v: string | null | undefined): string {
 }
 
 interface AbstractShape { abstract: string; survey: string | null; count: number; amount: number; d: string }
+interface TipLine { text: string; color?: string; muted?: boolean }
 
-export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "", abstractStats = [], focusCounty = null, onFocusChange, onAbstractClick }: Props) {
+export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "", abstractStats = [], focusCounty = null, onFocusChange, onAbstractClick, highlightCounty = null }: Props) {
   const [features, setFeatures] = useState<GeoFeature[] | null>(null);
-  const [tip, setTip] = useState<{ x: number; y: number; title: string; lines: { text: string; color?: string }[] } | null>(null);
+  const [tip, setTip] = useState<{ x: number; y: number; title: string; lines: TipLine[] } | null>(null);
   const [vb, setVb] = useState<ViewBox>(FULL_VIEW);
   const [abstractShapes, setAbstractShapes] = useState<AbstractShape[] | null>(null);
   const [abstractsVisible, setAbstractsVisible] = useState(false);
@@ -199,7 +202,7 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
 
   function fillFor(name: string): string {
     const s = statMap.get(name.toUpperCase());
-    if (!s || s.total === 0) return "rgba(148,163,184,0.10)";
+    if (!s || s.total === 0) return "var(--surface-2)";
     if (metric === "activity") {
       const t = Math.log(s.total + 1) / Math.log(maxTotal + 1);
       return `rgba(59,130,246,${(0.15 + 0.8 * t).toFixed(2)})`;
@@ -222,8 +225,8 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
     return `rgba(59,130,246,${(0.18 + 0.72 * t).toFixed(2)})`;
   }
 
-  if (!features) return <p className="muted">Loading map…</p>;
-  if (!shapes.length) return <p className="muted">County boundaries unavailable.</p>;
+  if (!features) return <p className="rs-map-status">Loading map…</p>;
+  if (!shapes.length) return <p className="rs-map-status">County boundaries unavailable.</p>;
 
   // Stroke widths in viewBox units shrink as we zoom in — divide by the zoom
   // factor so lines keep a constant on-screen weight during the animation.
@@ -231,43 +234,45 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
   const sw = (v: number) => v / zoom;
   const focused = !!focusCounty;
 
-  const moveTip = (e: React.MouseEvent, title: string, lines: { text: string; color?: string }[]) => {
+  const moveTip = (e: React.MouseEvent, title: string, lines: TipLine[]) => {
     const r = wrapRef.current?.getBoundingClientRect();
     if (r) setTip({ x: e.clientX - r.left + 12, y: e.clientY - r.top + 12, title, lines });
   };
 
   return (
-    <div ref={wrapRef} style={{ position: "relative" }}>
+    <div ref={wrapRef} className="rs-choro">
       {focused && (
         <button
-          className="small"
-          style={{ position: "absolute", top: 6, left: 6, zIndex: 6 }}
+          type="button"
+          className="rs-choro-back"
           onClick={() => onFocusChange?.(null)}
         >
           ← All counties
         </button>
       )}
-      <svg viewBox={vb.map((v) => v.toFixed(2)).join(" ")} style={{ width: "100%", height: "auto", display: "block" }}>
+      <svg viewBox={vb.map((v) => v.toFixed(2)).join(" ")} className="rs-choro-svg">
         {shapes.map((sh) => {
           const st = statMap.get(sh.name.toUpperCase());
           const isSel = selected.some((c) => c.toUpperCase() === sh.name.toUpperCase());
           const isFocus = focused && sh.name.toUpperCase() === focusCounty!.toUpperCase();
+          const isHover = !!highlightCounty && sh.name.toUpperCase() === highlightCounty.toUpperCase();
           return (
             <path
               key={sh.name}
               d={sh.d}
-              // Drilled in, the county's own choropleth wash disappears — the
-              // abstract mesh alone shows where the activity is.
-              fill={isFocus && abstractShapes?.length ? "rgba(148,163,184,0.05)" : fillFor(sh.name)}
-              // The focused county keeps its hotspot red outline through the
-              // drill-down; selection blue applies only at the overview.
-              stroke={isFocus
-                ? (st?.isHotspot ? "var(--red, #ef4444)" : "var(--accent, #3b82f6)")
-                : isSel ? "var(--accent, #3b82f6)" : st?.isHotspot ? "var(--red, #ef4444)" : "rgba(148,163,184,0.35)"}
-              strokeWidth={isFocus ? sw(2.2) : isSel ? sw(2) : st?.isHotspot ? sw(1.6) : sw(0.5)}
+              // Outline colours live in CSS (tokens): the focused county keeps
+              // its hotspot red outline through the drill-down; selection blue
+              // applies only at the overview.
+              className={`rs-cty ${isFocus ? "focus" : isSel ? "sel" : ""} ${st?.isHotspot ? "hot" : ""} ${isHover ? "hover" : ""}`}
+              strokeWidth={isFocus ? sw(2.2) : isSel ? sw(2) : st?.isHotspot ? sw(1.6) : isHover ? sw(1.2) : sw(0.6)}
               // While drilled in, the abstract layer owns interaction inside the
               // county; other counties stay clickable to hop directly between them.
-              style={{ cursor: st ? "pointer" : "default", opacity: focused && !isFocus ? 0.45 : 1, transition: "opacity 300ms ease" }}
+              style={{
+                // Drilled in, the county's own choropleth wash disappears — the
+                // abstract mesh alone shows where the activity is.
+                fill: isFocus && abstractShapes?.length ? "var(--surface-1)" : fillFor(sh.name),
+                cursor: st ? "pointer" : "default", opacity: focused && !isFocus ? 0.45 : 1, transition: "opacity 300ms ease",
+              }}
               pointerEvents={isFocus && abstractShapes?.length ? "none" : undefined}
               onClick={() => {
                 if (!st) return;
@@ -280,9 +285,9 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
                 { text: `${st.total.toLocaleString()} records` },
                 ...(st.pctChange != null ? [{ text: `${st.pctChange >= 0 ? "+" : ""}${Math.round(st.pctChange * 100)}% vs prior` }] : []),
                 ...(st.pctChange == null && st.total > 0 ? [{ text: "new activity" }] : []),
-                ...(st.isHotspot ? [{ text: "● Hotspot", color: "var(--red, #ef4444)" }] : []),
-                ...(!focused ? [{ text: "Click to zoom in" }] : []),
-              ] : [{ text: "No data" }])}
+                ...(st.isHotspot ? [{ text: "● Hotspot", color: "var(--danger-ink)" }] : []),
+                ...(!focused ? [{ text: "Click to zoom in", muted: true }] : []),
+              ] : [{ text: "No recorded activity", muted: true }])}
               onMouseLeave={() => setTip(null)}
             />
           );
@@ -299,16 +304,15 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
                 <path
                   key={ab.abstract}
                   d={ab.d}
-                  fill={abstractFill(stat, ab.count)}
-                  stroke={hot ? "var(--red, #ef4444)" : "rgba(148,163,184,0.4)"}
+                  className={`rs-abs ${hot ? "hot" : ""}`}
                   strokeWidth={hot ? sw(1.4) : sw(0.35)}
-                  style={{ cursor: active && onAbstractClick ? "pointer" : "default" }}
+                  style={{ fill: abstractFill(stat, ab.count), cursor: active && onAbstractClick ? "pointer" : "default" }}
                   onClick={() => active && onAbstractClick?.(stat?.abstractId ?? ab.abstract)}
                   onMouseMove={(e) => moveTip(e, formatAbstract({ abstract: ab.abstract, survey: ab.survey, county: focusCounty, state: "TX" }), [
                     { text: active ? `${(stat?.total ?? ab.count).toLocaleString()} records` : "No activity in period" },
                     ...(ab.amount > 0 ? [{ text: `$${Math.round(ab.amount).toLocaleString()} in transactions` }] : []),
-                    ...(hot ? [{ text: "● Hotspot", color: "var(--red, #ef4444)" }] : []),
-                    ...(active && onAbstractClick ? [{ text: "Click to view records" }] : []),
+                    ...(hot ? [{ text: "● Hotspot", color: "var(--danger-ink)" }] : []),
+                    ...(active && onAbstractClick ? [{ text: "Click to view records", muted: true }] : []),
                   ])}
                   onMouseLeave={() => setTip(null)}
                 />
@@ -318,26 +322,22 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
                 stays crisp above the abstract mesh. */}
             {focusShape && (
               <path d={focusShape.d} fill="none"
-                stroke={statMap.get(focusShape.name.toUpperCase())?.isHotspot ? "var(--red, #ef4444)" : "var(--accent, #3b82f6)"}
+                className={`rs-cty-ring ${statMap.get(focusShape.name.toUpperCase())?.isHotspot ? "hot" : ""}`}
                 strokeWidth={sw(2.2)} pointerEvents="none" />
             )}
           </g>
         )}
       </svg>
       {focused && abstractShapes === null && (
-        <div className="muted" style={{ position: "absolute", bottom: 8, left: 8, fontSize: 12 }}>Loading abstracts…</div>
+        <div className="rs-map-note">Loading abstracts…</div>
       )}
       {focused && abstractShapes !== null && abstractShapes.length === 0 && (
-        <div className="muted" style={{ position: "absolute", bottom: 8, left: 8, fontSize: 12 }}>Abstract boundaries aren't available for this county yet.</div>
+        <div className="rs-map-note">Abstract boundaries aren't available for this county yet.</div>
       )}
       {tip && (
-        <div style={{
-          position: "absolute", left: tip.x, top: tip.y, pointerEvents: "none", zIndex: 5,
-          background: "var(--panel, #1f2937)", border: "1px solid var(--border, #374151)",
-          borderRadius: 6, padding: "6px 9px", fontSize: 12, whiteSpace: "nowrap", boxShadow: "0 4px 12px rgba(0,0,0,0.4)",
-        }}>
+        <div className="rs-map-tip" style={{ left: tip.x, top: tip.y }}>
           <strong>{tip.title}</strong>
-          {tip.lines.map((l, i) => <div key={i} style={l.color ? { color: l.color } : undefined}>{l.text}</div>)}
+          {tip.lines.map((l, i) => <div key={i} className={l.muted ? "muted" : undefined} style={l.color ? { color: l.color } : undefined}>{l.text}</div>)}
         </div>
       )}
     </div>

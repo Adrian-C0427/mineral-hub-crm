@@ -1,6 +1,6 @@
 import { Navigate, useSearchParams } from "react-router-dom";
 import { OrgSettings } from "../components/OrgSettings";
-import { SettingsNav } from "../components/SettingsNav";
+import { SettingsLayout } from "../components/SettingsNav";
 
 type Tab = "org" | "users" | "roles" | "owner";
 
@@ -12,10 +12,8 @@ export function Organization() {
   if (raw === "portal") return <Navigate to="/settings/portal" replace />;
   const tab = (raw as Tab) || "org";
   return (
-    <div className="page" style={{ maxWidth: 900 }}>
-      <div className="page-header"><h1>Settings</h1></div>
-      <SettingsNav />
+    <SettingsLayout>
       <OrgSettings initialTab={tab} />
-    </div>
+    </SettingsLayout>
   );
 }

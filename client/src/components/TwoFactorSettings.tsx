@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { api, ApiError } from "../api/client";
 import { Banner, ConfirmDialog } from "./ui";
+import { Tag } from "./kit";
+import { SettingsCardHead } from "./SettingsNav";
 
 /**
  * Two-factor (TOTP) management for the account settings page: enroll (scan a QR
@@ -79,15 +81,21 @@ export function TwoFactorSettings() {
     finally { setBusy(false); }
   }
 
+  const enabled = !!status?.enabled;
   return (
-    <div className="panel">
-      <div className="section-head">
-        <h3 style={{ margin: 0 }}>Two-Factor Authentication</h3>
-        <span className={`badge ${status?.enabled ? "resp-offer" : "resp-pending"}`}>{status?.enabled ? "Enabled" : "Disabled"}</span>
-      </div>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Add a one-time code from an authenticator app (Google Authenticator, Authy, 1Password…) as a second step when signing in.
-      </p>
+    <section className="panel twofa-card">
+      <SettingsCardHead
+        title="Two-factor authentication"
+        badge={status && <Tag tone={enabled ? "success" : "neutral"} dot>{enabled ? "On" : "Off"}</Tag>}
+        desc="Add a one-time code from an authenticator app (Google Authenticator, Authy, 1Password…) as a second step when signing in."
+        aside={
+          status && !enabled && !setup ? (
+            <button className="primary" disabled={busy} onClick={startSetup}>{busy ? "Please wait…" : "Set up"}</button>
+          ) : enabled && !showDisable ? (
+            <button onClick={() => setShowDisable(true)}>Manage / disable</button>
+          ) : null
+        }
+      />
 
       {error && <Banner kind="error">{error}</Banner>}
 
@@ -99,55 +107,42 @@ export function TwoFactorSettings() {
         </Banner>
       )}
 
-      {status && !status.enabled && !setup && (
-        <button className="primary" disabled={busy} onClick={startSetup}>{busy ? "Please wait…" : "Enable two-factor authentication"}</button>
-      )}
-
       {setup && (
-        <div>
-          <ol className="twofa-steps">
-            <li>
-              Scan this QR code with your authenticator app (Google Authenticator, Authy, 1Password, etc.):
-              {qr && <div style={{ margin: "10px 0" }}><img src={qr} alt="Two-factor QR code" width={200} height={200} style={{ background: "#fff", borderRadius: 6, padding: 8 }} /></div>}
-              <div className="muted" style={{ fontSize: 12 }}>Can’t scan? Enter this key manually instead:</div>
-              <div className="twofa-secret">
-                <code>{setup.secret.replace(/(.{4})/g, "$1 ").trim()}</code>
-                <button className="small" onClick={() => navigator.clipboard?.writeText(setup.secret).catch(() => {})}>Copy</button>
-              </div>
-              <span className="muted" style={{ fontSize: 12 }}>Issuer “Mineral Hub”, time-based, 6 digits.</span>
-            </li>
-            <li>
-              Enter the current 6-digit code to confirm:
-              <div className="row" style={{ marginTop: 6 }}>
-                <input value={enableCode} onChange={(e) => setEnableCode(e.target.value)} inputMode="numeric" placeholder="123456" style={{ width: 140 }} />
-                <button className="primary" disabled={busy || !enableCode.trim()} onClick={enable}>Confirm &amp; enable</button>
-                <button className="small" onClick={() => { setSetup(null); setEnableCode(""); }}>Cancel</button>
-              </div>
-            </li>
-          </ol>
+        <div className="twofa-setup">
+          <div className="twofa-qr">
+            {qr ? <img src={qr} alt="Two-factor QR code" width={150} height={150} /> : <span>QR code</span>}
+          </div>
+          <div className="twofa-steps">
+            <span className="twofa-step"><b>1.</b> Scan this QR code with your authenticator app (Google Authenticator, Authy, 1Password, etc.). Can’t scan? Enter this key manually instead:</span>
+            <div className="twofa-secret">
+              <code>{setup.secret.replace(/(.{4})/g, "$1 ").trim()}</code>
+              <button className="small" onClick={() => navigator.clipboard?.writeText(setup.secret).catch(() => {})}>Copy</button>
+            </div>
+            <span className="twofa-note">Issuer “Mineral Hub”, time-based, 6 digits.</span>
+            <span className="twofa-step"><b>2.</b> Enter the current 6-digit code to confirm:</span>
+            <div className="twofa-verify">
+              <input className="twofa-code" value={enableCode} onChange={(e) => setEnableCode(e.target.value)} inputMode="numeric" placeholder="123456" />
+              <button className="primary" disabled={busy || !enableCode.trim()} onClick={enable}>Verify and turn on</button>
+              <button className="set-btn-ghost" onClick={() => { setSetup(null); setEnableCode(""); }}>Cancel</button>
+            </div>
+          </div>
         </div>
       )}
 
-      {status?.enabled && (
-        <div>
-          <p className="muted" style={{ marginBottom: 8 }}>{status.recoveryCodesRemaining} recovery code{status.recoveryCodesRemaining === 1 ? "" : "s"} remaining.</p>
-          {!showDisable ? (
-            <div className="row">
-              <button className="small" onClick={() => setShowDisable(true)}>Manage / disable</button>
-            </div>
-          ) : (
-            <div>
-              <div className="field" style={{ maxWidth: 240 }}>
-                <label>Current code (or recovery code)</label>
-                <input value={manageCode} onChange={(e) => setManageCode(e.target.value)} inputMode="numeric" placeholder="123456" />
-              </div>
-              <div className="row">
-                <button className="small" disabled={busy || !manageCode.trim()} onClick={regenerate}>Regenerate recovery codes</button>
-                <button className="danger" disabled={busy || !manageCode.trim()} onClick={() => setConfirmDisable(true)}>Disable 2FA</button>
-                <button className="small" onClick={() => { setShowDisable(false); setManageCode(""); }}>Cancel</button>
-              </div>
-            </div>
-          )}
+      {enabled && status && (
+        <p className="set-meta">{status.recoveryCodesRemaining} recovery code{status.recoveryCodesRemaining === 1 ? "" : "s"} remaining.</p>
+      )}
+      {enabled && showDisable && (
+        <div className="twofa-manage">
+          <div className="field">
+            <label>Current code (or recovery code)</label>
+            <input className="twofa-code" value={manageCode} onChange={(e) => setManageCode(e.target.value)} inputMode="numeric" placeholder="123456" />
+          </div>
+          <div className="row">
+            <button disabled={busy || !manageCode.trim()} onClick={regenerate}>Regenerate recovery codes</button>
+            <button className="danger" disabled={busy || !manageCode.trim()} onClick={() => setConfirmDisable(true)}>Disable 2FA</button>
+            <button className="set-btn-ghost" onClick={() => { setShowDisable(false); setManageCode(""); }}>Cancel</button>
+          </div>
         </div>
       )}
       {confirmDisable && (
@@ -161,6 +156,6 @@ export function TwoFactorSettings() {
           onConfirm={disable}
         />
       )}
-    </div>
+    </section>
   );
 }

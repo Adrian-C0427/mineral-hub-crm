@@ -246,7 +246,7 @@ authRouter.post("/logout", (_req, res) => {
 
 // Valid UI themes. Kept here so the preferences route and any future default
 // logic share one source of truth.
-const THEMES = ["dark", "light"] as const;
+const THEMES = ["dark", "light", "dim", "slate", "dusk", "neutral"] as const;
 type Theme = (typeof THEMES)[number];
 
 // Hex color as stored for accent/avatar preferences ("#rrggbb").
@@ -265,7 +265,7 @@ async function readPrefs(userId: string): Promise<{ themePreference: Theme | nul
       select: { themePreference: true, accentColor: true, accentColor2: true, avatarColor: true },
     });
     return {
-      themePreference: row?.themePreference === "light" || row?.themePreference === "dark" ? row.themePreference : null,
+      themePreference: row?.themePreference && (THEMES as readonly string[]).includes(row.themePreference) ? (row.themePreference as Theme) : null,
       accentColor: row?.accentColor && HEX_COLOR.test(row.accentColor) ? row.accentColor : null,
       accentColor2: row?.accentColor2 && HEX_COLOR.test(row.accentColor2) ? row.accentColor2 : null,
       avatarColor: row?.avatarColor && HEX_COLOR.test(row.avatarColor) ? row.avatarColor : null,

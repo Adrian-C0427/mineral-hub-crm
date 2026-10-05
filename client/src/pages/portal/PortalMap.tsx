@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { addCadastralLayers, styleWithGlyphs, watchGisHealth } from "../../lib/mapLayers";
@@ -11,17 +11,34 @@ const TX_CENTER: [number, number] = [-98.5, 31.3];
 const DEFAULT_LAYERS = { counties: true, boundaries: true, numbers: true, surveys: true, wells: true, wellbores: true };
 type LayerState = typeof DEFAULT_LAYERS;
 
+/** Legend swatches for the shared wells layer — the same colours its paint uses
+ *  (lib/mapLayers STATUS_COLOR); everything else falls under "Other". */
+const WELL_LEGEND = [
+  { label: "Producing", color: "#22c55e" },
+  { label: "Shut-in", color: "#f59e0b" },
+  { label: "Permitted", color: "#3b82f6" },
+  { label: "Plugged", color: "#6b7280" },
+];
+
+/** Imperative hooks for hosts that put map actions outside the map (e.g. "Locate tract"). */
+export interface PortalMapApi { recenter: () => void }
+
 /**
  * Public offering map — the same cadastral engine as the CRM (vector tiles
  * from PostGIS), with the offering's abstracts highlighted, layer toggles,
  * zoom/pan/reset controls, and auto-fit to the property's extent.
  */
-export function PortalMap({ features, height = 420, onSelect }: {
+export function PortalMap({ features, height = 420, onSelect, legendLabel = "This tract", resetLabel = "Reset view to the property", apiRef }: {
   features: FC;
   /** Pixel height, or any CSS length (e.g. "100%") to fill a flex container. */
   height?: number | string;
   /** Marketplace mode: called with the clicked feature's deal slug. */
   onSelect?: (slug: string, name: string) => void;
+  /** Legend name for the highlighted offering footprint. */
+  legendLabel?: string;
+  /** Tooltip / accessible name of the reset-view button. */
+  resetLabel?: string;
+  apiRef?: MutableRefObject<PortalMapApi | null>;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -44,11 +61,13 @@ export function PortalMap({ features, height = 420, onSelect }: {
     vis("wellbores", L.wellbores);
   }
 
+  const resetView = () => { if (homeBounds.current) mapRef.current?.fitBounds(homeBounds.current, { padding: 50, maxZoom: 13, duration: 500 }); };
+  if (apiRef) apiRef.current = { recenter: resetView };
+
   useEffect(() => {
     if (mapRef.current || !container.current) return;
     const map = new maplibregl.Map({ container: container.current, style: styleWithGlyphs(), center: TX_CENTER, zoom: 6 });
     watchGisHealth(map);
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
     mapRef.current = map;
     map.on("load", async () => {
       const countyLabels = await fetch(`/data/county-labels.geojson`).then((r) => r.json()).catch(() => ({ type: "FeatureCollection", features: [] }));
@@ -92,8 +111,8 @@ export function PortalMap({ features, height = 420, onSelect }: {
     }
   }, [features]);
 
-  // Keep the canvas sized to its container — the marketplace panel is resizable,
-  // so the map's box changes without a window resize event.
+  // Keep the canvas sized to its container — the marketplace panel is resizable
+  // (and the map can be hidden/shown), so its box changes without a window resize.
   useEffect(() => {
     const el = container.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -107,17 +126,21 @@ export function PortalMap({ features, height = 420, onSelect }: {
   const toggle = (k: keyof LayerState) => setLayers((p) => ({ ...p, [k]: !p[k] }));
 
   return (
-    <div className="portal-map" style={{ position: "relative", height, borderRadius: 8, overflow: "hidden", border: "1px solid var(--border)" }}>
-      <div ref={container} style={{ position: "absolute", inset: 0 }} />
-      {/* Both floating controls share one top-right flex container so they can
-          never overlap — the reset button sits beside the Layers panel and
-          wraps under it when the map is narrow. */}
+    <div className="portal-map pp-map" style={{ height }}>
+      <div ref={container} className="pp-map-canvas" />
+      {/* Zoom / reset stack (top-left), replacing MapLibre's default control. */}
+      <div className="pp-map-zoom">
+        <button type="button" onClick={() => mapRef.current?.zoomIn()} aria-label="Zoom in" title="Zoom in">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+        </button>
+        <button type="button" onClick={() => mapRef.current?.zoomOut()} aria-label="Zoom out" title="Zoom out">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+        </button>
+        <button type="button" onClick={resetView} aria-label={resetLabel} title={resetLabel}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>
+        </button>
+      </div>
       <div className="portal-map-controls">
-        <button
-          className="small portal-map-reset"
-          onClick={() => homeBounds.current && mapRef.current?.fitBounds(homeBounds.current, { padding: 50, maxZoom: 13, duration: 500 })}
-          title="Reset view to the property"
-        >⌂ Reset view</button>
         <MapLayersPanel
           variant="floating"
           collapsible
@@ -130,7 +153,13 @@ export function PortalMap({ features, height = 420, onSelect }: {
           onToggle={(k) => toggle(k as keyof LayerState)}
         />
       </div>
-      {hovered && <div className="portal-map-hover">{hovered}</div>}
+      {hovered && <div className="portal-map-hover pp-map-hover">{hovered}</div>}
+      <div className="pp-map-legend" aria-label="Map legend">
+        <span><i className="pp-lg-tract" />{legendLabel}</span>
+        {layers.wells && WELL_LEGEND.map((w) => (
+          <span key={w.label}><i className="pp-lg-dot" style={{ background: w.color }} />{w.label}</span>
+        ))}
+      </div>
     </div>
   );
 }

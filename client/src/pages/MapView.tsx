@@ -8,11 +8,13 @@ import { US_STATE_OPTIONS, US_STATE_LABELS } from "../lib/options";
 import { Select } from "../components/Select";
 import { downloadCsv } from "../lib/csv";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION } from "../lib/counties";
-import { addCadastralLayers, addTractLayers, tractInfo, TRACT_SOURCE, type TractInfo, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
+import { addCadastralLayers, addTractLayers, tractInfo, TRACT_SOURCE, STATUS_COLOR, type TractInfo, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
+import { collectCoords, bboxOfPoints } from "../lib/geo";
+import { FormSection } from "../components/kit";
 import { MapLayersPanel } from "../components/MapLayersPanel";
 import { MapShpImport } from "../components/MapShpImport";
 import { useAbstractIndex } from "../components/AbstractPicker";
-import { PHONE_QUERY, useIsPhone } from "../lib/mobile";
+import { PHONE_QUERY } from "../lib/mobile";
 import { abstractShortLabel, countyStateLabel, formatAbstract, rankAbstracts, surveyLabel } from "../lib/abstracts";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, StageBadge, PriorityBadge, ChipList } from "../components/ui";
@@ -106,6 +108,16 @@ const HEAT_STOPS: [number, string][] = [[0, "#eef2ff"], [0.2, "#fde68a"], [0.45,
 interface HeatState { oil: boolean; gas: boolean; intensity: number; radius: number; opacity: number; min: number; max: number; period: HeatPeriod; from: string; to: string; topProducers: boolean; hotspots: boolean }
 const DEFAULT_HEAT: HeatState = { oil: false, gas: false, intensity: 1.6, radius: 48, opacity: 0.85, min: 0, max: 0, period: "12m", from: "", to: "", topProducers: false, hotspots: true };
 
+// Chip dots for the Well status filter — the same colours the wells are drawn
+// in (read from the shared STATUS_COLOR match expression).
+const STATUS_DOT: Record<string, string> = (() => {
+  const m: Record<string, string> = {};
+  const expr = STATUS_COLOR as unknown as unknown[];
+  for (let i = 2; i + 1 < expr.length; i += 2) m[String(expr[i])] = String(expr[i + 1]);
+  return m;
+})();
+const STATUS_DOT_FALLBACK = String((STATUS_COLOR as unknown as unknown[]).at(-1));
+
 const STATUS_OPTIONS = [
   ["ACTIVE", "Active deals"], ["ALL", "All linked deals"], ["UNDER_CONTRACT", "Under Contract"],
   ["PREPARING_PACKAGE", "Preparing Package"], ["SENT_TO_BUYERS", "Sent to Buyers"], ["NEGOTIATING", "Negotiating"],
@@ -145,13 +157,15 @@ export function MapView() {
   // Saved filter presets (named filter combinations), remembered per browser.
   const [filterPresets, setFilterPresets] = useState<FilterPreset[]>(() => loadJson<FilterPreset[]>(MAP_FILTERS_KEY, []));
   const [filterName, setFilterName] = useState("");
+  // "Save current" expands into the name field + Save / Cancel.
+  const [saveOpen, setSaveOpen] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   // Full-screen viewing mode: the page becomes a fixed overlay filling the
   // viewport. Nothing remounts — search, filters, hotspots, layers, zoom,
   // position, and popups all carry across the toggle untouched.
   const [fullscreen, setFullscreen] = useState(false);
-  // Phones: the legend folds into a small button so it doesn't cover the map.
-  const phone = useIsPhone();
+  // The legend card collapses to its header; on phones it starts collapsed so
+  // it doesn't cover the map.
   const [legendOpen, setLegendOpen] = useState(() => !window.matchMedia(PHONE_QUERY).matches);
   const [statusFilter, setStatusFilter] = useState("ACTIVE");
   const [fStates, setFStates] = useState<string[]>([]);
@@ -239,7 +253,6 @@ export function MapView() {
     const savedCam = loadJson<MapCam | null>(MAP_VIEW_KEY, null);
     const map = new maplibregl.Map({ container: mapContainer.current, style: styleWithGlyphs(), center: savedCam?.center ?? LEON_CENTER, zoom: savedCam?.zoom ?? 10, attributionControl: { compact: true } });
     watchGisHealth(map);
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
     mapRef.current = map;
 
     map.on("load", async () => {
@@ -717,11 +730,21 @@ export function MapView() {
 
   // Imported tract boundaries (shapefile uploads) — fetched on load and after
   // every import/delete so the overlay always mirrors the stored set.
+  const tractsFC = useRef<GeoJSON.FeatureCollection | null>(null);
   async function loadTracts() {
     try {
       const fc = await api.get<GeoJSON.FeatureCollection>("/map/tracts");
+      tractsFC.current = fc;
       (mapRef.current?.getSource(TRACT_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(fc);
     } catch { /* overlay is optional — the map works without it */ }
+  }
+  // "Show on map" for one upload: turn the tracts layer on and frame that
+  // file's boundaries (from the overlay data already loaded).
+  function showImport(importId: string) {
+    setLayers((p) => ({ ...p, tracts: true }));
+    const feats = (tractsFC.current?.features ?? []).filter((f) => f.properties?.__importId === importId);
+    const pts = feats.flatMap((f) => collectCoords(f.geometry as unknown as { type: string; coordinates: unknown }));
+    if (pts.length) fitBbox(bboxOfPoints(pts));
   }
 
   // Saved filters: name the current filter combination, reload it later,
@@ -758,6 +781,10 @@ export function MapView() {
     return filterPresets.find((p) => JSON.stringify({ ...p.filters, status: p.filters.status ?? "ACTIVE" }) === cur)?.name ?? null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterPresets, statusFilter, fStates, fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses, fOperators, fFormations]);
+  // Filters button badge: how many filter groups are set (deal status counts
+  // once it is anything other than the default "Active deals").
+  const filterCount = (statusFilter !== "ACTIVE" ? 1 : 0) +
+    [fStates, fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses, fOperators, fFormations].filter((v) => v.length > 0).length;
   const anyFilterSet = fStates.length > 0 || fCounties.length > 0 || fSurveys.length > 0 || fAbstracts.length > 0 ||
     fWellTypes.length > 0 || fWellStatuses.length > 0 || fOperators.length > 0 || fFormations.length > 0;
   // Size the map to fill from its top down to the viewport bottom (footer), with
@@ -766,12 +793,24 @@ export function MapView() {
   useLayoutEffect(() => {
     const el = mapWrap.current;
     if (!el) return;
-    const measure = () => setMapH(Math.max(360, Math.round(window.innerHeight - el.getBoundingClientRect().top - 16)));
+    // A bottom tab bar (phones), when the shell has one, is subtracted too.
+    const measure = () => {
+      const tabbar = parseFloat(getComputedStyle(document.body).getPropertyValue("--tabbar-h")) || 0;
+      setMapH(Math.max(360, Math.round(window.innerHeight - el.getBoundingClientRect().top - 16 - tabbar)));
+    };
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
   }, [showFilters, showHeat, fullscreen]);
   useEffect(() => { mapRef.current?.resize(); }, [mapH]);
+  // Keep the canvas matched to its frame however the frame changes size.
+  useEffect(() => {
+    const el = mapContainer.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => mapRef.current?.resize());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   // Full-screen is a pure CSS re-layout of the SAME mounted tree — the map,
   // its panels, search, filters, and every piece of user state persist across
@@ -784,237 +823,134 @@ export function MapView() {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       // Let open menus/search consume their own Escape first.
-      if (document.querySelector(".msel-menu")) return;
+      if (document.querySelector(".msel-menu, .ml2-pop, .modal-overlay")) return;
       setFullscreen(false);
     };
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("keydown", onKey); mapRef.current?.resize(); };
   }, [fullscreen]);
 
-  return (
-    <div className={`page ${fullscreen ? "mc-fullscreen" : ""}`} style={fullscreen ? undefined : { maxWidth: 1400 }}>
-      <div className="page-header"><div className="row"><h1 style={{ marginBottom: 0 }}>Map</h1><span className="muted">Texas · {COUNTIES.length} counties · abstracts stream as you pan &amp; zoom</span></div></div>
+  const panelOpen = showFilters || showHeat;
+  const closePanel = () => { setShowFilters(false); setShowHeat(false); };
+  const clearAllFilters = () => {
+    setStatusFilter("ACTIVE");
+    setFStates([]); setFCounties([]); setFSurveys([]); setFAbstracts([]);
+    setFWellTypes([]); setFWellStatuses([]); setFOperators([]); setFFormations([]);
+  };
 
-      <div className="row" style={{ marginBottom: 12, gap: 10, position: "relative" }}>
-        {/* min-width keeps the full placeholder visible; the row wraps below it
-            on narrow screens instead of clipping the ghost text. */}
-        <div ref={searchBoxRef} style={{ position: "relative", flex: "1 1 360px", minWidth: "min(100%, 360px)", maxWidth: 520 }}>
-          <input
-            value={query}
-            onChange={(e) => { setQuery(e.target.value); setSearchFocus(true); }}
-            onFocus={() => setSearchFocus(true)}
-            onClick={() => setSearchFocus(true)}
-            onKeyDown={(e) => { if (e.key === "Escape") setSearchFocus(false); }}
-            placeholder="Search wells, abstracts, operators, deals…"
-            aria-label="Search the map"
-          />
+  return (
+    <div className={`page map-page ${fullscreen ? "mc-fullscreen" : ""}`}>
+      {/* Title + actions. In full screen only the title folds away — the
+          actions, search and panels stay usable over the map. */}
+      <div className="mc-head">
+        <div className="mc-title">
+          <h1>Map</h1>
+          <span className="mc-sub">Texas · {COUNTIES.length} counties · abstracts stream as you pan and zoom</span>
+        </div>
+        <div className="mc-actions">
+          <button type="button" className={`mc-btn ${showFilters || filterCount > 0 ? "active" : ""}`} aria-pressed={showFilters} onClick={() => { setShowFilters((s) => !s); setShowHeat(false); }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 5h16l-6 7.5V19l-4 1.5v-8L4 5z" /></svg>
+            Filters
+            {filterCount > 0 && <span className="mc-badge" aria-label={`${filterCount} active`}>{filterCount}</span>}
+          </button>
+          <button type="button" className={`mc-btn ${showHeat ? "active" : ""} ${heatActive ? "hot" : ""}`} aria-pressed={showHeat} onClick={() => { setShowHeat((s) => !s); setShowFilters(false); }}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3c3 4 6 6.5 6 10.5A6 6 0 0 1 6 13.5C6 9.5 9 7 12 3z" /></svg>
+            Heat map
+            {heatActive && <span className="mc-hot-dot" aria-label="Heat map on" />}
+          </button>
+          <button
+            type="button"
+            className="mc-btn"
+            disabled={!deals?.length}
+            title="Export the deals linked on the map to CSV"
+            onClick={() => downloadCsv(
+              `map-deals-${new Date().toISOString().slice(0, 10)}.csv`,
+              ["Deal", "Stage", "Priority", "State", "Counties", "Operator", "Asset Types", "NRA", "NMA", "Ask Price", "Profit Est.", "Buyer"],
+              (deals ?? []).map((d) => [
+                d.name, d.stage, d.priority, d.state ?? "", d.counties.join("; "), d.operator ?? "",
+                d.assetTypes.join("; "), d.nra ?? "", d.acreageNma ?? "", d.askPrice ?? "", d.profitEst ?? "", d.selectedBuyer?.name ?? "",
+              ]),
+            )}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
+            Export
+          </button>
+          <button
+            type="button"
+            className={`mc-btn ${fullscreen ? "active" : ""}`}
+            title={fullscreen ? "Exit full screen (Esc)" : "View the map full screen"}
+            aria-pressed={fullscreen}
+            onClick={() => setFullscreen((f) => !f)}
+          >
+            {fullscreen
+              ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" /></svg>
+              : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" /></svg>}
+            Full screen
+          </button>
+        </div>
+      </div>
+
+      <div className="mc-toolbar">
+        <div ref={searchBoxRef} className="mc-search">
+          <div className="mc-search-box">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
+            <input
+              value={query}
+              onChange={(e) => { setQuery(e.target.value); setSearchFocus(true); }}
+              onFocus={() => setSearchFocus(true)}
+              onClick={() => setSearchFocus(true)}
+              onKeyDown={(e) => { if (e.key === "Escape") setSearchFocus(false); }}
+              placeholder="Search wells, abstracts, operators, deals"
+              aria-label="Search the map"
+            />
+          </div>
           {searchFocus && query.trim().length < 2 && recents.length > 0 && (
-            <div className="msel-menu map-search-menu" style={{ top: "100%" }}>
+            <div className="msel-menu map-search-menu">
               <div className="map-search-group">Recent searches</div>
               {recents.map((r, i) => (
                 <div className="msel-opt" key={`${r.t}-${r.label}-${i}`} onMouseDown={() => runSearchAction(r.t, r.label, r.sub, r.p)}>
-                  <strong>{r.label}</strong> {r.sub && <span className="muted">· {r.sub}</span>}
+                  <span className="map-search-text"><strong>{r.label}</strong> {r.sub && <span className="muted">· {r.sub}</span>}</span>
                   <span className="map-search-kind">{GROUP_LABELS[r.t]}</span>
                 </div>
               ))}
             </div>
           )}
           {searchFocus && query.trim().length >= 2 && results.length > 0 && (
-            <div className="msel-menu map-search-menu" style={{ top: "100%" }}>
+            <div className="msel-menu map-search-menu">
               {results.map((r, i) => (
                 <div key={`${r.t}-${r.label}-${i}`}>
                   {(i === 0 || results[i - 1].t !== r.t) && <div className="map-search-group">{GROUP_LABELS[r.t]}</div>}
                   <div className="msel-opt" onMouseDown={() => runSearchAction(r.t, r.label, r.sub, r.p)}>
-                    <strong>{r.label}</strong> {r.sub && <span className="muted">· {r.sub}</span>}
+                    <span className="map-search-text"><strong>{r.label}</strong> {r.sub && <span className="muted">· {r.sub}</span>}</span>
                   </div>
                 </div>
               ))}
             </div>
           )}
           {searchFocus && query.trim().length >= 2 && sug && results.length === 0 && (
-            <div className="msel-menu map-search-menu" style={{ top: "100%" }}>
-              <div className="msel-opt muted">No matches for “{query.trim()}”</div>
+            <div className="msel-menu map-search-menu">
+              <div className="map-search-empty">No matches for “{query.trim()}”</div>
             </div>
           )}
         </div>
-        <div className="spacer" />
-        <button className={`mc-btn ${showFilters ? "active" : ""}`} onClick={() => { setShowFilters((s) => !s); setShowHeat(false); }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
-          Filters
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
-        </button>
-        <button className={`mc-btn ${showHeat ? "active" : ""} ${heatActive ? "hot" : ""}`} onClick={() => { setShowHeat((s) => !s); setShowFilters(false); }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2c3 4.5 6 7.5 6 11a6 6 0 01-12 0c0-1.5.5-3 1.5-4.5C8.5 10 10.5 7 12 2z" /></svg>
-          Heat map
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="6 9 12 15 18 9" /></svg>
-        </button>
-        <button
-          className="mc-btn"
-          disabled={!deals?.length}
-          title="Export the deals linked on the map to CSV"
-          onClick={() => downloadCsv(
-            `map-deals-${new Date().toISOString().slice(0, 10)}.csv`,
-            ["Deal", "Stage", "Priority", "State", "Counties", "Operator", "Asset Types", "NRA", "NMA", "Ask Price", "Profit Est.", "Buyer"],
-            (deals ?? []).map((d) => [
-              d.name, d.stage, d.priority, d.state ?? "", d.counties.join("; "), d.operator ?? "",
-              d.assetTypes.join("; "), d.nra ?? "", d.acreageNma ?? "", d.askPrice ?? "", d.profitEst ?? "", d.selectedBuyer?.name ?? "",
-            ]),
-          )}
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-          Export
-        </button>
-        <button
-          className={`mc-btn ${fullscreen ? "active" : ""}`}
-          title={fullscreen ? "Exit full screen (Esc)" : "View the map full screen"}
-          aria-pressed={fullscreen}
-          onClick={() => setFullscreen((f) => !f)}
-        >
-          {fullscreen
-            ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3" /></svg>
-            : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" /></svg>}
-          Full screen
-        </button>
+        <div className="mc-stats">
+          {deals == null ? <span>…</span> : ([
+            [num(deals.length), `deal${deals.length === 1 ? "" : "s"}`],
+            [num(abstractCount), `deal tract${abstractCount === 1 ? "" : "s"}`],
+            [num(assets.length), `mineral asset${assets.length === 1 ? "" : "s"}`],
+            [num(gisOptions.wellCount), "wells"],
+          ] as const).map(([v, l], i) => (
+            <span key={l} className="mc-stat">{i > 0 && <i className="mc-stat-dot" aria-hidden="true" />}<b>{v}</b> {l}</span>
+          ))}
+        </div>
       </div>
 
-      <div className="row" style={{ marginBottom: 8 }}>
-        <span className="muted">{deals == null ? "…" : `${deals.length} deal${deals.length === 1 ? "" : "s"} · ${abstractCount} deal tract${abstractCount === 1 ? "" : "s"} · ${assets.length} mineral asset${assets.length === 1 ? "" : "s"} · ${num(gisOptions.wellCount)} wells`}</span>
-      </div>
-
-      {/* GIS-style layout: an open Filters / Heat panel docks as a LEFT column
-          and the map keeps its full height beside it — panels never overlay or
-          shrink the map vertically. */}
-      <div className="mc-layout">
-      {(showFilters || showHeat) && (
-        <aside className="mc-side" style={{ height: mapH ? `${mapH}px` : undefined, order: dock === "left" ? 0 : 2 }}>
-          {/* Dock-side preference — remembered across sessions. */}
-          <div className="mc-dock-row">
-            <span className="ddx-label">Panel position</span>
-            <span className="mc-dock-btns">
-              <button type="button" className={`mc-dock-btn ${dock === "left" ? "on" : ""}`} title="Dock panel on the left" aria-pressed={dock === "left"} onClick={() => setDock("left")}>⇤ Left</button>
-              <button type="button" className={`mc-dock-btn ${dock === "right" ? "on" : ""}`} title="Dock panel on the right" aria-pressed={dock === "right"} onClick={() => setDock("right")}>Right ⇥</button>
-            </span>
-          </div>
-      {showFilters && (
-        <div className="panel mc-panel" style={{ marginBottom: 12 }}>
-          <div className="mc-grid">
-            <div><div className="ddx-label mc-lbl">Deal status</div><Select value={statusFilter} onChange={setStatusFilter} ariaLabel="Deal status" options={STATUS_OPTIONS.map(([v, l]) => ({ value: v, label: l }))} /></div>
-            {/* Cascading geography: State → County → Abstract → Survey. Map data
-                is Texas-only today, so counties empty out under a non-TX state. */}
-            <div><div className="ddx-label mc-lbl">State</div><SearchableMultiSelect options={[...US_STATE_OPTIONS]} labels={US_STATE_LABELS} value={fStates} onChange={setFStates} placeholder="States…" /></div>
-            <div><div className="ddx-label mc-lbl">County</div><SearchableMultiSelect options={fStates.length && !fStates.includes("TX") ? [] : meta.counties} value={fCounties} onChange={setFCounties} placeholder="Counties…" /></div>
-            <div><div className="ddx-label mc-lbl">Survey</div><SearchableMultiSelect options={gisOptions.surveys} value={fSurveys} onChange={setFSurveys} placeholder="Surveys…" /></div>
-            <div><div className="ddx-label mc-lbl">Abstract</div><SearchableMultiSelect options={gisOptions.abstracts} labels={abstractFilterLabels} filterOptions={rankAbstractFilter} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstract # or survey…" /></div>
-            <div><div className="ddx-label mc-lbl">Well type</div><SearchableMultiSelect options={gisOptions.wellTypes} value={fWellTypes} onChange={setFWellTypes} placeholder="Well types…" /></div>
-            <div><div className="ddx-label mc-lbl">Well status</div><SearchableMultiSelect options={gisOptions.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} placeholder="Well statuses…" /></div>
-            <div><div className="ddx-label mc-lbl">Operator <span className="mc-count">({gisOptions.operators.length})</span></div><SearchableMultiSelect options={gisOptions.operators} value={fOperators} onChange={setFOperators} placeholder="Operators…" /></div>
-            <div><div className="ddx-label mc-lbl">Formation <span className="mc-count">({scoped.formations.length})</span></div><SearchableMultiSelect options={scoped.formations} value={fFormations} onChange={setFFormations} placeholder="Formations…" /></div>
-          </div>
-          {/* Saved filters (reference footer bar): label + hint on the left,
-              name-it + Save + Clear all on the right; saved chips (load /
-              overwrite / delete) keep their row beneath when any exist. */}
-          <div className="mc-presets">
-            <div className="mc-presets-bar">
-              <span className="ddx-label" style={{ marginBottom: 0 }}>Saved filters</span>
-              <span className="mc-presets-hint">Save this combination to reapply it in one click.</span>
-              <span className="mc-presets-actions">
-                <input value={filterName} onChange={(e) => setFilterName(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveFilterPreset(filterName); } }}
-                  placeholder="Name these filters" style={{ width: 190 }} />
-                <button type="button" className="small" disabled={!filterName.trim() || !anyFilterSet}
-                  title={!filterName.trim() ? "Enabled once you name the filter set" : undefined}
-                  onClick={() => saveFilterPreset(filterName)}>Save filters</button>
-                <button type="button" className="small" disabled={!anyFilterSet && statusFilter === "ACTIVE"}
-                  onClick={() => {
-                    setStatusFilter("ACTIVE");
-                    setFStates([]); setFCounties([]); setFSurveys([]); setFAbstracts([]);
-                    setFWellTypes([]); setFWellStatuses([]); setFOperators([]); setFFormations([]);
-                  }}>Clear all</button>
-              </span>
-            </div>
-            {filterPresets.length > 0 && (
-              <div className="mc-presets-row" style={{ marginTop: 10 }}>
-                {filterPresets.map((p) => (
-                  <span key={p.name} className={`mc-preset-chip ${activePresetName === p.name ? "active" : ""}`}>
-                    <button type="button" className="mc-preset-apply" title="Load this saved filter" onClick={() => applyFilterPreset(p)}>{p.name}</button>
-                    <button type="button" className="mc-preset-upd" title="Overwrite with the current filters" onClick={() => saveFilterPreset(p.name)}>↻</button>
-                    <button type="button" className="mc-preset-del" title="Delete saved filter" onClick={() => deleteFilterPreset(p.name)}>×</button>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {showHeat && (
-        <div className="panel mc-panel" style={{ marginBottom: 12 }}>
-          <div className="mc-heat">
-            <div>
-              <div className="mc-dot-lbl"><span className="va-dot" style={{ background: "#f59e0b" }} /><span className="ddx-label">Layers</span></div>
-              {/* Full-width checkbox tiles (reference) — active rows tint blue. */}
-              <div className="mc-tiles">
-                <HeatTile on={heat.oil} label="Oil production" onClick={() => setHeatK("oil", !heat.oil)} />
-                <HeatTile on={heat.gas} label="Gas production" onClick={() => setHeatK("gas", !heat.gas)} />
-                <HeatTile on={heat.topProducers} label="Top producers" onClick={() => setHeatK("topProducers", !heat.topProducers)} />
-                <HeatTile on={heat.hotspots} label="Hotspot labels" onClick={() => setHeatK("hotspots", !heat.hotspots)} />
-              </div>
-              <div className="ddx-label mc-lbl" style={{ marginTop: 16 }}>Production period</div>
-              <Select value={heat.period} onChange={(v) => setHeatK("period", v as HeatPeriod)} ariaLabel="Heat map period"
-                options={[
-                  { value: "current", label: "Current month" },
-                  { value: "3m", label: "Last 3 months" },
-                  { value: "6m", label: "Last 6 months" },
-                  { value: "12m", label: "Last 12 months" },
-                  { value: "3y", label: "Last 3 years" },
-                  { value: "ytd", label: "Year to date" },
-                  { value: "all", label: "Cumulative (all history)" },
-                  { value: "custom", label: "Custom range" },
-                ]} />
-              {heat.period === "custom" && (
-                <div className="row" style={{ gap: 8, marginTop: 10 }}>
-                  <div style={{ flex: 1 }}><div className="ddx-label mc-lbl">From</div><input type="month" value={heat.from} onChange={(e) => setHeatK("from", e.target.value)} /></div>
-                  <div style={{ flex: 1 }}><div className="ddx-label mc-lbl">To</div><input type="month" value={heat.to} onChange={(e) => setHeatK("to", e.target.value)} /></div>
-                </div>
-              )}
-            </div>
-            <div className="mc-heat-mid">
-              <div className="mc-dot-lbl"><span className="va-dot" style={{ background: "var(--accent)" }} /><span className="ddx-label">Appearance</span></div>
-              <Slider label="Intensity" min={0.2} max={6} step={0.1} value={heat.intensity} onChange={(v) => setHeatK("intensity", v)} />
-              <Slider label="Radius" min={8} max={160} step={1} value={heat.radius} onChange={(v) => setHeatK("radius", v)} suffix="px" />
-              <Slider label="Opacity" min={0.1} max={1} step={0.05} value={heat.opacity} onChange={(v) => setHeatK("opacity", v)} />
-            </div>
-            <div>
-              <div className="mc-dot-lbl"><span className="va-dot" style={{ background: "#22c55e" }} /><span className="ddx-label">Production thresholds</span><span className="muted" style={{ fontSize: 11.5 }}>(per well, period)</span></div>
-              <div className="ddx-label mc-lbl">Minimum</div>
-              <input type="number" value={heat.min || ""} onChange={(e) => setHeatK("min", Number(e.target.value) || 0)} placeholder="No minimum" />
-              <div className="ddx-label mc-lbl" style={{ marginTop: 10 }}>Maximum</div>
-              <input type="number" value={heat.max || ""} onChange={(e) => setHeatK("max", Number(e.target.value) || 0)} placeholder="No maximum" />
-              <p className="muted" style={{ fontSize: 11.5, margin: "8px 0 0" }}>Oil in bbl, gas in mcf. Wells outside the range drop from the heat.</p>
-            </div>
-          </div>
-          {rank && (heat.oil || heat.gas) && (
-            <div className="mc-rank">
-              <div className="ddx-label" style={{ marginBottom: 6 }}>Production ranking · {periodLabelRef.current}</div>
-              <div className="dd-grid">
-                <RankList title="Top counties" rows={rank.counties} />
-                <RankList title="Top operators" rows={rank.operators} />
-                <RankList title="Top formations" rows={rank.formations} />
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-        </aside>
-      )}
-
-      {/* Height is measured to fill down to the footer (no blank space below);
-          dvh fallback tracks the real visible viewport before the first measure. */}
-      <div ref={mapWrap} className="mc-map" style={{ position: "relative", flex: 1, minWidth: 0, order: 1, height: mapH ? `${mapH}px` : "calc(100dvh - 250px)", minHeight: 320, borderRadius: 6, overflow: "hidden", border: "1px solid var(--border)" }}>
-        <div ref={mapContainer} style={{ position: "absolute", inset: 0 }} />
-        {/* Same collapsible floating Layers control as the Marketplace map —
-            one shared component, identical interaction on every map. */}
-        <div className="portal-map-controls mc-controls-left">
+      {/* The map fills the rest of the page. Filters / Heat map float INSIDE it,
+          docked left or right (remembered); the overlay controls on that side
+          step aside so nothing sits under the panel. */}
+      <div ref={mapWrap} className={`mc-map ${panelOpen ? `mc-has-panel mc-dock-${dock}` : ""}`} style={{ height: mapH ? `${mapH}px` : "calc(100dvh - 250px)" }}>
+        <div ref={mapContainer} className="mc-canvas" />
+        <div className="mc-controls-left">
           <MapLayersPanel
             variant="floating"
             collapsible
@@ -1030,52 +966,206 @@ export function MapView() {
             onToggle={(k) => toggle(k as keyof typeof layers)}
           />
           {can("manageMapData") && (
-            <MapShpImport onChanged={(bbox) => {
-              void loadTracts();
-              setLayers((p) => ({ ...p, tracts: true }));
-              if (bbox) mapRef.current?.fitBounds(bbox as maplibregl.LngLatBoundsLike, { padding: 60, duration: 800, maxZoom: 14 });
-            }} />
+            <MapShpImport
+              onChanged={(bbox) => {
+                void loadTracts();
+                setLayers((p) => ({ ...p, tracts: true }));
+                if (bbox) mapRef.current?.fitBounds(bbox as maplibregl.LngLatBoundsLike, { padding: 60, duration: 800, maxZoom: 14 });
+              }}
+              onShow={showImport}
+            />
           )}
         </div>
-        {!deals && <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", pointerEvents: "none" }}><Spinner label="Loading map…" /></div>}
+        {!deals && <div className="mc-loading"><Spinner label="Loading map…" /></div>}
 
-        {/* Compact exit control, bottom-right just above the zoom buttons —
-            minimal, consistent, and never covering map data. */}
         {fullscreen && (
-          <button type="button" className="mc-fs-exit" title="Exit full screen (Esc)" aria-label="Exit full screen"
-            onClick={() => setFullscreen(false)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3v3a2 2 0 0 1-2 2H3M21 8h-3a2 2 0 0 1-2-2V3M3 16h3a2 2 0 0 1 2 2v3M16 21v-3a2 2 0 0 1 2-2h3" /></svg>
+          <button type="button" className="mc-fs-exit" title="Exit full screen (Esc)" onClick={() => setFullscreen(false)}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" /></svg>
+            Exit full screen
           </button>
         )}
 
-        {phone && !legendOpen ? (
-          <button type="button" className="mc-legend-btn" onClick={() => setLegendOpen(true)} aria-expanded={false}>Legend</button>
-        ) : (
-        <div className="mc-legend" style={{ position: "absolute", left: 12, bottom: 26, background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, padding: "8px 12px", fontSize: 12 }}
-          onClick={phone ? () => setLegendOpen(false) : undefined} title={phone ? "Tap to hide the legend" : undefined}>
-          {heatActive ? (
-            <div style={{ minWidth: 160 }}>
-              <div className="muted" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: 4 }}>Production intensity · {periodLabelRef.current}</div>
-              <div style={{ height: 10, borderRadius: 5, background: `linear-gradient(90deg, ${HEAT_STOPS.map(([s, c]) => `${c} ${s * 100}%`).join(", ")})` }} />
-              <div className="row" style={{ justifyContent: "space-between", fontSize: 11 }}><span>0</span><span>Peak in view</span></div>
+        {panelOpen && (
+          <aside className={`mc-sheet mc-sheet-${dock}`} aria-label={showFilters ? "Filters" : "Heat map"}>
+            <div className="mc-sheet-head">
+              <span className="mc-sheet-title">{showFilters ? "Filters" : "Heat map"}</span>
+              <div className="mc-sheet-tools">
+                {/* Dock-side preference — remembered across sessions. */}
+                <div className="mc-dock-seg" title="Panel position" role="group" aria-label="Panel position">
+                  {(["left", "right"] as const).map((side) => (
+                    <button key={side} type="button" className={`mc-dock-btn ${dock === side ? "on" : ""}`} aria-pressed={dock === side}
+                      aria-label={side === "left" ? "Dock left" : "Dock right"} title={side === "left" ? "Dock left" : "Dock right"} onClick={() => setDock(side)}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><path d={side === "left" ? "M4 5h6v14H4z" : "M14 5h6v14h-6z"} fill="currentColor" stroke="none" /></svg>
+                    </button>
+                  ))}
+                </div>
+                <button type="button" className="mc-sheet-x" aria-label="Close panel" onClick={closePanel}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                </button>
+              </div>
+            </div>
+
+            {showFilters && (
+              <>
+                <div className="mc-sheet-body">
+                  <MapField label="Deal status"><Select value={statusFilter} onChange={setStatusFilter} ariaLabel="Deal status" options={STATUS_OPTIONS.map(([v, l]) => ({ value: v, label: l }))} /></MapField>
+                  {/* Cascading geography: State → County → Abstract → Survey. Map data
+                      is Texas-only today, so counties empty out under a non-TX state. */}
+                  <div className="mc-two">
+                    <MapField label="State"><SearchableMultiSelect options={[...US_STATE_OPTIONS]} labels={US_STATE_LABELS} value={fStates} onChange={setFStates} placeholder="States…" /></MapField>
+                    <MapField label="County"><SearchableMultiSelect options={fStates.length && !fStates.includes("TX") ? [] : meta.counties} value={fCounties} onChange={setFCounties} placeholder="Counties…" /></MapField>
+                  </div>
+                  <MapField label="Survey"><SearchableMultiSelect options={gisOptions.surveys} value={fSurveys} onChange={setFSurveys} placeholder="Surveys…" /></MapField>
+                  <MapField label="Abstract"><SearchableMultiSelect options={gisOptions.abstracts} labels={abstractFilterLabels} filterOptions={rankAbstractFilter} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstract # or survey…" /></MapField>
+                  <div className="mc-divider" />
+                  <MapField label="Well type"><ChipToggles options={gisOptions.wellTypes} value={fWellTypes} onChange={setFWellTypes} /></MapField>
+                  <MapField label="Well status"><ChipToggles options={gisOptions.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} dots={STATUS_DOT} /></MapField>
+                  <MapField label="Operator" count={gisOptions.operators.length}><SearchableMultiSelect options={gisOptions.operators} value={fOperators} onChange={setFOperators} placeholder="Operators…" /></MapField>
+                  <MapField label="Formation" count={scoped.formations.length}><SearchableMultiSelect options={scoped.formations} value={fFormations} onChange={setFFormations} placeholder="Formations…" /></MapField>
+                </div>
+                {/* Saved filters: load (name), overwrite (↻) and delete (×) per chip;
+                    "Save current" opens the name field. Saving an existing name
+                    overwrites that preset. */}
+                <div className="mc-saved">
+                  <div className="mc-saved-head">
+                    <span className="mc-label">Saved filters</span>
+                    <button type="button" className="mc-link" disabled={!anyFilterSet && statusFilter === "ACTIVE"} onClick={clearAllFilters}>Clear all</button>
+                  </div>
+                  <div className="mc-saved-chips">
+                    {filterPresets.map((p) => (
+                      <span key={p.name} className={`mc-preset-chip ${activePresetName === p.name ? "active" : ""}`}>
+                        <button type="button" className="mc-preset-apply" title="Load this saved filter" onClick={() => applyFilterPreset(p)}>
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 4h12v16l-6-4-6 4z" /></svg>
+                          {p.name}
+                        </button>
+                        <button type="button" className="mc-preset-upd" title="Overwrite with the current filters" aria-label={`Overwrite ${p.name} with the current filters`} onClick={() => saveFilterPreset(p.name)}>↻</button>
+                        <button type="button" className="mc-preset-del" title="Delete saved filter" aria-label={`Delete ${p.name}`} onClick={() => deleteFilterPreset(p.name)}>×</button>
+                      </span>
+                    ))}
+                    {!saveOpen && (
+                      <button type="button" className="mc-save-current" title="Save this combination to reapply it in one click." onClick={() => setSaveOpen(true)}>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                        Save current
+                      </button>
+                    )}
+                  </div>
+                  {saveOpen && (
+                    <div className="mc-save-row">
+                      <input value={filterName} onChange={(e) => setFilterName(e.target.value)} autoFocus
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") { e.preventDefault(); if (filterName.trim() && anyFilterSet) { saveFilterPreset(filterName); setSaveOpen(false); } }
+                          if (e.key === "Escape") { e.stopPropagation(); setSaveOpen(false); setFilterName(""); }
+                        }}
+                        placeholder="Name these filters" aria-label="Name these filters" />
+                      <button type="button" className="small primary" disabled={!filterName.trim() || !anyFilterSet}
+                        title={!filterName.trim() ? "Enabled once you name the filter set" : !anyFilterSet ? "Set a filter to save it" : undefined}
+                        onClick={() => { saveFilterPreset(filterName); setSaveOpen(false); }}>Save</button>
+                      <button type="button" className="small" onClick={() => { setSaveOpen(false); setFilterName(""); }}>Cancel</button>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
+            {showHeat && (
+              <div className="mc-sheet-body mc-heat-body">
+                <FormSection title="Layers">
+                  {/* Full-width checkbox tiles — active rows tint blue. */}
+                  <div className="mc-tiles">
+                    <HeatTile on={heat.oil} label="Oil production" unit="bbl" onClick={() => setHeatK("oil", !heat.oil)} />
+                    <HeatTile on={heat.gas} label="Gas production" unit="mcf" onClick={() => setHeatK("gas", !heat.gas)} />
+                    <HeatTile on={heat.topProducers} label="Top producers" unit="Top 15" onClick={() => setHeatK("topProducers", !heat.topProducers)} />
+                    <HeatTile on={heat.hotspots} label="Hotspot labels" onClick={() => setHeatK("hotspots", !heat.hotspots)} />
+                  </div>
+                  <MapField label="Production period">
+                    <Select value={heat.period} onChange={(v) => setHeatK("period", v as HeatPeriod)} ariaLabel="Heat map period"
+                      options={[
+                        { value: "current", label: "Current month" },
+                        { value: "3m", label: "Last 3 months" },
+                        { value: "6m", label: "Last 6 months" },
+                        { value: "12m", label: "Last 12 months" },
+                        { value: "3y", label: "Last 3 years" },
+                        { value: "ytd", label: "Year to date" },
+                        { value: "all", label: "Cumulative (all history)" },
+                        { value: "custom", label: "Custom range" },
+                      ]} />
+                  </MapField>
+                  {heat.period === "custom" && (
+                    <div className="mc-two">
+                      <MapField label="From"><input type="month" value={heat.from} onChange={(e) => setHeatK("from", e.target.value)} /></MapField>
+                      <MapField label="To"><input type="month" value={heat.to} onChange={(e) => setHeatK("to", e.target.value)} /></MapField>
+                    </div>
+                  )}
+                </FormSection>
+                <FormSection title="Appearance">
+                  <Slider label="Intensity" min={0.2} max={6} step={0.1} value={heat.intensity} onChange={(v) => setHeatK("intensity", v)} />
+                  <Slider label="Radius" min={8} max={160} step={1} value={heat.radius} onChange={(v) => setHeatK("radius", v)} suffix="px" />
+                  <Slider label="Opacity" min={0.1} max={1} step={0.05} value={heat.opacity} onChange={(v) => setHeatK("opacity", v)} />
+                </FormSection>
+                <FormSection title="Production thresholds">
+                  <div className="mc-two">
+                    <MapField label="Minimum"><input type="number" value={heat.min || ""} onChange={(e) => setHeatK("min", Number(e.target.value) || 0)} placeholder="No minimum" /></MapField>
+                    <MapField label="Maximum"><input type="number" value={heat.max || ""} onChange={(e) => setHeatK("max", Number(e.target.value) || 0)} placeholder="No maximum" /></MapField>
+                  </div>
+                  <p className="mc-help">Per well, for the selected period. Oil in bbl, gas in mcf. Wells outside the range drop from the heat.</p>
+                </FormSection>
+                {!heatActive && <div className="mc-heat-idle">Turn on oil or gas production above to draw the heat map.</div>}
+                {rank && heatActive && (
+                  <FormSection title={`Production ranking · ${periodLabelRef.current}`}>
+                    <div className="mc-rank">
+                      <RankList title="Top counties" rows={rank.counties} />
+                      <RankList title="Top operators" rows={rank.operators} />
+                      <RankList title="Top formations" rows={rank.formations} />
+                    </div>
+                  </FormSection>
+                )}
+              </div>
+            )}
+          </aside>
+        )}
+
+        {/* Legend card — collapses to its header (closed by default on phones).
+            While the heat map is on it explains the heat ramp instead. */}
+        <div className={`mcx-legend ${legendOpen ? "open" : ""}`}>
+          <button type="button" className="mcx-legend-head" onClick={() => setLegendOpen((o) => !o)} aria-expanded={legendOpen}>
+            <span>{heatActive ? "Heat map" : "Well status"}</span>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+          </button>
+          {legendOpen && (heatActive ? (
+            <div className="mcx-heat-legend">
+              <div className="mcx-legend-cap">Production intensity · {periodLabelRef.current}</div>
+              <div className="mcx-ramp" style={{ background: `linear-gradient(90deg, ${HEAT_STOPS.map(([s, c]) => `${c} ${s * 100}%`).join(", ")})` }} />
+              <div className="mcx-ramp-scale"><span>0</span><span>Peak in view</span></div>
               {/* Numeric range represented by the ramp, per active metric. */}
-              {heat.oil && heatScale.oil > 0 && <div className="muted" style={{ fontSize: 11 }}>Oil: 0 – {num(Math.round(heatScale.oil))} bbl / well</div>}
-              {heat.gas && heatScale.gas > 0 && <div className="muted" style={{ fontSize: 11 }}>Gas: 0 – {num(Math.round(heatScale.gas))} MCF / well</div>}
-              <div className="row" style={{ gap: 12, marginTop: 4 }}>
-                {heat.oil && <span className="row" style={{ gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#dc2626" }} />Oil</span>}
-                {heat.gas && <span className="row" style={{ gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#6d28d9" }} />Gas</span>}
-                {heat.topProducers && <span className="row" style={{ gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: "50%", background: "#facc15", border: "1.5px solid #78350f" }} />Top well</span>}
+              {heat.oil && heatScale.oil > 0 && <div className="mcx-legend-cap">Oil: 0 – {num(Math.round(heatScale.oil))} bbl / well</div>}
+              {heat.gas && heatScale.gas > 0 && <div className="mcx-legend-cap">Gas: 0 – {num(Math.round(heatScale.gas))} MCF / well</div>}
+              <div className="mcx-heat-keys">
+                {heat.oil && <span><i style={{ background: "#dc2626" }} />Oil</span>}
+                {heat.gas && <span><i style={{ background: "#6d28d9" }} />Gas</span>}
+                {heat.topProducers && <span><i style={{ background: "#facc15", boxShadow: "inset 0 0 0 1.5px #78350f" }} />Top well</span>}
               </div>
             </div>
           ) : (
-            <>
+            <div className="mcx-legend-rows">
               <Legend color="#22c55e" label="Producing" /><Legend color="#f59e0b" label="Shut-in" /><Legend color="#6b7280" label="Plugged" />
               <Legend color="#3b82f6" label="Permitted" /><Legend color="#78350f" label="Dry hole" /><Legend color="#7c3aed" label="Injection/Disposal" />
               {layers.wellbores && <Legend color="#0f766e" label="Wellbore (lateral)" line />}
-            </>
-          )}
+            </div>
+          ))}
         </div>
-        )}
+
+        {/* Zoom in / out and recenter (the first-visit Leon County view). */}
+        <div className="mc-zoom" role="group" aria-label="Map zoom">
+          <button type="button" aria-label="Zoom in" title="Zoom in" onClick={() => mapRef.current?.zoomIn()}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+          </button>
+          <button type="button" aria-label="Zoom out" title="Zoom out" onClick={() => mapRef.current?.zoomOut()}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+          </button>
+          <button type="button" aria-label="Recenter" title="Recenter" onClick={() => mapRef.current?.flyTo({ center: LEON_CENTER, zoom: 10, duration: 800 })}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="6" /><path d="M12 2v4M12 18v4M2 12h4M18 12h4" /></svg>
+          </button>
+        </div>
 
         {/* Heat hover tooltip — what the colors under the cursor represent. */}
         {heatActive && heatHover && (
@@ -1083,17 +1173,17 @@ export function MapView() {
             <div><strong>{heatHover.wells}</strong> producing well{heatHover.wells === 1 ? "" : "s"} nearby</div>
             {heat.oil && <div>Oil: <strong>{num(Math.round(heatHover.oil))}</strong> bbl</div>}
             {heat.gas && <div>Gas: <strong>{num(Math.round(heatHover.gas))}</strong> MCF</div>}
-            <div className="muted" style={{ fontSize: 10 }}>{periodLabelRef.current} · click for full breakdown</div>
+            <div className="muted" style={{ fontSize: 10.5 }}>{periodLabelRef.current} · click for full breakdown</div>
           </div>
         )}
 
         {/* Overlap chooser */}
         {choices && (
-          <div className="mc-float-panel" style={{ position: "absolute", top: 12, right: 12, width: 300, maxWidth: "calc(100% - 320px)", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, boxShadow: "var(--shadow)", padding: 16 }}>
-            <div className="section-head"><h3 style={{ margin: 0 }}>{choices.length} wells here</h3><button className="icon-btn" onClick={() => setChoices(null)}>×</button></div>
+          <div className="mc-float-panel mc-choices">
+            <div className="section-head"><h3 style={{ margin: 0 }}>{choices.length} wells here</h3><button className="icon-btn" aria-label="Close" onClick={() => setChoices(null)}>×</button></div>
             <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Pick the well you meant:</p>
             {choices.map((w) => (
-              <div key={w.fid} className="msel-opt" style={{ borderTop: "1px solid var(--border)" }} onClick={() => void openWell(w.fid)}>
+              <div key={w.fid} className="msel-opt mc-choice" onClick={() => void openWell(w.fid)}>
                 <strong>{w.api}{w.wellNo ? ` #${w.wellNo}` : ""}</strong><div className="muted" style={{ fontSize: 12 }}>{w.type} · {w.status}</div>
               </div>
             ))}
@@ -1101,11 +1191,11 @@ export function MapView() {
         )}
 
         {selected && !choices && (
-          <div className="mc-float-panel" style={{ position: "absolute", top: 12, right: 12, width: 320, maxWidth: "calc(100% - 320px)", maxHeight: "calc(100% - 190px)", overflowY: "auto", background: "var(--panel)", border: "1px solid var(--border)", borderRadius: 6, boxShadow: "var(--shadow)", padding: 16 }}>
+          <div className="mc-float-panel">
             {selected.kind === "well" ? (
               <>
-                <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.leaseName || "Well"} {selected.wellNo ? `#${selected.wellNo}` : ""}</h3><div className="muted" style={{ fontSize: 12 }}>{selected.symbol}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
-                <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.leaseName || "Well"} {selected.wellNo ? `#${selected.wellNo}` : ""}</h3><div className="muted" style={{ fontSize: 12 }}>{selected.symbol}</div></div><button className="icon-btn" aria-label="Close" onClick={clearSelection}>×</button></div>
+                <div className="dd-grid mc-kv">
                   <KV k="Operator" v={selected.operator} /><KV k="Oil / Gas" v={selected.oilGas} />
                   <KV k="Lease" v={selected.leaseName} /><KV k="RRC Lease #" v={selected.leaseNo} />
                   <KV k="Field" v={selected.field} /><KV k="API" v={selected.api} />
@@ -1120,8 +1210,8 @@ export function MapView() {
                 )}
                 {(selected.cumOil != null || selected.cumGas != null) && (
                   <>
-                    <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 10 }}>Lease production (RRC)</div>
-                    <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                    <div className="mc-fp-sec">Lease production (RRC)</div>
+                    <div className="dd-grid mc-kv">
                       <KV k="Cum. oil (bbl)" v={num(selected.cumOil)} /><KV k="Cum. gas (MCF)" v={num(selected.cumGas)} />
                       <KV k="Last produced" v={selected.lastProd} />
                     </div>
@@ -1135,7 +1225,7 @@ export function MapView() {
                   const last12 = series.slice(-12).reduce((s, p) => s + (kind === "gas" ? p[2] : p[1]), 0);
                   return (
                     <div style={{ marginTop: 10 }}>
-                      <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em" }}>Production trend · {kind === "gas" ? "gas (MCF)" : "oil (bbl)"} · last {Math.min(series.length, 36)} mo</div>
+                      <div className="mc-fp-sec" style={{ marginTop: 0 }}>Production trend · {kind === "gas" ? "gas (MCF)" : "oil (bbl)"} · last {Math.min(series.length, 36)} mo</div>
                       <ProductionChart series={series} kind={kind} />
                       <div className="muted" style={{ fontSize: 12 }}>Last 12 mo: {num(last12)} {kind === "gas" ? "MCF" : "bbl"}</div>
                     </div>
@@ -1143,104 +1233,103 @@ export function MapView() {
                 })()}
                 {(selected.permits?.length ?? 0) > 0 && (
                   <>
-                    <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 10 }}>Permit history (RRC W-1)</div>
+                    <div className="mc-fp-sec">Permit history (RRC W-1)</div>
                     {selected.permits!.slice(0, 5).map((p) => (
-                      <div key={p.statusNo} className="row" style={{ justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}>
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.operator || "—"}{p.wellNo ? ` #${p.wellNo}` : ""}</span>
-                        <span className="muted" style={{ whiteSpace: "nowrap" }}>{p.acres != null ? `${num(p.acres)} ac · ` : ""}{p.permitDate?.slice(0, 10) ?? "—"}</span>
+                      <div key={p.statusNo} className="mc-fp-row">
+                        <span>{p.operator || "—"}{p.wellNo ? ` #${p.wellNo}` : ""}</span>
+                        <span className="muted">{p.acres != null ? `${num(p.acres)} ac · ` : ""}{p.permitDate?.slice(0, 10) ?? "—"}</span>
                       </div>
                     ))}
                   </>
                 )}
                 {(selected.completions?.length ?? 0) > 0 && (
                   <>
-                    <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 10 }}>Completion filings (W-2/G-1)</div>
+                    <div className="mc-fp-sec">Completion filings (W-2/G-1)</div>
                     {selected.completions!.slice(0, 5).map((c) => (
-                      <div key={c.trackingNo} className="row" style={{ justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}>
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.fieldName || c.filingType || "Filing"}</span>
-                        <span className="muted" style={{ whiteSpace: "nowrap" }}>{(c.completionDate ?? c.filedDate)?.slice(0, 10) ?? "—"}</span>
+                      <div key={c.trackingNo} className="mc-fp-row">
+                        <span>{c.fieldName || c.filingType || "Filing"}</span>
+                        <span className="muted">{(c.completionDate ?? c.filedDate)?.slice(0, 10) ?? "—"}</span>
                       </div>
                     ))}
                   </>
                 )}
                 {/* fid resolves the exact rrc well (production is read live from
                     the centralized dataset); the API label is a readable fallback. */}
-                <Link className="primary" to={`/valuation?fid=${selected.fid}&well=${encodeURIComponent(selected.api || selected.api8 || "")}`}
-                  style={{ display: "flex", justifyContent: "center", marginTop: 12, padding: "8px 12px", borderRadius: 6 }}>
+                <Link className="primary mc-fp-cta" to={`/valuation?fid=${selected.fid}&well=${encodeURIComponent(selected.api || selected.api8 || "")}`}>
                   Open in Well Analysis →
                 </Link>
-                <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Operator, lease, field, dates, permits, and completions are from RRC records (lease-level; oil is reported per lease). Formation shows where a W-2 was filed.</p>
+                <p className="mc-fp-note">Operator, lease, field, dates, permits, and completions are from RRC records (lease-level; oil is reported per lease). Formation shows where a W-2 was filed.</p>
               </>
             ) : selected.kind === "hotspot" ? (
               <>
-                <div className="section-head"><div><h3 style={{ margin: 0 }}>Production summary</h3><div className="muted" style={{ fontSize: 12 }}>{selected.summary.wells} contributing well{selected.summary.wells === 1 ? "" : "s"} · {selected.periodLabel}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
-                <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                <div className="section-head"><div><h3 style={{ margin: 0 }}>Production summary</h3><div className="muted" style={{ fontSize: 12 }}>{selected.summary.wells} contributing well{selected.summary.wells === 1 ? "" : "s"} · {selected.periodLabel}</div></div><button className="icon-btn" aria-label="Close" onClick={clearSelection}>×</button></div>
+                <div className="dd-grid mc-kv">
                   <KV k="Total oil (bbl)" v={num(Math.round(selected.summary.oil))} /><KV k="Total gas (MCF)" v={num(Math.round(selected.summary.gas))} />
                   <KV k="Avg oil / well" v={num(Math.round(selected.summary.avgOil))} /><KV k="Avg gas / well" v={num(Math.round(selected.summary.avgGas))} />
                 </div>
                 {selected.summary.topOperators.length > 0 && (
                   <>
-                    <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 10 }}>Top operators</div>
+                    <div className="mc-fp-sec">Top operators</div>
                     {selected.summary.topOperators.map((o) => (
-                      <div key={o.name} className="row" style={{ justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}>
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.name}</span>
-                        <span className="muted" style={{ whiteSpace: "nowrap" }}>{num(Math.round(boe(o.oil, o.gas)))} BOE · {o.wells}w</span>
+                      <div key={o.name} className="mc-fp-row">
+                        <span>{o.name}</span>
+                        <span className="muted">{num(Math.round(boe(o.oil, o.gas)))} BOE · {o.wells}w</span>
                       </div>
                     ))}
                   </>
                 )}
                 {selected.summary.topWells.length > 0 && (
                   <>
-                    <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 10 }}>Top-producing wells</div>
+                    <div className="mc-fp-sec">Top-producing wells</div>
                     {selected.summary.topWells.map((w, i) => (
-                      <div key={i} className="row" style={{ justifyContent: "space-between", fontSize: 13, padding: "3px 0" }}>
-                        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.leaseName || w.api || "Well"}{w.operator ? ` · ${w.operator}` : ""}</span>
-                        <span className="muted" style={{ whiteSpace: "nowrap" }}>{num(Math.round(boe(w.oil, w.gas)))} BOE</span>
+                      <div key={i} className="mc-fp-row">
+                        <span>{w.leaseName || w.api || "Well"}{w.operator ? ` · ${w.operator}` : ""}</span>
+                        <span className="muted">{num(Math.round(boe(w.oil, w.gas)))} BOE</span>
                       </div>
                     ))}
                   </>
                 )}
-                <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 10 }}>
+                <div className="dd-grid mc-kv" style={{ marginTop: 10 }}>
                   <KV k="Counties" v={selected.summary.counties.join(", ")} />
                   <KV k="Abstracts" v={selected.summary.abstracts.slice(0, 8).map((a) => absIndex.labelAmong(a, fCounties)).join("; ")} />
                 </div>
                 {selected.summary.surveys.length > 0 && <div className="kv" style={{ marginTop: 6 }}><span className="k">Surveys</span><span className="v wrap">{selected.summary.surveys.slice(0, 8).join(", ")}</span></div>}
-                <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Totals attribute each lease's production evenly across its wells. BOE = oil + gas/6. Click elsewhere to summarize another area.</p>
+                <p className="mc-fp-note">Totals attribute each lease's production evenly across its wells. BOE = oil + gas/6. Click elsewhere to summarize another area.</p>
               </>
             ) : selected.kind === "tract" ? (
               <>
-                <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.name}</h3><div className="muted" style={{ fontSize: 12 }}>Imported tract · {selected.sourceFile}</div>{selected.dealId && <div style={{ fontSize: 12, marginTop: 2 }}>From deal <Link to={`/deals/${selected.dealId}`}>{selected.dealName ?? "Open deal"}</Link></div>}</div><button className="icon-btn" onClick={clearSelection}>×</button></div>
+                <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.name}</h3><div className="muted" style={{ fontSize: 12 }}>Imported tract · {selected.sourceFile}</div>{selected.dealId && <div style={{ fontSize: 12, marginTop: 2 }}>From deal <Link to={`/deals/${selected.dealId}`}>{selected.dealName ?? "Open deal"}</Link></div>}</div><button className="icon-btn" aria-label="Close" onClick={clearSelection}>×</button></div>
                 {selected.attrs.length > 0 ? (
-                  <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}>
+                  <div className="dd-grid mc-kv" style={{ marginTop: 6 }}>
                     {selected.attrs.map(([k, v]) => <KV key={k} k={k} v={v} />)}
                   </div>
                 ) : (
                   <p className="muted" style={{ fontSize: 12 }}>The shapefile carried no attributes for this boundary.</p>
                 )}
-                <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>Boundary and attributes come from the uploaded shapefile. Manage uploads via “Import SHP”.</p>
+                <p className="mc-fp-note">Boundary and attributes come from the uploaded shapefile. Manage uploads via “Import SHP”.</p>
               </>
             ) : (
               <>
-                <div className="section-head"><div><h3 style={{ margin: 0 }}>{formatAbstract({ abstract: selected.abstract })}</h3><div className="muted" style={{ fontSize: 12 }}>{[surveyLabel(selected.survey), countyStateLabel(selected.county, "TX")].filter(Boolean).join(" · ")}</div></div><button className="icon-btn" onClick={clearSelection}>×</button></div>
-                <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}><KV k="Abstract" v={abstractShortLabel({ abstract: selected.abstract })} /><KV k="Survey" v={selected.survey} /><KV k="County" v={selected.county} /></div>
+                <div className="section-head"><div><h3 style={{ margin: 0 }}>{formatAbstract({ abstract: selected.abstract })}</h3><div className="muted" style={{ fontSize: 12 }}>{[surveyLabel(selected.survey), countyStateLabel(selected.county, "TX")].filter(Boolean).join(" · ")}</div></div><button className="icon-btn" aria-label="Close" onClick={clearSelection}>×</button></div>
+                <div className="dd-grid mc-kv" style={{ marginTop: 6 }}><KV k="Abstract" v={abstractShortLabel({ abstract: selected.abstract })} /><KV k="Survey" v={selected.survey} /><KV k="County" v={selected.county} /></div>
                 {/* Owned mineral assets (HOLD) are identified as Mineral Assets —
                     no stage, priority, buyer, or other deal workflow. */}
                 {panelAssets.length > 0 && (
                   <>
-                    <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 10 }}>{panelAssets.length} mineral asset{panelAssets.length === 1 ? "" : "s"} (owned)</div>
+                    <div className="mc-fp-sec">{panelAssets.length} mineral asset{panelAssets.length === 1 ? "" : "s"} (owned)</div>
                     {panelAssets.map((a) => (
-                      <div key={a.id} style={{ borderTop: "1px solid var(--border)", padding: "10px 0" }}>
+                      <div key={a.id} className="mc-fp-card">
                         <div className="row" style={{ justifyContent: "space-between" }}><Link to={`/assets/${a.id}`} style={{ fontWeight: 600 }}>{a.name}</Link><span className="badge map-asset-badge">Mineral Asset</span></div>
-                        <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6, marginTop: 6 }}><KV k="Operator" v={a.operator} /><KV k="Asset Type" v={a.assetTypes.length ? <ChipList items={a.assetTypes} /> : null} /><KV k="NMA" v={num(a.acreageNma)} /><KV k="NRA" v={num(a.nra)} /></div>
+                        <div className="dd-grid mc-kv" style={{ marginTop: 6 }}><KV k="Operator" v={a.operator} /><KV k="Asset Type" v={a.assetTypes.length ? <ChipList items={a.assetTypes} /> : null} /><KV k="NMA" v={num(a.acreageNma)} /><KV k="NRA" v={num(a.nra)} /></div>
                       </div>
                     ))}
                   </>
                 )}
                 {(panelDeals.length > 0 || panelAssets.length === 0) && (
-                  <div className="muted" style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 10 }}>{panelDeals.length} active deal{panelDeals.length === 1 ? "" : "s"}</div>
+                  <div className="mc-fp-sec">{panelDeals.length} active deal{panelDeals.length === 1 ? "" : "s"}</div>
                 )}
                 {panelDeals.length === 0 ? (panelAssets.length === 0 && <p className="muted">No active deals in this abstract.</p>) : panelDeals.map((d) => (
-                  <div key={d.id} style={{ borderTop: "1px solid var(--border)", padding: "10px 0" }}>
+                  <div key={d.id} className="mc-fp-card">
                     <div className="row" style={{ justifyContent: "space-between" }}>
                       <span className="row" style={{ gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                         <Link to={d.recordType === "OWNED_ASSET" ? `/assets/${d.id}` : `/deals/${d.id}`} style={{ fontWeight: 600 }}>{d.name}</Link>
@@ -1249,7 +1338,7 @@ export function MapView() {
                       <PriorityBadge priority={d.priority} />
                     </div>
                     <div className="row" style={{ gap: 6, margin: "6px 0" }}><StageBadge stage={d.stage} />{d.selectedBuyer && <span className="muted" style={{ fontSize: 12 }}>→ {d.selectedBuyer.name}</span>}</div>
-                    <div className="dd-grid" style={{ gridTemplateColumns: "1fr 1fr", gap: 6 }}><KV k="Operator" v={d.operator} /><KV k="Asset Type" v={d.assetTypes.length ? <ChipList items={d.assetTypes} /> : null} /><KV k="NMA" v={num(d.acreageNma)} /><KV k="Profit est." v={money(d.profitEst)} /></div>
+                    <div className="dd-grid mc-kv"><KV k="Operator" v={d.operator} /><KV k="Asset Type" v={d.assetTypes.length ? <ChipList items={d.assetTypes} /> : null} /><KV k="NMA" v={num(d.acreageNma)} /><KV k="Profit est." v={money(d.profitEst)} /></div>
                   </div>
                 ))}
               </>
@@ -1257,23 +1346,55 @@ export function MapView() {
           </div>
         )}
       </div>
-      </div>
+    </div>
+  );
+}
+
+/** Field wrapper used throughout the map panels: sentence-case label with an
+ *  optional muted count, control below. */
+function MapField({ label, count, children }: { label: string; count?: number; children: React.ReactNode }) {
+  return (
+    <div className="mc-field">
+      <div className="mc-label">{label}{count != null && <span className="mc-count">{num(count)}</span>}</div>
+      {children}
+    </div>
+  );
+}
+/** Multi-select as toggle chips (Well type / Well status). Every value the
+ *  data offers is a chip; values already selected (e.g. from a saved filter)
+ *  stay visible even if the current county scope no longer lists them. */
+function ChipToggles({ options, value, onChange, dots }: { options: string[]; value: string[]; onChange: (v: string[]) => void; dots?: Record<string, string> }) {
+  const all = [...options, ...value.filter((v) => !options.includes(v))];
+  if (all.length === 0) return <div className="mc-chips-empty">—</div>;
+  return (
+    <div className="mc-chips">
+      {all.map((o) => {
+        const on = value.includes(o);
+        return (
+          <button key={o} type="button" className={`mc-chip ${on ? "on" : ""}`} aria-pressed={on}
+            onClick={() => onChange(on ? value.filter((v) => v !== o) : [...value, o])}>
+            {dots && <i style={{ background: dots[o] ?? STATUS_DOT_FALLBACK }} />}
+            {o}
+          </button>
+        );
+      })}
     </div>
   );
 }
 
 function Legend({ color, label, line }: { color: string; label: string; line?: boolean }) {
-  return <div className="row" style={{ gap: 8, marginTop: 4 }}><span style={{ width: 12, height: line ? 3 : 12, background: color, opacity: 0.9, borderRadius: line ? 0 : "50%", display: "inline-block" }} /> {label}</div>;
+  return <div className="mcx-legend-row"><span className={line ? "line" : "dot"} style={{ background: color }} />{label}</div>;
 }
 /** Full-width layer checkbox tile (Map Panels reference): 38px row with a
  *  filled blue checkbox when on and a blue-tinted row background. */
-function HeatTile({ on, label, onClick }: { on: boolean; label: string; onClick: () => void }) {
+function HeatTile({ on, label, unit, onClick }: { on: boolean; label: string; unit?: string; onClick: () => void }) {
   return (
     <button type="button" className={`mc-tile ${on ? "on" : ""}`} onClick={onClick} aria-pressed={on}>
       <span className="mc-tile-box">
-        {on && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.5"><path d="M20 6L9 17l-5-5" /></svg>}
+        {on && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>}
       </span>
-      {label}
+      <span className="mc-tile-label">{label}</span>
+      {unit && <span className="mc-tile-unit">{unit}</span>}
     </button>
   );
 }
@@ -1291,12 +1412,12 @@ function Slider({ label, min, max, step, value, onChange, suffix }: { label: str
 }
 function RankList({ title, rows }: { title: string; rows: { name: string; oil: number; gas: number; wells: number }[] }) {
   return (
-    <div className="field" style={{ marginBottom: 0 }}>
-      <label>{title}</label>
+    <div className="mc-rank-list">
+      <div className="mc-label">{title}</div>
       {rows.length === 0 ? <div className="muted" style={{ fontSize: 12 }}>—</div> : rows.map((r) => (
-        <div key={r.name} className="row" style={{ justifyContent: "space-between", fontSize: 13, padding: "2px 0" }}>
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.name || "(unknown)"}</span>
-          <span className="muted" style={{ whiteSpace: "nowrap" }}>{num(Math.round(boe(r.oil, r.gas)))}</span>
+        <div key={r.name} className="mc-fp-row">
+          <span>{r.name || "(unknown)"}</span>
+          <span className="muted">{num(Math.round(boe(r.oil, r.gas)))}</span>
         </div>
       ))}
     </div>

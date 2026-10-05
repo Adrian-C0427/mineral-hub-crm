@@ -9,6 +9,7 @@ import { StateSelect } from "./StateSelect";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
 import { MoneyInput } from "./MoneyInput";
 import { DateField } from "./DateField";
+import { FormSection } from "./kit";
 
 /**
  * Standardized New Buyer template — the buyer counterpart of NewDealModal.
@@ -82,7 +83,7 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
   const req = <Req />;
   return (
     <Modal
-      title="New Buyer"
+      title="New buyer"
       subtitle={<>Starts as <strong style={{ color: "var(--amber)" }}>Warm</strong> unless set otherwise · the buy box drives deal matching — add the rest later</>}
       onClose={onClose}
       wide
@@ -98,7 +99,8 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
         </>
       }
     >
-      <div className="modal-sec">Company &amp; contact</div>
+      <div className="bc-form">
+      <FormSection title="Company & contact">
       <div className="nd-grid3">
         <div className="field" style={{ gridColumn: "1 / -1" }}><label>Company name {req}</label><input value={f.companyName} onChange={set("companyName")} autoFocus placeholder="e.g. Bluebonnet Minerals LLC" /></div>
         <div className="field"><label>First name {req}</label><input value={f.contactFirstName} onChange={set("contactFirstName")} placeholder="First" /></div>
@@ -111,8 +113,9 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
             options={[{ value: "HOT", label: "Hot" }, { value: "WARM", label: "Warm" }, { value: "COLD", label: "Cold" }]} />
         </div>
       </div>
+      </FormSection>
 
-      <div className="modal-sec">Follow-up &amp; mailing address</div>
+      <FormSection title="Follow-up & mailing address">
       <div className="nd-grid3">
         <div className="field"><label>Next follow-up</label><DateField value={f.nextFollowUpDate} onChange={(v) => setF((p) => ({ ...p, nextFollowUpDate: v }))} /></div>
         <div className="field" style={{ gridColumn: "2 / -1" }}><label>Mailing address</label><input value={f.mailingAddress} onChange={set("mailingAddress")} placeholder="Street address" /></div>
@@ -120,8 +123,9 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
         <div className="field"><label>State</label><StateSelect value={f.mailingState} onChange={(v) => setF((p) => ({ ...p, mailingState: v }))} /></div>
         <div className="field"><label>ZIP code</label><input value={f.mailingZip} onChange={set("mailingZip")} placeholder="75201" /></div>
       </div>
+      </FormSection>
 
-      <div className="modal-sec">Buy box <span className="modal-sec-hint">· what this buyer wants; drives deal matching</span></div>
+      <FormSection title="Buy box" hint="What this buyer wants; drives deal matching">
       <div className="nd-grid3">
         <GeoFields
           states={states} onStatesChange={setStates}
@@ -136,6 +140,8 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
         <div className="field"><label>Min price</label><MoneyInput value={f.minPrice} onChange={(v) => setF((p) => ({ ...p, minPrice: v }))} ariaLabel="Minimum price" /></div>
         <div className="field"><label>Max price</label><MoneyInput value={f.maxPrice} onChange={(v) => setF((p) => ({ ...p, maxPrice: v }))} ariaLabel="Maximum price" /></div>
         <div className="field" style={{ gridColumn: "1 / -1" }}><label>Notes</label><textarea rows={3} value={f.notes} onChange={set("notes")} placeholder="Anything worth remembering about this buyer…" /></div>
+      </div>
+      </FormSection>
       </div>
       {error && <div className="error-text">{error}</div>}
     </Modal>

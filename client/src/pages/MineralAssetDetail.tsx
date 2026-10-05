@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState, lazy, Suspense } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell, ReferenceLine,
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell, ReferenceLine, LabelList,
 } from "recharts";
 import { api } from "../api/client";
 import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, MetricCard, Banner, Modal, ConfirmDialog, BackLink, CtPill } from "../components/ui";
+import { Spinner, Banner, Modal, ConfirmDialog, BackLink, CtPill } from "../components/ui";
+import { StatStrip, Segmented, Tag, type StatCell } from "../components/kit";
 import { Select } from "../components/Select";
 import { BuyerActivitySection } from "../components/BuyerActivitySection";
 import { CollapsibleSection } from "../components/CollapsibleSection";
@@ -17,7 +18,7 @@ import { DocumentsSection, type DocFile } from "../components/DocumentsSection";
 import { OfferRowActions } from "../components/OfferActions";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
-import { useAbstractLabels, SurveyMultiPicker } from "../components/AbstractPicker";
+import { useAbstractLabels, useAbstractIndex, abstractEntryShortLabel, SurveyMultiPicker } from "../components/AbstractPicker";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
 import { monthLabel, chartTooltip } from "../lib/charts";
 import { money, num, fmtDate, toInputDate, prettyEnum } from "../lib/format";
@@ -53,6 +54,9 @@ const REV_COLOR = "#22c55e";
 /** Positive financial values render in the app's success green; negative in red. */
 const posColor = (v: number | null | undefined): string | undefined =>
   v == null || v === 0 ? undefined : v > 0 ? "var(--green)" : "var(--red)";
+/** The same sign rule as a stat-strip tone. */
+const posTone = (v: number | null | undefined): StatCell["tone"] =>
+  v == null || v === 0 ? "default" : v > 0 ? "success" : "danger";
 
 export function MineralAssetDetail() {
   const { id } = useParams<{ id: string }>();
@@ -73,6 +77,14 @@ export function MineralAssetDetail() {
   // Initialize the tab from the asset's mode once, on first load.
   useEffect(() => { if (asset && matches === null) loadMatches(); }, [asset, matches, loadMatches]);
 
+  // Header sub-line abstracts: resolved labels only (internal IDs are never
+  // shown — an abstract the index hasn't resolved yet is simply left out).
+  const { byId: absById } = useAbstractIndex();
+  const abstractNames = useMemo(
+    () => (asset?.abstractIds ?? []).map((aid) => absById.get(aid)).filter((e): e is NonNullable<typeof e> => !!e).map(abstractEntryShortLabel),
+    [asset?.abstractIds, absById],
+  );
+
   if (!asset) return <Spinner />;
   const canEdit = can("editDeals");
   const refresh = () => { load(); loadMatches(); };
@@ -82,37 +94,52 @@ export function MineralAssetDetail() {
     refresh();
   }
 
+  const typeLabel = asset.assetTypes.join("/") || asset.ownershipType;
+  const states = asset.states?.length ? asset.states : (asset.state ? [asset.state] : []);
+  const place = [asset.counties.join(", "), states.join(", ")].filter(Boolean).join(", ");
+  const subline = [(asset.surveys ?? []).join(", "), abstractNames.join("; "), place, asset.operator ? `Operator ${asset.operator}` : ""].filter(Boolean);
+
   return (
     // `deal-detail` opts equivalent sections (KV grids, match cards, criteria
     // tags, panels) into the same styling used on the Active Deal page, so an
     // owned asset looks and behaves like a deal wherever the sections overlap.
-    <div className="page deal-detail">
-      <BackLink label="Back to Mineral Assets" fallback="/assets" />
-      <div className="page-header">
-        <div className="row">
-          <h1 style={{ marginBottom: 0 }}>{asset.name}</h1>
-          <CtPill color="#f5b04b">Owned Asset</CtPill>
-          {(asset.assetTypes.join("/") || asset.ownershipType) && <span className="ct-pill seller-type-pill">{asset.assetTypes.join("/") || asset.ownershipType}</span>}
-          {asset.assetMode === "SELL" && <CtPill dot color="#22c55e">Marketing for sale</CtPill>}
+    <div className="page deal-detail asset-detail">
+      <BackLink label="Mineral Assets" fallback="/assets" />
+      <div className="ad-head">
+        <div className="ad-head-main">
+          <div className="ad-title-row">
+            <h1>{asset.name}</h1>
+            <Tag tone="warn">Owned asset</Tag>
+            {typeLabel && <span className="ad-pill">{typeLabel}</span>}
+            {asset.producingStatus && <span className="ad-pill"><i className={asset.producingStatus === "Producing" ? "on" : ""} />{asset.producingStatus}</span>}
+            {asset.assetMode === "SELL" && <Tag tone="accent" dot>Marketing for sale</Tag>}
+          </div>
+          {subline.length > 0 && <div className="ad-subline">{subline.join(" · ")}</div>}
         </div>
-        <div className="row">
-          {canEdit && asset.assetMode !== "SELL" && <button className="primary" onClick={() => setMode("SELL")}>Mark for Sale</button>}
+        <div className="ad-head-actions">
+          {canEdit && asset.assetMode !== "SELL" && (
+            <button className="primary" onClick={() => setMode("SELL")}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 8h16v11H4zM9 8V5h6v3" /></svg>
+              Mark for sale
+            </button>
+          )}
           {canEdit && asset.assetMode === "SELL" && <button onClick={() => setMode("HOLD")}>Move to Hold</button>}
         </div>
       </div>
 
-      <div className="metrics-row">
-        <MetricCard label="Current Value" value={money(asset.currentValue)} />
-        <MetricCard label="Purchase Price" value={money(asset.purchasePrice)} hint={asset.acquisitionDate ? `Acquired ${fmtDate(asset.acquisitionDate)}` : undefined} />
-        <MetricCard label="ROI Since Acquisition" value={fmtPct(asset.roiSinceAcquisition)} valueColor={posColor(asset.roiSinceAcquisition)} />
-        <MetricCard label="Unrealized Gain / Loss" value={money(asset.unrealizedGainLoss)} valueColor={posColor(asset.unrealizedGainLoss)} />
-        <MetricCard label="Annual Royalty Income" value={money(asset.royaltyIncomeAnnual)} hint="Trailing 12 mo · from revenue" valueColor={asset.royaltyIncomeAnnual ? "var(--green)" : undefined} />
-      </div>
+      <StatStrip min={200} className="ad-hero" cells={[
+        { label: "Current value", value: money(asset.currentValue) },
+        { label: "Purchase price", value: money(asset.purchasePrice), sub: asset.acquisitionDate ? `Acquired ${fmtDate(asset.acquisitionDate)}` : undefined },
+        { label: "ROI since acquisition", value: fmtPct(asset.roiSinceAcquisition), tone: posTone(asset.roiSinceAcquisition),
+          sub: asset.purchasePrice != null ? `On ${money(asset.purchasePrice)} cost basis` : undefined },
+        { label: "Unrealized gain / loss", value: money(asset.unrealizedGainLoss), tone: posTone(asset.unrealizedGainLoss), sub: "Current value less basis" },
+        { label: "Annual royalty income", value: money(asset.royaltyIncomeAnnual), tone: asset.royaltyIncomeAnnual ? "success" : "default", sub: "Trailing 12 mo · from revenue" },
+      ]} />
 
       <Tabs
         tabs={[
           { key: "hold" as const, label: "Hold", title: "Portfolio management" },
-          { key: "sell" as const, label: "Sell", title: "Active marketing" },
+          { key: "sell" as const, label: asset.assetMode === "SELL" ? <span className="tab-lbl">Sell<span className="ad-tab-badge">Listed</span></span> : "Sell", title: "Active marketing" },
         ]}
         active={tab}
         onSelect={setTab}
@@ -145,10 +172,13 @@ function HoldTab({ asset, canEdit, onChanged }: { asset: AssetDetail; canEdit: b
 
       <FinancialsCard asset={asset} canEdit={canEdit} onSaved={onChanged} />
 
-      <div className="panel">
-        <div className="section-head"><h3>Location</h3><span className="muted">This asset's abstracts, imported tracts, and geographic extent</span></div>
-        <Suspense fallback={<Spinner label="Loading map…" />}><DealMap dealId={asset.id} abstractIds={asset.abstractIds} /></Suspense>
-      </div>
+      <section className="panel ad-card ad-location">
+        <div className="ad-card-head">
+          <div className="ad-card-titles"><h3>Location</h3></div>
+          <span className="ad-card-note">This asset's abstracts, imported tracts, and geographic extent</span>
+        </div>
+        <Suspense fallback={<Spinner label="Loading map…" />}><DealMap dealId={asset.id} abstractIds={asset.abstractIds} noun="asset" abstractsWhere="the Property card" /></Suspense>
+      </section>
 
       {can("viewDocuments") && <DocumentsSection ownerType="deal" ownerId={asset.id} files={asset.files} folders={asset.docFolders?.length ? asset.docFolders : ASSET_DOC_FOLDERS} onChanged={onChanged} canEdit={canEdit} canDelete={canEdit} />}
     </div>
@@ -159,22 +189,24 @@ function EditCard({ title, children, editing, onEdit, onCancel, onSave, canEdit 
   title: string; children: React.ReactNode; editing: boolean; onEdit: () => void; onCancel: () => void; onSave: () => void; canEdit: boolean;
 }) {
   return (
-    <div className="panel">
-      <div className="section-head">
-        <h3 style={{ margin: 0 }}>{title}</h3>
-        <div className="row" style={{ gap: 10, alignItems: "center" }}>
+    <section className="panel ad-card">
+      <div className="ad-card-head">
+        <div className="ad-card-titles"><h3>{title}</h3></div>
+        <div className="ad-card-actions">
           {canEdit && (editing
             ? <><button className="small" onClick={onCancel}>Cancel</button><button className="small primary" onClick={onSave}>Save</button></>
             : <button className="small" onClick={onEdit}>Edit</button>)}
         </div>
       </div>
-      {children}
-    </div>
+      <div className="ad-card-body">{children}</div>
+    </section>
   );
 }
 
 function KV({ k, v }: { k: string; v: React.ReactNode }) {
-  return <div className="kv"><span className="k">{k}</span><span className="v">{v || "—"}</span></div>;
+  // Values are single-line with an ellipsis; the full text is on hover.
+  const full = typeof v === "string" ? v : undefined;
+  return <div className="kv"><span className="k">{k}</span><span className={`v ${v ? "" : "empty"}`} title={full}>{v || "—"}</span></div>;
 }
 function Fld({ l, children }: { l: string; children: React.ReactNode }) {
   return <div className="field" style={{ marginBottom: 0 }}><label>{l}</label>{children}</div>;
@@ -345,22 +377,31 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
   }
 
   return (
-    <div className="panel">
-      <div className="section-head">
-        <h3 style={{ margin: 0 }}>Financials</h3>
-        <div className="row">
-          {canEdit && <button className="small" onClick={() => setShowAddRev(true)}>+ Add revenue</button>}
+    <section className="panel ad-card ad-fin">
+      <div className="ad-card-head">
+        <div className="ad-card-titles">
+          <h3>Financials</h3>
+          <span className="ad-card-sub">{rev.months > 0 ? `${money(totalRevenue)} booked across ${asset.revenueEntries.length} entr${asset.revenueEntries.length === 1 ? "y" : "ies"} · ${money(Math.round(rev.avg))} avg / mo` : "No revenue booked yet"}</span>
+        </div>
+        <div className="ad-card-actions">
+          {canEdit && (
+            <button className="small" onClick={() => setShowAddRev(true)}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              Add revenue
+            </button>
+          )}
           {canEdit && (edit
             ? <><button className="small" onClick={() => { setF(asset); setEdit(false); }}>Cancel</button><button className="small primary" onClick={saveFinancials}>Save</button></>
             : <button className="small" onClick={() => setEdit(true)}>Edit</button>)}
         </div>
       </div>
 
-      <div className="metrics-row fin-kpis" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
-        <MetricCard label="Total Revenue Booked" value={money(totalRevenue)} hint={`${asset.revenueEntries?.length ?? 0} entries`} valueColor={totalRevenue ? "var(--green)" : undefined} />
-        <MetricCard label="ROI Since Acquisition" value={fmtPct(asset.roiSinceAcquisition)} valueColor={posColor(asset.roiSinceAcquisition)} />
-        <MetricCard label="Unrealized Gain / Loss" value={money(asset.unrealizedGainLoss)} valueColor={posColor(asset.unrealizedGainLoss)} />
-        <MetricCard label="Lease Status" value={asset.leaseStatuses?.length ? asset.leaseStatuses.join(", ") : "—"} />
+      <div className="ad-band">
+        <BandCell label="Total revenue booked" value={money(totalRevenue)} sub={`${asset.revenueEntries?.length ?? 0} entries`} color={totalRevenue ? "var(--success-ink)" : undefined} />
+        <BandCell label="ROI since acquisition" value={fmtPct(asset.roiSinceAcquisition)} color={posColor(asset.roiSinceAcquisition)} />
+        <BandCell label="Unrealized gain / loss" value={money(asset.unrealizedGainLoss)} color={posColor(asset.unrealizedGainLoss)} />
+        <BandCell label="Lease status" value={asset.leaseStatuses?.length ? asset.leaseStatuses.join(", ") : "—"}
+          sub={[royaltyLabel(asset.royaltyRate), asset.leaseExpirationDate ? `expires ${fmtDate(asset.leaseExpirationDate)}` : ""].filter(Boolean).join(" · ") || undefined} />
       </div>
 
       {/* Revenue insights strip (reference) — shown once revenue exists.
@@ -381,40 +422,41 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
         );
       })()}
 
-      <div className="chart-grid">
-        <div className="panel" style={{ marginBottom: 0 }}>
-          <div className="panel-title" style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h3>Revenue / Royalty History</h3>
-            {rev.mom != null && <CtPill color={rev.mom >= 0 ? "#22c55e" : "#ef4444"}>{rev.mom >= 0 ? "▲" : "▼"} {rev.mom >= 0 ? "+" : ""}{rev.mom}% MoM</CtPill>}
+      <div className="ad-fin-split">
+        <div className="ad-fin-chart">
+          <div className="ad-sub-head">
+            <h4>Revenue history</h4>
+            {rev.mom != null && <Tag tone={rev.mom >= 0 ? "success" : "danger"}>{rev.mom >= 0 ? "▲" : "▼"} {rev.mom >= 0 ? "+" : ""}{rev.mom}% MoM</Tag>}
           </div>
           {chartData.length === 0 ? <p className="muted">No revenue entries yet. Add monthly royalty or lease income to build the history.</p> : (
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                <XAxis dataKey="month" tickFormatter={monthLabel} tick={{ fontSize: 11 }} minTickGap={20} />
-                <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => (v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${v}`)} width={54} />
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--line-faint)" vertical={false} />
+                <XAxis dataKey="month" tickFormatter={monthLabel} tick={{ fontSize: 11, fill: "var(--ink-3)" }} stroke="var(--line)" tickLine={false} minTickGap={20} />
+                <YAxis tick={{ fontSize: 11, fill: "var(--ink-4)" }} stroke="var(--line)" tickLine={false} tickFormatter={(v: number) => (v >= 1000 ? `$${Math.round(v / 1000)}k` : `$${v}`)} width={54} />
                 <Tooltip {...chartTooltip} labelFormatter={monthLabel} formatter={(v: number) => money(v)} />
                 {rev.avg > 0 && rev.months > 1 && (
-                  <ReferenceLine y={rev.avg} stroke="#f5b04b" strokeDasharray="6 5" strokeOpacity={0.8}
-                    label={{ value: `avg ${money(Math.round(rev.avg))} / mo`, position: "insideTopRight", fill: "#f5b04b", fontSize: 10.5, fontWeight: 700 }} />
+                  <ReferenceLine y={rev.avg} stroke="var(--warn)" strokeDasharray="6 5" strokeOpacity={0.7}
+                    label={{ value: `avg ${money(Math.round(rev.avg))} / mo`, position: "insideTopRight", fill: "var(--warn)", fontSize: 11, fontWeight: 600 }} />
                 )}
-                <Bar dataKey="amount" name="Revenue" isAnimationActive={false} radius={[3, 3, 0, 0]}>
+                <Bar dataKey="amount" name="Revenue" isAnimationActive={false} radius={[4, 4, 0, 0]} maxBarSize={120}>
                   {chartData.map((d, i) => <Cell key={i} fill={d.kind === "LEASE_BONUS" ? "#f59e0b" : REV_COLOR} />)}
+                  <LabelList dataKey="amount" position="top" formatter={(v: number) => money(v)} style={{ fill: "var(--ink)", fontSize: 11.5, fontWeight: 700 }} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
           )}
         </div>
-        <div className="panel" style={{ marginBottom: 0, display: "flex", flexDirection: "column" }}>
-          <div className="panel-title" style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <h3>Current Lease</h3>
+        <div className="ad-fin-lease">
+          <div className="ad-sub-head">
+            <h4>Current lease</h4>
             {!edit && (hasLease
-              ? <CtPill dot color="#22c55e">{asset.leaseStatuses?.[0] ?? "Lease on file"}</CtPill>
-              : <CtPill dot color="#f5b04b">No lease on file</CtPill>)}
+              ? <Tag tone="success" dot>{asset.leaseStatuses?.[0] ?? "Lease on file"}</Tag>
+              : <Tag tone="warn" dot>No lease on file</Tag>)}
           </div>
           {!edit ? (
             hasLease ? (
-            <div className="dd-grid" style={{ gridTemplateColumns: "1fr" }}>
+            <div className="dd-grid ad-kv2">
               <KV k="Lease Status" v={asset.leaseStatuses?.length ? asset.leaseStatuses.join(", ") : null} />
               <KV k="Royalty Rate" v={royaltyLabel(asset.royaltyRate) || null} />
               <KV k="Lease Effective Date" v={fmtDate(asset.leaseEffectiveDate)} />
@@ -434,7 +476,7 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
             </div>
             )
           ) : (
-            <div className="dd-grid" style={{ gridTemplateColumns: "1fr" }}>
+            <div className="dd-grid ad-kv2">
               <Fld l="Lease Status"><SearchableMultiSelect options={LEASE_STATUS_OPTIONS} value={f.leaseStatuses ?? []} onChange={(v) => setF({ ...f, leaseStatuses: v })} placeholder="Select lease status…" /></Fld>
               <Fld l="Royalty Rate"><RoyaltyRateField value={f.royaltyRate} onChange={(v) => setF({ ...f, royaltyRate: v })} /></Fld>
               <Fld l="Lease Effective Date"><DateField value={toInputDate(f.leaseEffectiveDate)} onChange={(v) => setF({ ...f, leaseEffectiveDate: v })} /></Fld>
@@ -445,7 +487,7 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
       </div>
 
       {(asset.revenueEntries?.length ?? 0) > 0 && (
-        <div className="table-scroll fin-revtable" style={{ marginTop: 12 }}>
+        <div className="table-scroll fin-revtable">
           <table className="data-table">
             <thead><tr><th>Month</th><th>Type</th><th>Operator</th><th className="right">Amount</th><th className="right">Δ Prior</th><th className="right">Running</th><th>Note</th>{canEdit && <th></th>}</tr></thead>
             <tbody>
@@ -463,13 +505,13 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
                 return enriched.reverse().map((r) => (
                   <tr key={r.id}>
                     <td style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{r.month.slice(0, 7)}</td>
-                    <td><CtPill color={r.kind === "LEASE_BONUS" ? "#f59e0b" : "#22c55e"}>{r.kind.replace("_", " ")}</CtPill></td>
+                    <td><Tag tone={r.kind === "LEASE_BONUS" ? "warn" : "success"}>{r.kind.replace("_", " ")}</Tag></td>
                     <td className="ct-dim">{r.operator || "—"}</td>
                     <td className="right" style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{money(r.amount)}</td>
                     <td className="right" style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", color: r.delta == null ? "var(--text-faint)" : r.delta >= 0 ? "var(--green)" : "var(--red)" }}>{r.delta == null ? "—" : `${r.delta >= 0 ? "+" : ""}${r.delta}%`}</td>
                     <td className="right ct-dim" style={{ fontVariantNumeric: "tabular-nums" }}>{money(r.running)}</td>
                     <td>{r.note || "—"}</td>
-                    {canEdit && <td className="right"><button className="link-btn" style={{ color: "var(--red)" }} onClick={() => delRevenue(r.id)}>Delete</button></td>}
+                    {canEdit && <td className="right"><button className="link-btn ad-row-del" onClick={() => delRevenue(r.id)}>Delete</button></td>}
                   </tr>
                 ));
               })()}
@@ -478,7 +520,18 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
         </div>
       )}
 
-      {showAddRev && <AddRevenueModal assetId={asset.id} onClose={() => setShowAddRev(false)} onSaved={() => { setShowAddRev(false); onSaved(); }} />}
+      {showAddRev && <AddRevenueModal assetId={asset.id} assetName={asset.name} onClose={() => setShowAddRev(false)} onSaved={() => { setShowAddRev(false); onSaved(); }} />}
+    </section>
+  );
+}
+
+/** One cell of a card's KPI band. */
+function BandCell({ label, value, sub, color }: { label: string; value: React.ReactNode; sub?: string; color?: string }) {
+  return (
+    <div className="ad-band-cell">
+      <span className="ad-band-l">{label}</span>
+      <span className="ad-band-v" style={color ? { color } : undefined}>{value}</span>
+      <span className="ad-band-s">{sub}</span>
     </div>
   );
 }
@@ -488,7 +541,7 @@ const MONTHS = [
   ["07", "July"], ["08", "August"], ["09", "September"], ["10", "October"], ["11", "November"], ["12", "December"],
 ] as const;
 
-function AddRevenueModal({ assetId, onClose, onSaved }: { assetId: string; onClose: () => void; onSaved: () => void }) {
+function AddRevenueModal({ assetId, assetName, onClose, onSaved }: { assetId: string; assetName: string; onClose: () => void; onSaved: () => void }) {
   const now = new Date();
   const curYear = now.getUTCFullYear();
   // Named month + a dedicated searchable year (default current), stored as YYYY-MM.
@@ -518,10 +571,9 @@ function AddRevenueModal({ assetId, onClose, onSaved }: { assetId: string; onClo
   }
 
   return (
-    <Modal title="Add Revenue Entry" onClose={onClose} footer={<><button className="small" onClick={onClose}>Cancel</button><button className="primary" disabled={busy} onClick={save}>{busy ? "Saving…" : "Add"}</button></>}>
-      {/* Standard sectioned layout (same system as New Deal / New Buyer). */}
-      <div className="modal-sec">Revenue entry</div>
-      <div className="nd-basics">
+    <Modal title="Add revenue" subtitle={`Book a royalty check, lease bonus or other payment for ${assetName}`} onClose={onClose}
+      footer={<><button className="small" onClick={onClose}>Cancel</button><button className="primary" disabled={busy} onClick={save}>{busy ? "Saving…" : "Add revenue"}</button></>}>
+      <div className="nd-basics ad-rev-form">
         <div className="field"><label>Month</label>
           <Select value={monthNum} onChange={setMonthNum} ariaLabel="Month"
             options={MONTHS.map(([v, l]) => ({ value: v, label: l }))} />
@@ -532,9 +584,12 @@ function AddRevenueModal({ assetId, onClose, onSaved }: { assetId: string; onClo
           <datalist id="rev-year-options">{years.map((y) => <option key={y} value={y} />)}</datalist>
         </div>
         <div className="field"><label>Amount</label><MoneyInput value={amount} onChange={setAmount} ariaLabel="Offer amount" /></div>
-        <div className="field"><label>Type</label><Select value={kind} onChange={setKind} ariaLabel="Revenue type" options={[{ value: "ROYALTY", label: "Royalty" }, { value: "LEASE_BONUS", label: "Lease Bonus" }, { value: "OTHER", label: "Other" }]} /></div>
-        <div className="field"><label>Operator</label><input value={operator} onChange={(e) => setOperator(e.target.value)} /></div>
-        <div className="field" style={{ gridColumn: "1 / -1" }}><label>Note</label><input value={note} onChange={(e) => setNote(e.target.value)} /></div>
+        <div className="field" style={{ gridColumn: "1 / -1" }}><label>Type</label>
+          <Segmented ariaLabel="Revenue type" className="ad-rev-type" value={kind} onChange={setKind}
+            options={[{ value: "ROYALTY", label: "Royalty" }, { value: "LEASE_BONUS", label: "Lease bonus" }, { value: "OTHER", label: "Other" }]} />
+        </div>
+        <div className="field"><label>Operator <span className="ad-opt">(optional)</span></label><input value={operator} onChange={(e) => setOperator(e.target.value)} /></div>
+        <div className="field"><label>Note <span className="ad-opt">(optional)</span></label><input value={note} onChange={(e) => setNote(e.target.value)} /></div>
       </div>
       {error && <Banner kind="error">{error}</Banner>}
     </Modal>
@@ -573,9 +628,14 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
   return (
     <div>
       {asset.assetMode !== "SELL" && (
-        <Banner kind="info">
-          This asset isn't actively marketed yet. <button className="link-btn" onClick={onSetSell}>Mark it for sale</button> to add it to the Pipeline alongside acquisition opportunities.
-        </Banner>
+        <div className="ad-callout" role="note">
+          <span className="ad-callout-icon" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 8v4M12 16h.01" /></svg></span>
+          <div className="ad-callout-text">
+            <strong>This asset isn't actively marketed yet</strong>
+            <span>Marking it for sale adds it to the Pipeline alongside acquisition opportunities.</span>
+          </div>
+          <button className="small primary" onClick={onSetSell}>Mark for sale</button>
+        </div>
       )}
 
       {/* Sale Readiness + Pricing Intelligence side by side (reference layout). */}
@@ -614,8 +674,11 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
         const color = pct >= 80 ? "#22c55e" : "#f5b04b";
         return (
           <div className="sr-grid">
-            <div className="panel sr-card" style={{ marginBottom: 0 }}>
-              <h3 style={{ margin: 0 }}>Sale Readiness</h3>
+            <section className="panel ad-card sr-card">
+              <div className="ad-card-head">
+                <div className="ad-card-titles"><h3>Sale readiness</h3></div>
+                <span className="ad-card-note">{done} of {items.length} complete</span>
+              </div>
               <div className="sr-top">
                 <span className="sr-ring">
                   <svg width="74" height="74" viewBox="0 0 74 74">
@@ -640,20 +703,22 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
                   </div>
                 ))}
               </div>
-            </div>
+            </section>
 
-            <div className="panel pi-card" style={{ marginBottom: 0 }}>
-              <div className="section-head" style={{ alignItems: "baseline", marginBottom: 0 }}>
-                <h3 style={{ margin: 0 }}>Pricing Intelligence</h3>
-                <div className="row" style={{ gap: 10, alignItems: "center" }}>
-                  <span className="muted" style={{ fontSize: 12 }}>Scenarios from this asset's current value</span>
+            <section className="panel ad-card pi-card">
+              <div className="ad-card-head">
+                <div className="ad-card-titles">
+                  <h3>Pricing intelligence</h3>
+                  <span className="ad-card-sub">Scenarios from this asset's current value</span>
+                </div>
+                <div className="ad-card-actions">
                   {canEdit && (edit
                     ? <><button className="small" onClick={() => { setF(asset); setEdit(false); }}>Cancel</button><button className="small primary" onClick={savePricing}>Save</button></>
                     : <button className="small" onClick={() => setEdit(true)}>Edit</button>)}
                 </div>
               </div>
               {edit ? (
-                <div className="dd-grid" style={{ marginTop: 14 }}>
+                <div className="dd-grid ad-card-body">
                   <Fld l="Current Value"><input type="number" value={f.currentValue ?? ""} onChange={(e) => setF({ ...f, currentValue: e.target.value === "" ? null : Number(e.target.value) })} /></Fld>
                   <Fld l="Asking Price"><MoneyInput value={f.askPrice != null ? String(f.askPrice) : ""} onChange={(v) => setF({ ...f, askPrice: v === "" ? null : Number(v) })} ariaLabel="Asking price" /></Fld>
                   <Fld l="Est. Closing Costs"><input type="number" value={f.estimatedClosingCosts ?? ""} onChange={(e) => setF({ ...f, estimatedClosingCosts: e.target.value === "" ? null : Number(e.target.value) })} /></Fld>
@@ -667,6 +732,7 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
                   <div>
                     <div className="ddx-label">$ / NRA</div>
                     <div className={`pi-v ${askNra == null ? "dim" : ""}`}>{askNra != null ? money(askNra) : "—"}</div>
+                    {asset.nra ? <div className="pi-note">across {num(asset.nra)} net royalty acres</div> : null}
                   </div>
                   <div className="pi-right">
                     <div className="ddx-label">Est. Net Proceeds</div>
@@ -702,7 +768,7 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
                   </div>
                 )}
               </>)}
-            </div>
+            </section>
           </div>
         );
       })()}
@@ -712,8 +778,8 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
       <MarketingFunnel metrics={asset.metrics} matchCount={matches?.length ?? 0} askPrice={asset.askPrice} costBasis={asset.purchasePrice} />
 
       {asset.offers.length > 0 && (
-        <div className="panel">
-          <h3>Offers</h3>
+        <section className="panel ad-card ad-offers">
+          <div className="ad-card-head"><div className="ad-card-titles"><h3>Offers</h3></div><span className="ad-card-note">{asset.offers.length} offer{asset.offers.length === 1 ? "" : "s"}</span></div>
           <div className="table-scroll"><table className="data-table">
             <thead><tr><th>Buyer</th><th className="right">Amount</th><th>Status</th><th>Expires</th><th></th></tr></thead>
             <tbody>{asset.offers.map((o) => (
@@ -729,14 +795,14 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
               </tr>
             ))}</tbody>
           </table></div>
-        </div>
+        </section>
       )}
 
       {/* Offering page publishing — identical to a standard deal. */}
       <DealPortalPanel dealId={asset.id} defaultOpen={false} />
 
       <CollapsibleSection
-        title="Buyer Activity"
+        title="Buyer activity"
         sub="Status, notes and communication history for this asset's marketing"
         right={<span className="muted" style={{ fontSize: 12.5 }}>{asset.buyerActivity.length} buyer{asset.buyerActivity.length === 1 ? "" : "s"}</span>}
       >
@@ -749,17 +815,17 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
       </CollapsibleSection>
 
       <CollapsibleSection
-        title="Buyer Match Recommendations"
+        title="Buyer match recommendations"
         sub="Ranked by fit with this asset"
         right={matches ? <span className="muted" style={{ fontSize: 12.5 }}>{matches.length} buyer{matches.length === 1 ? "" : "s"}</span> : undefined}
       >
         {!matches ? <Spinner /> : matches.length === 0 ? <p className="muted">No buyers in the system yet.</p> : (
           <>
             {canEdit && (
-              <div className="row" style={{ marginBottom: 10, alignItems: "center", gap: 8 }}>
+              <div className="ad-match-bar">
                 <span className="muted" style={{ fontSize: 13 }}>{selected.size} selected</span>
-                <button className="small primary" disabled={selected.size === 0} onClick={() => setShowEmail(true)}>Send via Email</button>
-                <button className="small" disabled={selected.size === 0} onClick={markContacted}>Mark Contacted</button>
+                <button className="small primary" disabled={selected.size === 0} onClick={() => setShowEmail(true)}>Send via email</button>
+                <button className="small" disabled={selected.size === 0} onClick={markContacted}>Mark contacted</button>
                 <span className="mr-legend">● matched · ○ not in buyer's buy box</span>
               </div>
             )}

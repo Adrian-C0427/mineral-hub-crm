@@ -1,0 +1,388 @@
+/* Redesign styles: deals — Deals list (pages/Deals.tsx) and the New deal modal
+   (components/NewDealModal.tsx). Colours come from the theme tokens only. */
+
+/* ===========================================================================
+   Deals list
+   =========================================================================== */
+.deals-page { display: flex; flex-direction: column; gap: 20px; }
+.deals-page > .page-header,
+.deals-page > .asset-tabs,
+.deals-page > .banner,
+.deals-page > .ct-card { margin: 0; }
+
+/* --- Header: title, stat line, New deal --------------------------------- */
+.dl-head { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.dl-head h1 { margin: 0; font-size: 26px; font-weight: 600; line-height: 1.15; letter-spacing: -0.022em; color: var(--ink); }
+.dl-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-3); }
+.dl-stats b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.dl-stats b.pos { color: var(--success); }
+.dl-stats b.neg { color: var(--danger-ink); }
+.dl-stats-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--line-hover-strong); flex: none; }
+.dl-new-btn { display: inline-flex; align-items: center; gap: 7px; height: 34px; min-height: 34px; padding: 0 14px 0 11px; font-size: 13px; }
+
+/* --- Scope tabs (route links) with counts ------------------------------- */
+.deals-page .asset-tabs { display: flex; gap: 24px; border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.deals-page .asset-tabs::-webkit-scrollbar { display: none; }
+.deals-page .asset-tabs .tab {
+  display: inline-flex; align-items: center; flex: none; height: 40px; padding: 0 2px; margin: 0;
+  border: 0; border-radius: 0; background: transparent; box-shadow: none;
+  font-size: 13.5px; font-weight: 500; color: var(--ink-3); white-space: nowrap; text-decoration: none;
+}
+.deals-page .asset-tabs .tab:hover { color: var(--ink); background: transparent; }
+.deals-page .asset-tabs .tab.active { color: var(--ink-strong); font-weight: 600; box-shadow: inset 0 -2px 0 var(--accent); }
+.dl-tab { display: inline-flex; align-items: center; gap: 8px; }
+.deals-page .tab-badge {
+  min-width: 20px; padding: 1px 6px; border-radius: var(--radius-pill-sm); text-align: center;
+  background: var(--surface-3); color: var(--ink-3); font-size: 11.5px; font-weight: 600; font-variant-numeric: tabular-nums;
+}
+.deals-page .tab.active .tab-badge { background: var(--accent-tint); color: var(--accent-ink); }
+
+/* --- Overdue warning ----------------------------------------------------- */
+.deals-page > .banner-warn {
+  padding: 11px 16px; border-radius: var(--radius-md); font-size: 13px; line-height: 1.5;
+  background: var(--warn-tint); border: 1px solid var(--warn-border); color: var(--ink-1);
+}
+.deals-page > .banner-warn strong { color: var(--warn-ink); font-weight: 600; }
+
+/* --- Table card ----------------------------------------------------------
+   overflow stays visible so the Customize View menu can leave the card. */
+.deals-page .dl-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); }
+
+/* Toolbar: search, stage filter, rows per page, Customize view. */
+.deals-page .dl-card .cv-toolbar { padding: 12px 14px; gap: 10px; border-bottom: 1px solid var(--line); margin: 0; }
+.deals-page .dl-card .cv-toolbar-left { gap: 8px; }
+.deals-page .dl-card .cv-toolbar input:not([type="checkbox"]) {
+  height: 32px; min-height: 32px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-nav);
+  font: 400 13px var(--font-sans); color: var(--ink);
+}
+.deals-page .dl-card .cv-toolbar input:not([type="checkbox"]):focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); }
+.deals-page .dl-card .cv-toolbar .msel-box { height: 32px; min-height: 32px; background: var(--bg); border-color: var(--line); border-radius: var(--radius-nav); font: 500 12.5px var(--font-sans); }
+.deals-page .dl-card .cv-toolbar .cv-btn {
+  height: 32px; min-height: 32px; padding: 0 11px; gap: 7px; border: 1px solid var(--line); border-radius: var(--radius-nav);
+  background: var(--surface); color: var(--ink); font: 500 12.5px var(--font-sans); box-shadow: none;
+}
+.deals-page .dl-card .cv-toolbar .cv-btn:hover,
+.deals-page .dl-card .cv-toolbar .cv-btn.active { border-color: var(--line-hover); }
+.dl-stage-filter.seg { padding: 3px; gap: 2px; border-radius: var(--radius); background: var(--surface-3); overflow-x: auto; scrollbar-width: none; }
+.dl-stage-filter.seg::-webkit-scrollbar { display: none; }
+.dl-stage-filter .seg-item { height: 26px; min-height: 26px; padding: 0 10px; border-radius: var(--radius-pill-sm); font-size: 12.5px; }
+.dl-stage-filter .seg-count { color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.dl-showing { font-size: 12.5px; color: var(--ink-3); white-space: nowrap; }
+
+/* Selection bar: lives inside the card, under the toolbar (sticky as before). */
+.deals-page .dl-card .bulk-bar {
+  min-height: 57px; margin: 0; padding: 12px 14px; gap: 6px; flex-wrap: wrap;
+  background: var(--accent-row); border: 0; border-bottom: 1px solid var(--line); border-radius: 0; box-shadow: none;
+}
+.deals-page .dl-card .bulk-bar > strong { padding: 0 8px 0 4px; font-size: 13px; font-weight: 600; color: var(--ink); }
+.deals-page .dl-card .bulk-bar > .spacer { order: 2; }
+.deals-page .dl-card .bulk-bar > button { order: 1; }
+.deals-page .dl-card .bulk-bar > button.small {
+  height: 30px; min-height: 30px; padding: 0 11px; border: 1px solid var(--accent-line); border-radius: var(--radius-nav);
+  background: var(--accent-row-hover); color: var(--ink); font-size: 12.5px; font-weight: 500; box-shadow: none;
+}
+.deals-page .dl-card .bulk-bar > button.small:hover { border-color: var(--accent); }
+.deals-page .dl-card .bulk-bar > button.small.danger { border-color: var(--danger-line); color: var(--danger-ink); }
+.deals-page .dl-card .bulk-bar > button.small.danger:hover { border-color: var(--danger); background: var(--danger-hover); }
+/* "Deselect all" — a quiet text button at the far right. */
+.deals-page .dl-card .bulk-bar > button.small:last-child { order: 3; border-color: transparent; background: transparent; color: var(--ink-2); }
+.deals-page .dl-card .bulk-bar > button.small:last-child:hover { color: var(--ink); border-color: transparent; }
+.deals-page .dl-card .cv-table > .banner { margin: 12px 14px; }
+
+/* Table: sentence-case 12px headers, 13.5px rows, neutral hover, tinted selection. */
+.deals-page .dl-card .data-table thead th {
+  height: auto; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--line);
+  font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--ink-3);
+}
+.deals-page .dl-card .data-table thead th.active,
+.deals-page .dl-card .data-table thead th.sortable:hover { color: var(--ink); }
+.deals-page .dl-card .data-table .sort-ind { font-size: 9px; color: currentColor; opacity: 0; transition: opacity 0.12s; }
+.deals-page .dl-card .data-table th.sortable:hover .sort-ind { opacity: 0.45; }
+.deals-page .dl-card .data-table th.active .sort-ind { opacity: 1; color: currentColor; }
+.deals-page .dl-card .data-table tbody td {
+  height: auto; padding: 15px 16px; border-bottom: 1px solid var(--line-faint);
+  font-size: 13.5px; color: var(--ink); font-variant-numeric: tabular-nums;
+}
+.deals-page .dl-card .data-table.auto-cols tbody td:nth-child(n) { background: var(--surface); }
+.deals-page .dl-card .data-table.auto-cols tbody tr:hover td:nth-child(n) { background: var(--surface-2); }
+.deals-page .dl-card .data-table.auto-cols tbody tr.row-selected td:nth-child(n) { background: var(--accent-row); }
+.deals-page .dl-card .data-table.auto-cols tbody tr.row-selected:hover td:nth-child(n) { background: var(--accent-row-hover); }
+/* The frozen Deal column reads as one with a hairline seam (design) instead of a shadow. */
+.deals-page .dl-card .data-table.lead-sticky.has-sel th:nth-child(2),
+.deals-page .dl-card .data-table.lead-sticky.has-sel td:nth-child(2),
+.deals-page .dl-card .data-table.lead-sticky:not(.has-sel) th:nth-child(1),
+.deals-page .dl-card .data-table.lead-sticky:not(.has-sel) td:nth-child(1) { box-shadow: inset -1px 0 0 var(--line-faint); }
+.deals-page .dl-card .data-table.lead-sticky thead th:nth-child(-n+2) { background: var(--surface); }
+/* Overdue rows keep their 3px red accent on the leading cell. */
+.deals-page .dl-card .data-table tr.row-overdue td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+.deals-page .dl-card .empty-cell { padding: 48px 24px; }
+
+/* Cells */
+.dl-name { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.dl-name-txt { font-weight: 600; color: var(--ink); }
+.deals-page .data-table .row-link:hover { text-decoration: none; }
+.deals-page .data-table .row-link:hover .dl-name-txt { color: var(--accent-ink); text-decoration: underline; }
+/* Priority: a coloured dot and plain text (the pill's tooltip is kept). */
+.dl-priority .ct-pill {
+  height: auto; padding: 0; gap: 8px; border: 0 !important; border-radius: 0;
+  background: transparent !important; color: var(--ink-soft) !important; font-size: 13.5px; font-weight: 400;
+}
+.dl-priority .ct-pill-dot { width: 7px; height: 7px; }
+/* Stage: a compact chip in the org's stage colour, with a leading dot. */
+.dl-stage .ct-pill { height: 22px; padding: 0 8px; gap: 6px; border-color: transparent !important; border-radius: var(--radius-pill-sm); font-size: 12px; font-weight: 600; }
+.dl-stage .ct-pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+.dl-roy { display: inline-flex; align-items: baseline; gap: 6px; }
+.dl-roy-pct { font-size: 12.5px; color: var(--ink-3); }
+.dl-date { color: var(--ink-2); white-space: nowrap; }
+.dl-date.overdue { color: var(--danger-ink); font-weight: 600; }
+.dl-owner-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-1); }
+.dl-empty { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.dl-empty strong { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.dl-empty span { font-size: 12.5px; color: var(--ink-3); }
+
+/* Footer: count + pager */
+.deals-page .dl-card .ct-foot { padding: 10px 14px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-3); }
+.deals-page .dl-card .ct-pgbtn { min-height: 28px; border-radius: var(--radius-sm); border-color: var(--line); background: transparent; color: var(--ink-2); box-shadow: none; }
+.deals-page .dl-card .ct-pgbtn:disabled { color: var(--ink-5); opacity: 1; }
+.deals-page .dl-card .ct-pgcur { border-radius: var(--radius-sm); background: var(--hover-strong); border-color: var(--line-strong); font-weight: 600; }
+
+/* GeoFields: the transient "Removed X — not in the selected state" note. */
+.geo-prune-note { font-size: 12px; color: var(--ink-3); }
+
+/* ===========================================================================
+   New deal modal — two panes (section rail + scrolling form) inside the
+   shared Modal, a summary footer, and a full-screen sheet on phones.
+   =========================================================================== */
+.modal.modal-wide:has(.nd-shell) {
+  width: 980px; max-width: 100%; height: min(860px, calc(100vh - 48px)); max-height: none;
+  overflow: hidden; border-color: var(--line-strong); border-radius: var(--radius-xl);
+  background: var(--surface); box-shadow: var(--shadow-modal);
+}
+.modal.modal-wide:has(.nd-shell):not(.modal-attn) { animation: ndRise 220ms cubic-bezier(.2, .8, .2, 1); }
+@keyframes ndRise { from { opacity: 0; transform: translateY(10px) scale(.985); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .modal.modal-wide:has(.nd-shell):not(.modal-attn) { animation: none; } }
+
+.modal:has(.nd-shell) > .modal-header { align-items: flex-start; gap: 16px; padding: 20px 18px 18px 24px; border-bottom: 1px solid var(--line); }
+.modal:has(.nd-shell) > .modal-header h3 { font-size: 18px; font-weight: 600; letter-spacing: -0.015em; color: var(--ink); }
+.modal:has(.nd-shell) .modal-sub { margin-top: 5px; font-size: 13px; color: var(--ink-3); }
+.modal:has(.nd-shell) .modal-sub strong { color: var(--ink); font-weight: 600; }
+.modal:has(.nd-shell) .modal-x {
+  width: 32px; height: 32px; min-height: 32px; padding: 0; display: flex; align-items: center; justify-content: center;
+  border: 0; border-radius: var(--radius); background: transparent; color: var(--ink-3); box-shadow: none; font-size: 15px;
+}
+.modal:has(.nd-shell) .modal-x:hover { background: var(--hover-strong); color: var(--ink); }
+.modal:has(.nd-shell) > .modal-body { flex: 1; min-height: 0; padding: 0; overflow: hidden; display: flex; flex-direction: column; }
+
+.nd-shell { flex: 1; min-height: 0; display: flex; }
+
+/* --- Section rail -------------------------------------------------------- */
+.nd-rail {
+  width: 212px; flex: none; display: flex; flex-direction: column; justify-content: space-between; gap: 16px;
+  padding: 16px 12px; border-right: 1px solid var(--line); background: var(--surface-inset);
+}
+.nd-rail-list { position: relative; display: flex; flex-direction: column; gap: 2px; }
+.nd-rail-item {
+  display: flex; align-items: center; gap: 10px; height: 34px; min-height: 34px; padding: 0 10px;
+  border: 0; border-radius: var(--radius-nav); background: transparent; box-shadow: none;
+  font-size: 13px; font-weight: 500; color: var(--ink-2); text-align: left; white-space: nowrap;
+}
+.nd-rail-item:hover { background: transparent; color: var(--ink); }
+.nd-rail-item.active { background: var(--hover); color: var(--ink-strong); font-weight: 600; box-shadow: inset 2px 0 0 var(--accent); }
+.nd-rail-label { flex: 1; }
+.nd-rail-opt { font-size: 11px; font-weight: 500; color: var(--ink-placeholder); }
+.nd-ring {
+  width: 16px; height: 16px; flex: none; border-radius: 50%; display: flex; align-items: center; justify-content: center;
+  border: 1.5px solid var(--line-hover-strong);
+}
+.nd-ring.opt { border-style: dashed; border-color: var(--line-hover); }
+.nd-rail-item.active .nd-ring:not(.done) { border: 1.5px solid var(--accent); }
+.nd-ring.done { border: 0; background: var(--success); color: var(--surface); }
+.nd-progress { display: flex; flex-direction: column; gap: 8px; padding: 0 10px 4px; font-size: 12px; color: var(--ink-3); }
+.nd-progress-bar { display: flex; gap: 3px; }
+.nd-progress-bar span { flex: 1; height: 3px; border-radius: 2px; background: var(--line-strong); }
+.nd-progress-bar span.done { background: var(--success); }
+
+/* --- Form pane ------------------------------------------------------------ */
+.nd-form { flex: 1; min-width: 0; overflow: auto; position: relative; padding: 0 28px 8px; overscroll-behavior: contain; }
+.nd-form .form-sec,
+.nd-form .form-sec:first-child { padding: 26px 0; gap: 18px; border-top: 0; border-bottom: 1px solid var(--line-soft); }
+.nd-form > [data-sec]:last-child .form-sec { border-bottom: 0; }
+.nd-form .form-sec-head { align-items: center; gap: 4px 10px; }
+.nd-form .form-sec-bar { height: 16px; }
+.nd-form .form-sec-hint { flex-basis: 100%; max-width: 633px; padding-left: 13px; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
+.nd-form .nd-basics,
+.nd-form .nd-grid3 { gap: 18px 14px; align-items: start; }
+.nd-form .nd-basics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.nd-form .nd-grid3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+/* Fields: 12.5px labels over 38px controls on the input surface. */
+.nd-form .field { display: flex; flex-direction: column; gap: 7px; min-width: 0; margin: 0; }
+.nd-form .field > label { margin: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-1); text-transform: none; letter-spacing: 0; }
+.modal .nd-form .field > input:not([type="checkbox"]):not([type="radio"]),
+.modal .nd-form .field > textarea,
+.modal .nd-form .money-input input,
+.modal .nd-form .nd-dtc > input,
+.modal .nd-form .field .msel-box {
+  min-height: 38px; background: var(--input); border: 1px solid var(--line-strong); border-radius: var(--radius); font-size: 13.5px; color: var(--ink);
+}
+.modal .nd-form .field > input:not([type="checkbox"]):not([type="radio"]),
+.modal .nd-form .money-input input,
+.modal .nd-form .nd-dtc > input { height: 38px; padding: 0 12px; }
+.modal .nd-form .money-input input { padding-left: 24px; }
+.nd-form .money-input .mi-prefix { left: 12px; font-size: 13.5px; color: var(--ink-4); }
+/* Search inputs inside the multi-selects / date field stay part of their box. */
+.modal .nd-form .field .msel-box input:not([type="checkbox"]) { min-height: 0; background: transparent; border: 0; border-radius: 0; }
+.modal .nd-form .field > input:not([type="checkbox"]):not([type="radio"]):focus,
+.modal .nd-form .field > textarea:focus,
+.modal .nd-form .money-input input:focus,
+.modal .nd-form .nd-dtc > input:focus,
+.modal .nd-form .field .msel-box:focus-within,
+.modal .nd-form .field .msel-box.open { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-ring); outline: none; }
+.modal .nd-form .msel.is-disabled .msel-box { background: var(--surface-1); color: var(--ink-placeholder); opacity: 1; }
+.nd-form input::placeholder,
+.nd-form textarea::placeholder { color: var(--ink-4); }
+.nd-form .nd-notes textarea { min-height: 88px; padding: 10px 12px; resize: vertical; line-height: 1.5; }
+.nd-form .nd-calc { margin: 0; font-size: 11.5px; color: var(--ink-4); }
+.nd-form .nd-calc.auto { color: var(--success-ink); }
+.nd-form .req-star { margin-left: 3px; color: var(--danger-ink); font-weight: 600; }
+
+/* Days to close: preset chips on a tray (active = accent) + "Other". */
+.nd-form .nd-dtc { gap: 8px; }
+.nd-form .nd-dtc .seg-control { display: flex; flex-wrap: nowrap; gap: 2px; padding: 3px; border: 0; border-radius: var(--radius); background: var(--surface-3); max-width: none; }
+.nd-form .nd-dtc .seg-control .seg {
+  flex: 1; height: 30px; min-height: 30px; max-width: none; padding: 0; display: flex; align-items: center; justify-content: center;
+  border: 0; border-radius: var(--radius-sm); background: transparent; box-shadow: none; color: var(--ink-2); font-size: 12.5px; font-weight: 600;
+}
+.nd-form .nd-dtc .seg-control .seg:hover { background: transparent; color: var(--ink); }
+.nd-form .nd-dtc .seg-control .seg.active,
+.nd-form .nd-dtc .seg-control .seg.active:hover { background: var(--accent); color: var(--on-accent); }
+
+/* Find buyer by: read-only derived value. */
+.nd-form .nd-derived {
+  min-height: 38px; padding: 8px 12px; gap: 2px; border: 1px dashed var(--line-3); border-radius: var(--radius);
+  background: transparent; font-size: 13px; color: var(--ink);
+}
+.nd-form .nd-derived strong { font-weight: 600; }
+.nd-form .nd-derived .muted { color: var(--ink-4); }
+
+/* Additional deals: header button + one card per deal (full deal form). */
+.nd-form .nd-assets { margin: 0; padding: 0; border: 0; }
+.nd-assets .form-sec { position: relative; }
+.nd-assets .form-sec-head { padding-right: 120px; }
+.nd-add-deal {
+  position: absolute; top: 18px; right: 0; display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; min-height: 32px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-nav);
+  background: var(--surface); color: var(--ink); font-size: 12.5px; font-weight: 500; box-shadow: none;
+}
+.nd-add-deal:hover { border-color: var(--line-hover-strong); background: var(--surface); }
+.nd-form .nd-asset-card {
+  display: flex; flex-direction: column; gap: 14px; margin: 0; padding: 14px;
+  border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1);
+}
+.nd-form .nd-asset-card-head { margin: 0; }
+.nd-form .nd-asset-card-head strong { font-size: 13px; font-weight: 600; color: var(--ink); }
+.nd-form .nd-asset-del {
+  width: 32px; height: 32px; min-height: 32px; padding: 0; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line-strong); border-radius: var(--radius); background: transparent; color: var(--ink-3); box-shadow: none;
+}
+.nd-form .nd-asset-del:hover { color: var(--danger-ink); border-color: var(--line-hover-strong); background: transparent; }
+.nd-form .nd-asset-card .dd-grid { gap: 14px; }
+.nd-form .nd-asset-timeline { margin: 0; }
+.nd-form .nd-asset-same { font-size: 13px; color: var(--ink-1); margin: 0; }
+
+/* Server / validation message, pinned above the footer. */
+.modal .nd-error { flex: none; margin: 0; padding: 10px 24px; border-top: 1px solid var(--danger-line); background: var(--danger-tint); color: var(--danger-ink); font-size: 13px; }
+
+/* --- Footer: running figures + required count + actions ----------------- */
+.modal:has(.nd-shell) > .modal-footer {
+  justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;
+  padding: 14px 20px 14px 24px; border-top: 1px solid var(--line); background: var(--surface); border-radius: 0;
+}
+.nd-sum { display: flex; gap: 28px; }
+.nd-sum-item { display: flex; flex-direction: column; gap: 3px; }
+.nd-sum-item span { font-size: 11.5px; font-weight: 500; color: var(--ink-3); }
+.nd-sum-item b { font-size: 15px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.nd-sum-item b.empty { color: var(--ink-placeholder); }
+.nd-foot-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.nd-left { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--ink-3); }
+.modal-footer .nd-left .modal-req-note { margin: 0; font-size: 12px; color: var(--ink-4); }
+.nd-foot-actions > button { height: 36px; min-height: 36px; padding: 0 14px; font-size: 13px; }
+.nd-foot-actions > button.primary { padding: 0 16px; }
+
+/* ===========================================================================
+   Phones
+   =========================================================================== */
+@media (max-width: 760px) {
+  /* List: natural-width header button, toolbar wraps, stage filter scrolls. */
+  .dl-new-btn { min-height: 40px; }
+  .deals-page .asset-tabs .tab { min-height: 44px; height: 44px; }
+  .deals-page .dl-card .cv-toolbar input:not([type="checkbox"]) { height: 40px; min-height: 40px; font-size: 16px; }
+  .deals-page .dl-card .cv-toolbar .cv-btn,
+  .deals-page .dl-card .cv-toolbar .msel-box { height: 40px; min-height: 40px; }
+  .dl-stage-filter.seg { flex: 1 1 100%; flex-wrap: nowrap; }
+  .dl-stage-filter .seg-item { height: 34px; min-height: 34px; flex: none; }
+  .deals-page .dl-card .bulk-bar > button.small { height: 40px; min-height: 40px; }
+  .deals-page .dl-card .data-table tbody td { padding: 12px 14px; }
+
+  /* New deal: a full-screen sheet. */
+  .modal-overlay:has(.nd-shell) { padding: 0; align-items: stretch; }
+  .modal.modal-wide:has(.nd-shell) { height: 100dvh; max-height: 100dvh; border: 0; border-radius: 0; }
+  .modal.modal-wide:has(.nd-shell):not(.modal-attn) { animation: none; }
+  .modal:has(.nd-shell) > .modal-header { padding: calc(env(safe-area-inset-top) + 12px) 12px 14px 16px; }
+  .modal:has(.nd-shell) .modal-x { min-width: 44px; min-height: 44px; }
+
+  /* Rail → horizontal step strip with the progress bar under it. */
+  .nd-shell { flex-direction: column; }
+  .nd-rail { width: auto; justify-content: flex-start; gap: 8px; padding: 10px 12px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .nd-rail-list { flex-direction: row; gap: 4px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .nd-rail-list::-webkit-scrollbar { display: none; }
+  .nd-rail-item { flex: none; height: 40px; min-height: 40px; padding: 0 10px 0 8px; gap: 8px; font-size: 12.5px; }
+  .nd-rail-item.active { box-shadow: inset 0 -2px 0 var(--accent); }
+  .nd-rail-opt { display: none; }
+  .nd-progress { padding: 0 2px; gap: 6px; font-size: 11.5px; }
+
+  .nd-form { padding: 0 16px 8px; }
+  .nd-form .form-sec,
+  .nd-form .form-sec:first-child { padding: 20px 0; }
+  .nd-form .nd-basics,
+  .nd-form .nd-grid3,
+  .nd-form .nd-asset-card .dd-grid { grid-template-columns: minmax(0, 1fr) !important; }
+  .modal .nd-form .field > input:not([type="checkbox"]):not([type="radio"]),
+  .modal .nd-form .field > textarea,
+  .modal .nd-form .money-input input,
+  .modal .nd-form .nd-dtc > input,
+  .modal .nd-form .field .msel-box { min-height: 42px; font-size: 16px; }
+  .modal .nd-form .field > input:not([type="checkbox"]):not([type="radio"]),
+  .modal .nd-form .money-input input,
+  .modal .nd-form .nd-dtc > input { height: 42px; }
+  .modal .nd-form .field .msel-box input:not([type="checkbox"]) { min-height: 0; font-size: 16px; }
+  .nd-form .nd-dtc .seg-control .seg { height: 36px; min-height: 36px; }
+  .nd-assets .form-sec-head { padding-right: 0; }
+  .nd-add-deal { position: static; align-self: flex-start; height: 40px; min-height: 40px; }
+  .nd-form .nd-asset-del { width: 40px; height: 40px; min-height: 40px; }
+
+  /* Sticky footer: figures, then the count and the two actions. */
+  .modal:has(.nd-shell) > .modal-footer { gap: 12px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
+  .nd-foot-actions { flex: 1 1 100%; flex-wrap: wrap; margin-left: 0; gap: 8px; }
+  .nd-left { flex: 1 1 100%; justify-content: space-between; }
+  .modal-footer .nd-left .modal-req-note { flex-basis: auto; }
+  .nd-foot-actions > button { flex: 1 1 0; height: 44px; min-height: 44px; }
+  .modal .nd-error { padding: 10px 16px; }
+}
+
+/* Landscape phones: the sheet uses the full (short) height; the rail stays a strip. */
+@media (pointer: coarse) and (max-height: 500px) {
+  .modal-overlay:has(.nd-shell) { padding: 0; }
+  .modal.modal-wide:has(.nd-shell) { height: 100dvh; max-height: 100dvh; border-radius: 0; }
+  .modal:has(.nd-shell) > .modal-header { padding: 8px 12px 8px 16px; }
+  .nd-shell { flex-direction: column; }
+  .nd-rail { width: auto; flex-direction: row; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 12px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .nd-rail-list { flex: 1; min-width: 0; flex-direction: row; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+  .nd-rail-list::-webkit-scrollbar { display: none; }
+  .nd-rail-item { flex: none; height: 40px; min-height: 40px; }
+  .nd-rail-item.active { box-shadow: inset 0 -2px 0 var(--accent); }
+  .nd-rail-opt { display: none; }
+  .nd-progress { flex: none; width: 140px; padding: 0; font-size: 11.5px; }
+  .modal:has(.nd-shell) > .modal-footer { padding: 8px 16px calc(8px + env(safe-area-inset-bottom)); }
+  .nd-foot-actions > button { min-height: 40px; height: 40px; }
+}

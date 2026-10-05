@@ -1,0 +1,446 @@
+/* Redesign styles: deal-detail
+   Deal page (pages/DealDetail.tsx) plus the components it renders. Rules for the
+   shared components (BuyerActivitySection, DealPortalPanel, DocumentsSection,
+   OfferRowActions and the deal modals) are unscoped on purpose so the Mineral
+   Asset and Buyer pages that reuse them stay consistent; page-only layout is
+   scoped to .deal-detail. */
+
+/* ---------------------------------------------------------------------------
+   Page frame + header
+   --------------------------------------------------------------------------- */
+.deal-detail { --block-gap: 16px; }
+.deal-detail .back-link { align-self: flex-start; font-size: 12.5px; font-weight: 500; color: var(--ink-3); }
+.deal-detail .back-link:hover { color: var(--ink); text-decoration: none; }
+
+.deal-detail .dd-head { align-items: center; justify-content: space-between; gap: 14px; }
+.dd-head-title { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
+.dd-head-title h1 { margin: 0; font-size: 26px; font-weight: 600; line-height: 1.15; letter-spacing: -0.022em; color: var(--ink); overflow-wrap: anywhere; }
+.dd-rename { width: 28px; height: 28px; min-height: 0; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-nav); color: var(--ink-4); font-size: inherit; }
+.dd-rename:hover { background: var(--hover-strong); color: var(--ink); }
+.dd-days { font-size: 12.5px; color: var(--ink-3); white-space: nowrap; }
+.dd-head-actions { display: flex; align-items: center; gap: 8px; }
+
+/* Move stage: primary button + menu of the deal's pipeline stages. */
+.dd-stage-btn { height: 34px; min-height: 0; padding: 0 14px; display: inline-flex; align-items: center; gap: 7px;
+  font-size: 13px; font-weight: 600; white-space: nowrap; }
+.dd-stage-menu { width: 220px; padding: 5px; gap: 1px; background: var(--popover); border: 1px solid var(--line-strong);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-menu); max-height: min(420px, calc(100dvh - 140px)); overflow-y: auto; }
+.dd-stage-menu .ovf-item { height: 32px; min-height: 0; padding: 0 10px; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 500; color: var(--ink-1); }
+.dd-stage-menu .ovf-item:hover { background: var(--hover-strong); }
+.dd-stage-menu .ovf-item.current { color: var(--ink-strong); font-weight: 600; }
+.dd-stage-cur { font-size: 11.5px; font-weight: 500; color: var(--ink-4); }
+/* ⋯ menu trigger: 34px bordered square. */
+.dd-head .ovf-btn { width: 34px; height: 34px; min-width: 34px; min-height: 0; padding: 0; display: inline-flex; align-items: center;
+  justify-content: center; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink-2); }
+.dd-head .ovf-btn:hover { border-color: var(--line-hover); color: var(--ink); background: var(--surface); }
+
+/* Deadline alert */
+.deal-detail .dd-alert { flex-wrap: wrap; justify-content: space-between; gap: 10px; padding: 11px 14px 11px 16px;
+  border: 1px solid var(--warn-border); border-radius: var(--radius-md); background: color-mix(in srgb, var(--warn) 7%, transparent);
+  color: var(--warn-ink); margin-bottom: var(--block-gap); }
+.dd-alert-main { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.dd-alert-main svg { flex: none; }
+.deal-detail .dd-alert-msg { font-size: 13px; color: var(--ink-1); }
+.deal-detail .dd-alert-msg b { font-weight: 600; color: var(--warn-ink); }
+.deal-detail .dd-alert-link { margin-left: 0; padding: 0; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.deal-detail .dd-alert-link:hover { color: var(--ink-strong); text-decoration: none; }
+
+/* Summary strip (kit StatStrip) */
+.dd-summary .stat-cell { padding: 16px 20px; gap: 5px; }
+.dd-summary .stat-value { font-weight: 500; line-height: 1.1; letter-spacing: -0.025em; }
+.dd-summary .stat-value, .dd-summary .stat-sub { font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------------------
+   Card chrome (non-collapsible cards) — same anatomy as the collapsible
+   sections' header: 16/20 padding, hairline under the header.
+   --------------------------------------------------------------------------- */
+.dd-card { padding: 0; display: flex; flex-direction: column; min-width: 0; }
+.dd-card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 16px 20px; border-bottom: 1px solid var(--line-soft); }
+.dd-card-head > div:first-child { min-width: 0; }
+.dd-card-title { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.35; color: var(--ink); }
+.dd-card-sub { margin-top: 3px; font-size: 12.5px; color: var(--ink-3); }
+.dd-card-note { font-size: 12px; color: var(--ink-4); }
+.dd-card-count { font-size: 12.5px; color: var(--ink-4); }
+.dd-card-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.dd-card-body { flex: 1; min-width: 0; padding: 16px 20px; }
+.dd-add-btn { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.dd-card > .empty-state { padding: 32px 20px; }
+
+/* Collapsible sections on this page (Buyer activity, Buyer matches, portal,
+   documents) take the same title scale as the cards. */
+.deal-detail .dpp-title h3 { font-size: 14px; font-weight: 600; }
+.deal-detail .dpp-sub { margin-top: 3px; font-size: 12.5px; color: var(--ink-3); }
+
+/* ---------------------------------------------------------------------------
+   Deal characteristics + Contract timeline
+   --------------------------------------------------------------------------- */
+.deal-detail .dd-top-grid { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: stretch; margin-bottom: var(--block-gap); }
+.deal-detail .dd-top-grid > .panel { margin-bottom: 0; }
+@media (max-width: 1000px) { .deal-detail .dd-top-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.ddc-view { padding: 6px 20px 18px; }
+.ddc-group { display: flex; flex-direction: column; padding-top: 12px; }
+.ddc-group-title { padding-bottom: 4px; font-size: 11.5px; font-weight: 600; color: var(--ink-4); }
+.ddc-rows { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); column-gap: 24px; }
+.ddc-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; padding: 9px 0;
+  border-bottom: 1px solid var(--line-faint); }
+.ddc-k { font-size: 12.5px; color: var(--ink-3); white-space: nowrap; }
+.ddc-v { min-width: 0; font-size: 13.5px; font-weight: 500; color: var(--ink); text-align: right; white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.ddc-v.dim { color: var(--ink-5); }
+.ddc-card .modal-sec { margin-top: 18px; }
+
+.ctl-card-body { display: flex; flex-direction: column; padding: 14px 20px 16px; }
+.ctl-empty { margin: 0; font-size: 13px; }
+.deal-detail .ctl-item { gap: 12px; }
+.deal-detail .ctl-rail::before { background: var(--line-strong); }
+.deal-detail .ctl-item:first-child .ctl-rail::before { top: 9px; }
+.deal-detail .ctl-item:last-child .ctl-rail::before { height: 9px; }
+.deal-detail .ctl-item.done .ctl-rail::before { background: var(--accent); opacity: 1; }
+.deal-detail .ctl-dot { width: 12px; height: 12px; margin: 3px auto 0; border: 2px solid var(--ink-5); background: var(--surface); }
+.deal-detail .ctl-dot.done { background: var(--accent); border-color: var(--accent); box-shadow: none; }
+.deal-detail .ctl-dot.next { border-color: var(--warn-ink); background: transparent; }
+.deal-detail .ctl-body { padding-bottom: 14px; }
+.deal-detail .ctl-row { align-items: flex-start; }
+.ctl-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.deal-detail .ctl-lbl { font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--ink-3); }
+.deal-detail .ctl-lbl.done { color: var(--accent); }
+.deal-detail .ctl-lbl.next { color: var(--warn-ink); }
+.ctl-ovr { font-style: normal; font-weight: 500; color: var(--ink-4); }
+.deal-detail .ctl-date { margin-top: 0; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.deal-detail .ctl-date.unset { color: var(--ink-5); }
+.deal-detail .ctl-when { display: inline-flex; align-items: center; flex: none; height: 20px; padding: 0 8px; border: 0;
+  border-radius: var(--radius-sm); font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.deal-detail .ctl-when.pill { background: var(--hover); color: var(--ink-3); }
+.deal-detail .ctl-when.chip { background: var(--warn-tint); color: var(--warn-ink); }
+.deal-detail .ctl-edit { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+
+/* ---------------------------------------------------------------------------
+   Tabs (underline strip with count badges)
+   --------------------------------------------------------------------------- */
+.deal-detail > .asset-tabs { gap: 24px; margin: 6px 0 var(--block-gap); border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+.deal-detail > .asset-tabs::-webkit-scrollbar { display: none; }
+.deal-detail > .asset-tabs .tab { height: 40px; padding: 0; display: inline-flex; align-items: center; gap: 7px; flex: none;
+  font-size: 13.5px; font-weight: 500; color: var(--ink-2); white-space: nowrap; }
+.deal-detail > .asset-tabs .tab:hover { color: var(--ink); }
+.deal-detail > .asset-tabs .tab.active { color: var(--ink-strong); font-weight: 600; border-bottom-color: var(--accent); }
+.deal-detail > .asset-tabs .tab-lbl::after { font-weight: 600; }
+.deal-detail > .asset-tabs .tab-badge,
+.deal-detail > .asset-tabs .tab.active .tab-badge { height: 18px; min-width: 18px; padding: 0 5px; display: inline-flex; align-items: center;
+  justify-content: center; border-radius: 9px; background: var(--hover-strong); color: var(--ink-2); font-size: 11px; font-weight: 600; }
+
+/* ---------------------------------------------------------------------------
+   General tab — Sellers + Location
+   --------------------------------------------------------------------------- */
+.seller-panel .seller-list { gap: 0; }
+.seller-empty { margin: 0; padding: 28px 20px; text-align: center; font-size: 12.5px; color: var(--ink-3); }
+.seller-panel .seller-card { display: flex; flex-direction: column; gap: 14px; padding: 16px 20px; border: 0; border-bottom: 1px solid var(--line-faint);
+  border-radius: 0; background: transparent; }
+.seller-panel .seller-card:last-child { border-bottom: 0; }
+.seller-id { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
+.seller-id-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.seller-name { font-size: 14px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.seller-meta { font-size: 12px; color: var(--ink-3); }
+.seller-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.seller-panel .seller-act { height: 30px; padding: 0 11px; gap: 6px; border: 1px solid var(--line); border-radius: var(--radius-nav);
+  background: transparent; color: var(--ink); font: 500 12.5px var(--font-sans); }
+.seller-panel .seller-act:hover { border-color: var(--line-hover); color: var(--ink); }
+.seller-actions .seller-edit { border-color: transparent; background: transparent; box-shadow: none; }
+.seller-actions .seller-edit:hover { background: var(--hover-strong); border-color: transparent; }
+.seller-actions .seller-remove { border-color: var(--line); background: transparent; box-shadow: none; color: var(--danger-ink); }
+.seller-actions .seller-remove:hover { border-color: color-mix(in srgb, var(--danger) 45%, transparent); background: var(--danger-hover); color: var(--danger-ink); }
+.seller-panel .seller-grid { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px 24px; margin-top: 0; }
+.seller-kv { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.seller-kv.wide { grid-column: 1 / -1; }
+.seller-k { font-size: 12px; color: var(--ink-3); }
+.seller-panel .seller-v { margin-top: 0; font-size: 13.5px; font-weight: 400; color: var(--ink); overflow-wrap: anywhere; }
+.seller-panel .seller-v.dim { color: var(--ink-5); }
+.seller-same { gap: 6px; text-transform: none; }
+
+.dd-location-hint { margin: 8px 0 0; font-size: 13px; }
+
+/* ---------------------------------------------------------------------------
+   Additional deals tab
+   --------------------------------------------------------------------------- */
+.dd-card .asset-total { margin: 14px 20px; padding: 9px 12px; border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface-inset); font-size: 13px; font-variant-numeric: tabular-nums; }
+.dd-card .asset-total .muted { font-size: 12.5px; letter-spacing: 0; text-transform: none; color: var(--ink-3); }
+.asset-ask { color: var(--accent-ink); }
+.asset-rows-scroll { overflow-x: auto; border-top: 1px solid var(--line-soft); }
+.asset-rows { min-width: 780px; }
+.asset-row { display: grid; grid-template-columns: minmax(180px, 1.4fr) minmax(180px, 1.6fr) 100px 120px 120px minmax(110px, auto);
+  align-items: center; gap: 14px; padding: 12px 20px; border-bottom: 1px solid var(--line-faint); color: var(--ink); text-decoration: none; }
+.asset-row:last-child { border-bottom: 0; }
+.asset-row:hover { background: var(--hover); color: var(--ink); text-decoration: none; }
+.asset-row-name { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.asset-row-title { font-weight: 600; overflow-wrap: anywhere; }
+.asset-row-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; min-width: 0; font-size: 12.5px; color: var(--ink-2); }
+.asset-row-num { font-size: 13px; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.asset-row-badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+
+/* ---------------------------------------------------------------------------
+   Buyers tab — selected buyer, offers, matches (page-scoped; the Mineral Asset
+   page still uses the older match-card markup)
+   --------------------------------------------------------------------------- */
+.deal-detail .dd-selected-banner { flex-wrap: wrap; gap: 10px; padding: 11px 16px; border: 1px solid var(--success-border);
+  border-radius: var(--radius-md); background: color-mix(in srgb, var(--success) 7%, transparent); color: var(--success-ink); font-size: 13px; }
+.deal-detail .dd-selected-banner span { color: var(--ink-1); }
+.deal-detail .dd-selected-banner b { font-weight: 600; color: var(--ink); }
+.deal-detail .dd-selected-banner .pos { color: var(--success-ink); }
+.deal-detail .dd-selected-banner .subtle-link { font-weight: 600; }
+
+.deal-detail .dd-offers .table-scroll { border: 0; border-radius: 0; background: transparent; }
+.deal-detail .dd-offers .data-table thead th { font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; color: var(--ink-3); }
+.deal-detail .dd-offers .data-table th:first-child, .deal-detail .dd-offers .data-table td:first-child { padding-left: 20px; }
+.deal-detail .dd-offers .data-table th:last-child, .deal-detail .dd-offers .data-table td:last-child { padding-right: 20px; }
+.deal-detail .dd-offer-buyer { font-size: 13.5px; font-weight: 600; }
+.dd-offer-amt { font-weight: 600; font-variant-numeric: tabular-nums; }
+.dd-offer-actions { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.dd-accept { border-color: var(--success-border); background: transparent; color: var(--success-ink); }
+.dd-accept:hover { border-color: color-mix(in srgb, var(--success) 50%, transparent); background: var(--success-tint); color: var(--success-ink); }
+
+.deal-detail .cs-body:has(> .mr-list) { padding: 0; }
+.mr-none { margin: 0; }
+.mr-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 20px; border-bottom: 1px solid var(--line-soft);
+  background: var(--surface-inset); }
+.mr-selall { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 12.5px; font-weight: 500; text-transform: none; color: var(--ink-2); }
+.mr-selcount { margin-right: 4px; font-size: 12.5px; color: var(--ink-4); }
+.mr-deselect { font-size: 12.5px; }
+.deal-detail .mr-list { gap: 0; }
+.deal-detail .match-card { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 12px 20px; border: 0;
+  border-bottom: 1px solid var(--line-faint); border-radius: 0; background: transparent; outline: 0; }
+.deal-detail .match-card:hover { background: var(--hover); }
+.deal-detail .match-card.match-selected { background: var(--accent-soft); outline: 0; }
+.deal-detail .match-rank { width: 22px; flex: none; font-size: 12px; color: var(--ink-4); }
+.deal-detail .mr-ring { width: 36px; height: 36px; flex: none; }
+.mr-ring-track { stroke: var(--line); }
+.mr-ring-val { stroke: var(--ink-4); }
+.mr-ring.success .mr-ring-val { stroke: var(--success-ink); }
+.mr-ring.warn .mr-ring-val { stroke: var(--warn-ink); }
+.deal-detail .mr-ring-n { font-size: 11px; font-weight: 700; color: var(--ink); }
+.mr-main { flex: 1; min-width: 240px; display: flex; flex-direction: column; gap: 7px; }
+.deal-detail .mr-title { flex-wrap: wrap; gap: 8px; }
+.deal-detail .mr-title .match-name { flex: 0 1 auto; font-size: 13.5px; font-weight: 600; }
+.deal-detail .mr-contacted { height: 22px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: var(--hover);
+  color: var(--ink-2); font-size: 12px; font-weight: 600; }
+.deal-detail .mr-crit { margin-left: 0; font-size: 12px; color: var(--ink-4); }
+.deal-detail .mr-meta { margin-top: 0; padding-left: 0; font-size: 12px; color: var(--ink-4); }
+.deal-detail .mr-tags { margin-top: 0; padding-left: 0; gap: 5px; }
+.deal-detail .crit-tag { height: 20px; padding: 0 7px; border-radius: 5px; background: transparent; font-size: 11.5px; font-weight: 500; }
+.deal-detail .crit-tag.crit-yes { border: 1px solid color-mix(in srgb, var(--success) 45%, transparent); background: transparent; color: var(--success-ink); }
+.deal-detail .crit-tag.crit-no { border: 1px solid var(--line-strong); color: var(--ink-4); }
+.deal-detail .match-log { flex: none; }
+.mr-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 12px 20px; }
+.deal-detail .mr-legend { margin-left: 0; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-4); }
+.mr-legend i { width: 10px; height: 10px; border-radius: 3px; border: 1px solid var(--line-strong); }
+.mr-legend i.yes { border-color: color-mix(in srgb, var(--success) 50%, transparent); }
+.deal-detail .mr-more { margin: 0 0 0 auto; }
+
+/* Buyer activity table (shared BuyerActivitySection) */
+.cs-body:has(> .ba-table) { padding: 0; }
+.ba-table { overflow-x: auto; }
+.ba-table > * { min-width: 900px; }
+.ba-cols { display: grid; grid-template-columns: minmax(200px, 1.6fr) 130px 120px 110px 104px 104px minmax(170px, auto); align-items: center; gap: 14px; }
+.ba-headrow { height: 36px; padding: 0 20px; border-bottom: 1px solid var(--line-soft); font-size: 12px; font-weight: 500; color: var(--ink-3); }
+.ba-right { text-align: right; }
+.ba-table .ba-row { border: 0; border-bottom: 1px solid var(--line-faint); border-radius: 0; background: transparent; }
+.ba-table .ba-row:last-child { border-bottom: 0; }
+.ba-table .ba-row.open { background: var(--surface-1); }
+.ba-table .ba-head { min-height: 56px; padding: 9px 20px; cursor: pointer; }
+.ba-table .ba-head:hover { background: var(--hover); }
+.ba-buyer { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ba-table .ba-caret { width: auto; flex: none; color: var(--ink-4); transition: transform 0.15s; }
+.ba-row.open .ba-caret { transform: rotate(90deg); }
+.ba-buyer-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ba-name { font-weight: 600; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ba-sub { font-size: 12px; color: var(--ink-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ba-table .ba-match { display: flex; }
+.ba-table .ba-bar { flex: 1; width: auto; height: 4px; border-radius: 2px; background: var(--line-soft); }
+.ba-table .ba-bar > span { border-radius: 2px; }
+.ba-table .ba-pct { min-width: 34px; font-size: 12px; text-align: right; }
+.ba-table .ba-amount { font-size: 13.5px; text-align: right; color: var(--ink); }
+.ba-table .ba-amount.dim { font-weight: 400; color: var(--ink-5); }
+.ba-table .ba-date { font-size: 13px; font-weight: 400; color: var(--ink-2); }
+.ba-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.ba-table .ba-body { padding: 4px 20px 16px 42px; border-top: 1px solid var(--line-faint); }
+.ba-kvs { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px 24px; padding: 12px 0 4px; }
+.ba-kv { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.ba-kv .k { font-size: 12px; color: var(--ink-3); }
+.ba-kv .v { font-size: 13.5px; color: var(--ink); overflow-wrap: anywhere; }
+.ba-none { font-size: 13px; }
+.ba-log-edit { margin-top: 4px; }
+.timeline-subject { font-size: 13px; font-weight: 600; }
+.timeline-body { font-size: 13px; }
+.timeline-when { font-size: 12px; color: var(--ink-3); }
+.timeline-err { font-size: 12px; }
+
+/* Offer row actions (shared OfferRowActions) */
+.offer-act { width: 28px; height: 28px; min-height: 0; padding: 0; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-nav); font-size: inherit; color: var(--ink-3); }
+.offer-act:hover { background: var(--hover-strong); color: var(--ink); }
+.offer-act.danger:hover { color: var(--danger-ink); }
+
+/* Modal helpers (LogContactModal, EditOfferModal, SendDealEmailModal) */
+.dd-hint { font-size: 11.5px; color: var(--ink-4); }
+.dd-opt { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--ink-4); }
+.offer-note { margin: 0; font-size: 12.5px; }
+.email-tokens { margin-top: 0; font-size: 12px; }
+.email-save-tpl { align-items: flex-end; gap: 6px; }
+.email-save-tpl .field { flex: 1; margin-bottom: 0; }
+.email-skipped { margin-top: 8px; }
+
+/* ---------------------------------------------------------------------------
+   Marketplace tab (shared DealPortalPanel)
+   --------------------------------------------------------------------------- */
+.dpp-analytics { overflow: hidden; }
+.dpp-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 1px; background: var(--line-faint); }
+.dpp-stat { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 16px 20px; background: var(--surface); }
+.dpp-stat-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.dpp-stat-label { font-size: 12.5px; font-weight: 500; color: var(--ink-3); }
+.dpp-stat-trend { font-size: 11.5px; font-weight: 600; color: var(--success-ink); white-space: nowrap; }
+.dpp-stat-v { font-size: 24px; font-weight: 500; line-height: 1.1; letter-spacing: -0.025em; color: var(--ink); font-variant-numeric: tabular-nums; }
+.dpp-stat-v.dim { color: var(--ink-4); }
+.dpp-stat-h { font-size: 12px; color: var(--ink-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dpp-stat-bar { height: 3px; margin-top: 6px; border-radius: 2px; background: var(--line-soft); overflow: hidden; }
+.dpp-stat-bar > div { height: 100%; }
+
+.dpp-controls { gap: 20px; padding: 14px 20px; border-bottom: 1px solid var(--line-soft); background: var(--surface-inset); }
+.dpp-vdiv { background: var(--line); }
+.dpp-switchrow strong { font-weight: 500; }
+.dpp-vis { min-width: 0; margin: 0; padding: 0; border: 0; }
+.dpp-vis:disabled { opacity: 0.45; }
+.dpp-vis .seg { border: 1px solid var(--line); background: var(--input); }
+.dpp-vis .seg-item { height: 26px; padding: 0 10px; }
+.dpp-vis:disabled .seg-item { cursor: not-allowed; }
+.dpp-ctl-label { font-size: 12.5px; color: var(--ink-3); }
+
+.dpp-field-label { display: block; margin-bottom: 7px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.dpp-field-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 10px; margin-bottom: 7px; }
+.dpp-field-head .dpp-field-label { margin-bottom: 0; }
+.dpp-field-note { font-size: 12px; color: var(--ink-4); }
+.dpp-summary { flex: 1; min-height: 110px; resize: vertical; }
+.dpp-sumgrid { gap: 20px; }
+.dpp-quality { align-self: start; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-inset); }
+.dpp-quality-title { font-size: 13px; font-weight: 600; color: var(--ink); }
+.dpp-quality-pct { font-weight: 700; }
+.dpp-quality-bar { height: 4px; margin-top: 12px; background: var(--line-soft); }
+.dpp-quality-list { gap: 2px; }
+.dpp-quality-item { padding: 5px 0; border-top: 0; }
+.dpp-qdot { border-color: var(--line-hover-strong); }
+.dpp-qdot.done { background: var(--success); border-color: var(--success); }
+.dpp-qlbl { font-size: 13px; font-weight: 400; color: var(--ink-3); }
+.dpp-qlbl.done { color: var(--ink); }
+
+.dpp-share { border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--input); }
+.dpp-share-ico { border-right-color: var(--line); color: var(--ink-4); }
+.dpp-preview { border-left-color: var(--line); color: var(--ink-3); }
+
+.dpp-contact { border-color: var(--line); border-radius: var(--radius-md); background: var(--surface-inset); }
+.dpp-contact-head { border-bottom-color: var(--line-soft); }
+.dpp-cnum { background: var(--accent-tint); color: var(--accent-ink); }
+.dpp-cbtn { border-color: var(--line); background: transparent; color: var(--ink-3); }
+.dpp-cbtn.danger { border-color: color-mix(in srgb, var(--danger) 25%, var(--line)); color: var(--danger-ink); }
+.dpp-cbtn.danger:hover { border-color: color-mix(in srgb, var(--danger) 50%, var(--line)); color: var(--danger-ink); }
+.dpp-addcontact { margin-top: 2px; padding: 0; border: 0; background: transparent; color: var(--accent-ink); font-size: 12.5px; font-weight: 600; }
+.dpp-addcontact:hover { color: var(--accent-ink-hover); border: 0; background: transparent; }
+
+.dpp-price { padding: 0; border: 0; background: transparent; gap: 7px 20px; }
+.dpp-money { display: flex; align-items: center; max-width: 420px; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--input); }
+.dpp-money:focus-within { border-color: var(--accent); }
+.dpp-money-pre { padding-left: 12px; color: var(--ink-4); }
+.dpp-money input { flex: 1; min-width: 0; padding-left: 6px; border: 0; background: transparent; box-shadow: none; }
+.dpp-money input:focus { border: 0; outline: none; box-shadow: none; }
+.dpp-price-note { font-size: 12px; color: var(--ink-4); }
+
+.dpp-doc { border-color: var(--line); border-radius: var(--radius); }
+.dpp-doc:hover { border-color: var(--line-hover); }
+.dpp-doc.on { border-color: var(--accent-border); background: var(--accent-soft); }
+.dpp-doc-ico { background: var(--danger-tint); color: var(--danger-ink); }
+.dpp-doc-name { font-weight: 500; }
+.dpp-doc-folder { padding: 2px 8px; border: 0; border-radius: var(--radius-sm); background: var(--hover); color: var(--ink-2);
+  font-size: 11.5px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+
+/* ---------------------------------------------------------------------------
+   Documents tab (shared DocumentsSection)
+   --------------------------------------------------------------------------- */
+.doc-section.drag-over { outline: 0; border-color: var(--accent); }
+.doc-section .doc-chips { gap: 6px; margin: 0 -20px; padding: 0 20px 14px; border-bottom: 1px solid var(--line-soft); }
+.doc-chip { height: 30px; padding: 0 10px; gap: 7px; border: 1px solid var(--line); border-radius: var(--radius); background: transparent;
+  color: var(--ink-2); font-size: 12.5px; font-weight: 500; }
+.doc-chip:hover { color: var(--ink); border-color: var(--line-hover); }
+.doc-chip.active { border-color: var(--accent); background: var(--accent-tint); color: var(--ink-strong); font-weight: 500; }
+.doc-count { min-width: 0; height: auto; padding: 0; border-radius: 0; background: transparent; color: var(--ink-4); font-size: 11.5px; font-weight: 500; }
+.doc-chip.active .doc-count { background: transparent; color: var(--accent-ink); }
+.doc-chip-new { border: 1px dashed var(--line-hover); background: transparent; color: var(--ink-3); font-weight: 500; }
+.doc-chip-new:hover { border-color: var(--line-hover-strong); color: var(--ink); }
+.doc-folderbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin: 14px 0 12px; }
+.doc-folder-name { display: inline-flex; align-items: center; gap: 4px; font-size: 13.5px; }
+.doc-folder-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.doc-folder-actions .small { display: inline-flex; align-items: center; gap: 6px; }
+.docx-upload { height: 30px; padding: 0 12px; gap: 6px; border: 0; border-radius: var(--radius-nav); background: var(--accent);
+  color: var(--on-accent); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.docx-upload:hover { border: 0; background: var(--accent-hover); color: var(--on-accent); }
+.doc-section .table-scroll { border: 1px solid var(--line); border-radius: var(--radius-md); }
+.doc-section .data-table thead th { background: transparent; color: var(--ink-3); font-size: 12px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.doc-section .empty-state { padding: 34px 20px; border: 1px dashed var(--line-hover); border-radius: var(--radius-md); }
+.doc-section.drag-over .empty-state { border-color: var(--accent); }
+.docx-name { font-weight: 500; }
+.docx-by { font-weight: 500; }
+.docx-ver { margin-left: 6px; }
+.cloud-list { max-height: 320px; overflow-y: auto; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.cloud-item { gap: 10px; padding: 8px 10px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.cloud-item:last-child { border-bottom: 0; }
+.cloud-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cloud-item-meta { flex-shrink: 0; font-size: 12px; color: var(--ink-3); }
+
+/* ---------------------------------------------------------------------------
+   Phones
+   --------------------------------------------------------------------------- */
+@media (max-width: 760px) {
+  .deal-detail .dd-head { align-items: flex-start; }
+  .deal-detail .dd-head > .dd-head-actions { flex: none; }
+  .deal-detail .dd-alert { padding: 11px 14px; }
+  .dd-card-head { padding: 14px 16px; }
+  .dd-card-body { padding: 14px 16px; }
+  .ddc-view { padding: 4px 16px 14px; }
+  .ddc-rows { grid-template-columns: minmax(0, 1fr); }
+  .ctl-card-body { padding: 14px 16px; }
+  .deal-detail .ctl-edit { grid-template-columns: minmax(0, 1fr); }
+  .seller-panel .seller-card { padding: 14px 16px; }
+  .seller-panel .seller-grid { grid-template-columns: minmax(0, 1fr); }
+  .seller-actions { width: 100%; }
+  .dd-card .asset-total { margin: 12px 16px; }
+  .asset-row { padding: 12px 16px; }
+  .deal-detail .dd-offers .data-table th:first-child, .deal-detail .dd-offers .data-table td:first-child { padding-left: 16px; }
+  .deal-detail .dd-offers .data-table th:last-child, .deal-detail .dd-offers .data-table td:last-child { padding-right: 16px; }
+  .mr-bulk, .mr-foot { padding: 12px 16px; }
+  .deal-detail .match-card { padding: 12px 16px; gap: 12px; }
+  .mr-main { min-width: 0; flex-basis: 100%; order: 1; }
+  .deal-detail .match-log { order: 2; }
+  .ba-headrow, .ba-table .ba-head { padding-left: 16px; padding-right: 16px; }
+  .ba-table .ba-body { padding: 4px 16px 14px 38px; }
+  .dpp-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .dpp-stat { padding: 14px 16px; }
+  .dpp-stat-v { font-size: 22px; }
+  .dpp-controls { gap: 14px; padding: 14px 16px; }
+  .dpp-vdiv { display: none; }
+  .dpp-money { max-width: none; }
+  .doc-section .doc-chips { margin: 0 -16px; padding: 0 16px 14px; }
+  .doc-folder-actions { width: 100%; }
+  .dd-stage-menu { max-width: calc(100vw - 32px); }
+}
+/* Touch targets (portrait and landscape phones): ≥40px for every control this
+   file shrinks below the phone minimum on desktop. */
+@media (max-width: 760px), (pointer: coarse) and (max-height: 500px) {
+  .dd-stage-btn, .dd-rename, .offer-act, .seller-panel .seller-act, .docx-upload, .doc-chip { min-height: 40px; height: auto; }
+  .dd-rename, .offer-act { min-width: 40px; }
+  .dd-head .ovf-btn { width: 40px; height: 40px; min-width: 40px; }
+  .dd-stage-menu .ovf-item { height: 40px; }
+  .dpp-vis .seg-item { height: auto; min-height: 40px; }
+}
+@media (pointer: coarse) and (max-height: 500px) {
+  .dd-stage-menu { max-height: calc(100dvh - 96px); }
+}

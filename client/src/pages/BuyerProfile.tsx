@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, RelationshipDot, StageBadge, StatusBadge, OverflowMenu, ConfirmDelete, CtPill, Modal, ChipList } from "../components/ui";
+import { Spinner, StageBadge, StatusBadge, OverflowMenu, ConfirmDelete, Modal, ChipList } from "../components/ui";
+import { StatStrip, Tag } from "../components/kit";
+import { RelTag } from "./Buyers";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { Select } from "../components/Select";
@@ -48,6 +50,9 @@ interface BuyerProfileData {
 }
 
 const ARRAY_KEYS: (keyof BuyBox)[] = ["states", "counties", "basins", "formations", "assetTypes"];
+const BUYBOX_LABELS: Partial<Record<keyof BuyBox, string>> = {
+  states: "States", counties: "Counties", basins: "Basins", formations: "Formations", assetTypes: "Asset types",
+};
 
 /** Human range: both bounds → "a – b", one bound → "500+ " / "up to 500", none → "Any". */
 function fmtRange(min: number | null, max: number | null, fmt: (n: number) => string): string {
@@ -56,6 +61,14 @@ function fmtRange(min: number | null, max: number | null, fmt: (n: number) => st
   if (max != null) return `up to ${fmt(max)}`;
   return "Any";
 }
+
+type SectionTab = "overview" | "relationships" | "chains" | "deals";
+const SECTION_TABS: { key: SectionTab; label: string; anchor: string }[] = [
+  { key: "overview", label: "Overview", anchor: "bp-overview" },
+  { key: "relationships", label: "Relationships", anchor: "bp-relationships" },
+  { key: "chains", label: "Chains", anchor: "bp-chains" },
+  { key: "deals", label: "Deal history", anchor: "bp-deals" },
+];
 
 // Section-based editing: each panel edits independently, so changing a phone
 // number can never accidentally disturb the buy box, and vice versa.
@@ -85,6 +98,9 @@ export function BuyerProfile() {
   // read the same payload the section already fetched (no duplicate request).
   const [net, setNet] = useState<BuyerNetwork | null>(null);
   const [sendDeal, setSendDeal] = useState(false);
+  // Sticky section tabs: scroll-to-anchor only (no scroll-spy), so the active
+  // tab is simply the last one clicked.
+  const [activeTab, setActiveTab] = useState<SectionTab>("overview");
 
   function load() { api.get<BuyerProfileData>(`/buyers/${id}`).then(setB); }
   useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers); }, [id]);
@@ -146,19 +162,32 @@ export function BuyerProfile() {
   function SectionHead({ title, section }: { title: string; section: Section }) {
     const active = editing === section;
     return (
-      <div className="section-head">
-        <h3 style={{ margin: 0 }}>{title}</h3>
+      <div className="bp-card-head">
+        <h3>{title}</h3>
         {can("editBuyers") && (active ? (
-          <div className="row" style={{ gap: 6 }}>
+          <div className="bp-card-actions">
             <button className="small" onClick={cancel} disabled={busy}>Cancel</button>
             <button className="small primary" onClick={() => void saveSection().catch(() => {})} disabled={busy}>{busy ? "Saving…" : "Save"}</button>
           </div>
         ) : (
-          <button className="small" onClick={() => startEdit(section)}>Edit</button>
+          <button className="small" onClick={() => startEdit(section)}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
+            Edit
+          </button>
         ))}
       </div>
     );
   }
+
+  /** Smooth-scroll to a section, clear of the sticky top bar + tab row. */
+  function goToSection(t: (typeof SECTION_TABS)[number]) {
+    setActiveTab(t.key);
+    const el = document.getElementById(t.anchor);
+    if (!el) return;
+    const bar = document.querySelector(".bp-tabs")?.getBoundingClientRect().bottom ?? 0;
+    window.scrollTo({ top: window.scrollY + el.getBoundingClientRect().top - bar - 14, behavior: "smooth" });
+  }
+  const hasChains = (net?.chains.length ?? 0) > 0;
 
   const editContact = editing === "contact";
   const editBox = editing === "buybox";
@@ -176,75 +205,78 @@ export function BuyerProfile() {
 
   return (
     <div className="page bp-page">
-      {/* Breadcrumb (reference) — keeps the browser-back behavior that preserves
-          the list's filters/scroll. */}
-      <div className="bp-crumbs">
-        <button type="button" className="bp-crumb-link" onClick={backToBuyers}>Buyers</button>
-        <span>/</span>
-        <span className="bp-crumb-cur">{view.companyName}</span>
-      </div>
-
-      <div className="bp-titlerow">
-        <div style={{ minWidth: 0 }}>
-          <div className="bp-titleline">
-            <h1 className="bp-title">{view.companyName}</h1>
-            <RelationshipDot status={view.relationshipStatus} />
-            {net && <CtPill color="var(--accent)">{net.classLabel}</CtPill>}
-          </div>
-          <div className="bp-meta">
-            {contactPerson && <><span>{contactPerson}</span><span className="bp-meta-div" /></>}
-            {geo && <><span>{geo}</span><span className="bp-meta-div" /></>}
-            {txOnRecord > 0 && <><span>{txOnRecord.toLocaleString("en-US")} transactions on record</span><span className="bp-meta-div" /></>}
-            {view.aliases.length > 0 && <><span>{view.aliases.length} recorded alias{view.aliases.length === 1 ? "" : "es"}</span><span className="bp-meta-div" /></>}
-            <span>Added {fmtDate(view.createdAt)}</span>
-          </div>
-        </div>
-        <div className="row" style={{ gap: 9 }}>
-          {can("editBuyers") && (
-            <button className="ct-btn" onClick={() => setSendDeal(true)} title="Email one of your deals to this buyer">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M22 2L11 13" /><path d="M22 2l-7 20-4-9-9-4 20-7z" /></svg>
-              Send a Deal
+      {/* Sticky section tabs (scroll-to-anchor). While a card is being edited the
+          other sections are hidden, so their tabs go inert. */}
+      <nav className="bp-tabs" aria-label="Buyer sections">
+        <div className="bp-tabs-inner">
+          {SECTION_TABS.filter((t) => t.key !== "chains" || hasChains).map((t) => (
+            <button key={t.key} type="button" className={`bp-tab ${activeTab === t.key ? "active" : ""}`}
+              disabled={editing != null && t.key !== "overview" && t.key !== "deals"}
+              onClick={() => goToSection(t)}>
+              {t.label}
             </button>
-          )}
-          {can("deleteBuyers") && !editing && <OverflowMenu items={[{ label: "Delete buyer…", danger: true, onClick: () => setConfirmDelete(true) }]} />}
+          ))}
+        </div>
+      </nav>
+
+      <div className="bp-head" id="bp-overview">
+        {/* Breadcrumb — keeps the browser-back behavior that preserves the
+            list's filters/scroll. */}
+        <div className="bp-crumbs">
+          <button type="button" className="bp-crumb-link" onClick={backToBuyers}>Buyers</button>
+          <span className="bp-crumb-sep">/</span>
+          <span className="bp-crumb-cur">{view.companyName}</span>
+        </div>
+
+        <div className="bp-titlerow">
+          <div style={{ minWidth: 0 }}>
+            <div className="bp-titleline">
+              <h1 className="bp-title">{view.companyName}</h1>
+              <RelTag status={view.relationshipStatus} />
+              {net && <Tag tone="accent">{net.classLabel}</Tag>}
+            </div>
+            <div className="bp-meta">
+              {contactPerson && <><span>{contactPerson}</span><span className="bp-meta-div" /></>}
+              {geo && <><span>{geo}</span><span className="bp-meta-div" /></>}
+              {txOnRecord > 0 && <><span>{txOnRecord.toLocaleString("en-US")} transactions on record</span><span className="bp-meta-div" /></>}
+              {view.aliases.length > 0 && <><span>{view.aliases.length} recorded alias{view.aliases.length === 1 ? "" : "es"}</span><span className="bp-meta-div" /></>}
+              <span>Added {fmtDate(view.createdAt)}</span>
+            </div>
+          </div>
+          <div className="bp-actions">
+            {can("editBuyers") && (
+              <button className="primary bp-send" onClick={() => setSendDeal(true)} title="Email one of your deals to this buyer">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M22 2L11 13" /><path d="M22 2l-7 20-4-9-9-4 20-7z" /></svg>
+                Send a deal
+              </button>
+            )}
+            {can("deleteBuyers") && !editing && <OverflowMenu items={[{ label: "Delete buyer…", danger: true, onClick: () => setConfirmDelete(true) }]} />}
+          </div>
         </div>
       </div>
 
-      {/* Intelligence strip (reference) — everything the research network knows
-          about how this buyer behaves, in one scan. */}
+      {/* Signals strip — everything the research network knows about how this
+          buyer behaves, in one scan. Shown only once the network has loaded. */}
       {net && (
-        <div className="bp-intel">
-          <div className="bp-intel-cell">
-            <div className="bp-intel-l">Behavior</div>
-            <div className="bp-intel-v" style={{ color: "var(--accent)" }}>{net.classLabel}</div>
-            <div className="bp-intel-s">{BEHAVIOR_BLURB[net.klass] ?? "Classified from its transaction flow"}</div>
-          </div>
-          <div className="bp-intel-cell">
-            <div className="bp-intel-l">Median hold</div>
-            <div className="bp-intel-v">{net.hold ? `${net.hold.medianMonths} months` : "—"}</div>
-            <div className="bp-intel-s">
-              {net.hold
-                ? `Fastest ${net.hold.fastestMonths} mo · slowest ${net.hold.slowestMonths} mo`
-                : net.dispositions === 0 ? "Never resold — holds what it buys" : "No acquire-then-sell round trip on record"}
-            </div>
-          </div>
-          <div className="bp-intel-cell">
-            <div className="bp-intel-l">Concentration</div>
-            <div className="bp-intel-v">{net.counties[0] ? `${Math.round(net.counties[0].pct * 100)}% ${net.counties[0].county}` : "—"}</div>
-            <div className="bp-intel-s">
-              {net.counties.slice(1, 3).map((c) => `${c.county} ${Math.round(c.pct * 100)}%`).join(" · ") || "Single county on record"}
-            </div>
-          </div>
-          <div className="bp-intel-cell">
-            <div className="bp-intel-l">Last activity</div>
-            <div className="bp-intel-v" style={{ color: net.lastActivity ? "var(--green)" : undefined }}>{net.lastActivity ? fmtDate(net.lastActivity.date) : "—"}</div>
-            <div className="bp-intel-s">
-              {net.lastActivity
-                ? `${net.lastActivity.kind === "sold" ? "Sold" : "Acquired"} ${net.lastActivity.tracts} tract${net.lastActivity.tracts === 1 ? "" : "s"} ${net.lastActivity.kind === "sold" ? "to" : "from"} ${net.lastActivity.counterparty}`
-                : "No recorded transactions"}
-            </div>
-          </div>
-        </div>
+        <StatStrip className="bp-signals" min={220} cells={[
+          { label: "Behavior", value: net.classLabel, tone: "accent", sub: BEHAVIOR_BLURB[net.klass] ?? "Classified from its transaction flow" },
+          {
+            label: "Median hold", value: net.hold ? `${net.hold.medianMonths} months` : "—",
+            sub: net.hold
+              ? `Fastest ${net.hold.fastestMonths} mo · slowest ${net.hold.slowestMonths} mo`
+              : net.dispositions === 0 ? "Never resold — holds what it buys" : "No acquire-then-sell round trip on record",
+          },
+          {
+            label: "Concentration", value: net.counties[0] ? `${Math.round(net.counties[0].pct * 100)}% ${net.counties[0].county}` : "—",
+            sub: net.counties.slice(1, 3).map((c) => `${c.county} ${Math.round(c.pct * 100)}%`).join(" · ") || "Single county on record",
+          },
+          {
+            label: "Last activity", value: net.lastActivity ? fmtDate(net.lastActivity.date) : "—", tone: net.lastActivity ? "success" : "default",
+            sub: net.lastActivity
+              ? `${net.lastActivity.kind === "sold" ? "Sold" : "Acquired"} ${net.lastActivity.tracts} tract${net.lastActivity.tracts === 1 ? "" : "s"} ${net.lastActivity.kind === "sold" ? "to" : "from"} ${net.lastActivity.counterparty}`
+              : "No recorded transactions",
+          },
+        ]} />
       )}
 
       {confirmDelete && (
@@ -257,23 +289,24 @@ export function BuyerProfile() {
       )}
       {err && <div className="error-text">{err}</div>}
 
-      {/* Contact Info · Buy Box · Contact Tracking, side by side (reference). */}
+      {/* Contact info · Buy box · Contact tracking, side by side; each card
+          edits in place. */}
       <div className="bp-cards">
-        {/* Contact Info */}
-        <div className="panel">
-          <SectionHead title="Contact Info" section="contact" />
+        {/* Contact info */}
+        <div className="bp-card">
+          <SectionHead title="Contact info" section="contact" />
           {editContact ? (
-            <>
+            <div className="bp-edit">
               <Row><Fld l="Company"><input value={view.companyName} onChange={(e) => setD({ companyName: e.target.value })} /></Fld><Fld l="First name"><input value={view.contactFirstName ?? ""} onChange={(e) => setD({ contactFirstName: e.target.value })} /></Fld></Row>
-              <Row><Fld l="Last name"><input value={view.contactLastName ?? ""} onChange={(e) => setD({ contactLastName: e.target.value })} /></Fld><Fld l=""><span /></Fld></Row>
-              <Row><Fld l="Email"><input value={view.email ?? ""} onChange={(e) => setD({ email: e.target.value })} /></Fld><Fld l="Phone"><PhoneInput value={view.phone ?? ""} onChange={(v) => setD({ phone: v })} /></Fld></Row>
-              <Fld l="Website"><input value={view.website ?? ""} onChange={(e) => setD({ website: e.target.value })} /></Fld>
-              <Fld l="Mailing address"><input value={view.mailingAddress ?? ""} onChange={(e) => setD({ mailingAddress: e.target.value })} /></Fld>
-              <Row>
-                <Fld l="Mailing city"><input value={view.mailingCity ?? ""} onChange={(e) => setD({ mailingCity: e.target.value })} /></Fld>
-                <Fld l="Mailing state"><StateSelect value={view.mailingState ?? ""} onChange={(v) => setD({ mailingState: v })} /></Fld>
-                <Fld l="Mailing ZIP code"><input value={view.mailingZip ?? ""} onChange={(e) => setD({ mailingZip: e.target.value })} /></Fld>
-              </Row>
+              <Row><Fld l="Last name"><input value={view.contactLastName ?? ""} onChange={(e) => setD({ contactLastName: e.target.value })} /></Fld><Fld l="Phone"><PhoneInput value={view.phone ?? ""} onChange={(v) => setD({ phone: v })} /></Fld></Row>
+              <Fld l="Email"><input value={view.email ?? ""} onChange={(e) => setD({ email: e.target.value })} placeholder="name@company.com" /></Fld>
+              <Fld l="Website"><input value={view.website ?? ""} onChange={(e) => setD({ website: e.target.value })} placeholder="https://" /></Fld>
+              <Fld l="Mailing address"><input value={view.mailingAddress ?? ""} onChange={(e) => setD({ mailingAddress: e.target.value })} placeholder="Street address" /></Fld>
+              <div className="bp-row-csz">
+                <Fld l="City"><input value={view.mailingCity ?? ""} onChange={(e) => setD({ mailingCity: e.target.value })} /></Fld>
+                <Fld l="State"><StateSelect value={view.mailingState ?? ""} onChange={(v) => setD({ mailingState: v })} /></Fld>
+                <Fld l="ZIP"><input value={view.mailingZip ?? ""} onChange={(e) => setD({ mailingZip: e.target.value })} /></Fld>
+              </div>
               <Fld l="Relationship owner(s)">
                 {/* Shared user-assignment component — identical to Deals/Assets. */}
                 <AssigneePicker
@@ -283,9 +316,9 @@ export function BuyerProfile() {
                   placeholder="Assign relationship owner(s)…"
                 />
               </Fld>
-            </>
+            </div>
           ) : (
-            <div className="dd-grid">
+            <div className="bp-kv-grid">
               <KV k="First name" v={view.contactFirstName} /><KV k="Last name" v={view.contactLastName} />
               <KV k="Email" v={view.email} /><KV k="Phone" v={view.phone ? formatPhone(view.phone) : null} />
               <KV k="Website" v={view.website} />
@@ -296,42 +329,44 @@ export function BuyerProfile() {
           )}
         </div>
 
-        {/* Buy Box */}
-        <div className="panel">
-          <SectionHead title="Buy Box & Criteria" section="buybox" />
+        {/* Buy box */}
+        <div className="bp-card">
+          <SectionHead title="Buy box & criteria" section="buybox" />
           {editBox ? (
-            <>
-              <GeoFields
-                states={view.buyBox.states} onStatesChange={(v) => setBox("states", v)}
-                counties={view.buyBox.counties} onCountiesChange={(v) => setBox("counties", v)}
-                labels={{ state: "states", county: "counties" }}
-              />
-              <Fld l="basins">
+            <div className="bp-edit">
+              <div className="bp-geo">
+                <GeoFields
+                  states={view.buyBox.states} onStatesChange={(v) => setBox("states", v)}
+                  counties={view.buyBox.counties} onCountiesChange={(v) => setBox("counties", v)}
+                  labels={{ state: "States", county: "Counties" }}
+                />
+              </div>
+              <Fld l="Basins">
                 <SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={view.buyBox.basins} onChange={(v) => setBox("basins", v)} placeholder="Search basins…" />
               </Fld>
-              <Fld l="formations">
+              <Fld l="Formations">
                 <SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={view.buyBox.formations} onChange={(v) => setBox("formations", v)} placeholder="Search formations…" />
               </Fld>
-              <Fld l="asset types">
+              <Fld l="Asset types">
                 <SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={view.buyBox.assetTypes} onChange={(v) => setBox("assetTypes", v)} placeholder="Search asset types…" />
               </Fld>
-              <Row><Fld l="Min acreage"><input type="number" value={view.buyBox.minAcreage ?? ""} onChange={(e) => setBox("minAcreage", e.target.value === "" ? null : Number(e.target.value))} /></Fld><Fld l="Max acreage"><input type="number" value={view.buyBox.maxAcreage ?? ""} onChange={(e) => setBox("maxAcreage", e.target.value === "" ? null : Number(e.target.value))} /></Fld></Row>
+              <Row><Fld l="Min acreage"><input type="number" value={view.buyBox.minAcreage ?? ""} onChange={(e) => setBox("minAcreage", e.target.value === "" ? null : Number(e.target.value))} placeholder="Any" /></Fld><Fld l="Max acreage"><input type="number" value={view.buyBox.maxAcreage ?? ""} onChange={(e) => setBox("maxAcreage", e.target.value === "" ? null : Number(e.target.value))} placeholder="Any" /></Fld></Row>
               <Row><Fld l="Min price"><MoneyInput value={view.buyBox.minPrice != null ? String(view.buyBox.minPrice) : ""} onChange={(v) => setBox("minPrice", v === "" ? null : Number(v))} ariaLabel="Minimum price" /></Fld><Fld l="Max price"><MoneyInput value={view.buyBox.maxPrice != null ? String(view.buyBox.maxPrice) : ""} onChange={(v) => setBox("maxPrice", v === "" ? null : Number(v))} ariaLabel="Maximum price" /></Fld></Row>
-            </>
+            </div>
           ) : (
-            <div className="dd-grid">
+            <div className="bp-kv-grid">
               {/* Friendly display names — the raw key rendered "ASSETTYPES". */}
-              {ARRAY_KEYS.map((k) => <KV key={k} k={k === "assetTypes" ? "Asset types" : k} v={(view.buyBox[k] as string[]).length ? <ChipList items={view.buyBox[k] as string[]} /> : null} />)}
+              {ARRAY_KEYS.map((k) => <KV key={k} k={BUYBOX_LABELS[k] ?? k} v={(view.buyBox[k] as string[]).length ? <ChipList items={view.buyBox[k] as string[]} /> : null} />)}
               <KV k="Acreage" v={fmtRange(view.buyBox.minAcreage, view.buyBox.maxAcreage, (n) => n.toLocaleString("en-US"))} />
               <KV k="Price" v={fmtRange(view.buyBox.minPrice, view.buyBox.maxPrice, (n) => money(n))} />
             </div>
           )}
         </div>
 
-      {/* Contact Tracking */}
-      <div className="panel">
-        <SectionHead title="Contact Tracking" section="tracking" />
-        {/* Follow-up alert (reference): amber when due today or overdue. */}
+      {/* Contact tracking */}
+      <div className="bp-card">
+        <SectionHead title="Contact tracking" section="tracking" />
+        {/* Follow-up alert: amber when due today or overdue. */}
         {(() => {
           if (!view.nextFollowUpDate) return null;
           // Follow-up dates are calendar days stored at UTC midnight — compare
@@ -355,24 +390,28 @@ export function BuyerProfile() {
             </div>
           );
         })()}
-        <div className="dd-grid">
-          <KV k="Close rate (computed)" v={view.closedDeals > 0 ? `${pct(view.closeRate)} · ${view.closedDeals} closed` : "No closed deals yet"} />
+        <div className={editTracking ? "bp-edit bp-edit-grid" : "bp-kv-grid"}>
+          {editTracking
+            ? <Fld l="Close rate (computed)"><div className="bp-computed">{view.closedDeals > 0 ? `${pct(view.closeRate)} · ${view.closedDeals} closed` : "No closed deals yet"}</div></Fld>
+            : <KV k="Close rate (computed)" v={view.closedDeals > 0 ? `${pct(view.closeRate)} · ${view.closedDeals} closed` : "No closed deals yet"} />}
           {editTracking ? (
             <>
               <Fld l="Status"><Select value={view.relationshipStatus} onChange={(v) => setD({ relationshipStatus: v as Relationship })} ariaLabel="Relationship status" options={[{ value: "HOT", label: "Hot" }, { value: "WARM", label: "Warm" }, { value: "COLD", label: "Cold" }]} /></Fld>
               <Fld l="Last contact"><DateField value={toInputDate(view.lastContactDate)} onChange={(v) => setD({ lastContactDate: v || null })} /></Fld>
               <Fld l="Next follow-up"><DateField value={toInputDate(view.nextFollowUpDate)} onChange={(v) => setD({ nextFollowUpDate: v || null })} /></Fld>
+              <div className="bp-span2">
+                <Fld l="Notes"><textarea rows={4} value={view.notes ?? ""} onChange={(e) => setD({ notes: e.target.value })} placeholder="Context for the next call…" /></Fld>
+              </div>
             </>
           ) : (
             <>
-              <KV k="Last contact" v={fmtDate(view.lastContactDate)} />
-              <KV k="Next follow-up" v={fmtDate(view.nextFollowUpDate)} />
+              <KV k="Status" v={<RelTag status={view.relationshipStatus} />} />
+              <KV k="Last contact" v={view.lastContactDate ? fmtDate(view.lastContactDate) : null} />
+              <KV k="Next follow-up" v={view.nextFollowUpDate ? fmtDate(view.nextFollowUpDate) : null} />
+              <div className="bp-span2"><KV k="Notes" v={view.notes ? <span className="wrap">{view.notes}</span> : null} /></div>
             </>
           )}
         </div>
-        <Fld l="Notes">
-          {editTracking ? <textarea rows={3} value={view.notes ?? ""} onChange={(e) => setD({ notes: e.target.value })} /> : <div className="wrap">{view.notes || "—"}</div>}
-        </Fld>
       </div>
 
       </div>
@@ -380,18 +419,20 @@ export function BuyerProfile() {
       {/* Relationships — transaction-network intelligence from research data.
           Mounted even while a section is being edited so the header strip keeps
           its data; the section itself hides its body during edits. */}
-      <div style={editing ? { display: "none" } : undefined}>
+      <div className="bp-sections" style={editing ? { display: "none" } : undefined}>
         {/* Aliases & merges — canonical identity, manual alias/merge tools,
             and the audit trail (with admin undo). */}
         <BuyerAliasManager buyerId={b.id} companyName={view.companyName} aliases={view.aliases} onChanged={load} />
-        <BuyerRelationships buyerId={b.id} onNetwork={setNet} />
+        <div id="bp-relationships" className="bp-sections">
+          <BuyerRelationships buyerId={b.id} onNetwork={setNet} />
+        </div>
       </div>
 
-      {/* Deal History — every row clickable */}
-      <div className="panel">
-        <div className="section-head">
+      {/* Deal history — every row clickable */}
+      <div className="bp-card bp-deals" id="bp-deals">
+        <div className="bp-card-head">
           <div>
-            <h3 style={{ margin: 0 }}>Deal History</h3>
+            <h3>Deal history</h3>
             <div className="bp-sub">Deals you've sent to this buyer</div>
           </div>
         </div>
@@ -412,16 +453,16 @@ export function BuyerProfile() {
           </div>
         ) : (
           <div className="table-scroll">
-            <table className="data-table">
-              <thead><tr><th>Deal</th><th>Stage</th><th>Status</th><th className="right">Amount</th><th>Date</th></tr></thead>
+            <table className="data-table bp-deal-table">
+              <thead><tr><th>Deal</th><th>Stage</th><th>Status</th><th className="right">Amount</th><th className="right">Date</th></tr></thead>
               <tbody>
                 {view.dealHistory.map((h) => (
                   <tr key={h.dealId} className="clickable" onClick={() => nav(`/deals/${h.dealId}`)}>
-                    <td><strong>{h.dealName}</strong>{h.isSelectedBuyer && <span className="badge resp-offer" style={{ marginLeft: 6 }}>Selected</span>}</td>
+                    <td><span className="bp-deal-name"><strong>{h.dealName}</strong>{h.isSelectedBuyer && <Tag tone="success">Selected</Tag>}</span></td>
                     <td><StageBadge stage={h.stage} /></td>
                     <td><StatusBadge status={h.status} /></td>
-                    <td className="right">{money(h.amount)}</td>
-                    <td>{fmtDate(h.date)}</td>
+                    <td className="right bp-amt">{money(h.amount)}</td>
+                    <td className="right bp-date">{fmtDate(h.date)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -481,11 +522,11 @@ function SendDealPicker({ buyerId, buyerName, onClose, onSent }: {
 }
 
 function KV({ k, v }: { k: string; v: React.ReactNode }) {
-  return <div className="kv"><span className="k">{k}</span><span className="v">{v || "—"}</span></div>;
+  return <div className="kv"><span className="k">{k}</span><span className={`v ${v ? "" : "empty"}`}>{v || "—"}</span></div>;
 }
 function Fld({ l, children }: { l: string; children: React.ReactNode }) {
   return <div className="field" style={{ flex: 1 }}><label>{l}</label>{children}</div>;
 }
 function Row({ children }: { children: React.ReactNode }) {
-  return <div className="row" style={{ alignItems: "flex-start", gap: 12 }}>{children}</div>;
+  return <div className="bp-row">{children}</div>;
 }

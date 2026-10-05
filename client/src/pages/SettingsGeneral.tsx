@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { ConfirmChanges, showToast } from "../components/ui";
@@ -8,18 +9,21 @@ import { ChangePasswordForm } from "../components/ChangePasswordForm";
 import { CompanyBranding } from "../components/CompanyBranding";
 import { AppearanceSettings } from "../components/AppearanceSettings";
 import { NotificationSettings } from "../components/NotificationSettings";
-import { SettingsNav } from "../components/SettingsNav";
+import { SettingsCardHead, SettingsLayout } from "../components/SettingsNav";
+import { Avatar } from "../components/kit";
+import { ROLE_LABEL } from "../lib/roles";
 
-/** General settings — account/profile now; structured for more sections later. */
+/** General settings — profile & security, notifications, appearance, branding. */
 export function SettingsGeneral() {
   const { user, refresh } = useAuth();
-  const [f, setF] = useState({
+  const initial = () => ({
     firstName: user?.firstName ?? "",
     lastName: user?.lastName ?? "",
     phone: user?.phone ?? "",
     email: user?.email ?? "",
     password: "",
   });
+  const [f, setF] = useState(initial);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -60,48 +64,73 @@ export function SettingsGeneral() {
     }
   }
 
+  const orgName = user?.organization?.name;
+  const roleLabel = ROLE_LABEL[user?.orgRole ?? ""];
+
   return (
-    <div className="page" style={{ maxWidth: 720 }}>
-      <div className="page-header"><h1>Settings</h1></div>
-      <SettingsNav />
-
-      {/* Account & Security (live) */}
-      <div className="panel">
-        <h3>Account & Security</h3>
-        <p className="muted" style={{ marginTop: 0 }}>Your profile and sign-in details. Enter your current password to confirm any changes — this never changes your password.</p>
-        <form onSubmit={requestSave}>
-          <div className="grid-2">
-            <div className="field"><label>First name</label><input value={f.firstName} onChange={set("firstName")} /></div>
-            <div className="field"><label>Last name</label><input value={f.lastName} onChange={set("lastName")} /></div>
+    <SettingsLayout>
+      {/* Profile & security */}
+      <div id="profile" className="settings-anchor">
+        <section className="panel set-card-flush">
+          <div className="profile-head">
+            <Avatar user={user} size={52} />
+            <div className="profile-head-text">
+              <span className="profile-name">{user?.name}</span>
+              {(roleLabel || orgName) && <span className="profile-sub">{[roleLabel, orgName].filter(Boolean).join(" · ")}</span>}
+            </div>
+            <Link to={{ hash: "#avatar-color" }} className="set-btn-outline">Change avatar color</Link>
           </div>
-          <div className="field"><label>Phone number</label><PhoneInput value={f.phone} onChange={(v) => setF((p) => ({ ...p, phone: v }))} /></div>
-          <div className="field"><label>Email address</label><input type="email" value={f.email} onChange={set("email")} /></div>
-          <div className="field"><label>Current password</label><input type="password" value={f.password} onChange={set("password")} autoComplete="current-password" placeholder="Required to confirm changes" /></div>
-          {error && <div className="error-text">{error}</div>}
-          <button className="primary" disabled={busy} style={{ marginTop: 8 }}>{busy ? "Saving…" : "Save changes"}</button>
-        </form>
-        {confirming && <ConfirmChanges onCancel={() => setConfirming(false)} onConfirm={save} />}
+          <div className="set-card-body">
+            <SettingsCardHead
+              title="Profile"
+              desc="Your profile and sign-in details. Enter your current password to confirm any changes — this never changes your password."
+            />
+            <form onSubmit={requestSave} className="set-stack">
+              <div className="set-field-grid">
+                <div className="field"><label>First name</label><input value={f.firstName} onChange={set("firstName")} /></div>
+                <div className="field"><label>Last name</label><input value={f.lastName} onChange={set("lastName")} /></div>
+                <div className="field"><label>Phone</label><PhoneInput value={f.phone} onChange={(v) => setF((p) => ({ ...p, phone: v }))} /></div>
+                <div className="field"><label>Email</label><input type="email" value={f.email} onChange={set("email")} /></div>
+              </div>
+              <div className="profile-confirm">
+                <div className="field">
+                  <label>Current password<span className="req-star"> *</span> <span className="label-note">to confirm these changes</span></label>
+                  <input type="password" value={f.password} onChange={set("password")} autoComplete="current-password" placeholder="Required to confirm changes" />
+                </div>
+                <div className="profile-confirm-actions">
+                  <button type="button" onClick={() => { setF(initial()); setError(null); }} disabled={busy}>Discard</button>
+                  <button className="primary" disabled={busy}>{busy ? "Saving…" : "Save changes"}</button>
+                </div>
+              </div>
+              {error && <div className="error-text">{error}</div>}
+            </form>
+          </div>
+          {confirming && <ConfirmChanges onCancel={() => setConfirming(false)} onConfirm={save} />}
+        </section>
+
+        <section className="panel">
+          <SettingsCardHead title="Password" desc="Use at least 8 characters. You'll need your current password to confirm." />
+          <ChangePasswordForm />
+        </section>
+
+        <TwoFactorSettings />
       </div>
 
-      <div className="panel">
-        <h3>Change Password</h3>
-        <p className="muted" style={{ marginTop: 0 }}>Update your password. You'll need your current password to confirm.</p>
-        <ChangePasswordForm />
+      <div id="notifications" className="settings-anchor">
+        <NotificationSettings />
       </div>
 
-      <TwoFactorSettings />
+      <div id="appearance" className="settings-anchor">
+        <AppearanceSettings />
+      </div>
 
-      <NotificationSettings />
-
-      <AppearanceSettings />
-
-      <CompanyBranding />
+      <div id="branding" className="settings-anchor">
+        <CompanyBranding />
+      </div>
 
       {/* One line instead of a stack of placeholder panels — empty promise
           sections add scroll and make the finished ones feel less finished. */}
-      <p className="muted" style={{ fontSize: 12, textAlign: "center" }}>
-        Coming soon: per-user defaults
-      </p>
-    </div>
+      <p className="muted settings-footnote">Coming soon: per-user defaults</p>
+    </SettingsLayout>
   );
 }

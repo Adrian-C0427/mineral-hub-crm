@@ -119,14 +119,14 @@ export function BuyerRelationships({ buyerId, onNetwork }: {
   // empty states live inside the section body so the header never jumps around.
   if (loading) {
     return (
-      <CollapsibleSection title="Relationships" sub="Transaction network from research data">
+      <CollapsibleSection title="Relationships" sub="Transaction network from research data" defaultOpen>
         <Spinner />
       </CollapsibleSection>
     );
   }
   if (!net) {
     return (
-      <CollapsibleSection title="Relationships" sub="Transaction network from research data">
+      <CollapsibleSection title="Relationships" sub="Transaction network from research data" defaultOpen>
         <p className="muted" style={{ margin: 0 }}>
           {reason === "no-activity" || reason === "no-entity-key"
             ? "No transaction relationships found for this buyer in the research data yet. As deed and assignment records are imported, this buyer's grantor/grantee network will appear here automatically."
@@ -146,6 +146,7 @@ export function BuyerRelationships({ buyerId, onNetwork }: {
       title="Relationships"
       sub={`${net.acquisitions} acquisitions · ${net.dispositions} dispositions · derived from research records`}
       right={<ClassBadge klass={net.klass} label={net.classLabel} />}
+      defaultOpen
     >
       {/* Stats strip — six figures separated by hairlines (reference layout). */}
       <div className="rel2-stats">
@@ -179,16 +180,18 @@ export function BuyerRelationships({ buyerId, onNetwork }: {
       {canEdit && suggestions.length > 0 && (
         <div className="rel-alias-callout">
           <div className="rel-alias-head">
-            <strong>Possible aliases detected</strong>
-            <span className="muted" style={{ fontSize: 12 }}>Similar names in the research data — review each before it counts toward this buyer.</span>
+            <strong><span className="rel-alias-dot" aria-hidden="true" />Possible aliases detected</strong>
+            <span className="rel-alias-sub">Similar names in the research data — review each before it counts toward this buyer.</span>
           </div>
           {suggestions.map((s) => (
             <div key={s.norm} className="rel-alias-row">
-              <span className="rel-alias-name">{s.name}</span>
-              <span className="muted rel-alias-meta">
-                {Math.round(s.confidence * 100)}% match · {s.txCount} transaction{s.txCount === 1 ? "" : "s"}
-                {s.buyerId && <> · existing buyer</>}
-              </span>
+              <div style={{ minWidth: 0 }}>
+                <div className="rel-alias-name">{s.name}</div>
+                <div className="rel-alias-meta">
+                  <b className={s.confidence >= 0.97 ? "hi" : ""}>{Math.round(s.confidence * 100)}% match</b> · {s.txCount} transaction{s.txCount === 1 ? "" : "s"}
+                  {s.buyerId && <> · existing buyer</>}
+                </div>
+              </div>
               <button className="small" onClick={() => setReviewing(s)}>Review</button>
             </div>
           ))}
@@ -196,11 +199,11 @@ export function BuyerRelationships({ buyerId, onNetwork }: {
       )}
 
       <div className="rel2-cols">
-        <PartyColumn title="Acquired From" tone="up" empty="No recorded acquisitions." parties={net.topGrantors}
+        <PartyColumn title="Acquired from" tone="up" empty="No recorded acquisitions." parties={net.topGrantors}
           canCreate={canCreate} adding={adding} onAdd={addAsBuyer} onOpen={(p) => p.buyerId && nav(`/buyers/${p.buyerId}`)} />
-        <PartyColumn title="Sold To" tone="down" empty="No recorded dispositions." parties={net.topGrantees}
+        <PartyColumn title="Sold to" tone="down" empty="No recorded dispositions." parties={net.topGrantees}
           canCreate={canCreate} adding={adding} onAdd={addAsBuyer} onOpen={(p) => p.buyerId && nav(`/buyers/${p.buyerId}`)} />
-        <PartyColumn title="Frequent Co-Buyers" tone="co" empty="No shared acquisitions found." parties={net.coBuyers}
+        <PartyColumn title="Frequent co-buyers" tone="co" empty="No shared acquisitions found." parties={net.coBuyers}
           canCreate={canCreate} adding={adding} onAdd={addAsBuyer} onOpen={(p) => p.buyerId && nav(`/buyers/${p.buyerId}`)} />
       </div>
     </CollapsibleSection>
@@ -208,12 +211,15 @@ export function BuyerRelationships({ buyerId, onNetwork }: {
     {/* Acquisition Chains — its own dedicated section, independent from
         Relationships, collapsed by default like the other profile sections. */}
     {net.chains.length > 0 && (
-      <CollapsibleSection
-        title="Acquisition Chains"
-        sub={`${net.chains.length} path${net.chains.length === 1 ? "" : "s"} through the transaction network, strongest first`}
-      >
-        <ChainSection chains={net.chains} classLabels={net.classLabels} focusNorm={net.norm} />
-      </CollapsibleSection>
+      <div id="bp-chains">
+        <CollapsibleSection
+          title="Acquisition chains"
+          sub={`${net.chains.length} path${net.chains.length === 1 ? "" : "s"} through the transaction network, strongest first`}
+          defaultOpen
+        >
+          <ChainSection chains={net.chains} classLabels={net.classLabels} focusNorm={net.norm} />
+        </CollapsibleSection>
+      </div>
     )}
 
     <>

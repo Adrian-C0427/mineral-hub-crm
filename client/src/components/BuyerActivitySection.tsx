@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { Handshake, Inbox, Pencil, Phone, RefreshCw, Send, StickyNote, Trash2, Users, type LucideIcon } from "lucide-react";
+import { ChevronRight, Handshake, Inbox, Pencil, Phone, RefreshCw, Send, StickyNote, Trash2, Users, type LucideIcon } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import { ConfirmDialog, StatusBadge, EmptyState, UserChip } from "./ui";
 import { Select } from "./Select";
@@ -20,7 +20,7 @@ const KIND_META: Record<CommKind, { icon: LucideIcon; label: string }> = {
 };
 
 /** Match-percent color scale (green / amber / red — mirrors the deal page). */
-const baPctColor = (pct: number): string => (pct >= 67 ? "#4ade80" : pct >= 34 ? "#f59e0b" : "#f87171");
+const baPctColor = (pct: number): string => (pct >= 67 ? "var(--success-ink)" : pct >= 34 ? "var(--warn)" : "var(--danger-ink)");
 
 const LOGGABLE: { v: CommKind; label: string }[] = [
   { v: "PHONE", label: "Call" }, { v: "MEETING", label: "Meeting" },
@@ -50,36 +50,48 @@ export function BuyerActivitySection({
   if (rows.length === 0) return <EmptyState title="No buyers contacted yet">Use Match Recommendations below to start outreach.</EmptyState>;
 
   return (
-    <div className="ba-list">
+    <div className="ba-table">
+      {/* One grid shared by the header and every row; the rows expand into the
+          buyer's details, log form and full communication timeline. */}
+      <div className="ba-cols ba-headrow" aria-hidden="true">
+        <span>Buyer</span><span>Status</span><span>Match</span><span className="ba-right">Offer</span>
+        <span>Follow-up</span><span>Last activity</span><span />
+      </div>
       {sorted.map((r) => {
         const isOpen = open === r.id;
         return (
-          <div key={r.id} className={`ba-row ${r.status === "PASSED" ? "row-dimmed" : ""}`}>
-            <div className="ba-head" onClick={() => setOpen(isOpen ? null : r.id)}>
-              <span className="ba-caret">{isOpen ? "▾" : "▸"}</span>
-              <Link to={`/buyers/${r.buyerId}`} className="subtle-link" onClick={(e) => e.stopPropagation()} style={{ fontWeight: 600 }}>{r.buyerName}</Link>
-              {r.companyName && r.companyName !== r.buyerName && <span className="muted">· {r.companyName}</span>}
-              <span className="spacer" />
-              {/* Reference-style match meter: 90px bar + mono colored percent. */}
+          <div key={r.id} className={`ba-row ${isOpen ? "open" : ""} ${r.status === "PASSED" ? "row-dimmed" : ""}`}>
+            <div className="ba-head ba-cols" onClick={() => setOpen(isOpen ? null : r.id)} aria-expanded={isOpen}>
+              <span className="ba-buyer">
+                <ChevronRight size={14} className="ba-caret" aria-hidden="true" />
+                <span className="ba-buyer-text">
+                  <Link to={`/buyers/${r.buyerId}`} className="subtle-link ba-name" onClick={(e) => e.stopPropagation()}>{r.buyerName}</Link>
+                  {r.companyName && r.companyName !== r.buyerName && <span className="ba-sub">{r.companyName}</span>}
+                </span>
+              </span>
+              <span><StatusBadge status={r.status} label={buyerStatusLabel(r.status)} /></span>
+              {/* Match meter: bar + coloured percent. */}
               <span className="ba-match" title={`${r.matchPercent}% buy-box match`}>
                 <span className="ba-bar"><span style={{ width: `${Math.min(100, Math.max(0, r.matchPercent))}%`, background: baPctColor(r.matchPercent) }} /></span>
                 <span className="ba-pct" style={{ color: baPctColor(r.matchPercent) }}>{r.matchPercent}%</span>
               </span>
-              <StatusBadge status={r.status} label={buyerStatusLabel(r.status)} />
-              {r.offerAmount != null && <span className="ba-amount">{money(r.offerAmount)}</span>}
+              <span className={`ba-amount ${r.offerAmount != null ? "" : "dim"}`}>{r.offerAmount != null ? money(r.offerAmount) : "—"}</span>
+              <span className="ba-date">{fmtDate(r.nextFollowUpDate)}</span>
               <span className="ba-date">{fmtDate(r.lastActivityDate)}</span>
-              {onRecordOffer && r.status !== "PASSED" && r.status !== "CLOSED" && (
-                <button className="small" onClick={(e) => { e.stopPropagation(); onRecordOffer(r); }}>Record offer</button>
-              )}
-              {canEdit && <button className="small" onClick={(e) => { e.stopPropagation(); onEdit(r); }}>Update</button>}
+              <span className="ba-actions">
+                {onRecordOffer && r.status !== "PASSED" && r.status !== "CLOSED" && (
+                  <button className="small" onClick={(e) => { e.stopPropagation(); onRecordOffer(r); }}>Record offer</button>
+                )}
+                {canEdit && <button className="small" onClick={(e) => { e.stopPropagation(); onEdit(r); }}>Update</button>}
+              </span>
             </div>
             {isOpen && (
               <div className="ba-body">
-                <div className="dd-grid" style={{ marginBottom: 8 }}>
-                  <div className="kv"><span className="k">Assigned</span><span className="v">{r.assignedTeamMember ? <UserChip user={r.assignedTeamMember} size={16} /> : "—"}</span></div>
-                  <div className="kv"><span className="k">Response received</span><span className="v">{r.responseReceived ? "Yes" : "No"}</span></div>
-                  <div className="kv"><span className="k">Next follow-up</span><span className="v">{fmtDate(r.nextFollowUpDate)}</span></div>
-                  <div className="kv"><span className="k">Notes</span><span className="v">{r.notes || "—"}</span></div>
+                <div className="ba-kvs">
+                  <div className="ba-kv"><span className="k">Assigned</span><span className="v">{r.assignedTeamMember ? <UserChip user={r.assignedTeamMember} size={16} /> : "—"}</span></div>
+                  <div className="ba-kv"><span className="k">Response received</span><span className="v">{r.responseReceived ? "Yes" : "No"}</span></div>
+                  <div className="ba-kv"><span className="k">Next follow-up</span><span className="v">{fmtDate(r.nextFollowUpDate)}</span></div>
+                  <div className="ba-kv"><span className="k">Notes</span><span className="v">{r.notes || "—"}</span></div>
                 </div>
                 {canEdit && <LogEntryForm dealId={dealId} buyerId={r.buyerId} onLogged={onChanged} />}
                 <Timeline entries={r.timeline} dealId={dealId} buyerId={r.buyerId} canEdit={canEdit} onChanged={onChanged} />
@@ -123,7 +135,7 @@ function LogEntryForm({ dealId, buyerId, onLogged }: { dealId: string; buyerId: 
 function Timeline({ entries, dealId, buyerId, canEdit, onChanged }: {
   entries: TimelineEntry[]; dealId: string; buyerId: string; canEdit: boolean; onChanged: () => void;
 }) {
-  if (entries.length === 0) return <p className="muted" style={{ fontSize: 13 }}>No communication logged yet.</p>;
+  if (entries.length === 0) return <p className="muted ba-none">No communication logged yet.</p>;
   return (
     <ul className="timeline">
       {entries.map((e) => <TimelineItem key={e.id} entry={e} dealId={dealId} buyerId={buyerId} canEdit={canEdit} onChanged={onChanged} />)}
@@ -158,7 +170,7 @@ function TimelineItem({ entry, dealId, buyerId, canEdit, onChanged }: {
     <li className="timeline-item">
       <div className="timeline-meta">
         <span className="timeline-kind"><Icon size={13} strokeWidth={2} aria-hidden="true" /> {meta.label}</span>
-        <span className="muted" style={{ fontSize: 12 }}>{fmtDate(entry.occurredAt)}{entry.createdBy ? ` · ${entry.createdBy}` : ""}</span>
+        <span className="timeline-when">{fmtDate(entry.occurredAt)}{entry.createdBy ? ` · ${entry.createdBy}` : ""}</span>
         <span className="timeline-actions">
           {editable && !editing && (
             <button className="icon-btn timeline-act" title="Edit entry" aria-label="Edit entry" onClick={() => { setErr(null); setEditing(true); }}>
@@ -180,16 +192,16 @@ function TimelineItem({ entry, dealId, buyerId, canEdit, onChanged }: {
         />
       ) : (
         <>
-          {entry.subject && <div style={{ fontWeight: 600, fontSize: 13 }}>{entry.subject}</div>}
+          {entry.subject && <div className="timeline-subject">{entry.subject}</div>}
           {entry.body && (
-            <div className="timeline-body" style={{ fontSize: 13 }}>
+            <div className="timeline-body">
               {long && !open ? `${entry.body.slice(0, 120)}… ` : entry.body}
               {long && <button className="link-btn" onClick={() => setOpen((o) => !o)}>{open ? "less" : "more"}</button>}
             </div>
           )}
         </>
       )}
-      {err && <span className="error-text" style={{ fontSize: 12 }}>{err}</span>}
+      {err && <span className="error-text timeline-err">{err}</span>}
       {confirmDelete && (
         <ConfirmDialog
           title="Delete this timeline entry?"
@@ -223,7 +235,7 @@ function EditEntryForm({ entry, dealId, buyerId, onCancel, onSaved }: {
   }
 
   return (
-    <div className="ba-log" style={{ marginTop: 4 }}>
+    <div className="ba-log ba-log-edit">
       <Select value={kind} onChange={(v) => setKind(v as CommKind)} width={150} ariaLabel="Entry type"
         options={LOGGABLE.map((k) => ({ value: k.v, label: k.label }))} />
       <input value={body} onChange={(e) => setBody(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") save(); }} autoFocus />

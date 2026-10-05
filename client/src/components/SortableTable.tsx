@@ -1,7 +1,6 @@
 import { fmtDate } from "../lib/format";
 import { useAuth } from "../auth/AuthContext";
 import { loadProfileTablePrefs, saveProfileTablePrefs } from "../lib/tablePrefs";
-import { Req } from "./ui";
 import { Select } from "./Select";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -288,30 +287,33 @@ function ColumnCustomizer<T>({ ordered, hidden, pinnedSet, onToggle, onReorder, 
   return (
     <div className="cv-wrap" ref={ref}>
       <button type="button" className={`small cv-btn ${open ? "active" : ""}`} onClick={() => setOpen((o) => !o)} title="Customize columns">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
-        Customize View
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4" /></svg>
+        Customize view
       </button>
       {open && (
-        <div className="cv-menu" role="dialog" aria-label="Customize columns">
-          <div className="cv-head"><strong>Columns</strong><span className="muted" style={{ fontSize: 12 }}>Show, hide, pin &amp; reorder</span></div>
+        <div className="cv-menu cv-columns" role="dialog" aria-label="Customize columns">
+          <div className="cv-head"><strong>Columns</strong><span className="cv-sub">Show, hide, pin and reorder</span></div>
           <div className="cv-list">
             {listed.map((c) => {
               const on = !hidden.has(c.key);
               const pinned = pinnedSet.has(c.key);
               return (
                 <div key={c.key}
-                  className={`cv-row ${dragKey === c.key ? "dragging" : ""} ${overKey === c.key && dragKey && dragKey !== c.key ? "drop-over" : ""}`}
+                  className={`cv-row ${on ? "" : "off"} ${dragKey === c.key ? "dragging" : ""} ${overKey === c.key && dragKey && dragKey !== c.key ? "drop-over" : ""}`}
                   onDragOver={(e) => { if (!dragKey) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (overKey !== c.key) setOverKey(c.key); }}
                   onDrop={(e) => { e.preventDefault(); if (dragKey) onReorder(dragKey, c.key); setDragKey(null); setOverKey(null); }}
                 >
                   {/* Only the handle is draggable, so the checkbox stays clickable. */}
                   <span className="cv-drag" title="Drag to reorder" aria-label="Drag to reorder" draggable
                     onDragStart={(e) => { setDragKey(c.key); e.dataTransfer.effectAllowed = "move"; }}
-                    onDragEnd={() => { setDragKey(null); setOverKey(null); }}>⠿</span>
+                    onDragEnd={() => { setDragKey(null); setOverKey(null); }}>
+                    <svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="3" r="1.4" /><circle cx="8.5" cy="3" r="1.4" /><circle cx="3.5" cy="8" r="1.4" /><circle cx="8.5" cy="8" r="1.4" /><circle cx="3.5" cy="13" r="1.4" /><circle cx="8.5" cy="13" r="1.4" /></svg>
+                  </span>
                   <label className="cv-check">
                     <input type="checkbox" checked={on} disabled={c.required} onChange={() => onToggle(c.key)} />
-                    <span>{c.header}{c.required && <Req />}</span>
+                    <span>{c.header}</span>
                   </label>
+                  {c.required && <span className="cv-req">Always shown</span>}
                   <span className="cv-move">
                     <button type="button" className={`icon-btn ${pinned ? "on" : ""}`} title={pinned ? "Unpin column" : "Pin column to the left"} aria-pressed={pinned} onClick={() => onPin(c.key)}>
                       <svg width="13" height="13" viewBox="0 0 24 24" fill={pinned ? "currentColor" : "none"} stroke="currentColor" strokeWidth="2"><path d="M12 17v5" /><path d="M9 10.76V4a1 1 0 011-1h4a1 1 0 011 1v6.76a2 2 0 00.55 1.38l1.9 1.9A1 1 0 0117.65 17H6.35a1 1 0 01-.7-1.96l1.9-1.9A2 2 0 009 10.76z" /></svg>
@@ -322,8 +324,8 @@ function ColumnCustomizer<T>({ ordered, hidden, pinnedSet, onToggle, onReorder, 
             })}
           </div>
           <div className="cv-foot">
-            <span className="cv-hint">Drag a header edge to resize (this session only — widths auto-fit the data on reload)</span>
-            <button type="button" className="small" disabled={isDefault} onClick={onReset}>Restore default</button>
+            <span className="cv-hint">Drag a header edge to resize. Widths reset on reload.</span>
+            <button type="button" className="small" disabled={isDefault} onClick={onReset}>Restore defaults</button>
           </div>
         </div>
       )}
@@ -368,7 +370,7 @@ export function SortableTable<T>({
     for (const key of pinnedKeys) { pinLeft[key] = acc; acc += widths[key] ?? PIN_DEFAULT_W; }
   }
   const pinStyle = (key: string, head: boolean): React.CSSProperties | undefined =>
-    pinnedSet.has(key) ? { position: "sticky", left: pinLeft[key], zIndex: head ? 7 : 3, background: head ? "var(--panel-2)" : "var(--panel)" } : undefined;
+    pinnedSet.has(key) ? { position: "sticky", left: pinLeft[key], zIndex: head ? 7 : 3, background: head ? "var(--surface)" : "var(--row-bg, var(--surface))" } : undefined;
 
   // Drag a header's right edge to resize the column (Customize View only).
   function startResize(e: React.PointerEvent, key: string) {
@@ -470,9 +472,11 @@ export function SortableTable<T>({
             {selection && (() => {
               const ids = paged.map(rowKey);
               const allSelected = ids.length > 0 && ids.every((id) => selection.selected.has(id));
+              // Some (not all) rows on the page selected: the header box shows a dash.
+              const someSelected = !allSelected && ids.some((id) => selection.selected.has(id));
               return (
-                <th className="center" style={{ width: 36, ...(hasPins ? { position: "sticky", left: 0, zIndex: 7, background: "var(--panel-2)" } : {}) }}>
-                  <input type="checkbox" checked={allSelected} onChange={() => selection.onToggleAll(ids)} aria-label="Select all" />
+                <th className="center" style={{ width: 36, ...(hasPins ? { position: "sticky", left: 0, zIndex: 7, background: "var(--surface)" } : {}) }}>
+                  <input type="checkbox" checked={allSelected} ref={(el) => { if (el) el.indeterminate = someSelected; }} onChange={() => selection.onToggleAll(ids)} aria-label="Select all" />
                 </th>
               );
             })()}
@@ -495,7 +499,7 @@ export function SortableTable<T>({
                 >
                   <span className="th-inner">
                     {c.header}
-                    <span className="sort-ind">{active ? (sort!.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+                    <svg className={`sort-ind ${active && sort!.dir === "asc" ? "asc" : ""}`} width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 5v14M6 13l6 6 6-6" /></svg>
                   </span>
                   {customizeId && (
                     <span
@@ -527,7 +531,7 @@ export function SortableTable<T>({
                 className={`${onRowClick ? "clickable" : ""} ${rowClassName?.(row) ?? ""} ${selection?.selected.has(id) ? "row-selected" : ""}`}
               >
                 {selection && (
-                  <td className="center" onClick={(e) => e.stopPropagation()} style={hasPins ? { position: "sticky", left: 0, zIndex: 3, background: "var(--panel)" } : undefined}>
+                  <td className="center" onClick={(e) => e.stopPropagation()} style={hasPins ? { position: "sticky", left: 0, zIndex: 3, background: "var(--row-bg, var(--surface))" } : undefined}>
                     <input type="checkbox" checked={selection.selected.has(id)} onChange={() => selection.onToggle(id)} aria-label="Select row" />
                   </td>
                 )}
@@ -558,21 +562,8 @@ export function SortableTable<T>({
     </div>
   );
 
-  // Records-per-page lives ABOVE the table, aligned with the toolbar's other
-  // controls, so it stays visible while scanning rows; the footer keeps the
-  // count and page navigation.
-  const rppControl = paginated ? (
-    <span className="ct-rpp" title="Records per page">
-      <Select
-        value={String(pageSize)}
-        onChange={(v) => setPageSize(Number(v))}
-        options={rowsPerPage!.map((n) => String(n))}
-        width={68}
-        ariaLabel="Records per page"
-      />
-    </span>
-  ) : null;
-
+  // Footer (design layout): the count on the left; rows-per-page, the page
+  // position and prev/next on the right.
   const footer = paginated ? (
     <div className="ct-foot">
       <span>
@@ -581,11 +572,26 @@ export function SortableTable<T>({
         {footerExtra}
       </span>
       <span className="ct-foot-controls">
+        <span className="ct-rpp-wrap">
+          <span className="ct-rpp-lbl">Rows per page</span>
+          <span className="ct-rpp" title="Records per page">
+            <Select
+              value={String(pageSize)}
+              onChange={(v) => setPageSize(Number(v))}
+              options={rowsPerPage!.map((n) => String(n))}
+              width={68}
+              ariaLabel="Records per page"
+            />
+          </span>
+        </span>
+        <span className="ct-pgof">Page {curPage} of {totalPages}</span>
         <span className="ct-pages">
-          <button className="ct-pgbtn" disabled={curPage <= 1} onClick={() => setPage(curPage - 1)} aria-label="Previous page">‹</button>
-          <span className="ct-pgcur">{curPage}</span>
-          <span className="ct-pgof">/ {totalPages}</span>
-          <button className="ct-pgbtn" disabled={curPage >= totalPages} onClick={() => setPage(curPage + 1)} aria-label="Next page">›</button>
+          <button className="ct-pgbtn" disabled={curPage <= 1} onClick={() => setPage(curPage - 1)} aria-label="Previous page">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6" /></svg>
+          </button>
+          <button className="ct-pgbtn" disabled={curPage >= totalPages} onClick={() => setPage(curPage + 1)} aria-label="Next page">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
+          </button>
         </span>
       </span>
     </div>
@@ -594,7 +600,6 @@ export function SortableTable<T>({
   if (!customizeId) {
     return (
       <>
-        {rppControl && <div className="ct-topbar">{rppControl}</div>}
         {table}
         {footer}
       </>
@@ -604,7 +609,6 @@ export function SortableTable<T>({
     <div className="cv-table">
       <div className="cv-toolbar">
         <div className="cv-toolbar-left">{toolbar}</div>
-        {rppControl}
         <ColumnCustomizer ordered={ordered} hidden={hidden} pinnedSet={pinnedSet} onToggle={toggle} onReorder={reorder} onPin={togglePin} onReset={reset} isDefault={isDefault} />
       </div>
       {subToolbar}

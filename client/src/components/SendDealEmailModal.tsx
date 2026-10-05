@@ -69,7 +69,7 @@ export function SendDealEmailModal({
         <>
           <Banner kind="info">Sent to {result.sent} buyer(s).</Banner>
           {result.skipped.length > 0 && (
-            <div style={{ marginTop: 8 }}>
+            <div className="email-skipped">
               <strong>Skipped ({result.skipped.length}):</strong>
               <ul>{result.skipped.map((s, i) => <li key={i}>{s.buyer} · {s.reason}</li>)}</ul>
             </div>
@@ -89,11 +89,11 @@ export function SendDealEmailModal({
             <label>Body</label>
             <textarea rows={10} value={body} onChange={(e) => setBody(e.target.value)} />
           </div>
-          <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+          <p className="dd-hint email-tokens">
             Personalization tokens (filled per buyer): {TOKENS.join(" ")}
           </p>
-          <div className="row" style={{ alignItems: "flex-end", gap: 6 }}>
-            <div className="field" style={{ flex: 1, marginBottom: 0 }}>
+          <div className="row email-save-tpl">
+            <div className="field">
               <label>Save current as template</label>
               <input value={saveName} onChange={(e) => setSaveName(e.target.value)} placeholder="Template name" />
             </div>

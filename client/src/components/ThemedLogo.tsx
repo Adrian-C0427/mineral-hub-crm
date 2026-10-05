@@ -19,13 +19,17 @@ import { adaptLogoToTheme, cachedLogoVariant } from "../lib/logoTheme";
  * - The component is memoized; parent re-renders don't touch it unless the
  *   logo itself changes.
  */
-export const ThemedLogo = memo(function ThemedLogo({ src, alt, className, style }: {
+export const ThemedLogo = memo(function ThemedLogo({ src, alt, className, style, variant }: {
   src: string;
   alt: string;
   className?: string;
   style?: React.CSSProperties;
+  /** Force a variant regardless of theme (the sidebar is always dark). */
+  variant?: "dark" | "light";
 }) {
-  const { theme } = useTheme();
+  // Logos have two variants; every theme except Light sits on a dark ground.
+  const { theme: appTheme } = useTheme();
+  const theme = variant ?? (appTheme === "light" ? "light" : "dark");
   // Re-render trigger for when background processing completes; the displayed
   // value itself always comes straight from the cache at render time.
   const [, bump] = useReducer((c: number) => c + 1, 0);

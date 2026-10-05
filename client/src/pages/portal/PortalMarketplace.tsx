@@ -6,18 +6,24 @@ import { SearchableMultiSelect } from "../../components/SearchableMultiSelect";
 import { Select } from "../../components/Select";
 import { GeoFields } from "../../components/GeoFields";
 import { PortalMap } from "./PortalMap";
-import { PortalShell } from "./PortalOffering";
+import { PortalShell, StarGlyph } from "./PortalOffering";
 import { portalGet, portalPost, type FC, type PortalDeal, type PortalOrg } from "./portalApi";
 import { MoneyInput } from "../../components/MoneyInput";
 import { PhoneInput } from "../../components/PhoneInput";
+import { Modal } from "../../components/ui";
+import { Segmented } from "../../components/kit";
 
 const EMPTY_FC: FC = { type: "FeatureCollection", features: [] };
 
-/** Uppercase asset-type pill for the card image header (e.g. MINERALS, ROYALTY). */
-function typePill(d: PortalDeal): string | null {
-  if (d.assetCount) return `PACKAGE · ${d.assetCount}`;
+const typeLabel = (t: string) => (ASSET_TYPE_LABELS as Record<string, string>)[t] ?? t;
+const locOf = (d: PortalDeal) => [d.counties.join(", "), d.states.join(", ")].filter(Boolean).join(" · ");
+
+/** Card type chip: a seller package shows "Package · n"; otherwise the asset-type
+ *  codes, with the full names as the tooltip. */
+function TypeChip({ d }: { d: PortalDeal }) {
+  if (d.assetCount) return <span className="pp-chip">Package · {d.assetCount}</span>;
   if (!d.assetTypes.length) return null;
-  return d.assetTypes.map((t) => (ASSET_TYPE_LABELS as Record<string, string>)[t] ?? t).join(" / ").toUpperCase();
+  return <span className="pp-chip type" title={d.assetTypes.map(typeLabel).join(" / ")}>{d.assetTypes.join(" / ")}</span>;
 }
 
 type SortKey = "featured" | "newest" | "nra" | "name";
@@ -85,11 +91,13 @@ export function PortalMarketplace() {
   // Buy-box form ("Tell us what you're looking for") — opened from the header
   // CTA per the design; state lives here so the button can reach it.
   const [buyBoxOpen, setBuyBoxOpen] = useState(false);
-  const leadRef = useRef<HTMLDivElement>(null);
-  function openBuyBox() {
-    setBuyBoxOpen(true);
-    setTimeout(() => leadRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
-  }
+  // Once sent, the buy box shows the thank-you instead of a second blank form.
+  const [leadSent, setLeadSent] = useState(false);
+  const openBuyBox = () => setBuyBoxOpen(true);
+  // Map visibility (desktop "Hide map") and the phone list/map mode — view
+  // state only, not persisted.
+  const [mapOn, setMapOn] = useState(true);
+  const [phoneMap, setPhoneMap] = useState(false);
 
   const snapshot = useMemo<FilterSnapshot>(() => ({
     q, states: fStates, counties: fCounties, basins: fBasins, formations: fFormations,
@@ -192,68 +200,108 @@ export function PortalMarketplace() {
     return rows.sort(cmp[sort]);
   }, [deals, q, fStates, fCounties, fBasins, fFormations, fAssetTypes, fOperators, nraMin, nraMax, sort]);
 
-  if (error) return <PortalShell><div className="panel" style={{ textAlign: "center", padding: 48 }}><h2>Portal unavailable</h2><p className="muted">{error}</p></div></PortalShell>;
+
+  // One removable chip per active filter value (same state the dropdowns edit).
+  const drop = (set: React.Dispatch<React.SetStateAction<string[]>>, v: string) => () => set((p) => p.filter((x) => x !== v));
+  const chips: { key: string; k: string; v: string; remove: () => void }[] = [
+    ...fStates.map((v) => ({ key: `st:${v}`, k: "State", v, remove: drop(setFStates, v) })),
+    ...fCounties.map((v) => ({ key: `co:${v}`, k: "County", v, remove: drop(setFCounties, v) })),
+    ...fBasins.map((v) => ({ key: `ba:${v}`, k: "Basin", v, remove: drop(setFBasins, v) })),
+    ...fFormations.map((v) => ({ key: `fo:${v}`, k: "Formation", v, remove: drop(setFFormations, v) })),
+    ...fAssetTypes.map((v) => ({ key: `ty:${v}`, k: "Type", v: typeLabel(v), remove: drop(setFAssetTypes, v) })),
+    ...fOperators.map((v) => ({ key: `op:${v}`, k: "Operator", v, remove: drop(setFOperators, v) })),
+    ...(nraMin ? [{ key: "nmin", k: "NRA min", v: nraMin, remove: () => setNraMin("") }] : []),
+    ...(nraMax ? [{ key: "nmax", k: "NRA max", v: nraMax, remove: () => setNraMax("") }] : []),
+  ];
+  const open = (d: PortalDeal) => navigate(`/offer/${d.slug}`);
+  const buyBoxBtn = (
+    <button type="button" className="pp-btn" onClick={openBuyBox}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 5h16l-6 7.5V19l-4 1.5v-8z" /></svg>
+      Submit your buy box
+    </button>
+  );
+
+  if (error) {
+    return (
+      <PortalShell>
+        <div className="pp-state">
+          <span className="pp-state-tag">Unavailable</span>
+          <h1>Portal unavailable</h1>
+          <p>{error}</p>
+        </div>
+      </PortalShell>
+    );
+  }
 
   return (
-    <PortalShell org={org ?? undefined} wide>
-      {/* Page header — title + the buy-box CTA. */}
-      <header className="mp-head">
-        <div>
-          <h1>Marketplace</h1>
-          <div className="mp-head-sub">Mineral &amp; royalty opportunities, sourced weekly</div>
+    <PortalShell org={org ?? undefined} wide action={buyBoxBtn}>
+      <div className="pp-titlerow">
+        <div className="pp-titlerow-main">
+          <h1 className="pp-h1">Marketplace</h1>
+          <span className="pp-lede">Mineral &amp; royalty opportunities, sourced weekly</span>
         </div>
-        <button className="pbtn pbtn-primary" onClick={openBuyBox}>Tell us what you're looking for</button>
-      </header>
+        {deals.length > 0 && (
+          <span className="pp-live"><i aria-hidden="true" />{deals.length} live opportunit{deals.length === 1 ? "y" : "ies"}</span>
+        )}
+      </div>
 
-      {/* Collapsible filters + workspace controls (map-first: filters stay out of the way). */}
-      <div className="panel mkt-controls">
-        <div className="mkt-search-row">
-          <input
-            className="mkt-search"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search opportunities — name, county, abstract, operator, basin, formation, RRC…"
-            aria-label="Search opportunities"
-          />
-          {q && <button type="button" className="mkt-search-clear" onClick={() => setQ("")} title="Clear search" aria-label="Clear search">×</button>}
-        </div>
-        <div className="mkt-controls-bar">
-          <button className="mp-btn" onClick={() => setShowFilters((s) => !s)}>
-            {showFilters ? "▾" : "▸"} Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ""}
+      <section className="pp-controls">
+        <div className="pp-toolbar">
+          <label className="pp-search">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search opportunities — name, county, abstract, operator, basin, formation, RRC…"
+              aria-label="Search opportunities"
+            />
+            {q && (
+              <button type="button" className="pp-search-x" onClick={() => setQ("")} title="Clear search" aria-label="Clear search">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              </button>
+            )}
+          </label>
+          <button type="button" className={`pp-tbtn ${showFilters || activeFilterCount > 0 ? "on" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8" /><circle cx="16" cy="7" r="2" /><circle cx="10" cy="17" r="2" /></svg>
+            Filters
+            {activeFilterCount > 0 && <span className="pp-badge">{activeFilterCount}</span>}
           </button>
-          <span className="mp-count"><b>{filtered.length}</b> of {deals.length} opportunities</span>
-          <span className="spacer" style={{ marginLeft: "auto" }} />
-          <Select value={sort} onChange={(v) => setSort(v as SortKey)} width={170} ariaLabel="Sort listings"
-            options={[
-              { value: "featured", label: "Featured first" },
-              { value: "newest", label: "Newest" },
-              { value: "nra", label: "Largest NRA" },
-              { value: "name", label: "Name A–Z" },
-            ]} />
-          <div className="seg-control mkt-seg">
-            <span className={`seg ${view === "grid" ? "active" : ""}`} onClick={() => setView("grid")}>▦ Grid</span>
-            <span className={`seg ${view === "table" ? "active" : ""}`} onClick={() => setView("table")}>≡ Table</span>
+          <div className="pp-sort">
+            <span className="pp-sort-l">Sort</span>
+            <Select value={sort} onChange={(v) => setSort(v as SortKey)} width={160} ariaLabel="Sort listings"
+              options={[
+                { value: "featured", label: "Featured first" },
+                { value: "newest", label: "Newest" },
+                { value: "nra", label: "Largest NRA" },
+                { value: "name", label: "Name A–Z" },
+              ]} />
           </div>
-          <button className="mp-btn" title={`Dock listings ${side === "left" ? "right" : "left"}`} onClick={() => setSide((s) => (s === "left" ? "right" : "left"))}>
-            {side === "left" ? "Dock listings right →" : "← Dock listings left"}
+          <Segmented<ListView>
+            className="pp-seg"
+            ariaLabel="Listing view"
+            value={view}
+            onChange={setView}
+            options={[
+              { value: "grid", label: <><GridIcon />Grid</> },
+              { value: "table", label: <><TableIcon />Table</> },
+            ]}
+          />
+          {mapOn && (
+            <button type="button" className="pp-tbtn pp-desk" title={`Dock listings ${side === "left" ? "right" : "left"}`} onClick={() => setSide((s) => (s === "left" ? "right" : "left"))}>
+              {side === "left" ? "Dock listings right →" : "← Dock listings left"}
+            </button>
+          )}
+          <button type="button" className={`pp-tbtn pp-desk ${mapOn ? "" : "on"}`} onClick={() => setMapOn((m) => !m)} aria-pressed={!mapOn}>
+            <MapIcon />{mapOn ? "Hide map" : "Show map"}
+          </button>
+          <button type="button" className={`pp-tbtn pp-phone ${phoneMap ? "on" : ""}`} onClick={() => setPhoneMap((m) => !m)} aria-pressed={phoneMap}>
+            <MapIcon />{phoneMap ? "Show list" : "Show map"}
           </button>
         </div>
 
         {showFilters && (
-          <div className="mkt-filters-body">
-            {/* Saved searches — reapply a named filter set, or save the current one. */}
-            <div className="portal-saved">
-              <span className="muted" style={{ fontSize: 13 }}>Saved searches:</span>
-              {saved.length === 0 && <span className="muted" style={{ fontSize: 13 }}>none yet</span>}
-              {saved.map((s) => (
-                <span key={s.name} className="portal-saved-chip">
-                  <button type="button" className="portal-saved-apply" onClick={() => applySnapshot(s.f)}>{s.name}</button>
-                  <button type="button" className="portal-saved-del" title="Delete" onClick={() => deleteSaved(s.name)}>×</button>
-                </span>
-              ))}
-              {hasFilters ? <button type="button" className="mp-btn" onClick={() => applySnapshot({})}>Clear</button> : null}
-            </div>
-            <div className="mp-filter-row">
+          <div className="pp-filters">
+            <div className="pp-filter-grid">
               {/* Same cascading geographic selector as the CRM; options scope to
                   what's actually published so nothing dangles. */}
               <GeoFields
@@ -266,65 +314,124 @@ export function PortalMarketplace() {
               <div className="field"><label>Formation</label><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={fFormations} onChange={setFFormations} placeholder="Any formation" /></div>
               <div className="field"><label>Asset type</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={fAssetTypes} onChange={setFAssetTypes} placeholder="Any type" /></div>
               <div className="field"><label>Operator</label><SearchableMultiSelect options={options.operators} value={fOperators} onChange={setFOperators} placeholder="Any operator" /></div>
-              <div className="field mp-nra"><label>NRA min</label><input type="number" min="0" value={nraMin} onChange={(e) => setNraMin(e.target.value)} placeholder="0" /></div>
-              <div className="field mp-nra"><label>NRA max</label><input type="number" min="0" value={nraMax} onChange={(e) => setNraMax(e.target.value)} placeholder="No max" /></div>
-              <div className="mp-savebar">
+              <div className="field">
+                <label>NRA range</label>
+                <div className="pp-range">
+                  <input type="number" min="0" value={nraMin} onChange={(e) => setNraMin(e.target.value)} placeholder="0" aria-label="NRA min" />
+                  <span aria-hidden="true">–</span>
+                  <input type="number" min="0" value={nraMax} onChange={(e) => setNraMax(e.target.value)} placeholder="No max" aria-label="NRA max" />
+                </div>
+              </div>
+            </div>
+            {/* Saved searches — reapply a named filter set, or save the current one. */}
+            <div className="pp-filters-foot">
+              <div className="pp-saved">
+                <span className="pp-saved-l">Saved searches</span>
+                {saved.length === 0 && <span className="pp-saved-none">None yet. Set filters, then save them here.</span>}
+                {saved.map((s) => (
+                  <span key={s.name} className="pp-saved-chip">
+                    <button type="button" className="pp-saved-apply" onClick={() => applySnapshot(s.f)}>{s.name}</button>
+                    <button type="button" className="pp-saved-del" title="Delete" aria-label={`Delete saved search ${s.name}`} onClick={() => deleteSaved(s.name)}>
+                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div className="pp-savebar">
                 <input
                   value={presetName}
                   onChange={(e) => setPresetName(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); saveCurrent(); } }}
                   placeholder="Name this search"
+                  aria-label="Name this search"
                 />
-                <button type="button" className="mp-btn" disabled={!presetName.trim() || !hasFilters} onClick={saveCurrent}>Save</button>
+                <button type="button" className="pp-btn" disabled={!presetName.trim() || !hasFilters} onClick={saveCurrent}>Save</button>
               </div>
             </div>
           </div>
         )}
-      </div>
 
-      {/* Map-first workspace: dockable, resizable listings panel + big map. */}
-      <div ref={wsRef} className={`mkt-workspace side-${side}`} style={{ "--panel-w": `${panelWidth}px` } as React.CSSProperties}>
-        <div className="mkt-panel">
+        <div className="pp-results">
+          <span className="pp-count"><b>{filtered.length}</b> of {deals.length} opportunities</span>
+          {chips.map((c) => (
+            <span key={c.key} className="pp-fchip">
+              <span className="pp-fchip-k">{c.k}</span>{c.v}
+              <button type="button" onClick={c.remove} aria-label={`Remove ${c.k} ${c.v}`}>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              </button>
+            </span>
+          ))}
+          {hasFilters && <button type="button" className="pp-clear" onClick={() => applySnapshot({})}>Clear all</button>}
+        </div>
+      </section>
+
+      {/* Workspace: dockable, resizable listings panel + the map (hideable). */}
+      <div
+        ref={wsRef}
+        className={`pp-ws side-${side} ${mapOn ? "with-map" : "no-map"} ${phoneMap ? "ph-map" : "ph-list"}`}
+        style={{ "--panel-w": `${panelWidth}px` } as React.CSSProperties}
+      >
+        <div className="pp-panel">
           {filtered.length === 0 ? (
-            <div className="mkt-empty">
-              <p className="muted" style={{ margin: 0 }}>No opportunities match those filters — broaden them, or tell us what you're looking for below.</p>
+            <div className="pp-empty">
+              <span className="pp-empty-t">No opportunities match these filters</span>
+              <span className="pp-empty-s">Broaden them, or tell us what you're looking for.</span>
+              <div className="pp-empty-btns">
+                {hasFilters && <button type="button" className="pp-btn" onClick={() => applySnapshot({})}>Clear filters</button>}
+                <button type="button" className="pp-btn primary" onClick={openBuyBox}>Submit your buy box</button>
+              </div>
             </div>
           ) : view === "grid" ? (
-            <div className="mp-cards">
-              {filtered.map((d) => (
-                <div key={d.slug} className="mp-card" onClick={() => navigate(`/offer/${d.slug}`)}>
-                  <div className="mp-card-hero">
-                    <svg width="54" height="54" viewBox="0 0 24 24" fill="none" strokeWidth="1.4" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" /></svg>
-                    {d.featured && <span className="pill-featured">★ FEATURED</span>}
-                    {typePill(d) && <span className="mp-pill-type">{typePill(d)}</span>}
-                  </div>
-                  <div className="mp-card-body">
-                    <div className="mp-card-top">
-                      <div className="mp-card-name">{d.name}</div>
-                      {d.askPrice != null && <div className="mp-card-price">${num(d.askPrice)}</div>}
+            <div className="pp-cards">
+              {filtered.map((d) => {
+                const sub = [d.formations[0], d.operator].filter(Boolean).join(" · ");
+                return (
+                  <div key={d.slug} className="pp-lcard" role="link" tabIndex={0} onClick={() => open(d)}
+                    onKeyDown={(e) => { if (e.key === "Enter") open(d); }}>
+                    <div className="pp-lcard-top">
+                      <div className="pp-chips">
+                        {d.featured && <span className="pp-chip feat"><StarGlyph />Featured</span>}
+                        <TypeChip d={d} />
+                        {d.producingStatus && <span className={`pp-chip prod ${d.producingStatus === "Producing" ? "on" : ""}`}><i />{d.producingStatus}</span>}
+                      </div>
+                      <span className="pp-lcard-name">{d.name}</span>
+                      <span className="pp-lcard-loc">{locOf(d)}{d.basins.length ? ` · ${d.basins[0]}` : ""}</span>
                     </div>
-                    <div className="mp-card-loc">{[d.counties.join(", "), d.states.join(", ")].filter(Boolean).join(" · ")}{d.basins.length ? ` · ${d.basins[0]}` : ""}</div>
-                    <div className="mp-card-stats">
-                      <div><div className="mp-stat-l">NRA</div><div className="mp-stat-v">{d.nra != null ? num(d.nra) : "—"}</div></div>
-                      <div><div className="mp-stat-l">WELLS</div><div className="mp-stat-v">{d.wells.length || "—"}</div></div>
-                      <div className="mp-stat-op"><div className="mp-stat-l">OPERATOR</div><div className="mp-stat-v">{d.operator ?? "—"}</div></div>
+                    <div className="pp-lcard-stats">
+                      <div><span>NRA</span><b>{d.nra != null ? num(d.nra) : "—"}</b></div>
+                      <div><span>Wells</span><b className={d.wells.length ? "" : "dim"}>{d.wells.length || "—"}</b></div>
+                      <div><span>Asking</span><b className={d.askPrice != null ? "ask" : "offer"}>{d.askPrice != null ? `$${num(d.askPrice)}` : "Make offer"}</b></div>
+                    </div>
+                    <div className="pp-lcard-foot">
+                      <span className="pp-lcard-sub">{sub || "—"}</span>
+                      <span className="pp-lcard-view">View
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+                      </span>
                     </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           ) : (
-            <div className="mp-tablecard">
+            <div className="pp-tablecard">
               <table>
-                <thead><tr><th>Opportunity</th><th>Location</th><th className="right">NRA</th><th className="right">Asking</th><th>Operator</th></tr></thead>
+                <thead>
+                  <tr><th>Opportunity</th><th>Location</th><th>Type</th><th className="right">NRA</th><th className="right">Wells</th><th className="right">Asking</th><th>Operator</th></tr>
+                </thead>
                 <tbody>
                   {filtered.map((d) => (
-                    <tr key={d.slug} className="clickable" onClick={() => navigate(`/offer/${d.slug}`)}>
-                      <td className="mp-td-name">{d.name}{d.featured ? " ★" : ""}{d.assetCount ? <span className="muted" style={{ fontSize: 12, fontWeight: 400 }}> · {d.assetCount} tract{d.assetCount > 1 ? "s" : ""}</span> : null}</td>
-                      <td className="mp-td-dim">{[d.counties.join(", "), d.states.join(", ")].filter(Boolean).join(" · ")}</td>
-                      <td className="right mp-td-nra">{d.nra != null ? num(d.nra) : "—"}</td>
-                      <td className="right mp-td-ask">{d.askPrice != null ? `$${num(d.askPrice)}` : "—"}</td>
-                      <td className="mp-td-dim">{d.operator ?? "—"}</td>
+                    <tr key={d.slug} onClick={() => open(d)}>
+                      <td className="pp-td-name">
+                        {d.featured && <span className="pp-td-star" title="Featured"><StarGlyph /></span>}
+                        {d.name}
+                        {d.assetCount ? <span className="pp-td-dim"> · {d.assetCount} tract{d.assetCount > 1 ? "s" : ""}</span> : null}
+                      </td>
+                      <td className="pp-td-dim">{locOf(d) || "—"}</td>
+                      <td>{d.assetTypes.length ? <span className="pp-chip type" title={d.assetTypes.map(typeLabel).join(" / ")}>{d.assetTypes.join(" / ")}</span> : <span className="pp-td-dim">—</span>}</td>
+                      <td className="right pp-td-strong">{d.nra != null ? num(d.nra) : "—"}</td>
+                      <td className="right">{d.wells.length || "—"}</td>
+                      <td className="right pp-td-ask">{d.askPrice != null ? `$${num(d.askPrice)}` : "—"}</td>
+                      <td className="pp-td-dim">{d.operator ?? "—"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -333,34 +440,54 @@ export function PortalMarketplace() {
           )}
         </div>
 
-        <div className="mkt-resize" onPointerDown={startResize} title="Drag to resize" role="separator" aria-orientation="vertical" />
+        {mapOn && <div className="pp-resize" onPointerDown={startResize} title="Drag to resize" role="separator" aria-orientation="vertical" />}
 
-        <div className="mkt-map">
-          <PortalMap features={features} height="100%" onSelect={(slug) => navigate(`/offer/${slug}`)} />
+        <div className="pp-mapcell">
+          <PortalMap features={features} height="100%" legendLabel="Opportunity" resetLabel="Fit to listings" onSelect={(slug) => navigate(`/offer/${slug}`)} />
         </div>
       </div>
 
-      <div ref={leadRef}>
-        <LeadCapture orgSlug={orgSlug} open={buyBoxOpen} onOpenChange={setBuyBoxOpen} />
-      </div>
+      <section className="pp-cta">
+        {leadSent ? (
+          <div>
+            <span className="pp-cta-t">Thank you — we've got it.</span>
+            <span className="pp-cta-s">Your acquisition criteria are in front of our team. We'll reach out as soon as a matching opportunity surfaces.</span>
+          </div>
+        ) : (
+          <>
+            <div>
+              <span className="pp-cta-t">Don't see an opportunity that fits your needs?</span>
+              <span className="pp-cta-s">Tell us your buy box — when a matching deal surfaces, you'll be the first call.</span>
+            </div>
+            <button type="button" className="pp-btn primary lg" onClick={openBuyBox}>Submit your buy box</button>
+          </>
+        )}
+      </section>
+
+      {buyBoxOpen && <LeadCapture orgSlug={orgSlug} done={leadSent} onDone={() => setLeadSent(true)} onClose={() => setBuyBoxOpen(false)} />}
     </PortalShell>
   );
 }
 
+const GridIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v7h-7zM4 13h7v7H4zM13 13h7v7h-7z" /></svg>;
+const TableIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16" /></svg>;
+const MapIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2zM9 4v14M15 6v14" /></svg>;
+
 // ---------------------------------------------------------------------------
-// "Don't see an opportunity that fits your needs?" — lead capture
+// "Don't see an opportunity that fits your needs?" — lead capture (buy box)
 // ---------------------------------------------------------------------------
 
-function LeadCapture({ orgSlug, open, onOpenChange }: { orgSlug: string; open: boolean; onOpenChange: (v: boolean) => void }) {
+function LeadCapture({ orgSlug, done, onDone, onClose }: { orgSlug: string; done: boolean; onDone: () => void; onClose: () => void }) {
   const [f, setF] = useState({
     companyName: "", contactName: "", email: "", phone: "", preferredContact: "either" as "email" | "phone" | "either",
     states: [] as string[], counties: [] as string[], basins: [] as string[], formations: [] as string[], assetTypes: [] as string[],
     minAcreage: "", maxAcreage: "", minPrice: "", maxPrice: "", additionalCriteria: "",
   });
   const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const set = <K extends keyof typeof f>(k: K) => (v: (typeof f)[K]) => setF((p) => ({ ...p, [k]: v }));
+  // Anything typed? Then a stray backdrop click / Escape won't discard it.
+  const dirty = !done && Object.entries(f).some(([k, v]) => k !== "preferredContact" && (Array.isArray(v) ? v.length > 0 : v !== ""));
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -386,44 +513,43 @@ function LeadCapture({ orgSlug, open, onOpenChange }: { orgSlug: string; open: b
         },
         additionalCriteria: f.additionalCriteria,
       });
-      setDone(true);
+      onDone();
     } catch (e2) { setError(e2 instanceof Error ? e2.message : "Submission failed"); }
     finally { setBusy(false); }
   }
 
   if (done) {
     return (
-      <div className="panel portal-lead" style={{ textAlign: "center", padding: 40 }}>
-        <h2 style={{ marginTop: 0 }}>Thank you — we've got it.</h2>
-        <p className="muted" style={{ marginBottom: 0 }}>Your acquisition criteria are in front of our team. We'll reach out as soon as a matching opportunity surfaces.</p>
-      </div>
-    );
-  }
-
-  // Compact by default: a CTA banner; the full form opens on click.
-  if (!open) {
-    return (
-      <div className="panel portal-lead portal-lead-cta">
-        <div>
-          <h3 style={{ margin: "0 0 4px" }}>Don't see an opportunity that fits your needs?</h3>
-          <p className="muted" style={{ margin: 0 }}>Tell us your buy box — when a matching deal surfaces, you'll be the first call.</p>
+      <Modal title="Tell us what you're looking for" onClose={onClose} wide footer={<button type="button" className="primary" onClick={onClose}>Back to marketplace</button>}>
+        <div className="pp-lead-done">
+          <span className="pp-offer-check" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+          </span>
+          <h2>Thank you — we've got it.</h2>
+          <p>Your acquisition criteria are in front of our team. We'll reach out as soon as a matching opportunity surfaces.</p>
         </div>
-        <button className="primary" onClick={() => onOpenChange(true)}>Submit Your Buy Box</button>
-      </div>
+      </Modal>
     );
   }
 
   const star = <span className="req-star" aria-hidden="true">*</span>;
   return (
-    <div className="panel portal-lead">
-      <div className="section-head">
-        <h2 style={{ margin: 0 }}>Tell Us What You're Looking For</h2>
-        <button className="mp-btn" onClick={() => onOpenChange(false)}>Close</button>
-      </div>
-      <p className="muted">We source new mineral and royalty opportunities every week — when something matches your buy box, you'll be the first call.</p>
-      <form onSubmit={submit}>
-        <div className="muted portal-lead-section">Contact information</div>
-        <div className="dd-grid">
+    <Modal
+      title="Tell us what you're looking for"
+      subtitle="We source new mineral and royalty opportunities every week — when something matches your buy box, you'll be the first call."
+      onClose={onClose}
+      wide
+      dirty={dirty}
+      footer={
+        <>
+          <button type="button" onClick={onClose}>Cancel</button>
+          <button type="submit" form="pp-lead-form" className="primary" disabled={busy}>{busy ? "Submitting…" : "Submit my criteria"}</button>
+        </>
+      }
+    >
+      <form id="pp-lead-form" className="pp-lead" onSubmit={submit}>
+        <div className="pp-lead-sec">Contact information</div>
+        <div className="pp-lead-grid">
           <div className="field"><label>Company name {star}</label><input value={f.companyName} onChange={(e) => set("companyName")(e.target.value)} /></div>
           <div className="field"><label>Contact name {star}</label><input value={f.contactName} onChange={(e) => set("contactName")(e.target.value)} /></div>
           <div className="field"><label>Email {star}</label><input type="email" value={f.email} onChange={(e) => set("email")(e.target.value)} /></div>
@@ -433,8 +559,8 @@ function LeadCapture({ orgSlug, open, onOpenChange }: { orgSlug: string; open: b
               options={[{ value: "either", label: "Either" }, { value: "email", label: "Email" }, { value: "phone", label: "Phone" }]} />
           </div>
         </div>
-        <div className="muted portal-lead-section">Your buy box</div>
-        <div className="dd-grid">
+        <div className="pp-lead-sec">Your buy box</div>
+        <div className="pp-lead-grid">
           <GeoFields
             states={f.states} onStatesChange={set("states")}
             counties={f.counties} onCountiesChange={set("counties")}
@@ -453,8 +579,7 @@ function LeadCapture({ orgSlug, open, onOpenChange }: { orgSlug: string; open: b
           <textarea rows={3} value={f.additionalCriteria} onChange={(e) => set("additionalCriteria")(e.target.value)} />
         </div>
         {error && <div className="error-text">{error}</div>}
-        <button className="primary" disabled={busy} style={{ marginTop: 8 }}>{busy ? "Submitting…" : "Submit my criteria"}</button>
       </form>
-    </div>
+    </Modal>
   );
 }

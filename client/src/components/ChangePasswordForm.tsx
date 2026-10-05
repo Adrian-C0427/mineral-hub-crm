@@ -46,17 +46,17 @@ export function ChangePasswordForm({ onChanged, compact }: { onChanged?: () => v
   }
 
   return (
-    <form onSubmit={submit}>
-      <div className={compact ? "" : "grid-2"}>
+    <form onSubmit={submit} className={compact ? "pw-form compact" : "pw-form"}>
+      <div className="pw-fields">
         <div className="field"><label>Current password</label><input type="password" value={current} onChange={(e) => setCurrent(e.target.value)} autoComplete="current-password" /></div>
-      </div>
-      <div className={compact ? "" : "grid-2"}>
         <div className="field"><label>New password</label><input type="password" value={next} onChange={(e) => setNext(e.target.value)} autoComplete="new-password" placeholder="At least 8 characters" /></div>
         <div className="field"><label>Confirm new password</label><input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" /></div>
       </div>
       {error && <div className="error-text">{error}</div>}
       {ok && <Banner kind="info">Password changed.</Banner>}
-      <button className="primary" disabled={busy} style={{ marginTop: 4 }}>{busy ? "Saving…" : "Change password"}</button>
+      <div className="pw-actions">
+        <button className="primary" disabled={busy}>{busy ? "Saving…" : compact ? "Change password" : "Update password"}</button>
+      </div>
     </form>
   );
 }

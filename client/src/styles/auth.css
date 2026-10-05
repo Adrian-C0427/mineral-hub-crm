@@ -1,0 +1,206 @@
+/* Redesign styles: auth */
+/* Sign in / create account / reset / OAuth return (pages/Login.tsx AuthLayout),
+   the forced password change screen (App.tsx .login-wrap) and the 404 page
+   (pages/NotFound.tsx). */
+
+/* --- Split-screen frame --- */
+.auth-page {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr));
+  min-height: calc(100vh / var(--ui-zoom, 1)); min-height: calc(100dvh / var(--ui-zoom, 1));
+  background: var(--bg); color: var(--ink); font-size: 13.5px;
+}
+.auth-home {
+  position: fixed; top: 18px; left: 22px; z-index: 60; display: flex; align-items: center; gap: 6px;
+  font-size: 13px; font-weight: 600; color: var(--ink-3); text-decoration: none;
+}
+.auth-home:hover { color: var(--ink); text-decoration: none; }
+
+.auth-brand {
+  position: relative; display: flex; flex-direction: column; justify-content: space-between; gap: 24px;
+  min-height: 320px; padding: 40px 48px; overflow: hidden;
+  border-right: 1px solid var(--line); background: var(--surface-inset);
+}
+.auth-grid, .nf-grid {
+  position: absolute; inset: 0; pointer-events: none;
+  background-image: linear-gradient(var(--surface-2) 1px, transparent 1px), linear-gradient(90deg, var(--surface-2) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+.auth-grid {
+  -webkit-mask-image: radial-gradient(ellipse at 30% 40%, #000 20%, transparent 75%);
+  mask-image: radial-gradient(ellipse at 30% 40%, #000 20%, transparent 75%);
+}
+.auth-logo { position: relative; display: flex; align-items: center; gap: 10px; }
+.auth-logo-mark {
+  width: 28px; height: 28px; flex: none; border-radius: var(--radius-nav); background: var(--ink); color: var(--bg);
+  display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; letter-spacing: -0.02em;
+}
+.auth-logo-name { display: flex; align-items: baseline; gap: 6px; }
+.auth-logo-name b { font-size: 17px; font-weight: 700; letter-spacing: -0.02em; color: var(--ink); }
+.auth-logo-name span { font-size: 13.5px; font-weight: 500; color: var(--ink-3); }
+
+.auth-hero { position: relative; display: flex; flex-direction: column; gap: 26px; max-width: 460px; padding: 48px 0; }
+.auth-eyebrow { font-size: 12.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent-ink); }
+.auth-hero h1 {
+  margin: 0; font-size: clamp(30px, 3.4vw, 42px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.08;
+  color: var(--ink-strong); text-wrap: pretty;
+}
+.auth-hero p { margin: 0; font-size: 15px; line-height: 1.6; color: var(--ink-2); text-wrap: pretty; }
+.auth-features { display: flex; flex-direction: column; border-top: 1px solid var(--line); }
+.auth-feature { display: flex; align-items: center; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.auth-feature-icon {
+  width: 30px; height: 30px; flex: none; border-radius: var(--radius); background: var(--surface-2); border: 1px solid var(--line);
+  color: var(--accent-ink); display: flex; align-items: center; justify-content: center;
+}
+.auth-feature-text { display: flex; flex-direction: column; gap: 1px; }
+.auth-feature-text b { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.auth-feature-text span { font-size: 12.5px; color: var(--ink-3); }
+.auth-brand-foot { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--ink-4); }
+.auth-brand-foot a { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-3); text-decoration: none; }
+.auth-brand-foot a:hover { color: var(--ink); text-decoration: none; }
+
+/* --- Form column --- */
+.auth-main { display: flex; align-items: center; justify-content: center; padding: 48px 32px; }
+.auth-col { width: 100%; max-width: 400px; animation: cmRise 220ms ease-out; }
+.auth-form { display: flex; flex-direction: column; gap: 26px; }
+
+.auth-seg { align-self: flex-start; border: 1px solid var(--line); background: var(--surface); }
+.auth-seg .seg-item { height: 30px; padding: 0 14px; font-weight: 600; color: var(--ink-3); }
+.auth-seg .seg-item:hover { color: var(--ink); }
+.auth-seg .seg-item.active { background: var(--selected); color: var(--ink); box-shadow: none; }
+
+.auth-title { display: flex; flex-direction: column; gap: 6px; }
+.auth-title h2 { margin: 0; font-size: 24px; font-weight: 700; letter-spacing: -0.02em; color: var(--ink-strong); }
+.auth-title span { font-size: 13.5px; line-height: 1.5; color: var(--ink-3); }
+
+.auth-sso .oauth-buttons { gap: 8px; }
+.auth-sso .oauth-btn {
+  height: 40px; min-height: 0; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: var(--radius);
+  background: var(--surface); color: var(--ink); font-size: 13.5px; font-weight: 600; box-shadow: none;
+}
+.auth-sso .oauth-btn:hover { border-color: var(--line-hover-strong); background: var(--surface); }
+.auth-sso .oauth-divider { margin: 18px 0 0; color: var(--ink-4); }
+.auth-sso .oauth-divider::before, .auth-sso .oauth-divider::after { border-bottom-color: var(--line); }
+
+.auth-fields { display: flex; flex-direction: column; gap: 14px; }
+.auth-fields .field { margin-bottom: 0; }
+.auth-page label { font-size: 12.5px; font-weight: 600; color: var(--ink-2); text-transform: none; letter-spacing: 0; }
+.auth-page input:not([type="checkbox"]):not([type="radio"]) {
+  height: 40px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: var(--radius);
+  background: var(--surface); color: var(--ink); font-size: 13.5px;
+}
+.auth-page input:not([type="checkbox"]):not([type="radio"]):focus { border-color: var(--accent); }
+.auth-name-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.auth-label-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.auth-label-row label { margin: 0; }
+.auth-label-note { font-size: 12.5px; font-weight: 500; color: var(--ink-4); }
+.auth-help { display: block; margin-top: 6px; font-size: 12px; line-height: 1.5; color: var(--ink-4); }
+.auth-page input.auth-code { letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
+
+button.auth-link {
+  min-height: 0; padding: 0; border: 0; background: transparent; box-shadow: none;
+  color: var(--accent-ink); font-size: 12.5px; font-weight: 600;
+}
+button.auth-link:hover { background: transparent; color: var(--accent-ink-hover); }
+button.auth-link.strong { color: var(--ink); font-size: 13px; }
+button.auth-link.strong:hover { color: var(--accent-ink); }
+
+.auth-pw {
+  display: flex; align-items: center; height: 40px; border: 1px solid var(--line-strong); border-radius: var(--radius);
+  background: var(--surface);
+}
+.auth-pw:focus-within { border-color: var(--accent); }
+.auth-page .auth-pw input:not([type="checkbox"]) { flex: 1; min-width: 0; height: 100%; border: 0; background: transparent; }
+button.auth-pw-eye {
+  width: 38px; height: 100%; min-height: 0; padding: 0; flex: none; display: flex; align-items: center; justify-content: center;
+  border: 0; background: transparent; box-shadow: none; color: var(--ink-3);
+}
+button.auth-pw-eye:hover { background: transparent; color: var(--ink); }
+
+.auth-error {
+  display: flex; align-items: flex-start; gap: 9px; padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 35%, transparent); border-radius: var(--radius);
+  background: color-mix(in srgb, var(--danger) 8%, transparent); font-size: 12.5px; line-height: 1.45; color: var(--danger-ink);
+}
+.auth-error svg { flex: none; margin-top: 1px; }
+.auth-submit { display: flex; flex-direction: column; gap: 14px; }
+button.auth-primary { width: 100%; height: 42px; border-radius: var(--radius-chip); font-size: 14px; font-weight: 600; }
+.auth-switch { text-align: center; font-size: 13px; color: var(--ink-3); }
+.auth-note { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--ink-1); }
+.auth-dev-link { margin: 0; font-size: 13px; word-break: break-all; }
+
+/* --- Forced password change (App.tsx ForcePasswordChange) --- */
+.login-wrap {
+  min-height: calc(100vh / var(--ui-zoom, 1)); padding: 24px 16px; background: var(--bg);
+  display: flex; align-items: center; justify-content: center;
+}
+.login-card {
+  max-width: 100%; padding: 32px; border: 1px solid var(--line); border-radius: var(--radius-xl);
+  background: var(--surface); box-shadow: var(--shadow-modal);
+}
+.login-card .brand { color: var(--ink); }
+.login-card .muted { color: var(--ink-3); line-height: 1.5; }
+.login-card label { font-size: 12.5px; color: var(--ink-2); }
+.login-card input:not([type="checkbox"]):not([type="radio"]) { height: 40px; padding: 0 12px; background: var(--bg); }
+.login-card .pw-actions button { min-height: 42px; border-radius: var(--radius-chip); font-size: 14px; }
+
+/* --- 404 (inside the app shell) --- */
+.nf-page {
+  position: relative; display: flex; flex-direction: column; overflow: hidden;
+  min-height: calc(100vh / var(--ui-zoom, 1) - 60px); min-height: calc(100dvh / var(--ui-zoom, 1) - 60px);
+}
+.nf-grid {
+  -webkit-mask-image: radial-gradient(ellipse at 50% 45%, #000 10%, transparent 70%);
+  mask-image: radial-gradient(ellipse at 50% 45%, #000 10%, transparent 70%);
+}
+.nf-main { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; padding: 48px 32px; }
+.nf-body {
+  width: 100%; max-width: 560px; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 22px;
+  animation: cmRise 220ms ease-out;
+}
+.nf-tags { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px; }
+.nf-code {
+  height: 24px; padding: 0 9px; display: inline-flex; align-items: center; border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink-3); font-size: 12px; font-weight: 700; letter-spacing: 0.08em;
+}
+.nf-eyebrow { font-size: 12.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent-ink); }
+.nf-body h1 {
+  margin: 0; font-size: clamp(30px, 4vw, 44px); font-weight: 700; letter-spacing: -0.03em; line-height: 1.08;
+  color: var(--ink-strong); text-wrap: balance;
+}
+.nf-body p { margin: 0; max-width: 440px; font-size: 15px; line-height: 1.6; color: var(--ink-2); text-wrap: pretty; }
+.nf-actions { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; }
+.nf-back, .nf-link {
+  height: 38px; display: inline-flex; align-items: center; gap: 8px; border-radius: var(--radius-chip);
+  font-size: 13px; font-weight: 600; text-decoration: none;
+}
+.nf-back { padding: 0 15px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); }
+.nf-back:hover { border-color: var(--line-hover-strong); color: var(--ink); text-decoration: none; }
+.nf-link { padding: 0 13px; border: 1px solid transparent; color: var(--ink-2); }
+.nf-link:hover { border-color: var(--line-strong); background: var(--surface); color: var(--ink); text-decoration: none; }
+.nf-foot { position: relative; padding: 18px 32px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-4); }
+
+/* --- Phones --- */
+@media (max-width: 760px) {
+  /* Brand panel first, then the form (as designed); the panel's right rule becomes a bottom rule. */
+  .auth-brand { min-height: 0; padding: 64px 20px 28px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .auth-hero { padding: 32px 0; gap: 22px; }
+  .auth-home { position: absolute; top: 18px; left: 16px; min-height: 40px; }
+  .auth-main { padding: 40px 16px 48px; }
+  .auth-page input:not([type="checkbox"]):not([type="radio"]) { height: 44px; font-size: 16px; }
+  .auth-pw { height: 44px; }
+  .auth-page .auth-pw input:not([type="checkbox"]) { height: 100%; }
+  .auth-seg .seg-item { height: 36px; }
+  button.auth-link { min-height: 32px; }
+  .auth-brand-foot a { min-height: 40px; }
+  .login-card { padding: 24px 18px; }
+  .login-card input:not([type="checkbox"]):not([type="radio"]) { font-size: 16px; }
+
+  .nf-page { min-height: calc(100dvh - var(--topbar-h, 60px)); }
+  .nf-main { padding: 40px 16px; }
+  .nf-back, .nf-link { height: 40px; }
+  .nf-foot { padding: 18px 16px; }
+}
+@media (pointer: coarse) and (max-height: 500px) {
+  .auth-page input:not([type="checkbox"]):not([type="radio"]), .login-card input:not([type="checkbox"]):not([type="radio"]) { font-size: 16px; }
+  .auth-home { position: absolute; }
+}

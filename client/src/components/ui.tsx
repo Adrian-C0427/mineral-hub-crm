@@ -123,9 +123,9 @@ export function SearchInput({ value, onChange, placeholder, ariaLabel }: {
   value: string; onChange: (v: string) => void; placeholder: string; ariaLabel: string;
 }) {
   return (
-    <div style={{ position: "relative", flex: "1 1 240px", maxWidth: 380 }}>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: "var(--text-dim)", pointerEvents: "none" }}><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} style={{ paddingLeft: 32 }} aria-label={ariaLabel} />
+    <div className="search-field">
+      <svg className="search-field-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
+      <input value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} aria-label={ariaLabel} />
     </div>
   );
 }
@@ -157,24 +157,27 @@ export function ChipList({ items, max, empty = "—" }: {
 }
 
 /** Design-system pill (reference spec): 22px tinted capsule, optional leading
- *  status dot. The one pill used for types, statuses, stages, and priorities. */
+ *  status dot. The one pill used for types, statuses, stages, and priorities.
+ *  The colour is handed to CSS (--pill-c), which derives the tint and a
+ *  readable text ink for the active theme (styles/shared.css). */
 export function CtPill({ color, dot, title, children }: { color: string; dot?: boolean; title?: string; children: ReactNode }) {
   return (
-    <span className="ct-pill" title={title} style={{ color, background: `${color.startsWith("#") ? color + "1A" : `color-mix(in srgb, ${color} 10%, transparent)`}`, border: `1px solid ${color.startsWith("#") ? color + "40" : `color-mix(in srgb, ${color} 25%, transparent)`}` }}>
-      {dot && <span className="ct-pill-dot" style={{ background: color }} />}
+    <span className="ct-pill" title={title} style={{ "--pill-c": color } as CSSProperties}>
+      {dot && <span className="ct-pill-dot" />}
       {children}
     </span>
   );
 }
 
-const PRIORITY_COLORS: Record<string, string> = { HIGH: "#ef4444", MEDIUM: "#f59e0b", LOW: "#22c55e" };
+// Low priority reads as neutral grey (design); High/Medium keep red/amber.
+const PRIORITY_COLORS: Record<string, string> = { HIGH: "var(--danger)", MEDIUM: "var(--warn)", LOW: "var(--ink-placeholder)" };
 
 export function PriorityBadge({ priority }: { priority: "HIGH" | "MEDIUM" | "LOW" }) {
   // Priority is computed, not user-set — the tooltip explains why it changes on its own.
   return (
     <CtPill
       dot
-      color={PRIORITY_COLORS[priority] ?? "#6b7280"}
+      color={PRIORITY_COLORS[priority] ?? "var(--ink-3)"}
       title="Priority is computed automatically from deadline proximity and deal stage — e.g. it relaxes once a buyer is selected and the deal moves to closing."
     >
       {prettyEnum(priority)}
@@ -190,11 +193,12 @@ export function StageBadge({ stage, pipelineId }: { stage: string; pipelineId?: 
   return <CtPill color={c}>{label(stage)}</CtPill>;
 }
 
-const REL_COLORS: Record<string, string> = { HOT: "#ef4444", WARM: "#f59e0b", COLD: "#6b7280" };
+// Cold is the accent blue (design); Hot/Warm keep red/amber.
+const REL_COLORS: Record<string, string> = { HOT: "var(--danger)", WARM: "var(--warn)", COLD: "var(--accent)" };
 
 /** Relationship as the design system's tinted, dotted capsule (Buyers reference). */
 export function RelationshipDot({ status }: { status: "HOT" | "WARM" | "COLD" }) {
-  return <CtPill dot color={REL_COLORS[status] ?? "#6b7280"}>{prettyEnum(status)}</CtPill>;
+  return <CtPill dot color={REL_COLORS[status] ?? "var(--ink-3)"}>{prettyEnum(status)}</CtPill>;
 }
 
 // New buyer pipeline statuses (BuyerStatus).
@@ -315,6 +319,18 @@ export function Spinner({ label = "Loading…" }: { label?: string }) {
   return <div className="spinner">{label}</div>;
 }
 
+/** Tinted icon tile at the start of a confirmation dialog's header: a check
+ *  for ordinary confirmations, a cross for destructive ones. */
+function ConfirmIcon({ danger }: { danger?: boolean }) {
+  return (
+    <span className={`confirm-ico ${danger ? "danger" : ""}`} aria-hidden="true">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        {danger ? <path d="M18 6L6 18M6 6l12 12" /> : <path d="M5 12.5l4.5 4.5L19 7.5" />}
+      </svg>
+    </span>
+  );
+}
+
 /**
  * Blocking confirmation dialog for significant actions. Renders above any
  * open modal (later in the DOM), so it can layer on top of settings modals.
@@ -344,8 +360,9 @@ export function ConfirmDialog({
     <div className="modal-overlay" onClick={() => requestClose("backdrop")}>
       <div className="modal" role="alertdialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
+          <ConfirmIcon danger={danger} />
           <h3>{title}</h3>
-          <button className="icon-btn" onClick={onCancel} aria-label="Close">×</button>
+          <button className="icon-btn modal-x" onClick={onCancel} aria-label="Close">✕</button>
         </div>
         <div className="modal-body">{message}</div>
         <div className="modal-footer">
@@ -392,8 +409,9 @@ export function ConfirmDelete({
     <div className="modal-overlay" onClick={() => requestClose("backdrop")}>
       <div key={attn} className={`modal ${attn ? "modal-attn" : ""}`} role="alertdialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
+          <ConfirmIcon danger />
           <h3>Confirm deletion</h3>
-          <button className="icon-btn" onClick={onCancel} aria-label="Close">×</button>
+          <button className="icon-btn modal-x" onClick={onCancel} aria-label="Close">✕</button>
         </div>
         <div className="modal-body">
           <p style={{ marginTop: 0 }}>
@@ -428,7 +446,7 @@ export function ConfirmDelete({
 export function ConfirmChanges({ busy, onCancel, onConfirm }: { busy?: boolean; onCancel: () => void; onConfirm: () => void }) {
   return (
     <ConfirmDialog
-      title="Confirm Changes"
+      title="Confirm changes"
       message={<p style={{ margin: 0 }}>You have modified your settings. Are you sure you want to save these changes?</p>}
       busy={busy}
       onCancel={onCancel}

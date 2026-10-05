@@ -29,6 +29,8 @@ function phoneVisualViewport(): VisualViewport | null {
 /** Matches .msel-menu's max-height so flip decisions agree with rendering. */
 const MENU_MAX_H = 240;
 const EDGE = 8; // minimum breathing room from viewport edges
+/** Space between the field and its menu (design: 6px). */
+const GAP = 6;
 /** Widest a list menu grows to fit long option names (operators, surveys). */
 const MENU_MAX_W = 520;
 
@@ -76,8 +78,8 @@ export function useMenuPosition(
       const vv = phoneVisualViewport(); // phones render unzoomed, so vv px = layout px
       const visTop = vv ? vv.offsetTop : 0;
       const visBottom = vv ? Math.min(vh, vv.offsetTop + vv.height) : vh;
-      const below = visBottom - r.bottom - 4 - EDGE;
-      const above = r.top - visTop - 4 - EDGE;
+      const below = visBottom - r.bottom - GAP - EDGE;
+      const above = r.top - visTop - GAP - EDGE;
       // The direction can only be decided from the menu's REAL height, and the
       // menu hasn't rendered on the first pass (menuRef is null then — flip
       // math would assume a full-height menu and send short lists upward for
@@ -85,8 +87,8 @@ export function useMenuPosition(
       // pass below re-runs place() with the menu measurable and locks then.
       if (dirRef.current == null && !menuRef.current) {
         setPos(fitContent
-          ? { position: "fixed", top: r.bottom + 4, left, width: r.width }
-          : { position: "fixed", top: r.bottom + 4, left, ...grow(r.width, left, vw), maxHeight: Math.max(80, Math.min(MENU_MAX_H, below)) });
+          ? { position: "fixed", top: r.bottom + GAP, left, width: r.width }
+          : { position: "fixed", top: r.bottom + GAP, left, ...grow(r.width, left, vw), maxHeight: Math.max(80, Math.min(MENU_MAX_H, below)) });
         return;
       }
       // Open downward whenever space permits: the full menu fits below, OR
@@ -101,9 +103,9 @@ export function useMenuPosition(
         const contentH = menuRef.current?.scrollHeight ?? MENU_MAX_H;
         if (dirRef.current == null) dirRef.current = below >= contentH || above < contentH || below >= above ? "down" : "up";
         if (dirRef.current === "down") {
-          setPos({ position: "fixed", top: r.bottom + 4, left, width: r.width });
+          setPos({ position: "fixed", top: r.bottom + GAP, left, width: r.width });
         } else {
-          setPos({ position: "fixed", bottom: vh - r.top + 4, left, width: r.width });
+          setPos({ position: "fixed", bottom: vh - r.top + GAP, left, width: r.width });
         }
         return;
       }
@@ -111,9 +113,9 @@ export function useMenuPosition(
       const fitsBelow = below >= Math.min(MENU_MAX_H, menuRef.current?.scrollHeight ?? MENU_MAX_H);
       if (dirRef.current == null) dirRef.current = fitsBelow || below >= MIN_USABLE || below >= above ? "down" : "up";
       if (dirRef.current === "down") {
-        setPos({ position: "fixed", top: r.bottom + 4, left, ...grow(r.width, left, vw), maxHeight: Math.max(80, Math.min(MENU_MAX_H, below)) });
+        setPos({ position: "fixed", top: r.bottom + GAP, left, ...grow(r.width, left, vw), maxHeight: Math.max(80, Math.min(MENU_MAX_H, below)) });
       } else {
-        setPos({ position: "fixed", bottom: vh - r.top + 4, left, ...grow(r.width, left, vw), maxHeight: Math.max(80, Math.min(MENU_MAX_H, above)) });
+        setPos({ position: "fixed", bottom: vh - r.top + GAP, left, ...grow(r.width, left, vw), maxHeight: Math.max(80, Math.min(MENU_MAX_H, above)) });
       }
     };
     place();

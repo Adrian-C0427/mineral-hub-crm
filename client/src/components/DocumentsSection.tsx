@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Cloud, FileText, Folder, Upload } from "lucide-react";
+import { Cloud, FileText, Upload } from "lucide-react";
 import { api } from "../api/client";
 import { Banner, EmptyState, Modal, OverflowMenu, Spinner, showToast } from "./ui";
 import { Select } from "./Select";
 import { SortableTable, type Column } from "./SortableTable";
 import { fmtDateLocal } from "../lib/format";
-import { avatarColor } from "../lib/avatarColor";
+import { Avatar } from "./kit";
 
 /**
  * The single, shared Documents section used everywhere documents are managed
@@ -50,10 +50,6 @@ function typeTone(t: string): "pdf" | "doc" | "sheet" | "image" | "plain" {
   if (t === "XLS" || t === "XLSX" || t === "CSV") return "sheet";
   if (["PNG", "JPG", "JPEG", "GIF", "WEBP", "HEIC", "SVG"].includes(t)) return "image";
   return "plain";
-}
-/** Initials avatar for the uploader (e.g. "Adrian Campos" → "AC"). */
-function initialsOf(name: string): string {
-  return name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "•";
 }
 
 /** How the in-app viewer renders a file; "other" falls back to download. */
@@ -196,27 +192,27 @@ export function DocumentsSection({
 
   const columns: Column<DocFile>[] = [
     {
-      key: "filename", header: "Document Name", value: (f) => f.filename.toLowerCase(),
+      key: "filename", header: "Document name", value: (f) => f.filename.toLowerCase(),
       // The name itself opens the in-app viewer — the natural "click the
       // document to see it" affordance.
       render: (f) => (
         <span className="docx-namecell" title={f.filename}>
           <span className={`docx-ftile ${typeTone(fileType(f))}`} aria-hidden="true"><FileText size={14} /></span>
           <button type="button" className="link-btn doc-name docx-name" onClick={() => setViewing(f)}>{f.filename}</button>
-          {(f.versionCount ?? 0) > 0 && <span className="chip-mini" style={{ marginLeft: 6 }} title={`${f.versionCount} previous version(s)`}>v{(f.versionCount ?? 0) + 1}</span>}
+          {(f.versionCount ?? 0) > 0 && <span className="chip-mini docx-ver" title={`${f.versionCount} previous version(s)`}>v{(f.versionCount ?? 0) + 1}</span>}
         </span>
       ),
     },
-    { key: "createdAt", header: "Date Uploaded", type: "date", value: (f) => f.createdAt, render: (f) => <span className="docx-date">{fmtDateLocal(f.createdAt)}</span> },
-    { key: "updatedAt", header: "Date Modified", type: "date", value: (f) => f.updatedAt ?? f.createdAt, render: (f) => <span className="docx-date dim">{fmtDateLocal(f.updatedAt ?? f.createdAt)}</span> },
+    { key: "createdAt", header: "Date uploaded", type: "date", value: (f) => f.createdAt, render: (f) => <span className="docx-date">{fmtDateLocal(f.createdAt)}</span> },
+    { key: "updatedAt", header: "Date modified", type: "date", value: (f) => f.updatedAt ?? f.createdAt, render: (f) => <span className="docx-date dim">{fmtDateLocal(f.updatedAt ?? f.createdAt)}</span> },
     {
-      key: "uploadedBy", header: "Uploaded By", value: (f) => f.uploadedBy ?? "",
+      key: "uploadedBy", header: "Uploaded by", value: (f) => f.uploadedBy ?? "",
       render: (f) => f.uploadedBy
-        ? <span className="docx-by"><span className="docx-avatar" aria-hidden="true" style={{ background: avatarColor(f.uploadedBy), color: "#fff" }}>{initialsOf(f.uploadedBy)}</span>{f.uploadedBy}</span>
+        ? <span className="docx-by"><Avatar name={f.uploadedBy} size={22} />{f.uploadedBy}</span>
         : "—",
     },
-    { key: "type", header: "File Type", value: (f) => fileType(f), render: (f) => <span className={`docx-type ${typeTone(fileType(f))}`}>{fileType(f)}</span> },
-    { key: "sizeBytes", header: "File Size", align: "right", value: (f) => f.sizeBytes, render: (f) => <span className="docx-date dim">{humanSize(f.sizeBytes)}</span> },
+    { key: "type", header: "File type", value: (f) => fileType(f), render: (f) => <span className={`docx-type ${typeTone(fileType(f))}`}>{fileType(f)}</span> },
+    { key: "sizeBytes", header: "File size", align: "right", value: (f) => f.sizeBytes, render: (f) => <span className="docx-date dim">{humanSize(f.sizeBytes)}</span> },
     {
       key: "actions", header: "", value: () => "", align: "right", width: "1%",
       // Two primary actions stay visible; everything else lives in a ⋯ menu
@@ -299,8 +295,8 @@ export function DocumentsSection({
         )}
       </div>
 
-      <div className="row" style={{ margin: "12px 0", justifyContent: "space-between" }}>
-        <span className="row" style={{ gap: 4, alignItems: "center" }}>
+      <div className="doc-folderbar">
+        <span className="doc-folder-name">
           <strong>{folder}</strong>
           {/* "Other" is the system fallback (unfiled documents) — not editable. */}
           {canManageFolders && folder !== "Other" && (
@@ -314,10 +310,10 @@ export function DocumentsSection({
           )}
         </span>
         {canEdit && (
-          <div className="row" style={{ gap: 8 }}>
+          <div className="doc-folder-actions">
             {cloudProviders.map((p) => (
               <button key={p.key} className="small" disabled={busy} onClick={() => setImporting(p)} title={`Import files from ${p.name} into ${folder}`}>
-                <Cloud size={13} style={{ marginRight: 4, verticalAlign: -2 }} />{p.name}
+                <Cloud size={13} aria-hidden="true" />{p.name}
               </button>
             ))}
             <label className="docx-upload">
@@ -604,12 +600,12 @@ function CloudImportModal({ provider, folder, ownerField, ownerId, onClose, onIm
       {files === null ? <Spinner label="Loading files…" /> : files.length === 0 ? (
         <EmptyState title={q ? "No matches" : "No files found"}>{q ? "Try a different search." : "Recent files appear here once the account has some."}</EmptyState>
       ) : (
-        <div style={{ maxHeight: 320, overflowY: "auto", border: "1px solid var(--border)", borderRadius: 6 }}>
+        <div className="cloud-list">
           {files.map((f) => (
-            <label key={f.id} className="row" style={{ gap: 10, padding: "8px 10px", borderBottom: "1px solid var(--border)", cursor: "pointer", alignItems: "center" }}>
+            <label key={f.id} className="row cloud-item">
               <input type="checkbox" checked={selected.has(f.id)} onChange={() => toggle(f.id)} />
-              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={f.name}>{f.name}</span>
-              <span className="muted" style={{ fontSize: 12, flexShrink: 0 }}>
+              <span className="cloud-item-name" title={f.name}>{f.name}</span>
+              <span className="cloud-item-meta">
                 {f.sizeBytes != null ? humanSize(f.sizeBytes) : "—"}{f.modifiedAt ? ` · ${fmtDateLocal(f.modifiedAt)}` : ""}
               </span>
             </label>

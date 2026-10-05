@@ -2,8 +2,17 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "../api/client";
 import { showToast } from "./ui";
 import { Toggle } from "./Toggle";
+import { SettingsCardHead } from "./SettingsNav";
 
 interface PrefType { key: string; label: string; description: string }
+
+const GROUP_OF: Record<string, string> = {
+  portal_lead: "Buyer portal", portal_offer: "Buyer portal",
+  email_reply: "Email",
+  deal_overdue: "Deals & tasks", follow_up_due: "Deals & tasks", task_due: "Deals & tasks",
+};
+const GROUP_ORDER = ["Buyer portal", "Email", "Deals & tasks"];
+const groupRank = (label: string) => { const i = GROUP_ORDER.indexOf(label); return i < 0 ? GROUP_ORDER.length : i; };
 
 /**
  * Per-user notification preferences (Settings → General). Muting a type hides
@@ -36,24 +45,42 @@ export function NotificationSettings() {
   }
 
   if (!loaded || types.length === 0) return null;
+
+  // Presentation-only grouping of the server's type list (server order kept
+  // inside each group; unknown types land in "Other").
+  const groups: { label: string; items: PrefType[] }[] = [];
+  for (const t of types) {
+    const label = GROUP_OF[t.key] ?? "Other";
+    let g = groups.find((x) => x.label === label);
+    if (!g) { g = { label, items: [] }; groups.push(g); }
+    g.items.push(t);
+  }
+  groups.sort((a, b) => groupRank(a.label) - groupRank(b.label));
+  const onCount = types.filter((t) => !muted.has(t.key)).length;
+
   return (
-    <div className="panel">
-      <h3>Notifications</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Choose which events reach your notification bell. Turning a type off hides it (and its unread count)
-        for you only — nothing is deleted, and other teammates keep their own settings.
-      </p>
-      <div className="notif-pref-list">
-        {types.map((t) => (
-          <div className="notif-pref-row" key={t.key}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <strong style={{ fontSize: 13.5 }}>{t.label}</strong>
-              <div className="muted" style={{ fontSize: 12 }}>{t.description}</div>
-            </div>
-            <Toggle checked={!muted.has(t.key)} onChange={(on) => void toggle(t.key, on)} ariaLabel={`${t.label} notifications`} />
+    <section className="panel notif-card">
+      <SettingsCardHead
+        title="Notifications"
+        desc="Choose which events reach your notification bell. Turning a type off hides it (and its unread count) for you only — nothing is deleted, and other teammates keep their own settings."
+        aside={<span className="set-meta">{onCount} of {types.length} on</span>}
+      />
+      {groups.map((g) => (
+        <div className="notif-pref-group" key={g.label}>
+          <span className="notif-pref-group-label">{g.label}</span>
+          <div className="notif-pref-list">
+            {g.items.map((t) => (
+              <div className="notif-pref-row" key={t.key}>
+                <div className="notif-pref-text">
+                  <strong>{t.label}</strong>
+                  <span>{t.description}</span>
+                </div>
+                <Toggle checked={!muted.has(t.key)} onChange={(on) => void toggle(t.key, on)} ariaLabel={`${t.label} notifications`} />
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-    </div>
+        </div>
+      ))}
+    </section>
   );
 }

@@ -1,7 +1,10 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth, type OrgRole } from "../auth/AuthContext";
-import { Banner, ConfirmChanges, ConfirmDialog, showToast } from "./ui";
+import { Banner, ConfirmChanges, ConfirmDialog, OverflowMenu, showToast } from "./ui";
+import { Avatar, Tag } from "./kit";
+import { SettingsCardHead } from "./SettingsNav";
 import { Select } from "./Select";
 import { fmtDate, fmtDateLocal } from "../lib/format";
 import { formatPhone } from "../lib/phone";
@@ -10,7 +13,7 @@ import { ROLE_LABEL } from "../lib/roles";
 // teamId is null for roles that don't manage membership — it is a join
 // credential, and the API withholds it rather than showing it to everyone.
 interface OrgInfo { id: string; name: string; teamId: string | null; memberCount: number; yourRole: OrgRole | null; yourPermissions: string[] }
-interface Member { id: string; name: string; email: string; phone: string | null; orgRole: OrgRole | null; status: string; lastActiveAt: string | null }
+interface Member { id: string; name: string; email: string; phone: string | null; orgRole: OrgRole | null; status: string; lastActiveAt: string | null; avatarColor?: string | null }
 interface Invite { id: string; code: string; reusable: boolean; active: boolean; maxUses: number | null; uses: number; createdAt: string }
 interface RoleRow { role: OrgRole; permissions: string[]; defaults: string[]; editable: boolean; customized: boolean }
 interface RolesResponse { roles: RoleRow[]; permissions: { key: string; label: string; group: string }[]; ownerOnlyActions: string[] }
@@ -38,24 +41,19 @@ export function OrgSettings({ initialTab }: { initialTab?: Tab } = {}) {
   const flash = (m: string) => showToast(m);
   const fail = (e: unknown) => showToast(e instanceof ApiError ? e.message : "Something went wrong", "error");
 
+  // Sections are chosen from the Settings menu (?tab=), which replaces the
+  // old inner tab strip with the same entries and the same gates.
   return (
-    <div className="panel">
-      <div className="tab-row">
-        <button className={`tab ${tab === "org" ? "active" : ""}`} onClick={() => setTab("org")}>Organization</button>
-        {showUsers && <button className={`tab ${tab === "users" ? "active" : ""}`} onClick={() => setTab("users")}>Users</button>}
-        {showRoles && <button className={`tab ${tab === "roles" ? "active" : ""}`} onClick={() => setTab("roles")}>Roles & Permissions</button>}
-        {showOwner && <button className={`tab ${tab === "owner" ? "active" : ""}`} onClick={() => setTab("owner")}>Owner controls</button>}
-      </div>
-
-      {tab === "org" && org && <OrgTab org={org} canEdit={can("manageOrgSettings")} isOwner={isOrgOwner} onSaved={() => { loadOrg(); refresh(); flash("Saved."); }} onJoined={() => { refresh(); loadOrg(); }} onError={fail} />}
+    <>
+      {tab === "org" && org && <OrgTab org={org} canEdit={can("manageOrgSettings")} isOwner={isOrgOwner} showUsers={showUsers} onSaved={() => { loadOrg(); refresh(); flash("Saved."); }} onJoined={() => { refresh(); loadOrg(); }} onError={fail} />}
       {tab === "users" && showUsers && <UsersTab onFlash={flash} onError={fail} />}
       {tab === "roles" && showRoles && <RolesTab onFlash={flash} onError={fail} />}
       {tab === "owner" && showOwner && <OwnerTab onFlash={flash} onError={fail} onTransferred={() => { refresh(); loadOrg(); }} />}
-    </div>
+    </>
   );
 }
 
-function OrgTab({ org, canEdit, isOwner, onSaved, onJoined, onError }: { org: OrgInfo; canEdit: boolean; isOwner: boolean; onSaved: () => void; onJoined: () => void; onError: (e: unknown) => void }) {
+function OrgTab({ org, canEdit, isOwner, showUsers, onSaved, onJoined, onError }: { org: OrgInfo; canEdit: boolean; isOwner: boolean; showUsers: boolean; onSaved: () => void; onJoined: () => void; onError: (e: unknown) => void }) {
   // The company name is read-only until an intentional Edit; saving requires
   // an explicit confirmation, and Cancel restores the original value.
   const [editingName, setEditingName] = useState(false);
@@ -100,50 +98,74 @@ function OrgTab({ org, canEdit, isOwner, onSaved, onJoined, onError }: { org: Or
 
   return (
     <>
-      <div className="dd-grid" style={{ marginBottom: 12 }}>
-        <div className="kv"><span className="k">Company</span><span className="v">
+      <section className="panel set-card-flush">
+        <div className="org-head">
+          <span className="org-tile" aria-hidden="true">{org.name.trim().charAt(0).toUpperCase() || "?"}</span>
           {!editingName ? (
-            <span className="row" style={{ gap: 6 }}>
-              {org.name}
-              {canEdit && <button className="small" onClick={() => setEditingName(true)}>Edit</button>}
-            </span>
+            <>
+              <div className="org-head-text">
+                <span className="org-name">{org.name}</span>
+                <span className="org-sub">{org.memberCount} member{org.memberCount === 1 ? "" : "s"}{org.yourRole && ROLE_LABEL[org.yourRole] ? ` · you're the ${ROLE_LABEL[org.yourRole].toLowerCase()}` : ""}</span>
+              </div>
+              {canEdit && <button className="set-btn-outline" onClick={() => setEditingName(true)}>Rename</button>}
+            </>
           ) : (
-            <span className="row" style={{ gap: 6 }}>
-              <input value={name} onChange={(e) => setName(e.target.value)} style={{ maxWidth: 260 }} autoFocus />
-              <button className="small primary" disabled={!name.trim() || name.trim() === org.name} onClick={() => setConfirmingName(true)}>Save</button>
-              <button className="small" onClick={cancelNameEdit}>Cancel</button>
-            </span>
+            <div className="org-rename">
+              <input value={name} onChange={(e) => setName(e.target.value)} aria-label="Company name" autoFocus />
+              <button className="primary" disabled={!name.trim() || name.trim() === org.name} onClick={() => setConfirmingName(true)}>Save</button>
+              <button className="set-btn-ghost" onClick={cancelNameEdit}>Cancel</button>
+            </div>
           )}
-        </span></div>
-        {/* Only shown to roles that manage membership — the API withholds it
-            from everyone else, since holding it is enough to join the org. */}
-        {org.teamId && (
-          <div className="kv"><span className="k">Team ID</span><span className="v">
-            <code>{org.teamId}</code>{" "}
-            <button className="small" onClick={() => copy(org.teamId!)}>Copy</button>
-            {isOwner && <button className="small" onClick={() => setConfirmingRotate(true)}>Reset</button>}
-          </span></div>
-        )}
-        <div className="kv"><span className="k">Your role</span><span className="v">{ROLE_LABEL[org.yourRole ?? ""] ?? "—"}</span></div>
-        <div className="kv"><span className="k">Members</span><span className="v">{org.memberCount}</span></div>
-      </div>
+        </div>
+        <div className="org-stats">
+          {/* Only shown to roles that manage membership — the API withholds it
+              from everyone else, since holding it is enough to join the org. */}
+          {org.teamId && (
+            <div className="org-stat">
+              <span className="org-stat-label">Team ID</span>
+              <span className="org-team-id">{org.teamId}</span>
+              <div className="row" style={{ gap: 6 }}>
+                <button className="small" onClick={() => copy(org.teamId!)}>Copy</button>
+                {isOwner && <button className="small" onClick={() => setConfirmingRotate(true)}>Reset</button>}
+              </div>
+              <span className="org-stat-help">Teammates use this to join {org.name}. Resetting stops the old ID from working.</span>
+            </div>
+          )}
+          <div className="org-stat">
+            <span className="org-stat-label">Members</span>
+            <span className="org-stat-value">{org.memberCount}</span>
+            {showUsers && <Link className="set-link" to="/settings/organization?tab=users">Manage team →</Link>}
+          </div>
+          <div className="org-stat">
+            <span className="org-stat-label">Your role</span>
+            <span className="org-stat-value">{ROLE_LABEL[org.yourRole ?? ""] ?? "—"}</span>
+            {isOwner && <Link className="set-link" to="/settings/organization?tab=roles">View permissions →</Link>}
+          </div>
+        </div>
+      </section>
       {/* Deliberately tucked away: switching companies is rare and moves the
           user out of this workspace, so it should never be one Enter away. */}
-      <details style={{ marginTop: 4 }}>
-        <summary className="muted" style={{ cursor: "pointer", fontSize: 13 }}>Join a different company…</summary>
-        <form
-          onSubmit={(e) => { e.preventDefault(); if (joinToken.trim()) setConfirmingJoin(true); }}
-          className="row"
-          style={{ margin: "10px 0 4px", alignItems: "flex-end" }}
-        >
-          <div className="field" style={{ flex: 1, marginBottom: 0 }}>
-            <label>Team ID or invite code</label>
-            <input value={joinToken} onChange={(e) => setJoinToken(e.target.value)} placeholder="e.g. TEAM-XXXXXX" />
-          </div>
-          <button className="small" disabled={!joinToken.trim()}>Join…</button>
-        </form>
-        <p className="muted" style={{ fontSize: 12 }}>Joining another organization moves you out of {org.name} and into their shared workspace.</p>
-      </details>
+      <section className="panel set-card-flush">
+        <details className="org-join">
+          <summary>
+            <span className="org-join-text">
+              <span className="org-join-title">Join a different company…</span>
+              <span className="org-join-sub">Joining another organization moves you out of {org.name} and into their shared workspace.</span>
+            </span>
+            <svg className="org-join-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+          </summary>
+          <form
+            onSubmit={(e) => { e.preventDefault(); if (joinToken.trim()) setConfirmingJoin(true); }}
+            className="org-join-form"
+          >
+            <div className="field">
+              <label>Team ID or invite code</label>
+              <input className="mono-input" value={joinToken} onChange={(e) => setJoinToken(e.target.value)} placeholder="e.g. TEAM-XXXXXX" />
+            </div>
+            <button className="primary" disabled={!joinToken.trim()}>Join…</button>
+          </form>
+        </details>
+      </section>
       {confirmingName && <ConfirmChanges busy={savingName} onCancel={() => setConfirmingName(false)} onConfirm={saveName} />}
       {confirmingJoin && (
         <ConfirmDialog
@@ -232,51 +254,69 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
     return m.orgRole && m.orgRole !== "OWNER" && !base.includes(m.orgRole) ? [m.orgRole, ...base] : base;
   };
   const legacyCount = members.filter((m) => m.orgRole === "MANAGER").length;
+  const activeCount = members.filter((m) => m.status === "ACTIVE").length;
 
   return (
     <>
       {can("manageMembers") && (
-        <>
-          {legacyCount > 0 && (
-            <Banner kind="warn">
-              {legacyCount === 1 ? "One team member is" : `${legacyCount} team members are`} still on the retired
-              <strong> Manager</strong> role. Reassign {legacyCount === 1 ? "them" : "each"} to Administrator, Standard User,
-              or Read-Only Viewer below. Until then they have Standard-User access.
-            </Banner>
-          )}
-          <div className="section-head"><h3 style={{ margin: 0 }}>Team members</h3></div>
-          <div className="table-scroll">
+        <section className="panel set-card-flush">
+          <div className="set-card-pad">
+            <SettingsCardHead
+              title="Team members"
+              desc={`${members.length} member${members.length === 1 ? "" : "s"} · ${activeCount} active`}
+            />
+            {legacyCount > 0 && (
+              <Banner kind="warn">
+                {legacyCount === 1 ? "One team member is" : `${legacyCount} team members are`} still on the retired
+                <strong> Manager</strong> role. Reassign {legacyCount === 1 ? "them" : "each"} to Administrator, Standard User,
+                or Read-Only Viewer below. Until then they have Standard-User access.
+              </Banner>
+            )}
+          </div>
+          <div className="table-scroll set-table">
             <table className="data-table users-table">
-              <thead><tr><th>Name</th><th>Email</th><th className="users-phone">Phone</th><th>Role</th><th>Status</th><th>Last active</th><th></th></tr></thead>
+              <thead><tr><th>Member</th><th className="users-phone">Phone</th><th>Role</th><th>Status</th><th>Last active</th><th className="user-actions-cell"><span className="sr-only">Actions</span></th></tr></thead>
               <tbody>
                 {members.map((m) => {
                   const isSelf = m.id === user?.id;
                   const locked = m.orgRole === "OWNER" || isSelf || (m.orgRole === "ADMIN" && !isOrgOwner);
+                  const actions = [
+                    ...(isOrgOwner ? [{ label: "Reset password", onClick: () => setResetting(m) }] : []),
+                    { label: m.status === "ACTIVE" ? "Deactivate" : "Reactivate", onClick: () => setPendingStatus(m) },
+                    // Destructive action set apart by danger styling.
+                    ...(can("inviteRemoveUsers") ? [{ label: "Remove from team", danger: true, onClick: () => setRemovingMember(m) }] : []),
+                  ];
                   return (
-                    <tr key={m.id}>
-                      <td>{m.name}{isSelf ? " (you)" : ""}</td>
-                      <td>{m.email}</td>
-                      <td>{m.phone ? formatPhone(m.phone) : "—"}</td>
+                    <tr key={m.id} className={m.status === "ACTIVE" ? "" : "member-off"}>
                       <td>
-                        {locked ? (ROLE_LABEL[m.orgRole ?? ""] ?? "—") : (
-                          <Select value={m.orgRole ?? "MEMBER"} onChange={(v) => setPendingRole({ m, orgRole: v as OrgRole })}
-                            width={200} ariaLabel={`Role for ${m.name}`}
-                            options={roleOptions(m).map((r) => ({ value: r, label: ROLE_LABEL[r] }))} />
-                        )}
-                        {m.orgRole === "MANAGER" && <span className="badge" style={{ marginLeft: 6, background: "rgba(245,158,11,.15)", color: "#b45309" }}>reassign</span>}
-                      </td>
-                      <td><span className={`badge ${m.status === "ACTIVE" ? "resp-offer" : "resp-no"}`}>{m.status === "ACTIVE" ? "Active" : "Disabled"}</span></td>
-                      <td>{m.lastActiveAt ? fmtDateLocal(m.lastActiveAt) : "—"}</td>
-                      <td className="right user-actions-cell">
-                        {!isSelf && m.orgRole !== "OWNER" && (
-                          <div className="user-actions">
-                            {isOrgOwner && <button className="small" onClick={() => setResetting(m)}>Reset password</button>}
-                            <button className="small" onClick={() => setPendingStatus(m)}>{m.status === "ACTIVE" ? "Deactivate" : "Activate"}</button>
-                            {/* Destructive action set apart by a divider + danger styling. */}
-                            {can("inviteRemoveUsers") && <span className="user-actions-sep" aria-hidden="true" />}
-                            {can("inviteRemoveUsers") && <button className="small danger" onClick={() => setRemovingMember(m)}>Remove</button>}
+                        <div className="member-cell">
+                          <Avatar user={m} size={32} />
+                          <div className="member-text">
+                            <span className="member-name">{m.name}{isSelf && <span className="member-you"> (you)</span>}</span>
+                            <span className="member-email">{m.email}</span>
                           </div>
-                        )}
+                        </div>
+                      </td>
+                      <td className="users-phone">{m.phone ? formatPhone(m.phone) : "—"}</td>
+                      <td>
+                        <div className="member-role">
+                          {locked ? (
+                            <span className="member-role-locked">
+                              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></svg>
+                              {ROLE_LABEL[m.orgRole ?? ""] ?? "—"}
+                            </span>
+                          ) : (
+                            <Select value={m.orgRole ?? "MEMBER"} onChange={(v) => setPendingRole({ m, orgRole: v as OrgRole })}
+                              width={190} ariaLabel={`Role for ${m.name}`}
+                              options={roleOptions(m).map((r) => ({ value: r, label: ROLE_LABEL[r] }))} />
+                          )}
+                          {m.orgRole === "MANAGER" && <Tag tone="warn">reassign</Tag>}
+                        </div>
+                      </td>
+                      <td><Tag tone={m.status === "ACTIVE" ? "success" : "neutral"} dot>{m.status === "ACTIVE" ? "Active" : "Deactivated"}</Tag></td>
+                      <td className="member-last">{m.lastActiveAt ? fmtDateLocal(m.lastActiveAt) : "—"}</td>
+                      <td className="right user-actions-cell">
+                        {!isSelf && m.orgRole !== "OWNER" && <OverflowMenu items={actions} ariaLabel={`Actions for ${m.name}`} />}
                       </td>
                     </tr>
                   );
@@ -284,32 +324,40 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
               </tbody>
             </table>
           </div>
-        </>
+        </section>
       )}
 
       {can("inviteRemoveUsers") && (
-        <>
-          <div className="section-head" style={{ marginTop: 18 }}>
-            <h3 style={{ margin: 0 }}>Invite codes</h3>
-            <div className="row">
-              <button className="small" onClick={() => genInvite(false)}>+ One-time code</button>
-              <button className="small" onClick={() => genInvite(true)}>+ Reusable code</button>
-            </div>
+        <section className="panel set-card-flush">
+          <div className="set-card-pad invite-head">
+            <SettingsCardHead
+              title="Invite codes"
+              desc="Share a code to let someone join. One-time codes stop working after one use."
+              aside={
+                <div className="row" style={{ gap: 8 }}>
+                  <button onClick={() => genInvite(false)}>+ One-time code</button>
+                  <button className="primary" onClick={() => genInvite(true)}>+ Reusable code</button>
+                </div>
+              }
+            />
           </div>
-          {invites.length === 0 ? <p className="muted">No invite codes yet.</p> : (
-            <div className="table-scroll">
-              <table className="data-table">
-                <thead><tr><th>Code</th><th>Type</th><th>Uses</th><th>Status</th><th></th></tr></thead>
+          {invites.length === 0 ? <p className="set-empty">No invite codes yet.</p> : (
+            <div className="table-scroll set-table">
+              <table className="data-table invite-table">
+                <thead><tr><th>Code</th><th>Type</th><th>Uses</th><th>Status</th><th className="right"><span className="sr-only">Actions</span></th></tr></thead>
                 <tbody>
                   {invites.map((i) => (
                     <tr key={i.id}>
-                      <td><code>{i.code}</code> <button className="small" onClick={() => copy(i.code)}>Copy</button></td>
-                      <td>{i.reusable ? "Reusable" : "One-time"}</td>
+                      <td><code className="invite-code">{i.code}</code></td>
+                      <td><Tag>{i.reusable ? "Reusable" : "One-time"}</Tag></td>
                       <td>{i.uses}{i.maxUses != null ? ` / ${i.maxUses}` : ""}</td>
-                      <td><span className={`badge ${i.active ? "resp-offer" : "resp-no"}`}>{i.active ? "Active" : "Disabled"}</span></td>
+                      <td><Tag tone={i.active ? "success" : "neutral"} dot>{i.active ? "Active" : "Disabled"}</Tag></td>
                       <td className="right">
-                        <button className="small" onClick={() => toggleInvite(i)}>{i.active ? "Disable" : "Enable"}</button>
-                        <button className="small danger" style={{ marginLeft: 6 }} onClick={() => setRevokingInvite(i)}>Revoke</button>
+                        <div className="invite-actions">
+                          <button className="small" onClick={() => copy(i.code)}>Copy</button>
+                          <button className="small" onClick={() => toggleInvite(i)}>{i.active ? "Disable" : "Enable"}</button>
+                          <button className="small set-btn-danger-text" onClick={() => setRevokingInvite(i)}>Revoke</button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -317,7 +365,7 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
               </table>
             </div>
           )}
-        </>
+        </section>
       )}
 
       {pendingRole && (
@@ -430,6 +478,7 @@ function RolesTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
   const [draft, setDraft] = useState<Record<string, Set<string>>>({});
   const [saving, setSaving] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [permQuery, setPermQuery] = useState("");
 
   function load() {
     api.get<RolesResponse>("/org/roles").then((r) => {
@@ -488,48 +537,74 @@ function RolesTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
     setDraft(d);
   }
 
-  if (!data) return <p className="muted">Loading roles…</p>;
+  if (!data) return <section className="panel"><p className="muted" style={{ margin: 0 }}>Loading roles…</p></section>;
+
+  // Client-side "Find a permission" filter (matches the label or group name).
+  const q = permQuery.trim().toLowerCase();
+  const shown = groups
+    .map(({ group, perms }) => ({ group, perms: q && !group.toLowerCase().includes(q) ? perms.filter((p) => p.label.toLowerCase().includes(q)) : perms }))
+    .filter((g) => g.perms.length > 0);
+  // A row is marked when any role's draft differs from the saved set.
+  const savedHas = (r: OrgRole, key: string) => data.roles.find((x) => x.role === r)?.permissions.includes(key) ?? false;
+  const rowChanged = (key: string) => ASSIGNABLE.some((r) => (draft[r]?.has(key) ?? false) !== savedHas(r, key));
 
   return (
     <>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Toggle permissions per role, then Save. The Owner always has full access. Owner-only actions
-        ({data.ownerOnlyActions.join(", ").replace(/([A-Z])/g, " $1").toLowerCase()}) are reserved for the Owner and can't be assigned.
-      </p>
-      <div className="table-scroll">
-        <table className="data-table perm-matrix">
-          <thead>
-            <tr>
-              <th>Permission</th>
-              <th className="center">Owner</th>
-              {ASSIGNABLE.map((r) => <th key={r} className="center">{ROLE_LABEL[r]}</th>)}
-            </tr>
-          </thead>
-          <tbody>
-            {groups.map(({ group, perms }) => (
-              <Fragment key={group}>
-                <tr className="group-row"><td colSpan={2 + ASSIGNABLE.length}><strong>{group}</strong></td></tr>
-                {perms.map((p) => (
-                  <tr key={p.key}>
-                    <td>{p.label}</td>
-                    <td className="center"><input type="checkbox" checked disabled /></td>
-                    {ASSIGNABLE.map((r) => (
-                      <td key={r} className="center">
-                        <input type="checkbox" checked={draft[r]?.has(p.key) ?? false} onChange={() => toggle(r, p.key)} />
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <div className="row" style={{ gap: 8, marginTop: 12 }}>
-        <button className="primary" disabled={saving || !dirty} onClick={() => setConfirming(true)}>Save</button>
-        <button disabled={saving || !dirty} onClick={resetAll}>Reset</button>
-        {dirty && <span className="muted" style={{ fontSize: 13 }}>Unsaved changes</span>}
-      </div>
+      <section className="panel set-card-flush">
+        <div className="set-card-pad roles-head">
+          <SettingsCardHead
+            title="Roles & permissions"
+            desc={<>
+              Toggle permissions per role, then Save. The Owner always has full access. Owner-only actions
+              ({data.ownerOnlyActions.join(", ").replace(/([A-Z])/g, " $1").toLowerCase()}) are reserved for the Owner and can't be assigned.
+            </>}
+            aside={
+              <div className="set-search">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></svg>
+                <input value={permQuery} onChange={(e) => setPermQuery(e.target.value)} placeholder="Find a permission" aria-label="Find a permission" />
+              </div>
+            }
+          />
+        </div>
+        <div className="table-scroll set-table">
+          <table className="data-table perm-matrix">
+            <thead>
+              <tr>
+                <th>Permission</th>
+                <th className="center"><span className="perm-col">Owner<span>Full access</span></span></th>
+                {ASSIGNABLE.map((r) => <th key={r} className="center"><span className="perm-col">{ROLE_LABEL[r]}</span></th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map(({ group, perms }) => (
+                <Fragment key={group}>
+                  <tr className="group-row"><td colSpan={2 + ASSIGNABLE.length}>{group}</td></tr>
+                  {perms.map((p) => (
+                    <tr key={p.key}>
+                      <td><span className="perm-label">{p.label}{rowChanged(p.key) && <i className="perm-changed" title="Unsaved change" />}</span></td>
+                      <td className="center"><input type="checkbox" checked disabled title="The Owner always has every permission" aria-label={`Owner: ${p.label}`} /></td>
+                      {ASSIGNABLE.map((r) => (
+                        <td key={r} className="center">
+                          <input type="checkbox" checked={draft[r]?.has(p.key) ?? false} onChange={() => toggle(r, p.key)} aria-label={`${ROLE_LABEL[r]}: ${p.label}`} />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {shown.length === 0 && <p className="set-empty">No permissions match "{permQuery.trim()}".</p>}
+      </section>
+      {dirty && (
+        <div className="set-savebar">
+          <span className="set-savebar-dot" aria-hidden="true" />
+          <span className="set-savebar-text">Unsaved changes</span>
+          <button disabled={saving} onClick={resetAll}>Discard</button>
+          <button className="primary" disabled={saving} onClick={() => setConfirming(true)}>Save permissions</button>
+        </div>
+      )}
       {confirming && <ConfirmChanges busy={saving} onCancel={() => setConfirming(false)} onConfirm={saveAll} />}
     </>
   );
@@ -556,21 +631,26 @@ function OwnerTab({ onFlash, onError, onTransferred }: { onFlash: (m: string) =>
 
   return (
     <>
-      <div className="section-head"><h3 style={{ margin: 0 }}>Transfer ownership</h3></div>
-      <p className="muted" style={{ marginTop: 0 }}>The Owner holds the highest level of control. Transferring ownership demotes you to Administrator.</p>
-      <div className="row" style={{ alignItems: "flex-end", marginBottom: 18 }}>
-        <div className="field" style={{ marginBottom: 0, minWidth: 240 }}>
-          <label>New owner</label>
-          <Select value={target} onChange={setTarget} placeholder="Select a member…" clearable searchable ariaLabel="New owner"
-            options={candidates.map((m) => ({ value: m.id, label: `${m.name} (${m.email})` }))} />
+      <section className="panel owner-card">
+        <SettingsCardHead title="Transfer ownership" desc="The Owner holds the highest level of control. Transferring ownership demotes you to Administrator." />
+        <div className="owner-transfer">
+          <div className="field">
+            <label>New owner</label>
+            <Select value={target} onChange={setTarget} placeholder="Select a member…" clearable searchable ariaLabel="New owner"
+              options={candidates.map((m) => ({ value: m.id, label: `${m.name} (${m.email})` }))} />
+          </div>
+          <button className="danger" disabled={!target} onClick={() => setConfirmingTransfer(true)}>Transfer ownership</button>
         </div>
-        <button className="danger" disabled={!target} onClick={() => setConfirmingTransfer(true)}>Transfer ownership</button>
-      </div>
+      </section>
 
-      {/* Single line instead of two placeholder sections. */}
-      <p className="muted" style={{ fontSize: 12, marginTop: 16 }}>
-        Coming soon (owner-only): billing &amp; subscription · organization-wide security settings
-      </p>
+      <section className="panel soon-card">
+        {["Billing & subscription", "Organization-wide security settings"].map((label) => (
+          <div className="soon-row" key={label}>
+            <span className="soon-label">{label}</span>
+            <Tag>Coming soon</Tag>
+          </div>
+        ))}
+      </section>
 
       {confirmingTransfer && targetMember && (
         <ConfirmDialog
