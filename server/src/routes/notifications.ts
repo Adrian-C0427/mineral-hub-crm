@@ -11,7 +11,7 @@ import { requireAuth, requireOrg, orgId, type AuthedRequest } from "../middlewar
 export const notificationsRouter = Router();
 notificationsRouter.use(requireAuth, requireOrg);
 
-function visibleWhere(req: AuthedRequest) {
+export function visibleWhere(req: AuthedRequest) {
   // Gate on the RBAC field (orgRole), NOT the legacy per-account `role` — that
   // field was historically OWNER for every workspace creator and stays OWNER
   // even after a demotion, so it must never grant admin-level visibility.
@@ -22,10 +22,13 @@ function visibleWhere(req: AuthedRequest) {
   // org whose owner was inactive silently accumulated leads no one could see.
   // ADMIN holds every permission by default (DEFAULT_ROLE_PERMISSIONS), so this
   // grants no visibility that role didn't already have everywhere else.
+  //
+  // A shared row someone has cleared stays visible to everyone else who sees it.
+  const me = req.user!.id;
   const admin = req.user!.orgRole === "OWNER" || req.user!.orgRole === "ADMIN";
   return {
     organizationId: orgId(req),
-    OR: admin ? [{ userId: req.user!.id }, { userId: null }] : [{ userId: req.user!.id }],
+    OR: admin ? [{ userId: me }, { userId: null, NOT: { hiddenForUserIds: { has: me } } }] : [{ userId: me }],
   };
 }
 
@@ -60,7 +63,8 @@ notificationsRouter.get(
       take: 50,
     });
     const unread = await prisma.notification.count({ where: { ...visibleWhere(req), ...mutedFilter, readAt: null } });
-    res.json({ notifications: rows, unread });
+    // Who else has cleared a shared row is not the caller's business.
+    res.json({ notifications: rows.map(({ hiddenForUserIds: _hidden, ...n }) => n), unread });
   }),
 );
 
@@ -109,10 +113,11 @@ notificationsRouter.post(
 );
 
 /**
- * Clearing = deleting the row, scoped by the same visibility rule as reading.
- * Untargeted rows (userId null) are one shared row for every admin/owner, so
- * clearing one clears it for the other admins too — the same way their read
- * state is already shared.
+ * Clearing, scoped by the same visibility rule as reading. A row targeted at
+ * the caller is deleted. An untargeted row (userId null) is one shared row for
+ * every admin/owner, so it is only hidden for the caller: deleting it would
+ * take an unassigned portal lead out of everyone else's bell before they saw
+ * it. (Read state stays shared, as before.)
  */
 notificationsRouter.delete(
   "/",
@@ -123,18 +128,26 @@ notificationsRouter.delete(
     const readOnly = req.query.read === "1";
     const muted = await mutedTypesFor(req.user!.id);
     const mutedFilter = muted.length ? { type: { notIn: muted } } : {};
-    const { count } = await prisma.notification.deleteMany({
-      where: { ...visibleWhere(req), ...mutedFilter, ...(readOnly ? { readAt: { not: null } } : {}) },
-    });
-    res.json({ ok: true, cleared: count });
+    const me = req.user!.id;
+    const where = { ...visibleWhere(req), ...mutedFilter, ...(readOnly ? { readAt: { not: null } } : {}) };
+    const [own, shared] = await prisma.$transaction([
+      prisma.notification.deleteMany({ where: { AND: [where, { userId: me }] } }),
+      prisma.notification.updateMany({ where: { AND: [where, { userId: null }] }, data: { hiddenForUserIds: { push: me } } }),
+    ]);
+    res.json({ ok: true, cleared: own.count + shared.count });
   }),
 );
 
 notificationsRouter.delete(
   "/:id",
   asyncHandler(async (req: AuthedRequest, res) => {
-    // deleteMany so the org + visibility scope is part of the delete itself.
-    const { count } = await prisma.notification.deleteMany({ where: { id: req.params.id, ...visibleWhere(req) } });
+    // deleteMany / updateMany so the org + visibility scope is part of the write itself.
+    const me = req.user!.id;
+    const where = { id: req.params.id, ...visibleWhere(req) };
+    let { count } = await prisma.notification.deleteMany({ where: { AND: [where, { userId: me }] } });
+    if (!count) {
+      ({ count } = await prisma.notification.updateMany({ where: { AND: [where, { userId: null }] }, data: { hiddenForUserIds: { push: me } } }));
+    }
     if (!count) throw new HttpError(404, "Notification not found");
     res.json({ ok: true });
   }),

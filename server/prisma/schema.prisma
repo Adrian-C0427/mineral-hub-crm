@@ -263,6 +263,9 @@ model Notification {
   body           String?
   link           String? // in-app path, e.g. /buyers/:id
   readAt         DateTime?
+  // Untargeted rows are one shared row for every admin/owner, so "clearing"
+  // one hides it for that person only (deleting it would clear it for all).
+  hiddenForUserIds String[] @default([])
   createdAt      DateTime  @default(now())
 
   @@index([organizationId, readAt])

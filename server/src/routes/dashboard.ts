@@ -306,7 +306,7 @@ dashboardRouter.get(
       return offersRecent.filter((o) => o.dateSubmitted > from && o.dateSubmitted <= t).length;
     });
 
-    const dueSoonTasks = await dueSoonTasksFor(org, req.user!.id, String(req.query.tasksFor ?? "me"), canManageTasks(req), now);
+    const dueSoonTasks = await dueSoonTasksFor(org, req.user!.id, String(req.query.tasksFor ?? "me"), canManageTasks(req), canViewContacts(req), now);
 
     res.json({
       metrics: {
@@ -349,6 +349,22 @@ export function taskOwnerWhere(meId: string, whose: string) {
   return owner ? { OR: [{ assignedToId: owner }, { assignedToId: null, createdById: owner }] } : {};
 }
 
+/** "View contacts" (or owner) — what the Contacts pages require. */
+export function canViewContacts(req: AuthedRequest): boolean {
+  return req.user?.orgRole === "OWNER" || (req.user?.permissions ?? []).includes("viewContacts");
+}
+
+/**
+ * Which tasks a caller may see at all. A contact task carries the contact's
+ * name and notes about them, so without "View contacts" a caller sees only the
+ * contact tasks that are theirs (assigned to them, or written by them) — what
+ * they need to do their own work. Standalone Dashboard tasks hold no contact
+ * data and stay visible to everyone, as before. Shared with the Calendar.
+ */
+export function taskVisibilityWhere(meId: string, seeContacts: boolean) {
+  return seeContacts ? {} : { OR: [{ contactId: null }, { assignedToId: meId }, { createdById: meId }] };
+}
+
 /**
  * Tasks widget feed: incomplete tasks (contact tasks and standalone Dashboard
  * tasks) that are overdue, due today, or coming due within the next 7 days
@@ -357,12 +373,12 @@ export function taskOwnerWhere(meId: string, whose: string) {
  * its assignee, or to its author when unassigned (the same owner the due-task
  * notification goes to).
  */
-async function dueSoonTasksFor(org: string, meId: string, whose: string, manageAll: boolean, now: Date = new Date()) {
+async function dueSoonTasksFor(org: string, meId: string, whose: string, manageAll: boolean, seeContacts: boolean, now: Date = new Date()) {
   const taskHorizon = new Date(now.getTime() + 7 * 86_400_000);
   const taskRows = await prisma.contactActivity.findMany({
     where: {
       organizationId: org, kind: "TASK", completedAt: null, dueDate: { not: null, lte: taskHorizon },
-      ...taskOwnerWhere(meId, whose),
+      AND: [taskOwnerWhere(meId, whose), taskVisibilityWhere(meId, seeContacts)],
     },
     select: taskSelect,
     orderBy: { dueDate: "asc" },
@@ -414,7 +430,7 @@ tasksRouter.get(
   "/",
   asyncHandler(async (req: AuthedRequest, res) => {
     const { assignee } = tasksForSchema.parse(req.query);
-    res.json(await dueSoonTasksFor(orgId(req), req.user!.id, assignee, canManageTasks(req)));
+    res.json(await dueSoonTasksFor(orgId(req), req.user!.id, assignee, canManageTasks(req), canViewContacts(req)));
   }),
 );
 
@@ -477,8 +493,11 @@ tasksRouter.post(
   }),
 );
 
-async function findTask(org: string, id: string) {
-  const t = await prisma.contactActivity.findFirst({ where: { id, organizationId: org, kind: "TASK" }, select: taskSelect });
+async function findTask(req: AuthedRequest, id: string) {
+  const t = await prisma.contactActivity.findFirst({
+    where: { id, organizationId: orgId(req), kind: "TASK", ...taskVisibilityWhere(req.user!.id, canViewContacts(req)) },
+    select: taskSelect,
+  });
   if (!t) throw new HttpError(404, "Task not found");
   return t;
 }
@@ -487,7 +506,7 @@ async function findTask(org: string, id: string) {
 tasksRouter.get(
   "/:id",
   asyncHandler(async (req: AuthedRequest, res) => {
-    res.json(serializeTask(await findTask(orgId(req), req.params.id), req.user!.id, canManageTasks(req)));
+    res.json(serializeTask(await findTask(req, req.params.id), req.user!.id, canManageTasks(req)));
   }),
 );
 
@@ -497,7 +516,7 @@ tasksRouter.patch(
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
     const { completed } = z.object({ completed: z.boolean() }).parse(req.body);
-    const t = await findTask(org, req.params.id);
+    const t = await findTask(req, req.params.id);
     const view = serializeTask(t, req.user!.id, canManageTasks(req));
     if (!view.canComplete) throw new HttpError(403, "Only the task's owner or a contact manager can complete it");
     const updated = await prisma.contactActivity.update({
