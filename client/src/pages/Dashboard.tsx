@@ -11,6 +11,7 @@ import { Modal, Req, Spinner, StageBadge, showToast } from "../components/ui";
 import { ApiError } from "../api/client";
 import { Select } from "../components/Select";
 import { Segmented, StatStrip, Tag } from "../components/kit";
+import { initialsOf } from "../lib/avatarColor";
 import { money, fmtDate, fmtDateLocal } from "../lib/format";
 import { useStages } from "../stages";
 import { CalendarGlyph } from "../components/PeriodSegmented";
@@ -82,7 +83,7 @@ interface DashboardData {
   overdue: { id: string; name: string; findBuyerByDate: string | null }[];
   stageCounts: { stage: string; count: number }[];
   upcomingFollowUps: { dealId: string; buyerName: string; dealName: string; date: string | null }[];
-  recentActivity: { id: string; summary: string; createdAt: string }[];
+  recentActivity: { id: string; summary: string; createdAt: string; dealId?: string | null }[];
   topBuyers: { id: string; name: string; companyName: string; volume: number }[];
   profitByMonth: {
     month: string; isCurrent: boolean; profit: number; projected: number;
@@ -135,37 +136,6 @@ function niceAxis(peak: number): { max: number; ticks: number[] } {
   return { max: best!.max, ticks };
 }
 
-/** Design-spec mini trend line (88×28 viewBox, stretched, 2px stroke) with a
- *  soft gradient area fill fading to transparent beneath the line. */
-let sparkSeq = 0;
-function Spark({ data, color, height = 26, gap = 8 }: { data: number[]; color: string; height?: number; gap?: number }) {
-  // Stable per-instance gradient id (colors repeat across KPI cards).
-  const idRef = useRef(`dash-spark-${++sparkSeq}`);
-  if (data.length < 2 || !data.some((v) => v !== 0)) return <div style={{ height, marginTop: gap }} />;
-  const min = Math.min(...data);
-  const max = Math.max(...data);
-  const pts = data
-    .map((v, i) => {
-      const x = (i / (data.length - 1)) * 88;
-      const y = max === min ? 14 : 25 - ((v - min) / (max - min)) * 22;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
-  const id = idRef.current;
-  return (
-    <svg width="100%" height={height} viewBox="0 0 88 28" preserveAspectRatio="none" style={{ marginTop: gap, display: "block" }}>
-      <defs>
-        <linearGradient id={id} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" style={{ stopColor: color, stopOpacity: 0.22 }} />
-          <stop offset="100%" style={{ stopColor: color, stopOpacity: 0 }} />
-        </linearGradient>
-      </defs>
-      <polygon points={`0,28 ${pts} 88,28`} fill={`url(#${id})`} />
-      <polyline points={pts} fill="none" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" style={{ stroke: color }} />
-    </svg>
-  );
-}
-
 function Delta({ pct }: { pct: number | null }) {
   if (pct == null || !isFinite(pct) || Math.round(pct) === 0) return null;
   const up = pct > 0;
@@ -189,14 +159,16 @@ function Delta({ pct }: { pct: number | null }) {
 // found in premium analytics tools. Positions persist per browser.
 // ---------------------------------------------------------------------------
 // Widget ids are persisted in saved layouts — never rename them. "profit" is
-// the Profit overview (realized hero + chart); "kpis" is the KPI tile row.
-type WidgetId = "kpis" | "profit" | "stages" | "activity" | "buyers" | "followups" | "tasks";
+// the Profit overview: realized hero + chart with the key-metric strip along
+// its bottom edge (one card, as designed). "kpis" was that strip as its own
+// widget in earlier versions and now only exists in saved v2 layouts.
+type WidgetId = "profit" | "stages" | "activity" | "buyers" | "followups" | "tasks";
 const WIDGET_LABELS: Record<WidgetId, string> = {
-  kpis: "Key metrics", profit: "Profit overview", stages: "Pipeline",
+  profit: "Profit overview", stages: "Pipeline",
   activity: "Recent activity", buyers: "Top buyers", followups: "Upcoming follow-ups",
   tasks: "Tasks",
 };
-const ALL_WIDGETS: WidgetId[] = ["kpis", "profit", "stages", "activity", "buyers", "followups", "tasks"];
+const ALL_WIDGETS: WidgetId[] = ["profit", "stages", "buyers", "activity", "tasks", "followups"];
 
 const COLS = 12;
 const ROW_H = 30;      // px per grid row (small unit = fine-grained heights)
@@ -205,23 +177,65 @@ const MIN_W = 3;
 const MIN_H = 4;
 
 interface Cell { x: number; y: number; w: number; h: number }
-// Default canvas mirrors the design: the profit overview full width with the
-// KPI tiles beneath it, then pipeline beside top buyers, then recent activity
-// beside tasks and follow-ups.
+// Default canvas = the design's: profit overview full width (12), pipeline (7)
+// beside top buyers (5), then recent activity (6), tasks (3) and follow-ups (3).
+// Heights are the design's card heights rounded to whole grid rows.
 const DEFAULT_LAYOUT: Record<WidgetId, Cell> = {
-  profit: { x: 0, y: 0, w: 12, h: 9 },
-  kpis: { x: 0, y: 9, w: 12, h: 4 },
-  stages: { x: 0, y: 13, w: 7, h: 7 },
-  buyers: { x: 7, y: 13, w: 5, h: 7 },
-  activity: { x: 0, y: 20, w: 6, h: 9 },
-  tasks: { x: 6, y: 20, w: 3, h: 9 },
-  followups: { x: 9, y: 20, w: 3, h: 9 },
+  profit: { x: 0, y: 0, w: 12, h: 10 },
+  stages: { x: 0, y: 10, w: 7, h: 6 },
+  buyers: { x: 7, y: 10, w: 5, h: 6 },
+  activity: { x: 0, y: 16, w: 6, h: 8 },
+  tasks: { x: 6, y: 16, w: 3, h: 8 },
+  followups: { x: 9, y: 16, w: 3, h: 8 },
 };
 /** Customize readout, e.g. "7 / 12 cols · 306px". */
 const sizeLabel = (c: Cell) => `${c.w} / ${COLS} cols · ${c.h * ROW_H + (c.h - 1) * GAP}px`;
 
 interface DashPrefs { layout: Record<WidgetId, Cell>; hidden: WidgetId[] }
-const DASH_KEY = "mh-dashboard:v2";
+const DASH_KEY = "mh-dashboard:v3";
+const DASH_KEY_V2 = "mh-dashboard:v2";
+
+// --- v2 → v3 ---------------------------------------------------------------
+// v2 always wrote the layout back on load, so every browser holds one even if
+// the user never arranged anything. A v2 layout that is exactly one of the
+// defaults the app has shipped is therefore "never customized" and starts on
+// the current default; anything else is the user's own arrangement and is
+// carried over as-is (the old key is left untouched).
+type V2Id = WidgetId | "kpis";
+const V2_IDS: V2Id[] = ["kpis", "profit", "stages", "activity", "buyers", "followups", "tasks"];
+const c4 = (x: number, y: number, w: number, h: number): Cell => ({ x, y, w, h });
+const V2_DEFAULTS: Record<V2Id, Cell>[] = [
+  { kpis: c4(0, 0, 12, 6), profit: c4(0, 6, 6, 9), stages: c4(6, 6, 6, 9), activity: c4(0, 15, 6, 8), buyers: c4(6, 15, 6, 8), followups: c4(0, 23, 12, 7), tasks: c4(0, 30, 12, 7) },
+  { kpis: c4(0, 0, 12, 6), profit: c4(0, 6, 7, 9), stages: c4(7, 6, 5, 9), tasks: c4(0, 15, 4, 9), buyers: c4(4, 15, 4, 9), activity: c4(8, 15, 4, 9), followups: c4(0, 24, 12, 7) },
+  { profit: c4(0, 0, 12, 9), kpis: c4(0, 9, 12, 4), stages: c4(0, 13, 7, 7), buyers: c4(7, 13, 5, 7), activity: c4(0, 20, 6, 9), tasks: c4(6, 20, 3, 9), followups: c4(9, 20, 3, 9) },
+];
+const isCell = (c: unknown): c is Cell =>
+  !!c && typeof c === "object" && (["x", "y", "w", "h"] as const).every((k) => { const n = (c as Record<string, unknown>)[k]; return typeof n === "number" && isFinite(n); });
+const sameCell = (a: Cell, b: Cell) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+
+function migrateV2(raw: string): DashPrefs {
+  const p = JSON.parse(raw) as { layout?: Partial<Record<V2Id, Cell>>; hidden?: string[] };
+  const saved: Partial<Record<V2Id, Cell>> = {};
+  for (const id of V2_IDS) { const c = p.layout?.[id]; if (isCell(c)) saved[id] = { x: c.x, y: c.y, w: c.w, h: c.h }; }
+  const hiddenV2 = (p.hidden ?? []).filter((id): id is V2Id => V2_IDS.includes(id as V2Id));
+  // Never arranged: every saved cell sits where a shipped default put it.
+  const untouched = hiddenV2.length === 0 && V2_DEFAULTS.some((def) => V2_IDS.every((id) => !saved[id] || sameCell(saved[id]!, def[id])));
+  if (untouched) return { layout: { ...DEFAULT_LAYOUT }, hidden: [] };
+
+  const layout = { ...DEFAULT_LAYOUT };
+  for (const id of ALL_WIDGETS) if (saved[id]) layout[id] = saved[id]!;
+  let hidden = hiddenV2.filter((id): id is WidgetId => id !== "kpis");
+  // The key metrics now live inside the profit card. Where the old KPI row sat
+  // flush against it (same column span), the card takes over that space; a
+  // hidden profit card takes the visible KPI row's place.
+  const k = saved.kpis, pr = layout.profit;
+  if (k && !hiddenV2.includes("kpis")) {
+    if (hidden.includes("profit")) { layout.profit = k; hidden = hidden.filter((id) => id !== "profit"); }
+    else if (k.x === pr.x && k.w === pr.w && k.y === pr.y + pr.h) layout.profit = { ...pr, h: pr.h + k.h };
+    else if (k.x === pr.x && k.w === pr.w && k.y + k.h === pr.y) layout.profit = { ...pr, y: k.y, h: pr.h + k.h };
+  }
+  return { layout, hidden };
+}
 
 function loadDashPrefs(): DashPrefs {
   try {
@@ -231,12 +245,14 @@ function loadDashPrefs(): DashPrefs {
       const layout = { ...DEFAULT_LAYOUT };
       for (const id of ALL_WIDGETS) {
         const c = p.layout?.[id];
-        if (c && [c.x, c.y, c.w, c.h].every((n) => typeof n === "number" && isFinite(n))) layout[id] = c;
+        if (isCell(c)) layout[id] = { x: c.x, y: c.y, w: c.w, h: c.h };
       }
       return { layout, hidden: (p.hidden ?? []).filter((id): id is WidgetId => ALL_WIDGETS.includes(id as WidgetId)) };
     }
+    const v2 = localStorage.getItem(DASH_KEY_V2);
+    if (v2) return migrateV2(v2);
     // One-time migration from the v1 swap-grid prefs: carry over hidden widgets,
-    // let positions start from the (better) default canvas.
+    // let positions start from the default canvas.
     const v1 = localStorage.getItem("mh-dashboard:v1");
     if (v1) {
       const p = JSON.parse(v1) as { hidden?: string[] };
@@ -260,6 +276,10 @@ export function Dashboard() {
   const { label: stageLabel, colorOf: stageColorOf } = useStages();
   const [prefs, setPrefs] = useState<DashPrefs>(loadDashPrefs);
   const [customizing, setCustomizing] = useState(false);
+  // Teammates: the Tasks widget's filter/assignee lists, and matching the
+  // actor at the start of an activity line.
+  const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
+  useEffect(() => { api.get<{ id: string; name: string }[]>("/users").then(setUsers).catch(() => {}); }, []);
   // A task opened from a notification (or a standalone task's row) —
   // `?task=<id>` in the URL, so the link is shareable and survives reloads.
   const [params, setParams] = useSearchParams();
@@ -373,8 +393,6 @@ export function Dashboard() {
   const { max: niceMax, ticks: axisTicks } = niceAxis(maxProfit);
   // Index of the bucket containing today (-1 when the window is in the past).
   const curIdx = d.profitByMonth.findIndex((m) => m.isCurrent);
-  const realized = d.profitByMonth.map((m) => m.profit);
-  const projectedSeries = d.profitByMonth.map((m) => m.projected);
   const nBuckets = d.profitByMonth.length;
 
   // Deltas only where an honest baseline exists.
@@ -423,54 +441,83 @@ export function Dashboard() {
     g.rows.push(a);
   }
 
+  // Key metrics: the strip along the bottom of the profit overview card (its
+  // own 2-up tiles on phones).
+  const kpiCells: { label: string; value: ReactNode; title: string }[] = [
+    {
+      label: "Under contract", value: fmtCompact(d.metrics.underContract ?? 0),
+      title: "Total acquisition cost (Our Cost) of every active deal we're under contract with sellers for. Excludes closed and dead deals and owned mineral assets.",
+    },
+    {
+      label: "Active deals", value: <>{d.metrics.activeDeals}<Delta pct={activeDelta} /></>,
+      title: "Deals currently in the pipeline. Δ vs 8 weeks ago.",
+    },
+    {
+      label: "Closed deals", value: <>{d.metrics.closedDealsCount}<Delta pct={closedCountDelta} /></>,
+      title: "Deals moved to Closed within the selected range, by Contract Timeline Closed Date. Δ vs the previous equal-length period.",
+    },
+    {
+      label: "Avg. profit per deal", value: <>{fmtCompact(d.metrics.avgProfitPerDeal)}<Delta pct={avgDelta} /></>,
+      title: "Realized profit per closed deal in the selected range (Closed Date). Δ vs the previous equal-length period.",
+    },
+    {
+      label: "Offers pending",
+      value: <span className={d.metrics.offersPending === 0 ? "dash-zero" : undefined}>{d.metrics.offersPending}</span>,
+      title: "Offers awaiting a decision.",
+    },
+  ];
+  const stageTotal = d.stageCounts.reduce((sum, s) => sum + s.count, 0);
+
+  // Activity line: the server sends one sentence. When it opens with a
+  // teammate's name that becomes the avatar + emphasised actor, and the quoted
+  // deal name links to the deal.
+  const activityRow = (a: DashboardData["recentActivity"][number]) => {
+    const actor = users.find((u) => u.name && a.summary.startsWith(`${u.name} `));
+    const rest = actor ? a.summary.slice(actor.name.length + 1) : a.summary;
+    // Trailing detail, as designed: the stage a deal moved to, or an expense's
+    // amount (both read from the sentence; anything else shows as written).
+    let text = rest;
+    let side: ReactNode = null;
+    const moved = rest.match(/^moved "[^"]+" to ([A-Za-z][A-Za-z ]*?)(?: \(.*\))?$/);
+    const expense = rest.match(/^added a (\$[\d,]+(?:\.\d+)?) expense$/);
+    if (moved) side = <StageBadge stage={moved[1].toUpperCase().replace(/ /g, "_")} />;
+    else if (expense) { text = "added an expense"; side = <span className="dash-act-amt">{expense[1]}</span>; }
+    const q = a.dealId ? text.match(/^([\s\S]*?)"([^"]+)"([\s\S]*)$/) : null;
+    return (
+      <div className="dash-act-row" key={a.id} title={fmtDateLocal(a.createdAt)}>
+        <span className="dash-act-avatar" aria-hidden="true">
+          {actor ? initialsOf(actor.name) : (
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg>
+          )}
+        </span>
+        <span className="dash-act-text">
+          {actor && <><span className="dash-act-actor">{actor.name}</span>{" "}</>}
+          {q ? <>{q[1]}<Link to={`/deals/${a.dealId}`} className="dash-act-link">{q[2]}</Link>{q[3]}</> : text}
+        </span>
+        {side}
+      </div>
+    );
+  };
+
   const widgetNodes: Record<WidgetId, ReactNode> = {
-    kpis: (
-      <StatStrip className="dash-kpis-strip" min={190} cells={[
-        {
-          label: "Under contract", value: fmtCompact(d.metrics.underContract ?? 0),
-          title: "Total acquisition cost (Our Cost) of every active deal we're under contract with sellers for. Excludes closed and dead deals and owned mineral assets.",
-        },
-        {
-          label: "Active deals", value: <>{d.metrics.activeDeals}<Delta pct={activeDelta} /></>,
-          sub: t?.activeDealsWeekly ? <Spark data={t.activeDealsWeekly} color="var(--accent2)" /> : undefined,
-          title: "Sparkline: active deals per week (8 weeks)",
-        },
-        {
-          label: "Closed deals", value: <>{d.metrics.closedDealsCount}<Delta pct={closedCountDelta} /></>,
-          sub: t?.closedWeekly ? <Spark data={t.closedWeekly} color="var(--success)" /> : undefined,
-          title: "Deals moved to Closed within the selected range, by Contract Timeline Closed Date. Δ vs the previous equal-length period. Sparkline: closes per week (8 weeks).",
-        },
-        {
-          label: "Avg. profit per deal", value: <>{fmtCompact(d.metrics.avgProfitPerDeal)}<Delta pct={avgDelta} /></>,
-          sub: t?.avgProfitPerDeal ? <Spark data={t.avgProfitPerDeal} color="var(--ink-3)" /> : undefined,
-          title: "Realized profit per closed deal in the selected range (Closed Date). Sparkline: running average across recent closes.",
-        },
-        {
-          label: "Offers pending",
-          value: <span className={d.metrics.offersPending === 0 ? "dash-zero" : undefined}>{d.metrics.offersPending}</span>,
-          sub: t?.offersWeekly ? <Spark data={t.offersWeekly} color="var(--warn)" /> : undefined,
-          title: "Sparkline: offers received per week (8 weeks)",
-        },
-      ]} />
-    ),
     profit: (
+      <>
+      {phoneStack && <StatStrip className="dash-kpis-strip" min={190} cells={kpiCells} />}
       <div className="panel dash-card dash-ov">
         <div className="dash-ov-main">
           <div className="dash-ov-hero">
-            <div className="dash-ov-top" title="Sparkline: realized profit by month">
+            <div className="dash-ov-top">
               <div className="dash-ov-label">Realized profit</div>
               <div className="dash-ov-valrow">
                 <span className="dash-ov-value">{fmtCompact(m.closedProfitYtd)}</span>
                 <Delta pct={closedDelta} />
               </div>
               <div className="dash-ov-period">{pd.long}</div>
-              <Spark data={curIdx >= 0 ? realized.slice(0, curIdx + 1) : realized} color="var(--success)" />
             </div>
             <div className="dash-ov-bottom">
               <div className="dash-ov-rows">
                 <div className="dash-ov-row" title="Best (or accepted) offer minus cost basis across active deals with offers — the same series as the Projected bars.">
                   <span className="dash-ov-row-label">Projected profit</span>
-                  <span className="dash-ov-row-spark"><Spark data={projectedSeries} color="var(--accent2)" height={18} gap={0} /></span>
                   <strong>{fmtCompact(m.projectedProfit)}</strong>
                 </div>
                 <div className="dash-ov-row" title="Realized profit (closed deals) plus projected profit (open deals).">
@@ -499,12 +546,10 @@ export function Dashboard() {
             <div className="dash-chart-head">
               <div className="dash-chart-titles">
                 <h3 className="dash-card-title">{chartMode === "cumulative" ? "Cumulative profit" : "Profit by month"}{pd.year ? `, ${pd.year}` : ""}</h3>
-                {d.profitByMonth.some((b) => b.profit > 0 || b.projected > 0) && (
-                  <div className="dash-legend">
-                    <span><span className="dash-swatch" style={{ background: "var(--success)" }} />Realized</span>
-                    <span><span className="dash-swatch dash-swatch-proj" />Projected</span>
-                  </div>
-                )}
+                <div className="dash-legend">
+                  <span><span className="dash-swatch" style={{ background: "var(--success)" }} />Realized</span>
+                  <span><span className="dash-swatch dash-swatch-proj" />Projected</span>
+                </div>
               </div>
               <Segmented className="dash-mode-seg" ariaLabel="Chart view" value={chartMode}
                 onChange={(v) => { setChartMode(v); setProfitHover(null); }}
@@ -519,7 +564,7 @@ export function Dashboard() {
             <div className="dash-chart">
               <div className="dash-chart-body">
                 <div className="dash-chart-axis" aria-hidden="true">
-                  {axisTicks.map((tick) => <span key={tick} style={{ bottom: `${(tick / niceMax) * 100}%` }}>{fmtCompact(tick)}</span>)}
+                  {axisTicks.map((tick) => <span key={tick} style={{ bottom: `${(tick / niceMax) * 100}%` }}>{fmtCompact(tick).replace(/\.0+(?=[KM]$)/, "")}</span>)}
                 </div>
                 <div className="dash-chart-plot">
                   {axisTicks.map((tick) => (
@@ -530,6 +575,11 @@ export function Dashboard() {
                       <div className="dash-chart-today" style={{ left: `${(curIdx / nBuckets) * 100}%` }} />
                       <div className="dash-chart-today-label" style={{ left: `${(curIdx / nBuckets) * 100}%` }}>Today</div>
                     </>
+                  )}
+                  {d.profitByMonth.every((b) => b.profit === 0 && b.projected === 0) && (
+                    <p className="dash-chart-empty">
+                      No closed or projected profit in this period — bars fill in as deals close (with a Closed Date) or get an accepted offer with a closing date.
+                    </p>
                   )}
                   <div className="dash-chart-cols">
                     {d.profitByMonth.map((b, i) => {
@@ -579,13 +629,18 @@ export function Dashboard() {
                 {d.profitByMonth.map((b) => <span key={b.month} className={b.isCurrent ? "current" : undefined}>{b.month}</span>)}
               </div>
             </div>
-            {d.profitByMonth.every((b) => b.profit === 0 && b.projected === 0) && (
-              <p className="dash-chart-empty">
-                No closed or projected profit in this period — bars fill in as deals close (with a Closed Date) or get an accepted offer with a closing date.
-              </p>
-            )}
           </div>
         </div>
+        {!phoneStack && (
+          <div className="dash-ov-kpis">
+            {kpiCells.map((k) => (
+              <div className="dash-ov-kpi" key={k.label} title={k.title}>
+                <div className="dash-ov-kpi-label">{k.label}</div>
+                <div className="dash-ov-kpi-value">{k.value}</div>
+              </div>
+            ))}
+          </div>
+        )}
         {profitDrill != null && d.profitByMonth[profitDrill] && (() => {
           const m = d.profitByMonth[profitDrill];
           const closed = (m.deals ?? []).filter((x) => x.kind === "closed");
@@ -652,6 +707,7 @@ export function Dashboard() {
           );
         })()}
       </div>
+      </>
     ),
     stages: (
       <div className="panel dash-card">
@@ -676,7 +732,10 @@ export function Dashboard() {
                     <span className="dash-pipe-dot" style={s.count > 0 ? { background: stageColorOf(s.stage) } : undefined} />
                     <span className="dash-pipe-label">{stageLabel(s.stage)}</span>
                   </span>
-                  <span className={`dash-pipe-count ${s.count > 0 ? "" : "zero"}`}>{s.count}</span>
+                  <span className="dash-pipe-nums">
+                    <span className={`dash-pipe-count ${s.count > 0 ? "" : "zero"}`}>{s.count}</span>
+                    <span className="dash-pipe-share">{s.count > 0 ? `${Math.round((s.count / stageTotal) * 100)}%` : "—"}</span>
+                  </span>
                 </Link>
               ))}
             </div>
@@ -692,9 +751,7 @@ export function Dashboard() {
         {d.recentActivity.length === 0 ? <p className="dash-empty">Nothing yet.</p> : activityGroups.map((g) => (
           <div className="dash-act-group" key={g.key}>
             <div className="dash-act-day">{g.label}</div>
-            {g.rows.map((a) => (
-              <div className="dash-act-row" key={a.id} title={fmtDateLocal(a.createdAt)}>{a.summary}</div>
-            ))}
+            {g.rows.map(activityRow)}
           </div>
         ))}
       </div>
@@ -704,7 +761,7 @@ export function Dashboard() {
         <div className="dash-card-head">
           <div className="dash-card-titles">
             <h3 className="dash-card-title">Top buyers</h3>
-            <span className="dash-card-sub">{pd.long}</span>
+            <span className="dash-card-sub">{m.periodLabel === "YTD" || !m.periodLabel ? "Year to date" : pd.long}</span>
           </div>
           <Link to="/buyers" className="dash-viewlink">View buyers <Chevron /></Link>
         </div>
@@ -728,8 +785,9 @@ export function Dashboard() {
     ),
     followups: (
       <div className="panel dash-card">
-        <div className="dash-card-head">
+        <div className="dash-card-head dash-fu-head">
           <h3 className="dash-card-title">Upcoming follow-ups</h3>
+          <Link to="/contacts" className="dash-viewlink">Contacts →</Link>
         </div>
         {d.upcomingFollowUps.length === 0 ? (
           <div className="dash-empty-row">
@@ -746,7 +804,7 @@ export function Dashboard() {
         ))}
       </div>
     ),
-    tasks: <TasksWidget initial={d.tasks ?? []} refreshKey={taskRefresh} onOpenTask={openTask} onChanged={() => setTaskRefresh((n) => n + 1)} />,
+    tasks: <TasksWidget initial={d.tasks ?? []} users={users} refreshKey={taskRefresh} onOpenTask={openTask} onChanged={() => setTaskRefresh((n) => n + 1)} />,
   };
 
   const hiddenIds = ALL_WIDGETS.filter((id) => prefs.hidden.includes(id));
@@ -867,7 +925,7 @@ export function Dashboard() {
               <strong>Customizing dashboard.</strong>{" "}
               {phoneStack
                 ? "Hide or show widgets here; arrange and resize them on a larger screen."
-                : "Drag a widget anywhere to move it, drag its edges or corner to resize, or hide it."}{" "}
+                : "Drag a widget by its bar to move it, drag the corner to resize, or hide it."}{" "}
               Changes save automatically.
             </span>
             {hiddenIds.length > 0 && (
@@ -954,8 +1012,8 @@ const TASK_PRIORITY_META: Record<string, { label: string; tone: "danger" | "warn
  * user's id. The list refetches as soon as the selection changes. Tasks can be
  * created here (for yourself or a teammate) and completed in place.
  */
-function TasksWidget({ initial, refreshKey, onOpenTask, onChanged }: {
-  initial: DashTask[]; refreshKey: number; onOpenTask: (id: string) => void; onChanged: () => void;
+function TasksWidget({ initial, users, refreshKey, onOpenTask, onChanged }: {
+  initial: DashTask[]; users: { id: string; name: string }[]; refreshKey: number; onOpenTask: (id: string) => void; onChanged: () => void;
 }) {
   const { user } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
@@ -963,8 +1021,6 @@ function TasksWidget({ initial, refreshKey, onOpenTask, onChanged }: {
   const [tasks, setTasks] = useState<DashTask[]>(initial);
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
-  useEffect(() => { api.get<{ id: string; name: string }[]>("/users").then(setUsers).catch(() => {}); }, []);
   // The dashboard payload already carries My Tasks; refetch for any change
   // after that (a new filter, a created/completed task, returning to the tab).
   const first = useRef(true);

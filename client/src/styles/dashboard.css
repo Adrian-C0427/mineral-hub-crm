@@ -53,7 +53,8 @@ a.primary.dash-start-link { border-color: var(--accent); background: var(--accen
 a.primary.dash-start-link:hover { border-color: var(--accent-hover); background: var(--accent-hover); color: var(--on-accent); }
 
 /* --- Card shell ----------------------------------------------------------- */
-.panel.dash-card { display: flex; flex-direction: column; padding: 0; margin: 0; overflow: auto; box-shadow: var(--shadow-card); }
+/* line-height: normal — the design sets none, and its paddings assume it. */
+.panel.dash-card { display: flex; flex-direction: column; padding: 0; margin: 0; overflow: auto; box-shadow: var(--shadow-card); line-height: normal; }
 .dash-card-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding: 18px 22px 14px; flex: none; }
 .dash-card-titles { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
 .panel .dash-card-title, .dash-card-title { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: 0; color: var(--ink); }
@@ -82,7 +83,7 @@ a.primary.dash-start-link:hover { border-color: var(--accent-hover); background:
 /* --- Profit overview (hero + chart) ---------------------------------------- */
 .dash-ov-main { display: flex; flex-wrap: wrap; flex: 1 0 auto; }
 .dash-ov-hero {
-  flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; gap: 28px;
+  flex: 1 1 260px; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; gap: 28px;
   padding: 24px 26px 26px; border-right: 1px solid var(--line-soft);
 }
 .dash-ov-top { display: flex; flex-direction: column; gap: 10px; }
@@ -94,7 +95,6 @@ a.primary.dash-start-link:hover { border-color: var(--accent-hover); background:
 .dash-ov-rows { display: flex; flex-direction: column; }
 .dash-ov-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line-soft); }
 .dash-ov-row-label { flex: none; font-size: 13px; color: var(--ink-2); }
-.dash-ov-row-spark { flex: 0 1 72px; width: 72px; margin-left: auto; align-self: center; }
 .dash-ov-row strong { font-size: 14px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 .dash-ov-split { display: flex; gap: 2px; height: 8px; }
 .dash-ov-split span { display: block; height: 100%; }
@@ -104,7 +104,7 @@ a.primary.dash-start-link:hover { border-color: var(--accent-hover); background:
 .dash-ov-split span:only-child { flex: 1; border-radius: 2px; }
 .dash-ov-split-legend { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-3); }
 
-.dash-ov-chart { flex: 3 1 420px; min-width: 0; display: flex; flex-direction: column; gap: 20px; padding: 22px 26px 18px; }
+.dash-ov-chart { flex: 3 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 20px; padding: 22px 26px 18px; }
 .dash-chart-head { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 16px; }
 .dash-chart-titles { display: flex; flex-direction: column; gap: 6px; }
 .dash-legend { display: flex; align-items: center; gap: 16px; font-size: 12.5px; color: var(--ink-2); }
@@ -164,7 +164,11 @@ a.primary.dash-start-link:hover { border-color: var(--accent-hover); background:
   font-size: 11.5px; font-weight: 500; color: var(--ink-3);
 }
 .dash-chart-x span.current { font-weight: 600; color: var(--ink); }
-.dash-chart-empty { margin: 0; font-size: 12px; color: var(--ink-3); }
+/* Empty period: the note sits inside the plot so the card keeps its height. */
+.dash-chart-empty {
+  position: absolute; left: 50%; top: 50%; z-index: 1; width: min(420px, 86%); margin: 0; transform: translate(-50%, -50%);
+  padding: 6px 10px; background: var(--surface); font-size: 12px; line-height: 1.5; text-align: center; color: var(--ink-3); pointer-events: none;
+}
 
 /* Month drill-down panel (portaled to <body>; only the Dashboard uses it). */
 .drill-panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-xl); box-shadow: var(--shadow-modal); }
@@ -191,13 +195,20 @@ a.primary.dash-start-link:hover { border-color: var(--accent-hover); background:
 .drill-profit.pos { color: var(--success-ink); }
 .drill-profit.neg { color: var(--danger-ink); }
 
-/* --- KPI tiles ------------------------------------------------------------ */
-.dash-kpis-strip { height: 100%; margin: 0; background: var(--line-soft); box-shadow: var(--shadow-card); }
-.dash-rgl .dash-w-body > .dash-kpis-strip { flex: 1; min-height: 0; overflow: auto; }
-.dash-kpis-strip .stat-cell { gap: 8px; padding: 18px 24px 20px; }
-.dash-kpis-strip .stat-label { color: var(--ink-2); }
-.dash-kpis-strip .stat-value { display: flex; align-items: baseline; gap: 10px; font-size: 24px; font-weight: 500; line-height: 1.1; letter-spacing: -0.025em; }
-.dash-kpis-strip .stat-sub { display: block; }
+/* --- Key metrics: strip along the bottom of the profit overview card -------- */
+.dash-ov-kpis { flex: none; display: flex; flex-wrap: wrap; border-top: 1px solid var(--line-soft); overflow: hidden; }
+.dash-ov-kpi {
+  flex: 1 1 190px; min-width: 0; display: flex; flex-direction: column; gap: 8px; margin: -1px 0 0 -1px; padding: 18px 24px 20px;
+  border-left: 1px solid var(--line-soft); border-top: 1px solid var(--line-soft);
+}
+.dash-ov-kpi-label { font-size: 12.5px; font-weight: 500; color: var(--ink-2); }
+.dash-ov-kpi-value {
+  display: flex; align-items: baseline; gap: 10px; font-size: 24px; font-weight: 500; line-height: 1.1; letter-spacing: -0.025em;
+  color: var(--ink); font-variant-numeric: tabular-nums;
+}
+/* Phones show the same metrics as separate tiles above the card. */
+.dash-kpis-strip { margin: 0; }
+.dash-kpis-strip .stat-value { display: flex; align-items: baseline; gap: 10px; }
 
 /* --- Pipeline ------------------------------------------------------------- */
 .dash-pipe-bar { display: flex; gap: 3px; height: 12px; margin: 8px 22px 0; }
@@ -215,6 +226,8 @@ a.primary.dash-start-link:hover { border-color: var(--accent-hover); background:
 .dash-pipe-name { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .dash-pipe-dot { flex: none; width: 8px; height: 8px; border-radius: 2px; background: var(--line); }
 .dash-pipe-label { font-size: 12.5px; font-weight: 500; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-pipe-nums { display: flex; align-items: baseline; gap: 8px; }
+.dash-pipe-share { font-size: 12px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .dash-pipe-count { font-size: 24px; font-weight: 500; line-height: 1; letter-spacing: -0.025em; color: var(--ink); font-variant-numeric: tabular-nums; }
 .dash-pipe-count.zero { color: var(--ink-4); }
 
@@ -237,10 +250,21 @@ a.primary.dash-start-link:hover { border-color: var(--accent-hover); background:
   padding: 7px 22px; background: var(--surface-2); border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft);
   font-size: 12px; font-weight: 600; color: var(--ink-3);
 }
-.dash-act-row { padding: 13px 22px; font-size: 13.5px; line-height: 1.45; color: var(--ink-1); text-wrap: pretty; overflow-wrap: anywhere; }
+.dash-act-row { display: flex; align-items: center; gap: 12px; padding: 13px 22px; }
+.dash-act-avatar {
+  flex: none; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 50%;
+  background: var(--line-soft); color: var(--ink); font-size: 10.5px; font-weight: 600; line-height: 1;
+}
+.dash-act-text { flex: 1; min-width: 0; font-size: 13.5px; line-height: 1.45; color: var(--ink-2); text-wrap: pretty; overflow-wrap: anywhere; }
+.dash-act-row > .ct-pill { flex: none; }
+.dash-act-amt { flex: none; font-size: 13.5px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+.dash-act-actor { font-weight: 500; color: var(--ink); }
+.dash-act-link { font-weight: 600; color: var(--ink); }
+.dash-act-link:hover { color: var(--ink); text-decoration: underline; }
 .dash-act-row + .dash-act-row { border-top: 1px solid var(--line-soft); }
 
 /* --- Upcoming follow-ups -------------------------------------------------- */
+.dash-card-head.dash-fu-head { padding: 16px 20px 14px; }
 .dash-fu-row {
   display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
   padding: 13px 20px; border-top: 1px solid var(--line-soft); font-size: 13.5px;
@@ -388,7 +412,8 @@ a.dash-tmain:hover { color: var(--ink); text-decoration: none; }
   .dash-stack.customizing .dash-w.cz { outline: 1px dashed color-mix(in srgb, var(--accent) 35%, transparent); outline-offset: 3px; border-radius: var(--radius-xl); }
 
   /* KPI tiles: separate 2-up cards. */
-  .dash-kpis-strip { gap: 10px; border: 0; border-radius: 0; background: transparent; box-shadow: none; overflow: visible; }
+  .dash-stack .dash-w.dash-w-profit .dash-w-body { gap: 12px; }
+  .dash-kpis-strip { flex: none; gap: 10px; border: 0; border-radius: 0; background: transparent; box-shadow: none; overflow: visible; }
   .dash-kpis-strip .stat-cell { padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius-xl); }
   .dash-kpis-strip .stat-label { font-size: 12px; font-weight: 600; color: var(--ink-3); }
   .dash-kpis-strip .stat-value { font-size: 24px; font-weight: 700; line-height: 1; letter-spacing: -0.02em; }
@@ -415,6 +440,8 @@ a.dash-tmain:hover { color: var(--ink); text-decoration: none; }
   .dash-pipe-cell:hover { background: transparent; }
   .dash-pipe-name { flex: 1; gap: 10px; }
   .dash-pipe-label { font-size: 13.5px; color: var(--ink); }
+  .dash-pipe-nums { display: contents; }
+  .dash-pipe-share { display: none; }
   .dash-pipe-count { min-width: 22px; text-align: right; font-size: 14px; font-weight: 600; letter-spacing: 0; }
 
   .dash-tb { grid-template-columns: 18px minmax(0, 1fr) auto auto; padding: 12px 16px; }
