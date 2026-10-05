@@ -8,8 +8,22 @@ import { StagesProvider } from "./stages";
 import { App } from "./App";
 import { ApiError } from "./api/client";
 import "./styles.css";
+import "./styles/kit.css";
+import "./styles/shared.css";
+import "./styles/settings.css";
+import "./styles/auth.css";
+import "./styles/dashboard.css";
+import "./styles/deals.css";
+import "./styles/deal-detail.css";
+import "./styles/pipeline.css";
+import "./styles/buyers-contacts.css";
+import "./styles/map-assets.css";
+import "./styles/research.css";
+import "./styles/analysis-finance.css";
+import "./styles/portal-public.css";
 // Phone-only overrides (every rule is inside a phone media query) — after styles.css so they win.
 import "./mobile.css";
+import "./styles/mobile-shell.css";
 
 // Front-end error monitoring — inert until VITE_SENTRY_DSN is set at build time.
 // The var is inlined by Vite during the build, so an unset DSN means this whole
