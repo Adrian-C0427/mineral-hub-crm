@@ -4,10 +4,10 @@ import type { CalendarEventType } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
-import { taskOwnerWhere } from "./dashboard.js";
+import { canViewContacts, taskOwnerWhere, taskVisibilityWhere } from "./dashboard.js";
 import {
   COLOR_RE, STARTER_TYPES, TIME_RE, closingEntries, dayKeyInRange, eventEntry, eventTimeError, followUpEntry,
-  nextTypeColor, parseCalendarRange, parseDayKey, sortEntries, taskEntry, type CalEntry,
+  nextTypeColor, parseCalendarRange, parseDayKey, sortEntries, taskEntry, type CalEntry, type LinkVisibility,
 } from "../domain/calendar.js";
 
 /**
@@ -69,6 +69,14 @@ function canViewDeals(req: AuthedRequest): boolean {
   return req.user?.orgRole === "OWNER" || (req.user?.permissions ?? []).includes("viewDeals");
 }
 
+/** Which event links the caller may see by name. */
+function linkVisibility(req: AuthedRequest): LinkVisibility {
+  return {
+    deals: canViewDeals(req),
+    buyers: req.user?.orgRole === "OWNER" || (req.user?.permissions ?? []).includes("viewBuyers"),
+  };
+}
+
 // The deals the Deals list shows: top-level opportunities, plus owned assets
 // that are being sold. "Archived" deals are the DEAD stage.
 const LISTED_DEALS = {
@@ -86,7 +94,8 @@ calendarRouter.get(
     // Whose tasks/reminders: all users (default), `me`, or one user id — the
     // same choices, and the same owner rule, as the Tasks widget.
     const tasksFor = z.string().min(1).max(200).default("all").parse(req.query.tasksFor);
-    const seeDeals = canViewDeals(req);
+    const can = linkVisibility(req);
+    const seeDeals = can.deals;
 
     const types = await ensureTypes(org);
     const closingTypeId = types.find((t) => t.systemKey === "closing")?.id ?? null;
@@ -123,7 +132,7 @@ calendarRouter.get(
       prisma.contactActivity.findMany({
         where: {
           organizationId: org, kind: { in: ["TASK", "REMINDER"] }, completedAt: null, dueDate: inRange,
-          ...taskOwnerWhere(req.user!.id, tasksFor),
+          AND: [taskOwnerWhere(req.user!.id, tasksFor), taskVisibilityWhere(req.user!.id, canViewContacts(req))],
         },
         select: {
           id: true, kind: true, title: true, body: true, dueDate: true, completedAt: true,
@@ -135,7 +144,7 @@ calendarRouter.get(
 
     const countOf = new Map(counts.map((c) => [c.typeId, c._count._all]));
     const entries: CalEntry[] = [
-      ...events.map(eventEntry),
+      ...events.map((e) => eventEntry(e, can)),
       ...deals.flatMap((d) => closingEntries(d, closingTypeId)).filter((e) => dayKeyInRange(e.date, range.fromKey, range.toKey)),
       ...followUps.map((f) => followUpEntry(f, followTypeId)).filter((e): e is CalEntry => e !== null),
       ...tasks.map((t) => taskEntry(t, followTypeId)).filter((e): e is CalEntry => e !== null),
@@ -205,7 +214,7 @@ calendarRouter.post(
       },
       include: eventInclude,
     });
-    res.status(201).json(eventEntry(created));
+    res.status(201).json(eventEntry(created, linkVisibility(req)));
   }),
 );
 
@@ -236,8 +245,15 @@ calendarRouter.patch(
     let dealId = data.dealId, buyerId = data.buyerId;
     if (dealId && buyerId === undefined) buyerId = null;
     if (buyerId && dealId === undefined) dealId = null;
+    // A link the caller cannot see is sent back to them as "no link", so the
+    // form would save it as null and silently unlink it. Leave it as it is.
+    const can = linkVisibility(req);
+    if ((existing.dealId && !can.deals) || (existing.buyerId && !can.buyers)) {
+      dealId = undefined;
+      buyerId = undefined;
+    }
 
-    await assertRefsInOrg(org, data);
+    await assertRefsInOrg(org, { ...data, dealId, buyerId });
     const updated = await prisma.calendarEvent.update({
       where: { id: existing.id },
       data: {
@@ -254,7 +270,7 @@ calendarRouter.patch(
       },
       include: eventInclude,
     });
-    res.json(eventEntry(updated));
+    res.json(eventEntry(updated, can));
   }),
 );
 

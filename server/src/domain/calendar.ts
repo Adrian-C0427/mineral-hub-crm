@@ -115,8 +115,19 @@ export interface EventRow {
   assignedTo: CalPerson | null;
 }
 
-/** A hand-entered CalendarEvent row. */
-export function eventEntry(e: EventRow): CalEntry {
+/** Which linked records the caller may see by name ("View deals" / "View buyers"). */
+export interface LinkVisibility { deals: boolean; buyers: boolean }
+const SEE_ALL: LinkVisibility = { deals: true, buyers: true };
+
+/**
+ * A hand-entered CalendarEvent row. Every org member reads the calendar, so a
+ * deal or buyer link is dropped for a caller who cannot see that kind of
+ * record — otherwise an event would hand them a name the Deals or Buyers page
+ * withholds. The event itself still shows.
+ */
+export function eventEntry(e: EventRow, can: LinkVisibility = SEE_ALL): CalEntry {
+  const deal = can.deals ? e.deal : null;
+  const buyer = can.buyers ? e.buyer : null;
   return {
     id: e.id,
     source: "event",
@@ -127,7 +138,7 @@ export function eventEntry(e: EventRow): CalEntry {
     allDay: e.allDay,
     start: e.allDay ? null : e.startTime,
     end: e.allDay ? null : e.endTime,
-    link: e.deal ? { kind: "deal", id: e.deal.id, label: e.deal.name } : e.buyer ? { kind: "buyer", id: e.buyer.id, label: e.buyer.name } : null,
+    link: deal ? { kind: "deal", id: deal.id, label: deal.name } : buyer ? { kind: "buyer", id: buyer.id, label: buyer.name } : null,
     assignee: e.assignedTo ? { id: e.assignedTo.id, name: e.assignedTo.name } : null,
     notes: e.notes,
     done: e.completedAt != null,
