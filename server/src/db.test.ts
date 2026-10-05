@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { Prisma } from "@prisma/client";
-import { withDbRetry } from "./db.js";
+import { withDbRetry, runtimeDatabaseUrl } from "./db.js";
 
 function prismaError(code: string) {
   return new Prisma.PrismaClientKnownRequestError("boom", {
@@ -63,5 +63,41 @@ describe("withDbRetry", () => {
     const op = vi.fn().mockRejectedValue(err);
     await expect(withDbRetry(op, 2, 0)).rejects.toBe(err);
     expect(op).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("runtimeDatabaseUrl", () => {
+  const direct =
+    "postgresql://u:p%40ss@ep-holy-meadow-ajsj9a8c.c-3.us-east-2.aws.neon.tech/neondb?sslmode=require";
+
+  it("moves a Neon direct endpoint onto its -pooler host, keeping creds/db/params", () => {
+    const out = new URL(runtimeDatabaseUrl(direct)!);
+    expect(out.hostname).toBe("ep-holy-meadow-ajsj9a8c-pooler.c-3.us-east-2.aws.neon.tech");
+    expect(out.username).toBe("u");
+    expect(out.password).toBe("p%40ss");
+    expect(out.pathname).toBe("/neondb");
+    expect(out.searchParams.get("sslmode")).toBe("require");
+  });
+
+  it("leaves an already-pooled Neon URL unchanged", () => {
+    const pooled = direct.replace("ajsj9a8c.", "ajsj9a8c-pooler.");
+    expect(runtimeDatabaseUrl(pooled)).toBe(pooled);
+  });
+
+  it("leaves non-Neon, unparseable, and missing URLs unchanged", () => {
+    expect(runtimeDatabaseUrl("postgresql://localhost:5432/mineralhub")).toBe(
+      "postgresql://localhost:5432/mineralhub",
+    );
+    expect(runtimeDatabaseUrl("not a url")).toBe("not a url");
+    expect(runtimeDatabaseUrl(undefined)).toBeUndefined();
+  });
+
+  it("respects the DB_DISABLE_POOLER_REWRITE opt-out", () => {
+    vi.stubEnv("DB_DISABLE_POOLER_REWRITE", "1");
+    try {
+      expect(runtimeDatabaseUrl(direct)).toBe(direct);
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
