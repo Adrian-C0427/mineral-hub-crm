@@ -130,14 +130,14 @@ export function ChainSection({ chains, classLabels, focusNorm, renderActions }: 
               <span className="chain2-endpoints">
                 <NodeBadge n={first} focus={hasFocus && first.norm === focusNorm} />
                 <span className="chain2-mid">→ {len - 2 > 0 && <b>{len - 2} more</b>} →</span>
-                <NodeBadge n={last} focus={hasFocus && last.norm === focusNorm} />
+                <NodeBadge n={last} focus={hasFocus && last.norm === focusNorm} term />
               </span>
               <span className="chain2-meta">
                 <span className="chain2-sum"><b>{len}</b> entities · <b>{c.chain.totalCount}</b> tx</span>
                 {c.chain.counties.length > 0 && (
                   <span className="chain2-counties">{c.chain.counties.slice(0, 2).join(" · ")}{c.chain.counties.length > 2 ? "…" : ""}</span>
                 )}
-                <span className={`va-chev ${open ? "" : "down"}`}>⌃</span>
+                <svg className="chain2-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
               </span>
             </button>
             {open && (
@@ -148,7 +148,7 @@ export function ChainSection({ chains, classLabels, focusNorm, renderActions }: 
                   {c.chain.nodes.map((n, j) => (
                     <Fragment key={n.norm}>
                       <div className="chain2-node">
-                        <NodeBox n={n} focus={hasFocus && j === c.position} />
+                        <NodeBox n={n} focus={hasFocus && j === c.position} term={j === len - 1} />
                         <span className={`chain2-cap ${hasFocus && j === c.position ? "focus" : ""}`}>
                           {hasFocus && j === c.position ? `This buyer · ${j + 1} of ${len}`
                             : j === 0 ? "Origin"
@@ -159,10 +159,10 @@ export function ChainSection({ chains, classLabels, focusNorm, renderActions }: 
                       {j < len - 1 && (
                         <div className="chain2-arrow" title={`${c.chain.hops[j]?.count ?? 0} transactions`}>
                           <span>{c.chain.hops[j]?.count ?? 0} tx</span>
-                          <svg width="52" height="10" viewBox="0 0 52 10" fill="none" aria-hidden="true">
-                            <line x1="0" y1="5" x2="46" y2="5" stroke="var(--accent)" strokeWidth="1.5" strokeDasharray="3 3" />
-                            <path d="M46 1.5L51 5l-5 3.5z" fill="var(--accent)" />
-                          </svg>
+                          <span className="chain2-line" aria-hidden="true">
+                            <i />
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+                          </span>
                         </div>
                       )}
                     </Fragment>
@@ -186,9 +186,9 @@ export function ChainSection({ chains, classLabels, focusNorm, renderActions }: 
       {chains.length > CAP && (
         <div className="chain2-foot">
           <button className="link-btn" onClick={() => { setShowAll((s) => !s); setOpenIdx(null); }}>
-            {showAll ? "Show strongest only" : `Show all ${chains.length} chains`}
+            {showAll ? `Show ${CAP} strongest` : `Show all ${chains.length} chains`}
           </button>
-          <span className="muted" style={{ fontSize: 11.5 }}>
+          <span className="chain2-showing">
             {showAll ? `Showing all ${chains.length}` : `Showing ${Math.min(CAP, chains.length)} strongest of ${chains.length}`}
           </span>
         </div>
@@ -197,11 +197,15 @@ export function ChainSection({ chains, classLabels, focusNorm, renderActions }: 
   );
 }
 
+/** Marks a chain's last entity (" term"), and one named with an ownership
+ *  share such as "FMTX LP (90.00%)" (" term pct") — styling hooks only. */
+const termClass = (n: ChainNode, term?: boolean) => (term ? (n.name.includes("%") ? " term pct" : " term") : "");
+
 /** Endpoint pill in a chain's summary row — tinted by the entity's class. */
-export function NodeBadge({ n, focus }: { n: ChainNode; focus: boolean }) {
+export function NodeBadge({ n, focus, term }: { n: ChainNode; focus: boolean; term?: boolean }) {
   const c = CLASS_COLORS[n.klass] ?? CLASS_FALLBACK_COLOR;
   return (
-    <span className={`chain2-pill ${focus ? "focus" : ""}`}
+    <span className={`chain2-pill ${focus ? "focus" : ""}${termClass(n, term)}`}
       style={focus ? undefined : { "--c": c } as CSSProperties}>
       {n.name}
     </span>
@@ -209,10 +213,10 @@ export function NodeBadge({ n, focus }: { n: ChainNode; focus: boolean }) {
 }
 
 /** Node box in the expanded flow — neutral card, accent ring on the focus buyer. */
-export function NodeBox({ n, focus }: { n: ChainNode; focus: boolean }) {
+export function NodeBox({ n, focus, term }: { n: ChainNode; focus: boolean; term?: boolean }) {
   const c = CLASS_COLORS[n.klass] ?? CLASS_FALLBACK_COLOR;
   return (
-    <span className={`chain2-box ${focus ? "focus" : ""}`} style={focus ? undefined : { "--c": c } as CSSProperties} title={n.name}>
+    <span className={`chain2-box ${focus ? "focus" : ""}${termClass(n, term)}`} style={focus ? undefined : { "--c": c } as CSSProperties} title={n.name}>
       {n.name}
     </span>
   );
