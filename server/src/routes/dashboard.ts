@@ -341,6 +341,15 @@ dashboardRouter.get(
 );
 
 /**
+ * Whose tasks a caller is looking at — `me`, `all` users, or one user id — as a
+ * ContactActivity filter. Shared with the Calendar so both apply one rule.
+ */
+export function taskOwnerWhere(meId: string, whose: string) {
+  const owner = whose === "all" ? null : whose === "me" ? meId : whose;
+  return owner ? { OR: [{ assignedToId: owner }, { assignedToId: null, createdById: owner }] } : {};
+}
+
+/**
  * Tasks widget feed: incomplete tasks (contact tasks and standalone Dashboard
  * tasks) that are overdue, due today, or coming due within the next 7 days
  * (the same near-future horizon the notification sweep leads into), soonest
@@ -350,11 +359,10 @@ dashboardRouter.get(
  */
 async function dueSoonTasksFor(org: string, meId: string, whose: string, manageAll: boolean, now: Date = new Date()) {
   const taskHorizon = new Date(now.getTime() + 7 * 86_400_000);
-  const owner = whose === "all" ? null : whose === "me" ? meId : whose;
   const taskRows = await prisma.contactActivity.findMany({
     where: {
       organizationId: org, kind: "TASK", completedAt: null, dueDate: { not: null, lte: taskHorizon },
-      ...(owner ? { OR: [{ assignedToId: owner }, { assignedToId: null, createdById: owner }] } : {}),
+      ...taskOwnerWhere(meId, whose),
     },
     select: taskSelect,
     orderBy: { dueDate: "asc" },

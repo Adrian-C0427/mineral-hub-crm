@@ -44,6 +44,7 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     // Archived remain reachable via the tabs on the Deals pages themselves.
     { label: "Deals", icon: pathIcon("M4 8h16v11H4zM9 8V5h6v3M4 13h16"), to: "/deals/active", match: "/deals", perm: "viewDeals", desc: "Acquisition opportunities you're working" },
     { label: "Pipeline", icon: pathIcon("M5 4v16M12 4v11M19 4v6"), to: "/pipeline", perm: "viewDeals", desc: "Drag deals through the acquisition stages" },
+    { label: "Calendar", icon: pathIcon("M4 6h16v14H4zM4 10h16M8 3v4M16 3v4"), to: "/calendar", desc: "Closings, deadlines, follow-ups, and team events" },
     { label: "Mineral Assets", icon: pathIcon("M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5"), to: "/assets", perm: "viewDeals", desc: "Your owned mineral & royalty portfolio" },
   ] },
   { label: "Relationships", items: [
