@@ -7,7 +7,8 @@ import { api, ApiError } from "../api/client";
 import { Spinner, Banner, Modal, ConfirmChanges, ConfirmDialog } from "../components/ui";
 import { Select } from "../components/Select";
 import { fmtDateTime } from "../lib/format";
-import { SettingsNav } from "../components/SettingsNav";
+import { SettingsLayout } from "../components/SettingsNav";
+import { Segmented, Tag } from "../components/kit";
 
 // The catalog lives on the SERVER (domain/integrationCatalog.ts) — the single
 // source of truth for which providers exist, how they authenticate, and how far
@@ -84,15 +85,15 @@ function IntegrationLogo({ p }: { p: Provider }) {
 function DomainChips({ domains }: { domains: ResendDomain[] }) {
   if (!domains.length) return null;
   return (
-    <div className="row" style={{ gap: 6, flexWrap: "wrap", margin: "0 0 6px" }}>
+    <div className="integration-chips">
       {domains.map((d) => (
-        <span
+        <Tag
           key={d.name}
-          className={`badge ${d.status === "verified" ? "resp-offer" : "resp-pending"}`}
+          tone={d.status === "verified" ? "success" : "warn"}
           title={d.status === "verified" ? "Domain verified — emails from this domain will deliver." : `Domain status: ${d.status}. Finish DNS verification at resend.com/domains.`}
         >
           {d.name} · {d.status}
-        </span>
+        </Tag>
       ))}
     </div>
   );
@@ -107,6 +108,7 @@ export function Integrations() {
   const [disconnecting, setDisconnecting] = useState<Provider | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<Record<string, { ok: boolean; message: string }>>({});
+  const [filter, setFilter] = useState<"all" | "connected" | "setup">("all");
 
   function load() {
     api.get<Provider[]>("/integrations")
@@ -169,27 +171,42 @@ export function Integrations() {
     finally { setBusyKey(null); setDisconnecting(null); }
   }
 
-  if (!providers) return <Spinner label="Loading integrations…" />;
+  if (!providers) return <SettingsLayout><Spinner label="Loading integrations…" /></SettingsLayout>;
+
+  // View filter (presentation only): counts are of the cards on this page.
+  const matches = (p: Provider) => filter === "all" || (filter === "connected" ? p.status === "CONNECTED" : p.status !== "CONNECTED");
+  const shown = categories.map(([category, items]) => [category, items.filter(matches)] as const).filter(([, items]) => items.length > 0);
 
   return (
-    <div className="page">
-      <div className="page-header">
-        <h1>Settings</h1>
-        <span className="muted">{connectedCount} connected</span>
+    <SettingsLayout>
+      <div className="integ-head">
+        <div className="set-head-text">
+          <h3 className="set-title">Integrations</h3>
+          <p className="set-desc">
+            A focused set of integrations, each fully functional the moment it's connected. Credentials are validated live
+            when you connect and stored encrypted; they are never sent back to the browser.
+          </p>
+        </div>
+        <Segmented
+          ariaLabel="Show integrations"
+          value={filter}
+          onChange={setFilter}
+          options={[
+            { value: "all", label: "All", count: providers.length },
+            { value: "connected", label: "Connected", count: connectedCount },
+            { value: "setup", label: "Needs setup", count: providers.length - connectedCount },
+          ]}
+        />
       </div>
-      <SettingsNav />
-      <p className="muted" style={{ marginTop: -8 }}>
-        A focused set of integrations, each fully functional the moment it's connected. Credentials are validated live
-        when you connect and stored encrypted; they are never sent back to the browser.
-      </p>
       {err && <Banner kind="error">{err}</Banner>}
       {flash && <Banner kind="info">{flash}</Banner>}
 
-      {categories.map(([category, items]) => {
+      {shown.length === 0 && <div className="integ-none">Nothing here.</div>}
+      {shown.map(([category, items]) => {
         const Icon = CATEGORY_ICON[category] ?? Bot;
         return (
-          <div key={category} className="panel">
-            <div className="section-head"><h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}><Icon size={18} /> {category}</h3></div>
+          <div key={category} className="integ-group">
+            <span className="integ-group-label"><Icon size={14} aria-hidden="true" /> {category}</span>
             <div className="integration-grid">
               {items.map((p) => (
                 <IntegrationCard
@@ -240,7 +257,7 @@ export function Integrations() {
           onConfirm={() => disconnect(disconnecting)}
         />
       )}
-    </div>
+    </SettingsLayout>
   );
 }
 
@@ -254,43 +271,45 @@ function IntegrationCard({ p, busy, result, onConnect, onOAuth, onDisconnect, on
   // yet — it needs an app registration + server credentials.
   const needsSetup = p.implementation === "oauth" && !p.configured;
   return (
-    <div className="integration-card">
+    <div className={`integration-card ${connected ? "connected" : ""}`}>
       <div className="integration-head">
         <IntegrationLogo p={p} />
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="integration-id">
           <div className="integration-name">{p.name}</div>
-          <span className="chip-mini">{AUTH_LABEL[p.auth]}</span>
-          {p.key === "resend" && <span className="chip-mini" style={{ marginLeft: 4 }} title="All app email routes through Resend when connected.">Primary email</span>}
-          <span
-            className={`badge ${connected ? "resp-offer" : errored ? "resp-no" : "resp-pending"}`}
-            style={{ marginLeft: 6 }}
-            title={
-              connected ? "Connected and validated — data can flow."
-                : errored ? "Connected previously but the last check failed — reconnect or re-validate."
-                : needsSetup ? "Needs a one-time server-side setup (OAuth app registration or API config) before it can be connected."
-                : "Ready to connect — add a credential to start. Nothing is flowing yet."
-            }
-          >
-            {connected ? "Connected" : errored ? "Error" : needsSetup ? "Setup required" : "Not connected"}
-          </span>
+          <div className="integration-chips">
+            <span className="chip-mini">{AUTH_LABEL[p.auth]}</span>
+            {p.key === "resend" && <span className="chip-mini" title="All app email routes through Resend when connected.">Primary email</span>}
+          </div>
         </div>
+        <Tag
+          tone={connected ? "success" : errored ? "danger" : needsSetup ? "warn" : "neutral"}
+          dot
+          title={
+            connected ? "Connected and validated — data can flow."
+              : errored ? "Connected previously but the last check failed — reconnect or re-validate."
+              : needsSetup ? "Needs a one-time server-side setup (OAuth app registration or API config) before it can be connected."
+              : "Ready to connect — add a credential to start. Nothing is flowing yet."
+          }
+        >
+          {connected ? "Connected" : errored ? "Error" : needsSetup ? "Setup required" : "Not connected"}
+        </Tag>
       </div>
       <p className="integration-desc" title={p.description}>{p.description}</p>
 
       {p.key === "resend" && (connected || errored) && p.config.fromEmail && (
-        <p className="muted" style={{ fontSize: 12, margin: "0 0 4px" }}>
+        <p className="integration-meta">
           Sender: <code>{p.config.fromName ? `${p.config.fromName} <${p.config.fromEmail}>` : p.config.fromEmail}</code>
         </p>
       )}
       {p.key === "resend" && (connected || errored) && <DomainChips domains={p.config.domains ?? []} />}
-      {connected && p.secretMask && <p className="muted" style={{ fontSize: 12, margin: "0 0 4px" }}>Credential: <code>{p.secretMask}</code></p>}
-      {connected && p.lastSyncAt && <p className="muted" style={{ fontSize: 12, margin: "0 0 4px" }}>Last sync: {fmtDateTime(p.lastSyncAt)}{p.config.schedule && p.config.schedule !== "manual" ? ` · auto (${p.config.schedule})` : ""}</p>}
-      {p.lastError && <p className="error-text" style={{ fontSize: 12 }}>{p.lastError}</p>}
-      {result && <p className={result.ok ? "muted" : "error-text"} style={{ fontSize: 12 }}>{result.message}</p>}
+      {connected && p.secretMask && <p className="integration-meta">Credential: <code>{p.secretMask}</code></p>}
+      {connected && p.lastSyncAt && <p className="integration-meta">Last sync: {fmtDateTime(p.lastSyncAt)}{p.config.schedule && p.config.schedule !== "manual" ? ` · auto (${p.config.schedule})` : ""}</p>}
+      {p.lastError && <p className="error-text integration-err">{p.lastError}</p>}
+      {result && <p className={`${result.ok ? "integration-meta" : "error-text integration-err"}`}>{result.message}</p>}
 
-      <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+      <div className="integration-actions">
         {needsSetup ? (
-          p.setupUrl && <a className="small" role="button" style={{ display: "inline-flex", alignItems: "center", gap: 6, border: "1px solid var(--border)", borderRadius: 6, padding: "6px 10px", textDecoration: "none", color: "var(--text)" }} href={p.setupUrl} target="_blank" rel="noreferrer">Setup guide ↗</a>
+          p.setupUrl && <a className="integration-link-btn" href={p.setupUrl} target="_blank" rel="noreferrer">Setup guide ↗</a>
         ) : p.implementation === "env" ? (
           <button className="small" disabled={busy} onClick={onTest}>{busy ? "Testing…" : "Test connection"}</button>
         ) : connected || errored ? (
@@ -301,7 +320,7 @@ function IntegrationCard({ p, busy, result, onConnect, onOAuth, onDisconnect, on
             <button className="small" onClick={p.implementation === "oauth" ? onOAuth : onConnect}>
               {p.implementation === "oauth" ? "Reconnect" : "Replace key"}
             </button>
-            <button className="small danger" onClick={onDisconnect}>Disconnect</button>
+            <button className="small set-btn-danger-text" onClick={onDisconnect}>Disconnect</button>
           </>
         ) : (
           <button className="small primary" disabled={busy} onClick={p.implementation === "oauth" ? onOAuth : onConnect}>
@@ -340,7 +359,7 @@ function ConnectModal({ provider, onClose, onConnected }: { provider: Provider; 
       <p className="muted" style={{ marginTop: 0 }}>{provider.description}</p>
       <div className="field">
         <label>{provider.secretLabel ?? "Credential"}</label>
-        <input type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={provider.secretHint ?? ""} autoFocus autoComplete="off" />
+        <input className="mono-input" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={provider.secretHint ?? ""} autoFocus autoComplete="off" />
       </div>
       {isResend && (
         <>

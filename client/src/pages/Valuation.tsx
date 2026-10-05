@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ResponsiveContainer, ComposedChart, Line, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
   BarChart, ReferenceLine, Cell,
 } from "recharts";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Banner, CtPill, MetricCard, Modal, Spinner, ChipList } from "../components/ui";
+import { Banner, Modal, Spinner, ChipList, ConfirmDialog, showToast } from "../components/ui";
+import { StatStrip, Tag, type StatCell } from "../components/kit";
 import { Select } from "../components/Select";
 import { WellImport } from "../components/WellImport";
-import { money, num, prettyEnum, fmtDate, fmtDateTime, fmtDateLocal } from "../lib/format";
+import { money, prettyEnum, fmtDate, fmtDateTime, fmtDateLocal } from "../lib/format";
 import { monthLabel, chartTooltip } from "../lib/charts";
 import { formatAbstract } from "../lib/abstracts";
 
@@ -149,6 +150,26 @@ const COLOR_CASH = "#3b82f6";
 const COLOR_CUM = "#f59e0b";
 
 const CONF_LABEL: Record<string, string> = { high: "High confidence", medium: "Medium confidence", low: "Low confidence" };
+const CONF_TONE = { high: "success", medium: "warn", low: "danger" } as const;
+
+/** Shared recharts axis / grid / legend styling (design chart frame). */
+const AXIS_TICK = { fontSize: 11, fill: "var(--ink-4)" };
+const AXIS_LABEL = { fontSize: 11, fill: "var(--ink-4)" };
+const LEGEND_PROPS = { iconSize: 12, wrapperStyle: { fontSize: 12, color: "var(--ink-2)", paddingTop: 6 } };
+const Grid = () => <CartesianGrid vertical={false} stroke="var(--line-faint)" />;
+const FC_DASH = "5 4";
+
+/** Well status (WellRow enum) → tag tone. */
+const statusTone = (s: string): "success" | "warn" | "danger" | "neutral" =>
+  s === "PRODUCING" ? "success" : s === "SHUT_IN" ? "warn" : "neutral";
+/** RRC free-text status (nearby wells) → text tone class. */
+const rrcStatusClass = (s: string | null): string => {
+  const v = (s ?? "").toLowerCase();
+  if (v.includes("produc")) return "ok";
+  if (v.includes("shut")) return "warn";
+  if (v.includes("cancel") || v.includes("abandon")) return "bad";
+  return "";
+};
 
 // ---------------------------------------------------------------------------
 // Page
@@ -157,14 +178,18 @@ const CONF_LABEL: Record<string, string> = { high: "High confidence", medium: "M
 type PageTab = "workspace" | "saved" | "data";
 type ResultTab = "production" | "forecast" | "cashflow" | "valuation" | "sensitivity" | "report";
 
+/** What a run was computed from — compared with the current inputs to flag stale results. */
+const runKey = (wells: WellRow[], a: Assumptions | null) => JSON.stringify({ ids: wells.map((w) => w.id), a });
+
 export function Valuation() {
-  const { can, user } = useAuth();
+  const { can } = useAuth();
   const canManage = can("manageWellAnalysis");
   const [pageTab, setPageTab] = useState<PageTab>("workspace");
 
   // Workspace state
   const [selected, setSelected] = useState<WellRow[]>([]);
   const [assumptions, setAssumptions] = useState<Assumptions | null>(null); // fetched defaults
+  const [defaults, setDefaults] = useState<Assumptions | null>(null);
   const [analysis, setAnalysis] = useState<AnalyzeResponse | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState("");
@@ -172,10 +197,11 @@ export function Valuation() {
   const [openAnalysisId, setOpenAnalysisId] = useState<string | null>(null);
   const [openAnalysisName, setOpenAnalysisName] = useState<string>("");
   const [saveOpen, setSaveOpen] = useState(false);
+  const [lastRunKey, setLastRunKey] = useState<string | null>(null);
   const reportRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    api.get<Assumptions>("/wells/assumptions/defaults").then(setAssumptions).catch(() => {});
+    api.get<Assumptions>("/wells/assumptions/defaults").then((d) => { setAssumptions(d); setDefaults(d); }).catch(() => {});
   }, []);
 
   // Deep-link from the map's well panel ("Open in Well Analysis"):
@@ -222,6 +248,7 @@ export function Valuation() {
     try {
       const resp = await api.post<AnalyzeResponse>("/wells/analyze", { wellIds: wells.map((w) => w.id), assumptions: a });
       setAnalysis(resp);
+      setLastRunKey(runKey(wells, a));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Analysis failed");
     } finally {
@@ -237,6 +264,8 @@ export function Valuation() {
       setSelected(wells.rows);
       setAssumptions((prev) => ({ ...(prev as Assumptions), ...d.assumptions }));
       setAnalysis(d.results ? { wells: wells.rows, result: d.results } : null);
+      // The saved snapshot counts as "up to date" for these wells and assumptions.
+      setLastRunKey(runKey(wells.rows, { ...(assumptions as Assumptions), ...d.assumptions }));
       setOpenAnalysisId(d.id);
       setOpenAnalysisName(d.name);
       setPageTab("workspace");
@@ -258,31 +287,35 @@ export function Valuation() {
     setPageTab("workspace");
   }
 
+  const dirty = analysis != null && lastRunKey != null && runKey(selected, assumptions) !== lastRunKey;
 
   return (
     <div className="page va-page">
       <div className="page-header">
-        <div>
-          <h2 style={{ margin: 0 }}>Well Analysis &amp; Valuation</h2>
-          <span className="muted">Everything known about a well in one place — full RRC record, production forecasting, decline curves and acquisition economics.</span>
+        <div className="va-title">
+          <h1>Well analysis &amp; valuation</h1>
+          <div className="page-sub">Everything known about a well in one place: the full RRC record, production forecasting, decline curves and acquisition economics.</div>
         </div>
-        <div className="row">
+        <div className="va-head-actions">
           {analysis && (
             <>
               {/* Saving writes a WellAnalysis row, so it follows the same
                   manageWellAnalysis gate the server enforces — a read-only
                   VIEWER can run and read analyses but not persist them. */}
-              {canManage && <button className="small" onClick={() => setSaveOpen(true)}>{openAnalysisId ? "Save / Save as…" : "Save analysis…"}</button>}
+              {canManage && <button onClick={() => setSaveOpen(true)}>{openAnalysisId ? "Save / Save as…" : "Save analysis…"}</button>}
             </>
           )}
-          <button className="primary small" onClick={newAnalysis}>+ New analysis</button>
+          <button className="primary" onClick={newAnalysis}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
+            New analysis
+          </button>
         </div>
       </div>
 
-      <div className="tab-row">
-        <button className={`tab ${pageTab === "workspace" ? "active" : ""}`} onClick={() => setPageTab("workspace")}>Analysis Workspace</button>
-        <button className={`tab ${pageTab === "saved" ? "active" : ""}`} onClick={() => setPageTab("saved")}>Saved Analyses</button>
-        <button className={`tab ${pageTab === "data" ? "active" : ""}`} onClick={() => setPageTab("data")}>Well Data{canManage ? " & Imports" : ""}</button>
+      <div className="tab-row va-tabs" role="tablist">
+        <button role="tab" aria-selected={pageTab === "workspace"} className={`tab ${pageTab === "workspace" ? "active" : ""}`} onClick={() => setPageTab("workspace")}>Analysis workspace</button>
+        <button role="tab" aria-selected={pageTab === "saved"} className={`tab ${pageTab === "saved" ? "active" : ""}`} onClick={() => setPageTab("saved")}>Saved analyses</button>
+        <button role="tab" aria-selected={pageTab === "data"} className={`tab ${pageTab === "data" ? "active" : ""}`} onClick={() => setPageTab("data")}>Well data{canManage ? " & imports" : ""}</button>
       </div>
 
       {error && <Banner kind="error">{error}</Banner>}
@@ -293,8 +326,10 @@ export function Valuation() {
           setSelected={setSelected}
           assumptions={assumptions}
           setAssumptions={setAssumptions as (a: Assumptions) => void}
+          onResetAssumptions={defaults ? () => setAssumptions(defaults) : undefined}
           analysis={analysis}
           running={running}
+          dirty={dirty}
           onRun={() => runAnalysis(selected, assumptions)}
           resultTab={resultTab}
           setResultTab={setResultTab}
@@ -316,7 +351,7 @@ export function Valuation() {
           assumptions={assumptions}
           result={analysis.result}
           onClose={() => setSaveOpen(false)}
-          onSaved={(id, name) => { setOpenAnalysisId(id); setOpenAnalysisName(name); setSaveOpen(false); }}
+          onSaved={(id, name) => { setOpenAnalysisId(id); setOpenAnalysisName(name); setSaveOpen(false); showToast("Analysis saved"); }}
         />
       )}
     </div>
@@ -324,7 +359,7 @@ export function Valuation() {
 }
 
 // ---------------------------------------------------------------------------
-// Workspace: well picker + assumptions + results
+// Workspace: wells card + assumptions card + results card
 // ---------------------------------------------------------------------------
 
 function Workspace(props: {
@@ -332,43 +367,39 @@ function Workspace(props: {
   setSelected: (w: WellRow[]) => void;
   assumptions: Assumptions;
   setAssumptions: (a: Assumptions) => void;
+  onResetAssumptions?: () => void;
   analysis: AnalyzeResponse | null;
   running: boolean;
+  dirty: boolean;
   onRun: () => void;
   resultTab: ResultTab;
   setResultTab: (t: ResultTab) => void;
   openAnalysisName: string;
   reportRef: React.RefObject<HTMLDivElement>;
 }) {
-  const { selected, setSelected, assumptions, setAssumptions, analysis, running, onRun, resultTab, setResultTab, openAnalysisName, reportRef } = props;
-  const [setupOpen, setSetupOpen] = useState(true);
+  const { selected, setSelected, assumptions, setAssumptions, onResetAssumptions, analysis, running, dirty, onRun, resultTab, setResultTab, openAnalysisName, reportRef } = props;
   const hasResult = analysis != null;
 
   return (
-    <div>
-      <div className="panel va-step">
-        <div className="va-step-head" onClick={() => setSetupOpen((o) => !o)}>
-          <div className="va-step-title">
-            <span className="va-step-num">1</span>
-            <span>Wells &amp; Assumptions{openAnalysisName && <span className="muted" style={{ fontWeight: 400 }}> · {openAnalysisName}</span>}</span>
-          </div>
-          <span className="va-step-toggle">{setupOpen ? "Hide" : `${selected.length} wells selected · Show`} <span className={`va-chev ${setupOpen ? "" : "down"}`}>⌃</span></span>
+    <div className="va-workspace">
+      <WellsCard selected={selected} setSelected={setSelected} openAnalysisName={openAnalysisName} />
+
+      <section className="va-card va-assume">
+        <div className="va-card-head">
+          <h3>Assumptions</h3>
+          {onResetAssumptions && <button type="button" className="link-btn va-reset" onClick={onResetAssumptions}>Reset defaults</button>}
         </div>
-        {setupOpen && (
-          <div className="va-body">
-            <WellPicker selected={selected} setSelected={setSelected} />
-            <WellDossier wells={selected} />
-            <AssumptionsForm a={assumptions} onChange={setAssumptions} />
-            <div className="row" style={{ marginTop: 14 }}>
-              <button className="primary" disabled={running || selected.length === 0} onClick={onRun}>
-                {running ? "Running analysis…" : hasResult ? "Re-run with current assumptions" : "Run analysis"}
-              </button>
-              {selected.length === 0 && <span className="muted">Select at least one well to run.</span>}
-              {hasResult && <span className="muted">Adjust any assumption and re-run to see the impact immediately.</span>}
-            </div>
-          </div>
-        )}
-      </div>
+        <AssumptionsForm a={assumptions} onChange={setAssumptions} />
+        <div className="va-run">
+          <button className={`primary ${hasResult && !dirty && !running ? "va-run-clean" : ""}`} disabled={running || selected.length === 0} onClick={onRun}>
+            {running ? "Running analysis…" : !hasResult ? "Run analysis" : dirty ? "Re-run with current assumptions" : "Re-run analysis"}
+          </button>
+          {selected.length === 0 && <span className="va-run-hint">Select at least one well to run.</span>}
+          {selected.length > 0 && hasResult && (dirty
+            ? <span className="va-run-hint warn">Wells or assumptions changed since the last run.</span>
+            : <span className="va-run-hint">Adjust any assumption and re-run to see the impact immediately.</span>)}
+        </div>
+      </section>
 
       {running && <Spinner label="Fitting decline curves and running economics…" />}
 
@@ -385,19 +416,75 @@ function Workspace(props: {
   );
 }
 
-// --- Well picker -----------------------------------------------------------
+/** "Wells in this analysis": chip row + Add well search popover + the selected well's full record. */
+function WellsCard({ selected, setSelected, openAnalysisName }: { selected: WellRow[]; setSelected: (w: WellRow[]) => void; openAnalysisName: string }) {
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [recOpen, setRecOpen] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const addRef = useRef<HTMLDivElement>(null);
+  const active = selected.find((w) => w.id === activeId) ?? selected[0] ?? null;
+
+  useEffect(() => {
+    if (!adding) return;
+    const onDoc = (e: MouseEvent) => { if (addRef.current && !addRef.current.contains(e.target as Node)) setAdding(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setAdding(false); };
+    document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [adding]);
+
+  return (
+    <section className="va-card va-wells">
+      <div className="va-chips">
+        <span className="va-chips-label">Wells in this analysis{openAnalysisName && <span className="va-open-name"> · {openAnalysisName}</span>}</span>
+        {selected.map((w) => (
+          <span key={w.id} className={`va-chip ${active?.id === w.id ? "on" : ""}`} title={`${w.county} Co, ${w.state} · ${w.operator ?? "unknown operator"}`}>
+            <button type="button" className="va-chip-name" onClick={() => { setActiveId(w.id); setRecOpen(true); }} aria-pressed={active?.id === w.id}>{w.name}</button>
+            <button type="button" className="va-chip-x" aria-label={`Remove ${w.name}`} onClick={() => setSelected(selected.filter((s) => s.id !== w.id))}>×</button>
+          </span>
+        ))}
+        <div className="va-add" ref={addRef}>
+          <button type="button" className="va-add-btn" onClick={() => setAdding((o) => !o)} aria-expanded={adding}>+ Add well</button>
+          {adding && (
+            <WellPicker
+              selected={selected}
+              onAdd={(w) => { setSelected([...selected, w]); setActiveId(w.id); setRecOpen(true); setAdding(false); }}
+              onClose={() => setAdding(false)}
+            />
+          )}
+        </div>
+      </div>
+
+      {!active ? (
+        <div className="va-wells-empty">No wells yet. Use <b>Add well</b> to search by API, RRC lease no, well/lease name, operator, county, survey or abstract.</div>
+      ) : (
+        <>
+          <div className="va-rec-head" role="button" tabIndex={0} aria-expanded={recOpen}
+            onClick={() => setRecOpen((o) => !o)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setRecOpen((o) => !o); } }}>
+            <div className="va-rec-id">
+              <span className="va-rec-name">{active.name}</span>
+              <span className="va-rec-loc">{active.apiNumber && <>API {active.apiNumber} · </>}{active.county} Co, {active.state}</span>
+              <Tag tone={statusTone(active.status)} dot>{prettyEnum(active.status)}</Tag>
+            </div>
+            <span className="va-rec-toggle">{recOpen ? "Hide record" : "Show full record"}</span>
+          </div>
+          {recOpen && <WellRecord key={active.id} well={active} />}
+        </>
+      )}
+    </section>
+  );
+}
+
+// --- Well picker (inside the Add well popover) --------------------------------
 
 interface RrcCandidate { fid: number; api: string | null; name: string; operator: string | null; county: string; type: string | null; status: string | null; hasProduction: boolean }
 
-function WellPicker({ selected, setSelected }: { selected: WellRow[]; setSelected: (w: WellRow[]) => void }) {
+function WellPicker({ selected, onAdd, onClose }: { selected: WellRow[]; onAdd: (w: WellRow) => void; onClose: () => void }) {
   const [q, setQ] = useState("");
   const [results, setResults] = useState<WellRow[]>([]);
   const [rrc, setRrc] = useState<RrcCandidate[]>([]);
   const [total, setTotal] = useState(0);
   const [searching, setSearching] = useState(false);
   const [importing, setImporting] = useState<number | null>(null);
-  const [open, setOpen] = useState(false);
-  const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -427,82 +514,62 @@ function WellPicker({ selected, setSelected }: { selected: WellRow[]; setSelecte
     setImporting(c.fid);
     try {
       const d = await api.post<{ well: WellRow }>(`/wells/import-rrc`, { fid: c.fid });
-      if (!selected.some((s) => s.id === d.well.id)) setSelected([...selected, d.well]);
-      setQ("");
-      setOpen(false); // selection made — close, like every dropdown in the app
+      // Selection made — the popover closes, like every dropdown in the app.
+      if (!selected.some((s) => s.id === d.well.id)) onAdd(d.well);
+      else onClose();
     } catch { /* surfaced by empty state */ }
     finally { setImporting(null); }
   }
-
-  useEffect(() => {
-    function onDoc(e: MouseEvent) {
-      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
-  }, []);
 
   const selectedIds = new Set(selected.map((w) => w.id));
   const addable = results.filter((r) => !selectedIds.has(r.id));
 
   return (
-    <div className="field" style={{ marginBottom: 14 }}>
-      <label className="va-microlabel">Wells to analyze</label>
-      <div className="msel" ref={boxRef}>
-        <div className="msel-box" onClick={() => setOpen(true)}>
-          {selected.map((w) => (
-            <span className="msel-chip" key={w.id} title={`${w.county} Co, ${w.state} · ${w.operator ?? "unknown operator"}`}>
-              {w.name}
-              <button type="button" onClick={(e) => { e.stopPropagation(); setSelected(selected.filter((s) => s.id !== w.id)); }}>×</button>
+    <div className="va-add-pop" role="dialog" aria-label="Add a well">
+      <div className="va-add-search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M20 20l-4-4" /></svg>
+        <input
+          autoFocus
+          value={q}
+          placeholder="Search by API, RRC lease no, well/lease name, operator, county, survey, abstract…"
+          onChange={(e) => setQ(e.target.value)}
+          aria-label="Search wells"
+        />
+      </div>
+      <div className="va-add-list">
+        {searching && <div className="va-add-empty">Searching…</div>}
+        {!searching && addable.length === 0 && rrc.length === 0 && <div className="va-add-empty">{total === 0 ? "No wells found in your list or the imported RRC data." : "All matching wells already selected."}</div>}
+        {!searching && addable.map((w) => (
+          <button type="button" className="va-add-opt" key={w.id} onClick={() => onAdd(w)}>
+            <span className="va-add-name">{w.name}{w.apiNumber && <span className="va-add-api"> · API {w.apiNumber}</span>}</span>
+            <span className="va-add-sub">
+              {w.operator ?? "Unknown operator"} · {w.county} Co, {w.state}
+              {w.production && w.production.months > 0 && <> · {w.production.months} months of production {w.production.firstMonth && <>({w.production.firstMonth} → {w.production.lastMonth})</>}</>}
+              {(!w.production || w.production.months === 0) && <> · no production data</>}
             </span>
-          ))}
-          <input
-            className="msel-input"
-            value={q}
-            placeholder={selected.length === 0 ? "Search by API, RRC lease no, well/lease name, operator, county, survey, abstract…" : ""}
-            onChange={(e) => { setQ(e.target.value); setOpen(true); }}
-            onFocus={() => setOpen(true)}
-          />
-        </div>
-        {open && (
-          <div className="msel-menu">
-            {searching && <div className="msel-empty">Searching…</div>}
-            {!searching && addable.length === 0 && rrc.length === 0 && <div className="msel-empty">{total === 0 ? "No wells found in your list or the imported RRC data." : "All matching wells already selected."}</div>}
-            {!searching && addable.map((w) => (
-              <div className="msel-opt" key={w.id} onClick={() => { setSelected([...selected, w]); setQ(""); setOpen(false); }}>
-                <strong>{w.name}</strong>{w.apiNumber && <span className="muted"> · API {w.apiNumber}</span>}
-                <div className="muted" style={{ fontSize: 12 }}>
-                  {w.operator ?? "Unknown operator"} · {w.county} Co, {w.state}
-                  {w.production && w.production.months > 0 && <> · {w.production.months} months of production {w.production.firstMonth && <>({w.production.firstMonth} → {w.production.lastMonth})</>}</>}
-                  {(!w.production || w.production.months === 0) && <> · no production data</>}
-                </div>
-              </div>
+          </button>
+        ))}
+        {!searching && rrc.length > 0 && (
+          <>
+            <div className="va-add-section">From imported RRC data · auto-syncs on open</div>
+            {rrc.map((c) => (
+              <button type="button" className="va-add-opt" key={c.fid} onClick={() => void addRrc(c)}>
+                <span className="va-add-name">{c.name}{c.api && <span className="va-add-api"> · API {c.api}</span>}</span>
+                <span className="va-add-sub">
+                  {c.operator ?? "Unknown operator"} · {c.county} Co, TX · {c.type ?? "—"}
+                  {c.hasProduction ? " · production history available" : " · no production on file"}
+                  {importing === c.fid && " · importing…"}
+                </span>
+              </button>
             ))}
-            {!searching && rrc.length > 0 && (
-              <>
-                <div className="msel-empty" style={{ padding: "6px 10px", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                  From imported RRC data · auto-syncs on open
-                </div>
-                {rrc.map((c) => (
-                  <div className="msel-opt" key={c.fid} onClick={() => void addRrc(c)}>
-                    <strong>{c.name}</strong>{c.api && <span className="muted"> · API {c.api}</span>}
-                    <div className="muted" style={{ fontSize: 12 }}>
-                      {c.operator ?? "Unknown operator"} · {c.county} Co, TX · {c.type ?? "—"}
-                      {c.hasProduction ? " · production history available" : " · no production on file"}
-                      {importing === c.fid && " · importing…"}
-                    </div>
-                  </div>
-                ))}
-              </>
-            )}
-          </div>
+          </>
         )}
       </div>
     </div>
   );
 }
 
-// --- Well dossier: the full centralized record for each selected well --------
+// --- Well record: the full centralized record for the selected well ----------
 
 interface Dossier {
   wellId: string;
@@ -524,204 +591,171 @@ interface Dossier {
 
 function Kv({ label, value }: { label: string; value: React.ReactNode }) {
   return (value == null || value === "" || value === "—") ? null : (
-    <div className="dossier-kv"><span className="muted">{label}</span><span>{value}</span></div>
+    <div className="va-fact"><span className="va-fact-l">{label}</span><span className="va-fact-v">{value}</span></div>
   );
 }
 
-function DossierCard({ well, open, onToggle }: { well: WellRow; open: boolean; onToggle: () => void }) {
-  const [d, setD] = useState<Dossier | null>(null);
-  const [loading, setLoading] = useState(false);
-  useEffect(() => {
-    if (!open || d || loading) return;
-    setLoading(true);
-    api.get<Dossier>(`/wells/${well.id}/dossier`).then(setD).catch(() => {}).finally(() => setLoading(false));
-  }, [open, d, loading, well.id]);
-
+/** A record sub-section: small heading + a bordered, scrollable table. */
+function RecTable({ title, head, children }: { title: ReactNode; head: ReactNode; children: ReactNode }) {
   return (
-    <div className="dossier-card">
-      <div className="dossier-head" onClick={onToggle}>
-        <strong>{well.name}</strong>
-        <span className="muted">
-          {well.apiNumber && <>API {well.apiNumber} · </>}{well.county} Co, {well.state}
-        </span>
-        <span className={`va-chev ${open ? "" : "down"}`} style={{ marginLeft: "auto" }}>⌃</span>
+    <div className="va-rec-sec">
+      <span className="va-rec-sec-t">{title}</span>
+      <div className="dossier-table-wrap">
+        <table className="dossier-table">
+          <thead><tr>{head}</tr></thead>
+          <tbody>{children}</tbody>
+        </table>
       </div>
-      {open && (
-        <div className="dossier-body">
-          {loading && <Spinner label="Loading full well record…" />}
-          {!loading && d && (
-            <>
-              <div className="dossier-grid">
-                <Kv label="API (10)" value={d.identity.api10} />
-                <Kv label="API (8)" value={d.identity.api8} />
-                <Kv label="RRC lease no" value={d.lease?.leaseNo} />
-                <Kv label="Well no" value={d.identity.wellNo} />
-                <Kv label="District" value={d.identity.district} />
-                <Kv label="County" value={`${d.identity.county}, ${d.identity.state}`} />
-                <Kv label="Abstract" value={d.identity.abstract ? formatAbstract({ abstract: d.identity.abstract, survey: d.identity.survey, county: d.identity.county, state: d.identity.state }) : null} />
-                <Kv label="Survey" value={d.identity.survey} />
-                <Kv label="Surface location" value={d.identity.latitude != null ? `${d.identity.latitude.toFixed(5)}, ${d.identity.longitude?.toFixed(5)}` : null} />
-                <Kv label="Well type" value={[d.status.oilGas, d.status.type].filter(Boolean).join(" · ") || null} />
-                <Kv label="Status" value={d.status.status} />
-                <Kv label="Spud date" value={d.status.spudDate && fmtDate(d.status.spudDate)} />
-                <Kv label="Plug date" value={d.status.plugDate && fmtDate(d.status.plugDate)} />
-                <Kv label="Last production" value={d.status.lastProd} />
-                <Kv label="Field" value={d.field.fieldName && `${d.field.fieldName}${d.field.fieldNo ? ` (#${d.field.fieldNo})` : ""}`} />
-                <Kv label="Reservoir(s)" value={d.field.reservoirs.length ? <ChipList items={d.field.reservoirs.map((r) => `${r.name}${r.type ? ` (${r.type})` : ""}`)} /> : null} />
-                <Kv label="Formations" value={d.formations.length ? <ChipList items={d.formations} /> : null} />
-                <Kv label="Operator (current)" value={d.operators.current.name && `${d.operators.current.name}${d.operators.current.operatorNo ? ` · P-5 #${d.operators.current.operatorNo}` : ""}`} />
-                <Kv label="Wellbore" value={d.wellbore.laterals.length ? `${d.wellbore.laterals.length} lateral${d.wellbore.laterals.length > 1 ? "s" : ""} · ${fmtVol(d.wellbore.totalLateralFt)} ft mapped` : null} />
-                <Kv label="RRC cumulative" value={d.cumulative ? `${fmtVol(d.cumulative.oilBbl)} bbl oil · ${fmtVol(d.cumulative.gasMcf)} mcf gas` : null} />
-              </div>
-
-              {d.lease && (
-                <div className="dossier-section">
-                  <div className="va-microlabel">Lease</div>
-                  <span style={{ fontSize: 13 }}>
-                    {d.lease.leaseName ?? "Lease"} · #{d.lease.leaseNo} ({d.lease.ogCode === "G" ? "gas" : "oil"}, District {d.lease.district}) · {d.lease.wellsOnLease} well{d.lease.wellsOnLease === 1 ? "" : "s"} on lease
-                    {d.lease.production && <> · {d.lease.production.months} months of production ({d.lease.production.firstMonth} → {d.lease.production.lastMonth}) · cum {fmtVol(d.lease.production.cumOilBbl)} bbl / {fmtVol(d.lease.production.cumGasMcf)} mcf</>}
-                  </span>
-                </div>
-              )}
-
-              {d.operators.history.length > 0 && (
-                <div className="dossier-section">
-                  <div className="va-microlabel">Operator history</div>
-                  <div className="dossier-table-wrap">
-                    <table className="dossier-table">
-                      <thead><tr><th>Operator</th><th>P-5 #</th><th>Source</th><th>From</th><th>To</th></tr></thead>
-                      <tbody>
-                        {d.operators.history.map((o, i) => (
-                          <tr key={i}><td>{o.name ?? "—"}</td><td>{o.operatorNo ?? "—"}</td><td>{o.source === "production" ? "Production era" : "At permit"}</td><td>{o.from ?? "—"}</td><td>{o.to ?? (o.source === "production" ? "—" : "")}</td></tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {d.permits.length > 0 && (
-                <div className="dossier-section">
-                  <div className="va-microlabel">Drilling permits ({d.permits.length})</div>
-                  <div className="dossier-table-wrap">
-                    <table className="dossier-table">
-                      <thead><tr><th>Date</th><th>Permit #</th><th>Operator</th><th>Lease</th><th>Well</th></tr></thead>
-                      <tbody>
-                        {d.permits.map((p) => (
-                          <tr key={p.statusNo}><td>{p.permitDate ? fmtDate(p.permitDate) : "—"}</td><td>{p.statusNo}</td><td>{p.operator ?? "—"}</td><td>{p.leaseName ?? "—"}</td><td>{p.wellNo ?? "—"}</td></tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {d.completions.length > 0 && (
-                <div className="dossier-section">
-                  <div className="va-microlabel">Completion filings ({d.completions.length})</div>
-                  <div className="dossier-table-wrap">
-                    <table className="dossier-table">
-                      <thead><tr><th>Completed</th><th>Filed</th><th>Form</th><th>Status</th><th>Field</th><th>Survey</th></tr></thead>
-                      <tbody>
-                        {d.completions.map((c) => (
-                          <tr key={c.trackingNo}><td>{c.completionDate ? fmtDate(c.completionDate) : "—"}</td><td>{c.filedDate ? fmtDate(c.filedDate) : "—"}</td><td>{c.filingType ?? "—"}</td><td>{c.status ?? "—"}</td><td>{c.fieldName ?? "—"}</td><td>{c.survey ?? "—"}</td></tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {d.nearby.length > 0 && (
-                <div className="dossier-section">
-                  <div className="va-microlabel">Nearby wells (within 1 mile)</div>
-                  <div className="dossier-table-wrap">
-                    <table className="dossier-table">
-                      <thead><tr><th>Well</th><th>API</th><th>Operator</th><th>Status</th><th>Distance</th></tr></thead>
-                      <tbody>
-                        {d.nearby.map((n) => (
-                          <tr key={n.fid}><td>{n.name}</td><td>{n.api ?? "—"}</td><td>{n.operator ?? "—"}</td><td>{n.status ?? "—"}</td><td>{fmtVol(n.distanceFt)} ft</td></tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                  {d.offsetOperators.length > 0 && (
-                    <div style={{ fontSize: 13, marginTop: 4 }}><span className="muted">Offset operators: </span><ChipList items={d.offsetOperators} max={6} /></div>
-                  )}
-                </div>
-              )}
-
-              {d.links && (
-                <div className="dossier-section" style={{ fontSize: 13 }}>
-                  <span className="muted">Railroad Commission: </span>
-                  <a href={d.links.rrcWellboreQuery} target="_blank" rel="noreferrer">Wellbore query</a>
-                  {" · "}<a href={d.links.rrcDrillingPermits} target="_blank" rel="noreferrer">Drilling permits</a>
-                  {" · "}<a href={d.links.rrcGisViewer} target="_blank" rel="noreferrer">GIS viewer</a>
-                </div>
-              )}
-
-              {!d.linked && (
-                <div className="muted" style={{ fontSize: 12 }}>
-                  This well isn't linked to the centralized RRC dataset (no matching API) — showing the attributes on file.
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      )}
     </div>
   );
 }
 
 /**
- * One card per selected well with the complete centralized record —
- * identity, status, lease, operators, permits, completions, wellbore,
- * nearby/offset wells — loaded automatically, no separate import.
+ * The complete centralized record for one well — identity, status, lease,
+ * operators, permits, completions, wellbore, nearby/offset wells — loaded
+ * lazily the first time it is shown, no separate import.
  */
-function WellDossier({ wells }: { wells: WellRow[] }) {
-  const [openId, setOpenId] = useState<string | null>(null);
+function WellRecord({ well }: { well: WellRow }) {
+  const [d, setD] = useState<Dossier | null>(null);
+  const [loading, setLoading] = useState(false);
   useEffect(() => {
-    if (wells.length === 1) setOpenId(wells[0].id);
-    else if (openId && !wells.some((w) => w.id === openId)) setOpenId(null);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wells]);
-  if (!wells.length) return null;
+    if (d || loading) return;
+    setLoading(true);
+    api.get<Dossier>(`/wells/${well.id}/dossier`).then(setD).catch(() => {}).finally(() => setLoading(false));
+  }, [d, loading, well.id]);
+
   return (
-    <div style={{ margin: "0 0 14px" }}>
-      <div className="va-microlabel">Well record — everything on file in the centralized database</div>
-      {wells.map((w) => (
-        <DossierCard key={w.id} well={w} open={openId === w.id} onToggle={() => setOpenId(openId === w.id ? null : w.id)} />
-      ))}
+    <div className="va-rec-body">
+      {loading && <Spinner label="Loading full well record…" />}
+      {!loading && d && (
+        <>
+          <div className="va-facts">
+            <Kv label="API (10)" value={d.identity.api10} />
+            <Kv label="API (8)" value={d.identity.api8} />
+            <Kv label="RRC lease no" value={d.lease?.leaseNo} />
+            <Kv label="Well no" value={d.identity.wellNo} />
+            <Kv label="District" value={d.identity.district} />
+            <Kv label="County" value={`${d.identity.county}, ${d.identity.state}`} />
+            <Kv label="Abstract" value={d.identity.abstract ? formatAbstract({ abstract: d.identity.abstract, survey: d.identity.survey, county: d.identity.county, state: d.identity.state }) : null} />
+            <Kv label="Survey" value={d.identity.survey} />
+            <Kv label="Surface location" value={d.identity.latitude != null ? `${d.identity.latitude.toFixed(5)}, ${d.identity.longitude?.toFixed(5)}` : null} />
+            <Kv label="Well type" value={[d.status.oilGas, d.status.type].filter(Boolean).join(" · ") || null} />
+            <Kv label="Status" value={d.status.status} />
+            <Kv label="Spud date" value={d.status.spudDate && fmtDate(d.status.spudDate)} />
+            <Kv label="Plug date" value={d.status.plugDate && fmtDate(d.status.plugDate)} />
+            <Kv label="Last production" value={d.status.lastProd} />
+            <Kv label="Field" value={d.field.fieldName && `${d.field.fieldName}${d.field.fieldNo ? ` (#${d.field.fieldNo})` : ""}`} />
+            <Kv label="Reservoir(s)" value={d.field.reservoirs.length ? <ChipList items={d.field.reservoirs.map((r) => `${r.name}${r.type ? ` (${r.type})` : ""}`)} /> : null} />
+            <Kv label="Operator (current)" value={d.operators.current.name && `${d.operators.current.name}${d.operators.current.operatorNo ? ` · P-5 #${d.operators.current.operatorNo}` : ""}`} />
+            <Kv label="Wellbore" value={d.wellbore.laterals.length ? `${d.wellbore.laterals.length} lateral${d.wellbore.laterals.length > 1 ? "s" : ""} · ${fmtVol(d.wellbore.totalLateralFt)} ft mapped` : null} />
+            <Kv label="RRC cumulative" value={d.cumulative ? `${fmtVol(d.cumulative.oilBbl)} bbl oil · ${fmtVol(d.cumulative.gasMcf)} mcf gas` : null} />
+          </div>
+
+          {(d.formations.length > 0 || d.links) && (
+            <div className="va-rec-meta">
+              {d.formations.length > 0 && (
+                <div className="va-rec-sec">
+                  <span className="va-rec-sec-t">Formations</span>
+                  <div className="va-formations">{d.formations.map((f, i) => <span key={`${f}-${i}`} className="va-formation">{f}</span>)}</div>
+                </div>
+              )}
+              {d.links && (
+                <div className="va-rec-sec">
+                  <span className="va-rec-sec-t">Railroad Commission</span>
+                  <div className="va-rrc-links">
+                    <a href={d.links.rrcWellboreQuery} target="_blank" rel="noreferrer">Wellbore query ↗</a>
+                    <a href={d.links.rrcDrillingPermits} target="_blank" rel="noreferrer">Drilling permits ↗</a>
+                    <a href={d.links.rrcGisViewer} target="_blank" rel="noreferrer">GIS viewer ↗</a>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {d.lease && (
+            <div className="va-rec-sec">
+              <span className="va-rec-sec-t">Lease</span>
+              <span className="va-rec-text">
+                {d.lease.leaseName ?? "Lease"} · #{d.lease.leaseNo} ({d.lease.ogCode === "G" ? "gas" : "oil"}, District {d.lease.district}) · {d.lease.wellsOnLease} well{d.lease.wellsOnLease === 1 ? "" : "s"} on lease
+                {d.lease.production && <> · {d.lease.production.months} months of production ({d.lease.production.firstMonth} → {d.lease.production.lastMonth}) · cum {fmtVol(d.lease.production.cumOilBbl)} bbl / {fmtVol(d.lease.production.cumGasMcf)} mcf</>}
+              </span>
+            </div>
+          )}
+
+          {d.nearby.length > 0 && (
+            <div className="va-rec-sec">
+              <RecTable title="Nearby wells · within 1 mile" head={<><th>Well</th><th>API</th><th>Operator</th><th>Status</th><th className="right">Distance</th></>}>
+                {d.nearby.map((n) => (
+                  <tr key={n.fid}><td className="strong">{n.name}</td><td className="dim">{n.api ?? "—"}</td><td>{n.operator ?? "—"}</td><td><span className={`va-rrc-status ${rrcStatusClass(n.status)}`}>{n.status ?? "—"}</span></td><td className="right">{fmtVol(n.distanceFt)} ft</td></tr>
+                ))}
+              </RecTable>
+              {d.offsetOperators.length > 0 && (
+                <div className="va-offsets"><span className="va-rec-sec-t">Offset operators</span><ChipList items={d.offsetOperators} max={6} /></div>
+              )}
+            </div>
+          )}
+
+          {d.operators.history.length > 0 && (
+            <RecTable title="Operator history" head={<><th>Operator</th><th>P-5 #</th><th>Source</th><th>From</th><th>To</th></>}>
+              {d.operators.history.map((o, i) => (
+                <tr key={i}><td>{o.name ?? "—"}</td><td>{o.operatorNo ?? "—"}</td><td>{o.source === "production" ? "Production era" : "At permit"}</td><td>{o.from ?? "—"}</td><td>{o.to ?? (o.source === "production" ? "—" : "")}</td></tr>
+              ))}
+            </RecTable>
+          )}
+
+          {d.permits.length > 0 && (
+            <RecTable title={`Drilling permits (${d.permits.length})`} head={<><th>Date</th><th>Permit #</th><th>Operator</th><th>Lease</th><th>Well</th></>}>
+              {d.permits.map((p) => (
+                <tr key={p.statusNo}><td>{p.permitDate ? fmtDate(p.permitDate) : "—"}</td><td>{p.statusNo}</td><td>{p.operator ?? "—"}</td><td>{p.leaseName ?? "—"}</td><td>{p.wellNo ?? "—"}</td></tr>
+              ))}
+            </RecTable>
+          )}
+
+          {d.completions.length > 0 && (
+            <RecTable title={`Completion filings (${d.completions.length})`} head={<><th>Completed</th><th>Filed</th><th>Form</th><th>Status</th><th>Field</th><th>Survey</th></>}>
+              {d.completions.map((c) => (
+                <tr key={c.trackingNo}><td>{c.completionDate ? fmtDate(c.completionDate) : "—"}</td><td>{c.filedDate ? fmtDate(c.filedDate) : "—"}</td><td>{c.filingType ?? "—"}</td><td>{c.status ?? "—"}</td><td>{c.fieldName ?? "—"}</td><td>{c.survey ?? "—"}</td></tr>
+              ))}
+            </RecTable>
+          )}
+
+          {!d.linked && (
+            <div className="va-rec-note">
+              This well isn't linked to the centralized RRC dataset (no matching API) — showing the attributes on file.
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
 // --- Assumptions form ------------------------------------------------------
 
-function NumField({ label, value, onChange, step = 1, prefix, suffix, width = 96, allowNull, hint }: {
+function NumField({ label, value, onChange, step = 1, prefix, suffix, allowNull, hint }: {
   label: string;
   value: number | null;
   onChange: (v: number | null) => void;
   step?: number;
   prefix?: string;
   suffix?: string;
-  width?: number;
   allowNull?: boolean;
   hint?: string;
 }) {
-  // Reference shape: uppercase micro-label, a plain compact input, and the unit
-  // as quiet text BESIDE the box (never a bordered segment inside it).
-  const unit = suffix ?? prefix;
+  // Units sit inside the field: a "$" prefix on the left, or the unit on the right.
+  const unit = suffix ? `${prefix ?? ""}${suffix}` : null;
+  const pre = !suffix && prefix ? prefix : null;
   return (
     <div className="va-num">
       <label title={hint}>{label}</label>
-      <div className="va-num-row">
+      <div className={`va-affix ${pre ? "has-pre" : ""} ${unit ? "has-suf" : ""}`} title={hint}>
+        {pre && <span className="va-pre" aria-hidden="true">{pre}</span>}
         <input
           type="number"
           step={step}
-          style={{ width }}
           value={value ?? ""}
           placeholder={allowNull ? "—" : undefined}
+          aria-label={label}
           onChange={(e) => {
             const s = e.target.value;
             if (s === "") { onChange(allowNull ? null : 0); return; }
@@ -729,13 +763,14 @@ function NumField({ label, value, onChange, step = 1, prefix, suffix, width = 96
             if (Number.isFinite(n)) onChange(n);
           }}
         />
-        {unit && <span className="va-num-unit">{unit}</span>}
+        {unit && <span className="va-suf" aria-hidden="true">{unit}</span>}
       </div>
     </div>
   );
 }
 
 function AssumptionsForm({ a, onChange }: { a: Assumptions; onChange: (a: Assumptions) => void }) {
+  const [advOpen, setAdvOpen] = useState(false);
   const set = <K extends keyof Assumptions>(k: K, v: Assumptions[K]) => onChange({ ...a, [k]: v });
   const setOverride = (phase: "oil" | "gas", key: "b" | "diAnnual", v: number | null) => {
     const cur = a.declineOverride ?? {};
@@ -748,45 +783,49 @@ function AssumptionsForm({ a, onChange }: { a: Assumptions; onChange: (a: Assump
   };
 
   return (
-    <div>
+    <>
       <div className="assumption-groups">
         <div className="assumption-group">
-          <div className="assumption-group-title"><span className="va-dot" style={{ background: "#22c55e" }} />Commodity prices</div>
+          <div className="assumption-group-title">Commodity prices</div>
           <div className="assumption-grid">
-            <NumField label="Oil ($/bbl)" value={a.oilPrice} onChange={(v) => set("oilPrice", v ?? 0)} step={1} />
-            <NumField label="Gas ($/mcf)" value={a.gasPrice} onChange={(v) => set("gasPrice", v ?? 0)} step={0.1} />
-            <NumField label="NGL ($/bbl)" value={a.nglPrice} onChange={(v) => set("nglPrice", v ?? 0)} step={1} />
+            <NumField label="Oil" value={a.oilPrice} onChange={(v) => set("oilPrice", v ?? 0)} step={1} suffix="$/bbl" />
+            <NumField label="Gas" value={a.gasPrice} onChange={(v) => set("gasPrice", v ?? 0)} step={0.1} suffix="$/mcf" />
+            <NumField label="NGL" value={a.nglPrice} onChange={(v) => set("nglPrice", v ?? 0)} step={1} suffix="$/bbl" />
             <NumField label="Price escalation" value={a.priceEscalationPct} onChange={(v) => set("priceEscalationPct", v ?? 0)} step={0.5} suffix="%/yr" />
           </div>
         </div>
-        {/* Reference groups acquisition inputs and return targets in ONE card
-            ("Acquisition & Returns") beside commodity prices. */}
         <div className="assumption-group">
-          <div className="assumption-group-title"><span className="va-dot" style={{ background: "#3b82f6" }} />Acquisition &amp; returns</div>
+          <div className="assumption-group-title">Acquisition &amp; returns</div>
           <div className="assumption-grid">
             <NumField label="Asking price" value={a.askingPrice} onChange={(v) => set("askingPrice", v ?? 0)} step={1000} prefix="$" />
             <NumField label="Closing costs" value={a.closingCosts} onChange={(v) => set("closingCosts", v ?? 0)} step={500} prefix="$" />
             <NumField label="Discount rate" value={a.discountRatePct} onChange={(v) => set("discountRatePct", v ?? 10)} step={0.5} suffix="%" />
             <NumField label="Target ROI" value={a.targetRoiPct} onChange={(v) => set("targetRoiPct", v)} step={5} suffix="%" allowNull hint="Total return on investment over the property's life (blank = no constraint)" />
-            <NumField label="Target profit ($)" value={a.targetProfitAmount} onChange={(v) => set("targetProfitAmount", v)} step={5000} prefix="$" allowNull />
+            <NumField label="Target profit" value={a.targetProfitAmount} onChange={(v) => set("targetProfitAmount", v)} step={5000} prefix="$" allowNull />
             <NumField label="Resale price" value={a.resalePrice} onChange={(v) => set("resalePrice", v)} step={5000} prefix="$" allowNull hint="Expected flip/resale price (optional)" />
             <NumField label="Resale margin target" value={a.targetProfitMarginPct} onChange={(v) => set("targetProfitMarginPct", v)} step={1} suffix="%" allowNull hint="Desired profit as % of resale price" />
           </div>
         </div>
       </div>
 
-      <details className="va-advanced">
-        <summary>Advanced: forecast controls &amp; manual decline override</summary>
-        <div className="assumption-grid va-advanced-grid">
-          <NumField label="Max forecast" value={a.maxForecastMonths} onChange={(v) => set("maxForecastMonths", v ?? 360)} step={12} suffix="mo" />
-          <NumField label="Economic limit" value={a.economicLimitNetCashFlow} onChange={(v) => set("economicLimitNetCashFlow", v ?? 0)} step={50} prefix="$" suffix="/mo" hint="Stop the forecast when monthly net cash flow falls below this" />
-          <NumField label="Oil decline (Di)" value={a.declineOverride?.oil?.diAnnual != null ? round4(a.declineOverride.oil.diAnnual * 100) : null} onChange={(v) => setOverride("oil", "diAnnual", v == null ? null : v / 100)} step={5} suffix="%/yr" allowNull hint="Manual nominal annual decline (blank = fit from data)" />
-          <NumField label="Oil b-factor" value={a.declineOverride?.oil?.b ?? null} onChange={(v) => setOverride("oil", "b", v)} step={0.1} allowNull hint="0 = exponential, 1 = harmonic" />
-          <NumField label="Gas decline (Di)" value={a.declineOverride?.gas?.diAnnual != null ? round4(a.declineOverride.gas.diAnnual * 100) : null} onChange={(v) => setOverride("gas", "diAnnual", v == null ? null : v / 100)} step={5} suffix="%/yr" allowNull />
-          <NumField label="Gas b-factor" value={a.declineOverride?.gas?.b ?? null} onChange={(v) => setOverride("gas", "b", v)} step={0.1} allowNull />
+      <button type="button" className="va-adv-toggle" aria-expanded={advOpen} onClick={() => setAdvOpen((o) => !o)}>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: advOpen ? "rotate(90deg)" : undefined }}><path d="M9 6l6 6-6 6" /></svg>
+        Forecast controls &amp; manual decline override
+      </button>
+      {advOpen && (
+        <div className="va-adv">
+          <div className="assumption-group-title">Forecast</div>
+          <div className="assumption-grid">
+            <NumField label="Max forecast" value={a.maxForecastMonths} onChange={(v) => set("maxForecastMonths", v ?? 360)} step={12} suffix="mo" />
+            <NumField label="Economic limit" value={a.economicLimitNetCashFlow} onChange={(v) => set("economicLimitNetCashFlow", v ?? 0)} step={50} prefix="$" suffix="/mo" hint="Stop the forecast when monthly net cash flow falls below this" />
+            <NumField label="Oil decline (Di)" value={a.declineOverride?.oil?.diAnnual != null ? round4(a.declineOverride.oil.diAnnual * 100) : null} onChange={(v) => setOverride("oil", "diAnnual", v == null ? null : v / 100)} step={5} suffix="%/yr" allowNull hint="Manual nominal annual decline (blank = fit from data)" />
+            <NumField label="Oil b-factor" value={a.declineOverride?.oil?.b ?? null} onChange={(v) => setOverride("oil", "b", v)} step={0.1} allowNull hint="0 = exponential, 1 = harmonic" />
+            <NumField label="Gas decline (Di)" value={a.declineOverride?.gas?.diAnnual != null ? round4(a.declineOverride.gas.diAnnual * 100) : null} onChange={(v) => setOverride("gas", "diAnnual", v == null ? null : v / 100)} step={5} suffix="%/yr" allowNull />
+            <NumField label="Gas b-factor" value={a.declineOverride?.gas?.b ?? null} onChange={(v) => setOverride("gas", "b", v)} step={0.1} allowNull />
+          </div>
         </div>
-      </details>
-    </div>
+      )}
+    </>
   );
 }
 
@@ -795,6 +834,11 @@ const round4 = (v: number) => Math.round(v * 10000) / 10000;
 // ---------------------------------------------------------------------------
 // Results
 // ---------------------------------------------------------------------------
+
+const RESULT_TABS: [ResultTab, string][] = [
+  ["production", "Production history"], ["forecast", "Decline & forecast"], ["cashflow", "Financials"],
+  ["valuation", "Valuation & offer"], ["sensitivity", "Sensitivity"], ["report", "Full report"],
+];
 
 function Results({ analysis, tab, setTab, reportRef, analysisName }: {
   analysis: AnalyzeResponse;
@@ -807,63 +851,77 @@ function Results({ analysis, tab, setTab, reportRef, analysisName }: {
   const v = r.valuation;
   const e = r.economics;
 
+  const headline: StatCell[] = [
+    { label: "Fair market value", value: fmtMoneyC(v.fairMarketValue), sub: `PV @ ${r.assumptions.discountRatePct}% · PV10 ${fmtMoneyC(v.pv10)}` },
+    { label: "Recommended offer", value: fmtMoneyC(v.recommendedOffer), tone: "success", sub: v.offerVsAskingPct != null ? `${v.offerVsAskingPct >= 0 ? "+" : ""}${v.offerVsAskingPct.toFixed(0)}% vs asking` : "No asking price set" },
+    {
+      label: "NPV at asking", value: v.atAsking ? fmtMoneyC(v.atAsking.npv) : "—",
+      tone: v.atAsking ? (v.atAsking.npv >= 0 ? "success" : "danger") : undefined,
+      sub: e.investment > 0 ? `Investment ${fmtMoneyC(e.investment)}` : "Set an asking price",
+    },
+    { label: "IRR / ROI", value: `${fmtPct1(e.irrAnnualPct)} / ${e.roiPct != null ? fmtPct1(e.roiPct) : "—"}`, sub: e.paybackMonths != null ? `Payout in ${fmtMonths(e.paybackMonths)}` : "Payout beyond forecast" },
+    { label: "Remaining life", value: r.forecast.remainingMonths > 0 ? fmtMonths(r.forecast.remainingMonths) : "—", sub: `${fmtVol(r.forecast.remaining.boe)} boe remaining` },
+  ];
+
   return (
-    <div>
-      <div className="panel va-step">
-        <div className="va-step-head" style={{ cursor: "default" }}>
-          <div className="va-step-title">
-            <span className="va-step-num">2</span>
-            <span>Results</span>
+    <section className="va-card va-results">
+      <div className="va-card-head va-results-head">
+        <h3>Results</h3>
+        <span className="va-run-at">Run {fmtDateTime(r.runAt)} · forecast <ConfBadge c={r.forecast.confidence} /></span>
+      </div>
+      <div className="va-results-top">
+        {r.warnings.map((w, i) => (
+          <div className="va-caveat" key={i}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9L2.6 17.5A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /></svg>
+            <span>{w}</span>
           </div>
-          <span className="muted">
-            Run {fmtDateTime(r.runAt)} · forecast <ConfBadge c={r.forecast.confidence} />
-          </span>
-        </div>
-
-        <div className="va-body">
-        {r.warnings.length > 0 && (
-          <Banner kind="warn">
-            <ul style={{ margin: 0, paddingLeft: 18 }}>{r.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
-          </Banner>
-        )}
-
-        <div className="metrics-row">
-          <MetricCard label="Fair market value" value={fmtMoneyC(v.fairMarketValue)} hint={`PV @ ${r.assumptions.discountRatePct}% · PV10 ${fmtMoneyC(v.pv10)}`} />
-          <MetricCard label="Recommended offer" value={fmtMoneyC(v.recommendedOffer)} hint={v.offerVsAskingPct != null ? `${v.offerVsAskingPct >= 0 ? "+" : ""}${v.offerVsAskingPct.toFixed(0)}% vs asking` : "No asking price set"} />
-          <MetricCard label="NPV at asking" value={v.atAsking ? fmtMoneyC(v.atAsking.npv) : "—"} hint={e.investment > 0 ? `Investment ${fmtMoneyC(e.investment)}` : "Set an asking price"} />
-          <MetricCard label="IRR / ROI" value={`${fmtPct1(e.irrAnnualPct)} / ${e.roiPct != null ? fmtPct1(e.roiPct) : "—"}`} hint={e.paybackMonths != null ? `Payout in ${fmtMonths(e.paybackMonths)}` : "Payout beyond forecast"} />
-          <MetricCard label="Remaining life" value={r.forecast.remainingMonths > 0 ? fmtMonths(r.forecast.remainingMonths) : "—"} hint={`${fmtVol(r.forecast.remaining.boe)} boe remaining`} />
-        </div>
-
-        <div className="tab-row" style={{ marginBottom: 0 }}>
-          <button className={`tab ${tab === "production" ? "active" : ""}`} onClick={() => setTab("production")}>Production History</button>
-          <button className={`tab ${tab === "forecast" ? "active" : ""}`} onClick={() => setTab("forecast")}>Decline &amp; Forecast</button>
-          <button className={`tab ${tab === "cashflow" ? "active" : ""}`} onClick={() => setTab("cashflow")}>Financials</button>
-          <button className={`tab ${tab === "valuation" ? "active" : ""}`} onClick={() => setTab("valuation")}>Valuation &amp; Offer</button>
-          <button className={`tab ${tab === "sensitivity" ? "active" : ""}`} onClick={() => setTab("sensitivity")}>Sensitivity</button>
-          <button className={`tab ${tab === "report" ? "active" : ""}`} onClick={() => setTab("report")}>Full Report</button>
-        </div>
+        ))}
+        <StatStrip min={170} cells={headline} />
+      </div>
+      <div className="va-rtabs-wrap">
+        <div className="tab-row va-tabs" role="tablist">
+          {RESULT_TABS.map(([key, label]) => (
+            <button key={key} role="tab" aria-selected={tab === key} className={`tab ${tab === key ? "active" : ""}`} onClick={() => setTab(key)}>{label}</button>
+          ))}
         </div>
       </div>
-
-      {tab === "production" && <ProductionTab r={r} />}
-      {tab === "forecast" && <ForecastTab r={r} />}
-      {tab === "cashflow" && <CashFlowTab r={r} />}
-      {tab === "valuation" && <ValuationTab r={r} />}
-      {tab === "sensitivity" && <SensitivityTab r={r} />}
-      {tab === "report" && (
-        <div ref={reportRef} className="report-capture">
-          <FullReport analysis={analysis} analysisName={analysisName} />
-        </div>
-      )}
-    </div>
+      <div className="va-results-body">
+        {tab === "production" && <ProductionTab r={r} />}
+        {tab === "forecast" && <ForecastTab r={r} />}
+        {tab === "cashflow" && <CashFlowTab r={r} />}
+        {tab === "valuation" && <ValuationTab r={r} />}
+        {tab === "sensitivity" && <SensitivityTab r={r} />}
+        {tab === "report" && (
+          <div ref={reportRef} className="report-capture">
+            <FullReport analysis={analysis} analysisName={analysisName} />
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
 function ConfBadge({ c }: { c: "high" | "medium" | "low" }) {
-  // Tinted capsule per the Well Analysis reference (green/amber/red).
-  const color = c === "high" ? "#22c55e" : c === "medium" ? "#f59e0b" : "#ef4444";
-  return <CtPill color={color}>{CONF_LABEL[c]}</CtPill>;
+  // Tinted capsule per the forecast confidence (green/amber/red).
+  return <Tag tone={CONF_TONE[c]}>{CONF_LABEL[c]}</Tag>;
+}
+
+/** Chart / table card: title with optional Historical / Forecast tags, right-side control, footnote. */
+function ChartCard({ title, hist, fc, right, note, children, className = "" }: {
+  title: ReactNode; hist?: boolean; fc?: boolean; right?: ReactNode; note?: ReactNode; children: ReactNode; className?: string;
+}) {
+  return (
+    <section className={`va-chart ${className}`}>
+      <div className="va-chart-head">
+        <h4>{title}</h4>
+        {hist && <span className="va-tag-hist">Historical</span>}
+        {fc && <span className="va-tag-fc">Forecast</span>}
+        {right && <span className="va-chart-right">{right}</span>}
+      </div>
+      {children}
+      {note && <p className="va-note">{note}</p>}
+    </section>
+  );
 }
 
 // --- Chart data builders ----------------------------------------------------
@@ -916,6 +974,15 @@ function annualCash(r: ValuationResult): AnnualCashRow[] {
   return [...by.values()];
 }
 
+/** Vertical marker at the last reported (historical) month on history + forecast charts. */
+function lastReportedLine(r: ValuationResult, yAxisId?: string) {
+  const last = r.history.length ? r.history[r.history.length - 1].month : null;
+  if (!last || !r.forecast.months.length) return null;
+  return (
+    <ReferenceLine x={last} {...(yAxisId ? { yAxisId } : {})} stroke="var(--line-hover-strong)" strokeDasharray="3 3"
+      label={{ value: "Last reported", position: "insideTopLeft", fontSize: 10.5, fill: "var(--ink-3)" }} />
+  );
+}
 
 // --- Production tab ---------------------------------------------------------
 
@@ -927,53 +994,50 @@ function ProductionTab({ r }: { r: ValuationResult }) {
     return { ...m, cumBoe: cum };
   }), [r.history]);
 
-  if (!r.history.length) return <div className="panel"><p className="muted">No production history for the selected wells.</p></div>;
+  if (!r.history.length) return <div className="va-empty">No production history for the selected wells.</div>;
 
   return (
-    <div>
-      <div className="metrics-row">
-        <MetricCard label="History" value={`${p.monthsOfHistory} mo`} hint={`${p.firstMonth} → ${p.lastMonth} · ${p.producingMonths} producing`} />
-        <MetricCard label="Cumulative oil" value={fmtVol(p.oil.cumulative, " bbl")} hint={p.oil.peak ? `Peak ${fmtVol(p.oil.peak.volume)} bbl in ${p.oil.peak.month}` : undefined} />
-        <MetricCard label="Cumulative gas" value={fmtVol(p.gas.cumulative, " mcf")} hint={p.gas.peak ? `Peak ${fmtVol(p.gas.peak.volume)} mcf in ${p.gas.peak.month}` : undefined} />
-        <MetricCard label="Cumulative NGL" value={fmtVol(p.ngl.cumulative, " bbl")} />
-        <MetricCard label="Total (BOE)" value={fmtVol(p.cumBoe)} hint="6 mcf = 1 boe" />
-      </div>
+    <div className="va-tab">
+      <StatStrip min={170} cells={[
+        { label: "History", value: `${p.monthsOfHistory} mo`, sub: `${p.firstMonth} → ${p.lastMonth} · ${p.producingMonths} producing` },
+        { label: "Cumulative oil", value: fmtVol(p.oil.cumulative, " bbl"), sub: p.oil.peak ? `Peak ${fmtVol(p.oil.peak.volume)} bbl in ${p.oil.peak.month}` : undefined },
+        { label: "Cumulative gas", value: fmtVol(p.gas.cumulative, " mcf"), sub: p.gas.peak ? `Peak ${fmtVol(p.gas.peak.volume)} mcf in ${p.gas.peak.month}` : undefined },
+        { label: "Cumulative NGL", value: fmtVol(p.ngl.cumulative, " bbl") },
+        { label: "Total (BOE)", value: fmtVol(p.cumBoe), sub: "6 mcf = 1 boe" },
+      ]} />
 
-      <div className="chart-grid">
-        <div className="panel">
-          <div className="panel-title"><h3>Monthly Production <HistTag /></h3></div>
+      <div className="va-two">
+        <ChartCard title="Monthly production" hist>
           <ResponsiveContainer width="100%" height={280}>
             <ComposedChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="month" tickFormatter={monthLabel} tick={{ fontSize: 11 }} minTickGap={28} />
-              <YAxis yAxisId="l" tick={{ fontSize: 11 }} label={{ value: "bbl / month", angle: -90, position: "insideLeft", fontSize: 11 }} />
-              <YAxis yAxisId="r" orientation="right" tick={{ fontSize: 11 }} label={{ value: "mcf / month", angle: 90, position: "insideRight", fontSize: 11 }} />
+              <Grid />
+              <XAxis dataKey="month" tickFormatter={monthLabel} tick={AXIS_TICK} axisLine={false} tickLine={false} minTickGap={28} />
+              <YAxis yAxisId="l" tick={AXIS_TICK} axisLine={false} tickLine={false} label={{ value: "bbl / month", angle: -90, position: "insideLeft", ...AXIS_LABEL }} />
+              <YAxis yAxisId="r" orientation="right" tick={AXIS_TICK} axisLine={false} tickLine={false} label={{ value: "mcf / month", angle: 90, position: "insideRight", ...AXIS_LABEL }} />
               <Tooltip {...chartTooltip} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
-              <Legend />
+              <Legend {...LEGEND_PROPS} />
               <Line yAxisId="l" dataKey="oilBbl" name="Oil (bbl)" stroke={COLOR_OIL} dot={false} strokeWidth={2} isAnimationActive={false} />
               <Line yAxisId="r" dataKey="gasMcf" name="Gas (mcf)" stroke={COLOR_GAS} dot={false} strokeWidth={2} isAnimationActive={false} />
               <Line yAxisId="l" dataKey="nglBbl" name="NGL (bbl)" stroke={COLOR_NGL} dot={false} isAnimationActive={false} />
             </ComposedChart>
           </ResponsiveContainer>
-        </div>
-        <div className="panel">
-          <div className="panel-title"><h3>Cumulative Production (BOE) <HistTag /></h3></div>
+        </ChartCard>
+        <ChartCard title="Cumulative production (BOE)" hist>
           <ResponsiveContainer width="100%" height={280}>
             <ComposedChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="month" tickFormatter={monthLabel} tick={{ fontSize: 11 }} minTickGap={28} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => v >= 1000 ? `${Math.round(v / 1000)}k` : String(v)} />
+              <Grid />
+              <XAxis dataKey="month" tickFormatter={monthLabel} tick={AXIS_TICK} axisLine={false} tickLine={false} minTickGap={28} />
+              <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={(v: number) => v >= 1000 ? `${Math.round(v / 1000)}k` : String(v)} />
               <Tooltip {...chartTooltip} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
               <Line dataKey="cumBoe" name="Cumulative BOE" stroke={COLOR_CUM} dot={false} strokeWidth={2} isAnimationActive={false} />
             </ComposedChart>
           </ResponsiveContainer>
-        </div>
+        </ChartCard>
       </div>
 
-      <div className="chart-grid">
-        <div className="panel">
-          <div className="panel-title"><h3>Annual Production <HistTag /></h3></div>
-          <div className="table-scroll"><table className="data-table">
+      <div className="va-two">
+        <ChartCard title="Annual production" hist>
+          <div className="table-scroll va-table"><table className="data-table">
             <thead><tr><th>Year</th><th className="right">Oil (bbl)</th><th className="right">Gas (mcf)</th><th className="right">NGL (bbl)</th><th className="right">BOE</th></tr></thead>
             <tbody>
               {p.annual.map((a) => (
@@ -981,46 +1045,44 @@ function ProductionTab({ r }: { r: ValuationResult }) {
               ))}
             </tbody>
           </table></div>
-        </div>
-        <div className="panel">
-          <div className="panel-title"><h3>Anomalies &amp; Notable Events</h3></div>
-          {p.anomalies.length === 0 ? <p className="muted">No significant anomalies detected — a clean, steady producer.</p> : (
-            <ul className="anomaly-list">
+        </ChartCard>
+        <ChartCard title="Anomalies & notable events">
+          {p.anomalies.length === 0 ? (
+            <div className="va-clean"><i aria-hidden="true" />No significant anomalies detected — a clean, steady producer.</div>
+          ) : (
+            <ul className="anomaly-list va-anomalies">
               {p.anomalies.map((x, i) => (
                 <li key={i}>
-                  <span className={`badge ${x.kind === "DOWNTIME" ? "resp-passed" : x.kind === "SHARP_DROP" ? "priority-high" : "resp-interested"}`}>{prettyEnum(x.kind)}</span>
-                  <strong style={{ margin: "0 6px" }}>{x.month}</strong>
-                  <span className="muted">{x.detail}</span>
+                  <Tag tone={x.kind === "DOWNTIME" ? "neutral" : x.kind === "SHARP_DROP" ? "danger" : "warn"}>{prettyEnum(x.kind)}</Tag>
+                  <strong>{x.month}</strong>
+                  <span className="va-anom-detail">{x.detail}</span>
                 </li>
               ))}
             </ul>
           )}
-        </div>
+        </ChartCard>
       </div>
     </div>
   );
 }
 
-const HistTag = () => <span className="badge resp-pending" style={{ marginLeft: 8, fontWeight: 500 }}>Historical</span>;
-const FcTag = () => <span className="badge resp-interested" style={{ marginLeft: 8, fontWeight: 500 }}>Forecast</span>;
-
 // --- Forecast tab -----------------------------------------------------------
 
-function DeclineFitCard({ phase, unit, fit }: { phase: string; unit: string; fit: DeclineFit | null }) {
+function DeclineFitCard({ phase, unit, color, fit }: { phase: string; unit: string; color: string; fit: DeclineFit | null }) {
   if (!fit) return (
     <div className="fit-card">
-      <div className="fit-title">{phase}</div>
-      <p className="muted" style={{ margin: 0 }}>No decline fit (insufficient or no production).</p>
+      <div className="fit-title"><i className="va-phase-dot" style={{ background: color }} />{phase}</div>
+      <p className="va-fit-none">No decline fit (insufficient or no production).</p>
     </div>
   );
   return (
     <div className="fit-card">
-      <div className="fit-title">{phase} · {prettyEnum(fit.model)}{fit.manual ? " (manual)" : ""} <ConfBadge c={fit.confidence} /></div>
+      <div className="fit-title"><i className="va-phase-dot" style={{ background: color }} />{phase} · {prettyEnum(fit.model)}{fit.manual ? " (manual)" : ""} <ConfBadge c={fit.confidence} /></div>
       <div className="fit-grid">
-        <div className="kv"><span className="k">Effective decline</span><span className="v">{(fit.diAnnualEffective * 100).toFixed(1)}%/yr</span></div>
         <div className="kv"><span className="k">Nominal Di</span><span className="v">{(fit.diAnnualNominal * 100).toFixed(1)}%/yr</span></div>
         <div className="kv"><span className="k">b-factor</span><span className="v">{fit.b.toFixed(2)}</span></div>
         <div className="kv"><span className="k">Fit R²</span><span className="v">{fit.r2.toFixed(3)}</span></div>
+        <div className="kv"><span className="k">Effective decline</span><span className="v">{(fit.diAnnualEffective * 100).toFixed(1)}%/yr</span></div>
         <div className="kv"><span className="k">Fit window</span><span className="v">{fit.fitStartMonth} → now ({fit.fitMonths} pts)</span></div>
         <div className="kv"><span className="k">Current rate</span><span className="v">{fmtVol(fit.currentRate)} {unit}/mo</span></div>
       </div>
@@ -1044,66 +1106,72 @@ function ForecastTab({ r }: { r: ValuationResult }) {
   const fc = r.forecast;
 
   return (
-    <div>
-      <div className="metrics-row">
-        <MetricCard label="Remaining life" value={fc.remainingMonths > 0 ? fmtMonths(fc.remainingMonths) : "—"} hint={fc.endReason === "ECONOMIC_LIMIT" ? `Economic limit ${fc.economicLimitMonth}` : fc.endReason === "MAX_MONTHS" ? "Capped at max forecast length" : "No decline fit"} />
-        <MetricCard label="Remaining oil" value={fmtVol(fc.remaining.oilBbl, " bbl")} hint="Forecast recoverable" />
-        <MetricCard label="Remaining gas" value={fmtVol(fc.remaining.gasMcf, " mcf")} hint="Forecast recoverable" />
-        <MetricCard label="Remaining BOE" value={fmtVol(fc.remaining.boe)} hint={`EUR ${fmtVol(fc.eur.boe)} boe total`} />
-        <MetricCard label="Confidence" value={CONF_LABEL[fc.confidence].split(" ")[0]} hint="Based on fit quality & history length" />
-      </div>
+    <div className="va-tab">
+      <StatStrip min={170} cells={[
+        { label: "Remaining life", value: fc.remainingMonths > 0 ? fmtMonths(fc.remainingMonths) : "—", sub: fc.endReason === "ECONOMIC_LIMIT" ? `Economic limit ${fc.economicLimitMonth}` : fc.endReason === "MAX_MONTHS" ? "Capped at max forecast length" : "No decline fit" },
+        { label: "Remaining oil", value: fmtVol(fc.remaining.oilBbl, " bbl"), sub: "Forecast recoverable" },
+        { label: "Remaining gas", value: fmtVol(fc.remaining.gasMcf, " mcf"), sub: "Forecast recoverable" },
+        { label: "Remaining BOE", value: fmtVol(fc.remaining.boe), sub: `EUR ${fmtVol(fc.eur.boe)} boe total` },
+        { label: "Confidence", value: CONF_LABEL[fc.confidence].split(" ")[0], tone: CONF_TONE[fc.confidence], sub: "Based on fit quality & history length" },
+      ]} />
 
-      <div className="panel">
-        <div className="panel-title">
-          <h3>Production: History &amp; Forecast <HistTag /><FcTag /></h3>
-          <label className="dm-chk"><input type="checkbox" checked={logScale} onChange={(e) => setLogScale(e.target.checked)} /> Semi-log (decline-curve view)</label>
-        </div>
-        <ResponsiveContainer width="100%" height={340}>
-          <ComposedChart data={logSafe}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-            <XAxis dataKey="month" tickFormatter={monthLabel} tick={{ fontSize: 11 }} minTickGap={28} />
-            <YAxis
-              yAxisId="l" tick={{ fontSize: 11 }} scale={logScale ? "log" : "auto"} domain={logScale ? ["auto", "auto"] : [0, "auto"]}
-              allowDataOverflow label={{ value: "bbl / month", angle: -90, position: "insideLeft", fontSize: 11 }}
-            />
-            <YAxis
-              yAxisId="r" orientation="right" tick={{ fontSize: 11 }} scale={logScale ? "log" : "auto"} domain={logScale ? ["auto", "auto"] : [0, "auto"]}
-              allowDataOverflow label={{ value: "mcf / month", angle: 90, position: "insideRight", fontSize: 11 }}
-            />
-            <Tooltip {...chartTooltip} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
-            <Legend />
-            <Line yAxisId="l" dataKey="histOil" name="Oil (actual)" stroke={COLOR_OIL} dot={false} strokeWidth={2} isAnimationActive={false} />
-            <Line yAxisId="l" dataKey="fcOil" name="Oil (forecast)" stroke={COLOR_OIL} dot={false} strokeWidth={2} strokeDasharray="6 4" isAnimationActive={false} />
-            <Line yAxisId="r" dataKey="histGas" name="Gas (actual)" stroke={COLOR_GAS} dot={false} strokeWidth={2} isAnimationActive={false} />
-            <Line yAxisId="r" dataKey="fcGas" name="Gas (forecast)" stroke={COLOR_GAS} dot={false} strokeWidth={2} strokeDasharray="6 4" isAnimationActive={false} />
-          </ComposedChart>
-        </ResponsiveContainer>
-        <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>
+      <ChartCard
+        title="Production: history & forecast" hist fc
+        right={
+          <button type="button" className={`va-semilog ${logScale ? "on" : ""}`} aria-pressed={logScale} onClick={() => setLogScale((s) => !s)} title="Decline-curve view">
+            <span className="va-mini-tgl" aria-hidden="true"><i /></span>Semi-log
+          </button>
+        }
+        note={<>
           Solid lines are reported production; dashed lines are the Arps decline forecast under current assumptions.
           {fc.economicLimitMonth && <> Forecast ends at the economic limit in <strong>{fc.economicLimitMonth}</strong>.</>}
-        </p>
-      </div>
+        </>}
+      >
+        <ResponsiveContainer width="100%" height={340}>
+          <ComposedChart data={logSafe}>
+            <Grid />
+            <XAxis dataKey="month" tickFormatter={monthLabel} tick={AXIS_TICK} axisLine={false} tickLine={false} minTickGap={28} />
+            <YAxis
+              yAxisId="l" tick={AXIS_TICK} axisLine={false} tickLine={false} scale={logScale ? "log" : "auto"} domain={logScale ? ["auto", "auto"] : [0, "auto"]}
+              allowDataOverflow label={{ value: "bbl / month", angle: -90, position: "insideLeft", ...AXIS_LABEL }}
+            />
+            <YAxis
+              yAxisId="r" orientation="right" tick={AXIS_TICK} axisLine={false} tickLine={false} scale={logScale ? "log" : "auto"} domain={logScale ? ["auto", "auto"] : [0, "auto"]}
+              allowDataOverflow label={{ value: "mcf / month", angle: 90, position: "insideRight", ...AXIS_LABEL }}
+            />
+            <Tooltip {...chartTooltip} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
+            <Legend {...LEGEND_PROPS} />
+            {lastReportedLine(r, "l")}
+            <Line yAxisId="l" dataKey="histOil" name="Oil (actual)" stroke={COLOR_OIL} dot={false} strokeWidth={2} isAnimationActive={false} />
+            <Line yAxisId="l" dataKey="fcOil" name="Oil (forecast)" stroke={COLOR_OIL} dot={false} strokeWidth={2} strokeDasharray={FC_DASH} isAnimationActive={false} />
+            <Line yAxisId="r" dataKey="histGas" name="Gas (actual)" stroke={COLOR_GAS} dot={false} strokeWidth={2} isAnimationActive={false} />
+            <Line yAxisId="r" dataKey="fcGas" name="Gas (forecast)" stroke={COLOR_GAS} dot={false} strokeWidth={2} strokeDasharray={FC_DASH} isAnimationActive={false} />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </ChartCard>
 
-      <div className="chart-grid">
-        <div className="panel">
-          <div className="panel-title"><h3>Cumulative BOE: History &amp; Forecast <HistTag /><FcTag /></h3></div>
+      <div className="va-two">
+        <ChartCard title="Cumulative BOE: history & forecast" hist fc>
           <ResponsiveContainer width="100%" height={260}>
             <ComposedChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="month" tickFormatter={monthLabel} tick={{ fontSize: 11 }} minTickGap={28} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={(v: number) => v >= 1000 ? `${Math.round(v / 1000)}k` : String(v)} />
+              <Grid />
+              <XAxis dataKey="month" tickFormatter={monthLabel} tick={AXIS_TICK} axisLine={false} tickLine={false} minTickGap={28} />
+              <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={(v: number) => v >= 1000 ? `${Math.round(v / 1000)}k` : String(v)} />
               <Tooltip {...chartTooltip} labelFormatter={monthLabel} formatter={(val: number) => Math.round(val).toLocaleString()} />
+              <Legend {...LEGEND_PROPS} />
+              {lastReportedLine(r)}
               <Line dataKey="cumBoe" name="Cumulative (actual)" stroke={COLOR_CUM} dot={false} strokeWidth={2} isAnimationActive={false} />
-              <Line dataKey="fcCumBoe" name="Cumulative (forecast)" stroke={COLOR_CUM} dot={false} strokeWidth={2} strokeDasharray="6 4" isAnimationActive={false} />
+              <Line dataKey="fcCumBoe" name="Cumulative (forecast)" stroke={COLOR_CUM} dot={false} strokeWidth={2} strokeDasharray={FC_DASH} isAnimationActive={false} />
             </ComposedChart>
           </ResponsiveContainer>
-        </div>
-        <div className="panel">
-          <div className="panel-title"><h3>Decline Curve Fits</h3></div>
-          <DeclineFitCard phase="Oil" unit="bbl" fit={r.decline.oil} />
-          <DeclineFitCard phase="Gas" unit="mcf" fit={r.decline.gas} />
-          <DeclineFitCard phase="NGL" unit="bbl" fit={r.decline.ngl} />
-        </div>
+        </ChartCard>
+        <ChartCard title="Decline curve fits">
+          <div className="va-fits">
+            <DeclineFitCard phase="Oil" unit="bbl" color={COLOR_OIL} fit={r.decline.oil} />
+            <DeclineFitCard phase="Gas" unit="mcf" color={COLOR_GAS} fit={r.decline.gas} />
+            <DeclineFitCard phase="NGL" unit="bbl" color={COLOR_NGL} fit={r.decline.ngl} />
+          </div>
+        </ChartCard>
       </div>
     </div>
   );
@@ -1119,68 +1187,64 @@ function CashFlowTab({ r }: { r: ValuationResult }) {
     return r.forecast.months[Math.min(e.paybackMonths - 1, r.forecast.months.length - 1)].month.slice(0, 4);
   }, [e.paybackMonths, r.forecast.months]);
 
-  if (!r.forecast.months.length) return <div className="panel"><p className="muted">No forecast months — nothing to project financially.</p></div>;
+  if (!r.forecast.months.length) return <div className="va-empty">No forecast months — nothing to project financially.</div>;
 
   return (
-    <div>
-      <div className="metrics-row">
-        <MetricCard label="Gross revenue" value={fmtMoneyC(e.grossRevenueTotal)} hint="8/8ths, life of forecast" />
-        <MetricCard label="Net cash flow" value={fmtMoneyC(e.netCashFlowTotal)} hint="Undiscounted, life of forecast" />
-        <MetricCard label={`PV @ ${r.assumptions.discountRatePct}%`} value={fmtMoneyC(e.presentValue)} hint={`PV10 ${fmtMoneyC(e.pv10)}`} />
-        <MetricCard label="Avg cash flow (yr 1)" value={`${fmtMoneyC(e.monthlyCashFlowFirstYearAvg)}/mo`} />
-      </div>
+    <div className="va-tab">
+      <StatStrip min={170} cells={[
+        { label: "Gross revenue", value: fmtMoneyC(e.grossRevenueTotal), sub: "8/8ths, life of forecast" },
+        { label: "Net cash flow", value: fmtMoneyC(e.netCashFlowTotal), tone: e.netCashFlowTotal < 0 ? "danger" : undefined, sub: "Undiscounted, life of forecast" },
+        { label: `PV @ ${r.assumptions.discountRatePct}%`, value: fmtMoneyC(e.presentValue), sub: `PV10 ${fmtMoneyC(e.pv10)}` },
+        { label: "Avg cash flow (yr 1)", value: `${fmtMoneyC(e.monthlyCashFlowFirstYearAvg)}/mo` },
+      ]} />
 
-      <div className="chart-grid">
-        <div className="panel">
-          <div className="panel-title"><h3>Annual Net Cash Flow <FcTag /></h3></div>
+      <div className="va-two">
+        <ChartCard title="Annual net cash flow" fc
+          note={paybackYear ? <>Cumulative cash flow crosses the investment in <strong>{paybackYear}</strong> ({fmtMonths(e.paybackMonths)}).</> : undefined}>
           <ResponsiveContainer width="100%" height={280}>
             <ComposedChart data={rows}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="year" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={(val: number) => fmtMoneyC(val)} width={70} />
+              <Grid />
+              <XAxis dataKey="year" tick={AXIS_TICK} axisLine={false} tickLine={false} />
+              <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={(val: number) => fmtMoneyC(val)} width={70} />
               <Tooltip {...chartTooltip} formatter={(val: number) => money(val)} />
-              <Legend />
-              <Bar dataKey="netCashFlow" name="Net cash flow" fill={COLOR_CASH} isAnimationActive={false} />
+              <Legend {...LEGEND_PROPS} />
+              <Bar dataKey="netCashFlow" name="Net cash flow" fill={COLOR_CASH} radius={[3, 3, 0, 0]} isAnimationActive={false} />
               <Line dataKey="cumNetCashFlow" name="Cumulative" stroke={COLOR_CUM} dot={false} strokeWidth={2} isAnimationActive={false} />
-              {e.investment > 0 && <ReferenceLine y={e.investment} stroke="var(--red)" strokeDasharray="4 4" label={{ value: "Investment", fontSize: 11, fill: "var(--red)" }} />}
+              {e.investment > 0 && <ReferenceLine y={e.investment} stroke="var(--danger)" strokeDasharray="4 4" label={{ value: "Investment", fontSize: 11, fill: "var(--danger-ink)" }} />}
             </ComposedChart>
           </ResponsiveContainer>
-          {paybackYear && <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Cumulative cash flow crosses the investment in <strong>{paybackYear}</strong> ({fmtMonths(e.paybackMonths)}).</p>}
-        </div>
-        <div className="panel">
-          <div className="panel-title"><h3>Annual Revenue by Commodity <FcTag /></h3></div>
+        </ChartCard>
+        <ChartCard title="Annual revenue by commodity" fc note="Gross (8/8ths) revenue at assumed prices before interest, taxes and costs.">
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={rows}>
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-              <XAxis dataKey="year" tick={{ fontSize: 11 }} />
-              <YAxis tick={{ fontSize: 11 }} tickFormatter={(val: number) => fmtMoneyC(val)} width={70} />
+              <Grid />
+              <XAxis dataKey="year" tick={AXIS_TICK} axisLine={false} tickLine={false} />
+              <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={(val: number) => fmtMoneyC(val)} width={70} />
               <Tooltip {...chartTooltip} formatter={(val: number) => money(val)} />
-              <Legend />
+              <Legend {...LEGEND_PROPS} />
               <Bar dataKey="oilRevenue" name="Oil" stackId="rev" fill={COLOR_OIL} isAnimationActive={false} />
               <Bar dataKey="gasRevenue" name="Gas" stackId="rev" fill={COLOR_GAS} isAnimationActive={false} />
               <Bar dataKey="nglRevenue" name="NGL" stackId="rev" fill={COLOR_NGL} isAnimationActive={false} />
             </BarChart>
           </ResponsiveContainer>
-          <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Gross (8/8ths) revenue at assumed prices before interest, taxes and costs.</p>
-        </div>
+        </ChartCard>
       </div>
 
-      <div className="panel">
-        <div className="panel-title"><h3>Annual Cash Flow Detail <FcTag /></h3></div>
-        <div className="table-scroll"><table className="data-table">
-          <thead><tr><th>Year</th><th className="right">Gross Revenue</th><th className="right">Net Cash Flow</th><th className="right">Cumulative</th></tr></thead>
+      <ChartCard title="Annual cash flow detail" fc>
+        <div className="table-scroll va-table va-table-tall"><table className="data-table">
+          <thead><tr><th>Year</th><th className="right">Gross revenue</th><th className="right">Net cash flow</th><th className="right">Cumulative</th></tr></thead>
           <tbody>
             {rows.map((row) => (
               <tr key={row.year}>
                 <td>{row.year}</td>
                 <td className="right">{money(row.grossRevenue)}</td>
-                <td className="right">{money(row.netCashFlow)}</td>
-                <td className="right">{money(row.cumNetCashFlow)}</td>
+                <td className={`right ${row.netCashFlow < 0 ? "va-neg" : ""}`}>{money(row.netCashFlow)}</td>
+                <td className={`right ${row.cumNetCashFlow < 0 ? "va-neg" : ""}`}>{money(row.cumNetCashFlow)}</td>
               </tr>
             ))}
           </tbody>
         </table></div>
-      </div>
+      </ChartCard>
     </div>
   );
 }
@@ -1193,21 +1257,17 @@ function ValuationTab({ r }: { r: ValuationResult }) {
   const a = r.assumptions;
 
   return (
-    <div>
-      <div className="chart-grid">
-        <div className="panel">
-          <div className="panel-title"><h3>Acquisition Valuation</h3></div>
-          <table className="data-table" style={{ minWidth: 0 }}>
-            <tbody>
-              <ValRow label="Fair market value" value={money(v.fairMarketValue)} hint={`PV of forecast cash flows @ ${a.discountRatePct}%`} calc />
-              <ValRow label="PV10 (reference)" value={money(v.pv10)} hint="Industry-standard 10% discount" calc />
-              <ValRow label="Undiscounted net cash flow" value={money(e.netCashFlowTotal)} calc />
-              <ValRow label="Seller's asking price" value={a.askingPrice > 0 ? money(a.askingPrice) : "—"} hint="Your input" />
-              <ValRow label="Closing costs" value={a.closingCosts > 0 ? money(a.closingCosts) : "—"} hint="Your input" />
-              <ValRow label="Maximum purchase price" value={money(v.maxPurchasePrice)} hint="Highest price meeting all your targets" calc strong />
-            </tbody>
-          </table>
-          {/* Recommended offer as the reference's green highlight card. */}
+    <div className="va-tab">
+      <div className="va-two">
+        <ChartCard title="Acquisition valuation">
+          <div className="va-vrows">
+            <ValRow label="Fair market value" value={money(v.fairMarketValue)} hint={`PV of forecast cash flows @ ${a.discountRatePct}%`} calc />
+            <ValRow label="PV10 (reference)" value={money(v.pv10)} hint="Industry-standard 10% discount" calc />
+            <ValRow label="Undiscounted net cash flow" value={money(e.netCashFlowTotal)} calc />
+            <ValRow label="Seller's asking price" value={a.askingPrice > 0 ? money(a.askingPrice) : "—"} hint="Your input" />
+            <ValRow label="Closing costs" value={a.closingCosts > 0 ? money(a.closingCosts) : "—"} hint="Your input" />
+            <ValRow label="Maximum purchase price" value={money(v.maxPurchasePrice)} hint="Highest price meeting all your targets" calc strong />
+          </div>
           <div className="va-offerbox">
             <div className="va-offerbox-label">Recommended offer</div>
             <div className="va-offerbox-value">{money(v.recommendedOffer)}</div>
@@ -1223,54 +1283,49 @@ function ValuationTab({ r }: { r: ValuationResult }) {
               {v.askingPriceAssessment === "BELOW_VALUE" && <>The asking price is <strong>below</strong> the estimated fair market value — potentially attractive.</>}
             </Banner>
           )}
-        </div>
+        </ChartCard>
 
-        <div className="panel">
-          <div className="panel-title"><h3>Returns &amp; Margin Analysis</h3></div>
-          <table className="data-table" style={{ minWidth: 0 }}>
-            <tbody>
-              <ValRow label="NPV at asking price" value={v.atAsking ? money(v.atAsking.npv) : "—"} calc />
-              <ValRow label="ROI at asking price" value={v.atAsking?.roiPct != null ? fmtPct1(v.atAsking.roiPct) : "—"} calc />
-              <ValRow label="Payout at asking price" value={v.atAsking ? fmtMonths(v.atAsking.paybackMonths) : "—"} calc />
-              <ValRow label="IRR (annualized)" value={fmtPct1(e.irrAnnualPct)} calc />
-              <ValRow label="Break-even price deck" value={e.breakEvenPriceFactor != null ? `${(e.breakEvenPriceFactor * 100).toFixed(0)}% of assumed prices` : "—"} hint={e.breakEvenOilPrice != null ? `≈ ${money(e.breakEvenOilPrice)}/bbl oil` : undefined} calc />
-            </tbody>
-          </table>
+        <ChartCard title="Returns & margin">
+          <div className="va-vrows">
+            <ValRow label="NPV at asking price" value={v.atAsking ? money(v.atAsking.npv) : "—"} calc />
+            <ValRow label="ROI at asking price" value={v.atAsking?.roiPct != null ? fmtPct1(v.atAsking.roiPct) : "—"} calc />
+            <ValRow label="Payout at asking price" value={v.atAsking ? fmtMonths(v.atAsking.paybackMonths) : "—"} calc />
+            <ValRow label="IRR (annualized)" value={fmtPct1(e.irrAnnualPct)} calc />
+            <ValRow label="Break-even price deck" value={e.breakEvenPriceFactor != null ? `${(e.breakEvenPriceFactor * 100).toFixed(0)}% of assumed prices` : "—"} hint={e.breakEvenOilPrice != null ? `≈ ${money(e.breakEvenOilPrice)}/bbl oil` : undefined} calc />
+          </div>
 
           {a.resalePrice != null && a.resalePrice > 0 ? (
             <>
-              <h4 style={{ margin: "14px 0 6px" }}>Resale scenario (at {money(a.resalePrice)})</h4>
-              <table className="data-table" style={{ minWidth: 0 }}>
-                <tbody>
-                  <ValRow label="Expected gross profit" value={v.expectedGrossProfit != null ? money(v.expectedGrossProfit) : "—"} calc />
-                  <ValRow label="Expected net profit" value={v.expectedNetProfit != null ? money(v.expectedNetProfit) : "—"} hint="After closing costs" calc strong />
-                  <ValRow label="Projected ROI at resale" value={fmtPct1(v.resaleRoiPct)} calc />
-                  <ValRow label="Profit margin" value={fmtPct1(v.resaleMarginPct)} hint={a.targetProfitMarginPct != null ? `Target ${a.targetProfitMarginPct}%` : undefined} calc />
-                </tbody>
-              </table>
+              <div className="va-sub-title">Resale scenario (at {money(a.resalePrice)})</div>
+              <div className="va-vrows">
+                <ValRow label="Expected gross profit" value={v.expectedGrossProfit != null ? money(v.expectedGrossProfit) : "—"} calc />
+                <ValRow label="Expected net profit" value={v.expectedNetProfit != null ? money(v.expectedNetProfit) : "—"} hint="After closing costs" calc strong />
+                <ValRow label="Projected ROI at resale" value={fmtPct1(v.resaleRoiPct)} calc />
+                <ValRow label="Profit margin" value={fmtPct1(v.resaleMarginPct)} hint={a.targetProfitMarginPct != null ? `Target ${a.targetProfitMarginPct}%` : undefined} calc />
+              </div>
             </>
           ) : (
-            <p className="muted" style={{ fontSize: 13 }}>Set a resale price in the assumptions to model a wholesale flip (profit, margin and buyer ROI).</p>
+            <p className="va-note">Set a resale price in the assumptions to model a wholesale flip (profit, margin and buyer ROI).</p>
           )}
-        </div>
+        </ChartCard>
       </div>
-      <p className="muted" style={{ fontSize: 12 }}>
-        <span className="badge resp-pending" style={{ fontWeight: 500 }}>Input</span> values come from your assumptions;{" "}
-        <span className="badge resp-offer" style={{ fontWeight: 500 }}>Calculated</span> values are derived from the production forecast.
+      <p className="va-note va-legend-line">
+        <span className="va-vtag input">Input</span> values come from your assumptions;{" "}
+        <span className="va-vtag calc">Calculated</span> values are derived from the production forecast.
       </p>
     </div>
   );
 }
 
-function ValRow({ label, value, hint, calc, strong, accent }: { label: string; value: string; hint?: string; calc?: boolean; strong?: boolean; accent?: boolean }) {
+function ValRow({ label, value, hint, calc, strong }: { label: string; value: string; hint?: string; calc?: boolean; strong?: boolean }) {
   return (
-    <tr>
-      <td>
-        {label} <span className={`badge ${calc ? "resp-offer" : "resp-pending"}`} style={{ fontWeight: 500, fontSize: 10 }}>{calc ? "Calculated" : "Input"}</span>
-        {hint && <div className="muted" style={{ fontSize: 11 }}>{hint}</div>}
-      </td>
-      <td className="right" style={{ fontWeight: strong ? 700 : 500, fontSize: strong ? 16 : 14, color: accent ? "var(--accent)" : undefined }}>{value}</td>
-    </tr>
+    <div className={`va-vrow ${strong ? "strong" : ""}`}>
+      <div className="va-vrow-l">
+        <span className="va-vrow-label">{label} <span className={`va-vtag ${calc ? "calc" : "input"}`}>{calc ? "Calculated" : "Input"}</span></span>
+        {hint && <span className="va-vrow-hint">{hint}</span>}
+      </div>
+      <span className="va-vrow-v">{value}</span>
+    </div>
   );
 }
 
@@ -1278,41 +1333,40 @@ function ValRow({ label, value, hint, calc, strong, accent }: { label: string; v
 
 function SensitivityTab({ r }: { r: ValuationResult }) {
   return (
-    <div className="chart-grid">
-      <div className="panel">
-        <div className="panel-title"><h3>NPV by Price Scenario</h3></div>
-        <ResponsiveContainer width="100%" height={280}>
-          <BarChart data={r.sensitivity}>
-            <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-            <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-            <YAxis tick={{ fontSize: 11 }} tickFormatter={(val: number) => fmtMoneyC(val)} width={70} />
-            <Tooltip {...chartTooltip} formatter={(val: number) => money(val)} />
-            <ReferenceLine y={0} stroke="var(--text-dim)" />
-            <Bar dataKey="npv" name="NPV" isAnimationActive={false}>
-              {r.sensitivity.map((s, i) => <Cell key={i} fill={s.npv >= 0 ? COLOR_OIL : COLOR_GAS} />)}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-        <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>All commodity prices scaled together; every scenario re-runs the full forecast, so remaining life shifts too.</p>
-      </div>
-      <div className="panel">
-        <div className="panel-title"><h3>Scenario Detail</h3></div>
-        <div className="table-scroll"><table className="data-table">
-          <thead><tr><th>Scenario</th><th className="right">Oil</th><th className="right">Gas</th><th className="right">PV</th><th className="right">NPV</th><th className="right">IRR</th><th className="right">Payout</th></tr></thead>
-          <tbody>
-            {r.sensitivity.map((s) => (
-              <tr key={s.label} className={s.priceFactor === 1 ? "row-base" : undefined}>
-                <td>{s.label}</td>
-                <td className="right">${s.oilPrice.toFixed(0)}</td>
-                <td className="right">${s.gasPrice.toFixed(2)}</td>
-                <td className="right">{fmtMoneyC(s.presentValue)}</td>
-                <td className="right" style={{ color: s.npv >= 0 ? "var(--green)" : "var(--red)" }}>{fmtMoneyC(s.npv)}</td>
-                <td className="right">{fmtPct1(s.irrAnnualPct)}</td>
-                <td className="right">{s.paybackMonths != null ? fmtMonths(s.paybackMonths) : "—"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table></div>
+    <div className="va-tab">
+      <div className="va-two">
+        <ChartCard title="NPV by price scenario" note="All commodity prices scaled together; every scenario re-runs the full forecast, so remaining life shifts too.">
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={r.sensitivity}>
+              <Grid />
+              <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
+              <YAxis tick={AXIS_TICK} axisLine={false} tickLine={false} tickFormatter={(val: number) => fmtMoneyC(val)} width={70} />
+              <Tooltip {...chartTooltip} formatter={(val: number) => money(val)} />
+              <ReferenceLine y={0} stroke="var(--line-hover)" />
+              <Bar dataKey="npv" name="NPV" radius={[3, 3, 0, 0]} maxBarSize={56} isAnimationActive={false}>
+                {r.sensitivity.map((s, i) => <Cell key={i} fill={s.npv >= 0 ? COLOR_OIL : COLOR_GAS} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+        <ChartCard title="Scenario detail">
+          <div className="table-scroll va-table"><table className="data-table">
+            <thead><tr><th>Scenario</th><th className="right">Oil</th><th className="right">Gas</th><th className="right">PV</th><th className="right">NPV</th><th className="right">IRR</th><th className="right">Payout</th></tr></thead>
+            <tbody>
+              {r.sensitivity.map((s) => (
+                <tr key={s.label} className={s.priceFactor === 1 ? "row-base" : undefined}>
+                  <td>{s.label}</td>
+                  <td className="right">${s.oilPrice.toFixed(0)}</td>
+                  <td className="right">${s.gasPrice.toFixed(2)}</td>
+                  <td className="right">{fmtMoneyC(s.presentValue)}</td>
+                  <td className={`right ${s.npv >= 0 ? "va-pos" : "va-neg"}`}>{fmtMoneyC(s.npv)}</td>
+                  <td className="right">{fmtPct1(s.irrAnnualPct)}</td>
+                  <td className="right">{s.paybackMonths != null ? fmtMonths(s.paybackMonths) : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table></div>
+        </ChartCard>
       </div>
     </div>
   );
@@ -1351,35 +1405,31 @@ function FullReport({ analysis, analysisName }: { analysis: AnalyzeResponse; ana
   }, [analysis, r, v, e, a, p]);
 
   return (
-    <div>
-      <div className="panel report-header">
-        <h2 style={{ margin: 0 }}>Well Production &amp; Valuation Report{analysisName ? ` · ${analysisName}` : ""}</h2>
-        <p className="muted" style={{ margin: "4px 0 0" }}>
+    <div className="va-report">
+      <section className="va-chart va-report-head">
+        <h2>Well production &amp; valuation report{analysisName ? ` · ${analysisName}` : ""}</h2>
+        <p className="va-report-sub">
           Generated {fmtDateTime(r.runAt)} · Forecast confidence: {CONF_LABEL[r.forecast.confidence]} ·
           Historical data and forecast estimates are labeled throughout.
         </p>
-      </div>
-
-      <div className="panel">
-        <h3>Executive Summary</h3>
-        <p style={{ marginBottom: 0 }}>{execSummary}</p>
+        <div className="va-report-label">Executive summary</div>
+        <p className="va-report-summary">{execSummary}</p>
         {r.warnings.length > 0 && (
           <>
-            <h4 style={{ marginBottom: 4 }}>Caveats</h4>
-            <ul style={{ margin: 0, paddingLeft: 18 }}>{r.warnings.map((w, i) => <li key={i} className="muted">{w}</li>)}</ul>
+            <div className="va-report-label">Caveats</div>
+            <ul className="va-report-caveats">{r.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
           </>
         )}
-      </div>
+      </section>
 
-      <div className="panel">
-        <h3>Property Overview</h3>
-        <div className="table-scroll"><table className="data-table">
-          <thead><tr><th>Well</th><th>API</th><th>Operator</th><th>County</th><th>Type</th><th>Status</th><th className="right">Months</th><th className="right">Cum Oil</th><th className="right">Cum Gas</th></tr></thead>
+      <ChartCard title="Property overview">
+        <div className="table-scroll va-table"><table className="data-table">
+          <thead><tr><th>Well</th><th>API</th><th>Operator</th><th>County</th><th>Type</th><th>Status</th><th className="right">Months</th><th className="right">Cum oil</th><th className="right">Cum gas</th></tr></thead>
           <tbody>
             {analysis.wells.map((w) => (
               <tr key={w.id}>
-                <td>{w.name}</td><td>{w.apiNumber ?? "—"}</td><td>{w.operator ?? "—"}</td>
-                <td>{w.county}, {w.state}</td><td>{w.wellType ?? "—"}</td><td>{prettyEnum(w.status)}</td>
+                <td className="strong">{w.name}</td><td className="va-mono">{w.apiNumber ?? "—"}</td><td>{w.operator ?? "—"}</td>
+                <td>{w.county}, {w.state}</td><td>{w.wellType ?? "—"}</td><td><Tag tone={statusTone(w.status)} dot>{prettyEnum(w.status)}</Tag></td>
                 <td className="right">{w.production?.months ?? 0}</td>
                 <td className="right">{fmtVol(w.production?.cumOilBbl)}</td>
                 <td className="right">{fmtVol(w.production?.cumGasMcf)}</td>
@@ -1387,36 +1437,38 @@ function FullReport({ analysis, analysisName }: { analysis: AnalyzeResponse; ana
             ))}
           </tbody>
         </table></div>
-      </div>
+      </ChartCard>
 
+      <div className="va-report-sec">Production history</div>
       <ProductionTab r={r} />
+      <div className="va-report-sec">Decline &amp; forecast</div>
       <ForecastTab r={r} />
+      <div className="va-report-sec">Financials</div>
       <CashFlowTab r={r} />
+      <div className="va-report-sec">Valuation &amp; offer</div>
       <ValuationTab r={r} />
+      <div className="va-report-sec">Sensitivity</div>
       <SensitivityTab r={r} />
 
-      <div className="panel">
-        <h3>Assumptions Used</h3>
-        <div className="dd-grid">
-          <div className="kv"><span className="k">Oil price</span><span className="v">{money(a.oilPrice)}/bbl</span></div>
-          <div className="kv"><span className="k">Gas price</span><span className="v">${a.gasPrice.toFixed(2)}/mcf</span></div>
-          <div className="kv"><span className="k">NGL price</span><span className="v">{money(a.nglPrice)}/bbl</span></div>
-          <div className="kv"><span className="k">Price escalation</span><span className="v">{a.priceEscalationPct}%/yr</span></div>
-          <div className="kv"><span className="k">Discount rate</span><span className="v">{a.discountRatePct}%</span></div>
-          <div className="kv"><span className="k">Asking price</span><span className="v">{a.askingPrice > 0 ? money(a.askingPrice) : "—"}</span></div>
-          <div className="kv"><span className="k">Closing costs</span><span className="v">{a.closingCosts > 0 ? money(a.closingCosts) : "—"}</span></div>
-          <div className="kv"><span className="k">Target ROI</span><span className="v">{a.targetRoiPct != null ? `${a.targetRoiPct}%` : "—"}</span></div>
-          <div className="kv"><span className="k">Resale price</span><span className="v">{a.resalePrice != null ? money(a.resalePrice) : "—"}</span></div>
-          <div className="kv"><span className="k">Resale margin target</span><span className="v">{a.targetProfitMarginPct != null ? `${a.targetProfitMarginPct}%` : "—"}</span></div>
-          <div className="kv"><span className="k">Max forecast</span><span className="v">{a.maxForecastMonths} months</span></div>
-          <div className="kv"><span className="k">Economic limit</span><span className="v">{money(a.economicLimitNetCashFlow)}/mo net</span></div>
-          <div className="kv"><span className="k">Decline override</span><span className="v">{a.declineOverride ? "Manual" : "Fit from data"}</span></div>
+      <ChartCard title="Assumptions used"
+        note={<>Forecasts are estimates from Arps decline-curve analysis of reported production and the assumptions above; they are not a guarantee of future performance.
+          Historical figures come from reported production data as imported.</>}>
+        <div className="va-facts va-facts-report">
+          <div className="va-fact"><span className="va-fact-l">Oil price</span><span className="va-fact-v">{money(a.oilPrice)}/bbl</span></div>
+          <div className="va-fact"><span className="va-fact-l">Gas price</span><span className="va-fact-v">${a.gasPrice.toFixed(2)}/mcf</span></div>
+          <div className="va-fact"><span className="va-fact-l">NGL price</span><span className="va-fact-v">{money(a.nglPrice)}/bbl</span></div>
+          <div className="va-fact"><span className="va-fact-l">Price escalation</span><span className="va-fact-v">{a.priceEscalationPct}%/yr</span></div>
+          <div className="va-fact"><span className="va-fact-l">Discount rate</span><span className="va-fact-v">{a.discountRatePct}%</span></div>
+          <div className="va-fact"><span className="va-fact-l">Asking price</span><span className="va-fact-v">{a.askingPrice > 0 ? money(a.askingPrice) : "—"}</span></div>
+          <div className="va-fact"><span className="va-fact-l">Closing costs</span><span className="va-fact-v">{a.closingCosts > 0 ? money(a.closingCosts) : "—"}</span></div>
+          <div className="va-fact"><span className="va-fact-l">Target ROI</span><span className="va-fact-v">{a.targetRoiPct != null ? `${a.targetRoiPct}%` : "—"}</span></div>
+          <div className="va-fact"><span className="va-fact-l">Resale price</span><span className="va-fact-v">{a.resalePrice != null ? money(a.resalePrice) : "—"}</span></div>
+          <div className="va-fact"><span className="va-fact-l">Resale margin target</span><span className="va-fact-v">{a.targetProfitMarginPct != null ? `${a.targetProfitMarginPct}%` : "—"}</span></div>
+          <div className="va-fact"><span className="va-fact-l">Max forecast</span><span className="va-fact-v">{a.maxForecastMonths} months</span></div>
+          <div className="va-fact"><span className="va-fact-l">Economic limit</span><span className="va-fact-v">{money(a.economicLimitNetCashFlow)}/mo net</span></div>
+          <div className="va-fact"><span className="va-fact-l">Decline override</span><span className="va-fact-v">{a.declineOverride ? "Manual" : "Fit from data"}</span></div>
         </div>
-        <p className="muted" style={{ fontSize: 12, marginBottom: 0, marginTop: 12 }}>
-          Forecasts are estimates from Arps decline-curve analysis of reported production and the assumptions above; they are not a guarantee of future performance.
-          Historical figures come from reported production data as imported.
-        </p>
-      </div>
+      </ChartCard>
     </div>
   );
 }
@@ -1430,12 +1482,12 @@ function SavedAnalyses({ onOpen, canManage }: { onOpen: (id: string) => void; ca
   const [sel, setSel] = useState<string[]>([]);
   const [compare, setCompare] = useState<SavedAnalysisDetail[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingDelete, setPendingDelete] = useState<SavedAnalysisRow | null>(null);
 
   const load = useCallback(() => { api.get<SavedAnalysisRow[]>("/wells/analyses").then(setRows).catch(() => setRows([])); }, []);
   useEffect(load, [load]);
 
   async function del(id: string) {
-    if (!window.confirm("Delete this saved analysis?")) return;
     await api.del(`/wells/analyses/${id}`);
     setSel((s) => s.filter((x) => x !== id));
     load();
@@ -1454,41 +1506,55 @@ function SavedAnalyses({ onOpen, canManage }: { onOpen: (id: string) => void; ca
   if (rows == null) return <Spinner label="Loading saved analyses…" />;
 
   return (
-    <div className="panel">
-      <div className="panel-title">
-        <h3 style={{ margin: 0 }}>Saved Analyses</h3>
-        <button className="small" disabled={sel.length < 2 || busy} onClick={openCompare}>
+    <section className="va-card va-saved">
+      <div className="va-card-head">
+        <h3>Saved analyses</h3>
+        <button disabled={sel.length < 2 || busy} onClick={openCompare} title="Select 2–4 analyses to compare">
           {busy ? "Loading…" : `Compare selected (${sel.length})`}
         </button>
       </div>
       {rows.length === 0 ? (
-        <p className="muted">No saved analyses yet. Run an analysis in the workspace and save it to build a library you can revisit and compare.</p>
+        <p className="va-saved-empty">No saved analyses yet. Run an analysis in the workspace and save it to build a library you can revisit and compare.</p>
       ) : (
-        <div className="table-scroll"><table className="data-table">
-          <thead><tr><th style={{ width: 30 }}></th><th>Name</th><th>Wells</th><th>Updated</th><th className="right">FMV</th><th className="right">Rec. Offer</th><th className="right">NPV</th><th className="right">IRR</th><th style={{ width: 130 }}></th></tr></thead>
-          <tbody>
-            {rows.map((r) => (
-              <tr key={r.id}>
-                <td><input type="checkbox" checked={sel.includes(r.id)} disabled={!sel.includes(r.id) && sel.length >= 4} onChange={(e) => setSel((s) => e.target.checked ? [...s, r.id] : s.filter((x) => x !== r.id))} /></td>
-                <td><strong>{r.name}</strong>{r.notes && <div className="muted" style={{ fontSize: 12 }}>{r.notes}</div>}</td>
-                <td className="wrap" style={{ maxWidth: 260 }}>{r.wellNames.join(", ")}</td>
-                <td>{fmtDateLocal(r.updatedAt)}</td>
-                <td className="right">{fmtMoneyC(r.headline?.fairMarketValue)}</td>
-                <td className="right">{fmtMoneyC(r.headline?.recommendedOffer)}</td>
-                <td className="right">{fmtMoneyC(r.headline?.npv)}</td>
-                <td className="right">{fmtPct1(r.headline?.irrAnnualPct)}</td>
-                <td className="right">
-                  <button className="link-btn" onClick={() => onOpen(r.id)}>Open</button>
-                  {canManage && <button className="link-btn" style={{ color: "var(--red)" }} onClick={() => del(r.id)}>Delete</button>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table></div>
+        <div className="va-saved-list">
+          {rows.map((r) => (
+            <div key={r.id} className={`va-saved-row ${sel.includes(r.id) ? "selected" : ""}`} role="button" tabIndex={0}
+              onClick={() => onOpen(r.id)} onKeyDown={(e) => { if (e.key === "Enter") onOpen(r.id); }}>
+              <span className="va-saved-cb" onClick={(e) => e.stopPropagation()}>
+                <input type="checkbox" aria-label={`Select ${r.name} to compare`} checked={sel.includes(r.id)} disabled={!sel.includes(r.id) && sel.length >= 4}
+                  onChange={(e) => setSel((s) => e.target.checked ? [...s, r.id] : s.filter((x) => x !== r.id))} />
+              </span>
+              <span className="va-saved-main">
+                <span className="va-saved-name">{r.name}</span>
+                <span className="va-saved-wells">{r.wellNames.join(", ")}</span>
+                {r.notes && <span className="va-saved-notes">{r.notes}</span>}
+              </span>
+              <span className="va-saved-m"><span>FMV</span><b>{fmtMoneyC(r.headline?.fairMarketValue)}</b></span>
+              <span className="va-saved-m"><span>Rec. offer</span><b className="va-pos">{fmtMoneyC(r.headline?.recommendedOffer)}</b></span>
+              <span className="va-saved-m"><span>NPV</span><b>{fmtMoneyC(r.headline?.npv)}</b></span>
+              <span className="va-saved-m"><span>IRR</span><b>{fmtPct1(r.headline?.irrAnnualPct)}</b></span>
+              <span className="va-saved-date" title="Last updated">{fmtDateLocal(r.updatedAt)}</span>
+              <span className="va-saved-actions" onClick={(e) => e.stopPropagation()}>
+                <button className="link-btn" onClick={() => onOpen(r.id)}>Open</button>
+                {canManage && <button className="link-btn va-del" onClick={() => setPendingDelete(r)}>Delete</button>}
+              </span>
+            </div>
+          ))}
+        </div>
       )}
 
       {compare && <CompareModal analyses={compare} onClose={() => setCompare(null)} />}
-    </div>
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Delete saved analysis"
+          message={<>Delete this saved analysis? <strong>{pendingDelete.name}</strong></>}
+          confirmLabel="Delete"
+          danger
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => { const id = pendingDelete.id; setPendingDelete(null); void del(id); }}
+        />
+      )}
+    </section>
   );
 }
 
@@ -1511,16 +1577,15 @@ function CompareModal({ analyses, onClose }: { analyses: SavedAnalysisDetail[]; 
     ["Discount rate", metric((r) => `${r.assumptions.discountRatePct}%`)],
   ];
   return (
-    <Modal title="Compare Analyses" onClose={onClose} wide>
-      <div className="table-scroll"><table className="data-table">
+    <Modal title="Compare analyses" subtitle="Values come from each analysis's saved snapshot (assumptions at the time it was run)." onClose={onClose} wide>
+      <div className="table-scroll va-table"><table className="data-table">
         <thead><tr><th>Metric</th>{analyses.map((d) => <th key={d.id} className="right">{d.name}</th>)}</tr></thead>
         <tbody>
           {rows.map(([label, vals]) => (
-            <tr key={label}><td>{label}</td>{vals.map((val, i) => <td key={i} className="right">{val}</td>)}</tr>
+            <tr key={label}><td className="va-cmp-label">{label}</td>{vals.map((val, i) => <td key={i} className="right">{val}</td>)}</tr>
           ))}
         </tbody>
       </table></div>
-      <p className="muted" style={{ fontSize: 12 }}>Values come from each analysis's saved snapshot (assumptions at the time it was run).</p>
     </Modal>
   );
 }
@@ -1563,12 +1628,13 @@ function SaveModal({ existingId, existingName, wellIds, assumptions, result, onC
 
   return (
     <Modal
-      title={existingId ? "Save Analysis" : "Save New Analysis"}
+      title={existingId ? "Save analysis" : "Save new analysis"}
+      subtitle="The current assumptions and computed results are snapshotted so this analysis stays stable even as new production data is imported."
       onClose={onClose}
       footer={
         <>
-          <button className="small" onClick={onClose}>Cancel</button>
-          {existingId && <button className="small" disabled={busy} onClick={() => save(true)}>Save as new</button>}
+          <button onClick={onClose}>Cancel</button>
+          {existingId && <button disabled={busy} onClick={() => save(true)}>Save as new</button>}
           <button className="primary" disabled={busy} onClick={() => save(false)}>{existingId ? "Update" : "Save"}</button>
         </>
       }
@@ -1579,7 +1645,6 @@ function SaveModal({ existingId, existingName, wellIds, assumptions, result, onC
       <div className="field"><label>Notes (optional)</label>
         <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} placeholder="Context, seller conversation, data caveats…" />
       </div>
-      <p className="muted" style={{ fontSize: 12 }}>The current assumptions and computed results are snapshotted so this analysis stays stable even as new production data is imported.</p>
       {error && <Banner kind="error">{error}</Banner>}
     </Modal>
   );
@@ -1595,6 +1660,7 @@ function WellData({ canManage }: { canManage: boolean }) {
   const [pageSize, setPageSize] = useState(50);
   const [data, setData] = useState<Paged<WellRow> | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [pendingDelete, setPendingDelete] = useState<WellRow | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -1604,7 +1670,6 @@ function WellData({ canManage }: { canManage: boolean }) {
   }, [q, page, pageSize, reloadKey]);
 
   async function del(w: WellRow) {
-    if (!window.confirm(`Delete ${w.name} and all its production data?`)) return;
     await api.del(`/wells/${w.id}`);
     setReloadKey((k) => k + 1);
   }
@@ -1612,52 +1677,75 @@ function WellData({ canManage }: { canManage: boolean }) {
   const pages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
 
   return (
-    <div>
-      <div className="panel">
-        <div className="panel-title">
-          <h3 style={{ margin: 0 }}>Wells ({data?.total ?? "…"})</h3>
-          <div className="row" style={{ gap: 10, alignItems: "center" }}>
-            <input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search wells…" style={{ width: 260 }} />
+    <div className="va-workspace">
+      <section className="va-card va-wells-data">
+        <div className="va-card-head">
+          <div className="va-card-title">
+            <h3>Wells</h3>
+            <span className="va-count">{data ? `${data.total.toLocaleString()} wells` : "…"}</span>
+          </div>
+          <div className="va-data-tools">
+            <div className="va-data-search">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M20 20l-4-4" /></svg>
+              <input value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} placeholder="Search wells, API, operator…" aria-label="Search wells" />
+            </div>
             <span className="ct-rpp" title="Records per page"><Select value={String(pageSize)} onChange={(v) => { setPageSize(Number(v)); setPage(1); }} options={["20", "50", "100", "200"]} width={68} ariaLabel="Records per page" /></span>
           </div>
         </div>
         {!data ? <Spinner /> : (
           <>
-            <div className="table-scroll"><table className="data-table">
-              <thead><tr><th>Well</th><th>API</th><th>Operator</th><th>County</th><th>Status</th><th className="right">Months</th><th className="right">Last Month</th><th className="right">Cum Oil (bbl)</th><th className="right">Cum Gas (mcf)</th>{canManage && <th></th>}</tr></thead>
+            <div className="table-scroll va-table va-wells-table"><table className="data-table">
+              <thead><tr><th>Well</th><th>API</th><th>Operator</th><th>County</th><th>Status</th><th className="right">Months</th><th className="right">Last month</th><th className="right">Cum oil (bbl)</th><th className="right">Cum gas (mcf)</th>{canManage && <th aria-label="Actions"></th>}</tr></thead>
               <tbody>
                 {data.rows.length === 0 && <tr><td colSpan={canManage ? 10 : 9} className="empty-cell">No wells yet. {canManage ? "Import production data below to get started." : "Ask an administrator to import production data."}</td></tr>}
                 {data.rows.map((w) => (
                   <tr key={w.id}>
-                    <td><strong>{w.name}</strong>{w.leaseName && <div className="muted" style={{ fontSize: 11 }}>{w.leaseName}</div>}</td>
-                    <td className="va-dim">{w.apiNumber ?? "—"}</td>
-                    <td className="va-dim">{w.operator ?? "—"}</td>
+                    <td><span className="va-well-name">{w.name}</span>{w.leaseName && <div className="va-well-lease">{w.leaseName}</div>}</td>
+                    <td className="va-mono">{w.apiNumber ?? "—"}</td>
+                    <td>{w.operator ?? "—"}</td>
                     <td className="va-dim">{w.county}, {w.state}</td>
-                    {/* Status colors per the reference: Producing green, Shut-in amber, else dim. */}
-                    <td><span className={`va-wstatus ${w.status === "PRODUCING" ? "ok" : w.status === "SHUT_IN" ? "warn" : ""}`}>{prettyEnum(w.status)}</span></td>
+                    <td><Tag tone={statusTone(w.status)} dot>{prettyEnum(w.status)}</Tag></td>
                     <td className="right va-num-cell">{w.production?.months ?? 0}</td>
                     <td className="right va-num-cell">{w.production?.lastMonth ?? "—"}</td>
                     <td className="right va-num-cell">{fmtVol(w.production?.cumOilBbl)}</td>
                     <td className="right va-num-cell">{fmtVol(w.production?.cumGasMcf)}</td>
-                    {canManage && <td className="right"><button className="link-btn" style={{ color: "var(--red)" }} onClick={() => del(w)}>Delete</button></td>}
+                    {canManage && (
+                      <td className="right">
+                        <button className="va-icon-del" aria-label={`Delete ${w.name}`} title="Delete well" onClick={() => setPendingDelete(w)}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 ))}
               </tbody>
             </table></div>
-            <div className="row" style={{ marginTop: 10, justifyContent: "flex-end", alignItems: "center", gap: 10 }}>
+            <div className="va-data-foot">
+              <span>Showing {data.rows.length.toLocaleString()} of {data.total.toLocaleString()} wells</span>
               {pages > 1 && (
-                <>
-                  <button className="small" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>‹ Prev</button>
-                  <span className="muted">Page {page} of {pages}</span>
-                  <button className="small" disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>Next ›</button>
-                </>
+                <span className="va-pager">
+                  <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>‹ Prev</button>
+                  <span>Page {page} of {pages}</span>
+                  <button disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>Next ›</button>
+                </span>
               )}
             </div>
           </>
         )}
-      </div>
+      </section>
 
       {canManage && <WellImport onDataChanged={() => setReloadKey((k) => k + 1)} />}
+
+      {pendingDelete && (
+        <ConfirmDialog
+          title="Delete well"
+          message={<>Delete <strong>{pendingDelete.name}</strong> and all its production data?</>}
+          confirmLabel="Delete"
+          danger
+          onCancel={() => setPendingDelete(null)}
+          onConfirm={() => { const w = pendingDelete; setPendingDelete(null); void del(w); }}
+        />
+      )}
     </div>
   );
 }

@@ -58,22 +58,30 @@ export default function LandingMap() {
     vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores);
   }
   useEffect(applyVis, [layers]);
-  const Chk = ({ k, label }: { k: keyof typeof layers; label: string }) => (
-    <label className="lm-chk"><input type="checkbox" checked={layers[k]} onChange={() => setLayers((p) => ({ ...p, [k]: !p[k] }))} /> {label}</label>
+  const Tog = ({ k, label }: { k: keyof typeof layers; label: string }) => (
+    <button type="button" className={`lm-tog ${layers[k] ? "on" : ""}`} aria-pressed={layers[k]} onClick={() => setLayers((p) => ({ ...p, [k]: !p[k] }))}>
+      <span className="lm-tog-box" aria-hidden="true" />{label}
+    </button>
   );
 
   return (
     <div className="lm-wrap">
-      <div className="lm-toolbar" role="group" aria-label="Map layers">
-        <span className="lm-live"><span className="lm-dot" aria-hidden />Live demo — real public cadastral data</span>
-        <Chk k="boundaries" label="Abstracts" /><Chk k="numbers" label="Numbers" /><Chk k="surveys" label="Survey names" />
-        <Chk k="wells" label="Wells" /><Chk k="wellbores" label="Wellbores" />
+      <div className="lm-toolbar">
+        <div className="lm-title">
+          <span className="lm-name">Map</span>
+          <span className="lm-live"><span className="lm-dot" aria-hidden />Live demo — real public cadastral data</span>
+        </div>
+        <div className="lm-layers" role="group" aria-label="Map layers">
+          <Tog k="boundaries" label="Abstracts" /><Tog k="numbers" label="Numbers" /><Tog k="surveys" label="Survey names" />
+          <Tog k="wells" label="Wells" /><Tog k="wellbores" label="Wellbores" />
+        </div>
       </div>
       <div className="lm-canvas">
         <div ref={container} style={{ position: "absolute", inset: 0 }} />
         {picked && (
           <div className="lm-info">
             <button className="lm-info-x" onClick={() => setPicked(null)} aria-label="Close">×</button>
+            <span className="lm-info-l">Selected</span>
             <strong>{picked.title}</strong>
             {picked.sub && <div>{picked.sub}</div>}
           </div>

@@ -1,6 +1,6 @@
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, Info, Users } from "lucide-react";
-import { CLASS_COLORS } from "../lib/entityClasses";
+import { CLASS_COLORS, CLASS_FALLBACK_COLOR } from "../lib/entityClasses";
 
 /**
  * Shared presentation for relationship intelligence — used by both the Buyer
@@ -16,9 +16,10 @@ export interface ChainEntry {
   position: number; role: string;
 }
 
+/** Class tag: tinted with the class colour, a leading dot, readable text in every theme. */
 export function ClassBadge({ klass, label }: { klass: string; label: string }) {
-  const c = CLASS_COLORS[klass] ?? "#64748b";
-  return <span className="badge" style={{ background: `${c}26`, color: c }}>{label}</span>;
+  const c = CLASS_COLORS[klass] ?? CLASS_FALLBACK_COLOR;
+  return <span className="class-badge" style={{ "--c": c } as CSSProperties}><i />{label}</span>;
 }
 
 export function RelStat({ n, l }: { n: number; l: string }) {
@@ -198,10 +199,10 @@ export function ChainSection({ chains, classLabels, focusNorm, renderActions }: 
 
 /** Endpoint pill in a chain's summary row — tinted by the entity's class. */
 export function NodeBadge({ n, focus }: { n: ChainNode; focus: boolean }) {
-  const c = CLASS_COLORS[n.klass] ?? "#64748b";
+  const c = CLASS_COLORS[n.klass] ?? CLASS_FALLBACK_COLOR;
   return (
     <span className={`chain2-pill ${focus ? "focus" : ""}`}
-      style={focus ? undefined : { background: `${c}1f`, borderColor: `${c}55`, color: c }}>
+      style={focus ? undefined : { "--c": c } as CSSProperties}>
       {n.name}
     </span>
   );
@@ -209,9 +210,9 @@ export function NodeBadge({ n, focus }: { n: ChainNode; focus: boolean }) {
 
 /** Node box in the expanded flow — neutral card, accent ring on the focus buyer. */
 export function NodeBox({ n, focus }: { n: ChainNode; focus: boolean }) {
-  const c = CLASS_COLORS[n.klass] ?? "#64748b";
+  const c = CLASS_COLORS[n.klass] ?? CLASS_FALLBACK_COLOR;
   return (
-    <span className={`chain2-box ${focus ? "focus" : ""}`} style={focus ? undefined : { borderColor: `${c}55` }} title={n.name}>
+    <span className={`chain2-box ${focus ? "focus" : ""}`} style={focus ? undefined : { "--c": c } as CSSProperties} title={n.name}>
       {n.name}
     </span>
   );

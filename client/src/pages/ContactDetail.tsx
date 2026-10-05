@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
-  ArrowLeft, Bell, CheckSquare, ChevronDown, ChevronLeft, ChevronRight, ChevronUp,
+  ArrowLeft, Bell, CheckSquare, ChevronDown, ChevronLeft, ChevronRight,
   Mail, MapPin, MessageSquare, Palette, Pencil, Phone, Pin, Plus, Search, Send, StickyNote, Trash2, X,
 } from "lucide-react";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, Banner, ConfirmDelete, EmptyState, showToast, UserChip, ChipList } from "../components/ui";
+import { Spinner, Banner, ConfirmDelete, EmptyState, showToast, UserChip, ChipList, OverflowMenu } from "../components/ui";
 import { Select } from "../components/Select";
 import { DateField } from "../components/DateField";
+import { Avatar, Segmented, Tag } from "../components/kit";
 import { fmtDate } from "../lib/format";
-import { avatarColor } from "../lib/avatarColor";
-import { type ContactRow, TYPES, STATUSES, typeLabel, statusLabel, CtPill, TYPE_COLORS, STATUS_COLORS } from "./Contacts";
+import { type ContactRow, TYPES, STATUSES, typeLabel, TypeTag, StatusTag } from "./Contacts";
 import { formatPhone, formatPhoneAsYouType, normalizePhone } from "../lib/phone";
 import type { UserLite } from "../types";
 
@@ -40,10 +40,14 @@ export interface ContactActivityRow {
 }
 
 const DISPOSITIONS = ["Connected", "No Answer", "Voicemail", "Bad Number", "Callback Requested"];
+/** Outcome tag tone per server disposition (display only). */
+const DISPOSITION_TONE: Record<string, "success" | "warn" | "neutral" | "danger" | "accent"> = {
+  Connected: "success", Voicemail: "warn", "No Answer": "neutral", "Bad Number": "danger", "Callback Requested": "accent",
+};
 
 // Optional note background colors — soft pastels, keyed by name (the server
-// stores the key; per-theme shades live in styles.css). Swatch hex is only the
-// picker preview.
+// stores the key; per-theme shades live in the stylesheet). Swatch hex is only
+// the picker preview.
 const NOTE_COLORS: { key: string; label: string; hex: string }[] = [
   { key: "yellow", label: "Yellow", hex: "#eab308" },
   { key: "blue", label: "Blue", hex: "#3b82f6" },
@@ -52,9 +56,6 @@ const NOTE_COLORS: { key: string; label: string; hex: string }[] = [
   { key: "pink", label: "Pink", hex: "#ec4899" },
   { key: "orange", label: "Orange", hex: "#f97316" },
 ];
-
-const initialsOf = (name: string): string =>
-  name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
 
 const fmtTime = (iso: string): string =>
   new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
@@ -69,12 +70,25 @@ const dayLabel = (iso: string): string => {
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: d.getFullYear() === today.getFullYear() ? undefined : "numeric" });
 };
 
-const KIND_META: Record<string, { label: string; icon: JSX.Element; tone: string }> = {
-  NOTE: { label: "Internal note", icon: <StickyNote size={14} />, tone: "var(--accent)" },
-  CALL: { label: "Outbound call", icon: <Phone size={14} />, tone: "var(--red)" },
-  EMAIL: { label: "Email", icon: <Mail size={14} />, tone: "#8b5cf6" },
-  SMS: { label: "Text message", icon: <MessageSquare size={14} />, tone: "var(--green)" },
+/** Timeline kinds: head label, filter label, icon, and colour class. */
+const KIND_META: Record<string, { label: string; tag: string; plural: string; icon: JSX.Element; cls: string }> = {
+  NOTE: { label: "Internal note", tag: "Note", plural: "Notes", icon: <StickyNote size={14} />, cls: "k-note" },
+  CALL: { label: "Outbound call", tag: "Call", plural: "Calls", icon: <Phone size={14} />, cls: "k-call" },
+  EMAIL: { label: "Email", tag: "Email", plural: "Emails", icon: <Mail size={14} />, cls: "k-email" },
+  SMS: { label: "Text message", tag: "Text", plural: "Texts", icon: <MessageSquare size={14} />, cls: "k-text" },
 };
+
+/** Due chip for tasks/reminders. Due dates are calendar days stored at UTC
+ *  midnight, so compare the stored day key with today's local day key. */
+function DueChip({ iso, done }: { iso: string | null; done: boolean }) {
+  if (!iso) return <span className="cw-chip">No date</span>;
+  const t = new Date();
+  const today = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`;
+  const key = iso.slice(0, 10);
+  if (done || key > today) return <span className="cw-chip">{fmtDate(iso)}</span>;
+  if (key === today) return <span className="cw-chip warn">Due today</span>;
+  return <span className="cw-chip danger">Overdue · {fmtDate(iso)}</span>;
+}
 
 export function ContactDetail() {
   const { id } = useParams<{ id: string }>();
@@ -103,6 +117,15 @@ export function ContactDetail() {
     const updated = await api.patch<ContactRow>(`/contacts/${id}`, body);
     setContact(updated);
   };
+  // Timeline pin / delete reuse the activity endpoints the Notes panel uses.
+  const updateActivity = async (a: ContactActivityRow, body: Record<string, unknown>) => {
+    await api.patch(`/contacts/${id}/activities/${a.id}`, body);
+    load();
+  };
+  const removeActivity = async (a: ContactActivityRow) => {
+    await api.del(`/contacts/${id}/activities/${a.id}`);
+    load();
+  };
 
   if (err) return <div className="page"><Banner kind="error">{err}</Banner></div>;
   if (!contact) return <Spinner />;
@@ -113,52 +136,50 @@ export function ContactDetail() {
 
   return (
     <div className="cw-wrap">
-      {/* Top bar: breadcrumb + record pager (reference header). */}
+      {/* Detail bar: back + record pager. */}
       <header className="cw-top">
-        <Link to="/contacts" className="cw-topback" aria-label="Back to contacts"><ArrowLeft size={13} /></Link>
+        <Link to="/contacts" className="cw-topback" aria-label="Back to contacts"><ArrowLeft size={15} /></Link>
         <span className="cw-toptitle">Contact Details</span>
         {idx >= 0 && <span className="cw-count">{idx + 1} of {all.length.toLocaleString()}</span>}
         <span className="cw-pager">
-          <button className="cw-pgbtn" disabled={idx <= 0} onClick={() => go(-1)} aria-label="Previous contact"><ChevronLeft size={11} /></button>
-          <button className="cw-pgbtn" disabled={idx < 0 || idx >= all.length - 1} onClick={() => go(1)} aria-label="Next contact"><ChevronRight size={11} /></button>
+          <button className="cw-pgbtn" disabled={idx <= 0} onClick={() => go(-1)} aria-label="Previous contact"><ChevronLeft size={13} /></button>
+          <button className="cw-pgbtn" disabled={idx < 0 || idx >= all.length - 1} onClick={() => go(1)} aria-label="Next contact"><ChevronRight size={13} /></button>
         </span>
       </header>
 
       <div className="cw">
       {/* ============================================== left: contact details */}
       <aside className="cw-left">
-        <div className="cw-ident">
-          <div className="cw-ident-row">
-            <span className="cw-avatar lg" style={{ background: avatarColor(contact.name), color: "#fff", borderColor: "transparent" }}>{initialsOf(contact.name)}</span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <NameField contact={contact} canEdit={canManage} onSave={patch} />
-              <div className="cw-pills">
-                <CtPill color={TYPE_COLORS[contact.type] ?? "#6b7280"}>{typeLabel(contact.type)}</CtPill>
-                <CtPill dot color={STATUS_COLORS[contact.status] ?? "#6b7280"}>{statusLabel(contact.status)}</CtPill>
-              </div>
-            </div>
-            {canManage && (
-              <button className="cw-del" title="Delete contact" aria-label="Delete contact" onClick={() => setConfirmDelete(true)}><Trash2 size={13} /></button>
-            )}
-          </div>
-
-          <div className="cw-two">
-            <div>
-              <div className="cw-lbl">Owner</div>
-              <Select ariaLabel="Owner" clearable searchable placeholder="Unassigned" disabled={!canManage}
-                value={contact.owner?.id ?? ""} onChange={(v) => void patch({ ownerId: v || null })}
-                options={users.map((u) => ({ value: u.id, label: u.name }))} />
-            </div>
-            <div>
-              <div className="cw-lbl">Status</div>
-              <Select ariaLabel="Status" disabled={!canManage}
-                value={contact.status} onChange={(v) => v && void patch({ status: v })}
-                options={STATUSES.map(([v, l]) => ({ value: v, label: l }))} />
+        <div className="cw-ident-row">
+          <Avatar name={contact.name} size={52} />
+          <div className="cw-ident-main">
+            <NameField contact={contact} canEdit={canManage} onSave={patch} />
+            <div className="cw-pills">
+              <TypeTag type={contact.type} />
+              <StatusTag status={contact.status} />
             </div>
           </div>
-
-          <Tags contact={contact} canManage={canManage} onSave={(tags) => void patch({ tags })} />
+          {canManage && (
+            <OverflowMenu items={[{ label: <span className="cw-menu-danger"><Trash2 size={14} /> Delete contact</span>, danger: true, onClick: () => setConfirmDelete(true) }]} />
+          )}
         </div>
+
+        <div className="cw-two">
+          <div>
+            <div className="cw-lbl">Owner</div>
+            <Select ariaLabel="Owner" clearable searchable placeholder="Unassigned" disabled={!canManage}
+              value={contact.owner?.id ?? ""} onChange={(v) => void patch({ ownerId: v || null })}
+              options={users.map((u) => ({ value: u.id, label: u.name }))} />
+          </div>
+          <div>
+            <div className="cw-lbl">Status</div>
+            <Select ariaLabel="Status" disabled={!canManage}
+              value={contact.status} onChange={(v) => v && void patch({ status: v })}
+              options={STATUSES.map(([v, l]) => ({ value: v, label: l }))} />
+          </div>
+        </div>
+
+        <Tags contact={contact} canManage={canManage} onSave={(tags) => void patch({ tags })} />
 
         <FieldSections contact={contact} canManage={canManage} onSave={patch} />
       </aside>
@@ -166,64 +187,20 @@ export function ContactDetail() {
       {/* ============================================== center: timeline */}
       <section className="cw-center">
         <div className="cw-chead">
-          <div className="row" style={{ gap: 12, alignItems: "center" }}>
-            <span className="cw-avatar" style={{ background: avatarColor(contact.name), color: "#fff", borderColor: "transparent" }}>{initialsOf(contact.name)}</span>
-            <div>
-              <div style={{ fontSize: 15, fontWeight: 700 }}>{contact.name}</div>
-              {contact.phone && <div className="cw-mono muted">{formatPhone(contact.phone)}</div>}
+          <div className="cw-chead-who">
+            <Avatar name={contact.name} size={40} />
+            <div style={{ minWidth: 0 }}>
+              <div className="cw-chead-name">{contact.name}</div>
+              {contact.phone && <div className="cw-chead-phone">{formatPhone(contact.phone)}</div>}
             </div>
           </div>
-          <div className="row" style={{ gap: 8 }}>
-            {contact.phone && <a className="cw-act call" href={`tel:${contact.phone}`} title={`Call ${formatPhone(contact.phone)}`}><Phone size={13} /> Call</a>}
-            {contact.email && <a className="cw-act" href={`mailto:${contact.email}`} title={`Email ${contact.email}`}><Mail size={13} /> Email</a>}
+          <div className="cw-chead-acts">
+            {contact.phone && <a className="cw-act call" href={`tel:${contact.phone}`} title={`Call ${formatPhone(contact.phone)}`}><Phone size={14} /> Call</a>}
+            {contact.email && <a className="cw-act" href={`mailto:${contact.email}`} title={`Email ${contact.email}`}><Mail size={14} /> Email</a>}
           </div>
         </div>
 
-        <div className="cw-timeline">
-          {activities === null ? <Spinner /> : timeline.length === 0 ? (
-            <EmptyState
-              icon={<span className="cw-empty-tile"><MessageSquare size={20} /></span>}
-              title="No activity yet"
-            >
-              Log your first call, text, email, or internal note below — everything lands on this timeline.
-            </EmptyState>
-          ) : (
-            timeline.map((a, i) => {
-              const meta = KIND_META[a.kind] ?? KIND_META.NOTE;
-              const newDay = i === 0 || dayKey(timeline[i - 1].createdAt) !== dayKey(a.createdAt);
-              return (
-                <div key={a.id}>
-                  {newDay && (
-                    <div className="cw-day">
-                      <span className="cw-day-line" /><span className="cw-day-chip">{dayLabel(a.createdAt)}</span><span className="cw-day-line" />
-                    </div>
-                  )}
-                  <div className="cw-event">
-                    <div className="cw-bubble">
-                      <div className="cw-bubble-head">
-                        <span className="cw-kind-ico" style={{ color: meta.tone, background: `color-mix(in srgb, ${meta.tone} 12%, transparent)` }}>{meta.icon}</span>
-                        <div style={{ flex: 1, minWidth: 0 }}>
-                          <div className="cw-bubble-title">
-                            {a.title ?? meta.label}{a.kind === "CALL" && a.disposition ? ` · ${a.disposition}` : ""}
-                          </div>
-                          {a.title && <div className="muted" style={{ fontSize: 11, marginTop: 1 }}>{meta.label}</div>}
-                          {a.kind === "CALL" && a.durationSeconds != null && (
-                            <div className="cw-mono muted" style={{ marginTop: 2 }}>{a.durationSeconds} sec</div>
-                          )}
-                        </div>
-                        {a.kind === "CALL" && a.disposition && (
-                          <span className={`cw-dispo ${a.disposition === "Connected" ? "ok" : "warn"}`}>{a.disposition}</span>
-                        )}
-                      </div>
-                      {a.body && <div className="cw-bubble-body">{a.body}</div>}
-                    </div>
-                    <div className="cw-event-meta"><span className="cw-mono">{fmtTime(a.createdAt)}</span> · <span>{a.createdBy?.name ?? "—"}</span></div>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
+        <Timeline activities={activities} timeline={timeline} canManage={canManage} onUpdate={updateActivity} onRemove={removeActivity} />
 
         {canManage && <Composer contactId={contact.id} onLogged={load} />}
       </section>
@@ -244,6 +221,98 @@ export function ContactDetail() {
   );
 }
 
+/* -------------------------------------------------------------- timeline */
+
+/**
+ * Activity timeline, newest first: pinned entries on top, then day groups.
+ * Filter chips narrow the view by kind (display only). Pin and delete are
+ * offered on notes and logged calls — the same entries the Notes panel already
+ * lets the team pin and delete; delete asks for a second click.
+ */
+function Timeline({ activities, timeline, canManage, onUpdate, onRemove }: {
+  activities: ContactActivityRow[] | null; timeline: ContactActivityRow[]; canManage: boolean;
+  onUpdate: (a: ContactActivityRow, body: Record<string, unknown>) => Promise<void>;
+  onRemove: (a: ContactActivityRow) => Promise<void>;
+}) {
+  const [kind, setKind] = useState("ALL");
+  const [armed, setArmed] = useState<string | null>(null);
+  useEffect(() => {
+    if (!armed) return;
+    const t = window.setTimeout(() => setArmed(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [armed]);
+
+  if (activities === null) return <div className="cw-timeline"><Spinner /></div>;
+
+  const shown = [...(kind === "ALL" ? timeline : timeline.filter((a) => a.kind === kind))]
+    .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+  const groups: { label: string; pinned?: boolean; items: ContactActivityRow[] }[] = [];
+  const pinned = shown.filter((a) => a.pinned);
+  if (pinned.length) groups.push({ label: "Pinned", pinned: true, items: pinned });
+  for (const a of shown.filter((x) => !x.pinned)) {
+    const last = groups[groups.length - 1];
+    if (last && !last.pinned && dayKey(last.items[0].createdAt) === dayKey(a.createdAt)) last.items.push(a);
+    else groups.push({ label: dayLabel(a.createdAt), items: [a] });
+  }
+
+  return (
+    <>
+      {timeline.length > 0 && (
+        <div className="cw-filters">
+          {[["ALL", "All"], ...Object.entries(KIND_META).map(([k, m]) => [k, m.plural])].map(([k, l]) => (
+            <button key={k} type="button" className={`cw-fchip ${kind === k ? "active" : ""}`} onClick={() => setKind(k)}>
+              {l}<span>{k === "ALL" ? timeline.length : timeline.filter((a) => a.kind === k).length}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="cw-timeline">
+        {timeline.length === 0 ? (
+          <EmptyState icon={<span className="cw-empty-tile"><MessageSquare size={18} /></span>} title="No activity yet">
+            Log your first call, text, email, or internal note below — everything lands on this timeline.
+          </EmptyState>
+        ) : shown.length === 0 ? (
+          <EmptyState icon={<span className="cw-empty-tile"><MessageSquare size={18} /></span>} title="Nothing in this filter" />
+        ) : groups.map((g) => (
+          <div key={g.label + g.items[0].id}>
+            <div className={`cw-day ${g.pinned ? "pinned" : ""}`}><span>{g.label}</span><i /></div>
+            {g.items.map((a) => {
+              const meta = KIND_META[a.kind] ?? KIND_META.NOTE;
+              const actionable = canManage && (a.kind === "NOTE" || a.kind === "CALL");
+              return (
+                <div key={a.id} className={`cw-event ${meta.cls}`}>
+                  <span className="cw-kind-ico">{meta.icon}</span>
+                  <div className="cw-entry">
+                    <div className="cw-entry-head">
+                      <span className="cw-entry-title">{a.title ?? meta.label}</span>
+                      <span className="cw-kind-tag">{meta.tag}</span>
+                      {a.kind === "CALL" && a.disposition && <Tag tone={DISPOSITION_TONE[a.disposition] ?? "neutral"}>{a.disposition}</Tag>}
+                      <span className="cw-entry-meta">
+                        {fmtTime(a.createdAt)} · {a.createdBy?.name ?? "—"}
+                        {a.kind === "CALL" && a.durationSeconds != null && <> · {a.durationSeconds} sec</>}
+                      </span>
+                      {actionable && (
+                        <span className="cw-entry-acts">
+                          <button type="button" className={`cw-ibtn ${a.pinned ? "pinned" : ""}`} title={a.pinned ? "Unpin" : "Pin to top"} aria-label={a.pinned ? "Unpin" : "Pin to top"}
+                            onClick={() => void onUpdate(a, { pinned: !a.pinned })}><Pin size={13} /></button>
+                          <button type="button" className={`cw-ibtn del ${armed === a.id ? "armed" : ""}`}
+                            title={armed === a.id ? "Click again to delete" : "Delete"} aria-label={armed === a.id ? "Click again to delete" : "Delete"}
+                            onClick={() => { if (armed === a.id) { setArmed(null); void onRemove(a); } else setArmed(a.id); }}><Trash2 size={13} /></button>
+                        </span>
+                      )}
+                    </div>
+                    {a.body && <div className="cw-entry-body">{a.body}</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 /* ------------------------------------------------------------------ tags */
 
 function Tags({ contact, canManage, onSave }: { contact: ContactRow; canManage: boolean; onSave: (tags: string[]) => void }) {
@@ -256,26 +325,21 @@ function Tags({ contact, canManage, onSave }: { contact: ContactRow; canManage: 
     setDraft(""); setAdding(false);
   };
   return (
-    <div style={{ marginTop: 14 }}>
-      <div className="cw-tags-head">
-        <span className="cw-lbl" style={{ marginBottom: 0 }}>Tags <span className="cw-mono" style={{ color: "var(--text-dim)" }}>({tags.length})</span></span>
-        {canManage && <button className="cw-tag-add" onClick={() => setAdding(true)}>+ Add tag</button>}
-      </div>
-      <div className="cw-tags">
-        {tags.map((t) => (
-          <span key={t} className="cw-tag">
-            {t}
-            {canManage && <button aria-label={`Remove tag ${t}`} onClick={() => onSave(tags.filter((x) => x !== t))}><X size={9} /></button>}
-          </span>
-        ))}
-        {adding && (
-          <input autoFocus className="cw-tag-input" value={draft} placeholder="New tag…"
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={add}
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } if (e.key === "Escape") { setDraft(""); setAdding(false); } }} />
-        )}
-        {tags.length === 0 && !adding && <span className="muted" style={{ fontSize: 12 }}>No tags yet.</span>}
-      </div>
+    <div className="cw-tags">
+      {tags.map((t) => (
+        <span key={t} className="cw-tag">
+          {t}
+          {canManage && <button aria-label={`Remove tag ${t}`} onClick={() => onSave(tags.filter((x) => x !== t))}><X size={10} /></button>}
+        </span>
+      ))}
+      {adding && (
+        <input autoFocus className="cw-tag-input" value={draft} placeholder="Tag name"
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={add}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } if (e.key === "Escape") { setDraft(""); setAdding(false); } }} />
+      )}
+      {canManage && !adding && <button className="cw-tag-add" onClick={() => setAdding(true)}>+ Add tag</button>}
+      {tags.length === 0 && !adding && !canManage && <span className="cw-none">No tags yet.</span>}
     </div>
   );
 }
@@ -340,6 +404,8 @@ interface FieldSpec {
     placeholder?: string;
     /** Build the single-field PATCH body from the edited string. */
     body: (v: string) => Record<string, unknown>;
+    /** Refuse an empty value (first / last name). */
+    required?: boolean;
   };
 }
 
@@ -348,7 +414,7 @@ function InlineField({ spec, canEdit, onSave }: { spec: FieldSpec; canEdit: bool
   const [v, setV] = useState("");
   const [busy, setBusy] = useState(false);
   const editable = canEdit && !!spec.edit;
-  const dirty = editing && spec.edit && v !== spec.edit.value;
+  const dirty = editing && spec.edit && v !== spec.edit.value && !(spec.edit.required && v.trim() === "");
 
   const start = () => { if (!editable) return; setV(spec.edit!.value); setEditing(true); };
   const save = async () => {
@@ -400,28 +466,36 @@ function InlineField({ spec, canEdit, onSave }: { spec: FieldSpec; canEdit: bool
 }
 
 const SECTION_ICONS: Record<string, JSX.Element> = {
-  "Reach the Owner": <Phone size={15} />,
-  "Mineral Interest": <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg>,
+  "Contact": <Phone size={15} />,
+  "Mineral interest": <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" /></svg>,
   "Acquisition": <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M20 7H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2zM16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2" /></svg>,
-  "Outreach Cadence": <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M3 12h4l3 8 4-16 3 8h4" /></svg>,
+  "Outreach": <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M3 12h4l3 8 4-16 3 8h4" /></svg>,
 };
 
 function FieldSections({ contact, canManage, onSave }: { contact: ContactRow; canManage: boolean; onSave: (body: Record<string, unknown>) => Promise<void> }) {
   const [q, setQ] = useState("");
-  // Reference: the dossier sections start as collapsed cards; open on demand.
-  const [closed, setClosed] = useState<Set<string>>(
-    () => new Set(["Reach the Owner", "Mineral Interest", "Acquisition", "Outreach Cadence"]));
+  // The dossier sections start open; each can be collapsed individually.
+  const [closed, setClosed] = useState<Set<string>>(() => new Set());
   const followUpOverdue = contact.nextFollowUpDate != null && new Date(contact.nextFollowUpDate).getTime() < Date.now();
 
   const list = (raw: string) => raw.split(",").map((s) => s.trim()).filter(Boolean);
   const day = (iso: string | null) => (iso ? iso.slice(0, 10) : "");
   const sections: { title: string; rows: FieldSpec[] }[] = [
     {
-      title: "Reach the Owner",
+      title: "Contact",
       rows: [
+        // First and last name are saved together, like the header name editor.
+        {
+          label: "First name", display: contact.firstName,
+          edit: { kind: "text", value: contact.firstName, required: true, body: (v) => ({ firstName: v.trim(), lastName: contact.lastName }) },
+        },
+        {
+          label: "Last name", display: contact.lastName,
+          edit: { kind: "text", value: contact.lastName, required: true, body: (v) => ({ firstName: contact.firstName, lastName: v.trim() }) },
+        },
         {
           label: "Phone",
-          display: contact.phone ? <a className="cw-mono" href={`tel:${contact.phone}`} onClick={(e) => e.stopPropagation()}>{formatPhone(contact.phone)}</a> : null,
+          display: contact.phone ? <a href={`tel:${contact.phone}`} onClick={(e) => e.stopPropagation()}>{formatPhone(contact.phone)}</a> : null,
           edit: { kind: "phone", value: formatPhone(contact.phone), placeholder: "(555) 000-0000", body: (v) => ({ phone: normalizePhone(v) || null }) },
         },
         {
@@ -432,19 +506,19 @@ function FieldSections({ contact, canManage, onSave }: { contact: ContactRow; ca
       ],
     },
     {
-      title: "Mineral Interest",
+      title: "Mineral interest",
       rows: [
         {
           label: "Ownership entity", display: contact.entityName,
           edit: { kind: "text", value: contact.entityName ?? "", body: (v) => ({ entityName: v.trim() || null }) },
         },
         {
-          label: "Counties", display: contact.counties.length ? <ChipList items={contact.counties} /> : null,
-          edit: { kind: "list", value: contact.counties.join(", "), placeholder: "Comma-separated", body: (v) => ({ counties: list(v) }) },
-        },
-        {
           label: "State", display: contact.states.length ? <ChipList items={contact.states} /> : null,
           edit: { kind: "list", value: contact.states.join(", "), placeholder: "Comma-separated", body: (v) => ({ states: list(v) }) },
+        },
+        {
+          label: "Counties", display: contact.counties.length ? <ChipList items={contact.counties} /> : null,
+          edit: { kind: "list", value: contact.counties.join(", "), placeholder: "Comma-separated", body: (v) => ({ counties: list(v) }) },
         },
       ],
     },
@@ -464,7 +538,7 @@ function FieldSections({ contact, canManage, onSave }: { contact: ContactRow; ca
       ],
     },
     {
-      title: "Outreach Cadence",
+      title: "Outreach",
       rows: [
         {
           label: "Last contacted", display: contact.lastContactedAt ? fmtDate(contact.lastContactedAt) : null,
@@ -473,10 +547,11 @@ function FieldSections({ contact, canManage, onSave }: { contact: ContactRow; ca
         {
           label: "Next follow-up",
           display: contact.nextFollowUpDate
-            ? <span style={followUpOverdue ? { color: "var(--red)", fontWeight: 600 } : undefined}>{fmtDate(contact.nextFollowUpDate)}{followUpOverdue ? " · overdue" : ""}</span>
+            ? <span className={followUpOverdue ? "cw-overdue" : undefined}>{fmtDate(contact.nextFollowUpDate)}{followUpOverdue ? " · overdue" : ""}</span>
             : null,
           edit: { kind: "date", value: day(contact.nextFollowUpDate), body: (v) => ({ nextFollowUpDate: v || null }) },
         },
+        { label: "Added", display: fmtDate(contact.createdAt) },
       ],
     },
   ];
@@ -488,7 +563,7 @@ function FieldSections({ contact, canManage, onSave }: { contact: ContactRow; ca
   return (
     <div className="cw-fields">
       <div className="cw-search">
-        <Search size={12} />
+        <Search size={14} />
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search fields…" aria-label="Search contact fields" />
       </div>
       {visible.map((s) => {
@@ -498,7 +573,7 @@ function FieldSections({ contact, canManage, onSave }: { contact: ContactRow; ca
             <button className="cw-sec-head" onClick={() => setClosed((prev) => { const n = new Set(prev); n.has(s.title) ? n.delete(s.title) : n.add(s.title); return n; })} aria-expanded={isOpen}>
               <span className="cw-sec-ico">{SECTION_ICONS[s.title]}</span>
               <span className="cw-sec-name">{s.title}</span>
-              {isOpen ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+              <ChevronDown size={14} className="cw-sec-chev" />
             </button>
             {isOpen && (
               <div className="cw-sec-body">
@@ -508,7 +583,8 @@ function FieldSections({ contact, canManage, onSave }: { contact: ContactRow; ca
           </div>
         );
       })}
-      <div className="cw-meta muted">Added {fmtDate(contact.createdAt)}</div>
+      {needle && visible.length === 0 && <div className="cw-none">No fields match "{q}".</div>}
+      <div className="cw-meta">Added {fmtDate(contact.createdAt)}</div>
     </div>
   );
 }
@@ -543,53 +619,55 @@ function Composer({ contactId, onLogged }: { contactId: string; onLogged: () => 
   };
 
   const TABS: [typeof tab, string][] = [["NOTE", "Internal note"], ["CALL", "Log call"], ["EMAIL", "Log email"], ["SMS", "Log text"]];
+  const label = TABS.find(([k]) => k === tab)![1];
   return (
     <div className="cw-composer">
-      <div className="cw-comp-tabs">
-        {TABS.map(([k, l]) => (
-          <button key={k} className={tab === k ? "active" : ""} onClick={() => { setTab(k); inputRef.current?.focus(); }}>{l}</button>
-        ))}
+      <div className="cw-comp-top">
+        <Segmented accent ariaLabel="Entry type" value={tab}
+          onChange={(k) => { setTab(k); inputRef.current?.focus(); }}
+          options={TABS.map(([k, l]) => ({ value: k, label: l }))} />
+        {tab === "CALL" && (
+          <div className="cw-outcomes" role="radiogroup" aria-label="Call disposition">
+            {DISPOSITIONS.map((d) => (
+              <button key={d} type="button" role="radio" aria-checked={dispo === d} className={`cw-pill ${dispo === d ? "active" : ""}`} onClick={() => setDispo(d)}>{d}</button>
+            ))}
+            <input className="cw-dur" type="number" min={0} value={dur} onChange={(e) => setDur(e.target.value)} placeholder="Duration (sec)" aria-label="Call duration in seconds" />
+          </div>
+        )}
       </div>
-      {tab === "CALL" && (
-        <div className="row" style={{ gap: 8, marginBottom: 8 }}>
-          <Select ariaLabel="Call disposition" width={180} value={dispo} onChange={(v) => v && setDispo(v)}
-            options={DISPOSITIONS.map((d) => ({ value: d, label: d }))} />
-          <input type="number" min={0} value={dur} onChange={(e) => setDur(e.target.value)} placeholder="Duration (sec)" style={{ width: 130 }} aria-label="Call duration in seconds" />
-        </div>
-      )}
       {tab === "NOTE" && (
         <input
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Title — concise summary…"
           aria-label="Note title"
-          style={{ marginBottom: 8, width: "100%" }}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); inputRef.current?.focus(); } }}
         />
       )}
       <div className="cw-comp-row">
         <textarea
           ref={inputRef}
-          rows={1}
+          rows={2}
           value={body}
           placeholder={tab === "NOTE" ? "Type an internal note…" : tab === "CALL" ? "Call summary…" : tab === "EMAIL" ? "Email summary…" : "Text summary…"}
           onChange={(e) => setBody(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }}
         />
-        <button className="cw-send" disabled={!ready || busy} onClick={() => void send()} title="Save to timeline" aria-label="Save to timeline">
-          <Send size={15} />
+        <button className="cw-send" disabled={!ready || busy} onClick={() => void send()} title={`${label} — save to timeline`} aria-label="Save to timeline">
+          <Send size={16} />
         </button>
       </div>
+      <div className="cw-comp-hint">Enter to save · Shift + Enter for a new line</div>
     </div>
   );
 }
 
 /* -------------------------------------------------------------- side panel */
 
-const TASK_PRIORITIES = [
-  { v: "LOW", label: "Low", color: "var(--green)" },
-  { v: "MEDIUM", label: "Medium", color: "var(--amber)" },
-  { v: "HIGH", label: "High", color: "var(--red)" },
+const TASK_PRIORITIES: { v: string; label: string; tone: "neutral" | "warn" | "danger" }[] = [
+  { v: "LOW", label: "Low", tone: "neutral" },
+  { v: "MEDIUM", label: "Medium", tone: "warn" },
+  { v: "HIGH", label: "High", tone: "danger" },
 ];
 
 function SidePanel({ contact, activities, canManage, onChanged, users }: {
@@ -598,7 +676,7 @@ function SidePanel({ contact, activities, canManage, onChanged, users }: {
   // Deep link from the dashboard Tasks widget / task-due notifications:
   // `?task=<id>` opens straight onto the Tasks tab.
   const openedOnTask = useMemo(() => new URLSearchParams(window.location.search).has("task"), []);
-  // Tasks is the default rail tab (reference); ?task deep links land there too.
+  // Tasks is the default rail tab; ?task deep links land there too.
   const [tab, setTab] = useState<"notes" | "tasks" | "reminders" | "minerals">(openedOnTask ? "tasks" : "tasks");
   const [q, setQ] = useState("");
   const [draft, setDraft] = useState("");   // Title — concise summary (required)
@@ -611,6 +689,9 @@ function SidePanel({ contact, activities, canManage, onChanged, users }: {
   const [noteColor, setNoteColor] = useState<string | null>(null);
   // Note id whose inline color palette is open (edit-in-place).
   const [colorPickFor, setColorPickFor] = useState<string | null>(null);
+  // Completed tasks fold into a group; a ?task deep link shows them so the
+  // linked task is on screen whatever its state.
+  const [showDone, setShowDone] = useState(openedOnTask);
 
   const notes = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -619,7 +700,10 @@ function SidePanel({ contact, activities, canManage, onChanged, users }: {
     return [...filtered].sort((a, b) => Number(b.pinned) - Number(a.pinned) || +new Date(b.createdAt) - +new Date(a.createdAt));
   }, [activities, q]);
   const tasks = activities.filter((a) => a.kind === "TASK").sort((a, b) => Number(!!a.completedAt) - Number(!!b.completedAt) || +new Date(a.dueDate ?? a.createdAt) - +new Date(b.dueDate ?? b.createdAt));
+  const openTasks = tasks.filter((a) => !a.completedAt);
+  const doneTasks = tasks.filter((a) => a.completedAt);
   const reminders = activities.filter((a) => a.kind === "REMINDER").sort((a, b) => +new Date(a.dueDate ?? a.createdAt) - +new Date(b.dueDate ?? b.createdAt));
+  const noteCount = activities.filter((a) => a.kind === "NOTE" || a.kind === "CALL").length;
 
   const add = async (kind: "TASK" | "REMINDER" | "NOTE") => {
     if (!draft.trim() || !note.trim() || busy) return;
@@ -643,28 +727,53 @@ function SidePanel({ contact, activities, canManage, onChanged, users }: {
     onChanged();
   };
 
+  const taskRow = (a: ContactActivityRow) => {
+    const p = TASK_PRIORITIES.find((x) => x.v === a.priority);
+    return (
+      <div key={a.id} className={`cw-task ${a.completedAt ? "done" : ""}`}>
+        <input type="checkbox" checked={!!a.completedAt} disabled={!canManage} onChange={() => void update(a, { completed: !a.completedAt })} aria-label={`Complete ${a.body}`} />
+        <div className="cw-task-main">
+          <div className="cw-task-title">{a.title ?? a.body}</div>
+          {a.title && <div className="cw-task-sub">{a.body}</div>}
+          <div className="cw-task-chips">
+            <DueChip iso={a.dueDate} done={!!a.completedAt} />
+            {p && <Tag tone={p.tone}>{p.label}</Tag>}
+            {a.assignedTo && <span className="cw-task-who"><UserChip user={a.assignedTo} size={18} /></span>}
+          </div>
+        </div>
+        {canManage && <button className="cw-ibtn del" title="Delete" aria-label="Delete" onClick={() => void remove(a)}><X size={13} /></button>}
+      </div>
+    );
+  };
+
+  const TABS: [typeof tab, string, number | null][] = [
+    ["notes", "Notes", noteCount], ["tasks", "Tasks", openTasks.length], ["reminders", "Reminders", reminders.filter((r) => !r.completedAt).length], ["minerals", "Minerals", null],
+  ];
+
   return (
     <aside className="cw-right">
-      <div className="cw-rtabs">
-        {([["notes", "Notes"], ["tasks", "Tasks"], ["reminders", "Reminders"], ["minerals", "Minerals"]] as const).map(([k, l]) => (
-          <button key={k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>{l}</button>
+      <div className="cw-rtabs" role="tablist">
+        {TABS.map(([k, l, n]) => (
+          <button key={k} role="tab" aria-selected={tab === k} className={tab === k ? "active" : ""} onClick={() => setTab(k)}>
+            {l}{n != null && <span className="cw-rtab-n">{n}</span>}
+          </button>
         ))}
       </div>
 
       <div className="cw-rbody">
         {tab === "notes" && (
           <>
-            <div className="cw-search" style={{ marginTop: 0 }}>
-              <Search size={12} />
+            <div className="cw-search">
+              <Search size={14} />
               <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search notes…" aria-label="Search notes" />
             </div>
             {canManage && (
               <div className="cw-addcol">
                 <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Title — concise summary…" aria-label="Note title" />
-                <div className="row" style={{ gap: 8 }}>
-                  <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note — details…" aria-label="Note details" style={{ flex: 1 }}
+                <div className="cw-addrow">
+                  <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note — details…" aria-label="Note details"
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add("NOTE"); } }} />
-                  <button className="primary small" disabled={!draft.trim() || !note.trim() || busy} onClick={() => void add("NOTE")}><Plus size={11} /> Add</button>
+                  <button className="cw-addbtn" disabled={!draft.trim() || !note.trim() || busy} onClick={() => void add("NOTE")}><Plus size={13} /> Add</button>
                 </div>
                 {/* Optional background color for the new note. */}
                 <div className="note-swatches" role="radiogroup" aria-label="Note color">
@@ -678,25 +787,22 @@ function SidePanel({ contact, activities, canManage, onChanged, users }: {
                 </div>
               </div>
             )}
-            {notes.length === 0 && <p className="muted" style={{ fontSize: 12.5 }}>No notes yet.</p>}
+            {notes.length === 0 && <p className="cw-none">{q.trim() ? `No notes match "${q.trim()}".` : "No notes yet."}</p>}
             {notes.map((a) => (
               <div key={a.id} className={`cw-note ${a.pinned ? "pinned" : ""}`} data-note-color={a.color ?? undefined}>
                 <div className="cw-note-head">
-                  <span className="cw-kind-ico sm" style={{
-                    color: a.kind === "CALL" ? "var(--amber)" : "var(--accent)",
-                    background: `color-mix(in srgb, ${a.kind === "CALL" ? "var(--amber)" : "var(--accent)"} 13%, transparent)`,
-                  }}>{a.kind === "CALL" ? <Phone size={12} /> : <StickyNote size={12} />}</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, flex: 1 }}>{a.title ?? (a.kind === "CALL" ? `Call · ${a.disposition ?? "Logged"}` : "Note")}</span>
+                  <span className={`cw-note-ico ${a.kind === "CALL" ? "k-call" : "k-note"}`}>{a.kind === "CALL" ? <Phone size={12} /> : <StickyNote size={12} />}</span>
+                  <span className="cw-note-title">{a.title ?? (a.kind === "CALL" ? `Call · ${a.disposition ?? "Logged"}` : "Note")}</span>
                   {canManage && (
-                    <span className="row" style={{ gap: 2 }}>
+                    <span className="cw-note-acts">
                       {a.kind === "NOTE" && (
-                        <button className="icon-btn" title="Note color"
+                        <button className="cw-ibtn" title="Note color" aria-label="Note color"
                           onClick={() => setColorPickFor((cur) => (cur === a.id ? null : a.id))}>
-                          <Palette size={12} />
+                          <Palette size={13} />
                         </button>
                       )}
-                      <button className="icon-btn" title={a.pinned ? "Unpin" : "Pin"} onClick={() => void update(a, { pinned: !a.pinned })}><Pin size={12} /></button>
-                      <button className="icon-btn" title="Delete" onClick={() => void remove(a)}><X size={12} /></button>
+                      <button className={`cw-ibtn ${a.pinned ? "pinned" : ""}`} title={a.pinned ? "Unpin" : "Pin"} aria-label={a.pinned ? "Unpin" : "Pin"} onClick={() => void update(a, { pinned: !a.pinned })}><Pin size={13} /></button>
+                      <button className="cw-ibtn del" title="Delete" aria-label="Delete" onClick={() => void remove(a)}><X size={13} /></button>
                     </span>
                   )}
                 </div>
@@ -713,7 +819,7 @@ function SidePanel({ contact, activities, canManage, onChanged, users }: {
                   </div>
                 )}
                 <div className="cw-note-body">{a.body}</div>
-                <div className="cw-note-foot"><span className="cw-mono">{fmtDate(a.createdAt)}, {fmtTime(a.createdAt)}</span><span>{a.createdBy?.name ?? ""}</span></div>
+                <div className="cw-note-foot"><span>{fmtDate(a.createdAt)}, {fmtTime(a.createdAt)}</span><span>{a.createdBy?.name ?? ""}</span></div>
               </div>
             ))}
           </>
@@ -723,74 +829,65 @@ function SidePanel({ contact, activities, canManage, onChanged, users }: {
           <>
             {canManage && (
               <div className="cw-addcol">
-                <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Task title…" aria-label="Title" />
+                <input value={draft} onChange={(e) => setDraft(e.target.value)} placeholder={tab === "tasks" ? "Task title…" : "Remind me to…"} aria-label="Title" />
                 <input value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note — details…" aria-label="Note details"
                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void add(tab === "tasks" ? "TASK" : "REMINDER"); } }} />
                 {tab === "tasks" ? (
                   <>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <div className="cw-addgrid">
                       <DateField value={due} onChange={setDue} />
-                      <Select ariaLabel="Priority" value={priority} onChange={(v) => setPriority(v || "MEDIUM")}
+                      <Segmented ariaLabel="Priority" value={priority} onChange={(v) => setPriority(v || "MEDIUM")}
                         options={TASK_PRIORITIES.map((p) => ({ value: p.v, label: p.label }))} />
                     </div>
-                    <div className="row" style={{ gap: 8 }}>
+                    <div className="cw-addrow">
                       <span style={{ flex: 1, minWidth: 0 }}>
                         <Select ariaLabel="Assignee" clearable searchable placeholder="Assign to me" value={assignee} onChange={setAssignee}
                           options={users.map((u) => ({ value: u.id, label: u.name }))} />
                       </span>
-                      <button className="cw-addbtn" disabled={!draft.trim() || !note.trim() || busy} onClick={() => void add("TASK")}>+ Add</button>
+                      <button className="cw-addbtn" disabled={!draft.trim() || !note.trim() || busy} onClick={() => void add("TASK")}><Plus size={13} /> Add</button>
                     </div>
                   </>
                 ) : (
-                  <div className="row" style={{ gap: 8 }}>
+                  <div className="cw-addrow">
                     <span style={{ flex: 1, minWidth: 0 }}><DateField value={due} onChange={setDue} /></span>
-                    <button className="cw-addbtn" disabled={!draft.trim() || !note.trim() || busy} onClick={() => void add("REMINDER")}>+ Add</button>
+                    <button className="cw-addbtn" disabled={!draft.trim() || !note.trim() || busy} onClick={() => void add("REMINDER")}><Plus size={13} /> Add</button>
                   </div>
                 )}
               </div>
             )}
             {tab === "tasks" && (
               <>
-                <div className="cw-lbl" style={{ marginTop: 8 }}>Up next</div>
+                <div className="cw-lbl">Up next</div>
                 {tasks.length === 0 && (
                   <div className="cw-empty-dash">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><path d="M22 4L12 14.01l-3-3" /></svg>
                     <span>No tasks yet — add one above.</span>
                   </div>
                 )}
-                {tasks.map((a) => (
-                  <div key={a.id} className={`cw-task ${a.completedAt ? "done" : ""}`}>
-                    <input type="checkbox" checked={!!a.completedAt} disabled={!canManage} onChange={() => void update(a, { completed: !a.completedAt })} aria-label={`Complete ${a.body}`} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div className="cw-task-title">{a.title ?? a.body}</div>
-                      {a.title && <div className="muted" style={{ fontSize: 11.5, marginTop: 1 }}>{a.body}</div>}
-                      <div className="row" style={{ gap: 6, marginTop: 2, flexWrap: "wrap" }}>
-                        {a.dueDate && <span className="cw-mono" style={{ fontSize: 11, color: a.completedAt ? "var(--text-dim)" : "var(--amber)" }}>{fmtDate(a.dueDate)}</span>}
-                        {a.priority && (() => {
-                          const p = TASK_PRIORITIES.find((x) => x.v === a.priority);
-                          return p ? <span style={{ fontSize: 10.5, fontWeight: 700, color: p.color, background: `color-mix(in srgb, ${p.color} 13%, transparent)`, borderRadius: 999, padding: "1px 7px" }}>{p.label}</span> : null;
-                        })()}
-                        {a.assignedTo && <span className="muted" style={{ fontSize: 11 }}><UserChip user={a.assignedTo} size={15} /></span>}
-                      </div>
-                    </div>
-                    {canManage && <button className="icon-btn" title="Delete" onClick={() => void remove(a)}><X size={12} /></button>}
-                  </div>
-                ))}
+                {openTasks.map(taskRow)}
+                {doneTasks.length > 0 && (
+                  <>
+                    <button type="button" className={`cw-group-toggle ${showDone ? "open" : ""}`} aria-expanded={showDone} onClick={() => setShowDone((v) => !v)}>
+                      <ChevronDown size={13} /> Completed ({doneTasks.length})
+                    </button>
+                    {showDone && doneTasks.map(taskRow)}
+                  </>
+                )}
               </>
             )}
             {tab === "reminders" && (
               <>
                 <div className="cw-lbl">Reminders</div>
-                {reminders.length === 0 && <p className="muted" style={{ fontSize: 12.5 }}>No reminders yet.</p>}
+                {reminders.length === 0 && <p className="cw-none">No reminders yet.</p>}
                 {reminders.map((a) => (
-                  <div key={a.id} className="cw-reminder">
-                    <span className="cw-kind-ico sm" style={{ color: "var(--amber)", background: "color-mix(in srgb, var(--amber) 13%, transparent)" }}><Bell size={12} /></span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                  <div key={a.id} className="cw-task cw-reminder">
+                    <span className="cw-rem-ico"><Bell size={12} /></span>
+                    <div className="cw-task-main">
                       <div className="cw-task-title">{a.title ?? a.body}</div>
-                      {a.title && <div className="muted" style={{ fontSize: 11.5, marginTop: 1 }}>{a.body}</div>}
-                      {a.dueDate && <div className="cw-mono" style={{ fontSize: 11, color: "var(--amber)", marginTop: 2 }}>{fmtDate(a.dueDate)}</div>}
+                      {a.title && <div className="cw-task-sub">{a.body}</div>}
+                      {a.dueDate && <div className="cw-task-chips"><DueChip iso={a.dueDate} done={!!a.completedAt} /></div>}
                     </div>
-                    {canManage && <button className="icon-btn" title="Delete" onClick={() => void remove(a)}><X size={12} /></button>}
+                    {canManage && <button className="cw-ibtn del" title="Delete" aria-label="Delete" onClick={() => void remove(a)}><X size={13} /></button>}
                   </div>
                 ))}
               </>
@@ -800,14 +897,14 @@ function SidePanel({ contact, activities, canManage, onChanged, users }: {
 
         {tab === "minerals" && (
           <>
-            <div className="cw-tags-head">
-              <span className="cw-lbl" style={{ marginBottom: 0 }}>Minerals owned</span>
-              <Link to="/map" style={{ fontSize: 11.5, fontWeight: 600 }}>View on map</Link>
+            <div className="cw-min-head">
+              <span className="cw-lbl">Counties of interest</span>
+              <Link to="/map" className="cw-maplink"><MapPin size={13} /> View on map</Link>
             </div>
             {contact.counties.length > 0 ? (
               <div className="cw-tags">
                 {contact.counties.map((c) => (
-                  <span key={c} className="cw-tag"><MapPin size={9} /> {c}{contact.states[0] ? `, ${contact.states[0]}` : ""}</span>
+                  <span key={c} className="cw-county"><MapPin size={12} /> {c}{contact.states[0] ? `, ${contact.states[0]}` : ""}</span>
                 ))}
               </div>
             ) : null}

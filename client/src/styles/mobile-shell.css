@@ -1,1 +1,67 @@
-/* Redesign styles: mobile-shell */
+/* Redesign styles: mobile-shell — phone tab bar, drawer stacking, bottom clearance.
+   The rest of the phone shell (drawer, top bar, sheets, page frame) is in
+   mobile.css; both files read the tokens defined here. */
+
+/* Stacking (extends the z-index scale in styles.css): the tab bar sits above
+   page content, sticky headers and the bulk bar, and below dropdowns, the
+   full-screen map, modals and toasts. The drawer and its backdrop slide in
+   UNDER it, so Menu stays visible and tappable to close the drawer. */
+:root {
+  --z-tabbar: 990;
+  --z-drawer: calc(var(--z-tabbar) - 10);
+  --z-drawer-backdrop: calc(var(--z-tabbar) - 20);
+}
+
+/* Bottom clearance tokens. Declared on <body> because the tab bar toggles
+   them with a body class (set while MobileTabBar is mounted).
+   --tabbar-h:     the tab bar's full height (0px when there is none);
+   --bottom-clear: what anything pinned to the screen bottom must clear: the
+                   tab bar, or just the home-indicator inset without one. */
+body {
+  --tabbar-h: 0px;
+  --bottom-clear: env(safe-area-inset-bottom, 0px);
+}
+
+/* Upright phones only — mirrors PHONE_TABBAR_QUERY in lib/mobile.ts. */
+@media (max-width: 760px) and (orientation: portrait) {
+  /* 1px border + 8px top + 52px items + bottom padding that clears the home
+     indicator (30px on an iPhone, 10px minimum). */
+  body.has-tabbar {
+    --tabbar-h: calc(61px + max(10px, env(safe-area-inset-bottom, 0px) - 4px));
+    --bottom-clear: var(--tabbar-h);
+  }
+
+  .mobile-tabbar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: var(--z-tabbar);
+    display: flex; height: var(--tabbar-h);
+    padding: 8px max(8px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom, 0px) - 4px) max(8px, env(safe-area-inset-left));
+    border-top: 1px solid var(--line); background: var(--bg); color: var(--ink-4);
+  }
+  .mobile-tab {
+    flex: 1; min-width: 0; height: auto; min-height: 0; margin: 0; padding: 6px 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 4px;
+    border: 0; border-radius: var(--radius-md); background: transparent; box-shadow: none;
+    color: var(--ink-4); font: inherit; font-size: 10.5px; font-weight: 600; line-height: 13px;
+    text-decoration: none; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .mobile-tab svg { flex: none; }
+  .mobile-tab span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-tab:hover { color: var(--ink-4); background: transparent; text-decoration: none; }
+  .mobile-tab.active, .mobile-tab.active:hover { color: var(--accent-ink); }
+  .mobile-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+  /* Light keeps the navigation dark: the tab bar re-declares the Dark tokens,
+     exactly like the sidebar / drawer scope in styles.css. */
+  :root[data-theme="light"] .mobile-tabbar {
+    color-scheme: dark;
+    --bg:#000000; --input:#050505; --surface:#0A0A0A; --surface-2:#111111; --surface-3:#141414; --popover:#0E0E0E;
+    --hover:#161616; --hover-strong:#1A1A1A; --selected:#1E1E1E; --chip:#202020;
+    --line-faint:#161616; --line-soft:#1A1A1A; --line:#1E1E1E; --line-strong:#262626; --line-hover:#333333;
+    --ink-strong:#FFFFFF; --ink:#EDEDED; --ink-1:#D4D4D4; --ink-2:#A6A6A6; --ink-3:#8A8A8A; --ink-4:#6E6E6E; --ink-5:#4A4A4A;
+    --accent-ink:#7AAEFF; --accent-ink-hover:#A9CBFF;
+    --panel:var(--surface); --panel-2:var(--surface-2); --border:var(--line); --text:var(--ink); --text-dim:var(--ink-3);
+    --text-faint:var(--ink-4); --text-mid:var(--ink-1); --hairline:var(--line-soft);
+    --shadow-pop:0 18px 40px -10px rgba(0,0,0,.8);
+    color: var(--ink-4);
+  }
+}

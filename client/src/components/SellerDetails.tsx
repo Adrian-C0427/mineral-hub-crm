@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { api } from "../api/client";
+import { Plus } from "lucide-react";
 import { Modal, Banner, ConfirmDelete, UserChip } from "./ui";
+import { Avatar, Tag } from "./kit";
 import { PhoneInput } from "./PhoneInput";
 import { Select } from "./Select";
 import { StateSelect } from "./StateSelect";
 import { formatPhone } from "../lib/phone";
-import { fmtDate, fmtDateLocal } from "../lib/format";
-import { avatarColor } from "../lib/avatarColor";
+import { fmtDateLocal } from "../lib/format";
 import type { Seller, SellerType, UserLite } from "../types";
 
 /**
@@ -42,18 +43,17 @@ export function SellerDetails({ dealId, sellers, users, canEdit, onChanged }: {
   }
 
   return (
-    <div className="panel">
-      {/* Centered section header with the action pinned right (reference). */}
-      <div className="seller-head">
-        <div className="seller-head-c">
-          <h3 style={{ margin: 0 }}>Seller Details</h3>
-          <div className="muted" style={{ fontSize: 12.5, marginTop: 3 }}>Owner and contact information for this deal, kept separate from the deal characteristics.</div>
+    <div className="panel dd-card seller-panel">
+      <div className="dd-card-head">
+        <div>
+          <h3 className="dd-card-title">Sellers</h3>
+          <div className="dd-card-sub">Owner and contact details, kept separate from the deal characteristics</div>
         </div>
-        {canEdit && <button className="small primary seller-head-add" style={{ whiteSpace: "nowrap" }} onClick={() => setEditing("new")}>+ Add seller</button>}
+        {canEdit && <button className="small primary dd-add-btn" onClick={() => setEditing("new")}><Plus size={13} strokeWidth={2.2} aria-hidden="true" />Add seller</button>}
       </div>
 
       {sellers.length === 0 ? (
-        <p className="muted">No seller information yet.{canEdit && " Add a seller to record their contact and mailing details."}</p>
+        <p className="seller-empty">No seller information yet.{canEdit && " Add a seller to record their contact and mailing details."}</p>
       ) : (
         <div className="seller-list">
           {sellers.map((s) => (
@@ -83,52 +83,47 @@ function SellerCard({ s, canEdit, onEdit, onRemove }: { s: Seller; canEdit: bool
   const mailing = [s.mailingAddress, s.mailingCity, [s.mailingState, s.mailingZip].filter(Boolean).join(" ")].filter(Boolean).join(", ");
   const sameAddr = physical && mailing && physical === mailing;
   const name = sellerDisplayName(s);
-  const initials = name.split(/\s+/).map((w) => w[0]).filter(Boolean).slice(0, 2).join("").toUpperCase();
+  const added = s.dateAdded ? fmtDateLocal(s.dateAdded) : null;
   return (
     <div className="seller-card">
       <div className="seller-card-head">
-        <div className="row" style={{ gap: 11, alignItems: "center", minWidth: 0 }}>
-          <span className="seller-avatar" style={{ background: avatarColor(name), color: "#fff" }}>{initials}</span>
-          <strong style={{ fontSize: 14.5, fontWeight: 800 }}>{name}</strong>
-          <span className="ct-pill seller-type-pill">{prettyType(s.sellerType)}</span>
-          {s.preferredContactMethod && (
-            <span className="ct-pill seller-pref-pill">
-              <span className="ct-pill-dot" style={{ background: "var(--green)" }} />
-              Prefers {s.preferredContactMethod.toLowerCase()}
-            </span>
-          )}
+        <div className="seller-id">
+          <Avatar name={name} size={34} />
+          <div className="seller-id-text">
+            <span className="seller-name">{name}</span>
+            <span className="seller-meta">{[prettyType(s.sellerType), added && `Added ${added}`].filter(Boolean).join(" · ")}</span>
+          </div>
+          {s.preferredContactMethod && <Tag tone="success" dot>Prefers {s.preferredContactMethod.toLowerCase()}</Tag>}
         </div>
-        <div className="row" style={{ gap: 8, alignItems: "center" }}>
+        <div className="seller-actions">
           {s.primaryPhone && (
             <a className="seller-act" href={`tel:${s.primaryPhone}`} title={`Call ${formatPhone(s.primaryPhone)}`}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.13.96.36 1.9.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.91.34 1.85.57 2.81.7A2 2 0 0122 16.92z" /></svg>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2" /></svg>
               Call
             </a>
           )}
           {s.email && (
             <a className="seller-act" href={`mailto:${s.email}`} title={`Email ${s.email}`}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2" /><path d="M22 7l-10 6L2 7" /></svg>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></svg>
               Email
             </a>
           )}
           {canEdit && (
             <>
-              {(s.primaryPhone || s.email) && <span className="seller-sep" />}
-              <button className="link-btn" onClick={onEdit}>Edit</button>
-              <button className="link-btn" style={{ color: "var(--red)" }} onClick={onRemove}>Remove</button>
+              <button type="button" className="small seller-edit" onClick={onEdit}>Edit</button>
+              <button type="button" className="small seller-remove" onClick={onRemove}>Remove</button>
             </>
           )}
         </div>
       </div>
       <div className="seller-grid">
-        <KV k="Primary Phone" v={s.primaryPhone ? formatPhone(s.primaryPhone) : null} />
+        <KV k="Phone" v={s.primaryPhone ? formatPhone(s.primaryPhone) : null} />
         <KV k="Email" v={s.email} />
-        <KV k="Preferred Contact" v={s.preferredContactMethod} />
-        <KV k="Assigned To" v={s.assignedTeamMember ? <UserChip user={s.assignedTeamMember} size={16} /> : null} />
-        <KV k="Physical Address" v={physical} />
-        <KV k="Mailing Address" v={sameAddr ? "Same as physical" : mailing} />
-        <KV k="Date Added" v={fmtDateLocal(s.dateAdded)} />
-        {s.internalNotes && <KV k="Internal Notes" v={s.internalNotes} wide />}
+        <KV k="Preferred contact" v={s.preferredContactMethod} />
+        <KV k="Assigned to" v={s.assignedTeamMember ? <UserChip user={s.assignedTeamMember} size={16} /> : null} />
+        <KV k="Physical address" v={physical} />
+        <KV k="Mailing address" v={sameAddr ? "Same as physical" : mailing} />
+        {s.internalNotes && <KV k="Notes" v={s.internalNotes} wide />}
       </div>
     </div>
   );
@@ -136,9 +131,9 @@ function SellerCard({ s, canEdit, onEdit, onRemove }: { s: Seller; canEdit: bool
 
 function KV({ k, v, wide }: { k: string; v: React.ReactNode; wide?: boolean }) {
   return (
-    <div style={wide ? { gridColumn: "1 / -1" } : undefined}>
-      <div className="ddx-label">{k}</div>
-      <div className={`seller-v ${v ? "" : "dim"}`}>{v || "—"}</div>
+    <div className={`seller-kv ${wide ? "wide" : ""}`}>
+      <span className="seller-k">{k}</span>
+      <span className={`seller-v ${v ? "" : "dim"}`}>{v || "—"}</span>
     </div>
   );
 }
@@ -248,12 +243,12 @@ function SellerFormModal({ dealId, seller, users, onClose, onSaved }: {
 
   return (
     <Modal
-      title={seller ? "Edit Seller" : "Add Seller"}
+      title={seller ? "Edit seller" : "Add seller"}
       onClose={onClose}
       wide
       footer={<>
-        <button className="small" onClick={onClose}>Cancel</button>
-        <button className="primary" disabled={busy} onClick={save}>{busy ? "Saving…" : seller ? "Save" : "Add seller"}</button>
+        <button onClick={onClose}>Cancel</button>
+        <button className="primary" disabled={busy} onClick={save}>{busy ? "Saving…" : seller ? "Save seller" : "Add seller"}</button>
       </>}
     >
       <FormGroup title="Personal information">
@@ -295,7 +290,7 @@ function SellerFormModal({ dealId, seller, users, onClose, onSaved }: {
       </FormGroup>
 
       <FormGroup title="Mailing address">
-        <label className="row" style={{ textTransform: "none", gap: 6, marginBottom: sameAsPhysical ? 0 : 10 }}>
+        <label className="row seller-same" style={{ marginBottom: sameAsPhysical ? 0 : 10 }}>
           <input type="checkbox" checked={sameAsPhysical} onChange={(e) => toggleSame(e.target.checked)} /> Mailing address is the same as physical address
         </label>
         {!sameAsPhysical && (

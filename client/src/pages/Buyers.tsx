@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
-import { RelationshipDot, Spinner, Banner, SearchInput, Modal, Req } from "../components/ui";
+import { Spinner, Banner, SearchInput, Modal, Req } from "../components/ui";
 import { Select } from "../components/Select";
+import { Segmented, Tag } from "../components/kit";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { NewBuyerModal } from "../components/NewBuyerModal";
 import { useRowSelection, BulkActionsBar } from "../components/bulk";
@@ -25,6 +26,30 @@ interface BuyerRow {
   source: string | null;
   portalLead: boolean;
   duplicateReview: boolean;
+}
+
+type Rel = "HOT" | "WARM" | "COLD";
+const REL_TONE: Record<Rel, "danger" | "warn" | "accent"> = { HOT: "danger", WARM: "warn", COLD: "accent" };
+const REL_LABEL: Record<Rel, string> = { HOT: "Hot", WARM: "Warm", COLD: "Cold" };
+const REL_DOT: Record<Rel, string> = { HOT: "var(--danger)", WARM: "var(--warn)", COLD: "var(--accent)" };
+
+/** Hot / Warm / Cold as the redesign's tinted, dotted tag (Cold reads blue). */
+export function RelTag({ status }: { status: Rel }) {
+  return <Tag tone={REL_TONE[status] ?? "neutral"} dot>{REL_LABEL[status] ?? status}</Tag>;
+}
+
+/** The list API sends the focus area pre-joined ("Leon, Freestone…", or
+ *  states / basins as a fallback). Display only: split it into chips and keep
+ *  the server's trailing "…" as a "more" marker. */
+function FocusChips({ value }: { value: string }) {
+  const more = value.endsWith("…");
+  const parts = (more ? value.slice(0, -1) : value).split(",").map((p) => p.trim()).filter(Boolean);
+  return (
+    <span className="bx-chips" title={value}>
+      {parts.map((p) => <span key={p} className="bx-chip">{p}</span>)}
+      {more && <span className="bx-more">+ more</span>}
+    </span>
+  );
 }
 
 export function Buyers() {
@@ -58,56 +83,64 @@ export function Buyers() {
 
   const withVolume = buyers.filter((b) => b.closedDeals > 0).length;
   const dash = <span className="bx-dash">—</span>;
+  // Segment counts are plain counts of the loaded rows; picking one drives the
+  // same relationshipStatus filter the list always had.
+  const relCount = (r: Rel) => buyers.filter((b) => b.relationshipStatus === r).length;
 
   const columns: Column<BuyerRow>[] = [
     { key: "buyer", header: "Buyer", type: "text", value: (b) => b.companyName,
       render: (b) => (
         <span className="bx-cell-text">
           <span className="bx-name">
-            {b.companyName}
+            <span className="bx-name-txt">{b.companyName}</span>
             {/* Provenance at a glance: portal-captured leads and fuzzy-match reviews. */}
-            {b.portalLead && <span className="badge" style={{ marginLeft: 6 }} title="Created or updated by a Buyer Portal submission">Portal lead</span>}
-            {b.duplicateReview && <span className="badge" style={{ marginLeft: 6, background: "var(--red)", color: "#fff" }} title="Possible duplicate of an existing buyer — review and merge if needed">Review</span>}
+            {b.portalLead && <Tag tone="accent" title="Created or updated by a Buyer Portal submission">Portal lead</Tag>}
+            {b.duplicateReview && <Tag tone="danger" title="Possible duplicate of an existing buyer — review and merge if needed">Review</Tag>}
           </span>
-          {(b.contactFirstName || b.contactLastName || b.contactName) && (
-            <span className="bx-contact">{[b.contactFirstName, b.contactLastName].filter(Boolean).join(" ") || b.contactName}</span>
-          )}
+          {(b.contactFirstName || b.contactLastName || b.contactName)
+            ? <span className="bx-contact">{[b.contactFirstName, b.contactLastName].filter(Boolean).join(" ") || b.contactName}</span>
+            : <span className="bx-contact none">No primary contact</span>}
         </span>
       ) },
-    { key: "focus", header: "Focus Area", type: "text", value: (b) => b.focusArea,
-      render: (b) => (b.focusArea ? <span className="bx-focus">{b.focusArea}</span> : dash) },
+    { key: "focus", header: "Focus area", type: "text", value: (b) => b.focusArea,
+      render: (b) => (b.focusArea && b.focusArea !== "—" ? <FocusChips value={b.focusArea} /> : dash) },
     { key: "rel", header: "Relationship", type: "text", value: (b) => ({ HOT: 0, WARM: 1, COLD: 2 }[b.relationshipStatus]),
-      render: (b) => <RelationshipDot status={b.relationshipStatus} /> },
+      render: (b) => <RelTag status={b.relationshipStatus} /> },
     // New buyers show "—" rather than a discouraging 0% / 0 until they have history.
     { key: "close", header: "Close %", type: "number", align: "right", value: (b) => b.closeRate,
       render: (b) => (b.closedDeals > 0 ? <span className="bx-num">{pct(b.closeRate)}</span> : dash) },
     { key: "deals", header: "Deals", type: "number", align: "right", value: (b) => b.closedDeals,
-      render: (b) => (b.closedDeals > 0 ? <span className="bx-num" style={{ fontWeight: 400 }}>{b.closedDeals}</span> : dash) },
+      render: (b) => (b.closedDeals > 0 ? <span className="bx-num">{b.closedDeals}</span> : dash) },
   ];
 
   return (
-    <div className="page contacts-page">
+    <div className="page contacts-page bx-page">
       <div className="page-header">
-        <div>
+        <div className="bc-head">
           <h1>Buyers</h1>
-          <span className="page-sub">{buyers.length} buyer{buyers.length === 1 ? "" : "s"} · {withVolume} with closed volume YTD</span>
+          <div className="bc-stats">
+            <span><b>{buyers.length}</b> buyer{buyers.length === 1 ? "" : "s"}</span>
+            <i aria-hidden="true" />
+            <span><b>{withVolume}</b> with closed volume YTD</span>
+          </div>
         </div>
-        <div className="row" style={{ gap: 8 }}>
+        <div className="bc-actions">
           {can("createBuyers") && (
             <button className="ct-btn" onClick={() => setShowImport(true)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 15V4M7 9l5-5 5 5M5 20h14" /></svg>
               Import CSV
             </button>
           )}
           {can("createBuyers") && (
             <button className="pbtn pbtn-primary" onClick={() => setShowNew(true)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-              New Buyer
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              New buyer
             </button>
           )}
         </div>
       </div>
 
+      <div className={`ct-card ${sel.selected.size ? "selecting" : ""}`}>
       <BulkActionsBar
         selectedIds={[...sel.selected]}
         onClear={sel.clear}
@@ -123,16 +156,21 @@ export function Buyers() {
             rows.map((b) => [b.companyName, b.contactFirstName ?? "", b.contactLastName ?? "", b.focusArea, b.relationshipStatus, b.closeRate, b.closedDeals]));
         }}
       />
-
-      <div className="ct-card" style={{ marginTop: 0 }}>
       <SortableTable
         customizeId="buyers-list"
         toolbar={
           <>
-            <SearchInput value={q} onChange={setQ} placeholder="Search company, contact, focus area…" ariaLabel="Search buyers" />
-            <Select value={rel} onChange={setRel} width={170} placeholder="All relationships" clearable ariaLabel="Filter by relationship"
-              options={[{ value: "HOT", label: "Hot" }, { value: "WARM", label: "Warm" }, { value: "COLD", label: "Cold" }]} />
-            {(q || rel) && <span className="muted" style={{ fontSize: 13, whiteSpace: "nowrap" }}>Showing {filtered.length} of {buyers.length}</span>}
+            <SearchInput value={q} onChange={setQ} placeholder="Search company, contact, focus area" ariaLabel="Search buyers" />
+            <Segmented<"" | Rel>
+              ariaLabel="Filter by relationship"
+              value={rel as "" | Rel}
+              onChange={setRel}
+              options={[
+                { value: "", label: "All", count: buyers.length },
+                ...(["HOT", "WARM", "COLD"] as Rel[]).map((r) => ({ value: r, label: REL_LABEL[r], count: relCount(r), dot: REL_DOT[r] })),
+              ]}
+            />
+            {(q || rel) && <span className="bc-showing">Showing {filtered.length} of {buyers.length}</span>}
           </>
         }
         columns={columns}

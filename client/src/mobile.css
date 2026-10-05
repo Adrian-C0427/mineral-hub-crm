@@ -9,6 +9,12 @@
      A. any phone          (max-width: 760px), (pointer: coarse) and (max-height: 500px)
      B. portrait phone     (max-width: 760px)
      C. landscape phone    (pointer: coarse) and (max-height: 500px)
+
+   The bottom tab bar (upright phones only) and its tokens live in
+   styles/mobile-shell.css. Anything pinned to the bottom of the screen clears
+   it with --bottom-clear (tab bar height, or just the home-indicator inset
+   where there is no tab bar); full-height layouts subtract --tabbar-h
+   (0px without a tab bar).
    =========================================================================== */
 
 /* ---------------------------------------------------------------------------
@@ -16,64 +22,78 @@
    --------------------------------------------------------------------------- */
 @media (max-width: 760px), (pointer: coarse) and (max-height: 500px) {
   /* Phones render at 100%: the 95% desktop density is too small to read and tap. */
-  :root { --ui-zoom: 1; --topbar-h: 52px; }
+  :root { --ui-zoom: 1; --topbar-h: 60px; }
   html, body { overflow-x: hidden; -webkit-text-size-adjust: 100%; }
   body { overscroll-behavior-y: none; }
 
   /* --- Shell: the sidebar leaves the flow and becomes an off-canvas drawer --- */
   .app-shell.with-sidebar { display: block; }
   .app-col { min-width: 0; }
+  /* The desktop sidebar, unchanged inside (brand row, grouped links, Settings
+     footer), slides in from the left. It sits under the tab bar so Menu stays
+     tappable to close it; its foot clears the bar. In Light it keeps the
+     sidebar's dark token scope (styles.css). */
   .sidebar.mobile-drawer {
-    position: fixed; top: 0; left: 0; bottom: 0; z-index: var(--z-flyout);
-    width: min(300px, 84vw); flex: none; height: 100dvh;
-    padding-top: env(safe-area-inset-top); padding-bottom: env(safe-area-inset-bottom);
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: var(--z-drawer);
+    width: min(290px, 84vw); flex: none; height: 100dvh;
+    padding-top: env(safe-area-inset-top); padding-bottom: var(--bottom-clear);
+    background: var(--bg); border-right: 1px solid var(--line);
     transform: translateX(-100%); visibility: hidden;
-    transition: transform 0.22s ease, visibility 0s linear 0.22s;
+    transition: transform 200ms ease-out, visibility 0s linear 200ms;
   }
   .sidebar.mobile-drawer.open {
-    transform: none; visibility: visible; transition: transform 0.22s ease;
-    box-shadow: 12px 0 40px rgba(0, 0, 0, 0.45);
+    transform: none; visibility: visible; transition: transform 200ms ease-out;
+    box-shadow: var(--shadow-drawer);
   }
   .mobile-nav-backdrop {
-    position: fixed; inset: 0; z-index: calc(var(--z-flyout) - 1);
-    background: rgba(0, 0, 0, 0.5); animation: mobileFade 0.18s ease;
+    position: fixed; inset: 0; z-index: var(--z-drawer-backdrop);
+    background: var(--scrim-soft); animation: mobileFade 160ms ease-out;
   }
   body.mobile-nav-open { overflow: hidden; }
+  /* Close (×) rides the brand row's right end. */
   .mobile-nav-close {
-    position: absolute; top: calc(env(safe-area-inset-top) + 10px); right: 8px; z-index: 2;
-    width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0;
-    display: inline-flex; align-items: center; justify-content: center; border-radius: 8px;
+    position: absolute; top: calc(env(safe-area-inset-top) + 10px); right: 10px; z-index: 2;
+    width: 40px; height: 40px; min-width: 40px; min-height: 40px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius);
+    color: var(--ink-3);
   }
-  .sidebar.mobile-drawer .sidebar-brand { height: 64px; padding-right: 56px; }
-  .sidebar.mobile-drawer .sidebar-nav { padding: 10px; gap: 4px; overscroll-behavior: contain; }
-  .sidebar.mobile-drawer .sidebar-link { min-height: 46px; padding: 11px 12px; font-size: 15px; gap: 12px; border-radius: 8px; }
-  .sidebar.mobile-drawer .sidebar-sublink { min-height: 42px; display: flex; align-items: center; font-size: 14px; }
+  .mobile-nav-close:hover, .mobile-nav-close:active { background: var(--hover-strong); color: var(--ink); }
+  .sidebar.mobile-drawer .sidebar-brand { height: 60px; padding: 0 60px 0 20px; }
+  .sidebar.mobile-drawer .sidebar-nav { overscroll-behavior: contain; }
+  /* Design typography (13.5px, 7px radius); rows grow to a 40px touch target. */
+  .sidebar.mobile-drawer .sidebar-link { height: auto; min-height: 40px; }
+  .sidebar.mobile-drawer .sidebar-sublink { min-height: 40px; display: flex; align-items: center; }
 
-  /* --- Top bar: menu button left, notifications + user right --- */
+  /* --- Top bar: notifications + account on the right (landscape adds the
+     menu button on the left). 60px (48px landscape) below the status bar. --- */
   .topbar {
-    min-height: var(--topbar-h); gap: 6px;
-    padding: 4px 10px; padding-top: max(4px, env(safe-area-inset-top));
-    padding-left: max(10px, env(safe-area-inset-left)); padding-right: max(10px, env(safe-area-inset-right));
+    height: auto; min-height: calc(var(--topbar-h) + env(safe-area-inset-top) + 1px); /* 1px = bottom border */
+    gap: 4px; padding: env(safe-area-inset-top) max(16px, env(safe-area-inset-right)) 0 max(16px, env(safe-area-inset-left));
   }
   .topbar-nav-btn {
-    margin-right: auto; width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0;
-    display: inline-flex; align-items: center; justify-content: center; border-radius: 8px; color: var(--text);
+    margin-right: auto; margin-left: -8px; width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius); color: var(--ink-2);
   }
-  .topbar .notif-bell { min-width: 44px; min-height: 44px; justify-content: center; }
-  .topbar-user { min-height: 44px; }
-  .topbar-menu { min-width: 240px; }
-  .topbar-menu-item { min-height: 44px; }
-  /* Notifications: a full-width sheet under the top bar. */
+  /* Bell: the design's 34px button; an invisible ring widens the hit area to 44px. */
+  .topbar .notif-bell { width: 34px; height: 34px; min-width: 34px; min-height: 34px; }
+  .topbar .notif-bell::after { content: ""; position: absolute; inset: -5px; }
+  .topbar-user { min-height: 42px; }
+  .topbar-menu-item { min-height: 40px; }
+  /* Notifications: a 360px panel under the top bar, right-aligned, kept inside
+     the screen and above the tab bar. */
   .topbar .notif-panel {
-    position: fixed; top: calc(var(--topbar-h) + env(safe-area-inset-top) + 4px); left: 8px; right: 8px;
-    width: auto; max-height: calc(100dvh - var(--topbar-h) - env(safe-area-inset-top) - 20px);
+    position: fixed; top: calc(var(--topbar-h) + env(safe-area-inset-top) + 4px); right: max(8px, env(safe-area-inset-right)); left: auto;
+    width: min(360px, calc(100vw - 16px)); max-width: none;
+    max-height: calc(100dvh - var(--topbar-h) - env(safe-area-inset-top) - var(--bottom-clear) - 16px);
+    display: flex; flex-direction: column;
   }
-  .notif-item { padding: 12px 14px; }
+  .topbar .notif-panel .notif-list { flex: 1 1 auto; min-height: 0; }
+  .notif-item { padding: 12px 10px; }
 
-  /* Pages keep clear of the home indicator / rounded corners. */
+  /* Pages: 16px gutters; the bottom clears the tab bar / home indicator. */
   .page {
-    padding-left: max(12px, env(safe-area-inset-left)); padding-right: max(12px, env(safe-area-inset-right));
-    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right));
+    padding-bottom: calc(20px + var(--bottom-clear));
   }
 
   /* --- Touch targets --- */
@@ -111,7 +131,7 @@
   .modal-overlay { padding: 0; align-items: flex-end; }
   .modal, .modal-wide {
     width: 100% !important; max-width: 100% !important; max-height: 100dvh;
-    border-radius: 14px 14px 0 0; border-left: 0; border-right: 0; border-bottom: 0;
+    border-radius: 22px 22px 0 0; border-left: 0; border-right: 0; border-bottom: 0;
   }
   .modal-header { padding: 12px 14px 12px 16px; gap: 10px; }
   .modal-header .icon-btn, .modal-header button[aria-label="Close"] { min-width: 44px; min-height: 44px; }
@@ -125,17 +145,19 @@
   /* --- Popovers & menus stay inside the viewport --- */
   /* Customize View: a bottom sheet (the anchored popover could open off-screen). */
   .cv-menu {
-    position: fixed; left: 8px; right: 8px; top: auto; bottom: calc(8px + env(safe-area-inset-bottom));
+    position: fixed; left: 8px; right: 8px; top: auto; bottom: calc(8px + var(--bottom-clear));
     width: auto; max-height: 72dvh; display: flex; flex-direction: column; z-index: var(--z-dropdown);
   }
   .cv-menu .cv-list { flex: 1; min-height: 0; overflow-y: auto; max-height: none; }
   .cv-move { min-width: 36px; min-height: 36px; }
   .dropdown-card { max-width: calc(100vw - 24px); }
   .sidebar-flyout { max-width: calc(100vw - 24px); }
+  /* Toasts: bottom of the screen, full width between the gutters, above the tab bar. */
   .toast-stack {
-    top: calc(var(--topbar-h) + env(safe-area-inset-top) + 8px); left: 12px; right: 12px; max-width: none;
+    top: auto; bottom: calc(var(--bottom-clear) + 28px); left: 12px; right: 12px;
+    width: auto; max-width: none; transform: none;
   }
-  .bulk-bar { top: calc(var(--topbar-h) + 6px); flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
+  .bulk-bar { top: calc(var(--topbar-h) + env(safe-area-inset-top) + 7px); flex-wrap: wrap; padding: 8px 12px; gap: 8px; }
 
   /* --- Map --- */
   .mc-float-panel {
@@ -153,9 +175,10 @@
   .heat-tip { display: none; } /* hover has no meaning on touch; tap summarizes */
 
   /* --- Pipeline board: swipe between stage columns --- */
+  /* Fills the screen between the top bar and the tab bar (1px = top bar border). */
   .pl2-page {
-    height: calc(100dvh - var(--topbar-h) - 1px - env(safe-area-inset-top)); /* 1px = top bar border */
-    padding-bottom: calc(8px + env(safe-area-inset-bottom));
+    height: calc(100dvh - var(--topbar-h) - 1px - env(safe-area-inset-top) - var(--tabbar-h));
+    padding-bottom: calc(8px + var(--bottom-clear) - var(--tabbar-h));
   }
   .pl2-page .kanban { scroll-snap-type: x proximity; scroll-padding-left: 2px; -webkit-overflow-scrolling: touch; overscroll-behavior-x: contain; }
   .pl2-page .kanban-col { scroll-snap-align: start; }
@@ -170,25 +193,21 @@
    --------------------------------------------------------------------------- */
 @media (max-width: 760px) {
   /* --- Type scale & rhythm --- */
+  /* Headings keep the desktop sizes (h1 26px), as in the design. */
   :root { --block-gap: 14px; --grid-gap: 12px; }
-  h1 { font-size: 22px; line-height: 1.2; }
-  h2 { font-size: 18px; }
-  h3 { font-size: 15px; }
-  .page { padding-top: 14px; }
+  .page { padding-top: 20px; }
   .panel { padding: 14px; }
 
-  /* Top bar: avatar only (name + role move into the menu). */
-  .topbar-user .topbar-user-meta, .topbar-user .topbar-caret { display: none; }
-  .topbar-user { padding: 3px; }
-  .topbar-div { display: none; }
+  /* Top bar: bell, divider, avatar + chevron (name and role move into the menu). */
+  .topbar-user .topbar-user-meta { display: none; }
 
-  /* --- Page headers: title first, actions wrap below as a full-width row --- */
-  .page-header { flex-wrap: wrap; align-items: flex-start; gap: 10px; }
+  /* --- Page headers: title first; actions keep their natural width and wrap
+     below it when the row is too narrow (design: flex-wrap, gap 20) --- */
+  .page-header { flex-wrap: wrap; align-items: flex-end; gap: 14px 20px; }
   .page-header > * { min-width: 0; max-width: 100%; }
   .page-header > :first-child { flex: 1 1 auto; }
   .page-header h1 { overflow-wrap: anywhere; }
-  .page-header > :not(:first-child) { flex: 1 1 100%; flex-wrap: wrap; }
-  .page-header .row > button, .page-header .row > a { flex: 1 1 auto; justify-content: center; }
+  .page-header > :not(:first-child) { flex: 0 1 auto; flex-wrap: wrap; }
 
   /* --- KPI / metric grids: two across (odd last tile spans the row) --- */
   .metrics-row, .metrics-row.dash-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; gap: 10px; }
@@ -241,7 +260,7 @@
   /* --- Map: controls in a tidy row, the map fills the rest of the screen --- */
   .mc-layout { flex-direction: column; }
   .mc-layout > .mc-map { flex: none !important; } /* keep its measured full-screen height in the column */
-  .page:has(> .mc-layout) { padding-bottom: 12px; } /* the map is measured to end 16px above the bottom */
+  .page:has(> .mc-layout) { padding-bottom: calc(12px + var(--tabbar-h)); } /* the map is measured to end 16px above the bottom */
   .mc-side { width: 100% !important; height: auto !important; max-height: 50dvh; min-height: 0; }
   .mc-btn { min-height: 40px; }
   .mc-dock-row { display: none; } /* left/right docking has no meaning in one column */
@@ -274,7 +293,6 @@
    --------------------------------------------------------------------------- */
 @media (pointer: coarse) and (max-height: 500px) {
   :root { --topbar-h: 48px; } /* 44px targets + 2px padding each side */
-  .topbar { min-height: var(--topbar-h); padding-top: 2px; padding-bottom: 2px; }
   .page { padding-top: 10px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
   .page-header { margin-bottom: 10px; flex-wrap: wrap; }
   h1 { font-size: 20px; }
@@ -292,5 +310,4 @@
   .cv-menu { left: auto; right: max(8px, env(safe-area-inset-right)); width: 320px; top: 8px; bottom: 8px; max-height: none; }
   .mc-side { max-height: none; }
   .mc-float-panel { top: 8px !important; bottom: 8px; left: auto !important; width: 340px !important; max-height: none !important; }
-  .notif-panel { left: auto !important; width: 360px !important; }
 }

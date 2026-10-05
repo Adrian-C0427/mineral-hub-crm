@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
+import { AuthError, AuthLayout, AuthTitle } from "./Login";
 
 /** Standalone page reached from the emailed reset link: /reset-password?token=… */
 export function ResetPassword() {
@@ -30,38 +31,41 @@ export function ResetPassword() {
   }
 
   return (
-    <div className="login-wrap">
-      <div className="login-card">
-        <div className="brand" style={{ fontSize: 22, marginBottom: 4 }}>Mineral Hub<span className="dot">.</span></div>
-        {!token ? (
-          <>
-            <p className="muted" style={{ marginTop: 0 }}>This reset link is missing its token.</p>
-            <button className="primary" style={{ width: "100%" }} onClick={() => navigate("/")}>Back to sign in</button>
-          </>
-        ) : done ? (
-          <>
-            <p className="muted" style={{ marginTop: 0 }}>Your password has been reset.</p>
-            <button className="primary" style={{ width: "100%" }} onClick={() => navigate("/")}>Sign in</button>
-          </>
-        ) : (
-          <form onSubmit={submit}>
-            <p className="muted" style={{ marginTop: 0 }}>Choose a new password</p>
+    <AuthLayout>
+      {!token ? (
+        <div className="auth-form">
+          <AuthTitle title="Reset your password" sub="This reset link is missing its token." />
+          <div className="auth-submit">
+            <button className="primary auth-primary" onClick={() => navigate("/")}>Back to sign in</button>
+          </div>
+        </div>
+      ) : done ? (
+        <div className="auth-form">
+          <AuthTitle title="Reset your password" sub="Your password has been reset." />
+          <div className="auth-submit">
+            <button className="primary auth-primary" onClick={() => navigate("/")}>Sign in</button>
+          </div>
+        </div>
+      ) : (
+        <form className="auth-form" onSubmit={submit}>
+          <AuthTitle title="Reset your password" sub="Choose a new password" />
+          <div className="auth-fields">
             <div className="field">
               <label>New password</label>
-              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus required />
+              <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoFocus required autoComplete="new-password" placeholder="At least 8 characters" />
             </div>
             <div className="field">
               <label>Confirm password</label>
-              <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required />
+              <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} required autoComplete="new-password" />
             </div>
-            {error && <div className="error-text">{error}</div>}
-            <button className="primary" style={{ width: "100%", marginTop: 8 }} disabled={busy}>{busy ? "Saving…" : "Reset password"}</button>
-            <p className="muted" style={{ textAlign: "center", marginTop: 14, marginBottom: 0 }}>
-              <a href="#" onClick={(e) => { e.preventDefault(); navigate("/"); }}>Back to sign in</a>
-            </p>
-          </form>
-        )}
-      </div>
-    </div>
+          </div>
+          {error && <AuthError>{error}</AuthError>}
+          <div className="auth-submit">
+            <button className="primary auth-primary" disabled={busy}>{busy ? "Saving…" : "Reset password"}</button>
+            <span className="auth-switch"><button type="button" className="auth-link" onClick={() => navigate("/")}>Back to sign in</button></span>
+          </div>
+        </form>
+      )}
+    </AuthLayout>
   );
 }

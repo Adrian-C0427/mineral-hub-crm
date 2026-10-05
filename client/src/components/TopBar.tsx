@@ -6,7 +6,7 @@ import { useTheme } from "../theme";
 import { userAvatarColor } from "../lib/avatarColor";
 import { NotificationsBell } from "./NotificationsBell";
 import { ROLE_LABEL } from "../lib/roles";
-import { setMobileNavOpen, useIsPhone } from "../lib/mobile";
+import { setMobileNavOpen, useHasTabBar, useIsPhone } from "../lib/mobile";
 
 /** Initials for the avatar chip — first letters of the first two name words. */
 const initialsOf = (name: string | undefined): string =>
@@ -42,14 +42,16 @@ export function TopBar() {
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
   }, [open]);
 
-  // Phones: the sidebar is a drawer, opened from here.
+  // Phones: the sidebar is a drawer. Upright phones open it from the tab bar's
+  // Menu; landscape phones (no tab bar) open it from the menu button here.
   const phone = useIsPhone();
+  const tabBar = useHasTabBar();
   const role = user?.orgRole ? ROLE_LABEL[user.orgRole] ?? user.orgRole : "";
   const close = () => setOpen(false);
 
   return (
     <header className="topbar">
-      {phone && (
+      {phone && !tabBar && (
         <button type="button" className="topbar-nav-btn icon-btn" onClick={() => setMobileNavOpen(true)} aria-label="Open navigation">
           <Menu size={20} />
         </button>

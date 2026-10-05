@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, Modal, Banner, MetricCard, SearchInput, ConfirmDelete, Req, showToast, CtPill } from "../components/ui";
+import { Spinner, Modal, Banner, SearchInput, ConfirmDelete, Req, showToast, CtPill } from "../components/ui";
+import { StatStrip, Segmented, Tag, Avatar, FormSection } from "../components/kit";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { useRowSelection, BulkBar } from "../components/bulk";
 import { downloadCsv } from "../lib/csv";
@@ -13,7 +14,6 @@ import { PhoneInput } from "../components/PhoneInput";
 import { DateField } from "../components/DateField";
 import { fmtDate, toInputDate } from "../lib/format";
 import { formatPhone } from "../lib/phone";
-import { userAvatarColor } from "../lib/avatarColor";
 import type { UserLite } from "../types";
 
 /**
@@ -51,33 +51,89 @@ export interface ContactRow {
 }
 
 export const TYPES: [string, string][] = [
-  ["SELLER", "Seller"], ["PROSPECT", "Prospect"], ["LEAD", "Inbound Lead"], ["REFERRAL", "Referral"], ["OTHER", "Other"],
+  ["SELLER", "Seller"], ["PROSPECT", "Prospect"], ["LEAD", "Inbound lead"], ["REFERRAL", "Referral"], ["OTHER", "Other"],
 ];
 export const STATUSES: [string, string][] = [
   ["NEW", "New"], ["CONTACTED", "Contacted"], ["ENGAGED", "Engaged"],
-  ["NEGOTIATING", "Negotiating"], ["CONVERTED", "Converted"], ["NOT_INTERESTED", "Not Interested"],
+  ["NEGOTIATING", "Negotiating"], ["CONVERTED", "Converted"], ["NOT_INTERESTED", "Not interested"],
 ];
 export const typeLabel = (v: string) => TYPES.find(([k]) => k === v)?.[1] ?? v;
 export const statusLabel = (v: string) => STATUSES.find(([k]) => k === v)?.[1] ?? v;
+/** Plural labels for the type filter segments (same server catalog). */
+const TYPE_PLURAL: Record<string, string> = { SELLER: "Sellers", PROSPECT: "Prospects", LEAD: "Inbound leads", REFERRAL: "Referrals", OTHER: "Other" };
 
 export interface ContactListRow { id: string; name: string; count: number }
-// Reference pill palette — type and status render as tinted pills (status adds
-// a leading dot). Colors extend the reference's Prospect/New examples.
-export const TYPE_COLORS: Record<string, string> = {
-  SELLER: "#22c55e", PROSPECT: "#3b82f6", LEAD: "#f59e0b", REFERRAL: "#8b5cf6", OTHER: "#6b7280",
+// Type and status render as the redesign's tinted tags (status adds a leading
+// dot). Tones are keyed by the server's catalog values.
+type TagTone = "neutral" | "accent" | "success" | "warn" | "danger" | "violet" | "cyan";
+export const TYPE_TONES: Record<string, TagTone> = {
+  SELLER: "violet", PROSPECT: "accent", LEAD: "cyan", REFERRAL: "neutral", OTHER: "neutral",
 };
-export const STATUS_COLORS: Record<string, string> = {
-  NEW: "#06b6d4", CONTACTED: "#f59e0b", ENGAGED: "#22c55e",
-  NEGOTIATING: "#8b5cf6", CONVERTED: "#22c55e", NOT_INTERESTED: "#ef4444",
+export const STATUS_TONES: Record<string, TagTone> = {
+  NEW: "neutral", CONTACTED: "accent", ENGAGED: "success",
+  NEGOTIATING: "warn", CONVERTED: "violet", NOT_INTERESTED: "danger",
 };
+export function TypeTag({ type }: { type: string }) {
+  return <Tag tone={TYPE_TONES[type] ?? "neutral"}>{typeLabel(type)}</Tag>;
+}
+export function StatusTag({ status }: { status: string }) {
+  return <Tag tone={STATUS_TONES[status] ?? "neutral"} dot>{statusLabel(status)}</Tag>;
+}
 export { CtPill };
 export const initialsOf = (name: string): string =>
   name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
-/** "Adrian Campos" → "Adrian C." (reference owner cell). */
+/** "Adrian Campos" → "Adrian C." (owner cell). */
 const shortName = (name: string): string => {
   const parts = name.split(/\s+/).filter(Boolean);
   return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1]![0]}.` : name;
 };
+
+/** Lists filter: one dashed "Lists" button opening the existing multi-select
+ *  list chips (live counts), Clear and Manage lists. Closes after each pick. */
+function ListsFilter({ lists, value, onChange, canManage, onManage }: {
+  lists: ContactListRow[]; value: string[]; onChange: (v: string[]) => void; canManage: boolean; onManage: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey, true);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey, true); };
+  }, [open]);
+  return (
+    <div className="ct-lists" ref={ref}>
+      <button type="button" className={`ct-lists-btn ${value.length ? "on" : ""}`} aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" /></svg>
+        Lists{value.length > 0 && <span className="ct-lists-n">{value.length}</span>}
+      </button>
+      {open && (
+        <div className="ct-lists-menu" role="menu">
+          {lists.length === 0 && <div className="ct-lists-empty">No lists yet.</div>}
+          {lists.map((l) => {
+            const on = value.includes(l.id);
+            return (
+              <button key={l.id} type="button" role="menuitemcheckbox" aria-checked={on} className={`ct-lists-item ${on ? "on" : ""}`}
+                onClick={() => { onChange(on ? value.filter((x) => x !== l.id) : [...value, l.id]); setOpen(false); }}>
+                <span className="ct-lists-check" aria-hidden="true">{on && <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12l5 5L20 7" /></svg>}</span>
+                <span className="ct-lists-name">{l.name}</span>
+                <span className="ct-lists-count">{l.count}</span>
+              </button>
+            );
+          })}
+          {(value.length > 0 || canManage) && (
+            <div className="ct-lists-foot">
+              {value.length > 0 && <button type="button" className="link-btn" onClick={() => { onChange([]); setOpen(false); }}>Clear</button>}
+              {canManage && <button type="button" className="ct-managelists" onClick={() => { setOpen(false); onManage(); }}>+ Manage lists</button>}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Contacts() {
   const { can } = useAuth();
@@ -125,105 +181,98 @@ export function Contacts() {
     { key: "name", header: "Contact", type: "text", value: (r) => r.name, minWidth: 200, required: true,
       render: (r) => (
         <span className="ct-name">
-          <span className="ct-avatar">{initialsOf(r.name)}</span>
-          <span style={{ minWidth: 0 }}>
-            <span className="ct-name-txt">{r.name}</span>
-            {r.entityName && <span className="ct-name-ent"> · {r.entityName}</span>}
-          </span>
+          <span className="ct-name-txt">{r.name}</span>
+          {r.entityName && <span className="ct-name-ent">{r.entityName}</span>}
         </span>
       ) },
     { key: "type", header: "Type", type: "text", value: (r) => typeLabel(r.type),
-      render: (r) => <CtPill color={TYPE_COLORS[r.type] ?? "#6b7280"}>{typeLabel(r.type)}</CtPill> },
+      render: (r) => <TypeTag type={r.type} /> },
     { key: "status", header: "Status", type: "text", value: (r) => statusLabel(r.status),
-      render: (r) => <CtPill dot color={STATUS_COLORS[r.status] ?? "#6b7280"}>{statusLabel(r.status)}</CtPill> },
+      render: (r) => <StatusTag status={r.status} /> },
     { key: "phone", header: "Phone", type: "text", value: (r) => r.phone, render: (r) => (r.phone ? <span className="ct-phone">{formatPhone(r.phone)}</span> : "—") },
-    { key: "email", header: "Email", type: "text", value: (r) => r.email, render: (r) => r.email ?? "—" },
+    { key: "email", header: "Email", type: "text", value: (r) => r.email, render: (r) => (r.email ? <span className="ct-email">{r.email}</span> : "—") },
     { key: "geo", header: "Counties", type: "text", value: (r) => r.counties.join(", "),
       render: (r) => r.counties.length ? r.counties.join(", ") : (r.states.join(", ") || "—") },
     { key: "source", header: "Source", type: "text", value: (r) => r.source, render: (r) => r.source ?? "—", defaultHidden: true },
     { key: "owner", header: "Owner", type: "text", value: (r) => r.owner?.name ?? null,
       render: (r) => r.owner ? (
         <span className="ct-owner">
-          <span className="ct-owner-av" style={{ background: userAvatarColor(r.owner), color: "#fff" }}>{initialsOf(r.owner.name)}</span>
-          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shortName(r.owner.name)}</span>
+          <Avatar user={r.owner} size={22} />
+          <span className="ct-owner-name">{shortName(r.owner.name)}</span>
         </span>
-      ) : "—" },
-    { key: "last", header: "Last Contact", type: "date", value: (r) => r.lastContactedAt, render: (r) => fmtDate(r.lastContactedAt) },
-    { key: "next", header: "Next Follow-up", type: "date", value: (r) => r.nextFollowUpDate,
+      ) : <span className="ct-unassigned">Unassigned</span> },
+    { key: "last", header: "Last contact", type: "date", value: (r) => r.lastContactedAt, render: (r) => <span className="ct-last">{fmtDate(r.lastContactedAt)}</span> },
+    { key: "next", header: "Next follow-up", type: "date", value: (r) => r.nextFollowUpDate,
       render: (r) => {
         const due = r.nextFollowUpDate && new Date(r.nextFollowUpDate).getTime() <= now;
-        return <span style={due ? { color: "var(--red)" } : undefined}>{fmtDate(r.nextFollowUpDate)}</span>;
+        return <span className={due ? "ct-due" : undefined}>{fmtDate(r.nextFollowUpDate)}</span>;
       } },
   ];
 
   return (
-    <div className="page contacts-page">
+    <div className="page contacts-page ct-page">
       <div className="page-header">
-        <div>
+        <div className="bc-head">
           <h1>Contacts</h1>
           <div className="page-sub">Acquisitions — sellers, prospects, and inbound leads you're sourcing from</div>
         </div>
-        <div className="row" style={{ gap: 8 }}>
+        <div className="bc-actions">
           {canManage && (
             <button className="ct-btn" onClick={() => setShowImport(true)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 15V4M7 9l5-5 5 5M5 20h14" /></svg>
               Import CSV
             </button>
           )}
           <button className="ct-btn" onClick={() => setShowExport("filtered")}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12" /></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
             Export
           </button>
           {canManage && (
             <button className="pbtn pbtn-primary" onClick={() => setEditing("new")}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-              New Contact
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              New contact
             </button>
           )}
         </div>
       </div>
 
-      <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
-        <MetricCard label="Total Contacts" value={rows.length} />
-        <MetricCard label="Active" value={active} hint="Not converted or closed out" />
-        <MetricCard label="New This Month" value={newThisMonth} />
-        <MetricCard label="Follow-ups Due" value={followUpsDue} valueColor={followUpsDue > 0 ? "var(--amber)" : undefined} />
-      </div>
+      <StatStrip className="ct-kpis" min={200} cells={[
+        { label: "Total contacts", value: rows.length },
+        { label: "Active", value: active, sub: "Not converted or closed out" },
+        { label: "New this month", value: newThisMonth },
+        { label: "Follow-ups due", value: followUpsDue, tone: followUpsDue > 0 ? "warn" : "default" },
+      ]} />
 
-      {canManage && (
-        <ContactsBulkBar
-          selectedIds={[...sel.selected]}
-          users={users}
-          lists={lists}
-          onClear={sel.clear}
-          onDone={() => { load(); loadLists(); }}
-          onExport={() => setShowExport("selected")}
-        />
-      )}
-
-      <div className="ct-card">
+      <div className={`ct-card ${sel.selected.size ? "selecting" : ""}`}>
+        {canManage && (
+          <ContactsBulkBar
+            selectedIds={[...sel.selected]}
+            users={users}
+            lists={lists}
+            onClear={sel.clear}
+            onDone={() => { load(); loadLists(); }}
+            onExport={() => setShowExport("selected")}
+          />
+        )}
         <SortableTable
           customizeId="contacts-list"
           toolbar={
             <>
               <SearchInput value={q} onChange={setQ} placeholder="Search name, entity, email, phone, county, owner…" ariaLabel="Search contacts" />
-              <Select ariaLabel="Type" width={140} clearable value={typeFilter} onChange={(v) => setTypeFilter(v ?? "")} placeholder="All types"
-                options={TYPES.map(([v, l]) => ({ value: v, label: l }))} />
-              <Select ariaLabel="Status" width={140} clearable value={statusFilter} onChange={(v) => setStatusFilter(v ?? "")} placeholder="All statuses"
+              <Segmented
+                ariaLabel="Filter by type"
+                value={typeFilter}
+                onChange={setTypeFilter}
+                options={[
+                  { value: "", label: "All", count: rows.length },
+                  ...TYPES.map(([v]) => ({ value: v, label: TYPE_PLURAL[v] ?? typeLabel(v), count: rows.filter((r) => r.type === v).length })),
+                ]}
+              />
+              <Select ariaLabel="Status" width={168} clearable value={statusFilter} onChange={(v) => setStatusFilter(v ?? "")} placeholder="All statuses"
                 options={STATUSES.map(([v, l]) => ({ value: v, label: l }))} />
-              {/* Lists — reusable groupings; click to filter (multi-select), counts live. */}
-              <span className="ct-lists">
-                <span className="ct-lists-lbl">Lists:</span>
-                {lists.map((l) => (
-                  <span key={l.id} className={`chip ${listFilter.includes(l.id) ? "active" : ""}`}
-                    onClick={() => setListFilter((p) => p.includes(l.id) ? p.filter((x) => x !== l.id) : [...p, l.id])}>
-                    {l.name} <span style={{ opacity: .65, fontVariantNumeric: "tabular-nums" }}>{l.count}</span>
-                  </span>
-                ))}
-                {listFilter.length > 0 && <button className="link-btn" style={{ fontSize: 12 }} onClick={() => setListFilter([])}>Clear</button>}
-                {canManage && <button className="ct-managelists" onClick={() => setShowLists(true)}>+ Manage lists</button>}
-              </span>
-              {(q || typeFilter || statusFilter) && <span className="muted" style={{ fontSize: 13, whiteSpace: "nowrap" }}>Showing {filtered.length} of {rows.length}</span>}
+              {/* Lists — reusable groupings; pick to filter (multi-select), counts live. */}
+              <ListsFilter lists={lists} value={listFilter} onChange={setListFilter} canManage={canManage} onManage={() => setShowLists(true)} />
+              {(q || typeFilter || statusFilter) && <span className="bc-showing">Showing {filtered.length} of {rows.length}</span>}
             </>
           }
           columns={columns}
@@ -233,7 +282,7 @@ export function Contacts() {
           rowHref={(r) => `/contacts/${r.id}`}
           defaultSort={{ key: "next", dir: "asc" }}
           empty={rows.length === 0
-            ? (canManage ? "No contacts yet — click “+ New Contact” to start building your acquisitions network." : "No contacts yet.")
+            ? (canManage ? "No contacts yet — click “+ New contact” to start building your acquisitions network." : "No contacts yet.")
             : "No contacts match your filters."}
           selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
           rowsPerPage={[20, 50, 100, 200]}
@@ -330,7 +379,7 @@ export function ContactModal({ contact, users, onClose, onSaved, onDeleted }: {
 
   return (
     <Modal
-      title={contact ? "Edit Contact" : "New Contact"}
+      title={contact ? "Edit contact" : "New contact"}
       subtitle="Sellers, prospects, and inbound leads for the acquisitions side"
       onClose={onClose}
       wide
@@ -342,37 +391,44 @@ export function ContactModal({ contact, users, onClose, onSaved, onDeleted }: {
       </>}
     >
       {/* Standard sectioned creation layout (same system as New Deal / New Buyer). */}
-      <div className="modal-sec">Identity</div>
-      <div className="nd-grid3">
-        <div className="field"><label>First name <Req /></label><input value={f.firstName} onChange={(e) => set("firstName")(e.target.value)} autoFocus /></div>
-        <div className="field"><label>Last name <Req /></label><input value={f.lastName} onChange={(e) => set("lastName")(e.target.value)} /></div>
-        <div className="field"><label>Company / entity</label><input value={f.entityName} onChange={(e) => set("entityName")(e.target.value)} placeholder="Trust, LLC, family entity…" /></div>
-      </div>
+      <div className="bc-form">
+      <FormSection title="Identity">
+        <div className="nd-grid3">
+          <div className="field"><label>First name <Req /></label><input value={f.firstName} onChange={(e) => set("firstName")(e.target.value)} autoFocus /></div>
+          <div className="field"><label>Last name <Req /></label><input value={f.lastName} onChange={(e) => set("lastName")(e.target.value)} /></div>
+          <div className="field"><label>Company / entity</label><input value={f.entityName} onChange={(e) => set("entityName")(e.target.value)} placeholder="Trust, LLC, family entity…" /></div>
+        </div>
+      </FormSection>
 
-      <div className="modal-sec">Classification</div>
-      <div className="nd-grid3">
-        <div className="field"><label>Type</label><Select ariaLabel="Contact type" value={f.type} onChange={(v) => v && set("type")(v)} options={TYPES.map(([v, l]) => ({ value: v, label: l }))} /></div>
-        <div className="field"><label>Status</label><Select ariaLabel="Contact status" value={f.status} onChange={(v) => v && set("status")(v)} options={STATUSES.map(([v, l]) => ({ value: v, label: l }))} /></div>
-        <div className="field"><label>Owner</label><Select ariaLabel="Owner" clearable value={f.ownerId} onChange={(v) => set("ownerId")(v ?? "")} placeholder="Unassigned" options={users.map((u) => ({ value: u.id, label: u.name }))} searchable /></div>
-      </div>
+      <FormSection title="Classification">
+        <div className="nd-grid3">
+          <div className="field"><label>Type</label><Select ariaLabel="Contact type" value={f.type} onChange={(v) => v && set("type")(v)} options={TYPES.map(([v, l]) => ({ value: v, label: l }))} /></div>
+          <div className="field"><label>Status</label><Select ariaLabel="Contact status" value={f.status} onChange={(v) => v && set("status")(v)} options={STATUSES.map(([v, l]) => ({ value: v, label: l }))} /></div>
+          <div className="field"><label>Owner</label><Select ariaLabel="Owner" clearable value={f.ownerId} onChange={(v) => set("ownerId")(v ?? "")} placeholder="Unassigned" options={users.map((u) => ({ value: u.id, label: u.name }))} searchable /></div>
+        </div>
+      </FormSection>
 
-      <div className="modal-sec">Contact information</div>
-      <div className="nd-grid3">
-        <div className="field"><label>Email</label><input type="email" value={f.email} onChange={(e) => set("email")(e.target.value)} /></div>
-        <div className="field"><label>Phone</label><PhoneInput value={f.phone} onChange={set("phone")} /></div>
-        <div className="field"><label>Source</label><input value={f.source} onChange={(e) => set("source")(e.target.value)} placeholder="Mailer, cold call, referral, web…" /></div>
-      </div>
+      <FormSection title="Contact information">
+        <div className="nd-grid3">
+          <div className="field"><label>Email</label><input type="email" value={f.email} onChange={(e) => set("email")(e.target.value)} placeholder="name@example.com" /></div>
+          <div className="field"><label>Phone</label><PhoneInput value={f.phone} onChange={set("phone")} /></div>
+          <div className="field"><label>Source</label><input value={f.source} onChange={(e) => set("source")(e.target.value)} placeholder="Mailer, cold call, referral, web…" /></div>
+        </div>
+      </FormSection>
 
-      <div className="modal-sec">Coverage <span className="modal-sec-hint">· where this contact's minerals are</span></div>
-      <div className="nd-grid3">
-        <GeoFields states={states} onStatesChange={setStates} counties={counties} onCountiesChange={setCounties} />
-      </div>
+      <FormSection title="Coverage" hint="Where this contact's minerals are">
+        <div className="nd-grid3">
+          <GeoFields states={states} onStatesChange={setStates} counties={counties} onCountiesChange={setCounties} />
+        </div>
+      </FormSection>
 
-      <div className="modal-sec">Follow-up & notes</div>
-      <div className="nd-grid3">
-        <div className="field"><label>Last contacted</label><DateField value={f.lastContactedAt} onChange={set("lastContactedAt")} /></div>
-        <div className="field"><label>Next follow-up</label><DateField value={f.nextFollowUpDate} onChange={set("nextFollowUpDate")} /></div>
-        <div className="field" style={{ gridColumn: "1 / -1" }}><label>Notes</label><textarea rows={3} value={f.notes} onChange={(e) => set("notes")(e.target.value)} placeholder="Ownership details, conversation history, interests…" /></div>
+      <FormSection title="Follow-up & notes">
+        <div className="nd-grid3">
+          <div className="field"><label>Last contacted</label><DateField value={f.lastContactedAt} onChange={set("lastContactedAt")} /></div>
+          <div className="field"><label>Next follow-up</label><DateField value={f.nextFollowUpDate} onChange={set("nextFollowUpDate")} /></div>
+          <div className="field" style={{ gridColumn: "1 / -1" }}><label>Notes</label><textarea rows={3} value={f.notes} onChange={(e) => set("notes")(e.target.value)} placeholder="Ownership details, conversation history, interests…" /></div>
+        </div>
+      </FormSection>
       </div>
       {error && <Banner kind="error">{error}</Banner>}
 

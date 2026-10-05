@@ -68,52 +68,56 @@ export function BuyerAliasManager({ buyerId, companyName, aliases, onChanged }: 
     <CollapsibleSection
       title="Aliases & merges"
       sub={aliases.length ? `${aliases.length} alias${aliases.length === 1 ? "" : "es"} recorded` : "No aliases recorded yet"}
+      defaultOpen
       right={canEdit ? (
         <button type="button" className="small" onClick={(e) => { e.stopPropagation(); setOpen(true); }}>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
           Merge / add alias
         </button>
       ) : undefined}
     >
       {/* Canonical vs aliases — unambiguous. */}
-      <div className="alias-canon-row">
+      <div className="alias-grid">
         <span className="alias-canon-label">Canonical buyer</span>
-        <span className="vchip alias-canon-chip">{companyName}</span>
-      </div>
-      <div className="alias-canon-row" style={{ alignItems: "flex-start" }}>
+        <span><span className="vchip alias-canon-chip">{companyName}</span></span>
         <span className="alias-canon-label">Aliases</span>
         {aliases.length === 0
-          ? <span className="muted" style={{ fontSize: 13 }}>None — activity is attributed to the canonical name only.</span>
+          ? <span className="alias-none">None — activity is attributed to the canonical name only.</span>
           : (
             <span className="vchips">
               {aliases.map((a) => (
-                <span className="vchip" key={a}>
+                <span className="vchip alias-chip" key={a}>
                   {a}
                   {canEdit && (
                     <button type="button" className="alias-chip-x" aria-label={`Remove alias ${a}`}
-                      onClick={() => setRemoveAlias(a)}>×</button>
+                      onClick={() => setRemoveAlias(a)}>
+                      <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                    </button>
                   )}
                 </span>
               ))}
             </span>
           )}
-      </div>
 
-      {history.length > 0 && (
-        <div className="alias-history">
-          <div className="ddx-label" style={{ marginBottom: 6 }}>Audit trail</div>
-          {history.map((e) => (
-            <div className="alias-history-row" key={e.id}>
-              <span className="alias-history-text">
-                {e.summary}
-                <span className="muted"> · {e.actorName ?? "system"}, {fmtDate(e.createdAt)}</span>
-              </span>
-              {e.undoable && canMerge && (
-                <button type="button" className="small" onClick={() => setUndoEvent(e)}>Undo merge</button>
-              )}
+        {history.length > 0 && (
+          <>
+            <span className="alias-canon-label">Audit trail</span>
+            <div className="alias-history">
+              {history.map((e) => (
+                <div className="alias-history-row" key={e.id}>
+                  <span className="alias-history-text">
+                    {e.summary}
+                    <span className="muted"> · {e.actorName ?? "system"}, {fmtDate(e.createdAt)}</span>
+                  </span>
+                  {e.undoable && canMerge && (
+                    <button type="button" className="small" onClick={() => setUndoEvent(e)}>Undo merge</button>
+                  )}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
+          </>
+        )}
+      </div>
 
       {open && (
         <MergeSearchModal

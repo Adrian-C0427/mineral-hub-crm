@@ -6,7 +6,8 @@ import { useAuth } from "../auth/AuthContext";
 import { loadBranding } from "../lib/branding";
 import { layoutRect } from "../lib/viewport";
 import { ThemedLogo } from "./ThemedLogo";
-import { revealActiveStripItems, setMobileNavOpen, useIsPhone, useMobileNavOpen } from "../lib/mobile";
+import { revealActiveStripItems, setMobileNavOpen, useHasTabBar, useIsPhone, useMobileNavOpen } from "../lib/mobile";
+import { MobileTabBar } from "./MobileTabBar";
 
 interface NavItem {
   label: string;
@@ -93,9 +94,11 @@ export function Sidebar() {
   const allowed = (item: NavItem): boolean => !item.perm || can(item.perm);
 
   // Phones: the navigation is an off-canvas drawer (full labels) opened from
-  // the top bar's menu button, so the page gets the whole screen width. It
-  // closes on navigation, backdrop tap, or Escape. Desktop is unaffected.
+  // the tab bar's Menu (upright) or the top bar's menu button (landscape), so
+  // the page gets the whole screen width. It closes on navigation, backdrop
+  // tap, Escape, or Menu again. Desktop is unaffected.
   const phone = useIsPhone();
+  const tabBar = useHasTabBar();
   const drawerOpen = useMobileNavOpen();
   useEffect(() => { setMobileNavOpen(false); return revealActiveStripItems(); }, [location.pathname, location.search]);
   useEffect(() => { if (!phone) setMobileNavOpen(false); }, [phone]);
@@ -125,6 +128,7 @@ export function Sidebar() {
   return (
     <>
     {phone && drawerOpen && <div className="mobile-nav-backdrop" onClick={() => setMobileNavOpen(false)} aria-hidden="true" />}
+    {phone && tabBar && <MobileTabBar />}
     <aside ref={asideRef} className={`sidebar ${railCollapsed ? "collapsed" : ""} ${phone ? `mobile-drawer ${drawerOpen ? "open" : ""}` : ""}`}
       aria-label="Main navigation" aria-hidden={phone && !drawerOpen ? true : undefined}>
       {/* Collapse control: a tiny chevron riding the panel's edge — half in,

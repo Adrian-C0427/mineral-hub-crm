@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { AuthError, AuthLayout, AuthTitle } from "./Login";
 
 /**
  * Landing page for the OAuth redirect (/auth/callback#token=… or #twofa=…).
@@ -47,28 +48,34 @@ export function OAuthCallback() {
   }
 
   return (
-    <div className="login-wrap">
-      <div className="login-card">
-        <div className="brand" style={{ fontSize: 22, marginBottom: 4 }}>Mineral Hub<span className="dot">.</span></div>
-        {twofaToken ? (
-          <form onSubmit={submitTwofa}>
-            <p className="muted" style={{ marginTop: 0 }}>Enter your two-factor code to finish signing in</p>
+    <AuthLayout>
+      {twofaToken ? (
+        <form className="auth-form" onSubmit={submitTwofa}>
+          <AuthTitle title="Two-factor authentication" sub="Enter your two-factor code to finish signing in" />
+          <div className="auth-fields">
             <div className="field">
               <label>Authentication code</label>
-              <input value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" autoFocus placeholder="6-digit code or recovery code" />
+              <input className="auth-code" value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" autoFocus placeholder="6-digit code or recovery code" />
             </div>
-            {error && <div className="error-text">{error}</div>}
-            <button className="primary" style={{ width: "100%", marginTop: 8 }} disabled={busy}>{busy ? "Verifying…" : "Verify"}</button>
-          </form>
-        ) : error ? (
-          <>
-            <div className="error-text">{error}</div>
-            <button className="primary" style={{ width: "100%", marginTop: 8 }} onClick={() => navigate("/", { replace: true })}>Back to sign in</button>
-          </>
-        ) : (
-          <p className="muted">Signing you in…</p>
-        )}
-      </div>
-    </div>
+          </div>
+          {error && <AuthError>{error}</AuthError>}
+          <div className="auth-submit">
+            <button className="primary auth-primary" disabled={busy}>{busy ? "Verifying…" : "Verify"}</button>
+          </div>
+        </form>
+      ) : error ? (
+        <div className="auth-form">
+          <AuthTitle title="Sign in" />
+          <AuthError>{error}</AuthError>
+          <div className="auth-submit">
+            <button className="primary auth-primary" onClick={() => navigate("/", { replace: true })}>Back to sign in</button>
+          </div>
+        </div>
+      ) : (
+        <div className="auth-form">
+          <AuthTitle title="Signing you in…" />
+        </div>
+      )}
+    </AuthLayout>
   );
 }

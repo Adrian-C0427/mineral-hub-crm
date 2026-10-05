@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, MetricCard, Modal, Banner, SearchInput, Req, CtPill, ChipList } from "../components/ui";
+import { Spinner, Modal, Banner, SearchInput, Req, ChipList } from "../components/ui";
+import { StatStrip, Segmented, Tag } from "../components/kit";
 import { dealSearchHaystack } from "../lib/dealSearch";
 import { Select } from "../components/Select";
 import { SortableTable, type Column } from "../components/SortableTable";
@@ -37,19 +38,25 @@ export function MineralAssets() {
   const [showNew, setShowNew] = useState(false);
   const [users, setUsers] = useState<UserLite[]>([]);
   const [q, setQ] = useState("");
+  // Status tabs: "all" or one producing-status value (the app's own list).
+  const [statusTab, setStatusTab] = useState("all");
   const sel = useRowSelection();
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    if (!needle) return assets ?? [];
-    return (assets ?? []).filter((d) => dealSearchHaystack(d).includes(needle));
-  }, [assets, q]);
+    let rows = assets ?? [];
+    if (statusTab !== "all") rows = rows.filter((d) => d.producingStatus === statusTab);
+    if (!needle) return rows;
+    return rows.filter((d) => dealSearchHaystack(d).includes(needle));
+  }, [assets, q, statusTab]);
 
   const load = () => api.get<DealSummary[]>("/deals?recordType=OWNED_ASSET").then(setAssets);
   useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
 
   function exportSelected() {
-    const rows = (assets ?? []).filter((a) => sel.selected.has(a.id));
+    exportRows((assets ?? []).filter((a) => sel.selected.has(a.id)));
+  }
+  function exportRows(rows: DealSummary[]) {
     downloadCsv(`mineral-assets-${new Date().toISOString().slice(0, 10)}.csv`,
       ["Asset", "State", "Counties", "Asset Type", "Producing", "NRA", "Purchase Price", "Current Value", "ROI %"],
       rows.map((a) => [a.name, a.state ?? "", a.counties.join("; "), a.assetTypes.join("/") || (a.ownershipType ?? ""), a.producingStatus ?? "", a.nra ?? "", a.purchasePrice ?? "", a.currentValue ?? "", a.roiSinceAcquisition?.toFixed(1) ?? ""]));
@@ -64,62 +71,93 @@ export function MineralAssets() {
       purchasePrice: sum((d) => d.purchasePrice),
       royalty: sum((d) => d.royaltyIncomeAnnual),
       forSale: rows.filter((d) => d.assetMode === "SELL").length,
+      producing: rows.filter((d) => d.producingStatus === "Producing").length,
+      noValue: rows.filter((d) => d.currentValue == null).length,
+      nra: sum((d) => d.nra),
     };
   }, [assets]);
 
   const columns: Column<DealSummary>[] = [
-    { key: "name", header: "Asset", value: (d) => d.name, render: (d) => (
-      <div className="row" style={{ gap: 8, alignItems: "center" }}><strong>{d.name}</strong>{d.assetMode === "SELL" && <CtPill color="#f5b04b">For sale</CtPill>}</div>
-    ) },
+    { key: "name", header: "Asset", value: (d) => d.name, render: (d) => {
+      // Sub-line: which economics are still blank, else surveys / operator.
+      const missing = [d.nra == null && "NRA", d.purchasePrice == null && "cost", d.currentValue == null && "value", !d.acquisitionDate && "acquired date"].filter(Boolean) as string[];
+      const sub = (d.surveys ?? []).join(", ") || d.operator || "";
+      return (
+        <div className="ma-asset">
+          <span className="ma-asset-name"><strong>{d.name}</strong>{d.assetMode === "SELL" && <Tag tone="warn">For sale</Tag>}</span>
+          {missing.length > 0
+            ? <span className="ma-asset-sub missing">Missing {missing.join(", ")}</span>
+            : sub && <span className="ma-asset-sub" title={sub}>{sub}</span>}
+        </div>
+      );
+    } },
     { key: "location", header: "Location", value: (d) => d.counties.join(", "), render: (d) => <ChipList items={[...d.counties, d.state]} max={4} /> },
     // Standardized asset type (RI/ORRI/…); legacy rows created before the
     // rename still show their old free-text ownershipType.
-    { key: "ownershipType", header: "Asset Type", value: (d) => d.assetTypes.join("/") || d.ownershipType, render: (d) => <ChipList items={d.assetTypes.length ? d.assetTypes : [d.ownershipType]} /> },
-    { key: "producing", header: "Producing", value: (d) => d.producingStatus,
+    { key: "ownershipType", header: "Type", value: (d) => d.assetTypes.join("/") || d.ownershipType, render: (d) => (
+      d.assetTypes.length
+        ? <span className="ma-types">{d.assetTypes.map((t) => <span key={t} className="ma-type" title={ASSET_TYPE_LABELS[t] ?? t}>{t}</span>)}</span>
+        : <ChipList items={[d.ownershipType]} />
+    ) },
+    { key: "producing", header: "Status", value: (d) => d.producingStatus,
       render: (d) => d.producingStatus
-        ? <CtPill dot color={d.producingStatus === "Producing" ? "#22c55e" : "#8b93a7"}>{d.producingStatus}</CtPill>
-        : "—" },
+        ? <Tag dot tone={d.producingStatus === "Producing" ? "success" : "neutral"}>{d.producingStatus}</Tag>
+        : <span className="ma-none">—</span> },
     { key: "nra", header: "NRA", value: (d) => d.nra, type: "number", align: "right", render: (d) => num(d.nra) },
     { key: "purchasePrice", header: "Cost", value: (d) => d.purchasePrice, type: "number", align: "right", render: (d) => money(d.purchasePrice) },
-    { key: "currentValue", header: "Current Value", value: (d) => d.currentValue, type: "number", align: "right", render: (d) => money(d.currentValue) },
+    { key: "currentValue", header: "Current value", value: (d) => d.currentValue, type: "number", align: "right", render: (d) => <span className="ma-strong">{money(d.currentValue)}</span> },
     { key: "roi", header: "ROI", value: (d) => d.roiSinceAcquisition, type: "number", align: "right", render: (d) => (
-      <span style={{ color: d.roiSinceAcquisition == null ? undefined : d.roiSinceAcquisition >= 0 ? "var(--green)" : "var(--red)" }}>{fmtPct(d.roiSinceAcquisition)}</span>
+      <span className={d.roiSinceAcquisition == null ? "ma-none" : d.roiSinceAcquisition >= 0 ? "ma-pos" : "ma-neg"}>{fmtPct(d.roiSinceAcquisition)}</span>
     ) },
+    { key: "income", header: "Income / yr", value: (d) => d.royaltyIncomeAnnual, type: "number", align: "right", render: (d) => money(d.royaltyIncomeAnnual) },
     { key: "acquired", header: "Acquired", value: (d) => d.acquisitionDate, type: "date", align: "right", render: (d) => fmtDate(d.acquisitionDate) },
   ];
+
+  // Status tabs: All plus each producing status that occurs in the portfolio.
+  const statusTabs = [
+    { value: "all", label: "All", count: assets?.length ?? 0 },
+    ...PRODUCING_STATUSES.map((st) => ({ value: st, label: st, count: (assets ?? []).filter((d) => d.producingStatus === st).length }))
+      .filter((t) => t.count > 0 || t.value === statusTab),
+  ];
+  const gain = totals.currentValue - totals.purchasePrice;
 
   if (!assets) return <Spinner label="Loading mineral assets…" />;
 
   return (
-    <div className="page contacts-page">
+    <div className="page contacts-page assets-page">
       <div className="page-header">
         <div>
           <h1 style={{ marginBottom: 0 }}>Mineral Assets</h1>
           <div className="page-sub">Owned mineral &amp; royalty interests — your portfolio, distinct from acquisition opportunities.</div>
         </div>
-        {can("createDeals") && (
-          <button className="pbtn pbtn-primary" onClick={() => setShowNew(true)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-            New Asset
-          </button>
-        )}
+        <div className="ma-actions">
+          {assets.length > 0 && (
+            <button type="button" onClick={() => exportRows(filtered)} title="Export the assets shown to CSV">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
+              Export CSV
+            </button>
+          )}
+          {can("createDeals") && (
+            <button className="pbtn pbtn-primary" onClick={() => setShowNew(true)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              New asset
+            </button>
+          )}
+        </div>
       </div>
 
-      <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
-        <MetricCard label="Assets Owned" value={totals.count} hint={totals.forSale > 0 ? `${totals.forSale} marked for sale` : undefined} />
-        <MetricCard label="Portfolio Value" value={money(totals.currentValue)} hint={`Cost basis ${money(totals.purchasePrice)}`} />
-        <MetricCard
-          label="Unrealized Gain"
-          value={money(totals.currentValue - totals.purchasePrice)}
-          hint={totals.purchasePrice > 0
-            ? fmtPct(((totals.currentValue - totals.purchasePrice) / totals.purchasePrice) * 100)
-            : totals.currentValue > 0 ? "Cost basis not set — add purchase price for a real gain figure" : undefined}
-          valueColor={(() => { const g = totals.currentValue - totals.purchasePrice; return g > 0 ? "var(--green)" : g < 0 ? "var(--red)" : undefined; })()}
-        />
-        <MetricCard label="Annual Royalty Income" value={money(totals.royalty)}
-          hint={totals.royalty ? undefined : "Fills in from royalty income on each asset"}
-          valueColor={totals.royalty ? "var(--green)" : undefined} />
-      </div>
+      <StatStrip min={220} className="ma-stats" cells={[
+        { label: "Assets owned", value: num(totals.count),
+          sub: [`${totals.producing} producing`, totals.forSale > 0 ? `${totals.forSale} marked for sale` : null].filter(Boolean).join(" · ") },
+        { label: "Portfolio value", value: money(totals.currentValue),
+          sub: <>Cost basis {money(totals.purchasePrice)}{totals.noValue > 0 && <span className="ma-warn"> · {totals.noValue} without a value</span>}</> },
+        { label: "Unrealized gain", value: money(gain), tone: gain > 0 ? "success" : gain < 0 ? "danger" : "default",
+          sub: totals.purchasePrice > 0
+            ? `${fmtPct((gain / totals.purchasePrice) * 100)} on cost`
+            : totals.currentValue > 0 ? <span className="ma-warn">Cost basis not set — add purchase price for a real gain figure</span> : undefined },
+        { label: "Annual royalty income", value: money(totals.royalty), tone: totals.royalty ? "success" : "default",
+          sub: totals.royalty ? "Trailing 12 mo · from revenue" : "Fills in from royalty income on each asset" },
+      ]} />
 
       <BulkActionsBar
         selectedIds={[...sel.selected]}
@@ -140,8 +178,9 @@ export function MineralAssets() {
             customizeId="mineral-assets-list"
             toolbar={
               <>
-                <SearchInput value={q} onChange={setQ} placeholder="Search asset, abstract, survey, county, operator…" ariaLabel="Search mineral assets" />
-                {q && <span className="muted" style={{ fontSize: 13, whiteSpace: "nowrap" }}>Showing {filtered.length} of {assets.length}</span>}
+                <SearchInput value={q} onChange={setQ} placeholder="Search asset, abstract, survey, county, operator" ariaLabel="Search mineral assets" />
+                {statusTabs.length > 1 && <Segmented options={statusTabs} value={statusTab} onChange={setStatusTab} ariaLabel="Producing status" />}
+                {(q || statusTab !== "all") && <span className="muted" style={{ fontSize: 13, whiteSpace: "nowrap" }}>Showing {filtered.length} of {assets.length}</span>}
               </>
             }
             columns={columns}
@@ -154,7 +193,7 @@ export function MineralAssets() {
             selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
             rowsPerPage={[20, 50, 100, 200]}
             paginationNoun="asset"
-            footerExtra={totals.currentValue > 0 ? ` · ${money(totals.currentValue)} total value` : ""}
+            footerExtra={`${totals.nra ? ` · ${num(totals.nra)} total NRA` : ""}${totals.currentValue > 0 ? ` · ${money(totals.currentValue)} total value` : ""}`}
           />
         )}
       </div>

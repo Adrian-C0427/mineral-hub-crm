@@ -8,6 +8,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import { Login } from "./pages/Login";
 import { ResetPassword } from "./pages/ResetPassword";
 import { OAuthCallback } from "./pages/OAuthCallback";
+import { NotFound } from "./pages/NotFound";
 import { ChangePasswordForm } from "./components/ChangePasswordForm";
 import { Dashboard } from "./pages/Dashboard";
 import { Pipeline } from "./pages/Pipeline";
@@ -147,7 +148,11 @@ export function App() {
           <Route path="/settings/general" element={<SettingsGeneral />} />
           <Route path="/settings/portal" element={<Guard perm="managePortal"><SettingsPortal /></Guard>} />
           <Route path="/settings/integrations" element={<Guard perm="manageApiIntegrations"><Suspense fallback={<Spinner label="Loading integrations…" />}><Integrations /></Suspense></Guard>} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          {/* Signed-out-only pages: once signed in they go to the Dashboard, as before. */}
+          <Route path="/login" element={<Navigate to="/" replace />} />
+          <Route path="/reset-password" element={<Navigate to="/" replace />} />
+          <Route path="/auth/callback" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<NotFound />} />
         </Routes>
         </ErrorBoundary>
       </main>

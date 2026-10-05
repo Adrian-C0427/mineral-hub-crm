@@ -87,7 +87,8 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, dealNra, de
 
   return (
     <Modal
-      title={`Update buyer · ${buyerName}`}
+      title="Update buyer"
+      subtitle={buyerName}
       onClose={onClose}
       dirty={notes.trim() !== (initial?.notes ?? "").trim() || amount.trim() !== "" || conditions.trim() !== ""}
       footer={
@@ -116,18 +117,18 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, dealNra, de
           <div className="modal-sec">Offer <span className="modal-sec-hint">· enter an amount to record a formal offer, or leave blank to just set the status</span></div>
           <div className="grid-2">
             <div className="field">
-              <label>Price per NRA <span className="muted" style={{ textTransform: "none" }}>(optional)</span></label>
+              <label>Price per NRA <span className="dd-opt">(optional)</span></label>
               <MoneyInput value={pricePerNra} ariaLabel="Price per NRA" disabled={dealNra == null}
                 onChange={(v) => { setPricePerNra(v); setPricePerNma(""); if (dealNra != null) setAmount(computeAmount(v, dealNra)); }} />
-              <span className="muted" style={{ fontSize: 11.5 }}>
+              <span className="dd-hint">
                 {dealNra != null ? `× ${dealNra} NRA` : "Deal has no NRA set"}
               </span>
             </div>
             <div className="field">
-              <label>Price per NMA <span className="muted" style={{ textTransform: "none" }}>(optional)</span></label>
+              <label>Price per NMA <span className="dd-opt">(optional)</span></label>
               <MoneyInput value={pricePerNma} ariaLabel="Price per NMA" disabled={dealNma == null}
                 onChange={(v) => { setPricePerNma(v); setPricePerNra(""); if (dealNma != null) setAmount(computeAmount(v, dealNma)); }} />
-              <span className="muted" style={{ fontSize: 11.5 }}>
+              <span className="dd-hint">
                 {dealNma != null ? `× ${dealNma} NMA` : "Deal has no NMA set"}
               </span>
             </div>

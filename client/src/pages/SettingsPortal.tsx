@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
 import { showToast } from "../components/ui";
 import { Toggle } from "../components/Toggle";
-import { SettingsNav } from "../components/SettingsNav";
+import { SettingsCardHead, SettingsLayout } from "../components/SettingsNav";
+import { Tag } from "../components/kit";
+import { Link } from "react-router-dom";
+import { useAuth } from "../auth/AuthContext";
 
 /**
  * Buyer Portal settings — enable/disable and the marketplace URL. Contact
@@ -21,15 +24,14 @@ interface PortalSettings {
 
 export function SettingsPortal() {
   return (
-    <div className="page" style={{ maxWidth: 820 }}>
-      <div className="page-header"><h1>Settings</h1></div>
-      <SettingsNav />
+    <SettingsLayout>
       <PortalGeneral />
-    </div>
+    </SettingsLayout>
   );
 }
 
 function PortalGeneral() {
+  const { can } = useAuth();
   const [f, setF] = useState({ enabled: false, slug: "" });
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -78,43 +80,69 @@ function PortalGeneral() {
     finally { setBusy(false); }
   }
 
-  if (!loaded) return <div className="panel"><p className="muted">Loading…</p></div>;
+  if (!loaded) return <div className="panel"><p className="muted" style={{ margin: 0 }}>Loading…</p></div>;
   const url = f.slug ? `${window.location.origin}/portal/${f.slug.trim().toLowerCase()}` : null;
 
   return (
-    <div className="panel">
-      <h3 style={{ marginTop: 0 }}>Marketplace</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        The Buyer Offering Portal is your public marketplace: published deals appear at your portal URL, and buyers can browse,
-        filter, view offering pages, and submit their acquisition criteria (which creates buyer leads in the CRM).
-      </p>
-      {/* Modern toggle switch — updates immediately. */}
-      <div className="row" style={{ alignItems: "center", gap: 12, marginBottom: 14 }}>
-        <Toggle checked={f.enabled} onChange={toggleEnabled} ariaLabel="Portal enabled" />
-        <div>
-          <strong>Portal {f.enabled ? "enabled" : "disabled"}</strong>
-          <div className="muted" style={{ fontSize: 12 }}>{f.enabled ? "Your marketplace is live at the URL below." : "Your marketplace is hidden from buyers."}</div>
+    <section className="panel set-card-flush">
+      <div className="set-card-pad portal-head">
+        <SettingsCardHead
+          title="Buyer marketplace"
+          badge={<Tag tone={f.enabled ? "success" : "neutral"} dot>{f.enabled ? "Live" : "Off"}</Tag>}
+          desc={<>
+            The Buyer Offering Portal is your public marketplace: published deals appear at your portal URL, and buyers can browse,
+            filter, view offering pages, and submit their acquisition criteria (which creates buyer leads in the CRM).
+          </>}
+          // Modern toggle switch — updates immediately.
+          aside={<Toggle checked={f.enabled} onChange={toggleEnabled} ariaLabel="Portal enabled" />}
+        />
+        <div className={`portal-state ${f.enabled ? "on" : "off"}`}>
+          <strong>Portal {f.enabled ? "enabled" : "disabled"}</strong> · {f.enabled ? "Your marketplace is live at the URL below." : "Your marketplace is hidden from buyers."}
         </div>
       </div>
-      <form onSubmit={saveUrl} style={{ maxWidth: 520 }}>
+      <form onSubmit={saveUrl} className="set-card-pad portal-form">
         <div className="field">
-          <label>Portal URL</label>
-          <input
-            ref={slugRef}
-            value={f.slug}
-            onChange={(e) => { setF((p) => ({ ...p, slug: e.target.value })); if (slugError) setSlugError(null); }}
-            placeholder="your-company"
-            aria-invalid={slugError ? true : undefined}
-          />
+          <label htmlFor="portal-slug">Portal URL</label>
+          <div className={`portal-slug ${slugError ? "invalid" : ""}`}>
+            <span className="portal-slug-prefix">…/portal/</span>
+            <input
+              id="portal-slug"
+              ref={slugRef}
+              value={f.slug}
+              onChange={(e) => { setF((p) => ({ ...p, slug: e.target.value })); if (slugError) setSlugError(null); }}
+              placeholder="your-company"
+              spellCheck={false}
+              aria-invalid={slugError ? true : undefined}
+            />
+          </div>
           {slugError && <div className="error-text" style={{ marginTop: 6 }}>{slugError}</div>}
-          {url && <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{url}</div>}
         </div>
-        <p className="muted" style={{ fontSize: 12 }}>
-          Branding (logo) comes from Settings → General → Company Branding. Deals are published individually from each deal page,
-          where you also set the point of contact shown on that listing.
-        </p>
-        <button className="primary" disabled={busy}>{busy ? "Saving…" : "Save marketplace settings"}</button>
+        {url && (
+          <div className="portal-url">
+            <span className="portal-url-text" title={url}>{url}</span>
+            <button type="button" className="small" onClick={() => { navigator.clipboard?.writeText(url).then(() => showToast("Portal URL copied")).catch(() => {}); }}>Copy</button>
+            <a className="portal-url-open" href={url} target="_blank" rel="noreferrer">
+              Open
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M7 17L17 7M9 7h8v8" /></svg>
+            </a>
+          </div>
+        )}
+        <div className="portal-actions">
+          <button className="primary" disabled={busy}>{busy ? "Saving…" : "Save marketplace settings"}</button>
+        </div>
       </form>
-    </div>
+      <div className="portal-links">
+        <div className="portal-link-cell">
+          <span className="portal-link-title">Logo</span>
+          <span className="portal-link-text">Branding (logo) comes from Settings → General → Company Branding.</span>
+          <Link className="set-link" to="/settings/general#branding">Edit branding →</Link>
+        </div>
+        <div className="portal-link-cell">
+          <span className="portal-link-title">Listings</span>
+          <span className="portal-link-text">Deals are published individually from each deal page, where you also set the point of contact shown on that listing.</span>
+          {can("viewDeals") && <Link className="set-link" to="/deals/active">Go to deals →</Link>}
+        </div>
+      </div>
+    </section>
   );
 }

@@ -21,10 +21,10 @@ export function BulkBar({ count, onClear, children }: { count: number; onClear: 
   if (count === 0) return null;
   return (
     <div className="bulk-bar">
-      <strong>{count} selected</strong>
-      <span className="spacer" />
+      <strong className="bulk-count">{count} selected</strong>
       {children}
-      <button className="small" onClick={onClear}>Deselect all</button>
+      <span className="spacer" />
+      <button className="small bulk-clear" onClick={onClear}>Clear selection</button>
     </div>
   );
 }

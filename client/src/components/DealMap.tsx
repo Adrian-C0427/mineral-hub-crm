@@ -31,7 +31,13 @@ const EMPTY: FC = { type: "FeatureCollection", features: [] };
  * Shapefile tracts imported here are linked to the deal (`dealId`) and drawn
  * with the main map's exact tract styling; the main map shows them too.
  */
-export function DealMap({ abstractIds, dealId }: { abstractIds: string[]; dealId?: string }) {
+export function DealMap({ abstractIds, dealId, noun = "deal", abstractsWhere = "Deal Characteristics" }: {
+  abstractIds: string[]; dealId?: string;
+  /** What the record is called in the empty-map hint ("deal", "asset"). */
+  noun?: string;
+  /** Where the page edits its abstracts (named in the empty-map hint). */
+  abstractsWhere?: string;
+}) {
   const { can } = useAuth();
   const [tractCount, setTractCount] = useState(0);
   // This deal's imported tracts, fetched on mount (independent of the map
@@ -54,7 +60,7 @@ export function DealMap({ abstractIds, dealId }: { abstractIds: string[]; dealId
     if (mapRef.current || !container.current) return;
     const map = new maplibregl.Map({ container: container.current, style: styleWithGlyphs(), center: LEON_CENTER, zoom: 9 });
     watchGisHealth(map);
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-left");
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-right");
     mapRef.current = map;
 
     map.on("load", async () => {
@@ -178,8 +184,8 @@ export function DealMap({ abstractIds, dealId }: { abstractIds: string[]; dealId
     <div className="deal-map">
       <div className="dm-canvas">
         <div ref={container} style={{ position: "absolute", inset: 0 }} />
-        {/* Same collapsible floating Layers control as the Marketplace map. */}
-        <div className="portal-map-controls">
+        {/* Same Layers popover + Import SHP as the main map, top-left. */}
+        <div className="portal-map-controls dm-controls">
           <MapLayersPanel
             variant="floating"
             collapsible
@@ -202,12 +208,22 @@ export function DealMap({ abstractIds, dealId }: { abstractIds: string[]; dealId
                 setLayers((p) => ({ ...p, tracts: true }));
                 if (bbox) mapRef.current?.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 40, duration: 800, maxZoom: 14 });
               }}
+              onShow={(importId) => {
+                // Frame one upload's boundaries from the tracts already loaded.
+                setLayers((p) => ({ ...p, tracts: true }));
+                void (tractsRef.current ?? loadTracts()).then((fc) => {
+                  const pts = fc.features.filter((f) => f.properties.__importId === importId).flatMap((f) => collectCoords(f.geometry));
+                  if (!pts.length) return;
+                  const [w, s, e, n] = bboxOfPoints(pts);
+                  mapRef.current?.fitBounds([[w, s], [e, n]], { padding: 40, duration: 800, maxZoom: 14 });
+                });
+              }}
             />
           )}
         </div>
         {selected && (
           <div className="dm-info">
-            <button className="icon-btn" style={{ float: "right" }} onClick={() => setSelected(null)}>×</button>
+            <button className="icon-btn dm-info-x" aria-label="Close" onClick={() => setSelected(null)}>×</button>
             {selected.kind === "abstract" ? (
               <><strong>{formatAbstract({ abstract: selected.abstract, survey: selected.survey, county: selected.county, state: "TX" })}</strong></>
             ) : selected.kind === "tract" ? (
@@ -222,10 +238,10 @@ export function DealMap({ abstractIds, dealId }: { abstractIds: string[]; dealId
           </div>
         )}
         {abstractIds.length === 0 && tractCount === 0 && (
-          <div className="dm-empty">No abstracts or imported tracts on this deal yet. Add abstracts in Deal Characteristics{dealId && can("manageMapData") ? ", or import a shapefile," : ""} to see it on the map.</div>
+          <div className="dm-empty">No abstracts or imported tracts on this {noun} yet. Add abstracts in {abstractsWhere}{dealId && can("manageMapData") ? ", or import a shapefile," : ""} to see it on the map.</div>
         )}
       </div>
-      <div className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+      <div className="dm-foot">
         {num(abstractIds.length)} abstract(s){dealId ? ` · ${num(tractCount)} imported tract(s)` : ""} · zoomed to the full deal extent
       </div>
     </div>

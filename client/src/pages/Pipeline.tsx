@@ -1,15 +1,17 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
-import { Modal, Spinner, showToast, ChipList } from "../components/ui";
+import { Spinner, showToast, ChipList } from "../components/ui";
 import { Select } from "../components/Select";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
+import { Segmented } from "../components/kit";
+import { Toggle } from "../components/Toggle";
 import { dealSearchHaystack } from "../lib/dealSearch";
 import { NewDealModal } from "../components/NewDealModal";
 import { StageChangeModal } from "../components/StageChangeModal";
-import { money, num, fmtDate } from "../lib/format";
+import { money, num, fmtDate, daysBetween } from "../lib/format";
 import { useAuth } from "../auth/AuthContext";
-import { useStages, stageColor } from "../stages";
+import { useStages, stageColor, type PipelineInfo } from "../stages";
 import { PipelineSettingsModal } from "../components/PipelineSettingsModal";
 import type { DealSummary, Stage } from "../types";
 
@@ -19,8 +21,8 @@ import type { DealSummary, Stage } from "../types";
 // behind a confirmation, after which the deal leaves the board for the Closed
 // Deals / Archived Deals subpage.
 const TRANSITIONS: { stage: Stage; label: string; hint: string }[] = [
-  { stage: "CLOSED", label: "Closed", hint: "→ Closed Deals" },
-  { stage: "DEAD", label: "Dead", hint: "→ Archived Deals" },
+  { stage: "CLOSED", label: "Closed", hint: "Drag a deal here to move it to Closed Deals" },
+  { stage: "DEAD", label: "Dead", hint: "Drag a deal here to move it to Archived Deals" },
 ];
 
 // Distance (px) the pointer must travel before a press becomes a drag — below it
@@ -31,6 +33,8 @@ const DRAG_THRESHOLD = 5;
 // the hold completes is treated as a scroll.
 const TOUCH_HOLD_MS = 350;
 const TOUCH_SLOP = 10;
+// A find-buyer date this many days out (or fewer) shows an "In Nd" chip.
+const DUE_SOON_DAYS = 7;
 
 
 interface DragState { id: string; w: number; offX: number; offY: number; moved: boolean }
@@ -41,14 +45,18 @@ interface DragState { id: string; w: number; offX: number; offY: number; moved: 
 // ---------------------------------------------------------------------------
 type CardField = "location" | "nra" | "nma" | "priority" | "profit" | "ourPrice" | "buyerPrice" | "days" | "buyer" | "dates";
 type CardSort = "priority" | "days" | "profit" | "nma" | "ourPrice" | "buyerPrice" | "name";
+/** Which figure each column header totals. */
+type ColumnTotal = "profit" | "ourPrice" | "buyerPrice" | "nra";
 interface PipelinePrefs {
   density: "comfortable" | "compact"; fields: Record<CardField, boolean>; sort: CardSort;
   /** Show each stage's Under Contract total (acquisition cost of its deals) in the column header. */
   underContract: boolean;
+  /** Column header total (added later; loadPrefs fills it in for older saved views). */
+  total: ColumnTotal;
 }
 const CARD_FIELDS: [CardField, string][] = [
   ["location", "Location"], ["nra", "NRA"], ["nma", "NMA"], ["priority", "Priority"], ["profit", "Est. profit"],
-  ["ourPrice", "Our price"], ["buyerPrice", "Buyer purchase price"],
+  ["ourPrice", "Our price"], ["buyerPrice", "Buyer price"],
   ["days", "Days in stage"], ["buyer", "Selected buyer"], ["dates", "Key dates"],
 ];
 // NMA / Our price / Buyer purchase price are opt-in so existing boards keep
@@ -58,6 +66,7 @@ const DEFAULT_PREFS: PipelinePrefs = {
   fields: { location: true, nra: true, nma: false, priority: true, profit: true, ourPrice: false, buyerPrice: false, days: true, buyer: true, dates: true },
   sort: "priority",
   underContract: false,
+  total: "profit",
 };
 const PREFS_KEY = "mh-pipeline-view:v1";
 function loadPrefs(): PipelinePrefs {
@@ -88,6 +97,7 @@ const EMPTY_FILTERS: PipelineFilterState = {
   nraMin: "", nraMax: "", nmaMin: "", nmaMax: "", ourMin: "", ourMax: "", buyerMin: "", buyerMax: "",
 };
 // Package rollups (agg*) represent the card the user sees — display, sort, and filter on those.
+const cardNra = (d: DealSummary) => d.aggNra ?? d.nra;
 const cardNma = (d: DealSummary) => d.aggAcreageNma ?? d.acreageNma;
 const cardOur = (d: DealSummary) => d.aggOurPrice ?? d.ourPrice;
 const cardBuyer = (d: DealSummary) => d.buyerPurchasePrice ?? null;
@@ -116,10 +126,51 @@ function applyPipelineFilters(rows: DealSummary[], f: PipelineFilterState): Deal
     (!f.buyerId || d.selectedBuyer?.id === f.buyerId) &&
     (!f.assigneeId || d.assignees.some((a) => a.id === f.assigneeId) || d.relationshipOwner?.id === f.assigneeId) &&
     (!f.overdueOnly || d.isOverdue) &&
-    inRange(d.aggNra ?? d.nra, bound(f.nraMin), bound(f.nraMax)) &&
+    inRange(cardNra(d), bound(f.nraMin), bound(f.nraMax)) &&
     inRange(cardNma(d), bound(f.nmaMin), bound(f.nmaMax)) &&
     inRange(cardOur(d), bound(f.ourMin), bound(f.ourMax)) &&
     inRange(cardBuyer(d), bound(f.buyerMin), bound(f.buyerMax)));
+}
+
+/** Filter option lists — drawn from the deals actually on the board. */
+function filterOptions(deals: DealSummary[]) {
+  const states = [...new Set(deals.flatMap((d) => [...d.states, ...(d.state ? [d.state] : [])]))].sort();
+  const counties = [...new Set(deals.flatMap((d) => d.counties))].sort();
+  const buyers = [...new Map(deals.flatMap((d) => (d.selectedBuyer ? [[d.selectedBuyer.id, d.selectedBuyer.name] as const] : []))).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1]));
+  const people = [...new Map(deals.flatMap((d) => [
+    ...d.assignees.map((a) => [a.id, a.name] as const),
+    ...(d.relationshipOwner ? [[d.relationshipOwner.id, d.relationshipOwner.name] as const] : []),
+  ])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  return { states, counties, buyers, people };
+}
+
+const PRIORITY_LABEL: Record<string, string> = { HIGH: "High", MEDIUM: "Medium", LOW: "Low" };
+
+/** One removable tag per active filter (same dimensions activeFilterCount counts). */
+function filterTags(f: PipelineFilterState, deals: DealSummary[]): { key: string; label: string; clear: Partial<PipelineFilterState> }[] {
+  const { buyers, people } = filterOptions(deals);
+  const range = (name: string, lo: string, hi: string, fmt: (n: number) => string) => {
+    const a = bound(lo), b = bound(hi);
+    if (a !== null && b !== null) return `${name} ${fmt(a)}–${fmt(b)}`;
+    if (a !== null) return `${name} ≥ ${fmt(a)}`;
+    if (b !== null) return `${name} ≤ ${fmt(b)}`;
+    return null;
+  };
+  const tags: { key: string; label: string | null; clear: Partial<PipelineFilterState> }[] = [
+    { key: "q", label: f.q.trim() ? `“${f.q.trim()}”` : null, clear: { q: "" } },
+    { key: "priority", label: f.priority ? `Priority: ${PRIORITY_LABEL[f.priority]}` : null, clear: { priority: "" } },
+    { key: "states", label: f.states.length ? `State: ${f.states.join(", ")}` : null, clear: { states: [] } },
+    { key: "counties", label: f.counties.length ? `County: ${f.counties.join(", ")}` : null, clear: { counties: [] } },
+    { key: "buyer", label: f.buyerId ? `Buyer: ${buyers.find(([id]) => id === f.buyerId)?.[1] ?? "Selected buyer"}` : null, clear: { buyerId: "" } },
+    { key: "team", label: f.assigneeId ? `Team member: ${people.find(([id]) => id === f.assigneeId)?.[1] ?? "Selected"}` : null, clear: { assigneeId: "" } },
+    { key: "nra", label: range("NRA", f.nraMin, f.nraMax, (n) => num(n)), clear: { nraMin: "", nraMax: "" } },
+    { key: "nma", label: range("NMA", f.nmaMin, f.nmaMax, (n) => num(n)), clear: { nmaMin: "", nmaMax: "" } },
+    { key: "our", label: range("Our price", f.ourMin, f.ourMax, (n) => money(n)), clear: { ourMin: "", ourMax: "" } },
+    { key: "buyerPrice", label: range("Buyer price", f.buyerMin, f.buyerMax, (n) => money(n)), clear: { buyerMin: "", buyerMax: "" } },
+    { key: "overdue", label: f.overdueOnly ? "Overdue only" : null, clear: { overdueOnly: false } },
+  ];
+  return tags.filter((t): t is { key: string; label: string; clear: Partial<PipelineFilterState> } => t.label !== null);
 }
 
 const PRIORITY_RANK: Record<string, number> = { HIGH: 0, MEDIUM: 1, LOW: 2 };
@@ -140,6 +191,64 @@ function sortDeals(rows: DealSummary[], sort: CardSort): DealSummary[] {
     name: (a, b) => a.name.localeCompare(b.name),
   };
   return [...rows].sort(cmp[sort]);
+}
+
+/** Column header totals: the label shown beside the figure, and its sum. */
+const COLUMN_TOTALS: Record<ColumnTotal, { option: string; label: string; sum: (rows: DealSummary[]) => number; fmt: (n: number) => string }> = {
+  profit: { option: "Est. profit", label: "est. profit", sum: (rows) => rows.reduce((s, d) => s + (d.profitEst ?? 0), 0), fmt: (n) => money(n) },
+  // Our price = what we owe sellers (owned assets for sale have no seller contract).
+  ourPrice: { option: "Our price", label: "our price", sum: (rows) => rows.filter((d) => d.recordType !== "OWNED_ASSET").reduce((s, d) => s + (cardOur(d) ?? 0), 0), fmt: (n) => money(n) },
+  buyerPrice: { option: "Buyer price", label: "buyer price", sum: (rows) => rows.reduce((s, d) => s + (cardBuyer(d) ?? 0), 0), fmt: (n) => money(n) },
+  nra: { option: "NRA", label: "NRA", sum: (rows) => rows.reduce((s, d) => s + (cardNra(d) ?? 0), 0), fmt: (n) => num(n) },
+};
+
+/** Status chip for the find-buyer date. "Overdue" follows the server's rule
+ *  (deal.isOverdue: no selected buyer and the date has passed). */
+function dueStatus(d: DealSummary): { text: string; tone: "danger" | "warn" | "neutral" } | null {
+  const days = daysBetween(d.findBuyerByDate);
+  if (days == null) return null;
+  if (d.isOverdue) return { text: days < 0 ? `Overdue ${-days}d` : "Overdue", tone: "danger" };
+  if (d.selectedBuyer) return null;
+  if (days === 0) return { text: "Due today", tone: "warn" };
+  if (days > 0 && days <= DUE_SOON_DAYS) return { text: `In ${days}d`, tone: "neutral" };
+  return null;
+}
+
+// --- Icons (inline, stroke = currentColor) ---------------------------------
+const Svg = ({ size = 14, sw = 1.7, children }: { size?: number; sw?: number; children: ReactNode }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
+);
+const ChevronIcon = () => <Svg sw={2}><path d="M6 9l6 6 6-6" /></Svg>;
+const CheckIcon = ({ size = 13 }: { size?: number }) => <Svg size={size} sw={2.8}><path d="M5 12.5l4.5 4.5L19 7.5" /></Svg>;
+const CloseIcon = ({ size = 10, sw = 2.6 }: { size?: number; sw?: number }) => <Svg size={size} sw={sw}><path d="M6 6l12 12M18 6L6 18" /></Svg>;
+const SlidersIcon = () => <Svg><path d="M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4" /></Svg>;
+const FunnelIcon = () => <Svg><path d="M4 5h16l-6 7.5V19l-4 1.5v-8L4 5z" /></Svg>;
+const GridIcon = () => <Svg><rect x="4" y="4" width="7" height="7" rx="1.5" /><rect x="13" y="4" width="7" height="7" rx="1.5" /><rect x="4" y="13" width="7" height="7" rx="1.5" /><rect x="13" y="13" width="7" height="7" rx="1.5" /></Svg>;
+const PlusIcon = () => <Svg sw={2}><path d="M12 5v14M5 12h14" /></Svg>;
+const SearchIcon = () => <Svg sw={1.8}><circle cx="11" cy="11" r="7" /><path d="M20 20l-3.5-3.5" /></Svg>;
+const PinIcon = () => <Svg size={12} sw={1.8}><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z" /><circle cx="12" cy="10" r="2.3" /></Svg>;
+const ClockIcon = () => <Svg size={12} sw={1.9}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5V12l3 2" /></Svg>;
+const ArrowIcon = () => <Svg size={11} sw={2}><path d="M5 12h14M13 6l6 6-6 6" /></Svg>;
+const TrayIcon = () => <Svg size={18}><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></Svg>;
+
+/** Popover open state that closes on an outside press or Escape. Presses inside
+ *  a body-portaled dropdown menu (the popover's own Select fields) don't count
+ *  as outside. */
+function usePopover() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      const t = e.target as HTMLElement;
+      if (ref.current?.contains(t) || t.closest?.(".msel-menu")) return;
+      setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+  return { open, setOpen, ref };
 }
 
 export function Pipeline() {
@@ -296,7 +405,7 @@ export function Pipeline() {
       load();
       showToast(
         <span>
-          Moved <strong>{deal.name}</strong> to {label(col)}.{" "}
+          <strong>{deal.name}</strong> moved to {label(col)}.{" "}
           <button
             className="link-btn"
             onClick={() => {
@@ -324,103 +433,130 @@ export function Pipeline() {
   const activeKeys = new Set(activeStages.map((s) => s.key));
   const activeBoardDeals = boardDeals.filter((d) => activeKeys.has(d.stage));
   const boardTotal = activeBoardDeals.reduce((sum, d) => sum + (d.profitEst ?? 0), 0);
+  const tags = filtersActive ? filterTags(filters, pipelineDeals) : [];
+  const total = COLUMN_TOTALS[prefs.total] ?? COLUMN_TOTALS.profit;
+  // Per-pipeline, per-stage opportunity counts for the settings stage editor.
+  const stageCount = (pipelineId: string, stageKey: string) => {
+    const p = pipelines.find((x) => x.id === pipelineId);
+    return deals.filter((d) => d.stage === stageKey && (p?.isDefault ? !d.pipelineId || d.pipelineId === pipelineId : d.pipelineId === pipelineId)).length;
+  };
 
   return (
     <div className="page pl2-page">
-      <div className="page-header pl2-head">
-        <div className="row" style={{ gap: 14, alignItems: "center", flexWrap: "wrap" }}>
-          <h1 style={{ marginBottom: 0 }}>Pipeline</h1>
+      <div className="page-header pl-head">
+        <div className="pl-head-main">
+          <h1>Pipeline</h1>
           {/* Pipeline selector — switch boards; each pipeline has its own stages. */}
-          <span className="pl2-picker">
-            <span className="pl2-dot" aria-hidden="true" />
-            <Select
-              ariaLabel="Pipeline"
-              width={170}
-              options={pipelines.map((p) => ({ value: p.id, label: p.name }))}
-              value={selectedId}
-              onChange={(v) => v && setSelectedId(v)}
-            />
-          </span>
-          <span className="pl2-sum">
-            <b>{activeBoardDeals.length}</b> active deal{activeBoardDeals.length === 1 ? "" : "s"} · <b>{money(boardTotal)}</b> in pipeline
-          </span>
-          {filtersActive && <span className="muted" style={{ fontSize: 12.5, whiteSpace: "nowrap" }}>Showing {boardDeals.length} of {pipelineDeals.length}</span>}
+          <PipelineSwitcher
+            pipelines={pipelines}
+            selectedId={selectedId}
+            onSelect={(id) => id && setSelectedId(id)}
+            onManage={canCustomizeStages ? () => setShowStages(true) : undefined}
+          />
+          <div className="pl-stats">
+            <span><b>{activeBoardDeals.length}</b> active deal{activeBoardDeals.length === 1 ? "" : "s"}</span>
+            <span className="pl-stats-dot" aria-hidden="true" />
+            <span><b className="pos">{money(boardTotal)}</b> est. profit in pipeline</span>
+          </div>
         </div>
-        <div className="row" style={{ gap: 8 }}>
-          <PipelineFilters deals={pipelineDeals} filters={filters} onChange={setFilters} />
-          {canCustomizeStages && <button className="small" title="Create, rename, reorder, and delete pipelines; configure stages and colors" onClick={() => setShowStages(true)}>Pipeline settings</button>}
+        <div className="pl-toolbar">
+          <PipelineFilters deals={pipelineDeals} filters={filters} onChange={setFilters} shown={boardDeals.length} />
           <PipelineCustomize prefs={prefs} onChange={setPrefs} />
-          {canCreate && <button className="primary" onClick={() => setShowNew(true)}>+ New Deal</button>}
+          {canCustomizeStages && (
+            <button type="button" className="pl-btn" title="Create, rename, reorder, and delete pipelines; configure stages and colors" onClick={() => setShowStages(true)}>
+              <SlidersIcon /><span>Pipeline settings</span>
+            </button>
+          )}
+          {canCreate && <button type="button" className="primary pl-new" onClick={() => setShowNew(true)}><PlusIcon /><span>New deal</span></button>}
         </div>
       </div>
 
-      {activeStages.length === 0 && (
-        <div className="panel" style={{ textAlign: "center", padding: "36px 20px" }}>
-          <p style={{ margin: 0 }}><strong>This pipeline has no stages yet.</strong></p>
-          <p className="muted" style={{ margin: "6px 0 14px" }}>Build it from scratch — add your first stage to start moving deals through it. Closed and Dead are already included.</p>
-          {canCustomizeStages && <button className="primary" onClick={() => setShowStages(true)}>Open Pipeline settings</button>}
+      {filtersActive && (
+        <div className="pl-tags">
+          <span className="pl-tags-count">Showing <b>{boardDeals.length}</b> of {pipelineDeals.length}</span>
+          {tags.map((t) => (
+            <span key={t.key} className="pl-tag">
+              <span>{t.label}</span>
+              <button type="button" aria-label={`Remove filter ${t.label}`} onClick={() => setFilters({ ...filters, ...t.clear })}><CloseIcon /></button>
+            </span>
+          ))}
+          <button type="button" className="pl-link" onClick={() => setFilters(EMPTY_FILTERS)}>Clear all</button>
         </div>
       )}
+
       <div className={`kanban ${prefs.density === "compact" ? "compact" : ""} ${drag ? "dragging" : ""}`}>
+        {activeStages.length === 0 && (
+          <div className="pl-nostages">
+            <span className="pl-nostages-title">{selected.name} has no stages yet</span>
+            <span className="pl-nostages-sub">Closed and Dead are included automatically.</span>
+            {canCustomizeStages && <button type="button" className="primary" onClick={() => setShowStages(true)}>Add stages</button>}
+          </div>
+        )}
         {activeStages.map((stage) => {
           const col = stage.key;
           const color = stageColor(allStages, col);
           const colDeals = sortDeals(boardDeals.filter((d) => d.stage === col), prefs.sort);
-          const colTotal = colDeals.reduce((sum, d) => sum + (d.profitEst ?? 0), 0);
+          const colTotal = total.sum(colDeals);
           // Under Contract for THIS stage only: what we owe sellers for its
           // deals (owned assets for sale have no seller contract).
-          const colUnderContract = colDeals.filter((d) => d.recordType !== "OWNED_ASSET").reduce((sum, d) => sum + (cardOur(d) ?? 0), 0);
+          const colUnderContract = COLUMN_TOTALS.ourPrice.sum(colDeals);
+          const hiddenByFilters = filtersActive && pipelineDeals.some((d) => d.stage === col);
           return (
             <div
               key={col} data-stage={col}
-              className={`kanban-col ${drag && overCol === col ? "drop-target" : ""}`}
-              style={{ borderTop: `3px solid ${color}` }}
+              className={`kanban-col pl-col ${drag && overCol === col && dragDeal?.stage !== col ? "drop-target" : ""}`}
+              style={{ "--stage": color } as CSSProperties}
             >
-              <div className="kanban-col-head">
-                <span>{stage.label}</span>
-                <span className={`pl2-count ${colDeals.length ? "on" : ""}`}>{colDeals.length}</span>
-              </div>
-              <div className={`pl2-colsum ${colTotal > 0 ? "pos" : ""}`}>{money(colTotal) === "—" ? "$0" : money(colTotal)}</div>
-              {prefs.underContract && (
-                <div className="pl2-colsum pl2-colsum-uc" title={`Acquisition cost of the deals in ${stage.label}`}>
-                  <span>Under contract</span> {money(colUnderContract) === "—" ? "$0" : money(colUnderContract)}
+              <div className="pl-col-head">
+                <div className="pl-col-title">
+                  <span className="pl-col-dot" aria-hidden="true" />
+                  <span className="pl-col-name" title={stage.label}>{stage.label}</span>
+                  <span className="pl-col-count">{colDeals.length}</span>
                 </div>
-              )}
-              <div className="kanban-col-body">
+                <div className="pl-col-total">
+                  <span className={`pl-col-sum ${colTotal > 0 ? (prefs.total === "profit" ? "pos" : "on") : ""}`}>{total.fmt(colTotal)}</span>
+                  <span className="pl-col-metric">{total.label}</span>
+                </div>
+                {prefs.underContract && (
+                  <div className="pl-col-uc" title={`Acquisition cost of the deals in ${stage.label}`}>
+                    <span>Under contract</span> {money(colUnderContract)}
+                  </div>
+                )}
+              </div>
+              <div className="kanban-col-body pl-col-body">
                 {colDeals.map((d) => (
-                  <Card key={d.id} deal={d} color={color} canMove={canMove} fields={prefs.fields} dragging={drag?.id === d.id && drag.moved}
+                  <Card key={d.id} deal={d} canMove={canMove} fields={prefs.fields} dragging={drag?.id === d.id && drag.moved}
                     onPointerDown={(e) => startDrag(e, d)} onMove={() => setMoving(d)} />
                 ))}
                 {colDeals.length === 0 && (
-                  <div className="kanban-empty">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-                    <span>Drop deals here</span>
+                  <div className="pl-empty">
+                    <TrayIcon />
+                    <span>{hiddenByFilters ? "No deals match filters" : "Drop deals here"}</span>
                   </div>
                 )}
               </div>
             </div>
           );
         })}
-
       </div>
 
       {/* Permanent Closed/Dead resolution zones — fixed at the BOTTOM of the
           board, side by side, always visible regardless of stage count or
           scroll position. Same data-stage drop mechanics as the columns. */}
       {canMove && (
-        <div className="tz-bottom">
+        <div className={`pl-zones ${drag?.moved ? "dragging" : ""}`}>
           {TRANSITIONS.map((t) => (
             <div
               key={t.stage} data-stage={t.stage}
-              className={`tz-zone ${t.stage === "DEAD" ? "dead" : "closed"} ${drag && overCol === t.stage ? "drop-target" : ""}`}
+              className={`pl-zone ${t.stage === "DEAD" ? "dead" : "closed"} ${drag && overCol === t.stage ? "drop-target" : ""}`}
             >
-              <span className={`tz-ico ${t.stage === "DEAD" ? "dead" : "closed"}`} aria-hidden="true">
-                {t.stage === "DEAD"
-                  ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-                  : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>}
+              <span className="pl-zone-main">
+                <span className="pl-zone-ico" aria-hidden="true">
+                  {t.stage === "DEAD" ? <CloseIcon size={14} sw={2.4} /> : <CheckIcon size={14} />}
+                </span>
+                <span className="pl-zone-name">{t.label}</span>
               </span>
-              <span className={`tz-name ${t.stage === "DEAD" ? "dead" : "closed"}`}>{t.label}</span>
-              <span className="tz-hint">{drag ? "Drop deals here" : "Drag a deal here"} {t.hint}</span>
+              <span className="pl-zone-hint">{t.hint}</span>
             </div>
           ))}
         </div>
@@ -429,7 +565,7 @@ export function Pipeline() {
       {/* Floating clone follows the cursor for a natural, lag-free drag. Its
           position is updated imperatively (cloneRef) during the drag. */}
       {drag && drag.moved && dragDeal && (
-        <div ref={cloneRef} className="deal-card drag-clone" style={{ position: "fixed", left: posRef.current.x - drag.offX, top: posRef.current.y - drag.offY, width: drag.w, pointerEvents: "none", zIndex: 1000 }}>
+        <div ref={cloneRef} className={`deal-card pl-card drag-clone ${prefs.density === "compact" ? "compact" : ""}`} style={{ position: "fixed", left: posRef.current.x - drag.offX, top: posRef.current.y - drag.offY, width: drag.w, pointerEvents: "none", zIndex: 1000 }}>
           <CardBody deal={dragDeal} fields={prefs.fields} />
         </div>
       )}
@@ -438,6 +574,7 @@ export function Pipeline() {
         <PipelineSettingsModal
           pipelines={pipelines}
           initialId={selected.id}
+          stageCount={stageCount}
           onClose={() => { setShowStages(false); reloadStages(); load(); }}
           onChanged={() => { reloadStages(); load(); }}
         />
@@ -463,179 +600,213 @@ export function Pipeline() {
   );
 }
 
-function Card({ deal, color, canMove, fields, dragging, onPointerDown, onMove }: {
-  deal: DealSummary; color?: string; canMove: boolean; fields: Record<CardField, boolean>; dragging: boolean;
+/** Pipeline switcher: the selected pipeline's name opens a menu of every
+ *  pipeline (default badged) plus "Manage pipelines" for admins. */
+function PipelineSwitcher({ pipelines, selectedId, onSelect, onManage }: {
+  pipelines: PipelineInfo[]; selectedId: string; onSelect: (id: string) => void; onManage?: () => void;
+}) {
+  const { open, setOpen, ref } = usePopover();
+  const current = pipelines.find((p) => p.id === selectedId) ?? pipelines[0];
+  return (
+    <div className="pl-switch" ref={ref}>
+      <button type="button" className={`pl-switch-btn ${open ? "open" : ""}`} aria-label="Pipeline" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span>{current?.name}</span><ChevronIcon />
+      </button>
+      {open && (
+        <div className="pl-menu" role="menu">
+          <div className="pl-menu-label">Pipelines</div>
+          {pipelines.map((p) => (
+            <button key={p.id} type="button" role="menuitemradio" aria-checked={p.id === selectedId}
+              className={`pl-menu-item ${p.id === selectedId ? "on" : ""}`}
+              onClick={() => { setOpen(false); onSelect(p.id); }}>
+              <span className="pl-menu-name">{p.name}</span>
+              {p.isDefault && <span className="pl-badge">Default</span>}
+              <span className="pl-menu-check"><CheckIcon /></span>
+            </button>
+          ))}
+          {onManage && (
+            <>
+              <div className="pl-menu-sep" />
+              <button type="button" role="menuitem" className="pl-menu-item pl-menu-manage" onClick={() => { setOpen(false); onManage(); }}>
+                <SlidersIcon /><span>Manage pipelines</span>
+              </button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Card({ deal, canMove, fields, dragging, onPointerDown, onMove }: {
+  deal: DealSummary; canMove: boolean; fields: Record<CardField, boolean>; dragging: boolean;
   onPointerDown: (e: React.PointerEvent) => void; onMove: () => void;
 }) {
   const isDead = deal.stage === "DEAD";
   return (
     <div
-      className={`deal-card ${isDead ? "dead" : ""} ${dragging ? "drag-source" : ""} ${canMove ? "draggable" : ""}`}
-      style={color ? { borderLeft: `3px solid ${color}` } : undefined}
+      className={`deal-card pl-card ${isDead ? "dead" : ""} ${dragging ? "drag-source" : ""} ${canMove ? "draggable" : ""}`}
       onPointerDown={canMove ? onPointerDown : undefined}
     >
-      {canMove && <button
-        className="dc-move"
-        title="Move to another stage"
-        aria-label={`Move ${deal.name} to another stage`}
-        onClick={(e) => { e.stopPropagation(); onMove(); }}
-        onPointerDown={(e) => e.stopPropagation()}
-      >⋯</button>}
-      <CardBody deal={deal} fields={fields} />
+      <CardBody deal={deal} fields={fields} action={canMove ? (
+        <button
+          type="button"
+          className="dc-move"
+          title="Move to another stage"
+          aria-label={`Move ${deal.name} to another stage`}
+          onClick={(e) => { e.stopPropagation(); onMove(); }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >⋯</button>
+      ) : null} />
     </div>
   );
 }
 
 /** Card content shared by the board card and the drag clone. Which facts appear
  *  is driven by the user's Customize View field preferences. */
-function CardBody({ deal, fields }: { deal: DealSummary; fields: Record<CardField, boolean> }) {
+function CardBody({ deal, fields, action }: { deal: DealSummary; fields: Record<CardField, boolean>; action?: ReactNode }) {
   const isClosing = deal.stage === "CLOSING";
   const isDead = deal.stage === "DEAD";
-  const showNra = fields.nra && (deal.aggNra ?? deal.nra) != null;
-  const showNma = fields.nma && cardNma(deal) != null;
   // Short uppercase tag for the head chip (e.g. Minerals → MI), reference-style.
   const typeTag = deal.assetTypes?.[0] ? deal.assetTypes[0].slice(0, 2).toUpperCase() : null;
+  const metrics: { label: string; value: string; pos?: boolean; title?: string }[] = [];
+  if (fields.nra) metrics.push({ label: "NRA", value: num(cardNra(deal)) });
+  if (fields.nma) metrics.push({ label: "NMA", value: num(cardNma(deal)) });
+  if (fields.ourPrice) metrics.push({ label: "Our price", value: money(cardOur(deal)), title: "Our price (acquisition cost)" });
+  if (fields.buyerPrice) metrics.push({ label: "Buyer price", value: money(cardBuyer(deal)), title: "Buyer purchase price — accepted offer, else best offer" });
+  if (fields.profit) metrics.push({ label: "Est. profit", value: money(deal.profitEst), pos: deal.profitEst != null });
+  const due = !isClosing && !isDead ? dueStatus(deal) : null;
   return (
     <>
-      <div className="dc2-head">
-        <span className="dc-name">{deal.name}{deal.assetCount ? <span className="dc-assets"> · {deal.assetCount} asset{deal.assetCount > 1 ? "s" : ""}</span> : null}</span>
-        {typeTag && <span className="dc2-tag" title={deal.assetTypes.join(", ")}>{typeTag}</span>}
+      <div className="pl-card-top">
+        <span className="pl-card-name" title={deal.name}>
+          {deal.name}{deal.assetCount ? <span className="pl-card-assets"> · {deal.assetCount} asset{deal.assetCount > 1 ? "s" : ""}</span> : null}
+        </span>
+        {fields.priority && (
+          <span className={`pl-chip pl-pri pri-${deal.priority.toLowerCase()}`}><i />{PRIORITY_LABEL[deal.priority] ?? deal.priority}</span>
+        )}
+        {typeTag && <span className="pl-type" title={deal.assetTypes.join(", ")}>{typeTag}</span>}
+        {action}
       </div>
-      {fields.location && (
-        <div className="dc-meta">
-          <span><ChipList items={[...deal.counties, deal.state]} max={3} /></span>
-        </div>
-      )}
-      {(showNra || showNma || fields.profit) && (
-        <div className="dc2-nums">
-          {showNra && <span className="dc2-nra"><b>{num((deal.aggNra ?? deal.nra)!)}</b> NRA</span>}
-          {showNra && showNma && <span className="dc2-sep">·</span>}
-          {showNma && <span className="dc2-nra"><b>{num(cardNma(deal)!)}</b> NMA</span>}
-          {(showNra || showNma) && fields.profit && <span className="dc2-sep">·</span>}
-          {fields.profit && <span className="dc2-money">{money(deal.profitEst)}</span>}
-        </div>
-      )}
-      {(fields.ourPrice || fields.buyerPrice) && (
-        <div className="dc-meta dc2-prices">
-          {fields.ourPrice && <span title="Our price (acquisition cost)">Our: <b>{money(cardOur(deal))}</b></span>}
-          {fields.buyerPrice && <span title="Buyer purchase price — accepted offer, else best offer">Buyer: <b>{money(cardBuyer(deal))}</b></span>}
-        </div>
-      )}
-      {fields.priority && (
-        <div className="dc-meta" style={{ marginTop: 6 }}>
-          <span className={`badge priority-${deal.priority.toLowerCase()}`}>{deal.priority[0] + deal.priority.slice(1).toLowerCase()}</span>
-        </div>
-      )}
-      {fields.buyer && isClosing && deal.selectedBuyer && <div className="dc-buyer">→ {deal.selectedBuyer.name}</div>}
-      {fields.dates && (
-        <div className="dc-meta" style={{ marginTop: 4 }}>
-          {isClosing ? (
-            <>
-              <span>Orig: {fmtDate(deal.originalClosingDate)}</span>
-              <span>Final: {fmtDate(deal.finalClosingDate)}</span>
-            </>
-          ) : (
-            !isDead && <span>Find buyer by: {fmtDate(deal.findBuyerByDate)}</span>
+      {(fields.location || fields.days) && (
+        <div className="pl-card-sub">
+          {fields.location ? <span className="pl-card-loc"><PinIcon /><ChipList items={[...deal.counties, deal.state]} max={3} /></span> : <span />}
+          {fields.days && (
+            <span className="pl-card-days"><ClockIcon />{deal.daysInStage === 0 ? "Moved today" : `${deal.daysInStage}d in stage`}</span>
           )}
         </div>
       )}
-      <div className="dc2-foot">
-        {fields.days ? (
-          <span className="dc2-days">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-            {deal.daysInStage}d in stage
-          </span>
-        ) : <span />}
-        <span className="dc2-open">
-          Open
-          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12" /><polyline points="12 5 19 12 12 19" /></svg>
-        </span>
-      </div>
+      {metrics.length > 0 && (
+        <div className="pl-metrics">
+          {metrics.map((m) => (
+            <div key={m.label} className="pl-metric" title={m.title}>
+              <span className="pl-metric-label">{m.label}</span>
+              <span className={`pl-metric-value ${m.value === "—" ? "dim" : m.pos ? "pos" : ""}`}>{m.value}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {fields.dates && (isClosing || !isDead) && (
+        <div className="pl-dates">
+          {isClosing ? (
+            <>
+              <span className="pl-date"><span>Original close</span><b>{fmtDate(deal.originalClosingDate)}</b></span>
+              <span className="pl-date"><span>Final close</span><b>{fmtDate(deal.finalClosingDate)}</b></span>
+            </>
+          ) : (
+            <span className="pl-date">
+              <span>Find buyer by</span><b>{fmtDate(deal.findBuyerByDate)}</b>
+              {due && <span className={`pl-due ${due.tone}`}>{due.text}</span>}
+            </span>
+          )}
+        </div>
+      )}
+      {fields.buyer && isClosing && deal.selectedBuyer && (
+        <span className="pl-chip pl-buyer" title={deal.selectedBuyer.name}><ArrowIcon /><span>{deal.selectedBuyer.name}</span></span>
+      )}
     </>
   );
 }
 
-/** Filters popover for the Pipeline board — same design language as Customize View. */
-function PipelineFilters({ deals, filters, onChange }: {
-  deals: DealSummary[]; filters: PipelineFilterState; onChange: (f: PipelineFilterState) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
-  }, [open]);
+/** Labelled field inside a board popover. */
+function PopField({ label, children }: { label: string; children: ReactNode }) {
+  return <div className="pl-field"><label>{label}</label>{children}</div>;
+}
 
+/** Filters popover for the Pipeline board — same design language as Customize View. */
+function PipelineFilters({ deals, filters, onChange, shown }: {
+  deals: DealSummary[]; filters: PipelineFilterState; onChange: (f: PipelineFilterState) => void; shown: number;
+}) {
+  const { open, setOpen, ref } = usePopover();
   // Option lists come from the deals actually on the board.
-  const states = [...new Set(deals.flatMap((d) => [...d.states, ...(d.state ? [d.state] : [])]))].sort();
-  const counties = [...new Set(deals.flatMap((d) => d.counties))].sort();
-  const buyers = [...new Map(deals.flatMap((d) => (d.selectedBuyer ? [[d.selectedBuyer.id, d.selectedBuyer.name] as const] : []))).entries()]
-    .sort((a, b) => a[1].localeCompare(b[1]));
-  const people = [...new Map(deals.flatMap((d) => [
-    ...d.assignees.map((a) => [a.id, a.name] as const),
-    ...(d.relationshipOwner ? [[d.relationshipOwner.id, d.relationshipOwner.name] as const] : []),
-  ])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  const { states, counties, buyers, people } = filterOptions(deals);
   const n = activeFilterCount(filters);
 
   return (
     <div className="cv-wrap" ref={ref}>
-      <button type="button" className={`small cv-btn ${open || n > 0 ? "active" : ""}`} onClick={() => setOpen((o) => !o)} title="Filter the board">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
-        Filters{n > 0 ? ` (${n})` : ""}
+      <button type="button" className={`pl-btn cv-btn ${open || n > 0 ? "active" : ""}`} onClick={() => setOpen((o) => !o)} title="Filter the board" aria-expanded={open}>
+        <FunnelIcon /><span>Filters</span>
+        {n > 0 && <span className="pl-btn-badge">{n}</span>}
       </button>
       {open && (
-        <div className="cv-menu" role="dialog" aria-label="Filter board" style={{ width: 280 }}>
-          <div className="cv-head"><strong>Filter opportunities</strong></div>
-          <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
-            <div className="field" style={{ marginBottom: 0 }}><label>Search</label>
-              <input value={filters.q} onChange={(e) => onChange({ ...filters, q: e.target.value })} placeholder="Deal, seller, abstract, survey…" aria-label="Search pipeline deals" />
+        <div className="cv-menu pl-pop pl-pop-filters" role="dialog" aria-label="Filter board">
+          <div className="pl-pop-head">
+            <span className="pl-pop-title">Filters</span>
+            <button type="button" className="pl-link" disabled={n === 0} onClick={() => onChange(EMPTY_FILTERS)}>Clear all</button>
+          </div>
+          <div className="pl-pop-body">
+            <PopField label="Search">
+              <div className="pl-search">
+                <SearchIcon />
+                <input value={filters.q} onChange={(e) => onChange({ ...filters, q: e.target.value })} placeholder="Deal, seller, abstract, survey" aria-label="Search pipeline deals" />
+              </div>
+            </PopField>
+            <PopField label="Priority">
+              <div className="pl-pri-chips" role="radiogroup" aria-label="Filter by priority">
+                {(["HIGH", "MEDIUM", "LOW"] as const).map((p) => {
+                  const on = filters.priority === p;
+                  return (
+                    <button key={p} type="button" role="radio" aria-checked={on} className={`pl-pri-chip pri-${p.toLowerCase()} ${on ? "on" : ""}`}
+                      onClick={() => onChange({ ...filters, priority: on ? "" : p })}>
+                      <i />{PRIORITY_LABEL[p]}
+                    </button>
+                  );
+                })}
+              </div>
+            </PopField>
+            <div className="pl-grid2">
+              <PopField label="State">
+                <SearchableMultiSelect options={states} value={filters.states} onChange={(v) => onChange({ ...filters, states: v })} placeholder="Any state" />
+              </PopField>
+              <PopField label="County">
+                <SearchableMultiSelect options={counties} value={filters.counties} onChange={(v) => onChange({ ...filters, counties: v })} placeholder="Any county" />
+              </PopField>
             </div>
-            <div className="field" style={{ marginBottom: 0 }}><label>Priority</label>
-              <Select value={filters.priority} onChange={(v) => onChange({ ...filters, priority: v as PipelineFilterState["priority"] })} clearable placeholder="Any priority" ariaLabel="Filter by priority"
-                options={[{ value: "HIGH", label: "High" }, { value: "MEDIUM", label: "Medium" }, { value: "LOW", label: "Low" }]} />
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}><label>State</label>
-              <SearchableMultiSelect options={states} value={filters.states} onChange={(v) => onChange({ ...filters, states: v })} placeholder="Any state" />
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}><label>County</label>
-              <SearchableMultiSelect options={counties} value={filters.counties} onChange={(v) => onChange({ ...filters, counties: v })} placeholder="Any county" />
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}><label>Selected buyer</label>
+            <PopField label="Selected buyer">
               <Select value={filters.buyerId} onChange={(v) => onChange({ ...filters, buyerId: v })} clearable searchable placeholder="Any buyer" ariaLabel="Filter by buyer"
                 options={buyers.map(([value, label]) => ({ value, label }))} />
-            </div>
-            <div className="field" style={{ marginBottom: 0 }}><label>Team member</label>
+            </PopField>
+            <PopField label="Team member">
               <Select value={filters.assigneeId} onChange={(v) => onChange({ ...filters, assigneeId: v })} clearable searchable placeholder="Anyone" ariaLabel="Filter by team member"
                 options={people.map(([value, label]) => ({ value, label }))} />
-            </div>
-            {/* From/To side by side on one line — the inputs split the row's
-                width evenly (flex) so they never wrap into a vertical stack,
-                at any panel width. */}
-            <div className="field" style={{ marginBottom: 0 }}><label>NRA range</label>
-              <div className="row" style={{ gap: 6, flexWrap: "nowrap", alignItems: "center" }}>
-                <input type="number" min={0} style={{ flex: 1, minWidth: 0 }} value={filters.nraMin} onChange={(e) => onChange({ ...filters, nraMin: e.target.value })} placeholder="From" aria-label="Minimum NRA" />
-                <span className="muted">–</span>
-                <input type="number" min={0} style={{ flex: 1, minWidth: 0 }} value={filters.nraMax} onChange={(e) => onChange({ ...filters, nraMax: e.target.value })} placeholder="To" aria-label="Maximum NRA" />
+            </PopField>
+            <div className="pl-divider" />
+            <RangeFilter label="NRA" min={filters.nraMin} max={filters.nraMax} onChange={(nraMin, nraMax) => onChange({ ...filters, nraMin, nraMax })} />
+            <RangeFilter label="NMA" min={filters.nmaMin} max={filters.nmaMax} onChange={(nmaMin, nmaMax) => onChange({ ...filters, nmaMin, nmaMax })} />
+            <RangeFilter label="Our price" money min={filters.ourMin} max={filters.ourMax} onChange={(ourMin, ourMax) => onChange({ ...filters, ourMin, ourMax })} />
+            <RangeFilter label="Buyer purchase price" money min={filters.buyerMin} max={filters.buyerMax} onChange={(buyerMin, buyerMax) => onChange({ ...filters, buyerMin, buyerMax })} />
+            <div className="pl-divider" />
+            <div className="pl-switch-row">
+              <div className="pl-switch-text">
+                <span className="pl-switch-title">Overdue only</span>
+                <span className="pl-switch-sub">Find-buyer date has passed and no buyer is selected</span>
               </div>
+              <Toggle checked={filters.overdueOnly} onChange={() => onChange({ ...filters, overdueOnly: !filters.overdueOnly })} ariaLabel="Overdue only" />
             </div>
-            <div className="field" style={{ marginBottom: 0 }}><label>NMA range</label>
-              <div className="row" style={{ gap: 6, flexWrap: "nowrap", alignItems: "center" }}>
-                <input type="number" min={0} style={{ flex: 1, minWidth: 0 }} value={filters.nmaMin} onChange={(e) => onChange({ ...filters, nmaMin: e.target.value })} placeholder="From" aria-label="Minimum NMA" />
-                <span className="muted">–</span>
-                <input type="number" min={0} style={{ flex: 1, minWidth: 0 }} value={filters.nmaMax} onChange={(e) => onChange({ ...filters, nmaMax: e.target.value })} placeholder="To" aria-label="Maximum NMA" />
-              </div>
-            </div>
-            <RangeFilter label="Our price range" min={filters.ourMin} max={filters.ourMax} onChange={(ourMin, ourMax) => onChange({ ...filters, ourMin, ourMax })} />
-            <RangeFilter label="Buyer purchase price range" min={filters.buyerMin} max={filters.buyerMax} onChange={(buyerMin, buyerMax) => onChange({ ...filters, buyerMin, buyerMax })} />
-            <label className="cv-row cv-check" style={{ justifyContent: "flex-start", padding: 0 }}>
-              <input type="checkbox" checked={filters.overdueOnly} onChange={() => onChange({ ...filters, overdueOnly: !filters.overdueOnly })} /> <span>Overdue only</span>
-            </label>
           </div>
-          <div className="cv-foot">
-            <button type="button" className="small" disabled={n === 0} onClick={() => onChange(EMPTY_FILTERS)}>Clear all</button>
+          <div className="pl-pop-foot">
+            <span>{shown} of {deals.length} deals match</span>
+            <button type="button" className="primary" onClick={() => setOpen(false)}>Done</button>
           </div>
         </div>
       )}
@@ -643,76 +814,75 @@ function PipelineFilters({ deals, filters, onChange }: {
   );
 }
 
-/** From/To dollar range, laid out like the acreage ranges. */
-function RangeFilter({ label, min, max, onChange }: { label: string; min: string; max: string; onChange: (min: string, max: string) => void }) {
+/** Min/Max range on one line; money ranges carry a "$" adornment. */
+function RangeFilter({ label, min, max, money: isMoney, onChange }: { label: string; min: string; max: string; money?: boolean; onChange: (min: string, max: string) => void }) {
   return (
-    <div className="field" style={{ marginBottom: 0 }}><label>{label}</label>
-      <div className="row" style={{ gap: 6, flexWrap: "nowrap", alignItems: "center" }}>
-        <input type="number" min={0} style={{ flex: 1, minWidth: 0 }} value={min} onChange={(e) => onChange(e.target.value, max)} placeholder="From $" aria-label={`Minimum ${label.replace(/ range$/, "")}`} />
-        <span className="muted">–</span>
-        <input type="number" min={0} style={{ flex: 1, minWidth: 0 }} value={max} onChange={(e) => onChange(min, e.target.value)} placeholder="To $" aria-label={`Maximum ${label.replace(/ range$/, "")}`} />
+    <PopField label={label}>
+      <div className="pl-range">
+        <span className={`pl-range-input ${isMoney ? "money" : ""}`}>
+          {isMoney && <span className="pl-range-cur" aria-hidden="true">$</span>}
+          <input type="number" min={0} value={min} onChange={(e) => onChange(e.target.value, max)} placeholder="Min" aria-label={`Minimum ${label}`} />
+        </span>
+        <span className="pl-range-sep">–</span>
+        <span className={`pl-range-input ${isMoney ? "money" : ""}`}>
+          {isMoney && <span className="pl-range-cur" aria-hidden="true">$</span>}
+          <input type="number" min={0} value={max} onChange={(e) => onChange(min, e.target.value)} placeholder="Max" aria-label={`Maximum ${label}`} />
+        </span>
       </div>
-    </div>
+    </PopField>
   );
 }
 
-/** Customize View popover for the Pipeline board (density, fields, sort). */
+/** Customize View popover for the Pipeline board (density, fields, totals, sort). */
 function PipelineCustomize({ prefs, onChange }: { prefs: PipelinePrefs; onChange: (p: PipelinePrefs) => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
-  }, [open]);
+  const { open, setOpen, ref } = usePopover();
   const toggleField = (k: CardField) => onChange({ ...prefs, fields: { ...prefs.fields, [k]: !prefs.fields[k] } });
 
   return (
     <div className="cv-wrap" ref={ref}>
-      <button type="button" className={`small cv-btn ${open ? "active" : ""}`} onClick={() => setOpen((o) => !o)} title="Customize the board">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
-        Customize View
+      <button type="button" className={`pl-btn cv-btn ${open ? "active" : ""}`} onClick={() => setOpen((o) => !o)} title="Customize the board" aria-expanded={open}>
+        <GridIcon /><span>Customize view</span>
       </button>
       {open && (
-        <div className="cv-menu" role="dialog" aria-label="Customize board">
-          <div className="cv-head"><strong>Card density</strong></div>
-          <div className="cv-seg" style={{ padding: "8px 12px" }}>
-            <div className="seg-control" style={{ width: "100%" }}>
-              <span className={`seg ${prefs.density === "comfortable" ? "active" : ""}`} onClick={() => onChange({ ...prefs, density: "comfortable" })}>Comfortable</span>
-              <span className={`seg ${prefs.density === "compact" ? "active" : ""}`} onClick={() => onChange({ ...prefs, density: "compact" })}>Compact</span>
-            </div>
+        <div className="cv-menu pl-pop pl-pop-custom" role="dialog" aria-label="Customize board">
+          <div className="pl-pop-head">
+            <span className="pl-pop-title">Customize view</span>
+            <button type="button" className="pl-link muted" onClick={() => onChange(DEFAULT_PREFS)}>Restore defaults</button>
           </div>
-          <div className="cv-head" style={{ borderTop: "1px solid var(--border)" }}><strong>Card fields</strong></div>
-          <div className="cv-fields-2">
-            {CARD_FIELDS.map(([k, label]) => (
-              <label key={k} className="cv-check" style={{ justifyContent: "flex-start" }}>
-                <input type="checkbox" checked={prefs.fields[k]} onChange={() => toggleField(k)} /> <span>{label}</span>
+          <div className="pl-pop-body">
+            <PopField label="Card density">
+              <Segmented accent className="pl-seg" ariaLabel="Card density" value={prefs.density} onChange={(density) => onChange({ ...prefs, density })}
+                options={[{ value: "comfortable", label: "Comfortable" }, { value: "compact", label: "Compact" }]} />
+            </PopField>
+            <PopField label="Card fields">
+              <div className="pl-checks">
+                {CARD_FIELDS.map(([k, label]) => (
+                  <label key={k} className="pl-check">
+                    <input type="checkbox" checked={prefs.fields[k]} onChange={() => toggleField(k)} /> <span>{label}</span>
+                  </label>
+                ))}
+              </div>
+            </PopField>
+            <div className="pl-divider" />
+            <PopField label="Column totals">
+              <Select value={prefs.total} onChange={(v) => onChange({ ...prefs, total: v as ColumnTotal })} ariaLabel="Column totals"
+                options={(Object.keys(COLUMN_TOTALS) as ColumnTotal[]).map((k) => ({ value: k, label: COLUMN_TOTALS[k].option }))} />
+              <label className="pl-check" title="Each stage's own total acquisition cost (Our Cost) — never the company-wide figure">
+                <input type="checkbox" checked={prefs.underContract} onChange={() => onChange({ ...prefs, underContract: !prefs.underContract })} /> <span>Also show under contract</span>
               </label>
-            ))}
-          </div>
-          <div className="cv-head" style={{ borderTop: "1px solid var(--border)" }}><strong>Stage totals</strong></div>
-          <div className="cv-fields-2">
-            <label className="cv-check" style={{ justifyContent: "flex-start" }} title="Each stage's own total acquisition cost (Our Cost) — never the company-wide figure">
-              <input type="checkbox" checked={prefs.underContract} onChange={() => onChange({ ...prefs, underContract: !prefs.underContract })} /> <span>Under Contract</span>
-            </label>
-          </div>
-          <div className="cv-head" style={{ borderTop: "1px solid var(--border)" }}><strong>Sort within a stage</strong></div>
-          <div style={{ padding: "8px 12px" }}>
-            <Select value={prefs.sort} onChange={(v) => onChange({ ...prefs, sort: v as CardSort })} ariaLabel="Sort cards by"
-              options={[
-                { value: "priority", label: "Priority" },
-                { value: "days", label: "Days in stage" },
-                { value: "profit", label: "Est. profit" },
-                { value: "nma", label: "NMA" },
-                { value: "ourPrice", label: "Our price" },
-                { value: "buyerPrice", label: "Buyer purchase price" },
-                { value: "name", label: "Name A–Z" },
-              ]} />
-          </div>
-          <div className="cv-foot">
-            <button type="button" className="small" onClick={() => onChange(DEFAULT_PREFS)}>Restore default</button>
+            </PopField>
+            <PopField label="Sort within a stage">
+              <Select value={prefs.sort} onChange={(v) => onChange({ ...prefs, sort: v as CardSort })} ariaLabel="Sort cards by"
+                options={[
+                  { value: "priority", label: "Priority" },
+                  { value: "days", label: "Days in stage" },
+                  { value: "profit", label: "Est. profit" },
+                  { value: "nma", label: "NMA" },
+                  { value: "ourPrice", label: "Our price" },
+                  { value: "buyerPrice", label: "Buyer purchase price" },
+                  { value: "name", label: "Name A–Z" },
+                ]} />
+            </PopField>
           </div>
         </div>
       )}

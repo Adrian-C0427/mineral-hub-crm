@@ -3,6 +3,7 @@ import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Banner } from "./ui";
 import { ThemedLogo } from "./ThemedLogo";
+import { SettingsCardHead } from "./SettingsNav";
 
 /**
  * Company Branding settings: upload a Full logo (expanded sidebar, PDF/report
@@ -45,13 +46,13 @@ export function CompanyBranding() {
   }
 
   return (
-    <div className="panel">
-      <h3>Company Branding</h3>
-      <p className="muted" style={{ marginTop: 0 }}>
-        Replace the default Mineral Hub branding with your own logos. They appear in the navigation sidebar and on exported PDF reports. Supported: PNG, SVG, JPG, WebP · max 512 KB.
-      </p>
+    <section className="panel">
+      <SettingsCardHead
+        title="Company branding"
+        desc="Replace the default Mineral Hub branding with your own logos. They appear in the navigation sidebar and on exported PDF reports. Supported: PNG, SVG, JPG, WebP · max 512 KB."
+      />
       {error && <Banner kind="error">{error}</Banner>}
-      <div className="dd-grid">
+      <div className="logo-slots">
         <LogoSlot
           label="Full logo" hint="Expanded sidebar · PDF reports & headers"
           current={org?.fullLogo ?? null} defaultLabel="Mineral Hub" busy={busy === "fullLogo"} disabled={!canManage}
@@ -63,8 +64,8 @@ export function CompanyBranding() {
           onFile={(f) => onFile("compactLogo", f)} onRemove={() => save("compactLogo", null)}
         />
       </div>
-      {!canManage && <p className="muted" style={{ fontSize: 12 }}>You need the “Manage Organization Settings” permission to change branding.</p>}
-    </div>
+      {!canManage && <p className="set-meta">You need the “Manage Organization Settings” permission to change branding.</p>}
+    </section>
   );
 }
 
@@ -78,8 +79,11 @@ function LogoSlot({ label, hint, current, defaultLabel, square, busy, disabled, 
   const pick = () => { if (!disabled) inputRef.current?.click(); };
 
   return (
-    <div className="field" style={{ marginBottom: 0 }}>
-      <label>{label}</label>
+    <div className="logo-slot">
+      <div className="logo-slot-head">
+        <span className="logo-slot-title">{label}</span>
+        <span className="logo-slot-hint">{hint}</span>
+      </div>
       <div
         className={`logo-drop ${drag ? "drag" : ""} ${square ? "square" : ""} ${disabled ? "disabled" : ""}`}
         onClick={pick}
@@ -90,12 +94,17 @@ function LogoSlot({ label, hint, current, defaultLabel, square, busy, disabled, 
       >
         {busy ? <span className="muted">Saving…</span>
           : current ? <ThemedLogo src={current} alt={label} className="logo-preview" />
-          : <span className="logo-default">{defaultLabel}<span className="muted" style={{ display: "block", fontSize: 11 }}>default</span></span>}
+          : (
+            <span className="logo-empty">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 20h16" /></svg>
+              <span className="logo-empty-title">{disabled ? "Default logo" : "Drop a file or browse"}</span>
+              <span className="logo-default">{defaultLabel}<span> · default</span></span>
+            </span>
+          )}
       </div>
-      <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{hint}</div>
-      <div className="row" style={{ gap: 8, marginTop: 6 }}>
+      <div className="logo-slot-actions">
         <button type="button" className="small" onClick={pick} disabled={disabled || busy}>{current ? "Replace" : "Upload"}</button>
-        {current && <button type="button" className="small danger" onClick={onRemove} disabled={disabled || busy}>Remove</button>}
+        {current && <button type="button" className="small set-btn-danger-text" onClick={onRemove} disabled={disabled || busy}>Remove</button>}
       </div>
       <input ref={inputRef} type="file" accept={ACCEPT_ATTR} style={{ display: "none" }}
         onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ""; }} />

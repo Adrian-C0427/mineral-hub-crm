@@ -5,6 +5,7 @@ import { Select } from "./Select";
 import { downloadCsv } from "../lib/csv";
 import { fmtDate, fmtDateTime } from "../lib/format";
 import { CsvDropzone } from "./CsvDropzone";
+import { Segmented, Tag } from "./kit";
 
 /**
  * Research data management: CSV import (Deeds / Leases / Drilling Permits →
@@ -15,6 +16,8 @@ import { CsvDropzone } from "./CsvDropzone";
 
 type Category = "deeds" | "leases" | "permits";
 const CATEGORY_LABEL: Record<Category, string> = { deeds: "Deeds", leases: "Leases", permits: "Drilling Permits" };
+/** Lower-case noun for the drop-zone prompt. */
+const CATEGORY_NOUN: Record<Category, string> = { deeds: "deeds", leases: "leases", permits: "drilling-permit" };
 
 interface FieldDef { key: string; label: string; required?: boolean }
 interface AnalyzeResp { headers: string[]; fields: FieldDef[]; suggestedMapping: Record<string, string>; rowCount: number; sample: Record<string, string>[] }
@@ -53,6 +56,10 @@ function runTypeLabel(source: string): string {
   if (source === "sample") return "Sample data";
   return source;
 }
+/** Import-history type tag colour by source tag. */
+const RUN_TONE: Record<string, "accent" | "violet" | "success" | "neutral"> = {
+  "csv-deeds": "accent", "csv-leases": "violet", "csv-permits": "success", sample: "neutral",
+};
 
 export function ResearchImport({ onDataChanged }: { onDataChanged: () => void }) {
   const [category, setCategory] = useState<Category>("deeds");
@@ -123,42 +130,49 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
   }
 
   const requiredMissing = analysis?.fields.filter((f) => f.required && !mapping[f.key]) ?? [];
+  const allRunsSelected = runs.length > 0 && runs.every((r) => selectedRuns.has(r.id));
+  const someRunsSelected = selectedRuns.size > 0 && !allRunsSelected;
 
   return (
-    <div>
-      <div className="panel">
-        <h3 style={{ marginBottom: 0 }}>Import public records</h3>
-        <p className="muted" style={{ margin: "4px 0 0", fontSize: 12.5, lineHeight: 1.55, maxWidth: 920 }}>
-          Upload a CSV of recorded deeds or leases (or a drilling-permit export). Rows are classified,
-          normalized and de-duplicated automatically; non-mineral instruments (liens, deeds of trust, easements) are skipped.
-          State and County come from the file's columns where present; if your file doesn't include them, assign them below before importing.
-        </p>
-        <div className="imp-row">
-          <div>
-            <div className="rec-flabel">Data type</div>
-            <Select value={category} onChange={(v) => { setCategory(v as Category); reset(); }} ariaLabel="Data type"
+    <div className="rs-imports">
+      <section className="rs-card rs-import-card">
+        <div className="rs-card-titles">
+          <h3>Import public records</h3>
+          <span className="rs-card-sub">
+            Upload a CSV of recorded deeds or leases (or a drilling-permit export). Rows are classified,
+            normalized and de-duplicated automatically; non-mineral instruments (liens, deeds of trust, easements) are skipped.
+            State and County come from the file's columns where present; if your file doesn't include them, assign them below before importing.
+          </span>
+        </div>
+        <div className="rs-import-row">
+          <div className="rs-import-field">
+            <span className="rec-flabel">Data type</span>
+            <Segmented<Category> accent ariaLabel="Data type" value={category} onChange={(v) => { setCategory(v); reset(); }}
               options={[
                 { value: "deeds", label: "Deeds" },
                 { value: "leases", label: "Leases" },
-                { value: "permits", label: "Drilling Permits" },
+                { value: "permits", label: "Drilling permits" },
               ]} />
           </div>
-          <div>
-            <div className="rec-flabel">CSV file</div>
-            <CsvDropzone slim onFile={onFile} />
+          <div className="rs-import-drop">
+            <CsvDropzone slim onFile={onFile} label={`Drop a ${CATEGORY_NOUN[category]} CSV here, or click to browse`} />
           </div>
-          <button className="rbtn" style={{ height: 38 }} onClick={downloadTemplate}>Download template</button>
+          <button type="button" className="rs-outline-btn" onClick={downloadTemplate}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" /></svg>
+            Download template
+          </button>
         </div>
+        {filename && (analysis || busy) && <div className="rs-import-file">{filename}</div>}
 
         {busy && <Spinner label="Working…" />}
         {error && <Banner kind="error">{error}</Banner>}
 
         {analysis && (
-          <div style={{ marginTop: 14 }}>
-            <h4 style={{ margin: "0 0 6px" }}>Map columns <span className="muted" style={{ fontWeight: 400 }}>({analysis.rowCount.toLocaleString()} rows found)</span></h4>
-            <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
+          <div className="rs-import-step">
+            <div className="rs-step-head">Map columns <span>({analysis.rowCount.toLocaleString()} rows found)</span></div>
+            <div className="rs-map-grid">
               {analysis.fields.map((f) => (
-                <div key={f.key} className="field" style={{ marginBottom: 0, minWidth: 200 }}>
+                <div key={f.key} className="field" style={{ marginBottom: 0 }}>
                   <label>{f.label}{f.required && <Req />}</label>
                   <Select value={mapping[f.key] ?? ""} onChange={(v) => setMapping((m) => ({ ...m, [f.key]: v }))}
                     placeholder="— not in file —" clearable searchable ariaLabel={`Map column for ${f.label}`}
@@ -172,13 +186,13 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
 
             {/* Assign State/County for the whole file when the columns aren't mapped. */}
             {(!mapping.state || !mapping.county) && (
-              <div style={{ marginTop: 12 }}>
-                <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
+              <div className="rs-assign">
+                <div className="rs-assign-note">
                   {(!mapping.state && !mapping.county) ? "This file has no State or County column — assign them for every row:"
                     : !mapping.state ? "No State column mapped — assign the State for this file:"
                       : "No County column mapped — assign the County for this file:"}
                 </div>
-                <div className="row" style={{ gap: 8 }}>
+                <div className="rs-assign-row">
                   {!mapping.state && (
                     <div className="field" style={{ marginBottom: 0, width: 110 }}><label>State <Req /></label>
                       <input value={assignState} maxLength={2} onChange={(e) => setAssignState(e.target.value.toUpperCase())} placeholder="TX" />
@@ -193,8 +207,8 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
               </div>
             )}
 
-            <div style={{ marginTop: 10 }}>
-              <button className="primary"
+            <div className="rs-import-go">
+              <button type="button" className="primary"
                 disabled={busy || requiredMissing.length > 0 || (!mapping.state && !assignState.trim()) || (!mapping.county && !assignCounty.trim())}
                 onClick={onCommit}>
                 Import {analysis.rowCount.toLocaleString()} rows as {CATEGORY_LABEL[category]}
@@ -229,52 +243,59 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
             <ImportReview runId={result.runId} />
           </div>
         )}
-      </div>
+      </section>
 
-      <div className="rec-card">
-        <div className="geo-head" style={{ alignItems: "flex-start" }}>
-          <div>
-            <h3 style={{ margin: 0 }}>Import history</h3>
-            <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>Deleting an import removes only the records that file created; all other imports stay intact.</div>
+      <section className="rs-card">
+        <div className="rs-card-head">
+          <div className="rs-card-titles">
+            <h3>Import history</h3>
+            <span className="rs-card-sub">Deleting an import removes only the records that file created; all other imports stay intact.</span>
           </div>
-          <button className="rbtn imp-del" onClick={() => setConfirmRuns(true)} disabled={selectedRuns.size === 0 || deletingRuns}>
-            Delete selected{selectedRuns.size > 0 ? ` (${selectedRuns.size})` : ""}
-          </button>
+          <div className="rs-card-tools">
+            {selectedRuns.size > 0 && <span className="rs-strong rs-small">{selectedRuns.size} selected</span>}
+            <button type="button" className="rs-outline-btn rs-danger" onClick={() => setConfirmRuns(true)} disabled={selectedRuns.size === 0 || deletingRuns}>
+              Delete selected{selectedRuns.size > 0 ? ` (${selectedRuns.size})` : ""}
+            </button>
+          </div>
         </div>
-        {runs.length === 0 ? <p className="muted" style={{ padding: "0 20px 16px", margin: 0 }}>No imports yet.</p> : (
+        {runs.length === 0 ? <p className="rs-empty">No imports yet.</p> : (
           <>
-            <div className="table-scroll"><table className="data-table">
+            <div className="table-scroll rs-flat-scroll"><table className="data-table rs-history">
               <thead><tr>
-                <th style={{ width: 36 }}><input type="checkbox" checked={runs.length > 0 && runs.every((r) => selectedRuns.has(r.id))} onChange={(e) => setSelectedRuns(e.target.checked ? new Set(runs.map((r) => r.id)) : new Set())} /></th>
-                <th style={{ color: "var(--text)" }}>Date <span style={{ color: "var(--accent)" }}>▼</span></th>
+                <th className="center" style={{ width: 44 }}>
+                  <input type="checkbox" aria-label="Select all imports" checked={allRunsSelected}
+                    ref={(el) => { if (el) el.indeterminate = someRunsSelected; }}
+                    onChange={(e) => setSelectedRuns(e.target.checked ? new Set(runs.map((r) => r.id)) : new Set())} />
+                </th>
+                <th className="active">Date <span className="rs-sort-ind" aria-hidden="true">↓</span></th>
                 <th>Type</th><th>Geography</th><th>File</th>
-                <th className="right">Imported</th><th className="right">Updated</th><th className="right">Duplicates</th><th className="right">Rejected</th><th style={{ width: 90 }}></th>
+                <th className="right">Imported</th><th className="right">Updated</th><th className="right">Duplicates</th><th className="right">Rejected</th><th style={{ width: 96 }}></th>
               </tr></thead>
               <tbody>
                 {runs.map((r) => (
-                  <tr key={r.id}>
-                    <td><input type="checkbox" checked={selectedRuns.has(r.id)} onChange={() => setSelectedRuns((p) => { const n = new Set(p); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n; })} /></td>
-                    <td><span className="rec-mid rec-nowrap">{fmtDateTime(r.createdAt)}</span></td>
-                    <td><span className="rec-type">{runTypeLabel(r.source)}</span></td>
-                    <td><span className="rec-faint">{[r.county, r.state].filter(Boolean).join(", ") || "—"}</span></td>
-                    <td><span className="rec-name" style={{ display: "inline-block", maxWidth: 340, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", verticalAlign: "bottom" }}>{r.filename ?? "—"}</span></td>
+                  <tr key={r.id} className={selectedRuns.has(r.id) ? "row-selected" : undefined}>
+                    <td className="center"><input type="checkbox" aria-label={`Select import ${r.filename ?? runTypeLabel(r.source)}`} checked={selectedRuns.has(r.id)} onChange={() => setSelectedRuns((p) => { const n = new Set(p); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n; })} /></td>
+                    <td><span className="rs-mid rec-nowrap">{fmtDateTime(r.createdAt)}</span></td>
+                    <td><Tag tone={RUN_TONE[r.source] ?? "neutral"}>{runTypeLabel(r.source)}</Tag></td>
+                    <td>{r.county || r.state ? <span className="rs-mid rec-nowrap">{[r.county, r.state].filter(Boolean).join(", ")}</span> : <span className="rs-zero">—</span>}</td>
+                    <td><span className="rs-file" title={r.filename ?? undefined}>{r.filename ?? "—"}</span></td>
                     <td className="right"><b className="rec-nowrap">{r.rowsImported.toLocaleString()}</b></td>
-                    <td className="right"><span className="rec-nowrap" style={{ color: (r.rowsUpdated ?? 0) > 0 ? "var(--green)" : "var(--text-faint)" }}>{(r.rowsUpdated ?? 0).toLocaleString()}</span></td>
-                    <td className="right"><span className="rec-nowrap" style={{ color: r.rowsSkipped > 0 ? "var(--amber)" : "var(--text-faint)" }}>{r.rowsSkipped.toLocaleString()}</span></td>
-                    <td className="right"><span className="rec-nowrap" style={{ color: r.rowsFailed > 0 ? "var(--red)" : "var(--text-faint)" }}>{r.rowsFailed.toLocaleString()}</span></td>
-                    <td className="right"><button className="opp-view" style={{ height: 30, padding: "0 13px", fontSize: 12 }} onClick={() => setReviewRun(r)}>Review</button></td>
+                    <td className="right"><span className={`rec-nowrap ${(r.rowsUpdated ?? 0) > 0 ? "rs-ok" : "rs-zero"}`}>{(r.rowsUpdated ?? 0).toLocaleString()}</span></td>
+                    <td className="right"><span className={`rec-nowrap ${r.rowsSkipped > 0 ? "rs-warn" : "rs-zero"}`}>{r.rowsSkipped.toLocaleString()}</span></td>
+                    <td className="right"><span className={`rec-nowrap ${r.rowsFailed > 0 ? "rs-bad" : "rs-zero"}`}>{r.rowsFailed.toLocaleString()}</span></td>
+                    <td className="right"><button type="button" className="rs-outline-btn sm" onClick={() => setReviewRun(r)}>Review</button></td>
                   </tr>
                 ))}
               </tbody>
             </table></div>
-            <div className="rec-foot">
+            <div className="rs-card-foot">
               <span>{runs.length.toLocaleString()} import{runs.length === 1 ? "" : "s"} · sorted by date, newest first</span>
             </div>
           </>
         )}
         {reviewRun && (
           <Modal title={`Import review · ${reviewRun.filename ?? runTypeLabel(reviewRun.source)} (${fmtDate(reviewRun.createdAt)})`} wide onClose={() => setReviewRun(null)}
-            footer={<button className="primary" onClick={() => setReviewRun(null)}>Done</button>}>
+            footer={<button type="button" className="primary" onClick={() => setReviewRun(null)}>Done</button>}>
             <ImportReview runId={reviewRun.id} />
           </Modal>
         )}
@@ -289,7 +310,7 @@ export function ResearchImport({ onDataChanged }: { onDataChanged: () => void })
               } finally { setDeletingRuns(false); }
             }} />
         )}
-      </div>
+      </section>
     </div>
   );
 }
@@ -326,7 +347,7 @@ function ImportReview({ runId }: { runId: string }) {
   if (err) return <Banner kind="error">{err}</Banner>;
   if (!resp) return <Spinner label="Loading import review…" />;
   if (resp.rows.length === 0) {
-    return <p className="muted" style={{ margin: "12px 0 0", fontSize: 13 }}>No per-row detail is stored for this import (imports made before the review feature don't have one).</p>;
+    return <p className="rs-review-note">No per-row detail is stored for this import (imports made before the review feature don't have one).</p>;
   }
 
   const counts = new Map<RowOutcome, number>();
@@ -346,41 +367,41 @@ function ImportReview({ runId }: { runId: string }) {
 
   return (
     <div className="import-review">
-      <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 14 }}>
-        <span className="ddx-label" style={{ marginRight: 2 }}>Review this import</span>
-        <div className="pill-filter">
+      <div className="rs-review-bar">
+        <span className="ddx-label">Review this import</span>
+        <div className="seg seg-accent rs-review-seg" role="tablist" aria-label="Import outcome">
           {OUTCOME_TABS.map((t) => {
             const n = counts.get(t.key) ?? 0;
             return (
-              <button key={t.key} type="button" className={tab === t.key ? "active" : ""} disabled={n === 0} style={n === 0 ? { opacity: 0.45 } : undefined}
+              <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} className={`seg-item ${tab === t.key ? "active" : ""}`} disabled={n === 0}
                 onClick={() => setTab(t.key)}>
-                {t.label} ({n.toLocaleString()})
+                <span>{t.label}</span><span className="seg-count">{n.toLocaleString()}</span>
               </button>
             );
           })}
         </div>
         <span className="spacer" />
-        <button type="button" className="small" onClick={exportCsv}>Export summary (CSV)</button>
+        <button type="button" className="rs-outline-btn" onClick={exportCsv}>Export summary (CSV)</button>
       </div>
       {rows.length === 0 ? (
-        <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>No rows in this category.</p>
+        <p className="rs-review-note">No rows in this category.</p>
       ) : (
-        <div className="table-scroll" style={{ marginTop: 10, maxHeight: 340, overflowY: "auto" }}>
-          <table className="data-table">
-            <thead><tr><th style={{ width: 52 }}>Row</th>{cols.map(([k, l]) => <th key={k}>{l}</th>)}{showReason && <th>Reason</th>}</tr></thead>
+        <div className="table-scroll rs-review-scroll">
+          <table className="data-table rs-sticky-head">
+            <thead><tr><th style={{ width: 56 }}>Row</th>{cols.map(([k, l]) => <th key={k}>{l}</th>)}{showReason && <th>Reason</th>}</tr></thead>
             <tbody>
               {rows.slice(0, 500).map((r) => (
                 <tr key={r.rowIndex}>
-                  <td className="muted">{r.rowIndex + 1}</td>
-                  {cols.map(([k]) => <td key={k}>{r.data[k] || "—"}</td>)}
-                  {showReason && <td className="muted">{r.reason ?? "—"}</td>}
+                  <td className="rs-mid">{r.rowIndex + 1}</td>
+                  {cols.map(([k]) => <td key={k}>{r.data[k] || <span className="rs-zero">—</span>}</td>)}
+                  {showReason && <td className="rs-mid">{r.reason ?? "—"}</td>}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       )}
-      {rows.length > 500 && <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>Showing the first 500 of {rows.length.toLocaleString()} rows — use Export for the complete list.</p>}
+      {rows.length > 500 && <p className="rs-review-note">Showing the first 500 of {rows.length.toLocaleString()} rows — use Export for the complete list.</p>}
     </div>
   );
 }

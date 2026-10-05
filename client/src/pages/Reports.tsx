@@ -1,21 +1,21 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid,
-  BarChart, LineChart, PieChart, Pie, Cell,
+  BarChart, LineChart, PieChart, Pie, Cell, ReferenceLine,
 } from "recharts";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, Banner, Modal, EmptyState, ChipList } from "../components/ui";
+import { StatStrip, Segmented, type StatCell } from "../components/kit";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { Select } from "../components/Select";
 import { GeoFields } from "../components/GeoFields";
-import { PeriodSegmented } from "../components/PeriodSegmented";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { ChartTypeToggle, useChartType } from "../components/ChartTypeToggle";
 import { money, pct, num, fmtDate, fmtDateLocal, prettyStage } from "../lib/format";
 import { useStages } from "../stages";
-import { CHART_COLORS, COLOR_REVENUE, COLOR_PROFIT, COLOR_FORECAST, monthLabel, chartTooltip } from "../lib/charts";
+import { CHART_COLORS, COLOR_REVENUE, COLOR_PROFIT, monthLabel, chartTooltip } from "../lib/charts";
 import type { DealSummary } from "../types";
 import { DateField } from "../components/DateField";
 
@@ -116,11 +116,11 @@ type MetricId =
   | "dealsLost" | "winRate" | "totalDeals" | "totalDealValue" | "avgDealSize" | "avgTimeToClose"
   | "activeBuyers" | "newBuyers" | "buyerActivity" | "reimbursementsOutstanding";
 const METRIC_LABELS: Record<MetricId, string> = {
-  revenue: "Revenue (Gross Fees)", netProfit: "Net Profit", grossProfit: "Gross Profit", expenses: "Expenses",
-  costPerDeal: "Cost per Deal", roi: "Return on Investment (ROI)",
-  dealsClosed: "Deals Closed", dealsAdded: "Deals Added", dealsLost: "Deals Lost", winRate: "Win Rate",
-  totalDeals: "Total Deals", totalDealValue: "Total Deal Value", avgDealSize: "Avg Deal Size", avgTimeToClose: "Avg Time to Close",
-  activeBuyers: "Active Buyers", newBuyers: "New Buyers", buyerActivity: "Buyer Activity", reimbursementsOutstanding: "Reimbursements Outstanding",
+  revenue: "Revenue (gross fees)", netProfit: "Net profit", grossProfit: "Gross profit", expenses: "Expenses",
+  costPerDeal: "Cost per deal", roi: "Return on investment (ROI)",
+  dealsClosed: "Deals closed", dealsAdded: "Deals added", dealsLost: "Deals lost", winRate: "Win rate",
+  totalDeals: "Total deals", totalDealValue: "Total deal value", avgDealSize: "Avg deal size", avgTimeToClose: "Avg time to close",
+  activeBuyers: "Active buyers", newBuyers: "New buyers", buyerActivity: "Buyer activity", reimbursementsOutstanding: "Reimbursements outstanding",
 };
 const DEFAULT_METRICS: MetricId[] = [
   "revenue", "netProfit", "grossProfit", "expenses", "costPerDeal", "roi", "dealsClosed", "dealsAdded", "dealsLost", "winRate",
@@ -150,9 +150,42 @@ function idLabels(items: { id: string; name: string }[]): Record<string, string>
   return out;
 }
 
+/** KPI strips: the 18 metrics in three groups (the saved order applies within each group). */
+const METRIC_GROUPS: { key: string; label: string; ids: MetricId[] }[] = [
+  { key: "fin", label: "Financials", ids: ["revenue", "netProfit", "grossProfit", "expenses", "costPerDeal", "roi"] },
+  { key: "deal", label: "Deals", ids: ["dealsClosed", "dealsAdded", "dealsLost", "winRate", "totalDeals", "totalDealValue", "avgDealSize", "avgTimeToClose"] },
+  { key: "buy", label: "Buyers & operations", ids: ["activeBuyers", "newBuyers", "buyerActivity", "reimbursementsOutstanding"] },
+];
+const groupOf = (id: MetricId) => METRIC_GROUPS.find((g) => g.ids.includes(id))?.key ?? "";
+const orderedMetrics = (prefs: MetricPrefs): MetricId[] =>
+  [...prefs.order.filter((id) => DEFAULT_METRICS.includes(id)), ...DEFAULT_METRICS.filter((id) => !prefs.order.includes(id))];
+
+/** Display value of each metric for a KPI set (current period or the comparison window). */
+const METRIC_FMT: Record<MetricId, (x: Kpis) => string> = {
+  revenue: (x) => money(x.revenue), netProfit: (x) => money(x.netProfit), grossProfit: (x) => money(x.grossProfit),
+  expenses: (x) => money(x.expenses),
+  costPerDeal: (x) => (x.costPerDeal == null ? "N/A" : money(x.costPerDeal, { cents: true })),
+  roi: (x) => fmtMultiple(x.roiMultiple),
+  dealsClosed: (x) => num(x.dealsClosed), dealsAdded: (x) => num(x.dealsAdded), dealsLost: (x) => num(x.dealsLost),
+  winRate: (x) => pct(x.winRate), totalDeals: (x) => num(x.totalDeals), totalDealValue: (x) => money(x.totalDealValue),
+  avgDealSize: (x) => (x.dealsClosed > 0 ? money(x.avgDealSize) : "—"),
+  avgTimeToClose: (x) => (x.dealsClosed > 0 ? `${Math.round(x.avgTimeToClose)}d` : "—"),
+  activeBuyers: (x) => num(x.activeBuyers), newBuyers: (x) => num(x.newBuyers), buyerActivity: (x) => num(x.buyerActivity),
+  reimbursementsOutstanding: (x) => money(x.reimbursementsOutstanding),
+};
+
+/** Compact axis money: $950, $1.2K, $14K, $1.3M. */
+function axisMoney(v: number): string {
+  const a = Math.abs(v), s = v < 0 ? "−$" : "$";
+  if (a >= 1_000_000) return `${s}${Number((a / 1_000_000).toFixed(1))}M`;
+  if (a >= 1000) return `${s}${Number((a / 1000).toFixed(a >= 10000 ? 0 : 1))}K`;
+  return `${s}${Math.round(a)}`;
+}
+const AXIS_TICK = { fontSize: 11, fill: "var(--ink-4)" };
+
 export function Reports() {
   const nav = useNavigate();
-  const { can, user } = useAuth();
+  const { user } = useAuth();
   const [period, setPeriod] = useState<Period>("THIS_YEAR");
   const [custom, setCustom] = useState({ from: "", to: "" });
   const [compare, setCompare] = useState<Compare>("NONE");
@@ -175,6 +208,16 @@ export function Reports() {
   // "Most active" panel consolidates the county/formation/basin breakdowns into
   // one card with a segmented selector (reference layout).
   const [geoView, setGeoView] = useState<"counties" | "formations" | "basins">("counties");
+
+  // On phones the period tray scrolls sideways: keep the active period in view.
+  const periodRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const strip = periodRef.current?.querySelector<HTMLElement>(".seg");
+    const active = strip?.querySelector<HTMLElement>(".seg-item.active");
+    if (!strip || !active || strip.scrollWidth <= strip.clientWidth + 1) return;
+    const a = active.getBoundingClientRect(), st = strip.getBoundingClientRect();
+    if (a.left < st.left || a.right > st.right) strip.scrollLeft += a.left - st.left - (st.width - a.width) / 2;
+  }, [period]);
 
   const range = useMemo(() => rangeFor(period, custom), [period, custom]);
   const cmp = useMemo(() => compareRange(compare, range.from, range.to), [compare, range.from, range.to]);
@@ -222,54 +265,92 @@ export function Reports() {
   }
 
   const CHIPS: [Period, string][] = [
-    ["THIS_MONTH", "This Month"], ["LAST_MONTH", "Last Month"], ["THIS_QUARTER", "This Quarter"],
-    ["LAST_QUARTER", "Last Quarter"], ["THIS_YEAR", "This Year"], ["LAST_YEAR", "Last Year"], ["CUSTOM", "Custom"],
+    ["THIS_MONTH", "This month"], ["LAST_MONTH", "Last month"], ["THIS_QUARTER", "This quarter"],
+    ["LAST_QUARTER", "Last quarter"], ["THIS_YEAR", "This year"], ["LAST_YEAR", "Last year"], ["CUSTOM", "Custom"],
   ];
 
   const k = data?.kpis;
+
+  /** One KPI cell: value + comparison pill, hint (or the prior value when comparing). */
+  function kpiCell(id: MetricId, o: {
+    label: string; d?: number | null; invert?: boolean; tone?: StatCell["tone"]; faint?: boolean;
+    onClick?: () => void; hint?: string; realized?: boolean;
+  }): StatCell {
+    const hasDelta = o.d !== undefined && o.d !== null;
+    const up = hasDelta && (o.d as number) > 0;
+    const flat = hasDelta && (o.d as number) === 0;
+    // "good" = improvement. For inverted metrics (expenses, losses) up is bad.
+    const good = flat ? null : o.invert ? !up : up;
+    const text = METRIC_FMT[id](k!);
+    return {
+      label: o.label,
+      tag: o.realized ? <span title="Realized: closed deals and recorded expenses only — no projections">Realized</span> : undefined,
+      value: (
+        <>
+          <span className={`rp-val ${o.faint ? "rp-faint" : ""}`}>{text}</span>
+          {hasDelta && (
+            <span className={`rp-delta ${good == null ? "flat" : good ? "good" : "bad"}`} title="Change vs the comparison period">
+              {flat ? "" : up ? "+" : "−"}{pct(Math.abs(o.d as number))}
+            </span>
+          )}
+        </>
+      ),
+      tone: o.tone,
+      sub: o.hint ?? (data?.previous ? `Prior ${METRIC_FMT[id](data.previous)}` : undefined),
+      onClick: o.onClick,
+    };
+  }
 
   return (
     <div className="page reports-page">
       <div className="page-header">
         <div>
-          <h1 style={{ marginBottom: 0 }}>Reports &amp; Analytics</h1>
+          <h1>Reports &amp; analytics</h1>
           <div className="page-sub">
             Business performance · {fmtDate(range.from)} – {fmtDate(range.to)} · Generated {fmtDate(new Date())}
           </div>
         </div>
         <div className="reports-toolbar">
-          <PeriodSegmented options={CHIPS} value={period} onChange={setPeriod} />
-          <button className={`rbtn ${showFilters ? "active" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>
-            Filters{activeFilterChips.length > 0 && <span className="rbtn-count"> ({activeFilterChips.length})</span>}
-          </button>
-          <MetricsCustomize prefs={metricPrefs} onChange={setMetricPrefs} />
+          <div className="rp-period-wrap" ref={periodRef}>
+            <Segmented accent className="rp-period" ariaLabel="Report period"
+              options={CHIPS.map(([value, label]) => ({ value, label }))} value={period} onChange={setPeriod} />
+          </div>
+          <div className="rp-toolbar-btns">
+            <button className={`rbtn ${showFilters || activeFilterChips.length > 0 ? "active" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5h16l-6 7.5V19l-4 1.5v-8L4 5z" /></svg>
+              Filters{activeFilterChips.length > 0 && <span className="rbtn-count">{activeFilterChips.length}</span>}
+            </button>
+            <MetricsCustomize prefs={metricPrefs} onChange={setMetricPrefs} />
+          </div>
         </div>
       </div>
 
+      {period === "CUSTOM" && (
+        <div className="rp-custom">
+          <span>From</span>
+          <DateField value={custom.from} onChange={(v) => setCustom((c) => ({ ...c, from: v }))} ariaLabel="From date" />
+          <span>to</span>
+          <DateField value={custom.to} onChange={(v) => setCustom((c) => ({ ...c, to: v }))} ariaLabel="To date" />
+        </div>
+      )}
+
       {/* --- Filters card (not captured in the report) --- */}
       {showFilters && (
-        <div className="reports-filters">
+        <section className="reports-filters">
           <div className="filters-head">
-            <strong style={{ fontSize: 14 }}>Filters</strong>
-            <div className="row" style={{ gap: 10 }}>
+            <h3>Filters</h3>
+            <div className="row" style={{ gap: 12 }}>
               {compare !== "NONE" && <span className="muted">Comparison on</span>}
-              {activeFilterChips.length > 0 && <button className="small" onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>}
+              <button className="link-btn rp-clear" disabled={activeFilterChips.length === 0} onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>
             </div>
           </div>
           <div className="filters-grid">
-            {period === "CUSTOM" && (
-              <>
-                <div className="field" style={{ marginBottom: 0 }}><label>From</label><DateField value={custom.from} onChange={(v) => setCustom((c) => ({ ...c, from: v }))} /></div>
-                <div className="field" style={{ marginBottom: 0 }}><label>To</label><DateField value={custom.to} onChange={(v) => setCustom((c) => ({ ...c, to: v }))} /></div>
-              </>
-            )}
-            <div className="field" style={{ marginBottom: 0 }}><label>Compare to</label>
+            <div className="field"><label>Compare to</label>
               <Select value={compare} onChange={(v) => setCompare(v as Compare)} ariaLabel="Compare to"
                 options={[
                   { value: "NONE", label: "No comparison" },
                   { value: "PREV_PERIOD", label: "Previous period" },
-                  { value: "PREV_YEAR", label: "Previous year" },
+                  { value: "PREV_YEAR", label: "Same period last year" },
                 ]} />
             </div>
             {/* Shared geographic hierarchy: all 50 states + cascading counties,
@@ -284,7 +365,7 @@ export function Reports() {
               ["formations", "Formations", opts.formations], ["assetTypes", "Asset types", opts.assetTypes],
               ["operators", "Operators", opts.operators], ["stages", "Deal status", opts.stages],
             ] as [string, string, string[]][]).map(([key, label, options]) => (
-              <div key={key} className="field" style={{ marginBottom: 0, minWidth: 0 }}>
+              <div key={key} className="field">
                 <label>{label}</label>
                 <SearchableMultiSelect
                   options={key === "stages" ? options.map(prettyStage) : options}
@@ -299,45 +380,45 @@ export function Reports() {
                 {/* ID-based selection with display labels — the old name→id
                     round-trip picked the wrong record when two buyers/users
                     shared a name. */}
-                <div className="field" style={{ marginBottom: 0, minWidth: 0 }}><label>Buyers</label>
+                <div className="field"><label>Buyers</label>
                   <SearchableMultiSelect options={opts.buyers.map((b) => b.id)} labels={idLabels(opts.buyers)}
                     value={filters.buyers} onChange={(ids) => setFilters((f) => ({ ...f, buyers: ids }))} placeholder="Filter buyers…" />
                 </div>
-                <div className="field" style={{ marginBottom: 0, minWidth: 0 }}><label>Team members</label>
+                <div className="field"><label>Team members</label>
                   <SearchableMultiSelect options={opts.users.map((u) => u.id)} labels={idLabels(opts.users)}
                     value={filters.users} onChange={(ids) => setFilters((f) => ({ ...f, users: ids }))} placeholder="Filter team…" />
                 </div>
               </>
             )}
           </div>
-        </div>
+        </section>
       )}
 
       {loading && !data ? <Spinner label="Building analytics…" /> : !data || !k ? <Banner kind="info">No data.</Banner> : (
-        <div ref={reportRef} className="report-capture">
+        <div ref={reportRef} className="report-capture rp-body">
           {/* --- Executive summary --- */}
-          <div className="exec-card">
-            <div className="exec-icon">
+          <section className="exec-card">
+            <div className={`exec-icon ${user?.organization?.fullLogo ? "has-logo" : ""}`}>
               {user?.organization?.fullLogo
                 ? <img src={user.organization.fullLogo} alt={user.organization.name} />
-                : <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 8c4-3 12-3 16 0M4 12c4-3 12-3 16 0M4 16c4-3 12-3 16 0" /></svg>}
+                : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20h16M7 16v-5M12 16V6M17 16v-8" /></svg>}
             </div>
             <div style={{ minWidth: 0 }}>
-              <div className="exec-title">{user?.organization?.name ?? "Mineral Hub"} · Business Performance Report</div>
+              <div className="exec-title">{user?.organization?.name ?? "Mineral Hub"} · Business performance report</div>
               <p className="exec-text">
                 <b>Executive summary.</b> Over this period the team closed <b>{num(k.dealsClosed)}</b> {k.dealsClosed === 1 ? "deal" : "deals"}{" "}
-                generating <b>{money(k.revenue)}</b> in revenue and <b style={{ color: k.netProfit >= 0 ? "var(--green)" : "var(--red)" }}>{money(k.netProfit)}</b> net profit,
+                generating <b>{money(k.revenue)}</b> in revenue and <b className={k.netProfit >= 0 ? "pos" : "neg"}>{money(k.netProfit)}</b> net profit,
                 added <b>{num(k.dealsAdded)}</b> new {k.dealsAdded === 1 ? "deal" : "deals"}, and maintained a <b>{pct(k.winRate)}</b> win rate.
-                Total company expenses were <b>{money(k.expenses, { cents: true })}</b> with <b style={k.reimbursementsOutstanding > 0 ? { color: "var(--amber)" } : undefined}>{money(k.reimbursementsOutstanding, { cents: true })}</b> outstanding in reimbursements
+                Total company expenses were <b>{money(k.expenses, { cents: true })}</b> with <b className={k.reimbursementsOutstanding > 0 ? "warn" : undefined}>{money(k.reimbursementsOutstanding, { cents: true })}</b> outstanding in reimbursements
                 {k.costPerDeal != null && <> — <b>{money(k.costPerDeal, { cents: true })}</b> per closed deal</>}
-                {k.roiMultiple != null && <>, a <b style={{ color: k.roiMultiple >= 0 ? "var(--green)" : "var(--red)" }}>{fmtMultiple(k.roiMultiple)}</b> return on spend</>}.
+                {k.roiMultiple != null && <>, a <b className={k.roiMultiple >= 0 ? "pos" : "neg"}>{fmtMultiple(k.roiMultiple)}</b> return on spend</>}.
                 {data.compare && <> Compared to {fmtDate(data.compare.from)} – {fmtDate(data.compare.to)}.</>}
               </p>
               {activeFilterChips.length > 0 && (
-                <p className="exec-text" style={{ marginTop: 6 }}><b>Filters:</b> {activeFilterChips.join(" · ")}</p>
+                <p className="exec-text exec-filters"><b>Filters:</b> {activeFilterChips.join(" · ")}</p>
               )}
             </div>
-          </div>
+          </section>
 
           {k.totalDeals === 0 && (
             <div className="panel">
@@ -347,59 +428,77 @@ export function Reports() {
             </div>
           )}
 
-          {/* --- KPI grid (Customize View: choose + order the metrics) --- */}
-          <div className="kpi-grid">
-            {(() => {
-              const nodes: Record<MetricId, ReactNode> = {
-                revenue: <Kpi label="Revenue (Gross Fees)" value={money(k.revenue)} d={data.deltas?.revenue} onClick={() => drillByDeal("Closed deals", (dd) => dd.stage === "CLOSED")} />,
-                netProfit: <Kpi label="Net Profit" value={money(k.netProfit)} d={data.deltas?.netProfit} valueColor={k.netProfit >= 0 ? "var(--green)" : "var(--red)"} />,
-                grossProfit: <Kpi label="Gross Profit" value={money(k.grossProfit)} d={data.deltas?.grossProfit} valueColor={k.grossProfit >= 0 ? "var(--green)" : "var(--red)"} />,
-                expenses: <Kpi label="Expenses" value={money(k.expenses)} d={data.deltas?.expenses} invert onClick={() => nav("/expenses")} />,
-                costPerDeal: <Kpi label="Cost per Deal" realized value={k.costPerDeal == null ? "N/A" : money(k.costPerDeal, { cents: true })}
-                  valueColor={k.costPerDeal == null ? "var(--text-faint)" : undefined}
-                  hint={k.costPerDeal == null ? "No deals closed in this period" : `${money(k.expenses, { cents: true })} expenses ÷ ${num(k.dealsClosed)} closed`}
-                  d={data.deltas?.costPerDeal} invert onClick={() => setFinDrill("cost")} />,
-                roi: <Kpi label="Return on Investment" realized value={fmtMultiple(k.roiMultiple)}
-                  valueColor={k.roiMultiple == null ? "var(--text-faint)" : k.roiMultiple >= 0 ? "var(--green)" : "var(--red)"}
-                  hint={k.roiMultiple == null
-                    ? (k.expenses <= 0 ? "No expenses recorded in this period" : "Closed deals have no accepted price yet")
-                    : `${money(k.netProfit)} net profit ÷ ${money(k.expenses)} expenses`}
-                  d={data.deltas?.roiMultiple} onClick={() => setFinDrill("roi")} />,
-                dealsClosed: <Kpi label="Deals Closed" value={num(k.dealsClosed)} d={data.deltas?.dealsClosed} onClick={() => drillByDeal("Closed deals", (dd) => dd.stage === "CLOSED")} />,
-                dealsAdded: <Kpi label="Deals Added" value={num(k.dealsAdded)} d={data.deltas?.dealsAdded} />,
-                dealsLost: <Kpi label="Deals Lost" value={num(k.dealsLost)} d={data.deltas?.dealsLost} invert valueColor={k.dealsLost === 0 ? "var(--text-faint)" : undefined} onClick={() => drillByDeal("Lost (dead) deals", (dd) => dd.stage === "DEAD")} />,
-                winRate: <Kpi label="Win Rate" value={pct(k.winRate)} d={data.deltas?.winRate} valueColor="var(--green)" />,
-                totalDeals: <Kpi label="Total Deals" value={num(k.totalDeals)} d={data.deltas?.totalDeals} onClick={() => nav("/deals")} />,
-                totalDealValue: <Kpi label="Total Deal Value" value={money(k.totalDealValue)} d={data.deltas?.totalDealValue} />,
-                avgDealSize: <Kpi label="Avg Deal Size (closed)" value={k.dealsClosed > 0 ? money(k.avgDealSize) : "—"} d={k.dealsClosed > 0 ? data.deltas?.avgDealSize : undefined} />,
-                avgTimeToClose: <Kpi label="Avg Time to Close" value={k.dealsClosed > 0 ? `${Math.round(k.avgTimeToClose)}d` : "—"} d={k.dealsClosed > 0 ? data.deltas?.avgTimeToClose : undefined} invert />,
-                activeBuyers: <Kpi label="Active Buyers" value={num(k.activeBuyers)} d={data.deltas?.activeBuyers} onClick={() => nav("/buyers")} />,
-                newBuyers: <Kpi label="New Buyers" value={num(k.newBuyers)} d={data.deltas?.newBuyers} />,
-                buyerActivity: <Kpi label="Buyer Activity" value={num(k.buyerActivity)} d={data.deltas?.buyerActivity} />,
-                reimbursementsOutstanding: <Kpi label="Reimbursements Outstanding" value={money(k.reimbursementsOutstanding)} d={data.deltas?.reimbursementsOutstanding} invert onClick={() => nav("/expenses")} />,
-              };
-              const ordered: MetricId[] = [...metricPrefs.order.filter((id) => DEFAULT_METRICS.includes(id)), ...DEFAULT_METRICS.filter((id) => !metricPrefs.order.includes(id))];
-              const visible = ordered.filter((id) => !metricPrefs.hidden.includes(id));
-              return visible.length === 0
-                ? <p className="muted" style={{ gridColumn: "1 / -1", margin: 0 }}>All metrics hidden — use Customize View to bring them back.</p>
-                : visible.map((id) => <Fragment key={id}>{nodes[id]}</Fragment>);
-            })()}
-          </div>
+          {/* --- KPI strips (Customize: choose + order the metrics) --- */}
+          {(() => {
+            const cells: Record<MetricId, StatCell> = {
+              revenue: kpiCell("revenue", { label: "Revenue (gross fees)", d: data.deltas?.revenue, tone: k.revenue < 0 ? "danger" : undefined, onClick: () => drillByDeal("Closed deals", (dd) => dd.stage === "CLOSED") }),
+              netProfit: kpiCell("netProfit", { label: "Net profit", d: data.deltas?.netProfit, tone: k.netProfit >= 0 ? "success" : "danger" }),
+              grossProfit: kpiCell("grossProfit", { label: "Gross profit", d: data.deltas?.grossProfit, tone: k.grossProfit >= 0 ? "success" : "danger" }),
+              expenses: kpiCell("expenses", { label: "Expenses", d: data.deltas?.expenses, invert: true, onClick: () => nav("/expenses") }),
+              costPerDeal: kpiCell("costPerDeal", {
+                label: "Cost per deal", realized: true, faint: k.costPerDeal == null,
+                hint: k.costPerDeal == null ? "No deals closed in this period" : `${money(k.expenses, { cents: true })} expenses ÷ ${num(k.dealsClosed)} closed`,
+                d: data.deltas?.costPerDeal, invert: true, onClick: () => setFinDrill("cost"),
+              }),
+              roi: kpiCell("roi", {
+                label: "Return on investment", realized: true, faint: k.roiMultiple == null,
+                tone: k.roiMultiple == null ? undefined : k.roiMultiple >= 0 ? "success" : "danger",
+                hint: k.roiMultiple == null
+                  ? (k.expenses <= 0 ? "No expenses recorded in this period" : "Closed deals have no accepted price yet")
+                  : `${money(k.netProfit)} net profit ÷ ${money(k.expenses)} expenses`,
+                d: data.deltas?.roiMultiple, onClick: () => setFinDrill("roi"),
+              }),
+              dealsClosed: kpiCell("dealsClosed", { label: "Deals closed", d: data.deltas?.dealsClosed, onClick: () => drillByDeal("Closed deals", (dd) => dd.stage === "CLOSED") }),
+              dealsAdded: kpiCell("dealsAdded", { label: "Deals added", d: data.deltas?.dealsAdded }),
+              dealsLost: kpiCell("dealsLost", { label: "Deals lost", d: data.deltas?.dealsLost, invert: true, faint: k.dealsLost === 0, onClick: () => drillByDeal("Lost (dead) deals", (dd) => dd.stage === "DEAD") }),
+              winRate: kpiCell("winRate", { label: "Win rate", d: data.deltas?.winRate, tone: "success" }),
+              totalDeals: kpiCell("totalDeals", { label: "Total deals", d: data.deltas?.totalDeals, onClick: () => nav("/deals") }),
+              totalDealValue: kpiCell("totalDealValue", { label: "Total deal value", d: data.deltas?.totalDealValue }),
+              avgDealSize: kpiCell("avgDealSize", { label: "Avg deal size (closed)", d: k.dealsClosed > 0 ? data.deltas?.avgDealSize : undefined }),
+              avgTimeToClose: kpiCell("avgTimeToClose", { label: "Avg time to close", d: k.dealsClosed > 0 ? data.deltas?.avgTimeToClose : undefined, invert: true }),
+              activeBuyers: kpiCell("activeBuyers", { label: "Active buyers", d: data.deltas?.activeBuyers, onClick: () => nav("/buyers") }),
+              newBuyers: kpiCell("newBuyers", { label: "New buyers", d: data.deltas?.newBuyers }),
+              buyerActivity: kpiCell("buyerActivity", { label: "Buyer activity", d: data.deltas?.buyerActivity }),
+              reimbursementsOutstanding: kpiCell("reimbursementsOutstanding", {
+                label: "Reimbursements outstanding", d: data.deltas?.reimbursementsOutstanding, invert: true,
+                tone: k.reimbursementsOutstanding > 0 ? "warn" : undefined, onClick: () => nav("/expenses"),
+              }),
+            };
+            const visible = orderedMetrics(metricPrefs).filter((id) => !metricPrefs.hidden.includes(id));
+            if (visible.length === 0) {
+              return <div className="rp-all-hidden">All metrics are hidden. Use Customize to show them again.</div>;
+            }
+            return METRIC_GROUPS.map((g) => {
+              const ids = visible.filter((id) => g.ids.includes(id));
+              if (ids.length === 0) return null;
+              return (
+                <div className="rp-kgroup" key={g.key}>
+                  <div className="rp-kgroup-label">{g.label}</div>
+                  <StatStrip min={220} cells={ids.map((id) => cells[id])} />
+                </div>
+              );
+            });
+          })()}
 
           {/* --- Trend + breakdowns --- */}
           <div className="chart-grid">
-            <div className="panel">
-              <h3>Revenue &amp; Net Profit Trend <span className="muted">(dashed = forecast)</span></h3>
+            <section className="panel rp-chart">
+              <div className="rp-chart-head">
+                <div>
+                  <h3>Revenue &amp; net profit</h3>
+                  <span className="rp-chart-sub">Monthly{data.series.some((s) => s.forecast) ? " · faded bars and dashed line are forecast" : ""}</span>
+                </div>
+              </div>
               <TrendChart series={data.series} />
               <div className="cl">
-                <span className="cl-item"><span className="cl-line" style={{ background: COLOR_REVENUE }} />Revenue</span>
+                <span className="cl-item"><span className="cl-dot" style={{ background: COLOR_REVENUE }} />Revenue</span>
                 <span className="cl-item"><span className="cl-line" style={{ background: COLOR_PROFIT }} />Net profit</span>
-                <span className="cl-item" style={{ color: COLOR_FORECAST }}><span className="cl-line dashed" />Forecast</span>
+                {data.series.some((s) => s.forecast) && <span className="cl-item"><span className="cl-line dashed" />Forecast</span>}
               </div>
-            </div>
-            <div className="panel">
-              <div className="panel-head">
-                <h3>Deals Added vs Closed</h3>
+            </section>
+            <section className="panel rp-chart">
+              <div className="rp-chart-head">
+                <h3>Deals added vs closed</h3>
                 <ChartTypeToggle type={activityType} options={["bar", "line"]} onChange={setActivityType} />
               </div>
               {(() => {
@@ -407,11 +506,11 @@ export function Reports() {
                 const Wrap = activityType === "line" ? LineChart : BarChart;
                 return (
                   <ResponsiveContainer width="100%" height={240}>
-                    <Wrap data={rows}>
-                      <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-                      <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                      <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                      <Tooltip {...chartTooltip} />
+                    <Wrap data={rows} margin={{ top: 6, right: 4, left: 0, bottom: 0 }}>
+                      <CartesianGrid vertical={false} stroke="var(--line-faint)" />
+                      <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
+                      <YAxis allowDecimals={false} tick={AXIS_TICK} axisLine={false} tickLine={false} width={36} />
+                      <Tooltip {...chartTooltip} cursor={{ fill: "var(--chart-col-hover)", stroke: "var(--line-strong)" }} />
                       {activityType === "line" ? (
                         <>
                           <Line type="monotone" dataKey="dealsAdded" name="Added" stroke={CHART_COLORS[0]} strokeWidth={2} dot={false} />
@@ -420,9 +519,9 @@ export function Reports() {
                         </>
                       ) : (
                         <>
-                          <Bar dataKey="dealsAdded" name="Added" fill={CHART_COLORS[0]} radius={[3, 3, 0, 0]} />
-                          <Bar dataKey="dealsClosed" name="Closed" fill={CHART_COLORS[1]} radius={[3, 3, 0, 0]} />
-                          <Bar dataKey="dealsLost" name="Lost" fill={CHART_COLORS[4]} radius={[3, 3, 0, 0]} />
+                          <Bar dataKey="dealsAdded" name="Added" fill={CHART_COLORS[0]} radius={[3, 3, 0, 0]} maxBarSize={18} />
+                          <Bar dataKey="dealsClosed" name="Closed" fill={CHART_COLORS[1]} radius={[3, 3, 0, 0]} maxBarSize={18} />
+                          <Bar dataKey="dealsLost" name="Lost" fill={CHART_COLORS[4]} radius={[3, 3, 0, 0]} maxBarSize={18} />
                         </>
                       )}
                     </Wrap>
@@ -434,20 +533,20 @@ export function Reports() {
                 <span className="cl-item"><span className="cl-dot" style={{ background: CHART_COLORS[1] }} />Closed</span>
                 <span className="cl-item"><span className="cl-dot" style={{ background: CHART_COLORS[4] }} />Lost</span>
               </div>
-            </div>
-            <div className="panel">
-              <div className="panel-head">
-                <h3>Asset Type Breakdown</h3>
+            </section>
+            <section className="panel rp-chart">
+              <div className="rp-chart-head">
+                <h3>Asset type breakdown</h3>
                 {data.breakdowns.assetTypes.length > 0 && <ChartTypeToggle type={assetType} options={["pie", "bar"]} onChange={setAssetType} />}
               </div>
-              {data.breakdowns.assetTypes.length === 0 ? <p className="muted">No data.</p> : assetType === "bar" ? (
+              {data.breakdowns.assetTypes.length === 0 ? <p className="rp-empty">No deals were added in this period.</p> : assetType === "bar" ? (
                 <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={data.breakdowns.assetTypes} layout="vertical" margin={{ left: 20 }}>
-                    <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-                    <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
-                    <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={110} />
-                    <Tooltip {...chartTooltip} />
-                    <Bar dataKey="count" name="Deals" radius={[0, 3, 3, 0]} cursor="pointer"
+                  <BarChart data={data.breakdowns.assetTypes} layout="vertical" margin={{ left: 8, right: 8 }}>
+                    <CartesianGrid horizontal={false} stroke="var(--line-faint)" />
+                    <XAxis type="number" allowDecimals={false} tick={AXIS_TICK} axisLine={false} tickLine={false} />
+                    <YAxis type="category" dataKey="name" tick={{ ...AXIS_TICK, fill: "var(--ink-2)" }} axisLine={false} tickLine={false} width={110} />
+                    <Tooltip {...chartTooltip} cursor={{ fill: "var(--chart-col-hover)" }} />
+                    <Bar dataKey="count" name="Deals" radius={[0, 4, 4, 0]} maxBarSize={22} cursor="pointer"
                       onClick={(e: { name?: string }) => e?.name && drillByDeal(`Asset type: ${e.name}`, (dd) => dd.assetTypes.includes(e.name!))}>
                       {data.breakdowns.assetTypes.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />)}
                     </Bar>
@@ -456,7 +555,7 @@ export function Reports() {
               ) : (
                 <ResponsiveContainer width="100%" height={240}>
                   <PieChart>
-                    <Pie data={data.breakdowns.assetTypes} dataKey="count" nameKey="name" cx="50%" cy="50%" outerRadius={85}
+                    <Pie data={data.breakdowns.assetTypes} dataKey="count" nameKey="name" cx="50%" cy="50%" innerRadius={52} outerRadius={85} paddingAngle={1} stroke="none"
                       label={(e: { name?: string }) => e.name ?? ""}
                       onClick={(e: { name?: string }) => e?.name && drillByDeal(`Asset type: ${e.name}`, (dd) => dd.assetTypes.includes(e.name!))}>
                       {data.breakdowns.assetTypes.map((_, i) => <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} style={{ cursor: "pointer" }} />)}
@@ -465,20 +564,17 @@ export function Reports() {
                   </PieChart>
                 </ResponsiveContainer>
               )}
-            </div>
-            <div className="panel">
-              <div className="panel-head">
-                <h3>Most Active</h3>
-                <div className="seg-control subtle" role="tablist" aria-label="Breakdown dimension">
-                  {([["counties", "Counties"], ["formations", "Formations"], ["basins", "Basins"]] as const).map(([key, label]) => (
-                    <button key={key} role="tab" aria-selected={geoView === key} className={`seg ${geoView === key ? "active" : ""}`} onClick={() => setGeoView(key)}>{label}</button>
-                  ))}
-                </div>
+            </section>
+            <section className="panel rp-chart">
+              <div className="rp-chart-head">
+                <h3>Most active</h3>
+                <Segmented ariaLabel="Breakdown dimension" value={geoView} onChange={setGeoView}
+                  options={[{ value: "counties", label: "Counties" }, { value: "formations", label: "Formations" }, { value: "basins", label: "Basins" }]} />
               </div>
-              {geoView === "counties" && <BreakdownBars data={data.breakdowns.counties} onClick={(name) => drillByDeal(`County: ${name}`, (dd) => dd.counties.includes(name))} />}
-              {geoView === "formations" && <BreakdownBars data={data.breakdowns.formations} color={CHART_COLORS[3]} onClick={(name) => drillByDeal(`Formation: ${name}`, (dd) => dd.formations.includes(name))} />}
-              {geoView === "basins" && <BreakdownBars data={data.breakdowns.basins} color={CHART_COLORS[5]} onClick={(name) => drillByDeal(`Basin: ${name}`, (dd) => dd.basins.includes(name))} />}
-            </div>
+              {geoView === "counties" && <RankedRows data={data.breakdowns.counties} onClick={(name) => drillByDeal(`County: ${name}`, (dd) => dd.counties.includes(name))} />}
+              {geoView === "formations" && <RankedRows data={data.breakdowns.formations} onClick={(name) => drillByDeal(`Formation: ${name}`, (dd) => dd.formations.includes(name))} />}
+              {geoView === "basins" && <RankedRows data={data.breakdowns.basins} onClick={(name) => drillByDeal(`Basin: ${name}`, (dd) => dd.basins.includes(name))} />}
+            </section>
           </div>
         </div>
       )}
@@ -496,7 +592,7 @@ export function Reports() {
   );
 }
 
-/** Customize View popover for the Reports KPI grid (show/hide + reorder metrics). */
+/** Customize popover for the Reports KPI strips (show/hide + reorder metrics within each group). */
 function MetricsCustomize({ prefs, onChange }: { prefs: MetricPrefs; onChange: (p: MetricPrefs) => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -508,49 +604,77 @@ function MetricsCustomize({ prefs, onChange }: { prefs: MetricPrefs; onChange: (
     return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
   }, [open]);
 
-  const ordered: MetricId[] = [...prefs.order.filter((id) => DEFAULT_METRICS.includes(id)), ...DEFAULT_METRICS.filter((id) => !prefs.order.includes(id))];
+  const ordered = orderedMetrics(prefs);
   const toggle = (id: MetricId) => onChange({ ...prefs, hidden: prefs.hidden.includes(id) ? prefs.hidden.filter((k) => k !== id) : [...prefs.hidden, id] });
-  // Drag-and-drop reorder (replaces the old ↑/↓ arrows).
+  // Drag-and-drop reorder (within a group — the strips are grouped).
   const [dragId, setDragId] = useState<MetricId | null>(null);
   const [overId, setOverId] = useState<MetricId | null>(null);
   const reorder = (from: MetricId, to: MetricId) => {
-    if (from === to) return;
+    if (from === to || groupOf(from) !== groupOf(to)) return;
     const keys = [...ordered];
     const fi = keys.indexOf(from), ti = keys.indexOf(to);
     if (fi < 0 || ti < 0) return;
     keys.splice(fi, 1); keys.splice(ti, 0, from);
     onChange({ ...prefs, order: keys });
   };
+  /** ↑/↓: swap with the neighbouring metric of the same group. */
+  const move = (id: MetricId, dir: -1 | 1) => {
+    const seq = ordered.filter((x) => groupOf(x) === groupOf(id));
+    const other = seq[seq.indexOf(id) + dir];
+    if (!other) return;
+    const keys = [...ordered];
+    const a = keys.indexOf(id), b = keys.indexOf(other);
+    [keys[a], keys[b]] = [keys[b], keys[a]];
+    onChange({ ...prefs, order: keys });
+  };
   const isDefault = prefs.order.length === 0 && prefs.hidden.length === 0;
+  const shown = DEFAULT_METRICS.filter((id) => !prefs.hidden.includes(id)).length;
 
   return (
     <div className="cv-wrap" ref={ref}>
-      <button type="button" className={`rbtn cv-btn ${open ? "active" : ""}`} onClick={() => setOpen((o) => !o)} title="Customize metrics">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
-        Customize View
+      <button type="button" className={`rbtn cv-btn ${open ? "active" : ""}`} onClick={() => setOpen((o) => !o)} title="Customize metrics" aria-expanded={open}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4" /></svg>
+        Customize
       </button>
       {open && (
-        <div className="cv-menu" role="dialog" aria-label="Customize metrics">
-          <div className="cv-head"><strong>Metrics</strong><span className="muted" style={{ fontSize: 12 }}>Show, hide &amp; reorder</span></div>
+        <div className="cv-menu rp-cust" role="dialog" aria-label="Customize metrics">
+          <div className="cv-head"><strong>Metrics</strong><span className="rp-cust-n">{shown} of {DEFAULT_METRICS.length} shown</span></div>
           <div className="cv-list">
-            {ordered.map((id) => (
-              <div key={id}
-                className={`cv-row ${dragId === id ? "dragging" : ""} ${overId === id && dragId && dragId !== id ? "drop-over" : ""}`}
-                onDragOver={(e) => { if (!dragId) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (overId !== id) setOverId(id); }}
-                onDrop={(e) => { e.preventDefault(); if (dragId) reorder(dragId, id); setDragId(null); setOverId(null); }}
-              >
-                <span className="cv-drag" title="Drag to reorder" aria-label="Drag to reorder" draggable
-                  onDragStart={(e) => { setDragId(id); e.dataTransfer.effectAllowed = "move"; }}
-                  onDragEnd={() => { setDragId(null); setOverId(null); }}>⠿</span>
-                <label className="cv-check">
-                  <input type="checkbox" checked={!prefs.hidden.includes(id)} onChange={() => toggle(id)} />
-                  <span>{METRIC_LABELS[id]}</span>
-                </label>
-              </div>
-            ))}
+            {METRIC_GROUPS.map((g) => {
+              const seq = ordered.filter((id) => groupOf(id) === g.key);
+              return (
+                <div className="rp-cust-group" key={g.key}>
+                  <div className="rp-cust-glabel">{g.label}</div>
+                  {seq.map((id, i) => (
+                    <div key={id}
+                      className={`cv-row ${dragId === id ? "dragging" : ""} ${overId === id && dragId && dragId !== id && groupOf(dragId) === g.key ? "drop-over" : ""}`}
+                      onDragOver={(e) => { if (!dragId || groupOf(dragId) !== g.key) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (overId !== id) setOverId(id); }}
+                      onDrop={(e) => { e.preventDefault(); if (dragId) reorder(dragId, id); setDragId(null); setOverId(null); }}
+                    >
+                      <span className="cv-drag" title="Drag to reorder" aria-label="Drag to reorder" draggable
+                        onDragStart={(e) => { setDragId(id); e.dataTransfer.effectAllowed = "move"; }}
+                        onDragEnd={() => { setDragId(null); setOverId(null); }}>⠿</span>
+                      <label className="cv-check">
+                        <input type="checkbox" checked={!prefs.hidden.includes(id)} onChange={() => toggle(id)} />
+                        <span>{METRIC_LABELS[id]}</span>
+                      </label>
+                      <span className="rp-cust-move">
+                        <button type="button" aria-label={`Move ${METRIC_LABELS[id]} up`} disabled={i === 0} onClick={() => move(id, -1)}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 15l6-6 6 6" /></svg>
+                        </button>
+                        <button type="button" aria-label={`Move ${METRIC_LABELS[id]} down`} disabled={i === seq.length - 1} onClick={() => move(id, 1)}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
+                        </button>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
           </div>
           <div className="cv-foot">
-            <button type="button" className="small" disabled={isDefault} onClick={() => onChange({ order: [], hidden: [] })}>Restore default</button>
+            <span />
+            <button type="button" className="small" disabled={isDefault} onClick={() => onChange({ order: [], hidden: [] })}>Restore defaults</button>
           </div>
         </div>
       )}
@@ -558,69 +682,70 @@ function MetricsCustomize({ prefs, onChange }: { prefs: MetricPrefs; onChange: (
   );
 }
 
-function Kpi({ label, value, d, invert, valueColor, onClick, hint, realized }: {
-  label: string; value: string; d?: number | null; invert?: boolean; valueColor?: string; onClick?: () => void;
-  /** One-line explanation under the value (e.g. the formula's inputs). */
-  hint?: string;
-  /** Tag the tile as a realized (closed-deal) figure, not a projection. */
-  realized?: boolean;
-}) {
-  const hasDelta = d !== undefined && d !== null;
-  const up = hasDelta && (d as number) > 0;
-  const flat = hasDelta && (d as number) === 0;
-  // "good" = improvement. For inverted metrics (expenses, losses) up is bad.
-  const good = flat ? null : invert ? !up : up;
-  const deltaClass = good == null ? "" : good ? "delta-up" : "delta-down";
-  const arrow = flat ? "→" : up ? "▲" : "▼";
+interface TrendRow { label: string; revenue: number; netProfit: number | null; netProfitF: number | null; expenses: number | null; forecast: boolean }
+
+/** Hover card for the revenue chart: the month's revenue, expenses (actual months) and net profit. */
+function TrendTip({ active, payload }: { active?: boolean; payload?: { payload: TrendRow }[] }) {
+  if (!active || !payload?.length) return null;
+  const r = payload[0].payload;
+  const net = r.netProfit ?? r.netProfitF;
   return (
-    <div className={`kpi-card ${onClick ? "clickable" : ""}`} onClick={onClick}>
-      <div className="kpi-label">{label}{realized && <span className="kpi-tag" title="Realized: closed deals and recorded expenses only — no projections">Realized</span>}</div>
-      <div className="kpi-value" style={valueColor ? { color: valueColor } : undefined}>{value}</div>
-      {hint && <div className="kpi-hint">{hint}</div>}
-      {hasDelta && <div className={`kpi-sub ${deltaClass}`}>{arrow} {pct(Math.abs(d as number))} vs prior</div>}
+    <div className="rp-tip">
+      <div className="rp-tip-t">{r.label}{r.forecast ? " · forecast" : ""}</div>
+      <div className="rp-tip-row"><span><i style={{ background: COLOR_REVENUE }} />Revenue</span><b>{money(r.revenue)}</b></div>
+      {r.expenses != null && <div className="rp-tip-row"><span><i style={{ background: "var(--ink-4)" }} />Expenses</span><b>{money(r.expenses)}</b></div>}
+      {net != null && <div className="rp-tip-row"><span><i style={{ background: COLOR_PROFIT }} />Net profit</span><b className={net < 0 ? "neg" : undefined}>{money(net)}</b></div>}
     </div>
   );
 }
 
 function TrendChart({ series }: { series: MonthPoint[] }) {
   const lastActual = series.reduce((idx, s, i) => (!s.forecast ? i : idx), 0);
-  const rows = series.map((s, i) => ({
+  const rows: TrendRow[] = series.map((s, i) => ({
     label: monthLabel(s.month),
-    revenue: s.forecast ? null : s.revenue,
+    revenue: s.revenue,
     netProfit: s.forecast ? null : s.netProfit,
-    // Forecast lines connect from the last actual point.
-    revenueF: s.forecast || i === lastActual ? s.revenue : null,
+    // The forecast line connects from the last actual point.
     netProfitF: s.forecast || i === lastActual ? s.netProfit : null,
+    expenses: s.forecast ? null : s.expenses,
+    forecast: Boolean(s.forecast),
   }));
   return (
     <ResponsiveContainer width="100%" height={240}>
-      <ComposedChart data={rows}>
-        <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-        <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-        <YAxis tickFormatter={(v) => money(v)} tick={{ fontSize: 11 }} width={70} />
-        <Tooltip {...chartTooltip} formatter={(v: number) => money(v)} />
-        <Line type="monotone" dataKey="revenue" name="Revenue" stroke={COLOR_REVENUE} strokeWidth={2} dot={false} connectNulls />
-        <Line type="monotone" dataKey="netProfit" name="Net Profit" stroke={COLOR_PROFIT} strokeWidth={2} dot={false} connectNulls />
-        <Line type="monotone" dataKey="revenueF" name="Revenue (forecast)" stroke={COLOR_REVENUE} strokeDasharray="5 4" strokeWidth={2} dot={false} connectNulls legendType="none" />
-        <Line type="monotone" dataKey="netProfitF" name="Net Profit (forecast)" stroke={COLOR_FORECAST} strokeDasharray="5 4" strokeWidth={2} dot={false} connectNulls legendType="none" />
+      <ComposedChart data={rows} margin={{ top: 6, right: 4, left: 0, bottom: 0 }}>
+        <CartesianGrid vertical={false} stroke="var(--line-faint)" />
+        <XAxis dataKey="label" tick={AXIS_TICK} axisLine={false} tickLine={false} />
+        <YAxis tickFormatter={axisMoney} tick={AXIS_TICK} axisLine={false} tickLine={false} width={52} />
+        <ReferenceLine y={0} stroke="var(--line-hover)" />
+        <Tooltip content={<TrendTip />} cursor={{ fill: "var(--chart-col-hover)" }} isAnimationActive={false} wrapperStyle={{ outline: "none", zIndex: 50 }} />
+        <Bar dataKey="revenue" name="Revenue" radius={[3, 3, 0, 0]} maxBarSize={28} isAnimationActive={false}>
+          {rows.map((r, i) => (
+            <Cell key={i} fill={COLOR_REVENUE} fillOpacity={r.forecast ? 0.22 : 1}
+              stroke={r.forecast ? COLOR_REVENUE : "none"} strokeDasharray={r.forecast ? "3 3" : undefined} strokeWidth={r.forecast ? 1 : 0} />
+          ))}
+        </Bar>
+        <Line type="linear" dataKey="netProfit" name="Net profit" stroke={COLOR_PROFIT} strokeWidth={2.2} dot={false} connectNulls isAnimationActive={false} />
+        <Line type="linear" dataKey="netProfitF" name="Net profit (forecast)" stroke={COLOR_PROFIT} strokeOpacity={0.8} strokeDasharray="5 4" strokeWidth={2.2} dot={false} connectNulls legendType="none" isAnimationActive={false} />
       </ComposedChart>
     </ResponsiveContainer>
   );
 }
 
-function BreakdownBars({ data, color = CHART_COLORS[0], onClick }: { data: { name: string; count: number }[]; color?: string; onClick?: (name: string) => void }) {
-  if (data.length === 0) return <p className="muted">No data.</p>;
+/** Ranked breakdown rows (Most active); clicking a row drills into its deals. */
+function RankedRows({ data, onClick }: { data: { name: string; count: number }[]; onClick?: (name: string) => void }) {
+  if (data.length === 0) return <p className="rp-empty">No activity in this period.</p>;
+  const max = Math.max(1, ...data.map((d) => d.count));
   return (
-    <ResponsiveContainer width="100%" height={Math.max(160, data.length * 34)}>
-      <BarChart data={data} layout="vertical" margin={{ left: 20 }}>
-        <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-        <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11 }} />
-        <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={110} />
-        <Tooltip {...chartTooltip} />
-        <Bar dataKey="count" name="Deals" fill={color} radius={[0, 3, 3, 0]} cursor="pointer"
-          onClick={(e: { name?: string }) => e?.name && onClick?.(e.name)} />
-      </BarChart>
-    </ResponsiveContainer>
+    <div className="rp-rank">
+      {data.map((d, i) => (
+        <button type="button" key={d.name} className="rp-rank-row" onClick={() => onClick?.(d.name)} title={`Show deals: ${d.name}`}>
+          <span className="rp-rank-n">{i + 1}</span>
+          <span className="rp-rank-l">{d.name}</span>
+          <span className="rp-rank-bar"><i className={i === 0 ? "top" : ""} style={{ width: `${(d.count / max) * 100}%` }} /></span>
+          <span className="rp-rank-c"><b>{num(d.count)}</b> {d.count === 1 ? "deal" : "deals"}</span>
+        </button>
+      ))}
+    </div>
   );
 }
 

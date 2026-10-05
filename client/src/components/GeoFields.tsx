@@ -87,7 +87,7 @@ export function GeoFields({
           onChange={disabled ? () => {} : onCountiesChange}
           placeholder="Search counties…"
         />
-        {prunedNote && <span className="muted" style={{ fontSize: 12 }}>{prunedNote}</span>}
+        {prunedNote && <span className="geo-prune-note">{prunedNote}</span>}
       </div>
       {onAbstractsChange && (
         <div className="field">

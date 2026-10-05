@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Modal } from "./ui";
+import { Modal, Req } from "./ui";
 import { Select } from "./Select";
 import { api, ApiError } from "../api/client";
 import { useStages } from "../stages";
@@ -89,63 +89,75 @@ export function StageChangeModal({ deal, initialStage, directTerminal, hasUnreso
     // Cancel returns to the picker in the two-step flow, or closes entirely when
     // opened directly on the confirmation (drag-to-terminal).
     const cancel = directTerminal ? onClose : () => setConfirming(false);
+    // Archive reads as not-yet-ready until a loss reason is chosen (it still
+    // runs validation when pressed, so the reason message explains why).
+    const reasonPending = !closed && directTerminal && deadReasonError() !== null;
     return (
       <Modal
-        title={closed ? "Move Deal to Closed?" : "Archive Deal?"}
+        title={closed ? "Move deal to Closed?" : "Archive deal?"}
+        subtitle={
+          <span className={`scm-icon ${closed ? "closed" : "dead"}`} aria-hidden="true">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <path d={closed ? "M5 12.5l4.5 4.5L19 7.5" : "M6 6l12 12M18 6L6 18"} />
+            </svg>
+          </span>
+        }
         onClose={cancel}
         footer={
           <>
             <button onClick={cancel} disabled={busy}>Cancel</button>
-            <button className={closed ? "primary" : "danger"} onClick={commit} disabled={busy}>
-              {busy ? "Moving…" : closed ? "Move Deal" : "Archive Deal"}
+            <button className={`${closed ? "primary" : "danger"} ${reasonPending ? "scm-pending" : ""}`} onClick={commit} disabled={busy}>
+              {busy ? "Moving…" : closed ? "Move deal" : "Archive deal"}
             </button>
           </>
         }
       >
-        <p style={{ marginTop: 0 }}>
-          Move <strong>{deal.name}</strong> to <strong>{closed ? "Closed" : "Dead"}</strong>? This
-          removes the opportunity from the active Pipeline and moves the associated deal to{" "}
-          <strong>{closed ? "Closed Deals" : "Archived Deals"}</strong>.
-        </p>
-        {/* Loss reason is captured here for the single-step (drag) flow; in the
-            two-step flow it was already chosen on the picker and shows read-only. */}
-        {toStage === "DEAD" && (
-          directTerminal ? (
-            <>
-              <div className="field">
-                <label>Reason lost (required)</label>
-                <Select value={deadCategory} onChange={setDeadCategory} placeholder="Select a reason…" ariaLabel="Reason lost"
-                  options={DEAD_REASONS.map((r) => ({ value: r, label: r }))} />
-              </div>
-              {deadCategory && (
+        <div className="scm scm-confirm">
+          <p className="scm-lead">
+            Move <strong>{deal.name}</strong> to <strong>{closed ? "Closed" : "Dead"}</strong>? This
+            removes the opportunity from the active pipeline and moves the associated deal to{" "}
+            <strong>{closed ? "Closed Deals" : "Archived Deals"}</strong>.
+          </p>
+          {/* Loss reason is captured here for the single-step (drag) flow; in the
+              two-step flow it was already chosen on the picker and shows read-only. */}
+          {toStage === "DEAD" && (
+            directTerminal ? (
+              <>
                 <div className="field">
-                  <label>{deadCategory === "Other" ? "Details (required)" : "Additional notes (optional)"}</label>
-                  <textarea rows={2} value={deadNotes} onChange={(e) => setDeadNotes(e.target.value)} placeholder="Add context for future loss analysis…" />
+                  <label>Reason lost <Req /></label>
+                  <Select value={deadCategory} onChange={setDeadCategory} placeholder="Select a reason…" ariaLabel="Reason lost"
+                    options={DEAD_REASONS.map((r) => ({ value: r, label: r }))} />
                 </div>
-              )}
-            </>
-          ) : (
-            <ul style={{ margin: "0 0 10px", paddingLeft: 18 }}>
-              <li>Loss reason <strong>{deadReason}</strong> is saved to the deal history with your name and the date.</li>
-              {deal.publishedToPortal && <li>The offering will be <strong>unpublished from the Buyer Portal</strong>.</li>}
-            </ul>
-          )
-        )}
-        {toStage === "DEAD" && directTerminal && deal.publishedToPortal && (
-          <p style={{ margin: "0 0 10px", color: "var(--red)" }}>The offering will be <strong>unpublished from the Buyer Portal</strong>.</p>
-        )}
-        <p className="muted" style={{ marginBottom: 0 }}>
-          Nothing is deleted — all deal information, documents, buyer activity, emails, notes,
-          and history stay with the deal, and dashboards and reports update automatically.
-        </p>
-        {error && <div className="error-text">{error}</div>}
+                {deadCategory && (
+                  <div className="field">
+                    <label>{deadCategory === "Other" ? <>Details <Req /></> : "Additional notes (optional)"}</label>
+                    <textarea rows={2} value={deadNotes} onChange={(e) => setDeadNotes(e.target.value)} placeholder="Add context for future loss analysis…" />
+                  </div>
+                )}
+              </>
+            ) : (
+              <ul className="scm-list">
+                <li>Loss reason <strong>{deadReason}</strong> is saved to the deal history with your name and the date.</li>
+                {deal.publishedToPortal && <li>The offering will be <strong>unpublished from the Buyer Portal</strong>.</li>}
+              </ul>
+            )
+          )}
+          {toStage === "DEAD" && directTerminal && deal.publishedToPortal && (
+            <p className="scm-warn">The offering will be <strong>unpublished from the Buyer Portal</strong>.</p>
+          )}
+          <p className="scm-note">
+            Nothing is deleted. All deal information, documents, buyer activity, emails, notes
+            and history stay with the deal, and dashboards and reports update automatically.
+          </p>
+          {error && <div className="error-text">{error}</div>}
+        </div>
       </Modal>
     );
   }
 
   return (
     <Modal
-      title="Move Stage"
+      title="Move stage"
       onClose={onClose}
       footer={
         <>
@@ -156,49 +168,51 @@ export function StageChangeModal({ deal, initialStage, directTerminal, hasUnreso
         </>
       }
     >
-      <p className="muted" style={{ marginTop: 0 }}>
-        Currently in <strong>{stageLabel(deal.stage)}</strong>.
-      </p>
-      <div className="field">
-        <label>Destination stage</label>
-        <Select value={toStage} onChange={(v) => setToStage(v as Stage)} ariaLabel="Destination stage"
-          options={stages.map((s) => ({ value: s.key, label: s.label }))} />
-      </div>
+      <div className="scm scm-picker">
+        <p className="scm-current">
+          Currently in <strong>{stageLabel(deal.stage)}</strong>.
+        </p>
+        <div className="field">
+          <label>Destination stage</label>
+          <Select value={toStage} onChange={(v) => setToStage(v as Stage)} ariaLabel="Destination stage"
+            options={stages.map((s) => ({ value: s.key, label: s.label }))} />
+        </div>
 
-      {/* Destination-specific pre-flight checklist */}
-      {toStage === "CLOSING" && (
-        <div className="banner banner-info">
-          Confirm before closing:
-          <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
-            <li>Selected buyer: {deal.selectedBuyer ? <strong>{deal.selectedBuyer.name}</strong> : <span style={{ color: "var(--red)" }}>none selected</span>}</li>
-            <li>Ask price: {deal.askPrice != null ? `$${deal.askPrice.toLocaleString()}` : <span style={{ color: "var(--red)" }}>not set</span>}</li>
-          </ul>
-        </div>
-      )}
-      {toStage === "DEAD" && (
-        <>
-          <div className="field">
-            <label>Reason lost (required)</label>
-            <Select value={deadCategory} onChange={setDeadCategory} placeholder="Select a reason…" ariaLabel="Reason lost"
-              options={DEAD_REASONS.map((r) => ({ value: r, label: r }))} />
+        {/* Destination-specific pre-flight checklist */}
+        {toStage === "CLOSING" && (
+          <div className="banner banner-info">
+            Confirm before closing:
+            <ul>
+              <li>Selected buyer: {deal.selectedBuyer ? <strong>{deal.selectedBuyer.name}</strong> : <span className="scm-missing">none selected</span>}</li>
+              <li>Ask price: {deal.askPrice != null ? `$${deal.askPrice.toLocaleString()}` : <span className="scm-missing">not set</span>}</li>
+            </ul>
           </div>
-          {deadCategory && (
+        )}
+        {toStage === "DEAD" && (
+          <>
             <div className="field">
-              <label>{deadCategory === "Other" ? "Details (required)" : "Additional notes (optional)"}</label>
-              <textarea rows={2} value={deadNotes} onChange={(e) => setDeadNotes(e.target.value)} placeholder="Add context for future loss analysis…" />
+              <label>Reason lost <Req /></label>
+              <Select value={deadCategory} onChange={setDeadCategory} placeholder="Select a reason…" ariaLabel="Reason lost"
+                options={DEAD_REASONS.map((r) => ({ value: r, label: r }))} />
             </div>
-          )}
-          {deal.publishedToPortal && (
-            <div className="banner banner-warn">This offering is live on the Buyer Portal — marking it Dead will unpublish it.</div>
-          )}
-        </>
-      )}
-      {hasUnresolvedActivity && toStage !== deal.stage && (
-        <div className="banner banner-warn">
-          Heads up: this deal has buyer outreach still awaiting a response. You can still proceed.
-        </div>
-      )}
-      {error && <div className="error-text">{error}</div>}
+            {deadCategory && (
+              <div className="field">
+                <label>{deadCategory === "Other" ? <>Details <Req /></> : "Additional notes (optional)"}</label>
+                <textarea rows={2} value={deadNotes} onChange={(e) => setDeadNotes(e.target.value)} placeholder="Add context for future loss analysis…" />
+              </div>
+            )}
+            {deal.publishedToPortal && (
+              <div className="banner banner-warn">This offering is live on the Buyer Portal — marking it Dead will unpublish it.</div>
+            )}
+          </>
+        )}
+        {hasUnresolvedActivity && toStage !== deal.stage && (
+          <div className="banner banner-warn">
+            Heads up: this deal has buyer outreach still awaiting a response. You can still proceed.
+          </div>
+        )}
+        {error && <div className="error-text">{error}</div>}
+      </div>
     </Modal>
   );
 }

@@ -85,83 +85,92 @@ export function WellImport({ onDataChanged }: { onDataChanged: () => void }) {
   const requiredMissing = analysis?.fields.filter((f) => f.required && !mapping[f.key]) ?? [];
 
   return (
-    <div>
-      <div className="panel">
-        <h3>Import Production Data</h3>
-        <p className="muted" style={{ marginTop: 0 }}>
-          Upload monthly well production (state agency exports, purchased data or your own spreadsheets).
-          Each row is one well-month; wells are created automatically and re-imports overwrite overlapping months.
-        </p>
-        <div className="row" style={{ flexWrap: "wrap", gap: 10, alignItems: "flex-end" }}>
-          <div className="field" style={{ marginBottom: 0, width: 90 }}><label>State</label>
-            <input value={state} maxLength={2} onChange={(e) => setState(e.target.value.toUpperCase())} placeholder="TX" />
-          </div>
-          <div className="field" style={{ marginBottom: 0, minWidth: 160 }}><label>County (default)</label>
-            <input value={county} onChange={(e) => setCounty(e.target.value)} placeholder="e.g. Midland" />
-          </div>
-          <div className="field" style={{ marginBottom: 0, flex: 1, minWidth: 250 }}><label>CSV file</label>
-            <CsvDropzone slim onFile={onFile} />
-          </div>
-          <button className="small" onClick={() => downloadCsv("well-production-template.csv", TEMPLATE_HEADERS, TEMPLATE_ROWS)}>Download template</button>
+    <>
+      <section className="va-card va-import">
+        <div className="va-card-head va-card-head-col">
+          <h3>Import production data</h3>
+          <p className="va-card-sub">
+            Upload monthly well production (state agency exports, purchased data or your own spreadsheets).
+            Each row is one well-month; wells are created automatically and re-imports overwrite overlapping months.
+          </p>
         </div>
-
-        {busy && <Spinner label="Working…" />}
-        {error && <Banner kind="error">{error}</Banner>}
-
-        {analysis && (
-          <div style={{ marginTop: 14 }}>
-            <h4 style={{ margin: "0 0 6px" }}>Map columns <span className="muted" style={{ fontWeight: 400 }}>({analysis.rowCount.toLocaleString()} rows found)</span></h4>
-            <div className="row" style={{ flexWrap: "wrap", gap: 8 }}>
-              {analysis.fields.map((f) => (
-                <div key={f.key} className="field" style={{ marginBottom: 0, minWidth: 190 }}>
-                  <label title={f.hint}>{f.label}{f.required && <Req />}</label>
-                  <Select value={mapping[f.key] ?? ""} onChange={(v) => setMapping((m) => ({ ...m, [f.key]: v }))}
-                    placeholder="— not in file —" clearable searchable ariaLabel={`Map column for ${f.label}`}
-                    options={analysis.headers.map((h) => ({ value: h, label: h }))} />
-                </div>
-              ))}
+        <div className="va-import-body">
+          <div className="va-import-fields">
+            <div className="field va-import-state"><label>State</label>
+              <input value={state} maxLength={2} onChange={(e) => setState(e.target.value.toUpperCase())} placeholder="TX" />
             </div>
-            {requiredMissing.length > 0 && (
-              <Banner kind="warn">Required: {requiredMissing.map((f) => f.label).join(", ")}</Banner>
-            )}
-            <div style={{ marginTop: 10 }}>
-              <button className="primary" disabled={busy || requiredMissing.length > 0} onClick={onCommit}>
-                Import {analysis.rowCount.toLocaleString()} rows
-              </button>
+            <div className="field va-import-county"><label>County (default)</label>
+              <input value={county} onChange={(e) => setCounty(e.target.value)} placeholder="e.g. Midland" />
             </div>
+            <button className="va-import-template" onClick={() => downloadCsv("well-production-template.csv", TEMPLATE_HEADERS, TEMPLATE_ROWS)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
+              Download template
+            </button>
+          </div>
+          <div className="field va-import-file"><label>CSV file</label>
+            <CsvDropzone onFile={onFile} label={filename ? `${filename} · drop another CSV or click to choose` : "Drop a production CSV here, or click to browse"} />
+          </div>
+
+          {busy && <Spinner label="Working…" />}
+          {error && <Banner kind="error">{error}</Banner>}
+
+          {analysis && (
+            <div className="va-import-map">
+              <div className="va-import-map-title">Map columns <span>({analysis.rowCount.toLocaleString()} rows found)</span></div>
+              <div className="va-import-map-grid">
+                {analysis.fields.map((f) => (
+                  <div key={f.key} className="field">
+                    <label title={f.hint}>{f.label}{f.required && <Req />}</label>
+                    <Select value={mapping[f.key] ?? ""} onChange={(v) => setMapping((m) => ({ ...m, [f.key]: v }))}
+                      placeholder="— not in file —" clearable searchable ariaLabel={`Map column for ${f.label}`}
+                      options={analysis.headers.map((h) => ({ value: h, label: h }))} />
+                  </div>
+                ))}
+              </div>
+              {requiredMissing.length > 0 && (
+                <Banner kind="warn">Required: {requiredMissing.map((f) => f.label).join(", ")}</Banner>
+              )}
+              <div>
+                <button className="primary" disabled={busy || requiredMissing.length > 0} onClick={onCommit}>
+                  Import {analysis.rowCount.toLocaleString()} rows
+                </button>
+              </div>
+            </div>
+          )}
+
+          {result && (
+            <Banner kind="info">
+              Imported <strong>{result.imported.toLocaleString()}</strong> production months
+              {result.wellsCreated > 0 && <> · created {result.wellsCreated.toLocaleString()} new wells</>}
+              {result.skipped > 0 && <> · {result.skipped.toLocaleString()} skipped{result.skippedReasons.length > 0 && <> ({result.skippedReasons.slice(0, 3).map((r) => `${r.count}× ${r.reason}`).join("; ")})</>}</>}
+              {result.failed > 0 && <> · {result.failed.toLocaleString()} unreadable (missing well identity or month)</>}
+            </Banner>
+          )}
+        </div>
+      </section>
+
+      <section className="va-card va-import-history">
+        <div className="va-card-head"><h3>Import history</h3></div>
+        {runs.length === 0 ? <p className="va-saved-empty">No production imports yet.</p> : (
+          <div className="va-import-history-body">
+            <div className="table-scroll va-table"><table className="data-table">
+              <thead><tr><th>Date</th><th>Geography</th><th>File</th><th className="right">Imported</th><th className="right">Skipped</th><th className="right">Failed</th></tr></thead>
+              <tbody>
+                {runs.map((r) => (
+                  <tr key={r.id}>
+                    <td>{fmtDateTime(r.createdAt)}</td>
+                    <td>{[r.county, r.state].filter(Boolean).join(", ") || "—"}</td>
+                    <td>{r.filename ?? "—"}</td>
+                    <td className="right">{r.rowsImported.toLocaleString()}</td>
+                    <td className="right">{r.rowsSkipped.toLocaleString()}</td>
+                    <td className="right">{r.rowsFailed.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table></div>
           </div>
         )}
-
-        {result && (
-          <Banner kind="info">
-            Imported <strong>{result.imported.toLocaleString()}</strong> production months
-            {result.wellsCreated > 0 && <> · created {result.wellsCreated.toLocaleString()} new wells</>}
-            {result.skipped > 0 && <> · {result.skipped.toLocaleString()} skipped{result.skippedReasons.length > 0 && <> ({result.skippedReasons.slice(0, 3).map((r) => `${r.count}× ${r.reason}`).join("; ")})</>}</>}
-            {result.failed > 0 && <> · {result.failed.toLocaleString()} unreadable (missing well identity or month)</>}
-          </Banner>
-        )}
-      </div>
-
-      <div className="panel">
-        <h3>Import History</h3>
-        {runs.length === 0 ? <p className="muted">No production imports yet.</p> : (
-          <div className="table-scroll"><table className="data-table">
-            <thead><tr><th>Date</th><th>Geography</th><th>File</th><th>Imported</th><th>Skipped</th><th>Failed</th></tr></thead>
-            <tbody>
-              {runs.map((r) => (
-                <tr key={r.id}>
-                  <td>{fmtDateTime(r.createdAt)}</td>
-                  <td>{[r.county, r.state].filter(Boolean).join(", ") || "—"}</td>
-                  <td>{r.filename ?? "—"}</td>
-                  <td>{r.rowsImported.toLocaleString()}</td>
-                  <td>{r.rowsSkipped.toLocaleString()}</td>
-                  <td>{r.rowsFailed.toLocaleString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table></div>
-        )}
-      </div>
-    </div>
+      </section>
+    </>
   );
 }

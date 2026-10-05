@@ -3,9 +3,9 @@ import { ArrowDown, ArrowUp, FileText, Star, X } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Banner } from "./ui";
+import { Segmented, Tag } from "./kit";
 import { Toggle } from "./Toggle";
 import { PhoneInput } from "./PhoneInput";
-import { Select } from "./Select";
 
 // A per-deal published contact. `id` is a stable key for React + reordering.
 interface DealContact { id: string; name: string; title: string | null; email: string | null; phone: string | null }
@@ -116,31 +116,34 @@ export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string
     {stats && (p.publishedToPortal || stats.views > 0 || stats.inquiries > 0) && (() => {
       const pctOf = (v: number, of: number) => (of > 0 ? Math.min(100, Math.round((v / of) * 100)) : 0);
       const tiles = [
-        { label: "Listing Views", trend: stats.viewsThisWeek > 0 ? `+${stats.viewsThisWeek} this week` : null,
+        { label: "Listing views", trend: stats.viewsThisWeek > 0 ? `+${stats.viewsThisWeek} this week` : null,
           value: String(stats.views), hint: stats.firstViewAt ? `since ${fmtShort(stats.firstViewAt)}` : "no views yet",
           dim: !stats.views, bar: "var(--accent2)", w: stats.views > 0 ? 100 : 0 },
-        { label: "Unique Visitors", trend: null, value: String(stats.uniqueVisitors),
+        { label: "Unique visitors", trend: null, value: String(stats.uniqueVisitors),
           hint: stats.returningVisitors > 0 ? `${stats.returningVisitors} returned twice+` : "—",
           dim: !stats.uniqueVisitors, bar: "var(--accent2)", w: pctOf(stats.uniqueVisitors, stats.views) },
-        { label: "Doc Downloads", trend: null, value: String(stats.downloads),
+        { label: "Doc downloads", trend: null, value: String(stats.downloads),
           hint: stats.topDownload ? stats.topDownload.folder : "—",
-          dim: !stats.downloads, bar: "#f5b04b", w: pctOf(stats.downloads, stats.views) },
+          dim: !stats.downloads, bar: "var(--warn)", w: pctOf(stats.downloads, stats.views) },
         { label: "Inquiries", trend: null, value: String(stats.inquiries),
           hint: stats.lastInquiry ? `${stats.lastInquiry.name} · ${fmtShort(stats.lastInquiry.date)}` : "—",
-          dim: !stats.inquiries, bar: "var(--green)", w: pctOf(stats.inquiries, stats.uniqueVisitors) },
+          dim: !stats.inquiries, bar: "var(--success)", w: pctOf(stats.inquiries, stats.uniqueVisitors) },
       ];
       return (
-        <div className="panel">
-          <div className="section-head" style={{ alignItems: "baseline" }}>
-            <h3 style={{ margin: 0 }}>Listing Analytics</h3>
-            <span className="muted" style={{ fontSize: 12 }}>Real marketplace traffic on this listing</span>
+        <div className="panel dd-card dpp-analytics">
+          <div className="dd-card-head">
+            <div>
+              <h3 className="dd-card-title">Listing analytics</h3>
+              <div className="dd-card-sub">Real marketplace traffic on this listing</div>
+            </div>
           </div>
-          <div className="mf-grid mf-grid-4">
+          <div className="dpp-stats">
             {tiles.map((t) => (
-              <div key={t.label} className="mf-stage">
-                <div className="mf-toprow"><span className="ddx-label">{t.label}</span>{t.trend && <span className="mf-trend">{t.trend}</span>}</div>
-                <div className="mf-row"><span className={`mf-v ${t.dim ? "dim" : ""}`}>{t.value}</span><span className="mf-h">{t.hint}</span></div>
-                <div className="mf-bar"><div style={{ width: `${t.w}%`, background: t.bar }} /></div>
+              <div key={t.label} className="dpp-stat">
+                <div className="dpp-stat-top"><span className="dpp-stat-label">{t.label}</span>{t.trend && <span className="dpp-stat-trend">{t.trend}</span>}</div>
+                <span className={`dpp-stat-v ${t.dim ? "dim" : ""}`}>{t.value}</span>
+                <span className="dpp-stat-h">{t.hint}</span>
+                <div className="dpp-stat-bar"><div style={{ width: `${t.w}%`, background: t.bar }} /></div>
               </div>
             ))}
           </div>
@@ -156,12 +159,12 @@ export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string
       >
         <div className="dpp-title">
           <div>
-            <h3 style={{ margin: 0 }}>Buyer Portal</h3>
-            <div className="dpp-sub">Only buyer-safe fields are shown — pricing, notes, sellers, and internal activity never appear.</div>
+            <h3 style={{ margin: 0 }}>Buyer portal listing</h3>
+            <div className="dpp-sub">Only buyer-safe fields are shown. Your cost, notes, sellers and internal activity never appear.</div>
           </div>
         </div>
         <span className="dpp-right">
-          <span className={`dpp-status ${p.publishedToPortal ? "live" : ""}`}><span className="dot" />{statusLabel}</span>
+          <Tag tone={p.publishedToPortal ? "success" : "neutral"} dot>{statusLabel}</Tag>
           <span className="muted" style={{ fontSize: 12.5 }}>{open ? "Collapse" : "Expand"}</span>
           <span className={`va-chev ${open ? "" : "down"}`}>⌃</span>
         </span>
@@ -176,20 +179,20 @@ export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string
           <strong>Published</strong>
         </label>
         <span className="dpp-vdiv" />
-        <div className="dpp-switchrow">
-          <span className="ddx-label">Visibility</span>
-          <Select
-            disabled={!canEdit || !p.publishedToPortal}
-            value={p.portalVisibility}
-            onChange={(v) => patch({ visibility: v })}
-            width={280}
+        {/* A disabled fieldset disables the segment buttons (same rule as before:
+            editable only with the publish permission, once published). */}
+        <fieldset className="dpp-switchrow dpp-vis" disabled={!canEdit || !p.publishedToPortal}>
+          <span className="dpp-ctl-label">Visibility</span>
+          <Segmented
             ariaLabel="Portal visibility"
+            value={p.portalVisibility}
+            onChange={(v) => { if (v !== p.portalVisibility) void patch({ visibility: v }); }}
             options={[
-              { value: "PUBLIC", label: "Public — listed in the marketplace" },
-              { value: "LINK_ONLY", label: "Private — shared link only" },
+              { value: "LINK_ONLY", label: "Link only", title: "Private — shared link only" },
+              { value: "PUBLIC", label: "Public", title: "Public — listed in the marketplace" },
             ]}
           />
-        </div>
+        </fieldset>
         <span className="dpp-vdiv" />
         <label className="dpp-switchrow">
           <Toggle checked={p.portalFeatured} disabled={!canEdit || !p.publishedToPortal} onChange={(v) => patch({ featured: v })} />
@@ -202,7 +205,7 @@ export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string
 
         {shareUrl && (
           <div style={{ marginBottom: 16 }}>
-            <div className="ddx-label" style={{ marginBottom: 8 }}>Share link</div>
+            <div className="dpp-field-label">Share link</div>
             <div className="dpp-share">
               <span className="dpp-share-ico">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 007.54.54l3-3a5 5 0 00-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 00-7.54-.54l-3 3a5 5 0 007.07 7.07l1.71-1.71" /></svg>
@@ -221,11 +224,11 @@ export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string
             computed live from this listing's real state — nothing invented. */}
         <div className="dpp-sumgrid" style={{ marginBottom: 16 }}>
           <div style={{ display: "flex", flexDirection: "column" }}>
-            <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-              <span className="ddx-label">Buyer-facing summary</span>
-              <span className="muted" style={{ fontSize: 11.5 }}>Shown on the offering page</span>
+            <div className="dpp-field-head">
+              <span className="dpp-field-label">Buyer-facing summary</span>
+              <span className="dpp-field-note">Shown on the offering page · {summary.length} character{summary.length === 1 ? "" : "s"}</span>
             </div>
-            <textarea rows={3} style={{ flex: 1, minHeight: 110 }} disabled={!canEdit} value={summary} onChange={(e) => setSummary(e.target.value)} onBlur={() => summary !== (p.portalSummary ?? "") && patch({ summary })} placeholder="Describe the opportunity for buyers…" />
+            <textarea rows={5} className="dpp-summary" disabled={!canEdit} value={summary} onChange={(e) => setSummary(e.target.value)} onBlur={() => summary !== (p.portalSummary ?? "") && patch({ summary })} placeholder="Describe the opportunity for buyers…" />
           </div>
           {(() => {
             const items = [
@@ -240,7 +243,7 @@ export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string
             return (
               <div className="dpp-quality">
                 <div className="dpp-quality-head">
-                  <span className="ddx-label">Listing Quality</span>
+                  <span className="dpp-quality-title">Listing quality</span>
                   <span className={`dpp-quality-pct ${pct === 100 ? "full" : ""}`}>{pct}%</span>
                 </div>
                 <div className="dpp-quality-bar"><div className={pct === 100 ? "full" : ""} style={{ width: `${pct}%` }} /></div>
@@ -248,7 +251,7 @@ export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string
                   {items.map((q) => (
                     <div key={q.label} className="dpp-quality-item">
                       <span className={`dpp-qdot ${q.done ? "done" : ""}`}>
-                        {q.done && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3.2" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>}
+                        {q.done && <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--on-accent)" strokeWidth="3.2" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>}
                       </span>
                       <span className={`dpp-qlbl ${q.done ? "done" : ""}`}>{q.label}</span>
                     </div>
@@ -263,9 +266,9 @@ export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string
             are configured on the deal (not globally). All are shown on the
             offering page when the Contact section below is enabled. */}
         <div style={{ marginBottom: 16 }}>
-          <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-            <span className="ddx-label">Contacts</span>
-            <span className="muted" style={{ fontSize: 11.5 }}>Shown on this listing when filled in</span>
+          <div className="dpp-field-head">
+            <span className="dpp-field-label">Listing contacts</span>
+            <span className="dpp-field-note">Shown on this listing when filled in</span>
           </div>
           {contacts.map((c, i) => (
             <div key={c.id} className="dpp-contact">
@@ -290,7 +293,7 @@ export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string
                     onBlur={() => saveContacts(contacts)} placeholder="e.g. Jane Doe" />
                 </div>
                 <div className="field" style={{ marginBottom: 8 }}>
-                  <label>Job title <span className="muted" style={{ textTransform: "none" }}>(optional)</span></label>
+                  <label>Job title <span className="dd-opt">(optional)</span></label>
                   <input disabled={!canEdit} value={c.title ?? ""}
                     onChange={(e) => updateContact(c.id, "title", e.target.value)}
                     onBlur={() => saveContacts(contacts)} placeholder="e.g. Land Manager" />
@@ -320,21 +323,24 @@ export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string
             listing only (never changes the deal). */}
         <div className="dpp-price">
           <div style={{ minWidth: 260 }}>
-            <div className="ddx-label" style={{ marginBottom: 8 }}>Published asking price</div>
+            <div className="dpp-field-label">Published asking price</div>
+            <div className="dpp-money">
+            <span className="dpp-money-pre" aria-hidden="true">$</span>
             <input
-              type="number" min="0" disabled={!canEdit}
+              type="number" min="0" disabled={!canEdit} aria-label="Published asking price"
               value={askOverride}
               placeholder={p.askPrice != null ? `Deal ask: $${p.askPrice.toLocaleString()}` : "No deal ask price set"}
               onChange={(e) => setAskOverride(e.target.value)}
               onBlur={() => { const v = askOverride.trim() === "" ? null : Number(askOverride); if (v !== p.portalAskPrice) { setP((prev) => prev ? { ...prev, portalAskPrice: v } : prev); patch({ askPrice: v }); } }}
             />
+            </div>
           </div>
           <div className="dpp-price-note">Leave blank to use the deal's Ask Price <b>({p.askPrice != null ? `$${p.askPrice.toLocaleString()}` : "not set"})</b>. This override doesn't change the deal.</div>
         </div>
 
         {(p.files?.length ?? 0) > 0 && (
           <div>
-            <div className="ddx-label" style={{ marginBottom: 10 }}>Documents visible to buyers</div>
+            <div className="dpp-field-label">Documents visible to buyers</div>
             <div className="dpp-docs">
               {p.files!.map((f) => (
                 <label key={f.id} className={`dpp-doc ${f.visibleToBuyers ? "on" : ""}`}>

@@ -125,7 +125,7 @@ export function DateField({ value, onChange, ariaLabel, disabled, placeholder = 
   // the layout viewport (NOT clientWidth, which under-reports under the
   // interface zoom and would push right-edge calendars off their field).
   const popupStyle = pos
-    ? { ...pos, width: 268, left: Math.max(8, Math.min(Number(pos.left ?? 8), layoutViewport().vw - 276)) }
+    ? { ...pos, width: 244, left: Math.max(8, Math.min(Number(pos.left ?? 8), layoutViewport().vw - 252)) }
     : undefined;
 
   return (
@@ -157,7 +157,7 @@ export function DateField({ value, onChange, ariaLabel, disabled, placeholder = 
           aria-label={open ? "Close calendar" : "Open calendar"}
           onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); if (disabled) return; if (open) close(); else { setOpen(true); inputRef.current?.focus(); } }}
           onClick={(e) => e.stopPropagation()}>
-          <CalendarDays size={15} className="datef-icon" aria-hidden strokeWidth={2} />
+          <CalendarDays size={15} className="datef-icon" aria-hidden strokeWidth={1.7} />
         </button>
       </div>
       {open && !disabled && pos && createPortal(
@@ -212,7 +212,7 @@ export function DateField({ value, onChange, ariaLabel, disabled, placeholder = 
 
           <div className="datef-foot">
             <button type="button" className="datef-link" onClick={() => { const t = todayIso(); const p = parseIso(t)!; setVy(p[0]); setVm(p[1]); onChange(t); close(); }}>Today</button>
-            {value && <button type="button" className="datef-link" onClick={() => { onChange(""); close(); }}>Clear</button>}
+            {value && <button type="button" className="datef-link datef-clear" onClick={() => { onChange(""); close(); }}>Clear</button>}
           </div>
         </div>,
         document.body,

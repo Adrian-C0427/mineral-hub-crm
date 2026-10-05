@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Modal, Req } from "./ui";
 import { api, ApiError } from "../api/client";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
@@ -11,7 +11,8 @@ import { OperatorSelect } from "./OperatorSelect";
 import { Select } from "./Select";
 import { royaltyOptions } from "../lib/royalty";
 import { findBuyerByOffsetDays } from "../lib/perAcre";
-import { fmtDate } from "../lib/format";
+import { fmtDate, money } from "../lib/format";
+import { FormSection } from "./kit";
 import {
   addDaysIso, applyAcreageEdit, AcreageNote, DaysToCloseField, editPriceGroup, emptyPriceGroup, PriceNote, syncPriceGroup,
   type AcreSource, type PriceField, type PriceGroup,
@@ -47,6 +48,24 @@ function assetMissing(a: AssetRow): string[] {
   if (!a.sameTimeline && !a.dateUnderContract) m.push("Date Under Contract");
   return m;
 }
+
+// The form's sections, in order, as listed in the left rail (a step strip on
+// phones). A required section is complete once none of its fields appear in
+// the form's existing `missing` list.
+type SecKey = "basics" | "location" | "economics" | "cost" | "asking" | "timeline" | "extras";
+const SECTIONS: { key: SecKey; label: string; fields?: string[] }[] = [
+  { key: "basics", label: "Basics", fields: ["Deal Name", "Asset Type", "Date Under Contract"] },
+  { key: "location", label: "Location", fields: ["State", "County", "Abstract"] },
+  { key: "economics", label: "Economics", fields: ["NMA or NRA"] },
+  { key: "cost", label: "Acquisition cost", fields: ["Acquisition Cost"] },
+  { key: "asking", label: "Asking price" },
+  { key: "timeline", label: "Timeline & notes" },
+  { key: "extras", label: "Additional deals" },
+];
+
+const CheckIcon = ({ size = 9 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
+);
 
 /**
  * Create a deal — or, when `parentDealId` is passed, add an additional deal under
@@ -133,6 +152,44 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
   const patchAsset = (i: number, patch: Partial<AssetRow>) =>
     setAssets((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
 
+  // Section rail: progress from the required checks above, click-to-jump, and
+  // a scroll-spy that follows the form as it scrolls.
+  const sections = SECTIONS.filter((x) => !(asset && x.key === "extras"));
+  const isDone = (k: SecKey) => {
+    const fields = SECTIONS.find((x) => x.key === k)?.fields;
+    return !!fields && !fields.some((m) => missing.includes(m));
+  };
+  const requiredSecs = sections.filter((x) => x.fields);
+  const reqDone = requiredSecs.filter((x) => isDone(x.key)).length;
+  const fieldsLeft = missing.length + assetErrors.reduce((n, e) => n + e.length, 0);
+  const [sec, setSec] = useState<SecKey>("basics");
+  const formRef = useRef<HTMLDivElement>(null);
+  const railRef = useRef<HTMLDivElement>(null);
+  const spyLock = useRef(0);
+  const goSec = (k: SecKey) => {
+    const pane = formRef.current;
+    const el = pane?.querySelector<HTMLElement>(`[data-sec="${k}"]`);
+    spyLock.current = Date.now() + 700;
+    if (pane && el) pane.scrollTo({ top: Math.max(0, el.offsetTop - 4), behavior: "smooth" });
+    setSec(k);
+  };
+  const onFormScroll = () => {
+    const pane = formRef.current;
+    if (!pane || Date.now() < spyLock.current) return;
+    const els = [...pane.querySelectorAll<HTMLElement>("[data-sec]")];
+    let cur = els[0]?.dataset.sec;
+    for (const el of els) if (el.offsetTop - 80 <= pane.scrollTop) cur = el.dataset.sec;
+    if (pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 4) cur = els[els.length - 1]?.dataset.sec;
+    if (cur && cur !== sec) setSec(cur as SecKey);
+  };
+  // On phones the rail is a sideways strip: keep the active step in view.
+  useEffect(() => {
+    const list = railRef.current;
+    const item = list?.querySelector<HTMLElement>(`[data-rail="${sec}"]`);
+    if (!list || !item || list.scrollWidth <= list.clientWidth) return;
+    list.scrollTo({ left: item.offsetLeft - (list.clientWidth - item.offsetWidth) / 2, behavior: "smooth" });
+  }, [sec]);
+
   async function submit() {
     if (missing.length) { setError(`Required: ${missing.join(", ")}`); return; }
     if (anyAssetIncomplete) {
@@ -196,7 +253,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
   const req = <Req />;
   return (
     <Modal
-      title={asset ? "Add Deal" : "New Deal"}
+      title={asset ? "Add deal" : "New deal"}
       subtitle={asset
         ? <>Added under the same seller — the full deal form, independently marketable</>
         : <>Starts in <strong>Under Contract</strong> · add sellers later in Seller Details</>}
@@ -205,119 +262,172 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
       dirty={Object.values(f).some((v) => v.trim() !== "") || [cost.perNma, cost.perNra, cost.total, ask.perNma, ask.perNra, ask.total].some((v) => v !== "") || states.length > 0 || counties.length > 0 || assetTypes.length > 0}
       footer={
         <>
-          <span className="modal-req-note"><Req /> Required</span>
-          <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={submit} disabled={busy || missing.length > 0 || anyAssetIncomplete}
-            title={missing.length ? "Enabled once required fields are filled" : undefined}>
-            {busy ? "Saving…" : asset ? "Add Deal" : assets.length ? `Create deal + ${assets.length} more` : "Create deal"}
-          </button>
+          <div className="nd-sum">
+            <div className="nd-sum-item"><span>Acquisition cost</span><b className={ourPrice == null ? "empty" : undefined}>{money(ourPrice)}</b></div>
+            <div className="nd-sum-item"><span>Asking price</span><b className={askPrice == null ? "empty" : undefined}>{money(askPrice)}</b></div>
+          </div>
+          <div className="nd-foot-actions">
+            <span className="nd-left">
+              <span className="modal-req-note"><Req /> Required</span>
+              {fieldsLeft > 0 && <span>{fieldsLeft} required field{fieldsLeft === 1 ? "" : "s"} left</span>}
+            </span>
+            <button onClick={onClose}>Cancel</button>
+            <button className="primary" onClick={submit} disabled={busy || missing.length > 0 || anyAssetIncomplete}
+              title={missing.length ? "Enabled once required fields are filled" : undefined}>
+              {busy ? "Saving…" : asset ? "Add deal" : assets.length ? `Create deal + ${assets.length} more` : "Create deal"}
+            </button>
+          </div>
         </>
       }
     >
-      <div className="modal-sec">Basics</div>
-      <div className="nd-basics">
-        <div className="field" style={{ gridColumn: "1 / -1" }}><label>Deal name {req}</label><input value={f.name} onChange={set("name")} autoFocus placeholder="e.g. Terry Casey · Reeves Co." /></div>
-        <div className="field"><label>Asset type {req}</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
-        <div className="field"><label>Date under contract {req}</label><DateField value={f.dateUnderContract} onChange={(v) => setF((p) => ({ ...p, dateUnderContract: v }))} /></div>
-      </div>
-
-      <div className="modal-sec">Location</div>
-      <div className="nd-grid3">
-        <GeoFields
-          states={states} onStatesChange={setStates}
-          counties={counties} onCountiesChange={setCounties}
-          abstractIds={abstractIds} onAbstractsChange={setAbstractIds}
-          labels={{ state: <>State {req}</>, county: <>County {req}</>, abstract: <>Abstract {req}</> }}
-        />
-        <div className="field"><label>Basin</label><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(counties))} value={basins} onChange={setBasins} placeholder={counties.length ? "Suggested for your counties first…" : "Search basins…"} /></div>
-        <div className="field"><label>Formation</label><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(counties))} value={formations} onChange={setFormations} placeholder={counties.length ? "Suggested for your counties first…" : "Search formations…"} /></div>
-        <div className="field"><label title="Operators active in the selected state and county">Operator</label>
-          <OperatorSelect states={states} counties={counties} value={f.operator} onChange={(v) => setF((p) => ({ ...p, operator: v }))} />
-        </div>
-      </div>
-
-      <div className="modal-sec">Economics <span className="modal-sec-hint">· NMA or NRA: at least one required (NMA alone for unleased acreage); with a royalty rate, either one calculates the other</span></div>
-      <div className="nd-grid3">
-        <div className="field"><label title="Converts between NMA and NRA (NRA = NMA × royalty ÷ 1/8)">Royalty rate</label>
-          <Select value={f.royaltyRate} onChange={(v) => editAcreage({ royaltyRate: v })} options={royaltyOptions()} clearable placeholder="Select royalty rate…" ariaLabel="Royalty rate" />
-        </div>
-        <div className="field"><label title="Net Mineral Acres · required unless NRA is provided">NMA {req}</label>
-          <input type="number" value={f.acreageNma} onChange={(e) => editAcreage({ nma: e.target.value })} placeholder="0.00" aria-label="NMA" />
-          <AcreageNote s={acre} field="nma" />
-        </div>
-        <div className="field"><label title="Net Royalty Acres · required unless NMA is provided">NRA {req}</label>
-          <input type="number" value={f.nra} onChange={(e) => editAcreage({ nra: e.target.value })} placeholder="0.00" aria-label="NRA" />
-          <AcreageNote s={acre} field="nra" />
-        </div>
-        <div className="field"><label>RRC</label><input value={f.rrc} onChange={set("rrc")} placeholder="RRC Number" /></div>
-      </div>
-
-      <div className="modal-sec">Acquisition cost <span className="modal-sec-hint">· enter any one: the total, per NMA or per NRA; the others are calculated from the acreage above</span></div>
-      <div className="nd-grid3">
-        <div className="field"><label>Our cost per NMA</label><MoneyInput decimals={2} value={cost.perNma} onChange={editCost("perNma")} ariaLabel="Our cost per NMA" placeholder="0.00" /></div>
-        <div className="field"><label>Our cost per NRA</label><MoneyInput decimals={2} value={cost.perNra} onChange={editCost("perNra")} ariaLabel="Our cost per NRA" placeholder="0.00" /></div>
-        <div className="field"><label title="Our price — what the property is under contract for">Acquisition cost {req}</label>
-          <MoneyInput value={cost.total} onChange={editCost("total")} ariaLabel="Acquisition cost" placeholder="0" />
-          <PriceNote g={cost} />
-        </div>
-      </div>
-
-      <div className="modal-sec">Asking price <span className="modal-sec-hint">· to buyers; enter any one of the total, per NMA or per NRA</span></div>
-      <div className="nd-grid3">
-        <div className="field"><label>Asking price per NMA</label><MoneyInput decimals={2} value={ask.perNma} onChange={editAsk("perNma")} ariaLabel="Asking price per NMA" placeholder="0.00" /></div>
-        <div className="field"><label>Asking price per NRA</label><MoneyInput decimals={2} value={ask.perNra} onChange={editAsk("perNra")} ariaLabel="Asking price per NRA" placeholder="0.00" /></div>
-        <div className="field"><label>Asking price</label>
-          <MoneyInput value={ask.total} onChange={editAsk("total")} ariaLabel="Asking price" placeholder="0" />
-          <PriceNote g={ask} />
-        </div>
-        <div className="field"><label>Est. closing costs</label><MoneyInput value={f.estimatedClosingCosts} onChange={(v) => setF((p) => ({ ...p, estimatedClosingCosts: v }))} ariaLabel="Estimated closing costs" /></div>
-      </div>
-
-      <div className="modal-sec">Timeline &amp; notes</div>
-      <div className="nd-grid3">
-        <div className="field"><label title="Days from Date Under Contract to closing · pick a preset or type any number">Days to close</label>
-          <DaysToCloseField value={f.daysToClose} onChange={(v) => setF((p) => ({ ...p, daysToClose: v }))} />
-        </div>
-        <div className="field"><label title="Deadline to secure a buyer: Date Under Contract + every day to close beyond 30 (30 → 0 days, 60 → 30 days, 75 → 45 days)">Find buyer by</label>
-          <div className="nd-derived" aria-live="polite">
-            {findBuyerBy
-              ? <><strong>{fmtDate(findBuyerBy)}</strong><span className="muted"> · contract + {findBuyerByOffsetDays(daysToClose)} days</span></>
-              : <span className="muted">{daysToClose ? "Set Date Under Contract to calculate" : "Set Date Under Contract and Days to Close"}</span>}
+      <div className="nd-shell">
+        <nav className="nd-rail" aria-label="Form sections">
+          <div className="nd-rail-list" ref={railRef}>
+            {sections.map((x) => {
+              const done = isDone(x.key);
+              const active = sec === x.key;
+              return (
+                <button type="button" key={x.key} data-rail={x.key} onClick={() => goSec(x.key)}
+                  className={`nd-rail-item${active ? " active" : ""}`} aria-current={active ? "step" : undefined}>
+                  <span className={`nd-ring ${done ? "done" : x.fields ? "req" : "opt"}`} aria-hidden="true">{done && <CheckIcon />}</span>
+                  <span className="nd-rail-label">{x.label}</span>
+                  {!x.fields && <span className="nd-rail-opt">Optional</span>}
+                </button>
+              );
+            })}
           </div>
-        </div>
-        <div className="field"><label title={closingManual ? undefined : "Follows Date Under Contract + Days to Close until you pick a date"}>Original closing date</label>
-          <DateField value={f.originalClosingDate} onChange={(v) => { setClosingManual(v !== ""); setF((p) => ({ ...p, originalClosingDate: v })); }} />
-        </div>
-      </div>
-      <div className="field" style={{ marginTop: 14 }}><label>Notes</label><textarea rows={2} value={f.notes} onChange={set("notes")} placeholder="Anything worth remembering about this deal…" /></div>
-
-      {/* Additional deals under the same seller. Each is an identical full deal
-          form and becomes an independently-marketable deal grouped under this
-          seller. */}
-      {!asset && (
-        <div className="nd-assets">
-          <div className="nd-assets-head">
-            <div>
-              <strong>Additional deals under this seller</strong>
-              <span className="muted" style={{ fontSize: 12, marginLeft: 8 }}>optional — each is a full deal, marketable separately</span>
+          <div className="nd-progress">
+            <div className="nd-progress-bar" aria-hidden="true">
+              {requiredSecs.map((x, i) => <span key={x.key} className={i < reqDone ? "done" : undefined} />)}
             </div>
-            <button type="button" className="small" onClick={() => setAssets((r) => [...r, emptyAsset()])}>+ Add Deal</button>
+            <span>{reqDone} of {requiredSecs.length} required sections</span>
           </div>
-          {assets.map((a, i) => (
-            <AssetCard
-              key={i}
-              index={i}
-              a={a}
-              req={req}
-              parentStates={states}
-              parentCounties={counties}
-              onPatch={(patch) => patchAsset(i, patch)}
-              onRemove={() => setAssets((r) => r.filter((_, idx) => idx !== i))}
-            />
-          ))}
+        </nav>
+
+        <div className="nd-form" ref={formRef} onScroll={onFormScroll}>
+          <div data-sec="basics">
+            <FormSection title="Basics">
+              <div className="nd-basics">
+                <div className="field" style={{ gridColumn: "1 / -1" }}><label>Deal name {req}</label><input value={f.name} onChange={set("name")} autoFocus placeholder="e.g. Terry Casey · Reeves Co." /></div>
+                <div className="field"><label>Asset type {req}</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
+                <div className="field"><label>Date under contract {req}</label><DateField value={f.dateUnderContract} onChange={(v) => setF((p) => ({ ...p, dateUnderContract: v }))} /></div>
+              </div>
+            </FormSection>
+          </div>
+
+          <div data-sec="location">
+            <FormSection title="Location">
+              <div className="nd-grid3">
+                <GeoFields
+                  states={states} onStatesChange={setStates}
+                  counties={counties} onCountiesChange={setCounties}
+                  abstractIds={abstractIds} onAbstractsChange={setAbstractIds}
+                  labels={{ state: <>State {req}</>, county: <>County {req}</>, abstract: <>Abstract {req}</> }}
+                />
+                <div className="field"><label>Basin</label><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(counties))} value={basins} onChange={setBasins} placeholder={counties.length ? "Suggested for your counties first…" : "Search basins…"} /></div>
+                <div className="field"><label>Formation</label><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(counties))} value={formations} onChange={setFormations} placeholder={counties.length ? "Suggested for your counties first…" : "Search formations…"} /></div>
+                <div className="field"><label title="Operators active in the selected state and county">Operator</label>
+                  <OperatorSelect states={states} counties={counties} value={f.operator} onChange={(v) => setF((p) => ({ ...p, operator: v }))} />
+                </div>
+              </div>
+            </FormSection>
+          </div>
+
+          <div data-sec="economics">
+            <FormSection title="Economics" hint="NMA or NRA: at least one required (NMA alone for unleased acreage). With a royalty rate, either one calculates the other.">
+              <div className="nd-grid3">
+                <div className="field"><label title="Converts between NMA and NRA (NRA = NMA × royalty ÷ 1/8)">Royalty rate</label>
+                  <Select value={f.royaltyRate} onChange={(v) => editAcreage({ royaltyRate: v })} options={royaltyOptions()} clearable placeholder="Select royalty rate…" ariaLabel="Royalty rate" />
+                </div>
+                <div className="field"><label title="Net Mineral Acres · required unless NRA is provided">NMA {req}</label>
+                  <input type="number" value={f.acreageNma} onChange={(e) => editAcreage({ nma: e.target.value })} placeholder="0.00" aria-label="NMA" />
+                  <AcreageNote s={acre} field="nma" />
+                </div>
+                <div className="field"><label title="Net Royalty Acres · required unless NMA is provided">NRA {req}</label>
+                  <input type="number" value={f.nra} onChange={(e) => editAcreage({ nra: e.target.value })} placeholder="0.00" aria-label="NRA" />
+                  <AcreageNote s={acre} field="nra" />
+                </div>
+                <div className="field"><label>RRC</label><input value={f.rrc} onChange={set("rrc")} placeholder="RRC number" /></div>
+              </div>
+            </FormSection>
+          </div>
+
+          <div data-sec="cost">
+            <FormSection title="Acquisition cost" hint="Enter any one: the total, per NMA or per NRA. The others are calculated from the acreage above.">
+              <div className="nd-grid3">
+                <div className="field"><label>Our cost per NMA</label><MoneyInput decimals={2} value={cost.perNma} onChange={editCost("perNma")} ariaLabel="Our cost per NMA" placeholder="0.00" /></div>
+                <div className="field"><label>Our cost per NRA</label><MoneyInput decimals={2} value={cost.perNra} onChange={editCost("perNra")} ariaLabel="Our cost per NRA" placeholder="0.00" /></div>
+                <div className="field"><label title="Our price — what the property is under contract for">Acquisition cost {req}</label>
+                  <MoneyInput value={cost.total} onChange={editCost("total")} ariaLabel="Acquisition cost" placeholder="0" />
+                  <PriceNote g={cost} />
+                </div>
+              </div>
+            </FormSection>
+          </div>
+
+          <div data-sec="asking">
+            <FormSection title="Asking price" hint="To buyers. Enter any one of the total, per NMA or per NRA.">
+              <div className="nd-grid3">
+                <div className="field"><label>Asking price per NMA</label><MoneyInput decimals={2} value={ask.perNma} onChange={editAsk("perNma")} ariaLabel="Asking price per NMA" placeholder="0.00" /></div>
+                <div className="field"><label>Asking price per NRA</label><MoneyInput decimals={2} value={ask.perNra} onChange={editAsk("perNra")} ariaLabel="Asking price per NRA" placeholder="0.00" /></div>
+                <div className="field"><label>Asking price</label>
+                  <MoneyInput value={ask.total} onChange={editAsk("total")} ariaLabel="Asking price" placeholder="0" />
+                  <PriceNote g={ask} />
+                </div>
+                <div className="field"><label>Est. closing costs</label><MoneyInput value={f.estimatedClosingCosts} onChange={(v) => setF((p) => ({ ...p, estimatedClosingCosts: v }))} ariaLabel="Estimated closing costs" placeholder="0" /></div>
+              </div>
+            </FormSection>
+          </div>
+
+          <div data-sec="timeline">
+            <FormSection title="Timeline & notes">
+              <div className="nd-grid3">
+                <div className="field"><label title="Days from Date Under Contract to closing · pick a preset or type any number">Days to close</label>
+                  <DaysToCloseField value={f.daysToClose} onChange={(v) => setF((p) => ({ ...p, daysToClose: v }))} />
+                </div>
+                <div className="field"><label title="Deadline to secure a buyer: Date Under Contract + every day to close beyond 30 (30 → 0 days, 60 → 30 days, 75 → 45 days)">Find buyer by</label>
+                  <div className="nd-derived" aria-live="polite">
+                    {findBuyerBy
+                      ? <><strong>{fmtDate(findBuyerBy)}</strong><span className="muted"> · contract + {findBuyerByOffsetDays(daysToClose)} days</span></>
+                      : <span className="muted">{daysToClose ? "Set Date Under Contract to calculate" : "Set Date Under Contract and Days to Close"}</span>}
+                  </div>
+                </div>
+                <div className="field"><label title={closingManual ? undefined : "Follows Date Under Contract + Days to Close until you pick a date"}>Original closing date</label>
+                  <DateField value={f.originalClosingDate} onChange={(v) => { setClosingManual(v !== ""); setF((p) => ({ ...p, originalClosingDate: v })); }} />
+                </div>
+              </div>
+              <div className="field nd-notes"><label>Notes</label><textarea rows={3} value={f.notes} onChange={set("notes")} placeholder="Anything worth remembering about this deal…" /></div>
+            </FormSection>
+          </div>
+
+          {/* Additional deals under the same seller. Each is an identical full deal
+              form and becomes an independently-marketable deal grouped under this
+              seller. */}
+          {!asset && (
+            <div data-sec="extras" className="nd-assets">
+              <FormSection title="Additional deals under this seller" hint="Optional. Each is a full deal, marketable separately.">
+                <button type="button" className="nd-add-deal" onClick={() => setAssets((r) => [...r, emptyAsset()])}>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                  Add deal
+                </button>
+                {assets.map((a, i) => (
+                  <AssetCard
+                    key={i}
+                    index={i}
+                    a={a}
+                    req={req}
+                    parentStates={states}
+                    parentCounties={counties}
+                    onPatch={(patch) => patchAsset(i, patch)}
+                    onRemove={() => setAssets((r) => r.filter((_, idx) => idx !== i))}
+                  />
+                ))}
+              </FormSection>
+            </div>
+          )}
         </div>
-      )}
-      {error && <div className="error-text">{error}</div>}
+      </div>
+      {error && <div className="error-text nd-error" role="alert">{error}</div>}
     </Modal>
   );
 }
@@ -331,9 +441,11 @@ function AssetCard({ index, a, req, parentStates, parentCounties, onPatch, onRem
     <div className="nd-asset-card">
       <div className="nd-asset-card-head">
         <strong>Deal {index + 1}</strong>
-        <button type="button" className="nd-asset-del" title="Remove deal" onClick={onRemove}>×</button>
+        <button type="button" className="nd-asset-del" title="Remove deal" aria-label="Remove deal" onClick={onRemove}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" /></svg>
+        </button>
       </div>
-      <div className="field"><label>Deal Name {req}</label><input value={a.name} onChange={(e) => onPatch({ name: e.target.value })} placeholder={`Deal ${index + 1}`} /></div>
+      <div className="field"><label>Deal name {req}</label><input value={a.name} onChange={(e) => onPatch({ name: e.target.value })} placeholder={`Deal ${index + 1}`} /></div>
       <div className="dd-grid">
         <GeoFields
           states={a.states} onStatesChange={(v) => onPatch({ states: v })}
@@ -341,18 +453,18 @@ function AssetCard({ index, a, req, parentStates, parentCounties, onPatch, onRem
           abstractIds={a.abstractIds} onAbstractsChange={(v) => onPatch({ abstractIds: v })}
           labels={{ state: <>State {req}</>, county: <>County {req}</>, abstract: <>Abstract {req}</> }}
         />
-        <div className="field"><label>Asset Type {req}</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={a.assetTypes} onChange={(v) => onPatch({ assetTypes: v })} placeholder="Search asset types…" /></div>
+        <div className="field"><label>Asset type {req}</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={a.assetTypes} onChange={(v) => onPatch({ assetTypes: v })} placeholder="Search asset types…" /></div>
         <div className="field"><label title="Net Mineral Acres · required unless NRA is provided">NMA {req}</label><input type="number" value={a.acreageNma} onChange={(e) => onPatch({ acreageNma: e.target.value })} /></div>
         <div className="field"><label title="Net Royalty Acres · required unless NMA is provided">NRA {req}</label><input type="number" value={a.nra} onChange={(e) => onPatch({ nra: e.target.value })} /></div>
-        <div className="field"><label>Our Price {req}</label><input type="number" value={a.ourPrice} onChange={(e) => onPatch({ ourPrice: e.target.value })} /></div>
+        <div className="field"><label>Our price {req}</label><input type="number" value={a.ourPrice} onChange={(e) => onPatch({ ourPrice: e.target.value })} /></div>
         <div className="field"><label>Basin</label><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(a.counties))} value={a.basins} onChange={(v) => onPatch({ basins: v })} placeholder="Search basins…" /></div>
         <div className="field"><label>Formation</label><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(a.counties))} value={a.formations} onChange={(v) => onPatch({ formations: v })} placeholder="Search formations…" /></div>
         {/* Assets inherit the deal's geography when they don't set their own. */}
         <div className="field"><label>Operator</label>
           <OperatorSelect states={a.states.length ? a.states : parentStates} counties={a.counties.length ? a.counties : parentCounties} value={a.operator} onChange={(v) => onPatch({ operator: v })} ariaLabel={`Deal ${index + 1} operator`} />
         </div>
-        <div className="field"><label>RRC</label><input value={a.rrc} onChange={(e) => onPatch({ rrc: e.target.value })} placeholder="RRC Number" /></div>
-        <div className="field"><label>Ask Price (to buyers)</label><input type="number" value={a.askPrice} onChange={(e) => onPatch({ askPrice: e.target.value })} /></div>
+        <div className="field"><label>RRC</label><input value={a.rrc} onChange={(e) => onPatch({ rrc: e.target.value })} placeholder="RRC number" /></div>
+        <div className="field"><label>Ask price (to buyers)</label><input type="number" value={a.askPrice} onChange={(e) => onPatch({ askPrice: e.target.value })} /></div>
       </div>
       {/* Contract timeline: shared with the deal by default; untick for its own. */}
       <div className="nd-asset-timeline">
@@ -361,7 +473,7 @@ function AssetCard({ index, a, req, parentStates, parentCounties, onPatch, onRem
           <span>Same contract timeline as the deal</span>
         </label>
         {!a.sameTimeline && (
-          <div className="field" style={{ marginBottom: 0 }}><label>Date Under Contract {req}</label><DateField value={a.dateUnderContract} onChange={(v) => onPatch({ dateUnderContract: v })} /></div>
+          <div className="field" style={{ marginBottom: 0 }}><label>Date under contract {req}</label><DateField value={a.dateUnderContract} onChange={(v) => onPatch({ dateUnderContract: v })} /></div>
         )}
       </div>
     </div>

@@ -1,8 +1,34 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { Modal, ConfirmDialog, showToast } from "./ui";
+import { FormSection } from "./kit";
 import { api } from "../api/client";
 import { stageColor, type PipelineInfo } from "../stages";
 import type { PipelineStage } from "../types";
+
+/** Stage colour swatches offered by the colour picker (any #rrggbb is still
+ *  accepted through "Custom colour", so existing colours are never lost). */
+const SWATCHES = ["#3B82F6", "#8B5CF6", "#06B6D4", "#22C55E", "#F59E0B", "#EC4899", "#EF4444", "#A6A6A6"];
+
+const Icon = ({ size = 13, sw = 1.8, children }: { size?: number; sw?: number; children: ReactNode }) => (
+  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
+);
+const PlusIcon = () => <Icon sw={2}><path d="M12 5v14M5 12h14" /></Icon>;
+const PencilIcon = () => <Icon><path d="M4 20h4L19 9l-4-4L4 16v4z" /><path d="M13.5 6.5l4 4" /></Icon>;
+const CloseIcon = () => <Icon size={14} sw={2}><path d="M6 6l12 12M18 6L6 18" /></Icon>;
+const CheckIcon = () => <Icon size={12} sw={2.8}><path d="M5 12.5l4.5 4.5L19 7.5" /></Icon>;
+const LockIcon = () => <Icon><rect x="5" y="11" width="14" height="9" rx="2" /><path d="M8 11V8a4 4 0 0 1 8 0v3" /></Icon>;
+const GripIcon = () => (
+  <svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor" aria-hidden="true">
+    <circle cx="3.5" cy="3" r="1.4" /><circle cx="8.5" cy="3" r="1.4" /><circle cx="3.5" cy="8" r="1.4" />
+    <circle cx="8.5" cy="8" r="1.4" /><circle cx="3.5" cy="13" r="1.4" /><circle cx="8.5" cy="13" r="1.4" />
+  </svg>
+);
+
+/** Enter saves, Escape cancels — and Escape stops there instead of closing the dialog. */
+const editKeys = (save: () => void, cancel: () => void) => (e: ReactKeyboardEvent<HTMLInputElement>) => {
+  if (e.key === "Enter") { e.preventDefault(); save(); }
+  else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancel(); }
+};
 
 /**
  * Pipeline Settings — the single home for ALL pipeline configuration:
@@ -10,10 +36,12 @@ import type { PipelineStage } from "../types";
  * stages (add, rename, reorder, remove, and per-stage colors). Day-to-day
  * board work stays on the Pipeline page; administration lives here.
  */
-export function PipelineSettingsModal({ pipelines, initialId, onClose, onChanged }: {
+export function PipelineSettingsModal({ pipelines, initialId, stageCount, onClose, onChanged }: {
   pipelines: PipelineInfo[];
   /** Pipeline to open with (the board's current selection). */
   initialId: string;
+  /** Opportunities currently in a pipeline's stage (shown beside each stage). */
+  stageCount?: (pipelineId: string, stageKey: string) => number;
   onClose: () => void;
   /** Reload pipelines/stages/deals after any persisted change. */
   onChanged: () => void;
@@ -22,6 +50,7 @@ export function PipelineSettingsModal({ pipelines, initialId, onClose, onChanged
   const sel = pipelines.find((p) => p.id === selId) ?? pipelines[0];
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [addingPipeline, setAddingPipeline] = useState(false);
   const [newPipelineName, setNewPipelineName] = useState("");
   const [confirmDeletePipeline, setConfirmDeletePipeline] = useState(false);
 
@@ -32,12 +61,14 @@ export function PipelineSettingsModal({ pipelines, initialId, onClose, onChanged
     finally { setBusy(false); }
   }
 
+  const cancelNewPipeline = () => { setAddingPipeline(false); setNewPipelineName(""); };
   const createPipeline = () => {
     const name = newPipelineName.trim();
     if (!name) return;
     void run(async () => {
       const p = await api.post<{ id: string }>("/pipeline/pipelines", { name });
       setNewPipelineName("");
+      setAddingPipeline(false);
       setSelId(p.id);
       showToast(`Pipeline "${name}" created — it starts blank; add its stages below.`);
     });
@@ -56,37 +87,52 @@ export function PipelineSettingsModal({ pipelines, initialId, onClose, onChanged
 
   return (
     <Modal title="Pipeline settings" onClose={onClose} wide footer={<button className="primary" onClick={onClose}>Done</button>}>
-      <div className="pls-grid">
+      <div className="pset">
         {/* ------------------------------------------------ pipelines pane */}
-        <div className="pls-list">
-          <div className="ddx-label" style={{ marginBottom: 8 }}>Pipelines</div>
-          {pipelines.map((p) => (
-            <div key={p.id}
-              className={`pls-row ${p.id === sel?.id ? "active" : ""} ${dropPipeline === p.id ? "drop-target" : ""} ${dragPipeline === p.id ? "dragging" : ""}`}
-              onClick={() => setSelId(p.id)} role="button" tabIndex={0}
-              onKeyDown={(e) => { if (e.key === "Enter") setSelId(p.id); }}
-              draggable={!busy}
-              onDragStart={(e) => { setDragPipeline(p.id); e.dataTransfer.effectAllowed = "move"; }}
-              onDragOver={(e) => { if (dragPipeline && dragPipeline !== p.id) { e.preventDefault(); setDropPipeline(p.id); } }}
-              onDragLeave={() => setDropPipeline((t) => (t === p.id ? null : t))}
-              onDrop={(e) => { e.preventDefault(); setDropPipeline(null); if (dragPipeline) reorderPipelines(dragPipeline, p.id); setDragPipeline(null); }}
-              onDragEnd={() => { setDragPipeline(null); setDropPipeline(null); }}
-              title="Drag to reorder pipelines"
-            >
-              <span className="stage-drag" aria-hidden="true">⠿</span>
-              <span className="pls-row-dot" style={{ background: stageColor(p.stages, p.stages.find((s) => !s.isTerminal)?.key ?? "") }} />
-              <span className="pls-row-name">{p.name}</span>
-              {p.isDefault && <span className="pls-default">Default</span>}
-            </div>
-          ))}
-          <div className="row" style={{ gap: 8, marginTop: 10 }}>
-            <input value={newPipelineName} onChange={(e) => setNewPipelineName(e.target.value)} placeholder="New pipeline name" disabled={busy}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); createPipeline(); } }} />
-            <button type="button" className="small" disabled={!newPipelineName.trim() || busy} onClick={createPipeline}>+ Create</button>
+        <div className="pset-list">
+          <div className="pset-label">Pipelines</div>
+          <div className="pset-rows">
+            {pipelines.map((p) => {
+              const active = p.stages.filter((s) => !s.isTerminal).length;
+              return (
+                <div key={p.id}
+                  className={`pset-row ${p.id === sel?.id ? "active" : ""} ${dropPipeline === p.id ? "drop-target" : ""} ${dragPipeline === p.id ? "dragging" : ""}`}
+                  onClick={() => setSelId(p.id)} role="button" tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter") setSelId(p.id); }}
+                  draggable={!busy}
+                  onDragStart={(e) => { setDragPipeline(p.id); e.dataTransfer.effectAllowed = "move"; }}
+                  onDragOver={(e) => { if (dragPipeline && dragPipeline !== p.id) { e.preventDefault(); setDropPipeline(p.id); } }}
+                  onDragLeave={() => setDropPipeline((t) => (t === p.id ? null : t))}
+                  onDrop={(e) => { e.preventDefault(); setDropPipeline(null); if (dragPipeline) reorderPipelines(dragPipeline, p.id); setDragPipeline(null); }}
+                  onDragEnd={() => { setDragPipeline(null); setDropPipeline(null); }}
+                  title="Drag to reorder pipelines"
+                >
+                  <span className="pset-grip" aria-hidden="true"><GripIcon /></span>
+                  <span className="pset-row-text">
+                    <span className="pset-row-name">{p.name}</span>
+                    <span className="pset-row-sub">{active} active stage{active === 1 ? "" : "s"}</span>
+                  </span>
+                  {p.isDefault && <span className="pset-badge">Default</span>}
+                </div>
+              );
+            })}
           </div>
-          <p className="muted" style={{ fontSize: 12, margin: "8px 0 0" }}>
-            New pipelines start blank — Closed and Dead are always included automatically.
-          </p>
+          <div className="pset-sep" />
+          <div className="pset-new">
+            {addingPipeline ? (
+              <div className="pset-new-form">
+                <input autoFocus value={newPipelineName} onChange={(e) => setNewPipelineName(e.target.value)} placeholder="Pipeline name" disabled={busy}
+                  aria-label="New pipeline name" onKeyDown={editKeys(createPipeline, cancelNewPipeline)} />
+                <div className="pset-actions">
+                  <button type="button" className="primary" disabled={!newPipelineName.trim() || busy} onClick={createPipeline}>Create</button>
+                  <button type="button" onClick={cancelNewPipeline}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <button type="button" className="pset-dashed" disabled={busy} onClick={() => setAddingPipeline(true)}><PlusIcon />New pipeline</button>
+            )}
+            <p className="pset-note">New pipelines start blank. Closed and Dead are always included automatically.</p>
+          </div>
         </div>
 
         {/* ------------------------------------------------ selected pipeline */}
@@ -96,13 +142,14 @@ export function PipelineSettingsModal({ pipelines, initialId, onClose, onChanged
             pipeline={sel}
             busy={busy}
             setBusy={setBusy}
+            err={err}
             setErr={setErr}
+            stageCount={stageCount}
             onChanged={onChanged}
             onDeleteRequested={() => setConfirmDeletePipeline(true)}
           />
         )}
       </div>
-      {err && <div className="error-text">{err}</div>}
 
       {confirmDeletePipeline && sel && (
         <ConfirmDialog
@@ -122,18 +169,62 @@ export function PipelineSettingsModal({ pipelines, initialId, onClose, onChanged
   );
 }
 
+/** Stage colour button with a swatch popover (plus a custom colour fallback). */
+function SwatchPicker({ color, label, disabled, onPick }: { color: string; label: string; disabled: boolean; onPick: (c: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    // Capture + stop: Escape closes just the swatches, never the dialog.
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
+    document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onKey, true);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey, true); };
+  }, [open]);
+  const current = color.toLowerCase();
+  // The native picker needs a hex value; non-hex fallbacks start it at the first swatch.
+  const hex = /^#[0-9a-f]{6}$/i.test(color) ? color : SWATCHES[0];
+  return (
+    <div className="pset-swatch" ref={ref}>
+      <button type="button" className={`pset-swatch-btn ${open ? "open" : ""}`} disabled={disabled} title="Stage color"
+        aria-label={`${label} color`} aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        <span style={{ background: color }} />
+      </button>
+      {open && (
+        <div className="pset-swatch-pop" role="listbox" aria-label={`${label} color`}>
+          {SWATCHES.map((c) => (
+            <button key={c} type="button" role="option" aria-selected={c.toLowerCase() === current} aria-label={c}
+              className={`pset-swatch-opt ${c.toLowerCase() === current ? "on" : ""}`} style={{ background: c, color: c }}
+              onClick={() => { setOpen(false); onPick(c); }} />
+          ))}
+          <label className="pset-swatch-custom" title="Custom color">
+            <span>Custom color</span>
+            <input type="color" value={hex} aria-label={`${label} custom color`}
+              onChange={(e) => onPick(e.target.value)} />
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Right pane: name, delete, and the stage editor (labels, order, colors). */
-function StagePane({ pipeline, busy, setBusy, setErr, onChanged, onDeleteRequested }: {
+function StagePane({ pipeline, busy, setBusy, err, setErr, stageCount, onChanged, onDeleteRequested }: {
   pipeline: PipelineInfo;
   busy: boolean;
   setBusy: (b: boolean) => void;
+  err: string | null;
   setErr: (e: string | null) => void;
+  stageCount?: (pipelineId: string, stageKey: string) => number;
   onChanged: () => void;
   onDeleteRequested: () => void;
 }) {
   const pid = pipeline.id;
   const [stages, setStages] = useState<PipelineStage[]>(pipeline.stages);
   const [name, setName] = useState(pipeline.name);
+  // One inline edit at a time: "name" (pipeline), a stage id, or "add" (new stage).
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<PipelineStage | null>(null);
   // Local active-stage order so drag reordering feels instant; persisted on drop.
@@ -143,6 +234,7 @@ function StagePane({ pipeline, busy, setBusy, setErr, onChanged, onDeleteRequest
 
   useEffect(() => { api.get<PipelineStage[]>(`/pipeline/stages?pipelineId=${encodeURIComponent(pid)}`).then(setStages).catch(() => {}); }, [pid]);
   useEffect(() => { setOrder(stages.filter((s) => !s.isTerminal)); }, [stages]);
+  useEffect(() => { setName(pipeline.name); }, [pipeline.name]);
 
   async function apply(fn: () => Promise<PipelineStage[]>) {
     setBusy(true); setErr(null);
@@ -151,19 +243,24 @@ function StagePane({ pipeline, busy, setBusy, setErr, onChanged, onDeleteRequest
     finally { setBusy(false); }
   }
 
+  const startEdit = (key: string, value: string) => { setEditing(key); setDraft(value); };
+  const cancelEdit = () => { setEditing(null); setDraft(""); };
+
   const renamePipeline = async (value: string) => {
     const v = value.trim();
-    if (!v || v === pipeline.name) return;
+    if (!v) return;
+    if (v === pipeline.name) { cancelEdit(); return; }
     setBusy(true); setErr(null);
-    try { await api.patch(`/pipeline/pipelines/${pid}`, { name: v }); onChanged(); }
+    try { await api.patch(`/pipeline/pipelines/${pid}`, { name: v }); setName(v); cancelEdit(); onChanged(); }
     catch (e) { setErr(e instanceof Error ? e.message : "Something went wrong"); }
     finally { setBusy(false); }
   };
 
   const rename = (s: PipelineStage, label: string) => {
     const v = label.trim();
-    if (!v || v === s.label) return;
-    apply(() => api.patch<PipelineStage[]>(`/pipeline/stages/${s.id}`, { label: v }));
+    if (!v) return;
+    if (v === s.label) { cancelEdit(); return; }
+    apply(async () => { const r = await api.patch<PipelineStage[]>(`/pipeline/stages/${s.id}`, { label: v }); cancelEdit(); return r; });
   };
   const recolor = (s: PipelineStage, color: string) => {
     if (!/^#[0-9a-fA-F]{6}$/.test(color) || color === s.color) return;
@@ -171,9 +268,10 @@ function StagePane({ pipeline, busy, setBusy, setErr, onChanged, onDeleteRequest
     setStages((prev) => prev.map((x) => (x.id === s.id ? { ...x, color } : x)));
     apply(() => api.patch<PipelineStage[]>(`/pipeline/stages/${s.id}`, { color }));
   };
+  const cancelAdd = () => { cancelEdit(); setNewLabel(""); };
   const add = () => {
     if (!newLabel.trim()) return;
-    apply(async () => { const r = await api.post<PipelineStage[]>("/pipeline/stages", { label: newLabel.trim(), pipelineId: pid }); setNewLabel(""); return r; });
+    apply(async () => { const r = await api.post<PipelineStage[]>("/pipeline/stages", { label: newLabel.trim(), pipelineId: pid }); cancelAdd(); return r; });
   };
   function commitReorder(from: number, to: number) {
     if (from === to || from < 0 || to < 0 || from >= order.length || to >= order.length || busy) return;
@@ -187,62 +285,114 @@ function StagePane({ pipeline, busy, setBusy, setErr, onChanged, onDeleteRequest
     if (dragIdx != null) commitReorder(dragIdx, target);
     setDragIdx(null); setOverIdx(null);
   }
+  const countLabel = (key: string) => {
+    if (!stageCount) return null;
+    const n = stageCount(pid, key);
+    return n ? `${n} deal${n === 1 ? "" : "s"}` : "Empty";
+  };
+  const terminal = stages.filter((s) => s.isTerminal);
 
   return (
-    <div className="pls-pane">
-      <div className="row" style={{ gap: 8, alignItems: "center", marginBottom: 14 }}>
-        <label style={{ margin: 0, whiteSpace: "nowrap" }}>Pipeline name</label>
-        <input value={name} disabled={busy} onChange={(e) => setName(e.target.value)}
-          onBlur={(e) => renamePipeline(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} style={{ maxWidth: 240 }} />
-        {!pipeline.isDefault && (
-          <button type="button" className="small danger" disabled={busy} onClick={onDeleteRequested} style={{ marginLeft: "auto" }}>
-            Delete pipeline
-          </button>
+    <div className="pset-pane">
+      {err && <div className="error-text pset-error">{err}</div>}
+      <div className="pset-head">
+        <div className="pset-name-block">
+          <label>Pipeline name</label>
+          {editing === "name" ? (
+            <div className="pset-edit">
+              <input autoFocus value={draft} disabled={busy} onChange={(e) => setDraft(e.target.value)} placeholder="Pipeline name"
+                aria-label="Pipeline name" onKeyDown={editKeys(() => void renamePipeline(draft), cancelEdit)} />
+              <button type="button" className="primary" disabled={!draft.trim() || busy} onClick={() => void renamePipeline(draft)}>Save</button>
+              <button type="button" onClick={cancelEdit}>Cancel</button>
+            </div>
+          ) : (
+            <div className="pset-name-view">
+              <span className="pset-name">{name}</span>
+              <button type="button" className="pset-ghost" disabled={busy} title="Rename pipeline" aria-label="Rename pipeline"
+                onClick={() => startEdit("name", name)}><PencilIcon />Rename</button>
+            </div>
+          )}
+        </div>
+        {pipeline.isDefault ? (
+          <span className="pset-default-pill"><CheckIcon />Default pipeline</span>
+        ) : (
+          <button type="button" className="danger pset-delete" disabled={busy} onClick={onDeleteRequested}>Delete pipeline</button>
         )}
       </div>
 
-      <p className="muted" style={{ marginTop: 0 }}>
-        Rename, reorder (drag by the <span aria-hidden="true">⠿</span> handle), recolor, add, or remove this pipeline's
-        active stages. Closed and Dead are always present and cannot be changed.
-      </p>
-      {order.length === 0 && (
-        <p className="muted" style={{ margin: "4px 0 10px" }}>
-          This pipeline is blank — add your first stage below. Closed and Dead are already included.
+      <FormSection title="Stages">
+        <p className="pset-desc">
+          Rename, reorder (drag by the <span aria-hidden="true">⠿</span> handle), recolor, add, or remove this pipeline's
+          active stages. Closed and Dead are always present and cannot be changed.
         </p>
-      )}
-      <div className="stage-editor">
-        {order.map((s, i) => (
-          <div key={s.id}
-            onDragOver={(e) => { if (dragIdx == null) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (overIdx !== i) setOverIdx(i); }}
-            onDrop={(e) => { e.preventDefault(); onDrop(i); }}
-            className={`stage-row ${dragIdx === i ? "dragging" : ""} ${overIdx === i && dragIdx !== null && dragIdx !== i ? "drop-over" : ""}`}
-          >
-            <span className="stage-drag" title="Drag to reorder" aria-label="Drag to reorder"
-              draggable={!busy}
-              onDragStart={(e) => { setDragIdx(i); e.dataTransfer.effectAllowed = "move"; }}
-              onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}
-            >⠿</span>
-            {/* Per-stage color — reflected on the board, cards, badges, and
-                dashboards immediately after save. */}
-            <input type="color" className="stage-color" disabled={busy}
-              value={s.color ?? stageColor(stages, s.key)}
-              title="Stage color"
-              aria-label={`${s.label} color`}
-              onChange={(e) => recolor(s, e.target.value)} />
-            <input defaultValue={s.label} disabled={busy} onBlur={(e) => rename(s, e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }} />
-            <button type="button" className="stage-del" disabled={busy || (pipeline.isDefault && order.length <= 1)}
-              title={pipeline.isDefault && order.length <= 1 ? "The default pipeline needs at least one active stage" : "Remove stage"}
-              onClick={() => setConfirmDelete(s)}>×</button>
+        <div className="stage-editor pset-stages">
+          {order.map((s, i) => {
+            const color = s.color ?? stageColor(stages, s.key);
+            const lastOfDefault = pipeline.isDefault && order.length <= 1;
+            return (
+              <div key={s.id}
+                onDragOver={(e) => { if (dragIdx == null) return; e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (overIdx !== i) setOverIdx(i); }}
+                onDrop={(e) => { e.preventDefault(); onDrop(i); }}
+                className={`pset-stage ${dragIdx === i ? "dragging" : ""} ${overIdx === i && dragIdx !== null && dragIdx !== i ? "drop-over" : ""}`}
+              >
+                <span className="pset-grip pset-handle" title="Drag to reorder" aria-label="Drag to reorder"
+                  draggable={!busy}
+                  onDragStart={(e) => { setDragIdx(i); e.dataTransfer.effectAllowed = "move"; }}
+                  onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}
+                ><GripIcon /></span>
+                {/* Per-stage color — reflected on the board, cards, badges, and
+                    dashboards immediately after save. */}
+                <SwatchPicker color={color} label={s.label} disabled={busy} onPick={(c) => recolor(s, c)} />
+                {editing === s.id ? (
+                  <div className="pset-edit">
+                    <input autoFocus value={draft} disabled={busy} onChange={(e) => setDraft(e.target.value)} placeholder="Stage name"
+                      aria-label={`Rename ${s.label}`} onKeyDown={editKeys(() => rename(s, draft), cancelEdit)} />
+                    <button type="button" className="primary" disabled={!draft.trim() || busy} onClick={() => rename(s, draft)}>Save</button>
+                    <button type="button" onClick={cancelEdit}>Cancel</button>
+                  </div>
+                ) : (
+                  <div className="pset-stage-name">
+                    <span title={s.label}>{s.label}</span>
+                    <button type="button" className="pset-icon-btn" disabled={busy} title="Rename stage" aria-label={`Rename ${s.label}`}
+                      onClick={() => startEdit(s.id, s.label)}><PencilIcon /></button>
+                  </div>
+                )}
+                <span className="pset-count" title={stageCount ? "Opportunities currently in this stage" : undefined}>{countLabel(s.key)}</span>
+                <button type="button" className="pset-del" disabled={busy || lastOfDefault}
+                  title={lastOfDefault ? "The default pipeline needs at least one active stage" : "Remove stage"}
+                  aria-label={`Remove ${s.label}`}
+                  onClick={() => setConfirmDelete(s)}><CloseIcon /></button>
+              </div>
+            );
+          })}
+          {order.length === 0 && <div className="pset-empty">No active stages yet. Add the first one below.</div>}
+          {editing === "add" ? (
+            <div className="pset-edit pset-add-form">
+              <input autoFocus value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Stage name" disabled={busy}
+                aria-label="New stage name" onKeyDown={editKeys(add, cancelAdd)} />
+              <button type="button" className="primary" disabled={!newLabel.trim() || busy} onClick={add}>Add</button>
+              <button type="button" onClick={cancelAdd}>Cancel</button>
+            </div>
+          ) : (
+            <button type="button" className="pset-dashed pset-add" disabled={busy} onClick={() => { setNewLabel(""); setEditing("add"); }}><PlusIcon />Add stage</button>
+          )}
+        </div>
+
+        {terminal.length > 0 && (
+          <div className="pset-locked">
+            <div className="pset-locked-label"><span>Always included</span><i /></div>
+            {terminal.map((s) => (
+              <div key={s.id} className="pset-stage locked">
+                <span className="pset-grip pset-lock" aria-hidden="true"><LockIcon /></span>
+                <span className="pset-swatch-btn static" aria-hidden="true"><span style={{ background: stageColor(stages, s.key) }} /></span>
+                <div className="pset-stage-name locked"><span>{s.label}</span></div>
+                <span className="pset-count dim">{s.key === "DEAD" ? "Archived" : "Closed"}</span>
+                <span className="pset-del-slot" />
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
-      <div className="row" style={{ gap: 8, marginTop: 10 }}>
-        <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="New stage name" disabled={busy}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} style={{ maxWidth: 240 }} />
-        <button type="button" className="small" disabled={!newLabel.trim() || busy} onClick={add}>+ Add stage</button>
-      </div>
+        )}
+      </FormSection>
 
       {confirmDelete && (
         <ConfirmDialog

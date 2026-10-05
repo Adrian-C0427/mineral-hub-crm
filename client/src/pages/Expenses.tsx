@@ -1,16 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Legend,
+  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid,
   PieChart, Pie, Cell,
 } from "recharts";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { MetricCard, Spinner, Banner, Modal, ConfirmDelete } from "../components/ui";
+import { Spinner, Banner, Modal, ConfirmDelete, ConfirmDialog } from "../components/ui";
+import { StatStrip, Avatar, Tag, FormSection } from "../components/kit";
 import { Select } from "../components/Select";
+import { Toggle } from "../components/Toggle";
 import { money, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
-import { userAvatarColor } from "../lib/avatarColor";
-import { CHART_COLORS, COLOR_EXPENSE, monthLabel, chartTooltip } from "../lib/charts";
+import { CHART_COLORS, monthLabel, chartTooltip } from "../lib/charts";
 import type { UserLite } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
 import { DateField } from "../components/DateField";
@@ -35,10 +36,19 @@ const EMPTY_FORM = { date: toInputDate(new Date()), amount: "", categoryId: "", 
 /** Stable per-category accent color — same palette everywhere (donut, legend,
  *  table chips), keyed by the category's position in the org's list. */
 function catColorFor(name: string | null | undefined, categories: Category[]): string {
-  if (!name) return "#8b93a7";
+  if (!name) return "var(--ink-3)";
   const i = categories.findIndex((c) => c.name === name);
-  return i >= 0 ? CHART_COLORS[i % CHART_COLORS.length] : "#8b93a7";
+  return i >= 0 ? CHART_COLORS[i % CHART_COLORS.length] : "var(--ink-3)";
 }
+
+/** Compact axis money: $950, $1.2K, $14K. */
+const axisMoney = (v: number): string => {
+  const a = Math.abs(v);
+  if (a >= 1000) return `$${Number((a / 1000).toFixed(a >= 10000 ? 0 : 1))}K`;
+  return `$${Math.round(a)}`;
+};
+
+const ICON = { width: 14, height: 14, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: 1.7, strokeLinecap: "round" as const, strokeLinejoin: "round" as const };
 
 export function Expenses() {
   const { user } = useAuth();
@@ -122,118 +132,139 @@ export function Expenses() {
 
   if (loading && !dash) return <Spinner label="Loading expenses…" />;
 
+  // The dashboard follows the date filter, so the charts say which window they show.
+  const scopeLabel = filters.from || filters.to ? "In range" : "All time";
+
   return (
-    <div className="page">
+    <div className="page xp-page">
       <div className="page-header">
         <div>
-          <h1 style={{ marginBottom: 0 }}>Expenses</h1>
-          <div className="xp-sub">Team spend &amp; reimbursements</div>
+          <h1>Expenses</h1>
+          <div className="page-sub">Team spend &amp; reimbursements</div>
         </div>
-        <div className="row">
-          <button className="small" onClick={() => setShowCats(true)}>Manage categories</button>
-          <button className="small" onClick={exportSelected} style={{ display: "inline-flex", alignItems: "center", gap: 7 }}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>
-            Export all (CSV)
+        <div className="xp-actions">
+          <button onClick={() => setShowCats(true)}>
+            <svg {...ICON}><path d="M4 6h16M4 12h16M4 18h10" /></svg>
+            Manage categories
           </button>
-          <button className="primary" onClick={() => { setEditing(null); setShowForm(true); }}>+ New expense</button>
+          <button onClick={exportSelected} title="Exports the selected rows, or every loaded row when nothing is selected">
+            <svg {...ICON}><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></svg>
+            Export CSV
+          </button>
+          <button className="primary" onClick={() => { setEditing(null); setShowForm(true); }}>
+            <svg {...ICON} strokeWidth={2.2}><path d="M12 5v14M5 12h14" /></svg>
+            New expense
+          </button>
         </div>
       </div>
 
       {err && <Banner kind="error">{err}</Banner>}
 
-      {/* KPIs — subs and colors per the Expenses design reference. */}
       {dash && (
-        <div className="metrics-row" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
-          <MetricCard label="Total Expenses" value={money(dash.totals.totalExpenses, { cents: true })} hint={`${dash.totals.count} records`} />
-          <MetricCard label="Total Reimbursed" value={money(dash.totals.totalReimbursed, { cents: true })} valueColor="var(--green)"
-            hint={dash.totals.totalExpenses > 0 ? `${((dash.totals.totalReimbursed / dash.totals.totalExpenses) * 100).toFixed(1)}% of spend` : undefined} />
-          <MetricCard label="Outstanding Reimbursements" value={money(dash.totals.totalOutstanding, { cents: true })} valueColor="var(--amber)" hint="Awaiting payout" />
-          <MetricCard label="Company Outstanding Balance" value={money(dash.totals.companyOutstanding, { cents: true })} hint="Owed to team" />
-        </div>
+        <StatStrip
+          className="xp-stats"
+          min={220}
+          cells={[
+            { label: "Total expenses", value: money(dash.totals.totalExpenses, { cents: true }), sub: `${dash.totals.count} records` },
+            {
+              label: "Total reimbursed", value: money(dash.totals.totalReimbursed, { cents: true }), tone: "success",
+              sub: dash.totals.totalExpenses > 0 ? `${((dash.totals.totalReimbursed / dash.totals.totalExpenses) * 100).toFixed(1)}% of spend` : undefined,
+            },
+            {
+              label: "Outstanding reimbursements", value: money(dash.totals.totalOutstanding, { cents: true }),
+              tone: dash.totals.totalOutstanding > 0 ? "warn" : "default", sub: "Awaiting payout",
+            },
+            { label: "Company outstanding balance", value: money(dash.totals.companyOutstanding, { cents: true }), sub: "Owed to team" },
+          ]}
+        />
       )}
 
-      {/* Charts */}
       {dash && (
         <div className="xp-charts">
-          <div className="panel xp-chart">
-            <h3>Expenses by Month</h3>
+          <section className="panel xp-card">
+            <div className="xp-card-head"><h3>By month</h3><span>{scopeLabel}</span></div>
             {dash.byMonth.length === 0 ? (
               <ChartEmpty icon={<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><line x1="18" y1="20" x2="18" y2="10" /><line x1="12" y1="20" x2="12" y2="4" /><line x1="6" y1="20" x2="6" y2="14" /></svg>}>
                 No expenses yet — data appears here as you log spend
               </ChartEmpty>
             ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={dash.byMonth.map((m) => ({ ...m, label: monthLabel(m.month) }))}>
-                  <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-                  <XAxis dataKey="label" tick={{ fontSize: 11 }} />
-                  <YAxis tickFormatter={(v) => money(v)} tick={{ fontSize: 11 }} width={70} />
-                  <Tooltip {...chartTooltip} formatter={(v: number) => money(v, { cents: true })} />
-                  <Bar dataKey="expenses" name="Expenses" fill={COLOR_EXPENSE} radius={[3, 3, 0, 0]} />
+              <ResponsiveContainer width="100%" height={210}>
+                <BarChart data={dash.byMonth.map((m) => ({ ...m, label: monthLabel(m.month) }))} margin={{ top: 6, right: 0, left: 0, bottom: 0 }}>
+                  <CartesianGrid vertical={false} stroke="var(--line-faint)" />
+                  <XAxis dataKey="label" tick={{ fontSize: 11, fill: "var(--ink-4)" }} axisLine={false} tickLine={false} />
+                  <YAxis tickFormatter={axisMoney} tick={{ fontSize: 11, fill: "var(--ink-4)" }} axisLine={false} tickLine={false} width={44} />
+                  <Tooltip {...chartTooltip} cursor={{ fill: "var(--chart-col-hover)" }} formatter={(v: number) => money(v, { cents: true })} />
+                  <Bar dataKey="expenses" name="Expenses" fill="var(--accent)" radius={[4, 4, 1, 1]} maxBarSize={34} isAnimationActive={false} />
                 </BarChart>
               </ResponsiveContainer>
             )}
-          </div>
+          </section>
 
-          <div className="panel xp-chart">
-            <h3>Expenses by Category</h3>
+          <section className="panel xp-card">
+            <div className="xp-card-head"><h3>By category</h3><span>{scopeLabel}</span></div>
             {dash.byCategory.length === 0 ? (
               <ChartEmpty icon={<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M21.21 15.89A10 10 0 118 2.83" /><path d="M22 12A10 10 0 0012 2v10z" /></svg>}>
                 No categories to chart yet
               </ChartEmpty>
             ) : (() => {
-              // Donut with the period total in the center + side legend with
-              // percentages (design reference) — a legend never truncates.
               const catTotal = dash.byCategory.reduce((s, c) => s + c.amount, 0);
               return (
                 <div className="xp-donut-wrap">
                   <div className="xp-donut">
-                    <ResponsiveContainer width="100%" height={190}>
-                      <PieChart>
-                        <Pie data={dash.byCategory} dataKey="amount" nameKey="name" cx="50%" cy="50%" innerRadius={56} outerRadius={82} paddingAngle={1} stroke="none">
-                          {dash.byCategory.map((c, i) => <Cell key={i} fill={catColorFor(c.name, categories)} />)}
-                        </Pie>
-                        <Tooltip {...chartTooltip} formatter={(v: number) => money(v, { cents: true })} />
-                      </PieChart>
-                    </ResponsiveContainer>
+                    <PieChart width={130} height={130}>
+                      <Pie data={dash.byCategory} dataKey="amount" nameKey="name" cx="50%" cy="50%" innerRadius={50} outerRadius={64} paddingAngle={1} stroke="none" isAnimationActive={false}>
+                        {dash.byCategory.map((c, i) => <Cell key={i} fill={catColorFor(c.name, categories)} />)}
+                      </Pie>
+                      <Tooltip {...chartTooltip} formatter={(v: number) => money(v, { cents: true })} />
+                    </PieChart>
                     <div className="xp-donut-center" aria-hidden="true">
                       <div className="xp-donut-total">{money(catTotal)}</div>
-                      <div className="xp-donut-sub">{filters.from || filters.to ? "IN RANGE" : "ALL TIME"}</div>
+                      <div className="xp-donut-sub">{scopeLabel}</div>
                     </div>
                   </div>
                   <div className="xp-donut-legend">
                     {dash.byCategory.map((c) => (
                       <div className="xp-leg-row" key={c.name}>
                         <span className="xp-leg-dot" style={{ background: catColorFor(c.name, categories) }} />
-                        {c.name} <span className="xp-leg-pct">{catTotal > 0 ? Math.round((c.amount / catTotal) * 100) : 0}%</span>
+                        <span className="xp-leg-name">{c.name}</span>
+                        <span className="xp-leg-amt">{money(c.amount)}</span>
+                        <span className="xp-leg-pct">{catTotal > 0 ? Math.round((c.amount / catTotal) * 100) : 0}%</span>
                       </div>
                     ))}
                   </div>
                 </div>
               );
             })()}
-          </div>
+          </section>
 
-          <div className="panel xp-chart">
-            <h3>Expenses by User</h3>
+          <section className="panel xp-card">
+            <div className="xp-card-head"><h3>Outstanding by team member</h3><span>Awaiting payout</span></div>
             {dash.byUser.length === 0 ? (
               <ChartEmpty icon={<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87" /></svg>}>
                 No spend recorded by teammates
               </ChartEmpty>
-            ) : (
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={dash.byUser} layout="vertical" margin={{ left: 20 }}>
-                  <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
-                  {/* Compact ticks ($4K) — full "$3,500" labels collided at narrow widths. */}
-                  <XAxis type="number" tickFormatter={(v: number) => (v >= 1000 ? `$${Math.round(v / 1000)}K` : `$${v}`)} tick={{ fontSize: 11 }} />
-                  <YAxis type="category" dataKey="name" tick={{ fontSize: 11 }} width={110} />
-                  <Tooltip {...chartTooltip} formatter={(v: number) => money(v, { cents: true })} />
-                  <Legend />
-                  <Bar dataKey="total" name="Total" fill={CHART_COLORS[0]} radius={[0, 3, 3, 0]} />
-                  <Bar dataKey="outstanding" name="Outstanding" fill={CHART_COLORS[2]} radius={[0, 3, 3, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            )}
-          </div>
+            ) : (() => {
+              const rows = [...dash.byUser].sort((a, b) => b.outstanding - a.outstanding);
+              const max = Math.max(0, ...rows.map((u) => u.outstanding));
+              return (
+                <div className="xp-owed">
+                  {rows.map((u) => {
+                    const lite = users.find((x) => x.id === u.userId);
+                    return (
+                      <div className="xp-owed-row" key={u.userId}>
+                        <div className="xp-owed-top">
+                          <span className="xp-owed-name"><Avatar user={lite ?? null} name={u.name} size={22} />{u.name}</span>
+                          <span className={`xp-owed-amt ${u.outstanding > 0 ? "warn" : ""}`}>{money(u.outstanding, { cents: true })}</span>
+                        </div>
+                        <span className="xp-owed-bar"><i style={{ width: max > 0 ? `${(u.outstanding / max) * 100}%` : 0 }} /></span>
+                        <span className="xp-owed-sub">{u.outstanding > 0 ? "Awaiting payout" : "Nothing outstanding"}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
+          </section>
         </div>
       )}
 
@@ -286,6 +317,17 @@ function ChartEmpty({ icon, children }: { icon: React.ReactNode; children: React
   );
 }
 
+/** Closes a popover on outside mousedown or Escape. */
+function useDismiss(open: boolean, ref: React.RefObject<HTMLElement>, close: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) close(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") close(); };
+    document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
+  }, [open, ref, close]);
+}
+
 // ---------------------------------------------------------------------------
 // All Expenses — month-grouped ledger with search, presets, column control,
 // bulk actions, and running totals that track the active filters.
@@ -328,13 +370,13 @@ function AllExpenses({
   const [presets, setPresets] = useState<Preset[]>(() => loadJson<Preset[]>(PRESETS_KEY, []));
   const [showCols, setShowCols] = useState(false);
   const colsRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!showCols) return;
-    const onDoc = (e: MouseEvent) => { if (colsRef.current && !colsRef.current.contains(e.target as Node)) setShowCols(false); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setShowCols(false); };
-    document.addEventListener("mousedown", onDoc); document.addEventListener("keydown", onKey);
-    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey); };
-  }, [showCols]);
+  const closeCols = useCallback(() => setShowCols(false), []);
+  useDismiss(showCols, colsRef, closeCols);
+  const [showPresets, setShowPresets] = useState(false);
+  const [presetName, setPresetName] = useState("");
+  const presetsRef = useRef<HTMLDivElement>(null);
+  const closePresets = useCallback(() => setShowPresets(false), []);
+  useDismiss(showPresets, presetsRef, closePresets);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [monthsShown, setMonthsShown] = useState(MONTHS_PAGE);
   const [sort, setSort] = useState<{ key: ColKey; dir: "asc" | "desc" }>({ key: "date", dir: "desc" });
@@ -380,66 +422,110 @@ function AllExpenses({
     }
     return [...m.entries()]
       .sort((a, b) => b[0].localeCompare(a[0]))
-      .map(([month, rows]) => ({ month, rows: rows.sort(cmp), subtotal: rows.reduce((s, e) => s + e.amount, 0) }));
+      .map(([month, rows]) => ({
+        month, rows: rows.sort(cmp),
+        subtotal: rows.reduce((s, e) => s + e.amount, 0),
+        outstanding: rows.reduce((s, e) => s + (e.reimbursed ? 0 : e.amount), 0),
+      }));
   }, [visible, sort]);
 
   const shownGroups = groups.slice(0, monthsShown);
   const shownIds = shownGroups.flatMap((g) => g.rows.map((e) => e.id));
   const allShownSelected = shownIds.length > 0 && shownIds.every((id) => selected.has(id));
+  const someShownSelected = !allShownSelected && shownIds.some((id) => selected.has(id));
 
   function saveCols(next: ColKey[]) { setCols(next); try { localStorage.setItem(COLS_KEY, JSON.stringify(next)); } catch { /* ignore */ } }
   function savePresets(next: Preset[]) { setPresets(next); try { localStorage.setItem(PRESETS_KEY, JSON.stringify(next)); } catch { /* ignore */ } }
   function savePreset() {
-    const name = prompt("Preset name:")?.trim();
-    if (!name) return;
+    const name = presetName.trim();
+    if (!name || !filtersActive) return;
     savePresets([...presets.filter((p) => p.name !== name), { name, filters, q }]);
+    setPresetName("");
+    setShowPresets(false);
   }
   function applyPreset(name: string) {
     const p = presets.find((x) => x.name === name);
     if (p) { setFilters(p.filters); setQ(p.q); }
+    setShowPresets(false);
   }
+  function clearFilters() { setFilters({ from: "", to: "", userId: "", categoryId: "", reimbursed: "" }); setQ(""); }
 
   const monthTitle = (ym: string) =>
     new Date(`${ym}-15T00:00:00`).toLocaleDateString(undefined, { month: "long", year: "numeric" });
   const has = (k: ColKey) => cols.includes(k);
   const onSort = (key: ColKey) =>
     setSort((p) => (p.key === key ? { key, dir: p.dir === "asc" ? "desc" : "asc" } : { key, dir: key === "date" ? "desc" : "asc" }));
-  const sortInd = (key: ColKey) => (sort.key === key ? (sort.dir === "asc" ? " ▲" : " ▼") : "");
+  const sortTh = (key: ColKey, label: string, right = false) => (
+    <th className={`sortable ${right ? "right" : ""} ${sort.key === key ? "active" : ""}`} onClick={() => onSort(key)}
+      aria-sort={sort.key === key ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}>
+      <span className="xp-th">
+        {label}
+        {sort.key === key && (
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"
+            style={{ transform: sort.dir === "asc" ? "rotate(180deg)" : undefined }}><path d="M6 9l6 6 6-6" /></svg>
+        )}
+      </span>
+    </th>
+  );
+  const colsDefault = cols.length === DEFAULT_COLS.length && DEFAULT_COLS.every((c) => cols.includes(c));
 
   return (
-    <div className="panel xp-panel">
+    <section className="panel xp-panel">
       {/* Panel header: title + search + presets + columns */}
       <div className="xp-head">
-        <h3 className="xp-title">All expenses</h3>
-        <div className="row" style={{ gap: 10, flexWrap: "wrap" }}>
+        <h3>All expenses</h3>
+        <div className="xp-tools">
           <div className="xp-search">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="M20 20l-4-4" /></svg>
             <input
-              type="search" placeholder="Search user, category, notes, amount…" value={q}
+              type="search" placeholder="Search user, category, notes, amount" value={q}
               onChange={(e) => setQ(e.target.value)} aria-label="Search expenses"
             />
           </div>
-          <Select value="" width={150} placeholder="Presets…" ariaLabel="Apply a saved filter preset"
-            onChange={(v) => { if (v) applyPreset(v); }}
-            options={presets.map((p) => ({ value: p.name, label: p.name }))} />
-          <button className="small" onClick={savePreset} disabled={!filtersActive} title="Save the current filters as a preset">Save preset</button>
+          <div className="cv-wrap" ref={presetsRef}>
+            <button className={`cv-btn ${showPresets ? "active" : ""}`} onClick={() => setShowPresets((s) => !s)} aria-expanded={showPresets} title="Saved filter presets">
+              <svg {...ICON}><path d="M6 4h12v17l-6-4-6 4z" /></svg>
+              Presets
+            </button>
+            {showPresets && (
+              <div className="cv-menu xp-menu" role="dialog" aria-label="Filter presets">
+                <div className="cv-list">
+                  {presets.length === 0 && <div className="xp-menu-empty">No saved presets yet</div>}
+                  {presets.map((p) => (
+                    <div className="xp-preset" key={p.name}>
+                      <button type="button" className="xp-preset-apply" onClick={() => applyPreset(p.name)}>{p.name}</button>
+                      <button type="button" className="xp-preset-del" aria-label={`Delete preset ${p.name}`} title="Delete preset"
+                        onClick={() => savePresets(presets.filter((x) => x.name !== p.name))}>
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M6 6l12 12M18 6L6 18" /></svg>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <form className="xp-preset-save" onSubmit={(e) => { e.preventDefault(); savePreset(); }}>
+                  <input value={presetName} onChange={(e) => setPresetName(e.target.value)} placeholder="Save current filters as…" aria-label="Preset name" />
+                  <button type="submit" className="primary" disabled={!presetName.trim() || !filtersActive}
+                    title={filtersActive ? "Save the current filters as a preset" : "Set a filter or search first"}>Save</button>
+                </form>
+              </div>
+            )}
+          </div>
           <div className="cv-wrap" ref={colsRef}>
-            <button className={`small cv-btn ${showCols ? "active" : ""}`} onClick={() => setShowCols((s) => !s)} title="Customize columns">
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="21" x2="4" y2="14" /><line x1="4" y1="10" x2="4" y2="3" /><line x1="12" y1="21" x2="12" y2="12" /><line x1="12" y1="8" x2="12" y2="3" /><line x1="20" y1="21" x2="20" y2="16" /><line x1="20" y1="12" x2="20" y2="3" /><line x1="1" y1="14" x2="7" y2="14" /><line x1="9" y1="8" x2="15" y2="8" /><line x1="17" y1="16" x2="23" y2="16" /></svg>
-              Customize View
+            <button className={`cv-btn ${showCols ? "active" : ""}`} onClick={() => setShowCols((s) => !s)} aria-expanded={showCols} title="Customize columns">
+              <svg {...ICON}><path d="M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4" /></svg>
+              Customize
             </button>
             {showCols && (
-              <div className="cv-menu" role="dialog" aria-label="Customize columns">
-                <div className="cv-head"><strong>Columns</strong><span className="muted" style={{ fontSize: 12 }}>Show &amp; hide</span></div>
+              <div className="cv-menu xp-menu" role="dialog" aria-label="Customize columns">
+                <div className="xp-menu-title">Columns</div>
                 <div className="cv-list">
                   {ALL_COLUMNS.map(([k, label]) => (
-                    <label key={k} className="cv-row cv-check" style={{ justifyContent: "flex-start" }}>
+                    <label key={k} className="cv-row cv-check">
                       <input type="checkbox" checked={has(k)} onChange={() => saveCols(has(k) ? cols.filter((c) => c !== k) : [...cols, k])} /> <span>{label}</span>
                     </label>
                   ))}
                 </div>
                 <div className="cv-foot">
-                  <button type="button" className="small" disabled={cols.length === DEFAULT_COLS.length && DEFAULT_COLS.every((c) => cols.includes(c))} onClick={() => saveCols(DEFAULT_COLS)}>Restore default</button>
+                  <button type="button" className="small" disabled={colsDefault} onClick={() => saveCols(DEFAULT_COLS)}>Restore defaults</button>
                 </div>
               </div>
             )}
@@ -447,48 +533,58 @@ function AllExpenses({
         </div>
       </div>
 
-      {/* Filter bar: structural filters + inline running totals */}
-      <div className="xp-filterbar">
-        <div className="xp-fld"><div className="xp-lbl">From</div><DateField value={filters.from} onChange={(v) => setFilters((f) => ({ ...f, from: v }))} /></div>
-        <div className="xp-fld"><div className="xp-lbl">To</div><DateField value={filters.to} onChange={(v) => setFilters((f) => ({ ...f, to: v }))} /></div>
-        <div className="xp-fld"><div className="xp-lbl">User</div>
+      {/* Structural filters (server-side) */}
+      <div className="xp-filters">
+        <div className="xp-fld"><label>From</label><DateField value={filters.from} onChange={(v) => setFilters((f) => ({ ...f, from: v }))} ariaLabel="From date" /></div>
+        <div className="xp-fld"><label>To</label><DateField value={filters.to} onChange={(v) => setFilters((f) => ({ ...f, to: v }))} ariaLabel="To date" /></div>
+        <div className="xp-fld"><label>User</label>
           <Select value={filters.userId} onChange={(v) => setFilters((f) => ({ ...f, userId: v }))}
-            placeholder="All" clearable searchable ariaLabel="Filter by user" width={190}
+            placeholder="All users" clearable searchable ariaLabel="Filter by user"
             options={users.map((u) => ({ value: u.id, label: u.name }))} />
         </div>
-        <div className="xp-fld"><div className="xp-lbl">Category</div>
+        <div className="xp-fld"><label>Category</label>
           <Select value={filters.categoryId} onChange={(v) => setFilters((f) => ({ ...f, categoryId: v }))}
-            placeholder="All" clearable ariaLabel="Filter by category" width={190}
+            placeholder="All categories" clearable ariaLabel="Filter by category"
             options={categories.map((c) => ({ value: c.id, label: c.name }))} />
         </div>
-        <div className="xp-fld"><div className="xp-lbl">Status</div>
+        <div className="xp-fld"><label>Status</label>
           <Select value={filters.reimbursed} onChange={(v) => setFilters((f) => ({ ...f, reimbursed: v }))}
-            placeholder="All" ariaLabel="Filter by status" width={160}
+            placeholder="All statuses" ariaLabel="Filter by status"
             options={[
-              { value: "", label: "All" },
+              { value: "", label: "All statuses" },
               { value: "false", label: "Outstanding" },
               { value: "true", label: "Reimbursed" },
             ]} />
         </div>
-        {filtersActive && (
-          <button className="small" style={{ alignSelf: "flex-end" }} onClick={() => { setFilters({ from: "", to: "", userId: "", categoryId: "", reimbursed: "" }); setQ(""); }}>Clear all</button>
-        )}
-        <div className="xp-summary">
-          <span className="xp-showing">Showing <b>{totals.count}</b> expenses</span>
-          <span className="xp-vdiv" aria-hidden="true" />
+      </div>
+
+      {/* Summary / selection actions + running totals */}
+      <div className="xp-summary-row">
+        <div className="xp-summary-left">
+          {selected.size > 0 ? (
+            <>
+              <span className="xp-selcount">{selected.size} selected</span>
+              <button className="small" onClick={() => bulk("reimburse")}>
+                <svg {...ICON} width={13} height={13} strokeWidth={2}><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>Mark reimbursed
+              </button>
+              <button className="small" onClick={() => bulk("unreimburse")}>
+                <svg {...ICON} width={13} height={13} strokeWidth={2}><path d="M4 12a8 8 0 1 0 2.3-5.6M4 4v4h4" /></svg>Mark outstanding
+              </button>
+              <button className="small danger" onClick={() => bulk("delete")}>Delete</button>
+              <button className="link-btn xp-clear-sel" onClick={() => setSelected(new Set())}>Clear</button>
+            </>
+          ) : (
+            <>
+              <span className="xp-showing">Showing <b>{totals.count}</b> {totals.count === 1 ? "expense" : "expenses"}</span>
+              {filtersActive && <button className="link-btn xp-clear" onClick={clearFilters}>Clear filters</button>}
+            </>
+          )}
+        </div>
+        <div className="xp-totals">
           <span className="xp-stat"><span className="xp-stat-l">Total</span><b>{money(totals.total, { cents: true })}</b></span>
           <span className="xp-stat ok"><span className="xp-stat-l">Reimbursed</span><b>{money(totals.reimbursed, { cents: true })}</b></span>
           <span className="xp-stat warn"><span className="xp-stat-l">Outstanding</span><b>{money(totals.outstanding, { cents: true })}</b></span>
         </div>
-      </div>
-
-      {/* Bulk action bar */}
-      <div className="xp-bulkbar">
-        <span className="xp-selcount">{selected.size} selected</span>
-        <span className="xp-vdiv" />
-        <button className="small" disabled={selected.size === 0} onClick={() => bulk("reimburse")}>✓ Mark reimbursed</button>
-        <button className="small" disabled={selected.size === 0} onClick={() => bulk("unreimburse")}>↺ Mark not reimbursed</button>
-        <button className="small danger" style={{ marginLeft: "auto" }} disabled={selected.size === 0} onClick={() => bulk("delete")}>Delete</button>
       </div>
 
       {visible.length === 0 ? (
@@ -497,27 +593,28 @@ function AllExpenses({
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1z" /><line x1="8" y1="8" x2="16" y2="8" /><line x1="8" y1="12" x2="16" y2="12" /><line x1="8" y1="16" x2="12" y2="16" /></svg>
           </div>
           <div className="xp-empty-t">No expenses in this range</div>
-          <div style={{ fontSize: 12.5 }}>Log your first expense or widen the date filter above.</div>
-          <button className="primary" style={{ marginTop: 6 }} onClick={onNew}>+ New expense</button>
+          <div className="xp-empty-b">Log your first expense or widen the date filter above.</div>
+          <button className="primary" onClick={onNew}>New expense</button>
         </div>
       ) : (
       <div className="table-scroll exp-scroll">
         <table className="data-table exp-table">
           <thead>
             <tr>
-              <th className="center" style={{ width: 36 }}>
+              <th className="xp-cb-col">
                 <input
                   type="checkbox" checked={allShownSelected} aria-label="Select all"
+                  ref={(el) => { if (el) el.indeterminate = someShownSelected; }}
                   onChange={() => setSelected(allShownSelected ? new Set() : new Set(shownIds))}
                 />
               </th>
-              {has("date") && <th className="sortable" onClick={() => onSort("date")}>Date{sortInd("date")}</th>}
-              {has("user") && <th className="sortable" onClick={() => onSort("user")}>User{sortInd("user")}</th>}
-              {has("category") && <th className="sortable" onClick={() => onSort("category")}>Category{sortInd("category")}</th>}
-              {has("amount") && <th className="sortable right" onClick={() => onSort("amount")}>Amount{sortInd("amount")}</th>}
-              {has("status") && <th className="sortable" onClick={() => onSort("status")}>Status{sortInd("status")}</th>}
+              {has("date") && sortTh("date", "Date")}
+              {has("user") && sortTh("user", "User")}
+              {has("category") && sortTh("category", "Category")}
+              {has("amount") && sortTh("amount", "Amount", true)}
+              {has("status") && sortTh("status", "Status")}
               {has("reimbursementDate") && <th>Reimbursed on</th>}
-              {has("notes") && <th className="sortable" onClick={() => onSort("notes")}>Notes{sortInd("notes")}</th>}
+              {has("notes") && sortTh("notes", "Notes")}
             </tr>
           </thead>
           <tbody>
@@ -541,13 +638,13 @@ function AllExpenses({
       </div>
       )}
       {visible.length > 0 && groups.length > monthsShown && (
-        <div className="row" style={{ justifyContent: "center", padding: "10px 20px 16px" }}>
-          <button className="small" onClick={() => setMonthsShown((n) => n + MONTHS_PAGE)}>
+        <div className="xp-more">
+          <button onClick={() => setMonthsShown((n) => n + MONTHS_PAGE)}>
             Show {Math.min(MONTHS_PAGE, groups.length - monthsShown)} more month{groups.length - monthsShown > 1 ? "s" : ""}
           </button>
         </div>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -555,7 +652,7 @@ function ExpMonthGroup({
   title, group, cols, colSpan, collapsed, onToggleCollapse, selected, toggle, onEdit, catColor,
 }: {
   title: string;
-  group: { month: string; rows: Expense[]; subtotal: number };
+  group: { month: string; rows: Expense[]; subtotal: number; outstanding: number };
   cols: ColKey[];
   colSpan: number;
   collapsed: boolean;
@@ -568,36 +665,46 @@ function ExpMonthGroup({
   const has = (k: ColKey) => cols.includes(k);
   return (
     <>
-      <tr className="exp-month-row clickable" onClick={onToggleCollapse}>
+      <tr className="exp-month-row clickable" onClick={onToggleCollapse} aria-expanded={!collapsed}>
         <td colSpan={colSpan}>
-          <span className="exp-month-caret">{collapsed ? "▸" : "▾"}</span>
-          <strong>{title}</strong>
-          <span className="muted" style={{ marginLeft: 8 }}>{group.rows.length} expense{group.rows.length === 1 ? "" : "s"}</span>
-          <span className="exp-month-subtotal">{money(group.subtotal, { cents: true })}</span>
+          <div className="exp-month">
+            <span className="exp-month-l">
+              <svg className={`exp-month-caret ${collapsed ? "" : "open"}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
+              <strong>{title}</strong>
+              <span className="exp-month-n">{group.rows.length} expense{group.rows.length === 1 ? "" : "s"}</span>
+              {group.outstanding > 0 && <span className="exp-month-out">{money(group.outstanding, { cents: true })} outstanding</span>}
+            </span>
+            <span className="exp-month-subtotal">{money(group.subtotal, { cents: true })}</span>
+          </div>
         </td>
       </tr>
-      {!collapsed && group.rows.map((e) => (
-        <tr
-          key={e.id}
-          className={`clickable ${e.reimbursed ? "exp-row-reimbursed" : "exp-row-outstanding"} ${selected.has(e.id) ? "row-selected" : ""}`}
-          onClick={() => onEdit(e)}
-        >
-          <td className="center" onClick={(ev) => ev.stopPropagation()}>
-            <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggle(e.id)} aria-label="Select row" />
-          </td>
-          {has("date") && <td className="xp-num">{fmtDate(e.date)}</td>}
-          {has("user") && <td>{e.userName
-            ? <span className="xp-user"><span className="xp-avatar" aria-hidden="true" style={{ background: userAvatarColor({ name: e.userName, avatarColor: e.userAvatarColor }), color: "#fff" }}>{e.userName.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "•"}</span>{e.userName}</span>
-            : "—"}</td>}
-          {has("category") && <td>{e.categoryName ? <span className="xp-cat" style={{ color: catColor(e.categoryName) }}>{e.categoryName}</span> : "—"}</td>}
-          {has("amount") && <td className="right xp-num xp-amount">{money(e.amount, { cents: true })}</td>}
-          {has("status") && (
-            <td><span className={`xp-status ${e.reimbursed ? "ok" : "warn"}`}><span className="dot" aria-hidden="true" />{e.reimbursed ? "Reimbursed" : "Outstanding"}</span></td>
-          )}
-          {has("reimbursementDate") && <td className="xp-num">{e.reimbursementDate ? fmtDate(e.reimbursementDate) : "—"}</td>}
-          {has("notes") && <td className="exp-notes">{e.notes || "—"}</td>}
-        </tr>
-      ))}
+      {!collapsed && group.rows.map((e) => {
+        const cc = catColor(e.categoryName);
+        return (
+          <tr
+            key={e.id}
+            className={`clickable ${e.reimbursed ? "exp-row-reimbursed" : "exp-row-outstanding"} ${selected.has(e.id) ? "row-selected" : ""}`}
+            onClick={() => onEdit(e)}
+          >
+            <td className="xp-cb-col" onClick={(ev) => ev.stopPropagation()}>
+              <input type="checkbox" checked={selected.has(e.id)} onChange={() => toggle(e.id)} aria-label="Select row" />
+            </td>
+            {has("date") && <td className="xp-num">{fmtDate(e.date)}</td>}
+            {has("user") && <td>{e.userName
+              ? <span className="xp-user"><Avatar user={{ name: e.userName, avatarColor: e.userAvatarColor }} size={22} />{e.userName}</span>
+              : "—"}</td>}
+            {has("category") && <td>{e.categoryName
+              ? <span className="xp-cat-chip" style={{ "--cat": cc } as React.CSSProperties}><i />{e.categoryName}</span>
+              : <span className="xp-none">—</span>}</td>}
+            {has("amount") && <td className="right xp-num xp-amount">{money(e.amount, { cents: true })}</td>}
+            {has("status") && (
+              <td><span className={`xp-status ${e.reimbursed ? "ok" : "warn"}`}><span className="dot" aria-hidden="true" />{e.reimbursed ? "Reimbursed" : "Outstanding"}</span></td>
+            )}
+            {has("reimbursementDate") && <td className="xp-num xp-dim">{e.reimbursementDate ? fmtDate(e.reimbursementDate) : "—"}</td>}
+            {has("notes") && <td className={`exp-notes ${e.notes ? "" : "xp-none"}`}>{e.notes || "—"}</td>}
+          </tr>
+        );
+      })}
     </>
   );
 }
@@ -652,41 +759,46 @@ function ExpenseForm({
     <Modal
       title={expense ? "Edit expense" : "Add expense"}
       onClose={onClose}
-      footer={<><button className="small" onClick={onClose}>Cancel</button><button className="primary" disabled={busy} onClick={save}>{busy ? "Saving…" : "Save"}</button></>}
+      footer={<>
+        <button onClick={onClose}>Cancel</button>
+        <button className="primary" disabled={busy} onClick={save}>{busy ? "Saving…" : expense ? "Save changes" : "Add expense"}</button>
+      </>}
     >
-      <form onSubmit={save}>
-        {/* Standard sectioned creation layout (same system as New Deal / New Buyer). */}
-        <div className="modal-sec">Expense</div>
-        <div className="nd-basics">
-          <div className="field"><label>Date</label><DateField value={f.date} onChange={(v) => setF((p) => ({ ...p, date: v }))} /></div>
-          <div className="field"><label>Amount</label><MoneyInput decimals={2} value={f.amount} onChange={(v) => setF((p) => ({ ...p, amount: v }))} placeholder="0.00" ariaLabel="Expense amount" /></div>
-          <div className="field">
-            <label>Category</label>
-            <Select value={f.categoryId} onChange={(v) => setF((p) => ({ ...p, categoryId: v }))}
-              placeholder="Uncategorized" clearable ariaLabel="Category"
-              options={categories.filter((c) => c.active || c.id === f.categoryId).map((c) => ({ value: c.id, label: c.name }))} />
+      <form onSubmit={save} className="xp-form">
+        <FormSection title="Expense">
+          <div className="xp-form-grid">
+            <div className="field"><label>Date</label><DateField value={f.date} onChange={(v) => setF((p) => ({ ...p, date: v }))} ariaLabel="Expense date" /></div>
+            <div className="field"><label>Amount</label><MoneyInput decimals={2} value={f.amount} onChange={(v) => setF((p) => ({ ...p, amount: v }))} placeholder="0.00" ariaLabel="Expense amount" /></div>
+            <div className="field">
+              <label>Category</label>
+              <Select value={f.categoryId} onChange={(v) => setF((p) => ({ ...p, categoryId: v }))}
+                placeholder="Uncategorized" clearable ariaLabel="Category"
+                options={categories.filter((c) => c.active || c.id === f.categoryId).map((c) => ({ value: c.id, label: c.name }))} />
+            </div>
+            <div className="field">
+              <label>User</label>
+              {/* Auto-populated with the current user and not editable. */}
+              <input value={currentUserName} disabled readOnly />
+            </div>
           </div>
-          <div className="field">
-            <label>User</label>
-            {/* Auto-populated with the current user and not editable. */}
-            <input value={currentUserName} disabled readOnly />
-          </div>
-        </div>
+        </FormSection>
 
-        <div className="modal-sec">Details</div>
-        <div className="field"><label>Notes</label><textarea value={f.notes} onChange={(e) => setF((p) => ({ ...p, notes: e.target.value }))} rows={3} /></div>
+        <FormSection title="Details">
+          <div className="field"><label>Notes</label><textarea value={f.notes} onChange={(e) => setF((p) => ({ ...p, notes: e.target.value }))} rows={3} placeholder="Vendor, purpose or deal reference" /></div>
+        </FormSection>
 
-        <div className="modal-sec">Reimbursement</div>
-        <div className="nd-basics">
-          <div className="field">
-            <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <input type="checkbox" checked={f.reimbursed} onChange={(e) => setF((p) => ({ ...p, reimbursed: e.target.checked }))} /> Reimbursed
-            </label>
+        <FormSection title="Reimbursement">
+          <div className="xp-reimb">
+            <Toggle checked={f.reimbursed} onChange={(v) => setF((p) => ({ ...p, reimbursed: v }))} ariaLabel="Reimbursed" />
+            <div className="xp-reimb-text">
+              <span className="xp-reimb-l">Reimbursed</span>
+              <span className="xp-reimb-h">{f.reimbursed ? `Paid back${currentUserName ? ` to ${currentUserName}` : ""}` : "Outstanding until paid back"}</span>
+            </div>
           </div>
           {f.reimbursed && (
-            <div className="field"><label>Reimbursement date</label><DateField value={f.reimbursementDate} onChange={(v) => setF((p) => ({ ...p, reimbursementDate: v }))} /></div>
+            <div className="field xp-reimb-date"><label>Reimbursed on</label><DateField value={f.reimbursementDate} onChange={(v) => setF((p) => ({ ...p, reimbursementDate: v }))} ariaLabel="Reimbursed on" /></div>
           )}
-        </div>
+        </FormSection>
         {error && <div className="error-text">{error}</div>}
       </form>
     </Modal>
@@ -698,6 +810,7 @@ function CategoryManager({ categories, onClose, onChanged }: { categories: Categ
   const [err, setErr] = useState<string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [pendingRemove, setPendingRemove] = useState<Category | null>(null);
   // Local order so drag reordering feels instant; persisted on each drop.
   const [order, setOrder] = useState<Category[]>(categories);
   useEffect(() => { setOrder(categories); }, [categories]);
@@ -712,13 +825,12 @@ function CategoryManager({ categories, onClose, onChanged }: { categories: Categ
   }
   const add = (e: React.FormEvent) => { e.preventDefault(); if (name.trim()) run(async () => { await api.post("/expenses/categories", { name: name.trim() }); setName(""); }); };
   const toggleActive = (c: Category) => run(() => api.patch(`/expenses/categories/${c.id}`, { active: !c.active }));
-  const remove = (c: Category) => { if (confirm(`Delete category "${c.name}"? Existing expenses keep their amount but become uncategorized.`)) run(() => api.del(`/expenses/categories/${c.id}`)); };
   function saveRename(c: Category) {
     const n = editName.trim();
     setEditId(null);
     if (n && n !== c.name) run(() => api.patch(`/expenses/categories/${c.id}`, { name: n }));
   }
-  /** Move a category from one position to another (drag & drop) and persist. */
+  /** Move a category from one position to another (drag & drop or arrows) and persist. */
   function commitReorder(from: number, to: number) {
     if (from === to || from < 0 || to < 0 || from >= order.length || to >= order.length) return;
     const next = [...order];
@@ -733,50 +845,64 @@ function CategoryManager({ categories, onClose, onChanged }: { categories: Categ
   }
 
   return (
-    <Modal title="Expense categories" onClose={onClose} footer={<button className="primary" onClick={onClose}>Done</button>}>
-      <form onSubmit={add} className="row" style={{ alignItems: "flex-end", marginBottom: 12 }}>
-        <div className="field" style={{ flex: 1, marginBottom: 0 }}><label>New category</label><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Marketing" /></div>
+    <Modal title="Expense categories" subtitle="Drag rows by the handle to reorder. Changes apply immediately to the expense forms."
+      onClose={onClose} footer={<button className="primary" onClick={onClose}>Done</button>}>
+      <form onSubmit={add} className="xp-cat-add">
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="New category, e.g. Marketing" aria-label="New category" />
         <button className="primary" disabled={!name.trim()}>Add</button>
       </form>
       {err && <div className="error-text">{err}</div>}
-      <div className="table-scroll">
-        <table className="data-table">
-          <thead><tr><th style={{ width: 44 }}></th><th>Name</th><th>Status</th><th></th></tr></thead>
-          <tbody>
-            {order.map((c, i) => (
-              <tr
-                key={c.id}
-                draggable
-                onDragStart={(e) => { setDragIdx(i); e.dataTransfer.effectAllowed = "move"; }}
-                onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (overIdx !== i) setOverIdx(i); }}
-                onDrop={(e) => { e.preventDefault(); onDrop(i); }}
-                onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}
-                className={`cat-row ${dragIdx === i ? "dragging" : ""} ${overIdx === i && dragIdx !== null && dragIdx !== i ? "drop-over" : ""}`}
-              >
-                <td>
-                  <span className="cat-drag" title="Drag to reorder" aria-label="Drag to reorder" style={{ cursor: "grab", userSelect: "none", color: "var(--text-dim)" }}>⠿</span>
-                </td>
-                <td>
-                  {editId === c.id ? (
-                    <input autoFocus value={editName} onChange={(e) => setEditName(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") saveRename(c); if (e.key === "Escape") setEditId(null); }}
-                      onBlur={() => saveRename(c)} style={{ width: 200 }} />
-                  ) : (
-                    <span className="clickable" title="Click to rename" onClick={() => { setEditId(c.id); setEditName(c.name); }}>{c.name}</span>
-                  )}
-                </td>
-                <td><span className={`badge ${c.active ? "resp-offer" : "resp-no"}`}>{c.active ? "Active" : "Hidden"}</span></td>
-                <td className="right">
-                  <button className="small" onClick={() => { setEditId(c.id); setEditName(c.name); }}>Rename</button>
-                  <button className="small" style={{ marginLeft: 6 }} onClick={() => toggleActive(c)}>{c.active ? "Hide" : "Show"}</button>
-                  <button className="small danger" style={{ marginLeft: 6 }} onClick={() => remove(c)}>Delete</button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="xp-cat-list">
+        {order.map((c, i) => (
+          <div
+            key={c.id}
+            draggable
+            onDragStart={(e) => { setDragIdx(i); e.dataTransfer.effectAllowed = "move"; }}
+            onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; if (overIdx !== i) setOverIdx(i); }}
+            onDrop={(e) => { e.preventDefault(); onDrop(i); }}
+            onDragEnd={() => { setDragIdx(null); setOverIdx(null); }}
+            className={`xp-cat-row ${c.active ? "" : "hidden"} ${dragIdx === i ? "dragging" : ""} ${overIdx === i && dragIdx !== null && dragIdx !== i ? "drop-over" : ""}`}
+          >
+            <span className="cat-drag" title="Drag to reorder" aria-label="Drag to reorder">⠿</span>
+            <span className="xp-cat-move">
+              <button type="button" aria-label={`Move ${c.name} up`} disabled={i === 0} onClick={() => commitReorder(i, i - 1)}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 15l6-6 6 6" /></svg>
+              </button>
+              <button type="button" aria-label={`Move ${c.name} down`} disabled={i === order.length - 1} onClick={() => commitReorder(i, i + 1)}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 9l6 6 6-6" /></svg>
+              </button>
+            </span>
+            <span className="xp-cat-swatch" style={{ background: catColorFor(c.name, order) }} />
+            <span className="xp-cat-name">
+              {editId === c.id ? (
+                <input autoFocus value={editName} onChange={(e) => setEditName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") saveRename(c); if (e.key === "Escape") setEditId(null); }}
+                  onBlur={() => saveRename(c)} aria-label="Category name" />
+              ) : (
+                <span className="clickable" title="Click to rename" onClick={() => { setEditId(c.id); setEditName(c.name); }}>{c.name}</span>
+              )}
+            </span>
+            <Tag tone={c.active ? "success" : "neutral"}>{c.active ? "Active" : "Hidden"}</Tag>
+            <span className="xp-cat-actions">
+              <button className="small" onClick={() => { setEditId(c.id); setEditName(c.name); }}>Rename</button>
+              <button className="small" onClick={() => toggleActive(c)}>{c.active ? "Hide" : "Show"}</button>
+              <button className="small xp-cat-del" aria-label={`Delete ${c.name}`} title="Delete" onClick={() => setPendingRemove(c)}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" /></svg>
+              </button>
+            </span>
+          </div>
+        ))}
       </div>
-      <p className="muted" style={{ fontSize: 12, marginBottom: 0 }}>Drag rows by the handle to reorder. Changes apply immediately to the expense forms.</p>
+      {pendingRemove && (
+        <ConfirmDialog
+          title="Delete category"
+          message={<>Delete category "{pendingRemove.name}"? Existing expenses keep their amount but become uncategorized.</>}
+          confirmLabel="Delete"
+          danger
+          onCancel={() => setPendingRemove(null)}
+          onConfirm={() => { const c = pendingRemove; setPendingRemove(null); run(() => api.del(`/expenses/categories/${c.id}`)); }}
+        />
+      )}
     </Modal>
   );
 }

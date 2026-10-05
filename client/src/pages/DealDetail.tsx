@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { api, ApiError } from "../api/client";
+import { api } from "../api/client";
 import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
 import {
-  Spinner, PriorityBadge, StageBadge, Modal, UserChip,
-  Banner, ConfirmDelete, ConfirmDialog, BackLink, OverflowMenu, showToast, CtPill, ChipList,
+  Spinner, Modal, Banner, ConfirmDelete, ConfirmDialog, BackLink, OverflowMenu, showToast, ChipList, EmptyState,
 } from "../components/ui";
-import { Pencil } from "lucide-react";
+import { StatStrip, Tag, type StatCell } from "../components/kit";
+import { useStages } from "../stages";
+import { ChevronDown, Pencil, Plus } from "lucide-react";
 import { useUnsavedSection } from "../lib/unsaved";
-import { SortableTable, type Column } from "../components/SortableTable";
 import { StageChangeModal } from "../components/StageChangeModal";
 import { LogContactModal } from "../components/LogContactModal";
 import { BuyerActivitySection } from "../components/BuyerActivitySection";
@@ -23,7 +23,6 @@ import { money, num, fmtDate, toInputDate, prettyEnum } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { SellerDetails } from "../components/SellerDetails";
 import { DealPortalPanel } from "../components/DealPortalPanel";
-import { AssigneePicker } from "../components/AssigneePicker";
 import { DocumentsSection, DEAL_DOC_FOLDERS, type DocFile } from "../components/DocumentsSection";
 import { OfferRowActions } from "../components/OfferActions";
 import type { AssetChild, BuyerActivityRow, DealSummary, MatchRec, Seller, UserLite } from "../types";
@@ -67,7 +66,9 @@ export function DealDetail() {
   const [deal, setDeal] = useState<DealDetailData | null>(null);
   const [matches, setMatches] = useState<MatchRec[] | null>(null);
   const [users, setUsers] = useState<UserLite[]>([]);
-  const [showStage, setShowStage] = useState(false);
+  // Destination picked from the "Move stage" menu; opening the standard
+  // StageChangeModal (all its checks and confirmations) pre-set to it.
+  const [stageTarget, setStageTarget] = useState<string | null>(null);
   const [logBuyer, setLogBuyer] = useState<EditTarget | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showEmail, setShowEmail] = useState(false);
@@ -122,31 +123,60 @@ export function DealDetail() {
   // The Back link names the list this deal belongs to, so it's clear where you
   // return: Closed → Closed Deals, Dead → Archived Deals, otherwise Active Deals.
   const backTo = deal.stage === "CLOSED"
-    ? { label: "Back to Closed Deals", fallback: "/deals/closed" }
+    ? { label: "Back to closed deals", fallback: "/deals/closed" }
     : deal.stage === "DEAD"
-      ? { label: "Back to Archived Deals", fallback: "/deals/archived" }
-      : { label: "Back to Active Deals", fallback: "/deals/active" };
+      ? { label: "Back to archived deals", fallback: "/deals/archived" }
+      : { label: "Back to active deals", fallback: "/deals/active" };
+
+  // Summary strip — the deal's own stored figures (the per-acre prices are the
+  // saved per-NMA / per-NRA values; per NRA falls back to the total ÷ NRA the
+  // page has always shown). Implied margin keeps the existing formula.
+  const perAcreSub = (perNma: number | null | undefined, perNra: number | null | undefined) =>
+    perNma == null && perNra == null ? undefined
+      : `${money(perNma, { cents: true })} / NMA · ${money(perNra, { cents: true })} / NRA`;
+  const ourPerNra = deal.ourCostPerNra ?? (deal.ourPrice != null && deal.nra ? Math.round(deal.ourPrice / deal.nra) : null);
+  const askPerNra = deal.askPricePerNra ?? (deal.askPrice != null && deal.nra ? Math.round(deal.askPrice / deal.nra) : null);
+  const hasMargin = deal.askPrice != null && deal.ourPrice != null && deal.ourPrice > 0;
+  const royalty = royaltyLabel(deal.royaltyRate);
+  const summary: StatCell[] = [
+    { label: "Our cost", value: money(deal.ourPrice), sub: perAcreSub(deal.ourCostPerNma, ourPerNra) },
+    { label: "Asking price", value: money(deal.askPrice), sub: perAcreSub(deal.askPricePerNma, askPerNra) },
+    {
+      label: "Implied margin",
+      value: hasMargin ? `${deal.askPrice! >= deal.ourPrice! ? "+" : ""}${Math.round(((deal.askPrice! - deal.ourPrice!) / deal.ourPrice!) * 100)}%` : "—",
+      tone: hasMargin ? (deal.askPrice! >= deal.ourPrice! ? "success" : "danger") : "default",
+      sub: "Asking price over our cost",
+    },
+    {
+      label: "Interest",
+      value: deal.nra != null ? `${num(deal.nra)} NRA` : "—",
+      sub: [deal.acreageNma != null ? `${num(deal.acreageNma)} NMA` : null, royalty ? `${royalty} royalty` : null].filter(Boolean).join(" · ") || undefined,
+    },
+    { label: "Final closing", value: deal.finalClosingDate ? relDays(deal.finalClosingDate) : "—", sub: deal.finalClosingDate ? fmtDate(deal.finalClosingDate) : "Not set" },
+  ];
+
+  // Tab labels with their record counts (counts of what each tab lists).
+  const tabLabel = (text: string, count: number) => count > 0
+    ? <><span className="tab-lbl" data-label={text}>{text}</span><span className="tab-badge">{count}</span></>
+    : text;
 
   return (
     <div className="page deal-detail">
       <BackLink label={backTo.label} fallback={backTo.fallback} />
-      <div className="page-header">
-        <div className="row">
-          <h1 style={{ marginBottom: 0 }}>{deal.name}</h1>
+      <div className="page-header dd-head">
+        <div className="dd-head-title">
+          <h1>{deal.name}</h1>
           {can("editDeals") && (
-            <button type="button" className="icon-btn" title="Rename deal" aria-label="Rename deal" onClick={() => setRenaming(true)}>
+            <button type="button" className="icon-btn dd-rename" title="Rename deal" aria-label="Rename deal" onClick={() => setRenaming(true)}>
               <Pencil size={14} />
             </button>
           )}
-          <PriorityBadge priority={deal.priority} />
-          <StageBadge stage={deal.stage} pipelineId={deal.pipelineId} />
-          <span className="muted" style={{ fontSize: 12, display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
-            {deal.daysInStage}d in stage
-          </span>
+          <Tag tone={PRIORITY_TONE[deal.priority] ?? "neutral"} dot title={PRIORITY_TIP}>{prettyEnum(deal.priority)} priority</Tag>
+          <StageTag stage={deal.stage} pipelineId={deal.pipelineId} />
+          <span className="dd-days">{deal.daysInStage}d in stage</span>
         </div>
-        <div className="row">
-          {can("editDeals") && <button className="primary" onClick={() => setShowStage(true)}>Move Stage →</button>}
+        <div className="dd-head-actions">
+          {can("editDeals") && <MoveStageMenu stage={deal.stage} pipelineId={deal.pipelineId} onPick={setStageTarget} />}
           {can("deleteDeals") && <OverflowMenu items={[{ label: "Delete deal…", danger: true, onClick: () => setConfirmDelete(true) }]} />}
         </div>
       </div>
@@ -161,9 +191,11 @@ export function DealDetail() {
         const when = days < 0 ? `was ${-days} day${days === -1 ? "" : "s"} ago` : days === 0 ? "is today" : `is in ${days} day${days === 1 ? "" : "s"}`;
         return (
           <div className="dd-alert">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /><path d="M12 9v4M12 17h.01" /></svg>
-            <span className="dd-alert-msg"><b>Find Buyer By {when}</b> ({fmtDate(deal.findBuyerByDate)}) and no buyer is attached to this deal yet.</span>
-            <button type="button" className="link-btn dd-alert-link" onClick={() => setTab("buyers")}>Open Buyers tab →</button>
+            <span className="dd-alert-main">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 4l9 16H3L12 4zM12 10v4M12 17h.01" /></svg>
+              <span className="dd-alert-msg"><b>Find buyer by {when}</b> ({fmtDate(deal.findBuyerByDate)}) and no buyer is attached to this deal yet.</span>
+            </span>
+            <button type="button" className="link-btn dd-alert-link" onClick={() => setTab("buyers")}>Review buyers →</button>
           </div>
         );
       })()}
@@ -175,10 +207,12 @@ export function DealDetail() {
         </Banner>
       )}
 
+      <StatStrip cells={summary} min={190} className="dd-summary" />
+
       {/* Persistent header — Deal Characteristics + Contract Timeline stay
           visible on every tab, exactly as before. */}
       <div className="dd-top-grid">
-        <CharacteristicsCard deal={deal} users={users} canEdit={can("editDeals")} onSaved={refreshAll} />
+        <CharacteristicsCard deal={deal} onSaved={refreshAll} />
         <ContractTimelineCard deal={deal} onSaved={loadDeal} />
       </div>
 
@@ -188,10 +222,10 @@ export function DealDetail() {
       <Tabs
         tabs={[
           { key: "general" as const, label: "General" },
-          { key: "additional" as const, label: "Additional Deals", hidden: !!deal.parent },
-          { key: "buyers" as const, label: "Buyers" },
+          { key: "additional" as const, label: tabLabel("Additional deals", deal.assets?.length ?? 0), hidden: !!deal.parent },
+          { key: "buyers" as const, label: tabLabel("Buyers", deal.buyerActivity.length) },
           { key: "marketplace" as const, label: "Marketplace" },
-          { key: "documents" as const, label: "Documents" },
+          { key: "documents" as const, label: tabLabel("Documents", can("viewDocuments") ? deal.files.length : 0) },
         ]}
         active={tab}
         onSelect={setTab}
@@ -213,15 +247,7 @@ export function DealDetail() {
 
       {/* Embedded, isolated map showing this deal's abstracts plus any tract
           boundaries imported onto it (shapefiles — also shown on the main map). */}
-      <div className="panel">
-        <div className="section-head"><h3>Location</h3><span className="muted">This deal's abstracts, imported tracts, and geographic extent</span></div>
-        <Suspense fallback={<Spinner label="Loading map…" />}><DealMap dealId={deal.id} abstractIds={deal.abstractIds} /></Suspense>
-        {deal.abstractIds.length === 0 && (
-          <p className="muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
-            No abstracts linked yet — add them under <strong>Deal characteristics → Edit → Abstract</strong> and the map will draw this deal's extent.
-          </p>
-        )}
-      </div>
+      <LocationCard deal={deal} />
       </div>
 
       {/* Additional Deals: the extra deals grouped under this seller. Hidden on a
@@ -249,7 +275,7 @@ export function DealDetail() {
       {deal.selectedBuyer && (
         <div className="dd-selected-banner">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>
-          <span><b>Selected buyer:</b> <Link to={`/buyers/${deal.selectedBuyer.id}`} className="subtle-link" style={{ fontWeight: 700 }}>{deal.selectedBuyer.name}</Link>
+          <span><b>Selected buyer:</b> <Link to={`/buyers/${deal.selectedBuyer.id}`} className="subtle-link">{deal.selectedBuyer.name}</Link>
             {deal.selectedBuyer.companyName && deal.selectedBuyer.companyName !== deal.selectedBuyer.name && <span className="muted"> · {deal.selectedBuyer.companyName}</span>}</span>
           <span className="dd-selected-right"><b>Profit est:</b> <b className="pos">{money(deal.profitEst)}</b></span>
         </div>
@@ -257,8 +283,14 @@ export function DealDetail() {
 
       {/* Offers */}
       {deal.offers.length > 0 && (
-        <div className="panel dd-offers">
-          <h3>Offers</h3>
+        <div className="panel dd-card dd-offers">
+          <div className="dd-card-head">
+            <div>
+              <h3 className="dd-card-title">Offers</h3>
+              <div className="dd-card-sub">Every offer received on this deal</div>
+            </div>
+            <span className="dd-card-count">{deal.offers.length} offer{deal.offers.length === 1 ? "" : "s"}</span>
+          </div>
           <div className="table-scroll">
             <table className="data-table">
               <thead><tr><th>Buyer</th><th className="right">Amount</th><th>Status</th><th>Expires</th><th>Conditions</th><th></th></tr></thead>
@@ -272,14 +304,14 @@ export function DealDetail() {
                   return (
                   <tr key={o.id}>
                     <td><Link to={`/buyers/${o.buyer.id}`} className="dd-offer-buyer">{o.buyer.name}</Link></td>
-                    <td className="right" style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{money(o.amount)}</td>
+                    <td className="right dd-offer-amt">{money(o.amount)}</td>
                     <td>{accepted ? "Accepted Offer" : prettyEnum(o.status)}</td>
                     <td>{fmtDate(o.expirationDate)}</td>
                     <td className="cell-clamp" title={o.conditions ?? undefined}>{o.conditions ?? "—"}</td>
                     <td className="right">
-                      <span className="row" style={{ gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
-                        {accepted ? <CtPill color="#22c55e">Accepted Offer</CtPill> :
-                          can("editDeals") ? <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button> : null}
+                      <span className="dd-offer-actions">
+                        {accepted ? <Tag tone="success" dot>Accepted Offer</Tag> :
+                          can("editDeals") ? <button className="small dd-accept" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button> : null}
                         {can("editDeals") && <OfferRowActions offer={o} accepted={accepted} onChanged={refreshAll} dealNma={deal.acreageNma} dealNra={deal.nra} />}
                       </span>
                     </td>
@@ -295,9 +327,9 @@ export function DealDetail() {
       {/* Buyer Activity — expanded by default; collapsible per-buyer relationship + timeline */}
       <CollapsibleSection
         defaultOpen
-        title="Buyer Activity"
+        title="Buyer activity"
         sub="Every buyer's status, notes, and full communication history on this deal"
-        right={<span className="muted" style={{ fontSize: 12.5 }}>{deal.buyerActivity.length} buyer{deal.buyerActivity.length === 1 ? "" : "s"}</span>}
+        right={<span className="dd-card-count">{deal.buyerActivity.length} buyer{deal.buyerActivity.length === 1 ? "" : "s"}</span>}
       >
         <BuyerActivitySection
           dealId={deal.id}
@@ -312,75 +344,76 @@ export function DealDetail() {
       {/* Match recommendations — expanded by default; actionable outreach */}
       <CollapsibleSection
         defaultOpen
-        title="Buyer Match Recommendations"
+        title="Buyer matches"
         sub="Ranked, every buyer, highest match first"
-        right={matches ? <span className="muted" style={{ fontSize: 12.5 }}>{matches.length} buyer{matches.length === 1 ? "" : "s"}</span> : undefined}
+        right={matches ? <span className="dd-card-count">{matches.length} buyer{matches.length === 1 ? "" : "s"}</span> : undefined}
       >
-        {!matches ? <Spinner /> : matches.length === 0 ? <p className="muted">No buyers in the system yet.</p> : (
+        {!matches ? <Spinner /> : matches.length === 0 ? <p className="muted mr-none">No buyers in the system yet.</p> : (
           <>
             {can("editDeals") && (
-              <div className="row" style={{ flexWrap: "wrap", gap: 8, alignItems: "center", marginBottom: 10 }}>
-                <label style={{ fontSize: 13, textTransform: "none" }}>
+              <div className="mr-bulk">
+                <label className="mr-selall">
                   <input type="checkbox" checked={selected.size > 0 && selected.size === matches.length} onChange={selectAllMatches} /> Select all
                 </label>
-                <span className="muted" style={{ fontSize: 13 }}>{selected.size} selected</span>
-                <button className="small primary" disabled={selected.size === 0} onClick={() => setShowEmail(true)}>Send Deal via Email</button>
-                <button className="small" disabled={selected.size === 0} onClick={markContacted}>Mark as Contacted</button>
-                <button className="small" disabled={selected.size === 0} onClick={exportSelected}>Export Selected (CSV)</button>
-                {selected.size > 0 && <button className="link-btn" style={{ fontSize: 12.5 }} onClick={() => setSelected(new Set())}>Deselect all</button>}
-                <span className="mr-legend">● matched · ○ not in buyer's buy box</span>
+                <span className="mr-selcount">{selected.size} selected</span>
+                <button className="small primary" disabled={selected.size === 0} onClick={() => setShowEmail(true)}>Send deal by email</button>
+                <button className="small" disabled={selected.size === 0} onClick={markContacted}>Mark as contacted</button>
+                <button className="small" disabled={selected.size === 0} onClick={exportSelected}>Export selected (CSV)</button>
+                {selected.size > 0 && <button className="link-btn mr-deselect" onClick={() => setSelected(new Set())}>Deselect all</button>}
               </div>
             )}
             <div className="mr-list">
             {(showAllMatches ? matches : matches.slice(0, 6)).map((m) => {
-              const ring = 2 * Math.PI * 16;
-              const ringColor = m.matchPercent >= 70 ? "#22c55e" : m.matchPercent >= 55 ? "#f5b04b" : "#5a6274";
+              const ring = 2 * Math.PI * 14;
+              const ringTone = m.matchPercent >= 70 ? "success" : m.matchPercent >= 55 ? "warn" : "low";
               return (
               <div className={`match-card ${selected.has(m.buyerId) ? "match-selected" : ""}`} key={m.buyerId}>
-                <div className="match-card-head">
-                  {can("editDeals") && <input type="checkbox" checked={selected.has(m.buyerId)} onChange={() => toggleMatch(m.buyerId)} />}
-                  <span className="match-rank">#{m.rank}</span>
-                  {/* Score ring (reference): circular progress with the % inside. */}
-                  <span className="mr-ring" aria-label={`${m.matchPercent}% match`}>
-                    <svg width="40" height="40" viewBox="0 0 40 40">
-                      <circle cx="20" cy="20" r="16" fill="none" stroke="var(--hairline)" strokeWidth="4" />
-                      <circle cx="20" cy="20" r="16" fill="none" stroke={ringColor} strokeWidth="4" strokeLinecap="round"
-                        strokeDasharray={`${((ring * m.matchPercent) / 100).toFixed(1)} ${ring.toFixed(1)}`} transform="rotate(-90 20 20)" />
-                    </svg>
-                    <span className="mr-ring-n">{m.matchPercent}</span>
-                  </span>
-                  <span className="mr-title">
+                {can("editDeals") && <input type="checkbox" checked={selected.has(m.buyerId)} onChange={() => toggleMatch(m.buyerId)} aria-label={`Select ${m.companyName || m.buyerName}`} />}
+                <span className="match-rank">#{m.rank}</span>
+                {/* Score ring: circular progress with the % inside. */}
+                <span className={`mr-ring ${ringTone}`} aria-label={`${m.matchPercent}% match`}>
+                  <svg width="36" height="36" viewBox="0 0 36 36">
+                    <circle cx="18" cy="18" r="14" fill="none" className="mr-ring-track" strokeWidth="3" />
+                    <circle cx="18" cy="18" r="14" fill="none" className="mr-ring-val" strokeWidth="3" strokeLinecap="round"
+                      strokeDasharray={`${((ring * m.matchPercent) / 100).toFixed(1)} ${ring.toFixed(1)}`} transform="rotate(-90 18 18)" />
+                  </svg>
+                  <span className="mr-ring-n">{m.matchPercent}</span>
+                </span>
+                <div className="mr-main">
+                  <div className="mr-title">
                     {/* Company name only — the primary identifier when evaluating matches.
                         Contact person is available on the Buyer Profile. */}
                     <Link to={`/buyers/${m.buyerId}`} className="match-name subtle-link" title={m.companyName || m.buyerName}>{m.companyName || m.buyerName}</Link>
-                    {m.matchPercent >= 70 && m.criteriaSpecified >= 4 && <CtPill color="#22c55e">Strong fit</CtPill>}
+                    {m.matchPercent >= 70 && m.criteriaSpecified >= 4 && <Tag tone="success" dot>Strong fit</Tag>}
                     {m.lastContactDate && <span className="mr-contacted">Contacted</span>}
-                  </span>
-                  <span className="mr-crit" title="How many buy-box criteria this buyer has set, and how many this deal matches">
-                    {m.criteriaSpecified > 0 ? `${m.criteriaSpecifiedMatched}/${m.criteriaSpecified} criteria met` : "no buy box set"}
-                  </span>
-                  {can("editDeals") && <button className="small primary match-log" onClick={() => setLogBuyer({ id: m.buyerId, name: m.buyerName })}>Log contact</button>}
+                    <span className="mr-crit" title="How many buy-box criteria this buyer has set, and how many this deal matches">
+                      {m.criteriaSpecified > 0 ? `${m.criteriaSpecifiedMatched}/${m.criteriaSpecified} criteria met` : "no buy box set"}
+                    </span>
+                  </div>
+                  <div className="mr-meta">
+                    Owner(s): {m.owners.length ? <ChipList items={m.owners} max={3} /> : "—"} · {m.previousDealsClosed} closed together · Last contact: {m.lastContactDate ? fmtDate(m.lastContactDate) : "never"}
+                    {/* "stale" only makes sense for aged contact — a never-contacted buyer isn't stale. */}
+                    {m.stale && m.lastContactDate && <span className="stale-flag" title="No contact in a while — worth a follow-up"> · stale</span>}
+                  </div>
+                  <div className="mr-tags">
+                    {m.matching.map((c) => <span key={c.key} className="crit-tag crit-yes">{c.label}</span>)}
+                    {m.nonMatching.map((c) => <span key={c.key} className="crit-tag crit-no">{c.label}</span>)}
+                  </div>
                 </div>
-                <div className="mr-tags">
-                  {m.matching.map((c) => <span key={c.key} className="crit-tag crit-yes">{c.label}</span>)}
-                  {m.nonMatching.map((c) => <span key={c.key} className="crit-tag crit-no">{c.label}</span>)}
-                </div>
-                <div className="mr-meta">
-                  Owner(s): {m.owners.length ? <ChipList items={m.owners} max={3} /> : "—"} · {m.previousDealsClosed} closed together · Last contact: {m.lastContactDate ? fmtDate(m.lastContactDate) : "never"}
-                  {/* "stale" only makes sense for aged contact — a never-contacted buyer isn't stale. */}
-                  {m.stale && m.lastContactDate && <span className="stale-flag" title="No contact in a while — worth a follow-up"> · stale</span>}
-                </div>
+                {can("editDeals") && <button className="small match-log" onClick={() => setLogBuyer({ id: m.buyerId, name: m.buyerName })}>Log contact</button>}
               </div>
               );
             })}
             </div>
-            {matches.length > 6 && (
-              <div className="mr-more">
-                <button className="ct-btn" onClick={() => setShowAllMatches((v) => !v)}>
+            <div className="mr-foot">
+              <span className="mr-legend"><i className="yes" />In buy box</span>
+              <span className="mr-legend"><i />Not in buyer's buy box</span>
+              {matches.length > 6 && (
+                <button className="small mr-more" onClick={() => setShowAllMatches((v) => !v)}>
                   {showAllMatches ? "Show top 6" : `Show all ${matches.length} buyers`}
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </>
         )}
       </CollapsibleSection>
@@ -397,12 +430,13 @@ export function DealDetail() {
         <RenameDealModal dealId={deal.id} current={deal.name} onClose={() => setRenaming(false)}
           onRenamed={() => { setRenaming(false); refreshAll(); }} />
       )}
-      {showStage && (
+      {stageTarget && (
         <StageChangeModal
           deal={deal}
+          initialStage={stageTarget}
           hasUnresolvedActivity={hasUnresolved}
-          onClose={() => setShowStage(false)}
-          onChanged={() => { setShowStage(false); refreshAll(); }}
+          onClose={() => setStageTarget(null)}
+          onChanged={() => { setStageTarget(null); refreshAll(); }}
         />
       )}
       {acceptOffer && (
@@ -514,27 +548,26 @@ function AssetsSection({ deal, canEdit, canPublish, onAdd, onChanged }: {
   }
 
   return (
-    <div className="panel">
-      <div className="section-head">
+    <div className="panel dd-card">
+      <div className="dd-card-head">
         <div>
-          <h3 style={{ margin: 0 }}>Additional Deals{assets.length ? ` (${assets.length})` : ""}</h3>
-          <span className="muted" style={{ fontSize: 12 }}>Add multiple deals under the same seller — each is independently marketable</span>
+          <h3 className="dd-card-title">Additional deals</h3>
+          <div className="dd-card-sub">Other interests from the same seller. Each stays independently marketable.</div>
         </div>
-        <div className="row" style={{ gap: 8 }}>
+        <div className="dd-card-actions">
           {canPublish && assets.length > 0 && (
             publishedCount < assets.length
               ? <button className="small" disabled={busy} onClick={() => publishAll(true)} title="Publish every deal to the buyer portal">Publish all</button>
               : <button className="small" disabled={busy} onClick={() => publishAll(false)} title="Unpublish every deal">Unpublish all</button>
           )}
-          {canEdit && <button className="small primary" onClick={onAdd}>+ Add Deal</button>}
+          {canEdit && <button className="small primary dd-add-btn" onClick={onAdd}><Plus size={13} strokeWidth={2.2} aria-hidden="true" />Add deal</button>}
         </div>
       </div>
 
       {assets.length === 0 ? (
-        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-          No additional deals yet. Use <strong>+ Add Deal</strong> to manage multiple interests from the same
-          seller together — each stays independently marketable.
-        </p>
+        <EmptyState title="No additional deals yet">
+          Use <strong>Add deal</strong> to manage multiple interests from the same seller together — each stays independently marketable.
+        </EmptyState>
       ) : (
         <>
           {/* Package total = this deal's own figures rolled up with its assets'. */}
@@ -543,31 +576,33 @@ function AssetsSection({ deal, canEdit, canPublish, onAdd, onChanged }: {
             {deal.aggNra != null && <span><strong>{num(deal.aggNra)}</strong> NRA</span>}
             {deal.aggAcreageNma != null && <span><strong>{num(deal.aggAcreageNma)}</strong> NMA</span>}
             {deal.aggOurPrice != null && <span>Our <strong>{money(deal.aggOurPrice)}</strong></span>}
-            {deal.aggAskPrice != null && <span style={{ color: "var(--accent)" }}>Ask <strong>{money(deal.aggAskPrice)}</strong></span>}
+            {deal.aggAskPrice != null && <span className="asset-ask">Ask <strong>{money(deal.aggAskPrice)}</strong></span>}
           </div>
-        <div className="asset-grid">
-          {assets.map((a) => (
-            <Link key={a.id} to={`/deals/${a.id}`} className="asset-card">
-              <div className="asset-card-head">
-                <span className="asset-card-name">{a.name}</span>
-                <StageBadge stage={a.stage} />
-              </div>
-              <div className="asset-card-facts">
-                {(a.counties.length > 0 || a.states.length > 0) && <span><ChipList items={[...a.counties, ...a.states]} max={4} /></span>}
-                {a.nra != null && <span><strong>{num(a.nra)}</strong> NRA</span>}
-                {a.assetTypes.length > 0 && <span><ChipList items={a.assetTypes} /></span>}
-                {a.operator && <span>{a.operator}</span>}
-                {a.rrc && <span>RRC {a.rrc}</span>}
-              </div>
-              <div className="asset-card-foot">
-                {a.ourPrice != null && <span className="muted">Our {money(a.ourPrice)}</span>}
-                {a.askPrice != null && <span style={{ color: "var(--accent)" }}>Ask {money(a.askPrice)}</span>}
-                {a.publishedToPortal && <span className="badge resp-offer">Published</span>}
-                {a.selectedBuyer && <span className="badge resp-pending">→ {a.selectedBuyer.name}</span>}
-              </div>
-            </Link>
-          ))}
-        </div>
+          <div className="asset-rows-scroll">
+            <div className="asset-rows">
+              {assets.map((a) => (
+                <Link key={a.id} to={`/deals/${a.id}`} className="asset-row">
+                  <span className="asset-row-name">
+                    <span className="asset-row-title">{a.name}</span>
+                    <StageTag stage={a.stage} />
+                  </span>
+                  <span className="asset-row-facts">
+                    {(a.counties.length > 0 || a.states.length > 0) && <ChipList items={[...a.counties, ...a.states]} max={4} />}
+                    {a.assetTypes.length > 0 && <ChipList items={a.assetTypes} />}
+                    {a.operator && <span>{a.operator}</span>}
+                    {a.rrc && <span>RRC {a.rrc}</span>}
+                  </span>
+                  <span className="asset-row-num">{a.nra != null ? <><strong>{num(a.nra)}</strong> NRA</> : "—"}</span>
+                  <span className="asset-row-num muted">{a.ourPrice != null ? `Our ${money(a.ourPrice)}` : ""}</span>
+                  <span className="asset-row-num asset-ask">{a.askPrice != null ? `Ask ${money(a.askPrice)}` : ""}</span>
+                  <span className="asset-row-badges">
+                    {a.publishedToPortal && <Tag tone="success" dot>Published</Tag>}
+                    {a.selectedBuyer && <Tag tone="accent">→ {a.selectedBuyer.name}</Tag>}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </div>
         </>
       )}
     </div>
@@ -600,24 +635,12 @@ function econTotals(e: EconForm) {
   return { nma: numOrNull(e.nma), nra: numOrNull(e.nra), daysToClose: dtc };
 }
 
-function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDetailData; users: UserLite[]; canEdit: boolean; onSaved: () => void }) {
+function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved: () => void }) {
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState(deal);
   const abstractLabel = useAbstractLabels(deal.abstractIds);
-  // Assigned team members are a core deal characteristic, so they live in this
-  // card. Selection is OPTIMISTIC: the chip appears/disappears instantly and
-  // the PATCH runs in the background — no server round-trip between click and
-  // feedback (the old flow re-fetched the whole deal per click, which made the
-  // control feel sluggish). On failure the previous selection is restored.
-  const [assigneeIds, setAssigneeIds] = useState<string[]>((deal.assignees ?? []).map((a) => a.id));
-  useEffect(() => { setAssigneeIds((deal.assignees ?? []).map((a) => a.id)); }, [deal]);
-  function saveAssignees(next: string[]) {
-    const prev = assigneeIds;
-    setAssigneeIds(next);
-    api.patch(`/deals/${deal.id}`, { assigneeIds: next })
-      .then(() => onSaved())
-      .catch((e) => { setAssigneeIds(prev); showToast(e instanceof ApiError ? e.message : "Could not update assignees"); });
-  }
+  // Team assignment is deliberately not shown or edited on the deal page; the
+  // deal's assignees are left untouched by every save below.
   // Seed the multi-state field from a legacy single `state` when needed. The
   // seed is also the dirty baseline for the unsaved-changes guard.
   const seed = useMemo(() => ({ ...deal, states: deal.states?.length ? deal.states : (deal.state ? [deal.state] : []) }), [deal]);
@@ -670,61 +693,61 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
     onSaved(); // editing characteristics auto-refreshes matches
   }
 
+  const list = (xs: readonly (string | null | undefined)[]) => xs.filter(Boolean).join(", ") || null;
+  const states = deal.states?.length ? deal.states : [deal.state];
+  // Our cost / asking price (totals and per-acre) and the implied margin are in
+  // the summary strip above the card.
+  const groups: { title: string; rows: { k: string; v: string | null }[] }[] = [
+    {
+      title: "Location",
+      rows: [
+        { k: "State", v: list(states) },
+        { k: "County", v: list(deal.counties) },
+        // Label the abstract with its county only when unambiguous.
+        { k: deal.abstractIds.length > 1 ? "Abstracts" : "Abstract", v: deal.abstractIds.length ? abstractLabel : null },
+        { k: "Basin", v: list(deal.basins) },
+        { k: "Formation", v: list(deal.formations) },
+        { k: "Operator", v: deal.operator },
+        { k: "RRC number", v: deal.rrc },
+      ],
+    },
+    {
+      title: "Interest & terms",
+      rows: [
+        { k: "Asset type", v: list(deal.assetTypes.map((t) => ASSET_TYPE_LABELS[t] ?? t)) },
+        { k: "Royalty rate", v: royaltyLabel(deal.royaltyRate) || null },
+        { k: "NMA", v: deal.acreageNma != null ? num(deal.acreageNma) : null },
+        { k: "NRA", v: deal.nra != null ? num(deal.nra) : null },
+        { k: "Est. closing costs", v: deal.estimatedClosingCosts != null ? money(deal.estimatedClosingCosts) : null },
+        { k: "Days to close", v: deal.daysToClose != null ? `${deal.daysToClose} days` : null },
+      ],
+    },
+  ];
+
   return (
-    <div className="panel">
-      <div className="section-head">
-        <h3>Deal characteristics</h3>
-        {edit ? <div className="row"><button className="small" onClick={discard}>Cancel</button><button className="small primary" onClick={save}>Save</button></div>
+    <div className="panel dd-card ddc-card">
+      <div className="dd-card-head">
+        <h3 className="dd-card-title">Deal characteristics</h3>
+        {edit ? <div className="dd-card-actions"><button className="small" onClick={discard}>Cancel</button><button className="small primary" onClick={save}>Save</button></div>
           : <button className="small" onClick={() => setEdit(true)}>Edit</button>}
       </div>
-      {!edit ? (<>
-        <div className="ddc-grid">
-          <DKV k="State" v={(deal.states?.length || deal.state) ? <ChipList items={deal.states?.length ? deal.states : [deal.state]} /> : null} />
-          <DKV k="County" v={deal.counties.length ? <ChipList items={deal.counties} /> : null} />
-          <DKV k="Basin" v={deal.basins.length ? <ChipList items={deal.basins} /> : null} />
-          <DKV k="Formation" v={deal.formations.length ? <ChipList items={deal.formations} /> : null} />
-          <DKV k="Asset Type" v={deal.assetTypes.length ? <ChipList items={deal.assetTypes} /> : null} />
-          <DKV k="Royalty Rate" v={royaltyLabel(deal.royaltyRate) || null} mono />
-          <DKV k="NMA" v={deal.acreageNma != null ? num(deal.acreageNma) : null} mono />
-          <DKV k="NRA" v={deal.nra != null ? num(deal.nra) : null} mono />
-          <DKV k="Our Cost" v={deal.ourPrice != null ? money(deal.ourPrice) : null} mono />
-          <DKV k="Our Cost per NMA" v={deal.ourCostPerNma != null ? money(deal.ourCostPerNma, { cents: true }) : null} mono />
-          <DKV k="Our Cost per NRA" v={deal.ourCostPerNra != null ? money(deal.ourCostPerNra, { cents: true }) : null} mono />
-          <DKV k="Asking Price (to buyers)" v={deal.askPrice != null ? money(deal.askPrice) : null} mono accent />
-          <DKV k="Asking Price per NMA" v={deal.askPricePerNma != null ? money(deal.askPricePerNma, { cents: true }) : null} mono />
-          <DKV k="Asking Price per NRA" v={deal.askPricePerNra != null ? money(deal.askPricePerNra, { cents: true }) : null} mono />
-          <DKV k="Est. Closing Costs" v={deal.estimatedClosingCosts != null ? money(deal.estimatedClosingCosts) : null} mono />
-          <DKV k="Days to Close" v={deal.daysToClose != null ? `${deal.daysToClose} days` : null} mono />
-          <DKV k="Operator" v={deal.operator} />
-          <DKV k="RRC" v={deal.rrc} />
-          {/* Label the abstract with its county only when unambiguous. */}
-          <DKV k={deal.abstractIds.length > 1 ? "Abstracts" : "Abstract"} v={abstractLabel || null} span2 />
-        </div>
-        {/* Derived economics — per-NRA figures and the implied ask-over-cost
-            margin, computed from the deal's own numbers (shown when they exist). */}
-        {deal.ourPrice != null && deal.nra ? (
-          <div className="ddc-strip">
-            <div>
-              <div className="ddx-label">Our $ / NRA</div>
-              <div className="ddc-strip-v">{money(Math.round(deal.ourPrice / deal.nra))}</div>
+      {!edit ? (
+        <div className="dd-card-body ddc-view">
+          {groups.map((g) => (
+            <div key={g.title} className="ddc-group">
+              <div className="ddc-group-title">{g.title}</div>
+              <div className="ddc-rows">
+                {g.rows.map((r) => (
+                  <div key={r.k} className="ddc-row">
+                    <span className="ddc-k">{r.k}</span>
+                    <span className={`ddc-v ${r.v ? "" : "dim"}`} title={r.v ?? undefined}>{r.v ?? "—"}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-            {deal.askPrice != null && (
-              <div>
-                <div className="ddx-label">Ask $ / NRA</div>
-                <div className="ddc-strip-v dim">{money(Math.round(deal.askPrice / deal.nra))}</div>
-              </div>
-            )}
-            {deal.askPrice != null && deal.ourPrice > 0 && (
-              <div>
-                <div className="ddx-label">Implied Margin</div>
-                <div className={`ddc-strip-v ${deal.askPrice >= deal.ourPrice ? "pos" : "neg"}`}>
-                  {deal.askPrice >= deal.ourPrice ? "+" : ""}{Math.round(((deal.askPrice - deal.ourPrice) / deal.ourPrice) * 100)}%
-                </div>
-              </div>
-            )}
-          </div>
-        ) : null}
-      </>) : (<>
+          ))}
+        </div>
+      ) : (<div className="dd-card-body">
         <div className="dd-grid">
           <GeoFields
             states={f.states ?? []} onStatesChange={setArr("states")}
@@ -733,59 +756,44 @@ function CharacteristicsCard({ deal, users, canEdit, onSaved }: { deal: DealDeta
           />
           <Fld l="Basin"><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(f.counties))} value={f.basins} onChange={setArr("basins")} placeholder="Search basins…" /></Fld>
           <Fld l="Formation"><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(f.counties))} value={f.formations} onChange={setArr("formations")} placeholder="Search formations…" /></Fld>
-          <Fld l="Asset Type"><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={f.assetTypes} onChange={setArr("assetTypes")} placeholder="Search asset types…" /></Fld>
+          <Fld l="Asset type"><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={f.assetTypes} onChange={setArr("assetTypes")} placeholder="Search asset types…" /></Fld>
           {/* Operator names run long — give the picker two columns. */}
           <div className="field" style={{ gridColumn: "span 2" }}>
             <label>Operator</label>
             <OperatorSelect states={f.states ?? []} counties={f.counties} value={f.operator ?? ""} onChange={(v) => setF((p) => ({ ...p, operator: v || null }))} />
           </div>
-          <Fld l="RRC">
+          <Fld l="RRC number">
             <input value={f.rrc ?? ""} onChange={set("rrc")} placeholder="RRC Number" />
           </Fld>
         </div>
         <div className="modal-sec">Economics <span className="modal-sec-hint">· with a royalty rate, NMA and NRA calculate each other; enter any one of a price's total, per NMA or per NRA</span></div>
         <div className="dd-grid">
-          <Fld l="Royalty Rate">
+          <Fld l="Royalty rate">
             <Select value={econ.royaltyRate} onChange={(v) => editAcreage({ royaltyRate: v })} options={royaltyOptions(econ.royaltyRate || null)}
               clearable placeholder="Select royalty rate…" ariaLabel="Royalty rate" />
           </Fld>
           <Fld l="NMA"><input type="number" value={econ.nma} onChange={(e) => editAcreage({ nma: e.target.value })} aria-label="NMA" /><AcreageNote s={econ} field="nma" /></Fld>
           <Fld l="NRA"><input type="number" value={econ.nra} onChange={(e) => editAcreage({ nra: e.target.value })} aria-label="NRA" /><AcreageNote s={econ} field="nra" /></Fld>
-          <Fld l="Our Cost per NMA"><MoneyInput decimals={2} value={econ.cost.perNma} onChange={editPrice("cost", "perNma")} ariaLabel="Our cost per NMA" placeholder="0.00" /></Fld>
-          <Fld l="Our Cost per NRA"><MoneyInput decimals={2} value={econ.cost.perNra} onChange={editPrice("cost", "perNra")} ariaLabel="Our cost per NRA" placeholder="0.00" /></Fld>
-          <Fld l="Our Cost">
+          <Fld l="Our cost per NMA"><MoneyInput decimals={2} value={econ.cost.perNma} onChange={editPrice("cost", "perNma")} ariaLabel="Our cost per NMA" placeholder="0.00" /></Fld>
+          <Fld l="Our cost per NRA"><MoneyInput decimals={2} value={econ.cost.perNra} onChange={editPrice("cost", "perNra")} ariaLabel="Our cost per NRA" placeholder="0.00" /></Fld>
+          <Fld l="Our cost">
             <MoneyInput value={econ.cost.total} onChange={editPrice("cost", "total")} ariaLabel="Our cost" placeholder="0" />
             <PriceNote g={econ.cost} />
           </Fld>
-          <Fld l="Asking Price per NMA"><MoneyInput decimals={2} value={econ.ask.perNma} onChange={editPrice("ask", "perNma")} ariaLabel="Asking price per NMA" placeholder="0.00" /></Fld>
-          <Fld l="Asking Price per NRA"><MoneyInput decimals={2} value={econ.ask.perNra} onChange={editPrice("ask", "perNra")} ariaLabel="Asking price per NRA" placeholder="0.00" /></Fld>
-          <Fld l="Asking Price (to buyers)">
+          <Fld l="Asking price per NMA"><MoneyInput decimals={2} value={econ.ask.perNma} onChange={editPrice("ask", "perNma")} ariaLabel="Asking price per NMA" placeholder="0.00" /></Fld>
+          <Fld l="Asking price per NRA"><MoneyInput decimals={2} value={econ.ask.perNra} onChange={editPrice("ask", "perNra")} ariaLabel="Asking price per NRA" placeholder="0.00" /></Fld>
+          <Fld l="Asking price (to buyers)">
             <MoneyInput value={econ.ask.total} onChange={editPrice("ask", "total")} ariaLabel="Asking price" placeholder="0" />
             <PriceNote g={econ.ask} />
           </Fld>
-          <Fld l="Est. Closing Costs"><MoneyInput value={econ.estimatedClosingCosts} onChange={(v) => setE({ estimatedClosingCosts: v })} ariaLabel="Estimated closing costs" /></Fld>
+          <Fld l="Est. closing costs"><MoneyInput value={econ.estimatedClosingCosts} onChange={(v) => setE({ estimatedClosingCosts: v })} ariaLabel="Estimated closing costs" /></Fld>
           <div className="field" style={{ gridColumn: "span 2" }}>
-            <label title="Days from Date Under Contract to closing · Find Buyer By gets every day beyond 30">Days to Close</label>
+            <label title="Days from Date Under Contract to closing · Find Buyer By gets every day beyond 30">Days to close</label>
             <DaysToCloseField value={econ.daysToClose} onChange={(v) => setE({ daysToClose: v })} />
             {nextClosing && <div className="nd-calc auto">Original closing moves to {fmtDate(nextClosing)}</div>}
           </div>
         </div>
-      </>)}
-
-      {/* Assigned Team Members — a core deal attribute, kept inside this card. */}
-      <div className="ddc-assignees">
-        <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
-          <span className="ddx-label">Assigned Team Members</span>
-          <span className="muted" style={{ fontSize: 12 }}>{assigneeIds.length ? `${assigneeIds.length} assigned` : "Unassigned"}</span>
-        </div>
-        {canEdit ? (
-          <AssigneePicker users={users} value={assigneeIds} onChange={saveAssignees} />
-        ) : (
-          <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-            {assigneeIds.length === 0 ? <span className="muted">Unassigned</span> : (deal.assignees ?? []).map((a) => <UserChip key={a.id} user={a} />)}
-          </div>
-        )}
-      </div>
+      </div>)}
     </div>
   );
 }
@@ -852,22 +860,23 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
   // Vertical milestone timeline: filled glowing dot = milestone date reached;
   // hollow dot = upcoming. Closed Date appears once the deal is closed/has a date.
   const milestones: { label: string; date: string | null; overridden?: boolean; revertKey?: "fbb" | "fc" }[] = [
-    { label: "Under Contract", date: deal.dateUnderContract },
-    { label: "Find Buyer By", date: deal.findBuyerByDate, overridden: deal.findBuyerByIsOverridden, revertKey: "fbb" },
-    { label: "Orig. Closing", date: deal.originalClosingDate },
-    { label: "Final Closing", date: deal.finalClosingDate, overridden: deal.finalClosingIsOverridden, revertKey: "fc" },
+    { label: "Under contract", date: deal.dateUnderContract },
+    { label: "Find buyer by", date: deal.findBuyerByDate, overridden: deal.findBuyerByIsOverridden, revertKey: "fbb" },
+    { label: "Original closing", date: deal.originalClosingDate },
+    { label: "Final closing", date: deal.finalClosingDate, overridden: deal.finalClosingIsOverridden, revertKey: "fc" },
     ...(deal.closedDate || isClosed ? [{ label: "Closed", date: deal.closedDate }] : []),
   ];
 
   return (
-    <div className="panel">
-      <div className="section-head">
-        <h3>Contract timeline</h3>
-        {edit ? <div className="row"><button className="small" onClick={() => setEdit(false)}>Cancel</button><button className="small primary" onClick={save}>Save</button></div>
+    <div className="panel dd-card ctl-card">
+      <div className="dd-card-head">
+        <h3 className="dd-card-title">Contract timeline</h3>
+        {edit ? <div className="dd-card-actions"><button className="small" onClick={() => setEdit(false)}>Cancel</button><button className="small primary" onClick={save}>Save</button></div>
           : <button className="small" onClick={startEdit}>Edit dates</button>}
       </div>
+      <div className="dd-card-body ctl-card-body">
       {noDates && !edit && (
-        <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+        <p className="muted ctl-empty">
           No dates yet — <strong>Edit dates</strong> and set the Under Contract date; Find Buyer By and Final Closing auto-calculate from it.
         </p>
       )}
@@ -887,16 +896,14 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
                     <span className={`ctl-dot ${done ? "done" : ""} ${isNext ? "next" : ""}`} />
                   </div>
                   <div className="ctl-body ctl-row">
-                    <div>
-                      <div className="ctl-toprow">
-                        <span className={`ctl-lbl ${done ? "done" : ""} ${isNext ? "next" : ""}`}>{m.label}{m.overridden && <em style={{ letterSpacing: 0, textTransform: "none" }}> (overridden)</em>}</span>
-                        {m.date && <span className={`ctl-when ${isNext ? "chip" : "pill"}`}>{relDays(m.date)}</span>}
-                      </div>
-                      <div className={`ctl-date ${isNext ? "next" : ""}`}>
-                        {fmtDate(m.date)}
+                    <div className="ctl-text">
+                      <span className={`ctl-lbl ${done ? "done" : ""} ${isNext ? "next" : ""}`}>{m.label}{m.overridden && <em className="ctl-ovr"> (overridden)</em>}</span>
+                      <span className={`ctl-date ${m.date ? "" : "unset"}`}>
+                        {m.date ? fmtDate(m.date) : "Not set"}
                         {m.overridden && m.revertKey && <button className="small" onClick={() => revert(m.revertKey!)}>Revert to auto</button>}
-                      </div>
+                      </span>
                     </div>
+                    {m.date && <span className={`ctl-when ${isNext ? "chip" : "pill"}`}>{relDays(m.date)}</span>}
                   </div>
                 </div>
               );
@@ -905,37 +912,91 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
         </div>
         )
       ) : (
-        <div className="dd-grid">
-          <Fld l="Under Contract"><DateField value={duc} onChange={(v) => setDuc(v)} /></Fld>
-          <Fld l="Find Buyer By"><DateField value={fbb} onChange={(v) => setFbb(v)} /></Fld>
-          <Fld l="Orig. Closing"><DateField value={oc} onChange={(v) => setOc(v)} /></Fld>
-          <Fld l="Final Closing"><DateField value={fc} onChange={(v) => setFc(v)} /></Fld>
-          <Fld l="Closed Date"><DateField value={cd} onChange={(v) => setCd(v)} /></Fld>
+        <div className="dd-grid ctl-edit">
+          <Fld l="Under contract"><DateField value={duc} onChange={(v) => setDuc(v)} /></Fld>
+          <Fld l="Find buyer by"><DateField value={fbb} onChange={(v) => setFbb(v)} /></Fld>
+          <Fld l="Original closing"><DateField value={oc} onChange={(v) => setOc(v)} /></Fld>
+          <Fld l="Final closing"><DateField value={fc} onChange={(v) => setFc(v)} /></Fld>
+          <Fld l="Closed date"><DateField value={cd} onChange={(v) => setCd(v)} /></Fld>
         </div>
       )}
-
+      </div>
     </div>
   );
 }
 
+const PRIORITY_TONE: Record<string, "danger" | "warn" | "success"> = { HIGH: "danger", MEDIUM: "warn", LOW: "success" };
+const PRIORITY_TIP = "Priority is computed automatically from deadline proximity and deal stage — e.g. it relaxes once a buyer is selected and the deal moves to closing.";
 
+/** Stage tag tinted with the stage's (customizable, per-pipeline) colour. */
+function StageTag({ stage, pipelineId }: { stage: string; pipelineId?: string | null }) {
+  const { label, colorOf } = useStages();
+  const c = colorOf(stage, pipelineId);
+  return <span className="tag dd-stage-tag" style={{ color: c, background: `color-mix(in srgb, ${c} 14%, transparent)` }}>{label(stage)}</span>;
+}
 
-
-/** Reference-style KV: uppercase micro-label over a semibold value (mono for
- *  numerics, green accent for the buyer-facing ask price, dimmed em-dash when empty). */
-function DKV({ k, v, mono, accent, span2 }: { k: string; v: React.ReactNode; mono?: boolean; accent?: boolean; span2?: boolean }) {
-  const empty = v == null || v === "";
+/** "Move stage" menu: lists the deal's own pipeline stages; picking one opens
+ *  the standard StageChangeModal pre-set to it (reasons, checks and the
+ *  Closed / Dead confirmations all still apply). */
+function MoveStageMenu({ stage, pipelineId, onPick }: { stage: string; pipelineId?: string | null; onPick: (stage: string) => void }) {
+  const { stagesOf } = useStages();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setOpen(false); } };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey, true);
+    return () => { document.removeEventListener("mousedown", onDoc); document.removeEventListener("keydown", onKey, true); };
+  }, [open]);
   return (
-    <div style={span2 ? { gridColumn: "span 2" } : undefined}>
-      <div className="ddx-label">{k}</div>
-      <div className={`ddx-val${mono && !empty ? " mono" : ""}${accent && !empty ? " pos" : ""}${empty ? " dim" : ""}`}>{empty ? "—" : v}</div>
+    <div className="ovf dd-stage" ref={ref}>
+      <button type="button" className="primary dd-stage-btn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        Move stage <ChevronDown size={13} strokeWidth={2.2} aria-hidden="true" />
+      </button>
+      {open && (
+        <div className="ovf-menu dd-stage-menu" role="menu">
+          {stagesOf(pipelineId).map((s) => (
+            <button key={s.key} type="button" role="menuitem" className={`ovf-item ${s.key === stage ? "current" : ""}`}
+              onClick={() => { setOpen(false); onPick(s.key); }}>
+              <span>{s.label}</span>
+              {s.key === stage && <span className="dd-stage-cur">Current</span>}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
 
-function KV({ k, v }: { k: string; v: React.ReactNode }) {
-  return <div className="kv"><span className="k">{k}</span><span className="v">{v || "—"}</span></div>;
+/** Location card: the embedded deal map with its abstracts and imported tracts. */
+function LocationCard({ deal }: { deal: DealDetailData }) {
+  const abstractLabel = useAbstractLabels(deal.abstractIds);
+  const states = deal.states?.length ? deal.states : [deal.state];
+  const place = [deal.counties.join(", "), states.filter(Boolean).join(", ")].filter(Boolean).join(", ");
+  const sub = [deal.abstractIds.length ? abstractLabel : null, place].filter(Boolean).join(" · ");
+  return (
+    <div className="panel dd-card dd-location">
+      <div className="dd-card-head">
+        <div>
+          <h3 className="dd-card-title">Location</h3>
+          {sub && <div className="dd-card-sub">{sub}</div>}
+        </div>
+        <span className="dd-card-note">This deal's abstracts, imported tracts, and geographic extent</span>
+      </div>
+      <div className="dd-card-body">
+        <Suspense fallback={<Spinner label="Loading map…" />}><DealMap dealId={deal.id} abstractIds={deal.abstractIds} /></Suspense>
+        {deal.abstractIds.length === 0 && (
+          <p className="muted dd-location-hint">
+            No abstracts linked yet — add them under <strong>Deal characteristics → Edit → Abstract</strong> and the map will draw this deal's extent.
+          </p>
+        )}
+      </div>
+    </div>
+  );
 }
+
 function Fld({ l, children }: { l: string; children: React.ReactNode }) {
   return <div className="field"><label>{l}</label>{children}</div>;
 }
