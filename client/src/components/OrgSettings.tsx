@@ -14,7 +14,18 @@ import { ROLE_LABEL } from "../lib/roles";
 // credential, and the API withholds it rather than showing it to everyone.
 interface OrgInfo { id: string; name: string; teamId: string | null; memberCount: number; yourRole: OrgRole | null; yourPermissions: string[] }
 interface Member { id: string; name: string; email: string; phone: string | null; orgRole: OrgRole | null; status: string; lastActiveAt: string | null; avatarColor?: string | null }
-interface Invite { id: string; code: string; reusable: boolean; active: boolean; maxUses: number | null; uses: number; createdAt: string }
+// code is null (codeHidden) when it grants a role the caller may not hand out
+// themselves — the API withholds it. role/expiresAt are null on older codes:
+// Standard User, never expires.
+interface Invite { id: string; code: string | null; codeHidden?: boolean; reusable: boolean; active: boolean; maxUses: number | null; uses: number; role?: OrgRole | null; expiresAt?: string | null; createdAt: string }
+
+/** "expires in N days" for a live code, null once it has lapsed. */
+function inviteExpiryText(expiresAt: string): string | null {
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  if (ms <= 0) return null;
+  const days = Math.ceil(ms / 86_400_000);
+  return `expires in ${days} day${days === 1 ? "" : "s"}`;
+}
 interface RoleRow { role: OrgRole; permissions: string[]; defaults: string[]; editable: boolean; customized: boolean }
 interface RolesResponse { roles: RoleRow[]; permissions: { key: string; label: string; group: string }[]; ownerOnlyActions: string[] }
 
@@ -204,6 +215,8 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
   // Destructive actions confirm through the shared ConfirmDialog (not native confirm()).
   const [removingMember, setRemovingMember] = useState<Member | null>(null);
   const [revokingInvite, setRevokingInvite] = useState<Invite | null>(null);
+  // Role the next generated code hands to whoever joins with it.
+  const [inviteRole, setInviteRole] = useState<OrgRole>("MEMBER");
   const [actionBusy, setActionBusy] = useState(false);
 
   function load() {
@@ -237,8 +250,8 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
     }
     catch (e) { onError(e); } finally { setActionBusy(false); }
   }
-  async function genInvite(reusable: boolean) { try { await api.post("/org/invites", { reusable }); load(); } catch (e) { onError(e); } }
-  async function toggleInvite(i: Invite) { await api.patch(`/org/invites/${i.id}`, { active: !i.active }); load(); }
+  async function genInvite(reusable: boolean) { try { await api.post("/org/invites", { reusable, role: inviteRole }); load(); } catch (e) { onError(e); } }
+  async function toggleInvite(i: Invite) { try { await api.patch(`/org/invites/${i.id}`, { active: !i.active }); load(); } catch (e) { onError(e); } }
   async function revokeInvite(i: Invite) {
     setActionBusy(true);
     try { await api.del(`/org/invites/${i.id}`); setRevokingInvite(null); load(); }
@@ -253,6 +266,9 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
     const base: OrgRole[] = isOrgOwner ? ["ADMIN", "MEMBER", "VIEWER"] : ["MEMBER", "VIEWER"];
     return m.orgRole && m.orgRole !== "OWNER" && !base.includes(m.orgRole) ? [m.orgRole, ...base] : base;
   };
+  // Same limit for invite codes (the server enforces it): the role a code
+  // grants must be one the creator could assign to a member directly.
+  const grantable: OrgRole[] = isOrgOwner ? ["ADMIN", "MEMBER", "VIEWER"] : ["MEMBER", "VIEWER"];
   const legacyCount = members.filter((m) => m.orgRole === "MANAGER").length;
   const activeCount = members.filter((m) => m.status === "ACTIVE").length;
 
@@ -332,9 +348,14 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
           <div className="set-card-pad invite-head">
             <SettingsCardHead
               title="Invite codes"
-              desc="Share a code to let someone join. One-time codes stop working after one use."
+              desc="Share a code to let someone join with a set role. Codes expire after 7 days; one-time codes also stop working after one use."
               aside={
                 <div className="row" style={{ gap: 8 }}>
+                  <div className="invite-role-pick">
+                    <Select value={inviteRole} onChange={(v) => setInviteRole(v as OrgRole)}
+                      width="100%" ariaLabel="Role for new invite codes"
+                      options={grantable.map((r) => ({ value: r, label: ROLE_LABEL[r] }))} />
+                  </div>
                   <button onClick={() => genInvite(false)}>+ One-time code</button>
                   <button className="primary" onClick={() => genInvite(true)}>+ Reusable code</button>
                 </div>
@@ -344,23 +365,40 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
           {invites.length === 0 ? <p className="set-empty">No invite codes yet.</p> : (
             <div className="table-scroll set-table">
               <table className="data-table invite-table">
-                <thead><tr><th>Code</th><th>Type</th><th>Uses</th><th>Status</th><th className="right"><span className="sr-only">Actions</span></th></tr></thead>
+                <thead><tr><th>Code</th><th>Role</th><th>Type</th><th>Uses</th><th>Status</th><th className="right"><span className="sr-only">Actions</span></th></tr></thead>
                 <tbody>
-                  {invites.map((i) => (
-                    <tr key={i.id}>
-                      <td><code className="invite-code">{i.code}</code></td>
-                      <td><Tag>{i.reusable ? "Reusable" : "One-time"}</Tag></td>
-                      <td>{i.uses}{i.maxUses != null ? ` / ${i.maxUses}` : ""}</td>
-                      <td><Tag tone={i.active ? "success" : "neutral"} dot>{i.active ? "Active" : "Disabled"}</Tag></td>
-                      <td className="right">
-                        <div className="invite-actions">
-                          <button className="small" onClick={() => copy(i.code)}>Copy</button>
-                          <button className="small" onClick={() => toggleInvite(i)}>{i.active ? "Disable" : "Enable"}</button>
-                          <button className="small set-btn-danger-text" onClick={() => setRevokingInvite(i)}>Revoke</button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                  {invites.map((i) => {
+                    const role = i.role ?? "MEMBER";
+                    // Codes without an expiry (older ones) show nothing extra.
+                    const expiry = i.expiresAt ? inviteExpiryText(i.expiresAt) : null;
+                    const expired = !!i.expiresAt && !expiry;
+                    return (
+                      <tr key={i.id}>
+                        <td>{i.code ? <code className="invite-code">{i.code}</code> : <span className="invite-hidden">Hidden · owner only</span>}</td>
+                        <td className="invite-role">{ROLE_LABEL[role] ?? role}</td>
+                        <td><Tag>{i.reusable ? "Reusable" : "One-time"}</Tag></td>
+                        <td>{i.uses}{i.maxUses != null ? ` / ${i.maxUses}` : ""}</td>
+                        <td>
+                          <div className="invite-status">
+                            {expired
+                              ? <Tag tone="danger" dot>Expired</Tag>
+                              : <Tag tone={i.active ? "success" : "neutral"} dot>{i.active ? "Active" : "Disabled"}</Tag>}
+                            {expiry && <span className="invite-expiry">{expiry}</span>}
+                          </div>
+                        </td>
+                        <td className="right">
+                          <div className="invite-actions">
+                            {i.code && !expired && <button className="small" onClick={() => copy(i.code!)}>Copy</button>}
+                            {/* An expired code can't be revived, and re-enabling takes the right to grant its role. */}
+                            {!expired && (i.active || grantable.includes(role)) && (
+                              <button className="small" onClick={() => toggleInvite(i)}>{i.active ? "Disable" : "Enable"}</button>
+                            )}
+                            <button className="small set-btn-danger-text" onClick={() => setRevokingInvite(i)}>Revoke</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -405,7 +443,7 @@ function UsersTab({ onFlash, onError }: { onFlash: (m: string) => void; onError:
       {revokingInvite && (
         <ConfirmDialog
           title="Revoke invite code?"
-          message={<>Revoke invite code <code>{revokingInvite.code}</code>? It can no longer be used to join this organization. This can't be undone.</>}
+          message={<>Revoke {revokingInvite.code ? <>invite code <code>{revokingInvite.code}</code></> : "this invite code"}? It can no longer be used to join this organization. This can't be undone.</>}
           confirmLabel="Revoke code"
           danger
           busy={actionBusy}

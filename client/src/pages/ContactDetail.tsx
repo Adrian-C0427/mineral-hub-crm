@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft, Bell, CheckSquare, ChevronDown, ChevronLeft, ChevronRight,
@@ -11,7 +11,7 @@ import { Select } from "../components/Select";
 import { DateField } from "../components/DateField";
 import { Avatar, Segmented, Tag } from "../components/kit";
 import { fmtDate } from "../lib/format";
-import { type ContactRow, TYPES, STATUSES, typeLabel, TypeTag, StatusTag } from "./Contacts";
+import { type ContactRow, TYPES, STATUSES, PREFERRED_CONTACTS, preferredContactLabel, typeLabel, TypeTag, StatusTag } from "./Contacts";
 import { formatPhone, formatPhoneAsYouType, normalizePhone } from "../lib/phone";
 import { useIsPhonePortrait } from "../lib/mobile";
 import type { UserLite } from "../types";
@@ -458,7 +458,13 @@ interface FieldSpec {
     body: (v: string) => Record<string, unknown>;
     /** Refuse an empty value (first / last name). */
     required?: boolean;
+    /** Select only: the choice can be cleared back to "no value". */
+    clearable?: boolean;
   };
+  /** Extra words the field search matches besides the label. */
+  keywords?: string;
+  /** Multi-part fields (mailing address) render their own editor. */
+  custom?: JSX.Element;
 }
 
 function InlineField({ spec, canEdit, onSave }: { spec: FieldSpec; canEdit: boolean; onSave: (body: Record<string, unknown>) => Promise<void> }) {
@@ -496,7 +502,8 @@ function InlineField({ spec, canEdit, onSave }: { spec: FieldSpec; canEdit: bool
       ) : (
         <div className="cw-fedit">
           {spec.edit!.kind === "select" ? (
-            <Select ariaLabel={spec.label} value={v} onChange={(nv) => nv && setV(nv)} options={spec.edit!.options ?? []} />
+            <Select ariaLabel={spec.label} value={v} clearable={spec.edit!.clearable} placeholder={spec.edit!.placeholder}
+              onChange={(nv) => (nv || spec.edit!.clearable) && setV(nv)} options={spec.edit!.options ?? []} />
           ) : spec.edit!.kind === "date" ? (
             <DateField value={v} onChange={setV} />
           ) : (
@@ -509,6 +516,62 @@ function InlineField({ spec, canEdit, onSave }: { spec: FieldSpec; canEdit: bool
               aria-label={spec.label}
             />
           )}
+          <button className="small primary" disabled={!dirty || busy} onClick={() => void save()}>Save</button>
+          <button className="icon-btn" title="Cancel" aria-label="Cancel edit" onClick={() => setEditing(false)}><X size={12} /></button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Mailing address: one dossier field, four parts saved together (like the
+ *  header name editor). Blank parts are stored empty. */
+function AddressField({ contact, canEdit, onSave }: { contact: ContactRow; canEdit: boolean; onSave: (body: Record<string, unknown>) => Promise<void> }) {
+  const cur = { street: contact.mailingStreet ?? "", city: contact.mailingCity ?? "", state: contact.mailingState ?? "", zip: contact.mailingZip ?? "" };
+  const [editing, setEditing] = useState(false);
+  const [a, setA] = useState(cur);
+  const [busy, setBusy] = useState(false);
+  const dirty = a.street.trim() !== cur.street || a.city.trim() !== cur.city || a.state.trim() !== cur.state || a.zip.trim() !== cur.zip;
+
+  const start = () => { if (!canEdit) return; setA(cur); setEditing(true); };
+  const save = async () => {
+    if (!dirty || busy) return;
+    setBusy(true);
+    try {
+      await onSave({
+        mailingStreet: a.street.trim() || null, mailingCity: a.city.trim() || null,
+        mailingState: a.state.trim() || null, mailingZip: a.zip.trim() || null,
+      });
+      setEditing(false);
+    } finally { setBusy(false); }
+  };
+  const keys = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") { e.preventDefault(); void save(); }
+    if (e.key === "Escape") setEditing(false);
+  };
+  const line2 = [[cur.city, cur.state].filter(Boolean).join(", "), cur.zip].filter(Boolean).join(" ");
+  const has = cur.street !== "" || line2 !== "";
+
+  return (
+    <div>
+      <div className="cw-flbl">Mailing address</div>
+      {!editing ? (
+        <div
+          className={`cw-fval ${has ? "" : "empty"} ${canEdit ? "editable" : ""}`}
+          role={canEdit ? "button" : undefined} tabIndex={canEdit ? 0 : undefined}
+          title={canEdit ? "Edit mailing address" : undefined}
+          onClick={start}
+          onKeyDown={canEdit ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); start(); } } : undefined}
+        >
+          {has ? <span>{cur.street}{cur.street && line2 ? <br /> : null}{line2}</span> : "—"}
+          {canEdit && <Pencil size={10} className="cw-fpen" aria-hidden="true" />}
+        </div>
+      ) : (
+        <div className="cw-fedit" style={{ flexWrap: "wrap" }}>
+          <input autoFocus value={a.street} maxLength={300} onChange={(e) => setA({ ...a, street: e.target.value })} placeholder="Street" aria-label="Mailing street" style={{ flex: "1 1 100%", minWidth: 0 }} onKeyDown={keys} />
+          <input value={a.city} maxLength={120} onChange={(e) => setA({ ...a, city: e.target.value })} placeholder="City" aria-label="Mailing city" style={{ flex: "2 1 90px", minWidth: 0 }} onKeyDown={keys} />
+          <input value={a.state} maxLength={50} onChange={(e) => setA({ ...a, state: e.target.value })} placeholder="State" aria-label="Mailing state" style={{ flex: "1 1 50px", minWidth: 0 }} onKeyDown={keys} />
+          <input value={a.zip} maxLength={20} onChange={(e) => setA({ ...a, zip: e.target.value })} placeholder="ZIP" aria-label="Mailing ZIP" style={{ flex: "1 1 60px", minWidth: 0 }} onKeyDown={keys} />
           <button className="small primary" disabled={!dirty || busy} onClick={() => void save()}>Save</button>
           <button className="icon-btn" title="Cancel" aria-label="Cancel edit" onClick={() => setEditing(false)}><X size={12} /></button>
         </div>
@@ -554,6 +617,19 @@ function FieldSections({ contact, canManage, onSave }: { contact: ContactRow; ca
           label: "Email",
           display: contact.email ? <a href={`mailto:${contact.email}`} onClick={(e) => e.stopPropagation()}>{contact.email}</a> : null,
           edit: { kind: "text", value: contact.email ?? "", placeholder: "name@example.com", body: (v) => ({ email: v.trim() || null }) },
+        },
+        {
+          label: "Preferred contact", display: preferredContactLabel(contact.preferredContact),
+          keywords: "call text mail method",
+          edit: {
+            kind: "select", value: contact.preferredContact ?? "", clearable: true, placeholder: "No preference",
+            options: PREFERRED_CONTACTS.map(([v, l]) => ({ value: v, label: l })), body: (v) => ({ preferredContact: v || null }),
+          },
+        },
+        {
+          label: "Mailing address", display: null,
+          keywords: "street city state zip postal",
+          custom: <AddressField contact={contact} canEdit={canManage} onSave={onSave} />,
         },
       ],
     },
@@ -609,7 +685,7 @@ function FieldSections({ contact, canManage, onSave }: { contact: ContactRow; ca
   ];
   const needle = q.trim().toLowerCase();
   const visible = needle
-    ? sections.map((s) => ({ ...s, rows: s.rows.filter((r) => r.label.toLowerCase().includes(needle)) })).filter((s) => s.rows.length)
+    ? sections.map((s) => ({ ...s, rows: s.rows.filter((r) => `${r.label} ${r.keywords ?? ""}`.toLowerCase().includes(needle)) })).filter((s) => s.rows.length)
     : sections;
 
   return (
@@ -629,7 +705,9 @@ function FieldSections({ contact, canManage, onSave }: { contact: ContactRow; ca
             </button>
             {isOpen && (
               <div className="cw-sec-body">
-                {s.rows.map((r) => <InlineField key={r.label} spec={r} canEdit={canManage} onSave={onSave} />)}
+                {s.rows.map((r) => r.custom
+                  ? <Fragment key={r.label}>{r.custom}</Fragment>
+                  : <InlineField key={r.label} spec={r} canEdit={canManage} onSave={onSave} />)}
               </div>
             )}
           </div>

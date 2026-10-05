@@ -202,10 +202,10 @@ authRouter.post(
 
     const user = await prisma.$transaction(async (tx) => {
       let organizationId: string;
-      let orgRole: "OWNER" | "MEMBER";
+      let orgRole: "OWNER" | "ADMIN" | "MEMBER" | "VIEWER";
       if (join) {
         organizationId = join.organizationId;
-        orgRole = "MEMBER";
+        orgRole = join.role; // the invite code's role; MEMBER for a Team ID or a role-less code
         await consumeInvite(join.inviteCodeId, tx);
       } else {
         const org = await createOrganization(`${data.firstName} ${data.lastName}'s Workspace`, tx);
@@ -431,18 +431,18 @@ authRouter.post(
       await consumeInvite(join.inviteCodeId, tx);
       await tx.user.update({
         where: { id: req.user!.id },
-        data: { organizationId: join.organizationId, orgRole: "MEMBER" },
+        data: { organizationId: join.organizationId, orgRole: join.role },
       });
     });
-    // No teamId in the response. The caller joins as a MEMBER, which is not a
-    // role that gets the join key — and when they redeemed a single-use INVITE
+    // No teamId in the response. The caller usually joins as a MEMBER, which is
+    // not a role that gets the join key — and when they redeemed a single-use INVITE
     // code rather than the Team ID, echoing it here would upgrade that one-shot
     // code into the org's permanent one.
     const org = await prisma.organization.findUnique({
       where: { id: join.organizationId },
       select: { id: true, name: true },
     });
-    res.json({ organization: org, orgRole: "MEMBER" });
+    res.json({ organization: org, orgRole: join.role });
   }),
 );
 
@@ -820,10 +820,10 @@ authRouter.get(
         }
         user = await prisma.$transaction(async (tx) => {
           let organizationId: string;
-          let orgRole: "OWNER" | "MEMBER";
+          let orgRole: "OWNER" | "ADMIN" | "MEMBER" | "VIEWER";
           if (join) {
             organizationId = join.organizationId;
-            orgRole = "MEMBER";
+            orgRole = join.role; // the invite code's role; MEMBER for a Team ID or a role-less code
             await consumeInvite(join.inviteCodeId, tx);
           } else {
             const org = await createOrganization(`${profile.name ?? profile.email}'s Workspace`, tx);

@@ -212,11 +212,15 @@ const STATUS_CLASS: Record<string, string> = {
   REVIEWING: "resp-interested",
   INTERESTED: "resp-interested",
   CONTACTED: "resp-pending",
+  NO_RESPONSE: "resp-noresponse",
   PASSED: "resp-passed",
 };
 
+// Labels prettyEnum would get wrong (it title-cases every word).
+const STATUS_LABEL: Record<string, string> = { NO_RESPONSE: "No response" };
+
 export function StatusBadge({ status, label }: { status: string; label?: string }) {
-  return <span className={`badge ${STATUS_CLASS[status] ?? ""}`}>{label ?? prettyEnum(status)}</span>;
+  return <span className={`badge ${STATUS_CLASS[status] ?? ""}`}>{label ?? STATUS_LABEL[status] ?? prettyEnum(status)}</span>;
 }
 
 export function MetricCard({ label, value, hint, valueColor }: { label: string; value: ReactNode; hint?: string; valueColor?: string }) {

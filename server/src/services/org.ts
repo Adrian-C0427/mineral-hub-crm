@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { HttpError } from "../middleware/errors.js";
-import { resolvePermissions, type OrgRole } from "../domain/permissions.js";
+import { ASSIGNABLE_ROLES, resolvePermissions, type OrgRole } from "../domain/permissions.js";
 import { getRoleOverride } from "./rolePermCache.js";
 
 // Unambiguous alphabet (no 0/O/1/I) for human-shareable codes.
@@ -102,33 +102,86 @@ export async function revokeInvitesKnownTo(
   return count;
 }
 
-export interface ResolvedJoin {
-  organizationId: string;
-  inviteCodeId: string | null;
+/** A role someone can be given: by a role change or by an invite code. Never OWNER. */
+export type GrantableRole = "ADMIN" | "MEMBER" | "VIEWER";
+
+/** New invite codes stop working this many days after they are created. */
+export const INVITE_TTL_DAYS = 7;
+
+export function inviteExpiryFrom(now: Date = new Date()): Date {
+  return new Date(now.getTime() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000);
 }
 
 /**
+ * The one rule for handing a role to someone else, shared by "change a member's
+ * role" (PATCH /org/members/:userId) and invite codes (which hand the role to
+ * whoever redeems them). OWNER is never grantable — ownership only moves through
+ * transfer-ownership — and only the owner can designate administrators.
+ */
+export function assertCanGrantRole(callerRole: OrgRole | null, role: OrgRole): asserts role is GrantableRole {
+  if (!ASSIGNABLE_ROLES.includes(role)) throw new HttpError(400, "That role cannot be assigned");
+  if (role === "ADMIN" && callerRole !== "OWNER") {
+    throw new HttpError(403, "Only the owner can designate administrators");
+  }
+}
+
+/** Non-throwing form of assertCanGrantRole, for deciding what a caller may see. */
+export function canGrantRole(callerRole: OrgRole | null, role: OrgRole): boolean {
+  return ASSIGNABLE_ROLES.includes(role) && (role !== "ADMIN" || callerRole === "OWNER");
+}
+
+export interface ResolvedJoin {
+  organizationId: string;
+  inviteCodeId: string | null;
+  /** Role the joiner receives. A Team ID, or a code with no role, gives MEMBER. */
+  role: GrantableRole;
+}
+
+/** The slice of the Prisma client resolveJoinToken reads (lets tests pass a fake). */
+type JoinLookupClient = {
+  organization: Pick<typeof prisma.organization, "findUnique">;
+  inviteCode: Pick<typeof prisma.inviteCode, "findUnique">;
+};
+
+/**
  * Resolve a join token that may be either an Organization Team ID or an InviteCode.
- * Validates invite-code active/exhausted state. Throws HttpError on invalid tokens.
+ * Validates invite-code active/expired/exhausted state and works out the role the
+ * joiner gets. Throws HttpError on invalid tokens. This is the single gate every
+ * redeem path goes through (register, SSO sign-up, POST /auth/join).
  * Does NOT mutate usage counts — call consumeInvite after a successful join.
  */
-export async function resolveJoinToken(rawToken: string): Promise<ResolvedJoin> {
+export async function resolveJoinToken(
+  rawToken: string,
+  db: JoinLookupClient = prisma,
+  now: Date = new Date(),
+): Promise<ResolvedJoin> {
   const token = rawToken.trim();
   if (!token) throw new HttpError(400, "Enter a Team ID or invite code");
 
   // Team ID (always-valid reusable join key)
-  const org = await prisma.organization.findUnique({ where: { teamId: token } });
-  if (org) return { organizationId: org.id, inviteCodeId: null };
+  const org = await db.organization.findUnique({ where: { teamId: token } });
+  if (org) return { organizationId: org.id, inviteCodeId: null, role: "MEMBER" };
 
   // Invite code
-  const invite = await prisma.inviteCode.findUnique({ where: { code: token } });
+  const invite = await db.inviteCode.findUnique({ where: { code: token } });
   if (!invite) throw new HttpError(404, "That Team ID or invite code was not found");
   if (!invite.active) throw new HttpError(400, "That invite code has been disabled");
+  // expiresAt NULL = a code from before expiry existed: never expires.
+  if (invite.expiresAt && invite.expiresAt.getTime() <= now.getTime()) {
+    throw new HttpError(400, "That invite code has expired");
+  }
   const cap = invite.reusable ? invite.maxUses : 1;
   if (cap != null && invite.uses >= cap) {
     throw new HttpError(400, "That invite code has already been used");
   }
-  return { organizationId: invite.organizationId, inviteCodeId: invite.id };
+  // role NULL = a code from before roles existed: MEMBER, as always. Anything
+  // that is not an assignable role (OWNER, retired MANAGER) can only have been
+  // written around the API, so the code is refused rather than honored.
+  const role: OrgRole = (invite.role as OrgRole | null) ?? "MEMBER";
+  if (role !== "ADMIN" && role !== "MEMBER" && role !== "VIEWER") {
+    throw new HttpError(400, "That invite code is not valid");
+  }
+  return { organizationId: invite.organizationId, inviteCodeId: invite.id, role };
 }
 
 /** Increment usage after a successful join. */

@@ -181,6 +181,7 @@ input[type="radio"]:disabled { opacity: 0.5; cursor: not-allowed; }
 .resp-interested, :root[data-theme="light"] .resp-interested { --pill-c: var(--accent); background: color-mix(in srgb, var(--pill-c) 13%, transparent); color: color-mix(in srgb, var(--pill-c) 62%, var(--ink-strong)); }
 .resp-pending, :root[data-theme="light"] .resp-pending,
 .resp-no, :root[data-theme="light"] .resp-no,
+.resp-noresponse, :root[data-theme="light"] .resp-noresponse,
 .resp-passed, :root[data-theme="light"] .resp-passed { --pill-c: var(--ink-3); background: var(--neutral-tint); color: var(--ink-2); }
 .stage-under_contract, :root[data-theme="light"] .stage-under_contract { --pill-c: var(--accent); }
 .stage-preparing_package, :root[data-theme="light"] .stage-preparing_package { --pill-c: #8B5CF6; }

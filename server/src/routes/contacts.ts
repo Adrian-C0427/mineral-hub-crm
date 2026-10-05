@@ -23,6 +23,8 @@ contactsRouter.use(requireAuth, requireOrg);
 
 export const CONTACT_TYPES = ["SELLER", "PROSPECT", "LEAD", "REFERRAL", "OTHER"] as const;
 export const CONTACT_STATUSES = ["NEW", "CONTACTED", "ENGAGED", "NEGOTIATING", "CONVERTED", "NOT_INTERESTED"] as const;
+// How the contact prefers to be reached. Optional: NULL = no preference recorded.
+export const PREFERRED_CONTACTS = ["CALL", "TEXT", "EMAIL", "MAIL"] as const;
 
 type ContactWithOwner = Contact & { owner: Pick<User, "id" | "name" | "avatarColor"> | null; lists?: { id: string }[] };
 
@@ -37,6 +39,11 @@ const serialize = (c: ContactWithOwner) => ({
   source: c.source,
   email: c.email,
   phone: c.phone,
+  preferredContact: c.preferredContact,
+  mailingStreet: c.mailingStreet,
+  mailingCity: c.mailingCity,
+  mailingState: c.mailingState,
+  mailingZip: c.mailingZip,
   states: c.states,
   counties: c.counties,
   notes: c.notes,
@@ -52,6 +59,9 @@ const serialize = (c: ContactWithOwner) => ({
 const dateField = z.string().datetime({ offset: true }).or(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).nullish()
   .transform((v) => (v ? new Date(v.length === 10 ? `${v}T00:00:00Z` : v) : null));
 
+// Optional free-text field: trimmed, and a blank string clears it (stored NULL).
+const optionalText = (max: number) => z.string().trim().max(max).nullish().transform((v) => (v === undefined ? undefined : v || null));
+
 const upsertSchema = z.object({
   firstName: z.string().trim().min(1).max(200),
   lastName: z.string().trim().min(1).max(200),
@@ -61,6 +71,11 @@ const upsertSchema = z.object({
   source: z.string().trim().max(300).nullish(),
   email: z.string().trim().email().max(320).nullish().or(z.literal("").transform(() => null)),
   phone: z.string().trim().max(50).nullish(),
+  preferredContact: z.enum(PREFERRED_CONTACTS).nullish().or(z.literal("").transform(() => null)),
+  mailingStreet: optionalText(300),
+  mailingCity: optionalText(120),
+  mailingState: optionalText(50),
+  mailingZip: optionalText(20),
   states: z.array(z.string().max(50)).max(100).optional(),
   counties: z.array(z.string().max(200)).max(500).optional(),
   notes: z.string().max(10_000).nullish(),
@@ -111,6 +126,11 @@ contactsRouter.post(
         source: data.source ?? null,
         email: data.email ?? null,
         phone: data.phone ?? null,
+        preferredContact: data.preferredContact ?? null,
+        mailingStreet: data.mailingStreet ?? null,
+        mailingCity: data.mailingCity ?? null,
+        mailingState: data.mailingState ?? null,
+        mailingZip: data.mailingZip ?? null,
         states: data.states ?? [],
         counties: data.counties ?? [],
         notes: data.notes ?? null,
@@ -144,6 +164,11 @@ contactsRouter.patch(
         ...(data.source !== undefined ? { source: data.source ?? null } : {}),
         ...(data.email !== undefined ? { email: data.email ?? null } : {}),
         ...(data.phone !== undefined ? { phone: data.phone ?? null } : {}),
+        ...(data.preferredContact !== undefined ? { preferredContact: data.preferredContact ?? null } : {}),
+        ...(data.mailingStreet !== undefined ? { mailingStreet: data.mailingStreet ?? null } : {}),
+        ...(data.mailingCity !== undefined ? { mailingCity: data.mailingCity ?? null } : {}),
+        ...(data.mailingState !== undefined ? { mailingState: data.mailingState ?? null } : {}),
+        ...(data.mailingZip !== undefined ? { mailingZip: data.mailingZip ?? null } : {}),
         ...(data.states !== undefined ? { states: data.states } : {}),
         ...(data.counties !== undefined ? { counties: data.counties } : {}),
         ...(data.notes !== undefined ? { notes: data.notes ?? null } : {}),
@@ -511,6 +536,11 @@ const CONTACT_IMPORT_FIELDS: { key: string; label: string; required?: boolean }[
   { key: "counties", label: "County(ies)" },
   { key: "tags", label: "Tags" },
   { key: "notes", label: "Notes" },
+  { key: "mailingStreet", label: "Mailing Street" },
+  { key: "mailingCity", label: "Mailing City" },
+  { key: "mailingState", label: "Mailing State" },
+  { key: "mailingZip", label: "Mailing Zip" },
+  { key: "preferredContact", label: "Preferred Contact" },
 ];
 
 const MAX_CONTACT_IMPORT_ROWS = 20_000;
@@ -556,6 +586,11 @@ function chunk<T>(items: T[], size: number): T[][] {
 const splitMulti = (v: string): string[] => v.split(/[;,|]/).map((x) => x.trim()).filter(Boolean);
 const normPhone = (v: string): string => v.replace(/\D/g, "");
 
+/** Map a CSV "preferred contact" cell to its key; anything unrecognised is left blank. */
+const PREFERRED_ALIASES: Record<string, (typeof PREFERRED_CONTACTS)[number]> = {
+  CALL: "CALL", PHONE: "CALL", TEXT: "TEXT", SMS: "TEXT", EMAIL: "EMAIL", "E-MAIL": "EMAIL", MAIL: "MAIL", LETTER: "MAIL",
+};
+
 function buildContact(row: Record<string, string>, mapping: Record<string, string>) {
   const get = (f: string): string => (mapping[f] ? (row[mapping[f]] ?? "").trim() : "");
   const type = get("type").toUpperCase().replace(/\s+/g, "_");
@@ -573,6 +608,12 @@ function buildContact(row: Record<string, string>, mapping: Record<string, strin
     counties: mapping.counties ? splitMulti(get("counties")) : [],
     tags: mapping.tags ? splitMulti(get("tags")) : [],
     notes: get("notes") || null,
+    // Same length caps as the create/update schema.
+    mailingStreet: get("mailingStreet").slice(0, 300) || null,
+    mailingCity: get("mailingCity").slice(0, 120) || null,
+    mailingState: get("mailingState").slice(0, 50) || null,
+    mailingZip: get("mailingZip").slice(0, 20) || null,
+    preferredContact: PREFERRED_ALIASES[get("preferredContact").toUpperCase()] ?? null,
   };
 }
 
@@ -597,6 +638,11 @@ contactsRouter.post(
       counties: ["county", "counties"],
       tags: ["tags", "labels"],
       notes: ["notes", "comments"],
+      mailingStreet: ["mailing street", "mailing address", "street", "street address", "address"],
+      mailingCity: ["mailing city", "city"],
+      mailingState: ["mailing state"],
+      mailingZip: ["mailing zip", "zip", "zip code", "zipcode", "postal code"],
+      preferredContact: ["preferred contact", "preferred contact method", "contact preference"],
     };
     for (const f of CONTACT_IMPORT_FIELDS) {
       const hit = headers.find((h) => {
@@ -729,6 +775,11 @@ contactsRouter.post(
             email: ex.email ?? r.contact.email,
             phone: ex.phone ?? r.contact.phone,
             notes: ex.notes ?? r.contact.notes,
+            mailingStreet: ex.mailingStreet ?? r.contact.mailingStreet,
+            mailingCity: ex.mailingCity ?? r.contact.mailingCity,
+            mailingState: ex.mailingState ?? r.contact.mailingState,
+            mailingZip: ex.mailingZip ?? r.contact.mailingZip,
+            preferredContact: ex.preferredContact ?? r.contact.preferredContact,
             states: ex.states.length ? ex.states : r.contact.states,
             counties: ex.counties.length ? ex.counties : r.contact.counties,
             tags: [...new Set([...ex.tags, ...r.contact.tags])],

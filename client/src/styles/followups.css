@@ -7,3 +7,34 @@
   .va-saved-row { grid-template-columns: 16px minmax(220px, 1.4fr) repeat(5, minmax(90px, 0.8fr)) 110px auto; }
 }
 .va-saved-m.va-saved-deck b { font-size: 13px; font-weight: 400; color: var(--ink-2); white-space: nowrap; }
+
+/* Expenses › category management: colour swatch button + preset popover
+   (same pattern as the pipeline stage colour picker). */
+.xp-cat-color { position: relative; flex: none; display: inline-flex; }
+button.xp-cat-color-btn {
+  width: 26px; height: 26px; min-height: 0; padding: 0; display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: transparent; box-shadow: none;
+}
+button.xp-cat-color-btn:hover { border-color: var(--line-hover-strong); background: transparent; }
+button.xp-cat-color-btn.open { border-color: var(--accent); }
+.xp-cat-color-pop {
+  position: fixed; z-index: calc(var(--z-modal) + 10); padding: 8px;
+  display: grid; grid-template-columns: repeat(5, 24px); gap: 6px;
+  background: var(--surface-3); border: 1px solid var(--line-3); border-radius: var(--radius); box-shadow: var(--shadow-pop);
+}
+button.xp-cat-color-opt { width: 24px; height: 24px; min-height: 0; padding: 0; border: 0; border-radius: var(--radius-sm); box-shadow: none; }
+button.xp-cat-color-opt:hover { border: 0; filter: brightness(1.12); }
+button.xp-cat-color-opt.on { box-shadow: 0 0 0 2px var(--surface-3), 0 0 0 4px currentColor; }
+button.xp-cat-color-default {
+  grid-column: 1 / -1; margin-top: 2px; height: 28px; min-height: 0; padding: 0 8px; display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: transparent; box-shadow: none;
+  font-size: 12px; font-weight: 500; color: var(--ink-2);
+}
+button.xp-cat-color-default:hover { border-color: var(--line-hover-strong); color: var(--ink); background: transparent; }
+button.xp-cat-color-default.on { border-color: var(--accent); color: var(--ink); }
+@media (max-width: 760px) {
+  button.xp-cat-color-btn { width: 36px; height: 36px; }
+  .xp-cat-color-pop { grid-template-columns: repeat(5, 32px); gap: 8px; }
+  button.xp-cat-color-opt { width: 32px; height: 32px; }
+  button.xp-cat-color-default { height: 40px; }
+}
