@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { Link, useParams, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, StageBadge, StatusBadge, OverflowMenu, ConfirmDelete, Modal, ChipList } from "../components/ui";
@@ -435,6 +435,7 @@ export function BuyerProfile() {
             <h3>Deal history</h3>
             <div className="bp-sub">Deals you've sent to this buyer</div>
           </div>
+          <Link to="/deals" className="bp-all-link">All deals →</Link>
         </div>
         {view.dealHistory.length === 0 ? (
           <div className="bp-empty">
@@ -466,6 +467,20 @@ export function BuyerProfile() {
                   </tr>
                 ))}
               </tbody>
+              {/* Totals: how many deals, how many closed, and the closed amount. */}
+              {(() => {
+                const closed = view.dealHistory.filter((h) => h.stage === "CLOSED");
+                const n = view.dealHistory.length;
+                return (
+                  <tfoot>
+                    <tr>
+                      <td colSpan={3}>{n} deal{n === 1 ? "" : "s"} · {closed.length} closed</td>
+                      <td className="right bp-total">{money(closed.reduce((t, h) => t + (h.amount ?? 0), 0))} closed</td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                );
+              })()}
             </table>
           </div>
         )}
