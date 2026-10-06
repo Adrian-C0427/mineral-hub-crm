@@ -11,8 +11,9 @@ import { NewDealModal } from "../components/NewDealModal";
 import { StageChangeModal } from "../components/StageChangeModal";
 import { money, num, fmtDate, daysBetween } from "../lib/format";
 import { useAuth } from "../auth/AuthContext";
-import { useStages, stageColor, type PipelineInfo } from "../stages";
+import { useStages, stageColor, isOpportunityPipeline, type PipelineInfo } from "../stages";
 import { PipelineSettingsModal } from "../components/PipelineSettingsModal";
+import { OpportunityBoard } from "../components/OpportunityBoard";
 import type { DealSummary, Stage } from "../types";
 
 // The Pipeline shows only ACTIVE-lifecycle stages as columns. Closed and Dead
@@ -443,6 +444,23 @@ export function Pipeline() {
     catch { load(); }
   }
 
+  // OPPORTUNITIES-kind pipelines render their own board (same look, Opportunity
+  // records instead of Deals). Everything below is the deals board, unchanged.
+  if (isOpportunityPipeline(selected)) {
+    return (
+      <OpportunityBoard
+        key={selected.id}
+        pipeline={selected}
+        pipelines={pipelines}
+        switcher={<PipelineSwitcher pipelines={pipelines} selectedId={selectedId} onSelect={(id) => id && setSelectedId(id)} onManage={canCustomizeStages ? () => setShowStages(true) : undefined} />}
+        showSettings={showStages}
+        onOpenSettings={() => setShowStages(true)}
+        onCloseSettings={() => { setShowStages(false); reloadStages(); }}
+        onSettingsChanged={reloadStages}
+      />
+    );
+  }
+
   if (!deals) return <Spinner />;
   const dragDeal = drag ? deals.find((d) => d.id === drag.id) ?? null : null;
   // Board shows ONLY the selected pipeline's deals. A null pipelineId means the
@@ -459,6 +477,7 @@ export function Pipeline() {
   // Per-pipeline, per-stage opportunity counts for the settings stage editor.
   const stageCount = (pipelineId: string, stageKey: string) => {
     const p = pipelines.find((x) => x.id === pipelineId);
+    if (isOpportunityPipeline(p)) return null; // opportunity counts live on that board
     return deals.filter((d) => d.stage === stageKey && (p?.isDefault ? !d.pipelineId || d.pipelineId === pipelineId : d.pipelineId === pipelineId)).length;
   };
 
@@ -641,6 +660,7 @@ function PipelineSwitcher({ pipelines, selectedId, onSelect, onManage }: {
               className={`pl-menu-item ${p.id === selectedId ? "on" : ""}`}
               onClick={() => { setOpen(false); onSelect(p.id); }}>
               <span className="pl-menu-name">{p.name}</span>
+              <span className={`pl-badge pl-kind ${isOpportunityPipeline(p) ? "opp" : ""}`}>{isOpportunityPipeline(p) ? "Opportunities" : "Deals"}</span>
               {p.isDefault && <span className="pl-badge">Default</span>}
               <span className="pl-menu-check"><CheckIcon /></span>
             </button>

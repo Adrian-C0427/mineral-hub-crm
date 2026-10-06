@@ -175,6 +175,7 @@ model Organization {
   inviteCodes       InviteCode[]
   calendarEventTypes CalendarEventType[]
   calendarEvents     CalendarEvent[]
+  opportunities      Opportunity[]
   expenses          Expense[]
   expenseCategories ExpenseCategory[]
   rolePermissions   RolePermissions[]
@@ -428,6 +429,7 @@ model User {
   assignedDeals      Deal[]              @relation("DealAssignees")
   calendarAssigned   CalendarEvent[]     @relation("CalendarAssignee")
   calendarCreated    CalendarEvent[]     @relation("CalendarCreator")
+  opportunitiesOwned Opportunity[]       @relation("OpportunityOwner")
   notificationPreference NotificationPreference?
 
   @@index([organizationId])
@@ -634,6 +636,8 @@ model Deal {
   revenueEntries AssetRevenueEntry[]
   mapTracts      MapTract[]
   calendarEvents CalendarEvent[]
+  // The prospect this deal was converted from, if any (column lives on Opportunity).
+  fromOpportunity Opportunity?  @relation("OpportunityConvertedDeal")
   // Team members assigned to this deal/asset (multi-assignee). relationshipOwner
   // is retained as the originating/primary owner for existing metrics & reports.
   assignees      User[]              @relation("DealAssignees")
@@ -773,9 +777,20 @@ model Pipeline {
   name           String
   isDefault      Boolean         @default(false)
   position       Int             @default(0)
+  // "DEALS" (the original board: deals in their stages) or "OPPORTUNITIES"
+  // (prospects; see Opportunity). Pre-existing pipelines are DEALS.
+  kind           String          @default("DEALS")
+  description    String?
+  // Opportunity pipelines only: entering this stage converts the opportunity
+  // into a deal when convertMode is "AUTO" ("MANUAL" = user clicks Convert).
+  convertStageKey     String?
+  convertMode         String          @default("MANUAL")
+  // Deal pipeline the converted deal is created in (null = the default pipeline).
+  convertToPipelineId String?
   createdAt      DateTime        @default(now())
   stages         PipelineStage[]
   deals          Deal[]
+  opportunities  Opportunity[]
 
   @@index([organizationId])
 }
@@ -1484,6 +1499,7 @@ model Contact {
 
   activities ContactActivity[]
   lists      ContactList[]     @relation("ContactListMembers")
+  opportunities Opportunity[]
 
   @@index([organizationId])
   @@index([organizationId, status])
@@ -1622,4 +1638,91 @@ model CalendarEvent {
   @@index([organizationId, date])
   @@index([dealId])
   @@index([buyerId])
+}
+
+// ---------------------------------------------------------------------------
+// Opportunities: lightweight prospects tracked through an OPPORTUNITIES
+// pipeline. Separate from Deal; an opportunity becomes a Deal only through
+// conversion (convertedDealId), which copies its fields and keeps this record.
+// ---------------------------------------------------------------------------
+
+model Opportunity {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  pipelineId     String
+  pipeline       Pipeline     @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  stage          String // PipelineStage.key within pipelineId
+  currentStageEnteredAt DateTime @default(now())
+
+  ownerId String?
+  owner   User?   @relation("OpportunityOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  // Seller / contact: an optional Contact record plus plain fields for when
+  // no contact exists yet.
+  contactId   String?
+  contact     Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  sellerName  String?
+  companyName String?
+  phone       String?
+  email       String?
+
+  // Property
+  state    String?
+  county   String?
+  abstract String?
+  survey   String?
+  estAcres Float?
+  estNma   Float?
+  estNra   Float?
+
+  source String?
+  notes  String?
+
+  lastActivityAt   DateTime?
+  nextFollowUpDate DateTime?
+  // Set when a terminal stage is entered (e.g. why it was passed/lost).
+  closeReason String?
+
+  // Conversion: the deal created from this opportunity (one per opportunity).
+  convertedDealId String?   @unique
+  convertedDeal   Deal?     @relation("OpportunityConvertedDeal", fields: [convertedDealId], references: [id], onDelete: SetNull)
+  convertedAt     DateTime?
+
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  stageHistory OpportunityStageHistory[]
+  activities   OpportunityActivity[]
+
+  @@index([organizationId, pipelineId, stage])
+  @@index([contactId])
+}
+
+model OpportunityStageHistory {
+  id              String      @id @default(cuid())
+  opportunityId   String
+  opportunity     Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  fromStage       String
+  toStage         String
+  reason          String?
+  changedByUserId String?
+  createdAt       DateTime    @default(now())
+
+  @@index([opportunityId, createdAt])
+}
+
+// Notes and logged touches on an opportunity (its activity trail).
+model OpportunityActivity {
+  id              String      @id @default(cuid())
+  opportunityId   String
+  opportunity     Opportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  kind            String // NOTE | CALL | EMAIL | TEXT | MEETING | SYSTEM
+  body            String
+  createdByUserId String?
+  createdAt       DateTime    @default(now())
+
+  @@index([opportunityId, createdAt])
 }

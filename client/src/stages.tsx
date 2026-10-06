@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api } from "./api/client";
 import { prettyStage } from "./lib/format";
-import type { PipelineStage } from "./types";
+import type { ConvertMode, PipelineKind, PipelineStage } from "./types";
 
 // Fallback used before the org's stages load (and for any non-provider render).
 const DEFAULT_STAGES: PipelineStage[] = [
@@ -20,7 +20,18 @@ export interface PipelineInfo {
   isDefault: boolean;
   position: number;
   stages: PipelineStage[];
+  /** "DEALS" (the original board) or "OPPORTUNITIES" (prospects). Absent on
+   *  the built-in fallback and on older responses — treat as DEALS. */
+  kind?: PipelineKind;
+  description?: string | null;
+  // Opportunity pipelines only — see PipelineSettingsModal's Conversion block.
+  convertStageKey?: string | null;
+  convertMode?: ConvertMode;
+  convertToPipelineId?: string | null;
 }
+
+/** True for pipelines that hold Opportunity records instead of Deals. */
+export const isOpportunityPipeline = (p: Pick<PipelineInfo, "kind"> | null | undefined): boolean => p?.kind === "OPPORTUNITIES";
 
 const FALLBACK_PIPELINE: PipelineInfo = { id: "", name: "Sales Pipeline", isDefault: true, position: 0, stages: DEFAULT_STAGES };
 
@@ -37,6 +48,12 @@ export function stageColor(stages: PipelineStage[], key: string): string {
   const active = stages.filter((s) => !s.isTerminal);
   const i = active.findIndex((s) => s.key === key);
   const stage = i >= 0 ? active[i] : undefined;
+  if (!stage) {
+    // Opportunity pipelines' terminal stages (Passed / Lost) are recolourable;
+    // without a stored colour, Lost reads red and Passed amber.
+    const terminal = stages.find((s) => s.isTerminal && s.key === key);
+    if (terminal) return terminal.color ?? (key === "LOST" ? "var(--red)" : "var(--warn)");
+  }
   return stage?.color ?? STAGE_PALETTE[(i >= 0 ? i : 0) % STAGE_PALETTE.length];
 }
 

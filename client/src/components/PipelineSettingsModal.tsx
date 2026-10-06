@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { Modal, ConfirmDialog, showToast } from "./ui";
-import { FormSection } from "./kit";
+import { FormSection, Segmented } from "./kit";
+import { Select } from "./Select";
 import { api } from "../api/client";
-import { stageColor, type PipelineInfo } from "../stages";
-import type { PipelineStage } from "../types";
+import { stageColor, isOpportunityPipeline, type PipelineInfo } from "../stages";
+import type { ConvertMode, PipelineKind, PipelineStage } from "../types";
+
+const KIND_LABEL: Record<PipelineKind, string> = { OPPORTUNITIES: "Opportunities", DEALS: "Deals" };
 
 /** Stage colour swatches offered by the colour picker (any #rrggbb is still
  *  accepted through "Custom colour", so existing colours are never lost). */
@@ -40,8 +43,9 @@ export function PipelineSettingsModal({ pipelines, initialId, stageCount, onClos
   pipelines: PipelineInfo[];
   /** Pipeline to open with (the board's current selection). */
   initialId: string;
-  /** Opportunities currently in a pipeline's stage (shown beside each stage). */
-  stageCount?: (pipelineId: string, stageKey: string) => number;
+  /** Records currently in a pipeline's stage (shown beside each stage); null
+   *  when the caller can't count that pipeline (no label is shown). */
+  stageCount?: (pipelineId: string, stageKey: string) => number | null;
   onClose: () => void;
   /** Reload pipelines/stages/deals after any persisted change. */
   onChanged: () => void;
@@ -52,6 +56,9 @@ export function PipelineSettingsModal({ pipelines, initialId, stageCount, onClos
   const [err, setErr] = useState<string | null>(null);
   const [addingPipeline, setAddingPipeline] = useState(false);
   const [newPipelineName, setNewPipelineName] = useState("");
+  // New pipelines default to Opportunities (prospects); Deals is the original board.
+  const [newPipelineKind, setNewPipelineKind] = useState<PipelineKind>("OPPORTUNITIES");
+  const [newPipelineDesc, setNewPipelineDesc] = useState("");
   const [confirmDeletePipeline, setConfirmDeletePipeline] = useState(false);
 
   async function run(fn: () => Promise<void>) {
@@ -61,16 +68,18 @@ export function PipelineSettingsModal({ pipelines, initialId, stageCount, onClos
     finally { setBusy(false); }
   }
 
-  const cancelNewPipeline = () => { setAddingPipeline(false); setNewPipelineName(""); };
+  const cancelNewPipeline = () => { setAddingPipeline(false); setNewPipelineName(""); setNewPipelineDesc(""); setNewPipelineKind("OPPORTUNITIES"); };
   const createPipeline = () => {
     const name = newPipelineName.trim();
     if (!name) return;
+    const kind = newPipelineKind;
     void run(async () => {
-      const p = await api.post<{ id: string }>("/pipeline/pipelines", { name });
-      setNewPipelineName("");
-      setAddingPipeline(false);
+      const p = await api.post<{ id: string }>("/pipeline/pipelines", { name, kind, description: newPipelineDesc.trim() || null });
+      cancelNewPipeline();
       setSelId(p.id);
-      showToast(`Pipeline "${name}" created — it starts blank; add its stages below.`);
+      showToast(kind === "OPPORTUNITIES"
+        ? `Pipeline "${name}" created with the opportunity stages — adjust them below.`
+        : `Pipeline "${name}" created — it starts blank; add its stages below.`);
     });
   };
 
@@ -110,7 +119,7 @@ export function PipelineSettingsModal({ pipelines, initialId, stageCount, onClos
                   <span className="pset-grip" aria-hidden="true"><GripIcon /></span>
                   <span className="pset-row-text">
                     <span className="pset-row-name">{p.name}</span>
-                    <span className="pset-row-sub">{active} active stage{active === 1 ? "" : "s"}</span>
+                    <span className="pset-row-sub">{KIND_LABEL[p.kind ?? "DEALS"]} · {active} active stage{active === 1 ? "" : "s"}</span>
                   </span>
                   {p.isDefault && <span className="pset-badge">Default</span>}
                 </div>
@@ -123,6 +132,10 @@ export function PipelineSettingsModal({ pipelines, initialId, stageCount, onClos
               <div className="pset-new-form">
                 <input autoFocus value={newPipelineName} onChange={(e) => setNewPipelineName(e.target.value)} placeholder="Pipeline name" disabled={busy}
                   aria-label="New pipeline name" onKeyDown={editKeys(createPipeline, cancelNewPipeline)} />
+                <Segmented accent className="pset-kind" ariaLabel="Pipeline kind" value={newPipelineKind} onChange={setNewPipelineKind}
+                  options={[{ value: "OPPORTUNITIES", label: "Opportunities" }, { value: "DEALS", label: "Deals" }]} />
+                <input value={newPipelineDesc} onChange={(e) => setNewPipelineDesc(e.target.value)} placeholder="Description (optional)" disabled={busy}
+                  aria-label="New pipeline description" onKeyDown={editKeys(createPipeline, cancelNewPipeline)} />
                 <div className="pset-actions">
                   <button type="button" className="primary" disabled={!newPipelineName.trim() || busy} onClick={createPipeline}>Create</button>
                   <button type="button" onClick={cancelNewPipeline}>Cancel</button>
@@ -131,7 +144,11 @@ export function PipelineSettingsModal({ pipelines, initialId, stageCount, onClos
             ) : (
               <button type="button" className="pset-dashed" disabled={busy} onClick={() => setAddingPipeline(true)}><PlusIcon />New pipeline</button>
             )}
-            <p className="pset-note">New pipelines start blank. Closed and Dead are always included automatically.</p>
+            <p className="pset-note">
+              {addingPipeline && newPipelineKind === "DEALS"
+                ? "A Deals pipeline starts blank. Closed and Dead are always included automatically."
+                : "An Opportunities pipeline holds prospects and starts with New Opportunity → Negotiating plus Passed and Lost. Convert an opportunity to create a deal."}
+            </p>
           </div>
         </div>
 
@@ -140,6 +157,7 @@ export function PipelineSettingsModal({ pipelines, initialId, stageCount, onClos
           <StagePane
             key={sel.id}
             pipeline={sel}
+            dealPipelines={pipelines.filter((p) => !isOpportunityPipeline(p))}
             busy={busy}
             setBusy={setBusy}
             err={err}
@@ -157,7 +175,9 @@ export function PipelineSettingsModal({ pipelines, initialId, stageCount, onClos
           confirmLabel="Delete pipeline"
           danger
           busy={busy}
-          message={<>Deals in this pipeline move to your default pipeline (Closed and Dead deals keep their status; active deals restart in its first stage). This can't be undone.</>}
+          message={isOpportunityPipeline(sel)
+            ? <>A pipeline that still holds opportunities can't be deleted — move or delete them first. This can't be undone.</>
+            : <>Deals in this pipeline move to your default pipeline (Closed and Dead deals keep their status; active deals restart in its first stage). This can't be undone.</>}
           onCancel={() => setConfirmDeletePipeline(false)}
           onConfirm={() => {
             setConfirmDeletePipeline(false);
@@ -209,19 +229,31 @@ function SwatchPicker({ color, label, disabled, onPick }: { color: string; label
 }
 
 /** Right pane: name, delete, and the stage editor (labels, order, colors). */
-function StagePane({ pipeline, busy, setBusy, err, setErr, stageCount, onChanged, onDeleteRequested }: {
+function StagePane({ pipeline, dealPipelines, busy, setBusy, err, setErr, stageCount, onChanged, onDeleteRequested }: {
   pipeline: PipelineInfo;
+  /** DEALS-kind pipelines (conversion targets). */
+  dealPipelines: PipelineInfo[];
   busy: boolean;
   setBusy: (b: boolean) => void;
   err: string | null;
   setErr: (e: string | null) => void;
-  stageCount?: (pipelineId: string, stageKey: string) => number;
+  stageCount?: (pipelineId: string, stageKey: string) => number | null;
   onChanged: () => void;
   onDeleteRequested: () => void;
 }) {
   const pid = pipeline.id;
+  const opp = isOpportunityPipeline(pipeline);
   const [stages, setStages] = useState<PipelineStage[]>(pipeline.stages);
   const [name, setName] = useState(pipeline.name);
+  // Opportunity pipelines: description + conversion settings (saved on change).
+  const [desc, setDesc] = useState(pipeline.description ?? "");
+  useEffect(() => { setDesc(pipeline.description ?? ""); }, [pipeline.description]);
+  const saveSettings = async (patch: { description?: string | null; convertStageKey?: string | null; convertMode?: ConvertMode; convertToPipelineId?: string | null }) => {
+    setBusy(true); setErr(null);
+    try { await api.patch(`/pipeline/pipelines/${pid}`, patch); onChanged(); }
+    catch (e) { setErr(e instanceof Error ? e.message : "Something went wrong"); }
+    finally { setBusy(false); }
+  };
   // One inline edit at a time: "name" (pipeline), a stage id, or "add" (new stage).
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -288,7 +320,9 @@ function StagePane({ pipeline, busy, setBusy, err, setErr, stageCount, onChanged
   const countLabel = (key: string) => {
     if (!stageCount) return null;
     const n = stageCount(pid, key);
-    return n ? `${n} deal${n === 1 ? "" : "s"}` : "Empty";
+    if (n == null) return null;
+    const noun = opp ? "opportunit" + (n === 1 ? "y" : "ies") : "deal" + (n === 1 ? "" : "s");
+    return n ? `${n} ${noun}` : "Empty";
   };
   const terminal = stages.filter((s) => s.isTerminal);
 
@@ -323,7 +357,7 @@ function StagePane({ pipeline, busy, setBusy, err, setErr, stageCount, onChanged
       <FormSection title="Stages">
         <p className="pset-desc">
           Rename, reorder (drag by the <span aria-hidden="true">⠿</span> handle), recolor, add, or remove this pipeline's
-          active stages. Closed and Dead are always present and cannot be changed.
+          active stages. {opp ? "Its two terminal stages can be renamed and recolored but not removed." : "Closed and Dead are always present and cannot be changed."}
         </p>
         <div className="stage-editor pset-stages">
           {order.map((s, i) => {
@@ -357,7 +391,7 @@ function StagePane({ pipeline, busy, setBusy, err, setErr, stageCount, onChanged
                       onClick={() => startEdit(s.id, s.label)}><PencilIcon /></button>
                   </div>
                 )}
-                <span className="pset-count" title={stageCount ? "Opportunities currently in this stage" : undefined}>{countLabel(s.key)}</span>
+                <span className="pset-count" title={stageCount ? "Records currently in this stage" : undefined}>{countLabel(s.key)}</span>
                 <button type="button" className="pset-del" disabled={busy || lastOfDefault}
                   title={lastOfDefault ? "The default pipeline needs at least one active stage" : "Remove stage"}
                   aria-label={`Remove ${s.label}`}
@@ -380,8 +414,30 @@ function StagePane({ pipeline, busy, setBusy, err, setErr, stageCount, onChanged
 
         {terminal.length > 0 && (
           <div className="pset-locked">
-            <div className="pset-locked-label"><span>Always included</span><i /></div>
-            {terminal.map((s) => (
+            <div className="pset-locked-label"><span>{opp ? "Terminal stages" : "Always included"}</span><i /></div>
+            {terminal.map((s) => opp ? (
+              // Opportunity pipelines: Passed / Lost can be renamed and recolored (never removed).
+              <div key={s.id} className="pset-stage">
+                <span className="pset-grip pset-lock" aria-hidden="true"><LockIcon /></span>
+                <SwatchPicker color={s.color ?? stageColor(stages, s.key)} label={s.label} disabled={busy} onPick={(c) => recolor(s, c)} />
+                {editing === s.id ? (
+                  <div className="pset-edit">
+                    <input autoFocus value={draft} disabled={busy} onChange={(e) => setDraft(e.target.value)} placeholder="Stage name"
+                      aria-label={`Rename ${s.label}`} onKeyDown={editKeys(() => rename(s, draft), cancelEdit)} />
+                    <button type="button" className="primary" disabled={!draft.trim() || busy} onClick={() => rename(s, draft)}>Save</button>
+                    <button type="button" onClick={cancelEdit}>Cancel</button>
+                  </div>
+                ) : (
+                  <div className="pset-stage-name">
+                    <span title={s.label}>{s.label}</span>
+                    <button type="button" className="pset-icon-btn" disabled={busy} title="Rename stage" aria-label={`Rename ${s.label}`}
+                      onClick={() => startEdit(s.id, s.label)}><PencilIcon /></button>
+                  </div>
+                )}
+                <span className="pset-count">{countLabel(s.key)}</span>
+                <span className="pset-del-slot" />
+              </div>
+            ) : (
               <div key={s.id} className="pset-stage locked">
                 <span className="pset-grip pset-lock" aria-hidden="true"><LockIcon /></span>
                 <span className="pset-swatch-btn static" aria-hidden="true"><span style={{ background: stageColor(stages, s.key) }} /></span>
@@ -394,13 +450,50 @@ function StagePane({ pipeline, busy, setBusy, err, setErr, stageCount, onChanged
         )}
       </FormSection>
 
+      {opp && (
+        <FormSection title="Conversion" hint="How opportunities in this pipeline become deals.">
+          <div className="pset-conv">
+            <div className="pset-conv-field pset-conv-wide">
+              <label>Description</label>
+              <input value={desc} disabled={busy} placeholder="What this pipeline is for (optional)" aria-label="Pipeline description"
+                onChange={(e) => setDesc(e.target.value)}
+                onBlur={() => { if ((desc.trim() || null) !== (pipeline.description ?? null)) void saveSettings({ description: desc.trim() || null }); }}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLInputElement).blur(); } }} />
+            </div>
+            <div className="pset-conv-field">
+              <label>Convert at stage</label>
+              <Select value={pipeline.convertStageKey ?? ""} disabled={busy} ariaLabel="Convert at stage" placeholder="Manual only"
+                onChange={(v) => void saveSettings({ convertStageKey: v || null, ...(v ? {} : { convertMode: "MANUAL" as ConvertMode }) })}
+                options={[{ value: "", label: "Manual only" }, ...order.map((s) => ({ value: s.key, label: s.label }))]} />
+            </div>
+            <div className="pset-conv-field">
+              <label>Mode</label>
+              <Select value={pipeline.convertStageKey ? (pipeline.convertMode ?? "MANUAL") : "MANUAL"} disabled={busy || !pipeline.convertStageKey} ariaLabel="Conversion mode"
+                onChange={(v) => void saveSettings({ convertMode: v as ConvertMode })}
+                options={[{ value: "MANUAL", label: "Manual", hint: "Convert to deal button" }, { value: "AUTO", label: "Automatic", hint: "when the stage is reached" }]} />
+            </div>
+            <div className="pset-conv-field">
+              <label>Create deals in</label>
+              <Select value={pipeline.convertToPipelineId ?? ""} disabled={busy} ariaLabel="Target deal pipeline"
+                onChange={(v) => void saveSettings({ convertToPipelineId: v || null })}
+                options={[{ value: "", label: "Default pipeline" }, ...dealPipelines.filter((p) => !p.isDefault).map((p) => ({ value: p.id, label: p.name }))]} />
+            </div>
+          </div>
+          <p className="pset-desc pset-conv-note">
+            {pipeline.convertStageKey && pipeline.convertMode === "AUTO"
+              ? <>Reaching <strong>{order.find((s) => s.key === pipeline.convertStageKey)?.label ?? "the stage"}</strong> creates the deal automatically; "Convert to deal" still works earlier.</>
+              : "Opportunities become deals only when someone clicks “Convert to deal”. The deal starts in the target pipeline's first stage."}
+          </p>
+        </FormSection>
+      )}
+
       {confirmDelete && (
         <ConfirmDialog
           title={`Remove "${confirmDelete.label}"?`}
           confirmLabel="Remove stage"
           danger
           busy={busy}
-          message={<>Any deals currently in <strong>{confirmDelete.label}</strong> move to the first active stage. This can't be undone.</>}
+          message={<>Any {opp ? "opportunities" : "deals"} currently in <strong>{confirmDelete.label}</strong> move to the first active stage. This can't be undone.</>}
           onCancel={() => setConfirmDelete(null)}
           onConfirm={async () => { await apply(() => api.del<PipelineStage[]>(`/pipeline/stages/${confirmDelete.id}`)); setConfirmDelete(null); }}
         />

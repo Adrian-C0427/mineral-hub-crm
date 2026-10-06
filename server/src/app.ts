@@ -12,6 +12,7 @@ import { errorHandler, notFound } from "./middleware/errors.js";
 import { authRouter } from "./routes/auth.js";
 import { usersRouter } from "./routes/users.js";
 import { dealsRouter } from "./routes/deals.js";
+import { opportunitiesRouter } from "./routes/opportunities.js";
 import { pipelineStagesRouter } from "./routes/pipelineStages.js";
 import { buyersRouter } from "./routes/buyers.js";
 import { contactsRouter } from "./routes/contacts.js";
@@ -96,6 +97,7 @@ export function createApp() {
   app.use("/api/users", usersRouter);
   app.use("/api/pipeline", pipelineStagesRouter);
   app.use("/api/deals", dealsRouter);
+  app.use("/api/opportunities", opportunitiesRouter);
   app.use("/api/buyers", buyersRouter);
   app.use("/api/contacts", contactsRouter);
   app.use("/api/offers", offersRouter);
