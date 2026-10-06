@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dashboardWindow, windowBuckets } from "./dashboard.js";
+import { dashboardWindow, windowBuckets, opportunityPipelineCounts } from "./dashboard.js";
 
 const NOW = new Date("2026-07-15T18:00:00Z");
 
@@ -43,5 +43,44 @@ describe("windowBuckets", () => {
     const b = windowBuckets(dashboardWindow("CUSTOM", NOW, "2020-01-01", "2026-12-31"), NOW);
     expect(b.map((x) => x.label)).toEqual(["2020", "2021", "2022", "2023", "2024", "2025", "2026"]);
     expect(b.filter((x) => x.isCurrent).map((x) => x.label)).toEqual(["2026"]);
+  });
+});
+
+describe("opportunityPipelineCounts (Opportunities card)", () => {
+  const pipelines = [
+    {
+      id: "p1", name: "Prospects",
+      stages: [
+        { key: "NEW_OPPORTUNITY", label: "New Opportunity", color: "#3b82f6", isTerminal: false },
+        { key: "CONTACTED", label: "Contacted", color: null, isTerminal: false },
+        { key: "PASSED", label: "Passed", color: null, isTerminal: true },
+        { key: "LOST", label: "Lost", color: null, isTerminal: true },
+      ],
+    },
+    { id: "p2", name: "Cold leads", stages: [{ key: "NEW", label: "New", color: null, isTerminal: false }] },
+  ];
+
+  it("counts per active stage in stage order, zero-filling and dropping terminal stages", () => {
+    const r = opportunityPipelineCounts(pipelines, [
+      { pipelineId: "p1", stage: "CONTACTED", count: 2 },
+      { pipelineId: "p1", stage: "NEW_OPPORTUNITY", count: 3 },
+      { pipelineId: "p1", stage: "PASSED", count: 9 }, // terminal — not active
+      { pipelineId: "p1", stage: "GONE", count: 1 },   // stage no longer exists
+    ]);
+    expect(r.pipelines).toEqual([
+      {
+        id: "p1", name: "Prospects", total: 5,
+        stages: [
+          { key: "NEW_OPPORTUNITY", label: "New Opportunity", color: "#3b82f6", count: 3 },
+          { key: "CONTACTED", label: "Contacted", color: null, count: 2 },
+        ],
+      },
+      { id: "p2", name: "Cold leads", total: 0, stages: [{ key: "NEW", label: "New", color: null, count: 0 }] },
+    ]);
+    expect(r.active).toBe(5);
+  });
+
+  it("is empty with no opportunity pipelines", () => {
+    expect(opportunityPipelineCounts([], [])).toEqual({ pipelines: [], active: 0 });
   });
 });

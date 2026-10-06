@@ -75,6 +75,44 @@ export function windowBuckets(win: { start: Date; end: Date }, now: Date): { y: 
   }));
 }
 
+/** An OPPORTUNITIES pipeline as the Opportunities card needs it. */
+export interface OppPipelineInput {
+  id: string;
+  name: string;
+  stages: { key: string; label: string; color: string | null; isTerminal: boolean }[];
+}
+
+/**
+ * The Opportunities card: per opportunity pipeline, how many NOT-yet-converted
+ * opportunities sit in each active stage (ordered by stage position, with the
+ * stage's stored colour — null when the stage has none, the client then uses
+ * its default palette). Terminal stages (Passed/Lost) and converted
+ * opportunities are left out: they are no longer being worked. `rows` are the
+ * per-(pipeline, stage) counts of non-converted opportunities; a row for an
+ * unknown stage key is ignored. `active` is the grand total across pipelines.
+ * Pure, so the shape is unit-testable without a database.
+ */
+export function opportunityPipelineCounts(
+  pipelines: OppPipelineInput[],
+  rows: { pipelineId: string; stage: string; count: number }[],
+): { pipelines: { id: string; name: string; total: number; stages: { key: string; label: string; color: string | null; count: number }[] }[]; active: number } {
+  const byPipeline = new Map<string, Map<string, number>>();
+  for (const r of rows) {
+    const m = byPipeline.get(r.pipelineId) ?? new Map<string, number>();
+    m.set(r.stage, (m.get(r.stage) ?? 0) + r.count);
+    byPipeline.set(r.pipelineId, m);
+  }
+  let active = 0;
+  const out = pipelines.map((p) => {
+    const counts = byPipeline.get(p.id);
+    const stages = p.stages.filter((s) => !s.isTerminal).map((s) => ({ key: s.key, label: s.label, color: s.color ?? null, count: counts?.get(s.key) ?? 0 }));
+    const total = stages.reduce((sum, s) => sum + s.count, 0);
+    active += total;
+    return { id: p.id, name: p.name, total, stages };
+  });
+  return { pipelines: out, active };
+}
+
 dashboardRouter.get(
   "/",
   asyncHandler(async (req: AuthedRequest, res) => {
@@ -308,6 +346,34 @@ dashboardRouter.get(
 
     const dueSoonTasks = await dueSoonTasksFor(org, req.user!.id, String(req.query.tasksFor ?? "me"), canManageTasks(req), canViewContacts(req), now);
 
+    // Opportunities card — prospects in OPPORTUNITIES-kind pipelines. Computed
+    // from the Opportunity table alone, so nothing here touches the deal
+    // metrics above (opportunities never count as deals anywhere on the page).
+    // `convertedInPeriod` keys on Opportunity.convertedAt within the same
+    // reporting window as the closed-deal metrics.
+    const oppPipelineRows = await prisma.pipeline.findMany({
+      where: { organizationId: org, kind: "OPPORTUNITIES" },
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+      select: { id: true, name: true },
+    });
+    const oppPipelines: OppPipelineInput[] = [];
+    for (const p of oppPipelineRows) {
+      const stages = await ensureStages(prisma, org, p.id);
+      oppPipelines.push({ id: p.id, name: p.name, stages: stages.map((s) => ({ key: s.key, label: s.label, color: s.color, isTerminal: s.isTerminal })) });
+    }
+    const [oppCounts, convertedInPeriod] = oppPipelines.length === 0 ? [[], 0] : await Promise.all([
+      prisma.opportunity.groupBy({
+        by: ["pipelineId", "stage"],
+        where: { organizationId: org, convertedDealId: null, pipelineId: { in: oppPipelines.map((p) => p.id) } },
+        _count: { _all: true },
+      }),
+      prisma.opportunity.count({ where: { organizationId: org, convertedAt: { gte: win.start, lt: win.end } } }),
+    ]);
+    const opportunities = {
+      ...opportunityPipelineCounts(oppPipelines, oppCounts.map((r) => ({ pipelineId: r.pipelineId, stage: r.stage, count: r._count._all }))),
+      convertedInPeriod,
+    };
+
     res.json({
       metrics: {
         activeDeals,
@@ -336,6 +402,7 @@ dashboardRouter.get(
       topBuyers,
       profitByMonth,
       trends: { activeDealsWeekly, avgProfitPerDeal: avgProfitTrend, closedWeekly, offersWeekly },
+      opportunities,
     });
   }),
 );

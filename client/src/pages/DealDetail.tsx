@@ -19,7 +19,7 @@ import { useAbstractLabels } from "../components/AbstractPicker";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
-import { money, num, fmtDate, toInputDate, prettyEnum } from "../lib/format";
+import { money, num, fmtDate, fmtDateLocal, toInputDate, prettyEnum } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { SellerDetails } from "../components/SellerDetails";
 import { DealPortalPanel } from "../components/DealPortalPanel";
@@ -55,6 +55,8 @@ interface DealDetailData extends DealSummary {
   parent: { id: string; name: string } | null;
   assets?: AssetChild[];
   assetCount?: number;
+  /** The opportunity this deal was converted from (null for hand-created deals; absent on older APIs). */
+  fromOpportunity?: { id: string; name: string; convertedAt: string | null } | null;
 }
 
 interface EditTarget { id: string; name: string; initial?: { status?: BuyerActivityRow["status"]; assignedTeamMemberId?: string | null; notes?: string | null; dateSent?: string | null; nextFollowUpDate?: string | null } }
@@ -183,6 +185,15 @@ export function DealDetail() {
       </div>
 
       {deal.stage === "DEAD" && deal.deadReason && <Banner kind="error">Dead: {deal.deadReason}</Banner>}
+
+      {/* Provenance — the counterpart of the opportunity page's "Converted to
+          deal" banner; the prospect's record and history live over there. */}
+      {deal.fromOpportunity && (
+        <Banner kind="info">
+          Converted from opportunity <Link to={`/opportunities/${deal.fromOpportunity.id}`}><strong>{deal.fromOpportunity.name}</strong></Link>
+          {deal.fromOpportunity.convertedAt && <> on {fmtDateLocal(deal.fromOpportunity.convertedAt)}</>}.
+        </Banner>
+      )}
 
       {/* Deadline alert — Find Buyer By is close (or past) and no buyer is
           attached yet. One click lands on the Buyers tab. */}
