@@ -29,7 +29,7 @@
     "@types/compression": "^1.8.1",
     "bcryptjs": "^2.4.3",
     "but-unzip": "^0.1.10",
-    "compression": "^1.8.1",
+    "compression": "^1.8.2",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
     "csv-parse": "^7.0.2",
