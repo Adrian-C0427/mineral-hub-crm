@@ -13,7 +13,7 @@ import { Select } from "../components/Select";
 import { Segmented, StatStrip, Tag } from "../components/kit";
 import { initialsOf } from "../lib/avatarColor";
 import { money, fmtDate, fmtDateLocal } from "../lib/format";
-import { useStages } from "../stages";
+import { STAGE_PALETTE, useStages } from "../stages";
 import { CalendarGlyph } from "../components/PeriodSegmented";
 import { DateField } from "../components/DateField";
 import { useTheme, isLightTheme } from "../theme";
@@ -92,6 +92,15 @@ interface DashboardData {
   }[];
   /** Real historical series for the KPI sparklines (optional: older API). */
   trends?: { activeDealsWeekly: number[]; avgProfitPerDeal: number[]; closedWeekly: number[]; offersWeekly: number[] };
+  /** Opportunities card: prospects per OPPORTUNITIES pipeline (optional: older API).
+   *  `color` is the stage's stored colour, null = default palette by position. */
+  opportunities?: {
+    pipelines: { id: string; name: string; total: number; stages: { key: string; label: string; color: string | null; count: number }[] }[];
+    /** Non-converted opportunities in active stages, all opportunity pipelines. */
+    active: number;
+    /** Opportunities converted to deals within the selected reporting window. */
+    convertedInPeriod: number;
+  };
 }
 
 // Compact currency for KPI values, matching the design ($1.28M / $892K / $47.8K).
@@ -162,13 +171,15 @@ function Delta({ pct }: { pct: number | null }) {
 // the Profit overview: realized hero + chart with the key-metric strip along
 // its bottom edge (one card, as designed). "kpis" was that strip as its own
 // widget in earlier versions and now only exists in saved v2 layouts.
-type WidgetId = "profit" | "stages" | "activity" | "buyers" | "followups" | "tasks";
+// "opps" (Opportunities) arrived after v3 layouts were already being saved:
+// a saved layout without it gets it at the bottom of the canvas on load.
+type WidgetId = "profit" | "stages" | "activity" | "buyers" | "followups" | "tasks" | "opps";
 const WIDGET_LABELS: Record<WidgetId, string> = {
   profit: "Profit overview", stages: "Pipeline",
   activity: "Recent activity", buyers: "Top buyers", followups: "Upcoming follow-ups",
-  tasks: "Tasks",
+  tasks: "Tasks", opps: "Opportunities",
 };
-const ALL_WIDGETS: WidgetId[] = ["profit", "stages", "buyers", "activity", "tasks", "followups"];
+const ALL_WIDGETS: WidgetId[] = ["profit", "stages", "buyers", "activity", "tasks", "followups", "opps"];
 
 const COLS = 12;
 const ROW_H = 30;      // px per grid row (small unit = fine-grained heights)
@@ -187,6 +198,7 @@ const DEFAULT_LAYOUT: Record<WidgetId, Cell> = {
   activity: { x: 0, y: 16, w: 6, h: 8 },
   tasks: { x: 6, y: 16, w: 3, h: 8 },
   followups: { x: 9, y: 16, w: 3, h: 8 },
+  opps: { x: 0, y: 24, w: 12, h: 6 },
 };
 /** Customize readout, e.g. "7 / 12 cols · 306px". */
 const sizeLabel = (c: Cell) => `${c.w} / ${COLS} cols · ${c.h * ROW_H + (c.h - 1) * GAP}px`;
@@ -201,7 +213,8 @@ const DASH_KEY_V2 = "mh-dashboard:v2";
 // defaults the app has shipped is therefore "never customized" and starts on
 // the current default; anything else is the user's own arrangement and is
 // carried over as-is (the old key is left untouched).
-type V2Id = WidgetId | "kpis";
+// The widget ids a v2 layout could hold ("opps" did not exist yet).
+type V2Id = "kpis" | "profit" | "stages" | "activity" | "buyers" | "followups" | "tasks";
 const V2_IDS: V2Id[] = ["kpis", "profit", "stages", "activity", "buyers", "followups", "tasks"];
 const c4 = (x: number, y: number, w: number, h: number): Cell => ({ x, y, w, h });
 const V2_DEFAULTS: Record<V2Id, Cell>[] = [
@@ -213,6 +226,21 @@ const isCell = (c: unknown): c is Cell =>
   !!c && typeof c === "object" && (["x", "y", "w", "h"] as const).every((k) => { const n = (c as Record<string, unknown>)[k]; return typeof n === "number" && isFinite(n); });
 const sameCell = (a: Cell, b: Cell) => a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
 
+/**
+ * Widgets a saved layout knows nothing about (added to the app after it was
+ * saved) go full-width at the bottom of the saved canvas, below whatever the
+ * user arranged — never on top of it. The saved cells themselves are untouched.
+ */
+function placeUnsavedWidgets(layout: Record<WidgetId, Cell>, savedIds: WidgetId[], hidden: WidgetId[]): void {
+  const placed = savedIds.filter((id) => !hidden.includes(id));
+  let bottom = placed.length ? Math.max(...placed.map((id) => layout[id].y + layout[id].h)) : 0;
+  for (const id of ALL_WIDGETS) {
+    if (savedIds.includes(id)) continue;
+    layout[id] = { ...DEFAULT_LAYOUT[id], x: 0, y: bottom };
+    bottom += layout[id].h;
+  }
+}
+
 function migrateV2(raw: string): DashPrefs {
   const p = JSON.parse(raw) as { layout?: Partial<Record<V2Id, Cell>>; hidden?: string[] };
   const saved: Partial<Record<V2Id, Cell>> = {};
@@ -223,8 +251,9 @@ function migrateV2(raw: string): DashPrefs {
   if (untouched) return { layout: { ...DEFAULT_LAYOUT }, hidden: [] };
 
   const layout = { ...DEFAULT_LAYOUT };
-  for (const id of ALL_WIDGETS) if (saved[id]) layout[id] = saved[id]!;
-  let hidden = hiddenV2.filter((id): id is WidgetId => id !== "kpis");
+  const savedIds: WidgetId[] = [];
+  for (const id of V2_IDS) if (id !== "kpis" && saved[id]) { layout[id] = saved[id]!; savedIds.push(id); }
+  let hidden: WidgetId[] = hiddenV2.filter((id): id is Exclude<V2Id, "kpis"> => id !== "kpis");
   // The key metrics now live inside the profit card. Where the old KPI row sat
   // flush against it (same column span), the card takes over that space; a
   // hidden profit card takes the visible KPI row's place.
@@ -234,6 +263,7 @@ function migrateV2(raw: string): DashPrefs {
     else if (k.x === pr.x && k.w === pr.w && k.y === pr.y + pr.h) layout.profit = { ...pr, h: pr.h + k.h };
     else if (k.x === pr.x && k.w === pr.w && k.y + k.h === pr.y) layout.profit = { ...pr, y: k.y, h: pr.h + k.h };
   }
+  placeUnsavedWidgets(layout, savedIds, hidden);
   return { layout, hidden };
 }
 
@@ -243,11 +273,15 @@ function loadDashPrefs(): DashPrefs {
     if (raw) {
       const p = JSON.parse(raw) as Partial<DashPrefs>;
       const layout = { ...DEFAULT_LAYOUT };
+      const savedIds: WidgetId[] = [];
       for (const id of ALL_WIDGETS) {
         const c = p.layout?.[id];
-        if (isCell(c)) layout[id] = { x: c.x, y: c.y, w: c.w, h: c.h };
+        if (isCell(c)) { layout[id] = { x: c.x, y: c.y, w: c.w, h: c.h }; savedIds.push(id); }
       }
-      return { layout, hidden: (p.hidden ?? []).filter((id): id is WidgetId => ALL_WIDGETS.includes(id as WidgetId)) };
+      const hidden = (p.hidden ?? []).filter((id): id is WidgetId => ALL_WIDGETS.includes(id as WidgetId));
+      // A layout saved before a widget existed: that widget joins at the bottom.
+      placeUnsavedWidgets(layout, savedIds, hidden);
+      return { layout, hidden };
     }
     const v2 = localStorage.getItem(DASH_KEY_V2);
     if (v2) return migrateV2(v2);
@@ -273,7 +307,7 @@ export function Dashboard() {
   const [customTo, setCustomTo] = useState("");
   const { theme, toggleTheme } = useTheme();
   const { user } = useAuth();
-  const { label: stageLabel, colorOf: stageColorOf } = useStages();
+  const { label: stageLabel, colorOf: stageColorOf, setSelectedId: selectPipeline } = useStages();
   const [prefs, setPrefs] = useState<DashPrefs>(loadDashPrefs);
   const [customizing, setCustomizing] = useState(false);
   // Teammates: the Tasks widget's filter/assignee lists, and matching the
@@ -743,6 +777,56 @@ export function Dashboard() {
         )}
       </div>
     ),
+    opps: (() => {
+      // Opportunities (prospects) — one block per OPPORTUNITIES pipeline, in the
+      // Pipeline card's style. The board has no URL for a pipeline, so the links
+      // select the pipeline (same as the board's switcher) before navigating.
+      const opps = d.opportunities ?? { pipelines: [], active: 0, convertedInPeriod: 0 };
+      const oppColor = (s: { color: string | null }, i: number) => s.color ?? STAGE_PALETTE[i % STAGE_PALETTE.length];
+      return (
+        <div className="panel dash-card dash-opps">
+          <div className="dash-card-head">
+            <div className="dash-card-titles">
+              <h3 className="dash-card-title">Opportunities</h3>
+              <span className="dash-card-sub">
+                {opps.active} active
+                {opps.convertedInPeriod > 0 && <span title={`Converted to deals — ${pd.long}`}> · {opps.convertedInPeriod} converted</span>}
+              </span>
+            </div>
+            <Link to="/pipeline" className="dash-viewlink" onClick={() => { if (opps.pipelines[0]) selectPipeline(opps.pipelines[0].id); }}>View pipeline <Chevron /></Link>
+          </div>
+          {opps.pipelines.length === 0 ? <p className="dash-empty">No opportunity pipelines yet — create one in Pipeline settings.</p> : opps.pipelines.map((p) => (
+            <div className="dash-opp-pipe" key={p.id}>
+              {opps.pipelines.length > 1 && (
+                <div className="dash-opp-pipe-head">
+                  <span className="dash-opp-pipe-name">{p.name}</span>
+                  <span className="dash-opp-pipe-total">{p.total} active</span>
+                </div>
+              )}
+              <div className="dash-pipe-bar" aria-hidden="true">
+                {p.total === 0 ? <span className="dash-pipe-bar-empty" /> : p.stages.map((s, i) => s.count > 0 && (
+                  <span key={s.key} style={{ flex: s.count, background: oppColor(s, i) }} />
+                ))}
+              </div>
+              <div className="dash-pipe-grid">
+                {p.stages.map((s, i) => (
+                  <Link className="dash-pipe-cell" key={s.key} to="/pipeline" onClick={() => selectPipeline(p.id)}>
+                    <span className="dash-pipe-name">
+                      <span className="dash-pipe-dot" style={s.count > 0 ? { background: oppColor(s, i) } : undefined} />
+                      <span className="dash-pipe-label">{s.label}</span>
+                    </span>
+                    <span className="dash-pipe-nums">
+                      <span className={`dash-pipe-count ${s.count > 0 ? "" : "zero"}`}>{s.count}</span>
+                      <span className="dash-pipe-share">{s.count > 0 ? `${Math.round((s.count / p.total) * 100)}%` : "—"}</span>
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    })(),
     activity: (
       <div className="panel dash-card">
         <div className="dash-card-head">

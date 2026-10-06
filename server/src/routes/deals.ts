@@ -531,6 +531,8 @@ export async function dealDetail(organizationId: string, id: string) {
       parentDeal: { select: { id: true, name: true } },
       assets: { include: { selectedBuyer: true }, orderBy: { createdAt: "asc" } },
       _count: { select: { assets: true } },
+      // The opportunity this deal was converted from, when it was (one per deal).
+      fromOpportunity: { select: { id: true, name: true, convertedAt: true } },
     },
   });
   if (!deal) throw new HttpError(404, "Deal not found");
@@ -615,6 +617,11 @@ export async function dealDetail(organizationId: string, id: string) {
       id: r.id, month: r.month, amount: r.amount, kind: r.kind, operator: r.operator, note: r.note,
     })),
     metrics: { buyersContacted, interested, offers: offerCount, highOffer },
+    // "Converted from opportunity …" line on the deal page; null for deals
+    // created by hand.
+    fromOpportunity: deal.fromOpportunity
+      ? { id: deal.fromOpportunity.id, name: deal.fromOpportunity.name, convertedAt: deal.fromOpportunity.convertedAt }
+      : null,
   };
 }
 
