@@ -212,3 +212,67 @@ export interface Seller {
   dateAdded: string;
   updatedAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// Opportunities — lightweight prospects that live in OPPORTUNITIES-kind
+// pipelines (never Deals). Converting one creates a Deal from its data.
+// ---------------------------------------------------------------------------
+export type PipelineKind = "DEALS" | "OPPORTUNITIES";
+export type ConvertMode = "MANUAL" | "AUTO";
+export type OppActivityKind = "NOTE" | "CALL" | "EMAIL" | "TEXT" | "MEETING" | "SYSTEM";
+
+/** Board row (GET /opportunities?pipelineId=…). */
+export interface OppSummary {
+  id: string;
+  name: string;
+  pipelineId: string;
+  stage: Stage;
+  currentStageEnteredAt: string;
+  owner: { id: string; name: string; avatarColor?: string | null } | null;
+  contactId: string | null;
+  sellerName: string | null;
+  companyName: string | null;
+  state: string | null;
+  county: string | null;
+  abstract: string | null;
+  survey: string | null;
+  estAcres: number | null;
+  estNma: number | null;
+  estNra: number | null;
+  source: string | null;
+  lastActivityAt: string | null;
+  /** Calendar day at UTC midnight (same convention as task due dates). */
+  nextFollowUpDate: string | null;
+  convertedDealId: string | null;
+  convertedAt: string | null;
+  closeReason: string | null;
+  createdAt: string;
+}
+
+export interface OppStageHistoryRow {
+  id: string;
+  fromStage: Stage;
+  toStage: Stage;
+  reason: string | null;
+  changedBy: { id: string; name: string } | null;
+  createdAt: string;
+}
+
+export interface OppActivityRow {
+  id: string;
+  kind: OppActivityKind | string;
+  body: string;
+  createdBy: { id: string; name: string } | null;
+  createdAt: string;
+}
+
+/** Full record (GET /opportunities/:id). */
+export interface Opp extends OppSummary {
+  phone: string | null;
+  email: string | null;
+  notes: string | null;
+  contact: { id: string; firstName: string; lastName: string; entityName: string | null; phone: string | null; email: string | null } | null;
+  convertedDeal: { id: string; name: string; stage: Stage } | null;
+  stageHistory: OppStageHistoryRow[];
+  activities: OppActivityRow[];
+}

@@ -3,7 +3,8 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
-import { ensureStages, ensurePipelines, ensureDefaultPipeline, seedStages, firstActiveStageKey, TERMINAL_STAGE_KEYS } from "../domain/stages.js";
+import { ensureStages, ensurePipelines, ensureDefaultPipeline, seedStages, firstActiveStageKey, TERMINAL_STAGE_KEYS, PIPELINE_KINDS, isOpportunityPipeline } from "../domain/stages.js";
+import { CONVERT_MODES } from "../domain/opportunities.js";
 import type { Pipeline, PipelineStage } from "@prisma/client";
 
 export const pipelineStagesRouter = Router();
@@ -13,7 +14,11 @@ const serialize = (s: PipelineStage) => ({ id: s.id, key: s.key, label: s.label,
 
 // Stage colors are hex values picked in the UI ("#rrggbb").
 const colorField = z.string().regex(/^#[0-9a-fA-F]{6}$/).nullish();
-const serializePipeline = (p: Pipeline) => ({ id: p.id, name: p.name, isDefault: p.isDefault, position: p.position });
+const serializePipeline = (p: Pipeline) => ({
+  id: p.id, name: p.name, isDefault: p.isDefault, position: p.position,
+  kind: p.kind, description: p.description,
+  convertStageKey: p.convertStageKey, convertMode: p.convertMode, convertToPipelineId: p.convertToPipelineId,
+});
 
 /** Resolve the pipeline a request targets (query/body pipelineId, else the
  *  org's default). Always validates org ownership. */
@@ -30,6 +35,15 @@ function dealsOfPipeline(organizationId: string, p: Pipeline) {
   return p.isDefault
     ? { organizationId, OR: [{ pipelineId: p.id }, { pipelineId: null }] }
     : { organizationId, pipelineId: p.id };
+}
+
+/** The pipeline a stage row belongs to (null pipelineId = the org's default). */
+async function pipelineOfStage(organizationId: string, stage: PipelineStage): Promise<Pipeline> {
+  const p = stage.pipelineId
+    ? await prisma.pipeline.findFirst({ where: { id: stage.pipelineId, organizationId } })
+    : await ensureDefaultPipeline(prisma, organizationId);
+  if (!p) throw new HttpError(404, "Pipeline not found");
+  return p;
 }
 
 // Normalize positions to 0..n with all active stages before the terminal ones,
@@ -55,18 +69,24 @@ pipelineStagesRouter.get(
   }),
 );
 
-// Create a pipeline (seeded with the default stage set incl. Closed/Dead).
+// Create a pipeline. New pipelines are OPPORTUNITIES (prospects) unless the
+// caller asks for a DEALS pipeline; the kind is fixed for the pipeline's life.
 pipelineStagesRouter.post(
   "/pipelines",
   requirePermission("manageOrgSettings"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { name } = z.object({ name: z.string().trim().min(1).max(60) }).parse(req.body);
+    const { name, kind, description } = z.object({
+      name: z.string().trim().min(1).max(60),
+      kind: z.enum(PIPELINE_KINDS).default("OPPORTUNITIES"),
+      description: z.string().trim().max(500).nullish(),
+    }).parse(req.body);
     const org = orgId(req);
     const max = await prisma.pipeline.aggregate({ where: { organizationId: org }, _max: { position: true } });
-    const p = await prisma.pipeline.create({ data: { organizationId: org, name, position: (max._max.position ?? 0) + 1 } });
-    // User-created pipelines start blank: only the permanent Closed/Dead
-    // terminals — users build their own active stages from scratch.
-    await seedStages(prisma, org, p.id, true);
+    const p = await prisma.pipeline.create({ data: { organizationId: org, name, kind, description: description || null, position: (max._max.position ?? 0) + 1 } });
+    // User-created DEALS pipelines start blank: only the permanent Closed/Dead
+    // terminals — users build their own active stages from scratch. An
+    // OPPORTUNITIES pipeline gets the opportunity starter stages.
+    await seedStages(prisma, org, p.id, true, kind);
     const stages = await ensureStages(prisma, org, p.id);
     res.status(201).json({ ...serializePipeline(p), stages: stages.map(serialize) });
   }),
@@ -90,15 +110,48 @@ pipelineStagesRouter.post(
   }),
 );
 
-// Rename a pipeline.
+// Rename / describe a pipeline; opportunity pipelines also carry their
+// conversion settings here. The kind is fixed at creation.
 pipelineStagesRouter.patch(
   "/pipelines/:id",
   requirePermission("manageOrgSettings"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { name } = z.object({ name: z.string().trim().min(1).max(60) }).parse(req.body);
-    const p = await prisma.pipeline.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
+    const body = z.object({
+      name: z.string().trim().min(1).max(60).optional(),
+      kind: z.enum(PIPELINE_KINDS).optional(),
+      description: z.string().trim().max(500).nullish(),
+      // Stage whose entry converts (AUTO) or offers to convert (MANUAL) an
+      // opportunity; must be one of the pipeline's active stages, or null.
+      convertStageKey: z.string().max(200).nullish(),
+      convertMode: z.enum(CONVERT_MODES).optional(),
+      // The DEALS pipeline converted deals are created in (null = default).
+      convertToPipelineId: z.string().max(200).nullish(),
+    }).parse(req.body);
+    const org = orgId(req);
+    const p = await prisma.pipeline.findFirst({ where: { id: req.params.id, organizationId: org } });
     if (!p) throw new HttpError(404, "Pipeline not found");
-    const out = await prisma.pipeline.update({ where: { id: p.id }, data: { name } });
+    if (body.kind !== undefined && body.kind !== p.kind) throw new HttpError(400, "A pipeline's kind cannot be changed after it is created");
+    const data: { name?: string; description?: string | null; convertStageKey?: string | null; convertMode?: string; convertToPipelineId?: string | null } = {};
+    if (body.name !== undefined) data.name = body.name;
+    if (body.description !== undefined) data.description = body.description || null;
+    if (body.convertStageKey !== undefined) {
+      if (body.convertStageKey) {
+        if (!isOpportunityPipeline(p)) throw new HttpError(400, "Conversion settings apply to opportunity pipelines only");
+        const stages = await ensureStages(prisma, org, p.id);
+        if (!stages.some((s) => s.key === body.convertStageKey && !s.isTerminal)) throw new HttpError(400, "The conversion stage must be one of this pipeline's active stages");
+      }
+      data.convertStageKey = body.convertStageKey || null;
+    }
+    if (body.convertMode !== undefined) data.convertMode = body.convertMode;
+    if (body.convertToPipelineId !== undefined) {
+      if (body.convertToPipelineId) {
+        if (!isOpportunityPipeline(p)) throw new HttpError(400, "Conversion settings apply to opportunity pipelines only");
+        const target = await prisma.pipeline.findFirst({ where: { id: body.convertToPipelineId, organizationId: org } });
+        if (!target || isOpportunityPipeline(target)) throw new HttpError(400, "Converted deals must go to a deals pipeline");
+      }
+      data.convertToPipelineId = body.convertToPipelineId || null;
+    }
+    const out = await prisma.pipeline.update({ where: { id: p.id }, data });
     res.json(serializePipeline(out));
   }),
 );
@@ -114,6 +167,16 @@ pipelineStagesRouter.delete(
     const p = await prisma.pipeline.findFirst({ where: { id: req.params.id, organizationId: org } });
     if (!p) throw new HttpError(404, "Pipeline not found");
     if (p.isDefault) throw new HttpError(400, "The default pipeline cannot be deleted");
+    // An opportunity pipeline has nowhere to move its prospects: it must be
+    // emptied first. Other opportunity pipelines that pointed converted deals
+    // at this one would only ever target a DEALS pipeline, so nothing dangles.
+    if (isOpportunityPipeline(p)) {
+      const held = await prisma.opportunity.count({ where: { organizationId: org, pipelineId: p.id } });
+      if (held > 0) throw new HttpError(400, `This pipeline still holds ${held} opportunit${held === 1 ? "y" : "ies"} — move or delete them first`);
+      await prisma.pipeline.delete({ where: { id: p.id } }); // stages cascade
+      res.json({ ok: true });
+      return;
+    }
     const def = await ensureDefaultPipeline(prisma, org);
     const fallbackKey = await firstActiveStageKey(prisma, org, def.id);
     await prisma.$transaction([
@@ -163,7 +226,9 @@ pipelineStagesRouter.post(
   }),
 );
 
-// Rename / recolor an active stage. Terminal (Closed / Dead) stages are locked.
+// Rename / recolor a stage. In deals pipelines the terminal (Closed / Dead)
+// stages are locked; an opportunity pipeline's Passed / Lost may be renamed
+// and recoloured (nothing keys on their labels).
 pipelineStagesRouter.patch(
   "/stages/:id",
   requirePermission("manageOrgSettings"),
@@ -171,7 +236,9 @@ pipelineStagesRouter.patch(
     const { label, color } = z.object({ label: z.string().trim().min(1).max(60).optional(), color: colorField }).parse(req.body);
     const stage = await prisma.pipelineStage.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!stage) throw new HttpError(404, "Stage not found");
-    if (stage.isTerminal) throw new HttpError(400, "Closed and Dead are permanent system stages and cannot be changed");
+    if (stage.isTerminal && !isOpportunityPipeline(await pipelineOfStage(orgId(req), stage))) {
+      throw new HttpError(400, "Closed and Dead are permanent system stages and cannot be changed");
+    }
     await prisma.pipelineStage.update({
       where: { id: stage.id },
       data: { ...(label !== undefined ? { label } : {}), ...(color !== undefined ? { color } : {}) },
@@ -206,6 +273,7 @@ pipelineStagesRouter.post(
 
 // Remove a custom/active stage. Terminals are locked; you can't remove the last
 // active stage. Deals sitting in the removed stage move to the first active one.
+// Opportunity pipelines follow the same rules with their opportunities.
 pipelineStagesRouter.delete(
   "/stages/:id",
   requirePermission("manageOrgSettings"),
@@ -213,11 +281,34 @@ pipelineStagesRouter.delete(
     const org = orgId(req);
     const stage = await prisma.pipelineStage.findFirst({ where: { id: req.params.id, organizationId: org } });
     if (!stage) throw new HttpError(404, "Stage not found");
-    if (stage.isTerminal) throw new HttpError(400, "Closed and Dead are permanent system stages and cannot be removed");
-    const p = stage.pipelineId
-      ? await prisma.pipeline.findFirst({ where: { id: stage.pipelineId, organizationId: org } })
-      : await ensureDefaultPipeline(prisma, org);
-    if (!p) throw new HttpError(404, "Pipeline not found");
+    const p = await pipelineOfStage(org, stage);
+    if (stage.isTerminal) {
+      throw new HttpError(400, isOpportunityPipeline(p)
+        ? "Passed and Lost are permanent stages and cannot be removed"
+        : "Closed and Dead are permanent system stages and cannot be removed");
+    }
+    if (isOpportunityPipeline(p)) {
+      const stages = await ensureStages(prisma, org, p.id);
+      const remainingActive = stages.filter((s) => !s.isTerminal && s.id !== stage.id);
+      const where = { organizationId: org, pipelineId: p.id, stage: stage.key };
+      if (remainingActive.length === 0) {
+        const occupied = await prisma.opportunity.count({ where });
+        if (occupied > 0) throw new HttpError(400, "Opportunities are still in this stage — add another stage or move them first");
+      }
+      const fallbackKey = remainingActive[0]?.key;
+      await prisma.$transaction([
+        ...(fallbackKey
+          ? [prisma.opportunity.updateMany({ where, data: { stage: fallbackKey, currentStageEnteredAt: new Date() } })]
+          : []),
+        prisma.pipelineStage.delete({ where: { id: stage.id } }),
+      ]);
+      // A removed stage can no longer be the conversion trigger.
+      if (p.convertStageKey === stage.key) await prisma.pipeline.update({ where: { id: p.id }, data: { convertStageKey: null } });
+      await renumber(p.id);
+      const out = await prisma.pipelineStage.findMany({ where: { pipelineId: p.id }, orderBy: { position: "asc" } });
+      res.json(out.map(serialize));
+      return;
+    }
     const stages = await ensureStages(prisma, org, p.id);
     const remainingActive = stages.filter((s) => !s.isTerminal && s.id !== stage.id);
     // The default pipeline always keeps at least one active stage (new deals

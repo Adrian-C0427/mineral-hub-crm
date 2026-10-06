@@ -15,7 +15,7 @@ import { effectiveStatus, ENGAGED_STATUSES, BUYER_STATUSES } from "../domain/buy
 import { sendEmail, personalize, renderEmailBody } from "../services/email.js";
 import { money as fmtMoney } from "../domain/format.js";
 import { newPortalSlug } from "./portal.js";
-import { ensureStages, activeStageKeys } from "../domain/stages.js";
+import { ensureStages, activeStageKeys, isOpportunityPipeline } from "../domain/stages.js";
 import { applyStageChange, applyStageUndo, signStageUndo, verifyStageUndo, STAGE_UNDO_MAX_TOKEN_BYTES } from "../services/stageUndo.js";
 
 export const dealsRouter = Router();
@@ -342,6 +342,8 @@ dealsRouter.post(
     if (data.pipelineId) {
       const p = await prisma.pipeline.findFirst({ where: { id: data.pipelineId, organizationId: orgId(req) } });
       if (!p) throw new HttpError(400, "Unknown pipeline");
+      // Opportunity pipelines hold prospects (Opportunity records), never deals.
+      if (isOpportunityPipeline(p)) throw new HttpError(400, "Deals cannot be created in an opportunity pipeline");
       pipelineId = p.isDefault ? null : p.id; // null = default, keeps legacy rows uniform
     }
     const activeKeys = await activeStageKeys(prisma, orgId(req), pipelineId);
@@ -493,120 +495,128 @@ dealsRouter.get(
   "/:id",
   requirePermission("viewDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const deal = await prisma.deal.findFirst({
-      where: { id: req.params.id, organizationId: orgId(req) },
-      include: {
-        ...dealInclude,
-        stageHistory: { orderBy: { createdAt: "asc" }, include: { changedBy: { select: { name: true } } } },
-        offers: { include: { buyer: { select: { id: true, name: true, companyName: true } } }, orderBy: { dateSubmitted: "desc" } },
-        // Only current versions; prior (superseded) versions stay reachable via /files/:id/versions.
-        files: {
-          where: { supersededById: null },
-          include: { uploadedBy: { select: { name: true } }, _count: { select: { supersedes: true } } },
-          orderBy: { createdAt: "desc" },
-        },
-        buyerActivity: {
-          include: {
-            buyer: { include: { buyBox: true } },
-            sentBy: { select: { name: true } },
-            assignedTeamMember: { select: { id: true, name: true, avatarColor: true } },
-            messages: { orderBy: { occurredAt: "desc" }, include: { createdBy: { select: { name: true } } } },
-          },
-        },
-        sellers: { include: { assignedTeamMember: { select: { id: true, name: true, avatarColor: true } } }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
-        revenueEntries: { orderBy: { month: "asc" } },
-        // Multi-asset: the parent package (if this deal is a child asset) and the
-        // child assets grouped under this deal (if it is a package).
-        parentDeal: { select: { id: true, name: true } },
-        assets: { include: { selectedBuyer: true }, orderBy: { createdAt: "asc" } },
-        _count: { select: { assets: true } },
-      },
-    });
-    if (!deal) throw new HttpError(404, "Deal not found");
-
-    const now = new Date();
-    // Buyer activity rows with live match %.
-    const activity = deal.buyerActivity.map((a) => {
-      const match = a.buyer.buyBox
-        ? computeMatch(deal, a.buyer.buyBox)
-        : computeMatch(deal, emptyBox());
-      return {
-        id: a.id,
-        buyerId: a.buyerId,
-        buyerName: a.buyer.name,
-        companyName: a.buyer.companyName,
-        matchPercent: match.matchPercent,
-        dateSent: a.dateSent,
-        status: effectiveStatus(a),
-        responseReceived: a.responseReceived,
-        offerAmount: a.offerAmount,
-        lastActivityDate: a.lastActivityDate,
-        nextFollowUpDate: a.nextFollowUpDate,
-        notes: a.notes,
-        sentBy: a.sentBy?.name ?? null,
-        assignedTeamMember: a.assignedTeamMember ? { id: a.assignedTeamMember.id, name: a.assignedTeamMember.name } : null,
-        timeline: a.messages.map((m) => ({
-          id: m.id,
-          kind: m.kind,
-          subject: m.subject,
-          body: m.body,
-          occurredAt: m.occurredAt,
-          createdBy: m.createdBy?.name ?? null,
-          threadId: m.threadId,
-        })),
-      };
-    });
-
-    // Metrics row.
-    const buyersContacted = activity.length;
-    const interested = activity.filter((a) => ENGAGED_STATUSES.includes(a.status)).length;
-    const offerCount = deal.offers.length;
-    const highOffer = deal.offers.reduce<number | null>((max, o) => (max == null || o.amount > max ? o.amount : max), null);
-
-    res.json({
-      ...serializeDeal(deal, now),
-      // Full child-asset cards for the package's Assets/Tracts section.
-      assets: deal.assets.map(serializeAssetChild),
-      stageHistory: deal.stageHistory.map((h) => ({
-        id: h.id,
-        fromStage: h.fromStage,
-        toStage: h.toStage,
-        changedBy: h.changedBy?.name ?? null,
-        deadReason: h.deadReason,
-        createdAt: h.createdAt,
-      })),
-      offers: deal.offers.map((o) => ({
-        id: o.id,
-        buyer: o.buyer,
-        amount: o.amount,
-        dateSubmitted: o.dateSubmitted,
-        conditions: o.conditions,
-        expirationDate: o.expirationDate,
-        status: o.status,
-        parentOfferId: o.parentOfferId,
-        notes: o.notes,
-      })),
-      files: deal.files.map((f) => ({
-        id: f.id,
-        category: f.category,
-        folder: f.folder,
-        filename: f.filename,
-        mimeType: f.mimeType,
-        sizeBytes: f.sizeBytes,
-        uploadedBy: f.uploadedBy?.name ?? null,
-        createdAt: f.createdAt,
-        updatedAt: f.updatedAt,
-        versionCount: f._count.supersedes,
-      })),
-      buyerActivity: activity,
-      sellers: deal.sellers.map((s) => serializeSeller(s)),
-      revenueEntries: deal.revenueEntries.map((r) => ({
-        id: r.id, month: r.month, amount: r.amount, kind: r.kind, operator: r.operator, note: r.note,
-      })),
-      metrics: { buyersContacted, interested, offers: offerCount, highOffer },
-    });
+    res.json(await dealDetail(orgId(req), req.params.id));
   }),
 );
+
+/**
+ * The full deal-page payload (GET /deals/:id). Exported so the opportunity
+ * conversion endpoint can return the new deal in exactly this shape.
+ */
+export async function dealDetail(organizationId: string, id: string) {
+  const deal = await prisma.deal.findFirst({
+    where: { id, organizationId },
+    include: {
+      ...dealInclude,
+      stageHistory: { orderBy: { createdAt: "asc" }, include: { changedBy: { select: { name: true } } } },
+      offers: { include: { buyer: { select: { id: true, name: true, companyName: true } } }, orderBy: { dateSubmitted: "desc" } },
+      // Only current versions; prior (superseded) versions stay reachable via /files/:id/versions.
+      files: {
+        where: { supersededById: null },
+        include: { uploadedBy: { select: { name: true } }, _count: { select: { supersedes: true } } },
+        orderBy: { createdAt: "desc" },
+      },
+      buyerActivity: {
+        include: {
+          buyer: { include: { buyBox: true } },
+          sentBy: { select: { name: true } },
+          assignedTeamMember: { select: { id: true, name: true, avatarColor: true } },
+          messages: { orderBy: { occurredAt: "desc" }, include: { createdBy: { select: { name: true } } } },
+        },
+      },
+      sellers: { include: { assignedTeamMember: { select: { id: true, name: true, avatarColor: true } } }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+      revenueEntries: { orderBy: { month: "asc" } },
+      // Multi-asset: the parent package (if this deal is a child asset) and the
+      // child assets grouped under this deal (if it is a package).
+      parentDeal: { select: { id: true, name: true } },
+      assets: { include: { selectedBuyer: true }, orderBy: { createdAt: "asc" } },
+      _count: { select: { assets: true } },
+    },
+  });
+  if (!deal) throw new HttpError(404, "Deal not found");
+
+  const now = new Date();
+  // Buyer activity rows with live match %.
+  const activity = deal.buyerActivity.map((a) => {
+    const match = a.buyer.buyBox
+      ? computeMatch(deal, a.buyer.buyBox)
+      : computeMatch(deal, emptyBox());
+    return {
+      id: a.id,
+      buyerId: a.buyerId,
+      buyerName: a.buyer.name,
+      companyName: a.buyer.companyName,
+      matchPercent: match.matchPercent,
+      dateSent: a.dateSent,
+      status: effectiveStatus(a),
+      responseReceived: a.responseReceived,
+      offerAmount: a.offerAmount,
+      lastActivityDate: a.lastActivityDate,
+      nextFollowUpDate: a.nextFollowUpDate,
+      notes: a.notes,
+      sentBy: a.sentBy?.name ?? null,
+      assignedTeamMember: a.assignedTeamMember ? { id: a.assignedTeamMember.id, name: a.assignedTeamMember.name } : null,
+      timeline: a.messages.map((m) => ({
+        id: m.id,
+        kind: m.kind,
+        subject: m.subject,
+        body: m.body,
+        occurredAt: m.occurredAt,
+        createdBy: m.createdBy?.name ?? null,
+        threadId: m.threadId,
+      })),
+    };
+  });
+
+  // Metrics row.
+  const buyersContacted = activity.length;
+  const interested = activity.filter((a) => ENGAGED_STATUSES.includes(a.status)).length;
+  const offerCount = deal.offers.length;
+  const highOffer = deal.offers.reduce<number | null>((max, o) => (max == null || o.amount > max ? o.amount : max), null);
+
+  return {
+    ...serializeDeal(deal, now),
+    // Full child-asset cards for the package's Assets/Tracts section.
+    assets: deal.assets.map(serializeAssetChild),
+    stageHistory: deal.stageHistory.map((h) => ({
+      id: h.id,
+      fromStage: h.fromStage,
+      toStage: h.toStage,
+      changedBy: h.changedBy?.name ?? null,
+      deadReason: h.deadReason,
+      createdAt: h.createdAt,
+    })),
+    offers: deal.offers.map((o) => ({
+      id: o.id,
+      buyer: o.buyer,
+      amount: o.amount,
+      dateSubmitted: o.dateSubmitted,
+      conditions: o.conditions,
+      expirationDate: o.expirationDate,
+      status: o.status,
+      parentOfferId: o.parentOfferId,
+      notes: o.notes,
+    })),
+    files: deal.files.map((f) => ({
+      id: f.id,
+      category: f.category,
+      folder: f.folder,
+      filename: f.filename,
+      mimeType: f.mimeType,
+      sizeBytes: f.sizeBytes,
+      uploadedBy: f.uploadedBy?.name ?? null,
+      createdAt: f.createdAt,
+      updatedAt: f.updatedAt,
+      versionCount: f._count.supersedes,
+    })),
+    buyerActivity: activity,
+    sellers: deal.sellers.map((s) => serializeSeller(s)),
+    revenueEntries: deal.revenueEntries.map((r) => ({
+      id: r.id, month: r.month, amount: r.amount, kind: r.kind, operator: r.operator, note: r.note,
+    })),
+    metrics: { buyersContacted, interested, offers: offerCount, highOffer },
+  };
+}
 
 // Seller serialization — the buyer/UI-facing projection of a DealSeller row.
 function serializeSeller(

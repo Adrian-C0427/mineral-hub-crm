@@ -43,6 +43,8 @@ const Landing = lazy(() => import("./pages/Landing").then((m) => ({ default: m.L
 // Acquisitions module — Contacts (sourcing side of the CRM).
 const Contacts = lazy(() => import("./pages/Contacts").then((m) => ({ default: m.Contacts })));
 const ContactDetail = lazy(() => import("./pages/ContactDetail").then((m) => ({ default: m.ContactDetail })));
+// Opportunities (prospects in OPPORTUNITIES-kind pipelines) — viewed with the deals permission.
+const Opportunity = lazy(() => import("./pages/Opportunity").then((m) => ({ default: m.Opportunity })));
 
 /** Redirect to Dashboard if the user lacks the required permission. */
 function Guard({ perm, children }: { perm: string; children: ReactNode }) {
@@ -132,6 +134,7 @@ export function App() {
           <Route path="/deals/closed" element={<Guard perm="viewDeals"><Deals scope="closed" /></Guard>} />
           <Route path="/deals/archived" element={<Guard perm="viewDeals"><Deals scope="archived" /></Guard>} />
           <Route path="/deals/:id" element={<Guard perm="viewDeals"><DealDetail /></Guard>} />
+          <Route path="/opportunities/:id" element={<Guard perm="viewDeals"><Suspense fallback={<Spinner label="Loading opportunity…" />}><Opportunity /></Suspense></Guard>} />
           <Route path="/buyers" element={<Guard perm="viewBuyers"><Buyers /></Guard>} />
           <Route path="/contacts" element={<Guard perm="viewContacts"><Suspense fallback={<Spinner label="Loading contacts…" />}><Contacts /></Suspense></Guard>} />
           <Route path="/contacts/:id" element={<Guard perm="viewContacts"><Suspense fallback={<Spinner label="Loading contact…" />}><ContactDetail /></Suspense></Guard>} />
