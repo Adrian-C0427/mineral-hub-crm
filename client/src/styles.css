@@ -45,6 +45,7 @@
   --accent-soft:color-mix(in srgb,var(--accent) 6%,transparent); --accent-border:color-mix(in srgb,var(--accent) 45%,transparent);
   --accent-row:color-mix(in srgb,var(--accent) 9%,var(--surface)); --accent-row-hover:color-mix(in srgb,var(--accent) 12%,var(--surface));
   --accent-line:color-mix(in srgb,var(--accent) 28%,var(--surface)); --proj:color-mix(in srgb,var(--accent2) 35%,var(--surface));
+  --atask:color-mix(in srgb,var(--warn) 55%,var(--surface));
   --success-tint:color-mix(in srgb,var(--success) 12%,transparent); --success-border:color-mix(in srgb,var(--success) 25%,transparent);
   --warn-tint:color-mix(in srgb,var(--warn) 12%,transparent); --warn-border:color-mix(in srgb,var(--warn) 30%,transparent);
   --danger-tint:color-mix(in srgb,var(--danger) 12%,transparent); --danger-hover:color-mix(in srgb,var(--danger) 10%,transparent);
@@ -118,6 +119,8 @@
   --accent-row:#0C1424; --accent-row-hover:#0F1A2E; --accent-line:#23324F; --proj:#1E3157; --danger-line:#3A1A1A; --danger-field:#7F1D1D;
 }
 :root[data-theme="light"]:not([data-accent]) { --proj:#BCD0F4; }
+/* Profit-at-asking chart series: muted amber in every theme (lighter on light). */
+:root[data-theme="light"] { --atask:color-mix(in srgb,var(--warn) 45%,var(--surface)); }
 :root[data-accent="custom"] { --accent-ink:color-mix(in srgb,var(--accent) 62%,#fff); --accent-ink-hover:color-mix(in srgb,var(--accent) 45%,#fff); }
 :root[data-theme="light"][data-accent="custom"] { --accent-ink:color-mix(in srgb,var(--accent) 78%,#000); --accent-ink-hover:color-mix(in srgb,var(--accent) 65%,#000); }
 /* In Light the navigation stays dark: the sidebar (and its collapsed-rail

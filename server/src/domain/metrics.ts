@@ -3,6 +3,7 @@
  *
  *  Close Rate   = closed-and-won deals ÷ deals with >= 1 offer made (per buyer)
  *  Net Profit   = accepted offer amount − our price − manual closing costs
+ *  Profit@Ask   = ask price − our price − manual closing costs (no offer involved)
  *  Gross Fee    = accepted offer amount − our price
  *  Avg Deal Size= mean of accepted offer amounts on closed deals
  *  Win Rate     = closed ÷ (closed + dead) within a period
@@ -21,6 +22,22 @@ export function netProfit(
   closingCosts: number | null,
 ): number {
   return acceptedAmount - (costBasis ?? 0) - (closingCosts ?? 0);
+}
+
+/**
+ * Profit at asking price: what the deal would make if a buyer paid our current
+ * asking price. Null when either price is missing — deliberately NO cost-basis
+ * fallback here (unlike netProfit callers, which pass `ourPrice ?? askPrice`):
+ * a deal without Our Cost has no meaningful asking-price profit, and falling
+ * back to askPrice would make it read as exactly −closing costs.
+ */
+export function profitAtAsk(
+  askPrice: number | null,
+  ourPrice: number | null,
+  closingCosts: number | null,
+): number | null {
+  if (askPrice == null || ourPrice == null) return null;
+  return netProfit(askPrice, ourPrice, closingCosts);
 }
 
 export function avg(nums: number[]): number {
