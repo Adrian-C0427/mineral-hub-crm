@@ -4,7 +4,7 @@ import { prisma, withDbRetry } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal } from "../serializers.js";
-import { netProfit, avg } from "../domain/metrics.js";
+import { netProfit, avg, profitAtAsk } from "../domain/metrics.js";
 import { ensureStages, TERMINAL_STAGE_KEYS } from "../domain/stages.js";
 
 export const dashboardRouter = Router();
@@ -73,6 +73,54 @@ export function windowBuckets(win: { start: Date; end: Date }, now: Date): { y: 
     label: y === now.getUTCFullYear() ? monthNames[m] : `${monthNames[m]} '${String(y).slice(2)}`,
     isCurrent: y === now.getUTCFullYear() && m === now.getUTCMonth(),
   }));
+}
+
+/** One deal behind a profit-chart bar (powers the click-through drill-down). */
+export type BucketDeal = {
+  id: string; name: string; stage: string;
+  /** closed = realized, projected = has an offer, atAsk = no offer yet (profit at asking price). */
+  kind: "closed" | "projected" | "atAsk";
+  amount: number | null; profit: number; date: string;
+};
+
+/** The scalars the at-asking series needs from an active deal. */
+type AtAskDeal = {
+  id: string; name: string; stage: string;
+  askPrice: number | null; ourPrice: number | null; estimatedClosingCosts: number | null;
+  offers: { amount: number }[];
+};
+
+/**
+ * "Profit at asking price" series — the third, mutually exclusive population
+ * next to realized (closed) and projected (active with an offer): active deals
+ * with NO offers at all and both prices set (ask − Our Cost − closing costs).
+ * `total` is the headline sum over that whole population; the per-bucket maps
+ * only hold deals whose resolved closing date lands on the chart's axis (a
+ * deal with no resolvable date, or one outside the window, is in the total
+ * but on no bar). Pure so it can be unit-tested without a database.
+ */
+export function profitAtAskSeries<T extends AtAskDeal>(
+  deals: T[],
+  closingDateOf: (d: T) => Date | string | null | undefined,
+  bucketIdx: (dt: Date) => number,
+): { total: number; byBucket: Map<number, number>; bucketDeals: { i: number; entry: BucketDeal }[] } {
+  let total = 0;
+  const byBucket = new Map<number, number>();
+  const bucketDeals: { i: number; entry: BucketDeal }[] = [];
+  for (const d of deals) {
+    if (d.offers.length) continue; // has an offer → it's in Projected, never here
+    const profit = profitAtAsk(d.askPrice, d.ourPrice, d.estimatedClosingCosts);
+    if (profit == null) continue;
+    total += profit;
+    const when = closingDateOf(d);
+    if (!when) continue;
+    const dt = new Date(when);
+    const i = bucketIdx(dt);
+    if (i < 0) continue;
+    byBucket.set(i, (byBucket.get(i) ?? 0) + profit);
+    bucketDeals.push({ i, entry: { id: d.id, name: d.name, stage: d.stage, kind: "atAsk", amount: d.askPrice, profit, date: dt.toISOString().slice(0, 10) } });
+  }
+  return { total, byBucket, bucketDeals };
 }
 
 dashboardRouter.get(
@@ -213,7 +261,6 @@ dashboardRouter.get(
       b.m === null ? dt.getUTCFullYear() === b.y : dt.getUTCFullYear() === b.y && dt.getUTCMonth() === b.m);
     // Per-bucket deal lists power the chart's click-through drill-down: the
     // user goes straight from a bar to the deals behind it.
-    type BucketDeal = { id: string; name: string; stage: string; kind: "closed" | "projected"; amount: number | null; profit: number; date: string };
     const bucketDeals = new Map<number, BucketDeal[]>();
     const pushBucketDeal = (i: number, entry: BucketDeal) => {
       const list = bucketDeals.get(i) ?? [];
@@ -253,10 +300,16 @@ dashboardRouter.get(
         amount, profit, date: new Date(s.finalClosingDate).toISOString().slice(0, 10),
       });
     }
+    // Profit at asking price by month — the active deals the Projected series
+    // leaves out (no offer yet), bucketed by the SAME resolved closing date.
+    // Realized / Projected / At-asking never overlap, so the three stack.
+    const atAsk = profitAtAskSeries(allActive, (d) => serializeDeal(d, now).finalClosingDate, bucketIdx);
+    for (const { i, entry } of atAsk.bucketDeals) pushBucketDeal(i, entry);
+    const kindOrder: Record<BucketDeal["kind"], number> = { closed: 0, projected: 1, atAsk: 2 };
     const profitByMonth = buckets.map((b, i) => ({
       month: b.label, isCurrent: b.isCurrent,
-      profit: monthly.get(i) ?? 0, projected: monthlyProjected.get(i) ?? 0,
-      deals: (bucketDeals.get(i) ?? []).sort((a, b2) => (a.kind === b2.kind ? b2.profit - a.profit : a.kind === "closed" ? -1 : 1)),
+      profit: monthly.get(i) ?? 0, projected: monthlyProjected.get(i) ?? 0, atAsk: atAsk.byBucket.get(i) ?? 0,
+      deals: (bucketDeals.get(i) ?? []).sort((a, b2) => (a.kind === b2.kind ? b2.profit - a.profit : kindOrder[a.kind] - kindOrder[b2.kind])),
     }));
 
     // --- KPI trends (sparkline series — real history, never fabricated) ------
@@ -317,6 +370,9 @@ dashboardRouter.get(
         avgProfitPerDeal,
         offersPending: activeOffers,
         underContract,
+        // Profit at asking price: active deals with no offer yet, if they sold
+        // at our ask (ask − Our Cost − closing costs). Separate from projected.
+        profitAtAsk: atAsk.total,
         periodLabel: win.label,
         // Prior equal-length window (Closed Date keyed) — delta baselines.
         closedProfitPrev,

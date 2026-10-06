@@ -1,7 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { resolveDealDates } from "./domain/dates.js";
 import { computePriority, isOverdue } from "./domain/priority.js";
-import { closeRate, netProfit } from "./domain/metrics.js";
+import { closeRate, netProfit, profitAtAsk } from "./domain/metrics.js";
 
 /** Deal with the relations we need to fully serialize a list/detail row. */
 export type DealWithRels = Prisma.DealGetPayload<{
@@ -85,6 +85,10 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
   // pre-Our-Price deals so historical profit stays correct.
   const costBasis = deal.ourPrice ?? deal.askPrice;
   const profitEst = bestOffer != null ? netProfit(bestOffer, costBasis, deal.estimatedClosingCosts) : null;
+  // Profit at asking price = ask − Our Cost − closing costs: what we'd make
+  // selling at our current ask (not an offer). The deal's OWN figures, like
+  // profitEst — no package roll-up. Null without both prices.
+  const atAsk = profitAtAsk(deal.askPrice, deal.ourPrice, deal.estimatedClosingCosts);
 
   // Package roll-up: a deal that groups child assets displays the aggregate of
   // its own value plus its children's. This is display-only — analytics read
@@ -220,6 +224,7 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     assignees: deal.assignees ?? [],
     priority,
     profitEst,
+    profitAtAsk: atAsk,
     isOverdue: isOverdue({ ...deal, selectedBuyerId: deal.selectedBuyerId }, now),
     updatedAt: deal.updatedAt,
     createdAt: deal.createdAt,

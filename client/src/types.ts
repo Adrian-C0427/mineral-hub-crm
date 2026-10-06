@@ -53,6 +53,8 @@ export interface DealSummary {
   daysInStage: number;
   priority: Priority;
   profitEst: number | null;
+  /** Ask price − Our Cost − closing costs (what we'd make selling at our ask); null without both prices. */
+  profitAtAsk?: number | null;
   isOverdue: boolean;
   dateUnderContract: string | null;
   originalClosingDate: string | null;

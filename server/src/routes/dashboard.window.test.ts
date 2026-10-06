@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dashboardWindow, windowBuckets } from "./dashboard.js";
+import { dashboardWindow, windowBuckets, profitAtAskSeries } from "./dashboard.js";
 
 const NOW = new Date("2026-07-15T18:00:00Z");
 
@@ -43,5 +43,47 @@ describe("windowBuckets", () => {
     const b = windowBuckets(dashboardWindow("CUSTOM", NOW, "2020-01-01", "2026-12-31"), NOW);
     expect(b.map((x) => x.label)).toEqual(["2020", "2021", "2022", "2023", "2024", "2025", "2026"]);
     expect(b.filter((x) => x.isCurrent).map((x) => x.label)).toEqual(["2026"]);
+  });
+});
+
+describe("profitAtAskSeries", () => {
+  // Same bucket resolver the route builds over the window's buckets.
+  const buckets = windowBuckets(dashboardWindow("YTD", NOW), NOW);
+  const bucketIdx = (dt: Date) => buckets.findIndex((b) => dt.getUTCFullYear() === b.y && dt.getUTCMonth() === b.m);
+  const deal = (o: { id: string; ask: number | null; our: number | null; costs?: number | null; offers?: number[]; closing?: string | null }) => ({
+    id: o.id, name: o.id, stage: "ACTIVE", askPrice: o.ask, ourPrice: o.our, estimatedClosingCosts: o.costs ?? null,
+    offers: (o.offers ?? []).map((amount) => ({ amount })), closing: o.closing ?? null,
+  });
+
+  it("counts only active deals with no offer and both prices; ask − our cost − closing costs", () => {
+    const s = profitAtAskSeries([
+      deal({ id: "a", ask: 150000, our: 100000, costs: 5000, closing: "2026-03-10" }),
+      deal({ id: "hasOffer", ask: 150000, our: 100000, offers: [120000], closing: "2026-03-10" }), // projected, not here
+      deal({ id: "noCost", ask: 150000, our: null, closing: "2026-03-10" }), // no Our Cost → no asking-price profit
+      deal({ id: "noAsk", ask: null, our: 100000, closing: "2026-03-10" }),
+    ], (d) => d.closing, bucketIdx);
+    expect(s.total).toBe(45000);
+    expect([...s.byBucket.entries()]).toEqual([[2, 45000]]); // March
+    expect(s.bucketDeals).toEqual([{ i: 2, entry: { id: "a", name: "a", stage: "ACTIVE", kind: "atAsk", amount: 150000, profit: 45000, date: "2026-03-10" } }]);
+  });
+
+  it("keeps undated and out-of-window deals in the total but off the bars", () => {
+    const s = profitAtAskSeries([
+      deal({ id: "dated", ask: 50000, our: 40000, closing: "2026-07-01" }),
+      deal({ id: "undated", ask: 50000, our: 30000, closing: null }),
+      deal({ id: "lastYear", ask: 50000, our: 45000, closing: "2025-12-31" }),
+    ], (d) => d.closing, bucketIdx);
+    expect(s.total).toBe(10000 + 20000 + 5000);
+    expect([...s.byBucket.entries()]).toEqual([[6, 10000]]); // July only
+    expect(s.bucketDeals.map((x) => x.entry.id)).toEqual(["dated"]);
+  });
+
+  it("sums several deals into one bucket and carries a negative margin through", () => {
+    const s = profitAtAskSeries([
+      deal({ id: "x", ask: 100000, our: 80000, closing: "2026-05-05" }),
+      deal({ id: "y", ask: 100000, our: 110000, costs: 1000, closing: "2026-05-20" }),
+    ], (d) => d.closing, bucketIdx);
+    expect(s.total).toBe(20000 - 11000);
+    expect(s.byBucket.get(4)).toBe(9000);
   });
 });

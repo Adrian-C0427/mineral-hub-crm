@@ -1,7 +1,8 @@
 /* Redesign styles: dashboard (pages/Dashboard.tsx). Loaded after styles.css,
    so these rules replace the older dash-* look there. Colours are theme
-   tokens only; chart series use --success (realized) and --proj (projected,
-   derived from the user's secondary accent). */
+   tokens only; chart series use --success (realized), --proj (projected,
+   derived from the user's secondary accent) and --atask (profit at asking
+   price, muted amber). */
 
 /* --- Page frame & header ------------------------------------------------ */
 .dash-page { display: flex; flex-direction: column; gap: 16px; }
@@ -79,6 +80,7 @@ a.primary.dash-start-link:hover { border-color: var(--accent-hover); background:
 .dash-delta.down, :root[data-theme="light"] .dash-delta.down { color: var(--danger-ink); }
 .dash-swatch { display: inline-block; flex: none; width: 8px; height: 8px; border-radius: 2px; }
 .dash-swatch-proj, :root[data-theme="light"] .dash-swatch-proj { background: var(--proj); opacity: 1; }
+.dash-swatch-atask, :root[data-theme="light"] .dash-swatch-atask { background: var(--atask); opacity: 1; }
 
 /* --- Profit overview (hero + chart) ---------------------------------------- */
 .dash-ov-main { display: flex; flex-wrap: wrap; flex: 1 0 auto; }
@@ -136,7 +138,9 @@ a.primary.dash-start-link:hover { border-color: var(--accent-hover); background:
 .dash-chart-col.clickable { cursor: pointer; }
 .dash-chart-col.clickable:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-ring); }
 .dash-chart-bar { flex: none; width: 52%; max-width: 40px; }
+.dash-chart-bar.atask { background: var(--atask); border-radius: 3px 3px 0 0; }
 .dash-chart-bar.proj { background: var(--proj); border-radius: 3px 3px 0 0; }
+.dash-chart-bar.proj.under { border-radius: 0; }
 .dash-chart-bar.real { background: var(--success); border-radius: 3px 3px 0 0; }
 .dash-chart-bar.real.under { border-radius: 0; }
 .dash-chart-bar.zero { height: 2px; background: var(--line); }

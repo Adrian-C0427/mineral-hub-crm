@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { resolveDealDates, daysUntil, addCalendarDays } from "./dates.js";
 import { computePriority, isOverdue } from "./priority.js";
 import { computeMatch } from "./matching.js";
-import { winRate, netProfit, grossFee, closeRate } from "./metrics.js";
+import { winRate, netProfit, grossFee, closeRate, profitAtAsk } from "./metrics.js";
 
 const d = (s: string) => new Date(s + "T00:00:00Z");
 
@@ -132,6 +132,14 @@ describe("metrics", () => {
   it("net profit subtracts ask price and closing costs", () => {
     expect(netProfit(150000, 100000, 5000)).toBe(45000);
     expect(grossFee(150000, 100000)).toBe(50000);
+  });
+  it("profit at ask = ask − our cost − closing costs, null without both prices", () => {
+    expect(profitAtAsk(150000, 100000, 5000)).toBe(45000);
+    expect(profitAtAsk(150000, 100000, null)).toBe(50000);
+    expect(profitAtAsk(150000, 160000, 0)).toBe(-10000);
+    // No cost-basis fallback: a deal missing Our Cost (or an ask) has no asking-price profit.
+    expect(profitAtAsk(150000, null, 5000)).toBeNull();
+    expect(profitAtAsk(null, 100000, 5000)).toBeNull();
   });
   it("win rate = closed / (closed + dead)", () => {
     expect(winRate(3, 1)).toBe(0.75);

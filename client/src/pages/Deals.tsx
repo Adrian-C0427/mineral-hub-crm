@@ -42,6 +42,8 @@ function costPerAcre(d: DealSummary, stored: number | null | undefined, acres: n
   return cost != null && acres ? Math.round((cost / acres) * 100) / 100 : null;
 }
 
+const PROFIT_AT_ASK_HINT = "Ask price − Our cost − closing costs: what we'd make selling at our current asking price. Not an offer.";
+
 /** Profit reads green (a loss reads red) wherever it appears in the table. */
 const profitCell = (v: number | null) =>
   v == null ? "—" : <span className={v < 0 ? "profit-neg" : "profit-pos"}>{money(v)}</span>;
@@ -160,6 +162,12 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
       render: (d) => royaltyCell(d.royaltyRate), legacyDefaultHidden: true, newlyAdded: true },
     { key: "profit", header: "Profit est.", type: "number", align: "right", value: (d) => d.profitEst, render: (d) => profitCell(d.profitEst),
       total: (rows) => { const t = sumOf(rows, (d) => d.profitEst); return <span className={t < 0 ? "dt-totals-neg" : "dt-totals-pos"}>{money(t)}</span>; } },
+    // Profit at asking price = ask − Our Cost − closing costs (the deal's own
+    // figures, like Profit est.): what we'd make selling at our ask — not an
+    // offer. Columns carry no header tooltip, so the hint rides on each cell.
+    { key: "profitAtAsk", header: "Profit at asking", type: "number", align: "right", value: (d) => d.profitAtAsk ?? null, newlyAdded: true,
+      render: (d) => <span title={PROFIT_AT_ASK_HINT}>{profitCell(d.profitAtAsk ?? null)}</span>,
+      total: (rows) => { const t = sumOf(rows, (d) => d.profitAtAsk); return <span className={t < 0 ? "dt-totals-neg" : "dt-totals-pos"}>{money(t)}</span>; } },
     { key: "uc", header: "Under contract", type: "date", value: (d) => d.dateUnderContract, render: (d) => dateCell(d.dateUnderContract), legacyDefaultHidden: true },
     { key: "fbb", header: "Find buyer by", type: "date", value: (d) => d.findBuyerByDate,
       render: (d) => dateCell(d.findBuyerByDate, d.isOverdue) },
@@ -264,10 +272,10 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
               onExport={() => {
                 const rows = filtered.filter((d) => sel.selected.has(d.id));
                 downloadCsv(`deals-${new Date().toISOString().slice(0, 10)}.csv`,
-                  ["Deal", "Priority", "Stage", "NMA", "NRA", "Our Cost", "Our Cost per NMA", "Our Cost per NRA", "Buyer Purchase Price", "Royalty Rate", "Profit Est.", "Under Contract", "Find Buyer By", "Current Buyer", "Owner"],
+                  ["Deal", "Priority", "Stage", "NMA", "NRA", "Our Cost", "Our Cost per NMA", "Our Cost per NRA", "Buyer Purchase Price", "Royalty Rate", "Profit Est.", "Under Contract", "Find Buyer By", "Current Buyer", "Owner", "Profit at Asking"],
                   rows.map((d) => [d.name, d.priority, d.stage, d.acreageNma ?? "", d.nra ?? "", d.aggOurPrice ?? d.ourPrice ?? "",
                     costPerAcre(d, d.ourCostPerNma, d.aggAcreageNma ?? d.acreageNma) ?? "", costPerAcre(d, d.ourCostPerNra, d.aggNra ?? d.nra) ?? "",
-                    d.buyerPurchasePrice ?? "", royaltyLabel(d.royaltyRate), d.profitEst ?? "", d.dateUnderContract ?? "", d.findBuyerByDate ?? "", d.selectedBuyer?.name ?? "", d.relationshipOwner?.name ?? ""]));
+                    d.buyerPurchasePrice ?? "", royaltyLabel(d.royaltyRate), d.profitEst ?? "", d.dateUnderContract ?? "", d.findBuyerByDate ?? "", d.selectedBuyer?.name ?? "", d.relationshipOwner?.name ?? "", d.profitAtAsk ?? ""]));
               }}
             />
           }

@@ -77,6 +77,8 @@ interface DashboardData {
     underContract?: number;
     /** Prior equal-length window (Closed Date keyed) — delta baselines. */
     closedProfitPrev?: number; closedDealsPrev?: number; avgProfitPrev?: number;
+    /** Profit at asking price: active deals with no offer yet, if sold at our ask (optional: older API). */
+    profitAtAsk?: number;
   };
   /** Contact tasks that are overdue, due today, or due within 7 days. */
   tasks?: DashTask[];
@@ -87,8 +89,10 @@ interface DashboardData {
   topBuyers: { id: string; name: string; companyName: string; volume: number }[];
   profitByMonth: {
     month: string; isCurrent: boolean; profit: number; projected: number;
+    /** Profit at asking price for the bucket's no-offer deals (optional: older API). */
+    atAsk?: number;
     /** The deals behind the bar — closed in (or scheduled to close in) the bucket. */
-    deals?: { id: string; name: string; stage: string; kind: "closed" | "projected"; amount: number | null; profit: number; date: string }[];
+    deals?: { id: string; name: string; stage: string; kind: "closed" | "projected" | "atAsk"; amount: number | null; profit: number; date: string }[];
   }[];
   /** Real historical series for the KPI sparklines (optional: older API). */
   trends?: { activeDealsWeekly: number[]; avgProfitPerDeal: number[]; closedWeekly: number[]; offersWeekly: number[] };
@@ -378,17 +382,19 @@ export function Dashboard() {
     );
   }
 
-  // Stacked bars (design): projected sits on top of realized, so the y-scale
-  // is driven by the tallest stack (the month total already shown above each
+  // Stacked bars (design): projected sits on top of realized, and profit at
+  // asking price (no-offer deals) on top of projected, so the y-scale is
+  // driven by the tallest stack (the month total already shown above each
   // bar). In Cumulative view each bucket shows the running total through it.
   // The axis is DYNAMIC — its max sits just above the tallest stack in the
   // SELECTED range (rescales with the range) rather than on a fixed scale.
-  let runR = 0, runP = 0;
+  let runR = 0, runP = 0, runA = 0;
   const shown = d.profitByMonth.map((m) => {
-    if (chartMode === "cumulative") { runR += m.profit; runP += m.projected; return { r: runR, p: runP }; }
-    return { r: m.profit, p: m.projected };
+    const a = m.atAsk ?? 0;
+    if (chartMode === "cumulative") { runR += m.profit; runP += m.projected; runA += a; return { r: runR, p: runP, a: runA }; }
+    return { r: m.profit, p: m.projected, a };
   });
-  const stackOf = (s: { r: number; p: number }) => Math.max(0, s.r) + Math.max(0, s.p);
+  const stackOf = (s: { r: number; p: number; a: number }) => Math.max(0, s.r) + Math.max(0, s.p) + Math.max(0, s.a);
   const maxProfit = Math.max(1, ...shown.map(stackOf));
   const { max: niceMax, ticks: axisTicks } = niceAxis(maxProfit);
   // Index of the bucket containing today (-1 when the window is in the past).
@@ -520,6 +526,10 @@ export function Dashboard() {
                   <span className="dash-ov-row-label">Projected profit</span>
                   <strong>{fmtCompact(m.projectedProfit)}</strong>
                 </div>
+                <div className="dash-ov-row" title="Active deals without an offer yet, if they sold at our asking price. Separate from realized and projected.">
+                  <span className="dash-ov-row-label">Profit at asking price</span>
+                  <strong>{fmtCompact(m.profitAtAsk ?? 0)}</strong>
+                </div>
                 <div className="dash-ov-row" title="Realized profit (closed deals) plus projected profit (open deals).">
                   <span className="dash-ov-row-label">Full-year outlook</span>
                   <strong>{fmtCompact(outlook)}</strong>
@@ -549,6 +559,7 @@ export function Dashboard() {
                 <div className="dash-legend">
                   <span><span className="dash-swatch" style={{ background: "var(--success)" }} />Realized</span>
                   <span><span className="dash-swatch dash-swatch-proj" />Projected</span>
+                  <span><span className="dash-swatch dash-swatch-atask" />At asking</span>
                 </div>
               </div>
               <Segmented className="dash-mode-seg" ariaLabel="Chart view" value={chartMode}
@@ -576,17 +587,17 @@ export function Dashboard() {
                       <div className="dash-chart-today-label" style={{ left: `${(curIdx / nBuckets) * 100}%` }}>Today</div>
                     </>
                   )}
-                  {d.profitByMonth.every((b) => b.profit === 0 && b.projected === 0) && (
+                  {d.profitByMonth.every((b) => b.profit === 0 && b.projected === 0 && !b.atAsk) && (
                     <p className="dash-chart-empty">
-                      No closed or projected profit in this period — bars fill in as deals close (with a Closed Date) or get an accepted offer with a closing date.
+                      No closed, projected or at-asking profit in this period — bars fill in as deals close (with a Closed Date), get an offer, or carry an ask and a closing date.
                     </p>
                   )}
                   <div className="dash-chart-cols">
                     {d.profitByMonth.map((b, i) => {
                       const s = shown[i];
-                      const r = Math.max(0, s.r), p = Math.max(0, s.p);
-                      const stackPct = ((r + p) / niceMax) * 100;
-                      const own = !(b.profit === 0 && b.projected === 0);
+                      const r = Math.max(0, s.r), p = Math.max(0, s.p), a = Math.max(0, s.a);
+                      const stackPct = ((r + p + a) / niceMax) * 100;
+                      const own = !(b.profit === 0 && b.projected === 0 && !b.atAsk);
                       const clickable = (b.deals?.length ?? 0) > 0;
                       const hovered = profitHover === i;
                       const frac = (i + 0.5) / nBuckets;
@@ -599,14 +610,16 @@ export function Dashboard() {
                           onClick={clickable ? () => setProfitDrill(i) : undefined}
                           onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setProfitDrill(i); } } : undefined}
                         >
-                          {/* The bucket's total (realized + projected) floats
-                              above the stack; hidden while its tooltip shows. */}
+                          {/* The bucket's total (realized + projected + at
+                              asking) floats above the stack; hidden while its
+                              tooltip shows. */}
                           {own && !hovered && (
-                            <span className={`dash-chart-val ${s.r > 0 ? "" : "dim"}`} style={{ bottom: `${stackPct}%` }}>{fmtCompact(s.r + s.p)}</span>
+                            <span className={`dash-chart-val ${s.r > 0 ? "" : "dim"}`} style={{ bottom: `${stackPct}%` }}>{fmtCompact(s.r + s.p + s.a)}</span>
                           )}
-                          {p > 0 && <div className="dash-chart-bar proj" style={{ height: `${(p / niceMax) * 100}%` }} />}
-                          {r > 0 && <div className={`dash-chart-bar real ${p > 0 ? "under" : ""}`} style={{ height: `${(r / niceMax) * 100}%` }} />}
-                          {r + p === 0 && <div className="dash-chart-bar zero" />}
+                          {a > 0 && <div className="dash-chart-bar atask" style={{ height: `${(a / niceMax) * 100}%` }} />}
+                          {p > 0 && <div className={`dash-chart-bar proj ${a > 0 ? "under" : ""}`} style={{ height: `${(p / niceMax) * 100}%` }} />}
+                          {r > 0 && <div className={`dash-chart-bar real ${p + a > 0 ? "under" : ""}`} style={{ height: `${(r / niceMax) * 100}%` }} />}
+                          {r + p + a === 0 && <div className="dash-chart-bar zero" />}
                           {hovered && (
                             <div className="dash-chart-tip" style={{
                               bottom: `calc(${Math.min(stackPct, 40)}% + 12px)`,
@@ -615,7 +628,8 @@ export function Dashboard() {
                               <div className="dash-chart-tip-title">{chartMode === "cumulative" ? `Through ${b.month}` : b.month}</div>
                               <div className="dash-chart-tip-row"><span><span className="dash-swatch" style={{ background: "var(--success)" }} />Realized</span><strong>{money(s.r)}</strong></div>
                               {s.p > 0 && <div className="dash-chart-tip-row"><span><span className="dash-swatch dash-swatch-proj" />Projected</span><strong>{money(s.p)}</strong></div>}
-                              <div className="dash-chart-tip-row total"><span>Total</span><strong>{money(s.r + s.p)}</strong></div>
+                              {s.a !== 0 && <div className="dash-chart-tip-row"><span><span className="dash-swatch dash-swatch-atask" />At asking</span><strong>{money(s.a)}</strong></div>}
+                              <div className="dash-chart-tip-row total"><span>Total</span><strong>{money(s.r + s.p + s.a)}</strong></div>
                               {clickable && <div className="dash-chart-tip-hint">Click for {b.deals!.length} deal{b.deals!.length === 1 ? "" : "s"}</div>}
                             </div>
                           )}
@@ -645,6 +659,8 @@ export function Dashboard() {
           const m = d.profitByMonth[profitDrill];
           const closed = (m.deals ?? []).filter((x) => x.kind === "closed");
           const projected = (m.deals ?? []).filter((x) => x.kind === "projected");
+          const atAsking = (m.deals ?? []).filter((x) => x.kind === "atAsk");
+          const atAsk = m.atAsk ?? 0;
           const total = (m.deals ?? []).length;
           const group = (title: string, sub: string, rows: typeof closed) => rows.length > 0 && (
             <div className="drill-group">
@@ -693,14 +709,21 @@ export function Dashboard() {
                     <strong>{money(m.projected)}</strong>
                   </div>
                 )}
+                {atAsk !== 0 && (
+                  <div className="drill-stat">
+                    <span className="drill-stat-label"><span className="dash-swatch dash-swatch-atask" /> At asking</span>
+                    <strong>{money(atAsk)}</strong>
+                  </div>
+                )}
                 <div className="drill-stat">
                   <span className="drill-stat-label">Total</span>
-                  <strong>{money(m.profit + m.projected)}</strong>
+                  <strong>{money(m.profit + m.projected + atAsk)}</strong>
                 </div>
               </div>
               <div className="drill-body">
                 {group("Closed this month", "Realized — keyed on the Contract Timeline's Closed Date; profit uses the accepted offer.", closed)}
                 {group("Scheduled to close", "Projected — active deals with an offer whose anticipated closing lands in this month.", projected)}
+                {group("At asking price", "Active deals with no offer yet — profit if sold at the asking price", atAsking)}
               </div>
             </aside>,
             document.body
