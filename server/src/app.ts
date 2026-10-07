@@ -8,6 +8,7 @@ import * as Sentry from "@sentry/node";
 import { sentryEnabled } from "./instrument.js";
 import { env } from "./config.js";
 import { attachUser } from "./middleware/auth.js";
+import { demoGuard } from "./middleware/demo.js";
 import { errorHandler, notFound } from "./middleware/errors.js";
 import { authRouter } from "./routes/auth.js";
 import { usersRouter } from "./routes/users.js";
@@ -89,6 +90,9 @@ export function createApp() {
   app.use(express.json({ limit: "2mb" }));
   app.use(cookieParser());
   app.use(attachUser);
+  // Showcase workspace: refuses destructive/sensitive writes for demo users
+  // (after body parsing + auth, before every router). No-op for everyone else.
+  app.use("/api", demoGuard);
 
   app.get("/health", (_req, res) => res.json({ ok: true, env: env.NODE_ENV }));
 

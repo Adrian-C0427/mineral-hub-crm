@@ -18,6 +18,11 @@ export interface AuthedRequest extends Request {
     orgRole: OrgRole | null;
     permissions: Permission[];
     mustChangePassword: boolean;
+    /** The caller's org is the public demo/showcase workspace (middleware/demo.ts). */
+    isDemo: boolean;
+    /** Demo only: the org whose Research + imported map tracts are read (never
+     *  written) in place of the demo's own. Null for every non-demo org. */
+    referenceOrgId: string | null;
   };
 }
 
@@ -52,6 +57,7 @@ export async function attachUser(req: AuthedRequest, _res: Response, next: NextF
             id: true, role: true, name: true, email: true, firstName: true, lastName: true,
             phone: true, organizationId: true, orgRole: true, mustChangePassword: true,
             status: true, lastActiveAt: true, sessionEpoch: true,
+            organization: { select: { isDemo: true, referenceOrgId: true } },
           },
         }),
       );
@@ -79,6 +85,10 @@ export async function attachUser(req: AuthedRequest, _res: Response, next: NextF
           orgRole: user.orgRole as OrgRole | null,
           permissions,
           mustChangePassword: user.mustChangePassword,
+          isDemo: user.organization?.isDemo === true,
+          // Honoured ONLY for demo orgs: a stray referenceOrgId on a real org
+          // must never redirect its Research/Map reads anywhere else.
+          referenceOrgId: user.organization?.isDemo === true ? user.organization.referenceOrgId ?? null : null,
         };
 
         // Throttled last-activity update (fire-and-forget).
@@ -171,6 +181,18 @@ export function orgId(req: AuthedRequest): string {
 }
 
 /**
+ * The org whose SHARED REFERENCE DATA (Research records, research history and
+ * imported map tracts) this caller reads. Always the caller's own org, except
+ * in the demo workspace, which reads its configured reference org live so the
+ * showcase tracks the real dataset. Use it ONLY for reads of those tables —
+ * every write, and every CRM table (deals, buyers, contacts, users…), stays on
+ * orgId(req). The demo guard blocks the write routes for demo users.
+ */
+export function researchOrgId(req: AuthedRequest): string {
+  return req.user!.referenceOrgId ?? orgId(req);
+}
+
+/**
  * May this caller see the org's Team ID?
  *
  * The Team ID is a JOIN CREDENTIAL, not a display field: anyone holding it can
@@ -185,5 +207,8 @@ export function orgId(req: AuthedRequest): string {
  * that actually manage membership.
  */
 export function canSeeTeamId(req: AuthedRequest): boolean {
+  // The demo workspace is shared by every prospect: its Team ID would let any
+  // of them attach a real account to it, so it is never shown.
+  if (req.user!.isDemo) return false;
   return req.user!.orgRole === "OWNER" || req.user!.permissions.includes("inviteRemoveUsers");
 }

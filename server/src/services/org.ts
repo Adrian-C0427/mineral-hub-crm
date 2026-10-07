@@ -160,6 +160,9 @@ export async function resolveJoinToken(
 
   // Team ID (always-valid reusable join key)
   const org = await db.organization.findUnique({ where: { teamId: token } });
+  // The demo workspace can't be joined: it is shared, reset nightly, and
+  // reads another org's reference data. Same answer as an unknown token.
+  if (org && (org as { isDemo?: boolean }).isDemo) throw new HttpError(404, "That Team ID or invite code was not found");
   if (org) return { organizationId: org.id, inviteCodeId: null, role: "MEMBER" };
 
   // Invite code

@@ -61,7 +61,7 @@ async function call(caller: Caller, method: string, path: string, body?: unknown
   app.use((req: AuthedRequest, _res, next) => {
     req.user = {
       id: caller.id, role: "ASSOCIATE", name: "Test", email: "t@local.test", firstName: null, lastName: null, phone: null,
-      organizationId: "org_a", orgRole: caller.orgRole, permissions: caller.permissions, mustChangePassword: false,
+      organizationId: "org_a", orgRole: caller.orgRole, permissions: caller.permissions, mustChangePassword: false, isDemo: false, referenceOrgId: null,
     };
     next();
   });

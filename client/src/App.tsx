@@ -120,6 +120,12 @@ export function App() {
           above the scrolling page area — present on every page and subpage. */}
       <div className="app-col">
       <TopBar />
+      {user.organization?.isDemo && (
+        <div className="demo-banner" role="status">
+          <strong>Demo workspace</strong>
+          <span>Explore freely: sample deals, buyers and assets, with live Research and Map data. Changes reset nightly; deleting, uploads, email delivery and integrations are turned off.</span>
+        </div>
+      )}
       <main className="app-main">
         {/* Boundary lives INSIDE the shell: a route error (e.g. a stale lazy
             chunk after a redeploy) can never blank the whole app or unmount

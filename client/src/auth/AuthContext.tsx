@@ -15,7 +15,8 @@ export interface CurrentUser {
   orgRole: OrgRole | null;
   permissions: string[];
   // teamId is null unless the caller manages membership (see canSeeTeamId).
-  organization: { id: string; name: string; teamId: string | null; fullLogo?: string | null; compactLogo?: string | null } | null;
+  // isDemo: the shared showcase workspace (server middleware/demo.ts).
+  organization: { id: string; name: string; teamId: string | null; fullLogo?: string | null; compactLogo?: string | null; isDemo?: boolean } | null;
   mustChangePassword?: boolean;
   /** Persisted UI theme, or null when the user hasn't explicitly chosen one.
    *  The client only adopts a non-null value, so it never clobbers the local

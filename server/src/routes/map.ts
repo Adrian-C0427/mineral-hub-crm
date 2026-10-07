@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, orgId, researchOrgId, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal } from "../serializers.js";
 import { TERMINAL_STAGE_KEYS } from "../domain/stages.js";
 import { parseShapefileUpload, MAX_TRACT_FEATURES, MAX_ORG_TRACT_BYTES, type UploadedFile } from "../domain/shpImport.js";
@@ -180,11 +180,16 @@ mapRouter.get(
   "/tracts",
   asyncHandler(async (req: AuthedRequest, res) => {
     const { dealId } = dealScopeSchema.parse(req.query);
+    // Imported tracts are map reference data: the demo reads its reference org's.
+    // The source deal belongs to THAT org, so its id/name are never shown to a
+    // demo user (a deal-scoped request from the demo matches nothing anyway).
+    const fromReference = req.user!.referenceOrgId != null;
     const rows = await prisma.mapTract.findMany({
-      where: { organizationId: orgId(req), ...(dealId ? { dealId } : {}) },
+      where: { organizationId: researchOrgId(req), ...(dealId ? { dealId } : {}) },
       orderBy: { createdAt: "asc" },
       include: { deal: { select: { id: true, name: true } } },
     });
+    if (fromReference) for (const r of rows) r.deal = null;
     res.json({
       type: "FeatureCollection",
       features: rows.map((r) => ({
@@ -209,7 +214,7 @@ mapRouter.get(
     const { dealId } = dealScopeSchema.parse(req.query);
     const groups = await prisma.mapTract.groupBy({
       by: ["importId", "sourceFile", "dealId"],
-      where: { organizationId: orgId(req), ...(dealId ? { dealId } : {}) },
+      where: { organizationId: researchOrgId(req), ...(dealId ? { dealId } : {}) },
       _count: { _all: true },
       _min: { createdAt: true },
     });
@@ -221,7 +226,8 @@ mapRouter.get(
     res.json(groups
       .map((g) => ({
         importId: g.importId, sourceFile: g.sourceFile, count: g._count._all, createdAt: g._min.createdAt,
-        dealId: g.dealId, dealName: g.dealId ? dealName.get(g.dealId) ?? null : null,
+        // Reference-org (demo) imports never expose the source org's deal ids.
+        dealId: req.user!.referenceOrgId ? null : g.dealId, dealName: g.dealId ? dealName.get(g.dealId) ?? null : null,
       }))
       .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))));
   }),
