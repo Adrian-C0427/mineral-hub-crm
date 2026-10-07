@@ -28,10 +28,13 @@ export interface DeadlineEvent {
 interface EventMapEntry { id: string; date: string }
 type EventMap = Record<string, EventMapEntry>;
 
+// Same rule as the in-app calendar (domain/calendar closingEntries): Closing is
+// the date entered on the deal; "Extended closing" exists only once the user
+// explicitly extended it (finalClosingDateOverride set), never the auto +15.
 const KINDS: { kind: string; label: string; pick: (d: ReturnType<typeof resolveDealDates>) => Date | null }[] = [
   { kind: "findBuyerBy", label: "Find buyer by", pick: (d) => d.findBuyerByDate },
   { kind: "originalClosing", label: "Closing", pick: (d) => d.originalClosingDate },
-  { kind: "finalClosing", label: "Extended closing", pick: (d) => d.finalClosingDate },
+  { kind: "finalClosing", label: "Extended closing", pick: (d) => (d.finalClosingIsOverridden ? d.finalClosingDate : null) },
 ];
 
 const isoDay = (d: Date): string => d.toISOString().slice(0, 10);

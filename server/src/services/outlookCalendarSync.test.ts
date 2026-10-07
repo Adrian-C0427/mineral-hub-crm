@@ -18,9 +18,22 @@ describe("planDeadlineEvents", () => {
     const byKey = new Map(events.map((e) => [e.key, e]));
     expect(byKey.get("deal1:findBuyerBy")?.date).toBe("2026-08-16"); // 45-day close → +15 calendar days
     expect(byKey.get("deal1:originalClosing")?.date).toBe("2026-09-01");
-    expect(byKey.get("deal1:finalClosing")?.date).toBe("2026-09-16"); // +15 calendar days
+    // Never extended → no "Extended closing" event (the auto +15 is not an extension).
+    expect(byKey.get("deal1:finalClosing")).toBeUndefined();
     expect(byKey.get("deal1:findBuyerBy")?.subject).toBe("Smith Ranch — Find buyer by (Mineral Hub)");
     expect(byKey.get("deal1:findBuyerBy")?.link).toBe("/deals/deal1");
+  });
+
+  it("adds an Extended closing event only once the closing was explicitly extended, keeping Closing", () => {
+    const events = planDeadlineEvents([deal({
+      originalClosingDate: new Date("2026-09-01T00:00:00Z"),
+      finalClosingDateOverride: new Date("2026-10-01T00:00:00Z"),
+    })]);
+    const byKey = new Map(events.map((e) => [e.key, e]));
+    expect(byKey.get("deal1:originalClosing")?.date).toBe("2026-09-01");
+    expect(byKey.get("deal1:originalClosing")?.subject).toBe("Smith Ranch — Closing (Mineral Hub)");
+    expect(byKey.get("deal1:finalClosing")?.date).toBe("2026-10-01");
+    expect(byKey.get("deal1:finalClosing")?.subject).toBe("Smith Ranch — Extended closing (Mineral Hub)");
   });
 
   it("respects overrides over the auto-derived dates", () => {

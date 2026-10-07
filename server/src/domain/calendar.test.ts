@@ -115,10 +115,10 @@ describe("closingEntries", () => {
     findBuyerByDateOverride: null, finalClosingDateOverride: null, daysToClose: null, buyerClosingDate: null,
   };
 
-  it("emits only the applicable final closing (original + 15 days), never the original", () => {
+  it("emits the Closing date exactly as entered, and no Extended closing when never extended", () => {
     const out = closingEntries(deal, "tc");
     expect(out.map((e) => [e.id, e.title, e.date])).toEqual([
-      ["closing:d1:final", "Closing — Smith 40", "2026-10-16"],
+      ["closing:d1:closing", "Closing — Smith 40", "2026-10-01"],
     ]);
     expect(out[0]).toMatchObject({
       source: "closing", readOnly: true, allDay: true, start: null, end: null, typeId: "tc", href: "/deals/d1",
@@ -126,24 +126,27 @@ describe("closingEntries", () => {
     });
   });
 
-  it("uses the override (where extensions land) as the one closing entry", () => {
+  it("adds an Extended closing at the extended date only after an explicit extension, keeping Closing", () => {
     const out = closingEntries({ ...deal, finalClosingDateOverride: day("2026-10-31") }, null);
-    expect(out.map((e) => [e.id, e.date])).toEqual([["closing:d1:final", "2026-10-31"]]);
+    expect(out.map((e) => [e.id, e.title, e.date])).toEqual([
+      ["closing:d1:closing", "Closing — Smith 40", "2026-10-01"],
+      ["closing:d1:extended", "Extended closing — Smith 40", "2026-10-31"],
+    ]);
     expect(out[0].typeId).toBeNull();
   });
 
   it("adds a separate 'Closing with buyer' entry when the buyer closing date is set", () => {
     const out = closingEntries({ ...deal, buyerClosingDate: day("2026-10-20") }, "tc");
     expect(out.map((e) => [e.id, e.title, e.date, e.typeId, e.href])).toEqual([
-      ["closing:d1:final", "Closing — Smith 40", "2026-10-16", "tc", "/deals/d1"],
+      ["closing:d1:closing", "Closing — Smith 40", "2026-10-01", "tc", "/deals/d1"],
       ["closing:d1:buyer", "Closing with buyer — Smith 40", "2026-10-20", "tc", "/deals/d1"],
     ]);
     // Buyer closing alone (no seller-side dates) still shows up.
     expect(closingEntries({ ...deal, originalClosingDate: null, buyerClosingDate: day("2026-10-20") }, "tc").map((e) => e.id)).toEqual(["closing:d1:buyer"]);
   });
 
-  it("emits only the final when there is no original, and nothing for dead or undated deals", () => {
-    expect(closingEntries({ ...deal, originalClosingDate: null, finalClosingDateOverride: day("2026-11-02") }, "tc").map((e) => e.date)).toEqual(["2026-11-02"]);
+  it("emits only the extended when there is no Closing date, and nothing for dead or undated deals", () => {
+    expect(closingEntries({ ...deal, originalClosingDate: null, finalClosingDateOverride: day("2026-11-02") }, "tc").map((e) => [e.id, e.date])).toEqual([["closing:d1:extended", "2026-11-02"]]);
     expect(closingEntries({ ...deal, stage: "DEAD", buyerClosingDate: day("2026-10-20") }, "tc")).toEqual([]);
     expect(closingEntries({ ...deal, originalClosingDate: null }, "tc")).toEqual([]);
   });
