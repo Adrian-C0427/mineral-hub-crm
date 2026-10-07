@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, orgId, researchOrgId, type AuthedRequest } from "../middleware/auth.js";
 import { LIST_LIMIT } from "../config.js";
 import { normalizeCompany } from "../serializers.js";
 import { normalizePhone } from "../domain/phone.js";
@@ -228,9 +228,10 @@ buyersRouter.get(
 
     // All-time ownership-transfer edges for the org (relationship analysis is not
     // date-scoped — it always reflects the full transaction history).
+    // Research is reference data (the demo reads its reference org's records).
     const rows = await prisma.researchDocument.findMany({
       where: {
-        organizationId: org, docClass: "TRANSACTION",
+        organizationId: researchOrgId(req), docClass: "TRANSACTION",
         grantorNorm: { not: null }, granteeNorm: { not: null },
       },
       select: {
@@ -354,7 +355,7 @@ buyersRouter.get(
 
     const focusNorms = new Set(buyerEntityKeys(buyer.companyName, buyer.aliases));
     const dismissed = new Set(buyer.dismissedAliasNorms);
-    const index = await researchEntityIndex(org);
+    const index = await researchEntityIndex(researchOrgId(req));
 
     // Other CRM buyers' keys — a suggestion that maps to an existing buyer
     // becomes a "merge profiles" prompt instead of a plain alias add.

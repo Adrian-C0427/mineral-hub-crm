@@ -7,6 +7,7 @@ import { backfillBuyerStatus } from "./services/backfill.js";
 import { startIntegrationScheduler } from "./services/integrationSync.js";
 import { startPortalReminderScheduler } from "./services/portalReminders.js";
 import { startDealAlertScheduler } from "./services/dealAlerts.js";
+import { startDemoResetScheduler } from "./services/demoReset.js";
 
 // Fail closed: in production, refuse to boot with default/missing secret keys.
 assertProductionSecrets();
@@ -19,6 +20,8 @@ startIntegrationScheduler();
 // Periodic reminder digest of unactioned buyer-portal offers/leads.
 startPortalReminderScheduler();
 startDealAlertScheduler();
+// Nightly reseed of the demo/showcase workspace (opt-in via DEMO_AUTO_RESET).
+startDemoResetScheduler();
 
 // Idempotent backfill so every existing user has an organization (multi-tenancy).
 ensureUsersHaveOrganizations().catch((e) =>

@@ -3,7 +3,7 @@ import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, orgId, researchOrgId, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal, serializeAssetChild, serializeContractExtension } from "../serializers.js";
 import { computeMatch } from "../domain/matching.js";
 import { normalizePhone } from "../domain/phone.js";
@@ -170,7 +170,7 @@ dealsRouter.get(
         : Promise.resolve([] as { name: string; n: number }[]),
       prisma.researchPermit.findMany({
         where: {
-          organizationId: orgId(req),
+          organizationId: researchOrgId(req), // reference data (demo: reference org)
           state: { in: states, mode: "insensitive" },
           county: { in: counties, mode: "insensitive" },
         },

@@ -165,6 +165,16 @@ model Organization {
   portalContactPhone   String?
   portalOfficeLocation String?
 
+  // --- Demo / showcase workspace ---------------------------------------------
+  // isDemo marks the public showcase org: the demo guard (middleware/demo.ts)
+  // blocks deletes, integrations, outbound email, uploads and team/security
+  // changes for its users, and only the demo seeder may wipe/reseed it.
+  isDemo         Boolean @default(false)
+  // Read-only reference data: when set, Research records and imported map
+  // tracts are READ from this org (live, so they track it) and never written.
+  // Plain id (no FK) so nothing can cascade between the two orgs.
+  referenceOrgId String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

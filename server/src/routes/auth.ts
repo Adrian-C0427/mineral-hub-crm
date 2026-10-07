@@ -13,6 +13,7 @@ import { LOGIN_RATE_LIMIT, env, isProd, emailConfigured } from "../config.js";
 import { createOrganization, resolveJoinToken, consumeInvite } from "../services/org.js";
 import { normalizePhone } from "../domain/phone.js";
 import { sendEmail } from "../services/email.js";
+import { demoLoginConfig, isDemoEmail } from "../services/demo.js";
 import {
   generateSecret, verifyTotp, otpauthUri, generateRecoveryCodes, hashRecoveryCode,
 } from "../domain/totp.js";
@@ -77,6 +78,16 @@ const loginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many login attempts. Try again later." },
+});
+
+// One-click demo sign-in: prospects share the demo login, so the cap is per
+// IP and generous enough for a demo meeting but not for scripted abuse.
+const demoLoginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many demo sign-ins. Try again in a few minutes." },
 });
 
 /** Issue a session (cookie + bearer token) and the compact user summary. */
@@ -152,6 +163,31 @@ authRouter.post(
       }
     }
 
+    res.json(issueSession(res, user));
+  }),
+);
+
+// Demo workspace one-click sign-in (opt-in: DEMO_PUBLIC_LOGIN=true). Issues a
+// session for the configured demo user ONLY when that user belongs to an
+// isDemo org and uses the demo email domain — it can never mint a session for
+// a real account, whatever DEMO_USER_EMAIL is set to.
+authRouter.get("/demo", (_req, res) => {
+  res.json({ enabled: demoLoginConfig().publicLogin });
+});
+
+authRouter.post(
+  "/demo",
+  demoLoginLimiter,
+  asyncHandler(async (_req, res) => {
+    const cfg = demoLoginConfig();
+    if (!cfg.publicLogin) throw new HttpError(404, "The demo is not available");
+    const user = await prisma.user.findUnique({
+      where: { email: cfg.email },
+      include: { organization: { select: { isDemo: true } } },
+    });
+    if (!user || user.status !== "ACTIVE" || !isDemoEmail(user.email) || user.organization?.isDemo !== true) {
+      throw new HttpError(404, "The demo is not available");
+    }
     res.json(issueSession(res, user));
   }),
 );
@@ -286,7 +322,7 @@ authRouter.get(
       req.user!.organizationId
         ? prisma.organization.findUnique({
             where: { id: req.user!.organizationId },
-            select: { id: true, name: true, teamId: true, fullLogo: true, compactLogo: true },
+            select: { id: true, name: true, teamId: true, fullLogo: true, compactLogo: true, isDemo: true },
           })
         : Promise.resolve(null),
       readPrefs(req.user!.id),

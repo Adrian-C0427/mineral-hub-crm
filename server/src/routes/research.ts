@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { Prisma, ResearchDocClass, ResearchDocType, ResearchPermitStatus, WellTrajectory } from "@prisma/client";
 import { prisma, withDbRetry } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, orgId, researchOrgId, type AuthedRequest } from "../middleware/auth.js";
 import {
   autoGranularity, bucketKey, bucketRange, detectHotspot, historyWindows,
   normalizeEntity, rollingAverage, splitAbstracts, splitParties, surgeSeverity, trend, type Trend,
@@ -379,7 +379,7 @@ researchRouter.get(
   "/filters",
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const org = orgId(req);
+    const org = researchOrgId(req); // reference data (demo reads its reference org)
     // Filter options are scoped to the active dataset (Transactions/Deeds vs
     // Leases) so the Buyers/Sellers/Doc-type dropdowns never offer parties or
     // instrument types from the other class.
@@ -476,7 +476,7 @@ researchRouter.get(
   "/summary",
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const org = orgId(req);
+    const org = researchOrgId(req); // reference data (demo reads its reference org)
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
     const cmp = parseCompare(req.query as Record<string, unknown>, win);
@@ -552,7 +552,7 @@ researchRouter.get(
   "/geography",
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const org = orgId(req);
+    const org = researchOrgId(req); // reference data (demo reads its reference org)
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
     const level = (["state", "county", "abstract"] as GeoLevel[]).includes(req.query.level as GeoLevel)
@@ -622,7 +622,7 @@ researchRouter.get(
   "/entities",
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const org = orgId(req);
+    const org = researchOrgId(req); // reference data (demo reads its reference org)
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
     const cmp = parseCompare(req.query as Record<string, unknown>, win);
@@ -720,7 +720,7 @@ researchRouter.get(
   "/relationships",
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const org = orgId(req);
+    const org = researchOrgId(req); // reference data (demo reads its reference org)
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
     const edges = await loadTxEdges(org, f, win);
@@ -785,7 +785,7 @@ researchRouter.post(
   "/relationships/transactions",
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const org = orgId(req);
+    const org = researchOrgId(req); // reference data (demo reads its reference org)
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
     const sel = relTxSchema.parse(req.body ?? {});
@@ -904,7 +904,8 @@ researchRouter.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
     const { keys } = z.object({ keys: z.array(z.string()).min(1).max(500) }).parse(req.body);
-    const byKey = await docsByGrantee(org, keys);
+    // Research documents come from the reference org (demo); buyers are ours.
+    const byKey = await docsByGrantee(researchOrgId(req), keys);
     const buyers = await prisma.buyer.findMany({
       where: { organizationId: org },
       select: { id: true, companyName: true, normalizedCompany: true, aliases: true, source: true, researchSummary: true, buyBox: { select: { counties: true, states: true } } },
@@ -972,7 +973,7 @@ researchRouter.post(
       })).min(1).max(500),
     }).parse(req.body);
 
-    const byKey = await docsByGrantee(org, decisions.map((d) => d.key));
+    const byKey = await docsByGrantee(researchOrgId(req), decisions.map((d) => d.key));
     // Ensure this org's "Research Imported" tag exists (tags are per-org).
     const tag = await prisma.buyerTag.upsert({
       where: { organizationId_name: { organizationId: org, name: RESEARCH_TAG } },
@@ -1052,7 +1053,7 @@ researchRouter.get(
   "/opportunities",
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const org = orgId(req);
+    const org = researchOrgId(req); // reference data (demo reads its reference org)
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
     const hist = historyWindows(win.from, win.to, 6);
@@ -1275,7 +1276,7 @@ researchRouter.get(
   "/records/options",
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const org = orgId(req);
+    const org = researchOrgId(req); // reference data (demo reads its reference org)
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
     const kind = req.query.kind === "permits" ? "permits" : req.query.kind === "rrcPermits" ? "rrcPermits" : "documents";
@@ -1353,7 +1354,7 @@ researchRouter.get(
   "/abstract-map",
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const org = orgId(req);
+    const org = researchOrgId(req); // reference data (demo reads its reference org)
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
     const county = z.string().trim().min(1, "mapCounty is required").max(100).parse(req.query.mapCounty ?? "");
@@ -1407,7 +1408,7 @@ researchRouter.get(
   "/abstract-buyers",
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const org = orgId(req);
+    const org = researchOrgId(req); // reference data (demo reads its reference org)
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
     if (!f.abstractIds.length) {
@@ -1489,7 +1490,7 @@ researchRouter.get(
   "/records/ids",
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const org = orgId(req);
+    const org = researchOrgId(req); // reference data (demo reads its reference org)
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
     const { q, instrument } = pageSchema.parse(req.query);
@@ -1523,7 +1524,7 @@ researchRouter.get(
   "/documents",
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const org = orgId(req);
+    const org = researchOrgId(req); // reference data (demo reads its reference org)
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
     const { page, pageSize, sortBy, sortDir, q, instrument } = pageSchema.parse(req.query);
@@ -1545,7 +1546,7 @@ researchRouter.get(
   "/permits",
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const org = orgId(req);
+    const org = researchOrgId(req); // reference data (demo reads its reference org)
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
     const { page, pageSize, sortBy, sortDir, q, instrument } = pageSchema.parse(req.query);
@@ -1694,7 +1695,7 @@ researchRouter.get(
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const run = await prisma.researchIngestRun.findFirst({
-      where: { id: req.params.id, organizationId: orgId(req) },
+      where: { id: req.params.id, organizationId: researchOrgId(req) },
       select: { id: true, kind: true },
     });
     if (!run) throw new HttpError(404, "Import not found");
@@ -1719,7 +1720,7 @@ researchRouter.get(
     // (automated=true) import through the same pipeline — their records appear
     // everywhere in Research — but the runs themselves stay out of this list.
     const runs = await prisma.researchIngestRun.findMany({
-      where: { organizationId: orgId(req), automated: false },
+      where: { organizationId: researchOrgId(req), automated: false },
       orderBy: { createdAt: "desc" },
       take: 50,
     });

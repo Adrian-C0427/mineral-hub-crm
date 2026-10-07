@@ -102,7 +102,7 @@ function PasswordField({ value, onChange, autoComplete, placeholder }: {
 }
 
 export function Login() {
-  const { login, register } = useAuth();
+  const { login, register, loginWithToken } = useAuth();
   const [params] = useSearchParams();
   const [mode, setMode] = useState<Mode>("login");
   const [email, setEmail] = useState("");
@@ -126,6 +126,23 @@ export function Login() {
   // Whether the server allows creating a brand-new workspace without an invite.
   // Defaults true so the field only tightens up once the policy is known.
   const [publicSignup, setPublicSignup] = useState(true);
+  // One-click demo workspace, offered only when the server enables it.
+  const [demoEnabled, setDemoEnabled] = useState(false);
+  useEffect(() => {
+    api.get<{ enabled: boolean }>("/auth/demo").then((r) => setDemoEnabled(r.enabled === true)).catch(() => {});
+  }, []);
+  async function exploreDemo() {
+    setError(null);
+    setBusy(true);
+    try {
+      const r = await api.post<{ token: string }>("/auth/demo", {});
+      await loginWithToken(r.token);
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "The demo is not available right now");
+    } finally {
+      setBusy(false);
+    }
+  }
   useEffect(() => {
     api.get<{ providers: Provider[]; publicSignup?: boolean }>("/auth/oauth/providers")
       .then((r) => { setProviders(r.providers); setPublicSignup(r.publicSignup !== false); })
@@ -327,6 +344,11 @@ export function Login() {
               {isRegister ? "Sign in" : "Create an account"}
             </button>
           </span>
+          {!isRegister && demoEnabled && (
+            <button type="button" className="auth-demo" disabled={busy} onClick={exploreDemo}>
+              Explore the demo workspace
+            </button>
+          )}
         </div>
       </form>
     </AuthLayout>
