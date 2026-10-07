@@ -1,6 +1,6 @@
 import { prisma } from "../db.js";
 import { verifyPassword, hashPassword } from "../auth/password.js";
-import { findDemoOrg, seedDemoOrg, resolveReferenceOrg, MIN_DEMO_PASSWORD_LENGTH } from "./demoSeed.js";
+import { findDemoOrg, seedDemoOrg, resolveReferenceOrg, MIN_DEMO_PASSWORD_LENGTH, DEMO_SEED_VERSION } from "./demoSeed.js";
 import { demoLoginConfig } from "./demo.js";
 
 /**
@@ -43,6 +43,19 @@ export async function ensureDemoWorkspace(): Promise<void> {
       referenceOrgId: ref.id, demoUserEmail: demoLoginConfig().email, demoUserPassword: password, log: () => {},
     });
     console.log(`[demo] demo workspace created (${Object.values(counts as Record<string, number>).reduce((a: number, b: number) => a + Number(b), 0)} rows)`);
+    return;
+  }
+  // The generated dataset changed in this release (or the login address did):
+  // reseed once so the demo reflects it without waiting for the nightly reset.
+  const org = await prisma.organization.findUnique({ where: { id: demo.id }, select: { demoSeedVersion: true } });
+  const loginRow = await prisma.user.findFirst({ where: { email: demoLoginConfig().email, organizationId: demo.id }, select: { id: true } });
+  if (org?.demoSeedVersion !== DEMO_SEED_VERSION || !loginRow) {
+    const referenceOrgId = demo.referenceOrgId ?? (refKey ? (await resolveReferenceOrg(prisma, refKey)).id : null);
+    console.log(`[demo] refreshing the demo workspace (dataset v${org?.demoSeedVersion ?? "none"} → v${DEMO_SEED_VERSION})`);
+    const { counts } = await seedDemoOrg(prisma, {
+      referenceOrgId, demoUserEmail: demoLoginConfig().email, demoUserPassword: password, log: () => {},
+    });
+    console.log(`[demo] demo workspace refreshed (${Object.values(counts as Record<string, number>).reduce((a: number, b: number) => a + Number(b), 0)} rows)`);
     return;
   }
   const user = await prisma.user.findFirst({

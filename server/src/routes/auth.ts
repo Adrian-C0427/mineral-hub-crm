@@ -13,7 +13,7 @@ import { LOGIN_RATE_LIMIT, env, isProd, emailConfigured } from "../config.js";
 import { createOrganization, resolveJoinToken, consumeInvite } from "../services/org.js";
 import { normalizePhone } from "../domain/phone.js";
 import { sendEmail } from "../services/email.js";
-import { demoLoginConfig, isDemoEmail } from "../services/demo.js";
+import { demoLoginConfig } from "../services/demo.js";
 import {
   generateSecret, verifyTotp, otpauthUri, generateRecoveryCodes, hashRecoveryCode,
 } from "../domain/totp.js";
@@ -169,8 +169,8 @@ authRouter.post(
 
 // Demo workspace one-click sign-in (opt-in: DEMO_PUBLIC_LOGIN=true). Issues a
 // session for the configured demo user ONLY when that user belongs to an
-// isDemo org and uses the demo email domain — it can never mint a session for
-// a real account, whatever DEMO_USER_EMAIL is set to.
+// isDemo org — it can never mint a session for a real account, whatever
+// DEMO_USER_EMAIL is set to.
 authRouter.get("/demo", (_req, res) => {
   res.json({ enabled: demoLoginConfig().publicLogin });
 });
@@ -185,7 +185,7 @@ authRouter.post(
       where: { email: cfg.email },
       include: { organization: { select: { isDemo: true } } },
     });
-    if (!user || user.status !== "ACTIVE" || !isDemoEmail(user.email) || user.organization?.isDemo !== true) {
+    if (!user || user.status !== "ACTIVE" || user.organization?.isDemo !== true) {
       throw new HttpError(404, "The demo is not available");
     }
     res.json(issueSession(res, user));

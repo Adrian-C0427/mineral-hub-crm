@@ -1,4 +1,4 @@
-import { isDemoEmail, isDemoOrg } from "./demo.js";
+import { demoLoginConfig, isDemoEmail, isDemoOrg } from "./demo.js";
 import nodemailer, { type Transporter } from "nodemailer";
 import { env, smtpConfigured } from "../config.js";
 import { HttpError } from "../middleware/errors.js";
@@ -42,7 +42,7 @@ export async function sendEmail(params: SendParams): Promise<void> {
   // Demo workspace: every "send" flow works end to end but nothing is
   // delivered — its buyers/contacts are sample people at invented domains, and
   // the shared demo login must never become a way to mail the outside world.
-  if (isDemoEmail(params.to) || (await isDemoOrg(params.organizationId))) {
+  if (isDemoEmail(params.to) || params.to.trim().toLowerCase() === demoLoginConfig().email || (await isDemoOrg(params.organizationId))) {
     console.log(`[demo] email suppressed (${params.subject.slice(0, 60)})`);
     return;
   }

@@ -114,9 +114,9 @@ describe("reference org", () => {
 });
 
 describe("seedDemoOrg guards", () => {
-  it("rejects a login email outside the demo domain before any database access", async () => {
+  it("rejects a malformed login email before any database access", async () => {
     const { db, calls, organization } = fakeDb([REAL]);
-    await expect(seedDemoOrg(db, { referenceOrgId: "org_real", demoUserEmail: "owner@carsaminerals.com", demoUserPassword: "long-enough-password" })).rejects.toThrow(/@brazosridge\.demo/);
+    await expect(seedDemoOrg(db, { referenceOrgId: "org_real", demoUserEmail: "not-an-email", demoUserPassword: "long-enough-password" })).rejects.toThrow(/Invalid demo login email/);
     expect(calls).toEqual([]);
     expect(organization.findMany).not.toHaveBeenCalled();
   });
