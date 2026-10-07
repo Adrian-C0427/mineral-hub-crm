@@ -157,16 +157,24 @@ export interface ClosingDealRow extends DealDateInputs {
 }
 
 /**
- * A deal's closing entries: the applicable Final Closing (override — which is
- * where contract extensions land — else Original + 15 days, resolved by
- * domain/dates and never re-derived here) plus, when set by hand, the
- * "Closing with buyer" date. The original closing is NOT emitted: the calendar
- * shows the deadline that currently applies. Dead deals yield nothing.
+ * A deal's closing entries.
+ *  - "Closing": the Closing date exactly as entered on the deal
+ *    (originalClosingDate). Never a calculated, extended or stage-move date.
+ *  - "Extended closing": ONLY when the user explicitly extended the closing
+ *    (the Extend action — or a hand-set final date — stores
+ *    finalClosingDateOverride). The auto "Closing + 15 days" that
+ *    resolveDealDates derives for every dated deal is NOT an extension and
+ *    is never shown here. The date itself still comes from resolveDealDates
+ *    (the same value the deal page shows), never re-derived.
+ *  - "Closing with buyer": the manual buyer-side date, when set.
+ * Dead deals yield nothing.
  */
 export function closingEntries(deal: ClosingDealRow, closingTypeId: string | null): CalEntry[] {
   if (deal.stage === "DEAD") return [];
+  const closingKey = deal.originalClosingDate ? dayKey(deal.originalClosingDate) : null;
+  const extended = deal.finalClosingDateOverride != null;
   const { finalClosingDate } = resolveDealDates(deal);
-  const finalKey = finalClosingDate ? dayKey(finalClosingDate) : null;
+  const extendedKey = extended && finalClosingDate ? dayKey(finalClosingDate) : null;
   const buyerKey = deal.buyerClosingDate ? dayKey(deal.buyerClosingDate) : null;
   const base = {
     source: "closing" as const, typeId: closingTypeId, assignee: null, notes: null,
@@ -175,7 +183,8 @@ export function closingEntries(deal: ClosingDealRow, closingTypeId: string | nul
     href: `/deals/${deal.id}`,
   };
   const out: CalEntry[] = [];
-  if (finalKey) out.push(derived({ ...base, id: `closing:${deal.id}:final`, title: `Closing — ${deal.name}`, date: finalKey }));
+  if (closingKey) out.push(derived({ ...base, id: `closing:${deal.id}:closing`, title: `Closing — ${deal.name}`, date: closingKey }));
+  if (extendedKey) out.push(derived({ ...base, id: `closing:${deal.id}:extended`, title: `Extended closing — ${deal.name}`, date: extendedKey }));
   if (buyerKey) out.push(derived({ ...base, id: `closing:${deal.id}:buyer`, title: `Closing with buyer — ${deal.name}`, date: buyerKey }));
   return out;
 }
