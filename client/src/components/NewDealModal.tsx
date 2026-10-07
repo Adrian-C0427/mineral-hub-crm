@@ -88,7 +88,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
     daysToClose: "", royaltyRate: "",
     dateUnderContract: "", originalClosingDate: "", notes: "",
   });
-  // Original closing follows Date Under Contract + Days to Close until the user
+  // Closing follows Date Under Contract + Days to Close until the user
   // picks a closing date themselves.
   const [closingManual, setClosingManual] = useState(false);
   // NMA ↔ NRA follow each other through the royalty rate; this is the one the
@@ -392,7 +392,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
                       : <span className="muted">{daysToClose ? "Set Date Under Contract to calculate" : "Set Date Under Contract and Days to Close"}</span>}
                   </div>
                 </div>
-                <div className="field"><label title={closingManual ? undefined : "Follows Date Under Contract + Days to Close until you pick a date"}>Original closing date</label>
+                <div className="field"><label title={closingManual ? undefined : "Follows Date Under Contract + Days to Close until you pick a date"}>Closing date</label>
                   <DateField value={f.originalClosingDate} onChange={(v) => { setClosingManual(v !== ""); setF((p) => ({ ...p, originalClosingDate: v })); }} />
                 </div>
               </div>

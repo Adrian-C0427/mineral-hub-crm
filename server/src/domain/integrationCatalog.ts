@@ -96,7 +96,7 @@ export const INTEGRATION_CATALOG: ProviderDef[] = [
   // --- Productivity ---
   {
     key: "outlookcalendar", name: "Outlook Calendar", category: "Productivity", auth: "oauth", implementation: "oauth",
-    description: "Mirrors deal deadlines — find-buyer-by, original closing, and final closing dates — as events on your Outlook calendar, kept up to date on each sync (Calendars.ReadWrite via Microsoft Graph).",
+    description: "Mirrors deal deadlines — find-buyer-by, closing, and extended closing dates — as events on your Outlook calendar, kept up to date on each sync (Calendars.ReadWrite via Microsoft Graph).",
     setupUrl: "https://portal.azure.com", syncable: true,
   },
 

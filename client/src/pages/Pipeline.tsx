@@ -751,8 +751,8 @@ function CardBody({ deal, fields, action }: { deal: DealSummary; fields: Record<
         <div className="pl-dates">
           {isClosing ? (
             <>
-              <span className="pl-date"><span>Original close</span><b>{fmtDate(deal.originalClosingDate)}</b></span>
-              <span className="pl-date"><span>Final close</span><b>{fmtDate(deal.finalClosingDate)}</b></span>
+              <span className="pl-date"><span>Closing</span><b>{fmtDate(deal.originalClosingDate)}</b></span>
+              <span className="pl-date"><span>Extended closing</span><b>{fmtDate(deal.finalClosingDate)}</b></span>
             </>
           ) : (
             <span className="pl-date">

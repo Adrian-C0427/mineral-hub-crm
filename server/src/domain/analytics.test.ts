@@ -110,13 +110,13 @@ describe("buildMonthlySeries", () => {
   });
 });
 
-describe("closed deals key on the Closing Date", () => {
-  it("realizedClosedAt is the Closing Date of a CLOSED deal and nothing else", () => {
+describe("closed deals key on the Contract Timeline Closing date (originalClosingDate)", () => {
+  it("realizedClosedAt is the Closing date of a CLOSED deal and nothing else", () => {
     const closing = new Date("2026-03-31");
-    expect(realizedClosedAt({ stage: "CLOSED", closedDate: closing })).toBe(closing);
-    expect(realizedClosedAt({ stage: "CLOSED", closedDate: null })).toBeNull();
+    expect(realizedClosedAt({ stage: "CLOSED", originalClosingDate: closing })).toBe(closing);
+    expect(realizedClosedAt({ stage: "CLOSED", originalClosingDate: null })).toBeNull();
     // A deal moved back out of CLOSED keeps no realized date even if an old one lingers.
-    expect(realizedClosedAt({ stage: "CLOSING", closedDate: closing })).toBeNull();
+    expect(realizedClosedAt({ stage: "CLOSING", originalClosingDate: closing })).toBeNull();
   });
 
   it("a CLOSED deal with no Closing Date is in no period, month or per-user count", () => {

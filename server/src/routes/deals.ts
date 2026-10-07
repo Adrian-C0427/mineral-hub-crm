@@ -1054,7 +1054,7 @@ dealsRouter.post(
     const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!deal) throw new HttpError(404, "Deal not found");
     const ext = nextContractExtension(deal);
-    if (!ext) throw new HttpError(400, "There is no closing date to extend — set the Original closing date first.");
+    if (!ext) throw new HttpError(400, "There is no closing date to extend — set the Closing date first.");
     await prisma.$transaction(async (tx) => {
       await tx.deal.update({ where: { id: deal.id }, data: { finalClosingDateOverride: ext.toDate } });
       await tx.dealContractExtension.create({
