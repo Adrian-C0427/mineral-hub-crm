@@ -20,7 +20,8 @@ startIntegrationScheduler();
 // Periodic reminder digest of unactioned buyer-portal offers/leads.
 startPortalReminderScheduler();
 startDealAlertScheduler();
-// Nightly reseed of the demo/showcase workspace (opt-in via DEMO_AUTO_RESET).
+// Demo/showcase workspace: created on first boot from env (DEMO_REFERENCE_ORG +
+// DEMO_USER_PASSWORD), login kept in sync, optional nightly reseed (DEMO_AUTO_RESET).
 startDemoResetScheduler();
 
 // Idempotent backfill so every existing user has an organization (multi-tenancy).
