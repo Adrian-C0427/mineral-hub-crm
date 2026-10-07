@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, hasPermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { logActivity } from "../services/activityLog.js";
 import { ensureStages, ensureDefaultPipeline, activeStageKeys, isOpportunityPipeline } from "../domain/stages.js";
 import { parseDayKey } from "../domain/calendar.js";
@@ -19,7 +19,9 @@ import { dealDetail } from "./deals.js";
 /**
  * Opportunities: lightweight prospects that live in an OPPORTUNITIES pipeline
  * (never Deals). Viewing uses the deal permissions (viewDeals / editDeals) —
- * an opportunity is a deal-in-waiting, not a separate module.
+ * an opportunity is a deal-in-waiting, not a separate module. Converting one
+ * (explicitly, or by an AUTO-convert stage move) creates a Deal, so it also
+ * needs createDeals — the same gate as POST /deals.
  */
 export const opportunitiesRouter = Router();
 opportunitiesRouter.use(requireAuth, requireOrg);
@@ -191,23 +193,31 @@ async function convertInTx(
 // Read
 // ---------------------------------------------------------------------------
 
-/** Every opportunity of a pipeline (all stages, converted ones included); the
- *  whole org's when pipelineId is omitted. */
+/** Hard ceiling on one board load. A board past this is truncated and says so
+ *  in the X-Result-Truncated header rather than dumping an unbounded list. */
+export const OPPORTUNITY_LIST_MAX = 5_000;
+
+/** Every opportunity of one pipeline (all stages, converted ones included).
+ *  pipelineId is required: there is no org-wide dump of the prospect list. */
 opportunitiesRouter.get(
   "/",
   requirePermission("viewDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
     const pipelineId = typeof req.query.pipelineId === "string" && req.query.pipelineId ? req.query.pipelineId : undefined;
-    if (pipelineId) {
-      const p = await prisma.pipeline.findFirst({ where: { id: pipelineId, organizationId: org }, select: { id: true } });
-      if (!p) throw new HttpError(404, "Pipeline not found");
-    }
+    if (!pipelineId) throw new HttpError(400, "pipelineId is required");
+    const p = await prisma.pipeline.findFirst({ where: { id: pipelineId, organizationId: org }, select: { id: true } });
+    if (!p) throw new HttpError(404, "Pipeline not found");
     const rows = await prisma.opportunity.findMany({
-      where: { organizationId: org, ...(pipelineId ? { pipelineId } : {}) },
+      where: { organizationId: org, pipelineId },
       include: summaryInclude,
       orderBy: [{ currentStageEnteredAt: "asc" }, { createdAt: "asc" }],
+      take: OPPORTUNITY_LIST_MAX + 1,
     });
+    if (rows.length > OPPORTUNITY_LIST_MAX) {
+      rows.length = OPPORTUNITY_LIST_MAX;
+      res.setHeader("X-Result-Truncated", "true");
+    }
     res.json(rows.map(serializeOpportunitySummary));
   }),
 );
@@ -324,6 +334,11 @@ opportunitiesRouter.post(
       res.json(await loadOpportunity(prisma, org, o.id));
       return;
     }
+    // Landing on the AUTO-convert stage creates a Deal: same gate as POST /deals.
+    const autoConvert = !target.isTerminal && o.pipeline.convertMode === "AUTO" && o.pipeline.convertStageKey === toStage;
+    if (autoConvert && !hasPermission(req, "createDeals")) {
+      throw new HttpError(403, "Moving to this stage converts the opportunity into a deal, which needs permission to create deals");
+    }
     const now = new Date();
     const user = { id: req.user!.id, name: req.user!.name };
     await prisma.$transaction(async (tx) => {
@@ -340,7 +355,7 @@ opportunitiesRouter.post(
       await tx.opportunityStageHistory.create({
         data: { opportunityId: o.id, fromStage: o.stage, toStage, reason: reason?.trim() || null, changedByUserId: user.id },
       });
-      if (!target.isTerminal && o.pipeline.convertMode === "AUTO" && o.pipeline.convertStageKey === toStage) {
+      if (autoConvert) {
         await convertInTx(tx, { organizationId: org, user, opportunityId: o.id });
       }
     });
@@ -355,6 +370,7 @@ const convertSchema = z.object({ pipelineId: z.string().max(200).nullish() });
 opportunitiesRouter.post(
   "/:id/convert",
   requirePermission("editDeals"),
+  requirePermission("createDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const { pipelineId } = convertSchema.parse(req.body ?? {});
     const org = orgId(req);

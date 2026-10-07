@@ -62,6 +62,8 @@ export function Opportunity() {
   const stageLabel = (key: string) => stageOf(key)?.label ?? key;
   const converted = !!opp.convertedDealId;
   const canEdit = can("editDeals");
+  // Converting creates a Deal, so it also needs createDeals (server-enforced).
+  const canConvert = canEdit && can("createDeals");
   // Converted opportunities keep their record editable but no longer move or convert.
   const canMove = canEdit && !converted;
   const terminal = !!stageOf(opp.stage)?.isTerminal;
@@ -105,7 +107,7 @@ export function Opportunity() {
               placeholder="Unassigned" disabled={!canEdit} options={users.map((u) => ({ value: u.id, label: u.name }))} />
           </div>
           {canMove && <MoveStageMenu stage={opp.stage} stages={stages} onPick={setStageTarget} />}
-          {canMove && <button type="button" className="primary op-convert-btn" onClick={() => setConverting(true)}>Convert to deal</button>}
+          {canMove && canConvert && <button type="button" className="primary op-convert-btn" onClick={() => setConverting(true)}>Convert to deal</button>}
           {canEdit && <OverflowMenu items={[{ label: "Delete opportunity…", danger: true, onClick: () => setConfirmDelete(true) }]} />}
         </div>
       </div>

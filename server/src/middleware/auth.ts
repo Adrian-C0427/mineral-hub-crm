@@ -113,6 +113,12 @@ export function requirePermission(permission: Permission) {
   };
 }
 
+/** In-handler form of `requirePermission`, for checks that only apply on
+ *  some paths of a route (e.g. a stage move that also creates a deal). */
+export function hasPermission(req: AuthedRequest, permission: Permission): boolean {
+  return !!req.user && (req.user.orgRole === "OWNER" || req.user.permissions.includes(permission));
+}
+
 /** Hard auth gate. 401 if not logged in. */
 export function requireAuth(req: AuthedRequest, res: Response, next: NextFunction): void {
   if (!req.user) {
