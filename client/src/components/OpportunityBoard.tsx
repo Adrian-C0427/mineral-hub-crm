@@ -85,8 +85,10 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
   const [converting, setConverting] = useState<OppSummary | null>(null);
   const nav = useNavigate();
   const { can } = useAuth();
-  // Viewing = viewDeals (the route guard); creating, moving and converting = editDeals.
+  // Viewing = viewDeals (the route guard); creating and moving = editDeals;
+  // converting creates a Deal, so it also needs createDeals (server-enforced).
   const canMove = can("editDeals");
+  const canConvert = canMove && can("createDeals");
   const canCustomizeStages = can("manageOrgSettings");
 
   const dragRef = useRef<DragState | null>(null);
@@ -303,7 +305,7 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
               </div>
               <div className="kanban-col-body pl-col-body">
                 {colOpps.map((o) => (
-                  <OppCard key={o.id} opp={o} canMove={canMove} dragging={drag?.id === o.id && drag.moved}
+                  <OppCard key={o.id} opp={o} canMove={canMove} canConvert={canConvert} dragging={drag?.id === o.id && drag.moved}
                     onPointerDown={(e) => startDrag(e, o)}
                     onOpen={() => nav(`/opportunities/${o.id}`)}
                     onMove={() => setMoving(o)}
@@ -391,15 +393,15 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
   );
 }
 
-function OppCard({ opp, canMove, dragging, onPointerDown, onOpen, onMove, onConvert }: {
-  opp: OppSummary; canMove: boolean; dragging: boolean;
+function OppCard({ opp, canMove, canConvert, dragging, onPointerDown, onOpen, onMove, onConvert }: {
+  opp: OppSummary; canMove: boolean; canConvert: boolean; dragging: boolean;
   onPointerDown: (e: React.PointerEvent) => void; onOpen: () => void; onMove: () => void; onConvert: () => void;
 }) {
   const converted = !!opp.convertedDealId;
   const draggable = canMove && !converted;
   const items = [
     { label: "Open", onClick: onOpen },
-    ...(canMove && !converted ? [{ label: "Convert to deal…", onClick: onConvert }, { label: "Move stage…", onClick: onMove }] : []),
+    ...(canMove && !converted ? [...(canConvert ? [{ label: "Convert to deal…", onClick: onConvert }] : []), { label: "Move stage…", onClick: onMove }] : []),
   ];
   return (
     <div
