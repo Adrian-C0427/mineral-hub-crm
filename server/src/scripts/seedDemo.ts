@@ -7,7 +7,7 @@
  *   DEMO_USER_PASSWORD='…' npm run seed:demo -- --reference-org "<org id or exact org name>" --confirm  # apply
  *
  * Env:
- *   DEMO_USER_EMAIL     login user (default demo@brazosridge.demo; must end with @brazosridge.demo)
+ *   DEMO_USER_EMAIL     login user (default demo@carsaminerals.com; the demo team stays @brazosridge.demo)
  *   DEMO_USER_PASSWORD  required, at least 12 characters
  *
  * Without --confirm nothing is written: the plan is printed (database host
@@ -15,9 +15,10 @@
  */
 import { prisma, runtimeDatabaseUrl } from "../db.js";
 import { s3Configured } from "../services/s3.js";
+import { demoLoginConfig } from "../services/demo.js";
 import {
   DEMO_EMAIL_DOMAIN, DEMO_ORG_NAME, MIN_DEMO_PASSWORD_LENGTH,
-  assertDemoEmail, countDemoRows, findDemoOrg, resolveReferenceOrg, seedDemoOrg,
+  assertLoginEmail, countDemoRows, findDemoOrg, resolveReferenceOrg, seedDemoOrg,
 } from "../services/demoSeed.js";
 
 function parseArgs(argv: string[]): { referenceOrg: string | null; confirm: boolean; help: boolean } {
@@ -58,9 +59,9 @@ async function main(): Promise<void> {
     return;
   }
   if (!args.referenceOrg) throw new Error('--reference-org "<org id or exact org name>" is required');
-  const email = (process.env.DEMO_USER_EMAIL ?? `demo@${DEMO_EMAIL_DOMAIN}`).trim().toLowerCase();
+  const email = demoLoginConfig().email;
   const password = process.env.DEMO_USER_PASSWORD ?? "";
-  assertDemoEmail(email);
+  assertLoginEmail(email);
   if (password.length < MIN_DEMO_PASSWORD_LENGTH) throw new Error(`DEMO_USER_PASSWORD is required and must be at least ${MIN_DEMO_PASSWORD_LENGTH} characters`);
 
   // Resolution refuses ambiguous names and demo orgs.

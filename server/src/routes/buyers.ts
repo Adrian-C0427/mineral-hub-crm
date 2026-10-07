@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requirePermission, orgId, researchOrgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, orgId, buyerNetworkOrgIds, type AuthedRequest } from "../middleware/auth.js";
 import { LIST_LIMIT } from "../config.js";
 import { normalizeCompany } from "../serializers.js";
 import { normalizePhone } from "../domain/phone.js";
@@ -228,10 +228,10 @@ buyersRouter.get(
 
     // All-time ownership-transfer edges for the org (relationship analysis is not
     // date-scoped — it always reflects the full transaction history).
-    // Research is reference data (the demo reads its reference org's records).
+    // Recorded transfers: the org's own (demo: reference records + its sample deeds).
     const rows = await prisma.researchDocument.findMany({
       where: {
-        organizationId: researchOrgId(req), docClass: "TRANSACTION",
+        organizationId: { in: buyerNetworkOrgIds(req) }, docClass: "TRANSACTION",
         grantorNorm: { not: null }, granteeNorm: { not: null },
       },
       select: {
@@ -298,14 +298,14 @@ const uniqCI = (list: string[]): string[] => {
 };
 
 /** Distinct research entity keys for the org, with tx counts + best raw spelling per side. */
-async function researchEntityIndex(org: string): Promise<Map<string, { name: string; asGrantee: number; asGrantor: number }>> {
+async function researchEntityIndex(orgIds: string[]): Promise<Map<string, { name: string; asGrantee: number; asGrantor: number }>> {
   const [grantees, grantors] = await Promise.all([
     prisma.researchDocument.groupBy({
-      by: ["granteeNorm", "grantee"], where: { organizationId: org, docClass: "TRANSACTION", granteeNorm: { not: null } },
+      by: ["granteeNorm", "grantee"], where: { organizationId: { in: orgIds }, docClass: "TRANSACTION", granteeNorm: { not: null } },
       _count: { _all: true },
     }),
     prisma.researchDocument.groupBy({
-      by: ["grantorNorm", "grantor"], where: { organizationId: org, docClass: "TRANSACTION", grantorNorm: { not: null } },
+      by: ["grantorNorm", "grantor"], where: { organizationId: { in: orgIds }, docClass: "TRANSACTION", grantorNorm: { not: null } },
       _count: { _all: true },
     }),
   ]);
@@ -325,7 +325,7 @@ async function researchEntityIndex(org: string): Promise<Map<string, { name: str
   // key, which is a different norm, so this never double-counts).
   const partyRows = await prisma.researchDocument.findMany({
     where: {
-      organizationId: org, docClass: "TRANSACTION",
+      organizationId: { in: orgIds }, docClass: "TRANSACTION",
       OR: [{ granteeNorms: { isEmpty: false } }, { grantorNorms: { isEmpty: false } }],
     },
     select: { granteeNorms: true, granteeParties: true, grantorNorms: true, grantorParties: true },
@@ -355,7 +355,7 @@ buyersRouter.get(
 
     const focusNorms = new Set(buyerEntityKeys(buyer.companyName, buyer.aliases));
     const dismissed = new Set(buyer.dismissedAliasNorms);
-    const index = await researchEntityIndex(researchOrgId(req));
+    const index = await researchEntityIndex(buyerNetworkOrgIds(req));
 
     // Other CRM buyers' keys — a suggestion that maps to an existing buyer
     // becomes a "merge profiles" prompt instead of a plain alias add.

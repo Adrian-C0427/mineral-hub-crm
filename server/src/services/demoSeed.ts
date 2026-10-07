@@ -44,6 +44,7 @@ import { normalizeAssumptions, runValuation, type MonthVolumes, type ValuationAs
 import { normalizeCompany } from "../serializers.js";
 import { formatCalendarDay } from "../domain/dates.js";
 import { abstractNumber } from "../domain/abstractLabel.js";
+import { normalizeEntity } from "../domain/research.js";
 import {
   BUYERS, CONTACT_SOURCES, COUNTIES, DEAD_REASONS, DISTANT_TOWNS, EMAIL_TEMPLATES, EXPENSE_CATEGORIES,
   FALLBACK_WELLS, FIRST_NAMES, INTERESTS, LANDMEN, LAST_NAMES, OPPORTUNITY_NOTES, OPPORTUNITY_PLAN,
@@ -54,6 +55,12 @@ export const DEMO_EMAIL_DOMAIN = "brazosridge.demo";
 export const DEMO_ORG_NAME = "Brazos Ridge Minerals";
 export const DEMO_PORTAL_SLUG = "brazos-ridge-minerals";
 export const MIN_DEMO_PASSWORD_LENGTH = 12;
+/** Bump whenever the generated dataset changes: the API reseeds a demo org whose
+ *  stored demoSeedVersion differs (services/demoReset.ensureDemoWorkspace). */
+export const DEMO_SEED_VERSION = 2;
+/** The demo login's address before it became configurable; an existing demo
+ *  org's login row with this email is renamed (same id) to the configured one. */
+export const LEGACY_DEMO_LOGIN_EMAIL = "demo@brazosridge.demo";
 const PRNG_SEED = 20_261_007;
 const TX_OPTIONS = { timeout: 10 * 60_000, maxWait: 60_000 } as const;
 
@@ -86,8 +93,16 @@ export function assertDemoEmail(email: string): void {
 }
 
 /** Prisma filter for the only users the seeder may touch. */
-function demoUserScope(demoOrgId: string) {
-  return { organizationId: demoOrgId, email: { endsWith: `@${DEMO_EMAIL_DOMAIN}` } };
+function demoUserScope(demoOrgId: string, loginEmail?: string) {
+  // The demo team is always @DEMO_EMAIL_DOMAIN; the login user may use a
+  // configured address — but every row touched must still be IN the demo org.
+  const domain = { email: { endsWith: `@${DEMO_EMAIL_DOMAIN}` } };
+  return { organizationId: demoOrgId, ...(loginEmail ? { OR: [domain, { email: loginEmail }] } : domain) };
+}
+
+/** The demo login address: any well-formed email (it is shared with prospects). */
+export function assertLoginEmail(email: string): void {
+  if (typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) throw new Error(`Invalid demo login email "${email}"`);
 }
 
 /** The demo org (isDemo = true), or null. More than one is a hard error. */
@@ -665,6 +680,8 @@ interface DealRef {
   ourPrice: number; askPrice: number; nma: number; dateUnderContract: Date; originalClosingDate: Date;
   stageTimes: Record<string, Date>; published: boolean; sellerContact: ContactRef | null; recordType: "OPPORTUNITY" | "OWNED_ASSET";
   daysToClose: number; buyerIds: string[]; abstract: GeoAbstract; interestLabel: string;
+  /** Closed deals: the accepted offer, back-solved from a monthly profit target. */
+  winAmount?: number;
 }
 
 interface Plan {
@@ -703,10 +720,13 @@ interface Plan {
   files: { row: Prisma.FileAttachmentCreateManyInput; body: Buffer }[];
   notifications: Prisma.NotificationCreateManyInput[];
   activityLogs: Prisma.ActivityLogCreateManyInput[];
+  researchDocs: Prisma.ResearchDocumentCreateManyInput[];
 }
 
 const ACQ_KEYS = ["owner", "elena", "travis", "kayla"]; // people who own deals
 const DEAL_STAGES = ["UNDER_CONTRACT", "PREPARING_PACKAGE", "SENT_TO_BUYERS", "NEGOTIATING", "CLOSING"];
+/** Active-deal spec indices published to the buyer portal (3 Sent to Buyers + 2 Negotiating). */
+const PUBLISHED_IDX = [8, 9, 10, 12, 13];
 
 class Planner {
   readonly p: Plan;
@@ -734,7 +754,7 @@ class Planner {
       dealSelections: [], sellers: [], stageHistory: [], buyerActivities: [], messages: [], offers: [], extensions: [],
       revenue: [], opportunities: [], oppHistory: [], oppActivities: [], portalContacts: [], portalEvents: [],
       expenseCategories: [], expenses: [], calendarTypes: [], calendarEvents: [], emailTemplates: [], files: [],
-      notifications: [], activityLogs: [],
+      notifications: [], activityLogs: [], researchDocs: [],
     };
   }
 
@@ -770,7 +790,7 @@ class Planner {
       const basins = [...new Set(b.regions.flatMap((r) => COUNTIES.filter((c) => c.region === r).flatMap((c) => c.basins)))];
       this.p.buyers.push({
         id, organizationId: this.orgId, name: b.company, companyName: b.company, normalizedCompany: normalizeCompany(b.company),
-        contactFirstName: b.first, contactLastName: b.last, contactName, email, phone: this.phone(b.areaCode),
+        contactFirstName: b.first, contactLastName: b.last, contactName, email, phone: this.phone(b.areaCode), website: `www.${b.domain}`,
         mailingAddress: b.street, mailingCity: b.city, mailingState: b.state, mailingZip: b.zip,
         relationshipStatus: b.status, notes: b.notes, active: b.active !== false, createdAt,
         nextFollowUpDate: b.status === "HOT" && b.active !== false ? clock.day(rng.int(1, 12)) : null,
@@ -860,7 +880,7 @@ class Planner {
   // -------------------------------------------------------------------------
   // Tracts: geography + economics for one deal/asset/opportunity
   // -------------------------------------------------------------------------
-  tract(info: CountyInfo, minPrice: number) {
+  tract(info: CountyInfo, minPrice: number, maxPrice = Infinity) {
     const { rng } = this;
     const g = this.geo.get(info.name)!;
     const fresh = g.abstracts.filter((a) => !this.usedAbstracts.has(a.id));
@@ -875,7 +895,7 @@ class Planner {
       gross = rng.pick(grossOpts);
       nma = round2(gross * rng.pick(fracOpts));
       cost = roundTo(rng.float(info.costPerNma[0], info.costPerNma[1]), 25);
-      if (nma >= lo && nma <= hi && nma * cost >= minPrice) break;
+      if (nma >= lo && nma <= hi && nma * cost >= minPrice && nma * cost <= maxPrice) break;
     }
     const royalty = rng.pick(info.royaltyRates);
     const nra = round2((nma * fraction(royalty)) / 0.125);
@@ -900,15 +920,35 @@ class Planner {
   // -------------------------------------------------------------------------
   planDeals(countyOrder: CountyInfo[]): { converted: { deal: DealRef; contact: ContactRef }[] } {
     const { rng, clock } = this;
-    type Spec = { kind: "ACTIVE" | "CLOSED" | "DEAD"; stageIdx: number; convert?: boolean; publish?: boolean; extend?: boolean; deadReason?: string; closeOffset?: number };
+    type Spec = { kind: "ACTIVE" | "CLOSED" | "DEAD"; stageIdx: number; convert?: boolean; publish?: boolean; extend?: boolean; deadReason?: string; closeOffset?: number; targetProfit?: number; finalMonth?: number };
     const specs: Spec[] = [];
-    const activeCounts = [6, 5, 6, 6, 5];
-    activeCounts.forEach((n, idx) => { for (let i = 0; i < n; i++) specs.push({ kind: "ACTIVE", stageIdx: idx }); });
+    // A pipeline sized to the business: 20 active deals, every stage populated,
+    // whose closings spread over the next few months (Closing stage = this
+    // month; earlier stages progressively later) so no month spikes.
+    const activeCounts = [4, 4, 4, 4, 4];
+    const finalMonths = [[3, 3, 3, 3], [2, 3, 3, 3], [1, 1, 2, 2], [1, 1, 1, 2], [0, 0, 0, 0]];
+    activeCounts.forEach((n, idx) => { for (let i = 0; i < n; i++) specs.push({ kind: "ACTIVE", stageIdx: idx, finalMonth: finalMonths[idx][i] }); });
     // Conversions (2 Under Contract + 1 Preparing Package), publishing (3 Sent + 2 Negotiating), extensions (2 Closing).
-    specs[0].convert = true; specs[1].convert = true; specs[6].convert = true;
-    specs[11].publish = true; specs[12].publish = true; specs[13].publish = true; specs[17].publish = true; specs[18].publish = true;
-    specs[23].extend = true; specs[24].extend = true;
-    for (let i = 0; i < 16; i++) specs.push({ kind: "CLOSED", stageIdx: 5, closeOffset: -(12 + Math.round(i * 28.5) + rng.int(0, 6)) });
+    specs[0].convert = true; specs[1].convert = true; specs[4].convert = true;
+    for (const i of PUBLISHED_IDX) specs[i].publish = true;
+    specs[18].extend = true; specs[19].extend = true;
+    // Closed deals: ~2 a month for 17 months (plus one already this month),
+    // each priced from a monthly profit target (~$70–105K/mo, ≈ $1M a year) so
+    // realized profit reads steady — no single-month spikes.
+    const todayUtc = new Date(clock.today);
+    const dom = todayUtc.getUTCDate();
+    const offsetOf = (monthsAgo: number, day: number) => {
+      const d = new Date(Date.UTC(todayUtc.getUTCFullYear(), todayUtc.getUTCMonth() - monthsAgo, 1));
+      const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+      return Math.round((Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), Math.min(day, last)) - clock.today) / DAY_MS);
+    };
+    if (dom >= 6) specs.push({ kind: "CLOSED", stageIdx: 5, closeOffset: offsetOf(0, Math.max(2, dom - rng.int(2, 4))), targetProfit: roundTo(rng.float(34_000, 46_000), 500) });
+    for (let k = 1; k <= 17; k++) {
+      const month = roundTo(88_000 * rng.float(0.82, 1.18), 500);
+      const a = roundTo(month * rng.float(0.44, 0.58), 500);
+      specs.push({ kind: "CLOSED", stageIdx: 5, closeOffset: offsetOf(k, rng.int(4, 12)), targetProfit: a });
+      specs.push({ kind: "CLOSED", stageIdx: 5, closeOffset: offsetOf(k, rng.int(16, 26)), targetProfit: month - a });
+    }
     DEAD_REASONS.forEach((r, i) => specs.push({ kind: "DEAD", stageIdx: [2, 1, 3, 2][i], deadReason: r }));
 
     const converted: { deal: DealRef; contact: ContactRef }[] = [];
@@ -916,7 +956,18 @@ class Planner {
     specs.forEach((spec, n) => {
       const info = countyOrder[n % countyOrder.length];
       const minPrice = info.region === "EAST" ? 15_000 : info.region === "EAGLE_FORD" ? 40_000 : 60_000;
-      const t = this.tract(info, minPrice);
+      const t = spec.kind === "CLOSED" && spec.targetProfit
+        ? this.tract(info, spec.targetProfit / 0.38, spec.targetProfit / 0.18)
+        : spec.kind === "ACTIVE" ? this.tract(info, 36_000, 72_000) : this.tract(info, minPrice);
+      let winAmount: number | undefined;
+      if (spec.kind === "CLOSED" && spec.targetProfit) {
+        // Accepted offer = cost basis + closing costs + this deal's profit target.
+        winAmount = roundTo(t.ourPrice + t.closingCosts + spec.targetProfit, 250);
+        if (t.askPrice < winAmount * 1.02) {
+          t.askPrice = roundTo(winAmount * rng.float(1.04, 1.12), 100);
+          t.ask = roundTo(t.askPrice / t.nma, 25);
+        }
+      }
       const id = newId();
       const ownerKey = spec.publish ? "owner" : spec.convert ? ACQ_KEYS[(n + 1) % ACQ_KEYS.length] : ACQ_KEYS[n % ACQ_KEYS.length];
       const owner = this.u(ownerKey);
@@ -932,10 +983,15 @@ class Planner {
         const ageRange: [number, number][] = [[2, 12], [6, 18], [10, 28], [16, 40], [24, 52]];
         const age = rng.int(...ageRange[spec.stageIdx]);
         startDay = -age;
-        const options = [30, 45, 60, 75, 90].filter((d) => d >= age + (spec.stageIdx === 4 ? 4 : 10));
-        // Any contracted window that still fits (30–90 days), so active closings
-        // spread over the next few months instead of bunching into one.
-        daysToClose = spec.extend ? Math.max(30, age - 4) : options.length ? rng.pick(options) : 90;
+        // Extended closing (Closing + 15, or + 30 once extended) lands in the
+        // deal's target month: this month for Closing, later for earlier stages.
+        const mo = spec.finalMonth ?? 1;
+        const monthStart = new Date(Date.UTC(new Date(clock.today).getUTCFullYear(), new Date(clock.today).getUTCMonth() + mo, 1));
+        const monthLast = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 0)).getUTCDate();
+        const firstDay = mo === 0 ? Math.min(monthLast, new Date(clock.today).getUTCDate() + 3) : 4;
+        const day = rng.int(firstDay, Math.max(firstDay, Math.min(monthLast, mo === 0 ? monthLast : 26)));
+        const finalOffset = Math.round((Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth(), day) - clock.today) / DAY_MS);
+        daysToClose = Math.min(150, Math.max(30, finalOffset - (spec.extend ? 30 : 15) + age));
         stage = DEAL_STAGES[spec.stageIdx];
         const start = clock.at(startDay, rng.int(8, 11), rng.int(0, 59));
         stageTimes.UNDER_CONTRACT = start;
@@ -982,7 +1038,7 @@ class Planner {
       const ref: DealRef = {
         id, name: t.name, county: info, region: info.region, stage, ownerKey, ourPrice: t.ourPrice, askPrice: t.askPrice, nma: t.nma,
         dateUnderContract, originalClosingDate, stageTimes, published: !!spec.publish, sellerContact, recordType: "OPPORTUNITY",
-        daysToClose, buyerIds: [], abstract: t.abstract, interestLabel: t.interest.label,
+        daysToClose, buyerIds: [], abstract: t.abstract, interestLabel: t.interest.label, winAmount,
       };
       this.deals.push(ref);
 
@@ -1016,8 +1072,8 @@ class Planner {
       if (spec.publish) {
         Object.assign(base, {
           publishedToPortal: true, portalSlug: crypto.randomBytes(12).toString("base64url"),
-          portalVisibility: n === 13 ? "LINK_ONLY" : "PUBLIC", portalFeatured: n === 11 || n === 17,
-          portalSummary: PORTAL_SUMMARIES[[11, 12, 13, 17, 18].indexOf(n)] ?? PORTAL_SUMMARIES[0],
+          portalVisibility: n === PUBLISHED_IDX[2] ? "LINK_ONLY" : "PUBLIC", portalFeatured: n === PUBLISHED_IDX[0] || n === PUBLISHED_IDX[3],
+          portalSummary: PORTAL_SUMMARIES[PUBLISHED_IDX.indexOf(n)] ?? PORTAL_SUMMARIES[0],
           portalContacts: [{ id: "c0", name: owner.name, title: owner.title, email: owner.email, phone: owner.phone }] as Prisma.InputJsonValue,
           portalContactName: owner.name, portalContactTitle: owner.title, portalContactEmail: owner.email, portalContactPhone: owner.phone,
         });
@@ -1106,7 +1162,7 @@ class Planner {
       const replyAt = addMs(dateSent, rng.float(0.6, 3) * DAY_MS);
       if (closingStage && i === 0) {
         // Winner: offer → accepted (moves deal to Closing) → closed.
-        const amt = offerAmt(1.16, 1.42);
+        const amt = d.winAmount ?? offerAmt(1.16, 1.42);
         const offerId = newId();
         const submitted = clock.past(addMs(acceptAt, -rng.float(1, 4) * DAY_MS));
         this.p.offers.push({ id: offerId, dealId: d.id, buyerId: b.id, amount: amt, dateSubmitted: submitted, createdAt: submitted, conditions: rng.pick(offerConds), expirationDate: clock.dayOf(addMs(submitted, 10 * DAY_MS)), status: "ACCEPTED" });
@@ -1712,6 +1768,171 @@ class Planner {
   }
 
   /** Buyers' last-contact dates follow the seeded outreach. */
+  // -------------------------------------------------------------------------
+  // Recorded transfer history (demo-owned deeds) behind the Buyer Profile's
+  // Relationships section: who each buyer acquired from and sold to, its
+  // acquisition chains, frequent co-buyers, concentration and typical hold.
+  // Read ONLY by the buyer network endpoints (never the Research pages, which
+  // show the reference org's real records). Tiers per region make the app's own
+  // classifier land each buyer on a realistic archetype: long-term holders that
+  // only buy, aggregators that consolidate upward, short-hold distributors that
+  // resell widely, and feeders that sell into one or two buyers.
+  // -------------------------------------------------------------------------
+  planResearchNetwork(): void {
+    const { rng, clock } = this;
+    const buyer = (name: string) => this.buyers.find((b) => b.name === name)?.name ?? null;
+    const TIERS: { region: Region; counties: string[]; terminals: string[]; aggregators: string[]; distributors: string[]; feeders: string[]; oneTime: string[] }[] = [
+      { region: "EAST", counties: ["Leon", "Robertson", "Freestone", "Madison", "Grimes", "Brazos", "Houston", "Anderson"],
+        terminals: ["Trinity Basin Minerals", "Post Oak Mineral Holdings"], aggregators: ["Navasota Valley Minerals"],
+        distributors: ["Cypress Bayou Mineral Co.", "Blackland Prairie Royalties", "Brushy Creek Mineral Partners"], feeders: ["Big Thicket Royalty"], oneTime: ["Whitetail Ridge Royalty"] },
+      { region: "EAGLE_FORD", counties: ["Karnes", "Gonzales", "La Salle", "Dimmit"],
+        terminals: ["Ironwood Royalty Holdings", "Post Oak Mineral Holdings"], aggregators: ["Mesquite Flats Minerals"],
+        distributors: ["Guadalupe Ridge Minerals", "Hackberry Creek Minerals"], feeders: ["Tejas Crossing Royalty"], oneTime: [] },
+      { region: "PERMIAN", counties: ["Martin", "Midland", "Howard", "Upton", "Reeves"],
+        terminals: ["Caprock Royalty Partners", "Comanche Springs Minerals"], aggregators: ["Llano Estacado Mineral Fund"],
+        distributors: ["Red Mesa Royalty Partners", "Brushy Creek Mineral Partners"], feeders: ["Stockton Plateau Royalty"], oneTime: [] },
+    ];
+    const SURNAMES = ["Hargrove", "Pruitt", "Kessler", "Dunavant", "Ochoa", "Brazeal", "Whitley", "Calloway", "Rountree", "Mabry", "Lindley", "Ashworth",
+      "Vickers", "Galvan", "Stroud", "Pennington", "Hollis", "McAdams", "Renfro", "Sowell", "Bivins", "Truitt", "Kincaid", "Hensley",
+      "Alcorn", "Yeager", "Burleson", "Sumrall", "Hightower", "Pettigrew", "Lockett", "Dancy", "Gholson", "Kubena", "Wofford", "Tankersley"];
+    const SUFFIXES = ["Family Partnership Ltd", "Mineral Trust", "Ranch Company", "Royalty Interests LLC", "Land & Cattle Co", "Family Minerals LP"];
+    const DEEDS: [Prisma.ResearchDocumentCreateManyInput["docType"], string][] = [
+      ["MINERAL_DEED", "MINERAL DEED"], ["MINERAL_DEED", "MINERAL DEED"], ["ROYALTY_DEED", "ROYALTY DEED"],
+      ["MINERAL_CONVEYANCE", "MINERAL AND ROYALTY CONVEYANCE"], ["WARRANTY_MINERAL_DEED", "WARRANTY MINERAL DEED"],
+    ];
+    const recName = (n: string) => n.toUpperCase().replace(/[.,]/g, "").replace(/\s+/g, " ").trim();
+    const seq = new Map<string, number>();
+    const nowMs = clock.now.getTime();
+    const latest = nowMs - 9 * DAY_MS;
+    const record = (county: string, abs: GeoAbstract, atMs: number, grantors: string[], grantees: string[], nma: number): boolean => {
+      if (atMs > latest) return false; // not recorded yet — the lot is still held
+      const at = clock.dayOf(new Date(atMs));
+      const year = at.getUTCFullYear();
+      const key = `${county}|${year}`;
+      const n = (seq.get(key) ?? rng.int(800, 3600)) + rng.int(4, 70);
+      seq.set(key, n);
+      const [docType, raw] = rng.pick(DEEDS);
+      const gr = grantors.map(recName), ge = grantees.map(recName);
+      this.p.researchDocs.push({
+        id: newId(), organizationId: this.orgId, state: "TX", county, docTypeRaw: raw, docType, docClass: "TRANSACTION",
+        instrumentNumber: `${year}-${String(n).padStart(6, "0")}`, recordingDate: at, effectiveDate: new Date(at.getTime() - rng.int(3, 21) * DAY_MS),
+        grantor: gr.join("; "), grantee: ge.join("; "),
+        grantorNorm: normalizeEntity(gr.join(" ")), granteeNorm: normalizeEntity(ge.join(" ")),
+        grantorParties: gr, granteeParties: ge,
+        grantorNorms: gr.map((x) => normalizeEntity(x)!).filter(Boolean), granteeNorms: ge.map((x) => normalizeEntity(x)!).filter(Boolean),
+        abstractId: abstractNumber(abs.label), abstractIds: [abstractNumber(abs.label)], survey: abs.survey,
+        acreage: nma, consideration: null,
+        source: "demo", sourceRef: null, createdAt: at,
+      });
+      return true;
+    };
+    const months = (m: number) => m * 30.4 * DAY_MS;
+    // Each lot gets its own tract where the county has enough, so hold times
+    // measure one lot (acquire → resell), not two unrelated lots on one abstract.
+    const usedLots = new Set<string>();
+    const abstractIn = (county: string) => {
+      const all = this.geo.get(county)!.abstracts;
+      const free = all.filter((x) => !usedLots.has(x.id));
+      const pick = rng.pick(free.length ? free : all);
+      usedLots.add(pick.id);
+      return pick;
+    };
+
+    let surname = 0;
+    for (const tier of TIERS) {
+      const terminals = tier.terminals.map(buyer).filter((x): x is string => !!x);
+      const aggregators = tier.aggregators.map(buyer).filter((x): x is string => !!x);
+      const distributors = tier.distributors.map(buyer).filter((x): x is string => !!x);
+      const feeders = tier.feeders.map(buyer).filter((x): x is string => !!x);
+      if (!terminals.length) continue;
+      const sellers = Array.from({ length: 14 }, () => `${SURNAMES[surname++ % SURNAMES.length]} ${rng.pick(SUFFIXES)}`);
+      const county = () => rng.pick(tier.counties);
+      const startMs = () => nowMs - months(rng.float(14, 70));
+      const nma = () => round2(rng.pick([2.5, 5, 6.67, 10, 12.5, 20, 25, 40]) * (tier.region === "PERMIAN" ? 0.5 : tier.region === "EAGLE_FORD" ? 1 : 2));
+
+      // Feeders: buy from three sources, pass lots up to the aggregator (or a holder).
+      for (const fd of feeders) {
+        const srcs = rng.shuffle(sellers).slice(0, 3);
+        for (let i = 0; i < 7; i++) {
+          const c = county(), a = abstractIn(c), sz = nma();
+          let t = startMs();
+          record(c, a, t, [srcs[i % 3]], [fd], sz);
+          t += months(rng.float(3, 9));
+          const up = i % 4 === 3 || !aggregators.length ? terminals[0] : aggregators[0];
+          if (!record(c, a, t, [fd], [up], sz)) continue;
+          if (up === aggregators[0]) record(c, a, t + months(rng.float(9, 20)), [up], [rng.pick(terminals)], sz);
+        }
+      }
+      // Aggregators: broad fan-in from many owners, consolidating into the holders.
+      for (const ag of aggregators) {
+        for (let i = 0; i < 11; i++) {
+          const c = county(), a = abstractIn(c), sz = nma();
+          const t = startMs();
+          record(c, a, t, [sellers[(i + 3) % sellers.length]], [ag], sz);
+          if (i % 3 !== 2) record(c, a, t + months(rng.float(8, 22)), [ag], [terminals[i % terminals.length]], sz);
+        }
+      }
+      // Short-hold distributors: buy from several owners, resell within months
+      // to a wide set of buyers (holders, the aggregator, each other).
+      distributors.forEach((ds, di) => {
+        const outs = [...terminals, ...aggregators, ...distributors.filter((x) => x !== ds)];
+        for (let i = 0; i < 9; i++) {
+          const c = county(), a = abstractIn(c), sz = nma();
+          const t = startMs();
+          record(c, a, t, [sellers[(i * 2 + di) % sellers.length]], [ds], sz);
+          if (i % 5 === 4) continue; // a couple of lots still held
+          const to = outs[(i + di) % outs.length];
+          if (!record(c, a, t + months(rng.float(2, 7)), [ds], [to], sz)) continue;
+          if (!terminals.includes(to)) {
+            const next = terminals[(i + 1) % terminals.length];
+            record(c, a, t + months(rng.float(9, 18)), [to], [next], sz);
+          }
+        }
+      });
+      // Holders also buy directly from owners.
+      terminals.forEach((tm, ti) => {
+        for (let i = 0; i < 4; i++) {
+          const c = county();
+          record(c, abstractIn(c), startMs(), [sellers[(i * 3 + ti + 1) % sellers.length]], [tm], nma());
+        }
+      });
+      // Co-acquisitions: two buyers taking a tract together (frequent co-buyers).
+      const coPairs = distributors.length >= 2 ? [[distributors[0], distributors[1]], [distributors[0], terminals[terminals.length - 1]]] : [[distributors[0] ?? terminals[0], terminals[terminals.length - 1]]];
+      for (const [x, y] of coPairs) {
+        if (!x || !y || x === y) continue;
+        for (let i = 0; i < 3; i++) {
+          const c = county();
+          record(c, abstractIn(c), startMs(), [sellers[(i + 7) % sellers.length]], [x, y], nma());
+        }
+        // The joint-grantee cell reads like a near-duplicate name to the alias
+        // detector; mark it reviewed on both buyers, as a user would.
+        const combined = normalizeEntity([x, y].map(recName).join(" "));
+        if (combined) for (const name of [x, y]) {
+          const row = this.p.buyers.find((b) => b.companyName === name);
+          if (row) row.dismissedAliasNorms = [...new Set([...((row.dismissedAliasNorms as string[] | undefined) ?? []), combined])];
+        }
+      }
+      for (const ot of tier.oneTime.map(buyer).filter((x): x is string => !!x)) {
+        const c = county();
+        record(c, abstractIn(c), startMs(), [sellers[13]], [ot], nma());
+      }
+    }
+
+    // Our own closed deals, as recorded: the seller deeds to Brazos Ridge and
+    // Brazos Ridge assigns to the winning buyer at closing.
+    const sel = new Map(this.p.dealSelections.map((x) => [x.id, x.selectedBuyerId]));
+    for (const d of this.deals) {
+      if (d.stage !== "CLOSED" || !d.sellerContact) continue;
+      const winner = this.buyers.find((b) => b.id === sel.get(d.id));
+      if (!winner) continue;
+      const c = d.sellerContact;
+      const sellerName = c.entityName ?? `${c.firstName} ${c.lastName}`;
+      const closeMs = d.originalClosingDate.getTime();
+      record(d.county.name, d.abstract, closeMs - 2 * DAY_MS, [sellerName], [`${DEMO_ORG_NAME} LLC`], d.nma);
+      record(d.county.name, d.abstract, closeMs, [`${DEMO_ORG_NAME} LLC`], [winner.name], d.nma);
+    }
+  }
+
   finalizeBuyers(): void {
     for (const b of this.p.buyers) {
       const times = this.p.buyerActivities.filter((a) => a.buyerId === b.id).map((a) => (a.lastActivityDate as Date).getTime());
@@ -1734,6 +1955,7 @@ function buildPlan(args: {
   pl.planWells(args.wells);
   pl.planDeals(countyOrder);
   pl.planAssets();
+  pl.planResearchNetwork();
   const contactStatus = new Map<string, { type: string; status: string; createdAt: Date; source: string; tags: string[] }>();
   // Converted opportunities' contacts are sellers on live deals.
   for (const d of pl.deals) if (d.sellerContact && pl.p.opportunities.some((o) => o.convertedDealId === d.id)) {
@@ -1760,7 +1982,7 @@ export async function seedDemoOrg(prisma: Db, opts: SeedDemoOptions): Promise<{ 
   const now = opts.now ?? new Date();
 
   // ---- validation (before ANY write) --------------------------------------
-  assertDemoEmail(opts.demoUserEmail);
+  assertLoginEmail(opts.demoUserEmail);
   if (typeof opts.demoUserPassword !== "string" || opts.demoUserPassword.length < MIN_DEMO_PASSWORD_LENGTH) {
     throw new Error(`The demo user password must be at least ${MIN_DEMO_PASSWORD_LENGTH} characters`);
   }
@@ -1780,6 +2002,13 @@ export async function seedDemoOrg(prisma: Db, opts: SeedDemoOptions): Promise<{ 
     if (!existing || u.organizationId !== existing.id) {
       throw new Error(`User ${u.email} already exists outside the demo organization — refusing to touch it`);
     }
+  }
+  // Login address changed (e.g. from the legacy default): keep the existing
+  // login row's id and rename it, rather than leaving a second OWNER behind.
+  let renameLoginFrom: string | null = null;
+  if (existing && !found.some((u) => u.email === loginEmail)) {
+    const legacy = await prisma.user.findFirst({ where: { organizationId: existing.id, email: LEGACY_DEMO_LOGIN_EMAIL }, select: { id: true } });
+    if (legacy && legacy.id) { renameLoginFrom = legacy.id; found.push({ id: legacy.id, email: loginEmail, organizationId: existing.id }); }
   }
   const users: UserRef[] = TEAM.map((m, i) => {
     const email = teamEmails[i];
@@ -1823,7 +2052,7 @@ export async function seedDemoOrg(prisma: Db, opts: SeedDemoOptions): Promise<{ 
       }
       await writeOrg(tx, orgId, !existing, reference?.id ?? null, users);
       await assertDemoOrg(tx, orgId);
-      await writeUsers(tx, orgId, users, teamHashes, opts.demoUserPassword);
+      await writeUsers(tx, orgId, users, teamHashes, opts.demoUserPassword, loginEmail, renameLoginFrom);
       await writePlan(tx, orgId, plan);
     }, TX_OPTIONS);
   } catch (e) {
@@ -1847,7 +2076,7 @@ async function writeOrg(tx: Tx, orgId: string, create: boolean, referenceOrgId: 
   const elena = users.find((u) => u.key === "elena")!;
   const portal = {
     portalEnabled: true, portalContactName: elena.name, portalContactEmail: `acquisitions@${DEMO_EMAIL_DOMAIN}`,
-    portalContactPhone: elena.phone, portalOfficeLocation: "Bryan, Texas", referenceOrgId,
+    portalContactPhone: elena.phone, portalOfficeLocation: "Bryan, Texas", referenceOrgId, demoSeedVersion: DEMO_SEED_VERSION,
   };
   if (create) {
     await tx.organization.create({ data: { id: orgId, name: DEMO_ORG_NAME, teamId: await generateTeamId(tx), isDemo: true, portalSlug: slug, ...portal } });
@@ -1857,12 +2086,19 @@ async function writeOrg(tx: Tx, orgId: string, create: boolean, referenceOrgId: 
   }
 }
 
-async function writeUsers(tx: Tx, orgId: string, users: UserRef[], hashes: string[], loginPassword: string): Promise<void> {
+async function writeUsers(tx: Tx, orgId: string, users: UserRef[], hashes: string[], loginPassword: string, loginEmail: string, renameLoginFrom: string | null): Promise<void> {
   const now = Date.now();
   for (let i = 0; i < users.length; i++) {
     const u = users[i];
-    assertDemoEmail(u.email);
-    const prior = await tx.user.findUnique({ where: { email: u.email }, select: { id: true, organizationId: true, passwordHash: true } });
+    const isLogin = u.key === "owner";
+    if (isLogin) assertLoginEmail(u.email); else assertDemoEmail(u.email);
+    let prior = await tx.user.findUnique({ where: { email: u.email }, select: { id: true, organizationId: true, passwordHash: true } });
+    if (!prior && isLogin && renameLoginFrom) {
+      // Rename the legacy login row (scoped: demo org + legacy demo address).
+      const res = await tx.user.updateMany({ where: { id: renameLoginFrom, organizationId: orgId, email: LEGACY_DEMO_LOGIN_EMAIL }, data: { email: u.email } });
+      if (res.count !== 1) throw new Error("Could not rename the legacy demo login");
+      prior = await tx.user.findUnique({ where: { email: u.email }, select: { id: true, organizationId: true, passwordHash: true } });
+    }
     if (prior && prior.organizationId !== orgId) throw new Error(`User ${u.email} belongs to another organization — refusing to touch it`);
     const profile = {
       name: u.name, firstName: u.member.firstName, lastName: u.member.lastName, phone: u.phone,
@@ -1874,7 +2110,7 @@ async function writeUsers(tx: Tx, orgId: string, users: UserRef[], hashes: strin
       // Only the scoped (demo org + @brazosridge.demo) row is updated.
       const unchanged = u.key === "owner" && (await bcrypt.compare(loginPassword, prior.passwordHash));
       const res = await tx.user.updateMany({
-        where: { id: prior.id, ...demoUserScope(orgId) },
+        where: { id: prior.id, ...demoUserScope(orgId, loginEmail) },
         data: { ...profile, passwordHash: unchanged ? prior.passwordHash : hashes[i], ...(unchanged ? {} : { sessionEpoch: { increment: 1 } }) },
       });
       if (res.count !== 1) throw new Error(`Could not update demo user ${u.email}`);
@@ -1948,4 +2184,5 @@ async function writePlan(tx: Tx, orgId: string, p: Plan): Promise<void> {
   await tx.emailTemplate.createMany({ data: p.emailTemplates });
   await tx.notification.createMany({ data: p.notifications });
   await chunked(p.activityLogs, (b) => tx.activityLog.createMany({ data: b }));
+  await chunked(p.researchDocs, (b) => tx.researchDocument.createMany({ data: b }));
 }

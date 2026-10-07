@@ -193,6 +193,16 @@ export function researchOrgId(req: AuthedRequest): string {
 }
 
 /**
+ * Orgs whose recorded transfers feed the BUYER relationship analysis: the
+ * reference records plus the demo's own sample deed history (which gives its
+ * sample buyers acquisition chains). Exactly [orgId] for every non-demo org.
+ * Research pages keep using researchOrgId alone.
+ */
+export function buyerNetworkOrgIds(req: AuthedRequest): string[] {
+  return [...new Set([researchOrgId(req), orgId(req)])];
+}
+
+/**
  * May this caller see the org's Team ID?
  *
  * The Team ID is a JOIN CREDENTIAL, not a display field: anyone holding it can

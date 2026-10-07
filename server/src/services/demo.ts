@@ -6,7 +6,9 @@ import { prisma } from "../db.js";
  * people all use this (non-deliverable) email domain.
  */
 export const DEMO_EMAIL_DOMAIN = "brazosridge.demo";
-export const DEFAULT_DEMO_USER_EMAIL = `demo@${DEMO_EMAIL_DOMAIN}`;
+/** The shared demo login. The demo TEAM uses DEMO_EMAIL_DOMAIN; the login itself
+ *  is a real-looking address prospects are given (override: DEMO_USER_EMAIL). */
+export const DEFAULT_DEMO_USER_EMAIL = "demo@carsaminerals.com";
 
 export function isDemoEmail(email: string | null | undefined): boolean {
   return !!email && email.trim().toLowerCase().endsWith(`@${DEMO_EMAIL_DOMAIN}`);
@@ -15,7 +17,7 @@ export function isDemoEmail(email: string | null | undefined): boolean {
 /** The demo login. One-click "Explore the demo" is opt-in (DEMO_PUBLIC_LOGIN=true). */
 export function demoLoginConfig(): { publicLogin: boolean; email: string } {
   const email = (process.env.DEMO_USER_EMAIL || DEFAULT_DEMO_USER_EMAIL).trim().toLowerCase();
-  return { publicLogin: process.env.DEMO_PUBLIC_LOGIN === "true" && isDemoEmail(email), email };
+  return { publicLogin: process.env.DEMO_PUBLIC_LOGIN === "true", email };
 }
 
 // isDemo never flips for a live org in practice; a short cache spares a
