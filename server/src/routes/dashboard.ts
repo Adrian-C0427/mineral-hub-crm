@@ -179,10 +179,11 @@ dashboardRouter.get(
     }, 0);
 
     // Every closed-deal metric keys EXCLUSIVELY on the Contract Timeline's
-    // Closed Date (Deal.closedDate) — never the stage-transition timestamp or
-    // updatedAt. A closed deal with no Closed Date set is deliberately absent
-    // from period-scoped reporting until the date is entered.
-    const closedInWindow = closedDeals.filter((d) => d.closedDate && inWindow(d.closedDate));
+    // Closing date (Deal.originalClosingDate — the contracted closing) — never
+    // the date the deal was moved to Closed (closedDate is auto-stamped on that
+    // move), createdAt, updatedAt or today. A closed deal with no Closing date
+    // is deliberately absent from period-scoped reporting until it is entered.
+    const closedInWindow = closedDeals.filter((d) => d.originalClosingDate && inWindow(d.originalClosingDate));
     const closedProfitYtd = closedInWindow.reduce(
       (sum, d) => sum + (d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : 0),
       0,
@@ -190,19 +191,19 @@ dashboardRouter.get(
     const closedDealsCount = closedInWindow.length;
 
     // Prior-period baselines for the KPI deltas: the window of EQUAL length
-    // immediately before the selected one, keyed on the same Closed Date. This
+    // immediately before the selected one, keyed on the same Closing date. This
     // is what the ▲/▼ percentages compare against, so they always answer "vs
     // the previous equivalent period" for whatever range the user picked.
     const prevStart = new Date(win.start.getTime() - (win.end.getTime() - win.start.getTime()));
     const inPrevWindow = (d: Date) => d.getTime() >= prevStart.getTime() && d.getTime() < win.start.getTime();
-    const closedInPrev = closedDeals.filter((d) => d.closedDate && inPrevWindow(d.closedDate));
+    const closedInPrev = closedDeals.filter((d) => d.originalClosingDate && inPrevWindow(d.originalClosingDate));
     const closedProfitPrev = closedInPrev.reduce(
       (sum, d) => sum + (d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : 0),
       0,
     );
     const closedDealsPrev = closedInPrev.length;
     // Average realized profit per closed deal in the window (same population
-    // and Closed Date keying as the Closed profit KPI above).
+    // and Closing date keying as the Closed profit KPI above).
     const avgProfitPerDeal = avg(
       closedInWindow.map((d) => (d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : null)).filter((n): n is number => n != null),
     );
@@ -254,7 +255,7 @@ dashboardRouter.get(
       .slice(0, 5);
 
     // Profit by month — realized profit bucketed by the Contract Timeline's
-    // Closed Date, spanning the SELECTED window (yearly buckets for very long
+    // Closing date, spanning the SELECTED window (yearly buckets for very long
     // custom ranges). Projected profit shares the same axis.
     const buckets = windowBuckets(win, now);
     const bucketIdx = (dt: Date): number => buckets.findIndex((b) =>
@@ -269,13 +270,13 @@ dashboardRouter.get(
     };
     const monthly = new Map<number, number>();
     for (const d of closedInWindow) {
-      const i = bucketIdx(d.closedDate!);
+      const i = bucketIdx(d.originalClosingDate!);
       if (i < 0) continue;
       const profit = d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : 0;
       monthly.set(i, (monthly.get(i) ?? 0) + profit);
       pushBucketDeal(i, {
         id: d.id, name: d.name, stage: d.stage, kind: "closed",
-        amount: d.selectedOffer?.amount ?? null, profit, date: d.closedDate!.toISOString().slice(0, 10),
+        amount: d.selectedOffer?.amount ?? null, profit, date: d.originalClosingDate!.toISOString().slice(0, 10),
       });
     }
     // Projected profit by month — SAME population as the Projected Profit KPI
@@ -331,21 +332,21 @@ dashboardRouter.get(
     );
 
     // Avg profit per deal as a running average across closes (last 8 points),
-    // ordered by the same Contract Timeline Closed Date as everything else.
+    // ordered by the same Contract Timeline Closing date as everything else.
     const closesAsc = closedDeals
-      .filter((d) => d.selectedOffer && d.closedDate)
-      .sort((a, b) => a.closedDate!.getTime() - b.closedDate!.getTime());
+      .filter((d) => d.selectedOffer && d.originalClosingDate)
+      .sort((a, b) => a.originalClosingDate!.getTime() - b.originalClosingDate!.getTime());
     let closeSum = 0;
     const avgProfitTrend = closesAsc.map((d, i) => {
       closeSum += netProfit(d.selectedOffer!.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts);
       return closeSum / (i + 1);
     }).slice(-8);
 
-    // Closed deals per week (8 weeks) by Closed Date — sparkline for the
+    // Closed deals per week (8 weeks) by Closing date — sparkline for the
     // Closed Deals KPI.
     const closedWeekly = weekMarks.map((t, i) => {
       const from = i === 0 ? new Date(t.getTime() - weekMs) : weekMarks[i - 1];
-      return closedDeals.filter((d) => d.closedDate && d.closedDate > from && d.closedDate <= t).length;
+      return closedDeals.filter((d) => d.originalClosingDate && d.originalClosingDate > from && d.originalClosingDate <= t).length;
     });
 
     // Offers RECEIVED per week (pending-status history isn't stored, so the
@@ -374,7 +375,7 @@ dashboardRouter.get(
         // at our ask (ask − Our Cost − closing costs). Separate from projected.
         profitAtAsk: atAsk.total,
         periodLabel: win.label,
-        // Prior equal-length window (Closed Date keyed) — delta baselines.
+        // Prior equal-length window (Closing date keyed) — delta baselines.
         closedProfitPrev,
         closedDealsPrev,
         avgProfitPrev,

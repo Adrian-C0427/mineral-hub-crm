@@ -116,7 +116,7 @@
 .deal-detail .ctl-when.chip { background: var(--warn-tint); color: var(--warn-ink); }
 .deal-detail .ctl-edit { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
 .ctl-note { grid-column: 1 / -1; margin: 0; font-size: 12px; line-height: 1.45; color: var(--ink-3); }
-/* Contract extensions on the Final closing milestone: the "Extended ×N" tag
+/* Contract extensions on the Extended closing milestone: the "Extended ×N" tag
    (squared, like every tag), the inline "Extend 15 days" action and the
    per-extension rows listed beneath the date. */
 .ctl-ext-tag { display: inline-flex; align-items: center; height: 18px; margin-left: 6px; padding: 0 6px; border-radius: var(--radius-pill-sm);

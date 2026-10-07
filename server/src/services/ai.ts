@@ -111,8 +111,8 @@ export function dealFacts(d: DealContext): string {
     line("Selected buyer", d.selectedBuyer?.name ?? null),
     line("Date under contract", dt(d.dateUnderContract)),
     line("Find buyer by", dt(d.findBuyerByDate)),
-    line("Original closing", dt(d.originalClosingDate)),
-    line("Final closing", dt(d.finalClosingDate)),
+    line("Closing", dt(d.originalClosingDate)),
+    line("Extended closing", dt(d.finalClosingDate)),
     line("Notes", d.notes),
   ].filter(Boolean).join("\n");
 }

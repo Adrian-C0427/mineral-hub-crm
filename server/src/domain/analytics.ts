@@ -23,22 +23,24 @@ export interface AnalyticsDeal {
   createdByUserId: string | null;
   closedByUserId: string | null;
   dateUnderContract: Date | null;
-  /** The deal's Closing Date (Deal.closedDate) while it is CLOSED — the one
-   *  date every closed-deal metric keys on (see realizedClosedAt). Never the
-   *  stage-transition timestamp: null here means the deal is not attributed
-   *  to any period or month until a Closing Date is entered. */
+  /** The deal's Closing date (Deal.originalClosingDate) while it is CLOSED —
+   *  the one date every closed-deal metric keys on (see realizedClosedAt).
+   *  Never the stage-transition timestamp: null here means the deal is not
+   *  attributed to any period or month until a Closing date is entered. */
   closedAt: Date | null;
   deadAt: Date | null;
 }
 
 /**
- * The date a CLOSED deal's realized result lands on: its Closing Date, which
- * is manual and editable. The same rule the dashboard applies ("closedInWindow"),
- * so both surfaces always put a deal in the same month. A deal that left CLOSED
- * keeps no realized date even if an old closedDate lingers on it.
+ * The date a CLOSED deal's realized result lands on: the Contract Timeline's
+ * Closing date (Deal.originalClosingDate — the contracted closing, entered on
+ * the deal). NEVER the date the deal was moved into Closed (closedDate is
+ * auto-stamped on that move), created, or last edited. The same rule the
+ * dashboard applies ("closedInWindow"), so both surfaces always put a deal in
+ * the same month. A deal that left CLOSED keeps no realized date.
  */
-export function realizedClosedAt(d: { stage: string; closedDate: Date | null }): Date | null {
-  return d.stage === "CLOSED" ? d.closedDate : null;
+export function realizedClosedAt(d: { stage: string; originalClosingDate: Date | null }): Date | null {
+  return d.stage === "CLOSED" ? d.originalClosingDate : null;
 }
 
 /** CLOSED deals with no Closing Date — present in the org but absent from

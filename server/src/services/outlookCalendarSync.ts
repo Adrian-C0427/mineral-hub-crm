@@ -30,8 +30,8 @@ type EventMap = Record<string, EventMapEntry>;
 
 const KINDS: { kind: string; label: string; pick: (d: ReturnType<typeof resolveDealDates>) => Date | null }[] = [
   { kind: "findBuyerBy", label: "Find buyer by", pick: (d) => d.findBuyerByDate },
-  { kind: "originalClosing", label: "Original closing", pick: (d) => d.originalClosingDate },
-  { kind: "finalClosing", label: "Final closing", pick: (d) => d.finalClosingDate },
+  { kind: "originalClosing", label: "Closing", pick: (d) => d.originalClosingDate },
+  { kind: "finalClosing", label: "Extended closing", pick: (d) => d.finalClosingDate },
 ];
 
 const isoDay = (d: Date): string => d.toISOString().slice(0, 10);

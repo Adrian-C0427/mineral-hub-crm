@@ -151,7 +151,7 @@ export function DealDetail() {
       value: deal.nra != null ? `${num(deal.nra)} NRA` : "—",
       sub: [deal.acreageNma != null ? `${num(deal.acreageNma)} NMA` : null, royalty ? `${royalty} royalty` : null].filter(Boolean).join(" · ") || undefined,
     },
-    { label: "Final closing", value: deal.finalClosingDate ? relDays(deal.finalClosingDate) : "—", sub: deal.finalClosingDate ? fmtDate(deal.finalClosingDate) : "Not set" },
+    { label: "Extended closing", value: deal.finalClosingDate ? relDays(deal.finalClosingDate) : "—", sub: deal.finalClosingDate ? fmtDate(deal.finalClosingDate) : "Not set" },
   ];
 
   // Tab labels with their record counts (counts of what each tab lists).
@@ -669,7 +669,7 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
     setEcon((p) => ({ ...p, [group]: editPriceGroup(p[group], field, v, numOrNull(p.nma), numOrNull(p.nra)) }));
   const t = econTotals(econ);
 
-  // Original closing follows Date Under Contract + Days to Close (as in New
+  // Closing follows Date Under Contract + Days to Close (as in New
   // Deal) unless it was set independently of the stored window.
   const contractIso = deal.dateUnderContract ? toInputDate(deal.dateUnderContract) : "";
   const closingIso = deal.originalClosingDate ? toInputDate(deal.originalClosingDate) : "";
@@ -790,7 +790,7 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
           <div className="field" style={{ gridColumn: "span 2" }}>
             <label title="Days from Date Under Contract to closing · Find Buyer By gets every day beyond 30">Days to close</label>
             <DaysToCloseField value={econ.daysToClose} onChange={(v) => setE({ daysToClose: v })} />
-            {nextClosing && <div className="nd-calc auto">Original closing moves to {fmtDate(nextClosing)}</div>}
+            {nextClosing && <div className="nd-calc auto">Closing moves to {fmtDate(nextClosing)}</div>}
           </div>
         </div>
       </div>)}
@@ -842,7 +842,7 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
   async function save() {
     const patch: Record<string, unknown> = {};
     // Only send changed fields. FBB becomes an override; DUC/OC/Buyer closing/
-    // Closed are direct. Final closing is not edited here — it is Original + 15
+    // Closed are direct. Extended closing is not edited here — it is Closing + 15
     // days and only moves out through "Extend 15 days" on the timeline.
     if (duc !== toInputDate(deal.dateUnderContract)) patch.dateUnderContract = duc || null;
     if (fbb !== toInputDate(deal.findBuyerByDate)) patch.findBuyerByDateOverride = fbb || null;
@@ -863,7 +863,7 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
   const noDates = !deal.dateUnderContract && !deal.findBuyerByDate && !deal.originalClosingDate && !deal.finalClosingDate && !deal.buyerClosingDate && !deal.closedDate;
 
   // "Extend 15 days": the server chains each extension from the applicable
-  // Final closing; the confirm previews the same calendar-day arithmetic.
+  // Extended closing; the confirm previews the same calendar-day arithmetic.
   const extensions = deal.contractExtensions ?? [];
   const extendTo = deal.finalClosingDate ? addDaysIso(toInputDate(deal.finalClosingDate), 15) : null;
   const canExtend = can("editDeals") && extendTo != null && !isClosed && deal.stage !== "DEAD";
@@ -879,15 +879,15 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
 
   // Vertical milestone timeline: filled glowing dot = milestone date reached;
   // hollow dot = upcoming. Closed Date appears once the deal is closed/has a date.
-  // `kind: "fc"` marks the Final closing milestone, which carries the Extend
+  // `kind: "fc"` marks the Extended closing milestone, which carries the Extend
   // action and its "Extended +15 days" rows.
   const milestones: { label: string; date: string | null; overridden?: boolean; kind?: "fbb" | "fc" }[] = [
     { label: "Under contract", date: deal.dateUnderContract },
     { label: "Find buyer by", date: deal.findBuyerByDate, overridden: deal.findBuyerByIsOverridden, kind: "fbb" },
-    { label: "Original closing", date: deal.originalClosingDate },
+    { label: "Closing", date: deal.originalClosingDate },
     // A manual override from before extensions existed still reads "(overridden)";
     // once extended, the "Extended ×N" tag says why the date is override-based.
-    { label: "Final closing", date: deal.finalClosingDate, overridden: deal.finalClosingIsOverridden && extensions.length === 0, kind: "fc" },
+    { label: "Extended closing", date: deal.finalClosingDate, overridden: deal.finalClosingIsOverridden && extensions.length === 0, kind: "fc" },
     { label: "Closing with buyer", date: deal.buyerClosingDate ?? null },
     ...(deal.closedDate || isClosed ? [{ label: "Closed", date: deal.closedDate }] : []),
   ];
@@ -902,7 +902,7 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
       <div className="dd-card-body ctl-card-body">
       {noDates && !edit && (
         <p className="muted ctl-empty">
-          No dates yet — <strong>Edit dates</strong> and set the Under Contract date; Find Buyer By and Final Closing auto-calculate from it.
+          No dates yet — <strong>Edit dates</strong> and set the Under Contract date; Find Buyer By and Extended Closing auto-calculate from it.
         </p>
       )}
       {!edit ? (
@@ -957,11 +957,11 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
         <div className="dd-grid ctl-edit">
           <Fld l="Under contract"><DateField value={duc} onChange={(v) => setDuc(v)} /></Fld>
           <Fld l="Find buyer by"><DateField value={fbb} onChange={(v) => setFbb(v)} /></Fld>
-          <Fld l="Original closing"><DateField value={oc} onChange={(v) => setOc(v)} /></Fld>
+          <Fld l="Closing"><DateField value={oc} onChange={(v) => setOc(v)} /></Fld>
           <Fld l="Closing with buyer"><DateField value={bc} onChange={(v) => setBc(v)} /></Fld>
           <Fld l="Closed date"><DateField value={cd} onChange={(v) => setCd(v)} /></Fld>
           <p className="ctl-note">
-            Final closing is Original closing + 15 days{deal.finalClosingDate ? ` (currently ${fmtDate(deal.finalClosingDate)})` : ""}; use <strong>Extend 15 days</strong> on the timeline to push it out.
+            Extended closing is Closing + 15 days{deal.finalClosingDate ? ` (currently ${fmtDate(deal.finalClosingDate)})` : ""}; use <strong>Extend 15 days</strong> on the timeline to push it out.
           </p>
         </div>
       )}
@@ -973,7 +973,7 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
           busy={extending}
           message={
             <>
-              Final closing on <strong>{deal.name}</strong> moves from {fmtDate(deal.finalClosingDate)} to{" "}
+              Extended closing on <strong>{deal.name}</strong> moves from {fmtDate(deal.finalClosingDate)} to{" "}
               <strong>{fmtDate(extendTo)}</strong> (+15 calendar days). The calendar and reminders follow the new date.
             </>
           }
