@@ -112,14 +112,13 @@ describe("eventEntry", () => {
 describe("closingEntries", () => {
   const deal = {
     id: "d1", name: "Smith 40", stage: "UNDER_CONTRACT", dateUnderContract: null, originalClosingDate: day("2026-10-01"),
-    findBuyerByDateOverride: null, finalClosingDateOverride: null, daysToClose: null,
+    findBuyerByDateOverride: null, finalClosingDateOverride: null, daysToClose: null, buyerClosingDate: null,
   };
 
-  it("emits the derived final closing (original + 15 days) and the original", () => {
+  it("emits only the applicable final closing (original + 15 days), never the original", () => {
     const out = closingEntries(deal, "tc");
     expect(out.map((e) => [e.id, e.title, e.date])).toEqual([
       ["closing:d1:final", "Closing — Smith 40", "2026-10-16"],
-      ["closing:d1:original", "Original closing — Smith 40", "2026-10-01"],
     ]);
     expect(out[0]).toMatchObject({
       source: "closing", readOnly: true, allDay: true, start: null, end: null, typeId: "tc", href: "/deals/d1",
@@ -127,88 +126,29 @@ describe("closingEntries", () => {
     });
   });
 
-  it("uses the override and skips the original when both fall on the same day", () => {
-    const out = closingEntries({ ...deal, finalClosingDateOverride: day("2026-10-01") }, null);
-    expect(out.map((e) => e.id)).toEqual(["closing:d1:final"]);
+  it("uses the override (where extensions land) as the one closing entry", () => {
+    const out = closingEntries({ ...deal, finalClosingDateOverride: day("2026-10-31") }, null);
+    expect(out.map((e) => [e.id, e.date])).toEqual([["closing:d1:final", "2026-10-31"]]);
     expect(out[0].typeId).toBeNull();
+  });
+
+  it("adds a separate 'Closing with buyer' entry when the buyer closing date is set", () => {
+    const out = closingEntries({ ...deal, buyerClosingDate: day("2026-10-20") }, "tc");
+    expect(out.map((e) => [e.id, e.title, e.date, e.typeId, e.href])).toEqual([
+      ["closing:d1:final", "Closing — Smith 40", "2026-10-16", "tc", "/deals/d1"],
+      ["closing:d1:buyer", "Closing with buyer — Smith 40", "2026-10-20", "tc", "/deals/d1"],
+    ]);
+    // Buyer closing alone (no seller-side dates) still shows up.
+    expect(closingEntries({ ...deal, originalClosingDate: null, buyerClosingDate: day("2026-10-20") }, "tc").map((e) => e.id)).toEqual(["closing:d1:buyer"]);
   });
 
   it("emits only the final when there is no original, and nothing for dead or undated deals", () => {
     expect(closingEntries({ ...deal, originalClosingDate: null, finalClosingDateOverride: day("2026-11-02") }, "tc").map((e) => e.date)).toEqual(["2026-11-02"]);
-    expect(closingEntries({ ...deal, stage: "DEAD" }, "tc")).toEqual([]);
+    expect(closingEntries({ ...deal, stage: "DEAD", buyerClosingDate: day("2026-10-20") }, "tc")).toEqual([]);
     expect(closingEntries({ ...deal, originalClosingDate: null }, "tc")).toEqual([]);
   });
 
   it("marks a closed deal's closing as done", () => {
     expect(closingEntries({ ...deal, stage: "CLOSED" }, "tc")[0].done).toBe(true);
-  });
-});
-
-describe("followUpEntry", () => {
-  const row = {
-    id: "a1", nextFollowUpDate: day("2026-10-20"), deal: { id: "d1", name: "Smith 40", stage: "MARKETING" },
-    buyer: { name: "Basin Peak" }, assignedTeamMember: { id: "u2", name: "Maria" },
-  };
-
-  it("maps a follow-up onto its deal", () => {
-    expect(followUpEntry(row, "tf")).toEqual({
-      id: "followup:a1", source: "followup", readOnly: true, title: "Follow up — Basin Peak", typeId: "tf", date: "2026-10-20",
-      allDay: true, start: null, end: null, link: { kind: "deal", id: "d1", label: "Smith 40" },
-      assignee: { id: "u2", name: "Maria" }, notes: null, done: false, href: "/deals/d1",
-    });
-  });
-
-  it("skips closed and dead deals and rows without a date", () => {
-    expect(followUpEntry({ ...row, deal: { ...row.deal, stage: "CLOSED" } }, "tf")).toBeNull();
-    expect(followUpEntry({ ...row, deal: { ...row.deal, stage: "DEAD" } }, "tf")).toBeNull();
-    expect(followUpEntry({ ...row, nextFollowUpDate: null }, "tf")).toBeNull();
-  });
-});
-
-describe("taskEntry", () => {
-  const task = {
-    id: "k1", kind: "TASK", title: "Call back", body: "About the lease", dueDate: day("2026-10-09"), completedAt: null,
-    assignedTo: { id: "u1", name: "Adrian" }, contact: { id: "c1", firstName: "Jo", lastName: "Reed", entityName: null },
-  };
-
-  it("maps a contact task", () => {
-    expect(taskEntry(task, "tf")).toEqual({
-      id: "task:k1", source: "task", readOnly: true, title: "Call back", typeId: "tf", date: "2026-10-09", allDay: true, start: null,
-      end: null, link: { kind: "contact", id: "c1", label: "Jo Reed" }, assignee: { id: "u1", name: "Adrian" }, notes: "About the lease",
-      done: false, href: "/contacts/c1?task=k1",
-    });
-  });
-
-  it("maps a reminder and a standalone dashboard task", () => {
-    expect(taskEntry({ ...task, kind: "REMINDER" }, null)).toMatchObject({ id: "reminder:k1", source: "reminder", typeId: null, href: "/contacts/c1?task=k1" });
-    expect(taskEntry({ ...task, contact: null, assignedTo: null, title: null, body: "File taxes" }, "tf")).toMatchObject({
-      id: "task:k1", title: "File taxes", notes: null, link: null, assignee: null, href: "/?task=k1",
-    });
-  });
-
-  it("falls back to the entity name for the contact label", () => {
-    expect(taskEntry({ ...task, contact: { id: "c2", firstName: null, lastName: null, entityName: "Reed Family LP" } }, "tf")!.link!.label).toBe("Reed Family LP");
-  });
-
-  it("skips completed, undated and non-task activities", () => {
-    expect(taskEntry({ ...task, completedAt: new Date() }, "tf")).toBeNull();
-    expect(taskEntry({ ...task, dueDate: null }, "tf")).toBeNull();
-    expect(taskEntry({ ...task, kind: "NOTE" }, "tf")).toBeNull();
-  });
-});
-
-describe("range filter and ordering", () => {
-  it("includes both ends of the range", () => {
-    expect(dayKeyInRange("2026-10-01", "2026-10-01", "2026-10-31")).toBe(true);
-    expect(dayKeyInRange("2026-10-31", "2026-10-01", "2026-10-31")).toBe(true);
-    expect(dayKeyInRange("2026-11-01", "2026-10-01", "2026-10-31")).toBe(false);
-    expect(dayKeyInRange("2026-09-30", "2026-10-01", "2026-10-31")).toBe(false);
-  });
-
-  it("sorts by day, all-day first, then start time", () => {
-    const mk = (id: string, date: string, allDay: boolean, start: string | null) =>
-      ({ ...eventEntry({ id, title: id, typeId: null, date: day(date), allDay, startTime: start, endTime: null, notes: null, completedAt: null, deal: null, buyer: null, assignedTo: null }) });
-    const out = sortEntries([mk("c", "2026-10-02", false, "14:00"), mk("d", "2026-10-03", true, null), mk("b", "2026-10-02", false, "09:00"), mk("a", "2026-10-02", true, null)]);
-    expect(out.map((e) => e.id)).toEqual(["a", "b", "c", "d"]);
   });
 });

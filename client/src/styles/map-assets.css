@@ -345,8 +345,6 @@
    their own look on the Deal page.
    =========================================================================== */
 .asset-detail { max-width: 1440px; padding: 24px 32px 56px; }
-.asset-detail .back-link { margin-bottom: 14px !important; padding: 0; font-size: 12.5px; font-weight: 500; color: var(--ink-3); }
-.asset-detail .back-link:hover { color: var(--ink); }
 
 .ad-head { display: flex; flex-wrap: wrap; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
 .ad-head-main { display: flex; flex-direction: column; gap: 8px; min-width: 0; }

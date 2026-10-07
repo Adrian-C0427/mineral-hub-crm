@@ -6,7 +6,7 @@ import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest }
 import { ensureStages } from "../domain/stages.js";
 import { netProfit, grossFee, avg, winRate } from "../domain/metrics.js";
 import {
-  computeKpis, delta, buildMonthlySeries, buildBreakdowns, inRange,
+  computeKpis, delta, buildMonthlySeries, buildBreakdowns, inRange, realizedClosedAt, countClosedWithoutDate,
   type AnalyticsDeal, type Range,
 } from "../domain/analytics.js";
 
@@ -19,26 +19,18 @@ const periodSchema = z.object({
 });
 
 /**
- * Deals whose CLOSED transition falls inside [from, to], keyed to that
- * timestamp. The period is applied in SQL: this previously loaded EVERY closed
- * deal in the org (plus its selectedOffer and buyer) and discarded the
- * out-of-period ones in memory, so the cost of a one-week report grew with the
- * tenant's entire history.
+ * The deal filter every closed-deal report figure starts from. A deal is "closed
+ * in the period" when its Closing Date (Deal.closedDate — manual, editable, the
+ * Contract Timeline's Closed date) falls inside it. The stage-history timestamp
+ * of the move to CLOSED is deliberately NOT used: the dashboard keys on
+ * closedDate, and a deal closed in March but entered in April belongs to March.
  */
-async function closedAtMap(organizationId: string, from: Date, to: Date): Promise<Map<string, Date>> {
-  const hist = await prisma.dealStageHistory.findMany({
-    where: {
-      toStage: "CLOSED",
-      createdAt: { gte: from, lte: to },
-      deal: { organizationId, recordType: "OPPORTUNITY", stage: "CLOSED" },
-    },
-    orderBy: { createdAt: "desc" },
-    select: { dealId: true, createdAt: true },
-  });
-  const map = new Map<string, Date>();
-  // Descending order → the first row per deal is its most recent CLOSED entry.
-  for (const h of hist) if (!map.has(h.dealId)) map.set(h.dealId, h.createdAt);
-  return map;
+const CLOSED_OPPORTUNITIES = { recordType: "OPPORTUNITY" as const, stage: "CLOSED" };
+
+/** CLOSED deals with no Closing Date: in the org, but in no period or month
+ *  until the date is entered (same rule as the dashboard). */
+function closedWithoutDateCount(organizationId: string): Promise<number> {
+  return prisma.deal.count({ where: { organizationId, ...CLOSED_OPPORTUNITIES, closedDate: null } });
 }
 
 /** Period bound → Date, falling back to `fallback` when absent or unparseable. */
@@ -54,14 +46,15 @@ reportsRouter.get(
     const fromDate = periodBound(from, "1970-01-01");
     const toDate = periodBound(to, "2999-12-31");
 
-    // Resolve the period in SQL first, then load only the deals it selected.
-    const closedAt = await closedAtMap(orgId(req), fromDate, toDate);
-    const inPeriod = closedAt.size
-      ? await prisma.deal.findMany({
-          where: { id: { in: [...closedAt.keys()] }, organizationId: orgId(req) },
-          include: { selectedOffer: true, selectedBuyer: { select: { name: true, companyName: true } } },
-        })
-      : [];
+    // The period is applied in SQL on the Closing Date, so only the deals it
+    // selects are loaded (never the tenant's entire closed history).
+    const [inPeriod, closedWithoutDate] = await Promise.all([
+      prisma.deal.findMany({
+        where: { organizationId: orgId(req), ...CLOSED_OPPORTUNITIES, closedDate: { gte: fromDate, lte: toDate } },
+        include: { selectedOffer: true, selectedBuyer: { select: { name: true, companyName: true } } },
+      }),
+      closedWithoutDateCount(orgId(req)),
+    ]);
 
     const rows = inPeriod.map((d) => {
       const accepted = d.selectedOffer?.amount ?? null;
@@ -79,7 +72,7 @@ reportsRouter.get(
         closingCosts: d.estimatedClosingCosts,
         grossFee: gross,
         netProfit: net,
-        closedDate: closedAt.get(d.id),
+        closedDate: d.closedDate,
       };
     });
 
@@ -87,7 +80,8 @@ reportsRouter.get(
     const grossTotal = rows.reduce((s, r) => s + (r.grossFee ?? 0), 0);
     const netTotal = rows.reduce((s, r) => s + (r.netProfit ?? 0), 0);
 
-    // Win rate within period: closed / (closed + dead).
+    // Win rate within period: closed / (closed + dead). Dead/lost has no
+    // manual date, so it still keys on the stage-history timestamp.
     const deadDeals = await prisma.dealStageHistory.findMany({
       where: { toStage: "DEAD", createdAt: { gte: fromDate, lte: toDate }, deal: { organizationId: orgId(req) } },
       distinct: ["dealId"],
@@ -105,6 +99,7 @@ reportsRouter.get(
       },
       winRate: winRate(rows.length, deadDeals.length),
       deadInPeriod: deadDeals.length,
+      closedWithoutDate,
     });
   }),
 );
@@ -127,8 +122,9 @@ async function loadAnalyticsDeals(organizationId: string): Promise<AnalyticsDeal
     where: { organizationId, recordType: "OPPORTUNITY" },
     include: {
       selectedOffer: { select: { amount: true } },
-      // Analytics only reads three event kinds (creation, CLOSED, DEAD) — no
-      // need to ship every intermediate stage move for every deal.
+      // Analytics reads three event kinds from the history (creation, who
+      // moved the deal to CLOSED, DEAD) — no need to ship every intermediate
+      // stage move for every deal. WHEN a deal closed comes from closedDate.
       stageHistory: {
         where: { OR: [{ fromStage: null }, { toStage: { in: ["CLOSED", "DEAD"] } }] },
         orderBy: { createdAt: "asc" },
@@ -137,14 +133,19 @@ async function loadAnalyticsDeals(organizationId: string): Promise<AnalyticsDeal
     },
   });
   return deals.map((d) => {
-    // Latest CLOSED / DEAD transitions, and the creator (fromStage === null event).
-    let closedAt: Date | null = null, closedByUserId: string | null = null, deadAt: Date | null = null;
+    // Who closed it (latest CLOSED transition), the latest DEAD transition, and
+    // the creator (fromStage === null event).
+    let closedByUserId: string | null = null, deadAt: Date | null = null;
     let createdByUserId: string | null = d.relationshipOwnerId;
     for (const h of d.stageHistory) {
       if (h.fromStage === null) createdByUserId = h.changedByUserId ?? createdByUserId;
-      if (h.toStage === "CLOSED") { closedAt = h.createdAt; closedByUserId = h.changedByUserId; }
+      if (h.toStage === "CLOSED") closedByUserId = h.changedByUserId;
       if (h.toStage === "DEAD") deadAt = h.createdAt;
     }
+    // The month/period a closed deal lands in is its Closing Date — the same
+    // rule as the dashboard. No date → the deal is in no period (counted by
+    // countClosedWithoutDate so the UI can say so).
+    const closedAt = realizedClosedAt(d);
     return {
       id: d.id,
       createdAt: d.createdAt,
@@ -270,6 +271,8 @@ reportsRouter.get(
       deltas,
       series,
       breakdowns: { ...breakdowns, perUser },
+      // Org-wide (not narrowed by the filters): closed deals that no period can show.
+      closedWithoutDate: countClosedWithoutDate(allDeals),
     });
   }),
 );
@@ -333,6 +336,7 @@ reportsRouter.get(
         revenue: kpis.revenue, closingCosts: kpis.closingCosts, grossProfit: kpis.grossProfit,
         expenses: kpis.expenses, netProfit: kpis.netProfit, dealsClosed: kpis.dealsClosed,
         costPerDeal: kpis.costPerDeal, roiMultiple: kpis.roiMultiple, closedWithoutPrice: kpis.closedWithoutPrice,
+        closedWithoutDate: countClosedWithoutDate(allDeals),
       },
       closedDeals,
       expenses: !canSeeExpenses ? null : expenses.map((e) => ({

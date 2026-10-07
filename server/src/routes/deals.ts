@@ -4,11 +4,11 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
-import { serializeDeal, serializeAssetChild } from "../serializers.js";
+import { serializeDeal, serializeAssetChild, serializeContractExtension } from "../serializers.js";
 import { computeMatch } from "../domain/matching.js";
 import { normalizePhone } from "../domain/phone.js";
 import { STALE_CONTACT_DAYS, LIST_LIMIT } from "../config.js";
-import { daysUntil } from "../domain/dates.js";
+import { daysUntil, formatCalendarDay, nextContractExtension } from "../domain/dates.js";
 import { totalFromPerAcre } from "../domain/perAcre.js";
 import { logActivity } from "../services/activityLog.js";
 import { effectiveStatus, ENGAGED_STATUSES, BUYER_STATUSES } from "../domain/buyerStatus.js";
@@ -526,6 +526,8 @@ export async function dealDetail(organizationId: string, id: string) {
       },
       sellers: { include: { assignedTeamMember: { select: { id: true, name: true, avatarColor: true } } }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
       revenueEntries: { orderBy: { month: "asc" } },
+      // Contract-timeline extensions, oldest first (each chains from the last).
+      contractExtensions: { orderBy: { createdAt: "asc" } },
       // Multi-asset: the parent package (if this deal is a child asset) and the
       // child assets grouped under this deal (if it is a package).
       parentDeal: { select: { id: true, name: true } },
@@ -536,6 +538,14 @@ export async function dealDetail(organizationId: string, id: string) {
   if (!deal) throw new HttpError(404, "Deal not found");
 
   const now = new Date();
+  // Who extended the closing: the extension rows keep only the user id, so the
+  // names are looked up here (a departed user shows as unknown rather than
+  // blocking the row).
+  const extenderIds = [...new Set(deal.contractExtensions.map((e) => e.extendedByUserId).filter((v): v is string => v != null))];
+  const extenders = extenderIds.length
+    ? await prisma.user.findMany({ where: { id: { in: extenderIds } }, select: { id: true, name: true } })
+    : [];
+  const extenderName = new Map(extenders.map((u) => [u.id, u.name]));
   // Buyer activity rows with live match %.
   const activity = deal.buyerActivity.map((a) => {
     const match = a.buyer.buyBox
@@ -610,6 +620,7 @@ export async function dealDetail(organizationId: string, id: string) {
       versionCount: f._count.supersedes,
     })),
     buyerActivity: activity,
+    contractExtensions: deal.contractExtensions.map((e) => serializeContractExtension(e, e.extendedByUserId ? extenderName.get(e.extendedByUserId) ?? null : null)),
     sellers: deal.sellers.map((s) => serializeSeller(s)),
     revenueEntries: deal.revenueEntries.map((r) => ({
       id: r.id, month: r.month, amount: r.amount, kind: r.kind, operator: r.operator, note: r.note,
@@ -830,6 +841,8 @@ const updateSchema = z.object({
   findBuyerByDateOverride: dateField,
   finalClosingDateOverride: dateField,
   closedDate: dateField,
+  // Manual "Closing with buyer" date (never calculated).
+  buyerClosingDate: dateField,
   estimatedClosingCosts: z.number().nullish(),
   relationshipOwnerId: z.string().max(10_000).nullish(),
   assigneeIds: z.array(z.string().max(200)).max(500).optional(),
@@ -1009,7 +1022,7 @@ dealsRouter.patch(
     for (const k of ["name", "sellerNames", "counties", "state", "states", "acreageNma", "nra", "abstractIds", "operator", "rrc", "askPrice", "ourPrice", "assetTypes", "basins", "formations", "estimatedClosingCosts", "relationshipOwnerId", "notes", ...PRICING_KEYS, ...ASSET_SCALAR_KEYS] as const) {
       if (k in data) patch[k] = (data as Record<string, unknown>)[k];
     }
-    for (const k of ["dateUnderContract", "originalClosingDate", "findBuyerByDateOverride", "finalClosingDateOverride", "closedDate", "acquisitionDate", "leaseEffectiveDate", "leaseExpirationDate"] as const) {
+    for (const k of ["dateUnderContract", "originalClosingDate", "findBuyerByDateOverride", "finalClosingDateOverride", "closedDate", "buyerClosingDate", "acquisitionDate", "leaseEffectiveDate", "leaseExpirationDate"] as const) {
       if (k in data) patch[k] = toDate((data as Record<string, unknown>)[k]);
     }
     const existing = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
@@ -1024,6 +1037,41 @@ dealsRouter.patch(
     if (data.states !== undefined) patch.state = data.states[0] ?? null;
     const deal = await prisma.deal.update({ where: { id: req.params.id }, data: patch, include: dealInclude });
     res.json(serializeDeal(deal));
+  }),
+);
+
+// --------------------------------------------------------------------------
+// Contract timeline — "Extended": push the applicable Final Closing out by
+// 15 calendar days. The new deadline lands in finalClosingDateOverride (so it
+// is what resolveDealDates — and therefore the calendar, alerts and Outlook
+// sync — read from now on), and a DealContractExtension row records the move.
+// Repeated extensions chain from the current applicable deadline.
+// --------------------------------------------------------------------------
+dealsRouter.post(
+  "/:id/extend",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
+    if (!deal) throw new HttpError(404, "Deal not found");
+    const ext = nextContractExtension(deal);
+    if (!ext) throw new HttpError(400, "There is no closing date to extend — set the Original closing date first.");
+    await prisma.$transaction(async (tx) => {
+      await tx.deal.update({ where: { id: deal.id }, data: { finalClosingDateOverride: ext.toDate } });
+      await tx.dealContractExtension.create({
+        data: { dealId: deal.id, fromDate: ext.fromDate, toDate: ext.toDate, days: ext.days, extendedByUserId: req.user!.id },
+      });
+      await logActivity(
+        {
+          eventType: "CLOSING_EXTENDED",
+          summary: `${req.user!.name} extended the closing on "${deal.name}" to ${formatCalendarDay(ext.toDate)} (+${ext.days} days)`,
+          organizationId: orgId(req),
+          actorUserId: req.user!.id,
+          dealId: deal.id,
+        },
+        tx,
+      );
+    });
+    res.json(await dealDetail(orgId(req), deal.id));
   }),
 );
 
@@ -1331,13 +1379,16 @@ dealsRouter.post(
         where: { dealId_buyerId: { dealId: deal.id, buyerId: offer.buyerId } },
         select: { id: true, status: true },
       });
+      // On a deal that is already Closed the winning buyer's record reads CLOSED
+      // (the deal's lifecycle), never a stale ACCEPTED.
+      const actStatus = deal.stage === "CLOSED" ? "CLOSED" : "ACCEPTED";
       const acceptedAct = await tx.dealBuyerActivity.upsert({
         where: { dealId_buyerId: { dealId: deal.id, buyerId: offer.buyerId } },
         create: {
-          dealId: deal.id, buyerId: offer.buyerId, status: "ACCEPTED", responseReceived: true,
+          dealId: deal.id, buyerId: offer.buyerId, status: actStatus, responseReceived: true,
           offerAmount: offer.amount, dateSent: now, lastActivityDate: now, sentByUserId: req.user!.id,
         },
-        update: { status: "ACCEPTED", responseReceived: true, offerAmount: offer.amount, lastActivityDate: now },
+        update: { status: actStatus, responseReceived: true, offerAmount: offer.amount, lastActivityDate: now },
       });
       if (prevAct?.status !== "ACCEPTED") {
         await tx.dealBuyerMessage.create({

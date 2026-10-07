@@ -53,8 +53,14 @@ export interface StageUndoSnapshot {
   followUps: [string, Iso][];
   /** Notifications the move marked read. */
   notificationIds: string[];
-  /** Winning buyer's activity the move set to CLOSED, with its previous values. */
-  winner: { activityId: string; status: string | null; lastActivityDate: Iso | null; messageId: string } | null;
+  /** Winning buyer's activity the move set to CLOSED, with its previous values
+   *  (`created`: the buyer had no activity row and the move added one). */
+  winner: { activityId: string; status: string | null; lastActivityDate: Iso | null; messageId: string; created?: boolean } | null;
+  /** The winning buyer's offer the move marked ACCEPTED, with its previous status. */
+  acceptedOffer?: { offerId: string; status: string } | null;
+  /** The selected offer/buyer the move recorded on the deal (it had no
+   *  selected offer), with the selected buyer it had before. */
+  selection?: { offerId: string; buyerId: string; prevBuyerId: string | null } | null;
   /** Rows the move wrote. */
   historyId: string;
   activityLogId: string;
@@ -109,6 +115,64 @@ export interface StageChangeDeal {
   updatedAt: Date;
 }
 
+type WinnerOffer = { id: string; buyerId: string; status: string; amount: number };
+const winnerOfferSelect = { id: true, buyerId: true, status: true, amount: true } as const;
+
+/**
+ * Who a closing deal is closing with, and on which offer.
+ *   Winner = the deal's selected buyer; else the buyer of its selected offer;
+ *            else the buyer of its most recently accepted offer; else, when a
+ *            single buyer holds an open offer, that buyer; else nobody.
+ *   Offer  = the selected offer when it is that buyer's; else the buyer's most
+ *            recently accepted offer; else their latest ACTIVE offer (the open
+ *            offer from the buyer the deal closed with IS the accepted one).
+ * `select` says the deal has no selected offer yet and the move should record
+ * this one.
+ */
+async function resolveWinner(
+  tx: Prisma.TransactionClient,
+  deal: StageChangeDeal,
+): Promise<{ buyerId: string; offer: WinnerOffer | null; select: boolean } | null> {
+  let buyerId: string | null = deal.selectedBuyerId ?? null;
+  let offer: WinnerOffer | null = null;
+  if (deal.selectedOfferId) {
+    offer = await tx.offer.findFirst({ where: { id: deal.selectedOfferId, dealId: deal.id }, select: winnerOfferSelect });
+    if (!buyerId) buyerId = offer?.buyerId ?? null;
+    else if (offer && offer.buyerId !== buyerId) offer = null; // selection out of step with the buyer
+  }
+  if (!buyerId) {
+    offer = await tx.offer.findFirst({
+      where: { dealId: deal.id, status: "ACCEPTED" },
+      orderBy: { updatedAt: "desc" }, select: winnerOfferSelect,
+    });
+    buyerId = offer?.buyerId ?? null;
+  }
+  // Nothing selected or accepted: when exactly ONE buyer holds an open offer,
+  // the deal can only be closing with them. Several open offers stay as they
+  // are — guessing a winner would be wrong.
+  if (!buyerId) {
+    const open = await tx.offer.findMany({
+      where: { dealId: deal.id, status: "ACTIVE" },
+      orderBy: { dateSubmitted: "desc" }, select: winnerOfferSelect,
+    });
+    const buyers = new Set(open.map((o) => o.buyerId));
+    if (buyers.size === 1) { offer = open[0]; buyerId = open[0].buyerId; }
+  }
+  if (!buyerId) return null;
+  if (!offer) {
+    offer =
+      (await tx.offer.findFirst({
+        where: { dealId: deal.id, buyerId, status: "ACCEPTED" },
+        orderBy: { updatedAt: "desc" }, select: winnerOfferSelect,
+      })) ??
+      (await tx.offer.findFirst({
+        where: { dealId: deal.id, buyerId, status: "ACTIVE" },
+        orderBy: { dateSubmitted: "desc" }, select: winnerOfferSelect,
+      }));
+  }
+  return { buyerId, offer, select: !!offer && !deal.selectedOfferId };
+}
+
 /**
  * Move a deal to `toStage` with every side effect, inside the caller's
  * transaction. Validation (stage exists, Dead reason present, not a no-op) is
@@ -124,6 +188,10 @@ export async function applyStageChange(
   const reason = toStage === "DEAD" ? p.deadReason!.trim() : null;
   const terminal = toStage === "CLOSED" || toStage === "DEAD";
   const stampClosed = toStage === "CLOSED" && !deal.closedDate;
+  // Resolved before the deal update so a missing selection is written in the
+  // same statement (one updatedAt for the undo to pin).
+  const win = toStage === "CLOSED" ? await resolveWinner(tx, deal) : null;
+  const select = win?.select && win.offer ? { offerId: win.offer.id, buyerId: win.buyerId, prevBuyerId: deal.selectedBuyerId ?? null } : null;
 
   const u = await tx.deal.update({
     where: { id: deal.id },
@@ -135,6 +203,9 @@ export async function applyStageChange(
       ...(stampClosed ? { closedDate: now } : {}),
       // A closed or dead deal is off the market — unpublish from the buyer portal.
       ...(terminal ? { publishedToPortal: false } : {}),
+      // Closing records the winning offer as the deal's selection when nothing
+      // was selected yet, so every surface keyed on it agrees.
+      ...(select ? { selectedOfferId: select.offerId, selectedBuyerId: select.buyerId } : {}),
     },
     select: { updatedAt: true },
   });
@@ -165,50 +236,52 @@ export async function applyStageChange(
     });
   }
 
-  // Closing a deal automatically marks the WINNING buyer's activity record
-  // CLOSED — the buyer whose offer was accepted (the deal's selected buyer,
-  // falling back to the selected/accepted offer). Every other buyer's
-  // record, and all communication history/notes/timeline, stay untouched.
+  // Closing a deal settles the WINNING buyer (see resolveWinner): their offer
+  // is the accepted one and their activity record is CLOSED. Every other
+  // buyer's record, and all communication history/notes/timeline, stay
+  // untouched.
   let winner: StageUndoSnapshot["winner"] = null;
-  if (toStage === "CLOSED") {
-    let winnerBuyerId: string | null = deal.selectedBuyerId ?? null;
-    if (!winnerBuyerId && deal.selectedOfferId) {
-      const off = await tx.offer.findUnique({ where: { id: deal.selectedOfferId }, select: { buyerId: true } });
-      winnerBuyerId = off?.buyerId ?? null;
+  let acceptedOffer: StageUndoSnapshot["acceptedOffer"] = null;
+  if (win) {
+    if (win.offer && win.offer.status !== "ACCEPTED") {
+      await tx.offer.update({ where: { id: win.offer.id }, data: { status: "ACCEPTED" } });
+      acceptedOffer = { offerId: win.offer.id, status: win.offer.status };
     }
-    if (!winnerBuyerId) {
-      const off = await tx.offer.findFirst({
-        where: { dealId: deal.id, status: "ACCEPTED" },
-        orderBy: { updatedAt: "desc" }, select: { buyerId: true },
+    const act = await tx.dealBuyerActivity.findUnique({
+      where: { dealId_buyerId: { dealId: deal.id, buyerId: win.buyerId } },
+    });
+    if (!act || act.status !== "CLOSED") {
+      // The winner's row was removed at some point (buyer taken off the deal):
+      // closing puts one back so the closed deal names its buyer.
+      const row = act ?? await tx.dealBuyerActivity.create({
+        data: {
+          dealId: deal.id, buyerId: win.buyerId, status: "CLOSED", responseReceived: true,
+          offerAmount: win.offer?.amount ?? null, dateSent: now, lastActivityDate: now, sentByUserId: user.id,
+        },
       });
-      winnerBuyerId = off?.buyerId ?? null;
-    }
-    if (winnerBuyerId) {
-      const act = await tx.dealBuyerActivity.findUnique({
-        where: { dealId_buyerId: { dealId: deal.id, buyerId: winnerBuyerId } },
-      });
-      if (act && act.status !== "CLOSED") {
+      if (act) {
         await tx.dealBuyerActivity.update({
           where: { id: act.id },
           data: { status: "CLOSED", lastActivityDate: now },
         });
-        // The change shows up in the buyer's interaction log like any other
-        // status change, so the automation is visible and auditable.
-        const msg = await tx.dealBuyerMessage.create({
-          data: {
-            organizationId: orgId, dealId: deal.id, buyerId: winnerBuyerId, activityId: act.id,
-            kind: "STATUS_CHANGE",
-            body: "Status automatically set to Closed — this buyer's accepted offer closed the deal.",
-            createdByUserId: user.id,
-          },
-        });
-        winner = {
-          activityId: act.id,
-          status: act.status,
-          lastActivityDate: act.lastActivityDate ? act.lastActivityDate.toISOString() : null,
-          messageId: msg.id,
-        };
       }
+      // The change shows up in the buyer's interaction log like any other
+      // status change, so the automation is visible and auditable.
+      const msg = await tx.dealBuyerMessage.create({
+        data: {
+          organizationId: orgId, dealId: deal.id, buyerId: win.buyerId, activityId: row.id,
+          kind: "STATUS_CHANGE",
+          body: "Status automatically set to Closed — this buyer's accepted offer closed the deal.",
+          createdByUserId: user.id,
+        },
+      });
+      winner = {
+        activityId: row.id,
+        status: act ? act.status : null,
+        lastActivityDate: act?.lastActivityDate ? act.lastActivityDate.toISOString() : null,
+        messageId: msg.id,
+        ...(act ? {} : { created: true }),
+      };
     }
   }
 
@@ -253,6 +326,8 @@ export async function applyStageChange(
     followUps,
     notificationIds,
     winner,
+    acceptedOffer,
+    selection: select,
     historyId: history.id,
     activityLogId: log.id,
   };
@@ -271,7 +346,7 @@ export async function applyStageUndo(tx: Prisma.TransactionClient, snap: StageUn
 
   const deal = await tx.deal.findFirst({
     where: { id: snap.dealId, organizationId: snap.orgId },
-    select: { stage: true, currentStageEnteredAt: true, deadReason: true, closedDate: true, updatedAt: true },
+    select: { stage: true, currentStageEnteredAt: true, deadReason: true, closedDate: true, updatedAt: true, selectedOfferId: true },
   });
   if (!deal) throw new HttpError(404, "Deal not found");
   // Any later stage change (this route, accept-offer, convert, bulk archive…)
@@ -299,11 +374,16 @@ export async function applyStageUndo(tx: Prisma.TransactionClient, snap: StageUn
     });
     if (act && act.status !== "CLOSED") throw changed("the winning buyer's status was changed");
   }
+  if (snap.selection && deal.selectedOfferId !== snap.selection.offerId) throw changed("the accepted offer was changed");
+  if (snap.acceptedOffer) {
+    const off = await tx.offer.findFirst({ where: { id: snap.acceptedOffer.offerId, dealId: snap.dealId }, select: { status: true } });
+    if (off && off.status !== "ACCEPTED") throw changed("the winning buyer's offer was changed");
+  }
 
   // Deal: previous stage and stage-entered date (days-in-stage is right again),
-  // dead reason, closed date, portal publication. updatedAt goes back too when
-  // nothing else has touched the deal. The where clause re-checks the stage so
-  // a concurrent move cannot be overwritten.
+  // dead reason, closed date, portal publication, selected offer/buyer.
+  // updatedAt goes back too when nothing else has touched the deal. The where
+  // clause re-checks the stage so a concurrent move cannot be overwritten.
   const untouched = sameTime(deal.updatedAt, snap.afterUpdatedAt);
   const res = await tx.deal.updateMany({
     where: { id: snap.dealId, organizationId: snap.orgId, stage: snap.toStage, currentStageEnteredAt: new Date(snap.at) },
@@ -313,10 +393,18 @@ export async function applyStageUndo(tx: Prisma.TransactionClient, snap: StageUn
       deadReason: snap.prev.deadReason,
       ...(snap.closedDateStamped ? { closedDate: null } : {}),
       ...(snap.unpublished ? { publishedToPortal: true } : {}),
+      ...(snap.selection ? { selectedOfferId: null, selectedBuyerId: snap.selection.prevBuyerId } : {}),
       ...(untouched ? { updatedAt: new Date(snap.prev.updatedAt) } : {}),
     },
   });
   if (res.count !== 1) throw changed("the deal's stage was changed again");
+  // The winning buyer's offer: back to the status it had before the close.
+  if (snap.acceptedOffer) {
+    await tx.offer.updateMany({
+      where: { id: snap.acceptedOffer.offerId, dealId: snap.dealId, status: "ACCEPTED" },
+      data: { status: snap.acceptedOffer.status as never },
+    });
+  }
 
   // Follow-ups: put each cleared date back, unless someone has set a new one.
   for (const [id, date] of snap.followUps) {
@@ -334,19 +422,24 @@ export async function applyStageUndo(tx: Prisma.TransactionClient, snap: StageUn
   }
   // Winning buyer: previous status; previous last-activity date unless newer
   // activity was logged; and remove the automatic "set to Closed" log entry.
+  // A row the move created (the buyer had none) is removed again.
   if (snap.winner) {
     const w = snap.winner;
-    await tx.dealBuyerActivity.updateMany({
-      where: { id: w.activityId, dealId: snap.dealId, status: "CLOSED" },
-      data: { status: w.status as never },
-    });
-    await tx.dealBuyerActivity.updateMany({
-      where: { id: w.activityId, dealId: snap.dealId, lastActivityDate: new Date(snap.at) },
-      data: { lastActivityDate: w.lastActivityDate ? new Date(w.lastActivityDate) : null },
-    });
     await tx.dealBuyerMessage.deleteMany({
       where: { id: w.messageId, dealId: snap.dealId, kind: "STATUS_CHANGE" },
     });
+    if (w.created) {
+      await tx.dealBuyerActivity.deleteMany({ where: { id: w.activityId, dealId: snap.dealId, status: "CLOSED" } });
+    } else {
+      await tx.dealBuyerActivity.updateMany({
+        where: { id: w.activityId, dealId: snap.dealId, status: "CLOSED" },
+        data: { status: w.status as never },
+      });
+      await tx.dealBuyerActivity.updateMany({
+        where: { id: w.activityId, dealId: snap.dealId, lastActivityDate: new Date(snap.at) },
+        data: { lastActivityDate: w.lastActivityDate ? new Date(w.lastActivityDate) : null },
+      });
+    }
   }
   // The stage-history row and activity-feed entry the move wrote.
   await tx.dealStageHistory.deleteMany({ where: { id: snap.historyId, dealId: snap.dealId } });

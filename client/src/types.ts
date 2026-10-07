@@ -65,6 +65,8 @@ export interface DealSummary {
   findBuyerByAuto: string | null;
   finalClosingAuto: string | null;
   closedDate: string | null;
+  /** Manual "Closing with buyer" date (never calculated). */
+  buyerClosingDate?: string | null;
   selectedBuyer: { id: string; name: string; companyName: string } | null;
   selectedOfferId: string | null;
   relationshipOwner: { id: string; name: string; avatarColor?: string | null } | null;
@@ -277,4 +279,14 @@ export interface Opp extends OppSummary {
   convertedDeal: { id: string; name: string; stage: Stage } | null;
   stageHistory: OppStageHistoryRow[];
   activities: OppActivityRow[];
+}
+
+/** One "Extended +N days" action on a deal's Contract timeline (deal detail). */
+export interface ContractExtension {
+  id: string;
+  fromDate: string;
+  toDate: string;
+  days: number;
+  extendedBy: { id: string; name: string | null } | null;
+  createdAt: string;
 }

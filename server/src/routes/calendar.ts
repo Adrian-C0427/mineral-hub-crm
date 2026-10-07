@@ -110,11 +110,11 @@ calendarRouter.get(
         ? prisma.deal.findMany({
             where: {
               organizationId: org, stage: { not: "DEAD" }, ...LISTED_DEALS,
-              AND: [{ OR: [{ originalClosingDate: { not: null } }, { finalClosingDateOverride: { not: null } }] }],
+              AND: [{ OR: [{ originalClosingDate: { not: null } }, { finalClosingDateOverride: { not: null } }, { buyerClosingDate: { not: null } }] }],
             },
             select: {
               id: true, name: true, stage: true, dateUnderContract: true, originalClosingDate: true,
-              findBuyerByDateOverride: true, finalClosingDateOverride: true, daysToClose: true,
+              findBuyerByDateOverride: true, finalClosingDateOverride: true, daysToClose: true, buyerClosingDate: true,
             },
           })
         : [],

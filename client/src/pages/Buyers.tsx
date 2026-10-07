@@ -9,6 +9,7 @@ import { NewBuyerModal } from "../components/NewBuyerModal";
 import { useRowSelection, BulkActionsBar } from "../components/bulk";
 import { pct } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
+import { useListState } from "../lib/listState";
 import { useAuth } from "../auth/AuthContext";
 import type { UserLite } from "../types";
 
@@ -73,9 +74,10 @@ export function Buyers() {
   const sel = useRowSelection();
   const nav = useNavigate();
 
-  // The only major list without search/filters until now.
-  const [q, setQ] = useState("");
-  const [rel, setRel] = useState("");
+  // Search + relationship filter, remembered per tab so Back from a buyer
+  // restores them.
+  const [q, setQ] = useListState("buyers:q", "");
+  const [rel, setRel] = useListState("buyers:rel", "");
 
   function load() { api.get<BuyerRow[]>("/buyers").then(setBuyers); }
   useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);

@@ -105,14 +105,20 @@ export function ToastHost() {
 }
 
 /**
- * Standard back-to-list navigation for detail pages. Prefers browser back (so
- * the parent list's filters/scroll survive) and falls back to `fallback` on a
- * deep link with no in-app history.
+ * The ONE return-to-parent control: a small left arrow + "Back", identical on
+ * every detail/sub page (styled once as `.back-link` in styles/shared.css).
+ * Prefers browser back (so the list's filters/sort/page/search survive) and
+ * falls back to `fallback` on a deep link with no in-app history.
  */
-export function BackLink({ label, fallback }: { label: string; fallback: string }) {
+export function BackLink({ fallback }: { fallback: string }) {
   const nav = useNavigate();
   const go = () => { if (window.history.length > 1) nav(-1); else nav(fallback); };
-  return <button className="link-btn back-link" onClick={go} style={{ marginBottom: 10 }}>← {label}</button>;
+  return (
+    <button type="button" className="back-link" onClick={go}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
+      Back
+    </button>
+  );
 }
 
 /** The single standardized required-field indicator: a red asterisk. */

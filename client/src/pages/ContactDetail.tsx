@@ -1,12 +1,12 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
-  ArrowLeft, Bell, CheckSquare, ChevronDown, ChevronLeft, ChevronRight,
+  Bell, CheckSquare, ChevronDown, ChevronLeft, ChevronRight,
   Mail, MapPin, MessageSquare, Palette, Pencil, Phone, Pin, Plus, Search, Send, StickyNote, Trash2, X,
 } from "lucide-react";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, Banner, ConfirmDelete, EmptyState, showToast, UserChip, ChipList, OverflowMenu } from "../components/ui";
+import { Spinner, Banner, ConfirmDelete, EmptyState, showToast, UserChip, ChipList, OverflowMenu, BackLink } from "../components/ui";
 import { Select } from "../components/Select";
 import { DateField } from "../components/DateField";
 import { Avatar, Segmented, Tag } from "../components/kit";
@@ -169,7 +169,7 @@ export function ContactDetail() {
     <div className="cw-wrap">
       {/* Detail bar: back + record pager. */}
       <header className="cw-top">
-        <Link to="/contacts" className="cw-topback" aria-label="Back to contacts"><ArrowLeft size={15} /></Link>
+        <BackLink fallback="/contacts" />
         <span className="cw-toptitle">Contact Details</span>
         {idx >= 0 && <span className="cw-count">{idx + 1} of {all.length.toLocaleString()}</span>}
         <span className="cw-pager">
