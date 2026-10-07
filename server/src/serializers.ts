@@ -212,6 +212,8 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     findBuyerByDateOverride: deal.findBuyerByDateOverride,
     finalClosingDateOverride: deal.finalClosingDateOverride,
     closedDate: deal.closedDate,
+    // Manual "Closing with buyer" date — entered by hand, never calculated.
+    buyerClosingDate: deal.buyerClosingDate ?? null,
     selectedBuyerId: deal.selectedBuyerId,
     selectedBuyer: deal.selectedBuyer
       ? { id: deal.selectedBuyer.id, name: deal.selectedBuyer.name, companyName: deal.selectedBuyer.companyName }
@@ -228,6 +230,23 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     isOverdue: isOverdue({ ...deal, selectedBuyerId: deal.selectedBuyerId }, now),
     updatedAt: deal.updatedAt,
     createdAt: deal.createdAt,
+  };
+}
+
+/** A DealContractExtension row plus the resolved name of who extended it. */
+export type ContractExtensionRow = {
+  id: string; fromDate: Date; toDate: Date; days: number; extendedByUserId: string | null; createdAt: Date;
+};
+
+/** One "Extended +N days" entry on the Contract Timeline (deal detail). */
+export function serializeContractExtension(e: ContractExtensionRow, extendedByName: string | null) {
+  return {
+    id: e.id,
+    fromDate: e.fromDate,
+    toDate: e.toDate,
+    days: e.days,
+    extendedBy: e.extendedByUserId ? { id: e.extendedByUserId, name: extendedByName } : null,
+    createdAt: e.createdAt,
   };
 }
 

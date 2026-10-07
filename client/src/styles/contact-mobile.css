@@ -15,6 +15,9 @@
   .cw-wrap .cw[data-mtab] .cw-center,
   .cw-wrap .cw[data-mtab] .cw-right { order: 1; }
 
+  /* Detail bar Back control: a 40px tap target without growing the bar. */
+  .cw-wrap .cw-top .back-link { min-height: 40px; margin: 0; }
+
   /* Quick actions: Call / Text / Email / Task / Note. */
   .cw-quick { flex: none; display: flex; padding: 20px 12px 8px; }
   .cw-wrap .cw-quick .cw-qa {

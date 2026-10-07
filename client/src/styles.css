@@ -3552,9 +3552,6 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .cw-wrap { display: flex; flex-direction: column; min-height: calc(100vh - 55px); }
 .cw-top { display: flex; align-items: center; gap: 14px; height: 60px; padding: 0 24px;
   border-bottom: 1px solid var(--hairline); flex-shrink: 0; }
-.cw-topback { width: 30px; height: 30px; border-radius: 6px; background: transparent; border: 1px solid var(--border);
-  color: var(--text-dim); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
-.cw-topback:hover { color: var(--text); text-decoration: none; }
 .cw-toptitle { font-size: 13.5px; font-weight: 700; }
 .cw-count { font-size: 12px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .cw-pager { display: flex; gap: 4px; }
@@ -3922,11 +3919,6 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
    Buyer Profile (Buyer Profile.html reference) — breadcrumb, title row with
    pills + meta, intelligence strip, follow-up alert, deal-history empty state.
    =========================================================================== */
-.bp-crumbs { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 600; color: var(--text-faint); padding: 0 0 10px; }
-.bp-crumb-link { background: none; border: none; padding: 0; font: inherit; color: var(--text-dim); cursor: pointer; }
-.bp-crumb-link:hover { color: var(--accent); }
-.bp-crumb-cur { color: var(--text-mid, var(--ink-1)); }
-:root[data-theme="light"] .bp-crumb-cur { color: #475467; }
 
 .bp-titlerow { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; flex-wrap: wrap; padding-bottom: 18px; }
 .bp-titleline { display: flex; align-items: center; gap: 11px; flex-wrap: wrap; }

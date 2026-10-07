@@ -162,9 +162,13 @@ offersRouter.patch(
     // so every surface keyed on selectedOfferId/selectedBuyerId (dashboard,
     // buyer close rate, "Selected buyer" banner, portal visibility) agrees.
     if (data.status === "ACCEPTED") {
+      // On a deal that has already closed, statuses are final: the buyer whose
+      // offer closed it reads CLOSED (what closing the deal sets), never a
+      // step back to ACCEPTED.
+      const parent = await prisma.deal.findUnique({ where: { id: owned.dealId }, select: { stage: true } });
       await prisma.dealBuyerActivity.updateMany({
         where: { dealId: owned.dealId, buyerId: owned.buyerId },
-        data: { status: "ACCEPTED", responseReceived: true, lastActivityDate: new Date() },
+        data: { status: parent?.stage === "CLOSED" ? "CLOSED" : "ACCEPTED", responseReceived: true, lastActivityDate: new Date() },
       });
       await prisma.deal.update({
         where: { id: owned.dealId },

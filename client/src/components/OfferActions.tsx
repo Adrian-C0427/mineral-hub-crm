@@ -19,13 +19,22 @@ export interface OfferRow {
 const STATUS_OPTIONS = ["ACTIVE", "REJECTED", "EXPIRED", "COUNTERED", "WITHDRAWN"].map((s) => ({ value: s, label: s[0] + s.slice(1).toLowerCase() }));
 
 /**
+ * What the accepted offer's status reads. OfferStatus has no CLOSED value, so
+ * once the deal is in CLOSED the winning buyer's accepted offer is presented
+ * as "Closed" (the offers table cells use this too).
+ */
+export const acceptedOfferLabel = (dealClosed?: boolean): string => (dealClosed ? "Closed" : "Accepted Offer");
+
+/**
  * Edit / delete controls for one row of a deal's Offers table (deal page and
  * mineral-asset page share it). Edits and deletions flow straight into every
  * derived number — best offer, profit estimates, dashboard, reports — because
  * those are computed from the offers relation at read time.
  */
-export function OfferRowActions({ offer, accepted, onChanged, dealNma, dealNra }: {
+export function OfferRowActions({ offer, accepted, dealClosed = false, onChanged, dealNma, dealNra }: {
   offer: OfferRow; accepted: boolean; onChanged: () => void;
+  /** The deal is in stage CLOSED: the accepted offer reads "Closed". */
+  dealClosed?: boolean;
   /** The deal's acreage, for the per-NMA / per-NRA offer pricing fields. */
   dealNma?: number | null; dealNra?: number | null;
 }) {
@@ -36,7 +45,7 @@ export function OfferRowActions({ offer, accepted, onChanged, dealNma, dealNra }
     <>
       <button className="icon-btn offer-act" title="Edit offer" aria-label={`Edit ${offer.buyer.name}'s offer`} onClick={() => setEditing(true)}><Pencil size={14} /></button>
       <button className="icon-btn offer-act danger" title="Delete offer" aria-label={`Delete ${offer.buyer.name}'s offer`} onClick={() => setDeleting(true)}><Trash2 size={14} /></button>
-      {editing && <EditOfferModal offer={offer} accepted={accepted} dealNma={dealNma ?? null} dealNra={dealNra ?? null} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); onChanged(); }} />}
+      {editing && <EditOfferModal offer={offer} accepted={accepted} dealClosed={dealClosed} dealNma={dealNma ?? null} dealNra={dealNra ?? null} onClose={() => setEditing(false)} onSaved={() => { setEditing(false); onChanged(); }} />}
       {deleting && (
         <ConfirmDialog
           title="Delete this offer?"
@@ -85,8 +94,8 @@ function amountFrom(price: string, acres: number | null): string {
   return String(Math.round(p * acres * 100) / 100);
 }
 
-function EditOfferModal({ offer, accepted, dealNma, dealNra, onClose, onSaved }: {
-  offer: OfferRow; accepted: boolean; dealNma: number | null; dealNra: number | null; onClose: () => void; onSaved: () => void;
+function EditOfferModal({ offer, accepted, dealClosed, dealNma, dealNra, onClose, onSaved }: {
+  offer: OfferRow; accepted: boolean; dealClosed: boolean; dealNma: number | null; dealNra: number | null; onClose: () => void; onSaved: () => void;
 }) {
   const [amount, setAmount] = useState(String(offer.amount));
   // Offer per NMA / per NRA mirror the amount: editing either price sets the
@@ -145,9 +154,10 @@ function EditOfferModal({ offer, accepted, dealNma, dealNra, onClose, onSaved }:
         </div>
         <div className="field"><label>Offer amount</label><MoneyInput value={amount} onChange={setFromAmount} ariaLabel="Offer amount" /></div>
         <div className="field"><label>Status</label>
-          {/* The accepted offer's status is managed by the accept flow. */}
+          {/* The accepted offer's status is managed by the accept flow (and
+              reads "Closed" once the deal has closed). */}
           {accepted
-            ? <input value="Accepted Offer" disabled aria-label="Offer status" />
+            ? <input value={acceptedOfferLabel(dealClosed)} disabled aria-label="Offer status" />
             : <Select value={status} onChange={setStatus} ariaLabel="Offer status" options={STATUS_OPTIONS} />}
         </div>
         <div className="field"><label>Expiration date</label><DateField value={expiration} onChange={setExpiration} /></div>

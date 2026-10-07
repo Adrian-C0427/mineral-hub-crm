@@ -53,7 +53,7 @@ export function Opportunity() {
   const load = useCallback(() => api.get<Opp>(`/opportunities/${id}`).then(setOpp).catch((e) => setErr(e instanceof ApiError ? e.message : "Could not load the opportunity")), [id]);
   useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, [load]);
 
-  if (err) return <div className="page"><BackLink label="Back to pipeline" fallback="/pipeline" /><Banner kind="error">{err}</Banner></div>;
+  if (err) return <div className="page"><BackLink fallback="/pipeline" /><Banner kind="error">{err}</Banner></div>;
   if (!opp) return <Spinner />;
 
   const pipeline = pipelines.find((p) => p.id === opp.pipelineId);
@@ -91,7 +91,7 @@ export function Opportunity() {
 
   return (
     <div className="page deal-detail opp-page">
-      <BackLink label="Back to pipeline" fallback="/pipeline" />
+      <BackLink fallback="/pipeline" />
       <div className="page-header dd-head">
         <div className="dd-head-title">
           <NameField name={opp.name} canEdit={canEdit} onSave={(name) => patch({ name })} />

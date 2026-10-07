@@ -7,6 +7,7 @@ import { StatStrip, Segmented, Tag, Avatar, FormSection } from "../components/ki
 import { SortableTable, type Column } from "../components/SortableTable";
 import { useRowSelection, BulkBar } from "../components/bulk";
 import { downloadCsv } from "../lib/csv";
+import { useListState } from "../lib/listState";
 import { Select } from "../components/Select";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
@@ -149,12 +150,13 @@ export function Contacts() {
   const { can } = useAuth();
   const [rows, setRows] = useState<ContactRow[] | null>(null);
   const [users, setUsers] = useState<UserLite[]>([]);
-  const [q, setQ] = useState("");
-  const [typeFilter, setTypeFilter] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
+  // Search + filters are remembered per tab so Back from a contact restores them.
+  const [q, setQ] = useListState("contacts:q", "");
+  const [typeFilter, setTypeFilter] = useListState("contacts:type", "");
+  const [statusFilter, setStatusFilter] = useListState("contacts:status", "");
   const [editing, setEditing] = useState<ContactRow | "new" | null>(null);
   const [lists, setLists] = useState<ContactListRow[]>([]);
-  const [listFilter, setListFilter] = useState<string[]>([]);
+  const [listFilter, setListFilter] = useListState<string[]>("contacts:lists", []);
   const [showImport, setShowImport] = useState(false);
   const [showExport, setShowExport] = useState<null | "filtered" | "selected">(null);
   const [showLists, setShowLists] = useState(false);

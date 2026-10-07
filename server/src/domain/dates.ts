@@ -79,6 +79,29 @@ export function resolveDealDates(deal: DealDateInputs): ResolvedDealDates {
   };
 }
 
+/** Calendar days each "Extend" action on the Contract Timeline adds to the
+ *  applicable Final Closing. */
+export const CONTRACT_EXTENSION_DAYS = 15;
+
+/**
+ * The next contract extension: the applicable Final Closing (override, else
+ * Original + 15 — i.e. whatever resolveDealDates says) moved out by
+ * CONTRACT_EXTENSION_DAYS. Repeated extensions chain because each one is
+ * stored in finalClosingDateOverride, which is what resolves next time.
+ * Null when the deal has no closing date to extend.
+ */
+export function nextContractExtension(deal: DealDateInputs): { fromDate: Date; toDate: Date; days: number } | null {
+  const { finalClosingDate } = resolveDealDates(deal);
+  if (!finalClosingDate) return null;
+  return { fromDate: finalClosingDate, toDate: addCalendarDays(finalClosingDate, CONTRACT_EXTENSION_DAYS), days: CONTRACT_EXTENSION_DAYS };
+}
+
+/** "Oct 31, 2026" — the UTC calendar day, for pre-rendered strings such as
+ *  activity-log summaries (same format the client's fmtDate renders). */
+export function formatCalendarDay(d: Date): string {
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+}
+
 /** Calendar-month bucket key, e.g. "2026-07" (UTC). */
 export function monthKey(d: Date): string {
   return d.toISOString().slice(0, 7);

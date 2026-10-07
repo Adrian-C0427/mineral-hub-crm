@@ -9,8 +9,6 @@
    Page frame + header
    --------------------------------------------------------------------------- */
 .deal-detail { --block-gap: 16px; }
-.deal-detail .back-link { align-self: flex-start; font-size: 12.5px; font-weight: 500; color: var(--ink-3); }
-.deal-detail .back-link:hover { color: var(--ink); text-decoration: none; }
 
 .deal-detail .dd-head { align-items: center; justify-content: space-between; gap: 14px; }
 .dd-head-title { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
@@ -117,6 +115,16 @@
 .deal-detail .ctl-when.pill { background: var(--hover); color: var(--ink-3); }
 .deal-detail .ctl-when.chip { background: var(--warn-tint); color: var(--warn-ink); }
 .deal-detail .ctl-edit { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+.ctl-note { grid-column: 1 / -1; margin: 0; font-size: 12px; line-height: 1.45; color: var(--ink-3); }
+/* Contract extensions on the Final closing milestone: the "Extended ×N" tag
+   (squared, like every tag), the inline "Extend 15 days" action and the
+   per-extension rows listed beneath the date. */
+.ctl-ext-tag { display: inline-flex; align-items: center; height: 18px; margin-left: 6px; padding: 0 6px; border-radius: var(--radius-pill-sm);
+  background: var(--accent-tint); color: var(--accent-ink); font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none; vertical-align: middle; }
+.ctl-exts { list-style: none; display: flex; flex-direction: column; gap: 4px; margin: 6px 0 0; padding: 0; }
+.ctl-ext { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; font-size: 12px; line-height: 1.4; color: var(--ink-3); }
+.ctl-ext-lbl { font-weight: 600; color: var(--ink-2); white-space: nowrap; }
+.ctl-ext-meta b { font-weight: 600; color: var(--ink); }
 
 /* ---------------------------------------------------------------------------
    Tabs (underline strip with count badges)
@@ -409,6 +417,8 @@
   .ddc-rows { grid-template-columns: minmax(0, 1fr); }
   .ctl-card-body { padding: 14px 16px; }
   .deal-detail .ctl-edit { grid-template-columns: minmax(0, 1fr); }
+  /* Extension rows stack: label on one line, date / who / new date on the next. */
+  .ctl-ext { flex-direction: column; gap: 1px; }
   .seller-panel .seller-card { padding: 14px 16px; }
   .seller-panel .seller-grid { grid-template-columns: minmax(0, 1fr); }
   .seller-actions { width: 100%; }
@@ -435,7 +445,7 @@
 /* Touch targets (portrait and landscape phones): ≥40px for every control this
    file shrinks below the phone minimum on desktop. */
 @media (max-width: 760px), (pointer: coarse) and (max-height: 500px) {
-  .dd-stage-btn, .dd-rename, .offer-act, .seller-panel .seller-act, .docx-upload, .doc-chip { min-height: 40px; height: auto; }
+  .dd-stage-btn, .dd-rename, .offer-act, .seller-panel .seller-act, .docx-upload, .doc-chip, .ctl-extend { min-height: 40px; height: auto; }
   .dd-rename, .offer-act { min-width: 40px; }
   .dd-head .ovf-btn { width: 40px; height: 40px; min-width: 40px; }
   .dd-stage-menu .ovf-item { height: 40px; }

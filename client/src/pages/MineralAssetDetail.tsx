@@ -15,7 +15,7 @@ import { LogContactModal } from "../components/LogContactModal";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { DealPortalPanel } from "../components/DealPortalPanel";
 import { DocumentsSection, type DocFile } from "../components/DocumentsSection";
-import { OfferRowActions } from "../components/OfferActions";
+import { OfferRowActions, acceptedOfferLabel } from "../components/OfferActions";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
 import { useAbstractLabels, useAbstractIndex, abstractEntryShortLabel, SurveyMultiPicker } from "../components/AbstractPicker";
@@ -104,7 +104,7 @@ export function MineralAssetDetail() {
     // tags, panels) into the same styling used on the Active Deal page, so an
     // owned asset looks and behaves like a deal wherever the sections overlap.
     <div className="page deal-detail asset-detail">
-      <BackLink label="Mineral Assets" fallback="/assets" />
+      <BackLink fallback="/assets" />
       <div className="ad-head">
         <div className="ad-head-main">
           <div className="ad-title-row">
@@ -784,12 +784,12 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
             <thead><tr><th>Buyer</th><th className="right">Amount</th><th>Status</th><th>Expires</th><th></th></tr></thead>
             <tbody>{asset.offers.map((o) => (
               <tr key={o.id}>
-                <td>{o.buyer.name}</td><td className="right">{money(o.amount)}</td><td>{o.status === "ACCEPTED" || asset.selectedOfferId === o.id ? "Accepted Offer" : prettyEnum(o.status)}</td><td>{fmtDate(o.expirationDate)}</td>
+                <td>{o.buyer.name}</td><td className="right">{money(o.amount)}</td><td>{o.status === "ACCEPTED" || asset.selectedOfferId === o.id ? acceptedOfferLabel(asset.stage === "CLOSED") : prettyEnum(o.status)}</td><td>{fmtDate(o.expirationDate)}</td>
                 <td className="right">
                   <span className="row" style={{ gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
-                    {o.status === "ACCEPTED" || asset.selectedOfferId === o.id ? <span className="badge resp-offer">Accepted Offer</span> :
+                    {o.status === "ACCEPTED" || asset.selectedOfferId === o.id ? <span className="badge resp-offer">{acceptedOfferLabel(asset.stage === "CLOSED")}</span> :
                       canEdit && <button className="small" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button>}
-                    {canEdit && <OfferRowActions offer={o} accepted={o.status === "ACCEPTED" || asset.selectedOfferId === o.id} onChanged={onChanged} dealNma={asset.acreageNma} dealNra={asset.nra} />}
+                    {canEdit && <OfferRowActions offer={o} accepted={o.status === "ACCEPTED" || asset.selectedOfferId === o.id} dealClosed={asset.stage === "CLOSED"} onChanged={onChanged} dealNma={asset.acreageNma} dealNra={asset.nra} />}
                   </span>
                 </td>
               </tr>
@@ -807,6 +807,7 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
         right={<span className="muted" style={{ fontSize: 12.5 }}>{asset.buyerActivity.length} buyer{asset.buyerActivity.length === 1 ? "" : "s"}</span>}
       >
         <BuyerActivitySection
+          dealClosed={asset.stage === "CLOSED"}
           dealId={asset.id}
           rows={asset.buyerActivity}
           onChanged={onChanged}

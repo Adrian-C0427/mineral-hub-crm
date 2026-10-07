@@ -24,8 +24,8 @@ import { downloadCsv } from "../lib/csv";
 import { SellerDetails } from "../components/SellerDetails";
 import { DealPortalPanel } from "../components/DealPortalPanel";
 import { DocumentsSection, DEAL_DOC_FOLDERS, type DocFile } from "../components/DocumentsSection";
-import { OfferRowActions } from "../components/OfferActions";
-import type { AssetChild, BuyerActivityRow, DealSummary, MatchRec, Seller, UserLite } from "../types";
+import { OfferRowActions, acceptedOfferLabel } from "../components/OfferActions";
+import type { AssetChild, BuyerActivityRow, ContractExtension, DealSummary, MatchRec, Seller, UserLite } from "../types";
 import { NewDealModal } from "../components/NewDealModal";
 import { MoneyInput } from "../components/MoneyInput";
 import { MarketingFunnel } from "../components/MarketingFunnel";
@@ -51,6 +51,8 @@ interface DealDetailData extends DealSummary {
   files: DocFile[];
   sellers: Seller[];
   metrics: { buyersContacted: number; interested: number; offers: number; highOffer: number | null };
+  // Contract-timeline extensions, oldest first.
+  contractExtensions?: ContractExtension[];
   // Multi-asset grouping.
   parent: { id: string; name: string } | null;
   assets?: AssetChild[];
@@ -121,13 +123,9 @@ export function DealDetail() {
     );
   }
 
-  // The Back link names the list this deal belongs to, so it's clear where you
-  // return: Closed → Closed Deals, Dead → Archived Deals, otherwise Active Deals.
-  const backTo = deal.stage === "CLOSED"
-    ? { label: "Back to closed deals", fallback: "/deals/closed" }
-    : deal.stage === "DEAD"
-      ? { label: "Back to archived deals", fallback: "/deals/archived" }
-      : { label: "Back to active deals", fallback: "/deals/active" };
+  // With no in-app history, Back lands on the list this deal belongs to:
+  // Closed → Closed Deals, Dead → Archived Deals, otherwise Active Deals.
+  const backFallback = deal.stage === "CLOSED" ? "/deals/closed" : deal.stage === "DEAD" ? "/deals/archived" : "/deals/active";
 
   // Summary strip — the deal's own stored figures (the per-acre prices are the
   // saved per-NMA / per-NRA values; per NRA falls back to the total ÷ NRA the
@@ -163,7 +161,7 @@ export function DealDetail() {
 
   return (
     <div className="page deal-detail">
-      <BackLink label={backTo.label} fallback={backTo.fallback} />
+      <BackLink fallback={backFallback} />
       <div className="page-header dd-head">
         <div className="dd-head-title">
           <h1>{deal.name}</h1>
@@ -306,14 +304,14 @@ export function DealDetail() {
                   <tr key={o.id}>
                     <td><Link to={`/buyers/${o.buyer.id}`} className="dd-offer-buyer">{o.buyer.name}</Link></td>
                     <td className="right dd-offer-amt">{money(o.amount)}</td>
-                    <td>{accepted ? "Accepted Offer" : prettyEnum(o.status)}</td>
+                    <td>{accepted ? acceptedOfferLabel(deal.stage === "CLOSED") : prettyEnum(o.status)}</td>
                     <td>{fmtDate(o.expirationDate)}</td>
                     <td className="cell-clamp" title={o.conditions ?? undefined}>{o.conditions ?? "—"}</td>
                     <td className="right">
                       <span className="dd-offer-actions">
-                        {accepted ? <Tag tone="success" dot>Accepted Offer</Tag> :
+                        {accepted ? <Tag tone="success" dot>{acceptedOfferLabel(deal.stage === "CLOSED")}</Tag> :
                           can("editDeals") ? <button className="small dd-accept" onClick={() => setAcceptOffer({ id: o.id, buyer: o.buyer.name, amount: o.amount })}>Accept</button> : null}
-                        {can("editDeals") && <OfferRowActions offer={o} accepted={accepted} onChanged={refreshAll} dealNma={deal.acreageNma} dealNra={deal.nra} />}
+                        {can("editDeals") && <OfferRowActions offer={o} accepted={accepted} dealClosed={deal.stage === "CLOSED"} onChanged={refreshAll} dealNma={deal.acreageNma} dealNra={deal.nra} />}
                       </span>
                     </td>
                   </tr>
@@ -333,6 +331,7 @@ export function DealDetail() {
         right={<span className="dd-card-count">{deal.buyerActivity.length} buyer{deal.buyerActivity.length === 1 ? "" : "s"}</span>}
       >
         <BuyerActivitySection
+          dealClosed={deal.stage === "CLOSED"}
           dealId={deal.id}
           rows={deal.buyerActivity}
           onChanged={refreshAll}
@@ -808,18 +807,21 @@ function relDays(iso: string): string {
 }
 
 function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved: () => void }) {
+  const { can } = useAuth();
   const [edit, setEdit] = useState(false);
   const [duc, setDuc] = useState("");
   const [fbb, setFbb] = useState("");
   const [oc, setOc] = useState("");
-  const [fc, setFc] = useState("");
+  const [bc, setBc] = useState("");
   const [cd, setCd] = useState("");
+  const [confirmExtend, setConfirmExtend] = useState(false);
+  const [extending, setExtending] = useState(false);
 
   function startEdit() {
     setDuc(toInputDate(deal.dateUnderContract));
     setFbb(toInputDate(deal.findBuyerByDate));
     setOc(toInputDate(deal.originalClosingDate));
-    setFc(toInputDate(deal.finalClosingDate));
+    setBc(toInputDate(deal.buyerClosingDate));
     setCd(toInputDate(deal.closedDate));
     setEdit(true);
   }
@@ -828,10 +830,10 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
   // any navigation attempt.
   useUnsavedSection(
     edit,
-    { duc, fbb, oc, fc, cd },
+    { duc, fbb, oc, bc, cd },
     {
       duc: toInputDate(deal.dateUnderContract), fbb: toInputDate(deal.findBuyerByDate),
-      oc: toInputDate(deal.originalClosingDate), fc: toInputDate(deal.finalClosingDate), cd: toInputDate(deal.closedDate),
+      oc: toInputDate(deal.originalClosingDate), bc: toInputDate(deal.buyerClosingDate), cd: toInputDate(deal.closedDate),
     },
     save,
     () => setEdit(false),
@@ -839,32 +841,54 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
 
   async function save() {
     const patch: Record<string, unknown> = {};
-    // Only send changed fields. FBB/FC become overrides; DUC/OC/Closed are direct.
+    // Only send changed fields. FBB becomes an override; DUC/OC/Buyer closing/
+    // Closed are direct. Final closing is not edited here — it is Original + 15
+    // days and only moves out through "Extend 15 days" on the timeline.
     if (duc !== toInputDate(deal.dateUnderContract)) patch.dateUnderContract = duc || null;
     if (fbb !== toInputDate(deal.findBuyerByDate)) patch.findBuyerByDateOverride = fbb || null;
     if (oc !== toInputDate(deal.originalClosingDate)) patch.originalClosingDate = oc || null;
-    if (fc !== toInputDate(deal.finalClosingDate)) patch.finalClosingDateOverride = fc || null;
+    if (bc !== toInputDate(deal.buyerClosingDate)) patch.buyerClosingDate = bc || null;
     if (cd !== toInputDate(deal.closedDate)) patch.closedDate = cd || null;
     await api.patch(`/deals/${deal.id}`, patch);
     setEdit(false);
     onSaved();
   }
 
-  async function revert(field: "fbb" | "fc") {
-    await api.patch(`/deals/${deal.id}`, field === "fbb" ? { findBuyerByDateOverride: null } : { finalClosingDateOverride: null });
+  async function revertFindBuyerBy() {
+    await api.patch(`/deals/${deal.id}`, { findBuyerByDateOverride: null });
     onSaved();
   }
 
   const isClosed = deal.stage === "CLOSED";
-  const noDates = !deal.dateUnderContract && !deal.findBuyerByDate && !deal.originalClosingDate && !deal.finalClosingDate && !deal.closedDate;
+  const noDates = !deal.dateUnderContract && !deal.findBuyerByDate && !deal.originalClosingDate && !deal.finalClosingDate && !deal.buyerClosingDate && !deal.closedDate;
+
+  // "Extend 15 days": the server chains each extension from the applicable
+  // Final closing; the confirm previews the same calendar-day arithmetic.
+  const extensions = deal.contractExtensions ?? [];
+  const extendTo = deal.finalClosingDate ? addDaysIso(toInputDate(deal.finalClosingDate), 15) : null;
+  const canExtend = can("editDeals") && extendTo != null && !isClosed && deal.stage !== "DEAD";
+  async function extend() {
+    setExtending(true);
+    try {
+      await api.post(`/deals/${deal.id}/extend`);
+      setConfirmExtend(false);
+      showToast(`Closing extended to ${fmtDate(extendTo)}`);
+      onSaved();
+    } finally { setExtending(false); }
+  }
 
   // Vertical milestone timeline: filled glowing dot = milestone date reached;
   // hollow dot = upcoming. Closed Date appears once the deal is closed/has a date.
-  const milestones: { label: string; date: string | null; overridden?: boolean; revertKey?: "fbb" | "fc" }[] = [
+  // `kind: "fc"` marks the Final closing milestone, which carries the Extend
+  // action and its "Extended +15 days" rows.
+  const milestones: { label: string; date: string | null; overridden?: boolean; kind?: "fbb" | "fc" }[] = [
     { label: "Under contract", date: deal.dateUnderContract },
-    { label: "Find buyer by", date: deal.findBuyerByDate, overridden: deal.findBuyerByIsOverridden, revertKey: "fbb" },
+    { label: "Find buyer by", date: deal.findBuyerByDate, overridden: deal.findBuyerByIsOverridden, kind: "fbb" },
     { label: "Original closing", date: deal.originalClosingDate },
-    { label: "Final closing", date: deal.finalClosingDate, overridden: deal.finalClosingIsOverridden, revertKey: "fc" },
+    // A manual override from before extensions existed still reads "(overridden)";
+    // once extended, the "Extended ×N" tag says why the date is override-based.
+    { label: "Final closing", date: deal.finalClosingDate, overridden: deal.finalClosingIsOverridden && extensions.length === 0, kind: "fc" },
+    { label: "Closing with buyer", date: deal.buyerClosingDate ?? null },
     ...(deal.closedDate || isClosed ? [{ label: "Closed", date: deal.closedDate }] : []),
   ];
 
@@ -891,6 +915,7 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
             return milestones.map((m) => {
               const done = m.date != null && new Date(m.date).getTime() <= Date.now();
               const isNext = m.label === nextLabel;
+              const isFinal = m.kind === "fc";
               return (
                 <div className={`ctl-item ${done ? "done" : ""}`} key={m.label}>
                   <div className="ctl-rail">
@@ -898,11 +923,27 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
                   </div>
                   <div className="ctl-body ctl-row">
                     <div className="ctl-text">
-                      <span className={`ctl-lbl ${done ? "done" : ""} ${isNext ? "next" : ""}`}>{m.label}{m.overridden && <em className="ctl-ovr"> (overridden)</em>}</span>
+                      <span className={`ctl-lbl ${done ? "done" : ""} ${isNext ? "next" : ""}`}>
+                        {m.label}{m.overridden && <em className="ctl-ovr"> (overridden)</em>}
+                        {isFinal && extensions.length > 0 && <span className="ctl-ext-tag" title={`Extended ${extensions.length} time${extensions.length === 1 ? "" : "s"}`}>Extended ×{extensions.length}</span>}
+                      </span>
                       <span className={`ctl-date ${m.date ? "" : "unset"}`}>
                         {m.date ? fmtDate(m.date) : "Not set"}
-                        {m.overridden && m.revertKey && <button className="small" onClick={() => revert(m.revertKey!)}>Revert to auto</button>}
+                        {m.kind === "fbb" && m.overridden && <button className="small" onClick={revertFindBuyerBy}>Revert to auto</button>}
+                        {isFinal && canExtend && <button className="small ctl-extend" onClick={() => setConfirmExtend(true)}>Extend 15 days</button>}
                       </span>
+                      {isFinal && extensions.length > 0 && (
+                        <ul className="ctl-exts">
+                          {extensions.map((e) => (
+                            <li className="ctl-ext" key={e.id}>
+                              <span className="ctl-ext-lbl">Extended +{e.days} days</span>
+                              <span className="ctl-ext-meta">
+                                {fmtDate(e.createdAt)}{e.extendedBy?.name ? ` · by ${e.extendedBy.name}` : ""} · to <b>{fmtDate(e.toDate)}</b>
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </div>
                     {m.date && <span className={`ctl-when ${isNext ? "chip" : "pill"}`}>{relDays(m.date)}</span>}
                   </div>
@@ -917,11 +958,29 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
           <Fld l="Under contract"><DateField value={duc} onChange={(v) => setDuc(v)} /></Fld>
           <Fld l="Find buyer by"><DateField value={fbb} onChange={(v) => setFbb(v)} /></Fld>
           <Fld l="Original closing"><DateField value={oc} onChange={(v) => setOc(v)} /></Fld>
-          <Fld l="Final closing"><DateField value={fc} onChange={(v) => setFc(v)} /></Fld>
+          <Fld l="Closing with buyer"><DateField value={bc} onChange={(v) => setBc(v)} /></Fld>
           <Fld l="Closed date"><DateField value={cd} onChange={(v) => setCd(v)} /></Fld>
+          <p className="ctl-note">
+            Final closing is Original closing + 15 days{deal.finalClosingDate ? ` (currently ${fmtDate(deal.finalClosingDate)})` : ""}; use <strong>Extend 15 days</strong> on the timeline to push it out.
+          </p>
         </div>
       )}
       </div>
+      {confirmExtend && extendTo && (
+        <ConfirmDialog
+          title={`Extend the closing to ${fmtDate(extendTo)}?`}
+          confirmLabel={extending ? "Extending…" : "Extend 15 days"}
+          busy={extending}
+          message={
+            <>
+              Final closing on <strong>{deal.name}</strong> moves from {fmtDate(deal.finalClosingDate)} to{" "}
+              <strong>{fmtDate(extendTo)}</strong> (+15 calendar days). The calendar and reminders follow the new date.
+            </>
+          }
+          onCancel={() => setConfirmExtend(false)}
+          onConfirm={extend}
+        />
+      )}
     </div>
   );
 }

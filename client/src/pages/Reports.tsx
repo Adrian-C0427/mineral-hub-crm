@@ -37,6 +37,8 @@ interface Financials {
   totals: {
     revenue: number; closingCosts: number; grossProfit: number; expenses: number; netProfit: number;
     dealsClosed: number; costPerDeal: number | null; roiMultiple: number | null; closedWithoutPrice: number;
+    /** Org-wide: CLOSED deals with no Closing Date, which no period can show. */
+    closedWithoutDate: number;
   };
   closedDeals: {
     id: string; name: string; closedAt: string | null; counties: string[]; acceptedAmount: number | null;
@@ -67,6 +69,9 @@ interface Analytics {
     assetTypes: { name: string; count: number }[];
     perUser: { userId: string; name: string; created: number; closed: number; activity: number }[];
   };
+  /** Org-wide: CLOSED deals with no Closing Date. Every closed-deal figure keys
+   *  on the Closing Date, so these are in no period or month until it is set. */
+  closedWithoutDate: number;
 }
 interface FilterOpts {
   counties: string[]; basins: string[]; formations: string[]; assetTypes: string[]; operators: string[];
@@ -414,6 +419,11 @@ export function Reports() {
                 {k.roiMultiple != null && <>, a <b className={k.roiMultiple >= 0 ? "pos" : "neg"}>{fmtMultiple(k.roiMultiple)}</b> return on spend</>}.
                 {data.compare && <> Compared to {fmtDate(data.compare.from)} – {fmtDate(data.compare.to)}.</>}
               </p>
+              {data.closedWithoutDate > 0 && (
+                <p className="exec-text">
+                  <b className="warn">{num(data.closedWithoutDate)} closed {data.closedWithoutDate === 1 ? "deal has" : "deals have"} no Closing Date</b> and {data.closedWithoutDate === 1 ? "is" : "are"} not shown — set the Closing Date on the deal to place it in a month.
+                </p>
+              )}
               {activeFilterChips.length > 0 && (
                 <p className="exec-text exec-filters"><b>Filters:</b> {activeFilterChips.join(" · ")}</p>
               )}
@@ -834,6 +844,7 @@ function FinancialsDrill({ query, focus, onClose, onOpenDeal, onOpenExpenses }: 
           <p className="muted fin-note">
             Realized results only: deals closed in this period and expenses dated in it. Open deals, projected profit and forecasts are excluded.
             {t.closedWithoutPrice > 0 && <> <b style={{ color: "var(--amber)" }}>{num(t.closedWithoutPrice)} closed {t.closedWithoutPrice === 1 ? "deal has" : "deals have"} no accepted offer</b> and {t.closedWithoutPrice === 1 ? "adds" : "add"} no revenue.</>}
+            {t.closedWithoutDate > 0 && <> <b style={{ color: "var(--amber)" }}>{num(t.closedWithoutDate)} closed {t.closedWithoutDate === 1 ? "deal has" : "deals have"} no Closing Date</b> and {t.closedWithoutDate === 1 ? "is" : "are"} not shown in any period.</>}
           </p>
           <div className="seg-control subtle" role="tablist" aria-label="Records" style={{ marginBottom: 12 }}>
             <button role="tab" aria-selected={tab === "deals"} className={`seg ${tab === "deals" ? "active" : ""}`} onClick={() => setTab("deals")}>Closed deals ({data.closedDeals.length})</button>

@@ -543,6 +543,9 @@ model Deal {
   dateUnderContract        DateTime?
   originalClosingDate      DateTime?
   findBuyerByDateOverride  DateTime?
+  // Expected closing with the BUYER (entered by hand, never calculated);
+  // separate from the seller-side final closing above.
+  buyerClosingDate         DateTime?
   finalClosingDateOverride DateTime?
   // Contracted days from Date Under Contract to closing. Beyond 30 days, the
   // extra time extends the auto Find-Buyer-By deadline (see domain/dates.ts).
@@ -638,6 +641,7 @@ model Deal {
   calendarEvents CalendarEvent[]
   // The prospect this deal was converted from, if any (column lives on Opportunity).
   fromOpportunity Opportunity?  @relation("OpportunityConvertedDeal")
+  contractExtensions DealContractExtension[]
   // Team members assigned to this deal/asset (multi-assignee). relationshipOwner
   // is retained as the originating/primary owner for existing metrics & reports.
   assignees      User[]              @relation("DealAssignees")
@@ -1725,4 +1729,19 @@ model OpportunityActivity {
   createdAt       DateTime    @default(now())
 
   @@index([opportunityId, createdAt])
+}
+
+// One row per "Extended" action on the Contract Timeline: the final closing
+// deadline moved from `fromDate` to `toDate` (+15 calendar days each time).
+model DealContractExtension {
+  id               String   @id @default(cuid())
+  dealId           String
+  deal             Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  fromDate         DateTime
+  toDate           DateTime
+  days             Int      @default(15)
+  extendedByUserId String?
+  createdAt        DateTime @default(now())
+
+  @@index([dealId, createdAt])
 }

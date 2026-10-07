@@ -253,6 +253,87 @@ describe("stage change undo", () => {
     expect(await status(() => applyStageUndo(w.tx, snap))).toBe(409);
   });
 
+  describe("closing settles the winning buyer", () => {
+    const offer = (o: Partial<Row>): Row => ({ id: "offer_1", dealId: "deal_1", buyerId: "buyer_w", status: "ACTIVE", amount: 150000, dateSubmitted: ENTERED, updatedAt: ENTERED, ...o });
+
+    it("accepts the selected buyer's open offer and records it as the deal's selection; undo restores both", async () => {
+      const w = world();
+      w.db.offer.rows.push(offer({ id: "offer_old", status: "COUNTERED", dateSubmitted: new Date("2026-08-01T00:00:00.000Z") }), offer({}));
+      const before = w.dump();
+      const snap = await w.move("CLOSED");
+      expect(w.db.offer.rows.find((o) => o.id === "offer_1")!.status).toBe("ACCEPTED");
+      expect(w.db.offer.rows.find((o) => o.id === "offer_old")!.status).toBe("COUNTERED");
+      expect(w.db.deal.rows[0]).toMatchObject({ selectedOfferId: "offer_1", selectedBuyerId: "buyer_w" });
+      expect(w.db.dealBuyerActivity.rows[0].status).toBe("CLOSED");
+      expect(snap.acceptedOffer).toEqual({ offerId: "offer_1", status: "ACTIVE" });
+      expect(snap.selection).toEqual({ offerId: "offer_1", buyerId: "buyer_w", prevBuyerId: "buyer_w" });
+      await applyStageUndo(w.tx, verifyStageUndo(signStageUndo(snap)!, caller));
+      expect(w.dump()).toEqual(before);
+    });
+
+    it("an already-accepted, selected offer is left alone", async () => {
+      const w = world();
+      w.db.offer.rows.push(offer({ status: "ACCEPTED" }));
+      w.db.deal.rows[0].selectedOfferId = "offer_1";
+      const before = w.dump();
+      const snap = await w.move("CLOSED");
+      expect(snap).toMatchObject({ acceptedOffer: null, selection: null });
+      expect(w.db.dealBuyerActivity.rows[0].status).toBe("CLOSED");
+      await applyStageUndo(w.tx, snap);
+      expect(w.dump()).toEqual(before);
+    });
+
+    it("finds the winner from the accepted offer when the deal has no selection", async () => {
+      const w = world();
+      Object.assign(w.db.deal.rows[0], { selectedBuyerId: null, selectedOfferId: null });
+      w.db.offer.rows.push(offer({ id: "offer_x", buyerId: "buyer_x", status: "ACTIVE" }), offer({ status: "ACCEPTED" }));
+      const before = w.dump();
+      const snap = await w.move("CLOSED");
+      expect(w.db.deal.rows[0]).toMatchObject({ selectedOfferId: "offer_1", selectedBuyerId: "buyer_w" });
+      expect(w.db.dealBuyerActivity.rows.map((a) => a.status)).toEqual(["CLOSED", "SENT", "PASSED"]);
+      expect(w.db.offer.rows.find((o) => o.id === "offer_x")!.status).toBe("ACTIVE"); // only the winner's offer
+      expect(snap.selection).toEqual({ offerId: "offer_1", buyerId: "buyer_w", prevBuyerId: null });
+      await applyStageUndo(w.tx, snap);
+      expect(w.dump()).toEqual(before);
+    });
+
+    it("gives a winner with no activity row one, marked CLOSED; undo removes it", async () => {
+      const w = world();
+      w.db.dealBuyerActivity.rows.shift(); // buyer_w was taken off the deal
+      w.db.offer.rows.push(offer({ status: "ACCEPTED" }));
+      w.db.deal.rows[0].selectedOfferId = "offer_1";
+      const before = w.dump();
+      const snap = await w.move("CLOSED");
+      const created = w.db.dealBuyerActivity.rows.find((a) => a.buyerId === "buyer_w")!;
+      expect(created).toMatchObject({ status: "CLOSED", offerAmount: 150000, dealId: "deal_1" });
+      expect(snap.winner).toMatchObject({ activityId: created.id, status: null, created: true });
+      expect(w.db.dealBuyerMessage.rows[0].activityId).toBe(created.id);
+      await applyStageUndo(w.tx, snap);
+      expect(w.dump()).toEqual(before);
+    });
+
+    it("refuses with 409 once the accepted offer or the selection was changed after the close", async () => {
+      const w = world();
+      w.db.offer.rows.push(offer({}));
+      const snap = await w.move("CLOSED");
+      w.db.offer.rows[0].status = "WITHDRAWN";
+      expect(await status(() => applyStageUndo(w.tx, snap))).toBe(409);
+      w.db.offer.rows[0].status = "ACCEPTED";
+      w.db.deal.rows[0].selectedOfferId = "offer_other";
+      expect(await status(() => applyStageUndo(w.tx, snap))).toBe(409);
+    });
+
+    it("a token from before offers were part of the snapshot still undoes", async () => {
+      const w = world();
+      const snap = await w.move("CLOSED");
+      const legacy = { ...snap } as Partial<typeof snap>;
+      delete legacy.acceptedOffer;
+      delete legacy.selection;
+      await applyStageUndo(w.tx, verifyStageUndo(signStageUndo(legacy as typeof snap)!, caller));
+      expect(w.db.deal.rows[0].stage).toBe("CLOSING");
+    });
+  });
+
   it("leaves newer work alone: a re-set follow-up, an unrelated deal edit", async () => {
     const w = world();
     const snap = await w.move("CLOSED");

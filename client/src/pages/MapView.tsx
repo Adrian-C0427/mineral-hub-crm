@@ -794,14 +794,45 @@ export function MapView() {
     return () => window.removeEventListener("resize", measure);
   }, [showFilters, showHeat, fullscreen]);
   useEffect(() => { mapRef.current?.resize(); }, [mapH]);
+
+  // Visible-area padding. With the Filters / Heat map sheet open, searches and
+  // selections centre within the map the sheet leaves uncovered: MapLibre keeps
+  // the camera centre inside its padding and fitBounds adds each call's own
+  // gutter on top of it, so one setPadding covers every flyTo/fitBounds here.
+  // Measured from the sheet's real box relative to the canvas (never a fixed
+  // offset) and redone whenever the sheet opens, closes, switches side or the
+  // frame resizes. While something is selected the change is eased so the
+  // selection stays centred in the new visible area. On phones the sheet spans
+  // the width, so no side padding would leave any map — none is set.
+  const sheetRef = useRef<HTMLElement>(null);
+  const selectedRef = useRef<Selected>(null); selectedRef.current = selected;
+  const syncPadding = useCallback(() => {
+    const map = mapRef.current, host = mapContainer.current;
+    if (!map || !host) return;
+    const next = { top: 0, bottom: 0, left: 0, right: 0 };
+    const sheet = sheetRef.current;
+    if (sheet) {
+      const m = host.getBoundingClientRect(), s = sheet.getBoundingClientRect();
+      const gutter = 12; // breathing room between the sheet edge and a centred result
+      const side = s.left - m.left <= m.right - s.right ? "left" : "right";
+      const pad = Math.round(side === "left" ? s.right - m.left + gutter : m.right - s.left + gutter);
+      // Only when a usable strip of map stays visible beside the sheet.
+      if (pad > 0 && m.width - pad >= 160) next[side] = pad;
+    }
+    const cur = map.getPadding();
+    if (cur.top === next.top && cur.bottom === next.bottom && cur.left === next.left && cur.right === next.right) return;
+    if (selectedRef.current) map.easeTo({ padding: next, duration: 800 });
+    else map.setPadding(next);
+  }, []);
+  useLayoutEffect(() => { syncPadding(); }, [showFilters, showHeat, dock, fullscreen, mapH, syncPadding]);
   // Keep the canvas matched to its frame however the frame changes size.
   useEffect(() => {
     const el = mapContainer.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const ro = new ResizeObserver(() => mapRef.current?.resize());
+    const ro = new ResizeObserver(() => { mapRef.current?.resize(); syncPadding(); });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [syncPadding]);
 
   // Full-screen is a pure CSS re-layout of the SAME mounted tree — the map,
   // its panels, search, filters, and every piece of user state persist across
@@ -977,7 +1008,7 @@ export function MapView() {
         )}
 
         {panelOpen && (
-          <aside className={`mc-sheet mc-sheet-${dock}`} aria-label={showFilters ? "Filters" : "Heat map"}>
+          <aside ref={sheetRef} className={`mc-sheet mc-sheet-${dock}`} aria-label={showFilters ? "Filters" : "Heat map"}>
             <div className="mc-sheet-head">
               <span className="mc-sheet-title">{showFilters ? "Filters" : "Heat map"}</span>
               <div className="mc-sheet-tools">

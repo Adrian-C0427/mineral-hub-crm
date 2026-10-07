@@ -29,7 +29,7 @@ const LOGGABLE: { v: CommKind; label: string }[] = [
 ];
 
 export function BuyerActivitySection({
-  dealId, rows, onChanged, onEdit, onRecordOffer, canEdit = true,
+  dealId, rows, onChanged, onEdit, onRecordOffer, canEdit = true, dealClosed = false,
 }: {
   dealId: string;
   rows: BuyerActivityRow[];
@@ -41,6 +41,10 @@ export function BuyerActivitySection({
   /** False for read-only users: hides Update and the inline log form (whose
    *  POSTs would just 403). */
   canEdit?: boolean;
+  /** The deal is in stage CLOSED: closing set the winning buyer to Closed and
+   *  every status is final, so the section says so and stops offering
+   *  "Record offer". */
+  dealClosed?: boolean;
 }) {
   const [open, setOpen] = useState<string | null>(null);
   const sorted = [...rows].sort(
@@ -51,6 +55,9 @@ export function BuyerActivitySection({
 
   return (
     <div className="ba-table">
+      {dealClosed && (
+        <p className="muted" style={{ margin: "0 0 8px", fontSize: 12.5 }}>Deal closed — statuses are final.</p>
+      )}
       {/* One grid shared by the header and every row; the rows expand into the
           buyer's details, log form and full communication timeline. */}
       <div className="ba-cols ba-headrow" aria-hidden="true">
@@ -79,7 +86,7 @@ export function BuyerActivitySection({
               <span className="ba-date">{fmtDate(r.nextFollowUpDate)}</span>
               <span className="ba-date">{fmtDate(r.lastActivityDate)}</span>
               <span className="ba-actions">
-                {onRecordOffer && r.status !== "PASSED" && r.status !== "CLOSED" && (
+                {onRecordOffer && !dealClosed && r.status !== "PASSED" && r.status !== "CLOSED" && (
                   <button className="small" onClick={(e) => { e.stopPropagation(); onRecordOffer(r); }}>Record offer</button>
                 )}
                 {canEdit && <button className="small" onClick={(e) => { e.stopPropagation(); onEdit(r); }}>Update</button>}

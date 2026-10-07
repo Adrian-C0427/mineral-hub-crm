@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, StageBadge, StatusBadge, OverflowMenu, ConfirmDelete, Modal, ChipList } from "../components/ui";
+import { Spinner, StageBadge, StatusBadge, OverflowMenu, ConfirmDelete, Modal, ChipList, BackLink } from "../components/ui";
 import { StatStrip, Tag } from "../components/kit";
 import { RelTag } from "./Buyers";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
@@ -153,11 +153,6 @@ export function BuyerProfile() {
   const setD = (patch: Partial<BuyerProfileData>) => setDraft((d) => (d ? { ...d, ...patch } : d));
   const setBox = (k: keyof BuyBox, v: unknown) => setDraft((d) => (d ? { ...d, buyBox: { ...d.buyBox, [k]: v } } : d));
 
-  // Return to the Buyers list. Prefer browser back so its filters/sort/scroll
-  // survive (the list keeps that state in memory); fall back to /buyers on a
-  // deep link with no in-app history.
-  const backToBuyers = () => { if (window.history.length > 1) nav(-1); else nav("/buyers"); };
-
   /** Per-panel header: title + its own Edit (or Save/Cancel while editing). */
   function SectionHead({ title, section }: { title: string; section: Section }) {
     const active = editing === section;
@@ -220,13 +215,8 @@ export function BuyerProfile() {
       </nav>
 
       <div className="bp-head" id="bp-overview">
-        {/* Breadcrumb — keeps the browser-back behavior that preserves the
-            list's filters/scroll. */}
-        <div className="bp-crumbs">
-          <button type="button" className="bp-crumb-link" onClick={backToBuyers}>Buyers</button>
-          <span className="bp-crumb-sep">/</span>
-          <span className="bp-crumb-cur">{view.companyName}</span>
-        </div>
+        {/* Shared Back control — browser back keeps the list's filters/scroll. */}
+        <BackLink fallback="/buyers" />
 
         <div className="bp-titlerow">
           <div style={{ minWidth: 0 }}>

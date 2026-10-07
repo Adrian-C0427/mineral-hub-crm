@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { computeKpis, delta, buildMonthlySeries, type AnalyticsDeal, type Range } from "./analytics.js";
+import {
+  computeKpis, delta, buildMonthlySeries, buildBreakdowns, realizedClosedAt, countClosedWithoutDate,
+  type AnalyticsDeal, type Range,
+} from "./analytics.js";
 
 const range: Range = { from: new Date("2026-01-01"), to: new Date("2026-12-31T23:59:59Z") };
 
@@ -104,5 +107,40 @@ describe("buildMonthlySeries", () => {
     expect(s.filter((p) => p.forecast).length).toBe(3);
     expect(s[0].revenue).toBe(10000);
     expect(s[1].revenue).toBe(20000);
+  });
+});
+
+describe("closed deals key on the Closing Date", () => {
+  it("realizedClosedAt is the Closing Date of a CLOSED deal and nothing else", () => {
+    const closing = new Date("2026-03-31");
+    expect(realizedClosedAt({ stage: "CLOSED", closedDate: closing })).toBe(closing);
+    expect(realizedClosedAt({ stage: "CLOSED", closedDate: null })).toBeNull();
+    // A deal moved back out of CLOSED keeps no realized date even if an old one lingers.
+    expect(realizedClosedAt({ stage: "CLOSING", closedDate: closing })).toBeNull();
+  });
+
+  it("a CLOSED deal with no Closing Date is in no period, month or per-user count", () => {
+    const deals = [
+      deal({ id: "dated", ourPrice: 100000, acceptedAmount: 150000, closedAt: new Date("2026-03-01"), closedByUserId: "u1" }),
+      deal({ id: "undated", ourPrice: 100000, acceptedAmount: 150000, closedAt: null, closedByUserId: "u1" }),
+    ];
+    const k = computeKpis(deals, [], [], [], range);
+    expect(k.dealsClosed).toBe(1);
+    expect(k.revenue).toBe(50000);
+    const s = buildMonthlySeries(deals, [], range, 0);
+    expect(s.reduce((n, p) => n + p.dealsClosed, 0)).toBe(1);
+    expect(buildBreakdowns(deals, [], range).perUser).toEqual([{ userId: "u1", created: 0, closed: 1, activity: 0 }]);
+    expect(countClosedWithoutDate(deals)).toBe(1);
+    // Only CLOSED deals count as "closed without a date".
+    expect(countClosedWithoutDate([deal({ stage: "CLOSING", closedAt: null })])).toBe(0);
+  });
+
+  it("the month a deal lands in follows its Closing Date, not when it was entered", () => {
+    // Entered in April (createdAt irrelevant to the series' closed bucket), closed on March 31.
+    const d = deal({ id: "1", createdAt: new Date("2026-04-02"), ourPrice: 100000, acceptedAmount: 120000, closedAt: new Date("2026-03-31T12:00:00Z") });
+    const s = buildMonthlySeries([d], [], { from: new Date("2026-01-01"), to: new Date("2026-06-30T23:59:59Z") }, 0);
+    expect(s.find((p) => p.month === "2026-03")?.dealsClosed).toBe(1);
+    expect(s.find((p) => p.month === "2026-03")?.revenue).toBe(20000);
+    expect(s.find((p) => p.month === "2026-04")?.dealsClosed).toBe(0);
   });
 });

@@ -12,6 +12,7 @@ import { downloadCsv } from "../lib/csv";
 import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
 import { useStages } from "../stages";
+import { useListState } from "../lib/listState";
 import { Avatar, Segmented, Tag } from "../components/kit";
 import type { DealSummary, UserLite } from "../types";
 
@@ -71,7 +72,9 @@ function inScope(d: DealSummary, scope: Scope): boolean {
 export function Deals({ scope = "all" }: { scope?: Scope }) {
   const { can } = useAuth();
   const [deals, setDeals] = useState<DealSummary[] | null>(null);
-  const [q, setQ] = useState("");
+  // Search and stage filter are remembered per tab so Back from a deal
+  // restores them (the stage filter per scope, since each scope has its own).
+  const [q, setQ] = useListState("deals:q", "");
   // ?new=1 (Dashboard "Create your first deal") opens the modal on arrival.
   const [params, setParams] = useSearchParams();
   const [showNew, setShowNew] = useState(params.get("new") === "1");
@@ -80,8 +83,7 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
   const nav = useNavigate();
   const { label: stageLabel, colorOf, stagesOf } = useStages();
   // Stage filter over the rows already loaded ("" = every stage).
-  const [stageKey, setStageKey] = useState("");
-  useEffect(() => { setStageKey(""); }, [scope]);
+  const [stageKey, setStageKey] = useListState(`deals:${scope}:stage`, "");
   const closeNew = () => { setShowNew(false); if (params.get("new")) setParams({}, { replace: true }); };
 
   function load() { api.get<DealSummary[]>("/deals").then(setDeals); }
@@ -173,6 +175,7 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
       render: (d) => dateCell(d.findBuyerByDate, d.isOverdue) },
     { key: "oc", header: "Orig. closing", type: "date", value: (d) => d.originalClosingDate, render: (d) => dateCell(d.originalClosingDate), legacyDefaultHidden: true },
     { key: "fc", header: "Final closing", type: "date", value: (d) => d.finalClosingDate, render: (d) => dateCell(d.finalClosingDate) },
+    { key: "bc", header: "Buyer closing", type: "date", value: (d) => d.buyerClosingDate ?? null, render: (d) => dateCell(d.buyerClosingDate ?? null), legacyDefaultHidden: false, newlyAdded: true },
     { key: "buyer", header: "Current buyer", type: "text", value: (d) => d.selectedBuyer?.name ?? null,
       render: (d) => <span className="ct-dim">{d.selectedBuyer?.name ?? "—"}</span> },
     { key: "owner", header: "Owner", type: "text", value: (d) => d.relationshipOwner?.name ?? null,
@@ -272,10 +275,10 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
               onExport={() => {
                 const rows = filtered.filter((d) => sel.selected.has(d.id));
                 downloadCsv(`deals-${new Date().toISOString().slice(0, 10)}.csv`,
-                  ["Deal", "Priority", "Stage", "NMA", "NRA", "Our Cost", "Our Cost per NMA", "Our Cost per NRA", "Buyer Purchase Price", "Royalty Rate", "Profit Est.", "Under Contract", "Find Buyer By", "Current Buyer", "Owner", "Profit at Asking"],
+                  ["Deal", "Priority", "Stage", "NMA", "NRA", "Our Cost", "Our Cost per NMA", "Our Cost per NRA", "Buyer Purchase Price", "Royalty Rate", "Profit Est.", "Under Contract", "Find Buyer By", "Buyer Closing", "Current Buyer", "Owner", "Profit at Asking"],
                   rows.map((d) => [d.name, d.priority, d.stage, d.acreageNma ?? "", d.nra ?? "", d.aggOurPrice ?? d.ourPrice ?? "",
                     costPerAcre(d, d.ourCostPerNma, d.aggAcreageNma ?? d.acreageNma) ?? "", costPerAcre(d, d.ourCostPerNra, d.aggNra ?? d.nra) ?? "",
-                    d.buyerPurchasePrice ?? "", royaltyLabel(d.royaltyRate), d.profitEst ?? "", d.dateUnderContract ?? "", d.findBuyerByDate ?? "", d.selectedBuyer?.name ?? "", d.relationshipOwner?.name ?? "", d.profitAtAsk ?? ""]));
+                    d.buyerPurchasePrice ?? "", royaltyLabel(d.royaltyRate), d.profitEst ?? "", d.dateUnderContract ?? "", d.findBuyerByDate ?? "", d.buyerClosingDate ?? "", d.selectedBuyer?.name ?? "", d.relationshipOwner?.name ?? "", d.profitAtAsk ?? ""]));
               }}
             />
           }

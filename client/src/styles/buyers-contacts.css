@@ -204,11 +204,6 @@
 .bp-tab.active { color: var(--ink); border-bottom-color: var(--accent); }
 
 .bp-head { display: flex; flex-direction: column; gap: 10px; }
-.bp-page .bp-crumbs { display: flex; align-items: center; gap: 7px; padding: 0; font-size: 12.5px; font-weight: 500; color: var(--ink-5); }
-.bp-page .bp-crumb-link { min-height: 0; padding: 0; border: 0; background: none; box-shadow: none; font: inherit; color: var(--ink-3); }
-.bp-page .bp-crumb-link:hover { color: var(--ink); background: none; }
-.bp-crumb-sep { color: var(--ink-5); }
-.bp-page .bp-crumb-cur { color: var(--ink-2); }
 .bp-page .bp-titlerow { padding-bottom: 0; gap: 20px; align-items: flex-start; }
 .bp-page .bp-titleline { gap: 10px; }
 .bp-page .bp-title { font-size: 26px; font-weight: 700; line-height: 1.15; letter-spacing: -0.02em; color: var(--ink-strong); }
@@ -453,8 +448,6 @@
    =========================================================================== */
 .cw-wrap { height: calc(100dvh - var(--topbar-h, 60px)); min-height: 0; display: flex; flex-direction: column; }
 .cw-wrap .cw-top { height: 64px; flex: none; gap: 12px; padding: 0 24px; border-bottom: 1px solid var(--line); }
-.cw-wrap .cw-topback { width: 32px; height: 32px; border: 1px solid var(--line-strong); border-radius: var(--radius); color: var(--ink-2); }
-.cw-wrap .cw-topback:hover { color: var(--ink); border-color: var(--line-hover-strong); text-decoration: none; }
 .cw-wrap .cw-toptitle { font-size: 15px; font-weight: 600; color: var(--ink); }
 .cw-wrap .cw-count { font-size: 12.5px; font-weight: 400; color: var(--ink-4); }
 .cw-wrap .cw-pager { gap: 4px; }
@@ -722,7 +715,7 @@
   /* Contact detail: the three columns stack and scroll with the page. */
   .cw-wrap { height: auto; min-height: 0; }
   .cw-wrap .cw-top { height: 56px; padding: 0 16px; }
-  .cw-wrap .cw-topback, .cw-wrap .cw-pgbtn { width: 40px; height: 40px; min-height: 40px; }
+  .cw-wrap .cw-pgbtn { width: 40px; height: 40px; min-height: 40px; }
   .cw-wrap .cw-pager { margin-left: auto; }
   .cw-wrap .cw { display: flex; flex-direction: column; overflow: visible; }
   .cw-wrap .cw-left, .cw-wrap .cw-right { width: 100% !important; overflow: visible; border: 0; }

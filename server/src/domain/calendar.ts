@@ -150,18 +150,24 @@ const derived = (p: Pick<CalEntry, "id" | "source" | "title" | "typeId" | "date"
   ...p, readOnly: true, allDay: true, start: null, end: null,
 });
 
-export interface ClosingDealRow extends DealDateInputs { id: string; name: string; stage: string }
+export interface ClosingDealRow extends DealDateInputs {
+  id: string; name: string; stage: string;
+  /** Manual "Closing with buyer" date; absent/null = no buyer-closing entry. */
+  buyerClosingDate?: Date | null;
+}
 
 /**
- * A deal's closing entries: the effective Final Closing (override, else
- * Original + 15 days — resolved by domain/dates, never re-derived here) and the
- * Original Closing when it falls on a different day. Dead deals yield nothing.
+ * A deal's closing entries: the applicable Final Closing (override — which is
+ * where contract extensions land — else Original + 15 days, resolved by
+ * domain/dates and never re-derived here) plus, when set by hand, the
+ * "Closing with buyer" date. The original closing is NOT emitted: the calendar
+ * shows the deadline that currently applies. Dead deals yield nothing.
  */
 export function closingEntries(deal: ClosingDealRow, closingTypeId: string | null): CalEntry[] {
   if (deal.stage === "DEAD") return [];
-  const { finalClosingDate, originalClosingDate } = resolveDealDates(deal);
+  const { finalClosingDate } = resolveDealDates(deal);
   const finalKey = finalClosingDate ? dayKey(finalClosingDate) : null;
-  const originalKey = originalClosingDate ? dayKey(originalClosingDate) : null;
+  const buyerKey = deal.buyerClosingDate ? dayKey(deal.buyerClosingDate) : null;
   const base = {
     source: "closing" as const, typeId: closingTypeId, assignee: null, notes: null,
     link: { kind: "deal" as const, id: deal.id, label: deal.name },
@@ -170,7 +176,7 @@ export function closingEntries(deal: ClosingDealRow, closingTypeId: string | nul
   };
   const out: CalEntry[] = [];
   if (finalKey) out.push(derived({ ...base, id: `closing:${deal.id}:final`, title: `Closing — ${deal.name}`, date: finalKey }));
-  if (originalKey && originalKey !== finalKey) out.push(derived({ ...base, id: `closing:${deal.id}:original`, title: `Original closing — ${deal.name}`, date: originalKey }));
+  if (buyerKey) out.push(derived({ ...base, id: `closing:${deal.id}:buyer`, title: `Closing with buyer — ${deal.name}`, date: buyerKey }));
   return out;
 }
 
