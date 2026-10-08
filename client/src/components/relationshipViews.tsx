@@ -1,20 +1,15 @@
-import { Fragment, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, Info, Users } from "lucide-react";
+import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { ArrowDown, ArrowUp, Users } from "lucide-react";
 import { CLASS_COLORS, CLASS_FALLBACK_COLOR } from "../lib/entityClasses";
 
 /**
  * Shared presentation for relationship intelligence — used by both the Buyer
  * Profile (BuyerRelationships) and Research → Relationships so the two screens
- * render the same polished layout from one implementation.
+ * render the same polished layout from one implementation. Acquisition chains
+ * live in their own shared component (AcquisitionChain.tsx).
  */
 
 export interface RelParty { norm: string; name: string; count: number; entityType: "company" | "individual"; buyerId: string | null }
-export interface ChainNode { norm: string; name: string; klass: string }
-export interface ChainHop { fromNorm: string; from: string; toNorm: string; to: string; count: number }
-export interface ChainEntry {
-  chain: { nodes: ChainNode[]; hops: ChainHop[]; length: number; strength: number; totalCount: number; counties: string[] };
-  position: number; role: string;
-}
 
 /** Class tag: tinted with the class colour, a leading dot, readable text in every theme. */
 export function ClassBadge({ klass, label }: { klass: string; label: string }) {
@@ -92,132 +87,5 @@ export function PartyColumn({ title, tone, empty, parties, canCreate, adding, on
         </div>
       )}
     </div>
-  );
-}
-
-/**
- * Acquisition chains, built to scale: each chain collapses to its endpoints +
- * hop count (one readable line however long the path), expands to the full
- * path on click, and only the strongest few show until "Show all".
- *
- * `focusNorm` highlights one entity through the chain (the buyer on the Buyer
- * Profile). Pass "" for no focus (Research market-wide view). `renderActions`
- * optionally renders an action row in the expanded body of each chain.
- */
-export function ChainSection({ chains, classLabels, focusNorm, renderActions }: {
-  chains: ChainEntry[]; classLabels: Record<string, string>; focusNorm: string;
-  renderActions?: (entry: ChainEntry, index: number) => ReactNode;
-}) {
-  const [openIdx, setOpenIdx] = useState<number | null>(null);
-  const [showAll, setShowAll] = useState(false);
-  if (chains.length === 0) return null;
-  const CAP = 5;
-  const visible = showAll ? chains : chains.slice(0, CAP);
-  const hasFocus = focusNorm !== "";
-
-  // The section header (title, count) is provided by the CollapsibleSection
-  // wrapping this list on the Buyer Profile.
-  return (
-    <div className="chain2-list">
-      {visible.map((c, i) => {
-        const open = openIdx === i;
-        const len = c.chain.nodes.length;
-        const first = c.chain.nodes[0], last = c.chain.nodes[len - 1];
-        return (
-          <div key={i} className={`chain2 ${open ? "open" : ""}`}>
-            <button type="button" className="chain2-head" onClick={() => setOpenIdx(open ? null : i)} aria-expanded={open}>
-              <span className={`chain2-rank ${open ? "hot" : ""}`}>#{i + 1}</span>
-              <span className="chain2-endpoints">
-                <NodeBadge n={first} focus={hasFocus && first.norm === focusNorm} />
-                <span className="chain2-mid">→ {len - 2 > 0 && <b>{len - 2} more</b>} →</span>
-                <NodeBadge n={last} focus={hasFocus && last.norm === focusNorm} term />
-              </span>
-              <span className="chain2-meta">
-                <span className="chain2-sum"><b>{len}</b> entities · <b>{c.chain.totalCount}</b> tx</span>
-                {c.chain.counties.length > 0 && (
-                  <span className="chain2-counties">{c.chain.counties.slice(0, 2).join(" · ")}{c.chain.counties.length > 2 ? "…" : ""}</span>
-                )}
-                <svg className="chain2-chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
-              </span>
-            </button>
-            {open && (
-              <div className="chain2-body">
-                {/* Horizontal node flow: every entity a labeled box, dashed
-                    tx-count arrows between hops, the focus buyer ringed. */}
-                <div className="chain2-flow">
-                  {c.chain.nodes.map((n, j) => (
-                    <Fragment key={n.norm}>
-                      <div className="chain2-node">
-                        <NodeBox n={n} focus={hasFocus && j === c.position} term={j === len - 1} />
-                        <span className={`chain2-cap ${hasFocus && j === c.position ? "focus" : ""}`}>
-                          {hasFocus && j === c.position ? `This buyer · ${j + 1} of ${len}`
-                            : j === 0 ? "Origin"
-                              : j === len - 1 ? "Terminus"
-                                : `${j + 1} of ${len}`}
-                        </span>
-                      </div>
-                      {j < len - 1 && (
-                        <div className="chain2-arrow" title={`${c.chain.hops[j]?.count ?? 0} transactions`}>
-                          <span>{c.chain.hops[j]?.count ?? 0} tx</span>
-                          <span className="chain2-line" aria-hidden="true">
-                            <i />
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 6l6 6-6 6" /></svg>
-                          </span>
-                        </div>
-                      )}
-                    </Fragment>
-                  ))}
-                </div>
-                {hasFocus && (
-                  <div className="chain2-info">
-                    <Info size={13} aria-hidden="true" />
-                    <span>
-                      This buyer is the <strong>{classLabels[c.role] ?? c.role}</strong> at position <b>{c.position + 1} of {len}</b>
-                      {c.chain.counties.length > 0 && <> · {c.chain.counties.join(", ")}</>}
-                    </span>
-                  </div>
-                )}
-                {renderActions && <div className="chain2-actions">{renderActions(c, i)}</div>}
-              </div>
-            )}
-          </div>
-        );
-      })}
-      {chains.length > CAP && (
-        <div className="chain2-foot">
-          <button className="link-btn" onClick={() => { setShowAll((s) => !s); setOpenIdx(null); }}>
-            {showAll ? `Show ${CAP} strongest` : `Show all ${chains.length} chains`}
-          </button>
-          <span className="chain2-showing">
-            {showAll ? `Showing all ${chains.length}` : `Showing ${Math.min(CAP, chains.length)} strongest of ${chains.length}`}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Marks a chain's last entity (" term"), and one named with an ownership
- *  share such as "FMTX LP (90.00%)" (" term pct") — styling hooks only. */
-const termClass = (n: ChainNode, term?: boolean) => (term ? (n.name.includes("%") ? " term pct" : " term") : "");
-
-/** Endpoint pill in a chain's summary row — tinted by the entity's class. */
-export function NodeBadge({ n, focus, term }: { n: ChainNode; focus: boolean; term?: boolean }) {
-  const c = CLASS_COLORS[n.klass] ?? CLASS_FALLBACK_COLOR;
-  return (
-    <span className={`chain2-pill ${focus ? "focus" : ""}${termClass(n, term)}`}
-      style={focus ? undefined : { "--c": c } as CSSProperties}>
-      {n.name}
-    </span>
-  );
-}
-
-/** Node box in the expanded flow — neutral card, accent ring on the focus buyer. */
-export function NodeBox({ n, focus, term }: { n: ChainNode; focus: boolean; term?: boolean }) {
-  const c = CLASS_COLORS[n.klass] ?? CLASS_FALLBACK_COLOR;
-  return (
-    <span className={`chain2-box ${focus ? "focus" : ""}${termClass(n, term)}`} style={focus ? undefined : { "--c": c } as CSSProperties} title={n.name}>
-      {n.name}
-    </span>
   );
 }

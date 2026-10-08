@@ -280,6 +280,12 @@
   .va-page .metrics-row { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
   .va-page .assumption-groups { grid-template-columns: minmax(0, 1fr) !important; }
 
+  /* --- Acquisition chains (shared component: Buyer Profile + Research) --- */
+  .chain2-list { --chain-gutter: 14px; }
+  .chain2-head { grid-template-columns: 34px minmax(0, 1fr); padding: 10px var(--chain-gutter); }
+  .chain2-meta { grid-column: 2; flex-wrap: wrap; }
+  .chain2-body { padding: 6px var(--chain-gutter) 16px; }
+
   /* --- Public buyer portal / marketplace --- */
   .portal-header { padding: 12px 14px; padding-top: max(12px, env(safe-area-inset-top)); flex-wrap: wrap; }
   .portal-main { padding: 16px 12px calc(28px + env(safe-area-inset-bottom)); }

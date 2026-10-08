@@ -572,18 +572,25 @@ export function surgeSeverity(current: number, previous: number, zScore: number 
 // Time bucketing
 // ---------------------------------------------------------------------------
 
-export type Granularity = "day" | "week" | "month";
+export type Granularity = "day" | "week" | "month" | "year";
 
-/** Pick a chart granularity that yields a readable number of buckets. */
-export function autoGranularity(from: Date, to: Date): Granularity {
+/**
+ * Pick a chart granularity that yields a readable number of buckets.
+ * `longSpans` (the "All" time frame, which can reach back decades) adds a
+ * yearly tier past ~5 years; bounded presets and custom ranges keep the
+ * day/week/month tiers unchanged.
+ */
+export function autoGranularity(from: Date, to: Date, longSpans = false): Granularity {
   const days = Math.max(1, Math.round((to.getTime() - from.getTime()) / 86400000));
   if (days <= 95) return "day";
   if (days <= 550) return "week";
+  if (longSpans && days > 1830) return "year";
   return "month";
 }
 
-/** Stable bucket key (UTC): day → YYYY-MM-DD, week → Monday's date, month → YYYY-MM. */
+/** Stable bucket key (UTC): day → YYYY-MM-DD, week → Monday's date, month → YYYY-MM, year → YYYY. */
 export function bucketKey(d: Date, g: Granularity): string {
+  if (g === "year") return String(d.getUTCFullYear());
   if (g === "month") return monthKey(d);
   if (g === "day") return d.toISOString().slice(0, 10);
   const day = d.getUTCDay(); // 0=Sun
@@ -600,9 +607,11 @@ export function bucketRange(from: Date, to: Date, g: Granularity): string[] {
   while (cur.getTime() <= end) {
     const k = bucketKey(cur, g);
     if (!seen.has(k)) { seen.add(k); keys.push(k); }
-    cur = g === "month"
-      ? new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 1))
-      : new Date(cur.getTime() + 86400000);
+    cur = g === "year"
+      ? new Date(Date.UTC(cur.getUTCFullYear() + 1, 0, 1))
+      : g === "month"
+        ? new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + 1, 1))
+        : new Date(cur.getTime() + 86400000);
   }
   return keys;
 }

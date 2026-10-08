@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell,
 } from "recharts";
-import { ArrowRight, Search } from "lucide-react";
+import { ArrowRight, MapPin, Search } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, Banner, Modal, ConfirmDelete, SearchInput, ChipList } from "../components/ui";
@@ -23,7 +24,10 @@ import { downloadCsv } from "../lib/csv";
 import { fmtDate, num, prettyEnum, prettyDocType } from "../lib/format";
 import { CHART_COLORS, chartTooltip } from "../lib/charts";
 import { DateField } from "../components/DateField";
-import { ChainSection, ClassBadge, PartyColumn, type ChainEntry, type RelParty } from "../components/relationshipViews";
+import { ALL_PERIOD, ALL_PERIOD_LABEL, isAllPeriod, withAllPeriod } from "../lib/period";
+import { permitsMapHref, type PermitMapPatch } from "../lib/permitMap";
+import { ClassBadge, PartyColumn, type RelParty } from "../components/relationshipViews";
+import { AcquisitionChains, type ChainEntry, type ChainHop, type ChainNode } from "../components/AcquisitionChain";
 
 /**
  * Research & Market Intelligence — trends in mineral transactions, leasing
@@ -40,7 +44,7 @@ interface SeriesPoint { key: string; transactions: number; leases: number; permi
 interface Summary {
   range: { from: string; to: string };
   compare: { from: string; to: string };
-  granularity: "day" | "week" | "month";
+  granularity: "day" | "week" | "month" | "year";
   kpis: Record<string, number>;
   previous: Record<string, number>;
   trends: Record<string, TrendT>;
@@ -59,6 +63,8 @@ interface EntityRow {
 interface Signal {
   id: string; kind: string; severity: number; title: string; detail: string;
   state: string; county: string | null; abstractId: string | null;
+  /** NEW_OPERATOR: the operator's normalized key (operator filter value). */
+  operator?: string;
   metrics: Record<string, number | null>;
 }
 interface FilterOpts {
@@ -125,7 +131,7 @@ interface RrcPermitRecord {
 // Period helpers
 // ---------------------------------------------------------------------------
 
-type Period = "LAST_30D" | "LAST_90D" | "LAST_6M" | "LAST_12M" | "THIS_YEAR" | "CUSTOM";
+type Period = "LAST_30D" | "LAST_90D" | "LAST_6M" | "LAST_12M" | "THIS_YEAR" | typeof ALL_PERIOD | "CUSTOM";
 type Compare = "NONE" | "PREV_PERIOD" | "PREV_YEAR";
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const DAY = 86400000;
@@ -139,6 +145,8 @@ function rangeFor(period: Period, custom: { from: string; to: string }): { from:
     case "LAST_6M": return { from: iso(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 6, today.getUTCDate()))), to: iso(today) };
     case "LAST_12M": return { from: iso(new Date(Date.UTC(today.getUTCFullYear() - 1, today.getUTCMonth(), today.getUTCDate()))), to: iso(today) };
     case "THIS_YEAR": return { from: iso(new Date(Date.UTC(today.getUTCFullYear(), 0, 1))), to: iso(today) };
+    // All carries no dates: the request sends ?period=ALL instead.
+    case ALL_PERIOD: return { from: "", to: "" };
     default: return { from: custom.from, to: custom.to };
   }
 }
@@ -231,8 +239,6 @@ interface CoBuyerRow {
   sharedAcquisitions?: number;
   firstDate?: string | null; lastDate?: string | null;
 }
-interface ChainNode { norm: string; name: string; klass: string }
-interface ChainHop { fromNorm: string; from: string; toNorm: string; to: string; count: number }
 interface ChainRow {
   path: string; feeders: string[]; midTier: string[]; terminus: string | null;
   length: number; strength: number; totalCount: number; counties: string[];
@@ -273,9 +279,13 @@ export function Research() {
   }, []);
 
   const range = useMemo(() => rangeFor(period, custom), [period, custom]);
+  const allTime = isAllPeriod(period);
   const qs = useMemo(() => {
     const q = new URLSearchParams();
     q.set("docClass", dataset);
+    // All: explicit flag so the server lifts the window rather than falling
+    // back to its 90-day default (no from/to, no comparison).
+    if (allTime) q.set("period", ALL_PERIOD);
     if (range.from) q.set("from", range.from);
     if (range.to) q.set("to", range.to);
     const cp = compareParams(compare, range.from, range.to);
@@ -289,7 +299,7 @@ export function Research() {
     for (const s of filters.sellers) q.append("seller", s);
     for (const o of filters.operators) q.append("operator", o);
     return q.toString();
-  }, [range.from, range.to, compare, filters, dataset]);
+  }, [allTime, range.from, range.to, compare, filters, dataset]);
 
   // Filter options are dataset-scoped: buyers/sellers/doc types offered come
   // only from the active class's documents.
@@ -303,17 +313,18 @@ export function Research() {
   const activeFilterCount =
     filters.states.length + filters.counties.length + filters.abstracts.length + filters.surveys.length + filters.docTypes.length +
     filters.buyers.length + filters.sellers.length + filters.operators.length;
-  const compareOff = compare === "NONE";
+  // Nothing precedes "All", so it never compares.
+  const compareOff = compare === "NONE" || allTime;
 
   const drillToRecords = useCallback((patch: Partial<Filters>) => {
     setFilters((f) => ({ ...f, ...patch }));
     setTab("records");
   }, []);
 
-  const CHIPS: [Period, string][] = [
+  const CHIPS: [Period, string][] = withAllPeriod<Period>([
     ["LAST_30D", "30D"], ["LAST_90D", "90D"], ["LAST_6M", "6M"],
     ["LAST_12M", "12M"], ["THIS_YEAR", "YTD"], ["CUSTOM", "Custom"],
-  ];
+  ]);
   const cmpRange = compareRangeFor(compare, range.from, range.to);
   // Show the year on the compare range only when it differs from the current range's year.
   const cmpWithYear = cmpRange != null && range.to !== "" &&
@@ -323,7 +334,7 @@ export function Research() {
     ["relationships", "Relationships"], ["opportunities", "Opportunities"], ["records", "Records"],
     ...(canManage ? ([["data", "Data & imports"]] as [Tab, string][]) : []),
   ];
-  const rangeLabel = range.from && range.to ? fmtRangeLabel(range.from, range.to) : "";
+  const rangeLabel = allTime ? ALL_PERIOD_LABEL : range.from && range.to ? fmtRangeLabel(range.from, range.to) : "";
 
   return (
     <div className="page research-page">
@@ -331,7 +342,12 @@ export function Research() {
         <div className="rs-title">
           <h1>Research &amp; Market Intelligence</h1>
           <div className="page-sub rs-sub">
-            {range.from && range.to ? (
+            {allTime ? (
+              <>
+                <span className="rs-sub-cur">{ALL_PERIOD_LABEL}</span>
+                <span>full available history · no comparison</span>
+              </>
+            ) : range.from && range.to ? (
               <>
                 <span className="rs-sub-cur">{rangeLabel}</span>
                 {cmpRange ? (
@@ -380,8 +396,8 @@ export function Research() {
                 <div className="field" style={{ marginBottom: 0 }}><label>To</label><DateField value={custom.to} onChange={(v) => setCustom((c) => ({ ...c, to: v }))} /></div>
               </>
             )}
-            <div className="field" style={{ marginBottom: 0 }}><label>Compare to</label>
-              <Select value={compare} onChange={(v) => setCompare(v as Compare)} ariaLabel="Compare to"
+            <div className="field" style={{ marginBottom: 0 }} title={allTime ? "No comparison for All — there is no earlier period" : undefined}><label>Compare to</label>
+              <Select value={allTime ? "NONE" : compare} onChange={(v) => setCompare(v as Compare)} ariaLabel="Compare to" disabled={allTime}
                 options={[
                   { value: "NONE", label: "No comparison" },
                   { value: "PREV_PERIOD", label: "Previous period" },
@@ -452,7 +468,7 @@ export function Research() {
 
       <div ref={captureRef} className="report-capture rs-body">
         {tab === "overview" && <OverviewTab qs={qs} compareOff={compareOff} dataset={dataset} />}
-        {tab === "geography" && <GeographyTab qs={qs} filters={filters} compareOff={compareOff} onDrill={drillToRecords}
+        {tab === "geography" && <GeographyTab qs={qs} filters={filters} compareOff={compareOff} allTime={allTime} onDrill={drillToRecords}
           onSetCounties={(counties) => setFilters((f) => ({ ...f, counties }))} />}
         {tab === "rankings" && <RankingsTab qs={qs} opts={opts} compareOff={compareOff} onDrill={drillToRecords} dataset={dataset} rangeLabel={rangeLabel} />}
         {tab === "relationships" && <RelationshipsTab qs={qs} onDrill={drillToRecords} dataset={dataset} />}
@@ -461,6 +477,34 @@ export function Research() {
         {tab === "data" && canManage && <ResearchImport onDataChanged={loadOpts} />}
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Drilling permits → Map
+// ---------------------------------------------------------------------------
+
+/**
+ * Opens the map with the wells behind a permit metric highlighted: the page's
+ * current filters + period, narrowed by `patch` (a row's county, an operator).
+ * The map re-counts that same set server-side. Null without map access, so
+ * callers render plain numbers instead of a dead link.
+ */
+function usePermitsOnMap(qs: string): ((label: string, patch?: PermitMapPatch) => void) | null {
+  const { can } = useAuth();
+  const navigate = useNavigate();
+  const canMap = can("viewMap");
+  return useMemo(() => (canMap ? (label: string, patch?: PermitMapPatch) => navigate(permitsMapHref(qs, label, patch)) : null), [canMap, navigate, qs]);
+}
+
+/** A permit count that opens those permits on the map (plain text when it can't). */
+function PermitCount({ n, onOpen }: { n: number; onOpen: (() => void) | null }) {
+  if (!n || !onOpen) return <span className={`rec-nowrap ${n ? "" : "rs-zero"}`}>{num(n)}</span>;
+  return (
+    <button type="button" className="rs-map-num" title={`Show ${num(n)} permit${n === 1 ? "" : "s"} on the map`}
+      onClick={(e) => { e.stopPropagation(); onOpen(); }}>
+      {num(n)}<MapPin size={11} aria-hidden="true" />
+    </button>
   );
 }
 
@@ -476,6 +520,7 @@ function OverviewTab({ qs, compareOff, dataset }: { qs: string; compareOff: bool
   // Customize View — per-chart visualization type (saved per user).
   const [trendType, setTrendType] = useChartType("research-activity", ["bar", "line"], "bar");
   const [docType, setDocType] = useChartType("research-doctypes", ["bar", "pie"], "bar");
+  const showPermits = usePermitsOnMap(qs);
   useEffect(() => {
     setLoading(true);
     api.get<Summary>(`/research/summary?${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
@@ -486,7 +531,9 @@ function OverviewTab({ qs, compareOff, dataset }: { qs: string; compareOff: bool
   const t = data.trends;
 
   const label = (k: string) =>
-    data.granularity === "month"
+    data.granularity === "year"
+      ? k
+      : data.granularity === "month"
       ? new Date(`${k}-01T00:00:00Z`).toLocaleDateString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" })
       : new Date(`${k}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 
@@ -497,11 +544,16 @@ function OverviewTab({ qs, compareOff, dataset }: { qs: string; compareOff: bool
     dataset === "LEASE" && id === "uniqueBuyers" ? "Active lessees" : RES_METRIC_LABEL[id];
   const orderedMetrics: ResMetricId[] = [...metricPrefs.order.filter((id) => DEFAULT_RES_METRICS.includes(id)), ...DEFAULT_RES_METRICS.filter((id) => !metricPrefs.order.includes(id))];
   const visibleMetrics = orderedMetrics.filter((id) => !metricPrefs.hidden.includes(id) && id !== offDataset);
+  // Permit KPIs open the wells behind them on the map (same filters + period).
+  const permitPatch: Partial<Record<ResMetricId, PermitMapPatch>> = { permits: {}, horizontalPermits: { trajectory: ["HORIZONTAL"] } };
   const kpiCells: StatCell[] = visibleMetrics.filter((id) => t[id]).map((id) => ({
     label: kpiLabel(id),
     value: num(t[id].current),
     // Change tags are comparative — hidden when comparison is off.
     sub: compareOff ? undefined : <span className="rs-delta-line"><DeltaTag t={t[id]} /><span>vs {num(t[id].previous)}</span></span>,
+    ...(showPermits && permitPatch[id] && t[id].current > 0
+      ? { onClick: () => showPermits(kpiLabel(id), permitPatch[id]), title: `Show these ${kpiLabel(id).toLowerCase()} on the map` }
+      : {}),
   }));
 
   // Series colours — one document series per view (the off-dataset class is
@@ -806,14 +858,18 @@ function ResearchAbstractFilter({ options, states, counties, value, onChange }: 
 // Geography
 // ---------------------------------------------------------------------------
 
-function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
+function GeographyTab({ qs, filters, compareOff, allTime, onDrill, onSetCounties }: {
   qs: string; filters: Filters; compareOff: boolean;
+  /** "All" time frame: no prior period, so the map offers Volume only. */
+  allTime: boolean;
   onDrill: (patch: Partial<Filters>) => void;
   /** Replace the page-wide county filter (empty array = statewide). */
   onSetCounties: (counties: string[]) => void;
 }) {
   const [level, setLevel] = useState<"county" | "abstract" | "state">("county");
-  const [metric, setMetric] = useState<"activity" | "change">("activity");
+  const [metricPick, setMetric] = useState<"activity" | "change">("activity");
+  const metric = allTime ? "activity" : metricPick;
+  const showPermits = usePermitsOnMap(qs);
   const [data, setData] = useState<{ level: string; rows: GeoRow[] } | null>(null);
   const [loading, setLoading] = useState(true);
   // The map always shows county-level stats regardless of the table level.
@@ -879,7 +935,12 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
       ) },
     { key: "transactions", header: "Transactions", value: (r) => r.transactions, align: "right", render: (r) => <span className={`rec-nowrap ${r.transactions ? "" : "rs-zero"}`}>{num(r.transactions)}</span> },
     { key: "leases", header: "Leases", value: (r) => r.leases, align: "right", render: (r) => <span className={`rec-nowrap ${r.leases ? "" : "rs-zero"}`}>{num(r.leases)}</span> },
-    { key: "permits", header: "Permits", value: (r) => r.permits, align: "right", render: (r) => <span className={`rec-nowrap ${r.permits ? "" : "rs-zero"}`}>{num(r.permits)}</span> },
+    { key: "permits", header: "Permits", value: (r) => r.permits, align: "right",
+      // The row's own permits on the map: its state / county / abstract replace
+      // those filters; everything else (period, operator…) carries over.
+      render: (r) => <PermitCount n={r.permits} onOpen={showPermits && (() => showPermits(`Permits · ${geoName(r)}`, {
+        state: [r.state], ...(r.county ? { county: [r.county] } : {}), ...(r.abstractId ? { abstractId: [r.abstractId] } : {}),
+      }))} /> },
     { key: "total", header: "Total", value: (r) => r.total, align: "right", render: (r) => <b className="rec-nowrap">{num(r.total)}</b> },
     // Prior/Change columns are comparative — hidden when comparison is off.
     ...(compareOff ? [] : ([
@@ -922,13 +983,17 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
             <div className="rs-card-titles">
               <h3>Texas activity</h3>
               <span className="rs-card-sub">
-                {metric === "activity"
+                {allTime
+                  ? "Shaded by records across all available history · click a county to zoom into its abstracts"
+                  : metric === "activity"
                   ? "Shaded by records in the period · red outline = hotspot · click a county to zoom into its abstracts"
                   : "Green is up, red is down vs the prior period · click a county to zoom into its abstracts"}
               </span>
             </div>
-            <Segmented<"activity" | "change"> accent ariaLabel="Map metric" value={metric} onChange={setMetric}
-              options={[{ value: "activity", label: "Volume" }, { value: "change", label: "Change" }]} />
+            {!allTime && (
+              <Segmented<"activity" | "change"> accent ariaLabel="Map metric" value={metric} onChange={setMetric}
+                options={[{ value: "activity", label: "Volume" }, { value: "change", label: "Change" }]} />
+            )}
           </div>
           <div className="rs-map-body">
             <div className="rs-map">
@@ -1059,6 +1124,7 @@ type Decision = { key: string; action: "create" | "merge" | "skip"; mergeIntoBuy
 
 function RankingsTab({ qs, opts, compareOff, onDrill, dataset, rangeLabel }: { qs: string; opts: FilterOpts | null; compareOff: boolean; onDrill: (patch: Partial<Filters>) => void; dataset: Dataset; rangeLabel: string }) {
   const [role, setRole] = useState<"buyers" | "sellers" | "operators">("buyers");
+  const showPermits = usePermitsOnMap(qs);
   const [data, setData] = useState<{ role: string; rows: EntityRow[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -1117,7 +1183,10 @@ function RankingsTab({ qs, opts, compareOff, onDrill, dataset, rangeLabel }: { q
     { key: "name", header: "Name", value: (r) => r.name, minWidth: 220,
       render: (r) => <span className="rs-rk-name"><span className="rs-strong">{r.name}</span>{r.newEntrant && <span className="rs-mini-tag new" title="No activity in the prior 12 months">New</span>}</span> },
     { key: "count", header: role === "operators" ? "Permits" : "Records", value: (r) => r.count, align: "right",
-      render: (r) => <span className="rs-count-bar"><span className="rs-bar"><i style={{ width: `${(r.count / maxRowCount) * 100}%` }} /></span><b>{num(r.count)}</b></span> },
+      render: (r) => <span className="rs-count-bar"><span className="rs-bar"><i style={{ width: `${(r.count / maxRowCount) * 100}%` }} /></span>
+        {/* An operator's count is its permits — open them on the map. */}
+        {role === "operators" ? <b><PermitCount n={r.count} onOpen={showPermits && (() => showPermits(`Permits · ${r.name}`, { operator: [r.key] }))} /></b> : <b>{num(r.count)}</b>}
+      </span> },
     // Prior/Change columns are comparative — hidden when comparison is off.
     ...(compareOff ? [] : ([
       { key: "previous", header: "Prior", value: (r: EntityRow) => r.previous, align: "right", render: (r: EntityRow) => <span className={r.previous ? "rs-mid" : "rs-zero"}>{num(r.previous)}</span> },
@@ -1314,7 +1383,7 @@ function relRowsToParties(rows: RelRow[], nameOf: (r: RelRow) => { norm: string;
     .sort((a, b) => b.count - a.count);
 }
 
-/** Adapt chain table rows to the shared ChainSection's entry shape. */
+/** Adapt chain table rows to the shared AcquisitionChains entry shape. */
 function chainRowsToEntries(rows: ChainRow[], focusNorm: string): ChainEntry[] {
   return rows.map((c) => {
     const idx = focusNorm ? c.nodes.findIndex((n) => n.norm === focusNorm) : -1;
@@ -1572,7 +1641,7 @@ function RelationshipsTab({ qs, onDrill, dataset }: { qs: string; onDrill: (patc
           </div>
           {chains.length === 0 ? <p className="rs-empty">No multi-hop acquisition paths {q ? `match “${q}”` : "detected in this period"}.</p> : (
             <div className="rs-chains">
-              <ChainSection
+              <AcquisitionChains
                 chains={chainRowsToEntries(chains, "")}
                 classLabels={data.classLabels}
                 focusNorm=""
@@ -1769,11 +1838,12 @@ function EntityModal({ norm, data, onClose, onOpenEntity, onViewTx }: {
         <div className="rs-dossier-sec">
           <div className="rs-dossier-sec-head">Appears in chains <span className="relv-count">{chains.length}</span></div>
           {chains.length === 0 ? <div className="rs-dashed-empty">Not part of any multi-hop chain in this period.</div> : (
-            /* The same compact ChainSection used on Buyer Profiles — collapsed
-               summary rows that expand on demand, with the standard chain
-               actions (supporting transactions + date range) for full parity
-               with the Chains view. */
-            <ChainSection
+            /* The same shared AcquisitionChains used on Buyer Profiles —
+               collapsed summary rows that expand on demand, with the standard
+               chain actions (supporting transactions + date range) for full
+               parity with the Chains view. Framed: the modal has no card. */
+            <AcquisitionChains
+              framed
               chains={chainRowsToEntries(chains, norm)}
               classLabels={data.classLabels}
               focusNorm={norm}
@@ -1897,17 +1967,21 @@ const SEVERITY_TIERS: { min: number; label: string; color: string }[] = [
 const severityTier = (n: number) => SEVERITY_TIERS.find((t) => n >= t.min) ?? SEVERITY_TIERS[SEVERITY_TIERS.length - 1];
 
 function OpportunitiesTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partial<Filters>) => void }) {
-  const [data, setData] = useState<{ signals: Signal[] } | null>(null);
+  const [data, setData] = useState<{ signals: Signal[]; requiresBoundedPeriod?: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
   // Severity filter — "all" or one of the tier labels above.
   const [sev, setSev] = useState<string>("all");
+  const showPermits = usePermitsOnMap(qs);
   useEffect(() => {
     setLoading(true);
-    api.get<{ signals: Signal[] }>(`/research/opportunities?${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
+    api.get<{ signals: Signal[]; requiresBoundedPeriod?: boolean }>(`/research/opportunities?${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
   }, [qs]);
 
   if (loading && !data) return <Spinner label="Scanning for emerging opportunities…" />;
   if (!data) return <Banner kind="info">Could not load opportunities.</Banner>;
+  if (data.requiresBoundedPeriod) {
+    return <Banner kind="info">Opportunity signals compare a period with the periods before it, so they need a bounded time frame — choose 30D, 90D, 6M, 12M, YTD or a custom range.</Banner>;
+  }
   if (data.signals.length === 0) {
     return <Banner kind="info">No statistically significant surges detected in this period — try widening the date range or clearing filters.</Banner>;
   }
@@ -1955,9 +2029,22 @@ function OpportunitiesTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
                 </div>
                 <p className="rs-opp-detail">{s.detail}</p>
               </div>
-              <button type="button" className="rs-outline-btn rs-opp-view" onClick={() => onDrill({ states: s.state ? [s.state] : [], counties: s.county ? [s.county] : [] })}>
-                View records <ArrowRight size={12} aria-hidden="true" />
-              </button>
+              <div className="rs-opp-actions">
+                <button type="button" className="rs-outline-btn rs-opp-view" onClick={() => onDrill({ states: s.state ? [s.state] : [], counties: s.county ? [s.county] : [] })}>
+                  View records <ArrowRight size={12} aria-hidden="true" />
+                </button>
+                {/* Permit signals: the permits they counted, on the map. */}
+                {showPermits && s.kind === "PERMIT_SURGE" && s.county && (
+                  <button type="button" className="rs-outline-btn rs-opp-view" onClick={() => showPermits(`Permitting surge · ${s.county} County`, { state: [s.state], county: [s.county!] })}>
+                    Show on map <MapPin size={12} aria-hidden="true" />
+                  </button>
+                )}
+                {showPermits && s.kind === "NEW_OPERATOR" && s.operator && (
+                  <button type="button" className="rs-outline-btn rs-opp-view" onClick={() => showPermits(s.title, { operator: [s.operator!] })}>
+                    Show on map <MapPin size={12} aria-hidden="true" />
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}

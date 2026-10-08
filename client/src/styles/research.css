@@ -1,7 +1,7 @@
 /* Redesign styles: research
    Research & Market Intelligence (pages/Research.tsx, ResearchChoropleth,
-   ResearchImport) plus the shared relationship views (class badges, chain
-   pills) that the Buyer profile renders too. Page rules are scoped to
+   ResearchImport) plus the shared relationship views (class badges) that the
+   Buyer profile renders too. Page rules are scoped to
    .research-page; dialogs render outside the page, so their rules use rs-*
    class names only. Colours are theme tokens — the only literals left are
    data colours (map fills, chart series). */
@@ -391,32 +391,20 @@
 .rs-cob-count b { font-size: 20px; font-weight: 500; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .rs-cob-count span { font-size: 12px; color: var(--ink-3); }
 
-/* Acquisition chains — flat rows inside the Research card; the node flow
-   wraps instead of scrolling sideways (Research views only). */
-.rs-chains .chain2-list { gap: 0; }
-.rs-chains .chain2 { border: 0; border-bottom: 1px solid var(--line-faint); border-radius: 0; background: transparent; }
-.rs-chains .chain2:hover { border-color: var(--line-faint); }
-.rs-chains .chain2.open { background: var(--surface-1); }
-.rs-chains .chain2-head { padding: 14px 20px; }
-.rs-chains .chain2-body { padding: 4px 20px 18px 78px; border-top: 0; }
-.rs-chains .chain2-foot { padding: 10px 20px; border-top: 1px solid var(--line-faint); }
-.rs-chains .chain2-foot .link-btn { color: var(--accent-ink); font-size: 12.5px; font-weight: 600; }
-.rs-chains .chain2-body, .rs-dossier .chain2-body { overflow-x: visible; }
-.rs-chains .chain2-flow, .rs-dossier .chain2-flow { flex-wrap: wrap; row-gap: 12px; min-width: 0; }
 
-/* Shared relationship-view colours (Research + Buyer profile): class tags,
-   chain endpoint pills and node boxes take the class colour from --c. */
+/* Acquisition chains: the shared component (styles/acquisition-chain.css),
+   flush in the Research card — row gutter lined up with the card header, rows
+   clipped to the card's rounded foot (as the Buyer Profile section card). */
+.rs-chains { --chain-gutter: 20px; overflow: hidden; border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+
+/* Shared relationship-view colours (Research + Buyer profile): class tags
+   take the class colour from --c. */
 .class-badge {
   display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 5px;
   background: color-mix(in srgb, var(--c) 13%, transparent); color: color-mix(in srgb, var(--c) 72%, var(--ink-strong));
   font-size: 12px; font-weight: 600; white-space: nowrap;
 }
 .class-badge i { width: 6px; height: 6px; border-radius: 50%; background: var(--c); flex: none; }
-.chain2-pill:not(.focus) {
-  background: color-mix(in srgb, var(--c) 12%, transparent); border-color: color-mix(in srgb, var(--c) 33%, transparent);
-  color: color-mix(in srgb, var(--c) 72%, var(--ink-strong));
-}
-.chain2-box:not(.focus) { border-color: color-mix(in srgb, var(--c) 33%, transparent); }
 
 /* Entities */
 .rs-class-bar { display: flex; flex-direction: column; gap: 10px; padding: 14px 20px; border-bottom: 1px solid var(--line-faint); }
@@ -500,6 +488,15 @@
 .rs-opp-detail { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
 .rs-outline-btn.rs-opp-view { border-color: var(--line-strong); background: transparent; }
 .rs-outline-btn.rs-opp-view:hover:not(:disabled) { border-color: var(--accent); background: transparent; }
+.rs-opp-actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+/* A permit count that opens those permits on the map (tables + rankings). */
+.rs-map-num {
+  display: inline-flex; align-items: center; gap: 4px; height: auto; min-height: 0; padding: 0; border: 0; background: none; box-shadow: none;
+  font: inherit; font-variant-numeric: tabular-nums; color: inherit; cursor: pointer; white-space: nowrap;
+}
+.rs-map-num svg { color: var(--ink-4); flex: none; }
+.rs-map-num:hover { background: none; border: 0; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.rs-map-num:hover svg { color: var(--accent); }
 
 /* ---------------------------------------------------------------------------
    Records
@@ -598,8 +595,6 @@
 
   .rs-cob { grid-template-columns: 32px minmax(0, 1fr); padding: 14px 16px; }
   .rs-cob-count { grid-column: 2; flex-direction: row; align-items: baseline; justify-content: flex-start; gap: 6px; }
-  .rs-chains .chain2-head { padding: 12px 16px; }
-  .rs-chains .chain2-body { padding: 4px 16px 16px; }
 
   .rs-opp { grid-template-columns: 52px minmax(0, 1fr); gap: 12px 14px; padding: 14px 16px; }
   .rs-opp-view { grid-column: 2; justify-self: start; }

@@ -27,6 +27,8 @@ const db = vi.hoisted(() => {
     opportunity: model("opportunity", ["findMany", "findFirst", "update"]),
     opportunityStageHistory: model("opportunityStageHistory", ["create"]),
     user: model("user", ["findMany", "findFirst"]),
+    // The stage move's row lock (lockStageRow).
+    $queryRaw: record("$queryRaw"),
     $transaction: async (fn: unknown) => {
       (calls["$transaction"] ??= []).push(fn);
       return typeof fn === "function" ? (fn as (tx: unknown) => unknown)(prisma) : Promise.all(fn as Promise<unknown>[]);
@@ -115,10 +117,12 @@ describe("opportunity conversion needs createDeals", () => {
 
   it("still lets the editor move to a stage that does not convert", async () => {
     // The response reload reads the full record; any shape the serializer accepts will do.
-    db.results["opportunity.findFirst"] = (args: { include?: { pipeline?: boolean } }) =>
-      args.include?.pipeline ? opp() : { ...opp({ stage: "LOST" }), owner: null, contact: null, convertedDeal: null, stageHistory: [], activities: [] };
+    // (The in-transaction re-read after the row lock selects stage fields only.)
+    db.results["opportunity.findFirst"] = (args: { include?: { pipeline?: boolean }; select?: unknown }) =>
+      args.include?.pipeline || args.select ? opp() : { ...opp({ stage: "LOST" }), owner: null, contact: null, convertedDeal: null, stageHistory: [], activities: [] };
     const res = await call(EDITOR_NO_CREATE, "POST", "/api/opportunities/opp_1/stage", { toStage: "LOST", reason: "No interest" });
     expect(res.status).toBe(200);
+    expect(db.calls["$queryRaw"]).toHaveLength(1);
     expect(db.calls["opportunity.update"]).toHaveLength(1);
   });
 });

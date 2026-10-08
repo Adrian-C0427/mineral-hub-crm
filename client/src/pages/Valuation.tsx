@@ -9,7 +9,7 @@ import { Banner, Modal, Spinner, ChipList, ConfirmDialog, showToast } from "../c
 import { StatStrip, Tag, type StatCell } from "../components/kit";
 import { Select } from "../components/Select";
 import { WellImport } from "../components/WellImport";
-import { money, prettyEnum, fmtDate, fmtDateTime, fmtDateLocal } from "../lib/format";
+import { compactMoney, money, prettyEnum, fmtDate, fmtDateTime, fmtDateLocal } from "../lib/format";
 import { monthLabel, chartTooltip } from "../lib/charts";
 import { formatAbstract } from "../lib/abstracts";
 
@@ -134,10 +134,7 @@ const fmtVol = (v: number | null | undefined, unit = ""): string => (v == null ?
 const fmtPct1 = (v: number | null | undefined): string => (v == null ? "—" : `${v.toFixed(1)}%`);
 const fmtMoneyC = (v: number | null | undefined): string => {
   if (v == null) return "—";
-  const abs = Math.abs(v);
-  if (abs >= 1_000_000) return `${v < 0 ? "-" : ""}$${(abs / 1_000_000).toFixed(2)}M`;
-  if (abs >= 10_000) return `${v < 0 ? "-" : ""}$${(abs / 1_000).toFixed(0)}K`;
-  return money(v);
+  return compactMoney(v, { mDigits: 2, kDigits: () => 0, kFrom: 10_000, trim: false, small: (x) => money(x) });
 };
 const fmtMonths = (m: number | null | undefined): string => {
   if (m == null) return "Beyond forecast";
@@ -1393,7 +1390,7 @@ function FullReport({ analysis, analysisName }: { analysis: AnalyzeResponse; ana
         `Decline-curve analysis projects ${fmtVol(r.forecast.remaining.boe)} BOE of remaining recovery over ${fmtMonths(r.forecast.remainingMonths)}${r.forecast.economicLimitMonth ? `, reaching the economic limit in ${r.forecast.economicLimitMonth}` : ""}.`,
       );
       parts.push(
-        `At the assumed price deck (oil ${money(a.oilPrice)}/bbl, gas $${a.gasPrice.toFixed(2)}/mcf) the interest generates ${money(e.netCashFlowTotal)} in undiscounted net cash flow, worth ${money(e.presentValue)} at a ${a.discountRatePct}% discount rate.`,
+        `At the assumed price deck (oil ${money(a.oilPrice, { cents: true })}/bbl, gas $${a.gasPrice.toFixed(2)}/mcf) the interest generates ${money(e.netCashFlowTotal)} in undiscounted net cash flow, worth ${money(e.presentValue)} at a ${a.discountRatePct}% discount rate.`,
       );
     }
     if (a.askingPrice > 0) {
@@ -1456,9 +1453,9 @@ function FullReport({ analysis, analysisName }: { analysis: AnalyzeResponse; ana
         note={<>Forecasts are estimates from Arps decline-curve analysis of reported production and the assumptions above; they are not a guarantee of future performance.
           Historical figures come from reported production data as imported.</>}>
         <div className="va-facts va-facts-report">
-          <div className="va-fact"><span className="va-fact-l">Oil price</span><span className="va-fact-v">{money(a.oilPrice)}/bbl</span></div>
+          <div className="va-fact"><span className="va-fact-l">Oil price</span><span className="va-fact-v">{money(a.oilPrice, { cents: true })}/bbl</span></div>
           <div className="va-fact"><span className="va-fact-l">Gas price</span><span className="va-fact-v">${a.gasPrice.toFixed(2)}/mcf</span></div>
-          <div className="va-fact"><span className="va-fact-l">NGL price</span><span className="va-fact-v">{money(a.nglPrice)}/bbl</span></div>
+          <div className="va-fact"><span className="va-fact-l">NGL price</span><span className="va-fact-v">{money(a.nglPrice, { cents: true })}/bbl</span></div>
           <div className="va-fact"><span className="va-fact-l">Price escalation</span><span className="va-fact-v">{a.priceEscalationPct}%/yr</span></div>
           <div className="va-fact"><span className="va-fact-l">Discount rate</span><span className="va-fact-v">{a.discountRatePct}%</span></div>
           <div className="va-fact"><span className="va-fact-l">Asking price</span><span className="va-fact-v">{a.askingPrice > 0 ? money(a.askingPrice) : "—"}</span></div>

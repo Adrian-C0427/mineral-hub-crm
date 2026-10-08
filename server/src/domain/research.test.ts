@@ -146,6 +146,16 @@ describe("time bucketing", () => {
     expect(autoGranularity(new Date("2025-06-01"), new Date("2026-06-01"))).toBe("week");
     expect(autoGranularity(new Date("2023-01-01"), new Date("2026-01-01"))).toBe("month");
   });
+  it("adds a yearly tier only for long spans (the All time frame)", () => {
+    // Bounded ranges never go coarser than monthly, however long.
+    expect(autoGranularity(new Date("2000-01-01"), new Date("2026-01-01"))).toBe("month");
+    expect(autoGranularity(new Date("2000-01-01"), new Date("2026-01-01"), true)).toBe("year");
+    // A short All span keeps the normal tiers.
+    expect(autoGranularity(new Date("2026-01-01"), new Date("2026-02-15"), true)).toBe("day");
+    expect(autoGranularity(new Date("2023-01-01"), new Date("2026-01-01"), true)).toBe("month");
+    expect(bucketKey(new Date("2026-06-30"), "year")).toBe("2026");
+    expect(bucketRange(new Date("2019-07-04"), new Date("2022-01-02"), "year")).toEqual(["2019", "2020", "2021", "2022"]);
+  });
   it("buckets dates stably (weeks start Monday)", () => {
     expect(bucketKey(new Date("2026-06-30"), "month")).toBe("2026-06");
     expect(bucketKey(new Date("2026-06-30"), "day")).toBe("2026-06-30");

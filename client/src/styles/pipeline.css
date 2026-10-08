@@ -52,6 +52,7 @@
 .pl-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-3); }
 .pl-stats b { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
 .pl-stats b.pos { color: var(--success); }
+.pl-stats b.neg { color: var(--danger); }
 .pl-stats-dot { width: 3px; height: 3px; border-radius: 50%; background: var(--line-hover-strong); }
 
 /* Toolbar: Filters · Customize view · Pipeline settings · New deal. Popovers

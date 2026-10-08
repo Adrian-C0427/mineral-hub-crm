@@ -120,3 +120,18 @@ export async function firstActiveStageKey(tx: Tx, organizationId: string, pipeli
   const keys = await activeStageKeys(tx, organizationId, pipelineId);
   return keys[0] ?? "UNDER_CONTRACT";
 }
+
+/**
+ * Serialize stage moves of one record. Two moves of the same card can arrive
+ * together (rapid drags on the board, two users at once); each must read the
+ * stage it actually moves FROM, or history records a fromStage the record was
+ * never in and the second move's side effects run against a stale row. Call
+ * inside the move's transaction, then re-read the row: the lock is held until
+ * the transaction ends, so a concurrent move of the same record waits for this
+ * one to commit and then sees its result.
+ */
+export async function lockStageRow(tx: Prisma.TransactionClient, table: "Deal" | "Opportunity", id: string): Promise<void> {
+  // The table name is one of two literals (never caller input); the id is bound.
+  if (table === "Deal") await tx.$queryRaw`SELECT id FROM "Deal" WHERE id = ${id} FOR UPDATE`;
+  else await tx.$queryRaw`SELECT id FROM "Opportunity" WHERE id = ${id} FOR UPDATE`;
+}

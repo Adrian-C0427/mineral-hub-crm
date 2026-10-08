@@ -12,25 +12,27 @@ import { ApiError } from "../api/client";
 import { Select } from "../components/Select";
 import { Segmented, StatStrip, Tag } from "../components/kit";
 import { initialsOf } from "../lib/avatarColor";
-import { money, fmtDate, fmtDateLocal } from "../lib/format";
+import { compactMoney, money, fmtDate, fmtDateLocal } from "../lib/format";
 import { useStages } from "../stages";
 import { CalendarGlyph } from "../components/PeriodSegmented";
 import { DateField } from "../components/DateField";
 import { useTheme, isLightTheme } from "../theme";
 import { layoutRect } from "../lib/viewport";
 import { useIsPhonePortrait } from "../lib/mobile";
+import { ALL_PERIOD, ALL_PERIOD_LABEL, withAllPeriod } from "../lib/period";
 
 // Global dashboard period (default YTD). Drives all period-scoped widgets.
-type DashPeriod = "THIS_MONTH" | "LAST_MONTH" | "THIS_QUARTER" | "YTD" | "CUSTOM";
-const DASH_PERIODS: readonly (readonly [DashPeriod, string])[] = [
+// All (shared definition, lib/period) spans every dated deal, with no Δ.
+type DashPeriod = "THIS_MONTH" | "LAST_MONTH" | "THIS_QUARTER" | "YTD" | typeof ALL_PERIOD | "CUSTOM";
+const DASH_PERIODS: readonly (readonly [DashPeriod, string])[] = withAllPeriod<DashPeriod>([
   ["THIS_MONTH", "This month"], ["LAST_MONTH", "Last month"], ["THIS_QUARTER", "This quarter"], ["YTD", "YTD"], ["CUSTOM", "Custom"],
-];
+]);
 
 const MONTHS_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 /**
  * Display name of the loaded reporting window, from the server's `periodLabel`
- * ("This Month", "Last Month", "This Quarter", "Custom", "YTD"). Calendar math
+ * ("This Month", "Last Month", "This Quarter", "Custom", "All", "YTD"). Calendar math
  * is in UTC, like the server's window. `year` is set when the window sits in
  * one calendar year (chart title suffix).
  */
@@ -44,6 +46,7 @@ function periodDisplay(label: string | undefined, from: string, to: string): { l
       return { long: `${MONTHS_LONG[(mo + 11) % 12]} ${ly}`, year: ly };
     }
     case "This Quarter": return { long: `Q${Math.floor(mo / 3) + 1} ${y}`, year: y };
+    case "All": return { long: ALL_PERIOD_LABEL, year: null };
     case "Custom":
       return {
         long: from && to ? `${fmtDate(from)} – ${fmtDate(to)}` : "Custom range",
@@ -100,11 +103,7 @@ interface DashboardData {
 
 // Compact currency for KPI values, matching the design ($1.28M / $892K / $47.8K).
 function fmtCompact(v: number): string {
-  const a = Math.abs(v);
-  const sign = v < 0 ? "-" : "";
-  if (a >= 1e6) return `${sign}$${(a / 1e6).toFixed(2)}M`;
-  if (a >= 1e3) return `${sign}$${a >= 1e5 ? Math.round(a / 1e3) : (a / 1e3).toFixed(1)}K`;
-  return money(v);
+  return compactMoney(v, { mDigits: 2, kDigits: (a) => (a >= 1e5 ? 0 : 1), trim: false, small: (x) => money(x) });
 }
 
 const pctChange = (cur: number, prev: number): number | null => (prev > 0 ? ((cur - prev) / prev) * 100 : null);
@@ -522,7 +521,7 @@ export function Dashboard() {
             </div>
             <div className="dash-ov-bottom">
               <div className="dash-ov-rows">
-                <div className="dash-ov-row" title="Best (or accepted) offer minus cost basis across active deals with offers — the same series as the Projected bars.">
+                <div className="dash-ov-row" title="Accepted (else best) offer minus cost basis and closing costs across active deals with offers — the same series as the Projected bars.">
                   <span className="dash-ov-row-label">Projected profit</span>
                   <strong>{fmtCompact(m.projectedProfit)}</strong>
                 </div>

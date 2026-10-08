@@ -10,12 +10,13 @@ import { normalizePhone } from "../domain/phone.js";
 import { STALE_CONTACT_DAYS, LIST_LIMIT } from "../config.js";
 import { daysUntil, formatCalendarDay, nextContractExtension } from "../domain/dates.js";
 import { totalFromPerAcre } from "../domain/perAcre.js";
+import { parseRoyaltyRate } from "../domain/royalty.js";
 import { logActivity } from "../services/activityLog.js";
 import { effectiveStatus, ENGAGED_STATUSES, BUYER_STATUSES } from "../domain/buyerStatus.js";
 import { sendEmail, personalize, renderEmailBody } from "../services/email.js";
 import { money as fmtMoney } from "../domain/format.js";
 import { newPortalSlug } from "./portal.js";
-import { ensureStages, activeStageKeys, isOpportunityPipeline } from "../domain/stages.js";
+import { ensureStages, activeStageKeys, isOpportunityPipeline, lockStageRow } from "../domain/stages.js";
 import { applyStageChange, applyStageUndo, signStageUndo, verifyStageUndo, STAGE_UNDO_MAX_TOKEN_BYTES } from "../services/stageUndo.js";
 
 export const dealsRouter = Router();
@@ -56,14 +57,17 @@ const assetFields = {
   bookValue: z.number().nullish(),
   ownershipStatus: z.string().max(10_000).nullish(),
   ownershipType: z.string().max(10_000).nullish(),
-  workingInterest: z.number().nullish(),
-  netRevenueInterest: z.number().nullish(),
+  // Decimal interests (fractions 0–1, e.g. 0.1875) — never percents.
+  workingInterest: z.number().min(0).max(1).nullish(),
+  netRevenueInterest: z.number().min(0).max(1).nullish(),
   surveys: z.array(z.string().max(200)).max(500).optional(),
   wells: z.array(z.string().max(200)).max(500).optional(),
   producingStatus: z.string().max(10_000).nullish(),
   royaltyIncomeAnnual: z.number().nullish(),
   // Current-lease redesign.
   leaseStatuses: z.array(z.string().max(200)).max(500).optional(),
+  // Any form the shared parser reads ("3/16", "18.75%", "0.1875", "18.75");
+  // stored in its canonical form by normalizeRoyaltyRate below.
   royaltyRate: z.string().max(10_000).nullish(),
   leaseEffectiveDate: dateField,
   leaseExpirationDate: dateField,
@@ -98,6 +102,23 @@ const ASSET_SCALAR_KEYS = [
   "leaseStatuses", "royaltyRate",
   "leaseStatus", "leaseInfo", "divisionOrdersNote", "taxInfo",
 ] as const;
+
+/**
+ * A submitted royalty rate through the ONE shared parser (domain/royalty.ts):
+ * blank → null, a valid rate → its canonical stored form ("2/16" → "1/8",
+ * "0.1875" → "18.75%", "3/20" kept), anything else → 400 with the reason.
+ * `stored` is the deal's current value: re-submitting it unchanged is always
+ * accepted, so an old free-text rate never blocks an unrelated save.
+ */
+export function normalizeRoyaltyRate(v: string | null | undefined, stored?: string | null): string | null | undefined {
+  if (v === undefined) return undefined;
+  const t = (v ?? "").trim();
+  if (!t) return null;
+  if (stored != null && t === stored.trim()) return stored;
+  const p = parseRoyaltyRate(t);
+  if (!p.ok) throw new HttpError(400, `Royalty rate: ${p.error}`);
+  return p.canonical;
+}
 
 // --------------------------------------------------------------------------
 // List
@@ -268,6 +289,7 @@ dealsRouter.post(
   requirePermission("createDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = createSchema.parse(req.body);
+    data.royaltyRate = normalizeRoyaltyRate(data.royaltyRate);
     // A manually entered total always wins; otherwise derive it from the
     // per-acre rate × the deal's acreage (so it also satisfies "Our Price").
     data.ourPrice ??= totalFromPerAcre(data.ourCostPerNma, data.acreageNma, data.ourCostPerNra, data.nra);
@@ -1027,6 +1049,7 @@ dealsRouter.patch(
     }
     const existing = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!existing) throw new HttpError(404, "Deal not found");
+    if ("royaltyRate" in data) patch.royaltyRate = normalizeRoyaltyRate(data.royaltyRate, existing.royaltyRate);
     if (data.assigneeIds !== undefined) {
       const ids = await validateOrgUsers(orgId(req), data.assigneeIds);
       patch.assignees = { set: ids.map((id) => ({ id })) };
@@ -1105,17 +1128,26 @@ dealsRouter.post(
     // The move and all of its side effects (unpublish, cleared follow-ups, read
     // notifications, closed date, winning buyer, history) live in applyStageChange,
     // which also returns the "before" snapshot that makes the move undoable.
-    const snapshot = await prisma.$transaction((tx) =>
-      applyStageChange(tx, deal, {
+    // Moves of one deal are serialized (lockStageRow) and act on the row as it
+    // is once the lock is held — a concurrent move (rapid drags, another user)
+    // has committed by then, so history and side effects start from the real
+    // stage instead of the one read above.
+    const snapshot = await prisma.$transaction(async (tx) => {
+      await lockStageRow(tx, "Deal", deal.id);
+      const current = await tx.deal.findFirst({ where: { id: deal.id, organizationId: orgId(req) } });
+      if (!current) throw new HttpError(404, "Deal not found");
+      // A concurrent move already landed it there: nothing to do or undo.
+      if (current.stage === toStage) return null;
+      return applyStageChange(tx, current, {
         toStage,
         deadReason,
         orgId: orgId(req),
         user: { id: req.user!.id, name: req.user!.name },
-      }),
-    );
+      });
+    });
     // Additive: a short-lived signed token for POST /:id/stage/undo (null when
-    // the snapshot is too large to carry).
-    res.json({ ...serializeDeal(await reload(deal.id)), undoToken: signStageUndo(snapshot) });
+    // the snapshot is too large to carry, or the move was a no-op).
+    res.json({ ...serializeDeal(await reload(deal.id)), undoToken: snapshot ? signStageUndo(snapshot) : null });
   }),
 );
 
@@ -1139,7 +1171,10 @@ dealsRouter.post(
     if (!stages.some((s) => s.key === snap.fromStage)) {
       throw new HttpError(409, "This move can no longer be undone — the stage it came from no longer exists.");
     }
-    await prisma.$transaction((tx) => applyStageUndo(tx, snap));
+    await prisma.$transaction(async (tx) => {
+      await lockStageRow(tx, "Deal", deal.id); // never interleave with a move of the same deal
+      await applyStageUndo(tx, snap);
+    });
     res.json(serializeDeal(await reload(deal.id)));
   }),
 );

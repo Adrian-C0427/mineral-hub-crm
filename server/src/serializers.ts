@@ -1,7 +1,8 @@
 import type { Prisma } from "@prisma/client";
 import { resolveDealDates } from "./domain/dates.js";
 import { computePriority, isOverdue } from "./domain/priority.js";
-import { closeRate, netProfit, profitAtAsk } from "./domain/metrics.js";
+import { acquisitionCost, closeRate, dealNetProfit, dealSalePrice, profitAtAsk } from "./domain/metrics.js";
+import { roundMoney, roundTo, sumMoney } from "./domain/money.js";
 
 /** Deal with the relations we need to fully serialize a list/detail row. */
 export type DealWithRels = Prisma.DealGetPayload<{
@@ -38,7 +39,7 @@ export function annualRoyaltyIncome(entries: RevenueRow[], now: Date = new Date(
   const royalty = entries.filter((e) => e.kind === "ROYALTY");
   if (!royalty.length) return null;
   const cutoff = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1));
-  return royalty.filter((e) => e.month >= cutoff).reduce((s, e) => s + e.amount, 0);
+  return sumMoney(royalty.filter((e) => e.month >= cutoff).map((e) => e.amount));
 }
 
 /** The child-asset scalars a package sums into its own displayed figures. */
@@ -74,36 +75,32 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
   // yet). Once an offer is ACCEPTED (the deal's selection, or the offer's own
   // status), IT is the deal's number everywhere — a higher rejected offer must
   // not keep inflating profit on lists, pipeline cards, or dashboards.
-  const acceptedOffer = deal.offers?.find((o) => o.id === deal.selectedOfferId)
-    ?? deal.offers?.find((o) => o.status === "ACCEPTED");
-  const bestOffer = acceptedOffer
-    ? acceptedOffer.amount
-    : deal.offers && deal.offers.length
-      ? deal.offers.reduce((m, o) => (o.amount > m ? o.amount : m), -Infinity)
-      : null;
+  const bestOffer = dealSalePrice(deal.offers, deal.selectedOfferId);
   // Cost basis is Our Price (acquisition cost); fall back to askPrice for
   // pre-Our-Price deals so historical profit stays correct.
-  const costBasis = deal.ourPrice ?? deal.askPrice;
-  const profitEst = bestOffer != null ? netProfit(bestOffer, costBasis, deal.estimatedClosingCosts) : null;
+  const profitEst = bestOffer != null ? dealNetProfit(bestOffer, deal) : null;
   // Profit at asking price = ask − Our Cost − closing costs: what we'd make
   // selling at our current ask (not an offer). The deal's OWN figures, like
   // profitEst — no package roll-up. Null without both prices.
-  const atAsk = profitAtAsk(deal.askPrice, deal.ourPrice, deal.estimatedClosingCosts);
+  const atAsk = profitAtAsk(deal.askPrice, acquisitionCost(deal), deal.estimatedClosingCosts);
 
   // Package roll-up: a deal that groups child assets displays the aggregate of
   // its own value plus its children's. This is display-only — analytics read
   // each deal's own stored value, so the package row equals the sum of the
   // separately-counted children (totals reconcile, nothing double-counts).
   const kids = deal.assets ?? [];
-  const rollUp = (own: number | null, pick: (a: RollupAsset) => number | null): number | null => {
+  // Money sums in whole cents; acreage keeps the 4 places NMA ↔ NRA uses — so a
+  // package total never shows a float tail (0.1 + 0.2 = 0.30000000000000004).
+  const rollUp = (own: number | null, pick: (a: RollupAsset) => number | null, kind: "money" | "acres"): number | null => {
     if (!kids.length) return own;
     const vals = [own, ...kids.map(pick)].filter((v): v is number => v != null);
-    return vals.length ? vals.reduce((s, v) => s + v, 0) : own;
+    if (!vals.length) return own;
+    return kind === "money" ? sumMoney(vals) : roundTo(vals.reduce((s, v) => s + v, 0), 4);
   };
-  const aggNra = rollUp(deal.nra, (a) => a.nra);
-  const aggNma = rollUp(deal.acreageNma, (a) => a.acreageNma);
-  const aggOur = rollUp(deal.ourPrice, (a) => a.ourPrice);
-  const aggAsk = rollUp(deal.askPrice, (a) => a.askPrice);
+  const aggNra = rollUp(deal.nra, (a) => a.nra, "acres");
+  const aggNma = rollUp(deal.acreageNma, (a) => a.acreageNma, "acres");
+  const aggOur = rollUp(deal.ourPrice, (a) => a.ourPrice, "money");
+  const aggAsk = rollUp(deal.askPrice, (a) => a.askPrice, "money");
 
   // Owned-asset economics (null for opportunities / when inputs are missing).
   const roiSinceAcquisition =
@@ -112,7 +109,7 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
       : null;
   const gainBasis = deal.bookValue ?? deal.purchasePrice;
   const unrealizedGainLoss =
-    deal.currentValue != null && gainBasis != null ? deal.currentValue - gainBasis : null;
+    deal.currentValue != null && gainBasis != null ? roundMoney(deal.currentValue - gainBasis) : null;
 
   // Annual Royalty Income is derived from recorded revenue when the entries are
   // loaded (owned-asset list + detail); elsewhere it falls back to the stored value.

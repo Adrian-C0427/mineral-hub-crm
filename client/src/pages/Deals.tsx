@@ -6,7 +6,9 @@ import { royaltyLabel, royaltyValue } from "../lib/royalty";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { NewDealModal } from "../components/NewDealModal";
 import { useRowSelection, BulkActionsBar } from "../components/bulk";
-import { money, num, fmtDate } from "../lib/format";
+import { compactMoney, money, num, fmtDate } from "../lib/format";
+import { perAcreRate } from "../lib/perAcre";
+import { roundTo, sumMoney } from "../lib/money";
 import { dealSearchHaystack } from "../lib/dealSearch";
 import { downloadCsv } from "../lib/csv";
 import { Tabs } from "../components/Tabs";
@@ -21,10 +23,7 @@ const SCOPE_TITLE: Record<Scope, string> = { all: "Deals", active: "Active Deals
 
 /** Compact money for the header stat line — "$93.7K", "$1.2M". */
 function moneyCompact(v: number): string {
-  const a = Math.abs(v);
-  if (a >= 1_000_000) return `$${(v / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
-  if (a >= 1_000) return `$${(v / 1_000).toFixed(1).replace(/\.0$/, "")}K`;
-  return `$${Math.round(v)}`;
+  return compactMoney(v);
 }
 
 const shortName = (name: string): string => {
@@ -40,7 +39,7 @@ const shortName = (name: string): string => {
 function costPerAcre(d: DealSummary, stored: number | null | undefined, acres: number | null | undefined): number | null {
   if (!d.assetCount && stored != null) return stored;
   const cost = d.aggOurPrice ?? d.ourPrice;
-  return cost != null && acres ? Math.round((cost / acres) * 100) / 100 : null;
+  return perAcreRate(cost, acres);
 }
 
 const PROFIT_AT_ASK_HINT = "Ask price − Our cost − closing costs: what we'd make selling at our current asking price. Not an offer.";
@@ -119,8 +118,10 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
   if (!deals) return <Spinner />;
 
   // Totals row: plain sums of what each column shows, over the listed deals.
-  const sumOf = (rows: DealSummary[], pick: (d: DealSummary) => number | null | undefined) => rows.reduce((t, d) => t + (pick(d) ?? 0), 0);
-  const acres = (v: number) => v.toLocaleString("en-US", { maximumFractionDigits: 3 });
+  // (Rounded to 4 places — the finest any summed column carries — so float
+  // tails like 0.30000000000000004 never surface.)
+  const sumOf = (rows: DealSummary[], pick: (d: DealSummary) => number | null | undefined) => roundTo(rows.reduce((t, d) => t + (pick(d) ?? 0), 0), 4);
+  const acres = (v: number) => v.toLocaleString("en-US", { maximumFractionDigits: 4 });
 
   const columns: Column<DealSummary>[] = [
     // The identifying column gets a width floor so names never wrap into a
@@ -190,8 +191,8 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
   // Live header stat line: what's in play and what it's projected to make.
   // Plain sums of the Profit Est. and Our Cost columns over this scope.
   const n = scoped.length;
-  const projected = scoped.reduce((s, d) => s + (d.profitEst ?? 0), 0);
-  const underContract = scoped.reduce((s, d) => s + (d.aggOurPrice ?? d.ourPrice ?? 0), 0);
+  const projected = sumMoney(scoped.map((d) => d.profitEst));
+  const underContract = sumMoney(scoped.map((d) => d.aggOurPrice ?? d.ourPrice));
   const profitStat = (label: string) => projected
     ? <><b className={projected < 0 ? "neg" : "pos"}>{moneyCompact(projected)}</b> {label}</>
     : null;

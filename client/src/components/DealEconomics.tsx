@@ -1,6 +1,9 @@
-import { royaltyValue } from "../lib/royalty";
+import { useEffect, useRef, useState } from "react";
+import { ROYALTY_RATE_OPTIONS, isPresetRoyalty, parseRoyaltyRate, royaltyLabel, royaltyShortLabel, royaltyValue } from "../lib/royalty";
 import { nmaFromNra, nraFromNma } from "../lib/perAcre";
 import { money } from "../lib/format";
+import { roundMoney } from "../lib/money";
+import { Select } from "./Select";
 
 /**
  * Shared pieces of the deal economics form, used by New Deal and the Deal
@@ -51,7 +54,69 @@ export function applyAcreageEdit(s: AcreageState, edit: { nma?: string; nra?: st
 export function AcreageNote({ s, field }: { s: AcreageState; field: "nma" | "nra" }) {
   const driver = field === "nra" ? "nma" : "nra";
   if (s.source !== driver || royaltyValue(s.royaltyRate) == null || !s[field].trim()) return null;
-  return <div className="nd-calc auto">Calculated from {driver.toUpperCase()} at {s.royaltyRate} royalty</div>;
+  return <div className="nd-calc auto">Calculated from {driver.toUpperCase()} at {royaltyShortLabel(s.royaltyRate)} royalty</div>;
+}
+
+// --- Royalty rate ------------------------------------------------------------
+
+const CUSTOM = "__custom__";
+
+/** Inline message for a royalty-rate field ("" = none set, which is valid). */
+export function royaltyRateError(v: string | null | undefined): string | null {
+  if (!(v ?? "").trim()) return null;
+  const p = parseRoyaltyRate(v);
+  return p.ok ? null : p.error;
+}
+
+/**
+ * Royalty Rate: the standard fractions, plus "Other / Custom…" which reveals a
+ * free-form input (18.75%, 0.1875, 3/16, 18.75 …). The value stays a string
+ * ("" = none); the shared parser (lib/royalty.ts) reads it for every
+ * calculation, and the API stores it in canonical form. An unreadable entry
+ * shows an inline message once the user leaves the input.
+ */
+export function RoyaltyRateField({ value, onChange, ariaLabel = "Royalty rate", placeholder = "Select royalty rate…" }: {
+  value: string | null; onChange: (v: string) => void; ariaLabel?: string; placeholder?: string;
+}) {
+  const v = value ?? "";
+  const [custom, setCustom] = useState(() => v.trim() !== "" && !isPresetRoyalty(v));
+  const [typing, setTyping] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const focusInput = useRef(false);
+  // A stored custom value loaded later (discard / refresh) opens the input.
+  useEffect(() => { if (v.trim() !== "" && !isPresetRoyalty(v)) setCustom(true); }, [v]);
+  useEffect(() => { if (custom && focusInput.current) { focusInput.current = false; inputRef.current?.focus(); } }, [custom]);
+  const error = custom && !typing ? royaltyRateError(v) : null;
+  const parsed = custom && v.trim() ? parseRoyaltyRate(v) : null;
+  return (
+    <>
+      <Select
+        value={custom ? CUSTOM : v} clearable placeholder={placeholder} ariaLabel={ariaLabel}
+        options={[...ROYALTY_RATE_OPTIONS.map((o) => ({ value: o, label: royaltyLabel(o) })), { value: CUSTOM, label: "Other / Custom…" }]}
+        onChange={(next) => {
+          if (next === CUSTOM) {
+            focusInput.current = true;
+            setCustom(true);
+            if (isPresetRoyalty(v)) onChange("");
+          } else {
+            setCustom(false);
+            onChange(next);
+          }
+        }}
+      />
+      {custom && (
+        <>
+          <input
+            ref={inputRef} value={v} style={{ marginTop: 6 }}
+            onChange={(e) => onChange(e.target.value)} onFocus={() => setTyping(true)} onBlur={() => setTyping(false)}
+            placeholder="e.g. 18.75%, 0.1875 or 3/16" aria-label={`${ariaLabel} (custom)`} aria-invalid={!!error}
+          />
+          {error ? <div className="error-text" role="alert" style={{ marginTop: 4 }}>{error}</div>
+            : parsed?.ok ? <div className="nd-calc">{royaltyLabel(parsed.canonical)} royalty</div> : null}
+        </>
+      )}
+    </>
+  );
 }
 
 /** Days to Close: preset chips plus any typed number (string, "" = unset). */
@@ -81,7 +146,7 @@ export interface PriceGroup { perNma: string; perNra: string; total: string; sou
 export const emptyPriceGroup = (): PriceGroup => ({ perNma: "", perNra: "", total: "", source: null });
 
 const toNum = (v: string) => (v.trim() === "" || !Number.isFinite(Number(v)) ? null : Number(v));
-const cents = (n: number | null) => (n == null || !Number.isFinite(n) ? "" : String(Math.round(n * 100) / 100));
+const cents = (n: number | null) => (n == null || !Number.isFinite(n) ? "" : String(roundMoney(n)));
 
 /**
  * Recalculate a price group from the figure the user typed, for the current

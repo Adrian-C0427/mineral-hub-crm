@@ -13,11 +13,12 @@ import { Select } from "../components/Select";
 import { GeoFields } from "../components/GeoFields";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { ChartTypeToggle, useChartType } from "../components/ChartTypeToggle";
-import { money, pct, num, fmtDate, fmtDateLocal, prettyStage } from "../lib/format";
+import { compactMoney, money, pct, num, fmtDate, fmtDateLocal, prettyStage } from "../lib/format";
 import { useStages } from "../stages";
 import { CHART_COLORS, COLOR_REVENUE, COLOR_PROFIT, monthLabel, chartTooltip } from "../lib/charts";
 import type { DealSummary } from "../types";
 import { DateField } from "../components/DateField";
+import { ALL_PERIOD, ALL_PERIOD_LABEL, isAllPeriod, withAllPeriod } from "../lib/period";
 
 interface Kpis {
   totalDeals: number; dealsAdded: number; dealsClosed: number; dealsLost: number; winRate: number;
@@ -78,7 +79,7 @@ interface FilterOpts {
   buyers: { id: string; name: string }[]; users: { id: string; name: string }[]; stages: string[];
 }
 
-type Period = "THIS_MONTH" | "LAST_MONTH" | "THIS_QUARTER" | "LAST_QUARTER" | "THIS_YEAR" | "LAST_YEAR" | "CUSTOM";
+type Period = "THIS_MONTH" | "LAST_MONTH" | "THIS_QUARTER" | "LAST_QUARTER" | "THIS_YEAR" | "LAST_YEAR" | typeof ALL_PERIOD | "CUSTOM";
 type Compare = "NONE" | "PREV_PERIOD" | "PREV_YEAR";
 
 const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -94,6 +95,9 @@ function rangeFor(period: Period, custom: { from: string; to: string }): { from:
     case "LAST_QUARTER": { const q = Math.floor(m / 3) * 3 - 3; return { from: iso(new Date(Date.UTC(y, q, 1))), to: iso(new Date(Date.UTC(y, q + 3, 0))) }; }
     case "THIS_YEAR": return { from: iso(new Date(Date.UTC(y, 0, 1))), to: iso(new Date(Date.UTC(y, 11, 31))) };
     case "LAST_YEAR": return { from: iso(new Date(Date.UTC(y - 1, 0, 1))), to: iso(new Date(Date.UTC(y - 1, 11, 31))) };
+    // All carries no dates: the request sends ?period=ALL and the server
+    // reports the span it resolved (data.range).
+    case ALL_PERIOD: return { from: "", to: "" };
     default: return { from: custom.from, to: custom.to };
   }
 }
@@ -181,10 +185,7 @@ const METRIC_FMT: Record<MetricId, (x: Kpis) => string> = {
 
 /** Compact axis money: $950, $1.2K, $14K, $1.3M. */
 function axisMoney(v: number): string {
-  const a = Math.abs(v), s = v < 0 ? "−$" : "$";
-  if (a >= 1_000_000) return `${s}${Number((a / 1_000_000).toFixed(1))}M`;
-  if (a >= 1000) return `${s}${Number((a / 1000).toFixed(a >= 10000 ? 0 : 1))}K`;
-  return `${s}${Math.round(a)}`;
+  return compactMoney(v, { kDigits: (a) => (a >= 10000 ? 0 : 1), minus: "−" });
 }
 const AXIS_TICK = { fontSize: 11, fill: "var(--ink-4)" };
 
@@ -225,7 +226,9 @@ export function Reports() {
   }, [period]);
 
   const range = useMemo(() => rangeFor(period, custom), [period, custom]);
-  const cmp = useMemo(() => compareRange(compare, range.from, range.to), [compare, range.from, range.to]);
+  const allTime = isAllPeriod(period);
+  // Nothing precedes "All", so it never compares.
+  const cmp = useMemo(() => (allTime ? null : compareRange(compare, range.from, range.to)), [allTime, compare, range.from, range.to]);
 
   useEffect(() => {
     api.get<FilterOpts>("/reports/filters").then(setOpts).catch(() => {});
@@ -235,14 +238,15 @@ export function Reports() {
   // so the KPI tiles and their drill-downs always read the same records.
   const query = useMemo(() => {
     const qs = new URLSearchParams();
-    qs.set("from", range.from); qs.set("to", range.to);
+    if (allTime) qs.set("period", ALL_PERIOD);
+    else { qs.set("from", range.from); qs.set("to", range.to); }
     if (cmp) { qs.set("compareFrom", cmp.from); qs.set("compareTo", cmp.to); }
     for (const [key, vals] of Object.entries(filters)) for (const v of vals) qs.append(key, v);
     return qs.toString();
-  }, [range.from, range.to, cmp?.from, cmp?.to, filters]);
+  }, [allTime, range.from, range.to, cmp?.from, cmp?.to, filters]);
 
   useEffect(() => {
-    if (!range.from || !range.to) return;
+    if (!allTime && (!range.from || !range.to)) return;
     setLoading(true);
     // Debounced: rapid filter clicks (each multi-select pick fires this
     // effect) coalesce into one analytics request instead of a burst.
@@ -250,7 +254,7 @@ export function Reports() {
       api.get<Analytics>(`/reports/analytics?${query}`).then(setData).finally(() => setLoading(false));
     }, 300);
     return () => window.clearTimeout(t);
-  }, [query, range.from, range.to]);
+  }, [query, allTime, range.from, range.to]);
   // Cost per Deal / ROI drill-down (which section opens first).
   const [finDrill, setFinDrill] = useState<"cost" | "roi" | null>(null);
 
@@ -269,10 +273,10 @@ export function Reports() {
     setDrill({ title, rows: dealsRef.current.filter(pred) });
   }
 
-  const CHIPS: [Period, string][] = [
+  const CHIPS: [Period, string][] = withAllPeriod<Period>([
     ["THIS_MONTH", "This month"], ["LAST_MONTH", "Last month"], ["THIS_QUARTER", "This quarter"],
     ["LAST_QUARTER", "Last quarter"], ["THIS_YEAR", "This year"], ["LAST_YEAR", "Last year"], ["CUSTOM", "Custom"],
-  ];
+  ]);
 
   const k = data?.kpis;
 
@@ -283,7 +287,9 @@ export function Reports() {
   }): StatCell {
     const hasDelta = o.d !== undefined && o.d !== null;
     const up = hasDelta && (o.d as number) > 0;
-    const flat = hasDelta && (o.d as number) === 0;
+    // Flat = shows as 0.0% (pct() is to one decimal), so a sub-0.05% move
+    // never reads as a colored "+0%".
+    const flat = hasDelta && Math.abs(o.d as number) < 0.0005;
     // "good" = improvement. For inverted metrics (expenses, losses) up is bad.
     const good = flat ? null : o.invert ? !up : up;
     const text = METRIC_FMT[id](k!);
@@ -312,7 +318,9 @@ export function Reports() {
         <div>
           <h1>Reports &amp; analytics</h1>
           <div className="page-sub">
-            Business performance · {fmtDate(range.from)} – {fmtDate(range.to)} · Generated {fmtDate(new Date())}
+            Business performance · {allTime
+              ? <>{ALL_PERIOD_LABEL}{data && <> ({fmtDate(data.range.from)} – {fmtDate(data.range.to)})</>}</>
+              : <>{fmtDate(range.from)} – {fmtDate(range.to)}</>} · Generated {fmtDate(new Date())}
           </div>
         </div>
         <div className="reports-toolbar">
@@ -345,13 +353,13 @@ export function Reports() {
           <div className="filters-head">
             <h3>Filters</h3>
             <div className="row" style={{ gap: 12 }}>
-              {compare !== "NONE" && <span className="muted">Comparison on</span>}
+              {compare !== "NONE" && !allTime && <span className="muted">Comparison on</span>}
               <button className="link-btn rp-clear" disabled={activeFilterChips.length === 0} onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>
             </div>
           </div>
           <div className="filters-grid">
-            <div className="field"><label>Compare to</label>
-              <Select value={compare} onChange={(v) => setCompare(v as Compare)} ariaLabel="Compare to"
+            <div className="field" title={allTime ? "No comparison for All — there is no earlier period" : undefined}><label>Compare to</label>
+              <Select value={allTime ? "NONE" : compare} onChange={(v) => setCompare(v as Compare)} ariaLabel="Compare to" disabled={allTime}
                 options={[
                   { value: "NONE", label: "No comparison" },
                   { value: "PREV_PERIOD", label: "Previous period" },
@@ -836,10 +844,10 @@ function FinancialsDrill({ query, focus, onClose, onOpenDeal, onOpenExpenses }: 
             </div>
           </div>
           <div className="fin-recon" aria-label="Net profit reconciliation">
-            <span>Revenue (Gross Fees) <b>{money(t.revenue)}</b></span>
-            <span>− Closing Costs <b>{money(t.closingCosts)}</b></span>
+            <span>Revenue (Gross Fees) <b>{money(t.revenue, { cents: true })}</b></span>
+            <span>− Closing Costs <b>{money(t.closingCosts, { cents: true })}</b></span>
             <span>− Expenses <b>{money(t.expenses, { cents: true })}</b></span>
-            <span>= Net Profit <b className={t.netProfit < 0 ? "profit-neg" : "profit-pos"}>{money(t.netProfit)}</b></span>
+            <span>= Net Profit <b className={t.netProfit < 0 ? "profit-neg" : "profit-pos"}>{money(t.netProfit, { cents: true })}</b></span>
           </div>
           <p className="muted fin-note">
             Realized results only: deals closed in this period and expenses dated in it. Open deals, projected profit and forecasts are excluded.

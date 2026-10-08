@@ -19,7 +19,7 @@ import { useAbstractLabels } from "../components/AbstractPicker";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
-import { money, num, fmtDate, toInputDate, prettyEnum } from "../lib/format";
+import { money, num, acres, fmtDate, toInputDate, prettyEnum } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { SellerDetails } from "../components/SellerDetails";
 import { DealPortalPanel } from "../components/DealPortalPanel";
@@ -30,11 +30,11 @@ import { NewDealModal } from "../components/NewDealModal";
 import { MoneyInput } from "../components/MoneyInput";
 import { MarketingFunnel } from "../components/MarketingFunnel";
 import { DateField } from "../components/DateField";
-import { royaltyLabel, royaltyOptions } from "../lib/royalty";
-import { Select } from "../components/Select";
+import { royaltyLabel } from "../lib/royalty";
+import { perAcreRate } from "../lib/perAcre";
 import { OperatorSelect } from "../components/OperatorSelect";
 import {
-  addDaysIso, applyAcreageEdit, AcreageNote, DaysToCloseField, editPriceGroup, priceGroupFromStored, PriceNote, syncPriceGroup,
+  addDaysIso, applyAcreageEdit, AcreageNote, DaysToCloseField, editPriceGroup, priceGroupFromStored, PriceNote, RoyaltyRateField, royaltyRateError, syncPriceGroup,
   type AcreageState, type PriceField, type PriceGroup,
 } from "../components/DealEconomics";
 // MapLibre is heavy; only load it when a deal detail page is viewed.
@@ -128,18 +128,20 @@ export function DealDetail() {
   const backFallback = deal.stage === "CLOSED" ? "/deals/closed" : deal.stage === "DEAD" ? "/deals/archived" : "/deals/active";
 
   // Summary strip — the deal's own stored figures (the per-acre prices are the
-  // saved per-NMA / per-NRA values; per NRA falls back to the total ÷ NRA the
-  // page has always shown). Implied margin keeps the existing formula.
+  // saved per-NMA / per-NRA values, else the total ÷ that acreage to the cent,
+  // the same fallback as the Deals table). Implied margin keeps the existing formula.
   const perAcreSub = (perNma: number | null | undefined, perNra: number | null | undefined) =>
     perNma == null && perNra == null ? undefined
       : `${money(perNma, { cents: true })} / NMA · ${money(perNra, { cents: true })} / NRA`;
-  const ourPerNra = deal.ourCostPerNra ?? (deal.ourPrice != null && deal.nra ? Math.round(deal.ourPrice / deal.nra) : null);
-  const askPerNra = deal.askPricePerNra ?? (deal.askPrice != null && deal.nra ? Math.round(deal.askPrice / deal.nra) : null);
+  const ourPerNma = deal.ourCostPerNma ?? perAcreRate(deal.ourPrice, deal.acreageNma);
+  const ourPerNra = deal.ourCostPerNra ?? perAcreRate(deal.ourPrice, deal.nra);
+  const askPerNma = deal.askPricePerNma ?? perAcreRate(deal.askPrice, deal.acreageNma);
+  const askPerNra = deal.askPricePerNra ?? perAcreRate(deal.askPrice, deal.nra);
   const hasMargin = deal.askPrice != null && deal.ourPrice != null && deal.ourPrice > 0;
   const royalty = royaltyLabel(deal.royaltyRate);
   const summary: StatCell[] = [
-    { label: "Our cost", value: money(deal.ourPrice), sub: perAcreSub(deal.ourCostPerNma, ourPerNra) },
-    { label: "Asking price", value: money(deal.askPrice), sub: perAcreSub(deal.askPricePerNma, askPerNra) },
+    { label: "Our cost", value: money(deal.ourPrice), sub: perAcreSub(ourPerNma, ourPerNra) },
+    { label: "Asking price", value: money(deal.askPrice), sub: perAcreSub(askPerNma, askPerNra) },
     {
       label: "Implied margin",
       value: hasMargin ? `${deal.askPrice! >= deal.ourPrice! ? "+" : ""}${Math.round(((deal.askPrice! - deal.ourPrice!) / deal.ourPrice!) * 100)}%` : "—",
@@ -148,8 +150,8 @@ export function DealDetail() {
     },
     {
       label: "Interest",
-      value: deal.nra != null ? `${num(deal.nra)} NRA` : "—",
-      sub: [deal.acreageNma != null ? `${num(deal.acreageNma)} NMA` : null, royalty ? `${royalty} royalty` : null].filter(Boolean).join(" · ") || undefined,
+      value: deal.nra != null ? `${acres(deal.nra)} NRA` : "—",
+      sub: [deal.acreageNma != null ? `${acres(deal.acreageNma)} NMA` : null, royalty ? `${royalty} royalty` : null].filter(Boolean).join(" · ") || undefined,
     },
     { label: "Extended closing", value: deal.finalClosingDate ? relDays(deal.finalClosingDate) : "—", sub: deal.finalClosingDate ? fmtDate(deal.finalClosingDate) : "Not set" },
   ];
@@ -269,14 +271,14 @@ export function DealDetail() {
       {/* Marketing funnel — the single buyer-marketing summary (contacted →
           interested → offers → highest offer → estimated profit), shared with
           the Mineral Assets Sell tab; cost basis for a deal is our price. */}
-      <MarketingFunnel metrics={deal.metrics} matchCount={matches?.length ?? 0} askPrice={deal.askPrice} costBasis={deal.ourPrice} />
+      <MarketingFunnel metrics={deal.metrics} matchCount={matches?.length ?? 0} askPrice={deal.askPrice} costBasis={deal.ourPrice} closingCosts={deal.estimatedClosingCosts} profit={deal.profitEst} />
 
       {deal.selectedBuyer && (
         <div className="dd-selected-banner">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true"><path d="M20 6L9 17l-5-5" /></svg>
           <span><b>Selected buyer:</b> <Link to={`/buyers/${deal.selectedBuyer.id}`} className="subtle-link">{deal.selectedBuyer.name}</Link>
             {deal.selectedBuyer.companyName && deal.selectedBuyer.companyName !== deal.selectedBuyer.name && <span className="muted"> · {deal.selectedBuyer.companyName}</span>}</span>
-          <span className="dd-selected-right"><b>Profit est:</b> <b className="pos">{money(deal.profitEst)}</b></span>
+          <span className="dd-selected-right"><b>Profit est:</b> <b className={(deal.profitEst ?? 0) < 0 ? "neg" : "pos"}>{money(deal.profitEst)}</b></span>
         </div>
       )}
 
@@ -678,6 +680,8 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
     ? addDaysIso(contractIso, t.daysToClose) : null;
 
   async function save() {
+    // An unreadable custom royalty rate already shows its inline message.
+    if (royaltyRateError(econ.royaltyRate)) return;
     await api.patch(`/deals/${deal.id}`, {
       states: f.states, counties: f.counties, basins: f.basins, formations: f.formations,
       assetTypes: f.assetTypes, abstractIds: f.abstractIds, operator: f.operator || null, rrc: f.rrc,
@@ -716,8 +720,8 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
       rows: [
         { k: "Asset type", v: list(deal.assetTypes.map((t) => ASSET_TYPE_LABELS[t] ?? t)) },
         { k: "Royalty rate", v: royaltyLabel(deal.royaltyRate) || null },
-        { k: "NMA", v: deal.acreageNma != null ? num(deal.acreageNma) : null },
-        { k: "NRA", v: deal.nra != null ? num(deal.nra) : null },
+        { k: "NMA", v: deal.acreageNma != null ? acres(deal.acreageNma) : null },
+        { k: "NRA", v: deal.nra != null ? acres(deal.nra) : null },
         { k: "Est. closing costs", v: deal.estimatedClosingCosts != null ? money(deal.estimatedClosingCosts) : null },
         { k: "Days to close", v: deal.daysToClose != null ? `${deal.daysToClose} days` : null },
       ],
@@ -769,8 +773,7 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
         <div className="modal-sec">Economics <span className="modal-sec-hint">· with a royalty rate, NMA and NRA calculate each other; enter any one of a price's total, per NMA or per NRA</span></div>
         <div className="dd-grid">
           <Fld l="Royalty rate">
-            <Select value={econ.royaltyRate} onChange={(v) => editAcreage({ royaltyRate: v })} options={royaltyOptions(econ.royaltyRate || null)}
-              clearable placeholder="Select royalty rate…" ariaLabel="Royalty rate" />
+            <RoyaltyRateField value={econ.royaltyRate} onChange={(v) => editAcreage({ royaltyRate: v })} />
           </Fld>
           <Fld l="NMA"><input type="number" value={econ.nma} onChange={(e) => editAcreage({ nma: e.target.value })} aria-label="NMA" /><AcreageNote s={econ} field="nma" /></Fld>
           <Fld l="NRA"><input type="number" value={econ.nra} onChange={(e) => editAcreage({ nra: e.target.value })} aria-label="NRA" /><AcreageNote s={econ} field="nra" /></Fld>
