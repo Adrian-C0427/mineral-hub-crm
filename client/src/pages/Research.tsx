@@ -23,7 +23,8 @@ import { downloadCsv } from "../lib/csv";
 import { fmtDate, num, prettyEnum, prettyDocType } from "../lib/format";
 import { CHART_COLORS, chartTooltip } from "../lib/charts";
 import { DateField } from "../components/DateField";
-import { ChainSection, ClassBadge, PartyColumn, type ChainEntry, type RelParty } from "../components/relationshipViews";
+import { ClassBadge, PartyColumn, type RelParty } from "../components/relationshipViews";
+import { AcquisitionChains, type ChainEntry, type ChainHop, type ChainNode } from "../components/AcquisitionChain";
 
 /**
  * Research & Market Intelligence — trends in mineral transactions, leasing
@@ -231,8 +232,6 @@ interface CoBuyerRow {
   sharedAcquisitions?: number;
   firstDate?: string | null; lastDate?: string | null;
 }
-interface ChainNode { norm: string; name: string; klass: string }
-interface ChainHop { fromNorm: string; from: string; toNorm: string; to: string; count: number }
 interface ChainRow {
   path: string; feeders: string[]; midTier: string[]; terminus: string | null;
   length: number; strength: number; totalCount: number; counties: string[];
@@ -1314,7 +1313,7 @@ function relRowsToParties(rows: RelRow[], nameOf: (r: RelRow) => { norm: string;
     .sort((a, b) => b.count - a.count);
 }
 
-/** Adapt chain table rows to the shared ChainSection's entry shape. */
+/** Adapt chain table rows to the shared AcquisitionChains entry shape. */
 function chainRowsToEntries(rows: ChainRow[], focusNorm: string): ChainEntry[] {
   return rows.map((c) => {
     const idx = focusNorm ? c.nodes.findIndex((n) => n.norm === focusNorm) : -1;
@@ -1572,7 +1571,7 @@ function RelationshipsTab({ qs, onDrill, dataset }: { qs: string; onDrill: (patc
           </div>
           {chains.length === 0 ? <p className="rs-empty">No multi-hop acquisition paths {q ? `match “${q}”` : "detected in this period"}.</p> : (
             <div className="rs-chains">
-              <ChainSection
+              <AcquisitionChains
                 chains={chainRowsToEntries(chains, "")}
                 classLabels={data.classLabels}
                 focusNorm=""
@@ -1769,11 +1768,12 @@ function EntityModal({ norm, data, onClose, onOpenEntity, onViewTx }: {
         <div className="rs-dossier-sec">
           <div className="rs-dossier-sec-head">Appears in chains <span className="relv-count">{chains.length}</span></div>
           {chains.length === 0 ? <div className="rs-dashed-empty">Not part of any multi-hop chain in this period.</div> : (
-            /* The same compact ChainSection used on Buyer Profiles — collapsed
-               summary rows that expand on demand, with the standard chain
-               actions (supporting transactions + date range) for full parity
-               with the Chains view. */
-            <ChainSection
+            /* The same shared AcquisitionChains used on Buyer Profiles —
+               collapsed summary rows that expand on demand, with the standard
+               chain actions (supporting transactions + date range) for full
+               parity with the Chains view. Framed: the modal has no card. */
+            <AcquisitionChains
+              framed
               chains={chainRowsToEntries(chains, norm)}
               classLabels={data.classLabels}
               focusNorm={norm}

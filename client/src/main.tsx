@@ -19,6 +19,7 @@ import "./styles/pipeline.css";
 import "./styles/buyers-contacts.css";
 import "./styles/map-assets.css";
 import "./styles/research.css";
+import "./styles/acquisition-chain.css";
 import "./styles/analysis-finance.css";
 import "./styles/portal-public.css";
 // Phone-only overrides (every rule is inside a phone media query) — after styles.css so they win.

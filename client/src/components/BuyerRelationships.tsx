@@ -5,7 +5,8 @@ import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { ConfirmDialog, Modal, Spinner, showToast } from "./ui";
 import { CollapsibleSection } from "./CollapsibleSection";
-import { ChainSection, ClassBadge, PartyColumn, RelStat, type ChainEntry, type RelParty } from "./relationshipViews";
+import { ClassBadge, PartyColumn, RelStat, type RelParty } from "./relationshipViews";
+import { AcquisitionChains, type ChainEntry } from "./AcquisitionChain";
 
 /**
  * Buyer Profile → Relationships section.
@@ -217,7 +218,7 @@ export function BuyerRelationships({ buyerId, onNetwork }: {
           sub={`${net.chains.length} path${net.chains.length === 1 ? "" : "s"} through the transaction network, strongest first`}
           defaultOpen
         >
-          <ChainSection chains={net.chains} classLabels={net.classLabels} focusNorm={net.norm} />
+          <AcquisitionChains chains={net.chains} classLabels={net.classLabels} focusNorm={net.norm} />
         </CollapsibleSection>
       </div>
     )}
