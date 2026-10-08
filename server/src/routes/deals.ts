@@ -10,6 +10,7 @@ import { normalizePhone } from "../domain/phone.js";
 import { STALE_CONTACT_DAYS, LIST_LIMIT } from "../config.js";
 import { daysUntil, formatCalendarDay, nextContractExtension } from "../domain/dates.js";
 import { totalFromPerAcre } from "../domain/perAcre.js";
+import { parseRoyaltyRate } from "../domain/royalty.js";
 import { logActivity } from "../services/activityLog.js";
 import { effectiveStatus, ENGAGED_STATUSES, BUYER_STATUSES } from "../domain/buyerStatus.js";
 import { sendEmail, personalize, renderEmailBody } from "../services/email.js";
@@ -56,14 +57,17 @@ const assetFields = {
   bookValue: z.number().nullish(),
   ownershipStatus: z.string().max(10_000).nullish(),
   ownershipType: z.string().max(10_000).nullish(),
-  workingInterest: z.number().nullish(),
-  netRevenueInterest: z.number().nullish(),
+  // Decimal interests (fractions 0–1, e.g. 0.1875) — never percents.
+  workingInterest: z.number().min(0).max(1).nullish(),
+  netRevenueInterest: z.number().min(0).max(1).nullish(),
   surveys: z.array(z.string().max(200)).max(500).optional(),
   wells: z.array(z.string().max(200)).max(500).optional(),
   producingStatus: z.string().max(10_000).nullish(),
   royaltyIncomeAnnual: z.number().nullish(),
   // Current-lease redesign.
   leaseStatuses: z.array(z.string().max(200)).max(500).optional(),
+  // Any form the shared parser reads ("3/16", "18.75%", "0.1875", "18.75");
+  // stored in its canonical form by normalizeRoyaltyRate below.
   royaltyRate: z.string().max(10_000).nullish(),
   leaseEffectiveDate: dateField,
   leaseExpirationDate: dateField,
@@ -98,6 +102,23 @@ const ASSET_SCALAR_KEYS = [
   "leaseStatuses", "royaltyRate",
   "leaseStatus", "leaseInfo", "divisionOrdersNote", "taxInfo",
 ] as const;
+
+/**
+ * A submitted royalty rate through the ONE shared parser (domain/royalty.ts):
+ * blank → null, a valid rate → its canonical stored form ("2/16" → "1/8",
+ * "0.1875" → "18.75%", "3/20" kept), anything else → 400 with the reason.
+ * `stored` is the deal's current value: re-submitting it unchanged is always
+ * accepted, so an old free-text rate never blocks an unrelated save.
+ */
+export function normalizeRoyaltyRate(v: string | null | undefined, stored?: string | null): string | null | undefined {
+  if (v === undefined) return undefined;
+  const t = (v ?? "").trim();
+  if (!t) return null;
+  if (stored != null && t === stored.trim()) return stored;
+  const p = parseRoyaltyRate(t);
+  if (!p.ok) throw new HttpError(400, `Royalty rate: ${p.error}`);
+  return p.canonical;
+}
 
 // --------------------------------------------------------------------------
 // List
@@ -268,6 +289,7 @@ dealsRouter.post(
   requirePermission("createDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = createSchema.parse(req.body);
+    data.royaltyRate = normalizeRoyaltyRate(data.royaltyRate);
     // A manually entered total always wins; otherwise derive it from the
     // per-acre rate × the deal's acreage (so it also satisfies "Our Price").
     data.ourPrice ??= totalFromPerAcre(data.ourCostPerNma, data.acreageNma, data.ourCostPerNra, data.nra);
@@ -1027,6 +1049,7 @@ dealsRouter.patch(
     }
     const existing = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!existing) throw new HttpError(404, "Deal not found");
+    if ("royaltyRate" in data) patch.royaltyRate = normalizeRoyaltyRate(data.royaltyRate, existing.royaltyRate);
     if (data.assigneeIds !== undefined) {
       const ids = await validateOrgUsers(orgId(req), data.assigneeIds);
       patch.assignees = { set: ids.map((id) => ({ id })) };

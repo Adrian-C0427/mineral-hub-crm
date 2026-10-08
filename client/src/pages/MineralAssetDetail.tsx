@@ -21,14 +21,21 @@ import { GeoFields } from "../components/GeoFields";
 import { useAbstractLabels, useAbstractIndex, abstractEntryShortLabel, SurveyMultiPicker } from "../components/AbstractPicker";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
 import { monthLabel, chartTooltip } from "../lib/charts";
-import { money, num, fmtDate, toInputDate, prettyEnum } from "../lib/format";
+import { money, num, acres, interestPct, fmtDate, toInputDate, prettyEnum } from "../lib/format";
 import { OWNERSHIP_TYPES, OWNERSHIP_STATUSES, PRODUCING_STATUSES } from "./MineralAssets";
 import type { BuyerActivityRow, DealSummary, MatchRec, RevenueEntry, Seller, UserLite } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
 import { MarketingFunnel } from "../components/MarketingFunnel";
 import { useUnsavedSection } from "../lib/unsaved";
 import { DateField } from "../components/DateField";
-import { ROYALTY_RATE_OPTIONS, royaltyLabel } from "../lib/royalty";
+import { royaltyLabel } from "../lib/royalty";
+import { roundMoney, sumMoney } from "../lib/money";
+import { RoyaltyRateField, royaltyRateError } from "../components/DealEconomics";
+
+/** Calendar months from one "YYYY-MM" to another, inclusive. */
+const monthSpan = (a: string, b: string) =>
+  (Number(b.slice(0, 4)) - Number(a.slice(0, 4))) * 12 + Number(b.slice(5, 7)) - Number(a.slice(5, 7)) + 1;
+
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
 
 // Mineral-asset document categories (module-specific; the shared DocumentsSection
@@ -212,27 +219,6 @@ function Fld({ l, children }: { l: string; children: React.ReactNode }) {
   return <div className="field" style={{ marginBottom: 0 }}><label>{l}</label>{children}</div>;
 }
 
-// Royalty rate = a common fraction from the preset list, or a custom value via
-// "Other". Stored as a plain string ("1/8", "3/16", or whatever's typed).
-function RoyaltyRateField({ value, onChange }: { value: string | null; onChange: (v: string | null) => void }) {
-  const preset = value != null && value !== "" && (ROYALTY_RATE_OPTIONS as readonly string[]).includes(value);
-  const [other, setOther] = useState<boolean>(value != null && value !== "" && !preset);
-  const selectValue = other ? "__other__" : preset ? value! : "";
-  return (
-    <>
-      <Select
-        value={selectValue} clearable placeholder="—" ariaLabel="Royalty rate"
-        options={[...ROYALTY_RATE_OPTIONS.map((o) => ({ value: o, label: royaltyLabel(o) })), { value: "__other__", label: "Other (custom)" }]}
-        onChange={(v) => {
-          if (v === "__other__") { setOther(true); onChange(value && !preset ? value : ""); }
-          else { setOther(false); onChange(v === "" ? null : v); }
-        }}
-      />
-      {other && <input style={{ marginTop: 6 }} value={value ?? ""} onChange={(e) => onChange(e.target.value)} placeholder="e.g. 1/3, 0.1875" />}
-    </>
-  );
-}
-
 function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit: boolean; onSaved: () => void }) {
   const [edit, setEdit] = useState(false);
   const [f, setF] = useState(asset);
@@ -260,9 +246,9 @@ function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdi
           <KV k="Purchase Price" v={money(asset.purchasePrice)} />
           <KV k="Current Value" v={money(asset.currentValue)} />
           <KV k="RRC" v={asset.rrc} />
-          <KV k="NMA" v={num(asset.acreageNma)} />
-          <KV k="NRA" v={num(asset.nra)} />
-          <KV k="Net Revenue Interest" v={asset.netRevenueInterest != null ? `${(asset.netRevenueInterest * 100).toFixed(2)}%` : "—"} />
+          <KV k="NMA" v={acres(asset.acreageNma)} />
+          <KV k="NRA" v={acres(asset.nra)} />
+          <KV k="Net Revenue Interest" v={asset.netRevenueInterest != null ? interestPct(asset.netRevenueInterest) : "—"} />
         </div>
       ) : (
         <div className="dd-grid">
@@ -274,7 +260,7 @@ function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdi
           <Fld l="RRC"><input value={f.rrc ?? ""} onChange={(e) => setF({ ...f, rrc: e.target.value })} placeholder="RRC Number" /></Fld>
           <Fld l="NMA"><input type="number" value={f.acreageNma ?? ""} onChange={(e) => setF({ ...f, acreageNma: numOrNull(e.target.value) })} /></Fld>
           <Fld l="NRA"><input type="number" value={f.nra ?? ""} onChange={(e) => setF({ ...f, nra: numOrNull(e.target.value) })} /></Fld>
-          <Fld l="Net Revenue Interest"><input type="number" step="0.01" value={f.netRevenueInterest ?? ""} onChange={(e) => setF({ ...f, netRevenueInterest: numOrNull(e.target.value) })} /></Fld>
+          <Fld l="Net Revenue Interest"><input type="number" step="any" min={0} max={1} value={f.netRevenueInterest ?? ""} onChange={(e) => setF({ ...f, netRevenueInterest: numOrNull(e.target.value) })} placeholder="Decimal, e.g. 0.1875" title="Decimal interest between 0 and 1 (0.1875 = 18.75%)" /></Fld>
         </div>
       )}
     </EditCard>
@@ -346,26 +332,31 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
     () => (asset.revenueEntries ?? []).map((r) => ({ month: r.month.slice(0, 7), amount: r.amount, kind: r.kind })),
     [asset.revenueEntries],
   );
-  const totalRevenue = useMemo(() => (asset.revenueEntries ?? []).reduce((s, r) => s + r.amount, 0), [asset.revenueEntries]);
+  const totalRevenue = useMemo(() => sumMoney((asset.revenueEntries ?? []).map((r) => r.amount)), [asset.revenueEntries]);
   // Derived revenue insights — all straight arithmetic on the booked entries.
   const rev = useMemo(() => {
     const entries = [...(asset.revenueEntries ?? [])].sort((a, b) => a.month.localeCompare(b.month));
     const byMonth = new Map<string, number>();
     for (const r of entries) byMonth.set(r.month.slice(0, 7), (byMonth.get(r.month.slice(0, 7)) ?? 0) + r.amount);
     const months = [...byMonth.entries()];
-    const avg = months.length ? totalRevenue / months.length : 0;
+    // Average over every calendar month from the first booked month to the
+    // last — a month with no entry is a $0 month, not a month left out.
+    const span = months.length ? monthSpan(months[0][0], months[months.length - 1][0]) : 0;
+    const avg = span ? roundMoney(totalRevenue / span) : 0;
     const best = months.reduce<[string, number] | null>((m, x) => (m == null || x[1] > m[1] ? x : m), null);
     const last = months[months.length - 1] ?? null;
     const prior = months[months.length - 2] ?? null;
     const mom = last && prior && prior[1] > 0 ? Math.round(((last[1] - prior[1]) / prior[1]) * 100) : null;
-    return { months: months.length, avg, best, last, prior, mom };
+    return { months: span, avg, best, last, prior, mom };
   }, [asset.revenueEntries, totalRevenue]);
   const hasLease = (asset.leaseStatuses?.length ?? 0) > 0 || !!asset.royaltyRate || !!asset.leaseEffectiveDate || !!asset.leaseExpirationDate;
 
   async function saveFinancials() {
+    // An unreadable custom royalty rate already shows its inline message.
+    if (royaltyRateError(f.royaltyRate)) return;
     await api.patch(`/deals/${asset.id}`, {
       leaseStatuses: f.leaseStatuses ?? [],
-      royaltyRate: f.royaltyRate,
+      royaltyRate: f.royaltyRate || null,
       leaseEffectiveDate: f.leaseEffectiveDate || null,
       leaseExpirationDate: f.leaseExpirationDate || null,
     });
@@ -642,7 +633,10 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
       {(() => {
         const perNra = (p: number | null) => (p != null && asset.nra ? Math.round(p / asset.nra) : null);
         const ask = asset.askPrice;
-        const proceeds = ask != null ? Math.round(ask * 0.97) - (asset.purchasePrice ?? 0) : null;
+        // Net proceeds at our ask: ask − closing costs − basis. The asset's own
+        // Est. Closing Costs when entered, else the ~3% rule of thumb.
+        const closing = ask != null ? (asset.estimatedClosingCosts ?? roundMoney(ask * 0.03)) : null;
+        const proceeds = ask != null ? roundMoney(ask - closing! - (asset.purchasePrice ?? 0)) : null;
         // Pricing scenarios anchored to the asset's own current value —
         // Conservative / Market / Aggressive (0.9× / 1× / 1.18×).
         const chips = asset.currentValue
@@ -732,12 +726,12 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
                   <div>
                     <div className="ddx-label">$ / NRA</div>
                     <div className={`pi-v ${askNra == null ? "dim" : ""}`}>{askNra != null ? money(askNra) : "—"}</div>
-                    {asset.nra ? <div className="pi-note">across {num(asset.nra)} net royalty acres</div> : null}
+                    {asset.nra ? <div className="pi-note">across {acres(asset.nra)} net royalty acres</div> : null}
                   </div>
                   <div className="pi-right">
                     <div className="ddx-label">Est. Net Proceeds</div>
-                    <div className={`pi-v ${proceeds == null ? "dim" : "pos"}`}>{proceeds != null ? money(proceeds) : "—"}</div>
-                    <div className="pi-note">after ~3% closing{asset.purchasePrice != null ? ` · ${money(asset.purchasePrice)} basis` : " · no basis set"}</div>
+                    <div className={`pi-v ${proceeds == null ? "dim" : proceeds < 0 ? "neg" : "pos"}`}>{proceeds != null ? money(proceeds) : "—"}</div>
+                    <div className="pi-note">{asset.estimatedClosingCosts != null ? `after ${money(asset.estimatedClosingCosts)} closing` : "after ~3% closing"}{asset.purchasePrice != null ? ` · ${money(asset.purchasePrice)} basis` : " · no basis set"}</div>
                   </div>
                 </div>
                 {chips.length > 0 && lo != null && hi != null && (
@@ -775,7 +769,7 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
 
       {/* Marketing funnel (shared with the Deal Profile Buyers tab):
           Contacted → Interested → Offers → Highest Offer. */}
-      <MarketingFunnel metrics={asset.metrics} matchCount={matches?.length ?? 0} askPrice={asset.askPrice} costBasis={asset.purchasePrice} />
+      <MarketingFunnel metrics={asset.metrics} matchCount={matches?.length ?? 0} askPrice={asset.askPrice} costBasis={asset.purchasePrice} closingCosts={asset.estimatedClosingCosts} profit={asset.profitEst} />
 
       {asset.offers.length > 0 && (
         <section className="panel ad-card ad-offers">

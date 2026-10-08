@@ -198,6 +198,7 @@
 .deal-detail .dd-selected-banner span { color: var(--ink-1); }
 .deal-detail .dd-selected-banner b { font-weight: 600; color: var(--ink); }
 .deal-detail .dd-selected-banner .pos { color: var(--success-ink); }
+.deal-detail .dd-selected-banner .neg { color: var(--danger); }
 .deal-detail .dd-selected-banner .subtle-link { font-weight: 600; }
 
 .deal-detail .dd-offers .table-scroll { border: 0; border-radius: 0; background: transparent; }

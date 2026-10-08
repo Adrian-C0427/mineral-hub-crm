@@ -13,7 +13,7 @@ import { Select } from "../components/Select";
 import { GeoFields } from "../components/GeoFields";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { ChartTypeToggle, useChartType } from "../components/ChartTypeToggle";
-import { money, pct, num, fmtDate, fmtDateLocal, prettyStage } from "../lib/format";
+import { compactMoney, money, pct, num, fmtDate, fmtDateLocal, prettyStage } from "../lib/format";
 import { useStages } from "../stages";
 import { CHART_COLORS, COLOR_REVENUE, COLOR_PROFIT, monthLabel, chartTooltip } from "../lib/charts";
 import type { DealSummary } from "../types";
@@ -181,10 +181,7 @@ const METRIC_FMT: Record<MetricId, (x: Kpis) => string> = {
 
 /** Compact axis money: $950, $1.2K, $14K, $1.3M. */
 function axisMoney(v: number): string {
-  const a = Math.abs(v), s = v < 0 ? "−$" : "$";
-  if (a >= 1_000_000) return `${s}${Number((a / 1_000_000).toFixed(1))}M`;
-  if (a >= 1000) return `${s}${Number((a / 1000).toFixed(a >= 10000 ? 0 : 1))}K`;
-  return `${s}${Math.round(a)}`;
+  return compactMoney(v, { kDigits: (a) => (a >= 10000 ? 0 : 1), minus: "−" });
 }
 const AXIS_TICK = { fontSize: 11, fill: "var(--ink-4)" };
 
@@ -283,7 +280,9 @@ export function Reports() {
   }): StatCell {
     const hasDelta = o.d !== undefined && o.d !== null;
     const up = hasDelta && (o.d as number) > 0;
-    const flat = hasDelta && (o.d as number) === 0;
+    // Flat = shows as 0.0% (pct() is to one decimal), so a sub-0.05% move
+    // never reads as a colored "+0%".
+    const flat = hasDelta && Math.abs(o.d as number) < 0.0005;
     // "good" = improvement. For inverted metrics (expenses, losses) up is bad.
     const good = flat ? null : o.invert ? !up : up;
     const text = METRIC_FMT[id](k!);
@@ -836,10 +835,10 @@ function FinancialsDrill({ query, focus, onClose, onOpenDeal, onOpenExpenses }: 
             </div>
           </div>
           <div className="fin-recon" aria-label="Net profit reconciliation">
-            <span>Revenue (Gross Fees) <b>{money(t.revenue)}</b></span>
-            <span>− Closing Costs <b>{money(t.closingCosts)}</b></span>
+            <span>Revenue (Gross Fees) <b>{money(t.revenue, { cents: true })}</b></span>
+            <span>− Closing Costs <b>{money(t.closingCosts, { cents: true })}</b></span>
             <span>− Expenses <b>{money(t.expenses, { cents: true })}</b></span>
-            <span>= Net Profit <b className={t.netProfit < 0 ? "profit-neg" : "profit-pos"}>{money(t.netProfit)}</b></span>
+            <span>= Net Profit <b className={t.netProfit < 0 ? "profit-neg" : "profit-pos"}>{money(t.netProfit, { cents: true })}</b></span>
           </div>
           <p className="muted fin-note">
             Realized results only: deals closed in this period and expenses dated in it. Open deals, projected profit and forecasts are excluded.

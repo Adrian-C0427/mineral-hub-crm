@@ -6,6 +6,7 @@ import { MoneyInput } from "./MoneyInput";
 import { DateField } from "./DateField";
 import { Select } from "./Select";
 import { money, toInputDate } from "../lib/format";
+import { amountFromRate, perAcreRate } from "../lib/perAcre";
 
 export interface OfferRow {
   id: string;
@@ -85,13 +86,13 @@ export function OfferRowActions({ offer, accepted, dealClosed = false, onChanged
 function perAcre(amount: string, acres: number | null): string {
   const a = Number(amount);
   if (acres == null || acres <= 0 || !isFinite(a) || a <= 0) return "";
-  return String(Math.round((a / acres) * 100) / 100);
+  return String(perAcreRate(a, acres));
 }
 /** Amount from a per-acre price × acreage ("" when it can't apply). */
 function amountFrom(price: string, acres: number | null): string {
   const p = Number(price);
-  if (acres == null || !isFinite(p) || p <= 0) return "";
-  return String(Math.round(p * acres * 100) / 100);
+  const v = isFinite(p) && p > 0 ? amountFromRate(p, acres) : null;
+  return v == null ? "" : String(v);
 }
 
 function EditOfferModal({ offer, accepted, dealClosed, dealNma, dealNra, onClose, onSaved }: {

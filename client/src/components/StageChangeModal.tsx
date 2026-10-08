@@ -4,6 +4,7 @@ import { Select } from "./Select";
 import { api, ApiError } from "../api/client";
 import { useStages } from "../stages";
 import type { DealSummary, Stage } from "../types";
+import { money } from "../lib/format";
 
 interface Props {
   deal: DealSummary;
@@ -184,7 +185,7 @@ export function StageChangeModal({ deal, initialStage, directTerminal, hasUnreso
             Confirm before closing:
             <ul>
               <li>Selected buyer: {deal.selectedBuyer ? <strong>{deal.selectedBuyer.name}</strong> : <span className="scm-missing">none selected</span>}</li>
-              <li>Ask price: {deal.askPrice != null ? `$${deal.askPrice.toLocaleString()}` : <span className="scm-missing">not set</span>}</li>
+              <li>Ask price: {deal.askPrice != null ? money(deal.askPrice) : <span className="scm-missing">not set</span>}</li>
             </ul>
           </div>
         )}

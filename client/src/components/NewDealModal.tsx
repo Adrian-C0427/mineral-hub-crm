@@ -8,13 +8,11 @@ import type { DealSummary } from "../types";
 import { MoneyInput } from "./MoneyInput";
 import { DateField } from "./DateField";
 import { OperatorSelect } from "./OperatorSelect";
-import { Select } from "./Select";
-import { royaltyOptions } from "../lib/royalty";
 import { findBuyerByOffsetDays } from "../lib/perAcre";
 import { fmtDate, money } from "../lib/format";
 import { FormSection } from "./kit";
 import {
-  addDaysIso, applyAcreageEdit, AcreageNote, DaysToCloseField, editPriceGroup, emptyPriceGroup, PriceNote, syncPriceGroup,
+  addDaysIso, applyAcreageEdit, AcreageNote, DaysToCloseField, editPriceGroup, emptyPriceGroup, PriceNote, RoyaltyRateField, royaltyRateError, syncPriceGroup,
   type AcreSource, type PriceField, type PriceGroup,
 } from "./DealEconomics";
 
@@ -192,6 +190,8 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
 
   async function submit() {
     if (missing.length) { setError(`Required: ${missing.join(", ")}`); return; }
+    const royaltyErr = royaltyRateError(f.royaltyRate);
+    if (royaltyErr) { setError(`Royalty rate: ${royaltyErr}`); return; }
     if (anyAssetIncomplete) {
       const i = assetErrors.findIndex((e) => e.length > 0);
       setError(`Additional deal ${i + 1} is missing: ${assetErrors[i].join(", ")}`);
@@ -337,7 +337,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
             <FormSection title="Economics" hint="NMA or NRA: at least one required (NMA alone for unleased acreage). With a royalty rate, either one calculates the other.">
               <div className="nd-grid3">
                 <div className="field"><label title="Converts between NMA and NRA (NRA = NMA × royalty ÷ 1/8)">Royalty rate</label>
-                  <Select value={f.royaltyRate} onChange={(v) => editAcreage({ royaltyRate: v })} options={royaltyOptions()} clearable placeholder="Select royalty rate…" ariaLabel="Royalty rate" />
+                  <RoyaltyRateField value={f.royaltyRate} onChange={(v) => editAcreage({ royaltyRate: v })} />
                 </div>
                 <div className="field"><label title="Net Mineral Acres · required unless NRA is provided">NMA {req}</label>
                   <input type="number" value={f.acreageNma} onChange={(e) => editAcreage({ nma: e.target.value })} placeholder="0.00" aria-label="NMA" />

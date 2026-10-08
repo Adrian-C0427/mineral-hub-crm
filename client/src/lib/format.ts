@@ -9,14 +9,51 @@ export function money(n: number | null | undefined, opts: { blank?: string; cent
   });
 }
 
+/**
+ * Compact money ("$93.7K", "−$1.2M") — the one implementation behind every
+ * page's short-figure style, so all of them put the sign before the "$" and
+ * roll 999,999 over to "$1M" instead of printing "$1000K".
+ *   kFrom   — smallest figure shown in K (smaller ones use `small`)
+ *   kDigits — decimals for a K figure (may depend on its size)
+ *   trim    — drop trailing zeros ("$12K" rather than "$12.0K")
+ */
+export function compactMoney(v: number, opts: {
+  mDigits?: number; kDigits?: (abs: number) => number; kFrom?: number; trim?: boolean; minus?: string; small?: (v: number) => string;
+} = {}): string {
+  const { mDigits = 1, kDigits = () => 1, kFrom = 1000, trim = true, minus = "-", small } = opts;
+  const a = Math.abs(v);
+  const fixed = (x: number, d: number) => (trim ? String(Number(x.toFixed(d))) : x.toFixed(d));
+  const sign = v < 0 && a >= 0.5 ? minus : "";
+  if (a >= kFrom) {
+    const kd = kDigits(a);
+    if (a < 1e6 && Number((a / 1000).toFixed(kd)) < 1000) return `${sign}$${fixed(a / 1000, kd)}K`;
+    return `${sign}$${fixed(a / 1e6, mDigits)}M`;
+  }
+  return small ? small(v) : `${sign}$${Math.round(a)}`;
+}
+
 export function num(n: number | null | undefined, suffix = ""): string {
   if (n == null) return "—";
   return n.toLocaleString("en-US") + suffix;
 }
 
+/** Acreage (NMA / NRA): up to the 4 decimals NMA ↔ NRA is calculated to. */
+export function acres(n: number | null | undefined, suffix = ""): string {
+  if (n == null) return "—";
+  return n.toLocaleString("en-US", { maximumFractionDigits: 4 }) + suffix;
+}
+
+/** A ratio (0.333…) as a percent, to one decimal when it has one ("33.3%", "50%"). */
 export function pct(rate: number | null | undefined): string {
   if (rate == null) return "—";
-  return `${Math.round(rate * 100)}%`;
+  return `${Number((rate * 100).toFixed(1))}%`;
+}
+
+/** A decimal interest (NRI / WI, 0.00390625) as a percent keeping its
+ *  precision — up to 6 places ("0.390625%", "18.75%"). */
+export function interestPct(decimal: number | null | undefined): string {
+  if (decimal == null) return "—";
+  return `${Number((decimal * 100).toFixed(6))}%`;
 }
 
 /**

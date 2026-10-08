@@ -1,4 +1,5 @@
 import { monthKey } from "./dates.js";
+import { roundMoney as r2 } from "./money.js";
 
 /**
  * Expense dashboard aggregation — pure function so the money math is unit-tested
@@ -62,22 +63,23 @@ export function aggregateExpenseDashboard(expenses: ExpenseInput[]): ExpenseDash
 
   return {
     totals: {
-      totalExpenses: total,
-      totalReimbursed: reimbursed,
-      totalOutstanding: total - reimbursed,
-      companyOutstanding: total - reimbursed,
+      // Running sums are rounded to the cent once, here (no float tails).
+      totalExpenses: r2(total),
+      totalReimbursed: r2(reimbursed),
+      totalOutstanding: r2(total - reimbursed),
+      companyOutstanding: r2(total - reimbursed),
       count: expenses.length,
     },
-    byCategory: Array.from(byCategory, ([name, amount]) => ({ name, amount })).sort((a, b) => b.amount - a.amount),
+    byCategory: Array.from(byCategory, ([name, amount]) => ({ name, amount: r2(amount) })).sort((a, b) => b.amount - a.amount),
     byMonth: months.map((ym) => ({
       month: ym,
-      expenses: byMonth.get(ym) ?? 0,
-      reimbursed: reimbursedByMonth.get(ym) ?? 0,
+      expenses: r2(byMonth.get(ym) ?? 0),
+      reimbursed: r2(reimbursedByMonth.get(ym) ?? 0),
     })),
-    byUser: Array.from(byUser, ([userId, v]) => ({ userId, name: v.name, total: v.total, outstanding: v.outstanding })).sort(
+    byUser: Array.from(byUser, ([userId, v]) => ({ userId, name: v.name, total: r2(v.total), outstanding: r2(v.outstanding) })).sort(
       (a, b) => b.total - a.total,
     ),
-    outstandingByUser: Array.from(byUser, ([userId, v]) => ({ userId, name: v.name, outstanding: v.outstanding }))
+    outstandingByUser: Array.from(byUser, ([userId, v]) => ({ userId, name: v.name, outstanding: r2(v.outstanding) }))
       .filter((u) => u.outstanding > 0)
       .sort((a, b) => b.outstanding - a.outstanding),
   };

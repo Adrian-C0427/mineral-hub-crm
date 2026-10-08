@@ -3,6 +3,7 @@ import { Modal } from "./ui";
 import { Select } from "./Select";
 import { api, ApiError } from "../api/client";
 import { toInputDate } from "../lib/format";
+import { amountFromRate } from "../lib/perAcre";
 import { BUYER_STATUS_OPTIONS } from "../lib/buyerStatus";
 import type { BuyerStatus, UserLite } from "../types";
 import { MoneyInput } from "./MoneyInput";
@@ -30,8 +31,8 @@ interface Props {
 /** price × total, rounded to the cent, as a MoneyInput-friendly string. */
 function computeAmount(price: string, total: number): string {
   const p = Number(price);
-  if (!isFinite(p) || p <= 0) return "";
-  return String(Math.round(p * total * 100) / 100);
+  const v = isFinite(p) && p > 0 ? amountFromRate(p, total) : null;
+  return v == null ? "" : String(v);
 }
 
 export function LogContactModal({ dealId, buyerId, buyerName, users, dealNra, dealNma, initial, onClose, onLogged }: Props) {
@@ -118,7 +119,7 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, dealNra, de
           <div className="grid-2">
             <div className="field">
               <label>Price per NRA <span className="dd-opt">(optional)</span></label>
-              <MoneyInput value={pricePerNra} ariaLabel="Price per NRA" disabled={dealNra == null}
+              <MoneyInput decimals={2} value={pricePerNra} ariaLabel="Price per NRA" disabled={dealNra == null}
                 onChange={(v) => { setPricePerNra(v); setPricePerNma(""); if (dealNra != null) setAmount(computeAmount(v, dealNra)); }} />
               <span className="dd-hint">
                 {dealNra != null ? `× ${dealNra} NRA` : "Deal has no NRA set"}
@@ -126,7 +127,7 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, dealNra, de
             </div>
             <div className="field">
               <label>Price per NMA <span className="dd-opt">(optional)</span></label>
-              <MoneyInput value={pricePerNma} ariaLabel="Price per NMA" disabled={dealNma == null}
+              <MoneyInput decimals={2} value={pricePerNma} ariaLabel="Price per NMA" disabled={dealNma == null}
                 onChange={(v) => { setPricePerNma(v); setPricePerNra(""); if (dealNma != null) setAmount(computeAmount(v, dealNma)); }} />
               <span className="dd-hint">
                 {dealNma != null ? `× ${dealNma} NMA` : "Deal has no NMA set"}

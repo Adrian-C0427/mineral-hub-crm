@@ -1,11 +1,12 @@
 /**
- * Lease royalty rates — the ONE parser every royalty figure in the client goes
- * through (NMA ↔ NRA, labels, the Royalty Rate field's validation). Mirrors
- * server/src/domain/royalty.ts, which the API uses to validate and store the
- * same values — keep the two in step (parity is unit-tested on the server).
+ * Lease royalty rates — the ONE parser every royalty figure goes through.
  *
- * Stored as a string so the user's intended form survives: a standard fraction
- * ("1/8", "3/16"), a custom fraction ("3/20") or a custom percentage ("18.75%").
+ * Deal.royaltyRate is stored as a string so the user's intended form survives:
+ * a standard fraction ("1/8", "3/16"), a custom fraction ("3/20") or a custom
+ * percentage ("18.75%"). Everything that does math with it (NMA ↔ NRA, the
+ * AI fact sheet, …) reads it through royaltyValue(), so a custom 18.75% and the
+ * preset 3/16 behave identically. Mirrored in client/src/lib/royalty.ts — keep
+ * the two in step (parity is unit-tested in royalty.test.ts).
  */
 
 /** The app's standard lease royalty rates, stored as fractions ("3/16"). */
@@ -78,14 +79,6 @@ export function royaltyLabel(r: string | null | undefined): string {
   return t.match(FRACTION) ? `${t.replace(/\s+/g, "")} · ${pct}` : pct;
 }
 
-/** Compact form for inline notes: a fraction as written ("3/16"), else the percentage ("18.75%"). */
-export function royaltyShortLabel(r: string | null | undefined): string {
-  const t = (r ?? "").trim();
-  const v = royaltyValue(t);
-  if (v == null) return t;
-  return t.match(FRACTION) ? t.replace(/\s+/g, "") : `${percentNumber(v)}%`;
-}
-
 /** A decimal interest as a percentage number, without float noise (0.1875 → 18.75). */
 function percentNumber(v: number): number {
   return Number((v * 100).toFixed(6));
@@ -96,7 +89,18 @@ function fractionValue(f: string): number {
   return a / b;
 }
 
-/** True when the stored value is one of the standard preset fractions. */
-export function isPresetRoyalty(r: string | null | undefined): boolean {
-  return r != null && (ROYALTY_RATE_OPTIONS as readonly string[]).includes(r);
+/**
+ * NMA ↔ NRA at a lease royalty rate. NRA is normalized to a 1/8 royalty:
+ * NRA = NMA × royalty ÷ 1/8 (10 NMA at 1/4 → 20 NRA; at 1/8 NRA = NMA).
+ * Rounded to 4 decimals; null when either input is missing. Mirrors
+ * nraFromNma/nmaFromNra in client/src/lib/perAcre.ts.
+ */
+export function nraFromNma(nma: number | null, royalty: number | null): number | null {
+  if (nma == null || royalty == null || !(royalty > 0)) return null;
+  return round4(nma * royalty * 8);
 }
+export function nmaFromNra(nra: number | null, royalty: number | null): number | null {
+  if (nra == null || royalty == null || !(royalty > 0)) return null;
+  return round4(nra / (royalty * 8));
+}
+const round4 = (n: number) => Math.round(n * 10_000) / 10_000;

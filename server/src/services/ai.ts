@@ -13,8 +13,9 @@ import { prisma } from "../db.js";
 import { HttpError } from "../middleware/errors.js";
 import { decryptSecret } from "./secrets.js";
 import { money } from "../domain/format.js";
+import { royaltyLabel } from "../domain/royalty.js";
 
-const num = (n: number) => n.toLocaleString("en-US");
+const num = (n: number) => n.toLocaleString("en-US", { maximumFractionDigits: 4 });
 
 const MODEL = process.env.ANTHROPIC_MODEL || "claude-opus-4-8";
 
@@ -71,6 +72,8 @@ export interface DealContext {
   state: string | null; states: string[]; counties: string[];
   operator: string | null; assetTypes: string[]; basins: string[]; formations: string[];
   acreageNma: number | null; nra: number | null;
+  /** Stored lease royalty rate ("3/16", "18.75%", …); optional for older callers. */
+  royaltyRate?: string | null;
   askPrice: number | null; ourPrice: number | null; estimatedClosingCosts: number | null;
   sellerNames: string[];
   selectedBuyer: { name: string } | null;
@@ -103,7 +106,8 @@ export function dealFacts(d: DealContext): string {
     line("Basins", d.basins),
     line("Formations", d.formations),
     line("Net mineral acres (NMA)", d.acreageNma != null ? num(d.acreageNma) : null),
-    line("Net royalty acres (NRA)", d.nra != null ? num(d.nra) : null),
+    line("Lease royalty rate", d.royaltyRate ? royaltyLabel(d.royaltyRate) : null),
+    line("Net royalty acres (NRA, normalized to a 1/8 royalty)", d.nra != null ? num(d.nra) : null),
     line("Our price (acquisition cost)", d.ourPrice != null ? money(d.ourPrice) : null),
     line("Ask price (to buyers)", d.askPrice != null ? money(d.askPrice) : null),
     line("Est. closing costs", d.estimatedClosingCosts != null ? money(d.estimatedClosingCosts) : null),

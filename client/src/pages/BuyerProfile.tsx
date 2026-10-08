@@ -15,6 +15,7 @@ import { BuyerRelationships, type BuyerNetwork } from "../components/BuyerRelati
 import { BuyerAliasManager } from "../components/BuyerAliasManager";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
 import { money, pct, fmtDate, toInputDate } from "../lib/format";
+import { sumMoney } from "../lib/money";
 import { formatPhone } from "../lib/phone";
 import { PhoneInput } from "../components/PhoneInput";
 import type { BuyBox, Relationship, UserLite } from "../types";
@@ -457,15 +458,18 @@ export function BuyerProfile() {
                   </tr>
                 ))}
               </tbody>
-              {/* Totals: how many deals, how many closed, and the closed amount. */}
+              {/* Totals: how many deals, how many this buyer closed (won), and
+                  that closed volume — a deal that closed with ANOTHER buyer is
+                  neither this buyer's close nor its volume (same rule as the
+                  close rate and the dashboard's top buyers). */}
               {(() => {
-                const closed = view.dealHistory.filter((h) => h.stage === "CLOSED");
+                const closed = view.dealHistory.filter((h) => h.stage === "CLOSED" && h.isSelectedBuyer);
                 const n = view.dealHistory.length;
                 return (
                   <tfoot>
                     <tr>
                       <td colSpan={3}>{n} deal{n === 1 ? "" : "s"} · {closed.length} closed</td>
-                      <td className="right bp-total">{money(closed.reduce((t, h) => t + (h.amount ?? 0), 0))} closed</td>
+                      <td className="right bp-total">{money(sumMoney(closed.map((h) => h.amount)))} closed</td>
                       <td />
                     </tr>
                   </tfoot>

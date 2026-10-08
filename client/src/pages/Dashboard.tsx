@@ -12,7 +12,7 @@ import { ApiError } from "../api/client";
 import { Select } from "../components/Select";
 import { Segmented, StatStrip, Tag } from "../components/kit";
 import { initialsOf } from "../lib/avatarColor";
-import { money, fmtDate, fmtDateLocal } from "../lib/format";
+import { compactMoney, money, fmtDate, fmtDateLocal } from "../lib/format";
 import { useStages } from "../stages";
 import { CalendarGlyph } from "../components/PeriodSegmented";
 import { DateField } from "../components/DateField";
@@ -100,11 +100,7 @@ interface DashboardData {
 
 // Compact currency for KPI values, matching the design ($1.28M / $892K / $47.8K).
 function fmtCompact(v: number): string {
-  const a = Math.abs(v);
-  const sign = v < 0 ? "-" : "";
-  if (a >= 1e6) return `${sign}$${(a / 1e6).toFixed(2)}M`;
-  if (a >= 1e3) return `${sign}$${a >= 1e5 ? Math.round(a / 1e3) : (a / 1e3).toFixed(1)}K`;
-  return money(v);
+  return compactMoney(v, { mDigits: 2, kDigits: (a) => (a >= 1e5 ? 0 : 1), trim: false, small: (x) => money(x) });
 }
 
 const pctChange = (cur: number, prev: number): number | null => (prev > 0 ? ((cur - prev) / prev) * 100 : null);
@@ -522,7 +518,7 @@ export function Dashboard() {
             </div>
             <div className="dash-ov-bottom">
               <div className="dash-ov-rows">
-                <div className="dash-ov-row" title="Best (or accepted) offer minus cost basis across active deals with offers — the same series as the Projected bars.">
+                <div className="dash-ov-row" title="Accepted (else best) offer minus cost basis and closing costs across active deals with offers — the same series as the Projected bars.">
                   <span className="dash-ov-row-label">Projected profit</span>
                   <strong>{fmtCompact(m.projectedProfit)}</strong>
                 </div>

@@ -27,9 +27,11 @@ function toDate(v: unknown): Date | null | undefined {
 // CSV import lives under /buyers/import (no separate Import page/route).
 buyersRouter.use("/import", requirePermission("createBuyers"), importRouter);
 
-/** Per-buyer close rate: closed-won deals ÷ deals where buyer made an offer. */
+/** Per-buyer close rate: closed-won deals ÷ deals where buyer made an offer.
+ *  A win counts only on a deal the buyer offered on, so the numerator is a
+ *  subset of the denominator and the rate can never read above 100%. */
 async function buyerCloseRate(buyerId: string, organizationId: string): Promise<{ rate: number; closedWon: number; dealsWithOffer: number }> {
-  const closedWon = await prisma.deal.count({ where: { selectedBuyerId: buyerId, stage: "CLOSED", organizationId } });
+  const closedWon = await prisma.deal.count({ where: { selectedBuyerId: buyerId, stage: "CLOSED", organizationId, offers: { some: { buyerId } } } });
   const offerDeals = await prisma.offer.findMany({ where: { buyerId, deal: { organizationId } }, select: { dealId: true }, distinct: ["dealId"] });
   const dealsWithOffer = offerDeals.length;
   return { rate: closeRate(closedWon, dealsWithOffer), closedWon, dealsWithOffer };
@@ -44,10 +46,9 @@ async function buyerCloseRate(buyerId: string, organizationId: string): Promise<
  */
 async function closeRatesByBuyer(organizationId: string): Promise<Map<string, { closedWon: number; dealsWithOffer: number }>> {
   const [won, offerPairs] = await Promise.all([
-    prisma.deal.groupBy({
-      by: ["selectedBuyerId"],
+    prisma.deal.findMany({
       where: { organizationId, stage: "CLOSED", selectedBuyerId: { not: null } },
-      _count: { _all: true },
+      select: { id: true, selectedBuyerId: true },
     }),
     // groupBy on the pair yields one row per DISTINCT (buyer, deal) — the same
     // thing the per-buyer `distinct: ["dealId"]` query was computing.
@@ -60,7 +61,9 @@ async function closeRatesByBuyer(organizationId: string): Promise<Map<string, { 
     row[key] += n;
     out.set(id, row);
   };
-  for (const w of won) if (w.selectedBuyerId) bump(w.selectedBuyerId, "closedWon", w._count._all);
+  // A win counts only where the buyer offered (same rule as buyerCloseRate).
+  const offered = new Set(offerPairs.map((p) => `${p.buyerId}|${p.dealId}`));
+  for (const w of won) if (w.selectedBuyerId && offered.has(`${w.selectedBuyerId}|${w.id}`)) bump(w.selectedBuyerId, "closedWon", 1);
   for (const p of offerPairs) bump(p.buyerId, "dealsWithOffer", 1);
   return out;
 }

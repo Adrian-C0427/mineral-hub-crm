@@ -13,7 +13,8 @@ import { SurveyMultiPicker } from "../components/AbstractPicker";
 import { ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
 import { useRowSelection, BulkActionsBar } from "../components/bulk";
 import { downloadCsv } from "../lib/csv";
-import { money, num, fmtDate } from "../lib/format";
+import { money, num, acres, fmtDate } from "../lib/format";
+import { roundTo, sumMoney } from "../lib/money";
 import type { DealSummary, UserLite } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
 import { DateField } from "../components/DateField";
@@ -64,8 +65,15 @@ export function MineralAssets() {
 
   const totals = useMemo(() => {
     const rows = assets ?? [];
-    const sum = (f: (d: DealSummary) => number | null) => rows.reduce((s, d) => s + (f(d) ?? 0), 0);
+    const sum = (f: (d: DealSummary) => number | null) => sumMoney(rows.map(f));
+    // Unrealized gain sums each asset's own gain (current value − book value,
+    // else purchase price — the server's unrealizedGainLoss). An asset missing
+    // either side is left out of BOTH the gain and its cost, instead of
+    // counting as $0 value against its full cost.
+    const gained = rows.filter((d) => d.unrealizedGainLoss != null);
     return {
+      gain: sumMoney(gained.map((d) => d.unrealizedGainLoss)),
+      gainBasis: sumMoney(gained.map((d) => d.bookValue ?? d.purchasePrice)),
       count: rows.length,
       currentValue: sum((d) => d.currentValue),
       purchasePrice: sum((d) => d.purchasePrice),
@@ -73,7 +81,7 @@ export function MineralAssets() {
       forSale: rows.filter((d) => d.assetMode === "SELL").length,
       producing: rows.filter((d) => d.producingStatus === "Producing").length,
       noValue: rows.filter((d) => d.currentValue == null).length,
-      nra: sum((d) => d.nra),
+      nra: roundTo(rows.reduce((s, d) => s + (d.nra ?? 0), 0), 4),
     };
   }, [assets]);
 
@@ -103,7 +111,7 @@ export function MineralAssets() {
       render: (d) => d.producingStatus
         ? <Tag dot tone={d.producingStatus === "Producing" ? "success" : "neutral"}>{d.producingStatus}</Tag>
         : <span className="ma-none">—</span> },
-    { key: "nra", header: "NRA", value: (d) => d.nra, type: "number", align: "right", render: (d) => num(d.nra) },
+    { key: "nra", header: "NRA", value: (d) => d.nra, type: "number", align: "right", render: (d) => acres(d.nra) },
     { key: "purchasePrice", header: "Cost", value: (d) => d.purchasePrice, type: "number", align: "right", render: (d) => money(d.purchasePrice) },
     { key: "currentValue", header: "Current value", value: (d) => d.currentValue, type: "number", align: "right", render: (d) => <span className="ma-strong">{money(d.currentValue)}</span> },
     { key: "roi", header: "ROI", value: (d) => d.roiSinceAcquisition, type: "number", align: "right", render: (d) => (
@@ -119,7 +127,7 @@ export function MineralAssets() {
     ...PRODUCING_STATUSES.map((st) => ({ value: st, label: st, count: (assets ?? []).filter((d) => d.producingStatus === st).length }))
       .filter((t) => t.count > 0 || t.value === statusTab),
   ];
-  const gain = totals.currentValue - totals.purchasePrice;
+  const gain = totals.gain;
 
   if (!assets) return <Spinner label="Loading mineral assets…" />;
 
@@ -152,8 +160,8 @@ export function MineralAssets() {
         { label: "Portfolio value", value: money(totals.currentValue),
           sub: <>Cost basis {money(totals.purchasePrice)}{totals.noValue > 0 && <span className="ma-warn"> · {totals.noValue} without a value</span>}</> },
         { label: "Unrealized gain", value: money(gain), tone: gain > 0 ? "success" : gain < 0 ? "danger" : "default",
-          sub: totals.purchasePrice > 0
-            ? `${fmtPct((gain / totals.purchasePrice) * 100)} on cost`
+          sub: totals.gainBasis > 0
+            ? `${fmtPct((gain / totals.gainBasis) * 100)} on cost`
             : totals.currentValue > 0 ? <span className="ma-warn">Cost basis not set — add purchase price for a real gain figure</span> : undefined },
         { label: "Annual royalty income", value: money(totals.royalty), tone: totals.royalty ? "success" : "default",
           sub: totals.royalty ? "Trailing 12 mo · from revenue" : "Fills in from royalty income on each asset" },
