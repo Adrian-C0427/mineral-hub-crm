@@ -4,6 +4,7 @@ import { prisma } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { ensureStages } from "../domain/stages.js";
+import { allTimeSpan, isAllPeriod } from "../domain/period.js";
 import { netProfit, grossFee, avg, winRate } from "../domain/metrics.js";
 import {
   computeKpis, delta, buildMonthlySeries, buildBreakdowns, inRange, realizedClosedAt, countClosedWithoutDate,
@@ -182,14 +183,17 @@ function parseDay(v: unknown, endOfDay = false): Date | null {
 }
 
 /** The report's period (default: this calendar year), comparison window and
- *  deal filters — shared by every analytics endpoint so they always agree. */
+ *  deal filters — shared by every analytics endpoint so they always agree.
+ *  `all` (?period=ALL) means no date restriction: each endpoint resolves the
+ *  range from its loaded records (allTimeRange) and there is no comparison. */
 function analyticsQuery(q: AuthedRequest["query"]) {
   const now = new Date();
+  const all = isAllPeriod(q.period);
   const from = parseDay(q.from) ?? new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
   const to = parseDay(q.to, true) ?? new Date(Date.UTC(now.getUTCFullYear(), 11, 31, 23, 59, 59));
   const range: Range = { from, to };
   const cmpFrom = parseDay(q.compareFrom), cmpTo = parseDay(q.compareTo, true);
-  const compare: Range | null = cmpFrom && cmpTo ? { from: cmpFrom, to: cmpTo } : null;
+  const compare: Range | null = !all && cmpFrom && cmpTo ? { from: cmpFrom, to: cmpTo } : null;
   const filters = {
     states: arrParam(q.states),
     counties: arrParam(q.counties),
@@ -201,7 +205,14 @@ function analyticsQuery(q: AuthedRequest["query"]) {
     users: arrParam(q.users),
     buyers: arrParam(q.buyers),
   };
-  return { range, compare, filters };
+  return { range, compare, filters, all };
+}
+
+/** The "All" period: first dated record → today (end of day), so every record
+ *  is in range and the monthly series starts where the data does. */
+function allTimeRange(dates: Iterable<Date | null | undefined>): Range {
+  const s = allTimeSpan(dates, new Date());
+  return { from: s.from, to: new Date(s.to.getTime() + 86_400_000 - 1) };
 }
 type AnalyticsFilters = ReturnType<typeof analyticsQuery>["filters"];
 
@@ -225,8 +236,7 @@ reportsRouter.get(
   "/analytics",
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
-    const { range, compare, filters } = analyticsQuery(req.query);
-    const { from, to } = range;
+    const { range: asked, compare, filters, all } = analyticsQuery(req.query);
 
     // NOTE: these four loads are deliberately uncapped. They feed org-wide
     // aggregates (KPIs, deltas, breakdowns), so a `take` would not bound the
@@ -251,6 +261,13 @@ reportsRouter.get(
     const buyers = buyersRaw.map((b) => ({ id: b.id, createdAt: b.createdAt, active: b.active }));
     const activities = activitiesRaw.map((a) => ({ date: a.dateSent ?? a.lastActivityDate ?? a.createdAt, sentByUserId: a.sentByUserId }));
     const userName = new Map(usersRaw.map((u) => [u.id, u.name]));
+    const range = all
+      ? allTimeRange([
+        ...deals.flatMap((d) => [d.createdAt, d.closedAt, d.deadAt]),
+        ...expenses.map((e) => e.date), ...buyers.map((b) => b.createdAt), ...activities.map((a) => a.date),
+      ])
+      : asked;
+    const { from, to } = range;
 
     const kpis = computeKpis(deals, expenses, buyers, activities, range);
     const prevKpis = compare ? computeKpis(deals, expenses, buyers, activities, compare) : null;
@@ -288,14 +305,14 @@ reportsRouter.get(
   "/analytics/financials",
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
-    const { range, filters } = analyticsQuery(req.query);
+    const { range: asked, filters, all } = analyticsQuery(req.query);
     // Individual expense rows (notes, submitter) are gated by manageExpenses
     // everywhere else; viewReports alone only earns the totals.
     const canSeeExpenses = req.user!.orgRole === "OWNER" || req.user!.permissions.includes("manageExpenses");
     const [allDeals, expensesRaw] = await Promise.all([
       loadAnalyticsDeals(org),
       prisma.expense.findMany({
-        where: { organizationId: org, date: { gte: range.from, lte: range.to } },
+        where: { organizationId: org, ...(all ? {} : { date: { gte: asked.from, lte: asked.to } }) },
         select: {
           id: true, date: true, amount: true, notes: true, reimbursed: true,
           category: { select: { name: true } }, user: { select: { name: true } },
@@ -304,6 +321,7 @@ reportsRouter.get(
       }),
     ]);
     const deals = filterDeals(allDeals, filters);
+    const range = all ? allTimeRange([...deals.map((d) => d.closedAt), ...expensesRaw.map((e) => e.date)]) : asked;
     const expenses = expensesRaw.filter((e) => inRange(e.date, range));
     const kpis = computeKpis(deals, expenses.map((e) => ({ amount: e.amount, date: e.date, reimbursed: e.reimbursed })), [], [], range);
 

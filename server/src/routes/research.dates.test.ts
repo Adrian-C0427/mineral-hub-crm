@@ -62,3 +62,27 @@ describe("window extrapolation stays in a serializable (positive) year", () => {
     expect(yearOf(cmp.from)).toBe(2025);
   });
 });
+
+describe('"All" time frame (?period=ALL)', () => {
+  it("lifts the date restriction instead of falling back to the 90-day default", () => {
+    const win = parseWindow({ period: "ALL" });
+    expect(win.all).toBe(true);
+    expect(win.from.toISOString()).toBe("1900-01-01T00:00:00.000Z");
+    expect(win.to.toISOString()).toBe("2100-12-31T00:00:00.000Z");
+  });
+
+  it("still lets an explicit from/to (Records panel date filter) narrow it", () => {
+    const win = parseWindow({ period: "ALL", from: "2020-05-01" });
+    expect(win.all).toBe(true);
+    expect(win.from.toISOString()).toBe("2020-05-01T00:00:00.000Z");
+    expect(win.to.toISOString()).toBe("2100-12-31T00:00:00.000Z");
+  });
+
+  it("leaves the existing windows untouched", () => {
+    const win = parseWindow({ from: "2026-01-01", to: "2026-03-31" });
+    expect(win.all).toBeUndefined();
+    const def = parseWindow({});
+    expect(def.all).toBeUndefined();
+    expect(Math.round((def.to.getTime() - def.from.getTime()) / 86400000)).toBe(89);
+  });
+});

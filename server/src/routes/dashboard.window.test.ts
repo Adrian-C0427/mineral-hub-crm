@@ -20,6 +20,28 @@ describe("dashboardWindow CUSTOM", () => {
   });
 });
 
+describe("dashboardWindow ALL", () => {
+  it("covers whole months across the deals' full span", () => {
+    const w = dashboardWindow("ALL", NOW, undefined, undefined, { from: new Date("2023-04-18"), to: new Date("2026-07-15") });
+    expect(w.label).toBe("All");
+    expect(w.start.toISOString()).toBe("2023-04-01T00:00:00.000Z");
+    expect(w.end.toISOString()).toBe("2026-08-01T00:00:00.000Z");
+    // > 24 months → yearly buckets, current year flagged.
+    expect(windowBuckets(w, NOW).map((b) => b.label)).toEqual(["2023", "2024", "2025", "2026"]);
+  });
+
+  it("is the current month when there are no dated deals", () => {
+    const w = dashboardWindow("ALL", NOW);
+    expect(w.start.toISOString()).toBe("2026-07-01T00:00:00.000Z");
+    expect(w.end.toISOString()).toBe("2026-08-01T00:00:00.000Z");
+  });
+
+  it("leaves the existing periods unchanged", () => {
+    expect(dashboardWindow(undefined, NOW).label).toBe("YTD");
+    expect(dashboardWindow("THIS_MONTH", NOW).label).toBe("This Month");
+  });
+});
+
 describe("windowBuckets", () => {
   it("spans YTD as the twelve current-year months with the current one flagged", () => {
     const b = windowBuckets(dashboardWindow("YTD", NOW), NOW);

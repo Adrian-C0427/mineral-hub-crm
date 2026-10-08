@@ -23,6 +23,7 @@ import { downloadCsv } from "../lib/csv";
 import { fmtDate, num, prettyEnum, prettyDocType } from "../lib/format";
 import { CHART_COLORS, chartTooltip } from "../lib/charts";
 import { DateField } from "../components/DateField";
+import { ALL_PERIOD, ALL_PERIOD_LABEL, isAllPeriod, withAllPeriod } from "../lib/period";
 import { ClassBadge, PartyColumn, type RelParty } from "../components/relationshipViews";
 import { AcquisitionChains, type ChainEntry, type ChainHop, type ChainNode } from "../components/AcquisitionChain";
 
@@ -41,7 +42,7 @@ interface SeriesPoint { key: string; transactions: number; leases: number; permi
 interface Summary {
   range: { from: string; to: string };
   compare: { from: string; to: string };
-  granularity: "day" | "week" | "month";
+  granularity: "day" | "week" | "month" | "year";
   kpis: Record<string, number>;
   previous: Record<string, number>;
   trends: Record<string, TrendT>;
@@ -126,7 +127,7 @@ interface RrcPermitRecord {
 // Period helpers
 // ---------------------------------------------------------------------------
 
-type Period = "LAST_30D" | "LAST_90D" | "LAST_6M" | "LAST_12M" | "THIS_YEAR" | "CUSTOM";
+type Period = "LAST_30D" | "LAST_90D" | "LAST_6M" | "LAST_12M" | "THIS_YEAR" | typeof ALL_PERIOD | "CUSTOM";
 type Compare = "NONE" | "PREV_PERIOD" | "PREV_YEAR";
 const iso = (d: Date) => d.toISOString().slice(0, 10);
 const DAY = 86400000;
@@ -140,6 +141,8 @@ function rangeFor(period: Period, custom: { from: string; to: string }): { from:
     case "LAST_6M": return { from: iso(new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 6, today.getUTCDate()))), to: iso(today) };
     case "LAST_12M": return { from: iso(new Date(Date.UTC(today.getUTCFullYear() - 1, today.getUTCMonth(), today.getUTCDate()))), to: iso(today) };
     case "THIS_YEAR": return { from: iso(new Date(Date.UTC(today.getUTCFullYear(), 0, 1))), to: iso(today) };
+    // All carries no dates: the request sends ?period=ALL instead.
+    case ALL_PERIOD: return { from: "", to: "" };
     default: return { from: custom.from, to: custom.to };
   }
 }
@@ -272,9 +275,13 @@ export function Research() {
   }, []);
 
   const range = useMemo(() => rangeFor(period, custom), [period, custom]);
+  const allTime = isAllPeriod(period);
   const qs = useMemo(() => {
     const q = new URLSearchParams();
     q.set("docClass", dataset);
+    // All: explicit flag so the server lifts the window rather than falling
+    // back to its 90-day default (no from/to, no comparison).
+    if (allTime) q.set("period", ALL_PERIOD);
     if (range.from) q.set("from", range.from);
     if (range.to) q.set("to", range.to);
     const cp = compareParams(compare, range.from, range.to);
@@ -288,7 +295,7 @@ export function Research() {
     for (const s of filters.sellers) q.append("seller", s);
     for (const o of filters.operators) q.append("operator", o);
     return q.toString();
-  }, [range.from, range.to, compare, filters, dataset]);
+  }, [allTime, range.from, range.to, compare, filters, dataset]);
 
   // Filter options are dataset-scoped: buyers/sellers/doc types offered come
   // only from the active class's documents.
@@ -302,17 +309,18 @@ export function Research() {
   const activeFilterCount =
     filters.states.length + filters.counties.length + filters.abstracts.length + filters.surveys.length + filters.docTypes.length +
     filters.buyers.length + filters.sellers.length + filters.operators.length;
-  const compareOff = compare === "NONE";
+  // Nothing precedes "All", so it never compares.
+  const compareOff = compare === "NONE" || allTime;
 
   const drillToRecords = useCallback((patch: Partial<Filters>) => {
     setFilters((f) => ({ ...f, ...patch }));
     setTab("records");
   }, []);
 
-  const CHIPS: [Period, string][] = [
+  const CHIPS: [Period, string][] = withAllPeriod<Period>([
     ["LAST_30D", "30D"], ["LAST_90D", "90D"], ["LAST_6M", "6M"],
     ["LAST_12M", "12M"], ["THIS_YEAR", "YTD"], ["CUSTOM", "Custom"],
-  ];
+  ]);
   const cmpRange = compareRangeFor(compare, range.from, range.to);
   // Show the year on the compare range only when it differs from the current range's year.
   const cmpWithYear = cmpRange != null && range.to !== "" &&
@@ -322,7 +330,7 @@ export function Research() {
     ["relationships", "Relationships"], ["opportunities", "Opportunities"], ["records", "Records"],
     ...(canManage ? ([["data", "Data & imports"]] as [Tab, string][]) : []),
   ];
-  const rangeLabel = range.from && range.to ? fmtRangeLabel(range.from, range.to) : "";
+  const rangeLabel = allTime ? ALL_PERIOD_LABEL : range.from && range.to ? fmtRangeLabel(range.from, range.to) : "";
 
   return (
     <div className="page research-page">
@@ -330,7 +338,12 @@ export function Research() {
         <div className="rs-title">
           <h1>Research &amp; Market Intelligence</h1>
           <div className="page-sub rs-sub">
-            {range.from && range.to ? (
+            {allTime ? (
+              <>
+                <span className="rs-sub-cur">{ALL_PERIOD_LABEL}</span>
+                <span>full available history · no comparison</span>
+              </>
+            ) : range.from && range.to ? (
               <>
                 <span className="rs-sub-cur">{rangeLabel}</span>
                 {cmpRange ? (
@@ -379,8 +392,8 @@ export function Research() {
                 <div className="field" style={{ marginBottom: 0 }}><label>To</label><DateField value={custom.to} onChange={(v) => setCustom((c) => ({ ...c, to: v }))} /></div>
               </>
             )}
-            <div className="field" style={{ marginBottom: 0 }}><label>Compare to</label>
-              <Select value={compare} onChange={(v) => setCompare(v as Compare)} ariaLabel="Compare to"
+            <div className="field" style={{ marginBottom: 0 }} title={allTime ? "No comparison for All — there is no earlier period" : undefined}><label>Compare to</label>
+              <Select value={allTime ? "NONE" : compare} onChange={(v) => setCompare(v as Compare)} ariaLabel="Compare to" disabled={allTime}
                 options={[
                   { value: "NONE", label: "No comparison" },
                   { value: "PREV_PERIOD", label: "Previous period" },
@@ -451,7 +464,7 @@ export function Research() {
 
       <div ref={captureRef} className="report-capture rs-body">
         {tab === "overview" && <OverviewTab qs={qs} compareOff={compareOff} dataset={dataset} />}
-        {tab === "geography" && <GeographyTab qs={qs} filters={filters} compareOff={compareOff} onDrill={drillToRecords}
+        {tab === "geography" && <GeographyTab qs={qs} filters={filters} compareOff={compareOff} allTime={allTime} onDrill={drillToRecords}
           onSetCounties={(counties) => setFilters((f) => ({ ...f, counties }))} />}
         {tab === "rankings" && <RankingsTab qs={qs} opts={opts} compareOff={compareOff} onDrill={drillToRecords} dataset={dataset} rangeLabel={rangeLabel} />}
         {tab === "relationships" && <RelationshipsTab qs={qs} onDrill={drillToRecords} dataset={dataset} />}
@@ -485,7 +498,9 @@ function OverviewTab({ qs, compareOff, dataset }: { qs: string; compareOff: bool
   const t = data.trends;
 
   const label = (k: string) =>
-    data.granularity === "month"
+    data.granularity === "year"
+      ? k
+      : data.granularity === "month"
       ? new Date(`${k}-01T00:00:00Z`).toLocaleDateString("en-US", { month: "short", year: "2-digit", timeZone: "UTC" })
       : new Date(`${k}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
 
@@ -805,14 +820,17 @@ function ResearchAbstractFilter({ options, states, counties, value, onChange }: 
 // Geography
 // ---------------------------------------------------------------------------
 
-function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
+function GeographyTab({ qs, filters, compareOff, allTime, onDrill, onSetCounties }: {
   qs: string; filters: Filters; compareOff: boolean;
+  /** "All" time frame: no prior period, so the map offers Volume only. */
+  allTime: boolean;
   onDrill: (patch: Partial<Filters>) => void;
   /** Replace the page-wide county filter (empty array = statewide). */
   onSetCounties: (counties: string[]) => void;
 }) {
   const [level, setLevel] = useState<"county" | "abstract" | "state">("county");
-  const [metric, setMetric] = useState<"activity" | "change">("activity");
+  const [metricPick, setMetric] = useState<"activity" | "change">("activity");
+  const metric = allTime ? "activity" : metricPick;
   const [data, setData] = useState<{ level: string; rows: GeoRow[] } | null>(null);
   const [loading, setLoading] = useState(true);
   // The map always shows county-level stats regardless of the table level.
@@ -921,13 +939,17 @@ function GeographyTab({ qs, filters, compareOff, onDrill, onSetCounties }: {
             <div className="rs-card-titles">
               <h3>Texas activity</h3>
               <span className="rs-card-sub">
-                {metric === "activity"
+                {allTime
+                  ? "Shaded by records across all available history · click a county to zoom into its abstracts"
+                  : metric === "activity"
                   ? "Shaded by records in the period · red outline = hotspot · click a county to zoom into its abstracts"
                   : "Green is up, red is down vs the prior period · click a county to zoom into its abstracts"}
               </span>
             </div>
-            <Segmented<"activity" | "change"> accent ariaLabel="Map metric" value={metric} onChange={setMetric}
-              options={[{ value: "activity", label: "Volume" }, { value: "change", label: "Change" }]} />
+            {!allTime && (
+              <Segmented<"activity" | "change"> accent ariaLabel="Map metric" value={metric} onChange={setMetric}
+                options={[{ value: "activity", label: "Volume" }, { value: "change", label: "Change" }]} />
+            )}
           </div>
           <div className="rs-map-body">
             <div className="rs-map">
@@ -1897,17 +1919,20 @@ const SEVERITY_TIERS: { min: number; label: string; color: string }[] = [
 const severityTier = (n: number) => SEVERITY_TIERS.find((t) => n >= t.min) ?? SEVERITY_TIERS[SEVERITY_TIERS.length - 1];
 
 function OpportunitiesTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partial<Filters>) => void }) {
-  const [data, setData] = useState<{ signals: Signal[] } | null>(null);
+  const [data, setData] = useState<{ signals: Signal[]; requiresBoundedPeriod?: boolean } | null>(null);
   const [loading, setLoading] = useState(true);
   // Severity filter — "all" or one of the tier labels above.
   const [sev, setSev] = useState<string>("all");
   useEffect(() => {
     setLoading(true);
-    api.get<{ signals: Signal[] }>(`/research/opportunities?${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
+    api.get<{ signals: Signal[]; requiresBoundedPeriod?: boolean }>(`/research/opportunities?${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
   }, [qs]);
 
   if (loading && !data) return <Spinner label="Scanning for emerging opportunities…" />;
   if (!data) return <Banner kind="info">Could not load opportunities.</Banner>;
+  if (data.requiresBoundedPeriod) {
+    return <Banner kind="info">Opportunity signals compare a period with the periods before it, so they need a bounded time frame — choose 30D, 90D, 6M, 12M, YTD or a custom range.</Banner>;
+  }
   if (data.signals.length === 0) {
     return <Banner kind="info">No statistically significant surges detected in this period — try widening the date range or clearing filters.</Banner>;
   }

@@ -6,6 +6,7 @@ import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest }
 import { serializeDeal } from "../serializers.js";
 import { netProfit, avg, profitAtAsk } from "../domain/metrics.js";
 import { ensureStages, TERMINAL_STAGE_KEYS } from "../domain/stages.js";
+import { allTimeSpan, isAllPeriod } from "../domain/period.js";
 
 export const dashboardRouter = Router();
 // The dashboard surfaces the same sensitive financials as Reports (projected /
@@ -33,12 +34,24 @@ function parseDayUTC(v: unknown): Date | null {
   return Number.isNaN(d.getTime()) || y < 1900 || y > 2100 ? null : d;
 }
 
-/** Global dashboard date window (default YTD). Upper bound is exclusive. */
+/**
+ * Global dashboard date window (default YTD). Upper bound is exclusive.
+ * "ALL" covers whole months across `span` — the dated deals' full extent
+ * (allTimeSpan), which the route resolves from the loaded deals.
+ */
 export function dashboardWindow(
-  period: string | undefined, now: Date, from?: unknown, to?: unknown,
+  period: string | undefined, now: Date, from?: unknown, to?: unknown, span?: { from: Date; to: Date },
 ): { start: Date; end: Date; label: string } {
   const y = now.getUTCFullYear(), m = now.getUTCMonth();
   switch (period) {
+    case "ALL": {
+      const s = span ?? { from: now, to: now };
+      return {
+        start: new Date(Date.UTC(s.from.getUTCFullYear(), s.from.getUTCMonth(), 1)),
+        end: new Date(Date.UTC(s.to.getUTCFullYear(), s.to.getUTCMonth() + 1, 1)),
+        label: "All",
+      };
+    }
     case "THIS_MONTH": return { start: new Date(Date.UTC(y, m, 1)), end: new Date(Date.UTC(y, m + 1, 1)), label: "This Month" };
     case "LAST_MONTH": return { start: new Date(Date.UTC(y, m - 1, 1)), end: new Date(Date.UTC(y, m, 1)), label: "Last Month" };
     case "THIS_QUARTER": { const q = Math.floor(m / 3) * 3; return { start: new Date(Date.UTC(y, q, 1)), end: new Date(Date.UTC(y, q + 3, 1)), label: "This Quarter" }; }
@@ -127,8 +140,7 @@ dashboardRouter.get(
   "/",
   asyncHandler(async (req: AuthedRequest, res) => {
     const now = new Date();
-    const win = dashboardWindow(req.query.period as string | undefined, now, req.query.from, req.query.to);
-    const inWindow = (d: Date) => d.getTime() >= win.start.getTime() && d.getTime() < win.end.getTime();
+    const period = req.query.period as string | undefined;
     const org = orgId(req);
 
     // The dashboard reports on the acquisition pipeline: opportunities plus any
@@ -156,6 +168,19 @@ dashboardRouter.get(
         prisma.offer.count({ where: { status: "ACTIVE", deal: { organizationId: org, selectedOfferId: null, ...IN_PIPELINE } } }),
       ]),
     );
+
+    // "All" spans every dated deal on the chart: closed deals' Closing dates
+    // and active deals' resolved closing dates (projected / at-asking bars),
+    // through today.
+    const allSpan = isAllPeriod(period)
+      ? allTimeSpan([
+        ...closedDeals.map((d) => d.originalClosingDate),
+        ...allActive.map((d) => { const fc = serializeDeal(d, now).finalClosingDate; return fc ? new Date(fc) : null; }),
+      ], now)
+      : undefined;
+    const win = dashboardWindow(period, now, req.query.from, req.query.to, allSpan);
+    const allTime = win.label === "All";
+    const inWindow = (d: Date) => d.getTime() >= win.start.getTime() && d.getTime() < win.end.getTime();
 
     // Metrics row
     const activeDeals = allActive.length;
@@ -376,9 +401,8 @@ dashboardRouter.get(
         profitAtAsk: atAsk.total,
         periodLabel: win.label,
         // Prior equal-length window (Closing date keyed) — delta baselines.
-        closedProfitPrev,
-        closedDealsPrev,
-        avgProfitPrev,
+        // "All" has no prior period, so no baseline (the client shows no Δ).
+        ...(allTime ? {} : { closedProfitPrev, closedDealsPrev, avgProfitPrev }),
       },
       tasks: dueSoonTasks,
       overdue: overdue.map((d) => ({ id: d.id, name: d.name, findBuyerByDate: d.findBuyerByDate })),
