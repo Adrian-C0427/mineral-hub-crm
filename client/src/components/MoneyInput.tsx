@@ -49,5 +49,8 @@ function format(raw: string, decimals: number): string {
   const [int, frac] = raw.split(".");
   const withSep = int === "" ? "" : Number(int).toLocaleString("en-US");
   if (raw.includes(".") && decimals > 0) return `${withSep}.${frac ?? ""}`;
+  // A whole-dollar field holding a CALCULATED amount with cents (per-acre rate
+  // × acreage): show the cents, so what's displayed is exactly what's saved.
+  if (frac && /[1-9]/.test(frac)) return `${withSep}.${frac}`;
   return withSep;
 }

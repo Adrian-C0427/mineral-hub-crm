@@ -10,7 +10,7 @@ import { Spinner, Banner, Modal, ConfirmDelete, ConfirmDialog } from "../compone
 import { StatStrip, Avatar, Tag, FormSection } from "../components/kit";
 import { Select } from "../components/Select";
 import { Toggle } from "../components/Toggle";
-import { money, fmtDate, toInputDate } from "../lib/format";
+import { compactMoney, money, fmtDate, toInputDate } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { CHART_COLORS, monthLabel, chartTooltip } from "../lib/charts";
 import type { UserLite } from "../types";
@@ -51,11 +51,7 @@ function catColorFor(name: string | null | undefined, categories: Category[]): s
 }
 
 /** Compact axis money: $950, $1.2K, $14K. */
-const axisMoney = (v: number): string => {
-  const a = Math.abs(v);
-  if (a >= 1000) return `$${Number((a / 1000).toFixed(a >= 10000 ? 0 : 1))}K`;
-  return `$${Math.round(a)}`;
-};
+const axisMoney = (v: number): string => compactMoney(v, { kDigits: (a) => (a >= 10000 ? 0 : 1), minus: "−" });
 
 /** "1 expense" / "3 expenses". */
 const countNoun = (n: number): string => `${n} expense${n === 1 ? "" : "s"}`;

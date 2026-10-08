@@ -3,6 +3,11 @@
  * Kept database-free so KPI/series math can be unit-tested directly.
  */
 import { linearForecast, addMonths } from "./forecast.js";
+import { dealCostBasis, grossFee } from "./metrics.js";
+import { avgMoney, roundMoney, sumMoney } from "./money.js";
+
+/** Realized gross fee of a closed deal: accepted offer − cost basis (0 without an accepted offer). */
+const feeOf = (d: AnalyticsDeal): number => (d.acceptedAmount != null ? grossFee(d.acceptedAmount, dealCostBasis(d)) : 0);
 
 export interface AnalyticsDeal {
   id: string;
@@ -98,7 +103,7 @@ export interface Kpis {
 export function costAndRoi(dealsClosed: number, closedWithoutPrice: number, expenses: number, netProfit: number): { costPerDeal: number | null; roiMultiple: number | null } {
   const revenueUnknown = dealsClosed > 0 && closedWithoutPrice === dealsClosed;
   return {
-    costPerDeal: dealsClosed > 0 ? expenses / dealsClosed : null,
+    costPerDeal: dealsClosed > 0 ? roundMoney(expenses / dealsClosed) : null,
     roiMultiple: expenses > 0 && !revenueUnknown ? netProfit / expenses : null,
   };
 }
@@ -116,22 +121,19 @@ export function computeKpis(
   const existedByEnd = deals.filter((d) => d.createdAt <= range.to);
 
   // Cost basis = Our Price (fall back to askPrice for pre-Our-Price deals).
-  const grossFees = closed.reduce(
-    (s, d) => s + (d.acceptedAmount != null ? d.acceptedAmount - (d.ourPrice ?? d.askPrice ?? 0) : 0),
-    0,
-  );
-  const closingCosts = closed.reduce((s, d) => s + (d.estimatedClosingCosts ?? 0), 0);
+  const grossFees = sumMoney(closed.map(feeOf));
+  const closingCosts = sumMoney(closed.map((d) => d.estimatedClosingCosts));
   const periodExpenses = expenses.filter((e) => inRange(e.date, range));
-  const expenseTotal = periodExpenses.reduce((s, e) => s + e.amount, 0);
-  const outstanding = periodExpenses.filter((e) => !e.reimbursed).reduce((s, e) => s + e.amount, 0);
+  const expenseTotal = sumMoney(periodExpenses.map((e) => e.amount));
+  const outstanding = sumMoney(periodExpenses.filter((e) => !e.reimbursed).map((e) => e.amount));
 
   const acceptedAmounts = closed.map((d) => d.acceptedAmount).filter((n): n is number => n != null);
   const closeDurations = closed
     .filter((d) => d.dateUnderContract && d.closedAt)
     .map((d) => daysBetween(d.dateUnderContract!, d.closedAt!));
 
-  const grossProfit = grossFees - closingCosts;
-  const netProfit = grossProfit - expenseTotal;
+  const grossProfit = roundMoney(grossFees - closingCosts);
+  const netProfit = roundMoney(grossProfit - expenseTotal);
   const closedWithoutPrice = closed.filter((d) => d.acceptedAmount == null).length;
 
   return {
@@ -140,8 +142,8 @@ export function computeKpis(
     dealsClosed: closed.length,
     dealsLost: lost.length,
     winRate: closed.length + lost.length === 0 ? 0 : closed.length / (closed.length + lost.length),
-    totalDealValue: added.reduce((s, d) => s + (d.askPrice ?? 0), 0),
-    avgDealSize: avg(acceptedAmounts),
+    totalDealValue: sumMoney(added.map((d) => d.askPrice)),
+    avgDealSize: avgMoney(acceptedAmounts),
     avgTimeToClose: avg(closeDurations),
     revenue: grossFees,
     grossProfit,
@@ -209,7 +211,7 @@ export function buildMonthlySeries(
       const c = idx.get(ymOf(d.closedAt));
       if (c) {
         c.dealsClosed++;
-        const fee = d.acceptedAmount != null ? d.acceptedAmount - (d.ourPrice ?? d.askPrice ?? 0) : 0;
+        const fee = feeOf(d);
         c.revenue += fee;
         c.netProfit += fee - (d.estimatedClosingCosts ?? 0);
       }
@@ -227,7 +229,11 @@ export function buildMonthlySeries(
     }
   }
 
-  const series = months.map((m) => idx.get(m)!);
+  // Sums of cent figures, rounded once so no float tail reaches the chart/CSV.
+  const series = months.map((m) => {
+    const p = idx.get(m)!;
+    return { ...p, revenue: roundMoney(p.revenue), netProfit: roundMoney(p.netProfit), expenses: roundMoney(p.expenses) };
+  });
 
   if (forecastMonths > 0 && series.length >= 2) {
     const revF = linearForecast(series.map((p) => p.revenue), forecastMonths);

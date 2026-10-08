@@ -6,6 +6,7 @@ import { Banner } from "./ui";
 import { Segmented, Tag } from "./kit";
 import { Toggle } from "./Toggle";
 import { PhoneInput } from "./PhoneInput";
+import { money } from "../lib/format";
 
 // A per-deal published contact. `id` is a stable key for React + reordering.
 interface DealContact { id: string; name: string; title: string | null; email: string | null; phone: string | null }
@@ -329,13 +330,13 @@ export function DealPortalPanel({ dealId, defaultOpen = true }: { dealId: string
             <input
               type="number" min="0" disabled={!canEdit} aria-label="Published asking price"
               value={askOverride}
-              placeholder={p.askPrice != null ? `Deal ask: $${p.askPrice.toLocaleString()}` : "No deal ask price set"}
+              placeholder={p.askPrice != null ? `Deal ask: ${money(p.askPrice)}` : "No deal ask price set"}
               onChange={(e) => setAskOverride(e.target.value)}
               onBlur={() => { const v = askOverride.trim() === "" ? null : Number(askOverride); if (v !== p.portalAskPrice) { setP((prev) => prev ? { ...prev, portalAskPrice: v } : prev); patch({ askPrice: v }); } }}
             />
             </div>
           </div>
-          <div className="dpp-price-note">Leave blank to use the deal's Ask Price <b>({p.askPrice != null ? `$${p.askPrice.toLocaleString()}` : "not set"})</b>. This override doesn't change the deal.</div>
+          <div className="dpp-price-note">Leave blank to use the deal's Ask Price <b>({p.askPrice != null ? money(p.askPrice) : "not set"})</b>. This override doesn't change the deal.</div>
         </div>
 
         {(p.files?.length ?? 0) > 0 && (

@@ -1,3 +1,5 @@
+import { roundMoney } from "./money";
+
 /**
  * Total price from per-acre pricing (Our Cost / Asking Price). NMA is the
  * primary measure: per-NMA × NMA wins, per-NRA × NRA is the fallback — the two
@@ -12,7 +14,18 @@ export function totalFromPerAcre(
   return null;
 }
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+const round2 = roundMoney;
+
+/** Per-acre price: total ÷ acres, to the cent; null without a positive acreage. */
+export function perAcreRate(total: number | null | undefined, acres: number | null | undefined): number | null {
+  if (total == null || !Number.isFinite(total) || acres == null || !(acres > 0)) return null;
+  return roundMoney(total / acres);
+}
+/** Amount from a per-acre price: rate × acres, to the cent; null without a positive acreage. */
+export function amountFromRate(rate: number | null | undefined, acres: number | null | undefined): number | null {
+  if (rate == null || !Number.isFinite(rate) || acres == null || !(acres > 0)) return null;
+  return roundMoney(rate * acres);
+}
 
 /** Find Buyer By offset: every contracted day to close beyond 30 (30 → 0,
  *  40 → 10, 60 → 30, 75 → 45). Mirrors findBuyerByOffsetDays in

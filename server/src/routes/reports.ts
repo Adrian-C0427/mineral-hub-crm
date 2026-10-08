@@ -5,7 +5,8 @@ import { asyncHandler } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { ensureStages } from "../domain/stages.js";
 import { allTimeSpan, isAllPeriod } from "../domain/period.js";
-import { netProfit, grossFee, avg, winRate } from "../domain/metrics.js";
+import { netProfit, grossFee, winRate, dealCostBasis } from "../domain/metrics.js";
+import { avgMoney, sumMoney } from "../domain/money.js";
 import {
   computeKpis, delta, buildMonthlySeries, buildBreakdowns, inRange, realizedClosedAt, countClosedWithoutDate,
   type AnalyticsDeal, type Range,
@@ -60,7 +61,7 @@ reportsRouter.get(
 
     const rows = inPeriod.map((d) => {
       const accepted = d.selectedOffer?.amount ?? null;
-      const costBasis = d.ourPrice ?? d.askPrice;
+      const costBasis = dealCostBasis(d);
       const gross = accepted != null ? grossFee(accepted, costBasis) : null;
       const net = accepted != null ? netProfit(accepted, costBasis, d.estimatedClosingCosts) : null;
       return {
@@ -79,8 +80,8 @@ reportsRouter.get(
     });
 
     const acceptedAmounts = rows.map((r) => r.acceptedAmount).filter((n): n is number => n != null);
-    const grossTotal = rows.reduce((s, r) => s + (r.grossFee ?? 0), 0);
-    const netTotal = rows.reduce((s, r) => s + (r.netProfit ?? 0), 0);
+    const grossTotal = sumMoney(rows.map((r) => r.grossFee));
+    const netTotal = sumMoney(rows.map((r) => r.netProfit));
 
     // Win rate within period: closed / (closed + dead). Dead/lost has no
     // manual date, so it still keys on the stage-history timestamp.
@@ -96,8 +97,11 @@ reportsRouter.get(
         dealsClosed: rows.length,
         grossFees: grossTotal,
         netProfit: netTotal,
-        avgProfitPerDeal: avg(rows.map((r) => r.netProfit ?? 0)),
-        avgDealSize: avg(acceptedAmounts),
+        // Over the deals that closed WITH an accepted offer — the same
+        // population as the dashboard's Avg profit per deal (a deal closed
+        // without a price has no realized profit, it is not a $0 deal).
+        avgProfitPerDeal: avgMoney(rows.map((r) => r.netProfit).filter((n): n is number => n != null)),
+        avgDealSize: avgMoney(acceptedAmounts),
       },
       winRate: winRate(rows.length, deadDeals.length),
       deadInPeriod: deadDeals.length,
@@ -332,19 +336,19 @@ reportsRouter.get(
     })).map((d) => [d.id, d.name]));
     const closedDeals = closed
       .map((d) => {
-        const costBasis = d.ourPrice ?? d.askPrice ?? 0;
+        const costBasis = dealCostBasis(d);
         // Same per-deal math as computeKpis: revenue = accepted − cost basis.
-        const revenue = d.acceptedAmount != null ? d.acceptedAmount - costBasis : null;
+        const revenue = d.acceptedAmount != null ? grossFee(d.acceptedAmount, costBasis) : null;
         return {
           id: d.id,
           name: names.get(d.id) ?? "Deal",
           closedAt: d.closedAt,
           counties: d.counties,
           acceptedAmount: d.acceptedAmount,
-          costBasis: d.ourPrice ?? d.askPrice,
+          costBasis,
           revenue,
           closingCosts: d.estimatedClosingCosts,
-          grossProfit: revenue != null ? revenue - (d.estimatedClosingCosts ?? 0) : null,
+          grossProfit: d.acceptedAmount != null ? netProfit(d.acceptedAmount, costBasis, d.estimatedClosingCosts) : null,
         };
       })
       .sort((a, b) => (b.closedAt?.getTime() ?? 0) - (a.closedAt?.getTime() ?? 0));

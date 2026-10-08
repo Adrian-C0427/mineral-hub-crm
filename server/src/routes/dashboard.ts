@@ -4,7 +4,8 @@ import { prisma, withDbRetry } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal } from "../serializers.js";
-import { netProfit, avg, profitAtAsk } from "../domain/metrics.js";
+import { acquisitionCost, dealNetProfit, dealSalePrice, profitAtAsk } from "../domain/metrics.js";
+import { avgMoney, roundMoney, sumMoney } from "../domain/money.js";
 import { ensureStages, TERMINAL_STAGE_KEYS } from "../domain/stages.js";
 import { allTimeSpan, isAllPeriod } from "../domain/period.js";
 
@@ -99,7 +100,7 @@ export type BucketDeal = {
 /** The scalars the at-asking series needs from an active deal. */
 type AtAskDeal = {
   id: string; name: string; stage: string;
-  askPrice: number | null; ourPrice: number | null; estimatedClosingCosts: number | null;
+  askPrice: number | null; ourPrice: number | null; purchasePrice?: number | null; estimatedClosingCosts: number | null;
   offers: { amount: number }[];
 };
 
@@ -122,9 +123,9 @@ export function profitAtAskSeries<T extends AtAskDeal>(
   const bucketDeals: { i: number; entry: BucketDeal }[] = [];
   for (const d of deals) {
     if (d.offers.length) continue; // has an offer → it's in Projected, never here
-    const profit = profitAtAsk(d.askPrice, d.ourPrice, d.estimatedClosingCosts);
+    const profit = profitAtAsk(d.askPrice, acquisitionCost(d), d.estimatedClosingCosts);
     if (profit == null) continue;
-    total += profit;
+    total += profit; // each profit is already to the cent; rounded once at return
     const when = closingDateOf(d);
     if (!when) continue;
     const dt = new Date(when);
@@ -133,7 +134,8 @@ export function profitAtAskSeries<T extends AtAskDeal>(
     byBucket.set(i, (byBucket.get(i) ?? 0) + profit);
     bucketDeals.push({ i, entry: { id: d.id, name: d.name, stage: d.stage, kind: "atAsk", amount: d.askPrice, profit, date: dt.toISOString().slice(0, 10) } });
   }
-  return { total, byBucket, bucketDeals };
+  for (const [i, v] of byBucket) byBucket.set(i, roundMoney(v));
+  return { total: roundMoney(total), byBucket, bucketDeals };
 }
 
 dashboardRouter.get(
@@ -189,19 +191,15 @@ dashboardRouter.get(
     // acquisition cost (Our Price) of every active seller deal. Owned assets
     // marketed for sale are already ours (no seller contract), so they're
     // excluded; child assets count individually (each carries its own cost).
-    const underContract = allActive
-      .filter((d) => d.recordType === "OPPORTUNITY")
-      .reduce((sum, d) => sum + (d.ourPrice ?? 0), 0);
+    const underContract = sumMoney(allActive.filter((d) => d.recordType === "OPPORTUNITY").map((d) => d.ourPrice));
 
     // Projected profit: best offer − ask − costs across active deals that have
     // offers. A deal with an ACCEPTED offer projects THAT offer (same rule as
     // the monthly chart and the deal serializer), never a higher rejected one.
-    const projectedProfit = allActive.reduce((sum, d) => {
-      const accepted = d.offers.find((o) => o.id === d.selectedOfferId) ?? d.offers.find((o) => o.status === "ACCEPTED");
-      const best = accepted?.amount ?? d.offers.reduce<number | null>((m, o) => (m == null || o.amount > m ? o.amount : m), null);
-      if (best == null) return sum;
-      return sum + netProfit(best, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts);
-    }, 0);
+    const projectedProfit = sumMoney(allActive.map((d) => {
+      const price = dealSalePrice(d.offers, d.selectedOfferId);
+      return price == null ? null : dealNetProfit(price, d);
+    }));
 
     // Every closed-deal metric keys EXCLUSIVELY on the Contract Timeline's
     // Closing date (Deal.originalClosingDate — the contracted closing) — never
@@ -209,10 +207,10 @@ dashboardRouter.get(
     // move), createdAt, updatedAt or today. A closed deal with no Closing date
     // is deliberately absent from period-scoped reporting until it is entered.
     const closedInWindow = closedDeals.filter((d) => d.originalClosingDate && inWindow(d.originalClosingDate));
-    const closedProfitYtd = closedInWindow.reduce(
-      (sum, d) => sum + (d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : 0),
-      0,
-    );
+    // Realized profit of a closed deal: its accepted (selected) offer − Our
+    // Cost − closing costs; null when it closed without an accepted offer.
+    const realized = (d: (typeof closedDeals)[number]) => (d.selectedOffer ? dealNetProfit(d.selectedOffer.amount, d) : null);
+    const closedProfitYtd = sumMoney(closedInWindow.map(realized));
     const closedDealsCount = closedInWindow.length;
 
     // Prior-period baselines for the KPI deltas: the window of EQUAL length
@@ -222,19 +220,12 @@ dashboardRouter.get(
     const prevStart = new Date(win.start.getTime() - (win.end.getTime() - win.start.getTime()));
     const inPrevWindow = (d: Date) => d.getTime() >= prevStart.getTime() && d.getTime() < win.start.getTime();
     const closedInPrev = closedDeals.filter((d) => d.originalClosingDate && inPrevWindow(d.originalClosingDate));
-    const closedProfitPrev = closedInPrev.reduce(
-      (sum, d) => sum + (d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : 0),
-      0,
-    );
+    const closedProfitPrev = sumMoney(closedInPrev.map(realized));
     const closedDealsPrev = closedInPrev.length;
     // Average realized profit per closed deal in the window (same population
     // and Closing date keying as the Closed profit KPI above).
-    const avgProfitPerDeal = avg(
-      closedInWindow.map((d) => (d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : null)).filter((n): n is number => n != null),
-    );
-    const avgProfitPrev = avg(
-      closedInPrev.map((d) => (d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : null)).filter((n): n is number => n != null),
-    );
+    const avgProfitPerDeal = avgMoney(closedInWindow.map(realized).filter((n): n is number => n != null));
+    const avgProfitPrev = avgMoney(closedInPrev.map(realized).filter((n): n is number => n != null));
 
     // Overdue alert (active, no buyer, past find-buyer-by)
     const overdue = allActive
@@ -270,7 +261,7 @@ dashboardRouter.get(
     for (const d of closedInWindow) {
       if (d.selectedBuyer && d.selectedOffer) {
         const cur = topBuyersMap.get(d.selectedBuyer.id) ?? { name: d.selectedBuyer.name, companyName: d.selectedBuyer.companyName, volume: 0 };
-        cur.volume += d.selectedOffer.amount;
+        cur.volume = sumMoney([cur.volume, d.selectedOffer.amount]);
         topBuyersMap.set(d.selectedBuyer.id, cur);
       }
     }
@@ -297,7 +288,7 @@ dashboardRouter.get(
     for (const d of closedInWindow) {
       const i = bucketIdx(d.originalClosingDate!);
       if (i < 0) continue;
-      const profit = d.selectedOffer ? netProfit(d.selectedOffer.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts) : 0;
+      const profit = realized(d) ?? 0;
       monthly.set(i, (monthly.get(i) ?? 0) + profit);
       pushBucketDeal(i, {
         id: d.id, name: d.name, stage: d.stage, kind: "closed",
@@ -311,15 +302,13 @@ dashboardRouter.get(
     // up top has to find that $30K on this axis.
     const monthlyProjected = new Map<number, number>();
     for (const d of allActive) {
-      const selOffer = d.selectedOfferId ? d.offers.find((o) => o.id === d.selectedOfferId) : undefined;
-      const best = d.offers.reduce<number | null>((m, o) => (m == null || o.amount > m ? o.amount : m), null);
-      const amount = selOffer?.amount ?? best;
+      const amount = dealSalePrice(d.offers, d.selectedOfferId);
       if (amount == null) continue;
       const s = serializeDeal(d, now);
       if (!s.finalClosingDate) continue;
       const i = bucketIdx(new Date(s.finalClosingDate));
       if (i < 0) continue;
-      const profit = netProfit(amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts);
+      const profit = dealNetProfit(amount, d);
       monthlyProjected.set(i, (monthlyProjected.get(i) ?? 0) + profit);
       pushBucketDeal(i, {
         id: d.id, name: d.name, stage: d.stage, kind: "projected",
@@ -334,7 +323,7 @@ dashboardRouter.get(
     const kindOrder: Record<BucketDeal["kind"], number> = { closed: 0, projected: 1, atAsk: 2 };
     const profitByMonth = buckets.map((b, i) => ({
       month: b.label, isCurrent: b.isCurrent,
-      profit: monthly.get(i) ?? 0, projected: monthlyProjected.get(i) ?? 0, atAsk: atAsk.byBucket.get(i) ?? 0,
+      profit: roundMoney(monthly.get(i) ?? 0), projected: roundMoney(monthlyProjected.get(i) ?? 0), atAsk: atAsk.byBucket.get(i) ?? 0,
       deals: (bucketDeals.get(i) ?? []).sort((a, b2) => (a.kind === b2.kind ? b2.profit - a.profit : kindOrder[a.kind] - kindOrder[b2.kind])),
     }));
 
@@ -363,8 +352,8 @@ dashboardRouter.get(
       .sort((a, b) => a.originalClosingDate!.getTime() - b.originalClosingDate!.getTime());
     let closeSum = 0;
     const avgProfitTrend = closesAsc.map((d, i) => {
-      closeSum += netProfit(d.selectedOffer!.amount, d.ourPrice ?? d.askPrice, d.estimatedClosingCosts);
-      return closeSum / (i + 1);
+      closeSum = sumMoney([closeSum, realized(d)]);
+      return roundMoney(closeSum / (i + 1));
     }).slice(-8);
 
     // Closed deals per week (8 weeks) by Closing date — sparkline for the

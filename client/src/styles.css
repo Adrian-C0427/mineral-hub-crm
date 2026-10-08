@@ -3845,6 +3845,7 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .pi-v { font-size: 24px; font-weight: 800; margin-top: 5px; font-variant-numeric: tabular-nums; }
 .pi-v.dim { color: var(--text-faint); }
 .pi-v.pos { color: var(--green); }
+.pi-v.neg { color: var(--red); }
 .pi-note { font-size: 11.5px; color: var(--text-faint); margin-top: 2px; }
 .pi-band-wrap { margin-top: 18px; }
 .pi-band { position: relative; height: 48px; }

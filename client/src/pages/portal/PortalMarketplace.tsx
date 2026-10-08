@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { num } from "../../lib/format";
+import { acres, money, num } from "../../lib/format";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../../lib/options";
 import { SearchableMultiSelect } from "../../components/SearchableMultiSelect";
 import { Select } from "../../components/Select";
@@ -398,9 +398,9 @@ export function PortalMarketplace() {
                       <span className="pp-lcard-loc">{locOf(d)}{d.basins.length ? ` · ${d.basins[0]}` : ""}</span>
                     </div>
                     <div className="pp-lcard-stats">
-                      <div><span>NRA</span><b>{d.nra != null ? num(d.nra) : "—"}</b></div>
+                      <div><span>NRA</span><b>{d.nra != null ? acres(d.nra) : "—"}</b></div>
                       <div><span>Wells</span><b className={d.wells.length ? "" : "dim"}>{d.wells.length || "—"}</b></div>
-                      <div><span>Asking</span><b className={d.askPrice != null ? "ask" : "offer"}>{d.askPrice != null ? `$${num(d.askPrice)}` : "Make offer"}</b></div>
+                      <div><span>Asking</span><b className={d.askPrice != null ? "ask" : "offer"}>{d.askPrice != null ? money(d.askPrice) : "Make offer"}</b></div>
                     </div>
                     <div className="pp-lcard-foot">
                       <span className="pp-lcard-sub">{sub || "—"}</span>
@@ -428,9 +428,9 @@ export function PortalMarketplace() {
                       </td>
                       <td className="pp-td-dim">{locOf(d) || "—"}</td>
                       <td>{d.assetTypes.length ? <span className="pp-chip type" title={d.assetTypes.map(typeLabel).join(" / ")}>{d.assetTypes.join(" / ")}</span> : <span className="pp-td-dim">—</span>}</td>
-                      <td className="right pp-td-strong">{d.nra != null ? num(d.nra) : "—"}</td>
+                      <td className="right pp-td-strong">{d.nra != null ? acres(d.nra) : "—"}</td>
                       <td className="right">{d.wells.length || "—"}</td>
-                      <td className="right pp-td-ask">{d.askPrice != null ? `$${num(d.askPrice)}` : "—"}</td>
+                      <td className="right pp-td-ask">{d.askPrice != null ? money(d.askPrice) : "—"}</td>
                       <td className="pp-td-dim">{d.operator ?? "—"}</td>
                     </tr>
                   ))}

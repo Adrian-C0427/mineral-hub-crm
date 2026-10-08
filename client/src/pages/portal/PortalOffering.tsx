@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { API_BASE } from "../../api/client";
-import { fmtDate, fmtDateLocal, num } from "../../lib/format";
+import { acres, fmtDate, fmtDateLocal, money, num } from "../../lib/format";
 import { PortalMap, type PortalMapApi } from "./PortalMap";
 import { portalGet, portalPost, visitorId, type FC, type PortalAbstract, type PortalDeal, type PortalDocument, type PortalImage, type PortalOrg, type PortalPackageAsset, type PortalProduction } from "./portalApi";
 import { formatPhone } from "../../lib/phone";
@@ -77,9 +77,9 @@ export function PortalOffering() {
   }
 
   const stats: StatCell[] = [
-    ...(deal.nra != null ? [{ label: "Net royalty acres", value: num(deal.nra) }] : []),
-    ...(deal.acreageNma != null ? [{ label: "Net mineral acres", value: num(deal.acreageNma) }] : []),
-    { label: "Asking", value: deal.askPrice != null ? `$${num(deal.askPrice)}` : "Make offer", tone: deal.askPrice != null ? "success" : "accent" },
+    ...(deal.nra != null ? [{ label: "Net royalty acres", value: acres(deal.nra) }] : []),
+    ...(deal.acreageNma != null ? [{ label: "Net mineral acres", value: acres(deal.acreageNma) }] : []),
+    { label: "Asking", value: deal.askPrice != null ? money(deal.askPrice) : "Make offer", tone: deal.askPrice != null ? "success" : "accent" },
     { label: "Wells", value: deal.wells.length || "—" },
     { label: "Listed", value: fmtDateLocal(deal.listedAt) },
   ];
@@ -195,7 +195,7 @@ export function PortalOffering() {
                     <div className="pp-asset-name">{a.name}</div>
                     <div className="pp-asset-facts">
                       {a.counties.length > 0 && <span>{a.counties.join(", ")}{a.states.length ? ` · ${a.states.join(", ")}` : ""}</span>}
-                      {a.nra != null && <span><strong>{num(a.nra)}</strong> NRA</span>}
+                      {a.nra != null && <span><strong>{acres(a.nra)}</strong> NRA</span>}
                       {a.assetTypes.length > 0 && <span>{a.assetTypes.join("/")}</span>}
                       {a.operator && <span>{a.operator}</span>}
                     </div>

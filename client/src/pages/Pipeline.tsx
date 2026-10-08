@@ -9,7 +9,8 @@ import { Toggle } from "../components/Toggle";
 import { dealSearchHaystack } from "../lib/dealSearch";
 import { NewDealModal } from "../components/NewDealModal";
 import { StageChangeModal } from "../components/StageChangeModal";
-import { money, num, fmtDate, daysBetween } from "../lib/format";
+import { money, num, acres, fmtDate, daysBetween } from "../lib/format";
+import { roundTo, sumMoney } from "../lib/money";
 import { useAuth } from "../auth/AuthContext";
 import { useStages, stageColor, isOpportunityPipeline, type PipelineInfo } from "../stages";
 import { PipelineSettingsModal } from "../components/PipelineSettingsModal";
@@ -218,11 +219,11 @@ function sortDeals(rows: DealSummary[], sort: CardSort): DealSummary[] {
 
 /** Column header totals: the label shown beside the figure, and its sum. */
 const COLUMN_TOTALS: Record<ColumnTotal, { option: string; label: string; sum: (rows: DealSummary[]) => number; fmt: (n: number) => string }> = {
-  profit: { option: "Est. profit", label: "est. profit", sum: (rows) => rows.reduce((s, d) => s + (d.profitEst ?? 0), 0), fmt: (n) => money(n) },
+  profit: { option: "Est. profit", label: "est. profit", sum: (rows) => sumMoney(rows.map((d) => d.profitEst)), fmt: (n) => money(n) },
   // Our price = what we owe sellers (owned assets for sale have no seller contract).
-  ourPrice: { option: "Our price", label: "our price", sum: (rows) => rows.filter((d) => d.recordType !== "OWNED_ASSET").reduce((s, d) => s + (cardOur(d) ?? 0), 0), fmt: (n) => money(n) },
-  buyerPrice: { option: "Buyer price", label: "buyer price", sum: (rows) => rows.reduce((s, d) => s + (cardBuyer(d) ?? 0), 0), fmt: (n) => money(n) },
-  nra: { option: "NRA", label: "NRA", sum: (rows) => rows.reduce((s, d) => s + (cardNra(d) ?? 0), 0), fmt: (n) => num(n) },
+  ourPrice: { option: "Our price", label: "our price", sum: (rows) => sumMoney(rows.filter((d) => d.recordType !== "OWNED_ASSET").map(cardOur)), fmt: (n) => money(n) },
+  buyerPrice: { option: "Buyer price", label: "buyer price", sum: (rows) => sumMoney(rows.map(cardBuyer)), fmt: (n) => money(n) },
+  nra: { option: "NRA", label: "NRA", sum: (rows) => roundTo(rows.reduce((s, d) => s + (cardNra(d) ?? 0), 0), 4), fmt: (n) => acres(n) },
 };
 
 /** Status chip for the find-buyer date. "Overdue" follows the server's rule
@@ -510,7 +511,7 @@ export function Pipeline() {
   // Header summary: deals currently on the board + their combined est. profit.
   const activeKeys = new Set(activeStages.map((s) => s.key));
   const activeBoardDeals = boardDeals.filter((d) => activeKeys.has(d.stage));
-  const boardTotal = activeBoardDeals.reduce((sum, d) => sum + (d.profitEst ?? 0), 0);
+  const boardTotal = sumMoney(activeBoardDeals.map((d) => d.profitEst));
   const tags = filtersActive ? filterTags(filters, pipelineDeals) : [];
   const total = COLUMN_TOTALS[prefs.total] ?? COLUMN_TOTALS.profit;
   // Per-pipeline, per-stage opportunity counts for the settings stage editor.
@@ -535,7 +536,7 @@ export function Pipeline() {
           <div className="pl-stats">
             <span><b>{activeBoardDeals.length}</b> active deal{activeBoardDeals.length === 1 ? "" : "s"}</span>
             <span className="pl-stats-dot" aria-hidden="true" />
-            <span><b className="pos">{money(boardTotal)}</b> est. profit in pipeline</span>
+            <span><b className={boardTotal < 0 ? "neg" : "pos"}>{money(boardTotal)}</b> est. profit in pipeline</span>
           </div>
         </div>
         <div className="pl-toolbar">

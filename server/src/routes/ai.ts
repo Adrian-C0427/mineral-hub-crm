@@ -44,7 +44,7 @@ async function loadDealContext(req: AuthedRequest, dealId: string): Promise<{ na
       name: s.name, stage: s.stage, recordType: s.recordType,
       state: s.state, states: s.states, counties: s.counties,
       operator: s.operator, assetTypes: s.assetTypes, basins: s.basins, formations: s.formations,
-      acreageNma: s.acreageNma, nra: s.nra,
+      acreageNma: s.acreageNma, nra: s.nra, royaltyRate: s.royaltyRate,
       askPrice: s.askPrice, ourPrice: s.ourPrice, estimatedClosingCosts: s.estimatedClosingCosts,
       sellerNames: s.sellerNames, selectedBuyer: s.selectedBuyer ? { name: s.selectedBuyer.name } : null,
       dateUnderContract: s.dateUnderContract, originalClosingDate: s.originalClosingDate,
