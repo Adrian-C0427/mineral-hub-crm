@@ -19,18 +19,20 @@ import { DateField } from "../components/DateField";
 import { useTheme, isLightTheme } from "../theme";
 import { layoutRect } from "../lib/viewport";
 import { useIsPhonePortrait } from "../lib/mobile";
+import { ALL_PERIOD, ALL_PERIOD_LABEL, withAllPeriod } from "../lib/period";
 
 // Global dashboard period (default YTD). Drives all period-scoped widgets.
-type DashPeriod = "THIS_MONTH" | "LAST_MONTH" | "THIS_QUARTER" | "YTD" | "CUSTOM";
-const DASH_PERIODS: readonly (readonly [DashPeriod, string])[] = [
+// All (shared definition, lib/period) spans every dated deal, with no Δ.
+type DashPeriod = "THIS_MONTH" | "LAST_MONTH" | "THIS_QUARTER" | "YTD" | typeof ALL_PERIOD | "CUSTOM";
+const DASH_PERIODS: readonly (readonly [DashPeriod, string])[] = withAllPeriod<DashPeriod>([
   ["THIS_MONTH", "This month"], ["LAST_MONTH", "Last month"], ["THIS_QUARTER", "This quarter"], ["YTD", "YTD"], ["CUSTOM", "Custom"],
-];
+]);
 
 const MONTHS_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 /**
  * Display name of the loaded reporting window, from the server's `periodLabel`
- * ("This Month", "Last Month", "This Quarter", "Custom", "YTD"). Calendar math
+ * ("This Month", "Last Month", "This Quarter", "Custom", "All", "YTD"). Calendar math
  * is in UTC, like the server's window. `year` is set when the window sits in
  * one calendar year (chart title suffix).
  */
@@ -44,6 +46,7 @@ function periodDisplay(label: string | undefined, from: string, to: string): { l
       return { long: `${MONTHS_LONG[(mo + 11) % 12]} ${ly}`, year: ly };
     }
     case "This Quarter": return { long: `Q${Math.floor(mo / 3) + 1} ${y}`, year: y };
+    case "All": return { long: ALL_PERIOD_LABEL, year: null };
     case "Custom":
       return {
         long: from && to ? `${fmtDate(from)} – ${fmtDate(to)}` : "Custom range",

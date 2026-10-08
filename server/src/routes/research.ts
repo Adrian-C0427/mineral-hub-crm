@@ -25,6 +25,7 @@ import {
 } from "../domain/researchGraph.js";
 import { normalizeCompany } from "../serializers.js";
 import { formatAbstract } from "../domain/abstractLabel.js";
+import { allTimeSpan, isAllPeriod } from "../domain/period.js";
 
 /**
  * Research & Market Intelligence API.
@@ -153,7 +154,9 @@ function pctParam(v: unknown): number | undefined {
   return Number.isFinite(n) && n >= 0 && n <= 100 ? n : undefined;
 }
 
-interface Window { from: Date; to: Date } // [from, to] inclusive days
+// [from, to] inclusive days. `all` marks the "All" time frame (?period=ALL):
+// open bounds, no comparison/history baseline.
+interface Window { from: Date; to: Date; all?: boolean }
 
 export function parseFilters(q: Record<string, unknown>): ResearchFilters {
   return {
@@ -176,8 +179,19 @@ export function parseFilters(q: Record<string, unknown>): ResearchFilters {
   };
 }
 
-/** Current window from ?from/&to (defaults to the last 90 days). */
+/** Open bounds for the "All" time frame — inside parseDay's plausible-year range. */
+const ALL_FROM = new Date("1900-01-01T00:00:00Z");
+const ALL_TO = new Date("2100-12-31T00:00:00Z");
+
+/**
+ * Current window from ?from/&to (defaults to the last 90 days). `?period=ALL`
+ * lifts the date restriction instead of falling back to that default — an
+ * explicit from/to (the Records panel's own date filter) still narrows it.
+ */
 export function parseWindow(q: Record<string, unknown>): Window {
+  if (isAllPeriod(q.period)) {
+    return { from: parseDay(q.from as string | undefined) ?? ALL_FROM, to: parseDay(q.to as string | undefined) ?? ALL_TO, all: true };
+  }
   const to = parseDay(q.to as string | undefined) ?? new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z");
   const from = parseDay(q.from as string | undefined) ?? new Date(to.getTime() - 89 * DAY);
   return { from, to };
@@ -495,10 +509,13 @@ researchRouter.get(
     const org = researchOrgId(req); // reference data (demo reads its reference org)
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
-    const cmp = parseCompare(req.query as Record<string, unknown>, win);
+    // "All" has no previous period: nothing precedes the full history, so no
+    // comparison is loaded (the client hides the deltas).
+    const cmp = win.all ? null : parseCompare(req.query as Record<string, unknown>, win);
 
     const [docs, permits, prevDocs, prevPermits] = await Promise.all([
-      loadDocs(org, f, win), loadPermits(org, f, win), loadDocs(org, f, cmp), loadPermits(org, f, cmp),
+      loadDocs(org, f, win), loadPermits(org, f, win),
+      cmp ? loadDocs(org, f, cmp) : Promise.resolve([]), cmp ? loadPermits(org, f, cmp) : Promise.resolve([]),
     ]);
 
     const kpisOf = (ds: DocRow[], ps: PermitRow[]) => ({
@@ -517,9 +534,14 @@ researchRouter.get(
     const trends: Record<string, Trend> = {};
     for (const k of Object.keys(current) as (keyof typeof current)[]) trends[k] = trend(current[k], previous[k]);
 
-    // Time series over the current window, gap-free.
-    const g = autoGranularity(win.from, win.to);
-    const keys = bucketRange(win.from, win.to, g);
+    // Time series over the current window, gap-free. "All" charts the span
+    // the matching records actually cover (first record → today), with yearly
+    // buckets once it outgrows a readable number of months.
+    const span = win.all
+      ? allTimeSpan([...docs.map((d) => d.recordingDate), ...permits.map((p) => p.activityDate)], new Date())
+      : win;
+    const g = autoGranularity(span.from, span.to, win.all);
+    const keys = bucketRange(span.from, span.to, g);
     const idx = new Map(keys.map((k, i) => [k, i]));
     const series = keys.map((key) => ({ key, transactions: 0, leases: 0, permits: 0 }));
     for (const d of docs) {
@@ -531,7 +553,7 @@ researchRouter.get(
       if (i != null) series[i].permits++;
     }
     const totals = series.map((s) => s.transactions + s.leases + s.permits);
-    const avgWindow = g === "day" ? 7 : g === "week" ? 4 : 3;
+    const avgWindow = g === "day" ? 7 : g === "week" ? 4 : g === "month" ? 3 : 2;
     const rolling = rollingAverage(totals, avgWindow);
     const seriesOut = series.map((s, i) => ({ ...s, total: totals[i], rollingAvg: Math.round(rolling[i] * 10) / 10 }));
 
@@ -540,8 +562,8 @@ researchRouter.get(
     for (const d of docs) byType.set(d.docType, (byType.get(d.docType) ?? 0) + 1);
 
     res.json({
-      range: { from: win.from.toISOString().slice(0, 10), to: win.to.toISOString().slice(0, 10) },
-      compare: { from: cmp.from.toISOString().slice(0, 10), to: cmp.to.toISOString().slice(0, 10) },
+      range: { from: span.from.toISOString().slice(0, 10), to: span.to.toISOString().slice(0, 10) },
+      compare: cmp ? { from: cmp.from.toISOString().slice(0, 10), to: cmp.to.toISOString().slice(0, 10) } : null,
       granularity: g,
       kpis: current,
       previous,
@@ -574,11 +596,12 @@ researchRouter.get(
     const level = (["state", "county", "abstract"] as GeoLevel[]).includes(req.query.level as GeoLevel)
       ? (req.query.level as GeoLevel) : "county";
 
-    // One load spanning the 6 history windows + compare + current.
-    const hist = historyWindows(win.from, win.to, 6);
-    const span: Window = { from: hist[0].from, to: win.to };
+    // One load spanning the 6 history windows + compare + current. "All"
+    // has no history before it: no baseline, so no prior counts or hotspots.
+    const hist = win.all ? [] : historyWindows(win.from, win.to, 6);
+    const span: Window = hist.length ? { from: hist[0].from, to: win.to } : win;
     const [docs, permits] = await Promise.all([loadDocs(org, f, span), loadPermits(org, f, span)]);
-    const cmp = hist[hist.length - 1]; // window immediately before = comparison period
+    const cmp: Window | null = hist.length ? hist[hist.length - 1] : null; // window immediately before = comparison period
 
     interface GeoAgg {
       state: string; county: string | null; abstractId: string | null;
@@ -604,7 +627,7 @@ researchRouter.get(
       if (!key) return;
       const a = get(key, row);
       if (within(date, win)) a[kind]++;
-      if (within(date, cmp)) a.prevTotal++;
+      if (cmp && within(date, cmp)) a.prevTotal++;
       hist.forEach((h, i) => { if (within(date, h)) a.history[i]++; });
     };
     for (const d of docs) bump(d, d.recordingDate, d.docClass === "TRANSACTION" ? "transactions" : "leases");
@@ -641,12 +664,14 @@ researchRouter.get(
     const org = researchOrgId(req); // reference data (demo reads its reference org)
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
-    const cmp = parseCompare(req.query as Record<string, unknown>, win);
     const role = req.query.role === "sellers" ? "sellers" : req.query.role === "operators" ? "operators" : "buyers";
 
     // Lookback (new-entrant detection): 12 months before the current window.
-    const lookback: Window = { from: new Date(win.from.getTime() - 365 * DAY), to: new Date(win.from.getTime() - DAY) };
-    const span: Window = { from: lookback.from.getTime() < cmp.from.getTime() ? lookback.from : cmp.from, to: win.to };
+    // "All" has neither a comparison period nor a lookback — nobody can be
+    // "new" relative to the full history.
+    const cmp: Window | null = win.all ? null : parseCompare(req.query as Record<string, unknown>, win);
+    const lookback: Window | null = win.all ? null : { from: new Date(win.from.getTime() - 365 * DAY), to: new Date(win.from.getTime() - DAY) };
+    const span: Window = cmp && lookback ? { from: lookback.from.getTime() < cmp.from.getTime() ? lookback.from : cmp.from, to: win.to } : win;
 
     interface EntityAgg {
       name: string; count: number; prev: number; seenBefore: boolean;
@@ -663,8 +688,8 @@ researchRouter.get(
         a.counties.add(county);
         if (horizontal) a.horizontal++;
       }
-      if (within(date, cmp)) a.prev++;
-      if (within(date, lookback)) a.seenBefore = true;
+      if (cmp && within(date, cmp)) a.prev++;
+      if (lookback && within(date, lookback)) a.seenBefore = true;
     };
 
     if (role === "operators") {
@@ -689,7 +714,7 @@ researchRouter.get(
           key, name: a.name, count: a.count, previous: a.prev,
           absoluteChange: t.absoluteChange, pctChange: t.pctChange, direction: t.direction,
           acreage: Math.round(a.acreage), counties: [...a.counties].sort(),
-          horizontal: a.horizontal, newEntrant: !a.seenBefore && a.count > 0,
+          horizontal: a.horizontal, newEntrant: !win.all && !a.seenBefore && a.count > 0,
         };
       })
       .filter((r) => r.count > 0 || r.previous > 0)
@@ -1072,6 +1097,10 @@ researchRouter.get(
     const org = researchOrgId(req); // reference data (demo reads its reference org)
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
+    // Every signal is a change against the periods before the window (surges,
+    // new operators, concentration vs prior). "All" has no prior period, so
+    // there is nothing to detect — say so rather than flag all history.
+    if (win.all) return res.json({ signals: [], requiresBoundedPeriod: true });
     const hist = historyWindows(win.from, win.to, 6);
     const span: Window = { from: new Date(Math.min(hist[0].from.getTime(), win.from.getTime() - 365 * DAY)), to: win.to };
     const lookback: Window = { from: new Date(win.from.getTime() - 365 * DAY), to: new Date(win.from.getTime() - DAY) };
