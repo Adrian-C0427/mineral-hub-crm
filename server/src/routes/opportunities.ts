@@ -5,7 +5,7 @@ import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, hasPermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { logActivity } from "../services/activityLog.js";
-import { ensureStages, ensureDefaultPipeline, activeStageKeys, isOpportunityPipeline } from "../domain/stages.js";
+import { ensureStages, ensureDefaultPipeline, activeStageKeys, isOpportunityPipeline, lockStageRow } from "../domain/stages.js";
 import { parseDayKey } from "../domain/calendar.js";
 import {
   OPPORTUNITY_ACTIVITY_KINDS,
@@ -342,6 +342,15 @@ opportunitiesRouter.post(
     const now = new Date();
     const user = { id: req.user!.id, name: req.user!.name };
     await prisma.$transaction(async (tx) => {
+      // Serialize moves of one opportunity and act on the row as it is once the
+      // lock is held (see lockStageRow): a concurrent move has committed by
+      // then, so history records the stage it really left, and a conversion
+      // that move triggered stops this one.
+      await lockStageRow(tx, "Opportunity", o.id);
+      const current = await tx.opportunity.findFirst({ where: { id: o.id, organizationId: org }, select: { stage: true, convertedDealId: true } });
+      if (!current) throw new HttpError(404, "Opportunity not found");
+      if (current.convertedDealId) throw new HttpError(409, "This opportunity was converted to a deal and can no longer be moved");
+      if (current.stage === toStage) return; // a concurrent move already landed it there
       await tx.opportunity.update({
         where: { id: o.id },
         data: {
@@ -353,7 +362,7 @@ opportunitiesRouter.post(
         },
       });
       await tx.opportunityStageHistory.create({
-        data: { opportunityId: o.id, fromStage: o.stage, toStage, reason: reason?.trim() || null, changedByUserId: user.id },
+        data: { opportunityId: o.id, fromStage: current.stage, toStage, reason: reason?.trim() || null, changedByUserId: user.id },
       });
       if (autoConvert) {
         await convertInTx(tx, { organizationId: org, user, opportunityId: o.id });

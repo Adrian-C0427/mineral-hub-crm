@@ -15,7 +15,7 @@ import { effectiveStatus, ENGAGED_STATUSES, BUYER_STATUSES } from "../domain/buy
 import { sendEmail, personalize, renderEmailBody } from "../services/email.js";
 import { money as fmtMoney } from "../domain/format.js";
 import { newPortalSlug } from "./portal.js";
-import { ensureStages, activeStageKeys, isOpportunityPipeline } from "../domain/stages.js";
+import { ensureStages, activeStageKeys, isOpportunityPipeline, lockStageRow } from "../domain/stages.js";
 import { applyStageChange, applyStageUndo, signStageUndo, verifyStageUndo, STAGE_UNDO_MAX_TOKEN_BYTES } from "../services/stageUndo.js";
 
 export const dealsRouter = Router();
@@ -1105,17 +1105,26 @@ dealsRouter.post(
     // The move and all of its side effects (unpublish, cleared follow-ups, read
     // notifications, closed date, winning buyer, history) live in applyStageChange,
     // which also returns the "before" snapshot that makes the move undoable.
-    const snapshot = await prisma.$transaction((tx) =>
-      applyStageChange(tx, deal, {
+    // Moves of one deal are serialized (lockStageRow) and act on the row as it
+    // is once the lock is held — a concurrent move (rapid drags, another user)
+    // has committed by then, so history and side effects start from the real
+    // stage instead of the one read above.
+    const snapshot = await prisma.$transaction(async (tx) => {
+      await lockStageRow(tx, "Deal", deal.id);
+      const current = await tx.deal.findFirst({ where: { id: deal.id, organizationId: orgId(req) } });
+      if (!current) throw new HttpError(404, "Deal not found");
+      // A concurrent move already landed it there: nothing to do or undo.
+      if (current.stage === toStage) return null;
+      return applyStageChange(tx, current, {
         toStage,
         deadReason,
         orgId: orgId(req),
         user: { id: req.user!.id, name: req.user!.name },
-      }),
-    );
+      });
+    });
     // Additive: a short-lived signed token for POST /:id/stage/undo (null when
-    // the snapshot is too large to carry).
-    res.json({ ...serializeDeal(await reload(deal.id)), undoToken: signStageUndo(snapshot) });
+    // the snapshot is too large to carry, or the move was a no-op).
+    res.json({ ...serializeDeal(await reload(deal.id)), undoToken: snapshot ? signStageUndo(snapshot) : null });
   }),
 );
 
@@ -1139,7 +1148,10 @@ dealsRouter.post(
     if (!stages.some((s) => s.key === snap.fromStage)) {
       throw new HttpError(409, "This move can no longer be undone — the stage it came from no longer exists.");
     }
-    await prisma.$transaction((tx) => applyStageUndo(tx, snap));
+    await prisma.$transaction(async (tx) => {
+      await lockStageRow(tx, "Deal", deal.id); // never interleave with a move of the same deal
+      await applyStageUndo(tx, snap);
+    });
     res.json(serializeDeal(await reload(deal.id)));
   }),
 );
