@@ -500,6 +500,15 @@
 .rs-opp-detail { margin: 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-3); }
 .rs-outline-btn.rs-opp-view { border-color: var(--line-strong); background: transparent; }
 .rs-outline-btn.rs-opp-view:hover:not(:disabled) { border-color: var(--accent); background: transparent; }
+.rs-opp-actions { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+/* A permit count that opens those permits on the map (tables + rankings). */
+.rs-map-num {
+  display: inline-flex; align-items: center; gap: 4px; height: auto; min-height: 0; padding: 0; border: 0; background: none; box-shadow: none;
+  font: inherit; font-variant-numeric: tabular-nums; color: inherit; cursor: pointer; white-space: nowrap;
+}
+.rs-map-num svg { color: var(--ink-4); flex: none; }
+.rs-map-num:hover { background: none; border: 0; color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.rs-map-num:hover svg { color: var(--accent); }
 
 /* ---------------------------------------------------------------------------
    Records

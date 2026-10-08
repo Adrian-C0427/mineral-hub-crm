@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Link } from "react-router-dom";
-import { api } from "../api/client";
+import { Link, useSearchParams } from "react-router-dom";
+import { api, ApiError } from "../api/client";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { US_STATE_OPTIONS, US_STATE_LABELS } from "../lib/options";
 import { Select } from "../components/Select";
@@ -15,10 +15,11 @@ import { MapLayersPanel } from "../components/MapLayersPanel";
 import { MapShpImport } from "../components/MapShpImport";
 import { useAbstractIndex } from "../components/AbstractPicker";
 import { PHONE_QUERY } from "../lib/mobile";
+import { readPermitsMapParams, withoutPermitParams } from "../lib/permitMap";
 import { abstractShortLabel, countyStateLabel, formatAbstract, rankAbstracts, surveyLabel } from "../lib/abstracts";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, StageBadge, PriorityBadge, ChipList } from "../components/ui";
-import { money, num } from "../lib/format";
+import { fmtDate, money, num } from "../lib/format";
 import {
   extractWells, wellsPerLease, buildPoints, latestMonth, periodWindow, metricGeojson,
   summarize, rankings, detectHotspots, boe,
@@ -104,6 +105,25 @@ const HEAT_OIL_COLOR = ["interpolate", ["linear"], ["heatmap-density"],
 const HEAT_GAS_COLOR = ["interpolate", ["linear"], ["heatmap-density"],
   0, "rgba(0,0,0,0)", 0.15, "#c7d2fe", 0.4, "#818cf8", 0.65, "#6d28d9", 0.85, "#4c1d95", 1, "#2e1065"] as unknown as maplibregl.ExpressionSpecification;
 const HEAT_STOPS: [number, string][] = [[0, "#eef2ff"], [0.2, "#fde68a"], [0.45, "#f59e0b"], [0.7, "#ea580c"], [1, "#7f1d1d"]];
+
+// --- Drilling-permit highlight (deep link from Research permit metrics) ---
+/** /research/permit-locations — the counted permits placed on their wells. */
+interface PermitLocations {
+  range: { from: string; to: string };
+  total: number; located: number; unlocated: number; wells: number; truncated: boolean;
+  bbox: BBox | null;
+  points: { fid: number | null; lon: number; lat: number; permits: number }[];
+}
+type PermitHl =
+  | { key: string; status: "loading" }
+  | { key: string; status: "ready"; data: PermitLocations }
+  | { key: string; status: "error"; message: string };
+/** Highlight ring colour — distinct from every well-status colour. */
+const PERMIT_HL_COLOR = "#ec4899";
+// Non-highlighted wells fade while a permit highlight is on so the permitted
+// wells read at a glance; the default opacity comes back on clear.
+const WELLS_OPACITY = 0.9;
+const WELLS_DIM_OPACITY = ["case", ["boolean", ["feature-state", "permit"], false], 1, 0.3] as unknown as maplibregl.ExpressionSpecification;
 
 interface HeatState { oil: boolean; gas: boolean; intensity: number; radius: number; opacity: number; min: number; max: number; period: HeatPeriod; from: string; to: string; topProducers: boolean; hotspots: boolean }
 const DEFAULT_HEAT: HeatState = { oil: false, gas: false, intensity: 1.6, radius: 48, opacity: 0.85, min: 0, max: 0, period: "12m", from: "", to: "", topProducers: false, hotspots: true };
@@ -211,6 +231,15 @@ export function MapView() {
   // Hover summary of the production points near the cursor.
   const [heatHover, setHeatHover] = useState<{ x: number; y: number; wells: number; oil: number; gas: number } | null>(null);
   const [heatReady, setHeatReady] = useState(false);
+  // True once the style + layer stack are up (deep-link highlights wait on it).
+  const [mapReady, setMapReady] = useState(false);
+  // Drilling-permit highlight requested via /map?show=permits&… — the filters
+  // ride the URL (reload/back keep it); the wells are looked up server-side.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const permitReq = useMemo(() => readPermitsMapParams(searchParams), [searchParams]);
+  const [permitHl, setPermitHl] = useState<PermitHl | null>(null);
+  const permitFids = useRef<number[]>([]);
+  const permitFitted = useRef<string | null>(null);
   // Bumped when the background heat-well fetch lands (data arrives after load).
   const [heatData, setHeatData] = useState(0);
   const setHeatK = <K extends keyof HeatState>(k: K, v: HeatState[K]) => setHeat((p) => ({ ...p, [k]: v }));
@@ -314,11 +343,31 @@ export function MapView() {
         "text-field": ["get", "label"], "text-font": ["Noto Sans Regular"], "text-size": 11, "text-offset": [0, -1.6], "text-anchor": "bottom", "text-allow-overlap": true },
         paint: { "text-color": "#7f1d1d", "text-halo-color": "#ffffff", "text-halo-width": 1.6 } });
 
+      // Drilling-permit highlight (top of the stack): a ring per permitted well
+      // at EVERY zoom — well tiles only start at z9, so a statewide fit still
+      // shows where the permits are — plus the laterals of permitted wells.
+      map.addSource("permit-hl", { type: "geojson", data: EMPTY_FC });
+      map.addLayer({ id: "permit-hl-bores", type: "line", source: "abstracts", "source-layer": "wellbores", minzoom: 10,
+        filter: ["in", ["get", "surfaceId"], ["literal", []]] as unknown as maplibregl.FilterSpecification,
+        layout: { "line-cap": "round" }, paint: { "line-color": PERMIT_HL_COLOR, "line-width": ["interpolate", ["linear"], ["zoom"], 10, 2, 15, 4] as unknown as maplibregl.ExpressionSpecification, "line-opacity": 0.9 } });
+      map.addLayer({ id: "permit-hl", type: "circle", source: "permit-hl", paint: {
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 4, 9, 6.5, 12, 9, 15, 13] as unknown as maplibregl.ExpressionSpecification,
+        "circle-color": "rgba(236,72,153,0.18)", "circle-stroke-color": PERMIT_HL_COLOR,
+        "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 5, 2, 12, 3] as unknown as maplibregl.ExpressionSpecification } });
+      map.on("mouseenter", "permit-hl", () => (map.getCanvas().style.cursor = "pointer"));
+      map.on("mouseleave", "permit-hl", () => (map.getCanvas().style.cursor = ""));
+
       map.on("click", (e) => {
         // Precise well selection: gather wells under a small tolerance box.
         const t = 6;
         const bx: [maplibregl.PointLike, maplibregl.PointLike] = [[e.point.x - t, e.point.y - t], [e.point.x + t, e.point.y + t]];
         const hits = layersRef.current.wells ? map.queryRenderedFeatures(bx, { layers: ["wells"] }) : [];
+        // A highlight ring opens its well even where the wells layer is off or
+        // not drawn yet (below z9).
+        if (!hits.length) {
+          const ring = map.queryRenderedFeatures(bx, { layers: ["permit-hl"] }).find((f) => f.properties?.fid != null);
+          if (ring) { void openWell(Number(ring.properties.fid)); return; }
+        }
         // De-dupe by fid (a feature can appear once), keep distinct wells.
         const seen = new Map<number, WellProps>();
         for (const h of hits) { const p = h.properties as Record<string, unknown>; const fid = Number(p.fid); if (!seen.has(fid)) seen.set(fid, toWellProps(p)); }
@@ -384,6 +433,7 @@ export function MapView() {
 
       styleReady.current = true;
       applyLayerVisibility(); applyWellFilter();
+      setMapReady(true);
       setHeatReady(true); // lets the heat effect run its first compute with a fresh closure
     });
     return () => { map.remove(); mapRef.current = null; styleReady.current = false; };
@@ -470,7 +520,7 @@ export function MapView() {
     const vis = (id: string, on: boolean) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
     vis("abstracts-fill", L.boundaries); vis("abstracts-line", L.boundaries);
     vis("abstracts-num", L.absNums); vis("abstracts-survey", L.surveyNames);
-    vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores);
+    vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores); vis("permit-hl-bores", L.wellbores);
     vis("tracts-fill", L.tracts); vis("tracts-line", L.tracts); vis("tracts-label", L.tracts);
     applyHighlight();
   }
@@ -625,6 +675,52 @@ export function MapView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
   useEffect(applyWellFilter, [fWellTypes, fWellStatuses, fOperators]);
+
+  // Drilling-permit highlight: resolve the URL's permit filters to wells. The
+  // server re-counts exactly the set the Research metric counted (same filters,
+  // same loader) — the URL never carries ids. Sequence-guarded so a quick
+  // back/forward between two links can't land the older answer last.
+  const permitKey = permitReq ? `${permitReq.apiQs}|${permitReq.label}` : null;
+  const permitSeq = useRef(0);
+  useEffect(() => {
+    const seq = ++permitSeq.current;
+    if (!permitReq || !permitKey) { setPermitHl(null); return; }
+    setPermitHl({ key: permitKey, status: "loading" });
+    api.get<PermitLocations>(`/research/permit-locations?${permitReq.apiQs}`)
+      .then((data) => { if (permitSeq.current === seq) setPermitHl({ key: permitKey, status: "ready", data }); })
+      .catch((e: unknown) => {
+        if (permitSeq.current !== seq) return;
+        const message = e instanceof ApiError && e.status === 403 ? "You don't have access to Research permits." : "Couldn't load the permit locations.";
+        setPermitHl({ key: permitKey, status: "error", message });
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [permitKey]);
+  // Paint the highlight: rings + permitted laterals, fade every other well
+  // (feature-state, so it holds as tiles stream in), and frame the permits
+  // once per request — later re-renders never steal the camera back.
+  useEffect(() => {
+    const map = mapRef.current; if (!map || !mapReady) return;
+    for (const fid of permitFids.current) map.setFeatureState({ source: "abstracts", sourceLayer: "wells", id: fid }, { permit: false });
+    const data = permitHl?.status === "ready" ? permitHl.data : null;
+    const fids = data ? data.points.flatMap((p) => (p.fid != null ? [p.fid] : [])) : [];
+    permitFids.current = fids;
+    for (const fid of fids) map.setFeatureState({ source: "abstracts", sourceLayer: "wells", id: fid }, { permit: true });
+    (map.getSource("permit-hl") as maplibregl.GeoJSONSource | undefined)?.setData({
+      type: "FeatureCollection",
+      features: (data?.points ?? []).map((p) => ({ type: "Feature", properties: p.fid != null ? { fid: p.fid, permits: p.permits } : { permits: p.permits }, geometry: { type: "Point", coordinates: [p.lon, p.lat] } })),
+    } as unknown as GeoJSON.FeatureCollection);
+    if (map.getLayer("permit-hl-bores")) map.setFilter("permit-hl-bores", ["in", ["get", "surfaceId"], ["literal", fids]] as unknown as maplibregl.FilterSpecification);
+    if (map.getLayer("wells")) map.setPaintProperty("wells", "circle-opacity", data ? WELLS_DIM_OPACITY : WELLS_OPACITY);
+    if (data && permitHl && permitFitted.current !== permitHl.key) {
+      permitFitted.current = permitHl.key;
+      fitBbox(data.bbox);
+    }
+    if (!permitHl) permitFitted.current = null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, permitHl]);
+  // Clear = drop the permit params from the URL (other params, layers and
+  // filters stay as the user set them).
+  const clearPermitHl = () => setSearchParams(withoutPermitParams(searchParams), { replace: true });
   // Zoom to the filtered results: whenever filters change, ask the server for
   // the bounding box of everything matching and frame it. Debounced so rapid
   // edits coalesce; sequence-guarded so a slow response can't zoom late; the
@@ -792,7 +888,7 @@ export function MapView() {
     measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
-  }, [showFilters, showHeat, fullscreen]);
+  }, [showFilters, showHeat, fullscreen, permitReq != null]);
   useEffect(() => { mapRef.current?.resize(); }, [mapH]);
 
   // Visible-area padding. With the Filters / Heat map sheet open, searches and
@@ -966,6 +1062,36 @@ export function MapView() {
           ))}
         </div>
       </div>
+
+      {/* Drilling-permit highlight bar — what's highlighted, how many permits
+          could be placed, and the way back out. */}
+      {permitReq && (
+        <div className="mc-permit-bar" role="status">
+          <span className="mc-permit-swatch" aria-hidden="true" />
+          <span className="mc-permit-text">
+            <b>{permitReq.label}</b>
+            {permitHl?.status === "ready" && <span className="muted"> · {fmtDate(permitHl.data.range.from)} – {fmtDate(permitHl.data.range.to)}</span>}
+            {permitReq.counties.length > 0 && permitReq.counties.length <= 3 && <span className="muted"> · {permitReq.counties.join(", ")}</span>}
+          </span>
+          <span className="mc-permit-count">
+            {!permitHl || permitHl.status === "loading" ? "Locating permits…"
+              : permitHl.status === "error" ? permitHl.message
+              : permitHl.data.total === 0 ? "No permits match these filters"
+              : <>
+                  <b>{num(permitHl.data.located)}</b> of <b>{num(permitHl.data.total)}</b> permit{permitHl.data.total === 1 ? "" : "s"} located
+                  {permitHl.data.located > 0 && <> · {num(permitHl.data.wells)} well{permitHl.data.wells === 1 ? "" : "s"}</>}
+                  {permitHl.data.unlocated > 0 && <span className="muted" title="These permits have no mapped well (by API number) and no coordinates of their own."> · {num(permitHl.data.unlocated)} without a mapped location</span>}
+                  {permitHl.data.truncated && <span className="muted"> · showing the first {num(permitHl.data.points.length)}</span>}
+                </>}
+          </span>
+          <span className="mc-permit-actions">
+            {permitHl?.status === "ready" && permitHl.data.bbox && (
+              <button type="button" className="small" onClick={() => fitBbox(permitHl.data.bbox)}>Zoom to permits</button>
+            )}
+            <button type="button" className="small" onClick={clearPermitHl} aria-label="Clear the permit highlight">Clear highlight</button>
+          </span>
+        </div>
+      )}
 
       {/* The map fills the rest of the page. Filters / Heat map float INSIDE it,
           docked left or right (remembered); the overlay controls on that side
@@ -1170,6 +1296,7 @@ export function MapView() {
               <Legend color="#22c55e" label="Producing" /><Legend color="#f59e0b" label="Shut-in" /><Legend color="#6b7280" label="Plugged" />
               <Legend color="#3b82f6" label="Permitted" /><Legend color="#78350f" label="Dry hole" /><Legend color="#7c3aed" label="Injection/Disposal" />
               {layers.wellbores && <Legend color="#0f766e" label="Wellbore (lateral)" line />}
+              {permitReq && <Legend color={PERMIT_HL_COLOR} label="Highlighted permit" />}
             </div>
           ))}
         </div>
