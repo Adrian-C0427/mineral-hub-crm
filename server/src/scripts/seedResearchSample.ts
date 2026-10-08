@@ -19,7 +19,7 @@
  */
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
-import { classifyDocType, normalizeEntity, splitAbstracts, splitParties } from "../domain/research.js";
+import { classifyDocType, documentPartyFields, normalizeEntity, splitAbstracts } from "../domain/research.js";
 
 const SOURCE = "sample";
 const DAY = 86400000;
@@ -128,11 +128,9 @@ async function main() {
           docTypeRaw, docType: cls.docType, docClass: cls.docClass,
           instrumentNumber: `${date.getUTCFullYear()}-${instr++}`,
           recordingDate: date,
-          grantor, grantee,
-          grantorNorm: normalizeEntity(grantor), granteeNorm: normalizeEntity(grantee),
-          grantorParties: splitParties(grantor), granteeParties: splitParties(grantee),
-          grantorNorms: splitParties(grantor).map((p) => normalizeEntity(p)!).filter(Boolean),
-          granteeNorms: splitParties(grantee).map((p) => normalizeEntity(p)!).filter(Boolean),
+          ...(({ partyInterests, ...pf }) => ({
+            ...pf, ...(partyInterests.length ? { partyInterests: partyInterests as unknown as Prisma.InputJsonValue } : {}),
+          }))(documentPartyFields(grantor, grantee)),
           abstractId, abstractIds: splitAbstracts(abstractId), survey: chance(0.7) ? pick(SURVEYS) : null,
           acreage: chance(0.7) ? Math.round(rnd() * 320 + 10) : null,
           consideration: chance(0.3) ? Math.round((rnd() * 900 + 100)) * 1000 : null,

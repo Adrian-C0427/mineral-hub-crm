@@ -17,7 +17,7 @@ import { parse } from "csv-parse/sync";
 import { HttpError } from "../middleware/errors.js";
 import {
   classifyDocType, classifyPermitStatus, classifyTrajectory,
-  documentDedupeKey, normalizeEntity, splitParties, splitAbstracts, normField,
+  documentDedupeKey, documentPartyFields, interestSignature, normalizeEntity, splitAbstracts, normField,
 } from "./research.js";
 
 // Cap rows per ingest so a single file can't drive an unbounded parse/insert
@@ -180,18 +180,25 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
     // the instrument number alone, which county exports repeat across each
     // grantor/grantee and legal tract). Existing-in-DB vs seen-in-this-file
     // are reported as distinct reasons.
+    // Party keys + conveyed interests are re-derived from each stored cell AS
+    // RECORDED, exactly as an incoming row is — so the comparison never depends
+    // on whether an older record has been through the interest backfill yet.
     const existingKeys = new Set(
       (await prisma.researchDocument.findMany({
         where: { organizationId: org },
         select: {
           instrumentNumber: true, county: true, state: true, recordingDate: true, docType: true,
-          grantorNorm: true, granteeNorm: true, volume: true, page: true, abstractId: true,
+          grantor: true, grantee: true, grantorAsRecorded: true, granteeAsRecorded: true,
+          volume: true, page: true, abstractId: true,
         },
-      })).map((r) => documentDedupeKey({
-        state: r.state, county: r.county, instrumentNumber: r.instrumentNumber,
-        recordingDate: r.recordingDate, docType: r.docType, grantorNorm: r.grantorNorm, granteeNorm: r.granteeNorm,
-        volume: r.volume, page: r.page, abstractId: r.abstractId,
-      })),
+      })).map((r) => {
+        const pf = documentPartyFields(r.grantorAsRecorded ?? r.grantor, r.granteeAsRecorded ?? r.grantee);
+        return documentDedupeKey({
+          state: r.state, county: r.county, instrumentNumber: r.instrumentNumber,
+          recordingDate: r.recordingDate, docType: r.docType, grantorNorm: pf.grantorNorm, granteeNorm: pf.granteeNorm,
+          volume: r.volume, page: r.page, abstractId: r.abstractId, interests: interestSignature(pf.partyInterests),
+        });
+      }),
     );
     const seenInFile = new Set<string>();
     const REASON_EXISTING = "Duplicate of an already-imported record";
@@ -223,20 +230,17 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
       const rowCounty = get(row, "county") ? titleCounty(get(row, "county")) : fallbackCounty;
       if (!rowState || !rowCounty) { record(i, "REJECTED", "Missing county/state (assign one for this file)", data); continue; }
       const instrumentNumber = get(row, "instrumentNumber") || null;
-      const grantor = get(row, "grantor") || null;
-      const grantee = get(row, "grantee") || null;
-      const grantorNorm = normalizeEntity(grantor);
-      const granteeNorm = normalizeEntity(grantee);
-      // Individual participants (strict split on , ; /) — the record itself
-      // stays ONE transaction; these link each participant to it.
-      const grantorParties = splitParties(grantor);
-      const granteeParties = splitParties(grantee);
+      // Clean names, grouping keys, individual participants (strict split on
+      // , ; /) and the conveyed interest ("ABC MINERALS LLC – 50%" → ABC
+      // MINERALS LLC at 50%) — the record itself stays ONE transaction.
+      const pf = documentPartyFields(get(row, "grantor") || null, get(row, "grantee") || null);
+      const { grantorNorm, granteeNorm } = pf;
       const volume = get(row, "volume") || null;
       const page = get(row, "page") || null;
       const abstractId = get(row, "abstractId") || null;
       const key = documentDedupeKey({
         state: rowState, county: rowCounty, instrumentNumber, recordingDate, docType: cls.docType,
-        grantorNorm, granteeNorm, volume, page, abstractId,
+        grantorNorm, granteeNorm, volume, page, abstractId, interests: interestSignature(pf.partyInterests),
       });
       if (existingKeys.has(key)) { record(i, "DUPLICATE", REASON_EXISTING, data); continue; }
       if (seenInFile.has(key)) { record(i, "DUPLICATE", REASON_IN_FILE, data); continue; }
@@ -247,10 +251,13 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
         docTypeRaw, docType: cls.docType, docClass: cls.docClass,
         instrumentNumber, volume, page,
         recordingDate,
-        grantor, grantee, grantorNorm, granteeNorm,
-        grantorParties, granteeParties,
-        grantorNorms: grantorParties.map((p) => normalizeEntity(p)!).filter(Boolean),
-        granteeNorms: granteeParties.map((p) => normalizeEntity(p)!).filter(Boolean),
+        grantor: pf.grantor, grantee: pf.grantee,
+        grantorAsRecorded: pf.grantorAsRecorded, granteeAsRecorded: pf.granteeAsRecorded,
+        grantorNorm, granteeNorm,
+        grantorParties: pf.grantorParties, granteeParties: pf.granteeParties,
+        grantorNorms: pf.grantorNorms, granteeNorms: pf.granteeNorms,
+        interestPct: pf.interestPct,
+        ...(pf.partyInterests.length ? { partyInterests: pf.partyInterests as unknown as Prisma.InputJsonValue } : {}),
         abstractId,
         abstractIds: splitAbstracts(abstractId), // each abstract independently filterable
         source, ingestRunId: runId,

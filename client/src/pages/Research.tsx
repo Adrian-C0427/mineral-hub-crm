@@ -73,7 +73,39 @@ interface DocRecord {
   /** Individual participants split from multi-party cells at import (may be
    *  empty on legacy rows — display falls back to the raw cell). */
   grantorParties?: string[]; granteeParties?: string[];
+  /** Conveyed interest split out of the party cells ("ABC MINERALS LLC –
+   *  50%"): grantor/grantee are the clean names, the cells as recorded are
+   *  kept for reference, and the share is data of its own. */
+  grantorAsRecorded?: string | null; granteeAsRecorded?: string | null;
+  interestPct?: number | null;
+  partyInterests?: PartyInterestRec[] | null;
   abstractId: string | null; survey: string | null; acreage: number | null; consideration: number | null; source: string;
+}
+interface PartyInterestRec { side: "GRANTOR" | "GRANTEE"; party: string; norm: string; pct: number; text: string }
+
+/** "50%", "12.5%", "33.333%". */
+function fmtShare(n: number): string {
+  return `${n.toLocaleString(undefined, { maximumFractionDigits: 3 })}%`;
+}
+/** Plain-text interest for CSV: the figure, or the per-party shares when no single figure applies. */
+function interestText(r: DocRecord): string {
+  const list = r.partyInterests ?? [];
+  if (r.interestPct != null) return list.length > 1 ? `${fmtShare(r.interestPct)} (${list.map((i) => `${i.party} ${fmtShare(i.pct)}`).join("; ")})` : fmtShare(r.interestPct);
+  return list.map((i) => `${i.party} ${fmtShare(i.pct)}`).join("; ");
+}
+/** Interest conveyed cell: the figure, with each party's share beneath when several state one. */
+function InterestCell({ r }: { r: DocRecord }) {
+  const list = r.partyInterests ?? [];
+  if (r.interestPct == null && !list.length) return <span className="rs-zero">—</span>;
+  const recorded = [r.grantorAsRecorded, r.granteeAsRecorded].filter(Boolean).join(" → ");
+  return (
+    <span className="rec-nowrap" title={recorded ? `As recorded: ${recorded}` : undefined}>
+      {r.interestPct != null && <span className="rs-strong">{fmtShare(r.interestPct)}</span>}
+      {(r.interestPct == null || list.length > 1) && list.map((i) => (
+        <span key={`${i.side}:${i.norm}`} className="rs-sub-line">{i.party} · {fmtShare(i.pct)}</span>
+      ))}
+    </span>
+  );
 }
 interface PermitRecord {
   id: string; state: string; county: string; apiNumber: string | null; permitNumber: string | null;
@@ -1781,15 +1813,15 @@ function TxDrillModal({ qs, title, selector, onClose }: {
           <div className="rs-deeds-bar">
             <span className="rs-mid">{rows.length} transaction{rows.length === 1 ? "" : "s"}</span>
             <button type="button" className="rs-outline-btn" onClick={() => downloadCsv("relationship-transactions.csv",
-              ["Recorded", "Type", "Grantor", "Grantee", "County", "Abstract", "Instrument #"],
-              rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.grantor, r.grantee, `${r.county}, ${r.state}`, r.abstractId, r.instrumentNumber]))}>
+              ["Recorded", "Type", "Grantor", "Grantee", "Interest conveyed", "County", "Abstract", "Instrument #"],
+              rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.grantor, r.grantee, interestText(r), `${r.county}, ${r.state}`, r.abstractId, r.instrumentNumber]))}>
               <DownloadIcon />
               Export CSV
             </button>
           </div>
           <div className="table-scroll rs-deeds-scroll">
             <table className="data-table rs-sticky-head">
-              <thead><tr><th>Recorded</th><th>Type</th><th>Grantor</th><th>Grantee</th><th>County</th><th>Abstract</th><th>Instrument #</th></tr></thead>
+              <thead><tr><th>Recorded</th><th>Type</th><th>Grantor</th><th>Grantee</th><th>Interest</th><th>County</th><th>Abstract</th><th>Instrument #</th></tr></thead>
               <tbody>
                 {rows.map((r) => (
                   <tr key={r.id}>
@@ -1797,6 +1829,7 @@ function TxDrillModal({ qs, title, selector, onClose }: {
                     <td title={r.docTypeRaw}><DocTypeTag docType={r.docType} raw={r.docTypeRaw} /></td>
                     <td>{r.grantor ?? <span className="rs-zero">—</span>}</td>
                     <td>{r.grantee ?? <span className="rs-zero">—</span>}</td>
+                    <td><InterestCell r={r} /></td>
                     <td className="rec-nowrap">{r.county}, {r.state}</td>
                     <td>
                       {r.abstractId ? <span className="rs-strong">{r.abstractId.split(",").map((a) => absIndex.label(a.trim(), r.county, r.state)).join("; ")}</span> : <span className="rs-zero">—</span>}
@@ -1947,8 +1980,10 @@ interface AbstractBuyer {
 
 // docClass is NOT a records-level filter — the page-level dataset toggle
 // (Transactions/Deeds vs Leases) owns record-class separation for every view.
-interface RecFilters { abstracts: string[]; counties: string[]; surveys: string[]; docTypes: string[]; grantors: string[]; grantees: string[]; statuses: string[]; trajectories: string[]; instrument: string; from: string; to: string }
-const EMPTY_REC_FILTERS: RecFilters = { abstracts: [], counties: [], surveys: [], docTypes: [], grantors: [], grantees: [], statuses: [], trajectories: [], instrument: "", from: "", to: "" };
+interface RecFilters { abstracts: string[]; counties: string[]; surveys: string[]; docTypes: string[]; grantors: string[]; grantees: string[]; statuses: string[]; trajectories: string[]; instrument: string; from: string; to: string; interestMin: string; interestMax: string }
+const EMPTY_REC_FILTERS: RecFilters = { abstracts: [], counties: [], surveys: [], docTypes: [], grantors: [], grantees: [], statuses: [], trajectories: [], instrument: "", from: "", to: "", interestMin: "", interestMax: "" };
+/** A typed percent filter value, or "" when empty / not a 0–100 number. */
+const pctFilter = (v: string) => { const n = Number(v.trim()); return v.trim() && Number.isFinite(n) && n >= 0 && n <= 100 ? String(n) : ""; };
 // grantors/grantees are {value: normalized key, label: display name} — a
 // multi-party cell contributes each participant as its own option.
 interface RecOptions { counties: string[]; abstracts: string[]; surveys?: string[]; docTypes?: string[]; docClasses?: string[]; grantors?: { value: string; label: string }[]; grantees?: { value: string; label: string }[]; statuses?: string[]; trajectories?: string[] }
@@ -2016,12 +2051,15 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
     if (instrumentQ) p.set("instrument", instrumentQ);
     if (rf.from) p.set("from", rf.from);
     if (rf.to) p.set("to", rf.to);
+    if (kind === "documents" && pctFilter(rf.interestMin)) p.set("interestMin", pctFilter(rf.interestMin));
+    if (kind === "documents" && pctFilter(rf.interestMax)) p.set("interestMax", pctFilter(rf.interestMax));
     if (searchQ) p.set("q", searchQ);
     return p.toString();
-  }, [qs, rf, searchQ, instrumentQ]);
+  }, [qs, rf, searchQ, instrumentQ, kind]);
   const activeFilterCount = rf.abstracts.length + rf.counties.length + rf.surveys.length + rf.docTypes.length +
     rf.grantors.length + rf.grantees.length +
-    rf.statuses.length + rf.trajectories.length + (rf.instrument.trim() ? 1 : 0) + (rf.from ? 1 : 0) + (rf.to ? 1 : 0);
+    rf.statuses.length + rf.trajectories.length + (rf.instrument.trim() ? 1 : 0) + (rf.from ? 1 : 0) + (rf.to ? 1 : 0) +
+    (pctFilter(rf.interestMin) || pctFilter(rf.interestMax) ? 1 : 0);
 
   // Abstract Buyer Preview: whenever an abstract is selected (page-level drill
   // or the records Abstract filter), summarize its top 5 buyers above the table
@@ -2103,8 +2141,8 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
         let rows = await fetchAllRows<DocRecord>("documents");
         if (onlySelected) rows = rows.filter((r) => sel.selected.has(r.id));
         downloadCsv(onlySelected ? "research-documents-selected.csv" : "research-documents.csv",
-          ["Recording Date", "Type", "Class", "Grantor", "Grantee", "Instrument #", "State", "County", "Abstract"],
-          rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.docClass, r.grantor, r.grantee, r.instrumentNumber, r.state, r.county, r.abstractId]));
+          ["Recording Date", "Type", "Class", "Grantor", "Grantee", "Interest conveyed", "Instrument #", "State", "County", "Abstract"],
+          rows.map((r) => [r.recordingDate.slice(0, 10), r.docTypeRaw, r.docClass, r.grantor, r.grantee, interestText(r), r.instrumentNumber, r.state, r.county, r.abstractId]));
       } else if (kind === "rrcPermits") {
         const rows = await fetchAllRows<RrcPermitRecord>("rrc-permits");
         downloadCsv("rrc-permits.csv",
@@ -2133,6 +2171,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
     // wrap onto extra lines) — nothing hides behind a "+N" indicator.
     { key: "grantor", header: dataset === "LEASE" ? "Grantor (lessor)" : "Grantor (seller)", value: (r) => r.grantor, minWidth: 180, render: (r) => <span className="rec-name"><ChipList items={r.grantorParties?.length ? r.grantorParties : [r.grantor]} /></span> },
     { key: "grantee", header: dataset === "LEASE" ? "Grantee (lessee)" : "Grantee (buyer)", value: (r) => r.grantee, minWidth: 180, render: (r) => <span className="rec-name"><ChipList items={r.granteeParties?.length ? r.granteeParties : [r.grantee]} /></span> },
+    { key: "interestPct", header: "Interest conveyed", value: (r) => r.interestPct ?? null, align: "right", type: "number", render: (r) => <InterestCell r={r} /> },
     { key: "county", header: "County", value: (r) => `${r.county}, ${r.state}`, render: (r) => <span className="rs-mid rec-nowrap">{r.county}, {r.state}</span> },
     { key: "abstractId", header: "Abstract", value: (r) => r.abstractId, align: "right", render: (r) => r.abstractId ? <span className="rs-mid chips-oneline"><ChipList items={r.abstractId.split(",").map((a) => absIndex.label(a.trim(), r.county, r.state))} /></span> : dash },
     { key: "instrumentNumber", header: "Instrument #", value: (r) => r.instrumentNumber, align: "right", render: (r) => r.instrumentNumber ? <span className="rs-mono rec-nowrap">{r.instrumentNumber}</span> : dash },
@@ -2236,6 +2275,20 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
               {rf.instrument && <button type="button" className="msel-clear" aria-label="Clear instrument filter"
                 onMouseDown={(e) => { e.preventDefault(); setRf((p) => ({ ...p, instrument: "" })); }}>×</button>}
             </div></div></div>
+        )}
+        {kind === "documents" && (
+          <div><div className="rec-flabel">Interest conveyed (%)</div>
+            <div className="rs-pct-range">
+              <div className="msel msel-single"><div className="msel-box">
+                <input className="datef-input" inputMode="decimal" value={rf.interestMin} onChange={(e) => setRf((p) => ({ ...p, interestMin: e.target.value }))}
+                  placeholder="Min" aria-label="Minimum interest conveyed, percent" />
+              </div></div>
+              <span className="rs-mid" aria-hidden>–</span>
+              <div className="msel msel-single"><div className="msel-box">
+                <input className="datef-input" inputMode="decimal" value={rf.interestMax} onChange={(e) => setRf((p) => ({ ...p, interestMax: e.target.value }))}
+                  placeholder="Max" aria-label="Maximum interest conveyed, percent" />
+              </div></div>
+            </div></div>
         )}
         <div><div className="rec-flabel">From</div><DateField value={rf.from} onChange={(v) => setRf((p) => ({ ...p, from: v }))} ariaLabel="Records from date" /></div>
         <div><div className="rec-flabel">To</div><DateField value={rf.to} onChange={(v) => setRf((p) => ({ ...p, to: v }))} ariaLabel="Records to date" /></div>
