@@ -20,16 +20,32 @@ const strOrNull = (v: string) => (v.trim() === "" ? null : v.trim());
  * Only the name is required; everything else lives behind "More details" so a
  * prospect can be captured in seconds and filled in later on its page.
  */
-export function NewOpportunityModal({ pipelines, pipelineId, onClose, onCreated }: {
+export function NewOpportunityModal({ pipelines, pipelineId, onClose, onCreated, onPipelinesChanged }: {
   pipelines: PipelineInfo[];
   /** Pipeline to preselect (the board's current selection). */
   pipelineId?: string;
   onClose: () => void;
   onCreated: (o: Opp) => void;
+  /** The server's pipeline list differs from the app's copy — refresh it. */
+  onPipelinesChanged?: () => void;
 }) {
   const { user } = useAuth();
-  const oppPipelines = pipelines.filter(isOpportunityPipeline);
-  const [pid, setPid] = useState(() => (oppPipelines.some((p) => p.id === pipelineId) ? pipelineId! : oppPipelines[0]?.id ?? ""));
+  // Fetched fresh on open: the pipeline sent to the server must be one that
+  // exists in this org right now. The app's copy is only the first paint.
+  const [fresh, setFresh] = useState<PipelineInfo[] | null>(null);
+  const oppPipelines = (fresh ?? pipelines).filter(isOpportunityPipeline);
+  const pick = (list: PipelineInfo[]) => (list.some((p) => p.id === pipelineId) ? pipelineId! : list[0]?.id ?? "");
+  const [pid, setPid] = useState(() => pick(oppPipelines));
+  const refreshPipelines = (keep: boolean) =>
+    api.get<PipelineInfo[]>("/pipeline/pipelines").then((ps) => {
+      const opp = ps.filter(isOpportunityPipeline);
+      setFresh(ps);
+      setPid((cur) => (keep && opp.some((p) => p.id === cur) ? cur : pick(opp)));
+      const known = new Set(pipelines.map((p) => p.id));
+      if (ps.length !== pipelines.length || ps.some((p) => !known.has(p.id))) onPipelinesChanged?.();
+      return opp;
+    });
+  useEffect(() => { void refreshPipelines(true).catch(() => {}); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const pipeline = oppPipelines.find((p) => p.id === pid);
   const activeStages = pipeline?.stages.filter((s) => !s.isTerminal) ?? [];
   const [stage, setStage] = useState(activeStages[0]?.key ?? "");
@@ -89,7 +105,16 @@ export function NewOpportunityModal({ pipelines, pipelineId, onClose, onCreated 
       });
       onCreated(o);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to create opportunity");
+      // The chosen pipeline no longer exists (deleted, or the workspace was
+      // reset elsewhere): reload the list, reselect a valid one, say so.
+      if (err instanceof ApiError && err.status === 400 && /unknown pipeline/i.test(err.message)) {
+        const opp = await refreshPipelines(false).catch(() => [] as PipelineInfo[]);
+        setError(opp.length
+          ? "That pipeline was changed or removed. The list is up to date now — check the pipeline and try again."
+          : "There is no Opportunities pipeline yet. Create one in Pipeline settings.");
+      } else {
+        setError(err instanceof ApiError ? err.message : "Failed to create opportunity");
+      }
       setBusy(false);
     }
   }

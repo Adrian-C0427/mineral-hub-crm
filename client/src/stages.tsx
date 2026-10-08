@@ -1,5 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api } from "./api/client";
+import { useAuth } from "./auth/AuthContext";
 import { prettyStage } from "./lib/format";
 import type { ConvertMode, PipelineKind, PipelineStage } from "./types";
 
@@ -102,10 +103,24 @@ export function StagesProvider({ children }: { children: ReactNode }) {
   const [selectedId, setSelectedIdState] = useState<string>(() => {
     try { return localStorage.getItem(SELECTED_KEY) ?? ""; } catch { return ""; }
   });
+  // Pipelines belong to the signed-in ORGANIZATION: (re)load whenever the
+  // account changes (sign-in, sign-out, switching to/from the demo) — never
+  // keep another org's ids around. A response for a previous account is dropped.
+  const { user } = useAuth();
+  const account = user ? `${user.id}:${user.organization?.id ?? ""}` : "";
+  const accountRef = useRef(account);
+  accountRef.current = account;
   const load = useCallback(() => {
-    api.get<PipelineInfo[]>("/pipeline/pipelines").then((ps) => { if (ps.length) setPipelines(ps); }).catch(() => { /* keep defaults */ });
+    const forAccount = accountRef.current;
+    if (!forAccount) return;
+    api.get<PipelineInfo[]>("/pipeline/pipelines")
+      .then((ps) => { if (accountRef.current === forAccount && ps.length) setPipelines(ps); })
+      .catch(() => { /* keep what we have */ });
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    setPipelines([FALLBACK_PIPELINE]);
+    load();
+  }, [account, load]);
 
   const setSelectedId = useCallback((id: string) => {
     setSelectedIdState(id);
