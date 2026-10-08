@@ -610,8 +610,13 @@ researchRouter.get(
         ));
       } catch { wells = []; } // rrc schema absent (fresh install) → coordinates only
     }
+    // "All" has open bounds — report the span the permits actually cover.
+    const span = win.all && permits.length ? allTimeSpan(permits.map((p) => p.activityDate), new Date()) : null;
+    const day = (d: Date) => d.toISOString().slice(0, 10);
     res.json({
-      range: { from: win.from.toISOString().slice(0, 10), to: win.to.toISOString().slice(0, 10) },
+      range: win.all
+        ? { all: true, from: span ? day(span.from) : null, to: span ? day(span.to) : null }
+        : { all: false, from: day(win.from), to: day(win.to) },
       ...resolvePermitLocations(permits, wells.map((w) => ({ ...w, fid: Number(w.fid) })), MAX_PERMIT_POINTS),
     });
   }),

@@ -7,7 +7,8 @@
 // ids, and survives reload/back.
 
 /** Research query keys that scope permits (doc-only keys are dropped). */
-const PERMIT_KEYS = ["from", "to", "state", "county", "abstractId", "survey", "operator", "trajectory", "permitStatus"] as const;
+// `period` carries the "All" time frame (?period=ALL), which has no from/to.
+const PERMIT_KEYS = ["period", "from", "to", "state", "county", "abstractId", "survey", "operator", "trajectory", "permitStatus"] as const;
 type PermitKey = (typeof PERMIT_KEYS)[number];
 export type PermitMapPatch = Partial<Record<PermitKey, string[]>>;
 

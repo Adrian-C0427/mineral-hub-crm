@@ -109,7 +109,7 @@ const HEAT_STOPS: [number, string][] = [[0, "#eef2ff"], [0.2, "#fde68a"], [0.45,
 // --- Drilling-permit highlight (deep link from Research permit metrics) ---
 /** /research/permit-locations — the counted permits placed on their wells. */
 interface PermitLocations {
-  range: { from: string; to: string };
+  range: { all?: boolean; from: string | null; to: string | null };
   total: number; located: number; unlocated: number; wells: number; truncated: boolean;
   bbox: BBox | null;
   points: { fid: number | null; lon: number; lat: number; permits: number }[];
@@ -1070,7 +1070,9 @@ export function MapView() {
           <span className="mc-permit-swatch" aria-hidden="true" />
           <span className="mc-permit-text">
             <b>{permitReq.label}</b>
-            {permitHl?.status === "ready" && <span className="muted"> · {fmtDate(permitHl.data.range.from)} – {fmtDate(permitHl.data.range.to)}</span>}
+            {permitHl?.status === "ready" && <span className="muted"> · {permitHl.data.range.all
+              ? `All time${permitHl.data.range.from ? ` (${fmtDate(permitHl.data.range.from)} – ${fmtDate(permitHl.data.range.to)})` : ""}`
+              : `${fmtDate(permitHl.data.range.from)} – ${fmtDate(permitHl.data.range.to)}`}</span>}
             {permitReq.counties.length > 0 && permitReq.counties.length <= 3 && <span className="muted"> · {permitReq.counties.join(", ")}</span>}
           </span>
           <span className="mc-permit-count">
