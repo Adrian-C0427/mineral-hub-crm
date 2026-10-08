@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   autoGranularity, bucketKey, bucketRange, classifyDocType, classifyPermitStatus,
   classifyTrajectory, detectHotspot, documentDedupeKey, historyWindows, normalizeEntity,
+  documentPartyFields, extractInterest, interestSignature, parsePartyCell, splitParties,
   normInstrument, rollingAverage, surgeSeverity, trend,
 } from "./research.js";
 import { CSV_DOCUMENTS, CSV_PERMITS, guessMapping } from "./researchSources.js";
@@ -236,5 +237,87 @@ describe("document duplicate detection", () => {
     expect(documentDedupeKey(withVol)).not.toBe(documentDedupeKey({ ...withVol, abstractId: "289654" }));
     // Unmapped/absent fields compare as empty on both sides.
     expect(documentDedupeKey(base)).toBe(documentDedupeKey({ ...base, volume: "", page: null }));
+  });
+});
+
+describe("conveyed interest in party names", () => {
+  const cases: [string, string, number | null][] = [
+    ["ABC Minerals LLC", "ABC Minerals LLC", null],
+    ["ABC Minerals LLC 50%", "ABC Minerals LLC", 50],
+    ["ABC Minerals LLC – 50% interest", "ABC Minerals LLC", 50],
+    ["ABC Minerals LLC (50%)", "ABC Minerals LLC", 50],
+    ["ABC Minerals LLC - 25%", "ABC Minerals LLC", 25],
+    ["ABC Minerals LLC — 100%", "ABC Minerals LLC", 100],
+    ["ABC Minerals LLC (50% undivided mineral interest)", "ABC Minerals LLC", 50],
+    ["50% ABC Minerals LLC", "ABC Minerals LLC", 50],
+    ["ABC MINERALS LLC 12.5 PCT", "ABC MINERALS LLC", 12.5],
+    ["ABC MINERALS LLC 50 PERCENT MINERAL INTEREST", "ABC MINERALS LLC", 50],
+    ["ABC LLC [25% NPRI]", "ABC LLC", 25],
+    ["ABC MINERALS LLC 1/2 INT", "ABC MINERALS LLC", 50],
+    ["SMITH JOHN ET UX AS TO AN UNDIVIDED 1/2 MI", "SMITH JOHN ET UX", 50],
+    ["JOHN A SMITH 50%", "JOHN A SMITH", 50],
+  ];
+  it("separates the share from the name", () => {
+    for (const [raw, name, pct] of cases) {
+      const ex = extractInterest(raw);
+      expect([raw, ex.name, ex.pct]).toEqual([raw, name, pct]);
+    }
+  });
+  it("keeps the share text as recorded", () => {
+    expect(extractInterest("ABC Minerals LLC – 50% interest").text).toBe("50% interest");
+    expect(extractInterest("ABC Minerals LLC (50%)").text).toBe("50%");
+  });
+  it("leaves names that only look numeric alone", () => {
+    for (const raw of ["3/4 RANCH LLC", "SMITH JOHN DECD 1/2/2019", "ABC MINERALS LLC 150%", "SECTION 12 PARTNERS LP", "ABC INTERNATIONAL LLC"]) {
+      expect(extractInterest(raw)).toEqual({ name: raw, pct: null, text: null });
+    }
+  });
+  it("groups every spelling under one entity key", () => {
+    expect(new Set(cases.slice(0, 11).map(([raw]) => normalizeEntity(raw)))).toEqual(new Set(["ABC MINERALS", "ABC"]));
+    expect(normalizeEntity("ABC Minerals LLC – 50%")).toBe(normalizeEntity("ABC Minerals LLC"));
+  });
+});
+
+describe("parsePartyCell / documentPartyFields", () => {
+  it("attaches a comma-separated share to its party instead of inventing a party", () => {
+    expect(splitParties("ABC MINERALS LLC, 50%")).toEqual(["ABC MINERALS LLC"]);
+    expect(parsePartyCell("SMITH JOHN, AS TO 1/2").parties).toEqual([{ name: "SMITH JOHN", norm: "SMITH JOHN", pct: 50, text: "AS TO 1/2" }]);
+  });
+  it("keeps per-party shares in multi-party cells and never splits a fraction", () => {
+    const pf = documentPartyFields("SMITH JOHN", "ABC MINERALS LLC 1/2; XYZ ROYALTY LP 1/2");
+    expect(pf.granteeParties).toEqual(["ABC MINERALS LLC", "XYZ ROYALTY LP"]);
+    expect(pf.granteeNorms).toEqual(["ABC MINERALS", "XYZ ROYALTY"]);
+    expect(pf.grantee).toBe("ABC MINERALS LLC; XYZ ROYALTY LP");
+    expect(pf.granteeAsRecorded).toBe("ABC MINERALS LLC 1/2; XYZ ROYALTY LP 1/2");
+    expect(pf.partyInterests.map((i) => [i.side, i.norm, i.pct])).toEqual([["GRANTEE", "ABC MINERALS", 50], ["GRANTEE", "XYZ ROYALTY", 50]]);
+    expect(pf.interestPct).toBe(100); // total conveyed by the instrument
+  });
+  it("leaves cells without a share exactly as recorded", () => {
+    const pf = documentPartyFields("Company A, Company B", "Buyer LLC");
+    expect([pf.grantor, pf.grantorAsRecorded, pf.grantee, pf.granteeAsRecorded, pf.interestPct, pf.partyInterests])
+      .toEqual(["Company A, Company B", null, "Buyer LLC", null, null, []]);
+  });
+  it("treats disagreeing shares on both sides as ambiguous", () => {
+    expect(documentPartyFields("SMITH JOHN 50%", "ABC LLC 50%").interestPct).toBe(50);
+    expect(documentPartyFields("SMITH JOHN 50%", "ABC LLC 25%").interestPct).toBeNull();
+  });
+  it("the same deed at different shares is not a duplicate; keys without shares are unchanged", () => {
+    const base = { state: "TX", county: "Leon", instrumentNumber: "2026-1", recordingDate: new Date("2026-01-02"), docType: "MINERAL_DEED" };
+    const key = (grantee: string) => {
+      const pf = documentPartyFields("SMITH JOHN", grantee);
+      return documentDedupeKey({ ...base, grantorNorm: pf.grantorNorm, granteeNorm: pf.granteeNorm, interests: interestSignature(pf.partyInterests) });
+    };
+    expect(key("ABC LLC 50%")).not.toBe(key("ABC LLC 25%"));
+    expect(key("ABC LLC 50%")).toBe(key("ABC, LLC – 50%"));
+    expect(key("ABC LLC")).toBe(documentDedupeKey({ ...base, grantorNorm: "SMITH JOHN", granteeNorm: "ABC" }));
+  });
+});
+
+describe("legal suffix after a comma", () => {
+  it("stays part of the party name instead of becoming a party", () => {
+    expect(splitParties("Blackrock Minerals, LLC")).toEqual(["Blackrock Minerals, LLC"]);
+    expect(splitParties("SMITH JOHN, ET AL; ABC, L.L.C.")).toEqual(["SMITH JOHN, ET AL", "ABC, L.L.C."]);
+    expect(parsePartyCell("ABC, LLC – 50%").parties).toEqual([{ name: "ABC, LLC", norm: "ABC", pct: 50, text: "50%" }]);
+    expect(splitParties("Company A, Company B")).toEqual(["Company A", "Company B"]);
   });
 });

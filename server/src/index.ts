@@ -8,6 +8,7 @@ import { startIntegrationScheduler } from "./services/integrationSync.js";
 import { startPortalReminderScheduler } from "./services/portalReminders.js";
 import { startDealAlertScheduler } from "./services/dealAlerts.js";
 import { startDemoResetScheduler } from "./services/demoReset.js";
+import { backfillTransactionInterests } from "./services/researchInterestBackfill.js";
 
 // Fail closed: in production, refuse to boot with default/missing secret keys.
 assertProductionSecrets();
@@ -32,6 +33,12 @@ ensureUsersHaveOrganizations().catch((e) =>
 // Idempotent backfill of the new buyer pipeline status from legacy responseStatus.
 backfillBuyerStatus().catch((e) =>
   console.error("Buyer status backfill failed:", e instanceof Error ? e.message : e),
+);
+
+// Idempotent, lossless: conveyed-interest shares written into recorded party
+// names ("ABC MINERALS LLC – 50%") become their own data on older records.
+backfillTransactionInterests().catch((e) =>
+  console.error("Conveyed-interest backfill failed:", e instanceof Error ? e.message : e),
 );
 
 app.listen(env.PORT, () => {

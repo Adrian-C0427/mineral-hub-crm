@@ -1222,6 +1222,18 @@ model ResearchDocument {
   grantorNorms   String[] @default([])
   granteeNorms   String[] @default([])
 
+  // Conveyed interest. County indexes often write the share into the party
+  // cell ("ABC MINERALS LLC – 50%"); it is extracted at import (and for older
+  // rows by the boot backfill) so the share never splits one buyer into many.
+  // grantor/grantee above hold the clean names; the cells exactly as recorded
+  // are kept here (null when there was no interest text to remove).
+  grantorAsRecorded String?
+  granteeAsRecorded String?
+  // Interest conveyed by the instrument, 0–100 (null = not stated/ambiguous).
+  interestPct       Float?
+  // Per-party detail: [{ side: "GRANTOR"|"GRANTEE", party, norm, pct, text }].
+  partyInterests    Json?
+
   // Geography below county level. TX: abstract/survey. Elsewhere: trs
   // ("Sec 12 T2N R3W") or whatever the state's cadastral unit is.
   // `abstractId` keeps the cell EXACTLY as recorded (possibly "15, 47, 209");
@@ -1251,6 +1263,7 @@ model ResearchDocument {
   @@index([organizationId, grantorNorm])
   @@index([organizationId, abstractId])
   @@index([organizationId, ingestRunId])
+  @@index([organizationId, interestPct])
 }
 
 // A drilling permit / well lifecycle record (TX RRC W-1 and equivalents).

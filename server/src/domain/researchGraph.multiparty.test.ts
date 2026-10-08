@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { splitParties } from "./research.js";
+import { documentPartyFields, splitParties } from "./research.js";
 import {
   aggregateRelationships, aggregateGroupRelationships, classifyEntities, coBuyerPartnerships,
   buildChains, entityNetwork, expandDocToEdges, type TransferDocRow,
@@ -157,5 +157,36 @@ describe("acquisition chains through partnership participants", () => {
     const paths = chains.map((c) => c.nodes.map((n) => n.norm).join(">"));
     expect(paths).toContain("COMPANY A>COMPANY C>COMPANY D");
     expect(paths).toContain("COMPANY B>COMPANY C>COMPANY D");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Conveyed-interest shares written into party names ("ABC MINERALS LLC – 50%")
+// must never split one buyer into many.
+// ---------------------------------------------------------------------------
+
+describe("conveyed interest in party names", () => {
+  const variants = ["ABC Minerals LLC", "ABC Minerals LLC 50%", "ABC Minerals LLC – 50% interest", "ABC Minerals LLC (50%)", "ABC Minerals LLC – 25%", "ABC Minerals LLC – 100%"];
+
+  it("groups every spelling under one buyer, on imported and legacy rows alike", () => {
+    const imported = variants.map((v, i) => {
+      const pf = documentPartyFields("Seller Co", v);
+      return doc({ id: `imp${i}`, ...pf });
+    });
+    // Legacy rows: raw cell only, with the keys the old normalizer stored ("ABC MINERALS LLC 50").
+    const legacy = variants.map((v, i) => doc({ id: `leg${i}`, grantee: v, granteeNorm: v.includes("%") ? v.toUpperCase().replace(/[^A-Z0-9 ]+/g, " ").replace(/\s+/g, " ").trim() : "ABC MINERALS" }));
+    for (const rows of [imported, legacy]) {
+      const edges = rows.flatMap(expandDocToEdges);
+      expect(new Set(edges.map((e) => e.granteeNorm))).toEqual(new Set(["ABC MINERALS"]));
+      expect(new Set(edges.map((e) => e.grantee))).toEqual(new Set(["ABC Minerals LLC"]));
+      const rels = aggregateRelationships(edges);
+      expect(rels).toHaveLength(1);
+      expect(rels[0].count).toBe(variants.length);
+      expect(classifyEntities(rels).get("ABC MINERALS")!.acquisitions).toBe(variants.length);
+    }
+  });
+
+  it("keeps each transaction's share as data", () => {
+    expect(variants.map((v) => documentPartyFields("Seller Co", v).interestPct)).toEqual([null, 50, 50, 50, 25, 100]);
   });
 });

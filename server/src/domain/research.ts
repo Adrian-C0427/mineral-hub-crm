@@ -131,6 +131,79 @@ export function classifyTrajectory(raw: string | null | undefined): Trajectory {
 // Entity-name normalization (grouping key for buyers/sellers/operators)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Conveyed-interest extraction ("ABC MINERALS LLC – 50%")
+// ---------------------------------------------------------------------------
+//
+// County indexes often write the share conveyed into the party cell itself:
+// "ABC MINERALS LLC 50%", "ABC MINERALS LLC – 50% INTEREST", "ABC MINERALS
+// LLC (50%)", "SMITH JOHN, AS TO AN UNDIVIDED 1/2 MI". That text is
+// transaction data, not part of who the party is — left in the name it splits
+// one buyer into many. extractInterest separates the two.
+
+/** Words that may lead the share: "as to", "an undivided". */
+const INTEREST_LEAD = String.raw`(?:\bAS\s+TO\s+)?(?:(?:\bAN?\s+)?\b(?:UNDIVIDED|UNDIV|UND)\.?\s+)?`;
+/** Words that may follow the share ("of the mineral interest", "MI", "NPRI"). */
+const INTEREST_QUAL = String.raw`(?:OF|IN|THE|HIS|HER|THEIR|ITS|SAID|UNDIVIDED|UND|MINERALS?|MIN|ROYALTY|ROYALTIES|ROY|NPRI|ORRI|ORR|NMI|MI|RI|NRI|WI|O&G|OIL\s*(?:&|AND)\s*GAS)`;
+const INTEREST_WORD = String.raw`(?:INTERESTS?|INTRS?|INTS?|INTST)`;
+/** Trailing qualifiers are consumed only when they END in an interest word
+ *  ("50% undivided mineral interest") or run to the end of the party ("50%
+ *  MI") — so a share written mid-name never eats the rest of the name. */
+const TAIL_WORD = String.raw`(?:\s+${INTEREST_QUAL}\b\.?)*\s*\b${INTEREST_WORD}\b\.?`;
+const TAIL_TO_END = String.raw`(?:\s+${INTEREST_QUAL}\b\.?)+(?=\s*[)\]]?\s*$)`;
+const AT_END = String.raw`(?=\s*[)\]]?\s*$)`;
+/** "50%", "12.5 %", "50 PCT", "50 percent". */
+const PCT_RE = new RegExp(
+  `${INTEREST_LEAD}(?<![\\w.])(?<num>\\d{1,3}(?:\\.\\d+)?|\\.\\d+)\\s*(?:%|(?:PCT|PERCENT|PER\\s+CENT)\\b\\.?)(?:${TAIL_WORD}|${TAIL_TO_END})?`,
+  "gi",
+);
+/** "1/2" — only as a share: followed by an interest word or ending the party
+ *  (never a date like 1/2/2019, never "A/B" party separators). */
+const FRACTION_RE = new RegExp(
+  `${INTEREST_LEAD}(?<![\\w./])(?<n>\\d{1,4})\\s*\\/\\s*(?<d>\\d{1,5})(?![\\d/]|\\s*\\/)(?:${TAIL_WORD}|${TAIL_TO_END}|${AT_END})`,
+  "gi",
+);
+
+/** Tidy what is left of a name once the share is removed. */
+function tidyPartyName(s: string): string {
+  return s
+    .replace(/[([]\s*[)\]]/g, " ")            // "ABC LLC ()" → "ABC LLC"
+    .replace(/\s+/g, " ")
+    .replace(/^[\s,;:\-–—]+|[\s,;:\-–—]+$/g, "")  // "ABC LLC –" → "ABC LLC"
+    .replace(/\s+(?:AS\s+TO|OF)$/i, "")
+    .trim();
+}
+
+/**
+ * Separate a conveyed-interest share from a party name:
+ *   "ABC Minerals LLC – 50% interest" → { name: "ABC Minerals LLC", pct: 50, text: "50% interest" }
+ *   "ABC Minerals LLC (1/2 MI)"       → { name: "ABC Minerals LLC", pct: 50, text: "1/2 MI" }
+ *   "ABC Minerals LLC"                → { name: "ABC Minerals LLC", pct: null, text: null }
+ * Only shares in (0, 100] count; anything else is left untouched. When a name
+ * carries several shares the first is the value and all are kept in `text`.
+ */
+export function extractInterest(raw: string | null | undefined): { name: string; pct: number | null; text: string | null } {
+  const src = raw ?? "";
+  if (!/\d/.test(src)) return { name: src.trim(), pct: null, text: null };
+  let pct: number | null = null;
+  const texts: string[] = [];
+  const take = (m: string, v: number) => {
+    if (!(v > 0 && v <= 100)) return m;
+    if (pct == null) pct = round4(v);
+    texts.push(m.replace(/^[\s([]+|[\s)\]]+$/g, ""));
+    return " ";
+  };
+  let name = src.replace(PCT_RE, (m: string, ...rest: unknown[]) =>
+    take(m, parseFloat((rest[rest.length - 1] as { num: string }).num)));
+  name = name.replace(FRACTION_RE, (m: string, ...rest: unknown[]) => {
+    const g = rest[rest.length - 1] as { n: string; d: string };
+    const n = Number(g.n), d = Number(g.d);
+    return d > 0 && n <= d ? take(m, (n / d) * 100) : m;
+  });
+  if (!texts.length) return { name: src.trim(), pct: null, text: null };
+  return { name: tidyPartyName(name), pct, text: texts.join("; ") };
+}
+
 const ENTITY_SUFFIXES = [
   "LLC", "L L C", "LP", "L P", "LLP", "LTD", "INC", "INCORPORATED", "CORP",
   "CORPORATION", "CO", "COMPANY", "LC", "PLLC",
@@ -139,13 +212,14 @@ const ENTITY_NOISE = ["ET UX", "ET AL", "ET VIR", "ETUX", "ETAL", "ETVIR"];
 
 /**
  * Normalize an entity name for grouping: uppercase, strip punctuation,
- * drop spousal/party noise ("et ux") and trailing legal suffixes so
- * "Blackrock Minerals, LLC" and "BLACKROCK MINERALS LP" group together.
- * Returns null for empty input.
+ * drop spousal/party noise ("et ux"), any conveyed-interest phrase ("– 50%",
+ * "(1/2 INT)" — see extractInterest) and trailing legal suffixes so
+ * "Blackrock Minerals, LLC", "BLACKROCK MINERALS LP" and "Blackrock Minerals
+ * LLC 50%" group together. Returns null for empty input.
  */
 export function normalizeEntity(name: string | null | undefined): string | null {
   if (!name) return null;
-  let t = name.toUpperCase().replace(/[^A-Z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
+  let t = extractInterest(name).name.toUpperCase().replace(/[^A-Z0-9 ]+/g, " ").replace(/\s+/g, " ").trim();
   for (const n of ENTITY_NOISE) t = t.replace(new RegExp(` ${n}$`), "").replace(new RegExp(` ${n} `), " ");
   let changed = true;
   while (changed) {
@@ -162,31 +236,176 @@ export function normalizeEntity(name: string | null | undefined): string | null 
 // Multi-party splitting (co-grantors / co-grantees on one instrument)
 // ---------------------------------------------------------------------------
 
+/** One participant of a grantor/grantee cell, with the share of the interest
+ *  recorded against it (null when the record states none). */
+export interface ParsedParty {
+  name: string;          // display name, conveyed-interest text removed
+  norm: string;          // grouping key (normalizeEntity)
+  pct: number | null;    // 0–100
+  text: string | null;   // the interest phrase as recorded ("50% interest")
+}
+
 /**
- * Split a raw grantor/grantee cell into its individual parties.
- *
  * STRICT separator set — exactly commas, semicolons, and forward slashes.
  * Nothing else splits: "&", "AND", "ET UX" and similar joiners stay inside a
  * single party name (they are part of how a party is written, not a party
- * boundary), so "SMITH & SONS LLC" remains one entity.
+ * boundary), so "SMITH & SONS LLC" remains one entity. A slash BETWEEN DIGITS
+ * is a fraction ("1/2 INT"), never a party boundary.
+ */
+const PARTY_SEPARATOR = /(?:[,;]|(?<!\d\s*)\/(?!\s*\d))+/;
+
+/**
+ * Parse a raw grantor/grantee cell into its individual parties, each with its
+ * conveyed interest split out ("ABC MINERALS LLC – 50%" → ABC MINERALS LLC at
+ * 50%). A part that is ONLY an interest phrase ("ABC LLC, 50%" — the comma
+ * split it off) belongs to the party before it (or after it, when it leads).
+ *
+ * Likewise a part that is ONLY a legal suffix or party noise ("ABC MINERALS,
+ * LLC", "SMITH JOHN, ET AL") is part of the name before it — never a party
+ * called "LLC".
  *
  * Parts that normalize to nothing are dropped; parts that normalize to the
- * same entity key are de-duplicated (first spelling wins). A single-party
- * cell returns a one-element array.
+ * same entity key are de-duplicated (first spelling wins). `hasInterest` is
+ * true when any interest text was found in the cell.
  */
-export function splitParties(raw: string | null | undefined): string[] {
-  if (!raw) return [];
-  const seen = new Set<string>();
-  const out: string[] = [];
-  for (const part of String(raw).split(/[,;/]+/)) {
-    const p = part.trim();
-    if (!p) continue;
-    const norm = normalizeEntity(p);
-    if (!norm || seen.has(norm)) continue;
-    seen.add(norm);
+export function parsePartyCell(raw: string | null | undefined): { parties: ParsedParty[]; hasInterest: boolean } {
+  if (!raw) return { parties: [], hasInterest: false };
+  const out: ParsedParty[] = [];
+  const byNorm = new Map<string, ParsedParty>();
+  let hasInterest = false;
+  let leading: { pct: number; text: string | null } | null = null;
+  for (const part of String(raw).split(PARTY_SEPARATOR)) {
+    const ex = extractInterest(part);
+    if (ex.pct != null) hasInterest = true;
+    const prev = out[out.length - 1];
+    if (prev && isSuffixOnly(ex.name)) {
+      prev.name = `${prev.name}, ${ex.name}`;
+      if (prev.pct == null && ex.pct != null) { prev.pct = ex.pct; prev.text = ex.text; }
+      continue;
+    }
+    const norm = normalizeEntity(ex.name);
+    if (!norm) {
+      if (ex.pct == null) continue;
+      if (!prev) leading = { pct: ex.pct, text: ex.text };
+      else if (prev.pct == null) { prev.pct = ex.pct; prev.text = ex.text; }
+      continue;
+    }
+    const seen = byNorm.get(norm);
+    if (seen) {
+      if (seen.pct == null && ex.pct != null) { seen.pct = ex.pct; seen.text = ex.text; }
+      continue;
+    }
+    const p: ParsedParty = { name: ex.name, norm, pct: ex.pct, text: ex.text };
+    if (p.pct == null && leading) { p.pct = leading.pct; p.text = leading.text; }
+    leading = null;
+    byNorm.set(norm, p);
     out.push(p);
   }
-  return out;
+  return { parties: out, hasInterest };
+}
+
+/** "LLC", "L.L.C.", "Inc.", "et al" — a part made only of legal suffixes /
+ *  party noise, which normalizeEntity strips from the end of a name. */
+function isSuffixOnly(part: string): boolean {
+  return /[A-Za-z]/.test(part) && normalizeEntity(`X ${part}`) === "X";
+}
+
+/**
+ * Split a raw grantor/grantee cell into its individual party names (conveyed-
+ * interest text removed — see parsePartyCell). A single-party cell returns a
+ * one-element array.
+ */
+export function splitParties(raw: string | null | undefined): string[] {
+  return parsePartyCell(raw).parties.map((p) => p.name);
+}
+
+/** A share of the conveyed interest recorded against one party of a document. */
+export interface PartyInterest {
+  side: "GRANTOR" | "GRANTEE";
+  party: string; // clean display name
+  norm: string;  // grouping key
+  pct: number;   // 0–100
+  text: string;  // as recorded ("50% undivided interest")
+}
+
+/** Every party-name field of a ResearchDocument, derived from the raw cells. */
+export interface DocumentPartyFields {
+  /** Display cells with interest text removed (the raw cell when there was none). */
+  grantor: string | null;
+  grantee: string | null;
+  /** The cell exactly as recorded — set only when interest text was removed. */
+  grantorAsRecorded: string | null;
+  granteeAsRecorded: string | null;
+  grantorNorm: string | null;
+  granteeNorm: string | null;
+  grantorParties: string[];
+  granteeParties: string[];
+  grantorNorms: string[];
+  granteeNorms: string[];
+  /** Interest conveyed by the instrument (0–100), or null when not stated or
+   *  ambiguous — see documentInterestPct. Per-party detail: partyInterests. */
+  interestPct: number | null;
+  partyInterests: PartyInterest[];
+}
+
+const round4 = (n: number) => Math.round(n * 10000) / 10000;
+
+/**
+ * The single "interest conveyed" figure for a document: the stated share, or
+ * the total when several parties on ONE side each state theirs ("A 50%; B 50%"
+ * → 100). When both sides state shares they must agree, else it is ambiguous
+ * (null) and only the per-party detail is kept. Never above 100.
+ */
+export function documentInterestPct(interests: PartyInterest[]): number | null {
+  const total = (side: PartyInterest["side"]) => {
+    const xs = interests.filter((i) => i.side === side);
+    return xs.length ? round4(xs.reduce((a, i) => a + i.pct, 0)) : null;
+  };
+  const g = total("GRANTOR"), t = total("GRANTEE");
+  const v = g != null && t != null ? (g === t ? g : null) : g ?? t;
+  return v != null && v > 0 && v <= 100 ? v : null;
+}
+
+/**
+ * Derive every party field of a recorded document from its raw grantor and
+ * grantee cells — the single path used by imports, the sample seeder and the
+ * existing-record backfill, so names, grouping keys and conveyed interests are
+ * identical however a record arrived. The percentage is DATA (interestPct +
+ * partyInterests), never part of a name; the raw cell is kept as recorded.
+ */
+export function documentPartyFields(grantorRaw: string | null | undefined, granteeRaw: string | null | undefined): DocumentPartyFields {
+  const side = (raw: string | null | undefined, which: PartyInterest["side"]) => {
+    const cell = raw && raw.trim() ? raw : null;
+    const { parties, hasInterest } = parsePartyCell(cell);
+    const clean = hasInterest ? parties.map((p) => p.name).join("; ") || null : cell;
+    return {
+      cell: clean,
+      recorded: hasInterest ? cell : null,
+      norm: normalizeEntity(clean),
+      names: parties.map((p) => p.name),
+      norms: parties.map((p) => p.norm),
+      interests: parties.filter((p) => p.pct != null)
+        .map((p): PartyInterest => ({ side: which, party: p.name, norm: p.norm, pct: p.pct!, text: p.text ?? `${p.pct}%` })),
+    };
+  };
+  const gr = side(grantorRaw, "GRANTOR");
+  const ge = side(granteeRaw, "GRANTEE");
+  const partyInterests = [...gr.interests, ...ge.interests];
+  return {
+    grantor: gr.cell, grantee: ge.cell,
+    grantorAsRecorded: gr.recorded, granteeAsRecorded: ge.recorded,
+    grantorNorm: gr.norm, granteeNorm: ge.norm,
+    grantorParties: gr.names, granteeParties: ge.names,
+    grantorNorms: gr.norms, granteeNorms: ge.norms,
+    interestPct: documentInterestPct(partyInterests),
+    partyInterests,
+  };
+}
+
+/** Stable signature of a document's conveyed interests for duplicate
+ *  detection ("" when none): the same deed at 50% and at 25% is two records. */
+export function interestSignature(interests: PartyInterest[] | null | undefined): string {
+  return (interests ?? []).map((i) => `${i.side[0]}:${i.norm}:${i.pct}`).sort().join(",");
 }
 
 /**
@@ -247,6 +466,8 @@ export function documentDedupeKey(p: {
   volume?: string | null;
   page?: string | null;
   abstractId?: string | null;
+  /** interestSignature(partyInterests) — empty for records stating none. */
+  interests?: string | null;
 }): string {
   return [
     p.state.toUpperCase(),
@@ -259,6 +480,9 @@ export function documentDedupeKey(p: {
     normField(p.volume),
     normField(p.page),
     normField(p.abstractId),
+    // Appended only when present, so keys of records stating no interest are
+    // exactly what they were before interests were extracted.
+    ...(p.interests ? [p.interests] : []),
   ].join("|");
 }
 

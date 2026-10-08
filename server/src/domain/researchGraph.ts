@@ -90,11 +90,17 @@ function sideParties(
   if (norms.length > 0) {
     return norms.slice(0, MAX_PARTIES_PER_SIDE).map((n, i) => ({ norm: n, name: parties[i]?.trim() || n }));
   }
+  // splitParties also removes conveyed-interest text ("ABC LLC – 50%"), so a
+  // row not yet through the interest backfill still groups under the buyer.
   const split = splitParties(raw);
   if (split.length > 1) {
     return split.slice(0, MAX_PARTIES_PER_SIDE)
       .map((p) => ({ norm: normalizeEntity(p) ?? "", name: p }))
       .filter((p) => p.norm);
+  }
+  if (split.length === 1 && split[0] !== raw?.trim()) {
+    const n = normalizeEntity(split[0]);
+    if (n) return [{ norm: n, name: split[0] }];
   }
   return norm ? [{ norm, name: raw?.trim() || norm }] : [];
 }

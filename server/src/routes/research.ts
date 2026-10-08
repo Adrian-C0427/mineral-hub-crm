@@ -142,6 +142,15 @@ export interface ResearchFilters {
   abstractIds: string[];
   statuses: string[];
   trajectories: string[];
+  /** Conveyed-interest range, percent (0–100) — documents only. */
+  interestMin?: number;
+  interestMax?: number;
+}
+
+/** "?interestMin=25" → 25; anything outside 0–100 or unparseable is ignored. */
+function pctParam(v: unknown): number | undefined {
+  const n = typeof v === "string" && v.trim() ? Number(v) : NaN;
+  return Number.isFinite(n) && n >= 0 && n <= 100 ? n : undefined;
 }
 
 interface Window { from: Date; to: Date } // [from, to] inclusive days
@@ -162,6 +171,8 @@ export function parseFilters(q: Record<string, unknown>): ResearchFilters {
     abstractIds: [...arr(q.abstractId), ...arr(q.abstract)].slice(0, MAX_FILTER_VALUES),
     statuses: arr(q.permitStatus),
     trajectories: arr(q.trajectory),
+    interestMin: pctParam(q.interestMin),
+    interestMax: pctParam(q.interestMax),
   };
 }
 
@@ -217,6 +228,11 @@ function docWhere(org: string, f: ResearchFilters, win?: Window): Prisma.Researc
   if (f.docClass) w.docClass = f.docClass;
   if (f.docTypes.length) w.docType = { in: f.docTypes as ResearchDocType[] };
   if (f.surveys.length) w.survey = { in: f.surveys };
+  // Conveyed interest (extracted from the party cells): a range keeps only
+  // records that state one.
+  if (f.interestMin != null || f.interestMax != null) {
+    w.interestPct = { not: null, ...(f.interestMin != null ? { gte: f.interestMin } : {}), ...(f.interestMax != null ? { lte: f.interestMax } : {}) };
+  }
   const and: Prisma.ResearchDocumentWhereInput[] = [];
   if (f.buyers.length) and.push({ OR: [{ granteeNorm: { in: f.buyers } }, { granteeNorms: { hasSome: f.buyers } }] });
   if (f.sellers.length) and.push({ OR: [{ grantorNorm: { in: f.sellers } }, { grantorNorms: { hasSome: f.sellers } }] });
@@ -1233,6 +1249,7 @@ const DOC_SORT_COLUMNS: Record<string, { column: string; nullable?: boolean }> =
   docType: { column: "docType" },
   grantor: { column: "grantor", nullable: true },
   grantee: { column: "grantee", nullable: true },
+  interestPct: { column: "interestPct", nullable: true },
   acreage: { column: "acreage", nullable: true },
   consideration: { column: "consideration", nullable: true },
   instrumentNumber: { column: "instrumentNumber", nullable: true },
@@ -1462,6 +1479,8 @@ function applyDocSearch(where: Prisma.ResearchDocumentWhereInput, q?: string, in
     // One free-text term matched against every user-visible record field.
     where.OR = [
       { grantor: contains(q) }, { grantee: contains(q) },
+      // The cells as recorded too, so a search for "50%" still finds them.
+      { grantorAsRecorded: contains(q) }, { granteeAsRecorded: contains(q) },
       { instrumentNumber: contains(q) }, { docTypeRaw: contains(q) },
       { county: contains(q) }, { abstractId: contains(q) },
       { survey: contains(q) }, { legalDescription: contains(q) },
