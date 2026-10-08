@@ -62,7 +62,7 @@ const ClockIcon = () => <Svg size={12} sw={1.9}><circle cx="12" cy="12" r="8.5" 
 const PersonIcon = () => <Svg size={12} sw={1.9}><circle cx="12" cy="8" r="3.5" /><path d="M5 20a7 7 0 0 1 14 0" /></Svg>;
 const TrayIcon = () => <Svg size={18}><path d="M12 4v11M7 10l5 5 5-5M5 20h14" /></Svg>;
 
-export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, onOpenSettings, onCloseSettings, onSettingsChanged }: {
+export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, onOpenSettings, onCloseSettings, onSettingsChanged, onSelectPipeline }: {
   /** The selected (OPPORTUNITIES-kind) pipeline. */
   pipeline: PipelineInfo;
   pipelines: PipelineInfo[];
@@ -72,6 +72,8 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
   onOpenSettings: () => void;
   onCloseSettings: () => void;
   onSettingsChanged: () => void;
+  /** Show another pipeline's board (after creating an opportunity there). */
+  onSelectPipeline?: (id: string) => void;
 }) {
   const [opps, setOpps] = useState<OppSummary[] | null>(null);
   const [q, setQ] = useState("");
@@ -99,7 +101,11 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
   overRef.current = overCol;
 
   function load() {
-    api.get<OppSummary[]>(`/opportunities?pipelineId=${encodeURIComponent(pipeline.id)}`).then(setOpps).catch(() => setOpps([]));
+    api.get<OppSummary[]>(`/opportunities?pipelineId=${encodeURIComponent(pipeline.id)}`).then(setOpps).catch((err) => {
+      setOpps([]);
+      // This pipeline isn't in the org (stale list): refresh the pipelines.
+      if (err instanceof ApiError && err.status === 404) onSettingsChanged();
+    });
   }
   useEffect(load, [pipeline.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -360,7 +366,22 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
       )}
       {showNew && (
         <NewOpportunityModal pipelines={pipelines} pipelineId={pipeline.id} onClose={() => setShowNew(false)}
-          onCreated={(o) => { setShowNew(false); nav(`/opportunities/${o.id}`); }} />
+          onPipelinesChanged={onSettingsChanged}
+          onCreated={(o) => {
+            setShowNew(false);
+            // Show it where it lives: this board (refreshed in place) or the
+            // board of the pipeline it was created in.
+            if (o.pipelineId === pipeline.id) {
+              setOpps((prev) => (prev && !prev.some((x) => x.id === o.id) ? [o, ...prev] : prev));
+              load();
+            } else {
+              onSettingsChanged();
+              onSelectPipeline?.(o.pipelineId);
+            }
+            const where = pipelines.find((p) => p.id === o.pipelineId);
+            const stageName = where?.stages.find((s) => s.key === o.stage)?.label ?? o.stage;
+            showToast(<span><strong>{o.name}</strong> added to {stageName}. <Link to={`/opportunities/${o.id}`} className="link-btn">Open</Link></span>, "success", 8000);
+          }} />
       )}
       {pending && (
         <OpportunityStageModal

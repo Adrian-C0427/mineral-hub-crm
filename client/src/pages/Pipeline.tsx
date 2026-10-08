@@ -457,6 +457,7 @@ export function Pipeline() {
         onOpenSettings={() => setShowStages(true)}
         onCloseSettings={() => { setShowStages(false); reloadStages(); }}
         onSettingsChanged={reloadStages}
+        onSelectPipeline={(id) => { reloadStages(); setSelectedId(id); }}
       />
     );
   }
