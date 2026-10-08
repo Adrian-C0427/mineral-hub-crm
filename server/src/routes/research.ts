@@ -26,6 +26,7 @@ import {
 import { normalizeCompany } from "../serializers.js";
 import { formatAbstract } from "../domain/abstractLabel.js";
 import { allTimeSpan, isAllPeriod } from "../domain/period.js";
+import { permitApi8, resolvePermitLocations, type WellLocation } from "../domain/permitLocations.js";
 
 /**
  * Research & Market Intelligence API.
@@ -220,6 +221,10 @@ interface PermitRow {
   activityDate: Date; state: string; county: string;
   operator: string; operatorNorm: string; status: ResearchPermitStatus; trajectory: WellTrajectory;
   abstractId: string | null; survey: string | null;
+  /** 8-digit API — the dedupe key and the link to the well on the map. */
+  api8: string | null;
+  /** The permit's own surface coordinates (org imports only; RRC W-1s carry none). */
+  lat: number | null; lon: number | null;
 }
 
 /**
@@ -337,6 +342,7 @@ async function loadPermits(org: string, f: ResearchFilters, win: Window): Promis
       select: {
         activityDate: true, state: true, county: true, operator: true, operatorNorm: true,
         status: true, trajectory: true, abstractId: true, survey: true, apiNumber: true,
+        latitude: true, longitude: true,
       },
     }),
     loadRrcPermits(f, win),
@@ -344,14 +350,10 @@ async function loadPermits(org: string, f: ResearchFilters, win: Window): Promis
   // The platform's imported RRC drilling permits (B3, rrc.permits) participate
   // in every research analytic automatically — no manual Research-page import.
   // Dedupe by 8-digit API so a CSV-imported permit isn't double counted.
-  const seen = new Set(orgRows.map((r) => (r.apiNumber ?? "").replace(/\D/g, "").replace(/^42/, "").slice(0, 8)).filter((s) => s.length === 8));
-  return [
-    ...orgRows.map(({ apiNumber: _a, ...r }) => r),
-    ...rrcRows.filter((r) => !r.api8 || !seen.has(r.api8)).map(({ api8: _b, ...r }) => r),
-  ];
+  const imported: PermitRow[] = orgRows.map(({ apiNumber, latitude, longitude, ...r }) => ({ ...r, api8: permitApi8(apiNumber), lat: latitude, lon: longitude }));
+  const seen = new Set(imported.map((r) => r.api8).filter((a): a is string => a != null));
+  return [...imported, ...rrcRows.filter((r) => !r.api8 || !seen.has(r.api8))];
 }
-
-interface RrcPermitRow extends PermitRow { api8: string | null }
 
 /**
  * RRC drilling permits already in the database (B3 import) surfaced as research
@@ -359,7 +361,7 @@ interface RrcPermitRow extends PermitRow { api8: string | null }
  * Trajectory is inferred from the well number ("...H" = horizontal), covering
  * the horizontal-permit analytics without a separate dataset.
  */
-async function loadRrcPermits(f: ResearchFilters, win: Window): Promise<RrcPermitRow[]> {
+async function loadRrcPermits(f: ResearchFilters, win: Window): Promise<PermitRow[]> {
   // RRC permits are Texas-only; skip when a state filter is set that excludes TX.
   if (f.states.length && !f.states.includes("TX")) return [];
   // Permit-status filter maps only to APPROVED for issued RRC permits.
@@ -380,7 +382,7 @@ async function loadRrcPermits(f: ResearchFilters, win: Window): Promise<RrcPermi
         WHERE ${conds.join(" AND ")}`,
       ...params,
     );
-    const out: RrcPermitRow[] = [];
+    const out: PermitRow[] = [];
     for (const r of rows) {
       const operatorNorm = normalizeEntity(r.operator) ?? "";
       if (f.operators.length && !f.operators.includes(operatorNorm)) continue;
@@ -392,7 +394,7 @@ async function loadRrcPermits(f: ResearchFilters, win: Window): Promise<RrcPermi
         activityDate: r.permitDate, state: "TX", county: r.county,
         operator: r.operator ?? "Unknown", operatorNorm,
         status: "APPROVED" as ResearchPermitStatus, trajectory,
-        abstractId: r.abstract, survey: r.survey, api8: r.api8,
+        abstractId: r.abstract, survey: r.survey, api8: r.api8, lat: null, lon: null,
       });
     }
     return out;
@@ -570,6 +572,47 @@ researchRouter.get(
       trends,
       series: seriesOut,
       docTypeBreakdown: [...byType.entries()].map(([docType, count]) => ({ docType, count })).sort((a, b) => b.count - a.count),
+    });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Permit locations — the wells behind a "Drilling permits" metric, for the map
+// ---------------------------------------------------------------------------
+
+/** Points returned to the map per request (the framing bbox covers all). */
+export const MAX_PERMIT_POINTS = 5000;
+
+/**
+ * The map's "show these permits" deep link (/map?show=permits&…) resolves here.
+ * Same filters + window parsing and the same loader as /summary, /geography,
+ * /entities and /opportunities, so the highlighted set is exactly the counted
+ * set; each permit is then placed on its rrc.wells surface location by API, or
+ * by its own coordinates (see domain/permitLocations). Lookups are server-side
+ * by filter — the URL never carries ids.
+ */
+researchRouter.get(
+  "/permit-locations",
+  requirePermission("viewResearch"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = researchOrgId(req); // reference data (demo reads its reference org)
+    const f = parseFilters(req.query as Record<string, unknown>);
+    const win = parseWindow(req.query as Record<string, unknown>);
+    const permits = await loadPermits(org, f, win);
+    const api8s = [...new Set(permits.map((p) => p.api8).filter((a): a is string => a != null))];
+    let wells: WellLocation[] = [];
+    if (api8s.length) {
+      try {
+        wells = await withDbRetry(() => prisma.$queryRawUnsafe<WellLocation[]>(
+          `SELECT fid, api8, ST_X(geom) AS lon, ST_Y(geom) AS lat
+             FROM rrc.wells WHERE api8 = ANY($1::text[]) AND geom IS NOT NULL`,
+          api8s,
+        ));
+      } catch { wells = []; } // rrc schema absent (fresh install) → coordinates only
+    }
+    res.json({
+      range: { from: win.from.toISOString().slice(0, 10), to: win.to.toISOString().slice(0, 10) },
+      ...resolvePermitLocations(permits, wells.map((w) => ({ ...w, fid: Number(w.fid) })), MAX_PERMIT_POINTS),
     });
   }),
 );
@@ -1115,6 +1158,8 @@ researchRouter.get(
       title: string;
       detail: string;
       state: string; county: string | null; abstractId: string | null;
+      /** NEW_OPERATOR: the operator's normalized key (the research operator filter value). */
+      operator?: string;
       metrics: Record<string, number | null>;
     }
     const signals: Signal[] = [];
@@ -1224,11 +1269,12 @@ researchRouter.get(
       if (within(p.activityDate, win)) { a.cur++; a.counties.add(p.county); }
       if (within(p.activityDate, lookback)) a.before = true;
     }
-    for (const a of opAgg.values()) {
+    for (const [norm, a] of opAgg) {
       if (!a.before && a.cur >= 2) {
         signals.push({
           id: `NEWOP:${a.name}`,
           kind: "NEW_OPERATOR",
+          operator: norm,
           severity: Math.min(100, 35 + a.cur * 6),
           title: `New operator: ${a.name}`,
           detail: `${a.cur} permits filed in ${[...a.counties].join(", ")} with no activity in the prior 12 months — a new entrant staking out acreage.`,

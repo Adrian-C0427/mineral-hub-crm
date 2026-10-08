@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid, PieChart, Pie, Cell,
 } from "recharts";
-import { ArrowRight, Search } from "lucide-react";
+import { ArrowRight, MapPin, Search } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, Banner, Modal, ConfirmDelete, SearchInput, ChipList } from "../components/ui";
@@ -24,6 +25,7 @@ import { fmtDate, num, prettyEnum, prettyDocType } from "../lib/format";
 import { CHART_COLORS, chartTooltip } from "../lib/charts";
 import { DateField } from "../components/DateField";
 import { ALL_PERIOD, ALL_PERIOD_LABEL, isAllPeriod, withAllPeriod } from "../lib/period";
+import { permitsMapHref, type PermitMapPatch } from "../lib/permitMap";
 import { ClassBadge, PartyColumn, type RelParty } from "../components/relationshipViews";
 import { AcquisitionChains, type ChainEntry, type ChainHop, type ChainNode } from "../components/AcquisitionChain";
 
@@ -61,6 +63,8 @@ interface EntityRow {
 interface Signal {
   id: string; kind: string; severity: number; title: string; detail: string;
   state: string; county: string | null; abstractId: string | null;
+  /** NEW_OPERATOR: the operator's normalized key (operator filter value). */
+  operator?: string;
   metrics: Record<string, number | null>;
 }
 interface FilterOpts {
@@ -477,6 +481,34 @@ export function Research() {
 }
 
 // ---------------------------------------------------------------------------
+// Drilling permits → Map
+// ---------------------------------------------------------------------------
+
+/**
+ * Opens the map with the wells behind a permit metric highlighted: the page's
+ * current filters + period, narrowed by `patch` (a row's county, an operator).
+ * The map re-counts that same set server-side. Null without map access, so
+ * callers render plain numbers instead of a dead link.
+ */
+function usePermitsOnMap(qs: string): ((label: string, patch?: PermitMapPatch) => void) | null {
+  const { can } = useAuth();
+  const navigate = useNavigate();
+  const canMap = can("viewMap");
+  return useMemo(() => (canMap ? (label: string, patch?: PermitMapPatch) => navigate(permitsMapHref(qs, label, patch)) : null), [canMap, navigate, qs]);
+}
+
+/** A permit count that opens those permits on the map (plain text when it can't). */
+function PermitCount({ n, onOpen }: { n: number; onOpen: (() => void) | null }) {
+  if (!n || !onOpen) return <span className={`rec-nowrap ${n ? "" : "rs-zero"}`}>{num(n)}</span>;
+  return (
+    <button type="button" className="rs-map-num" title={`Show ${num(n)} permit${n === 1 ? "" : "s"} on the map`}
+      onClick={(e) => { e.stopPropagation(); onOpen(); }}>
+      {num(n)}<MapPin size={11} aria-hidden="true" />
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Overview
 // ---------------------------------------------------------------------------
 
@@ -488,6 +520,7 @@ function OverviewTab({ qs, compareOff, dataset }: { qs: string; compareOff: bool
   // Customize View — per-chart visualization type (saved per user).
   const [trendType, setTrendType] = useChartType("research-activity", ["bar", "line"], "bar");
   const [docType, setDocType] = useChartType("research-doctypes", ["bar", "pie"], "bar");
+  const showPermits = usePermitsOnMap(qs);
   useEffect(() => {
     setLoading(true);
     api.get<Summary>(`/research/summary?${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
@@ -511,11 +544,16 @@ function OverviewTab({ qs, compareOff, dataset }: { qs: string; compareOff: bool
     dataset === "LEASE" && id === "uniqueBuyers" ? "Active lessees" : RES_METRIC_LABEL[id];
   const orderedMetrics: ResMetricId[] = [...metricPrefs.order.filter((id) => DEFAULT_RES_METRICS.includes(id)), ...DEFAULT_RES_METRICS.filter((id) => !metricPrefs.order.includes(id))];
   const visibleMetrics = orderedMetrics.filter((id) => !metricPrefs.hidden.includes(id) && id !== offDataset);
+  // Permit KPIs open the wells behind them on the map (same filters + period).
+  const permitPatch: Partial<Record<ResMetricId, PermitMapPatch>> = { permits: {}, horizontalPermits: { trajectory: ["HORIZONTAL"] } };
   const kpiCells: StatCell[] = visibleMetrics.filter((id) => t[id]).map((id) => ({
     label: kpiLabel(id),
     value: num(t[id].current),
     // Change tags are comparative — hidden when comparison is off.
     sub: compareOff ? undefined : <span className="rs-delta-line"><DeltaTag t={t[id]} /><span>vs {num(t[id].previous)}</span></span>,
+    ...(showPermits && permitPatch[id] && t[id].current > 0
+      ? { onClick: () => showPermits(kpiLabel(id), permitPatch[id]), title: `Show these ${kpiLabel(id).toLowerCase()} on the map` }
+      : {}),
   }));
 
   // Series colours — one document series per view (the off-dataset class is
@@ -831,6 +869,7 @@ function GeographyTab({ qs, filters, compareOff, allTime, onDrill, onSetCounties
   const [level, setLevel] = useState<"county" | "abstract" | "state">("county");
   const [metricPick, setMetric] = useState<"activity" | "change">("activity");
   const metric = allTime ? "activity" : metricPick;
+  const showPermits = usePermitsOnMap(qs);
   const [data, setData] = useState<{ level: string; rows: GeoRow[] } | null>(null);
   const [loading, setLoading] = useState(true);
   // The map always shows county-level stats regardless of the table level.
@@ -896,7 +935,12 @@ function GeographyTab({ qs, filters, compareOff, allTime, onDrill, onSetCounties
       ) },
     { key: "transactions", header: "Transactions", value: (r) => r.transactions, align: "right", render: (r) => <span className={`rec-nowrap ${r.transactions ? "" : "rs-zero"}`}>{num(r.transactions)}</span> },
     { key: "leases", header: "Leases", value: (r) => r.leases, align: "right", render: (r) => <span className={`rec-nowrap ${r.leases ? "" : "rs-zero"}`}>{num(r.leases)}</span> },
-    { key: "permits", header: "Permits", value: (r) => r.permits, align: "right", render: (r) => <span className={`rec-nowrap ${r.permits ? "" : "rs-zero"}`}>{num(r.permits)}</span> },
+    { key: "permits", header: "Permits", value: (r) => r.permits, align: "right",
+      // The row's own permits on the map: its state / county / abstract replace
+      // those filters; everything else (period, operator…) carries over.
+      render: (r) => <PermitCount n={r.permits} onOpen={showPermits && (() => showPermits(`Permits · ${geoName(r)}`, {
+        state: [r.state], ...(r.county ? { county: [r.county] } : {}), ...(r.abstractId ? { abstractId: [r.abstractId] } : {}),
+      }))} /> },
     { key: "total", header: "Total", value: (r) => r.total, align: "right", render: (r) => <b className="rec-nowrap">{num(r.total)}</b> },
     // Prior/Change columns are comparative — hidden when comparison is off.
     ...(compareOff ? [] : ([
@@ -1080,6 +1124,7 @@ type Decision = { key: string; action: "create" | "merge" | "skip"; mergeIntoBuy
 
 function RankingsTab({ qs, opts, compareOff, onDrill, dataset, rangeLabel }: { qs: string; opts: FilterOpts | null; compareOff: boolean; onDrill: (patch: Partial<Filters>) => void; dataset: Dataset; rangeLabel: string }) {
   const [role, setRole] = useState<"buyers" | "sellers" | "operators">("buyers");
+  const showPermits = usePermitsOnMap(qs);
   const [data, setData] = useState<{ role: string; rows: EntityRow[] } | null>(null);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -1138,7 +1183,10 @@ function RankingsTab({ qs, opts, compareOff, onDrill, dataset, rangeLabel }: { q
     { key: "name", header: "Name", value: (r) => r.name, minWidth: 220,
       render: (r) => <span className="rs-rk-name"><span className="rs-strong">{r.name}</span>{r.newEntrant && <span className="rs-mini-tag new" title="No activity in the prior 12 months">New</span>}</span> },
     { key: "count", header: role === "operators" ? "Permits" : "Records", value: (r) => r.count, align: "right",
-      render: (r) => <span className="rs-count-bar"><span className="rs-bar"><i style={{ width: `${(r.count / maxRowCount) * 100}%` }} /></span><b>{num(r.count)}</b></span> },
+      render: (r) => <span className="rs-count-bar"><span className="rs-bar"><i style={{ width: `${(r.count / maxRowCount) * 100}%` }} /></span>
+        {/* An operator's count is its permits — open them on the map. */}
+        {role === "operators" ? <b><PermitCount n={r.count} onOpen={showPermits && (() => showPermits(`Permits · ${r.name}`, { operator: [r.key] }))} /></b> : <b>{num(r.count)}</b>}
+      </span> },
     // Prior/Change columns are comparative — hidden when comparison is off.
     ...(compareOff ? [] : ([
       { key: "previous", header: "Prior", value: (r: EntityRow) => r.previous, align: "right", render: (r: EntityRow) => <span className={r.previous ? "rs-mid" : "rs-zero"}>{num(r.previous)}</span> },
@@ -1923,6 +1971,7 @@ function OpportunitiesTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
   const [loading, setLoading] = useState(true);
   // Severity filter — "all" or one of the tier labels above.
   const [sev, setSev] = useState<string>("all");
+  const showPermits = usePermitsOnMap(qs);
   useEffect(() => {
     setLoading(true);
     api.get<{ signals: Signal[]; requiresBoundedPeriod?: boolean }>(`/research/opportunities?${qs}`).then(setData).catch(() => setData(null)).finally(() => setLoading(false));
@@ -1980,9 +2029,22 @@ function OpportunitiesTab({ qs, onDrill }: { qs: string; onDrill: (patch: Partia
                 </div>
                 <p className="rs-opp-detail">{s.detail}</p>
               </div>
-              <button type="button" className="rs-outline-btn rs-opp-view" onClick={() => onDrill({ states: s.state ? [s.state] : [], counties: s.county ? [s.county] : [] })}>
-                View records <ArrowRight size={12} aria-hidden="true" />
-              </button>
+              <div className="rs-opp-actions">
+                <button type="button" className="rs-outline-btn rs-opp-view" onClick={() => onDrill({ states: s.state ? [s.state] : [], counties: s.county ? [s.county] : [] })}>
+                  View records <ArrowRight size={12} aria-hidden="true" />
+                </button>
+                {/* Permit signals: the permits they counted, on the map. */}
+                {showPermits && s.kind === "PERMIT_SURGE" && s.county && (
+                  <button type="button" className="rs-outline-btn rs-opp-view" onClick={() => showPermits(`Permitting surge · ${s.county} County`, { state: [s.state], county: [s.county!] })}>
+                    Show on map <MapPin size={12} aria-hidden="true" />
+                  </button>
+                )}
+                {showPermits && s.kind === "NEW_OPERATOR" && s.operator && (
+                  <button type="button" className="rs-outline-btn rs-opp-view" onClick={() => showPermits(s.title, { operator: [s.operator!] })}>
+                    Show on map <MapPin size={12} aria-hidden="true" />
+                  </button>
+                )}
+              </div>
             </div>
           );
         })}
