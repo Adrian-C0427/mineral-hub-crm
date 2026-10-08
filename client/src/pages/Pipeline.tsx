@@ -14,6 +14,7 @@ import { useAuth } from "../auth/AuthContext";
 import { useStages, stageColor, isOpportunityPipeline, type PipelineInfo } from "../stages";
 import { PipelineSettingsModal } from "../components/PipelineSettingsModal";
 import { OpportunityBoard } from "../components/OpportunityBoard";
+import { useBoardSync } from "../lib/useBoardSync";
 import type { DealSummary, Stage } from "../types";
 
 // The Pipeline shows only ACTIVE-lifecycle stages as columns. Closed and Dead
@@ -28,6 +29,24 @@ const TRANSITIONS: { stage: Stage; label: string; hint: string }[] = [
 
 /** Stage-change response: the deal plus a short-lived token that undoes the move. */
 type StageMoved = DealSummary & { undoToken?: string | null };
+
+/** Fold a stage-change response into a board card. The response is the deal's
+ *  detail shape (no package rollups / asset counts), so only what a move
+ *  changes is taken from it; the rest of the card stays as listed. */
+function withSavedStage(card: DealSummary, saved: DealSummary): DealSummary {
+  return {
+    ...card,
+    stage: saved.stage,
+    daysInStage: saved.daysInStage,
+    isOverdue: saved.isOverdue,
+    closedDate: saved.closedDate,
+    publishedToPortal: saved.publishedToPortal,
+    selectedBuyer: saved.selectedBuyer,
+    selectedOfferId: saved.selectedOfferId,
+  };
+}
+
+const apiErrorText = (err: unknown, fallback: string) => (err instanceof ApiError && err.message ? err.message : fallback);
 
 // Distance (px) the pointer must travel before a press becomes a drag — below it
 // the gesture is treated as a click (navigate to the deal).
@@ -256,7 +275,6 @@ function usePopover() {
 }
 
 export function Pipeline() {
-  const [deals, setDeals] = useState<DealSummary[] | null>(null);
   const [drag, setDrag] = useState<DragState | null>(null);
   const [overCol, setOverCol] = useState<Stage | null>(null);
   const [showNew, setShowNew] = useState(false);
@@ -289,9 +307,18 @@ export function Pipeline() {
   overRef.current = overCol;
 
   // The pipeline is the acquisition board — opportunities only. Owned mineral
-  // assets are managed in their own module and never appear here.
-  function load() { api.get<DealSummary[]>("/deals?recordType=OPPORTUNITY").then(setDeals); }
-  useEffect(load, []);
+  // assets are managed in their own module and never appear here. The board's
+  // rows, optimistic moves and refreshes run through useBoardSync (see
+  // lib/boardSync.ts for the ordering rules that stop cards jumping back).
+  const board = useBoardSync<DealSummary>({
+    scope: "deals",
+    fetchRows: () => api.get<DealSummary[]>("/deals?recordType=OPPORTUNITY"),
+    enabled: !isOpportunityPipeline(selected),
+    paused: drag != null,
+    onFetchError: (_err, initial) => { if (initial) showToast("Could not load the pipeline.", "error"); },
+  });
+  const deals = board.rows;
+  const load = board.reload;
 
   // While dragging, a rAF loop auto-scrolls whichever column body the pointer
   // hovers (near its top/bottom edge) and the board horizontally (near its
@@ -399,7 +426,9 @@ export function Pipeline() {
   /** "Moved to X · Undo" toast. Undo redeems the server's short-lived token,
    *  which restores the deal exactly as it was — stage, days in stage and, for
    *  Closed/Dead, everything that move switched off. Without a token an
-   *  ordinary move falls back to moving the card back; Closed/Dead get no Undo. */
+   *  ordinary move falls back to moving the card back; Closed/Dead get no Undo.
+   *  Undo is itself a board move (instant, sequenced with any other move of
+   *  the card, reverted with an error if the server refuses). */
   function offerUndo(deal: DealSummary, toStage: Stage, undoToken?: string | null) {
     const fromStage = deal.stage;
     const terminal = toStage === "CLOSED" || toStage === "DEAD";
@@ -407,16 +436,19 @@ export function Pipeline() {
     const undo = () => {
       if (used) return;
       used = true;
-      const req = undoToken
-        ? api.post(`/deals/${deal.id}/stage/undo`, { undoToken })
-        : api.post(`/deals/${deal.id}/stage`, { toStage: fromStage });
-      void req
-        .then(() => { load(); showToast(`Moved back to ${label(fromStage)}.`); })
-        .catch((err) => {
-          // Expired, or the deal changed since: say why and show the real board.
+      const send = () => (undoToken
+        ? api.post<DealSummary>(`/deals/${deal.id}/stage/undo`, { undoToken })
+        : api.post<DealSummary>(`/deals/${deal.id}/stage`, { toStage: fromStage }));
+      // (Closed/Dead deals stay in the board's list, just outside the columns,
+      // so a terminal move's undo moves the card straight back in.)
+      void board.move(deal.id, fromStage, send, withSavedStage).then((r) => {
+        if (r.status === "saved" && r.latest) showToast(`Moved back to ${label(fromStage)}.`);
+        // Expired, or the deal changed since: say why; the card is back where the server has it.
+        if (r.status === "failed" && r.latest) {
+          showToast(r.error instanceof ApiError && (r.error.status === 409 || r.error.status === 410 || r.error.status === 403) ? r.error.message : "Could not undo the move.", "error");
           load();
-          showToast(err instanceof ApiError && (err.status === 409 || err.status === 410 || err.status === 403) ? err.message : "Could not undo the move.", "error");
-        });
+        }
+      });
     };
     showToast(
       <span>
@@ -431,17 +463,23 @@ export function Pipeline() {
 
   async function commitMove(deal: DealSummary, col: Stage) {
     // Terminal stages carry downstream effects — confirm first (their move runs
-    // through the modal). Normal stage moves are immediate + optimistic, with
-    // an Undo in the toast: an accidental 20px drag shouldn't silently rewrite
-    // stage history.
+    // through the modal; cancelling it leaves the card where it was). Normal
+    // stage moves are immediate + optimistic, with an Undo in the toast: an
+    // accidental 20px drag shouldn't silently rewrite stage history.
     if (col === "CLOSED" || col === "DEAD") { setPending({ deal, toStage: col }); return; }
-    setDeals((prev) => prev?.map((d) => (d.id === deal.id ? { ...d, stage: col } : d)) ?? prev);
-    try {
-      const moved = await api.post<StageMoved>(`/deals/${deal.id}/stage`, { toStage: col });
-      load();
-      offerUndo(deal, col, moved.undoToken);
+    const r = await board.move(deal.id, col, () => api.post<StageMoved>(`/deals/${deal.id}/stage`, { toStage: col }), withSavedStage);
+    // Only the card's newest move speaks: a superseded one is already moot.
+    if (r.status === "saved" && r.latest) offerUndo(deal, col, r.result.undoToken);
+    if (r.status === "failed" && r.latest) {
+      showToast(<span>Could not move <strong>{deal.name}</strong> to {label(col)} — {apiErrorText(r.error, "the change was not saved")}. The card was moved back.</span>, "error");
     }
-    catch { load(); }
+  }
+
+  /** A stage modal saved a move: show the saved card (no wait for a refetch), then refresh. */
+  function afterModalMove(before: DealSummary, saved: DealSummary) {
+    board.upsert(saved, withSavedStage);
+    load();
+    offerUndo(before, saved.stage, (saved as StageMoved).undoToken);
   }
 
   // OPPORTUNITIES-kind pipelines render their own board (same look, Opportunity
@@ -627,14 +665,14 @@ export function Pipeline() {
           initialStage={pending.toStage}
           directTerminal
           onClose={() => setPending(null)}
-          onChanged={(d) => { setPending(null); load(); offerUndo(pending.deal, d.stage, (d as StageMoved).undoToken); }}
+          onChanged={(d) => { setPending(null); afterModalMove(pending.deal, d); }}
         />
       )}
       {moving && (
         <StageChangeModal
           deal={moving}
           onClose={() => setMoving(null)}
-          onChanged={(d) => { setMoving(null); load(); offerUndo(moving, d.stage, (d as StageMoved).undoToken); }}
+          onChanged={(d) => { setMoving(null); afterModalMove(moving, d); }}
         />
       )}
     </div>

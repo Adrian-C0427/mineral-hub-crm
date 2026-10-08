@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { Spinner, showToast, Modal, OverflowMenu } from "./ui";
@@ -9,6 +9,7 @@ import { useAuth } from "../auth/AuthContext";
 import { stageColor, isOpportunityPipeline, type PipelineInfo } from "../stages";
 import { PipelineSettingsModal } from "./PipelineSettingsModal";
 import { NewOpportunityModal } from "./NewOpportunityModal";
+import { useBoardSync } from "../lib/useBoardSync";
 import type { Opp, OppSummary, PipelineStage, Stage } from "../types";
 
 /**
@@ -26,6 +27,20 @@ const TOUCH_HOLD_MS = 350;
 const TOUCH_SLOP = 10;
 
 interface DragState { id: string; w: number; offX: number; offY: number; moved: boolean }
+
+/** Fold a stage-change response (the full record) into a board card: only what
+ *  a move changes, so the card keeps its listed shape. */
+export function withSavedOppStage(card: OppSummary, saved: OppSummary): OppSummary {
+  return {
+    ...card,
+    stage: saved.stage,
+    currentStageEnteredAt: saved.currentStageEnteredAt,
+    lastActivityAt: saved.lastActivityAt,
+    closeReason: saved.closeReason,
+    convertedDealId: saved.convertedDealId,
+    convertedAt: saved.convertedAt,
+  };
+}
 
 /** Whole days since the opportunity entered its current stage. */
 export function oppDaysInStage(o: Pick<OppSummary, "currentStageEnteredAt">): number {
@@ -75,7 +90,6 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
   /** Show another pipeline's board (after creating an opportunity there). */
   onSelectPipeline?: (id: string) => void;
 }) {
-  const [opps, setOpps] = useState<OppSummary[] | null>(null);
   const [q, setQ] = useState("");
   const [drag, setDrag] = useState<DragState | null>(null);
   const [overCol, setOverCol] = useState<Stage | null>(null);
@@ -100,14 +114,19 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
   dragRef.current = drag;
   overRef.current = overCol;
 
-  function load() {
-    api.get<OppSummary[]>(`/opportunities?pipelineId=${encodeURIComponent(pipeline.id)}`).then(setOpps).catch((err) => {
-      setOpps([]);
+  // Rows, optimistic moves and refreshes run through useBoardSync (see
+  // lib/boardSync.ts for the ordering rules that stop cards jumping back).
+  const board = useBoardSync<OppSummary>({
+    scope: `opps:${pipeline.id}`,
+    fetchRows: () => api.get<OppSummary[]>(`/opportunities?pipelineId=${encodeURIComponent(pipeline.id)}`),
+    paused: drag != null,
+    onFetchError: (err) => {
       // This pipeline isn't in the org (stale list): refresh the pipelines.
       if (err instanceof ApiError && err.status === 404) onSettingsChanged();
-    });
-  }
-  useEffect(load, [pipeline.id]); // eslint-disable-line react-hooks/exhaustive-deps
+    },
+  });
+  const opps = board.rows;
+  const load = board.reload;
 
   const autoScrollTimer = useRef<number | null>(null);
   function autoScrollTick() {
@@ -214,12 +233,16 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
     }
     const fromStage = before.stage;
     let used = false;
+    // Undo is itself a board move: instant, sequenced with any other move of
+    // the card, reverted with an error if the server refuses.
     const undo = () => {
       if (used) return;
       used = true;
-      api.post(`/opportunities/${before.id}/stage`, { toStage: fromStage })
-        .then(() => { load(); showToast(`Moved back to ${labelOf(fromStage)}.`); })
-        .catch((err) => { load(); showToast(err instanceof ApiError ? err.message : "Could not undo the move.", "error"); });
+      void board.move(before.id, fromStage, () => api.post<Opp>(`/opportunities/${before.id}/stage`, { toStage: fromStage }), withSavedOppStage)
+        .then((r) => {
+          if (r.status === "saved" && r.latest) showToast(`Moved back to ${labelOf(fromStage)}.`);
+          if (r.status === "failed" && r.latest) showToast(r.error instanceof ApiError ? r.error.message : "Could not undo the move.", "error");
+        });
     };
     showToast(
       <span><strong>{before.name}</strong> moved to {labelOf(after.stage)}. <button className="link-btn" onClick={undo}>Undo</button></span>,
@@ -228,17 +251,27 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
   }
 
   async function commitMove(opp: OppSummary, col: Stage) {
-    // Terminal stages (Passed / Lost) confirm first and take an optional reason.
+    // Terminal stages (Passed / Lost) confirm first and take an optional
+    // reason; cancelling that dialog leaves the card where it was.
     if (isTerminal(col)) { setPending({ opp, toStage: col }); return; }
-    setOpps((prev) => prev?.map((o) => (o.id === opp.id ? { ...o, stage: col } : o)) ?? prev);
-    try {
-      const moved = await api.post<Opp>(`/opportunities/${opp.id}/stage`, { toStage: col });
-      load();
-      afterMove(opp, moved);
-    } catch (err) {
-      load();
-      showToast(err instanceof ApiError ? err.message : "Could not move the opportunity.", "error");
+    const r = await board.move(opp.id, col, () => api.post<Opp>(`/opportunities/${opp.id}/stage`, { toStage: col }), withSavedOppStage);
+    // Only the card's newest move speaks: a superseded one is already moot.
+    if (r.status === "saved" && r.latest) {
+      afterMove(opp, r.result);
+      // Landing on an auto-convert stage created a deal elsewhere: refresh.
+      if (r.result.convertedDealId && !opp.convertedDealId) load();
     }
+    if (r.status === "failed" && r.latest) {
+      const why = r.error instanceof ApiError && r.error.message ? r.error.message : "the change was not saved";
+      showToast(<span>Could not move <strong>{opp.name}</strong> to {labelOf(col)} — {why}. The card was moved back.</span>, "error");
+    }
+  }
+
+  /** A stage dialog saved a move: show the saved card (no wait for a refetch), then refresh. */
+  function afterModalMove(before: OppSummary, saved: Opp) {
+    board.upsert(saved, withSavedOppStage);
+    load();
+    afterMove(before, saved);
   }
 
   if (!opps) return <Spinner />;
@@ -372,7 +405,7 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
             // Show it where it lives: this board (refreshed in place) or the
             // board of the pipeline it was created in.
             if (o.pipelineId === pipeline.id) {
-              setOpps((prev) => (prev && !prev.some((x) => x.id === o.id) ? [o, ...prev] : prev));
+              board.upsert(o, (prev) => prev);
               load();
             } else {
               onSettingsChanged();
@@ -390,7 +423,7 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
           initialStage={pending.toStage}
           directTerminal
           onClose={() => setPending(null)}
-          onChanged={(o) => { setPending(null); load(); afterMove(pending.opp, o); }}
+          onChanged={(o) => { setPending(null); afterModalMove(pending.opp, o); }}
         />
       )}
       {moving && (
@@ -398,7 +431,7 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
           opp={moving}
           pipeline={pipeline}
           onClose={() => setMoving(null)}
-          onChanged={(o) => { setMoving(null); load(); afterMove(moving, o); }}
+          onChanged={(o) => { setMoving(null); afterModalMove(moving, o); }}
         />
       )}
       {converting && (
@@ -407,7 +440,7 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
           pipeline={pipeline}
           pipelines={pipelines}
           onClose={() => setConverting(null)}
-          onConverted={() => { setConverting(null); load(); }}
+          onConverted={(r) => { setConverting(null); board.upsert(r.opportunity, withSavedOppStage); load(); }}
         />
       )}
     </div>
