@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
-import maplibregl from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import "../../lib/maplibreWorker";
 import { addCadastralLayers, styleWithGlyphs, watchGisHealth } from "../../lib/mapLayers";
 import { MapLayersPanel } from "../../components/MapLayersPanel";
 import { collectCoords, bboxOfPoints } from "../../lib/geo";

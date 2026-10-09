@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import maplibregl from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import "../lib/maplibreWorker";
 import { collectCoords, bboxOfPoints } from "../lib/geo";
 import { num } from "../lib/format";
 import { api } from "../api/client";

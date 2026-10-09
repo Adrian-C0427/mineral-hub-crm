@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import maplibregl from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import "../lib/maplibreWorker";
 import { addCadastralLayers, styleWithGlyphs } from "../lib/mapLayers";
 import { countyStateLabel, formatAbstract, surveyLabel } from "../lib/abstracts";
 
