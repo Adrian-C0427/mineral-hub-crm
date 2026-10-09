@@ -1,7 +1,8 @@
 // All 254 Texas counties (statewide cadastral: boundaries + abstracts +
 // survey names live in PostGIS and stream as vector tiles). Generated from
 // tx-counties.geojson — fips is the 3-digit RRC/API county code.
-export interface CountyDef { key: string; name: string; fips: string }
+// `state` is omitted for Texas; Louisiana parishes (PARISHES below) carry "LA".
+export interface CountyDef { key: string; name: string; fips: string; state?: string }
 
 export const COUNTIES: CountyDef[] = [
   { key: "anderson", name: "Anderson", fips: "001" },
@@ -268,3 +269,63 @@ export const COUNTIES_WITH_WELLS = [
 
 /** County keys with a {key}-production.json monthly-production asset (heat map; phase B5 replaces). */
 export const COUNTIES_WITH_PRODUCTION = ["leon", "freestone"];
+
+/**
+ * Louisiana Haynesville/Bossier parishes (boundaries + PLSS sections live in
+ * the same PostGIS tables as Texas, loaded at server boot — see
+ * server/src/services/gisRegions.ts). fips is the 3-digit parish code.
+ * Sabine and Red River share their names with Texas counties, so parishes are
+ * always addressed by a state-qualified key (mapCountyKey).
+ */
+export const PARISHES: CountyDef[] = [
+  { key: "la-bienville", name: "Bienville", fips: "013", state: "LA" },
+  { key: "la-bossier", name: "Bossier", fips: "015", state: "LA" },
+  { key: "la-caddo", name: "Caddo", fips: "017", state: "LA" },
+  { key: "la-desoto", name: "De Soto", fips: "031", state: "LA" },
+  { key: "la-natchitoches", name: "Natchitoches", fips: "069", state: "LA" },
+  { key: "la-redriver", name: "Red River", fips: "081", state: "LA" },
+  { key: "la-sabine", name: "Sabine", fips: "085", state: "LA" },
+];
+
+/** Two-letter state → 2-digit census fips prefix of the gis.counties key. */
+export const STATE_FIPS: Record<string, string> = { TX: "48", LA: "22" };
+
+/**
+ * The map's county filter value for a county/parish: the bare name for Texas
+ * (so saved filters and URLs keep working) and "ST|Name" for any other state
+ * ("LA|Sabine" vs Texas "Sabine"). Mirrors server/src/domain/gisRegion.ts.
+ */
+export function mapCountyKey(name: string, state?: string | null): string {
+  const st = (state ?? "TX").trim().toUpperCase() || "TX";
+  return st === "TX" ? name : `${st}|${name}`;
+}
+
+/** Inverse of mapCountyKey: "LA|Sabine" → LA/Sabine, "Sabine" → TX/Sabine. */
+export function parseMapCountyKey(key: string): { state: string; name: string } {
+  const m = /^([A-Za-z]{2})\s*\|\s*(.+)$/.exec(key.trim());
+  return m ? { state: m[1].toUpperCase(), name: m[2].trim() } : { state: "TX", name: key.trim() };
+}
+
+/** "Sabine Parish, LA" for non-Texas keys; Texas keys display as their name. */
+export function mapCountyKeyLabel(key: string): string {
+  const { state, name } = parseMapCountyKey(key);
+  return state === "TX" ? name : `${name} ${state === "LA" ? "Parish" : "County"}, ${state}`;
+}
+
+/**
+ * County filter options for the map, scoped by the State filter: Texas
+ * counties when no state (or TX) is selected, Louisiana parishes when no state
+ * (or LA) is selected. Values are mapCountyKey keys; Texas first, then parishes.
+ */
+export function mapCountyOptions(states: readonly string[] = []): string[] {
+  const want = (st: string) => states.length === 0 || states.includes(st);
+  return [
+    ...(want("TX") ? COUNTIES.map((c) => c.name).sort() : []),
+    ...(want("LA") ? PARISHES.map((p) => mapCountyKey(p.name, "LA")) : []),
+  ];
+}
+
+/** Labels for the non-Texas county filter values (Texas names label themselves). */
+export const MAP_COUNTY_LABELS: Record<string, string> = Object.fromEntries(
+  PARISHES.map((p) => [mapCountyKey(p.name, p.state), mapCountyKeyLabel(mapCountyKey(p.name, p.state))]),
+);

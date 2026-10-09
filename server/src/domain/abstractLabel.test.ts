@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { abstractNumber, abstractShortLabel, formatAbstract, rankAbstracts, surveyLabel } from "./abstractLabel.js";
+import {
+  abstractNumber, abstractShortLabel, abstractSortKey, countyLabel, countyStateLabel, formatAbstract, isSectionLabel,
+  rankAbstracts, sectionLabel, sectionNumber, surveyLabel,
+} from "./abstractLabel.js";
 
 describe("formatAbstract", () => {
   it("identifies an abstract by number, survey, county and state", () => {
@@ -48,5 +51,48 @@ describe("rankAbstracts", () => {
   it("accepts an 'abstract'/'A-' prefix in the query", () => {
     expect(rank("abstract 15")[0]).toBe("A-15");
     expect(rank("A-5")[0]).toBe("A-5");
+  });
+});
+
+// Louisiana: parishes (not counties) and PLSS sections (stored where a Texas
+// abstract lives: label "Sec 12", survey = township/range "T17N R13W").
+describe("parish and section wording", () => {
+  it("calls a Louisiana county-level division a parish", () => {
+    expect(countyLabel("Caddo", "LA")).toBe("Caddo Parish");
+    expect(countyLabel("Sabine", "TX")).toBe("Sabine County");
+    expect(countyLabel("Sabine", null)).toBe("Sabine County");
+    expect(countyStateLabel("Caddo", "LA")).toBe("Caddo Parish, Louisiana");
+    expect(countyStateLabel("Leon", "TX")).toBe("Leon County, Texas");
+    expect(countyStateLabel("Caddo Parish", "LA")).toBe("Caddo Parish, Louisiana");
+  });
+  it("recognises section labels and their numbers", () => {
+    expect(isSectionLabel("Sec 12")).toBe(true);
+    expect(isSectionLabel("Section 7")).toBe(true);
+    expect(isSectionLabel("A-12")).toBe(false);
+    expect(isSectionLabel("SECTION 12 BLK 4")).toBe(true);
+    expect(sectionNumber("Sec 07")).toBe("7");
+    expect(sectionNumber("A-7")).toBeNull();
+    expect(abstractSortKey("Sec 12")).toBe(12);
+  });
+  it("labels a section with its township/range, never as an abstract or survey", () => {
+    expect(sectionLabel({ abstract: "Sec 32", survey: "T23N R16W" })).toBe("Sec 32 · T23N R16W");
+    expect(abstractShortLabel({ abstract: "Sec 32", survey: "T23N R16W" })).toBe("Sec 32 · T23N R16W");
+    expect(formatAbstract({ abstract: "Sec 32", survey: "T23N R16W", county: "Caddo", state: "LA" }))
+      .toBe("Sec 32 · T23N R16W · Caddo Parish, Louisiana");
+    // The state is implied by the section label when a caller doesn't have it.
+    expect(formatAbstract({ abstract: "Sec 5", survey: "T5N R12W", county: "Sabine" })).toBe("Sec 5 · T5N R12W · Sabine Parish, Louisiana");
+    expect(surveyLabel("T17N R13W")).toBe("T17N R13W");
+    expect(surveyLabel("t5½n r5w")).toBe("T5½N R5W");
+  });
+  it("leaves Texas abstracts exactly as before", () => {
+    expect(formatAbstract({ abstract: "A-5", survey: "SMITH, J", county: "Sabine", state: "TX" })).toBe("Abstract 5 · J. Smith Survey · Sabine County, Texas");
+    expect(abstractShortLabel({ abstract: "A-5", survey: "SMITH, J" })).toBe("A-5 · J. Smith Survey");
+  });
+  it("ranks sections by section number", () => {
+    const secs = ["Sec 21", "Sec 1", "Sec 12", "Sec 2", "Sec 11"];
+    const rank = (q: string) => rankAbstracts(secs, q, (a) => ({ abstract: a, text: `${a} T17N R13W` }));
+    expect(rank("")).toEqual(["Sec 1", "Sec 2", "Sec 11", "Sec 12", "Sec 21"]);
+    expect(rank("sec 1")[0]).toBe("Sec 1");
+    expect(rank("12")[0]).toBe("Sec 12");
   });
 });

@@ -5,7 +5,8 @@ import { prisma, withDbRetry } from "../db.js";
 import { asyncHandler } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { escapeLike, rankRefEntries, MIN_SEARCH_CHARS, type RefEntry } from "../domain/search.js";
-import { abstractNumber, countyStateLabel, rankAbstracts, surveyLabel } from "../domain/abstractLabel.js";
+import { abstractNumber, countyLabel, countyStateLabel, isSectionLabel, rankAbstracts, sectionLabel, surveyLabel } from "../domain/abstractLabel.js";
+import { countyKey, countyNoun, countyScopePredicate, countySearchTerm, GIS_STATES, parsePlssQuery, texasCountyNames } from "../domain/gisRegion.js";
 
 /**
  * GIS Phase A (see docs/architecture/0003-gis-scale-architecture.md).
@@ -19,6 +20,12 @@ import { abstractNumber, countyStateLabel, rankAbstracts, surveyLabel } from "..
  * Authorization header, and the payload is public-record survey geometry
  * (same data UT BEG serves publicly). Everything org- or deal-related stays
  * on the authed routers.
+ *
+ * Coverage is multi-state: gis.counties / gis.abstracts carry Texas counties +
+ * abstracts and Louisiana parishes + PLSS sections (services/gisRegions.ts
+ * loads the latter at boot), told apart by their `state` column. County names
+ * repeat across states (Sabine, Red River), so every county-scoped query here
+ * goes through domain/gisRegion's state-qualified keys.
  */
 
 const TILE_EXTENT = 4096;
@@ -108,12 +115,12 @@ gisTilesRouter.get(
        wanted AS (SELECT ST_Transform(ST_Expand(env, 4000), 4326) AS box, env FROM bounds),
        cty_mvt AS (
          SELECT ST_AsMVTGeom(ST_Transform(c.geom, 3857), w.env, ${TILE_EXTENT}, ${TILE_BUFFER}, true) AS geom,
-                c.fips, c.name
+                c.fips, c.name, c.state
            FROM gis.counties c, wanted w WHERE c.geom && w.box
        ),
        abs_mvt AS (
          SELECT ST_AsMVTGeom(ST_Transform(a.geom, 3857), w.env, ${TILE_EXTENT}, ${TILE_BUFFER}, true) AS geom,
-                a.id, a.county, replace(a.abstract, '?', '') AS abstract, a.survey, a.area_m2 AS area
+                a.id, a.state, a.county, replace(a.abstract, '?', '') AS abstract, a.survey, a.area_m2 AS area
            FROM gis.abstracts a, wanted w WHERE a.geom && w.box
        ),
        well_mvt AS (
@@ -285,6 +292,16 @@ export function invalidateReferenceIndex(): void {
 }
 
 /**
+ * Forget everything this process memoized from the gis/rrc schemas — the tile
+ * LRU and the reference index. Called after a boot-time cadastral load
+ * (services/gisRegions.ts) so tiles served while it ran don't outlive it.
+ */
+export function clearGisCaches(): void {
+  tileCache.clear();
+  invalidateReferenceIndex();
+}
+
+/**
  * Unified map search: one query, every entity the map knows about — counties,
  * abstracts, surveys, wells (API #, well #, lease name/number), operators,
  * fields, formations, basins, and the org's deals & mineral assets. Each group
@@ -298,6 +315,28 @@ export function parseExtent(ext: string | null): [number, number, number, number
   return m ? [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])] : null;
 }
 
+/**
+ * The multi-state /suggest queries, named so they can be exercised directly
+ * against a PostGIS database. $1/$2/$3 are documented per query.
+ */
+export const SUGGEST_SQL = {
+  /** Counties + parishes: $1 = ILIKE pattern, $2 = name term, $3 = state or NULL. */
+  counties: `SELECT name, state, ST_XMin(geom) minx, ST_YMin(geom) miny, ST_XMax(geom) maxx, ST_YMax(geom) maxy
+               FROM gis.counties WHERE name ILIKE $1 ESCAPE '\\' AND ($3::text IS NULL OR state = $3::text)
+              ORDER BY similarity(name, $2) DESC, name, state DESC LIMIT 254`,
+  /** Louisiana sections: $1 = township/range ("T17N R13W") or NULL, $2 = section number or NULL. */
+  plssSections: `SELECT id, abstract, survey, county, state, 1::float8 AS score
+                   FROM gis.abstracts
+                  WHERE state = 'LA'
+                    AND ($1::text IS NULL OR survey = $1::text)
+                    AND ($2::int IS NULL OR NULLIF(regexp_replace(abstract, '[^0-9]', '', 'g'), '')::int = $2::int)
+                  ORDER BY survey, NULLIF(regexp_replace(abstract, '[^0-9]', '', 'g'), '')::int NULLS LAST, county
+                  LIMIT 200`,
+  /** One whole township: $1 = township/range. */
+  township: `SELECT survey, array_agg(DISTINCT county ORDER BY county) AS counties, count(*)::int AS n, ST_Extent(geom)::text AS ext
+               FROM gis.abstracts WHERE state = 'LA' AND survey = $1::text GROUP BY survey`,
+};
+
 gisRouter.get(
   "/suggest",
   asyncHandler(async (req: AuthedRequest, res) => {
@@ -306,16 +345,26 @@ gisRouter.get(
     // them yields a pattern with no extractable trigram, which is precisely the
     // seq scan the indexes exist to prevent. See domain/search.escapeLike.
     const like = `%${escapeLike(q)}%`;
+    // "Caddo Parish" / "Sabine County, TX" name a county in a specific state;
+    // a bare "Sabine" finds both the Texas county and the Louisiana parish.
+    const ct = countySearchTerm(q);
+    // A PLSS reference ("Sec 12 T17N R13W", "T17N R13W") resolves Louisiana
+    // sections exactly — the label/survey text match below can't, since the
+    // section and the township live in different columns.
+    const plss = parsePlssQuery(q);
 
-    const [counties, abstracts, wells, reference, deals] = await Promise.all([
-      // Counties, with bbox so the client can frame them without local data.
-      prisma.$queryRawUnsafe<{ name: string; minx: number; miny: number; maxx: number; maxy: number }[]>(
-        `SELECT name, ST_XMin(geom) minx, ST_YMin(geom) miny, ST_XMax(geom) maxx, ST_YMax(geom) maxy
-           FROM gis.counties WHERE name ILIKE $1 ESCAPE '\\'
-          ORDER BY similarity(name, $2) DESC, name LIMIT 254`, like, q),
-      // Abstract number OR survey name (both live on gis.abstracts). Labels are
-      // matched and returned with the source data's stray '?' stripped.
-      prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string; state: string | null; score: number }[]>(
+    type AbsRow = { id: string; abstract: string | null; survey: string | null; county: string; state: string | null; score: number };
+    const [counties, abstracts, townships, wells, reference, deals] = await Promise.all([
+      // Counties/parishes, with bbox so the client can frame them without local data.
+      prisma.$queryRawUnsafe<{ name: string; state: string; minx: number; miny: number; maxx: number; maxy: number }[]>(
+        SUGGEST_SQL.counties, `%${escapeLike(ct.name)}%`, ct.name, ct.state),
+      plss
+        // Louisiana sections by township/range and/or section number.
+        ? prisma.$queryRawUnsafe<AbsRow[]>(
+          SUGGEST_SQL.plssSections, plss.township, plss.section)
+        // Abstract number OR survey name (both live on gis.abstracts). Labels are
+        // matched and returned with the source data's stray '?' stripped.
+        : prisma.$queryRawUnsafe<AbsRow[]>(
         `SELECT id, replace(abstract, '?', '') AS abstract, survey, county, state,
                 GREATEST(similarity(replace(coalesce(abstract,''), '?', ''), $2), similarity(coalesce(survey,''), $2)) AS score
            FROM gis.abstracts
@@ -327,6 +376,11 @@ gisRouter.get(
                         WHEN ltrim(regexp_replace(coalesce(abstract,''), '[^0-9]', '', 'g'), '0') LIKE $3 || '%' THEN 1
                         ELSE 2 END,
                    score DESC, county, abstract LIMIT 200`, like, q, (q.match(/\d+/)?.[0] ?? "").replace(/^0+(?=\d)/, "")),
+      // A whole PLSS township ("T17N R13W"), framed as one result.
+      plss?.township
+        ? prisma.$queryRawUnsafe<{ survey: string; counties: string[]; n: number; ext: string | null }[]>(
+          SUGGEST_SQL.township, plss.township)
+        : Promise.resolve([]),
       // Wells: API number, well number, well ID, lease name, RRC lease number.
       prisma.$queryRawUnsafe<{ fid: number; api8: string | null; wellNo: string | null; leaseName: string | null; leaseNo: string | null; operator: string | null; type: string | null; county: string; score: number }[]>(
         `SELECT fid, api8, well_no AS "wellNo", lease_name AS "leaseName", lease_no AS "leaseNo",
@@ -356,15 +410,30 @@ gisRouter.get(
     ]);
 
     res.json({
-      counties: counties.map((c) => ({ label: `${c.name} County`, bbox: [c.minx, c.miny, c.maxx, c.maxy] })),
+      // "Leon County, TX" / "Caddo Parish, LA" — the state tells Sabine TX from Sabine LA.
+      counties: counties.map((c) => ({
+        label: `${countyLabel(c.name, c.state)}, ${c.state}`,
+        sub: `Go to ${countyNoun(c.state).toLowerCase()}`,
+        key: countyKey(c.name, c.state),
+        bbox: [c.minx, c.miny, c.maxx, c.maxy],
+      })),
       // Number-first ranking (exact abstract # → prefix → contains → survey
       // text, ascending by number within each) so "15" puts Abstract 15 on top.
-      abstracts: rankAbstracts(abstracts, q, (a) => ({ abstract: a.abstract ?? a.id, text: `${a.abstract ?? ""} ${a.survey ?? ""} ${a.county}` }))
-        .map((a) => ({
-          id: a.id,
-          label: `Abstract ${abstractNumber(a.abstract ?? a.id)}`,
-          sub: [surveyLabel(a.survey), countyStateLabel(a.county, a.state ?? "TX")].filter(Boolean).join(" · "),
-        })),
+      // PLSS results arrive already ordered by township and section number.
+      abstracts: (plss ? abstracts : rankAbstracts(abstracts, q, (a) => ({ abstract: a.abstract ?? a.id, text: `${a.abstract ?? ""} ${a.survey ?? ""} ${a.county}` })))
+        .map((a) => (a.state === "LA" || isSectionLabel(a.abstract)
+          // A Louisiana PLSS section: "Sec 12 · T17N R13W" in "Caddo Parish, Louisiana".
+          ? { id: a.id, label: sectionLabel(a), sub: countyStateLabel(a.county, a.state ?? "LA") }
+          : {
+            id: a.id,
+            label: `Abstract ${abstractNumber(a.abstract ?? a.id)}`,
+            sub: [surveyLabel(a.survey), countyStateLabel(a.county, a.state ?? "TX")].filter(Boolean).join(" · "),
+          })),
+      townships: townships.map((t) => ({
+        label: t.survey,
+        sub: `Township · ${t.counties.map((c) => countyLabel(c, "LA")).join(", ")}, LA · ${t.n} section${t.n === 1 ? "" : "s"}`,
+        bbox: parseExtent(t.ext),
+      })),
       wells: wells.map((w) => ({
         fid: w.fid,
         label: `${w.leaseName ?? "Well"}${w.wellNo ? ` #${w.wellNo}` : ""}`,
@@ -391,9 +460,9 @@ gisRouter.get(
   asyncHandler(async (req, res) => {
     const { q } = searchSchema.parse(req.query);
     const rows = await prisma.$queryRawUnsafe<
-      { id: string; abstract: string | null; survey: string | null; county: string; lon: number; lat: number }[]
+      { id: string; abstract: string | null; survey: string | null; county: string; state: string; lon: number; lat: number }[]
     >(
-      `SELECT id, replace(abstract, '?', '') AS abstract, survey, county,
+      `SELECT id, replace(abstract, '?', '') AS abstract, survey, county, state,
               ST_X(ST_PointOnSurface(geom)) AS lon, ST_Y(ST_PointOnSurface(geom)) AS lat
          FROM gis.abstracts
         WHERE replace(abstract, '?', '') ILIKE $1 ESCAPE '\\' OR survey ILIKE $1 ESCAPE '\\'
@@ -475,7 +544,8 @@ const optionsSchema = z.object({ counties: z.string().max(4000).optional() });
 
 /**
  * Survey/abstract filter option lists, optionally scoped to counties
- * (comma-separated names). Replaces the client building these from
+ * (comma-separated county keys: "Leon" = Texas, "LA|Caddo" = a Louisiana
+ * parish — see domain/gisRegion). Replaces the client building these from
  * downloaded GeoJSON.
  */
 gisRouter.get(
@@ -502,8 +572,9 @@ gisRouter.get(
     }
 
     // County-scoped: these ride the county btree, so they stay live queries.
-    const scope = `county = ANY($1::text[]) AND`;
-    const params = [names];
+    // State-qualified, so Sabine TX and Sabine LA never mix.
+    const params: unknown[] = [];
+    const scope = `${countyScopePredicate(names, params)} AND`;
     const surveys = await prisma.$queryRawUnsafe<{ v: string }[]>(
       `SELECT DISTINCT survey AS v FROM gis.abstracts WHERE ${scope} survey IS NOT NULL ORDER BY v`,
       ...params,
@@ -512,16 +583,19 @@ gisRouter.get(
       `SELECT DISTINCT replace(abstract, '?', '') AS v FROM gis.abstracts WHERE ${scope} abstract IS NOT NULL ORDER BY v`,
       ...params,
     );
-    // Well-derived filter option lists from rrc.wells, same county scoping.
-    const wScope = `WHERE county = ANY($1::text[])`;
-    const wellAgg = await prisma.$queryRawUnsafe<{ types: string[]; statuses: string[]; operators: string[]; n: number }[]>(
-      `SELECT array_agg(DISTINCT type) FILTER (WHERE type IS NOT NULL) AS types,
-              array_agg(DISTINCT status) FILTER (WHERE status IS NOT NULL) AS statuses,
-              array_agg(DISTINCT operator) FILTER (WHERE operator IS NOT NULL) AS operators,
-              count(*)::int AS n
-         FROM rrc.wells ${wScope}`,
-      ...params,
-    );
+    // Well-derived filter option lists from rrc.wells (RRC = Texas only), so
+    // only the Texas counties among the selection can scope them.
+    const txNames = texasCountyNames(names);
+    const wellAgg = txNames.length
+      ? await prisma.$queryRawUnsafe<{ types: string[]; statuses: string[]; operators: string[]; n: number }[]>(
+        `SELECT array_agg(DISTINCT type) FILTER (WHERE type IS NOT NULL) AS types,
+                array_agg(DISTINCT status) FILTER (WHERE status IS NOT NULL) AS statuses,
+                array_agg(DISTINCT operator) FILTER (WHERE operator IS NOT NULL) AS operators,
+                count(*)::int AS n
+           FROM rrc.wells WHERE county = ANY($1::text[])`,
+        txNames,
+      )
+      : [];
     const w = wellAgg[0];
     res.json({
       surveys: surveys.map((r) => r.v),
@@ -540,7 +614,8 @@ gisRouter.get(
  * query params (?operators=A&operators=B) because operator names can contain
  * commas. Precedence: any well-level filter (type/status/operator) frames the
  * matching wells; otherwise abstract/survey filters frame matching abstracts;
- * otherwise the selected counties frame themselves.
+ * otherwise the selected counties frame themselves. County values are
+ * state-qualified keys (domain/gisRegion: "Leon", "LA|Caddo").
  */
 /**
  * Pure query planner for /extent (exported for tests): picks the table whose
@@ -559,7 +634,8 @@ export function planExtentQuery(q: Record<string, unknown>): { sql: string; para
 
   if (wellTypes.length || wellStatuses.length || operators.length) {
     const conds: string[] = [];
-    if (counties.length) conds.push(cond("county", counties));
+    // rrc.wells is Texas-only (RRC): a Louisiana parish matches no well.
+    if (counties.length) conds.push(cond("county", texasCountyNames(counties)));
     if (surveys.length) conds.push(cond("survey", surveys));
     if (abstracts.length) conds.push(cond("replace(abstract, '?', '')", abstracts));
     if (wellTypes.length) conds.push(cond("type", wellTypes));
@@ -569,20 +645,21 @@ export function planExtentQuery(q: Record<string, unknown>): { sql: string; para
   }
   if (surveys.length || abstracts.length) {
     const conds: string[] = [];
-    if (counties.length) conds.push(cond("county", counties));
+    if (counties.length) conds.push(countyScopePredicate(counties, params));
     if (surveys.length) conds.push(cond("survey", surveys));
     if (abstracts.length) conds.push(cond("replace(abstract, '?', '')", abstracts));
     return { sql: `SELECT ST_Extent(geom)::text AS ext FROM gis.abstracts WHERE ${conds.join(" AND ")}`, params };
   }
   if (counties.length) {
-    return { sql: `SELECT ST_Extent(geom)::text AS ext FROM gis.counties WHERE ${cond("name", counties)}`, params };
+    return { sql: `SELECT ST_Extent(geom)::text AS ext FROM gis.counties WHERE ${countyScopePredicate(counties, params, { state: "state", county: "name" })}`, params };
   }
-  // State filter alone: frame the whole state. GIS coverage is Texas-only
-  // today, so any selection including TX frames the full county extent and a
-  // non-TX-only selection has nothing to frame.
+  // State filter alone: frame the selected states' coverage (Texas counties,
+  // Louisiana's Haynesville parishes). A selection with no GIS coverage has
+  // nothing to frame.
   if (states.length) {
-    if (!states.some((s) => s.toUpperCase() === "TX")) return null;
-    return { sql: `SELECT ST_Extent(geom)::text AS ext FROM gis.counties`, params };
+    const covered = [...new Set(states.map((s) => s.toUpperCase()))].filter((s) => (GIS_STATES as readonly string[]).includes(s));
+    if (!covered.length) return null;
+    return { sql: `SELECT ST_Extent(geom)::text AS ext FROM gis.counties WHERE ${cond("state", covered)}`, params };
   }
   return null;
 }
@@ -621,8 +698,8 @@ gisRouter.get(
   asyncHandler(async (req, res) => {
     const ids = String(req.query.ids ?? "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 500);
     if (!ids.length) return res.json({ type: "FeatureCollection", features: [] });
-    const rows = await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string; area: number | null; geom: string }[]>(
-      `SELECT id, replace(abstract, '?', '') AS abstract, survey, county, area_m2 AS area, ST_AsGeoJSON(geom, 6) AS geom
+    const rows = await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string; state: string; area: number | null; geom: string }[]>(
+      `SELECT id, replace(abstract, '?', '') AS abstract, survey, county, state, area_m2 AS area, ST_AsGeoJSON(geom, 6) AS geom
          FROM gis.abstracts WHERE id = ANY($1::text[])`,
       ids,
     );
@@ -630,7 +707,7 @@ gisRouter.get(
       type: "FeatureCollection",
       features: rows.map((r) => ({
         type: "Feature",
-        properties: { id: r.id, abstract: r.abstract, survey: r.survey, county: r.county, area: r.area },
+        properties: { id: r.id, abstract: r.abstract, survey: r.survey, county: r.county, state: r.state, area: r.area },
         geometry: JSON.parse(r.geom) as unknown,
       })),
     });
@@ -685,9 +762,9 @@ gisRouter.get(
   "/abstracts/:id",
   asyncHandler(async (req, res) => {
     const rows = await prisma.$queryRawUnsafe<
-      { id: string; abstract: string | null; survey: string | null; county: string; minx: number; miny: number; maxx: number; maxy: number }[]
+      { id: string; abstract: string | null; survey: string | null; county: string; state: string; minx: number; miny: number; maxx: number; maxy: number }[]
     >(
-      `SELECT id, replace(abstract, '?', '') AS abstract, survey, county,
+      `SELECT id, replace(abstract, '?', '') AS abstract, survey, county, state,
               ST_XMin(geom) AS minx, ST_YMin(geom) AS miny, ST_XMax(geom) AS maxx, ST_YMax(geom) AS maxy
          FROM gis.abstracts WHERE id = $1`,
       String(req.params.id),

@@ -438,10 +438,12 @@ async function loadGeography(db: Db, log: (m: string) => void): Promise<Map<stri
     };
     if (hasGis) {
       // SELECT only. Largest named tracts first (they read well on the map).
+      // Texas-only: the demo counties are Texas, and gis.abstracts also holds
+      // Louisiana parishes that share names with Texas counties.
       const rows = await db.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null }[]>(
         `SELECT id, replace(abstract, '?', '') AS abstract, survey
            FROM gis.abstracts
-          WHERE upper(county) = upper($1) AND abstract IS NOT NULL AND abstract <> '' AND survey IS NOT NULL AND survey <> ''
+          WHERE state = 'TX' AND upper(county) = upper($1) AND abstract IS NOT NULL AND abstract <> '' AND survey IS NOT NULL AND survey <> ''
           ORDER BY area_m2 DESC NULLS LAST, id
           LIMIT 40`, info.name);
       if (rows.length >= 3) {

@@ -3,7 +3,8 @@
  * county (ST_PointOnSurface — always inside the polygon, even for concave
  * shapes) plus the county bbox, for the map's county-name layer and
  * search go-to-county framing. County POLYGONS render from vector tiles
- * (gis.counties, full-resolution TIGER); this file is just 254 points.
+ * (gis.counties, full-resolution TIGER); this file is just 254 points (plus
+ * the Louisiana Haynesville parishes, labelled "Caddo Parish").
  *
  * Usage: npx tsx src/scripts/exportCountyLabels.ts
  */
@@ -15,8 +16,8 @@ import { prisma } from "../db.js";
 const OUT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../client/public/data/county-labels.geojson");
 
 async function main() {
-  const rows = await prisma.$queryRawUnsafe<{ fips: string; name: string; lon: number; lat: number; minx: number; miny: number; maxx: number; maxy: number }[]>(
-    `SELECT fips, name,
+  const rows = await prisma.$queryRawUnsafe<{ fips: string; name: string; state: string; lon: number; lat: number; minx: number; miny: number; maxx: number; maxy: number }[]>(
+    `SELECT fips, name, state,
             round(ST_X(ST_PointOnSurface(geom))::numeric, 5)::float AS lon,
             round(ST_Y(ST_PointOnSurface(geom))::numeric, 5)::float AS lat,
             round(ST_XMin(geom)::numeric, 4)::float AS minx, round(ST_YMin(geom)::numeric, 4)::float AS miny,
@@ -26,7 +27,9 @@ async function main() {
     type: "FeatureCollection",
     features: rows.map((r) => ({
       type: "Feature",
-      properties: { fips: r.fips, name: r.name, bbox: [r.minx, r.miny, r.maxx, r.maxy] },
+      // `label` is what the map prints: Texas counties by name, Louisiana
+      // parishes as "Caddo Parish" (so Sabine LA never reads as Sabine TX).
+      properties: { fips: r.fips, name: r.name, state: r.state, label: r.state === "LA" ? `${r.name} Parish` : r.name, bbox: [r.minx, r.miny, r.maxx, r.maxy] },
       geometry: { type: "Point", coordinates: [r.lon, r.lat] },
     })),
   };

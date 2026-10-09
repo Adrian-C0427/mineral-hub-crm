@@ -10,7 +10,7 @@ import { API_BASE } from "../api/client";
  * an hour keyed by full URL, so a new value makes every client abandon its
  * stale tiles immediately; the server ignores the query param (its own LRU
  * clears on the deploy that ships the bump). */
-export const TILE_DATA_VERSION = "2026-09-11";
+export const TILE_DATA_VERSION = "2026-10-08";
 
 /** Cadastral vector tiles from PostGIS (/api/gis/tiles). Absolute URL required
  * by MapLibre; falls back to the page origin in dev (Vite proxies /api). */
@@ -100,9 +100,11 @@ export function addCadastralLayers(map: maplibregl.Map, countyLabels: GeoJSON.Fe
   // wellbores. promoteId maps each layer's key to its feature id.
   map.addSource("abstracts", { type: "vector", tiles: [ABSTRACT_TILES], minzoom: 0, maxzoom: 14, promoteId: { abstracts: "id", wells: "fid", wellbores: "fid" } });
   // County name labels (DB-derived points, always inside their polygon).
+  // Louisiana points carry a `label` ("Caddo Parish") so a parish never reads
+  // as the same-named Texas county; Texas points print their name.
   map.addSource("county-labels", { type: "geojson", data: countyLabels });
   map.addLayer({ id: "county-names", type: "symbol", source: "county-labels", maxzoom: 10, layout: {
-    "text-field": ["get", "name"], "text-font": ["Noto Sans Regular"],
+    "text-field": ["coalesce", ["get", "label"], ["get", "name"]] as unknown as Expr, "text-font": ["Noto Sans Regular"],
     "text-size": ["interpolate", ["linear"], ["zoom"], 4, 9, 6, 12, 9, 16],
     "text-transform": "uppercase", "text-letter-spacing": 0.08,
     "text-padding": 4, "text-allow-overlap": false, "text-optional": true },

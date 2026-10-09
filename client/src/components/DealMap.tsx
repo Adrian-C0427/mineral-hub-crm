@@ -14,7 +14,7 @@ const LEON_CENTER: [number, number] = [-95.99, 31.29];
 
 type FC = { type: "FeatureCollection"; features: { type: "Feature"; id?: string | number; properties: Record<string, unknown>; geometry: { type: string; coordinates: unknown } }[] };
 type Sel =
-  | { kind: "abstract"; abstract: string; survey: string; county: string }
+  | { kind: "abstract"; abstract: string; survey: string; county: string; state: string }
   | { kind: "well"; api: string; wellNo: string; operator: string; leaseName: string; status: string; type: string }
   | ({ kind: "tract" } & TractInfo)
   | null;
@@ -114,7 +114,7 @@ export function DealMap({ abstractIds, dealId, noun = "deal", abstractsWhere = "
           if (tf.length) { setSelected({ kind: "tract", ...tractInfo(tf[0].properties as Record<string, unknown>) }); return; }
         }
         const ah = map.queryRenderedFeatures(ev.point, { layers: map.getLayer("abstracts-fill") ? ["abstracts-fill"] : [] });
-        if (ah.length) { const p = ah[0].properties as Record<string, unknown>; setSelected({ kind: "abstract", abstract: String(p.abstract ?? ""), survey: String(p.survey ?? ""), county: String(p.county ?? "") }); }
+        if (ah.length) { const p = ah[0].properties as Record<string, unknown>; setSelected({ kind: "abstract", abstract: String(p.abstract ?? ""), survey: String(p.survey ?? ""), county: String(p.county ?? ""), state: String(p.state ?? "TX") }); }
         else setSelected(null);
       });
     });
@@ -225,7 +225,7 @@ export function DealMap({ abstractIds, dealId, noun = "deal", abstractsWhere = "
           <div className="dm-info">
             <button className="icon-btn dm-info-x" aria-label="Close" onClick={() => setSelected(null)}>×</button>
             {selected.kind === "abstract" ? (
-              <><strong>{formatAbstract({ abstract: selected.abstract, survey: selected.survey, county: selected.county, state: "TX" })}</strong></>
+              <><strong>{formatAbstract({ abstract: selected.abstract, survey: selected.survey, county: selected.county, state: selected.state })}</strong></>
             ) : selected.kind === "tract" ? (
               <><strong>{selected.name}</strong>
                 <div className="muted" style={{ fontSize: 12 }}>Imported tract · {selected.sourceFile}</div>

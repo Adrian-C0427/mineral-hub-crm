@@ -12,17 +12,26 @@ describe("planExtentQuery precedence", () => {
     expect(planExtentQuery({ counties: "" })).toBeNull();
   });
 
-  it("frames counties from gis.counties when only counties are selected", () => {
+  it("frames counties from gis.counties when only counties are selected (bare names = Texas)", () => {
     const plan = planExtentQuery({ counties: ["Leon", "Freestone"] })!;
     expect(plan.sql).toContain("FROM gis.counties");
-    expect(plan.sql).toContain("name = ANY($1::text[])");
-    expect(plan.params).toEqual([["Leon", "Freestone"]]);
+    expect(plan.sql).toContain("(state = ANY($1::text[]) AND name = ANY($2::text[]))");
+    expect(plan.params).toEqual([["TX"], ["Leon", "Freestone"]]);
   });
 
-  it("frames the whole state when only a State filter (incl. TX) is set", () => {
+  it("keeps Sabine TX and Sabine LA apart (state-qualified county keys)", () => {
+    expect(planExtentQuery({ counties: "Sabine" })!.params).toEqual([["TX"], ["Sabine"]]);
+    expect(planExtentQuery({ counties: "LA|Sabine" })!.params).toEqual([["LA"], ["Sabine"]]);
+    const both = planExtentQuery({ counties: ["Sabine", "LA|Sabine"] })!;
+    expect(both.sql).toContain("((state = ANY($1::text[]) AND name = ANY($2::text[])) OR (state = ANY($3::text[]) AND name = ANY($4::text[])))");
+    expect(both.params).toEqual([["TX"], ["Sabine"], ["LA"], ["Sabine"]]);
+  });
+
+  it("frames the selected states' coverage when only a State filter is set", () => {
     const plan = planExtentQuery({ states: "TX" })!;
-    expect(plan.sql).toContain("FROM gis.counties");
-    expect(plan.sql).not.toContain("WHERE");
+    expect(plan.sql).toContain("FROM gis.counties WHERE state = ANY($1::text[])");
+    expect(plan.params).toEqual([["TX"]]);
+    expect(planExtentQuery({ states: ["la", "OK"] })!.params).toEqual([["LA"]]);
   });
 
   it("returns null for a State-only selection outside GIS coverage", () => {
@@ -32,11 +41,24 @@ describe("planExtentQuery precedence", () => {
   it("frames matching abstracts when abstract/survey filters are set", () => {
     const plan = planExtentQuery({ counties: "Leon", abstracts: ["101", "202"] })!;
     expect(plan.sql).toContain("FROM gis.abstracts");
-    expect(plan.sql).toContain("county = ANY($1::text[])");
+    expect(plan.sql).toContain("(state = ANY($1::text[]) AND county = ANY($2::text[]))");
     // Abstract values are compared against the display form ('?' stripped),
     // matching what /gis/options and the vector tiles serve.
-    expect(plan.sql).toContain("replace(abstract, '?', '') = ANY($2::text[])");
-    expect(plan.params).toEqual([["Leon"], ["101", "202"]]);
+    expect(plan.sql).toContain("replace(abstract, '?', '') = ANY($3::text[])");
+    expect(plan.params).toEqual([["TX"], ["Leon"], ["101", "202"]]);
+  });
+
+  it("frames a parish's sections by state-qualified key", () => {
+    const plan = planExtentQuery({ counties: "LA|Caddo", abstracts: "Sec 12" })!;
+    expect(plan.sql).toContain("FROM gis.abstracts");
+    expect(plan.params).toEqual([["LA"], ["Caddo"], ["Sec 12"]]);
+  });
+
+  it("scopes well filters to Texas counties only (rrc.wells is RRC/Texas data)", () => {
+    const plan = planExtentQuery({ counties: ["Leon", "LA|Caddo"], wellTypes: "Gas" })!;
+    expect(plan.sql).toContain("FROM rrc.wells");
+    expect(plan.params).toEqual([["Leon"], ["Gas"]]);
+    expect(planExtentQuery({ counties: "LA|Caddo", wellTypes: "Gas" })!.params).toEqual([[], ["Gas"]]);
   });
 
   it("frames matching wells when any well-level filter is set, keeping all scoping predicates", () => {

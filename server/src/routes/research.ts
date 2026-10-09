@@ -1470,13 +1470,15 @@ researchRouter.get(
     }
 
     // Abstract polygons for the county; simplified — this is a summary map.
+    // Texas-scoped: research records are Texas county-clerk data, and county
+    // names repeat across states (Sabine, Red River are also Louisiana parishes).
     type AbsRow = { abstract: string | null; survey: string | null; geom: string | null };
     let features: unknown[] = [];
     try {
       const rows = await prisma.$queryRawUnsafe<AbsRow[]>(
         `SELECT replace(abstract, '?', '') AS abstract, survey,
                 ST_AsGeoJSON(ST_SimplifyPreserveTopology(geom, 0.0004), 5) AS geom
-           FROM gis.abstracts WHERE upper(county) = upper($1)`,
+           FROM gis.abstracts WHERE state = 'TX' AND upper(county) = upper($1)`,
         county,
       );
       features = rows

@@ -27,7 +27,7 @@ export interface PortalPackageAsset {
   id: string; name: string; counties: string[]; states: string[];
   nra: number | null; assetTypes: string[]; operator: string | null;
 }
-export interface PortalAbstract { id: string; abstract: string | null; survey: string | null; county: string }
+export interface PortalAbstract { id: string; abstract: string | null; survey: string | null; county: string; state?: string }
 export interface PortalDocument { id: string; filename: string; mimeType: string; sizeBytes: number; folder: string }
 export interface PortalImage { id: string; filename: string; url: string }
 export interface PortalProduction {
