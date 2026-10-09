@@ -10,6 +10,9 @@ import { normalizeAssumptions, runValuation, type MonthVolumes } from "../domain
 import { monthKey } from "../domain/dates.js";
 import { MAX_CSV_CHARS } from "../config.js";
 import { escapeLike, MIN_SEARCH_CHARS } from "../domain/search.js";
+import { isLaFid, LA_PRODUCT_LABEL, laWellFid, sectionLabelOf } from "../domain/sonrisWells.js";
+import { sonrisWellsAvailable } from "../services/sonrisWells.js";
+import { identifierDigits, LA_WELL_SQL, laUnitProduction, type LaWellRecord } from "../services/sonrisQueries.js";
 
 /**
  * Well Production Analysis & Valuation API.
@@ -225,6 +228,34 @@ async function rrcVolumesByWell(wells: ProdWell[]): Promise<Map<string, MonthVol
   return out;
 }
 
+/**
+ * Live UNIT production for Louisiana (source "sonris") wells, keyed by well
+ * id. Louisiana reports per unit (LUW), not per well, so a well's history IS
+ * its unit's — never split, and always labeled as unit production. `luw` rides
+ * along so callers summing several wells count a shared unit once.
+ * sourceRef = the state well serial.
+ */
+async function sonrisVolumesByWell(wells: ProdWell[]): Promise<Map<string, { luw: string; volumes: MonthVolumes[] }>> {
+  const out = new Map<string, { luw: string; volumes: MonthVolumes[] }>();
+  const la = wells.filter((w) => w.source === "sonris" && w.sourceRef && Number.isInteger(Number(w.sourceRef)));
+  if (!la.length || !sonrisWellsAvailable()) return out;
+  const units = await prisma.$queryRawUnsafe<{ fid: number; luw: string | null }[]>(
+    `SELECT fid, luw FROM sonris.wells WHERE fid = ANY($1::int[])`, la.map((w) => laWellFid(Number(w.sourceRef))));
+  const luwOf = new Map(units.map((u) => [u.fid, u.luw]));
+  const luws = [...new Set(units.map((u) => u.luw).filter((l): l is string => !!l))];
+  if (!luws.length) return out;
+  const rows = await prisma.$queryRawUnsafe<{ luw: string; ym: number; oil: number; gas: number }[]>(LA_WELL_SQL.unitMonthly, luws);
+  const byLuw = new Map<string, MonthVolumes[]>();
+  for (const r of rows) {
+    (byLuw.get(r.luw) ?? byLuw.set(r.luw, []).get(r.luw)!).push({ month: ymStr(r.ym), oilBbl: r.oil, gasMcf: r.gas, nglBbl: 0, waterBbl: 0 });
+  }
+  for (const w of la) {
+    const luw = luwOf.get(laWellFid(Number(w.sourceRef)));
+    if (luw) out.set(w.id, { luw, volumes: byLuw.get(luw) ?? [] });
+  }
+  return out;
+}
+
 function summaryOf(volumes: MonthVolumes[]): WellSummary {
   if (!volumes.length) return { firstMonth: null, lastMonth: null, months: 0, cumOilBbl: 0, cumGasMcf: 0, cumNglBbl: 0 };
   const months = volumes.map((v) => v.month).sort();
@@ -242,7 +273,7 @@ async function productionSummaries(organizationId: string, wellIds: string[]): P
   // defense-in-depth so a future caller passing raw ids can't leak cross-org
   // production (mirrors loadMergedProduction).
   const wells = await prisma.researchWell.findMany({ where: { id: { in: wellIds }, organizationId }, select: { id: true, source: true, sourceRef: true, apiNumber: true } });
-  const rrcVols = await rrcVolumesByWell(wells);
+  const [rrcVols, laVols] = await Promise.all([rrcVolumesByWell(wells), sonrisVolumesByWell(wells)]);
   // Manual / CSV production (everything that isn't an rrc live read).
   const groups = await prisma.wellProductionMonth.groupBy({
     by: ["wellId"],
@@ -254,7 +285,7 @@ async function productionSummaries(organizationId: string, wellIds: string[]): P
 
   const result = new Map<string, WellSummary>();
   for (const w of wells) {
-    const live = rrcVols.get(w.id);
+    const live = rrcVols.get(w.id) ?? laVols.get(w.id)?.volumes;
     if (live && live.length) { result.set(w.id, summaryOf(live)); continue; }
     const g = manual.get(w.id);
     if (g) result.set(w.id, {
@@ -427,10 +458,28 @@ wellsRouter.get(
         LIMIT 15`,
       q, `%${escapeLike(q)}%`,
     );
-    res.json(rows.map((w) => ({
-      fid: w.fid, api: w.api10 ?? w.api8, name: `${w.lease_name ?? "Well"}${w.well_no ? ` #${w.well_no}` : ""}`,
-      operator: w.operator, county: w.county, type: w.type, status: w.status, hasProduction: w.has_prod,
-    })));
+    // Louisiana wells (sonris.*) — offered alongside, marked with their state
+    // and unit so the picker labels the production as the unit's.
+    const la = sonrisWellsAvailable()
+      ? await prisma.$queryRawUnsafe<{ fid: number; api: string | null; name: string; wellNo: string | null; operator: string | null; parish: string; type: string; status: string; luw: string | null; has_prod: boolean }[]>(
+        `SELECT s.fid, s.api, s.name, s.well_no AS "wellNo", s.operator, s.parish, s.type, s.status, s.luw,
+                EXISTS (SELECT 1 FROM sonris.production p WHERE p.luw = s.luw) AS has_prod
+           FROM (${LA_WELL_SQL.suggest}) s
+          ORDER BY has_prod DESC, s.score DESC
+          LIMIT 10`,
+        `%${escapeLike(q)}%`, q, identifierDigits(q))
+      : [];
+    res.json([
+      ...rows.map((w) => ({
+        fid: w.fid, api: w.api10 ?? w.api8, name: `${w.lease_name ?? "Well"}${w.well_no ? ` #${w.well_no}` : ""}`,
+        operator: w.operator, county: w.county, type: w.type, status: w.status, hasProduction: w.has_prod,
+      })),
+      ...la.map((w) => ({
+        fid: w.fid, api: w.api, name: `${w.name}${w.wellNo ? ` #${w.wellNo}` : ""}`,
+        operator: w.operator, county: w.parish, state: "LA", source: "sonris", luw: w.luw,
+        type: w.type, status: w.status, hasProduction: w.has_prod,
+      })),
+    ]);
   }),
 );
 
@@ -518,6 +567,82 @@ wellsRouter.post(
 );
 
 // ---------------------------------------------------------------------------
+// SONRIS bridge — the Louisiana equivalent of /import-rrc. Opening a
+// Louisiana well upserts it as a ResearchWell (source "sonris", sourceRef =
+// state serial); its production is its UNIT's (LUW) monthly series, read live
+// from sonris.production at analysis time and labeled as unit production.
+// ---------------------------------------------------------------------------
+
+/**
+ * Map status bucket → Well Analysis status. Explicit rather than
+ * classifyWellStatus' text match, which would read an expired permit
+ * ("Canceled/Abandoned") as plugged and a dry hole as unknown.
+ */
+const LA_WELL_STATUS: Record<string, WellStatus> = {
+  Producing: "PRODUCING", "Shut-In": "SHUT_IN", Plugged: "PLUGGED", "Dry Hole": "PLUGGED",
+};
+
+/** The ResearchWell fields of a Louisiana well (pure, for tests). */
+export function laResearchWellData(w: LaWellRecord, boreType: string | null) {
+  const section = sectionLabelOf(w.section);
+  return {
+    name: `${w.name}${w.wellNo ? ` #${w.wellNo}` : ""}`.toUpperCase(),
+    operator: w.operator,
+    // The well list's second line: whose production this analysis reads.
+    leaseName: w.luw ? `Unit production · LUW ${w.luw}` : "No production unit on record",
+    fieldName: w.field,
+    formation: null,
+    state: "LA",
+    county: w.parish,
+    status: LA_WELL_STATUS[w.status] ?? "UNKNOWN",
+    trajectory: classifyTrajectory(boreType === "Horizontal" ? "H" : boreType === "Directional" ? "D" : ""),
+    wellType: (w.product && LA_PRODUCT_LABEL[w.product]) || w.type,
+    spudDate: w.spudDate ? new Date(`${w.spudDate}T00:00:00Z`) : null,
+    abstractId: section,
+    survey: w.township,
+    trs: section && w.township ? `${section} ${w.township}` : null,
+    latitude: w.lat,
+    longitude: w.lon,
+    source: "sonris",
+    sourceRef: String(w.serial),
+  };
+}
+
+wellsRouter.post(
+  "/import-sonris",
+  // Same gate and same reasoning as /import-rrc: a read-through cache fill
+  // over public state record data that never overwrites a curated well.
+  requirePermission("viewWellAnalysis"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const body = z.object({ fid: z.number().int().optional(), serial: z.number().int().positive().optional() })
+      .refine((b) => b.fid !== undefined || b.serial !== undefined, "fid or serial required").parse(req.body);
+    const fid = body.fid ?? laWellFid(body.serial!);
+    if (!isLaFid(fid) || !sonrisWellsAvailable()) return res.status(404).json({ error: "Well not found in the Louisiana well data" });
+    const [w] = await prisma.$queryRawUnsafe<LaWellRecord[]>(LA_WELL_SQL.detail, fid);
+    if (!w) return res.status(404).json({ error: "Well not found in the Louisiana well data" });
+    const [bore] = await prisma.$queryRawUnsafe<{ type: string }[]>(LA_WELL_SQL.bores, fid);
+    const org = orgId(req);
+    const data = laResearchWellData(w, bore?.type ?? null);
+    const existing = await prisma.researchWell.findFirst({
+      where: { organizationId: org, OR: [{ source: "sonris", sourceRef: String(w.serial) }, ...(w.api ? [{ apiNumber: w.api }] : [])] },
+    });
+    // Only sonris-sourced rows are refreshed (see /import-rrc for why).
+    const well = existing
+      ? existing.source === "sonris"
+        ? await prisma.researchWell.update({ where: { id: existing.id }, data })
+        : existing
+      : await prisma.researchWell.create({ data: { ...data, organizationId: org, apiNumber: w.api } });
+    // Production is NOT copied (read live from sonris.production), and the
+    // unit's first month is not stamped as the well's first production — the
+    // series is the unit's, and the bundled window starts mid-history.
+    const unit = (await sonrisVolumesByWell([{ id: well.id, source: well.source, sourceRef: well.sourceRef, apiNumber: well.apiNumber }])).get(well.id);
+    const summaries = await productionSummaries(org, [well.id]);
+    const fresh = await prisma.researchWell.findUniqueOrThrow({ where: { id: well.id } });
+    res.json({ well: serializeWell(fresh, summaries.get(well.id)), monthsSynced: unit?.volumes.length ?? 0, permits: [] });
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Well dossier — EVERYTHING the centralized database knows about one well,
 // aggregated in a single call. The Well Analysis page renders this whether the
 // well was opened from the map or found via search, so both workflows show the
@@ -528,12 +653,84 @@ wellsRouter.post(
 // operators, plus deep links to the RRC's own viewers.
 // ---------------------------------------------------------------------------
 
+/**
+ * The dossier of a Louisiana well, in the same shape the Well Analysis record
+ * renders (no RRC lease/permits/completions — Louisiana has none of those
+ * here) plus `unit`: its LUW and the unit's production, labeled as such.
+ */
+async function laDossier(well: { id: string; name: string; county: string; state: string; operator: string | null; fieldName: string | null; apiNumber: string | null; abstractId: string | null; survey: string | null; latitude: number | null; longitude: number | null; wellType: string | null; status: WellStatus; spudDate: Date | null; formation: string | null; sourceRef: string | null }) {
+  const serial = Number(well.sourceRef);
+  const fid = Number.isInteger(serial) && serial > 0 ? laWellFid(serial) : null;
+  const [w] = fid !== null && sonrisWellsAvailable() ? await prisma.$queryRawUnsafe<LaWellRecord[]>(LA_WELL_SQL.detail, fid) : [];
+  const [bores, unit, nearby] = w
+    ? await Promise.all([
+      prisma.$queryRawUnsafe<{ fid: number; type: string; lengthFt: number }[]>(LA_WELL_SQL.bores, w.fid),
+      laUnitProduction(w.luw),
+      prisma.$queryRawUnsafe<{ fid: number; api: string | null; name: string; well_no: string | null; operator: string | null; status: string; type: string; distance_m: number }[]>(
+        `SELECT w2.fid, w2.api, w2.name, w2.well_no, w2.operator, w2.status, w2.type,
+                ST_Distance(w2.geom::geography, w1.geom::geography) AS distance_m
+           FROM sonris.wells w1 JOIN sonris.wells w2
+             ON w2.fid <> w1.fid AND ST_DWithin(w2.geom::geography, w1.geom::geography, 1609)
+          WHERE w1.fid = $1 ORDER BY distance_m LIMIT 12`, w.fid),
+    ])
+    : [[], null, []];
+  const ymText = (ym: number | null) => (ym ? ymStr(ym) : null);
+  return {
+    wellId: well.id,
+    linked: Boolean(w),
+    identity: {
+      api8: null, api10: w?.api ?? well.apiNumber, wellNo: w?.wellNo ?? null, rrcWellId: null, fid: w?.fid ?? null,
+      serial: w?.serial ?? (Number.isInteger(serial) ? serial : null),
+      name: w ? `${w.name}${w.wellNo ? ` #${w.wellNo}` : ""}` : well.name,
+      county: w?.parish ?? well.county, district: null, state: "LA",
+      abstract: w ? sectionLabelOf(w.section) : well.abstractId, survey: w?.township ?? well.survey,
+      latitude: w?.lat ?? well.latitude, longitude: w?.lon ?? well.longitude,
+      locationNote: w?.locationQuality === "flag" ? "Location may be approximate (state coordinates don't match the recorded section)" : null,
+    },
+    status: {
+      symbol: w?.symbol ?? null, type: w?.type ?? well.wellType, status: w?.statusText ?? well.status,
+      category: null, oilGas: w?.product ? LA_PRODUCT_LABEL[w.product] ?? null : null,
+      spudDate: w?.spudDate ?? well.spudDate?.toISOString().slice(0, 10) ?? null,
+      plugDate: null,
+      lastProd: ymText(unit?.lastMonth ?? null),
+    },
+    formations: well.formation ? [well.formation] : [],
+    field: { fieldNo: w?.fieldId ?? null, fieldName: w?.field ?? well.fieldName, reservoirs: [] },
+    lease: null,
+    unit: w?.luw ? {
+      luw: w.luw, name: unit?.luwName ?? null, type: unit?.luwType ?? null,
+      wellsReported: unit?.wellsReported ?? null, mappedWells: unit?.mappedWells ?? 0,
+      production: unit && unit.months ? {
+        months: unit.months, firstMonth: ymText(unit.firstMonth), lastMonth: ymText(unit.lastMonth),
+        cumOilBbl: unit.totals.oil, cumGasMcf: unit.totals.gas,
+      } : null,
+    } : null,
+    operators: { current: { operatorNo: w?.operatorId ?? null, name: w?.operator ?? well.operator }, history: [] },
+    permits: [],
+    completions: [],
+    wellbore: {
+      laterals: bores.map((b) => ({ fid: b.fid, type: b.type, lengthFt: Math.round(Number(b.lengthFt)) })),
+      totalLateralFt: Math.round(bores.reduce((t, b) => t + Number(b.lengthFt), 0)),
+    },
+    cumulative: null,
+    nearby: nearby.map((n) => ({
+      fid: n.fid, api: n.api, name: `${n.name}${n.well_no ? ` #${n.well_no}` : ""}`,
+      operator: n.operator, status: n.status, type: n.type, distanceFt: Math.round(n.distance_m * 3.28084),
+    })),
+    offsetOperators: [...new Set(nearby.map((n) => n.operator).filter((o): o is string => Boolean(o) && o !== w?.operator))],
+    links: null,
+  };
+}
+
 wellsRouter.get(
   "/:id/dossier",
   requirePermission("viewWellAnalysis"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const well = await prisma.researchWell.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!well) { res.status(404).json({ error: "Well not found" }); return; }
+
+    // A Louisiana (SONRIS) well has its own record — never an RRC lookup.
+    if (well.source === "sonris") { res.json(await laDossier(well)); return; }
 
     // Resolve the well into the centralized rrc dataset by fid (exact) or API.
     // Number.isFinite, not a truthiness check: a non-numeric sourceRef yields
@@ -810,7 +1007,11 @@ async function loadMergedProduction(org: string, wellIds: string[]) {
   const wells = await prisma.researchWell.findMany({ where: { id: { in: wellIds }, organizationId: org } });
   if (wells.length !== wellIds.length) return null;
   // Live production from the centralized rrc dataset (single source of truth)…
-  const rrcVols = await rrcVolumesByWell(wells);
+  const [rrcVols, laVols] = await Promise.all([rrcVolumesByWell(wells), sonrisVolumesByWell(wells)]);
+  // …Louisiana unit production, each unit ONCE even when several of the
+  // selected wells share it (it is the unit's volume, not each well's)…
+  const units = new Map<string, MonthVolumes[]>();
+  for (const v of laVols.values()) if (!units.has(v.luw)) units.set(v.luw, v.volumes);
   // …plus any manually entered / CSV production (never double-counted with rrc).
   const rows = await prisma.wellProductionMonth.findMany({
     where: { wellId: { in: wells.map((w) => w.id) }, NOT: { source: "rrc" } },
@@ -818,6 +1019,7 @@ async function loadMergedProduction(org: string, wellIds: string[]) {
   });
   const volumes: MonthVolumes[] = [
     ...[...rrcVols.values()].flat(),
+    ...[...units.values()].flat(),
     ...rows.map((r) => ({ month: dateToYm(r.month), oilBbl: r.oilBbl, gasMcf: r.gasMcf, nglBbl: r.nglBbl, waterBbl: r.waterBbl })),
   ];
   return { wells, volumes };

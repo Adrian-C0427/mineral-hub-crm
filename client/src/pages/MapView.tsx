@@ -16,6 +16,7 @@ import { MapShpImport } from "../components/MapShpImport";
 import { useAbstractIndex } from "../components/AbstractPicker";
 import { PHONE_QUERY } from "../lib/mobile";
 import { readPermitsMapParams, withoutPermitParams } from "../lib/permitMap";
+import { type LaWellDetail, sectionTownship, unitProductionTitle, ymLabel } from "../lib/laWells";
 import { abstractShortLabel, countyStateLabel, formatAbstract, isSectionLabel, rankAbstracts, sectionLabel, sectionNumber, surveyLabel } from "../lib/abstracts";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, StageBadge, PriorityBadge, ChipList } from "../components/ui";
@@ -46,7 +47,9 @@ type GeoFeature = { type: "Feature"; id?: number; properties: Record<string, unk
 type SelAbstract = { kind: "abstract"; id: string; abstract: string; survey: string; county: string; state: string };
 type WellPermit = { statusNo: string; permitDate: string | null; operator: string | null; leaseName: string | null; wellNo: string | null; acres: number | null; survey: string | null; abstract: string | null };
 type WellCompletion = { trackingNo: string; filingType: string | null; status: string | null; filedDate: string | null; completionDate: string | null; fieldName: string | null };
-type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; operator: string | null; leaseName: string | null; leaseNo: string | null; field: string | null; oilGas: string | null; district: string | null; cumOil: number | null; cumGas: number | null; lastProd: string | null; formations: string | null; unitAcres?: number | null; spudDate?: string | null; plugDate?: string | null; permits?: WellPermit[]; completions?: WellCompletion[] };
+type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; operator: string | null; leaseName: string | null; leaseNo: string | null; field: string | null; oilGas: string | null; district: string | null; cumOil: number | null; cumGas: number | null; lastProd: string | null; formations: string | null; unitAcres?: number | null; spudDate?: string | null; plugDate?: string | null; permits?: WellPermit[]; completions?: WellCompletion[];
+  /** "TX" | "LA" (tile `state`); Louisiana wells carry their SONRIS record in `la`. */
+  state?: string; la?: LaWellDetail };
 type SelWell = { kind: "well" } & WellProps;
 type SelHotspot = { kind: "hotspot"; summary: AreaSummary; periodLabel: string };
 type SelTract = { kind: "tract" } & TractInfo;
@@ -446,7 +449,7 @@ export function MapView() {
   }, []);
 
   function toWellProps(p: Record<string, unknown>): WellProps {
-    return { fid: Number(p.fid), api: (p.api as string) || "", api8: (p.api8 as string) || "", wellNo: (p.wellNo as string) || null, wellId: (p.wellId as string) || "", symbol: (p.symbol as string) || "", type: (p.type as string) || "", status: (p.status as string) || "", county: (p.county as string) || "Leon", abstract: (p.abstract as string) || null, survey: (p.survey as string) || null, operator: (p.operator as string) || null, leaseName: (p.leaseName as string) || null, leaseNo: (p.leaseNo as string) || null, field: (p.field as string) || null, oilGas: (p.oilGas as string) || null, district: (p.district as string) || null, cumOil: p.cumOil != null ? Number(p.cumOil) : null, cumGas: p.cumGas != null ? Number(p.cumGas) : null, lastProd: (p.lastProd as string) || null, formations: Array.isArray(p.formations) ? (p.formations as string[]).join(", ") : ((p.formations as string) || null) };
+    return { fid: Number(p.fid), api: (p.api as string) || "", api8: (p.api8 as string) || "", wellNo: (p.wellNo as string) || null, wellId: (p.wellId as string) || "", symbol: (p.symbol as string) || "", type: (p.type as string) || "", status: (p.status as string) || "", county: (p.county as string) || "Leon", abstract: (p.abstract as string) || null, survey: (p.survey as string) || null, operator: (p.operator as string) || null, leaseName: (p.leaseName as string) || null, leaseNo: (p.leaseNo as string) || null, field: (p.field as string) || null, oilGas: (p.oilGas as string) || null, district: (p.district as string) || null, cumOil: p.cumOil != null ? Number(p.cumOil) : null, cumGas: p.cumGas != null ? Number(p.cumGas) : null, lastProd: (p.lastProd as string) || null, formations: Array.isArray(p.formations) ? (p.formations as string[]).join(", ") : ((p.formations as string) || null), state: (p.state as string) || undefined };
   }
   function clearSelection() {
     const map = mapRef.current;
@@ -479,7 +482,9 @@ export function MapView() {
   async function openWell(fid: number, fly = false) {
     try {
       const d = await api.get<Record<string, unknown>>(`/gis/wells/${fid}`);
-      selectWell({
+      // A Louisiana (SONRIS) well: its own record + its unit's production.
+      if (d.state === "LA") selectWell({ ...toWellProps(d), state: "LA", la: d as unknown as LaWellDetail });
+      else selectWell({
         ...toWellProps(d),
         formations: Array.isArray(d.formations) ? (d.formations as string[]).join(", ") : null,
         spudDate: (d.spudDate as string | null)?.slice(0, 10) ?? null,
@@ -1343,7 +1348,7 @@ export function MapView() {
             <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>Pick the well you meant:</p>
             {choices.map((w) => (
               <div key={w.fid} className="msel-opt mc-choice" onClick={() => void openWell(w.fid)}>
-                <strong>{w.api}{w.wellNo ? ` #${w.wellNo}` : ""}</strong><div className="muted" style={{ fontSize: 12 }}>{w.type} · {w.status}</div>
+                <strong>{w.api || (w.state === "LA" ? "Louisiana well" : "")}{w.wellNo ? ` #${w.wellNo}` : ""}</strong><div className="muted" style={{ fontSize: 12 }}>{w.type} · {w.status}</div>
               </div>
             ))}
           </div>
@@ -1351,7 +1356,9 @@ export function MapView() {
 
         {selected && !choices && (
           <div className="mc-float-panel">
-            {selected.kind === "well" ? (
+            {selected.kind === "well" && selected.la ? (
+              <LaWellPanel w={selected.la} onClose={clearSelection} />
+            ) : selected.kind === "well" ? (
               <>
                 <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.leaseName || "Well"} {selected.wellNo ? `#${selected.wellNo}` : ""}</h3><div className="muted" style={{ fontSize: 12 }}>{selected.symbol}</div></div><button className="icon-btn" aria-label="Close" onClick={clearSelection}>×</button></div>
                 <div className="dd-grid mc-kv">
@@ -1571,8 +1578,8 @@ function RankList({ title, rows }: { title: string; rows: { name: string; oil: n
     </div>
   );
 }
-function ProductionChart({ series, kind }: { series: [number, number, number][]; kind: "oil" | "gas" }) {
-  const pts = series.slice(-36);
+function ProductionChart({ series, kind, months = 36 }: { series: [number, number, number][]; kind: "oil" | "gas"; months?: number }) {
+  const pts = series.slice(-months);
   const idx = kind === "gas" ? 2 : 1;
   const max = Math.max(1, ...pts.map((p) => p[idx]));
   const W = 288, H = 56, bw = W / Math.max(pts.length, 1);
@@ -1580,12 +1587,91 @@ function ProductionChart({ series, kind }: { series: [number, number, number][];
   return (
     <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: "block", margin: "4px 0" }}>
       {pts.map((p, i) => {
-        const h = (p[idx] / max) * (H - 2);
+        // Reported adjustments can be negative; they draw as no bar.
+        const h = (Math.max(0, p[idx]) / max) * (H - 2);
         return <rect key={i} x={i * bw} y={H - h} width={Math.max(bw - 0.6, 0.6)} height={h} fill={color} opacity={0.85} />;
       })}
     </svg>
   );
 }
+/**
+ * The well panel for a Louisiana (SONRIS) well: the state's own status
+ * wording, dates, depths, PLSS location, and its UNIT's production. Louisiana
+ * reports production per unit (LUW), so every figure is labeled as the
+ * unit's — never as this well's.
+ */
+function LaWellPanel({ w, onClose }: { w: LaWellDetail; onClose: () => void }) {
+  const u = w.unit;
+  const lateral = w.bores.reduce((t, b) => t + b.lengthFt, 0);
+  const depth = (n: number | null) => (n != null ? num(n) : "—");
+  return (
+    <>
+      <div className="section-head">
+        <div>
+          <h3 style={{ margin: 0 }}>{w.name}{w.wellNo ? ` #${w.wellNo}` : ""}</h3>
+          <div className="muted" style={{ fontSize: 12 }}>{w.statusText} · {w.location}</div>
+        </div>
+        <button className="icon-btn" aria-label="Close" onClick={onClose}>×</button>
+      </div>
+      {w.locationQuality === "flag" && (
+        <p className="mc-fp-note" role="note" style={{ marginTop: 0 }}>⚠ Location may be approximate (state coordinates don't match the recorded section).</p>
+      )}
+      <div className="dd-grid mc-kv">
+        <KV k="Operator" v={w.operator} /><KV k="Field" v={w.field} />
+        <KV k="Status" v={w.statusText} /><KV k="Product" v={w.productLabel} />
+        <KV k="Spud" v={w.spudDate} /><KV k="Completed" v={w.completionDate} />
+        <KV k="Status date" v={w.statusDate} /><KV k="Permitted" v={w.permitDate} />
+        <KV k="MD / TVD (ft)" v={w.md != null || w.tvd != null ? `${depth(w.md)} / ${depth(w.tvd)}` : null} />
+        <KV k="Sec / Twp·Rng" v={sectionTownship(w.abstract, w.township)} />
+        <KV k="Parish" v={w.location} /><KV k="Serial" v={String(w.serial)} />
+        <KV k="API" v={w.api || null} /><KV k="Unit (LUW)" v={w.luw} />
+        <KV k="Wellbore" v={w.bores.length ? `${w.bores.length} bore line${w.bores.length === 1 ? "" : "s"} · ${num(lateral)} ft surface → bottom hole` : null} />
+      </div>
+      {!u ? (
+        <>
+          <div className="mc-fp-sec">Unit production</div>
+          <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>No production unit (LUW) is recorded for this well, so there is no production to show.</p>
+        </>
+      ) : (
+        <>
+          <div className="mc-fp-sec">{unitProductionTitle(u)}</div>
+          {u.months === 0 ? (
+            <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+              No production is reported for LUW {u.luw} in the Red River Parish data ({ymLabel(u.window.from)} – {ymLabel(u.window.to)}).
+            </p>
+          ) : (
+            <>
+              {u.totals.gas > 0 && (
+                <div style={{ marginTop: 6 }}>
+                  <div className="muted" style={{ fontSize: 12 }}>Unit gas (MCF) · monthly, {ymLabel(u.firstMonth)} – {ymLabel(u.lastMonth)}</div>
+                  <ProductionChart series={u.series} kind="gas" months={60} />
+                </div>
+              )}
+              {u.totals.oil > 0 && (
+                <div style={{ marginTop: 6 }}>
+                  <div className="muted" style={{ fontSize: 12 }}>Unit oil incl. condensate (bbl) · monthly</div>
+                  <ProductionChart series={u.series} kind="oil" months={60} />
+                </div>
+              )}
+              <div className="dd-grid mc-kv">
+                <KV k="Unit gas, 5 yr (MCF)" v={num(Math.round(u.totals.gas))} /><KV k="Unit oil, 5 yr (bbl)" v={num(Math.round(u.totals.oil))} />
+                <KV k="Months reported" v={String(u.months)} /><KV k="Latest month" v={ymLabel(u.lastMonth)} />
+                <KV k="Unit operator" v={u.operator} /><KV k="Mapped wells in unit" v={String(u.mappedWells)} />
+              </div>
+              {u.flaggedMonths > 0 && <p className="mc-fp-note">{u.flaggedMonths} month{u.flaggedMonths === 1 ? "" : "s"} carry a state data notice (e.g. a delinquent report).</p>}
+            </>
+          )}
+          <p className="mc-fp-note">Louisiana reports production per unit, not per well: these are the unit's volumes for all of its wells, not this well's own.</p>
+        </>
+      )}
+      <Link className="primary mc-fp-cta" to={`/valuation?fid=${w.fid}&well=${encodeURIComponent(w.api || String(w.serial))}`}>
+        Open in Well Analysis →
+      </Link>
+      <p className="mc-fp-note">Well record, status and unit production from the Louisiana Office of Conservation (SONRIS) public data. The map colors it with the matching Texas status ({w.status}).</p>
+    </>
+  );
+}
+
 function KV({ k, v }: { k: string; v: React.ReactNode }) {
   const [copied, setCopied] = useState(false);
   const text = typeof v === "string" || typeof v === "number" ? String(v) : null;

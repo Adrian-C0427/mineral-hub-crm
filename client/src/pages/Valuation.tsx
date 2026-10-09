@@ -12,6 +12,7 @@ import { WellImport } from "../components/WellImport";
 import { compactMoney, money, prettyEnum, fmtDate, fmtDateTime, fmtDateLocal } from "../lib/format";
 import { monthLabel, chartTooltip } from "../lib/charts";
 import { formatAbstract } from "../lib/abstracts";
+import { countyStateShort, isLaWellFid, unitProductionTitle } from "../lib/laWells";
 
 /**
  * Well Production Analysis & Valuation — the single comprehensive view of
@@ -204,8 +205,9 @@ export function Valuation() {
   }, []);
 
   // Deep-link from the map's well panel ("Open in Well Analysis"):
-  // ?fid=<rrc well id>&well=<API#>. The well is linked into the centralized
-  // dataset, its production is read live from rrc.production, and the analysis
+  // ?fid=<map well id>&well=<API#>. The well is linked into the centralized
+  // dataset, its production is read live (rrc.production for a Texas well; the
+  // UNIT's sonris.production for a Louisiana one — its fid says which), and the analysis
   // RUNS IMMEDIATELY with default assumptions — the user lands on a finished,
   // fully-populated result with no search, import or extra click.
   const [autoRunPending, setAutoRunPending] = useState(false);
@@ -216,9 +218,10 @@ export function Valuation() {
     if (!fid && !w) return;
     (async () => {
       try {
-        // fid is exact — upsert-link the rrc well so analyze reads it live.
+        // fid is exact — upsert-link the rrc (or Louisiana SONRIS) well so
+        // analyze reads it live.
         if (fid) {
-          const imported = await api.post<{ well: WellRow }>(`/wells/import-rrc`, { fid: Number(fid) });
+          const imported = await api.post<{ well: WellRow }>(isLaWellFid(fid) ? `/wells/import-sonris` : `/wells/import-rrc`, { fid: Number(fid) });
           setSelected([imported.well]); setPageTab("workspace"); setAutoRunPending(true); return;
         }
         const found = await api.get<Paged<WellRow>>(`/wells?q=${encodeURIComponent(w!)}&pageSize=1`);
@@ -436,7 +439,7 @@ function WellsCard({ selected, setSelected, openAnalysisName }: { selected: Well
       <div className="va-chips">
         <span className="va-chips-label">Wells in this analysis{openAnalysisName && <span className="va-open-name"> · {openAnalysisName}</span>}</span>
         {selected.map((w) => (
-          <span key={w.id} className={`va-chip ${active?.id === w.id ? "on" : ""}`} title={`${w.county} Co, ${w.state} · ${w.operator ?? "unknown operator"}`}>
+          <span key={w.id} className={`va-chip ${active?.id === w.id ? "on" : ""}`} title={`${countyStateShort(w.county, w.state)} · ${w.operator ?? "unknown operator"}${w.leaseName ? ` · ${w.leaseName}` : ""}`}>
             <button type="button" className="va-chip-name" onClick={() => { setActiveId(w.id); setRecOpen(true); }} aria-pressed={active?.id === w.id}>{w.name}</button>
             <button type="button" className="va-chip-x" aria-label={`Remove ${w.name}`} onClick={() => setSelected(selected.filter((s) => s.id !== w.id))}>×</button>
           </span>
@@ -475,7 +478,8 @@ function WellsCard({ selected, setSelected, openAnalysisName }: { selected: Well
 
 // --- Well picker (inside the Add well popover) --------------------------------
 
-interface RrcCandidate { fid: number; api: string | null; name: string; operator: string | null; county: string; type: string | null; status: string | null; hasProduction: boolean }
+/** A well from the imported state data: Texas RRC, or Louisiana SONRIS (state "LA", production = its unit's). */
+interface RrcCandidate { fid: number; api: string | null; name: string; operator: string | null; county: string; type: string | null; status: string | null; hasProduction: boolean; state?: string; source?: string; luw?: string | null }
 
 function WellPicker({ selected, onAdd, onClose }: { selected: WellRow[]; onAdd: (w: WellRow) => void; onClose: () => void }) {
   const [q, setQ] = useState("");
@@ -512,7 +516,7 @@ function WellPicker({ selected, onAdd, onClose }: { selected: WellRow[]; onAdd: 
   async function addRrc(c: RrcCandidate) {
     setImporting(c.fid);
     try {
-      const d = await api.post<{ well: WellRow }>(`/wells/import-rrc`, { fid: c.fid });
+      const d = await api.post<{ well: WellRow }>(c.source === "sonris" ? `/wells/import-sonris` : `/wells/import-rrc`, { fid: c.fid });
       // Selection made — the popover closes, like every dropdown in the app.
       if (!selected.some((s) => s.id === d.well.id)) onAdd(d.well);
       else onClose();
@@ -542,7 +546,7 @@ function WellPicker({ selected, onAdd, onClose }: { selected: WellRow[]; onAdd: 
           <button type="button" className="va-add-opt" key={w.id} onClick={() => onAdd(w)}>
             <span className="va-add-name">{w.name}{w.apiNumber && <span className="va-add-api"> · API {w.apiNumber}</span>}</span>
             <span className="va-add-sub">
-              {w.operator ?? "Unknown operator"} · {w.county} Co, {w.state}
+              {w.operator ?? "Unknown operator"} · {countyStateShort(w.county, w.state)}{w.leaseName && w.state === "LA" ? ` · ${w.leaseName}` : ""}
               {w.production && w.production.months > 0 && <> · {w.production.months} months of production {w.production.firstMonth && <>({w.production.firstMonth} → {w.production.lastMonth})</>}</>}
               {(!w.production || w.production.months === 0) && <> · no production data</>}
             </span>
@@ -550,13 +554,15 @@ function WellPicker({ selected, onAdd, onClose }: { selected: WellRow[]; onAdd: 
         ))}
         {!searching && rrc.length > 0 && (
           <>
-            <div className="va-add-section">From imported RRC data · auto-syncs on open</div>
+            <div className="va-add-section">From imported RRC &amp; Louisiana data · auto-syncs on open</div>
             {rrc.map((c) => (
               <button type="button" className="va-add-opt" key={c.fid} onClick={() => void addRrc(c)}>
                 <span className="va-add-name">{c.name}{c.api && <span className="va-add-api"> · API {c.api}</span>}</span>
                 <span className="va-add-sub">
-                  {c.operator ?? "Unknown operator"} · {c.county} Co, TX · {c.type ?? "—"}
-                  {c.hasProduction ? " · production history available" : " · no production on file"}
+                  {c.operator ?? "Unknown operator"} · {countyStateShort(c.county, c.state ?? "TX")} · {c.type ?? "—"}
+                  {c.state === "LA"
+                    ? (c.luw ? (c.hasProduction ? ` · unit production (LUW ${c.luw})` : ` · no production on file for LUW ${c.luw}`) : " · no production unit")
+                    : (c.hasProduction ? " · production history available" : " · no production on file")}
                   {importing === c.fid && " · importing…"}
                 </span>
               </button>
@@ -573,7 +579,7 @@ function WellPicker({ selected, onAdd, onClose }: { selected: WellRow[]; onAdd: 
 interface Dossier {
   wellId: string;
   linked: boolean;
-  identity: { api8: string | null; api10: string | null; wellNo: string | null; rrcWellId: string | null; fid: number | null; name: string; county: string; district: string | null; state: string; abstract: string | null; survey: string | null; latitude: number | null; longitude: number | null };
+  identity: { api8: string | null; api10: string | null; wellNo: string | null; rrcWellId: string | null; fid: number | null; name: string; county: string; district: string | null; state: string; abstract: string | null; survey: string | null; latitude: number | null; longitude: number | null; serial?: number | null; locationNote?: string | null };
   status: { symbol: string | null; type: string | null; status: string | null; category: string | null; oilGas: string | null; spudDate: string | null; plugDate: string | null; lastProd: string | null };
   formations: string[];
   field: { fieldNo: string | null; fieldName: string | null; reservoirs: { district: string; fieldNo: string; name: string; type: string | null }[] };
@@ -586,6 +592,8 @@ interface Dossier {
   nearby: { fid: number; api: string | null; name: string; operator: string | null; status: string | null; type: string | null; distanceFt: number }[];
   offsetOperators: string[];
   links: { rrcWellboreQuery: string; rrcGisViewer: string; rrcDrillingPermits: string } | null;
+  /** Louisiana wells: the production unit (LUW) whose volumes the analysis reads. */
+  unit?: { luw: string; name: string | null; type: string | null; wellsReported: number | null; mappedWells: number; production: { months: number; firstMonth: string | null; lastMonth: string | null; cumOilBbl: number; cumGasMcf: number } | null } | null;
 }
 
 function Kv({ label, value }: { label: string; value: React.ReactNode }) {
@@ -629,15 +637,16 @@ function WellRecord({ well }: { well: WellRow }) {
       {!loading && d && (
         <>
           <div className="va-facts">
-            <Kv label="API (10)" value={d.identity.api10} />
+            <Kv label={d.identity.state === "LA" ? "API (14)" : "API (10)"} value={d.identity.api10} />
             <Kv label="API (8)" value={d.identity.api8} />
+            <Kv label="State serial" value={d.identity.serial != null ? String(d.identity.serial) : null} />
             <Kv label="RRC lease no" value={d.lease?.leaseNo} />
             <Kv label="Well no" value={d.identity.wellNo} />
             <Kv label="District" value={d.identity.district} />
-            <Kv label="County" value={`${d.identity.county}, ${d.identity.state}`} />
+            <Kv label={d.identity.state === "LA" ? "Parish" : "County"} value={d.identity.state === "LA" ? `${d.identity.county} Parish, LA` : `${d.identity.county}, ${d.identity.state}`} />
             <Kv label="Abstract" value={d.identity.abstract ? formatAbstract({ abstract: d.identity.abstract, survey: d.identity.survey, county: d.identity.county, state: d.identity.state }) : null} />
             <Kv label="Survey" value={d.identity.survey} />
-            <Kv label="Surface location" value={d.identity.latitude != null ? `${d.identity.latitude.toFixed(5)}, ${d.identity.longitude?.toFixed(5)}` : null} />
+            <Kv label="Surface location" value={d.identity.latitude != null ? `${d.identity.latitude.toFixed(5)}, ${d.identity.longitude?.toFixed(5)}${d.identity.locationNote ? ` (${d.identity.locationNote})` : ""}` : null} />
             <Kv label="Well type" value={[d.status.oilGas, d.status.type].filter(Boolean).join(" · ") || null} />
             <Kv label="Status" value={d.status.status} />
             <Kv label="Spud date" value={d.status.spudDate && fmtDate(d.status.spudDate)} />
@@ -677,6 +686,22 @@ function WellRecord({ well }: { well: WellRow }) {
               <span className="va-rec-text">
                 {d.lease.leaseName ?? "Lease"} · #{d.lease.leaseNo} ({d.lease.ogCode === "G" ? "gas" : "oil"}, District {d.lease.district}) · {d.lease.wellsOnLease} well{d.lease.wellsOnLease === 1 ? "" : "s"} on lease
                 {d.lease.production && <> · {d.lease.production.months} months of production ({d.lease.production.firstMonth} → {d.lease.production.lastMonth}) · cum {fmtVol(d.lease.production.cumOilBbl)} bbl / {fmtVol(d.lease.production.cumGasMcf)} mcf</>}
+              </span>
+            </div>
+          )}
+
+          {d.unit !== undefined && d.identity.state === "LA" && (
+            <div className="va-rec-sec">
+              <span className="va-rec-sec-t">Production unit</span>
+              <span className="va-rec-text">
+                {!d.unit ? "No production unit (LUW) is recorded for this well — Louisiana reports production per unit, so there is none to analyze."
+                  : <>
+                      {unitProductionTitle({ luw: d.unit.luw, luwName: d.unit.name, wellsReported: d.unit.wellsReported })}
+                      {d.unit.production
+                        ? <> · {d.unit.production.months} months ({d.unit.production.firstMonth} → {d.unit.production.lastMonth}) · {fmtVol(d.unit.production.cumOilBbl)} bbl / {fmtVol(d.unit.production.cumGasMcf)} mcf</>
+                        : " · no production reported for this unit in the bundled Louisiana data"}
+                      {" "}· {d.unit.mappedWells} mapped well{d.unit.mappedWells === 1 ? "" : "s"} carry this unit. The analysis uses the unit's volumes (all its wells), not this well's own.
+                    </>}
               </span>
             </div>
           )}

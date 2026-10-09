@@ -24,7 +24,8 @@ import { prisma } from "../db.js";
  *    does nothing beyond two counts;
  *  - otherwise parishes and sections are upserted in batches inside one
  *    transaction (advisory-locked, so two instances booting together load
- *    once), and the marker is written last;
+ *    once), and the marker is written last (loadVersionedDataset — the same
+ *    machinery loads the Louisiana well data, services/sonrisWells.ts);
  *  - every write is scoped to state 'LA' rows whose ids come from the file.
  *    Texas rows are never touched. The only DELETE removes Louisiana section
  *    ids ("LA-…") in this dataset's parishes that a NEWER version of this same
@@ -103,14 +104,16 @@ export function parseRegionDataset(json: Buffer | string, key = LA_DATASET_KEY):
  * Whether boot has work to do. Load when nothing (or a different version) was
  * recorded, or when rows went missing since; prune stale ids only when a
  * previous version of this dataset was loaded and the file has changed.
+ * `present`/`expected` are per-table row counts ({ parishes, sections } here,
+ * { wells, bores, production } for services/sonrisWells.ts).
  */
-export function decideLoad(
+export function decideLoad<C extends Record<string, number>>(
   marker: { version: string } | null,
   version: string,
-  present: { parishes: number; sections: number },
-  expected: { parishes: number; sections: number },
+  present: C,
+  expected: C,
 ): { load: boolean; pruneStale: boolean } {
-  const complete = present.parishes === expected.parishes && present.sections === expected.sections;
+  const complete = Object.keys(expected).every((k) => present[k] === expected[k]);
   const sameVersion = marker?.version === version;
   return { load: !sameVersion || !complete, pruneStale: !!marker && !sameVersion };
 }
@@ -159,24 +162,45 @@ export interface GisDbRunner extends GisDb {
   transaction<T>(fn: (tx: GisDb) => Promise<T>): Promise<T>;
 }
 
-export type RegionLoadResult =
-  | { status: "no-gis" }
-  | { status: "current"; parishes: number; sections: number }
-  | { status: "loaded"; parishes: number; sections: number; pruned: number };
-
-async function readState(db: GisDb, ds: RegionDataset) {
-  const [m] = await db.query<{ version: string }>(`SELECT version FROM gis.dataset_version WHERE key = $1`, [ds.key]);
-  const [c] = await db.query<{ parishes: number; sections: number }>(
-    `SELECT (SELECT count(*)::int FROM gis.counties WHERE state = '${STATE}' AND fips = ANY($1::text[])) AS parishes,
-            (SELECT count(*)::int FROM gis.abstracts WHERE state = '${STATE}' AND id = ANY($2::text[])) AS sections`,
-    [ds.parishes.map((p) => p.fips), ds.sections.map((s) => s.id)],
-  );
-  return { marker: m ?? null, present: { parishes: Number(c?.parishes ?? 0), sections: Number(c?.sections ?? 0) } };
+/**
+ * One bundled dataset, as the generic versioned loader sees it. Everything
+ * dataset-specific (tables, validation, write strategy) lives in the spec;
+ * the version marker, the "is there work?" decision, the advisory lock and the
+ * single transaction are shared — Louisiana parishes/sections below and the
+ * Louisiana well data (services/sonrisWells.ts) both load through it.
+ */
+export interface VersionedDatasetSpec<C extends Record<string, number>> {
+  key: string;
+  version: string;
+  /** Tables that must exist (a GIS-enabled database); otherwise skip, writing nothing. */
+  requires: readonly string[];
+  /** Idempotent DDL (CREATE … IF NOT EXISTS), run once the requirements hold. */
+  ddl?: readonly string[];
+  /** Row counts the bundled file carries, per table. */
+  expected: C;
+  /** Row counts of this dataset currently in the database. */
+  present(db: GisDb): Promise<C>;
+  /** Write every row (inside the locked transaction); resolves the stale rows removed. */
+  write(tx: GisDb, plan: { pruneStale: boolean }): Promise<number>;
 }
 
-export async function loadRegionDataset(db: GisDbRunner, ds: RegionDataset): Promise<RegionLoadResult> {
+export type VersionedLoadResult<C extends Record<string, number>> =
+  | { status: "no-gis" }
+  | ({ status: "current" } & C)
+  | ({ status: "loaded"; pruned: number } & C);
+
+async function readMarker(db: GisDb, key: string): Promise<{ version: string } | null> {
+  const [m] = await db.query<{ version: string }>(`SELECT version FROM gis.dataset_version WHERE key = $1`, [key]);
+  return m ?? null;
+}
+
+export async function loadVersionedDataset<C extends Record<string, number>>(
+  db: GisDbRunner,
+  spec: VersionedDatasetSpec<C>,
+): Promise<VersionedLoadResult<C>> {
   const [t] = await db.query<{ ok: boolean }>(
-    `SELECT (to_regclass('gis.counties') IS NOT NULL AND to_regclass('gis.abstracts') IS NOT NULL) AS ok`,
+    `SELECT (${spec.requires.map((_, i) => `to_regclass($${i + 1}) IS NOT NULL`).join(" AND ")}) AS ok`,
+    [...spec.requires],
   );
   if (!t?.ok) return { status: "no-gis" };
   await db.execute(`CREATE TABLE IF NOT EXISTS gis.dataset_version (
@@ -184,30 +208,54 @@ export async function loadRegionDataset(db: GisDbRunner, ds: RegionDataset): Pro
     version   text NOT NULL,
     loaded_at timestamptz NOT NULL DEFAULT now()
   )`);
-  const expected = { parishes: ds.parishes.length, sections: ds.sections.length };
+  for (const sql of spec.ddl ?? []) await db.execute(sql);
 
   // Cheap pre-check outside the transaction: the steady state on every boot.
-  const before = await readState(db, ds);
-  if (!decideLoad(before.marker, ds.version, before.present, expected).load) return { status: "current", ...expected };
+  const before = decideLoad(await readMarker(db, spec.key), spec.version, await spec.present(db), spec.expected);
+  if (!before.load) return { status: "current", ...spec.expected };
 
   return db.transaction(async (tx) => {
     // Serialize concurrent boots (two replicas, an overlapping deploy); the
     // loser re-reads the state below and finds the work already done.
-    await tx.execute(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`gis.dataset:${ds.key}`]);
-    const cur = await readState(tx, ds);
-    const plan = decideLoad(cur.marker, ds.version, cur.present, expected);
-    if (!plan.load) return { status: "current" as const, ...expected };
+    await tx.execute(`SELECT pg_advisory_xact_lock(hashtext($1))`, [`gis.dataset:${spec.key}`]);
+    const plan = decideLoad(await readMarker(tx, spec.key), spec.version, await spec.present(tx), spec.expected);
+    if (!plan.load) return { status: "current" as const, ...spec.expected };
+    const pruned = await spec.write(tx, plan);
+    await tx.execute(
+      `INSERT INTO gis.dataset_version (key, version, loaded_at) VALUES ($1, $2, now())
+       ON CONFLICT (key) DO UPDATE SET version = EXCLUDED.version, loaded_at = EXCLUDED.loaded_at`,
+      [spec.key, spec.version],
+    );
+    return { status: "loaded" as const, ...spec.expected, pruned };
+  });
+}
 
-    for (const rows of batches(ds.parishes, PARISH_BATCH)) {
-      const q = buildParishUpsert(rows);
-      await tx.execute(q.sql, q.params);
-    }
-    for (const rows of batches(ds.sections, SECTION_BATCH)) {
-      const q = buildSectionUpsert(rows);
-      await tx.execute(q.sql, q.params);
-    }
-    let pruned = 0;
-    if (plan.pruneStale) {
+export type RegionLoadResult = VersionedLoadResult<{ parishes: number; sections: number }>;
+
+export async function loadRegionDataset(db: GisDbRunner, ds: RegionDataset): Promise<RegionLoadResult> {
+  return loadVersionedDataset(db, {
+    key: ds.key,
+    version: ds.version,
+    requires: ["gis.counties", "gis.abstracts"],
+    expected: { parishes: ds.parishes.length, sections: ds.sections.length },
+    async present(q) {
+      const [c] = await q.query<{ parishes: number; sections: number }>(
+        `SELECT (SELECT count(*)::int FROM gis.counties WHERE state = '${STATE}' AND fips = ANY($1::text[])) AS parishes,
+                (SELECT count(*)::int FROM gis.abstracts WHERE state = '${STATE}' AND id = ANY($2::text[])) AS sections`,
+        [ds.parishes.map((p) => p.fips), ds.sections.map((s) => s.id)],
+      );
+      return { parishes: Number(c?.parishes ?? 0), sections: Number(c?.sections ?? 0) };
+    },
+    async write(tx, plan) {
+      for (const rows of batches(ds.parishes, PARISH_BATCH)) {
+        const q = buildParishUpsert(rows);
+        await tx.execute(q.sql, q.params);
+      }
+      for (const rows of batches(ds.sections, SECTION_BATCH)) {
+        const q = buildSectionUpsert(rows);
+        await tx.execute(q.sql, q.params);
+      }
+      if (!plan.pruneStale) return 0;
       const gone = await tx.query<{ n: number }>(
         `WITH d AS (
            DELETE FROM gis.abstracts
@@ -217,18 +265,13 @@ export async function loadRegionDataset(db: GisDbRunner, ds: RegionDataset): Pro
          SELECT count(*)::int AS n FROM d`,
         [[...new Set(ds.parishes.map((p) => p.fips.slice(2)))], ds.sections.map((s) => s.id)],
       );
-      pruned = Number(gone[0]?.n ?? 0);
-    }
-    await tx.execute(
-      `INSERT INTO gis.dataset_version (key, version, loaded_at) VALUES ($1, $2, now())
-       ON CONFLICT (key) DO UPDATE SET version = EXCLUDED.version, loaded_at = EXCLUDED.loaded_at`,
-      [ds.key, ds.version],
-    );
-    return { status: "loaded" as const, ...expected, pruned };
+      return Number(gone[0]?.n ?? 0);
+    },
   });
 }
 
-const prismaRunner: GisDbRunner = {
+/** GisDbRunner over the app's Prisma client (shared with services/sonrisWells.ts). */
+export const prismaRunner: GisDbRunner = {
   query: <T>(sql: string, params: unknown[] = []) => prisma.$queryRawUnsafe<T[]>(sql, ...params),
   execute: (sql, params = []) => prisma.$executeRawUnsafe(sql, ...params),
   transaction: (fn) => prisma.$transaction(
@@ -236,7 +279,8 @@ const prismaRunner: GisDbRunner = {
       query: <T>(sql: string, params: unknown[] = []) => tx.$queryRawUnsafe<T[]>(sql, ...params),
       execute: (sql, params = []) => tx.$executeRawUnsafe(sql, ...params),
     }),
-    // ~3.5 MB of geometry in ~35 statements: far past Prisma's 5s default.
+    // ~3.5 MB of geometry in ~35 statements (and ~30k well/production rows):
+    // far past Prisma's 5s default.
     { maxWait: 30_000, timeout: 10 * 60_000 },
   ),
 };
