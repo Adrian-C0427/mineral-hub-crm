@@ -1,4 +1,4 @@
-import maplibregl from "maplibre-gl";
+import * as maplibregl from "maplibre-gl";
 import { API_BASE } from "../api/client";
 
 // Shared cadastral map layer stack used identically by the main map (MapView)
