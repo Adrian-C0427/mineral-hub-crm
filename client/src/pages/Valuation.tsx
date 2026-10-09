@@ -464,7 +464,7 @@ function WellsCard({ selected, setSelected, openAnalysisName }: { selected: Well
             onClick={() => setRecOpen((o) => !o)} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setRecOpen((o) => !o); } }}>
             <div className="va-rec-id">
               <span className="va-rec-name">{active.name}</span>
-              <span className="va-rec-loc">{active.apiNumber && <>API {active.apiNumber} · </>}{active.county} Co, {active.state}</span>
+              <span className="va-rec-loc">{active.apiNumber && <>API {active.apiNumber} · </>}{countyStateShort(active.county, active.state)}</span>
               <Tag tone={statusTone(active.status)} dot>{prettyEnum(active.status)}</Tag>
             </div>
             <span className="va-rec-toggle">{recOpen ? "Hide record" : "Show full record"}</span>
@@ -644,8 +644,8 @@ function WellRecord({ well }: { well: WellRow }) {
             <Kv label="Well no" value={d.identity.wellNo} />
             <Kv label="District" value={d.identity.district} />
             <Kv label={d.identity.state === "LA" ? "Parish" : "County"} value={d.identity.state === "LA" ? `${d.identity.county} Parish, LA` : `${d.identity.county}, ${d.identity.state}`} />
-            <Kv label="Abstract" value={d.identity.abstract ? formatAbstract({ abstract: d.identity.abstract, survey: d.identity.survey, county: d.identity.county, state: d.identity.state }) : null} />
-            <Kv label="Survey" value={d.identity.survey} />
+            <Kv label={d.identity.state === "LA" ? "Section" : "Abstract"} value={d.identity.abstract ? formatAbstract({ abstract: d.identity.abstract, survey: d.identity.survey, county: d.identity.county, state: d.identity.state }) : null} />
+            <Kv label={d.identity.state === "LA" ? "Township / range" : "Survey"} value={d.identity.survey} />
             <Kv label="Surface location" value={d.identity.latitude != null ? `${d.identity.latitude.toFixed(5)}, ${d.identity.longitude?.toFixed(5)}${d.identity.locationNote ? ` (${d.identity.locationNote})` : ""}` : null} />
             <Kv label="Well type" value={[d.status.oilGas, d.status.type].filter(Boolean).join(" · ") || null} />
             <Kv label="Status" value={d.status.status} />
