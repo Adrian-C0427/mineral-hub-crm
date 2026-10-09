@@ -53,9 +53,19 @@ export function groupCountyKeys(keys: readonly string[]): Map<string, string[]> 
   return out;
 }
 
+/** One state's county/parish names among the keys. */
+export function stateCountyNames(keys: readonly string[], state: string): string[] {
+  return groupCountyKeys(keys).get(state.toUpperCase()) ?? [];
+}
+
 /** Texas names among the keys — the only ones rrc.* (RRC = Texas) can match. */
 export function texasCountyNames(keys: readonly string[]): string[] {
-  return groupCountyKeys(keys).get("TX") ?? [];
+  return stateCountyNames(keys, "TX");
+}
+
+/** Louisiana parish names among the keys — the only ones sonris.* (SONRIS = Louisiana) can match. */
+export function louisianaParishNames(keys: readonly string[]): string[] {
+  return stateCountyNames(keys, "LA");
 }
 
 /**
