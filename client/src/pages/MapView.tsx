@@ -7,7 +7,7 @@ import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { US_STATE_OPTIONS, US_STATE_LABELS } from "../lib/options";
 import { Select } from "../components/Select";
 import { downloadCsv } from "../lib/csv";
-import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION } from "../lib/counties";
+import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION, PARISHES, STATE_FIPS, MAP_COUNTY_LABELS, mapCountyOptions } from "../lib/counties";
 import { addCadastralLayers, addTractLayers, tractInfo, TRACT_SOURCE, STATUS_COLOR, type TractInfo, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
 import { collectCoords, bboxOfPoints } from "../lib/geo";
 import { FormSection } from "../components/kit";
@@ -16,7 +16,7 @@ import { MapShpImport } from "../components/MapShpImport";
 import { useAbstractIndex } from "../components/AbstractPicker";
 import { PHONE_QUERY } from "../lib/mobile";
 import { readPermitsMapParams, withoutPermitParams } from "../lib/permitMap";
-import { abstractShortLabel, countyStateLabel, formatAbstract, rankAbstracts, surveyLabel } from "../lib/abstracts";
+import { abstractShortLabel, countyStateLabel, formatAbstract, isSectionLabel, rankAbstracts, sectionLabel, sectionNumber, surveyLabel } from "../lib/abstracts";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, StageBadge, PriorityBadge, ChipList } from "../components/ui";
 import { fmtDate, money, num } from "../lib/format";
@@ -42,7 +42,8 @@ interface MapAsset {
 }
 type FC = { type: "FeatureCollection"; features: GeoFeature[] };
 type GeoFeature = { type: "Feature"; id?: number; properties: Record<string, unknown>; geometry: { type: string; coordinates: unknown } };
-type SelAbstract = { kind: "abstract"; id: string; abstract: string; survey: string; county: string };
+/** A clicked cadastral unit: a Texas abstract, or a Louisiana PLSS section (state "LA"). */
+type SelAbstract = { kind: "abstract"; id: string; abstract: string; survey: string; county: string; state: string };
 type WellPermit = { statusNo: string; permitDate: string | null; operator: string | null; leaseName: string | null; wellNo: string | null; acres: number | null; survey: string | null; abstract: string | null };
 type WellCompletion = { trackingNo: string; filingType: string | null; status: string | null; filedDate: string | null; completionDate: string | null; fieldName: string | null };
 type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; operator: string | null; leaseName: string | null; leaseNo: string | null; field: string | null; oilGas: string | null; district: string | null; cumOil: number | null; cumGas: number | null; lastProd: string | null; formations: string | null; unitAcres?: number | null; spudDate?: string | null; plugDate?: string | null; permits?: WellPermit[]; completions?: WellCompletion[] };
@@ -56,7 +57,10 @@ const LEON_CENTER: [number, number] = [-95.99, 31.29];
 // --- Unified map search (server-ranked, /gis/suggest) ---
 type BBox = [number, number, number, number];
 interface Suggest {
-  counties: { label: string; bbox: BBox }[];
+  /** Texas counties and Louisiana parishes ("Caddo Parish, LA"). */
+  counties: { label: string; sub?: string; key?: string; bbox: BBox }[];
+  /** PLSS townships ("T17N R13W") — Louisiana only. */
+  townships?: { label: string; sub: string; bbox: BBox | null }[];
   abstracts: { id: string; label: string; sub: string }[];
   wells: { fid: number; label: string; sub: string }[];
   operators: { name: string; sub: string; bbox: BBox | null }[];
@@ -92,7 +96,7 @@ function loadJson<T>(key: string, fallback: T): T {
 function saveJson(key: string, value: unknown) { try { localStorage.setItem(key, JSON.stringify(value)); } catch { /* storage off */ } }
 
 const GROUP_LABELS: Record<keyof Suggest, string> = {
-  counties: "Counties", abstracts: "Abstracts & surveys", wells: "Wells & leases",
+  counties: "Counties & parishes", townships: "Townships", abstracts: "Abstracts, surveys & sections", wells: "Wells & leases",
   operators: "Operators", fields: "Fields", formations: "Formations",
   deals: "Deals", assets: "Mineral assets",
 };
@@ -288,9 +292,10 @@ export function MapView() {
       // 3-digit code) for search → "go to county" framing.
       const bboxByFips = new Map<string, [number, number, number, number]>();
       for (const f of (countyLabels.features ?? []) as GeoFeature[]) bboxByFips.set(String(f.properties.fips), f.properties.bbox as [number, number, number, number]);
-      for (const c of COUNTIES) { const bb = bboxByFips.get(`48${c.fips}`); if (bb) countyBBox.current.set(c.key, bb); }
+      for (const c of [...COUNTIES, ...PARISHES]) { const bb = bboxByFips.get(`${STATE_FIPS[c.state ?? "TX"]}${c.fips}`); if (bb) countyBBox.current.set(c.key, bb); }
 
-      setMeta({ counties: COUNTIES.map((c) => c.name).sort() });
+      // Texas counties by name + Louisiana parishes by "LA|Name" key.
+      setMeta({ counties: mapCountyOptions() });
 
       void Promise.all(
         COUNTIES_WITH_WELLS.map((k) => fetch(`/data/${k}-wells.geojson`).then((r) => r.json()).catch(() => ({ features: [] }))),
@@ -458,7 +463,8 @@ export function MapView() {
     clearSelection();
     selAbstractRef.current = id;
     map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id }, { selected: true });
-    setSelected({ kind: "abstract", id, abstract: (props.abstract as string) || id, survey: (props.survey as string) || "", county: (props.county as string) || "" });
+    const abstract = (props.abstract as string) || id;
+    setSelected({ kind: "abstract", id, abstract, survey: (props.survey as string) || "", county: (props.county as string) || "", state: (props.state as string) || (isSectionLabel(abstract) ? "LA" : "TX") });
   }
   function selectWell(w: WellProps) {
     const map = mapRef.current; if (!map) return;
@@ -492,8 +498,8 @@ export function MapView() {
     // bbox come from the GIS API rather than the map.
     const map = mapRef.current; if (!map) return;
     try {
-      const r = await api.get<{ id: string; abstract: string | null; survey: string | null; county: string; minx: number; miny: number; maxx: number; maxy: number }>(`/gis/abstracts/${encodeURIComponent(id)}`);
-      selectAbstract(id, { abstract: r.abstract, survey: r.survey, county: r.county });
+      const r = await api.get<{ id: string; abstract: string | null; survey: string | null; county: string; state: string; minx: number; miny: number; maxx: number; maxy: number }>(`/gis/abstracts/${encodeURIComponent(id)}`);
+      selectAbstract(id, { abstract: r.abstract, survey: r.survey, county: r.county, state: r.state });
       map.fitBounds([[r.minx, r.miny], [r.maxx, r.maxy]], { padding: 80, maxZoom: 14, duration: 800 });
     } catch { /* stale search result — nothing to select */ }
   }
@@ -785,6 +791,7 @@ export function MapView() {
   function runSearchAction(t: keyof Suggest, label: string, sub: string, p: Record<string, unknown>): void {
     switch (t) {
       case "counties": fitBbox(p.bbox as BBox); break;
+      case "townships": fitBbox(p.bbox as BBox | null); break;
       case "abstracts": void selectAbstractById(String(p.id)); break;
       case "wells": void openWell(Number(p.fid), true); break;
       case "operators": setFOperators((prev) => (prev.includes(String(p.name)) ? prev : [...prev, String(p.name)])); fitBbox(p.bbox as BBox | null); break;
@@ -799,7 +806,8 @@ export function MapView() {
   const results = useMemo(() => {
     if (!sug) return [] as { t: keyof Suggest; label: string; sub: string; p: Record<string, unknown> }[];
     const out: { t: keyof Suggest; label: string; sub: string; p: Record<string, unknown> }[] = [];
-    for (const c of sug.counties) out.push({ t: "counties", label: c.label, sub: "Go to county", p: { bbox: c.bbox } });
+    for (const c of sug.counties) out.push({ t: "counties", label: c.label, sub: c.sub ?? "Go to county", p: { bbox: c.bbox } });
+    for (const t of sug.townships ?? []) out.push({ t: "townships", label: t.label, sub: t.sub, p: { bbox: t.bbox } });
     for (const a of sug.abstracts) out.push({ t: "abstracts", label: a.label, sub: a.sub, p: { id: a.id } });
     for (const w of sug.wells) out.push({ t: "wells", label: w.label, sub: w.sub, p: { fid: w.fid } });
     for (const o of sug.operators) out.push({ t: "operators", label: o.name, sub: o.sub, p: { name: o.name, bbox: o.bbox } });
@@ -963,7 +971,7 @@ export function MapView() {
       <div className="mc-head">
         <div className="mc-title">
           <h1>Map</h1>
-          <span className="mc-sub">Texas · {COUNTIES.length} counties · abstracts stream as you pan and zoom</span>
+          <span className="mc-sub">Texas · {COUNTIES.length} counties · Louisiana · {PARISHES.length} Haynesville parishes · abstracts and sections stream as you pan and zoom</span>
         </div>
         <div className="mc-actions">
           <button type="button" className={`mc-btn ${showFilters || filterCount > 0 ? "active" : ""}`} aria-pressed={showFilters} onClick={() => { setShowFilters((s) => !s); setShowHeat(false); }}>
@@ -1018,7 +1026,7 @@ export function MapView() {
               onFocus={() => setSearchFocus(true)}
               onClick={() => setSearchFocus(true)}
               onKeyDown={(e) => { if (e.key === "Escape") setSearchFocus(false); }}
-              placeholder="Search wells, abstracts, operators, deals"
+              placeholder="Search wells, abstracts, sections, operators, deals"
               aria-label="Search the map"
             />
           </div>
@@ -1160,11 +1168,13 @@ export function MapView() {
                 <div className="mc-sheet-body">
                   <MapField label="Deal status"><Select value={statusFilter} onChange={setStatusFilter} ariaLabel="Deal status" options={STATUS_OPTIONS.map(([v, l]) => ({ value: v, label: l }))} /></MapField>
                   {/* Cascading geography: State → County → Abstract → Survey, one per row. Map data
-                      is Texas-only today, so counties empty out under a non-TX state. */}
+                      covers Texas counties and Louisiana's Haynesville parishes; the county list
+                      follows the State filter. Parish values are "LA|Name" keys (Sabine and Red
+                      River are also Texas counties) and display as "Sabine Parish, LA". */}
                   <MapField label="State"><SearchableMultiSelect options={[...US_STATE_OPTIONS]} labels={US_STATE_LABELS} value={fStates} onChange={setFStates} placeholder="States…" /></MapField>
-                  <MapField label="County"><SearchableMultiSelect options={fStates.length && !fStates.includes("TX") ? [] : meta.counties} value={fCounties} onChange={setFCounties} placeholder="Counties…" /></MapField>
-                  <MapField label="Abstract"><SearchableMultiSelect options={gisOptions.abstracts} labels={abstractFilterLabels} filterOptions={rankAbstractFilter} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstract # or survey…" /></MapField>
-                  <MapField label="Survey"><SearchableMultiSelect options={gisOptions.surveys} value={fSurveys} onChange={setFSurveys} placeholder="Surveys…" /></MapField>
+                  <MapField label="County / parish"><SearchableMultiSelect options={fStates.length ? mapCountyOptions(fStates) : meta.counties} labels={MAP_COUNTY_LABELS} value={fCounties} onChange={setFCounties} placeholder="Counties or parishes…" /></MapField>
+                  <MapField label="Abstract / section"><SearchableMultiSelect options={gisOptions.abstracts} labels={abstractFilterLabels} filterOptions={rankAbstractFilter} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstract #, section or survey…" /></MapField>
+                  <MapField label="Survey / township"><SearchableMultiSelect options={gisOptions.surveys} value={fSurveys} onChange={setFSurveys} placeholder="Surveys or townships…" /></MapField>
                   <div className="mc-divider" />
                   <MapField label="Well type"><SearchableMultiSelect options={gisOptions.wellTypes} value={fWellTypes} onChange={setFWellTypes} placeholder="Well types…" /></MapField>
                   <MapField label="Well status"><SearchableMultiSelect options={gisOptions.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} placeholder="Well statuses…" /></MapField>
@@ -1459,8 +1469,18 @@ export function MapView() {
               </>
             ) : (
               <>
-                <div className="section-head"><div><h3 style={{ margin: 0 }}>{formatAbstract({ abstract: selected.abstract })}</h3><div className="muted" style={{ fontSize: 12 }}>{[surveyLabel(selected.survey), countyStateLabel(selected.county, "TX")].filter(Boolean).join(" · ")}</div></div><button className="icon-btn" aria-label="Close" onClick={clearSelection}>×</button></div>
-                <div className="dd-grid mc-kv" style={{ marginTop: 6 }}><KV k="Abstract" v={abstractShortLabel({ abstract: selected.abstract })} /><KV k="Survey" v={selected.survey} /><KV k="County" v={selected.county} /></div>
+                {selected.state === "LA" || isSectionLabel(selected.abstract) ? (
+                  // A Louisiana PLSS section: section · township/range in its parish.
+                  <>
+                    <div className="section-head"><div><h3 style={{ margin: 0 }}>{sectionLabel({ abstract: selected.abstract, survey: selected.survey })}</h3><div className="muted" style={{ fontSize: 12 }}>{countyStateLabel(selected.county, "LA")}</div></div><button className="icon-btn" aria-label="Close" onClick={clearSelection}>×</button></div>
+                    <div className="dd-grid mc-kv" style={{ marginTop: 6 }}><KV k="Section" v={sectionNumber(selected.abstract) ?? selected.abstract} /><KV k="Township / range" v={selected.survey} /><KV k="Parish" v={selected.county} /></div>
+                  </>
+                ) : (
+                  <>
+                    <div className="section-head"><div><h3 style={{ margin: 0 }}>{formatAbstract({ abstract: selected.abstract })}</h3><div className="muted" style={{ fontSize: 12 }}>{[surveyLabel(selected.survey), countyStateLabel(selected.county, selected.state || "TX")].filter(Boolean).join(" · ")}</div></div><button className="icon-btn" aria-label="Close" onClick={clearSelection}>×</button></div>
+                    <div className="dd-grid mc-kv" style={{ marginTop: 6 }}><KV k="Abstract" v={abstractShortLabel({ abstract: selected.abstract })} /><KV k="Survey" v={selected.survey} /><KV k="County" v={selected.county} /></div>
+                  </>
+                )}
                 {/* Owned mineral assets (HOLD) are identified as Mineral Assets —
                     no stage, priority, buyer, or other deal workflow. */}
                 {panelAssets.length > 0 && (
@@ -1477,7 +1497,7 @@ export function MapView() {
                 {(panelDeals.length > 0 || panelAssets.length === 0) && (
                   <div className="mc-fp-sec">{panelDeals.length} active deal{panelDeals.length === 1 ? "" : "s"}</div>
                 )}
-                {panelDeals.length === 0 ? (panelAssets.length === 0 && <p className="muted">No active deals in this abstract.</p>) : panelDeals.map((d) => (
+                {panelDeals.length === 0 ? (panelAssets.length === 0 && <p className="muted">No active deals in this {selected.state === "LA" ? "section" : "abstract"}.</p>) : panelDeals.map((d) => (
                   <div key={d.id} className="mc-fp-card">
                     <div className="row" style={{ justifyContent: "space-between" }}>
                       <span className="row" style={{ gap: 6, alignItems: "center", flexWrap: "wrap" }}>

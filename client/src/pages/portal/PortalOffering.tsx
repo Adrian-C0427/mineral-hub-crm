@@ -60,7 +60,7 @@ export function PortalOffering() {
   const location = locationOf(deal);
   const producing = deal.producingStatus === "Producing";
   const surveys = (deal.surveys.length ? deal.surveys : [...new Set(abstracts.map((a) => a.survey).filter(Boolean))] as string[]);
-  const absLabel = (a: PortalAbstract) => formatAbstract({ abstract: (a.abstract ?? a.id).replace(/\?/g, ""), survey: a.survey, county: a.county, state: "TX" });
+  const absLabel = (a: PortalAbstract) => formatAbstract({ abstract: (a.abstract ?? a.id).replace(/\?/g, ""), survey: a.survey, county: a.county, state: a.state ?? "TX" });
   const firstAbs = abstracts[0];
   const firstAbsNo = (firstAbs?.abstract ?? "").replace(/\?/g, "");
   const hasContact = org.contacts.length > 0 || mailto || org.contactPhone || org.officeLocation;
@@ -141,7 +141,7 @@ export function PortalOffering() {
                     <span className="pp-abs-badge">{firstAbsNo ? `A-${firstAbsNo}` : "A"}</span>
                     <div className="pp-absstrip-text">
                       <span className="pp-absstrip-name">{formatAbstract({ abstract: firstAbsNo || firstAbs.id, survey: firstAbs.survey })}{abstracts.length > 1 ? ` +${abstracts.length - 1} more` : ""}</span>
-                      <span className="pp-absstrip-sub">{[countyStateLabel(firstAbs.county, "TX"), deal.basins.join(", ")].filter(Boolean).join(" · ")}</span>
+                      <span className="pp-absstrip-sub">{[countyStateLabel(firstAbs.county, firstAbs.state ?? "TX"), deal.basins.join(", ")].filter(Boolean).join(" · ")}</span>
                     </div>
                   </div>
                   <button type="button" className="pp-btn sm" onClick={() => mapApi.current?.recenter()}>

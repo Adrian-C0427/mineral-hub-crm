@@ -92,7 +92,7 @@ export function GeoFields({
       {onAbstractsChange && (
         <div className="field">
           <label>{labels?.abstract ?? "Abstract"}</label>
-          <AbstractMultiPicker value={abstractIds ?? []} counties={counties} onChange={disabled ? () => {} : onAbstractsChange} />
+          <AbstractMultiPicker value={abstractIds ?? []} counties={counties} states={states} onChange={disabled ? () => {} : onAbstractsChange} />
         </div>
       )}
     </>

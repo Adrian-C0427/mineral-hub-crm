@@ -9,6 +9,8 @@ import { startPortalReminderScheduler } from "./services/portalReminders.js";
 import { startDealAlertScheduler } from "./services/dealAlerts.js";
 import { startDemoResetScheduler } from "./services/demoReset.js";
 import { backfillTransactionInterests } from "./services/researchInterestBackfill.js";
+import { ensureGisRegions } from "./services/gisRegions.js";
+import { clearGisCaches } from "./routes/gis.js";
 
 // Fail closed: in production, refuse to boot with default/missing secret keys.
 assertProductionSecrets();
@@ -40,6 +42,13 @@ backfillBuyerStatus().catch((e) =>
 backfillTransactionInterests().catch((e) =>
   console.error("Conveyed-interest backfill failed:", e instanceof Error ? e.message : e),
 );
+
+// Idempotent, additive: Louisiana Haynesville parishes + PLSS sections, bundled
+// with the server, upserted into the gis schema when missing or out of date
+// (Texas rows are never touched). Tiles cached while it ran are dropped after.
+ensureGisRegions()
+  .then((loaded) => { if (loaded) clearGisCaches(); })
+  .catch((e) => console.error("GIS region load failed:", e instanceof Error ? e.message : e));
 
 app.listen(env.PORT, () => {
   // eslint-disable-next-line no-console

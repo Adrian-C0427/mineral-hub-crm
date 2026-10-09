@@ -32,10 +32,37 @@ export function abstractNumber(raw: string | null | undefined): string {
   return s.replace(/^a\s*-\s*/i, "");
 }
 
-/** Numeric sort key of an abstract number ("15B" → 15); non-numeric sorts last. */
+/** Numeric sort key of an abstract number ("15B" → 15; a PLSS "Sec 12" → 12); non-numeric sorts last. */
 export function abstractSortKey(raw: string | null | undefined): number {
-  const n = parseInt(abstractNumber(raw), 10);
+  const n = parseInt(sectionNumber(raw) ?? abstractNumber(raw), 10);
   return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
+}
+
+/**
+ * Louisiana cadastral units are PLSS sections, stored in the same slots as a
+ * Texas abstract: label "Sec 12", survey = township/range "T17N R13W". They are
+ * recognised by the label itself, so every caller formats them correctly even
+ * where the row's state isn't at hand.
+ */
+export function isSectionLabel(raw: string | null | undefined): boolean {
+  return /^sec(?:tion)?\.?\s*\d/i.test((raw ?? "").trim());
+}
+
+/** "Sec 07" / "Section 7" → "7"; null when the label isn't a section. */
+export function sectionNumber(raw: string | null | undefined): string | null {
+  const m = /^sec(?:tion)?\.?\s*0*(\d+[a-z]?)\b/i.exec((raw ?? "").trim());
+  return m ? m[1].toUpperCase() : null;
+}
+
+/** "T17N R13W" — a PLSS township/range (fractional townships carry a ½). */
+export function isTownshipRange(raw: string | null | undefined): boolean {
+  return /^T\d+½?[NS]\s+R\d+½?[EW]$/i.test((raw ?? "").trim());
+}
+
+/** "Sec 12 · T17N R13W" — a section with its township/range. */
+export function sectionLabel(p: { abstract: string | null | undefined; survey?: string | null }): string {
+  const n = sectionNumber(p.abstract);
+  return [n ? `Sec ${n}` : (p.abstract ?? "").trim() || "Section", (p.survey ?? "").trim().toUpperCase()].filter(Boolean).join(" · ");
 }
 
 // Grantee names that are organizations/grants, not "Last, First" people.
@@ -51,6 +78,8 @@ const titleWord = (w: string) => (/^[A-Z]\.?$/i.test(w) ? `${w[0].toUpperCase()}
 export function surveyLabel(survey: string | null | undefined): string {
   let s = (survey ?? "").trim().replace(/\s+/g, " ");
   if (!s) return "";
+  // A PLSS township/range is not a survey name — it reads as recorded.
+  if (isTownshipRange(s)) return s.toUpperCase();
   s = s.replace(/\s*\bSUR\.?$/i, "");
   // A trailing grant type ("SANCHEZ, S LEAGUE") names the survey itself.
   const kind = s.match(/\s+(SURVEY|LEAGUE|LABOR|GRANT)$/i)?.[1] ?? "";
@@ -61,26 +90,41 @@ export function surveyLabel(survey: string | null | undefined): string {
   return `${s} ${kind ? titleWord(kind) : "Survey"}`;
 }
 
-/** "Leon County, Texas" — whichever parts are known. */
-export function countyStateLabel(county: string | null | undefined, state: string | null | undefined): string {
+/** "Leon County" / "Caddo Parish" — Louisiana's county-level division is the parish. */
+export function countyLabel(county: string | null | undefined, state: string | null | undefined): string {
   const c = (county ?? "").trim();
+  if (!c) return "";
+  if (/\b(county|parish)$/i.test(c)) return c;
+  return `${c} ${(state ?? "").trim().toUpperCase() === "LA" ? "Parish" : "County"}`;
+}
+
+/** "Leon County, Texas" / "Caddo Parish, Louisiana" — whichever parts are known. */
+export function countyStateLabel(county: string | null | undefined, state: string | null | undefined): string {
+  const c = countyLabel(county, state);
   const st = stateName(state);
-  if (c) return `${/county$/i.test(c) ? c : `${c} County`}${st ? `, ${st}` : ""}`;
+  if (c) return `${c}${st ? `, ${st}` : ""}`;
   return st;
 }
 
 export interface AbstractParts { abstract: string | null | undefined; survey?: string | null; county?: string | null; state?: string | null }
 
-/** "Abstract 15 · J Dunn Survey · Leon County, Texas" (parts that are unknown are omitted). */
+/**
+ * "Abstract 15 · J Dunn Survey · Leon County, Texas" (parts that are unknown are
+ * omitted); a Louisiana section reads "Sec 12 · T17N R13W · Caddo Parish, Louisiana".
+ */
 export function formatAbstract(p: AbstractParts): string {
+  if (isSectionLabel(p.abstract)) {
+    return [sectionLabel(p), countyStateLabel(p.county, p.state ?? (p.county ? "LA" : null))].filter(Boolean).join(" · ");
+  }
   const num = abstractNumber(p.abstract);
   return [num ? `Abstract ${num}` : "Abstract", surveyLabel(p.survey), countyStateLabel(p.county, p.state)]
     .filter(Boolean)
     .join(" · ");
 }
 
-/** "A-3 · W Dwight Survey" — abstract selectors, where the county is already chosen. */
+/** "A-3 · W Dwight Survey" (or "Sec 12 · T17N R13W") — abstract selectors, where the county is already chosen. */
 export function abstractShortLabel(p: { abstract: string | null | undefined; survey?: string | null }): string {
+  if (isSectionLabel(p.abstract)) return sectionLabel(p);
   const num = abstractNumber(p.abstract);
   return [num ? `A-${num}` : "Abstract", surveyLabel(p.survey)].filter(Boolean).join(" · ");
 }
@@ -99,11 +143,11 @@ export function rankAbstracts<T>(items: readonly T[], query: string, get: (t: T)
   const digits = q.match(/\d+/)?.[0]?.replace(/^0+(?=\d)/, "") ?? "";
   // Words other than an "abstract"/"a-" prefix must also match the item's text.
   const words = q.replace(/\d+[a-z]?/g, " ").split(/[\s,.#—·-]+/)
-    .filter((w) => w && !/^(a|ab|abs|abst|abstr|abstra|abstrac|abstract)$/.test(w));
+    .filter((w) => w && !/^(a|ab|abs|abst|abstr|abstra|abstrac|abstract|sec|section)$/.test(w));
   const scored: { t: T; tier: number; key: number; text: string }[] = [];
   for (const t of items) {
     const { abstract, text } = get(t);
-    const num = abstractNumber(abstract).toLowerCase();
+    const num = (sectionNumber(abstract) ?? abstractNumber(abstract)).toLowerCase();
     const hay = text.toLowerCase();
     let tier: number;
     if (!q) tier = 0;

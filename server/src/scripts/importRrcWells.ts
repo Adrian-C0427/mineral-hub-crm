@@ -202,7 +202,7 @@ async function main(): Promise<void> {
   const joined = await prisma.$executeRawUnsafe(
     `UPDATE rrc.wells w SET abstract_id = a.id, abstract = a.abstract, survey = COALESCE(w.survey, a.survey)
        FROM gis.abstracts a
-      WHERE w.abstract_id IS NULL AND ST_Contains(a.geom, w.geom)`);
+      WHERE w.abstract_id IS NULL AND a.state = 'TX' AND ST_Contains(a.geom, w.geom)`);
   console.log(`  attributed ${joined} wells to abstracts`);
 
   console.log("Field names from rrc.fields…");

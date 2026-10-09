@@ -322,8 +322,8 @@ portalRouter.get(
     recordPortalEvent(deal.id, "VIEW", visitorKeyFrom(req));
     // Abstract/survey labels for the info grid (numbers alone mean little).
     const abstracts = deal.abstractIds.length
-      ? await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string }[]>(
-          `SELECT id, abstract, survey, county FROM gis.abstracts WHERE id = ANY($1::text[])`,
+      ? await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string; state: string }[]>(
+          `SELECT id, abstract, survey, county, state FROM gis.abstracts WHERE id = ANY($1::text[])`,
           deal.abstractIds.slice(0, 500),
         )
       : [];

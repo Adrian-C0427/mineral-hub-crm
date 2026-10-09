@@ -99,7 +99,9 @@ async function importAbstracts(file: string): Promise<{ county: string; count: n
   const county = String(fc.features[0]?.properties.county ?? "?");
   const fips = String(fc.features[0]?.properties.countyFips ?? "?");
   // Replace-by-county keeps re-imports clean if the source data changes shape.
-  await prisma.$executeRawUnsafe(`DELETE FROM gis.abstracts WHERE county_fips = $1`, fips);
+  // Texas only: county_fips is the 3-digit code, which Louisiana parishes reuse
+  // (Caddo 017 = Bailey 017) — their sections must never go with it.
+  await prisma.$executeRawUnsafe(`DELETE FROM gis.abstracts WHERE state = 'TX' AND county_fips = $1`, fips);
   const BATCH = 200;
   for (let i = 0; i < fc.features.length; i += BATCH) {
     const rows = fc.features.slice(i, i + BATCH);
@@ -154,7 +156,7 @@ async function main(): Promise<void> {
   // e.g. the statewide backfill ran against ~/rrc-data/otls without the
   // original 12 counties' files).
   const [{ n: dbAbstracts }] = await prisma.$queryRawUnsafe<{ n: bigint }[]>(
-    `SELECT count(*)::bigint AS n FROM gis.abstracts WHERE county = ANY($1::text[])`, importedCounties);
+    `SELECT count(*)::bigint AS n FROM gis.abstracts WHERE state = 'TX' AND county = ANY($1::text[])`, importedCounties);
   const [{ n: dbTotal }] = await prisma.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*)::bigint AS n FROM gis.abstracts`);
   const [{ n: invalid }] = await prisma.$queryRawUnsafe<{ n: bigint }[]>(`SELECT count(*)::bigint AS n FROM gis.abstracts WHERE NOT ST_IsValid(geom)`);
   console.log(`DB: ${dbAbstracts} abstracts for this run's ${importedCounties.length} counties (files: ${total}); ${dbTotal} total; invalid geometries: ${invalid}`);

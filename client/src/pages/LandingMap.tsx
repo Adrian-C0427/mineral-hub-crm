@@ -41,7 +41,7 @@ export default function LandingMap() {
         const abs = map.queryRenderedFeatures(ev.point, { layers: map.getLayer("abstracts-fill") ? ["abstracts-fill"] : [] });
         if (abs.length) {
           const p = abs[0].properties as Record<string, unknown>;
-          setPicked({ title: formatAbstract({ abstract: p.abstract as string | null }), sub: [surveyLabel(p.survey as string | null), countyStateLabel(p.county as string | null, "TX")].filter(Boolean).join(" · ") });
+          setPicked({ title: formatAbstract({ abstract: p.abstract as string | null }), sub: [surveyLabel(p.survey as string | null), countyStateLabel(p.county as string | null, (p.state as string | null) || "TX")].filter(Boolean).join(" · ") });
         } else setPicked(null);
       });
     });
