@@ -1,5 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { ZodError } from "zod";
+import { isTransientDbError } from "../dbErrors.js";
 
 /** Throwable with an HTTP status. */
 export class HttpError extends Error {
@@ -56,6 +57,17 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
         ? "Request payload is too large."
         : "The request could not be read. Check the request body and try again.",
     });
+    return;
+  }
+
+  // The database was unreachable even after withDbRetry's short retries — a
+  // Neon outage or compute restart, not a bug in the request. Answer 503 with
+  // Retry-After so clients can tell "try again shortly" from a real fault
+  // (Sentry MINERAL-HUB-API-7: a ~40s Neon outage on 2026-10-11).
+  if (isTransientDbError(err)) {
+    console.error("Database unavailable:", (err as Error).message);
+    res.setHeader("Retry-After", "5");
+    res.status(503).json({ error: "The database is temporarily unavailable. Please try again in a moment." });
     return;
   }
 

@@ -9,7 +9,7 @@ import { sentryEnabled } from "./instrument.js";
 import { env } from "./config.js";
 import { attachUser } from "./middleware/auth.js";
 import { demoGuard } from "./middleware/demo.js";
-import { errorHandler, notFound } from "./middleware/errors.js";
+import { asyncHandler, errorHandler, notFound } from "./middleware/errors.js";
 import { authRouter } from "./routes/auth.js";
 import { usersRouter } from "./routes/users.js";
 import { dealsRouter } from "./routes/deals.js";
@@ -89,7 +89,10 @@ export function createApp() {
   }
   app.use(express.json({ limit: "2mb" }));
   app.use(cookieParser());
-  app.use(attachUser);
+  // attachUser is async and Express 4 doesn't forward a rejected promise from
+  // middleware: a DB outage there became an unhandled rejection and a hung
+  // request (Sentry MINERAL-HUB-API-7). asyncHandler routes it to errorHandler.
+  app.use(asyncHandler(attachUser));
   // Showcase workspace: refuses destructive/sensitive writes for demo users
   // (after body parsing + auth, before every router). No-op for everyone else.
   app.use("/api", demoGuard);
