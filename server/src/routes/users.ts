@@ -5,12 +5,13 @@ import { hashPassword } from "../auth/password.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import crypto from "node:crypto";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { demoReadOnly } from "../middleware/demo.js";
 import { normalizePhone } from "../domain/phone.js";
 import { rotateTeamId, revokeInvitesKnownTo } from "../services/org.js";
 
 export const usersRouter = Router();
 
-usersRouter.use(requireAuth, requireOrg);
+usersRouter.use(requireAuth, requireOrg, demoReadOnly());
 
 usersRouter.get(
   "/",

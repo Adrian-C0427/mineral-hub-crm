@@ -1795,8 +1795,10 @@ researchRouter.get(
   "/ingest/runs/:id/rows",
   requirePermission("viewResearch"),
   asyncHandler(async (req: AuthedRequest, res) => {
+    // The caller's OWN upload log — never the demo's reference org: its runs'
+    // raw rows are that org's uploaded files, not shared reference records.
     const run = await prisma.researchIngestRun.findFirst({
-      where: { id: req.params.id, organizationId: researchOrgId(req) },
+      where: { id: req.params.id, organizationId: orgId(req) },
       select: { id: true, kind: true },
     });
     if (!run) throw new HttpError(404, "Import not found");
@@ -1821,7 +1823,7 @@ researchRouter.get(
     // (automated=true) import through the same pipeline — their records appear
     // everywhere in Research — but the runs themselves stay out of this list.
     const runs = await prisma.researchIngestRun.findMany({
-      where: { organizationId: researchOrgId(req), automated: false },
+      where: { organizationId: orgId(req), automated: false }, // own uploads only (see /rows)
       orderBy: { createdAt: "desc" },
       take: 50,
     });

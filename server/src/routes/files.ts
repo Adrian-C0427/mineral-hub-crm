@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { forbidDemo, DEMO_MESSAGES } from "../middleware/demo.js";
 import { env } from "../config.js";
 import { buildKey, putObject, getDownloadUrl, deleteObject, isAllowedMime, sniffMime, s3Configured } from "../services/s3.js";
 import { isImportProvider, listProviderFiles, importProviderFile } from "../services/cloudDocs.js";
@@ -24,6 +25,7 @@ const metaSchema = z.object({
 
 filesRouter.post(
   "/",
+  forbidDemo(DEMO_MESSAGES.UPLOAD),
   requirePermission("manageDocuments"),
   upload.single("file"),
   asyncHandler(async (req: AuthedRequest, res) => {
@@ -132,6 +134,7 @@ filesRouter.patch(
 // back to it via supersedes.
 filesRouter.post(
   "/:id/replace",
+  forbidDemo(DEMO_MESSAGES.UPLOAD),
   requirePermission("manageDocuments"),
   upload.single("file"),
   asyncHandler(async (req: AuthedRequest, res) => {
@@ -262,6 +265,7 @@ filesRouter.get(
 // upload → S3 → FileAttachment row on the deal or buyer.
 filesRouter.post(
   "/cloud/:provider/import",
+  forbidDemo(DEMO_MESSAGES.UPLOAD),
   requirePermission("manageDocuments"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const row = await connectedImportRow(req);

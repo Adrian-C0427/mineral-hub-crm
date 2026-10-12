@@ -17,6 +17,7 @@ import { prisma } from "../db.js";
 import type { Integration } from "@prisma/client";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { demoReadOnly } from "../middleware/demo.js";
 import { INTEGRATION_CATALOG, providerByKey } from "../domain/integrationCatalog.js";
 import { validateSecret, validateEnvProvider, envConfigured } from "../services/integrationProviders.js";
 import { encryptSecret, secretHint } from "../services/secrets.js";
@@ -31,7 +32,7 @@ import {
 } from "../services/integrationOAuth.js";
 
 export const integrationsRouter = Router();
-integrationsRouter.use(requireAuth, requireOrg, requirePermission("manageApiIntegrations"));
+integrationsRouter.use(requireAuth, requireOrg, requirePermission("manageApiIntegrations"), demoReadOnly());
 
 // connect/test/sync trigger outbound requests to third parties — cap how fast an
 // admin (or a stolen admin session) can fire them. Read routes are unaffected.

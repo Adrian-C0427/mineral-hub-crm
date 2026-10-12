@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requireOrgOwner, requirePermission, orgId, canSeeTeamId, type AuthedRequest } from "../middleware/auth.js";
+import { demoReadOnly } from "../middleware/demo.js";
 import {
   generateInviteCode, rotateTeamId, revokeInvitesKnownTo, assertCanGrantRole, canGrantRole, inviteExpiryFrom,
 } from "../services/org.js";
@@ -15,7 +16,7 @@ import {
 } from "../domain/permissions.js";
 
 export const orgRouter = Router();
-orgRouter.use(requireAuth, requireOrg);
+orgRouter.use(requireAuth, requireOrg, demoReadOnly());
 
 // Current organization info (any member). Includes the caller's effective
 // permissions so the UI can gate controls (server still enforces).

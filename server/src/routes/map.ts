@@ -162,6 +162,9 @@ const tractImportLimiter = rateLimit({
   message: { error: "Too many shapefile imports. Wait a few minutes and try again." },
 });
 
+/** Shown in place of the reference org's upload filenames to demo users. */
+const REFERENCE_TRACT_SOURCE = "Reference tracts";
+
 // ?dealId= scopes a list to one deal's imports (the deal map); omitted = every
 // org tract, deal-linked ones included (the main map).
 const dealScopeSchema = z.object({ dealId: z.string().min(1).max(200).optional() });
@@ -181,15 +184,16 @@ mapRouter.get(
   asyncHandler(async (req: AuthedRequest, res) => {
     const { dealId } = dealScopeSchema.parse(req.query);
     // Imported tracts are map reference data: the demo reads its reference org's.
-    // The source deal belongs to THAT org, so its id/name are never shown to a
-    // demo user (a deal-scoped request from the demo matches nothing anyway).
+    // Tracts linked to one of THAT org's deals mark what it is pursuing, so the
+    // demo never sees them at all — only the org's general (unlinked) tracts,
+    // and without the upload filename (often names the prospect or lease).
     const fromReference = req.user!.referenceOrgId != null;
     const rows = await prisma.mapTract.findMany({
-      where: { organizationId: researchOrgId(req), ...(dealId ? { dealId } : {}) },
+      where: { organizationId: researchOrgId(req), ...(dealId ? { dealId } : fromReference ? { dealId: null } : {}) },
       orderBy: { createdAt: "asc" },
       include: { deal: { select: { id: true, name: true } } },
     });
-    if (fromReference) for (const r of rows) r.deal = null;
+    if (fromReference) for (const r of rows) { r.deal = null; r.sourceFile = REFERENCE_TRACT_SOURCE; }
     res.json({
       type: "FeatureCollection",
       features: rows.map((r) => ({
@@ -212,9 +216,11 @@ mapRouter.get(
   "/tracts/imports",
   asyncHandler(async (req: AuthedRequest, res) => {
     const { dealId } = dealScopeSchema.parse(req.query);
+    // Demo: same scope as /tracts — the reference org's unlinked tracts only.
+    const fromReference = req.user!.referenceOrgId != null;
     const groups = await prisma.mapTract.groupBy({
       by: ["importId", "sourceFile", "dealId"],
-      where: { organizationId: researchOrgId(req), ...(dealId ? { dealId } : {}) },
+      where: { organizationId: researchOrgId(req), ...(dealId ? { dealId } : fromReference ? { dealId: null } : {}) },
       _count: { _all: true },
       _min: { createdAt: true },
     });
@@ -225,9 +231,9 @@ mapRouter.get(
     const dealName = new Map(deals.map((d) => [d.id, d.name]));
     res.json(groups
       .map((g) => ({
-        importId: g.importId, sourceFile: g.sourceFile, count: g._count._all, createdAt: g._min.createdAt,
+        importId: g.importId, sourceFile: fromReference ? REFERENCE_TRACT_SOURCE : g.sourceFile, count: g._count._all, createdAt: g._min.createdAt,
         // Reference-org (demo) imports never expose the source org's deal ids.
-        dealId: req.user!.referenceOrgId ? null : g.dealId, dealName: g.dealId ? dealName.get(g.dealId) ?? null : null,
+        dealId: fromReference ? null : g.dealId, dealName: g.dealId ? dealName.get(g.dealId) ?? null : null,
       }))
       .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt))));
   }),
