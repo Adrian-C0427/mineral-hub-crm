@@ -52,13 +52,24 @@ const BLOCKED: { test: RegExp; message: string }[] = [
 ];
 
 /**
+ * The path as Express ROUTES it, in the form the policy matches. Express
+ * matches routes case-insensitively and tolerates trailing slashes, so
+ * "/API/Org/invites/" reaches the same handler as "/api/org/invites" — the
+ * policy must see them as the same path too, or the guard is bypassed.
+ */
+function normalizePath(path: string): string {
+  const p = path.toLowerCase().replace(/\/{2,}/g, "/");
+  return p.length > 1 ? p.replace(/\/+$/, "") : p;
+}
+
+/**
  * Why a demo user's request is refused, or null when it may proceed. Pure, so
  * the policy is unit-tested directly. `path` is the URL path (no query).
  */
 export function demoBlockReason(method: string, path: string, body?: unknown): string | null {
   const m = method.toUpperCase();
   if (READ_METHODS.has(m)) return null;
-  const p = path.length > 1 ? path.replace(/\/+$/, "") : path;
+  const p = normalizePath(path);
 
   if (m === "DELETE") return DELETE_ALLOWED.some((r) => r.test(p)) ? null : DELETE_MESSAGE;
 
@@ -76,7 +87,32 @@ export function demoBlockReason(method: string, path: string, body?: unknown): s
 
 export function demoGuard(req: AuthedRequest, res: Response, next: NextFunction): void {
   if (!req.user?.isDemo) return next();
-  const reason = demoBlockReason(req.method, req.originalUrl.split("?")[0], req.body);
+  // baseUrl + path is the parsed pathname Express routes on. originalUrl is the
+  // raw request target, which can be absolute-form ("http://host/api/…") and
+  // would then match none of the policy's /api patterns.
+  const reason = demoBlockReason(req.method, req.baseUrl + req.path, req.body);
   if (!reason) return next();
   res.status(403).json({ error: reason, demo: true });
 }
+
+/**
+ * Router-level backstop for the locked areas: refuses every non-read request
+ * from a demo user whatever URL spelling reached the router, so the lock does
+ * not rest on demoGuard's path matching alone. No-op for everyone else.
+ */
+export function demoReadOnly(message: string = SETTINGS_MESSAGE) {
+  return (req: AuthedRequest, res: Response, next: NextFunction): void => {
+    if (!req.user?.isDemo || READ_METHODS.has(req.method.toUpperCase())) return next();
+    res.status(403).json({ error: message, demo: true });
+  };
+}
+
+/** Same backstop for a single route (account security, uploads). */
+export function forbidDemo(message: string = SETTINGS_MESSAGE) {
+  return (req: AuthedRequest, res: Response, next: NextFunction): void => {
+    if (!req.user?.isDemo) return next();
+    res.status(403).json({ error: message, demo: true });
+  };
+}
+
+export const DEMO_MESSAGES = { SETTINGS: SETTINGS_MESSAGE, UPLOAD: UPLOAD_MESSAGE, AI: AI_MESSAGE } as const;

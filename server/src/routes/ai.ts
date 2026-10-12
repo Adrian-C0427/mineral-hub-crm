@@ -10,12 +10,13 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { demoReadOnly, DEMO_MESSAGES } from "../middleware/demo.js";
 import { serializeDeal } from "../serializers.js";
 import { logActivity } from "../services/activityLog.js";
 import { summarizeDeal, draftOutreach, type DealContext } from "../services/ai.js";
 
 export const aiRouter = Router();
-aiRouter.use(requireAuth, requireOrg, requirePermission("useAiFeatures"));
+aiRouter.use(requireAuth, requireOrg, requirePermission("useAiFeatures"), demoReadOnly(DEMO_MESSAGES.AI));
 
 // AI calls cost money and hit provider rate limits — cap per authenticated user.
 // Keyed on the user id, NOT req.ip: the caller is always logged in here

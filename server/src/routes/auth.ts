@@ -9,6 +9,7 @@ import { verifyPassword, hashPassword, dummyVerifyPassword } from "../auth/passw
 import { signSession, setSessionCookie, clearSessionCookie } from "../auth/session.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, canSeeTeamId, type AuthedRequest } from "../middleware/auth.js";
+import { forbidDemo } from "../middleware/demo.js";
 import { LOGIN_RATE_LIMIT, env, isProd, emailConfigured } from "../config.js";
 import { createOrganization, resolveJoinToken, consumeInvite } from "../services/org.js";
 import { normalizePhone } from "../domain/phone.js";
@@ -456,6 +457,7 @@ const joinLimiter = rateLimit({
 authRouter.post(
   "/join",
   requireAuth,
+  forbidDemo(),
   joinLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const { token } = z.object({ token: z.string().min(1) }).parse(req.body);
@@ -498,6 +500,7 @@ const accountSchema = z.object({
 authRouter.patch(
   "/me",
   requireAuth,
+  forbidDemo(),
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = accountSchema.parse(req.body);
     const email = data.email.toLowerCase();
@@ -538,6 +541,7 @@ const changePasswordSchema = z.object({
 authRouter.post(
   "/change-password",
   requireAuth,
+  forbidDemo(),
   asyncHandler(async (req: AuthedRequest, res) => {
     const { currentPassword, newPassword } = changePasswordSchema.parse(req.body);
     const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
@@ -693,6 +697,7 @@ authRouter.get(
 authRouter.post(
   "/2fa/setup",
   requireAuth,
+  forbidDemo(),
   asyncHandler(async (req: AuthedRequest, res) => {
     const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { email: true, totpEnabled: true } });
     if (user?.totpEnabled) throw new HttpError(400, "Two-factor authentication is already enabled. Disable it first to re-enroll.");
@@ -706,6 +711,7 @@ authRouter.post(
 authRouter.post(
   "/2fa/enable",
   requireAuth,
+  forbidDemo(),
   twoFactorLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const { code } = z.object({ code: z.string().trim().min(1) }).parse(req.body);
@@ -724,6 +730,7 @@ authRouter.post(
 authRouter.post(
   "/2fa/disable",
   requireAuth,
+  forbidDemo(),
   twoFactorLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const { code } = z.object({ code: z.string().trim().min(1) }).parse(req.body);
@@ -740,6 +747,7 @@ authRouter.post(
 authRouter.post(
   "/2fa/recovery-codes",
   requireAuth,
+  forbidDemo(),
   twoFactorLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const { code } = z.object({ code: z.string().trim().min(1) }).parse(req.body);
