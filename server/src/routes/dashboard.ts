@@ -8,6 +8,8 @@ import { acquisitionCost, dealNetProfit, dealSalePrice, profitAtAsk } from "../d
 import { avgMoney, roundMoney, sumMoney } from "../domain/money.js";
 import { ensureStages, TERMINAL_STAGE_KEYS } from "../domain/stages.js";
 import { allTimeSpan, isAllPeriod } from "../domain/period.js";
+import { TASK_PRIORITIES, taskAssignedNotice, taskEditSchema } from "../domain/tasks.js";
+import { editTask } from "../services/tasks.js";
 
 export const dashboardRouter = Router();
 // The dashboard surfaces the same sensitive financials as Reports (projected /
@@ -458,18 +460,23 @@ async function dueSoonTasksFor(org: string, meId: string, whose: string, manageA
 }
 
 const taskSelect = {
-  id: true, title: true, body: true, dueDate: true, priority: true, completedAt: true, createdAt: true,
+  id: true, kind: true, title: true, body: true, dueDate: true, priority: true, completedAt: true, createdAt: true,
+  contactId: true, assignedToId: true, createdById: true,
   assignedTo: { select: { id: true, name: true } },
   createdBy: { select: { id: true, name: true } },
   contact: { select: { id: true, firstName: true, lastName: true, entityName: true } },
 } as const;
 type TaskRow = {
-  id: string; title: string | null; body: string; dueDate: Date | null; priority: string | null; completedAt: Date | null; createdAt: Date;
+  id: string; kind: string; title: string | null; body: string; dueDate: Date | null; priority: string | null; completedAt: Date | null; createdAt: Date;
+  contactId: string | null; assignedToId: string | null; createdById: string | null;
   assignedTo: { id: string; name: string } | null; createdBy: { id: string; name: string } | null;
   contact: { id: string; firstName: string | null; lastName: string | null; entityName: string | null } | null;
 };
 function serializeTask(t: TaskRow, meId: string, manageAll: boolean) {
   const owner = t.assignedTo ?? t.createdBy;
+  // Anyone who manages contacts can close or edit any task; otherwise only its
+  // owner or author.
+  const mine = manageAll || owner?.id === meId || t.createdBy?.id === meId;
   return {
     id: t.id,
     title: t.title ?? t.body,
@@ -483,8 +490,8 @@ function serializeTask(t: TaskRow, meId: string, manageAll: boolean) {
     createdAt: t.createdAt,
     contactId: t.contact?.id ?? null,
     contactName: t.contact ? [t.contact.firstName, t.contact.lastName].filter(Boolean).join(" ") || t.contact.entityName || "Contact" : null,
-    // Anyone who manages contacts can close any task; otherwise only its owner or author.
-    canComplete: manageAll || owner?.id === meId || t.createdBy?.id === meId,
+    canComplete: mine,
+    canEdit: mine,
   };
 }
 
@@ -504,7 +511,6 @@ tasksRouter.get(
   }),
 );
 
-const TASK_PRIORITIES = ["LOW", "MEDIUM", "HIGH"] as const;
 const createTaskSchema = z.object({
   title: z.string().trim().min(1).max(200),
   details: z.string().trim().max(10_000).nullish(),
@@ -546,17 +552,8 @@ tasksRouter.post(
     });
     let notified = false;
     if (assignee.id !== me.id) {
-      const pr = data.priority[0] + data.priority.slice(1).toLowerCase();
-      await prisma.notification.create({
-        data: {
-          organizationId: org,
-          userId: assignee.id,
-          type: "task_assigned",
-          title: `New task: ${data.title.slice(0, 80)}`,
-          body: `${me.name} assigned you a task · ${pr} priority · due ${data.dueDate.slice(5, 7)}/${data.dueDate.slice(8, 10)}/${data.dueDate.slice(0, 4)}.`,
-          link: `/?task=${created.id}`,
-        },
-      });
+      const notice = taskAssignedNotice({ id: created.id, title: data.title, priority: data.priority, dueDate: due, contactId: null }, me.name);
+      await prisma.notification.create({ data: { organizationId: org, userId: assignee.id, ...notice } });
       notified = true;
     }
     res.status(201).json({ ...serializeTask(created, me.id, canManageTasks(req)), notified });
@@ -580,24 +577,27 @@ tasksRouter.get(
   }),
 );
 
-/** Complete / reopen a task from the Dashboard (contact or standalone). */
+/**
+ * Edit a task (contact or standalone) from the task form — title, details, due
+ * date, priority, assignee, status — or just complete / reopen it (the
+ * widget's checkbox sends only `completed`). Same validation as creating it;
+ * the shared write path keeps its due alert and assignment notice in step.
+ */
 tasksRouter.patch(
   "/:id",
   asyncHandler(async (req: AuthedRequest, res) => {
-    const org = orgId(req);
-    const { completed } = z.object({ completed: z.boolean() }).parse(req.body);
+    const me = req.user!;
+    const edit = taskEditSchema.parse(req.body);
     const t = await findTask(req, req.params.id);
-    const view = serializeTask(t, req.user!.id, canManageTasks(req));
-    if (!view.canComplete) throw new HttpError(403, "Only the task's owner or a contact manager can complete it");
-    const updated = await prisma.contactActivity.update({
-      where: { id: t.id },
-      data: { completedAt: completed ? new Date() : null },
-      select: taskSelect,
+    const manageAll = canManageTasks(req);
+    if (!serializeTask(t, me.id, manageAll).canEdit) throw new HttpError(403, "Only the task's owner or a contact manager can change it");
+    const { saved, notified } = await editTask({
+      org: orgId(req),
+      editor: { id: me.id, name: me.name },
+      task: t,
+      edit,
+      save: (data) => prisma.contactActivity.update({ where: { id: t.id }, data, select: taskSelect }),
     });
-    // Completing a task retires its due-alert from every bell immediately.
-    if (completed) {
-      await prisma.notification.deleteMany({ where: { organizationId: org, type: "task_due", link: { contains: `task=${t.id}` } } });
-    }
-    res.json(serializeTask(updated, req.user!.id, canManageTasks(req)));
+    res.json({ ...serializeTask(saved, me.id, manageAll), notified });
   }),
 );

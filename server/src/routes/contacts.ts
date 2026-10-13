@@ -7,6 +7,8 @@ import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest }
 import { parse } from "csv-parse/sync";
 import { LIST_LIMIT, MAX_CSV_CHARS } from "../config.js";
 import type { Contact, ContactActivity, ContactList, User } from "@prisma/client";
+import { TASK_PRIORITIES, isTaskKind, taskEditSchema } from "../domain/tasks.js";
+import { editTask } from "../services/tasks.js";
 
 /**
  * Acquisitions — Contacts.
@@ -202,8 +204,6 @@ contactsRouter.delete(
 export const ACTIVITY_KINDS = ["NOTE", "CALL", "EMAIL", "SMS", "TASK", "REMINDER"] as const;
 export const CALL_DISPOSITIONS = ["Connected", "No Answer", "Voicemail", "Bad Number", "Callback Requested"] as const;
 
-export const TASK_PRIORITIES = ["LOW", "MEDIUM", "HIGH"] as const;
-
 // Optional note background colors (soft pastels in the client). Named keys, not
 // hex — the client owns the exact per-theme shades.
 export const NOTE_COLORS = ["yellow", "blue", "green", "purple", "pink", "orange"] as const;
@@ -320,7 +320,10 @@ contactsRouter.post(
   }),
 );
 
-// Toggle completion (tasks) / pin, or edit the body.
+// Edit an activity. Tasks and reminders go through the shared task write path
+// (the task form: title, details, due date, priority, assignee, status — same
+// rules as creating one, and their due alerts stay in step); notes and logged
+// calls / emails / texts can be pinned, recoloured, or have their text edited.
 contactsRouter.patch(
   "/:id/activities/:aid",
   requirePermission("manageContacts"),
@@ -328,37 +331,33 @@ contactsRouter.patch(
     const c = await findContact(orgId(req), req.params.id);
     const existing = await prisma.contactActivity.findFirst({ where: { id: req.params.aid, contactId: c.id } });
     if (!existing) throw new HttpError(404, "Activity not found");
+    if (isTaskKind(existing.kind)) {
+      const { saved } = await editTask({
+        org: orgId(req),
+        editor: { id: req.user!.id, name: req.user!.name },
+        task: { ...existing, contact: c },
+        edit: taskEditSchema.parse(req.body),
+        save: (data) => prisma.contactActivity.update({ where: { id: existing.id }, data, include: authorInclude }),
+      });
+      res.json(serializeActivity(saved));
+      return;
+    }
     const data = z.object({
       title: z.string().trim().min(1).max(200).optional(),
       body: z.string().trim().min(1).max(10_000).optional(),
-      completed: z.boolean().optional(),
       pinned: z.boolean().optional(),
-      dueDate: dateField.optional(),
-      priority: z.enum(TASK_PRIORITIES).nullish(),
-      assignedToId: z.string().nullish().optional(),
       color: z.enum(NOTE_COLORS).nullish().optional(),
     }).parse(req.body);
-    if (data.assignedToId !== undefined) await checkAssignee(orgId(req), data.assignedToId);
     const updated = await prisma.contactActivity.update({
       where: { id: existing.id },
       data: {
         ...(data.title !== undefined ? { title: data.title } : {}),
         ...(data.body !== undefined ? { body: data.body } : {}),
-        ...(data.completed !== undefined ? { completedAt: data.completed ? new Date() : null } : {}),
         ...(data.pinned !== undefined ? { pinned: data.pinned } : {}),
-        ...(data.dueDate !== undefined ? { dueDate: data.dueDate } : {}),
-        ...(data.priority !== undefined ? { priority: data.priority } : {}),
-        ...(data.assignedToId !== undefined ? { assignedToId: data.assignedToId } : {}),
         ...(data.color !== undefined ? { color: data.color } : {}),
       },
       include: authorInclude,
     });
-    // Completing a task retires its due-alert from every bell immediately.
-    if (data.completed) {
-      await prisma.notification.deleteMany({
-        where: { organizationId: orgId(req), type: "task_due", link: { contains: `task=${existing.id}` } },
-      });
-    }
     res.json(serializeActivity(updated));
   }),
 );

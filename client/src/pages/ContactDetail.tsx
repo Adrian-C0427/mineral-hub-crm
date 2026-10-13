@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   Bell, CheckSquare, ChevronDown, ChevronLeft, ChevronRight,
   Mail, MapPin, MessageSquare, Palette, Pencil, Phone, Pin, Plus, Search, Send, StickyNote, Trash2, X,
@@ -10,6 +10,8 @@ import { Spinner, Banner, ConfirmDelete, EmptyState, showToast, UserChip, ChipLi
 import { Select } from "../components/Select";
 import { DateField } from "../components/DateField";
 import { Avatar, Segmented, Tag } from "../components/kit";
+import { TaskFormModal } from "../components/TaskForm";
+import { contactTaskValues, taskEditBody } from "../lib/tasks";
 import { fmtDate } from "../lib/format";
 import { type ContactRow, TYPES, STATUSES, PREFERRED_CONTACTS, preferredContactLabel, typeLabel, TypeTag, StatusTag } from "./Contacts";
 import { formatPhone, formatPhoneAsYouType, normalizePhone } from "../lib/phone";
@@ -836,6 +838,21 @@ function SidePanel({ contact, activities, canManage, onChanged, users, phoneTab 
   // Completed tasks fold into a group; a ?task deep link shows them so the
   // linked task is on screen whatever its state.
   const [showDone, setShowDone] = useState(openedOnTask);
+  // The task / reminder open in the task form (edit mode). A `?task=<id>`
+  // deep link (Tasks widget, task notifications, Calendar) opens it straight
+  // away for anyone who can edit; closing the form drops the parameter.
+  const [editing, setEditing] = useState<ContactActivityRow | null>(null);
+  const [params, setParams] = useSearchParams();
+  const linkedTask = params.get("task");
+  useEffect(() => {
+    if (!linkedTask || !canManage) return;
+    const a = activities.find((x) => x.id === linkedTask && (x.kind === "TASK" || x.kind === "REMINDER"));
+    if (a) setEditing(a);
+  }, [linkedTask, activities, canManage]);
+  const closeEditor = () => {
+    setEditing(null);
+    if (params.has("task")) { const next = new URLSearchParams(params); next.delete("task"); setParams(next, { replace: true }); }
+  };
 
   const notes = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -871,12 +888,25 @@ function SidePanel({ contact, activities, canManage, onChanged, users, phoneTab 
     onChanged();
   };
 
+  // Clicking a task / reminder (or its pencil) opens it in the task form.
+  const openProps = (a: ContactActivityRow) => canManage ? {
+    className: "cw-task-main editable", role: "button", tabIndex: 0, title: `Edit ${a.kind === "REMINDER" ? "reminder" : "task"}`,
+    onClick: () => setEditing(a),
+    onKeyDown: (e: React.KeyboardEvent) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setEditing(a); } },
+  } : { className: "cw-task-main" };
+  const rowActs = (a: ContactActivityRow) => canManage && (
+    <span className="cw-note-acts">
+      <button className="cw-ibtn" title="Edit" aria-label="Edit" onClick={() => setEditing(a)}><Pencil size={13} /></button>
+      <button className="cw-ibtn del" title="Delete" aria-label="Delete" onClick={() => void remove(a)}><X size={13} /></button>
+    </span>
+  );
+
   const taskRow = (a: ContactActivityRow) => {
     const p = TASK_PRIORITIES.find((x) => x.v === a.priority);
     return (
       <div key={a.id} className={`cw-task ${a.completedAt ? "done" : ""}`}>
         <input type="checkbox" checked={!!a.completedAt} disabled={!canManage} onChange={() => void update(a, { completed: !a.completedAt })} aria-label={`Complete ${a.body}`} />
-        <div className="cw-task-main">
+        <div {...openProps(a)}>
           <div className="cw-task-title">{a.title ?? a.body}</div>
           {a.title && <div className="cw-task-sub">{a.body}</div>}
           <div className="cw-task-chips">
@@ -885,7 +915,7 @@ function SidePanel({ contact, activities, canManage, onChanged, users, phoneTab 
             {a.assignedTo && <span className="cw-task-who"><UserChip user={a.assignedTo} size={18} /></span>}
           </div>
         </div>
-        {canManage && <button className="cw-ibtn del" title="Delete" aria-label="Delete" onClick={() => void remove(a)}><X size={13} /></button>}
+        {rowActs(a)}
       </div>
     );
   };
@@ -1026,12 +1056,12 @@ function SidePanel({ contact, activities, canManage, onChanged, users, phoneTab 
                 {reminders.map((a) => (
                   <div key={a.id} className="cw-task cw-reminder">
                     <span className="cw-rem-ico"><Bell size={12} /></span>
-                    <div className="cw-task-main">
+                    <div {...openProps(a)}>
                       <div className="cw-task-title">{a.title ?? a.body}</div>
                       {a.title && <div className="cw-task-sub">{a.body}</div>}
                       {a.dueDate && <div className="cw-task-chips"><DueChip iso={a.dueDate} done={!!a.completedAt} /></div>}
                     </div>
-                    {canManage && <button className="cw-ibtn del" title="Delete" aria-label="Delete" onClick={() => void remove(a)}><X size={13} /></button>}
+                    {rowActs(a)}
                   </div>
                 ))}
               </>
@@ -1059,6 +1089,22 @@ function SidePanel({ contact, activities, canManage, onChanged, users, phoneTab 
           </>
         )}
       </div>
+
+      {editing && (() => {
+        const kind = editing.kind === "REMINDER" ? "REMINDER" : "TASK";
+        return (
+          <TaskFormModal mode="edit" kind={kind} initial={contactTaskValues(editing)} users={users}
+            assigneeName={editing.assignedTo?.name ?? editing.createdBy?.name} detailsRequired
+            subtitle={<>On {contact.name || contact.entityName || "this contact"}</>}
+            onClose={closeEditor}
+            onSubmit={async (v) => {
+              await api.patch(`/contacts/${contact.id}/activities/${editing.id}`, taskEditBody(kind, v));
+              closeEditor();
+              onChanged();
+              showToast(kind === "TASK" ? "Task updated." : "Reminder updated.");
+            }} />
+        );
+      })()}
     </aside>
   );
 }

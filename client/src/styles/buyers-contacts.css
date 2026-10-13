@@ -567,6 +567,10 @@
 .cw-wrap .cw-task { display: flex; align-items: flex-start; gap: 10px; padding: 11px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface); }
 .cw-wrap .cw-task input[type="checkbox"] { width: 18px; height: 18px; border-radius: 5px; margin-top: 1px; flex: none; }
 .cw-task-main { flex: 1; min-width: 0; }
+/* Click a task / reminder to open it in the task form. */
+.cw-task-main.editable { cursor: pointer; border-radius: var(--radius-sm); }
+.cw-task-main.editable:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.cw-wrap .cw-task-main.editable:hover .cw-task-title { color: var(--accent-ink); }
 .cw-wrap .cw-task-title { font-size: 13.5px; font-weight: 500; color: var(--ink); overflow-wrap: anywhere; }
 .cw-wrap .cw-task.done .cw-task-title { text-decoration: line-through; color: var(--ink-4); }
 .cw-task-sub { margin-top: 2px; font-size: 12.5px; color: var(--ink-3); overflow-wrap: anywhere; }
