@@ -178,7 +178,11 @@ export interface HighLevelScopeSettings {
   tags: { name: string; texted: number }[];
   pipelines: { id: string; name: string; texted: number }[];
   counts: LineCounts;
+  /** The form's other settings as stored now (the page's integration list may be older). */
   pricePerSegment: number | null;
+  responseWindowDays: number;
+  crmTagsEnabled: boolean;
+  notes: string;
 }
 
 export type TagLine = "minerals" | "realEstate" | "neither";
@@ -232,4 +236,44 @@ export function parsePrice(input: string): number | null | "invalid" {
   const v = Number(t);
   if (!Number.isFinite(v) || v < 0 || v > 1) return "invalid";
   return Math.round(v * 1_000_000) / 1_000_000;
+}
+
+/** The Configure form's settings besides the Minerals filter, as the form holds them. */
+export interface ConfigureFields { price: string; windowDays: string; notes: string; crmTags: boolean }
+
+/** Stored settings → form fields. */
+export function configureFields(c: { pricePerSegment?: number | null; responseWindowDays?: number; notes?: string; crmTagsEnabled?: boolean }): ConfigureFields {
+  return {
+    price: c.pricePerSegment == null ? "" : String(c.pricePerSegment),
+    windowDays: String(c.responseWindowDays ?? 30),
+    notes: c.notes ?? "",
+    crmTags: !!c.crmTagsEnabled,
+  };
+}
+
+/**
+ * The form opens with the page's (possibly older) settings; when the fresh
+ * stored ones arrive they become its starting point, and every field the
+ * admin hasn't edited yet shows them. An edit already made is kept.
+ */
+export function adoptStored(form: { loaded: ConfigureFields; now: ConfigureFields }, stored: ConfigureFields): { loaded: ConfigureFields; now: ConfigureFields } {
+  const pick = <K extends keyof ConfigureFields>(k: K): ConfigureFields[K] => (form.now[k] === form.loaded[k] ? stored[k] : form.now[k]);
+  return { loaded: stored, now: { price: pick("price"), windowDays: pick("windowDays"), notes: pick("notes"), crmTags: pick("crmTags") } };
+}
+
+/**
+ * The settings to save: only what the admin changed from the starting point,
+ * so a field they didn't touch never overwrites a value saved meanwhile in
+ * another tab or by another admin. (The form checks the price before saving.)
+ */
+export function configureChanges(loaded: ConfigureFields, now: ConfigureFields): {
+  pricePerSegment?: number | null; responseWindowDays?: number; notes?: string; crmTagsEnabled?: boolean;
+} {
+  const out: ReturnType<typeof configureChanges> = {};
+  const price = parsePrice(now.price);
+  if (price !== "invalid" && price !== parsePrice(loaded.price)) out.pricePerSegment = price;
+  if (now.windowDays !== loaded.windowDays) out.responseWindowDays = Number(now.windowDays);
+  if (now.notes !== loaded.notes) out.notes = now.notes;
+  if (now.crmTags !== loaded.crmTags) out.crmTagsEnabled = now.crmTags;
+  return out;
 }

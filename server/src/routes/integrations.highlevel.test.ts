@@ -380,10 +380,22 @@ describe("Minerals filter options and preview", () => {
       pipelines: [{ id: "pMin", name: "Minerals", texted: 1 }, { id: "pRE", name: "On-Market", texted: 1 }],
       counts: { texted: 5, minerals: 3, realEstate: 0, unclassified: 2 },
       pricePerSegment: null,
+      responseWindowDays: 30,
+      crmTagsEnabled: false,
+      notes: "",
     });
     // Texted people only: the query asks for contacts with at least one text sent, and live opportunities.
     expect(db.calls["highLevelContact.findMany"][0]).toMatchObject({ where: { organizationId: ORG, outboundTotal: { gt: 0 } } });
     expect(db.calls["highLevelOpportunity.findMany"][0]).toMatchObject({ where: { organizationId: ORG, deletedInHl: false } });
+  });
+
+  it("GET /highlevel/scope returns the form's other settings as stored now (the page's list may be older)", async () => {
+    db.results["integration.findUnique"] = row({
+      locationId: LOC, hlPipelines: PIPES, hlTags: [], hlSync: { phase: "live" },
+      pricePerSegment: 0.0091, responseWindowDays: 14, crmTagsEnabled: true, notes: "Owner's key",
+    });
+    const r = await call("GET", "/highlevel/scope");
+    expect(r.body).toMatchObject({ pricePerSegment: 0.0091, responseWindowDays: 14, crmTagsEnabled: true, notes: "Owner's key" });
   });
 
   it("POST /highlevel/scope-preview splits texted people under a draft filter without saving it", async () => {

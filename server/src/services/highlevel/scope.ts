@@ -10,7 +10,9 @@
  */
 import { prisma } from "../../db.js";
 import { classifyContact, normalizeTag, suggestScope, type SmsScope } from "../../domain/smsScope.js";
-import { readPipelines, readTags, effectiveScope, pricePerSegmentOf, type HlPipelineRef } from "./mapping.js";
+import {
+  readPipelines, readTags, effectiveScope, pricePerSegmentOf, responseWindowOf, crmTagsEnabledOf, type HlPipelineRef,
+} from "./mapping.js";
 
 export interface TextedPerson { tags: string[]; pipelineIds: string[] }
 
@@ -72,7 +74,16 @@ export async function textedPeople(organizationId: string): Promise<TextedPerson
   return contacts.map((c) => ({ tags: c.tags, pipelineIds: pipelinesOf.get(c.hlId) ?? [] }));
 }
 
-/** GET /api/integrations/highlevel/scope — what the Configure form needs. */
+function notesOf(config: unknown): string {
+  const n = config && typeof config === "object" ? (config as Record<string, unknown>).notes : undefined;
+  return typeof n === "string" ? n : "";
+}
+
+/**
+ * GET /api/integrations/highlevel/scope — what the Configure form needs,
+ * including its other settings as stored NOW: the page's integration list may
+ * be older (another tab or admin saved since), and the form starts from these.
+ */
 export async function scopeSettings(organizationId: string, config: unknown) {
   const people = await textedPeople(organizationId);
   const pipelines = readPipelines(config);
@@ -84,5 +95,8 @@ export async function scopeSettings(organizationId: string, config: unknown) {
     ...scopeOptionsFrom(people, readTags(config), pipelines),
     counts: countLines(people, scope),
     pricePerSegment: pricePerSegmentOf(config),
+    responseWindowDays: responseWindowOf(config),
+    crmTagsEnabled: crmTagsEnabledOf(config),
+    notes: notesOf(config),
   };
 }

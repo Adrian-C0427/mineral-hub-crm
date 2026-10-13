@@ -6,6 +6,7 @@ import { describe, it, expect } from "vitest";
 import {
   previewText, sizeText, importProgress, importingText, totalsText, lastRunText, RESPONSE_WINDOW_CHOICES, HL_SCOPES,
   tagLine, setTagLine, togglePipeline, filterTags, previewCountsText, parsePrice, missingScopesText, type SmsScope,
+  configureFields, adoptStored, configureChanges,
 } from "../src/lib/highlevel";
 
 describe("HighLevel card text", () => {
@@ -122,5 +123,35 @@ describe("crmTagsText", () => {
     expect(crmTagsText({ ...t, working: true, pending: 3_100 })?.text).toBe("Tagging contacts in HighLevel: 3,100 contacts left to check.");
     expect(crmTagsText({ ...t, enabled: false, removing: true, working: true, pending: 40 })?.text).toBe("Removing Mineral Hub's tags from HighLevel: 40 contacts left.");
     expect(crmTagsText(t)?.text).toBe("SMS & Acquisition tags on 9,812 contacts in HighLevel · kept in step with Reports every 15 minutes.");
+  });
+});
+
+describe("HighLevel Configure form: never overwrite newer settings", () => {
+  // The page's integration list was loaded before the price was saved elsewhere.
+  const pageList = configureFields({ pricePerSegment: null, responseWindowDays: 30 });
+  const stored = configureFields({ pricePerSegment: 0.0091, responseWindowDays: 30, crmTagsEnabled: true, notes: "Owner's key" });
+
+  it("an unchanged price is not sent", () => {
+    expect(configureChanges(pageList, pageList)).toEqual({});
+    expect(configureChanges(stored, stored)).toEqual({});
+    // Same value typed differently is still unchanged.
+    expect(configureChanges(stored, { ...stored, price: "$0.00910" })).toEqual({});
+  });
+
+  it("sends only what the admin changed", () => {
+    expect(configureChanges(stored, { ...stored, windowDays: "14" })).toEqual({ responseWindowDays: 14 });
+    expect(configureChanges(stored, { ...stored, price: "" })).toEqual({ pricePerSegment: null });
+    expect(configureChanges(stored, { ...stored, price: "0.01", crmTags: false, notes: "" }))
+      .toEqual({ pricePerSegment: 0.01, crmTagsEnabled: false, notes: "" });
+    expect(configureChanges(stored, { ...stored, price: "abc" })).toEqual({});
+  });
+
+  it("shows the stored settings once they load, keeping any edit already made", () => {
+    const untouched = adoptStored({ loaded: pageList, now: pageList }, stored);
+    expect(untouched).toEqual({ loaded: stored, now: stored });
+    expect(configureChanges(untouched.loaded, untouched.now)).toEqual({}); // saving now can't wipe the price
+    const edited = adoptStored({ loaded: pageList, now: { ...pageList, windowDays: "60" } }, stored);
+    expect(edited.now).toEqual({ ...stored, windowDays: "60" });
+    expect(configureChanges(edited.loaded, edited.now)).toEqual({ responseWindowDays: 60 });
   });
 });
