@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  summarizeContact, touchRates, isOptOutReply, isReachedStatus, isUnconfirmedStatus, isSentStatus,
+  summarizeContact, touchRates, isOptOutReply, isReachedStatus, isUnconfirmedStatus, isSentStatus, isWrongNumberReply, smsSegments, carrierHealth, textingCost,
   type SmsMessageInput, type TouchOutcomeCount,
 } from "./smsMetrics.js";
 
@@ -114,5 +114,66 @@ describe("touchRates", () => {
 
   it("reports N/A (null) when nobody was reached", () => {
     expect(touchRates([])[0]).toMatchObject({ received: 0, rate: null, cumulativeRate: null });
+  });
+});
+
+describe("isWrongNumberReply", () => {
+  it.each(["Wrong number", "wrong #", "You have the wrong person", "No one by that name here", "No, this isn't Robert", "This is not his number", "you got the wrong guy"])(
+    "treats %j as a wrong number", (s) => expect(isWrongNumberReply(s)).toBe(true));
+  it.each(["Not interested", "Who is this?", "This is not a good time, call me Monday", "What's the offer?", "", null])(
+    "treats %j as a normal reply", (s) => expect(isWrongNumberReply(s)).toBe(false));
+});
+
+describe("smsSegments", () => {
+  it("counts plain text in 160 / 153 character segments", () => {
+    expect(smsSegments("")).toBe(1);
+    expect(smsSegments("a".repeat(160))).toBe(1);
+    expect(smsSegments("a".repeat(161))).toBe(2);
+    expect(smsSegments("a".repeat(306))).toBe(2);
+    expect(smsSegments("a".repeat(307))).toBe(3);
+  });
+  it("counts extension characters twice and switches to Unicode for emoji", () => {
+    expect(smsSegments("€".repeat(80))).toBe(1);
+    expect(smsSegments("€".repeat(81))).toBe(2);
+    expect(smsSegments("Hi 👋")).toBe(1);
+    expect(smsSegments("a".repeat(69) + "😀")).toBe(2); // 71 UTF-16 units
+  });
+});
+
+describe("wrong numbers and speed to lead", () => {
+  const wrong = (days: number): SmsMessageInput => ({ ...inn(days), wrongNumber: true });
+  const person = (days: number, user = "u5"): SmsMessageInput => ({ ...out(days, "delivered", user), source: "app" });
+  const auto = (days: number): SmsMessageInput => ({ ...out(days, "delivered", null), source: "workflow" });
+
+  it("a wrong-number reply is not a response and the outreach carries on", () => {
+    const s = summarizeContact([out(0), wrong(1), out(5), out(9), inn(10)]);
+    expect(s).toMatchObject({ outcome: "RESPONDED", touches: 3, wrongNumberAt: at(1), wrongNumberTouch: 1 });
+  });
+
+  it("only wrong numbers → WRONG_NUMBER, never a response", () => {
+    expect(summarizeContact([out(0), wrong(1), out(3)])).toMatchObject({ outcome: "WRONG_NUMBER", touches: 2, responseSeconds: null });
+  });
+
+  it("an opt-out worded as a wrong number is still an opt-out", () => {
+    expect(summarizeContact([out(0), { ...wrong(1), optOut: true }]).outcome).toBe("OPTED_OUT");
+  });
+
+  it("measures the reply → first text a team member typed, skipping automations", () => {
+    const s = summarizeContact([out(0), inn(1), auto(1.001), person(1.5, "u9")]);
+    expect(s.replyAnsweredSeconds).toBe(Math.round(0.5 * 86_400));
+    expect(s.answeredByHlUserId).toBe("u9");
+    expect(summarizeContact([out(0), inn(1), auto(2)]).replyAnsweredSeconds).toBeNull();
+  });
+});
+
+describe("carrierHealth and textingCost", () => {
+  it("warns only on a real sample that is well above normal", () => {
+    expect(carrierHealth({ sent: 500, failed: 100, reachedContacts: 400, optOuts: 30 }).warnings).toEqual(["optOut", "failure"]);
+    expect(carrierHealth({ sent: 500, failed: 20, reachedContacts: 400, optOuts: 8 }).warnings).toEqual([]);
+    expect(carrierHealth({ sent: 40, failed: 30, reachedContacts: 10, optOuts: 9 }).warnings).toEqual([]);
+  });
+  it("prices segments and stays N/A without a price", () => {
+    expect(textingCost(34_556, 0.0091)).toBeCloseTo(314.4596);
+    expect(textingCost(10, null)).toBeNull();
   });
 });
