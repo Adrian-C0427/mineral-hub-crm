@@ -47,7 +47,7 @@ import { logActivity } from "../activityLog.js";
 import {
   summarizeContact, carrierHealth, FAILED_STATUSES, PENDING_STATUSES, type SmsMessageInput, type HealthInput,
 } from "../../domain/smsMetrics.js";
-import { classifyContact, suggestScope } from "../../domain/smsScope.js";
+import { classifyContact, suggestScope, normalizeTag } from "../../domain/smsScope.js";
 import { desiredCrmTags, tagDiff, CRM_TAGS } from "../../domain/smsTags.js";
 import { HighLevelClient, HighLevelError, HL_AUTH_MESSAGE, type HlExportPage, type HlOpportunity } from "./client.js";
 import {
@@ -863,6 +863,11 @@ const CRM_TAG_CONCURRENCY = 2;
  * recomputed waits a run. A refused write (the key lacks contacts.write)
  * stops this step for the run and is shown on the card — the rest of the
  * sync carries on.
+ *
+ * Two writes in flight that both add a tag the location doesn't have yet
+ * each CREATE it — a duplicate entry in HighLevel's Settings → Tags (seen on
+ * the first production run). So in each run the first write that adds a
+ * given tag runs alone; once it has, writes with that tag run in parallel.
  */
 async function writeCrmTags(ctx: Ctx): Promise<void> {
   const cur = await prisma.integration.findUnique({ where: { id: ctx.rowId }, select: { config: true } });
@@ -887,6 +892,13 @@ async function writeCrmTags(ctx: Ctx): Promise<void> {
   let refused = false;
   let failure: unknown = null;
   let next = 0;
+  const written = new Set<string>(); // tags added by a finished write this run — they exist now
+  let solo: Promise<unknown> = Promise.resolve();
+  const alone = (fn: () => Promise<void>): Promise<void> => {
+    const run = solo.then(fn);
+    solo = run.catch(() => undefined);
+    return run;
+  };
   const worker = async () => {
     while (!refused && !failure && next < batch.length && timeLeft(ctx)) {
       const c = batch[next++];
@@ -895,8 +907,12 @@ async function writeCrmTags(ctx: Ctx): Promise<void> {
       try {
         if (add.length || remove.length) {
           checkDailyBudget(ctx);
-          if (add.length) await ctx.client.addContactTags(c.hlId, add);
-          if (remove.length) await ctx.client.removeContactTags(c.hlId, remove);
+          const write = async () => {
+            if (add.length) await ctx.client.addContactTags(c.hlId, add);
+            if (remove.length) await ctx.client.removeContactTags(c.hlId, remove);
+            for (const t of add) written.add(normalizeTag(t));
+          };
+          await (add.some((t) => !written.has(normalizeTag(t))) ? alone(write) : write());
           ctx.stats.crmTagged++;
         }
         const removed = new Set(remove.map((t) => t.toLowerCase()));
