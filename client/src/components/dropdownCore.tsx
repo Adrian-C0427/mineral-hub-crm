@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { ChevronDown } from "lucide-react";
-import { layoutRect, layoutViewport } from "../lib/viewport";
+import { layoutRect, layoutViewport, popupX } from "../lib/viewport";
 import { PHONE_QUERY } from "../lib/mobile";
 
 /** Phones only: the visible viewport (it shrinks when the on-screen keyboard
@@ -53,11 +53,21 @@ export function useMenuPosition(
      * no maxHeight clamp is applied — the popup must never be clipped.
      */
     fitContent?: boolean;
+    /**
+     * Fixed popup width (px) instead of the anchor's — for popovers wider than
+     * their trigger. Shrinks to fit narrow viewports.
+     */
+    width?: number;
+    /** "end" lines the popup's right edge up with the anchor's (still clamped
+     *  inside the viewport); the default lines up the left edges. */
+    align?: "start" | "end";
   },
 ) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<CSSProperties | null>(null);
   const fitContent = opts?.fitContent ?? false;
+  const fixedW = opts?.width;
+  const alignEnd = opts?.align === "end";
   // The open direction is decided ONCE per open and then locked. Re-deciding
   // on every reposition made menus flip mid-interaction (picking an option
   // shrinks the list → the flip math changes → the menu jumps). Locked, the
@@ -74,7 +84,7 @@ export function useMenuPosition(
       // Viewport in layout px — same coordinate space as layoutRect and the
       // fixed portal, so edge clamping is exact under the interface zoom.
       const { vw, vh } = layoutViewport();
-      const left = Math.max(EDGE, Math.min(r.left, vw - r.width - EDGE));
+      const { left, width: w } = popupX(r, vw, { width: fixedW, align: alignEnd ? "end" : "start", edge: EDGE });
       const vv = phoneVisualViewport(); // phones render unzoomed, so vv px = layout px
       const visTop = vv ? vv.offsetTop : 0;
       const visBottom = vv ? Math.min(vh, vv.offsetTop + vv.height) : vh;
@@ -87,8 +97,8 @@ export function useMenuPosition(
       // pass below re-runs place() with the menu measurable and locks then.
       if (dirRef.current == null && !menuRef.current) {
         setPos(fitContent
-          ? { position: "fixed", top: r.bottom + GAP, left, width: r.width }
-          : { position: "fixed", top: r.bottom + GAP, left, ...grow(r.width, left, vw), maxHeight: Math.max(80, Math.min(MENU_MAX_H, below)) });
+          ? { position: "fixed", top: r.bottom + GAP, left, width: w }
+          : { position: "fixed", top: r.bottom + GAP, left, ...grow(w, left, vw), maxHeight: Math.max(80, Math.min(MENU_MAX_H, below)) });
         return;
       }
       // Open downward whenever space permits: the full menu fits below, OR
@@ -103,9 +113,9 @@ export function useMenuPosition(
         const contentH = menuRef.current?.scrollHeight ?? MENU_MAX_H;
         if (dirRef.current == null) dirRef.current = below >= contentH || above < contentH || below >= above ? "down" : "up";
         if (dirRef.current === "down") {
-          setPos({ position: "fixed", top: r.bottom + GAP, left, width: r.width });
+          setPos({ position: "fixed", top: r.bottom + GAP, left, width: w });
         } else {
-          setPos({ position: "fixed", bottom: vh - r.top + GAP, left, width: r.width });
+          setPos({ position: "fixed", bottom: vh - r.top + GAP, left, width: w });
         }
         return;
       }
@@ -113,9 +123,9 @@ export function useMenuPosition(
       const fitsBelow = below >= Math.min(MENU_MAX_H, menuRef.current?.scrollHeight ?? MENU_MAX_H);
       if (dirRef.current == null) dirRef.current = fitsBelow || below >= MIN_USABLE || below >= above ? "down" : "up";
       if (dirRef.current === "down") {
-        setPos({ position: "fixed", top: r.bottom + GAP, left, ...grow(r.width, left, vw), maxHeight: Math.max(80, Math.min(MENU_MAX_H, below)) });
+        setPos({ position: "fixed", top: r.bottom + GAP, left, ...grow(w, left, vw), maxHeight: Math.max(80, Math.min(MENU_MAX_H, below)) });
       } else {
-        setPos({ position: "fixed", bottom: vh - r.top + GAP, left, ...grow(r.width, left, vw), maxHeight: Math.max(80, Math.min(MENU_MAX_H, above)) });
+        setPos({ position: "fixed", bottom: vh - r.top + GAP, left, ...grow(w, left, vw), maxHeight: Math.max(80, Math.min(MENU_MAX_H, above)) });
       }
     };
     place();
@@ -148,7 +158,7 @@ export function useMenuPosition(
       window.removeEventListener("scroll", onScroll, true);
       ro?.disconnect();
     };
-  }, [open, anchorRef, fitContent]);
+  }, [open, anchorRef, fitContent, fixedW, alignEnd]);
 
   return { menuRef, pos };
 }

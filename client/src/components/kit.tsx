@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
 import { userAvatarColor, avatarColor } from "../lib/avatarColor";
 
@@ -43,11 +43,13 @@ export function StatStrip({ cells, className = "", min = 180 }: { cells: StatCel
 /** Segmented control. `accent` fills the active option with the accent colour
  *  (period selectors); the default is the neutral tray used for filters. */
 export interface SegOption<T extends string> { value: T; label: ReactNode; count?: number | string; dot?: string; title?: string }
-export function Segmented<T extends string>({ options, value, onChange, accent = false, className = "", ariaLabel }: {
+export function Segmented<T extends string>({ options, value, onChange, accent = false, className = "", ariaLabel, rootRef }: {
   options: SegOption<T>[]; value: T; onChange: (v: T) => void; accent?: boolean; className?: string; ariaLabel?: string;
+  /** The tray element — e.g. to anchor a popover to it. */
+  rootRef?: Ref<HTMLDivElement>;
 }) {
   return (
-    <div className={`seg ${accent ? "seg-accent" : ""} ${className}`} role="tablist" aria-label={ariaLabel}>
+    <div ref={rootRef} className={`seg ${accent ? "seg-accent" : ""} ${className}`} role="tablist" aria-label={ariaLabel}>
       {options.map((o) => (
         <button key={o.value} type="button" role="tab" aria-selected={o.value === value} title={o.title}
           className={`seg-item ${o.value === value ? "active" : ""}`} onClick={() => onChange(o.value)}>

@@ -167,6 +167,24 @@ input[type="radio"]:disabled { opacity: 0.5; cursor: not-allowed; }
 .datef-link.datef-clear { color: var(--ink-3); }
 .datef-link.datef-clear:hover { color: var(--ink); }
 
+/* DateRangePopover: custom reporting range (From / To, Cancel / Apply)
+   floating under a period selector. Same surface and mselIn entrance as the
+   other portaled menus; fades out the same way (EXIT_MS in the component). */
+.msel-menu.drp-pop { display: flex; flex-direction: column; gap: 10px; padding: 14px; overflow: visible; max-height: none; border-radius: var(--radius-lg); }
+.drp-pop:focus { outline: none; }
+.drp-pop.leaving { animation: drpOut 0.12s ease forwards; pointer-events: none; }
+@keyframes drpOut { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(-4px); } }
+.drp-fields { display: flex; flex-direction: column; gap: 8px; }
+.drp-field { display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: center; gap: 10px; }
+.drp-label { font-size: 12.5px; font-weight: 500; color: var(--ink-3); }
+.drp-msg { min-height: 18px; font-size: 12px; line-height: 18px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.drp-msg.error { color: var(--danger-ink); }
+.drp-foot { display: flex; justify-content: flex-end; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.drp-foot button.primary[aria-disabled="true"], .drp-foot button.primary[aria-disabled="true"]:hover {
+  background: var(--panel-2); border-color: var(--border); color: var(--text-dim); box-shadow: none; cursor: not-allowed;
+}
+@media (prefers-reduced-motion: reduce) { .drp-pop.leaving { animation: none; } }
+
 /* ---------------------------------------------------------------------------
    Money input (C6) and toolbar search field (C7)
    --------------------------------------------------------------------------- */
@@ -470,6 +488,9 @@ tfoot td { background: var(--surface-1); border-top: 1px solid var(--line); font
    --------------------------------------------------------------------------- */
 .modal-overlay, :root[data-theme="light"] .modal-overlay { background: var(--scrim); }
 .modal { border-color: var(--line-strong); border-radius: var(--radius-xl); box-shadow: var(--shadow-modal); }
+/* The dialog box takes focus on open when nothing inside asks for it (the
+   shared focus trap, components/ui.tsx); it is not a control, so no ring. */
+.modal:focus { outline: none; }
 :root[data-theme="light"] .modal { border-color: var(--line-strong); box-shadow: var(--shadow-modal); }
 .modal-footer { border-radius: 0 0 calc(var(--radius-xl) - 1px) calc(var(--radius-xl) - 1px); }
 .modal-header h3 { font-weight: 600; }
