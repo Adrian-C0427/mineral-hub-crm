@@ -395,8 +395,8 @@ export function SmsReportView({ allTime, range, filters, filterChips, execIcon, 
           <li><b>Texts sent</b> counts every text that went out in the period, including ones that failed. Texts that are still scheduled don’t count until they go out.</li>
           <li>
             <b>Reached</b> means HighLevel reported the text as delivered — or still shows it as “sent” with no delivery receipt either way.
-            Failed texts never count. Of the {num(data.notes.reachedTexts)} texts that reached people in this period,{" "}
-            {num(data.notes.unconfirmedTexts)} had no delivery receipt.
+            Failed texts never count. The response rates below count {num(data.notes.reachedTexts)} texts (each person’s texts up to
+            their first reply); {num(data.notes.unconfirmedTexts)} of them had no delivery receipt and are counted as reached.
           </li>
           <li>
             <b>Replied</b> means the person’s first text back came within <b>{data.windowDays} days</b> of our latest text. The response window

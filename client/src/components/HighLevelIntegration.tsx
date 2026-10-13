@@ -96,6 +96,10 @@ export function HighLevelConnectModal({ name, setupUrl, locationId, onClose, onC
   const [location, setLocation] = useState(locationId ?? "");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The setup steps make the form taller than the dialog, so a failed check's
+  // message would land below the fold — bring it into view.
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (error) errorRef.current?.scrollIntoView({ block: "nearest" }); }, [error]);
 
   async function connect() {
     if (!secret.trim()) { setError("Paste the Private Integration key from HighLevel."); return; }
@@ -140,7 +144,7 @@ export function HighLevelConnectModal({ name, setupUrl, locationId, onClose, onC
         Nothing is imported until you press <b>Start import</b>.
         {setupUrl && <> <a href={setupUrl} target="_blank" rel="noreferrer">HighLevel’s guide to Private Integrations ↗</a></>}
       </p>
-      {error && <div className="error-text">{error}</div>}
+      {error && <div ref={errorRef} className="error-text" role="alert">{error}</div>}
     </Modal>
   );
 }
