@@ -7,6 +7,9 @@
  *  Gross Fee    = accepted offer amount − our price
  *  Avg Deal Size= mean of accepted offer amounts on closed deals
  *  Win Rate     = closed ÷ (closed + dead) within a period
+ *  Implied Margin = (ask price − our price) ÷ our price — markup on cost
+ *
+ * Mirrored (the parts the client computes) in client/src/lib/metrics.ts.
  *
  * COST BASIS = ourPrice (our acquisition cost). Callers pass `ourPrice ?? askPrice`
  * (dealCostBasis) so pre-Our-Price deals (which recorded their cost in askPrice)
@@ -98,6 +101,35 @@ export function profitAtAsk(
 export function avg(nums: number[]): number {
   if (nums.length === 0) return 0;
   return nums.reduce((a, b) => a + b, 0) / nums.length;
+}
+
+/**
+ * Implied margin — the deal page header's "Implied margin" ("Asking price over
+ * our cost"): (ask − our price) ÷ our price, as a ratio (0.25 = +25%). The
+ * formula is kept as it has always been: markup on cost, closing costs NOT
+ * deducted — it describes the asking price, not a realized profit. Null when
+ * it can't be computed: either price missing, or Our Price not positive. It
+ * reads the deal's own Our Price — no dealCostBasis Ask fallback (that would
+ * read as a flat 0%) — and a missing price is never treated as $0.
+ */
+export function impliedMargin(askPrice: number | null | undefined, ourPrice: number | null | undefined): number | null {
+  if (askPrice == null || ourPrice == null || !Number.isFinite(askPrice) || !Number.isFinite(ourPrice) || !(ourPrice > 0)) return null;
+  return (askPrice - ourPrice) / ourPrice;
+}
+
+/**
+ * Average implied margin over a set of deals: the SIMPLE mean of each deal's
+ * own impliedMargin — every eligible deal weighs the same (not a
+ * dollar-weighted Σask ÷ Σcost), so it reads as "the typical deal's margin".
+ * Deals whose margin is null (a price missing, Our Price ≤ 0) are left out of
+ * the mean and the count alike. `deals` is how many margins were averaged;
+ * `value` is null (N/A) when none qualify.
+ */
+export function averageImpliedMargin(
+  deals: { askPrice: number | null; ourPrice: number | null }[],
+): { value: number | null; deals: number } {
+  const margins = deals.map((d) => impliedMargin(d.askPrice, d.ourPrice)).filter((m): m is number => m != null);
+  return { value: margins.length ? avg(margins) : null, deals: margins.length };
 }
 
 /** Per-buyer close rate. dealsWithOffer is the denominator (deals where buyer made an offer). */

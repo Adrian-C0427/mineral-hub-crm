@@ -16,6 +16,7 @@ import { useStages, stageColor, isOpportunityPipeline, type PipelineInfo } from 
 import { PipelineSettingsModal } from "../components/PipelineSettingsModal";
 import { OpportunityBoard } from "../components/OpportunityBoard";
 import { useBoardSync } from "../lib/useBoardSync";
+import { useBoardWheel } from "../lib/boardWheel";
 import type { DealSummary, Stage } from "../types";
 
 // The Pipeline shows only ACTIVE-lifecycle stages as columns. Closed and Dead
@@ -320,6 +321,8 @@ export function Pipeline() {
   });
   const deals = board.rows;
   const load = board.reload;
+  // Mouse wheel / trackpad routing between the board and its columns (lib/boardWheel.ts).
+  const kanbanRef = useBoardWheel();
 
   // While dragging, a rAF loop auto-scrolls whichever column body the pointer
   // hovers (near its top/bottom edge) and the board horizontally (near its
@@ -522,7 +525,7 @@ export function Pipeline() {
   };
 
   return (
-    <div className="page pl2-page">
+    <div className="page page-fill pl2-page">
       <div className="page-header pl-head">
         <div className="pl-head-main">
           <h1>Pipeline</h1>
@@ -564,7 +567,7 @@ export function Pipeline() {
         </div>
       )}
 
-      <div className={`kanban ${prefs.density === "compact" ? "compact" : ""} ${drag ? "dragging" : ""}`}>
+      <div ref={kanbanRef} className={`kanban ${prefs.density === "compact" ? "compact" : ""} ${drag ? "dragging" : ""}`}>
         {activeStages.length === 0 && (
           <div className="pl-nostages">
             <span className="pl-nostages-title">{selected.name} has no stages yet</span>

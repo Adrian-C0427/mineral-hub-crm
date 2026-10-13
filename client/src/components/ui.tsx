@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { prettyEnum } from "../lib/format";
 import { userAvatarColor, initialsOf } from "../lib/avatarColor";
-import { layoutRect, layoutViewport } from "../lib/viewport";
+import { layoutRect, layoutViewport, rootZoom } from "../lib/viewport";
 import { useStages } from "../stages";
 
 /**
@@ -30,11 +30,21 @@ function DialogLayer({ children }: { children: ReactNode }) {
   return createPortal(children, document.body);
 }
 
+/** Keyboard-reachable controls, in DOM (= tab) order. */
+const TABBABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex], [contenteditable="true"]';
+const tabbablesIn = (root: HTMLElement) =>
+  Array.from(root.querySelectorAll<HTMLElement>(TABBABLE)).filter((el) => el.tabIndex >= 0 && el.getClientRects().length > 0);
+
 function useDialogChrome(onClose: () => void, dirty?: boolean) {
   const id = useRef(Symbol("dialog")).current;
   const [attn, setAttn] = useState(0);
   const latest = useRef({ onClose, dirty });
   latest.current = { onClose, dirty };
+  /** The dialog box (.modal): focus is kept inside it while it's top-most. */
+  const dialogRef = useRef<HTMLDivElement>(null);
+  // Whatever had focus before the dialog mounted (read during the first
+  // render — by effect time an autoFocus field inside has already taken it).
+  const [opener] = useState(() => (document.activeElement instanceof HTMLElement ? document.activeElement : null));
 
   // requestClose("x") always closes; backdrop/esc respect the dirty guard.
   const requestClose = (source: "backdrop" | "esc" | "x") => {
@@ -44,25 +54,88 @@ function useDialogChrome(onClose: () => void, dirty?: boolean) {
 
   useEffect(() => {
     MODAL_STACK.push(id);
-    document.body.classList.add("modal-open");
+    const isTop = () => MODAL_STACK[MODAL_STACK.length - 1] === id;
+    if (MODAL_STACK.length === 1) {
+      // Locking the scroll removes a classic (non-overlay) page scrollbar,
+      // which widened the page under the dialog — the dashboard grid re-laid
+      // out behind the backdrop, and again on close. Pad the body by the
+      // scrollbar's width (in zoomed CSS px) so the page keeps its width.
+      const bar = window.innerWidth - document.documentElement.clientWidth;
+      if (bar > 0) document.body.style.paddingRight = `${bar / rootZoom()}px`;
+      document.body.classList.add("modal-open");
+    }
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      if (MODAL_STACK[MODAL_STACK.length - 1] !== id) return;
+      if (!isTop()) return;
       e.stopPropagation();
       if (latest.current.dirty) { setAttn((n) => n + 1); return; }
       latest.current.onClose();
     };
     document.addEventListener("keydown", onKey);
+
+    // Focus trap. Focus starts inside the dialog (an autoFocus field keeps it;
+    // otherwise the dialog box itself), Tab / Shift+Tab wrap around its
+    // controls, and focus can't drift back into the page behind the backdrop.
+    // Body-level popups the dialog opens (dropdown menus, calendars) live
+    // outside both and are left alone.
+    const appRoot = document.getElementById("root");
+    const box = dialogRef.current;
+    if (box && !box.contains(document.activeElement)) box.focus({ preventScroll: true });
+    const onTab = (e: KeyboardEvent) => {
+      const dlg = dialogRef.current;
+      if (e.key !== "Tab" || !dlg || !isTop()) return;
+      const a = document.activeElement;
+      const inside = !!a && dlg.contains(a);
+      if (!inside && a && a !== document.body && !appRoot?.contains(a)) return; // in a popup
+      const list = tabbablesIn(dlg);
+      if (list.length === 0) { e.preventDefault(); dlg.focus({ preventScroll: true }); return; }
+      const first = list[0], last = list[list.length - 1];
+      if (!inside || a === dlg) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+      else if (!e.shiftKey && a === last) { e.preventDefault(); first.focus(); }
+      else if (e.shiftKey && a === first) { e.preventDefault(); last.focus(); }
+    };
+    // Something in the page grabbing focus while the dialog is up hands it
+    // straight back to where it was in the dialog.
+    let lastInside = box && document.activeElement instanceof HTMLElement && box.contains(document.activeElement) ? document.activeElement : null;
+    const onFocusIn = (e: FocusEvent) => {
+      const dlg = dialogRef.current;
+      if (!dlg || !isTop() || !(e.target instanceof HTMLElement)) return;
+      if (dlg.contains(e.target)) { lastInside = e.target; return; }
+      if (!appRoot?.contains(e.target)) return;
+      (lastInside && dlg.contains(lastInside) ? lastInside : dlg).focus({ preventScroll: true });
+    };
+    // Capture phase: fields that stop key events from bubbling still wrap.
+    document.addEventListener("keydown", onTab, true);
+    document.addEventListener("focusin", onFocusIn);
     return () => {
       const i = MODAL_STACK.indexOf(id);
       if (i >= 0) MODAL_STACK.splice(i, 1);
-      if (MODAL_STACK.length === 0) document.body.classList.remove("modal-open");
+      if (MODAL_STACK.length === 0) {
+        document.body.classList.remove("modal-open");
+        document.body.style.removeProperty("padding-right");
+      }
       document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", onTab, true);
+      document.removeEventListener("focusin", onFocusIn);
+      // Hand focus back to what opened the dialog (a button, a chart bar), so
+      // keyboard users land where they were — unless focus has already moved
+      // on, or the opener is a text field (several open their menu on focus).
+      const a = document.activeElement;
+      if (opener && opener !== document.body && opener.isConnected && (!a || a === document.body)
+        && !opener.matches('input, textarea, select, [contenteditable="true"]')) {
+        opener.focus({ preventScroll: true });
+      }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+  // A blocked close re-mounts the box (key={attn}, to replay the pulse), which
+  // drops focus to <body>; put it back in the dialog.
+  useEffect(() => {
+    const box = dialogRef.current;
+    if (attn && box && !box.contains(document.activeElement)) box.focus({ preventScroll: true });
+  }, [attn]);
 
-  return { requestClose, attn };
+  return { requestClose, attn, dialogRef };
 }
 
 /* ---------------------------------------------------------------- toasts --
@@ -110,9 +183,14 @@ export function ToastHost() {
  * Prefers browser back (so the list's filters/sort/page/search survive) and
  * falls back to `fallback` on a deep link with no in-app history.
  */
-export function BackLink({ fallback }: { fallback: string }) {
+export function BackLink({ fallback, onFallback }: {
+  fallback: string;
+  /** Runs before going to `fallback` — e.g. select the board the record
+   *  belongs to, so a deep link's Back lands on that board. */
+  onFallback?: () => void;
+}) {
   const nav = useNavigate();
-  const go = () => { if (window.history.length > 1) nav(-1); else nav(fallback); };
+  const go = () => { if (window.history.length > 1) nav(-1); else { onFallback?.(); nav(fallback); } };
   return (
     <button type="button" className="back-link" onClick={go}>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
@@ -299,12 +377,14 @@ export function Modal({
    *  discarding the user's in-progress input; × and Cancel still close. */
   dirty?: boolean;
 }) {
-  const { requestClose, attn } = useDialogChrome(onClose, dirty);
+  const { requestClose, attn, dialogRef } = useDialogChrome(onClose, dirty);
   return (
     <DialogLayer>
     <div className="modal-overlay" onClick={() => requestClose("backdrop")}>
       <div
         key={attn} /* re-triggers the pulse animation on each blocked close */
+        ref={dialogRef}
+        tabIndex={-1}
         className={`modal ${wide ? "modal-wide" : ""} ${attn ? "modal-attn" : ""}`}
         role="dialog"
         aria-modal="true"
@@ -366,11 +446,11 @@ export function ConfirmDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
-  const { requestClose } = useDialogChrome(onCancel);
+  const { requestClose, dialogRef } = useDialogChrome(onCancel);
   return (
     <DialogLayer>
     <div className="modal-overlay" onClick={() => requestClose("backdrop")}>
-      <div className="modal" role="alertdialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div ref={dialogRef} tabIndex={-1} className="modal" role="alertdialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <ConfirmIcon danger={danger} />
           <h3>{title}</h3>
@@ -415,11 +495,11 @@ export function ConfirmDelete({
   const plural = count === 1 ? itemLabel : `${itemLabel}s`;
   const armed = typed.trim().toUpperCase() === "DELETE";
   // Typed text counts as dirty — a stray backdrop click shouldn't eat it.
-  const { requestClose, attn } = useDialogChrome(onCancel, typed.length > 0);
+  const { requestClose, attn, dialogRef } = useDialogChrome(onCancel, typed.length > 0);
   return (
     <DialogLayer>
     <div className="modal-overlay" onClick={() => requestClose("backdrop")}>
-      <div key={attn} className={`modal ${attn ? "modal-attn" : ""}`} role="alertdialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
+      <div key={attn} ref={dialogRef} tabIndex={-1} className={`modal ${attn ? "modal-attn" : ""}`} role="alertdialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <ConfirmIcon danger />
           <h3>Confirm deletion</h3>

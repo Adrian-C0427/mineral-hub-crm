@@ -244,6 +244,22 @@
 }
 .rs-map-tip strong { margin-bottom: 2px; font-weight: 600; }
 .rs-map-tip .muted { color: var(--ink-3); }
+/* Free pan / zoom (ResearchChoropleth `zoomable`). touch-action leaves one-
+   finger page scrolling to the browser but hands pinches to the map. */
+.rs-choro.zoomable .rs-choro-svg { cursor: grab; touch-action: pan-x pan-y; user-select: none; -webkit-user-select: none; }
+.rs-choro.dragging .rs-choro-svg, .rs-choro.dragging .rs-choro-svg * { cursor: grabbing !important; }
+.rs-choro > .rs-choro-zoom { right: 8px; bottom: 8px; }
+.rs-choro.zoomable .rs-map-note { right: 56px; }
+.rs-choro-hint {
+  position: absolute; inset: 0; z-index: 4; display: flex; align-items: center; justify-content: center; padding: 16px;
+  pointer-events: none; opacity: 0; transition: opacity 200ms ease;
+}
+.rs-choro-hint.show { opacity: 1; }
+.rs-choro-hint span {
+  padding: 8px 14px; background: var(--raised); border: 1px solid var(--line-3); border-radius: 9px; box-shadow: var(--shadow-pop);
+  font-size: 13px; font-weight: 500; color: var(--ink); text-align: center;
+}
+.rs-sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 /* County / abstract outlines (fills are data colours, set inline). Order
    matters: hotspot beats hover, selection beats hotspot, focus wins. */
 .rs-cty { stroke: var(--line-strong); }

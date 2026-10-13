@@ -210,7 +210,7 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
   const filtering = !!q || !!activeStage;
 
   return (
-    <div className="page deals-page">
+    <div className="page page-fill deals-page">
       <div className="page-header">
         <div className="dl-head">
           <h1>{SCOPE_TITLE[scope]}</h1>

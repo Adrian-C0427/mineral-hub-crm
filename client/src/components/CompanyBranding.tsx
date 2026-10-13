@@ -4,17 +4,22 @@ import { useAuth } from "../auth/AuthContext";
 import { Banner } from "./ui";
 import { ThemedLogo } from "./ThemedLogo";
 import { SettingsCardHead } from "./SettingsNav";
+import { usableLogo } from "../lib/branding";
+import { useLogoFailures } from "../lib/useBrandLogo";
 
 /**
  * Company Branding settings: upload a Full logo (expanded sidebar, PDF/report
  * headers) and a Compact logo/icon (collapsed sidebar). Logos are stored as
  * data URLs on the organization; removing one reverts to the default Mineral
  * Hub branding. Drag-and-drop or click to upload, with a live preview.
+ *
+ * Raster formats only — the server refuses SVG (routes/org.ts LOGO_MIME: logos
+ * are echoed on the public portal), so the picker must not offer it.
  */
 
-const ACCEPT = ["image/png", "image/svg+xml", "image/jpeg", "image/webp"];
+const ACCEPT = ["image/png", "image/jpeg", "image/webp"];
 const MAX_BYTES = 512 * 1024;
-const ACCEPT_ATTR = ".png,.svg,.jpg,.jpeg,.webp";
+const ACCEPT_ATTR = ".png,.jpg,.jpeg,.webp";
 
 type Field = "fullLogo" | "compactLogo";
 
@@ -37,7 +42,7 @@ export function CompanyBranding() {
 
   function onFile(field: Field, file: File) {
     setError(null);
-    if (!ACCEPT.includes(file.type)) { setError("Unsupported file type. Use PNG, SVG, JPG, or WebP."); return; }
+    if (!ACCEPT.includes(file.type)) { setError("Unsupported file type. Use PNG, JPG, or WebP."); return; }
     if (file.size > MAX_BYTES) { setError(`"${file.name}" is too large (max 512 KB).`); return; }
     const reader = new FileReader();
     reader.onload = () => save(field, String(reader.result));
@@ -49,18 +54,18 @@ export function CompanyBranding() {
     <section className="panel">
       <SettingsCardHead
         title="Company branding"
-        desc="Replace the default Mineral Hub branding with your own logos. They appear in the navigation sidebar and on exported PDF reports. Supported: PNG, SVG, JPG, WebP · max 512 KB."
+        desc="Replace the default Mineral Hub branding with your own logos. They appear in the navigation sidebar and on exported PDF reports. Supported: PNG, JPG, WebP · max 512 KB."
       />
       {error && <Banner kind="error">{error}</Banner>}
       <div className="logo-slots">
         <LogoSlot
           label="Full logo" hint="Expanded sidebar · PDF reports & headers"
-          current={org?.fullLogo ?? null} defaultLabel="Mineral Hub" busy={busy === "fullLogo"} disabled={!canManage}
+          current={usableLogo(org?.fullLogo)} defaultLabel="Mineral Hub" busy={busy === "fullLogo"} disabled={!canManage}
           onFile={(f) => onFile("fullLogo", f)} onRemove={() => save("fullLogo", null)}
         />
         <LogoSlot
           label="Compact logo (icon)" hint="Collapsed sidebar · square, recognizable at small sizes" square
-          current={org?.compactLogo ?? null} defaultLabel="MH" busy={busy === "compactLogo"} disabled={!canManage}
+          current={usableLogo(org?.compactLogo)} defaultLabel="MH" busy={busy === "compactLogo"} disabled={!canManage}
           onFile={(f) => onFile("compactLogo", f)} onRemove={() => save("compactLogo", null)}
         />
       </div>
@@ -76,6 +81,10 @@ function LogoSlot({ label, hint, current, defaultLabel, square, busy, disabled, 
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [drag, setDrag] = useState(false);
+  // A stored logo the browser can't decode: say so (the sidebar falls back on
+  // its own) instead of a broken-image preview.
+  const { failed, markFailed } = useLogoFailures();
+  const broken = !!current && failed.has(current);
   const pick = () => { if (!disabled) inputRef.current?.click(); };
 
   return (
@@ -93,7 +102,13 @@ function LogoSlot({ label, hint, current, defaultLabel, square, busy, disabled, 
         role="button" tabIndex={0}
       >
         {busy ? <span className="muted">Saving…</span>
-          : current ? <ThemedLogo src={current} alt={label} className="logo-preview" />
+          : broken ? (
+            <span className="logo-empty">
+              <span className="logo-empty-title">This logo can’t be displayed</span>
+              <span className="logo-default">{disabled ? "Ask an admin to replace it" : "Upload a replacement"}</span>
+            </span>
+          )
+          : current ? <ThemedLogo src={current} alt={label} className="logo-preview" onError={markFailed} />
           : (
             <span className="logo-empty">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 16V4M7 9l5-5 5 5M4 20h16" /></svg>

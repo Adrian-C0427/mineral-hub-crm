@@ -6,6 +6,8 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { useBrandLogo } from "../lib/useBrandLogo";
+import { ThemedLogo } from "../components/ThemedLogo";
 import { Spinner, Banner, Modal, EmptyState, ChipList } from "../components/ui";
 import { StatStrip, Segmented, type StatCell } from "../components/kit";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
@@ -30,6 +32,11 @@ interface Kpis {
   /** Realized net profit ÷ expenses; null = N/A (no expenses / no priced closed deal). */
   roiMultiple: number | null;
   closedWithoutPrice: number;
+  /** Mean of the closed deals' implied margins (ask − our price) ÷ our price,
+   *  as a ratio; null = N/A (no closed deal with both prices). */
+  avgImpliedMargin: number | null;
+  /** How many closed deals avgImpliedMargin averages. */
+  impliedMarginDeals: number;
 }
 
 /** The records behind Cost per Deal and ROI (GET /reports/analytics/financials). */
@@ -121,18 +128,18 @@ const EMPTY_FILTERS: Record<string, string[]> = { states: [], counties: [], basi
 
 // Customize View — which KPI metrics show, and in what order (saved per user).
 type MetricId =
-  | "revenue" | "netProfit" | "grossProfit" | "expenses" | "costPerDeal" | "roi" | "dealsClosed" | "dealsAdded"
+  | "revenue" | "netProfit" | "grossProfit" | "expenses" | "costPerDeal" | "roi" | "avgImpliedMargin" | "dealsClosed" | "dealsAdded"
   | "dealsLost" | "winRate" | "totalDeals" | "totalDealValue" | "avgDealSize" | "avgTimeToClose"
   | "activeBuyers" | "newBuyers" | "buyerActivity" | "reimbursementsOutstanding";
 const METRIC_LABELS: Record<MetricId, string> = {
   revenue: "Revenue (gross fees)", netProfit: "Net profit", grossProfit: "Gross profit", expenses: "Expenses",
-  costPerDeal: "Cost per deal", roi: "Return on investment (ROI)",
+  costPerDeal: "Cost per deal", roi: "Return on investment (ROI)", avgImpliedMargin: "Avg implied margin",
   dealsClosed: "Deals closed", dealsAdded: "Deals added", dealsLost: "Deals lost", winRate: "Win rate",
   totalDeals: "Total deals", totalDealValue: "Total deal value", avgDealSize: "Avg deal size", avgTimeToClose: "Avg time to close",
   activeBuyers: "Active buyers", newBuyers: "New buyers", buyerActivity: "Buyer activity", reimbursementsOutstanding: "Reimbursements outstanding",
 };
 const DEFAULT_METRICS: MetricId[] = [
-  "revenue", "netProfit", "grossProfit", "expenses", "costPerDeal", "roi", "dealsClosed", "dealsAdded", "dealsLost", "winRate",
+  "revenue", "netProfit", "grossProfit", "expenses", "costPerDeal", "roi", "avgImpliedMargin", "dealsClosed", "dealsAdded", "dealsLost", "winRate",
   "totalDeals", "totalDealValue", "avgDealSize", "avgTimeToClose", "activeBuyers", "newBuyers", "buyerActivity", "reimbursementsOutstanding",
 ];
 interface MetricPrefs { order: MetricId[]; hidden: MetricId[] }
@@ -159,9 +166,9 @@ function idLabels(items: { id: string; name: string }[]): Record<string, string>
   return out;
 }
 
-/** KPI strips: the 18 metrics in three groups (the saved order applies within each group). */
+/** KPI strips: the 19 metrics in three groups (the saved order applies within each group). */
 const METRIC_GROUPS: { key: string; label: string; ids: MetricId[] }[] = [
-  { key: "fin", label: "Financials", ids: ["revenue", "netProfit", "grossProfit", "expenses", "costPerDeal", "roi"] },
+  { key: "fin", label: "Financials", ids: ["revenue", "netProfit", "grossProfit", "expenses", "costPerDeal", "roi", "avgImpliedMargin"] },
   { key: "deal", label: "Deals", ids: ["dealsClosed", "dealsAdded", "dealsLost", "winRate", "totalDeals", "totalDealValue", "avgDealSize", "avgTimeToClose"] },
   { key: "buy", label: "Buyers & operations", ids: ["activeBuyers", "newBuyers", "buyerActivity", "reimbursementsOutstanding"] },
 ];
@@ -175,6 +182,7 @@ const METRIC_FMT: Record<MetricId, (x: Kpis) => string> = {
   expenses: (x) => money(x.expenses),
   costPerDeal: (x) => (x.costPerDeal == null ? "N/A" : money(x.costPerDeal, { cents: true })),
   roi: (x) => fmtMultiple(x.roiMultiple),
+  avgImpliedMargin: (x) => (x.avgImpliedMargin == null ? "N/A" : pct(x.avgImpliedMargin)),
   dealsClosed: (x) => num(x.dealsClosed), dealsAdded: (x) => num(x.dealsAdded), dealsLost: (x) => num(x.dealsLost),
   winRate: (x) => pct(x.winRate), totalDeals: (x) => num(x.totalDeals), totalDealValue: (x) => money(x.totalDealValue),
   avgDealSize: (x) => (x.dealsClosed > 0 ? money(x.avgDealSize) : "—"),
@@ -192,6 +200,9 @@ const AXIS_TICK = { fontSize: 11, fill: "var(--ink-4)" };
 export function Reports() {
   const nav = useNavigate();
   const { user } = useAuth();
+  // Report header mark: same slot resolution as the expanded sidebar, themed
+  // like it too (a dark mark on this dark-theme card was invisible).
+  const brandLogo = useBrandLogo(user?.organization, "full");
   const [period, setPeriod] = useState<Period>("THIS_YEAR");
   const [custom, setCustom] = useState({ from: "", to: "" });
   const [compare, setCompare] = useState<Compare>("NONE");
@@ -283,7 +294,7 @@ export function Reports() {
   /** One KPI cell: value + comparison pill, hint (or the prior value when comparing). */
   function kpiCell(id: MetricId, o: {
     label: string; d?: number | null; invert?: boolean; tone?: StatCell["tone"]; faint?: boolean;
-    onClick?: () => void; hint?: string; realized?: boolean;
+    onClick?: () => void; hint?: string; title?: string; realized?: boolean;
   }): StatCell {
     const hasDelta = o.d !== undefined && o.d !== null;
     const up = hasDelta && (o.d as number) > 0;
@@ -308,6 +319,7 @@ export function Reports() {
       ),
       tone: o.tone,
       sub: o.hint ?? (data?.previous ? `Prior ${METRIC_FMT[id](data.previous)}` : undefined),
+      title: o.title,
       onClick: o.onClick,
     };
   }
@@ -411,9 +423,9 @@ export function Reports() {
         <div ref={reportRef} className="report-capture rp-body">
           {/* --- Executive summary --- */}
           <section className="exec-card">
-            <div className={`exec-icon ${user?.organization?.fullLogo ? "has-logo" : ""}`}>
-              {user?.organization?.fullLogo
-                ? <img src={user.organization.fullLogo} alt={user.organization.name} />
+            <div className={`exec-icon ${brandLogo.src ? "has-logo" : ""}`}>
+              {brandLogo.src
+                ? <ThemedLogo src={brandLogo.src} alt={user?.organization?.name ?? "Company logo"} onError={brandLogo.onError} />
                 : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20h16M7 16v-5M12 16V6M17 16v-8" /></svg>}
             </div>
             <div style={{ minWidth: 0 }}>
@@ -465,6 +477,19 @@ export function Reports() {
                   ? (k.expenses <= 0 ? "No expenses recorded in this period" : "Closed deals have no accepted price yet")
                   : `${money(k.netProfit)} net profit ÷ ${money(k.expenses)} expenses`,
                 d: data.deltas?.roiMultiple, onClick: () => setFinDrill("roi"),
+              }),
+              // The deal page's Implied margin, averaged (simple mean) over the
+              // deals closed in the period with the report's filters.
+              avgImpliedMargin: kpiCell("avgImpliedMargin", {
+                label: "Avg implied margin", faint: k.avgImpliedMargin == null,
+                tone: k.avgImpliedMargin == null ? undefined : k.avgImpliedMargin >= 0 ? "success" : "danger",
+                hint: `Closed deals only · ${num(k.impliedMarginDeals)} ${k.impliedMarginDeals === 1 ? "deal" : "deals"}`
+                  + (data.previous ? ` · Prior ${METRIC_FMT.avgImpliedMargin(data.previous)}` : ""),
+                title: "Average of each closed deal's implied margin: (asking price − our cost) ÷ our cost, as shown on the deal page."
+                  + (k.dealsClosed > k.impliedMarginDeals
+                    ? ` ${num(k.dealsClosed - k.impliedMarginDeals)} closed ${k.dealsClosed - k.impliedMarginDeals === 1 ? "deal is" : "deals are"} left out for a missing asking price or our cost.`
+                    : ""),
+                d: k.avgImpliedMargin != null ? data.deltas?.avgImpliedMargin : undefined,
               }),
               dealsClosed: kpiCell("dealsClosed", { label: "Deals closed", d: data.deltas?.dealsClosed, onClick: () => drillByDeal("Closed deals", (dd) => dd.stage === "CLOSED") }),
               dealsAdded: kpiCell("dealsAdded", { label: "Deals added", d: data.deltas?.dealsAdded }),

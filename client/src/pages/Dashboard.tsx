@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
-import { X } from "lucide-react";
 import GridLayout, { type Layout } from "react-grid-layout";
 import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Modal, Req, Spinner, StageBadge, showToast } from "../components/ui";
+import { Modal, Spinner, StageBadge, showToast } from "../components/ui";
 import { ApiError } from "../api/client";
 import { Select } from "../components/Select";
 import { Segmented, StatStrip, Tag } from "../components/kit";
@@ -16,10 +14,13 @@ import { compactMoney, money, fmtDate, fmtDateLocal } from "../lib/format";
 import { useStages } from "../stages";
 import { CalendarGlyph } from "../components/PeriodSegmented";
 import { DateField } from "../components/DateField";
+import { TASK_PRIORITY_META, TaskFormModal } from "../components/TaskForm";
+import { dashTaskValues, newTaskValues, taskEditBody } from "../lib/tasks";
+import { DateRangePopover } from "../components/DateRangePopover";
 import { useTheme, isLightTheme } from "../theme";
 import { layoutRect } from "../lib/viewport";
 import { useIsPhonePortrait } from "../lib/mobile";
-import { ALL_PERIOD, ALL_PERIOD_LABEL, withAllPeriod } from "../lib/period";
+import { ALL_PERIOD, ALL_PERIOD_LABEL, EMPTY_RANGE, rangeIssue, withAllPeriod, type DayRange } from "../lib/period";
 
 // Global dashboard period (default YTD). Drives all period-scoped widgets.
 // All (shared definition, lib/period) spans every dated deal, with no Δ.
@@ -71,6 +72,8 @@ interface DashTask {
   completedAt?: string | null; createdAt?: string;
   /** The viewer may complete it (its owner/author, or a contact manager). */
   canComplete?: boolean;
+  /** The viewer may edit it — the same rule as completing it. */
+  canEdit?: boolean;
 }
 
 interface DashboardData {
@@ -271,9 +274,25 @@ function loadDashPrefs(): DashPrefs {
 export function Dashboard() {
   const [d, setD] = useState<DashboardData | null>(null);
   const [period, setPeriod] = useState<DashPeriod>("YTD");
-  // Custom reporting range (period === "CUSTOM"): fetch waits for both ends.
-  const [customFrom, setCustomFrom] = useState("");
-  const [customTo, setCustomTo] = useState("");
+  // Custom reporting range. `custom` is the APPLIED range (what the metrics
+  // show while period === "CUSTOM"); picking happens in a floating popover
+  // with its own draft, and only a complete range lands here, on Apply — so
+  // the header never reflows and the page never reloads mid-pick. Switching
+  // presets keeps it, and reopening Custom starts from it.
+  const [custom, setCustom] = useState<DayRange>(EMPTY_RANGE);
+  const [rangeOpen, setRangeOpen] = useState(false);
+  const periodRef = useRef<HTMLDivElement>(null);
+  // The range the LOADED numbers belong to: labels follow the data, not a
+  // newer pick that is still loading.
+  const [loadedRange, setLoadedRange] = useState<DayRange>(EMPTY_RANGE);
+  const pickPeriod = (v: DashPeriod) => {
+    // Custom toggles the range picker; the period switches to Custom only
+    // once a range is applied there.
+    if (v === "CUSTOM") { setRangeOpen((o) => !o); return; }
+    setRangeOpen(false);
+    setPeriod(v);
+  };
+  const applyRange = (r: DayRange) => { setCustom(r); setPeriod("CUSTOM"); setRangeOpen(false); };
   const { theme, toggleTheme } = useTheme();
   const { user } = useAuth();
   const { label: stageLabel, colorOf: stageColorOf } = useStages();
@@ -294,35 +313,32 @@ export function Dashboard() {
   // spinning forever (a task opened from a notification still shows).
   const [denied, setDenied] = useState(false);
   // Profit chart interactivity: hovered bucket (rich tooltip) + clicked bucket
-  // (drill-down modal listing the deals behind that bar).
+  // (drill-down dialog listing the deals behind that bar).
   const [profitHover, setProfitHover] = useState<number | null>(null);
   const [profitDrill, setProfitDrill] = useState<number | null>(null);
+  // The bar's tooltip is dropped as its dialog opens (it would otherwise sit
+  // frozen behind the backdrop until the pointer moves again).
+  const openDrill = (i: number) => { setProfitHover(null); setProfitDrill(i); };
   // Chart view: each bucket on its own, or a running total across the window
   // (derived from the same loaded series).
   const [chartMode, setChartMode] = useState<"monthly" | "cumulative">("monthly");
-  // The drill panel is non-modal (no backdrop / no focus trap), so wire up
-  // Escape ourselves.
-  useEffect(() => {
-    if (profitDrill == null) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setProfitDrill(null); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [profitDrill]);
-  // The panel centers itself in the viewport with pure fixed-position CSS —
-  // deliberately independent of the navigation sidebar's state, so it never
-  // shifts when the nav expands or collapses.
   useEffect(() => { try { localStorage.setItem(DASH_KEY, JSON.stringify(prefs)); } catch { /* ignore */ } }, [prefs]);
 
+  const rangeKey = period === "CUSTOM" ? `${custom.from}..${custom.to}` : "";
   useEffect(() => {
     const qs = new URLSearchParams({ period });
+    const range = period === "CUSTOM" ? custom : EMPTY_RANGE;
     if (period === "CUSTOM") {
-      if (!customFrom || !customTo || customFrom > customTo) return; // wait for a complete range
-      qs.set("from", customFrom); qs.set("to", customTo);
+      if (rangeIssue(range)) return; // only applied (complete) ranges get here
+      qs.set("from", range.from); qs.set("to", range.to);
     }
+    // Only the latest selection may update the page: a slower response for a
+    // period the user already left must not land on top of the newer one.
+    let live = true;
     const load = () => {
       void api.get<DashboardData>(`/dashboard?${qs.toString()}`)
-        .then((data) => { setD(data); setDenied(false); })
-        .catch((e) => { if (e instanceof ApiError && e.status === 403) setDenied(true); });
+        .then((data) => { if (!live) return; setD(data); setLoadedRange(range); setDenied(false); })
+        .catch((e) => { if (live && e instanceof ApiError && e.status === 403) setDenied(true); });
     };
     load();
     // Deals are created, edited, moved and removed on other pages (or in other
@@ -331,8 +347,9 @@ export function Dashboard() {
     const onVisible = () => { if (document.visibilityState === "visible") load(); };
     document.addEventListener("visibilitychange", onVisible);
     window.addEventListener("focus", onVisible);
-    return () => { document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("focus", onVisible); };
-  }, [period, customFrom, customTo]);
+    return () => { live = false; document.removeEventListener("visibilitychange", onVisible); window.removeEventListener("focus", onVisible); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- rangeKey stands in for `custom`
+  }, [period, rangeKey]);
 
   // Grid width tracks the CONTAINER (not the window), so collapsing/expanding
   // the sidebar reflows the canvas immediately. Sub-320px readings are ignored:
@@ -367,7 +384,7 @@ export function Dashboard() {
     [visibleIds, prefs.layout],
   );
 
-  const taskModal = openTaskId ? <TaskDetailModal id={openTaskId} onClose={closeTask} onChanged={() => setTaskRefresh((n) => n + 1)} /> : null;
+  const taskModal = openTaskId ? <TaskDetailModal id={openTaskId} users={users} onClose={closeTask} onChanged={() => setTaskRefresh((n) => n + 1)} /> : null;
   if (!d) {
     return (
       <>
@@ -417,7 +434,7 @@ export function Dashboard() {
   const splitOk = m.closedProfitYtd >= 0 && m.projectedProfit >= 0 && outlook > 0;
   const realizedPct = splitOk ? Math.round((m.closedProfitYtd / outlook) * 100) : 0;
 
-  const pd = periodDisplay(m.periodLabel, customFrom, customTo);
+  const pd = periodDisplay(m.periodLabel, loadedRange.from, loadedRange.to);
 
   // Brand-new workspace: no active deals and nothing closed yet. Guide the
   // first steps instead of presenting a wall of zeros.
@@ -459,11 +476,11 @@ export function Dashboard() {
     },
     {
       label: "Closed deals", value: <>{d.metrics.closedDealsCount}<Delta pct={closedCountDelta} /></>,
-      title: "Deals moved to Closed within the selected range, by Contract Timeline Closed Date. Δ vs the previous equal-length period.",
+      title: "Deals moved to Closed within the selected range, by the Contract Timeline's Closing date. Δ vs the previous equal-length period.",
     },
     {
       label: "Avg. profit per deal", value: <>{fmtCompact(d.metrics.avgProfitPerDeal)}<Delta pct={avgDelta} /></>,
-      title: "Realized profit per closed deal in the selected range (Closed Date). Δ vs the previous equal-length period.",
+      title: "Realized profit per closed deal in the selected range (by Closing date). Δ vs the previous equal-length period.",
     },
     {
       label: "Offers pending",
@@ -570,7 +587,7 @@ export function Dashboard() {
                 realized or projected profit show a faint zero stub instead of
                 vanishing, so the x-axis spacing stays stable. Gridlines follow
                 the $-labeled axis ticks; hovering shows the full breakdown;
-                clicking a month opens a non-blocking details panel. */}
+                clicking a month opens its deals in the shared dialog. */}
             <div className="dash-chart">
               <div className="dash-chart-body">
                 <div className="dash-chart-axis" aria-hidden="true">
@@ -588,7 +605,7 @@ export function Dashboard() {
                   )}
                   {d.profitByMonth.every((b) => b.profit === 0 && b.projected === 0 && !b.atAsk) && (
                     <p className="dash-chart-empty">
-                      No closed, projected or at-asking profit in this period — bars fill in as deals close (with a Closed Date), get an offer, or carry an ask and a closing date.
+                      No closed, projected or at-asking profit in this period — bars fill in as deals close (by their Closing date), get an offer, or carry an ask and a closing date.
                     </p>
                   )}
                   <div className="dash-chart-cols">
@@ -606,8 +623,8 @@ export function Dashboard() {
                           role={clickable ? "button" : undefined} tabIndex={clickable ? 0 : undefined}
                           aria-label={clickable ? `${b.month}: view ${b.deals!.length} deal${b.deals!.length === 1 ? "" : "s"}` : undefined}
                           onMouseEnter={() => setProfitHover(i)} onMouseLeave={() => setProfitHover((h) => (h === i ? null : h))}
-                          onClick={clickable ? () => setProfitDrill(i) : undefined}
-                          onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setProfitDrill(i); } } : undefined}
+                          onClick={clickable ? () => openDrill(i) : undefined}
+                          onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDrill(i); } } : undefined}
                         >
                           {/* The bucket's total (realized + projected + at
                               asking) floats above the stack; hidden while its
@@ -654,80 +671,6 @@ export function Dashboard() {
             ))}
           </div>
         )}
-        {profitDrill != null && d.profitByMonth[profitDrill] && (() => {
-          const m = d.profitByMonth[profitDrill];
-          const closed = (m.deals ?? []).filter((x) => x.kind === "closed");
-          const projected = (m.deals ?? []).filter((x) => x.kind === "projected");
-          const atAsking = (m.deals ?? []).filter((x) => x.kind === "atAsk");
-          const atAsk = m.atAsk ?? 0;
-          const total = (m.deals ?? []).length;
-          const group = (title: string, sub: string, rows: typeof closed) => rows.length > 0 && (
-            <div className="drill-group">
-              <div className="drill-group-head">
-                <span className="drill-group-title">{title}</span>
-                <span className="drill-group-count">{rows.length}</span>
-              </div>
-              <div className="drill-group-sub">{sub}</div>
-              {rows.map((x) => (
-                <div key={x.id} className="drill-row">
-                  <div className="drill-row-main">
-                    <Link to={`/deals/${x.id}`} className="drill-row-name">{x.name}</Link>
-                    <StageBadge stage={x.stage} />
-                  </div>
-                  <div className="drill-row-meta">
-                    <span className="muted">{fmtDate(x.date)}</span>
-                    {x.amount != null && <span>{money(x.amount)}</span>}
-                    <span className={`drill-profit ${x.profit >= 0 ? "pos" : "neg"}`}>{money(x.profit)}</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          );
-          {/* Non-blocking floating panel (no backdrop) — the dashboard stays
-              scrollable and clickable while it's open; clicking another month
-              simply re-points the panel. Esc or × closes. Portaled to <body>:
-              the react-grid-layout item's CSS transform would otherwise turn
-              position:fixed into transform-relative positioning. */}
-          return createPortal(
-            <aside className="drill-panel" role="dialog" aria-label={`${m.month} profit breakdown`}>
-              <div className="drill-head">
-                <div style={{ minWidth: 0 }}>
-                  <h3 className="drill-title">{m.month} — profit breakdown</h3>
-                  <div className="drill-sub">{total} deal{total === 1 ? "" : "s"} this month</div>
-                </div>
-                <button className="icon-btn drill-x" onClick={() => setProfitDrill(null)} aria-label="Close"><X size={16} /></button>
-              </div>
-              <div className="drill-summary">
-                <div className="drill-stat">
-                  <span className="drill-stat-label"><span className="dash-swatch" style={{ background: "var(--success)" }} /> Realized</span>
-                  <strong>{money(m.profit)}</strong>
-                </div>
-                {m.projected > 0 && (
-                  <div className="drill-stat">
-                    <span className="drill-stat-label"><span className="dash-swatch dash-swatch-proj" /> Projected</span>
-                    <strong>{money(m.projected)}</strong>
-                  </div>
-                )}
-                {atAsk !== 0 && (
-                  <div className="drill-stat">
-                    <span className="drill-stat-label"><span className="dash-swatch dash-swatch-atask" /> At asking</span>
-                    <strong>{money(atAsk)}</strong>
-                  </div>
-                )}
-                <div className="drill-stat">
-                  <span className="drill-stat-label">Total</span>
-                  <strong>{money(m.profit + m.projected + atAsk)}</strong>
-                </div>
-              </div>
-              <div className="drill-body">
-                {group("Closed this month", "Realized — keyed on the Contract Timeline's Closed Date; profit uses the accepted offer.", closed)}
-                {group("Scheduled to close", "Projected — active deals with an offer whose anticipated closing lands in this month.", projected)}
-                {group("At asking price", "Active deals with no offer yet — profit if sold at the asking price", atAsking)}
-              </div>
-            </aside>,
-            document.body
-          );
-        })()}
       </div>
       </>
     ),
@@ -829,6 +772,71 @@ export function Dashboard() {
     tasks: <TasksWidget initial={d.tasks ?? []} users={users} refreshKey={taskRefresh} onOpenTask={openTask} onChanged={() => setTaskRefresh((n) => n + 1)} />,
   };
 
+  // Month drill-down: the deals behind a Profit-by-Month bar, in the shared
+  // dialog (portaled to <body>, blurred backdrop, focus trap, Escape /
+  // backdrop close) like every other dialog. Rendered here at page level, not
+  // inside the chart's grid item, so no widget box or transform touches it.
+  const drillBucket = profitDrill != null ? d.profitByMonth[profitDrill] : undefined;
+  const drillModal = drillBucket && (() => {
+    const b = drillBucket;
+    const closed = (b.deals ?? []).filter((x) => x.kind === "closed");
+    const projected = (b.deals ?? []).filter((x) => x.kind === "projected");
+    const atAsking = (b.deals ?? []).filter((x) => x.kind === "atAsk");
+    const atAsk = b.atAsk ?? 0;
+    const total = (b.deals ?? []).length;
+    const group = (title: string, sub: string, rows: typeof closed) => rows.length > 0 && (
+      <div className="drill-group">
+        <div className="drill-group-head">
+          <span className="drill-group-title">{title}</span>
+          <span className="drill-group-count">{rows.length}</span>
+        </div>
+        <div className="drill-group-sub">{sub}</div>
+        {rows.map((x) => (
+          <div key={x.id} className="drill-row">
+            <div className="drill-row-main">
+              <Link to={`/deals/${x.id}`} className="drill-row-name">{x.name}</Link>
+              <StageBadge stage={x.stage} />
+            </div>
+            <div className="drill-row-meta">
+              <span className="muted">{fmtDate(x.date)}</span>
+              {x.amount != null && <span>{money(x.amount)}</span>}
+              <span className={`drill-profit ${x.profit >= 0 ? "pos" : "neg"}`}>{money(x.profit)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+    return (
+      <Modal title={`${b.month} — profit breakdown`} subtitle={`${total} deal${total === 1 ? "" : "s"} this month`} onClose={() => setProfitDrill(null)}>
+        <div className="drill-summary">
+          <div className="drill-stat">
+            <span className="drill-stat-label"><span className="dash-swatch" style={{ background: "var(--success)" }} /> Realized</span>
+            <strong>{money(b.profit)}</strong>
+          </div>
+          {b.projected > 0 && (
+            <div className="drill-stat">
+              <span className="drill-stat-label"><span className="dash-swatch dash-swatch-proj" /> Projected</span>
+              <strong>{money(b.projected)}</strong>
+            </div>
+          )}
+          {atAsk !== 0 && (
+            <div className="drill-stat">
+              <span className="drill-stat-label"><span className="dash-swatch dash-swatch-atask" /> At asking</span>
+              <strong>{money(atAsk)}</strong>
+            </div>
+          )}
+          <div className="drill-stat">
+            <span className="drill-stat-label">Total</span>
+            <strong>{money(b.profit + b.projected + atAsk)}</strong>
+          </div>
+        </div>
+        {group("Closed this month", "Realized — keyed on the Contract Timeline's Closing date; profit uses the accepted offer.", closed)}
+        {group("Scheduled to close", "Projected — active deals with an offer whose anticipated closing lands in this month.", projected)}
+        {group("At asking price", "Active deals with no offer yet — profit if sold at the asking price", atAsking)}
+      </Modal>
+    );
+  })();
+
   const hiddenIds = ALL_WIDGETS.filter((id) => prefs.hidden.includes(id));
   const isDefaultLayout = prefs.hidden.length === 0 && JSON.stringify(prefs.layout) === JSON.stringify(DEFAULT_LAYOUT);
 
@@ -890,22 +898,24 @@ export function Dashboard() {
   return (
     <div className="page dash-page">
       {taskModal}
+      {drillModal}
       <div className="page-header dash-header">
         <div className="dash-greet">
           <div className="dash-eyebrow">{today}</div>
           <h1 className="dash-title">Good {daypart}, {firstName}</h1>
         </div>
         <div className="dash-actions">
-          <Segmented accent className="dash-period" ariaLabel="Reporting period" value={period} onChange={setPeriod}
-            options={DASH_PERIODS.map(([v, label]) => ({ value: v, label: v === "CUSTOM" ? <><CalendarGlyph size={13} />{label}</> : label }))} />
-          {period === "CUSTOM" && (
-            <div className="dash-range">
-              <span>From</span>
-              <div className="dash-range-field"><DateField value={customFrom} onChange={setCustomFrom} ariaLabel="Custom range from" placeholder="From" /></div>
-              <span>to</span>
-              <div className="dash-range-field"><DateField value={customTo} onChange={setCustomTo} ariaLabel="Custom range to" placeholder="To" /></div>
-            </div>
-          )}
+          {/* Custom lights up while its range picker is open; the applied
+              range shows in the profit card and the Custom tooltip. */}
+          <Segmented accent className="dash-period" ariaLabel="Reporting period" rootRef={periodRef}
+            value={rangeOpen ? "CUSTOM" : period} onChange={pickPeriod}
+            options={DASH_PERIODS.map(([v, label]) => v === "CUSTOM"
+              ? {
+                value: v, label: <><CalendarGlyph size={13} />{label}</>,
+                title: custom.from && custom.to ? `${fmtDate(custom.from)} – ${fmtDate(custom.to)} · click to change` : "Choose a custom date range",
+              }
+              : { value: v, label })} />
+          <DateRangePopover anchorRef={periodRef} open={rangeOpen} value={custom} onApply={applyRange} onCancel={() => setRangeOpen(false)} />
           <button type="button" className={`dash-cz-toggle ${customizing ? "active" : ""}`} onClick={() => setCustomizing((c) => !c)} title="Customize dashboard layout">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" aria-hidden="true"><path d="M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4" /></svg>
             <span>{customizing ? "Done" : "Customize"}</span>
@@ -1021,13 +1031,9 @@ export function Dashboard() {
 // Tasks widget — every outstanding contact task that needs attention (overdue,
 // due today, or due within the next week). Checking a task completes it in the
 // database and removes it from the widget instantly; clicking the row opens
-// the contact workspace with that task in focus.
+// the task (a contact task opens on the contact's workspace, where it can be
+// edited; a standalone one in the task modal here).
 // ---------------------------------------------------------------------------
-const TASK_PRIORITY_META: Record<string, { label: string; tone: "danger" | "warn" | "neutral"; dot: string }> = {
-  HIGH: { label: "High", tone: "danger", dot: "var(--danger)" },
-  MEDIUM: { label: "Medium", tone: "warn", dot: "var(--warn)" },
-  LOW: { label: "Low", tone: "neutral", dot: "var(--ink-3)" },
-};
 
 /**
  * Whose tasks the widget lists: "me" (default — My Tasks), "all" users, or one
@@ -1147,90 +1153,45 @@ function TasksWidget({ initial, users, refreshKey, onOpenTask, onChanged }: {
   );
 }
 
-const PRIORITY_CHOICES = [
-  { key: "LOW", label: "Low" }, { key: "MEDIUM", label: "Medium" }, { key: "HIGH", label: "High" },
-] as const;
-
 /**
  * New task from the Dashboard: for yourself or assigned to a teammate (who is
- * notified, with a link that opens the task).
+ * notified, with a link that opens the task). The same form edits it later.
  */
 function CreateTaskModal({ users, onClose, onCreated }: {
   users: { id: string; name: string }[]; onClose: () => void; onCreated: () => void;
 }) {
   const { user } = useAuth();
-  const [title, setTitle] = useState("");
-  const [details, setDetails] = useState("");
-  const [assignee, setAssignee] = useState(user?.id ?? "");
-  const [priority, setPriority] = useState<"LOW" | "MEDIUM" | "HIGH">("MEDIUM");
-  const [due, setDue] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const options = [
-    { value: user?.id ?? "", label: `Me (${user?.name ?? "you"})` },
-    ...users.filter((u) => u.id !== user?.id).map((u) => ({ value: u.id, label: u.name })),
-  ];
-  const ready = title.trim() !== "" && due !== "";
-
-  async function submit() {
-    if (!ready || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const created = await api.post<DashTask & { notified: boolean }>("/tasks", {
-        title: title.trim(), details: details.trim() || null, priority, dueDate: due,
-        assignedToId: assignee && assignee !== user?.id ? assignee : null,
-      });
-      showToast(created.notified
-        ? `Task created and assigned to ${created.assignedTo?.name ?? "your teammate"} — they've been notified.`
-        : "Task created.");
-      onCreated();
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not create the task");
-    } finally { setBusy(false); }
-  }
-
   return (
-    <Modal title="New task" subtitle={<>For you or a teammate. Assigned teammates are notified.</>} onClose={onClose}
-      dirty={title.trim() !== "" || details.trim() !== "" || due !== ""}
-      footer={
-        <>
-          <span className="modal-req-note"><Req /> Required</span>
-          <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={() => void submit()} disabled={!ready || busy}>{busy ? "Creating…" : "Create task"}</button>
-        </>
-      }>
-      <div className="field"><label>Task {<Req />}</label>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus maxLength={200} placeholder="e.g. Call the title company about the Leon closing" />
-      </div>
-      <div className="field"><label>Details</label>
-        <textarea rows={3} value={details} onChange={(e) => setDetails(e.target.value)} placeholder="Anything the assignee should know" />
-      </div>
-      <div className="dash-task-form-row">
-        <div className="field"><label>Assign to</label>
-          <Select value={assignee} onChange={(v) => setAssignee(v || user?.id || "")} options={options} searchable={options.length > 8} ariaLabel="Assign to" />
-        </div>
-        <div className="field"><label>Due date {<Req />}</label>
-          <DateField value={due} onChange={setDue} ariaLabel="Due date" />
-        </div>
-      </div>
-      <div className="field" style={{ marginBottom: 0 }}><label>Priority</label>
-        <Segmented accent className="dash-pri-seg" ariaLabel="Priority" value={priority} onChange={setPriority}
-          options={PRIORITY_CHOICES.map((p) => ({ value: p.key, label: p.label, dot: TASK_PRIORITY_META[p.key].dot }))} />
-      </div>
-      {error && <div className="error-text" style={{ marginTop: 12 }}>{error}</div>}
-    </Modal>
+    <TaskFormModal mode="create" initial={newTaskValues(user?.id ?? "")} users={users} dueRequired
+      subtitle={<>For you or a teammate. Assigned teammates are notified.</>} onClose={onClose}
+      onSubmit={async (v) => {
+        const created = await api.post<DashTask & { notified: boolean }>("/tasks", {
+          title: v.title.trim(), details: v.details.trim() || null, priority: v.priority, dueDate: v.due,
+          assignedToId: v.assignee && v.assignee !== user?.id ? v.assignee : null,
+        });
+        showToast(created.notified
+          ? `Task created and assigned to ${created.assignedTo?.name ?? "your teammate"} — they've been notified.`
+          : "Task created.");
+        onCreated();
+      }} />
   );
 }
 
-/** One task, opened from a notification or a standalone task's row. */
-function TaskDetailModal({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
+/**
+ * One task, opened from a notification or a standalone task's row. "Edit"
+ * switches to the task form (the same one that created it); saving returns
+ * here with the stored values and refreshes the Tasks widget.
+ */
+function TaskDetailModal({ id, users, onClose, onChanged }: {
+  id: string; users: { id: string; name: string }[]; onClose: () => void; onChanged: () => void;
+}) {
   const [task, setTask] = useState<DashTask | null>(null);
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
   useEffect(() => {
     let live = true;
-    setTask(null); setMissing(false);
+    setTask(null); setMissing(false); setEditing(false);
     api.get<DashTask>(`/tasks/${encodeURIComponent(id)}`)
       .then((t) => { if (live) setTask(t); })
       .catch(() => { if (live) setMissing(true); });
@@ -1249,6 +1210,24 @@ function TaskDetailModal({ id, onClose, onChanged }: { id: string; onClose: () =
     } finally { setBusy(false); }
   }
 
+  if (editing && task) {
+    return (
+      <TaskFormModal mode="edit" initial={dashTaskValues(task)} users={users} assigneeName={task.assignedTo?.name}
+        dueRequired={!task.contactId} detailsRequired={!!task.contactId}
+        subtitle={task.contactName ? <>On {task.contactName}</> : undefined}
+        onClose={() => setEditing(false)}
+        onSubmit={async (v) => {
+          const saved = await api.patch<DashTask & { notified?: boolean }>(`/tasks/${task.id}`, taskEditBody("TASK", v));
+          setTask(saved);
+          setEditing(false);
+          onChanged();
+          showToast(saved.notified
+            ? `Task updated and assigned to ${saved.assignedTo?.name ?? "your teammate"} — they've been notified.`
+            : "Task updated.");
+        }} />
+    );
+  }
+
   const pr = task ? TASK_PRIORITY_META[task.priority] ?? TASK_PRIORITY_META.MEDIUM : null;
   const todayKey = new Date().toISOString().slice(0, 10);
   const overdue = !!task?.dueDate && !task.completedAt && task.dueDate.slice(0, 10) < todayKey;
@@ -1258,6 +1237,7 @@ function TaskDetailModal({ id, onClose, onChanged }: { id: string; onClose: () =
         <>
           {task?.contactId && <Link to={`/contacts/${task.contactId}?task=${task.id}`} className="btn-ghost-link" style={{ marginRight: "auto" }}>Open contact</Link>}
           <button onClick={onClose}>Close</button>
+          {task?.canEdit && <button onClick={() => setEditing(true)} disabled={busy}>Edit</button>}
           {task?.canComplete && (
             task.completedAt
               ? <button onClick={() => void setCompleted(false)} disabled={busy}>Reopen task</button>

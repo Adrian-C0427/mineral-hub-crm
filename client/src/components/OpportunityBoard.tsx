@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { Spinner, showToast, Modal, OverflowMenu } from "./ui";
@@ -9,7 +9,13 @@ import { useAuth } from "../auth/AuthContext";
 import { stageColor, isOpportunityPipeline, type PipelineInfo } from "../stages";
 import { PipelineSettingsModal } from "./PipelineSettingsModal";
 import { NewOpportunityModal } from "./NewOpportunityModal";
+import { abstractEntryShortLabel, useAbstractIndex } from "./AbstractPicker";
 import { useBoardSync } from "../lib/useBoardSync";
+import { isAbstractId } from "../lib/opportunityForm";
+import { surveyLabel } from "../lib/abstracts";
+import { useListState } from "../lib/listState";
+import { rememberBoardScroll, restoreBoardScroll } from "../lib/boardScroll";
+import { useBoardWheel } from "../lib/boardWheel";
 import type { Opp, OppSummary, PipelineStage, Stage } from "../types";
 
 /**
@@ -63,6 +69,22 @@ export function oppSellerLine(o: Pick<OppSummary, "sellerName" | "companyName">)
   return [o.sellerName, o.companyName].filter(Boolean).join(" · ") || null;
 }
 
+/**
+ * An opportunity's abstract as people read it: a GIS abstract by its label
+ * ("A-3 · W Dwight Survey"), anything else as written — with the survey after
+ * it when given (and not already named by the label).
+ */
+export function OppAbstract({ abstract, survey }: { abstract: string | null; survey?: string | null }) {
+  if (abstract && isAbstractId(abstract)) return <GisAbstract id={abstract.trim().toUpperCase()} survey={survey ?? null} />;
+  return <>{[abstract, survey].filter(Boolean).join(" · ")}</>;
+}
+function GisAbstract({ id, survey }: { id: string; survey: string | null }) {
+  const { byId } = useAbstractIndex();
+  const e = byId.get(id);
+  const extra = survey && (!e || surveyLabel(e.survey) !== survey) ? survey : null;
+  return <>{[e ? abstractEntryShortLabel(e) : id, extra].filter(Boolean).join(" · ")}</>;
+}
+
 // --- Icons (inline, stroke = currentColor) ---------------------------------
 const Svg = ({ size = 14, sw = 1.7, children }: { size?: number; sw?: number; children: ReactNode }) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{children}</svg>
@@ -90,7 +112,8 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
   /** Show another pipeline's board (after creating an opportunity there). */
   onSelectPipeline?: (id: string) => void;
 }) {
-  const [q, setQ] = useState("");
+  // Search survives opening a card and coming Back (per pipeline, per tab).
+  const [q, setQ] = useListState(`opps:${pipeline.id}:q`, "");
   const [drag, setDrag] = useState<DragState | null>(null);
   const [overCol, setOverCol] = useState<Stage | null>(null);
   const [showNew, setShowNew] = useState(false);
@@ -127,6 +150,18 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
   });
   const opps = board.rows;
   const load = board.reload;
+  const kanbanRef = useBoardWheel();
+
+  // Opening a card remembers where the board was scrolled; coming Back puts
+  // it there again once the rows are on screen.
+  const pageRef = useRef<HTMLDivElement>(null);
+  const scrollScope = `opps:${pipeline.id}`;
+  const shown = opps != null;
+  useLayoutEffect(() => { if (shown) restoreBoardScroll(scrollScope, pageRef.current); }, [shown, scrollScope]);
+  function openOpp(id: string) {
+    rememberBoardScroll(scrollScope, pageRef.current);
+    nav(`/opportunities/${id}`);
+  }
 
   const autoScrollTimer = useRef<number | null>(null);
   function autoScrollTick() {
@@ -213,7 +248,7 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
       const target = overRef.current;
       setDrag(null); setOverCol(null);
       if (!d) return;
-      if (!d.moved) { nav(`/opportunities/${opp.id}`); return; } // press without drag = open
+      if (!d.moved) { openOpp(opp.id); return; } // press without drag = open
       if (target && target !== opp.stage) commitMove(opp, target);
     };
     window.addEventListener("pointermove", onMove);
@@ -288,7 +323,7 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
   const stageCount = (pipelineId: string, stageKey: string) => (pipelineId === pipeline.id ? opps.filter((o) => o.stage === stageKey).length : null);
 
   return (
-    <div className="page pl2-page op-board">
+    <div className="page page-fill pl2-page op-board" ref={pageRef}>
       <div className="page-header pl-head">
         <div className="pl-head-main">
           <h1>Pipeline</h1>
@@ -311,7 +346,7 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
         </div>
       </div>
 
-      <div className={`kanban ${drag ? "dragging" : ""}`}>
+      <div ref={kanbanRef} className={`kanban ${drag ? "dragging" : ""}`}>
         {activeStages.length === 0 && (
           <div className="pl-nostages">
             <span className="pl-nostages-title">{pipeline.name} has no stages yet</span>
@@ -346,7 +381,7 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
                 {colOpps.map((o) => (
                   <OppCard key={o.id} opp={o} canMove={canMove} canConvert={canConvert} dragging={drag?.id === o.id && drag.moved}
                     onPointerDown={(e) => startDrag(e, o)}
-                    onOpen={() => nav(`/opportunities/${o.id}`)}
+                    onOpen={() => openOpp(o.id)}
                     onMove={() => setMoving(o)}
                     onConvert={() => setConverting(o)} />
                 ))}
@@ -400,20 +435,18 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
       {showNew && (
         <NewOpportunityModal pipelines={pipelines} pipelineId={pipeline.id} onClose={() => setShowNew(false)}
           onPipelinesChanged={onSettingsChanged}
-          onCreated={(o) => {
+          onCreated={(o, where) => {
             setShowNew(false);
-            // Show it where it lives: this board (refreshed in place) or the
-            // board of the pipeline it was created in.
+            // Show it where it lives: on this board right away (then refreshed),
+            // or on the board of the pipeline it was created in.
             if (o.pipelineId === pipeline.id) {
               board.upsert(o, (prev) => prev);
               load();
             } else {
-              onSettingsChanged();
               onSelectPipeline?.(o.pipelineId);
             }
-            const where = pipelines.find((p) => p.id === o.pipelineId);
-            const stageName = where?.stages.find((s) => s.key === o.stage)?.label ?? o.stage;
-            showToast(<span><strong>{o.name}</strong> added to {stageName}. <Link to={`/opportunities/${o.id}`} className="link-btn">Open</Link></span>, "success", 8000);
+            const place = o.pipelineId === pipeline.id || !where.pipelineName ? where.stageLabel : `${where.pipelineName} · ${where.stageLabel}`;
+            showToast(<span><strong>{o.name}</strong> added to {place}. <Link to={`/opportunities/${o.id}`} className="link-btn">Open</Link></span>, "success", 8000);
           }} />
       )}
       {pending && (
@@ -626,11 +659,10 @@ export function ConvertOpportunityModal({ opp, pipeline, pipelines, onClose, onC
   const seller = opp.contact
     ? [opp.contact.firstName, opp.contact.lastName].filter(Boolean).join(" ") + (opp.contact.entityName ? ` · ${opp.contact.entityName}` : "")
     : oppSellerLine(opp);
-  const property = [
-    [opp.county, opp.state].filter(Boolean).join(", "),
-    opp.abstract ? `Abstract ${opp.abstract}` : null,
-    opp.survey ? `${opp.survey} Survey` : null,
-  ].filter(Boolean).join(" · ");
+  const place = [opp.county, opp.state].filter(Boolean).join(", ");
+  const property = place || opp.abstract || opp.survey
+    ? <>{place}{place && (opp.abstract || opp.survey) ? " · " : null}<OppAbstract abstract={opp.abstract} survey={opp.survey} /></>
+    : null;
   const acreage = [
     opp.estNma != null ? `${num(opp.estNma)} NMA` : opp.estAcres != null ? `${num(opp.estAcres)} acres` : null,
     opp.estNra != null ? `${num(opp.estNra)} NRA` : null,

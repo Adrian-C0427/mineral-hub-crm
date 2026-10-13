@@ -5,6 +5,7 @@ import {
   convertedSeller,
   isAbstractId,
   normalizeAbstractId,
+  opportunityFieldValues,
   sellerPreferredMethod,
   serializeOpportunity,
   serializeOpportunitySummary,
@@ -200,5 +201,24 @@ describe("pipeline kinds (domain/stages)", () => {
     expect(isTerminalKeyForKind("DEALS", "LOST")).toBe(false);
     expect(isOpportunityPipeline({ kind: "OPPORTUNITIES" })).toBe(true);
     expect(isOpportunityPipeline({ kind: "DEALS" })).toBe(false);
+  });
+});
+
+describe("opportunityFieldValues (create + PATCH share it)", () => {
+  it("keeps only the keys the body names, so a PATCH leaves the rest alone", () => {
+    expect(opportunityFieldValues({ sellerName: "Ann Smith" })).toEqual({ sellerName: "Ann Smith" });
+    expect(opportunityFieldValues({})).toEqual({});
+  });
+  it("stores a blank or emptied field as null, never an empty string", () => {
+    expect(opportunityFieldValues({ sellerName: "  ", email: "", notes: null, ownerId: "", contactId: "" }))
+      .toEqual({ sellerName: null, email: null, notes: null, ownerId: null, contactId: null });
+  });
+  it("trims text and keeps numbers (including 0) as given", () => {
+    expect(opportunityFieldValues({ county: " Leon ", estNma: 0, estNra: 12.5, estAcres: null }))
+      .toEqual({ county: "Leon", estNma: 0, estNra: 12.5, estAcres: null });
+  });
+  it("ignores keys that are not plain editable columns", () => {
+    const body = { sellerName: "A", stage: "QUALIFIED", pipelineId: "p2", name: "X" } as Record<string, unknown>;
+    expect(opportunityFieldValues(body as Parameters<typeof opportunityFieldValues>[0])).toEqual({ sellerName: "A" });
   });
 });

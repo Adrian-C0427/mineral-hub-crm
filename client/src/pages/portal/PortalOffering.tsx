@@ -11,6 +11,8 @@ import { DateField } from "../../components/DateField";
 import { StatStrip, type StatCell } from "../../components/kit";
 import { countyStateLabel, formatAbstract } from "../../lib/abstracts";
 import { ASSET_TYPE_LABELS } from "../../lib/options";
+import { usableLogo } from "../../lib/branding";
+import { useLogoFailures } from "../../lib/useBrandLogo";
 
 const EMPTY_FC: FC = { type: "FeatureCollection", features: [] };
 
@@ -443,11 +445,15 @@ export function StarGlyph() {
 
 /** Shared public chrome: branded sticky header + footer, no CRM sidebar/auth. */
 export function PortalShell({ org, wide, action, children }: { org?: PortalOrg; wide?: boolean; action?: ReactNode; children: React.ReactNode }) {
-  const brand = org?.fullLogo
-    ? <img className="pp-brand-logo" src={org.fullLogo} alt={org.name} />
+  // A logo that can't be decoded drops to the next option instead of a broken image.
+  const { failed, markFailed } = useLogoFailures();
+  const fullLogo = usableLogo(org?.fullLogo, failed);
+  const markLogo = usableLogo(org?.compactLogo, failed);
+  const brand = fullLogo
+    ? <img className="pp-brand-logo" src={fullLogo} alt={org?.name ?? ""} onError={() => markFailed(fullLogo)} />
     : (
       <>
-        {org?.compactLogo && <img className="pp-brand-mark" src={org.compactLogo} alt="" />}
+        {markLogo && <img className="pp-brand-mark" src={markLogo} alt="" onError={() => markFailed(markLogo)} />}
         <span className="brand pp-brand-name">{org?.name ?? <>Mineral Hub<span className="dot">.</span></>}</span>
       </>
     );

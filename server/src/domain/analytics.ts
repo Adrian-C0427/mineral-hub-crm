@@ -3,7 +3,7 @@
  * Kept database-free so KPI/series math can be unit-tested directly.
  */
 import { linearForecast, addMonths } from "./forecast.js";
-import { dealCostBasis, grossFee } from "./metrics.js";
+import { averageImpliedMargin, dealCostBasis, grossFee } from "./metrics.js";
 import { avgMoney, roundMoney, sumMoney } from "./money.js";
 
 /** Realized gross fee of a closed deal: accepted offer − cost basis (0 without an accepted offer). */
@@ -89,6 +89,12 @@ export interface Kpis {
   roiMultiple: number | null;
   /** Closed deals in the period with no accepted offer — revenue they can't contribute. */
   closedWithoutPrice: number;
+  /** Mean of the per-deal implied margins (ask − our price) ÷ our price of the
+   *  deals closed in the period, as a ratio; null (N/A) when no closed deal has
+   *  both prices and a positive Our Price. See averageImpliedMargin. */
+  avgImpliedMargin: number | null;
+  /** How many closed deals avgImpliedMargin averages (the eligible ones). */
+  impliedMarginDeals: number;
 }
 
 /**
@@ -135,6 +141,9 @@ export function computeKpis(
   const grossProfit = roundMoney(grossFees - closingCosts);
   const netProfit = roundMoney(grossProfit - expenseTotal);
   const closedWithoutPrice = closed.filter((d) => d.acceptedAmount == null).length;
+  // Same closed-in-period population as every other closed-deal KPI; deals
+  // without a computable margin are excluded, never counted as 0%.
+  const margin = averageImpliedMargin(closed);
 
   return {
     totalDeals: existedByEnd.length,
@@ -156,6 +165,8 @@ export function computeKpis(
     buyerActivity: activities.filter((a) => inRange(a.date, range)).length,
     ...costAndRoi(closed.length, closedWithoutPrice, expenseTotal, netProfit),
     closedWithoutPrice,
+    avgImpliedMargin: margin.value,
+    impliedMarginDeals: margin.deals,
   };
 }
 

@@ -32,6 +32,7 @@ import { MarketingFunnel } from "../components/MarketingFunnel";
 import { DateField } from "../components/DateField";
 import { royaltyLabel } from "../lib/royalty";
 import { perAcreRate } from "../lib/perAcre";
+import { impliedMargin } from "../lib/metrics";
 import { OperatorSelect } from "../components/OperatorSelect";
 import {
   addDaysIso, applyAcreageEdit, AcreageNote, DaysToCloseField, editPriceGroup, priceGroupFromStored, PriceNote, RoyaltyRateField, royaltyRateError, syncPriceGroup,
@@ -137,15 +138,16 @@ export function DealDetail() {
   const ourPerNra = deal.ourCostPerNra ?? perAcreRate(deal.ourPrice, deal.nra);
   const askPerNma = deal.askPricePerNma ?? perAcreRate(deal.askPrice, deal.acreageNma);
   const askPerNra = deal.askPricePerNra ?? perAcreRate(deal.askPrice, deal.nra);
-  const hasMargin = deal.askPrice != null && deal.ourPrice != null && deal.ourPrice > 0;
+  // The shared formula (lib/metrics) — Reports' Avg implied margin averages it.
+  const margin = impliedMargin(deal.askPrice, deal.ourPrice);
   const royalty = royaltyLabel(deal.royaltyRate);
   const summary: StatCell[] = [
     { label: "Our cost", value: money(deal.ourPrice), sub: perAcreSub(ourPerNma, ourPerNra) },
     { label: "Asking price", value: money(deal.askPrice), sub: perAcreSub(askPerNma, askPerNra) },
     {
       label: "Implied margin",
-      value: hasMargin ? `${deal.askPrice! >= deal.ourPrice! ? "+" : ""}${Math.round(((deal.askPrice! - deal.ourPrice!) / deal.ourPrice!) * 100)}%` : "—",
-      tone: hasMargin ? (deal.askPrice! >= deal.ourPrice! ? "success" : "danger") : "default",
+      value: margin != null ? `${margin >= 0 ? "+" : ""}${Math.round(margin * 100)}%` : "—",
+      tone: margin == null ? "default" : margin >= 0 ? "success" : "danger",
       sub: "Asking price over our cost",
     },
     {

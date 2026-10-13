@@ -11,6 +11,7 @@ import {
   OPPORTUNITY_ACTIVITY_KINDS,
   convertedDealFields,
   convertedSeller,
+  opportunityFieldValues,
   serializeOpportunity,
   serializeOpportunitySummary,
 } from "../domain/opportunities.js";
@@ -117,8 +118,19 @@ const createSchema = z.object({
   stage: z.string().max(200).optional(),
   ...editableFields,
 });
+// Same field rules as create. The pipeline and stage are not edited here: a
+// stage change goes through POST /:id/stage (history, terminal reasons, AUTO
+// conversion) and an opportunity stays in the pipeline it was created in.
 const updateSchema = z.object({ name: z.string().trim().min(1).max(200).optional(), ...editableFields });
-const EDITABLE_KEYS = ["ownerId", "contactId", "sellerName", "companyName", "phone", "email", "state", "county", "abstract", "survey", "estAcres", "estNma", "estNra", "source", "notes"] as const;
+
+/** Validated editable columns of a create/PATCH body (blank → null; the
+ *  owner and contact must belong to the caller's org). */
+async function editableValues(organizationId: string, data: z.infer<typeof updateSchema>) {
+  const fields = opportunityFieldValues(data);
+  if (fields.ownerId) await validateOwner(organizationId, fields.ownerId);
+  if (fields.contactId) await validateContact(organizationId, fields.contactId);
+  return fields;
+}
 
 // ---------------------------------------------------------------------------
 // Conversion — the one place an opportunity becomes a Deal. Runs inside the
@@ -243,8 +255,7 @@ opportunitiesRouter.post(
     const stages = await ensureStages(prisma, org, p.id);
     const stage = data.stage ?? stages.find((s) => !s.isTerminal)?.key;
     if (!stage || !stages.some((s) => s.key === stage)) throw new HttpError(400, "Unknown pipeline stage");
-    if (data.ownerId) await validateOwner(org, data.ownerId);
-    if (data.contactId) await validateContact(org, data.contactId);
+    const fields = await editableValues(org, data);
     const now = new Date();
     const created = await prisma.$transaction(async (tx) => {
       const o = await tx.opportunity.create({
@@ -254,21 +265,7 @@ opportunitiesRouter.post(
           pipelineId: p.id,
           stage,
           currentStageEnteredAt: now,
-          ownerId: data.ownerId ?? null,
-          contactId: data.contactId ?? null,
-          sellerName: data.sellerName ?? null,
-          companyName: data.companyName ?? null,
-          phone: data.phone ?? null,
-          email: data.email ?? null,
-          state: data.state ?? null,
-          county: data.county ?? null,
-          abstract: data.abstract ?? null,
-          survey: data.survey ?? null,
-          estAcres: data.estAcres ?? null,
-          estNma: data.estNma ?? null,
-          estNra: data.estNra ?? null,
-          source: data.source ?? null,
-          notes: data.notes ?? null,
+          ...fields,
           nextFollowUpDate: toDay(data.nextFollowUpDate) ?? null,
           lastActivityAt: now,
           createdByUserId: req.user!.id,
@@ -287,13 +284,14 @@ opportunitiesRouter.patch(
   requirePermission("editDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = updateSchema.parse(req.body);
+    // Say so rather than silently dropping a stage/pipeline the caller meant to change.
+    if (req.body && typeof req.body === "object" && ("stage" in req.body || "pipelineId" in req.body)) {
+      throw new HttpError(400, "Stages change with Move stage, and an opportunity stays in its pipeline");
+    }
     const org = orgId(req);
     const o = await ownOpportunity(req);
-    if (data.ownerId) await validateOwner(org, data.ownerId);
-    if (data.contactId) await validateContact(org, data.contactId);
-    const patch: Record<string, unknown> = { lastActivityAt: new Date() };
+    const patch: Record<string, unknown> = { lastActivityAt: new Date(), ...(await editableValues(org, data)) };
     if (data.name !== undefined) patch.name = data.name;
-    for (const k of EDITABLE_KEYS) if (k in data) patch[k] = (data as Record<string, unknown>)[k] ?? null;
     if (data.nextFollowUpDate !== undefined) patch.nextFollowUpDate = toDay(data.nextFollowUpDate);
     await prisma.opportunity.update({ where: { id: o.id }, data: patch });
     res.json(await loadOpportunity(prisma, org, o.id));

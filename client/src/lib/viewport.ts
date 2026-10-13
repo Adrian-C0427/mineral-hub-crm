@@ -50,3 +50,20 @@ export function layoutRect(el: Element): LayoutRect {
     width: r.width / z, height: r.height / z,
   };
 }
+
+/**
+ * Horizontal placement of a body-portaled popup hanging from `anchor` (all in
+ * layout px): `width` is the popup's own width (default: the anchor's),
+ * shrunk to fit narrow viewports; `left` lines it up with the anchor's left
+ * edge — or its right edge for align "end" — then clamps it so the whole
+ * popup stays `edge` px inside the viewport.
+ */
+export function popupX(
+  anchor: { left: number; right: number; width: number }, vw: number,
+  opts?: { width?: number; align?: "start" | "end"; edge?: number },
+): { left: number; width: number } {
+  const edge = opts?.edge ?? 8;
+  const width = opts?.width != null ? Math.min(opts.width, vw - 2 * edge) : anchor.width;
+  const left = Math.max(edge, Math.min(opts?.align === "end" ? anchor.right - width : anchor.left, vw - width - edge));
+  return { left, width };
+}

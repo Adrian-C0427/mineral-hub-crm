@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseRoyaltyRate, royaltyValue, royaltyLabel, nraFromNma, nmaFromNra, ROYALTY_RATE_OPTIONS } from "./royalty.js";
 import { totalFromPerAcre } from "./perAcre.js";
-import { dealNetProfit } from "./metrics.js";
+import { dealNetProfit, impliedMargin } from "./metrics.js";
 
 describe("parseRoyaltyRate", () => {
   it("reads every accepted form of 18.75% as the same decimal interest", () => {
@@ -83,7 +83,7 @@ describe("calculations with a custom royalty rate", () => {
   });
 });
 
-// The client mirrors (client/src/lib/royalty.ts, money.ts, perAcre.ts) must
+// The client mirrors (client/src/lib/royalty.ts, money.ts, perAcre.ts, metrics.ts) must
 // agree with the server on every input — they are separate files because the
 // two builds don't share code, so this keeps them from drifting.
 describe("client mirrors agree with the server", () => {
@@ -115,5 +115,14 @@ describe("client mirrors agree with the server", () => {
       expect(cp.nraFromNma(a, r)).toBe(nraFromNma(a, r));
       expect(cp.nmaFromNra(a, r)).toBe(nmaFromNra(a, r));
     }
+  });
+
+  it("implied margin (deal page) matches the Reports formula", async () => {
+    const cm = await load("metrics.ts");
+    const cases: [number | null | undefined, number | null | undefined][] = [
+      [150_000, 100_000], [40_000, 30_000], [80_000, 100_000], [0, 100_000], [100_000, 100_000],
+      [null, 100_000], [150_000, null], [150_000, 0], [150_000, -1], [undefined, undefined], [Number.NaN, 1],
+    ];
+    for (const [ask, our] of cases) expect(cm.impliedMargin(ask, our), `${ask}/${our}`).toBe(impliedMargin(ask, our));
   });
 });
