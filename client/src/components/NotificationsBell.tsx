@@ -17,6 +17,7 @@ const TYPE_STYLE: Record<string, { tone: "danger" | "accent" | "warn" | "success
   portal_lead: { tone: "success", d: "M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7zM3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 4.5a3.5 3.5 0 0 1 0 6.5M21 20c0-2.6-1.6-4.9-4-5.7" },
   portal_offer: { tone: "success", d: "M4 8h16v11H4zM9 8V5h6v3M4 13h16" },
   email_reply: { tone: "accent", d: "M4 6h16v12H4zM4 7l8 6 8-6" },
+  integration_error: { tone: "danger", d: "M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5" },
 };
 const BELL_PATHS = ["M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15L6 16z", "M10 20.5a2 2 0 0 0 4 0"];
 

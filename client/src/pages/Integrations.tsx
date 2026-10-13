@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Mail, Bot, HardDrive, Calendar, ShieldCheck,
-  Users, Cloud, Send, type LucideIcon,
+  Users, Cloud, Send, MessageSquare, type LucideIcon,
 } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import { Spinner, Banner, Modal, ConfirmChanges, ConfirmDialog } from "../components/ui";
@@ -9,6 +9,8 @@ import { Select } from "../components/Select";
 import { fmtDateTime } from "../lib/format";
 import { SettingsLayout } from "../components/SettingsNav";
 import { Segmented, Tag } from "../components/kit";
+import { useHighLevelStatus, HighLevelSummary, HighLevelConnectModal } from "../components/HighLevelIntegration";
+import { RESPONSE_WINDOW_CHOICES, HL_SYNC_EVERY } from "../lib/highlevel";
 
 // The catalog lives on the SERVER (domain/integrationCatalog.ts) — the single
 // source of truth for which providers exist, how they authenticate, and how far
@@ -25,7 +27,11 @@ interface Provider {
   description: string; secretLabel?: string; secretHint?: string; setupUrl?: string; syncable?: boolean;
   status: "CONNECTED" | "NOT_CONNECTED" | "ERROR";
   configured: boolean;
-  config: { schedule?: string; notes?: string; fromEmail?: string; fromName?: string; domains?: ResendDomain[] };
+  config: {
+    schedule?: string; notes?: string; fromEmail?: string; fromName?: string; domains?: ResendDomain[];
+    // HighLevel
+    locationId?: string; locationName?: string; responseWindowDays?: number;
+  };
   secretMask: string | null;
   connectedAt: string | null; lastSyncAt: string | null; lastError: string | null;
 }
@@ -50,7 +56,7 @@ const LOGO_SLUG: Record<string, string> = {
 const LOGO_ICON: Record<string, LucideIcon> = {
   smtp: Send, storage: HardDrive,
   outlook: Mail, outlookcalendar: Calendar, onedrive: Cloud, entra: ShieldCheck,
-  teams: Users,
+  teams: Users, highlevel: MessageSquare,
 };
 const BRAND_COLOR: Record<string, string> = {
   outlook: "#0078D4", outlookcalendar: "#0078D4", onedrive: "#0078D4", entra: "#0078D4",
@@ -220,6 +226,7 @@ export function Integrations() {
                   onConfigure={() => setConfiguring(p)}
                   onTest={() => run(p, "test")}
                   onSync={() => run(p, "sync")}
+                  onReload={load}
                 />
               ))}
             </div>
@@ -227,7 +234,16 @@ export function Integrations() {
         );
       })}
 
-      {connecting && (
+      {connecting?.key === "highlevel" && (
+        <HighLevelConnectModal
+          name={connecting.name}
+          setupUrl={connecting.setupUrl}
+          locationId={connecting.status !== "NOT_CONNECTED" ? connecting.config.locationId : undefined}
+          onClose={() => setConnecting(null)}
+          onConnected={(msg) => { setConnecting(null); setFlash(msg); load(); }}
+        />
+      )}
+      {connecting && connecting.key !== "highlevel" && (
         <ConnectModal
           provider={connecting}
           onClose={() => setConnecting(null)}
@@ -245,10 +261,17 @@ export function Integrations() {
         <ConfirmDialog
           title={`Disconnect ${disconnecting.name}?`}
           message={
-            <p style={{ margin: 0 }}>
-              The stored credential will be deleted. You can reconnect at any time with a new {disconnecting.secretLabel?.toLowerCase() ?? "credential"}.
-              {disconnecting.key === "resend" && " Until then, outbound email falls back to the instance-wide transport (or fails with a clear error if none is configured)."}
-            </p>
+            disconnecting.key === "highlevel" ? (
+              <p style={{ margin: 0 }}>
+                Syncing stops and the stored key is deleted. Texts already imported stay, so Reports keep their history.
+                You can reconnect any time with a new key — syncing picks up where it left off.
+              </p>
+            ) : (
+              <p style={{ margin: 0 }}>
+                The stored credential will be deleted. You can reconnect at any time with a new {disconnecting.secretLabel?.toLowerCase() ?? "credential"}.
+                {disconnecting.key === "resend" && " Until then, outbound email falls back to the instance-wide transport (or fails with a clear error if none is configured)."}
+              </p>
+            )
           }
           confirmLabel="Disconnect"
           danger
@@ -261,12 +284,17 @@ export function Integrations() {
   );
 }
 
-function IntegrationCard({ p, busy, result, onConnect, onOAuth, onDisconnect, onConfigure, onTest, onSync }: {
+function IntegrationCard({ p, busy, result, onConnect, onOAuth, onDisconnect, onConfigure, onTest, onSync, onReload }: {
   p: Provider; busy: boolean; result?: { ok: boolean; message: string };
   onConnect: () => void; onOAuth: () => void; onDisconnect: () => void; onConfigure: () => void; onTest: () => void; onSync: () => void;
+  onReload: () => void;
 }) {
   const connected = p.status === "CONNECTED";
   const errored = p.status === "ERROR";
+  // HighLevel shows its sync phase (preview → importing → live) from its own status route.
+  const isHL = p.key === "highlevel";
+  const hl = useHighLevelStatus(isHL && (connected || errored), `${p.status}|${p.lastSyncAt}|${p.connectedAt}|${p.lastError}`, onReload);
+  const hlPhase = hl.status?.phase ?? null;
   // An OAuth provider that isn't configured on the server can't be connected
   // yet — it needs an app registration + server credentials.
   const needsSetup = p.implementation === "oauth" && !p.configured;
@@ -303,7 +331,9 @@ function IntegrationCard({ p, busy, result, onConnect, onOAuth, onDisconnect, on
       )}
       {p.key === "resend" && (connected || errored) && <DomainChips domains={p.config.domains ?? []} />}
       {connected && p.secretMask && <p className="integration-meta">Credential: <code>{p.secretMask}</code></p>}
-      {connected && p.lastSyncAt && <p className="integration-meta">Last sync: {fmtDateTime(p.lastSyncAt)}{p.config.schedule && p.config.schedule !== "manual" ? ` · auto (${p.config.schedule})` : ""}</p>}
+      {connected && p.lastSyncAt && !isHL && <p className="integration-meta">Last sync: {fmtDateTime(p.lastSyncAt)}{p.config.schedule && p.config.schedule !== "manual" ? ` · auto (${p.config.schedule})` : ""}</p>}
+      {isHL && hl.status && (connected || errored) && <HighLevelSummary s={hl.status} />}
+      {isHL && hl.error && <p className="error-text integration-err">{hl.error}</p>}
       {p.lastError && <p className="error-text integration-err">{p.lastError}</p>}
       {result && <p className={`${result.ok ? "integration-meta" : "error-text integration-err"}`}>{result.message}</p>}
 
@@ -312,6 +342,19 @@ function IntegrationCard({ p, busy, result, onConnect, onOAuth, onDisconnect, on
           p.setupUrl && <a className="integration-link-btn" href={p.setupUrl} target="_blank" rel="noreferrer">Setup guide ↗</a>
         ) : p.implementation === "env" ? (
           <button className="small" disabled={busy} onClick={onTest}>{busy ? "Testing…" : "Test connection"}</button>
+        ) : isHL && (connected || errored) ? (
+          <>
+            {hlPhase === "preview" && (
+              <button className="small primary" disabled={hl.starting || errored} onClick={() => void hl.startImport()}>
+                {hl.starting ? "Starting…" : "Start import"}
+              </button>
+            )}
+            <button className="small" disabled={busy} onClick={onTest}>{busy ? "Working…" : "Test"}</button>
+            {hlPhase === "live" && <button className="small" disabled={busy} onClick={onSync}>Sync now</button>}
+            <button className="small" onClick={onConfigure}>Configure</button>
+            <button className="small" onClick={onConnect}>Replace key</button>
+            <button className="small set-btn-danger-text" onClick={onDisconnect}>Disconnect</button>
+          </>
         ) : connected || errored ? (
           <>
             <button className="small" disabled={busy} onClick={onTest}>{busy ? "Working…" : "Test"}</button>
@@ -389,14 +432,21 @@ function ConfigureModal({ provider, onClose, onSaved }: { provider: Provider; on
   const [notes, setNotes] = useState(provider.config.notes ?? "");
   const [fromEmail, setFromEmail] = useState(provider.config.fromEmail ?? "");
   const [fromName, setFromName] = useState(provider.config.fromName ?? "");
+  const [windowDays, setWindowDays] = useState(String(provider.config.responseWindowDays ?? 30));
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isResend = provider.key === "resend";
+  const isHL = provider.key === "highlevel";
 
   async function save() {
     setConfirming(false); setBusy(true); setError(null);
     try {
+      if (isHL) {
+        await api.patch(`/integrations/${provider.key}`, { config: { responseWindowDays: Number(windowDays), notes } });
+        onSaved();
+        return;
+      }
       const config: Record<string, string> = { schedule, notes };
       if (isResend) {
         if (!fromEmail.trim()) { setError("Resend needs a sender email address."); setBusy(false); return; }
@@ -426,15 +476,34 @@ function ConfigureModal({ provider, onClose, onSaved }: { provider: Provider; on
           </div>
         </>
       )}
-      <div className="field">
-        <label>Automatic synchronization</label>
-        <Select value={schedule} onChange={setSchedule} ariaLabel="Sync schedule"
-          options={[
-            { value: "manual", label: "Manual only" },
-            ...(provider.syncable ? [{ value: "hourly", label: "Every hour" }, { value: "daily", label: "Daily" }] : []),
-          ]} />
-        <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Automatic sync re-validates the connection on schedule and records failures on this page and in the activity log.</p>
-      </div>
+      {isHL ? (
+        <>
+          <div className="field">
+            <label>Response window</label>
+            <Select value={windowDays} onChange={setWindowDays} ariaLabel="Response window"
+              options={RESPONSE_WINDOW_CHOICES.map((d) => ({ value: String(d), label: `${d} days` }))} />
+            <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+              A reply counts as a response when it arrives within this many days of the most recent text; later replies show as late replies. Changing it recounts every contact in Reports.
+            </p>
+          </div>
+          <div className="field">
+            <label>Automatic synchronization</label>
+            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
+              Nothing to set — new texts and delivery updates are checked automatically {HL_SYNC_EVERY}. Use Sync now on the card to check right away.
+            </p>
+          </div>
+        </>
+      ) : (
+        <div className="field">
+          <label>Automatic synchronization</label>
+          <Select value={schedule} onChange={setSchedule} ariaLabel="Sync schedule"
+            options={[
+              { value: "manual", label: "Manual only" },
+              ...(provider.syncable ? [{ value: "hourly", label: "Every hour" }, { value: "daily", label: "Daily" }] : []),
+            ]} />
+          <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Automatic sync re-validates the connection on schedule and records failures on this page and in the activity log.</p>
+        </div>
+      )}
       <div className="field"><label>Notes</label><textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Internal notes about this connection" /></div>
       {error && <div className="error-text">{error}</div>}
       {confirming && <ConfirmChanges busy={busy} onCancel={() => setConfirming(false)} onConfirm={save} />}

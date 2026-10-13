@@ -10,6 +10,12 @@
  * container, so in-process scheduling needs no extra infrastructure). Every
  * tick finds CONNECTED integrations whose config.schedule ("hourly"/"daily")
  * is due by lastSyncAt and syncs them. Failures never throw out of the tick.
+ *
+ * HighLevel has its own cadence (services/highlevel/scheduler.ts) but rides
+ * THIS tick for its 15-minute live sync, reusing the rows the tick already
+ * loaded: production's database (Neon free plan) suspends after 5 idle
+ * minutes and caps compute hours, so a separate, shorter HighLevel interval
+ * would keep it awake around the clock.
  */
 import type { Integration } from "@prisma/client";
 import { prisma } from "../db.js";
@@ -21,6 +27,8 @@ import { isOAuthProvider, getFreshAccessToken } from "./integrationOAuth.js";
 import { isInboundEmailProvider, syncInboundEmail } from "./emailInboundSync.js";
 import { refreshResendDomains } from "./resend.js";
 import { syncOutlookCalendar } from "./outlookCalendarSync.js";
+import { checkHighLevel, runHighLevelSync, HIGHLEVEL } from "./highlevel/sync.js";
+import { highLevelTick, ensureImportLoop, MANUAL_BUDGET_MS } from "./highlevel/scheduler.js";
 import { env } from "../config.js";
 
 export interface IntegrationConfig {
@@ -40,6 +48,7 @@ export async function checkIntegration(row: Integration): Promise<ValidationResu
   const def = providerByKey(row.provider);
   if (!def) return { ok: false, message: "Unknown provider." };
   if (def.implementation === "env") return validateEnvProvider(row.provider);
+  if (row.provider === HIGHLEVEL) return checkHighLevel(row);
   // OAuth: "valid" = we can obtain a fresh access token (refreshing if needed).
   if (isOAuthProvider(row.provider)) {
     try {
@@ -62,6 +71,21 @@ export async function checkIntegration(row: Integration): Promise<ValidationResu
 
 /** Run a sync: validate, stamp lastSyncAt/lastError/status, audit-log the outcome. */
 export async function syncIntegration(row: Integration, actorUserId?: string | null): Promise<ValidationResult> {
+  // HighLevel: "Sync now" is one bounded sync run, which does its own
+  // status / lastSyncAt / lastError bookkeeping.
+  if (row.provider === HIGHLEVEL) {
+    const r = await runHighLevelSync(row, { budgetMs: MANUAL_BUDGET_MS, reason: "manual" });
+    if (r.ok && r.phase === "importing") ensureImportLoop(row.organizationId);
+    if (!r.skipped) {
+      await logActivity({
+        eventType: r.ok ? "integration.synced" : "integration.sync_failed",
+        summary: r.ok ? "Integration highlevel synchronized" : `Integration highlevel sync failed: ${r.message}`,
+        organizationId: row.organizationId,
+        actorUserId: actorUserId ?? null,
+      });
+    }
+    return { ok: r.ok, message: r.message };
+  }
   let result = await checkIntegration(row);
   // Data pulls layered on the health check — each provider's real work:
   if (result.ok && isInboundEmailProvider(row.provider)) {
@@ -116,9 +140,14 @@ const TICK_MS = 15 * 60 * 1000;
 const DUE_MS: Record<string, number> = { hourly: 60 * 60 * 1000, daily: 24 * 60 * 60 * 1000 };
 
 async function tick(): Promise<void> {
-  const rows = await prisma.integration.findMany({ where: { status: "CONNECTED" } });
+  // HighLevel rows in ERROR are included so a transient outage recovers by itself.
+  const rows = await prisma.integration.findMany({
+    where: { OR: [{ status: "CONNECTED" }, { provider: HIGHLEVEL, status: "ERROR" }] },
+  });
   const now = Date.now();
   for (const row of rows) {
+    // HighLevel never uses config.schedule — it is synced below, from this same tick.
+    if (row.provider === HIGHLEVEL || row.status !== "CONNECTED") continue;
     const schedule = configOf(row).schedule;
     const interval = schedule ? DUE_MS[schedule] : undefined;
     if (!interval) continue; // manual (or unset) — only synced on demand
@@ -130,6 +159,7 @@ async function tick(): Promise<void> {
       console.error(`Integration sync tick failed for ${row.provider}:`, e instanceof Error ? e.message : e);
     }
   }
+  await highLevelTick(rows.filter((r) => r.provider === HIGHLEVEL));
 }
 
 /** Start the background scheduler (call once at boot; no-op in tests). */
