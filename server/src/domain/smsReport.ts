@@ -7,7 +7,12 @@
  * Dates are UTC calendar days. A period [from, to] covers from 00:00Z up to
  * (not including) to + 1 day 00:00Z.
  */
-import { DEFAULT_RESPONSE_WINDOW_DAYS, RESPONSE_WINDOW_OPTIONS, ratio, type TouchOutcomeCount } from "./smsMetrics.js";
+import {
+  DEFAULT_RESPONSE_WINDOW_DAYS, HEALTH_MIN_TEXTS, RESPONSE_WINDOW_OPTIONS, carrierHealth, ratio, textingCost,
+  type HealthResult, type TouchOutcomeCount,
+} from "./smsMetrics.js";
+import { phoneTagKinds, suggestScope, type SmsScope } from "./smsScope.js";
+import type { FunnelStep } from "./smsFunnel.js";
 
 export const DAY_MS = 86_400_000;
 
@@ -129,9 +134,32 @@ export interface SmsKpis {
   avgTextsPerContact: number | null;
   avgResponseSeconds: number | null;
   medianResponseSeconds: number | null;
+  /** Cohort contacts who hit a wrong number (a flagged reply or an XLeads wrong-number tag). */
+  wrongNumbers: number;
+  wrongNumberRate: number | null;
+  /** Funnel, in people (see funnelSummary). */
+  opportunities: number;
+  interestedRate: number | null;
+  offers: number;
+  offerAcceptanceRate: number | null;
+  closedDeals: number;
+  /** Dollars; null when no price per segment is set. */
+  textingCost: number | null;
+  costPerReply: number | null;
+  costPerOpportunity: number | null;
+  costPerOffer: number | null;
+  costPerClosedDeal: number | null;
+  /** Speed to lead (see speedSummary). */
+  medianAnswerSeconds: number | null;
+  answeredWithinHourRate: number | null;
+  neverAnsweredRate: number | null;
 }
 
-export interface VolumeTotals { sent: number; delivered: number; failed: number; inbound: number; contactsTexted: number }
+export interface VolumeTotals {
+  sent: number; delivered: number; failed: number; inbound: number; contactsTexted: number;
+  /** Billable segments of the texts sent (a text not yet counted = 1), and how many weren't counted yet. */
+  segments?: number; unknownSegments?: number;
+}
 export interface CohortTotals { reached: number; responded: number; optedOut: number; avgSeconds: number | null; medianSeconds: number | null }
 
 /** Sum the cohort's (touches, outcome) rows. */
@@ -147,7 +175,17 @@ export function cohortCounts(rows: readonly TouchOutcomeCount[]) {
   return { reached, responded, optedOut, lateReplies };
 }
 
-export function computeKpis(v: VolumeTotals, c: CohortTotals): SmsKpis {
+/** The newer sections' headline figures; each is optional so a caller can leave a section out. */
+export interface KpiSections {
+  wrongNumbers?: number;
+  funnel?: FunnelSummary;
+  cost?: CostSummary;
+  speed?: SpeedSummary;
+}
+
+export function computeKpis(v: VolumeTotals, c: CohortTotals, x: KpiSections = {}): SmsKpis {
+  const step = (k: FunnelStepKey) => x.funnel?.steps.find((s) => s.key === k)?.count ?? 0;
+  const wrong = x.wrongNumbers ?? 0;
   return {
     textsSent: v.sent,
     textsDelivered: v.delivered,
@@ -163,6 +201,21 @@ export function computeKpis(v: VolumeTotals, c: CohortTotals): SmsKpis {
     // A median/average of nobody is N/A, not 0 seconds.
     avgResponseSeconds: c.responded > 0 ? c.avgSeconds : null,
     medianResponseSeconds: c.responded > 0 ? c.medianSeconds : null,
+    wrongNumbers: wrong,
+    wrongNumberRate: ratio(wrong, c.reached),
+    opportunities: step("opportunity"),
+    interestedRate: x.funnel?.interestedRate ?? null,
+    offers: step("offer"),
+    offerAcceptanceRate: x.funnel?.offerAcceptanceRate ?? null,
+    closedDeals: step("closed"),
+    textingCost: x.cost?.total ?? null,
+    costPerReply: x.cost?.perReply ?? null,
+    costPerOpportunity: x.cost?.perOpportunity ?? null,
+    costPerOffer: x.cost?.perOffer ?? null,
+    costPerClosedDeal: x.cost?.perClosedDeal ?? null,
+    medianAnswerSeconds: x.speed?.medianSeconds ?? null,
+    answeredWithinHourRate: x.speed?.within1hRate ?? null,
+    neverAnsweredRate: x.speed?.neverRate ?? null,
   };
 }
 
@@ -174,6 +227,10 @@ export const DELTA_KIND: Record<keyof SmsKpis, DeltaKind> = {
   contactsTexted: "relative", contactsReached: "relative", contactsResponded: "relative",
   responseRate: "points", optedOut: "relative", optOutRate: "points", avgTextsPerContact: "relative",
   avgResponseSeconds: "relative", medianResponseSeconds: "relative",
+  wrongNumbers: "relative", wrongNumberRate: "points",
+  opportunities: "relative", interestedRate: "points", offers: "relative", offerAcceptanceRate: "points", closedDeals: "relative",
+  textingCost: "relative", costPerReply: "relative", costPerOpportunity: "relative", costPerOffer: "relative", costPerClosedDeal: "relative",
+  medianAnswerSeconds: "relative", answeredWithinHourRate: "points", neverAnsweredRate: "points",
 };
 
 /** (cur − prev) ÷ prev; null when either side is missing or prev is 0 (no base to compare to). */
@@ -266,15 +323,44 @@ export interface HlSyncState {
   imported: number;
   lastRun: { at: string | null; ok: boolean; message: string | null } | null;
 }
+export interface HlPipeline { id: string; name: string }
 export interface HlReportConfig {
   locationName: string | null;
   responseWindowDays: number;
   hlUsers: HlUser[];
   sync: HlSyncState;
+  /** The saved minerals filter; null = not saved yet (the sync then uses suggestScope). */
+  scope: SmsScope | null;
+  /** Dollars per billable SMS segment; null = not set. */
+  pricePerSegment: number | null;
+  /** The HighLevel location's IANA time zone, when known and valid. */
+  locationTimezone: string | null;
+  hlPipelines: HlPipeline[];
+  hlTags: string[];
 }
 
 const str = (v: unknown) => (typeof v === "string" && v.trim() ? v : null);
 const int = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? Math.max(0, Math.round(v)) : null);
+const strings = (v: unknown) => (Array.isArray(v) ? v.filter((s): s is string => typeof s === "string" && s.trim() !== "") : null);
+
+/** A saved scope, or null when absent or malformed (every list must be a string array). */
+function readScope(v: unknown): SmsScope | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  const o = v as Record<string, unknown>;
+  const mineralTags = strings(o.mineralTags), realEstateTags = strings(o.realEstateTags), mineralPipelineIds = strings(o.mineralPipelineIds);
+  return mineralTags && realEstateTags && mineralPipelineIds ? { mineralTags, realEstateTags, mineralPipelineIds } : null;
+}
+
+/** True for a time zone this runtime (and so Postgres, which uses the same IANA names) knows. */
+export function isValidTimeZone(tz: unknown): tz is string {
+  if (typeof tz !== "string" || !tz.trim() || tz.length > 64) return false;
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Read the parts of the stored config the report uses, tolerating any shape. */
 export function readHlConfig(raw: unknown): HlReportConfig {
@@ -285,6 +371,7 @@ export function readHlConfig(raw: unknown): HlReportConfig {
   const phase = sync.phase === "preview" || sync.phase === "importing" || sync.phase === "live" ? sync.phase : null;
   const preview = (sync.preview && typeof sync.preview === "object" ? sync.preview : {}) as Record<string, unknown>;
   const lastRun = sync.lastRun && typeof sync.lastRun === "object" ? sync.lastRun as Record<string, unknown> : null;
+  const price = cfg.pricePerSegment;
   return {
     locationName: str(cfg.locationName),
     responseWindowDays: win != null && (RESPONSE_WINDOW_OPTIONS as readonly number[]).includes(win) ? win : DEFAULT_RESPONSE_WINDOW_DAYS,
@@ -299,7 +386,278 @@ export function readHlConfig(raw: unknown): HlReportConfig {
       imported: int(sync.imported) ?? 0,
       lastRun: lastRun ? { at: str(lastRun.at), ok: lastRun.ok !== false, message: str(lastRun.message) } : null,
     },
+    scope: readScope(cfg.scope),
+    pricePerSegment: typeof price === "number" && Number.isFinite(price) && price >= 0 ? price : null,
+    locationTimezone: isValidTimeZone(cfg.locationTimezone) ? cfg.locationTimezone : null,
+    hlPipelines: (Array.isArray(cfg.hlPipelines) ? cfg.hlPipelines : []).flatMap((p) => {
+      const o = (p && typeof p === "object" ? p : {}) as Record<string, unknown>;
+      const id = str(o.id);
+      return id ? [{ id, name: str(o.name) ?? "HighLevel pipeline" }] : [];
+    }),
+    hlTags: strings(cfg.hlTags) ?? [],
   };
+}
+
+/** The minerals filter in force: the saved one, else the same suggestion the sync classifies with. */
+export const effectiveScope = (cfg: HlReportConfig): SmsScope => cfg.scope ?? suggestScope(cfg.hlTags, cfg.hlPipelines);
+
+/** Which texting a report counts: minerals only (the default) or everything. */
+export type ReportScope = "minerals" | "all";
+export const parseReportScope = (v: unknown): ReportScope => (v === "all" ? "all" : "minerals");
+
+/** Business lines as stored on HighLevelContact.line; anything else (or null, not classified yet) is unclassified. */
+export function lineCounts(rows: readonly { line: string | null; n: number }[]) {
+  const out = { minerals: 0, realEstate: 0, unclassified: 0 };
+  for (const r of rows) {
+    if (r.line === "minerals") out.minerals += r.n;
+    else if (r.line === "real_estate") out.realEstate += r.n;
+    else out.unclassified += r.n;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Funnel (HighLevel opportunities), cost, speed to lead
+// ---------------------------------------------------------------------------
+
+/** Funnel steps in people, in order. "responded" = replied (the response cohort). */
+export const FUNNEL_STEP_KEYS = ["reached", "responded", "opportunity", "offer", "accepted", "contract", "closed"] as const;
+export type FunnelStepKey = (typeof FUNNEL_STEP_KEYS)[number];
+
+export interface FunnelCounts {
+  reached: number; responded: number; opportunity: number; offer: number; accepted: number; contract: number; closed: number;
+  /** People whose every counted opportunity is dead now. */
+  dead: number;
+  /** Opportunities left out because they were created before the person's first text. */
+  preExisting: number;
+  /** Texts sent to everyone in the cohort (outboundTotal), for texts per closed deal. */
+  cohortTexts: number;
+  /** Seconds from the first text to the first counted opportunity / to closing. */
+  toOpportunity: { avg: number | null; median: number | null };
+  toClose: { avg: number | null; median: number | null; known: number };
+}
+
+export interface FunnelSummary {
+  steps: { key: FunnelStepKey; count: number; fromPrevious: number | null; fromReached: number | null }[];
+  dead: number;
+  preExisting: number;
+  interestedRate: number | null;
+  offerAcceptanceRate: number | null;
+  contactsPerOffer: number | null;
+  contactsPerClosedDeal: number | null;
+  textsPerClosedDeal: number | null;
+  toOpportunity: { avgSeconds: number | null; medianSeconds: number | null };
+  toClose: { avgSeconds: number | null; medianSeconds: number | null; known: number; unknown: number };
+}
+
+const secs = (v: number | null) => (v == null || !Number.isFinite(v) ? null : Math.max(0, Math.round(v)));
+
+/**
+ * Step-to-step and overall conversion. People can reach a step without the
+ * one before it (an opportunity from a phone call, say), so a step is not
+ * forced to be smaller than the previous one.
+ */
+export function funnelSummary(f: FunnelCounts): FunnelSummary {
+  let prev: number | null = null;
+  const steps = FUNNEL_STEP_KEYS.map((key) => {
+    const count = f[key];
+    const s = { key, count, fromPrevious: prev == null ? null : ratio(count, prev), fromReached: ratio(count, f.reached) };
+    prev = count;
+    return s;
+  });
+  return {
+    steps,
+    dead: f.dead,
+    preExisting: f.preExisting,
+    interestedRate: ratio(f.opportunity, f.reached),
+    offerAcceptanceRate: ratio(f.accepted, f.offer),
+    contactsPerOffer: ratio(f.reached, f.offer),
+    contactsPerClosedDeal: ratio(f.reached, f.closed),
+    textsPerClosedDeal: ratio(f.cohortTexts, f.closed),
+    toOpportunity: f.opportunity > 0
+      ? { avgSeconds: secs(f.toOpportunity.avg), medianSeconds: secs(f.toOpportunity.median) }
+      : { avgSeconds: null, medianSeconds: null },
+    toClose: {
+      avgSeconds: f.toClose.known > 0 ? secs(f.toClose.avg) : null,
+      medianSeconds: f.toClose.known > 0 ? secs(f.toClose.median) : null,
+      known: f.toClose.known,
+      unknown: Math.max(0, f.closed - f.toClose.known),
+    },
+  };
+}
+
+/** Per-person opportunity flags (one row of the funnel lateral) → the furthest step, and whether it's dead now. */
+export function furthestStep(x: { n: number; offer: boolean; accepted: boolean; contract: boolean; closed: boolean; alive: number }):
+  { step: FunnelStep; dead: boolean } | null {
+  if (!x.n) return null;
+  const step: FunnelStep = x.closed ? "closed" : x.contract ? "contract" : x.accepted ? "accepted" : x.offer ? "offer" : "opportunity";
+  return { step, dead: x.alive === 0 };
+}
+
+export interface CostSummary {
+  pricePerSegment: number | null;
+  segments: number;
+  /** Texts whose segments weren't counted yet (each counted as one). */
+  unknownSegments: number;
+  total: number | null;
+  perReply: number | null;
+  perOpportunity: number | null;
+  perOffer: number | null;
+  perClosedDeal: number | null;
+}
+
+/**
+ * Texting cost = billable segments sent in the period × the price. Results
+ * (replies, opportunities…) are the period's response cohort, so the cost per
+ * result mixes send dates with first-text dates — the report says so.
+ */
+export function costSummary(segments: number, unknownSegments: number, price: number | null,
+  results: { responded: number; opportunities: number; offers: number; closed: number }): CostSummary {
+  const total = textingCost(segments, price);
+  const per = (n: number) => (total == null ? null : ratio(total, n));
+  return {
+    pricePerSegment: price, segments, unknownSegments, total,
+    perReply: per(results.responded), perOpportunity: per(results.opportunities), perOffer: per(results.offers), perClosedDeal: per(results.closed),
+  };
+}
+
+export interface SpeedCounts {
+  /** Cohort contacts who replied (RESPONDED). */
+  responded: number;
+  /** Of those, answered by a team member's text (replyAnsweredSeconds set). */
+  answered: number;
+  within5m: number; within1h: number; within24h: number;
+  avg: number | null; median: number | null;
+}
+export interface SpeedSummary {
+  responded: number; answered: number; never: number;
+  avgSeconds: number | null; medianSeconds: number | null;
+  within5mRate: number | null; within1hRate: number | null; within24hRate: number | null; neverRate: number | null;
+}
+
+/** Speed to lead: shares are of everyone who replied, so "never answered" completes the picture. */
+export function speedSummary(s: SpeedCounts): SpeedSummary {
+  const never = Math.max(0, s.responded - s.answered);
+  return {
+    responded: s.responded, answered: s.answered, never,
+    avgSeconds: s.answered > 0 ? secs(s.avg) : null,
+    medianSeconds: s.answered > 0 ? secs(s.median) : null,
+    within5mRate: ratio(s.within5m, s.responded),
+    within1hRate: ratio(s.within1h, s.responded),
+    within24hRate: ratio(s.within24h, s.responded),
+    neverRate: ratio(never, s.responded),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Best time to text, phone-list quality, carrier health
+// ---------------------------------------------------------------------------
+
+/** Slots with fewer people than this are shown muted and never called "best". */
+export const BEST_TIME_MIN_SAMPLE = 20;
+
+/** One weekday × hour slot of first texts (dow 1 = Monday … 7 = Sunday, ISO; hour 0–23 local). */
+export interface SlotCount { dow: number; hour: number; reached: number; responded: number }
+export interface SlotCell extends SlotCount { rate: number | null; small: boolean }
+
+export function bestTimeGrid(rows: readonly SlotCount[], minSample = BEST_TIME_MIN_SAMPLE, top = 3): { cells: SlotCell[]; best: SlotCell[] } {
+  const cells = rows
+    .filter((r) => r.dow >= 1 && r.dow <= 7 && r.hour >= 0 && r.hour <= 23 && r.reached > 0)
+    .map((r) => ({ ...r, rate: ratio(r.responded, r.reached), small: r.reached < minSample }))
+    .sort((a, b) => a.dow - b.dow || a.hour - b.hour);
+  const best = cells
+    .filter((c) => !c.small && c.responded > 0)
+    .sort((a, b) => (b.rate ?? 0) - (a.rate ?? 0) || b.reached - a.reached || a.dow - b.dow || a.hour - b.hour)
+    .slice(0, top);
+  return { cells, best };
+}
+
+/** Phone-quality groups of the report (landline includes "sms incapable"). */
+export const PHONE_GROUPS = ["wrongNumber", "disconnected", "landline", "rotated", "exhausted"] as const;
+export type PhoneGroup = (typeof PHONE_GROUPS)[number];
+export type PhoneTagSets = Record<PhoneGroup | "any", string[]>;
+
+/**
+ * The org's actual tag strings per phone-quality group, classified once with
+ * smsScope.ts phoneTagKinds() — so SQL matches them exactly (array overlap)
+ * instead of re-running the tag rules on every contact.
+ */
+export function phoneTagSets(tags: readonly string[]): PhoneTagSets {
+  const out: PhoneTagSets = { wrongNumber: [], disconnected: [], landline: [], rotated: [], exhausted: [], any: [] };
+  for (const tag of new Set(tags)) {
+    const kinds = phoneTagKinds([tag]);
+    if (!kinds.size) continue;
+    out.any.push(tag);
+    if (kinds.has("wrongNumber")) out.wrongNumber.push(tag);
+    if (kinds.has("disconnected")) out.disconnected.push(tag);
+    if (kinds.has("landline") || kinds.has("smsIncapable")) out.landline.push(tag);
+    if (kinds.has("rotated")) out.rotated.push(tag);
+    if (kinds.has("exhausted")) out.exhausted.push(tag);
+  }
+  return out;
+}
+
+export interface QualityCohortGroup {
+  key: string; reached: number; responded: number;
+  wrongNumber: number; disconnected: number; landline: number; rotated: number; exhausted: number;
+}
+export interface QualityVolumeGroup { key: string; sent: number; delivered: number }
+export interface QualityRow extends QualityCohortGroup {
+  name: string;
+  sent: number; delivered: number; deliveryRate: number | null;
+  responseRate: number | null; wrongNumberRate: number | null; disconnectedRate: number | null;
+  landlineRate: number | null; rotatedRate: number | null; exhaustedRate: number | null;
+}
+
+/** Phone-list quality per tag or source: people-based shares of those reached, delivery from the texts. */
+export function mergeQuality(cohort: readonly QualityCohortGroup[], volume: readonly QualityVolumeGroup[], nameOf: (key: string) => string): QualityRow[] {
+  const rows = new Map<string, QualityRow>();
+  const row = (key: string) => {
+    let r = rows.get(key);
+    if (!r) {
+      r = {
+        key, name: nameOf(key), reached: 0, responded: 0, wrongNumber: 0, disconnected: 0, landline: 0, rotated: 0, exhausted: 0,
+        sent: 0, delivered: 0, deliveryRate: null, responseRate: null, wrongNumberRate: null, disconnectedRate: null,
+        landlineRate: null, rotatedRate: null, exhaustedRate: null,
+      };
+      rows.set(key, r);
+    }
+    return r;
+  };
+  for (const c of cohort) {
+    const r = row(c.key);
+    r.reached += c.reached; r.responded += c.responded; r.wrongNumber += c.wrongNumber; r.disconnected += c.disconnected;
+    r.landline += c.landline; r.rotated += c.rotated; r.exhausted += c.exhausted;
+  }
+  for (const v of volume) { const r = row(v.key); r.sent += v.sent; r.delivered += v.delivered; }
+  for (const r of rows.values()) {
+    r.deliveryRate = ratio(r.delivered, r.sent);
+    r.responseRate = ratio(r.responded, r.reached);
+    r.wrongNumberRate = ratio(r.wrongNumber, r.reached);
+    r.disconnectedRate = ratio(r.disconnected, r.reached);
+    r.landlineRate = ratio(r.landline, r.reached);
+    r.rotatedRate = ratio(r.rotated, r.reached);
+    r.exhaustedRate = ratio(r.exhausted, r.reached);
+  }
+  return [...rows.values()].sort((a, b) => b.reached - a.reached || b.sent - a.sent || a.name.localeCompare(b.name));
+}
+
+export interface HealthCounts { sent: number; failed: number; reached: number; optOuts: number }
+export interface HealthDay extends HealthCounts, HealthResult { day: string; /** Too few texts to judge (carrierHealth ignores it). */ small: boolean }
+
+/** carrierHealth over one window, keeping the counts beside the rates. */
+export const healthOf = (c: HealthCounts): HealthCounts & HealthResult =>
+  ({ ...c, ...carrierHealth({ sent: c.sent, failed: c.failed, reachedContacts: c.reached, optOuts: c.optOuts }) });
+
+/** One point per UTC day of the range (empty days are zeros) and the days that breached a threshold. */
+export function healthDays(r: DayRange, rows: readonly (HealthCounts & { day: string })[]): { days: HealthDay[]; breachDays: string[] } {
+  const byDay = new Map(rows.map((x) => [x.day, x]));
+  const days = bucketKeys(r, "day").map((day) => {
+    const x = byDay.get(day);
+    const h = healthOf({ sent: x?.sent ?? 0, failed: x?.failed ?? 0, reached: x?.reached ?? 0, optOuts: x?.optOuts ?? 0 });
+    return { day, ...h, small: h.sent < HEALTH_MIN_TEXTS };
+  });
+  return { days, breachDays: days.filter((d) => d.warnings.length > 0).map((d) => d.day) };
 }
 
 // ---------------------------------------------------------------------------
@@ -327,5 +685,32 @@ export function parseSmsFilters(q: Record<string, unknown>): SmsFilters {
   return { senders: listParam(q.senders), tags: listParam(q.tags), sources: listParam(q.sources) };
 }
 
-export const DRILL_SETS = ["texted", "reached", "responded", "optedOut", "noReply", "lateReply", "inboundFirst"] as const;
+export const DRILL_SETS = [
+  "texted", "reached", "responded", "optedOut", "noReply", "lateReply", "inboundFirst",
+  // Wrong numbers, and the people outside "minerals" texted in the period.
+  "wrongNumber", "unclassified", "realEstate",
+  // Funnel steps (people at or past the step), dead opportunities, replies no team member answered.
+  "opportunity", "offer", "accepted", "contract", "closed", "dead", "unanswered",
+  // Phone-list quality (XLeads phone-rotation tags).
+  "disconnected", "landline", "rotated", "exhausted",
+] as const;
 export type DrillSet = (typeof DRILL_SETS)[number];
+
+/** Drill sets that list people texted in the period (not the response cohort). */
+export const TEXTED_SETS: readonly DrillSet[] = ["texted", "unclassified", "realEstate"];
+export const FUNNEL_SETS: readonly DrillSet[] = ["opportunity", "offer", "accepted", "contract", "closed", "dead"];
+
+/**
+ * A table row a drill narrows to, on top of the report filters (so the list
+ * matches the row even when a filter picks several tags):
+ * sender / tag / source = the Breakdown table; listTag = the Phone lists table,
+ * whose "(no tag)" row means "no list tag" (phone-rotation tags aren't lists).
+ */
+export const DRILL_ROW_DIMS = ["sender", "tag", "source", "listTag"] as const;
+export type DrillRowDim = (typeof DRILL_ROW_DIMS)[number];
+export function drillRow(q: Record<string, unknown>): { dim: DrillRowDim; key: string } | null {
+  const dim = (DRILL_ROW_DIMS as readonly string[]).includes(String(q.rowDim)) ? q.rowDim as DrillRowDim : null;
+  // Not trimmed: a tag is matched exactly as the row showed it.
+  const key = typeof q.rowKey === "string" && q.rowKey.length <= 500 ? q.rowKey : "";
+  return dim && key ? { dim, key } : null;
+}

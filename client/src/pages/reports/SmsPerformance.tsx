@@ -12,25 +12,35 @@ import { CollapsibleSection } from "../../components/CollapsibleSection";
 import { fmtDate, fmtDateTime, num, pct } from "../../lib/format";
 import { CHART_COLORS } from "../../lib/charts";
 import {
-  BUCKET_LABEL, SMALL_SAMPLE, fmtDuration, smsQuery, touchLabel, trendLabel, trendTitle, withFilter,
-  type BreakdownRow, type SmsFilterOptions, type SmsFilters, type SmsKpis, type SmsReport, type SmsStatus, type TouchRate,
-  type TrendBucket, type TrendPoint,
+  BUCKET_LABEL, SCOPE_LABEL, SMALL_SAMPLE, fmtCost, fmtDuration, smsQuery, touchLabel, trendLabel, trendTitle, withRow,
+  type BreakdownRow, type DrillRow, type SmsFilterOptions, type SmsFilters, type SmsKpis, type SmsReport, type SmsScope, type SmsStatus,
+  type TouchRate, type TrendBucket, type TrendPoint,
 } from "../../lib/smsReport";
 import { DeltaPill } from "./DeltaPill";
 import { SmsDrill, type DrillSpec } from "./SmsDrill";
+import {
+  BestTimeSection, CarrierHealthSection, CostSection, FunnelSection, PhoneListsSection, SpeedSection, healthWarning,
+} from "./SmsSections";
 
 const AXIS_TICK = { fontSize: 11, fill: "var(--ink-4)" };
+/** The Carrier health section, for the warning banner's link. */
+const HEALTH_ID = "sms-carrier-health";
 const COLOR_SENT = CHART_COLORS[0];
 const COLOR_REPLY = CHART_COLORS[1];
 
-/** The SMS filter choices (team members incl. Automated / unassigned, tags, sources). */
-export function useSmsFilterOptions(enabled: boolean): SmsFilterOptions | null {
-  const [opts, setOpts] = useState<SmsFilterOptions | null>(null);
+/** The SMS filter choices (team members incl. Automated / unassigned, tags, sources) of the scope's contacts. */
+export function useSmsFilterOptions(enabled: boolean, scope: SmsScope): SmsFilterOptions | null {
+  const [loaded, setLoaded] = useState<{ scope: SmsScope; opts: SmsFilterOptions } | null>(null);
   useEffect(() => {
-    if (!enabled || opts) return;
-    api.get<SmsFilterOptions>("/reports/sms/filters").then(setOpts).catch(() => {});
-  }, [enabled, opts]);
-  return opts;
+    if (!enabled || loaded?.scope === scope) return;
+    let live = true;
+    api.get<SmsFilterOptions>(`/reports/sms/filters?scope=${scope}`)
+      .then((opts) => { if (live) setLoaded({ scope, opts }); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [enabled, scope, loaded?.scope]);
+  // The other scope's choices stay usable until this scope's arrive.
+  return loaded?.opts ?? null;
 }
 
 /** Connection state; re-checked every 20s while the first import runs. */
@@ -63,6 +73,15 @@ const KPI_FMT: Record<keyof SmsKpis, (k: SmsKpis) => string> = {
   optOutRate: (k) => (k.optOutRate == null ? "N/A" : pct(k.optOutRate)),
   avgTextsPerContact: (k) => (k.avgTextsPerContact == null ? "N/A" : String(Number(k.avgTextsPerContact.toFixed(1)))),
   avgResponseSeconds: (k) => fmtDuration(k.avgResponseSeconds), medianResponseSeconds: (k) => fmtDuration(k.medianResponseSeconds),
+  wrongNumbers: (k) => num(k.wrongNumbers), wrongNumberRate: (k) => (k.wrongNumberRate == null ? "N/A" : pct(k.wrongNumberRate)),
+  opportunities: (k) => num(k.opportunities), interestedRate: (k) => (k.interestedRate == null ? "N/A" : pct(k.interestedRate)),
+  offers: (k) => num(k.offers), offerAcceptanceRate: (k) => (k.offerAcceptanceRate == null ? "N/A" : pct(k.offerAcceptanceRate)),
+  closedDeals: (k) => num(k.closedDeals),
+  textingCost: (k) => fmtCost(k.textingCost), costPerReply: (k) => fmtCost(k.costPerReply), costPerOpportunity: (k) => fmtCost(k.costPerOpportunity),
+  costPerOffer: (k) => fmtCost(k.costPerOffer), costPerClosedDeal: (k) => fmtCost(k.costPerClosedDeal),
+  medianAnswerSeconds: (k) => fmtDuration(k.medianAnswerSeconds),
+  answeredWithinHourRate: (k) => (k.answeredWithinHourRate == null ? "N/A" : pct(k.answeredWithinHourRate)),
+  neverAnsweredRate: (k) => (k.neverAnsweredRate == null ? "N/A" : pct(k.neverAnsweredRate)),
 };
 
 type Dim = "senders" | "tags" | "sources";
@@ -77,6 +96,9 @@ interface ViewProps {
   filterChips: string[];
   /** The report header mark (same as the Deals view). */
   execIcon: ReactNode;
+  /** Minerals only (default) or all texting, and the switch's setter. */
+  scope: SmsScope;
+  onScope: (s: SmsScope) => void;
 }
 
 /**
@@ -85,13 +107,13 @@ interface ViewProps {
  * team member / tag / source — read from the org's HighLevel sync.
  */
 export function SmsPerformance(props: ViewProps) {
-  const { allTime, range, cmp, filters } = props;
+  const { allTime, range, cmp, filters, scope } = props;
   const { status, failed: statusFailed } = useSmsStatus();
   const [data, setData] = useState<SmsReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
 
-  const query = useMemo(() => smsQuery({ allTime, range, cmp, filters }), [allTime, range, cmp, filters]);
+  const query = useMemo(() => smsQuery({ allTime, range, cmp, filters, scope }), [allTime, range, cmp, filters, scope]);
   const reportable = !!status && (status.connected || status.hasData);
   // While the first import runs, each status poll that shows more texts refreshes the numbers.
   const importTick = status?.phase === "importing" ? status.imported : 0;
@@ -116,7 +138,7 @@ export function SmsPerformance(props: ViewProps) {
 }
 
 /** The SMS view for a loaded status (and report, once it arrives). */
-export function SmsReportView({ allTime, range, filters, filterChips, execIcon, status, data, loading, error, query }: ViewProps & {
+export function SmsReportView({ filterChips, execIcon, scope, onScope, status, data, loading, error, query }: ViewProps & {
   status: SmsStatus; data: SmsReport | null; loading: boolean; error: boolean; query: string;
 }) {
   const nav = useNavigate();
@@ -127,6 +149,8 @@ export function SmsReportView({ allTime, range, filters, filterChips, execIcon, 
   const reportable = status.connected || status.hasData;
 
   const settingsLink = <Link to="/settings/integrations" className="link-btn">Settings → Integrations</Link>;
+  // Where the minerals filter, price and response window are set.
+  const hlSettings = canManage ? <><Link to="/settings/integrations" className="link-btn">Settings → Integrations</Link> → HighLevel</> : <>Settings → Integrations → HighLevel (ask an admin)</>;
   if (!reportable) {
     return (
       <div className="panel">
@@ -182,6 +206,25 @@ export function SmsReportView({ allTime, range, filters, filterChips, execIcon, 
       </Banner>,
     );
   }
+  if (scope === "minerals" && status.hasData && status.minerals === 0 && status.realEstate + status.unclassified > 0) {
+    banners.push(
+      <Banner key="no-minerals" kind="info">
+        <b>Nobody texted is sorted into minerals yet</b>, so “Minerals only” shows nothing. {num(status.unclassified)} texted{" "}
+        {status.unclassified === 1 ? "person isn't" : "people aren't"} classified — choose your minerals tags and pipelines in {hlSettings}, or{" "}
+        <button type="button" className="link-btn sms-inline-btn" onClick={() => onScope("all")}>switch to All texting</button>.
+      </Banner>,
+    );
+  }
+  const healthText = data ? healthWarning(data.carrierHealth) : null;
+  if (healthText) {
+    banners.push(
+      <Banner key="health" kind="warn">
+        <b>Carrier warning:</b> {healthText} Carriers can start filtering texts from numbers like this.{" "}
+        <button type="button" className="link-btn sms-inline-btn"
+          onClick={() => document.getElementById(HEALTH_ID)?.scrollIntoView({ behavior: "smooth", block: "start" })}>See Carrier health</button>
+      </Banner>,
+    );
+  }
   if (error && data) banners.push(<Banner key="stale" kind="error">Could not refresh the numbers — showing the last ones loaded.</Banner>);
   const pendingRecount = data?.notes.summariesPending ?? 0;
   if (pendingRecount > 0) {
@@ -205,7 +248,8 @@ export function SmsReportView({ allTime, range, filters, filterChips, execIcon, 
 
   const k = data.kpis;
   const periodLabel = `${fmtDate(data.range.from)} – ${fmtDate(data.range.to)}`;
-  const open = (spec: DrillSpec, q = query) => setDrill({ ...spec, query: q });
+  const open = (spec: DrillSpec, row?: DrillRow) => setDrill({ ...spec, query: row ? withRow(query, row) : query });
+  const split = data.scopeInfo.texted;
 
   /** One KPI tile: value + comparison pill (points for rates), hint and the prior value when comparing. */
   function cell(key: keyof SmsKpis, o: {
@@ -275,6 +319,12 @@ export function SmsReportView({ allTime, range, filters, filterChips, execIcon, 
       title: "People whose first reply asked to stop (STOP, unsubscribe, remove me…) — never counted as a response.",
       onClick: () => open({ title: "People who asked to stop", set: "optedOut" }),
     }),
+    cell("wrongNumberRate", {
+      label: "Wrong-number rate", invert: true,
+      hint: `${num(k.wrongNumbers)} ${k.wrongNumbers === 1 ? "person" : "people"} reached`,
+      title: "People who replied that we had the wrong person, or whose number XLeads tagged as a wrong number. Not a response — the outreach carries on with their next number.",
+      onClick: () => open({ title: "Wrong numbers", set: "wrongNumber" }),
+    }),
   ];
 
   const bdRows = data.breakdowns[dim];
@@ -290,8 +340,10 @@ export function SmsReportView({ allTime, range, filters, filterChips, execIcon, 
     { key: "median", header: "Typical time to reply", type: "number", align: "right", value: (r) => r.medianResponseSeconds,
       render: (r) => (r.medianResponseSeconds == null ? <span className="muted">—</span> : fmtDuration(r.medianResponseSeconds)) },
   ];
-  const drillRow = (r: BreakdownRow) =>
-    open({ title: `People reached · ${r.name}`, set: "reached" }, smsQuery({ allTime, range, cmp: null, filters: withFilter(filters, dim, r.key) }));
+  const ROW_DIM: Record<Dim, DrillRow["dim"]> = { senders: "sender", tags: "tag", sources: "source" };
+  const drillRow = (r: BreakdownRow) => open({ title: `People reached · ${r.name}`, set: "reached" }, { dim: ROW_DIM[dim], key: r.key });
+  const cntLink = (n: number, set: DrillSpec["set"], title: string) =>
+    n > 0 ? <button type="button" className="link-btn sms-inline-btn" onClick={() => open({ title, set })}>{num(n)}</button> : <>{num(n)}</>;
 
   return (
     <div className="rp-body sms-body">
@@ -312,7 +364,25 @@ export function SmsReportView({ allTime, range, filters, filterChips, execIcon, 
                 {k.medianResponseSeconds != null && <> The typical reply came <b>{fmtDuration(k.medianResponseSeconds)}</b> after the first text.</>}
               </>
             ) : <>Nobody was reached for the first time in this period.</>}
+            {k.opportunities > 0 && <> <b>{num(k.opportunities)}</b> became {k.opportunities === 1 ? "an opportunity" : "opportunities"}, <b>{num(k.offers)}</b> got an offer and <b>{num(k.closedDeals)}</b> closed.</>}
+            {k.textingCost != null && <> Texting cost <b>{fmtCost(k.textingCost)}</b>.</>}
             {data.compare && <> Compared to {fmtDate(data.compare.from)} – {fmtDate(data.compare.to)}.</>}
+          </p>
+          <p className="exec-text exec-filters">
+            <b>{SCOPE_LABEL[scope]}.</b>{" "}
+            {scope === "minerals" ? (
+              <>
+                Counting the {num(split.minerals)} {split.minerals === 1 ? "person" : "people"} texted in this period who are sorted into minerals.
+                {" "}Left out: {cntLink(split.realEstate, "realEstate", "Real-estate people texted")} real estate and{" "}
+                {cntLink(split.unclassified, "unclassified", "People texted who aren't classified")} not classified.
+              </>
+            ) : (
+              <>
+                People texted in this period: {num(split.minerals)} minerals, {cntLink(split.realEstate, "realEstate", "Real-estate people texted")} real estate,{" "}
+                {cntLink(split.unclassified, "unclassified", "People texted who aren't classified")} not classified.
+              </>
+            )}
+            {!data.scopeInfo.saved && <> The minerals filter is still the suggested one (county and “mineral” tags, pipelines named “Minerals”) — review it in {hlSettings}.</>}
           </p>
           <p className="exec-text exec-filters">
             {periodLabel} · from HighLevel{status.locationName && <> · {status.locationName}</>}
@@ -371,6 +441,13 @@ export function SmsReportView({ allTime, range, filters, filterChips, execIcon, 
         </section>
       </div>
 
+      <FunnelSection data={data} cell={cell} open={open} settings={hlSettings} />
+      <CostSection data={data} cell={cell} settings={hlSettings} />
+      <SpeedSection data={data} cell={cell} open={open} />
+      <BestTimeSection data={data} />
+      <PhoneListsSection data={data} open={open} />
+      <CarrierHealthSection data={data} id={HEALTH_ID} />
+
       <section className="panel rp-chart sms-breakdown">
         <div className="rp-chart-head">
           <div>
@@ -392,6 +469,12 @@ export function SmsReportView({ allTime, range, filters, filterChips, execIcon, 
 
       <CollapsibleSection title="How these numbers are counted" sub="Plain-English definitions for every figure on this page">
         <ul className="sms-howto">
+          <li>
+            <b>Minerals only / All texting.</b> Your HighLevel account also does real-estate texting, so by default every figure counts only people
+            sorted into minerals: anyone in a minerals pipeline or carrying a minerals tag. Otherwise a real-estate tag makes them real estate, and
+            anyone else is “not classified” — shown separately so nothing goes missing. The tags and pipelines are chosen in {hlSettings}.
+            “All texting” counts everyone.
+          </li>
           <li><b>Texts sent</b> counts every text that went out in the period, including ones that failed. Texts that are still scheduled don’t count until they go out.</li>
           <li>
             <b>Reached</b> means HighLevel reported the text as delivered — or still shows it as “sent” with no delivery receipt either way.
@@ -418,6 +501,35 @@ export function SmsReportView({ allTime, range, filters, filterChips, execIcon, 
               : "none in this period"}.
           </li>
           <li><b>Time to first reply</b> runs from the first text that reached the person to their reply. “Typical” is the median: half of the replies came faster.</li>
+          <li>
+            <b>Wrong numbers</b> are people who replied that we had the wrong person, or whose number XLeads tagged “wrong number”. That reply is
+            not a response and doesn't end the outreach — XLeads usually moves on to the person's next number.
+          </li>
+          <li>
+            <b>Funnel &amp; offers</b> come from the stage each person's HighLevel opportunity is in (minerals pipelines in “Minerals only”). A person
+            counts once, at the furthest step reached; offers that later died still count as offers. Opportunities created before the person's
+            first text aren't credited to texting.
+          </li>
+          <li>
+            <b>Cost</b> is billable text segments sent × your price per segment. A long text or one with an emoji costs more than one segment.
+            Incoming texts aren't charged in these figures. Cost is dated by the day texts were sent; results by each person's first text.
+          </li>
+          <li>
+            <b>Speed to lead</b> runs from a person's reply to the next text a team member typed. Automated follow-ups don't count as an answer.
+          </li>
+          <li>
+            <b>Best time to text</b> compares response rates by the weekday and hour of each person's first text. Hours with fewer than{" "}
+            {data.bestTime.minSample} people are greyed out and never called “best”.
+          </li>
+          <li>
+            <b>Phone lists</b> read the tags XLeads' phone-rotation workflows add. “Needed 2nd/3rd number” means XLeads switched to another of the
+            person's numbers; “All numbers used up” means none of them worked.
+          </li>
+          <li>
+            <b>Carrier health</b> checks each day's opt-out rate (people who asked to stop ÷ people reached) and failure rate (failed ÷ sent) against
+            the levels where carriers tend to start filtering: {pct(data.carrierHealth.thresholds.optOutRate)} and {pct(data.carrierHealth.thresholds.failureRate)}.
+            Days with fewer than {num(data.carrierHealth.thresholds.minTexts)} texts aren't judged. It always counts all texting.
+          </li>
           <li>
             <b>Team members:</b> a reply is credited to whoever sent the person’s first text; for automated texts, to the person the contact is assigned to
             in HighLevel; otherwise “Automated / unassigned”. Texts sent are credited to the sender, or the assignee for automated texts.

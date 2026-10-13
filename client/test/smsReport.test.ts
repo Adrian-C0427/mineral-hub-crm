@@ -7,7 +7,8 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  EMPTY_SMS_FILTERS, fmtDuration, outcomeLabel, sentByLabel, smsQuery, touchLabel, trendLabel, trendTitle, withFilter,
+  EMPTY_SMS_FILTERS, dayLabel, fmtCost, fmtDuration, fmtPer, furthestStepLabel, heatLevel, hourLabel, hourShort, lineLabel, outcomeLabel,
+  sentByLabel, slotHours, slotLabel, smsQuery, touchLabel, trendLabel, trendTitle, withRow, wrongNumberLabel,
 } from "../src/lib/smsReport";
 import { deltaView } from "../src/lib/reportDelta";
 
@@ -32,9 +33,16 @@ describe("smsQuery", () => {
     expect(q.has("from") || q.has("compareFrom")).toBe(false);
   });
 
-  it("narrows one dimension to a breakdown row, keeping the others", () => {
-    expect(withFilter({ senders: ["u1"], tags: ["A", "B"], sources: ["S"] }, "tags", "(no tag)"))
-      .toEqual({ senders: ["u1"], tags: ["(no tag)"], sources: ["S"] });
+  it("sends the scope (minerals unless asked for all texting)", () => {
+    expect(new URLSearchParams(smsQuery({ allTime: false, range, cmp: null, filters: EMPTY_SMS_FILTERS })).get("scope")).toBe("minerals");
+    expect(new URLSearchParams(smsQuery({ allTime: false, range, cmp: null, filters: EMPTY_SMS_FILTERS, scope: "all" })).get("scope")).toBe("all");
+  });
+
+  it("narrows a drill to one table row on top of the filters (they still apply)", () => {
+    const base = smsQuery({ allTime: false, range, cmp: null, filters: { senders: [], tags: ["A", "B"], sources: [] } });
+    const q = new URLSearchParams(withRow(base, { dim: "listTag", key: "(no tag)" }));
+    expect(q.getAll("tags")).toEqual(["A", "B"]);
+    expect([q.get("rowDim"), q.get("rowKey")]).toEqual(["listTag", "(no tag)"]);
   });
 });
 
@@ -70,6 +78,7 @@ describe("plain-language labels", () => {
     expect(outcomeLabel("RESPONDED")).toBe("Replied");
     expect(outcomeLabel("OPTED_OUT")).toBe("Asked to stop");
     expect(outcomeLabel("INBOUND_FIRST")).toBe("Texted us first");
+    expect(outcomeLabel("WRONG_NUMBER")).toBe("Wrong number");
     expect(outcomeLabel(null)).toBe("—");
   });
 
@@ -94,5 +103,48 @@ describe("deltaView (Reports comparison pill)", () => {
     expect(deltaView(0.02, { kind: "points", invert: true }).tone).toBe("bad");
     expect(deltaView(-0.3, { invert: true }).tone).toBe("good");
     expect(deltaView(0.0004)).toEqual({ text: "0%", tone: "flat" });
+  });
+});
+
+describe("KPI section helpers", () => {
+  it("formats costs to the cent, tiny ones as under 1¢, missing ones as N/A", () => {
+    expect(fmtCost(52.0884)).toBe("$52.09");
+    expect(fmtCost(0.18)).toBe("$0.18");
+    expect(fmtCost(0.004)).toBe("under 1¢");
+    expect(fmtCost(0)).toBe("$0.00");
+    expect(fmtCost(null)).toBe("N/A");
+    expect(fmtPer(135.727)).toBe("135.7");
+    expect(fmtPer(1234)).toBe("1,234");
+    expect(fmtPer(null)).toBe("N/A");
+  });
+
+  it("names business lines, funnel steps and why someone is a wrong number", () => {
+    expect([lineLabel("minerals"), lineLabel("real_estate"), lineLabel(null), lineLabel("odd")]).toEqual(["Minerals", "Real estate", "Not classified", "Not classified"]);
+    expect(furthestStepLabel("accepted", false)).toBe("Offer accepted");
+    expect(furthestStepLabel("offer", true)).toBe("Offer made · now dead");
+    expect(furthestStepLabel(null, null)).toBe("—");
+    expect(wrongNumberLabel({ wrongNumberAt: "2026-09-03T15:00:00Z", wrongNumberTouch: 2 })).toBe("Replied so after text 2");
+    expect(wrongNumberLabel({ wrongNumberAt: null, wrongNumberTouch: null })).toBe("XLeads wrong-number tag");
+  });
+
+  it("labels best-time slots and picks the hours to show", () => {
+    expect([hourLabel(0), hourLabel(9), hourLabel(12), hourLabel(17)]).toEqual(["12 AM", "9 AM", "12 PM", "5 PM"]);
+    expect([hourShort(0), hourShort(9), hourShort(12), hourShort(23)]).toEqual(["12a", "9a", "12p", "11p"]);
+    expect(slotLabel({ dow: 3, hour: 11 })).toBe("Wed 11 AM");
+    expect(slotHours([{ hour: 14 }, { hour: 9 }])).toEqual([9, 10, 11, 12, 13, 14]);
+    expect(slotHours([])).toHaveLength(11);
+  });
+
+  it("shades a cell against the best rate with enough people (small samples never set the scale)", () => {
+    const cells = [{ rate: 0.2, small: false }, { rate: 0.1, small: false }, { rate: 0.9, small: true }];
+    expect(heatLevel(0.2, cells)).toBe(1);
+    expect(heatLevel(0.1, cells)).toBe(0.5);
+    expect(heatLevel(0.9, cells)).toBe(1); // capped
+    expect(heatLevel(null, cells)).toBe(0);
+    expect(heatLevel(0.1, [{ rate: 0, small: false }])).toBe(0);
+  });
+
+  it("labels a carrier-health day", () => {
+    expect(dayLabel("2026-09-30")).toBe("Sep 30");
   });
 });
