@@ -476,11 +476,11 @@ export function Dashboard() {
     },
     {
       label: "Closed deals", value: <>{d.metrics.closedDealsCount}<Delta pct={closedCountDelta} /></>,
-      title: "Deals moved to Closed within the selected range, by Contract Timeline Closed Date. Δ vs the previous equal-length period.",
+      title: "Deals moved to Closed within the selected range, by the Contract Timeline's Closing date. Δ vs the previous equal-length period.",
     },
     {
       label: "Avg. profit per deal", value: <>{fmtCompact(d.metrics.avgProfitPerDeal)}<Delta pct={avgDelta} /></>,
-      title: "Realized profit per closed deal in the selected range (Closed Date). Δ vs the previous equal-length period.",
+      title: "Realized profit per closed deal in the selected range (by Closing date). Δ vs the previous equal-length period.",
     },
     {
       label: "Offers pending",
@@ -605,7 +605,7 @@ export function Dashboard() {
                   )}
                   {d.profitByMonth.every((b) => b.profit === 0 && b.projected === 0 && !b.atAsk) && (
                     <p className="dash-chart-empty">
-                      No closed, projected or at-asking profit in this period — bars fill in as deals close (with a Closed Date), get an offer, or carry an ask and a closing date.
+                      No closed, projected or at-asking profit in this period — bars fill in as deals close (by their Closing date), get an offer, or carry an ask and a closing date.
                     </p>
                   )}
                   <div className="dash-chart-cols">
@@ -830,7 +830,7 @@ export function Dashboard() {
             <strong>{money(b.profit + b.projected + atAsk)}</strong>
           </div>
         </div>
-        {group("Closed this month", "Realized — keyed on the Contract Timeline's Closed Date; profit uses the accepted offer.", closed)}
+        {group("Closed this month", "Realized — keyed on the Contract Timeline's Closing date; profit uses the accepted offer.", closed)}
         {group("Scheduled to close", "Projected — active deals with an offer whose anticipated closing lands in this month.", projected)}
         {group("At asking price", "Active deals with no offer yet — profit if sold at the asking price", atAsking)}
       </Modal>
