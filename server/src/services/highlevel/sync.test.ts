@@ -13,6 +13,13 @@ import { Prisma, type Integration } from "@prisma/client";
 
 type Row = Record<string, unknown>;
 
+const CRM_LOWER = vi.hoisted(() => new Set([
+  "sms - text 1 sent", "sms - text 2 sent", "sms - text 3 sent", "sms - text 4+ sent",
+  "sms - responded - text 1", "sms - responded - text 2", "sms - responded - text 3", "sms - responded - text 4+",
+  "acquisition - interested", "acquisition - offer made", "acquisition - offer accepted", "acquisition - deal created",
+  "acquisition - deal closed", "acquisition - not interested", "acquisition - do not contact",
+]));
+
 const mem = vi.hoisted(() => {
   const tables: Record<string, Row[]> = {};
   let seq = 0;
@@ -48,7 +55,7 @@ const mem = vi.hoisted(() => {
   }
   const pick = (row: Row, select?: Row) => (select ? Object.fromEntries(Object.keys(select).map((k) => [k, row[k]])) : { ...row });
   const DEFAULTS: Record<string, Row> = {
-    highLevelContact: { tags: [], summaryDirty: true, deletedInHl: false, fetchedAt: null, outboundTotal: 0, summaryWindowDays: null, line: null },
+    highLevelContact: { tags: [], summaryDirty: true, deletedInHl: false, fetchedAt: null, outboundTotal: 0, summaryWindowDays: null, line: null, crmTagsPending: false, smsOptedOut: false, touches: 0, outcome: null },
     highLevelMessage: { segments: null, wrongNumber: false, optOut: false },
     highLevelOpportunity: { deletedInHl: false, maxRank: 1, offerAt: null, acceptedAt: null, contractAt: null, closedAt: null, deadAt: null },
   };
@@ -95,7 +102,21 @@ const mem = vi.hoisted(() => {
   const prisma = new Proxy({} as Record<string, unknown>, {
     get: (_t, key: string) => {
       if (key === "$transaction") return (ops: Promise<unknown>[]) => Promise.all(ops);
-      if (key === "$queryRaw") return async (...args: unknown[]) => { state.raw.push(args); return [state.health]; };
+      if (key === "$queryRaw") return async (...args: unknown[]) => {
+        if (JSON.stringify(args).includes("hl:crm-tagged")) {
+          const n = (tables.highLevelContact ?? []).filter((c) => !c.deletedInHl && (c.tags as string[]).some((t) => CRM_LOWER.has(t.toLowerCase()))).length;
+          return [{ n }];
+        }
+        state.raw.push(args); return [state.health];
+      };
+      if (key === "$executeRaw") return async (...args: unknown[]) => {
+        if (!JSON.stringify(args).includes("hl:crm-untag")) return 0;
+        let n = 0;
+        for (const c of tables.highLevelContact ?? []) {
+          if (!c.deletedInHl && (c.tags as string[]).some((t) => CRM_LOWER.has(t.toLowerCase()))) { c.crmTagsPending = true; n++; }
+        }
+        return n;
+      };
       return model(key);
     },
   });
@@ -141,6 +162,22 @@ vi.mock("./client.js", async (importOriginal) => {
       if (hl.refuse.has("tags")) throw new real.HighLevelError("auth", { status: 401, detail: "The token is not authorized for this scope." });
       return hl.tags.map((name) => ({ name }));
     }
+    async addContactTags(id: string, tags: string[]) {
+      hl.calls.push({ kind: "addTags", params: { id, tags } });
+      if (hl.refuse.has("write")) throw new real.HighLevelError("auth", { status: 403, detail: "The token is not authorized for this scope." });
+      const c = hl.contacts.get(id) ?? {};
+      const have = new Set(((c.tags as string[]) ?? []).map((t) => t.toLowerCase()));
+      c.tags = [...((c.tags as string[]) ?? []), ...tags.map((t) => t.toLowerCase()).filter((t) => !have.has(t))]; // HighLevel lower-cases tags
+      hl.contacts.set(id, c);
+    }
+    async removeContactTags(id: string, tags: string[]) {
+      hl.calls.push({ kind: "removeTags", params: { id, tags } });
+      if (hl.refuse.has("write")) throw new real.HighLevelError("auth", { status: 403, detail: "The token is not authorized for this scope." });
+      const c = hl.contacts.get(id) ?? {};
+      const drop = new Set(tags.map((t) => t.toLowerCase()));
+      c.tags = ((c.tags as string[]) ?? []).filter((t) => !drop.has(t.toLowerCase()));
+      hl.contacts.set(id, c);
+    }
     async getContact(id: string) {
       const c = hl.contacts.get(id);
       if (!c) throw new real.HighLevelError("notFound", { status: 404 });
@@ -176,7 +213,7 @@ vi.mock("./client.js", async (importOriginal) => {
   return { ...real, HighLevelClient: FakeClient };
 });
 
-import { runHighLevelSync, highLevelStatus, startTagRefresh } from "./sync.js";
+import { runHighLevelSync, highLevelStatus, startTagRefresh, startCrmTagging, startCrmTagRemoval } from "./sync.js";
 import { SUMMARY_VERSION } from "./mapping.js";
 
 const ORG = "org1";
@@ -495,6 +532,104 @@ describe("re-read tags now", () => {
     vi.setSystemTime(T0 + 5 * 60_000);
     expect(await startTagRefresh(ORG)).toBe(true);
     expect(hlSync().tagRefresh).toEqual(first);
+  });
+});
+
+describe("Mineral Hub's own tags in HighLevel", () => {
+  const SCOPE = { mineralTags: ["minerals"], realEstateTags: [], mineralPipelineIds: ["pMin"] };
+  /** A contact with a real text history: O = delivered outbound text, I = reply, S = STOP. */
+  const seedContact = (hlId: string, texts: string, tags: string[] = ["minerals"]) => {
+    mem.create("highLevelContact", {
+      organizationId: ORG, hlId, tags: [...tags], summaryDirty: true, line: null,
+      fetchedAt: new Date(T0), lastMessageAt: new Date(T0 - DAY),
+    });
+    [...texts].forEach((k, i) => mem.create("highLevelMessage", {
+      organizationId: ORG, hlId: `${hlId}_${i}`, hlContactId: hlId, direction: k === "O" ? "outbound" : "inbound",
+      status: "delivered", source: "workflow", hlUserId: null, optOut: k === "S", wrongNumber: false, segments: 1,
+      sentAt: new Date(T0 - 10 * DAY + i * DAY),
+    }));
+    hl.contacts.set(hlId, { tags: [...tags] });
+  };
+  const hlTags = (id: string) => (hl.contacts.get(id)!.tags as string[]);
+  const writes = () => hl.calls.filter((c) => c.kind === "addTags" || c.kind === "removeTags");
+
+  it("writes each contact's tags from its texts and minerals opportunities, only what's missing, and never twice", async () => {
+    seedIntegration({}, { scope: SCOPE, crmTagsEnabled: true });
+    seedContact("r2", "OOI");
+    seedContact("n5", "OOOOO");
+    seedContact("off", "OI", ["minerals", "sms - text 1 sent", "acquisition - interested", "probate"]);
+    seedContact("stop", "OS");
+    hl.opportunities = [
+      hlOpp("o1", { contactId: "off", pipelineId: "pMin", pipelineStageId: "s2" }),
+      hlOpp("o2", { contactId: "off", pipelineId: "pRE", pipelineStageId: "r1", status: "won" }), // real-estate pipeline: ignored
+    ];
+    await startCrmTagging(ORG);
+    expect(hlSync().crmTags).toMatchObject({ backlog: true, removing: false });
+    await run(); await run(); // summaries + opportunities first, then the writes
+    expect(hlTags("r2")).toEqual(["minerals", "sms - text 1 sent", "sms - text 2 sent", "sms - responded - text 2"]);
+    expect(hlTags("n5")).toEqual(["minerals", "sms - text 1 sent", "sms - text 2 sent", "sms - text 3 sent", "sms - text 4+ sent"]);
+    // Only the changes: Responded - Text 1 and Offer Made added, Interested removed; probate untouched.
+    expect(hlTags("off")).toEqual(["minerals", "sms - text 1 sent", "probate", "sms - responded - text 1", "acquisition - offer made"]);
+    expect(hlTags("stop")).toEqual(["minerals", "sms - text 1 sent", "acquisition - do not contact"]);
+    expect(rows("highLevelContact").every((c) => c.crmTagsPending === false)).toBe(true);
+    expect(hlSync().crmTags).toMatchObject({ backlog: false, written: 4, error: null });
+    expect((await highLevelStatus(ORG)).crmTags).toMatchObject({ enabled: true, pending: 0, tagged: 4, written: 4 });
+
+    hl.calls.length = 0;
+    await startCrmTagging(ORG); // switched off and on again: everyone re-checked, nothing re-written
+    await run();
+    expect(writes()).toHaveLength(0);
+  });
+
+  it("follows a stage move: the contact's Acquisition tag changes on the next runs", async () => {
+    seedIntegration({}, { scope: SCOPE, crmTagsEnabled: true });
+    seedContact("c1", "OI");
+    hl.opportunities = [hlOpp("o1", { contactId: "c1", pipelineStageId: "s1" })];
+    await startCrmTagging(ORG);
+    await run(); await run();
+    expect(hlTags("c1")).toContain("acquisition - interested");
+    hl.opportunities = [hlOpp("o1", { contactId: "c1", pipelineStageId: "s2", lastStageChangeAt: iso(T0) })];
+    await run(); await run();
+    expect(hlTags("c1")).toContain("acquisition - offer made");
+    expect(hlTags("c1")).not.toContain("acquisition - interested");
+  });
+
+  it("a key without contacts.write: noted on the card, the rest of the sync carries on, and it resumes once allowed", async () => {
+    seedIntegration({}, { scope: SCOPE, crmTagsEnabled: true });
+    seedContact("c1", "OO");
+    hl.refuse.add("write");
+    await startCrmTagging(ORG);
+    await run();
+    const r = await run();
+    expect(r.ok).toBe(true);
+    expect(integration().status).toBe("CONNECTED");
+    expect(hlSync().crmTags).toMatchObject({ error: "permission", backlog: false });
+    expect((await highLevelStatus(ORG)).crmTags).toMatchObject({ error: "permission", pending: 1 });
+    hl.refuse.delete("write");
+    await run();
+    expect(hlTags("c1")).toContain("sms - text 2 sent");
+    expect(hlSync().crmTags).toMatchObject({ error: null });
+  });
+
+  it("Remove CRM tags takes only Mineral Hub's tags off, then stops", async () => {
+    seedIntegration({}, { scope: SCOPE, crmTagsEnabled: false });
+    seedContact("c1", "OOI", ["minerals", "sms - text 1 sent", "sms - responded - text 2", "acquisition - deal closed", "leon county"]);
+    seedContact("c2", "O");
+    await run(); // summaries
+    await startCrmTagRemoval(ORG);
+    expect(rows("highLevelContact").filter((c) => c.crmTagsPending).map((c) => c.hlId)).toEqual(["c1"]);
+    await run();
+    expect(hlTags("c1")).toEqual(["minerals", "leon county"]);
+    expect(writes()).toHaveLength(1);
+    expect(hlSync().crmTags).toMatchObject({ removing: false, backlog: false });
+  });
+
+  it("does nothing while switched off", async () => {
+    seedIntegration({}, { scope: SCOPE });
+    seedContact("c1", "OOI");
+    await run(); await run();
+    expect(writes()).toHaveLength(0);
+    expect(contact("c1").crmTagsPending).toBe(false);
   });
 });
 

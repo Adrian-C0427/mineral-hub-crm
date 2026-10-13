@@ -7,8 +7,9 @@
  *    the rows that tick already loaded) — no extra database wake-ups.
  *  - IMPORTING orgs run back to back (each run starts when the previous one
  *    ends) until the import reaches live, and so do live orgs while a
- *    "Re-read tags now" is running. Those catch-ups may keep the database
- *    awake; each stops by itself.
+ *    "Re-read tags now" runs or CRM tags are waiting to be written or
+ *    removed. Those catch-ups may keep the database awake; each stops by
+ *    itself.
  *  - At boot, one query resumes any import a restart interrupted (each run
  *    picks up from the persisted checkpoint).
  * Waits between import runs (backoff, HighLevel rate-limit pauses) are kept in
@@ -31,8 +32,9 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms).unref()
 
 const importLoops = new Set<string>();
 
-/** Runs go back to back: the first import, or a tag re-read once live. */
-const catchingUp = (s: HlSyncState) => s.phase === "importing" || (s.phase === "live" && tagRefreshRunning(s));
+/** Runs go back to back: the first import, a tag re-read, or CRM tags waiting to be written / removed. */
+const catchingUp = (s: HlSyncState) =>
+  s.phase === "importing" || (s.phase === "live" && (tagRefreshRunning(s) || !!s.crmTags?.backlog));
 
 /** Start the back-to-back catch-up runs for an org — import or tag re-read (no-op if already running or in tests). */
 export function ensureImportLoop(organizationId: string): void {
@@ -79,10 +81,22 @@ export async function highLevelTick(rows: readonly Integration[]): Promise<void>
     if (state.phase !== "live") continue;
     try {
       await runHighLevelSync(row, { budgetMs: RUN_BUDGET_MS, reason: "scheduled" });
+      await continueCatchUp(row.organizationId);
     } catch (e) {
       console.error(`[highlevel] scheduled sync failed for org ${row.organizationId}:`, e instanceof Error ? e.message : e);
     }
   }
+}
+
+/**
+ * After a single run (Sync now, the 15-minute tick, a settings kick): if it
+ * left catch-up work — CRM tags still to write, a tag re-read, the import —
+ * carry on back to back now instead of waiting for the next tick.
+ */
+export async function continueCatchUp(organizationId: string): Promise<void> {
+  if (process.env.NODE_ENV === "test") return;
+  const row = await prisma.integration.findUnique({ where: { organizationId_provider: { organizationId, provider: HIGHLEVEL } } });
+  if (row && row.status !== "NOT_CONNECTED" && !needsReconnect(row) && catchingUp(readSyncState(row.config))) ensureImportLoop(organizationId);
 }
 
 /** A one-off background run outside the schedule (e.g. after the response window or Minerals filter changes). */
@@ -92,6 +106,7 @@ export function kickHighLevelRun(row: Integration, reason: "settings" | "manual"
   if (catchingUp(state)) { ensureImportLoop(row.organizationId); return; }
   if (state.phase !== "live" || needsReconnect(row)) return;
   void runHighLevelSync(row, { budgetMs: RUN_BUDGET_MS, reason })
+    .then(() => continueCatchUp(row.organizationId))
     .catch((e) => console.error(`[highlevel] background sync failed for org ${row.organizationId}:`, e instanceof Error ? e.message : e));
 }
 

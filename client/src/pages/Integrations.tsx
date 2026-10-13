@@ -29,7 +29,7 @@ interface Provider {
   config: {
     schedule?: string; notes?: string; fromEmail?: string; fromName?: string; domains?: ResendDomain[];
     // HighLevel
-    locationId?: string; locationName?: string; responseWindowDays?: number; pricePerSegment?: number | null;
+    locationId?: string; locationName?: string; responseWindowDays?: number; pricePerSegment?: number | null; crmTagsEnabled?: boolean;
   };
   secretMask: string | null;
   connectedAt: string | null; lastSyncAt: string | null; lastError: string | null;

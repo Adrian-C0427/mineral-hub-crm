@@ -1,6 +1,9 @@
 /**
- * HighLevel (LeadConnector) API client — READ-ONLY. Only GET requests exist
- * here; the CRM never writes to HighLevel.
+ * HighLevel (LeadConnector) API client. Reads (GET) everything the sync
+ * needs; the ONLY writes are adding / removing tags on a contact
+ * (addContactTags / removeContactTags), used solely for Mineral Hub's own
+ * SMS / Acquisition tags when the owner turns that on (domain/smsTags.ts).
+ * Both are idempotent in HighLevel, so retrying them is safe.
  *
  * Built for long unattended syncs against a rate-limited API:
  *  - Version header per endpoint family (conversations 2021-04-15, the rest
@@ -257,6 +260,18 @@ export class HighLevelClient {
     return Array.isArray(r.tags) ? r.tags : [];
   }
 
+  /** Add tags to a contact (needs contacts.write). Adding a tag it already has is a no-op. */
+  async addContactTags(contactId: string, tags: readonly string[]): Promise<void> {
+    if (!tags.length) return;
+    await this.request("POST", `/contacts/${encodeURIComponent(contactId)}/tags`, {}, VERSION_DEFAULT, { tags });
+  }
+
+  /** Remove tags from a contact (needs contacts.write). Removing one it doesn't have is a no-op. */
+  async removeContactTags(contactId: string, tags: readonly string[]): Promise<void> {
+    if (!tags.length) return;
+    await this.request("DELETE", `/contacts/${encodeURIComponent(contactId)}/tags`, {}, VERSION_DEFAULT, { tags });
+  }
+
   /** A contact; HighLevel's 404 (or a 400 saying "not found") is a notFound error. */
   async getContact(contactId: string): Promise<HlContact> {
     try {
@@ -273,19 +288,26 @@ export class HighLevelClient {
 
   // --- Transport -----------------------------------------------------------
 
-  private async get<T>(path: string, query: Record<string, string | number | undefined>, version: string): Promise<T> {
+  private get<T>(path: string, query: Record<string, string | number | undefined>, version: string): Promise<T> {
+    return this.request<T>("GET", path, query, version);
+  }
+
+  private async request<T>(method: "GET" | "POST" | "DELETE", path: string, query: Record<string, string | number | undefined>,
+    version: string, body?: unknown): Promise<T> {
     const qs = new URLSearchParams();
     for (const [k, v] of Object.entries(query)) if (v !== undefined && v !== "") qs.set(k, String(v));
     const q = qs.toString();
     const url = `${this.base}${path}${q ? `?${q}` : ""}`;
-    const headers = { Authorization: `Bearer ${this.token}`, Version: version, Accept: "application/json" };
+    const headers: Record<string, string> = { Authorization: `Bearer ${this.token}`, Version: version, Accept: "application/json" };
+    if (body !== undefined) headers["Content-Type"] = "application/json";
+    const payload = body === undefined ? undefined : JSON.stringify(body);
 
     for (let attempt = 1; ; attempt++) {
       await this.throttle();
       this.requests++;
       let res: Response;
       try {
-        res = await this.fetchWithTimeout(url, headers);
+        res = await this.fetchWithTimeout(url, method, headers, payload);
       } catch (e) {
         const detail = e instanceof Error && e.name === "AbortError" ? `timed out after ${this.timeoutMs} ms` : e instanceof Error ? e.message : "network error";
         if (attempt >= this.maxAttempts) throw new HighLevelError("network", { detail });
@@ -294,6 +316,7 @@ export class HighLevelClient {
       }
       this.readRateHeaders(res);
       if (res.ok) {
+        if (method !== "GET") return (await res.text().then((t) => (t ? JSON.parse(t) : {})).catch(() => ({}))) as T;
         try {
           return (await res.json()) as T;
         } catch {
@@ -322,11 +345,11 @@ export class HighLevelClient {
     }
   }
 
-  private async fetchWithTimeout(url: string, headers: Record<string, string>): Promise<Response> {
+  private async fetchWithTimeout(url: string, method: string, headers: Record<string, string>, body?: string): Promise<Response> {
     const ctl = new AbortController();
     const t = setTimeout(() => ctl.abort(), this.timeoutMs);
     try {
-      return await this.doFetch(url, { method: "GET", headers, signal: ctl.signal });
+      return await this.doFetch(url, { method, headers, body, signal: ctl.signal });
     } finally {
       clearTimeout(t);
     }

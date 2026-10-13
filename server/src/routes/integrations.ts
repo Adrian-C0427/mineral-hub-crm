@@ -36,12 +36,15 @@ import {
   exchangeCode, persistBundle,
 } from "../services/integrationOAuth.js";
 import { RESPONSE_WINDOW_OPTIONS } from "../domain/smsMetrics.js";
-import { HIGHLEVEL, highLevelStatus, validateHighLevelConnection, needsReconnect, startTagRefresh } from "../services/highlevel/sync.js";
+import {
+  HIGHLEVEL, highLevelStatus, validateHighLevelConnection, needsReconnect, startTagRefresh,
+  startCrmTagging, stopCrmTagging, startCrmTagRemoval,
+} from "../services/highlevel/sync.js";
 import {
   readSyncState, responseWindowOf, parseLocationId, readPipelines, savedScopeOf, sameScope, cleanScope, pricePerSegmentOf,
-  newlyUsedTags, tagRefreshRunning, type HlSyncState,
+  newlyUsedTags, tagRefreshRunning, crmTagsEnabledOf, type HlSyncState,
 } from "../services/highlevel/mapping.js";
-import { ensureImportLoop, kickHighLevelRun } from "../services/highlevel/scheduler.js";
+import { ensureImportLoop, kickHighLevelRun, continueCatchUp } from "../services/highlevel/scheduler.js";
 import { scopeSettings, textedPeople, countLines } from "../services/highlevel/scope.js";
 
 export const integrationsRouter = Router();
@@ -157,6 +160,8 @@ const configSchema = z.object({
     .optional(),
   scope: scopeSchema.nullable().optional(),
   pricePerSegment: z.number().nullable().optional(),
+  // Write Mineral Hub's own SMS / Acquisition tags to HighLevel contacts.
+  crmTagsEnabled: z.boolean().optional(),
 });
 
 /** Keep only the settings that belong to this provider. */
@@ -166,7 +171,7 @@ function configFor(provider: string, config: z.infer<typeof configSchema> | unde
     // HighLevel syncs on its own cadence; its location changes only by reconnecting.
     delete c.schedule; delete c.locationId; delete c.fromEmail; delete c.fromName;
   } else {
-    delete c.locationId; delete c.responseWindowDays; delete c.scope; delete c.pricePerSegment;
+    delete c.locationId; delete c.responseWindowDays; delete c.scope; delete c.pricePerSegment; delete c.crmTagsEnabled;
   }
   return c;
 }
@@ -227,6 +232,30 @@ integrationsRouter.post(
     await logActivity({
       eventType: "integration.import_started",
       summary: `HighLevel import started (about ${(state.preview?.texts ?? 0).toLocaleString("en-US")} texts)`,
+      organizationId: orgId(req), actorUserId: req.user?.id ?? null,
+    });
+    ensureImportLoop(orgId(req));
+    res.json(await highLevelStatus(orgId(req)));
+  }),
+);
+
+// "Remove CRM tags": switch tag writing off and take every Mineral Hub tag
+// (domain/smsTags.ts CRM_TAGS) off every HighLevel contact. Other tags stay.
+integrationsRouter.post(
+  "/highlevel/crm-tags/remove",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const row = await getRow(req, HIGHLEVEL);
+    if (!row || row.status === "NOT_CONNECTED") throw new HttpError(400, "Connect HighLevel first.");
+    if (needsReconnect(row)) throw new HttpError(400, "HighLevel needs a new key first. Use Replace key.");
+    if (readSyncState(row.config).phase !== "live") throw new HttpError(409, "Wait for the import to finish first.");
+    const cfg = (row.config ?? {}) as Record<string, unknown>;
+    if (cfg.crmTagsEnabled) {
+      await prisma.integration.update({ where: { id: row.id }, data: { config: { ...cfg, crmTagsEnabled: false } as never } });
+    }
+    await startCrmTagRemoval(orgId(req));
+    await logActivity({
+      eventType: "integration.crm_tags_remove_started",
+      summary: "Removing Mineral Hub's SMS / Acquisition tags from HighLevel",
       organizationId: orgId(req), actorUserId: req.user?.id ?? null,
     });
     ensureImportLoop(orgId(req));
@@ -459,6 +488,18 @@ integrationsRouter.patch(
       await prisma.highLevelContact.updateMany({ where: { organizationId: orgId(req) }, data: { summaryDirty: true } });
       if (row.status !== "NOT_CONNECTED") kickHighLevelRun(row, "settings");
     }
+    // CRM tags switched on → check every texted contact once (back-to-back runs);
+    // switched off → stop writing (tags already in HighLevel stay until removed).
+    const crmTagsChanged = def.key === HIGHLEVEL && typeof config.crmTagsEnabled === "boolean"
+      && config.crmTagsEnabled !== crmTagsEnabledOf(prevCfg);
+    if (crmTagsChanged) {
+      if (config.crmTagsEnabled) {
+        await startCrmTagging(orgId(req));
+        if (row.status !== "NOT_CONNECTED" && !needsReconnect(row)) ensureImportLoop(orgId(req));
+      } else {
+        await stopCrmTagging(orgId(req));
+      }
+    }
     // Saving re-sorts contacts from their STORED tags. A newly used tag that no
     // stored contact carries was probably added in HighLevel after they were
     // read (e.g. a new `minerals` tag) — re-read everyone's tags, at most once
@@ -482,6 +523,7 @@ integrationsRouter.patch(
       windowChanged ? `response window set to ${config.responseWindowDays} days` : null,
       scopeChanged ? (after ? "Minerals filter saved" : "Minerals filter reset to the suggestion") : null,
       priceChanged ? (config.pricePerSegment == null ? "texting price cleared" : `texting price set to $${config.pricePerSegment} per segment`) : null,
+      crmTagsChanged ? (config.crmTagsEnabled ? "HighLevel tags turned on" : "HighLevel tags turned off") : null,
     ].filter(Boolean);
     await logActivity({
       eventType: "integration.config_updated",
@@ -515,8 +557,8 @@ integrationsRouter.post(
       where: { id: row.id },
       data: result.ok ? { lastError: null, status: "CONNECTED" } : { lastError: result.message, status: "ERROR" },
     });
-    // A passing test clears a HighLevel key error; an interrupted import resumes.
-    if (result.ok && def.key === HIGHLEVEL && readSyncState(row.config).phase === "importing") ensureImportLoop(orgId(req));
+    // A passing test clears a HighLevel key error; interrupted catch-up work (import, tag re-read, CRM tags) resumes.
+    if (result.ok && def.key === HIGHLEVEL) await continueCatchUp(orgId(req));
     await logActivity({
       eventType: result.ok ? "integration.test_passed" : "integration.test_failed",
       summary: `Integration ${def.name} test ${result.ok ? "passed" : `failed: ${result.message}`}`,
@@ -540,6 +582,8 @@ integrationsRouter.post(
       return res.json({ ok: false, message: "Connect this integration before syncing." });
     }
     const result = await syncIntegration(row, req.user?.id ?? null);
+    // HighLevel: if the run left catch-up work (CRM tags to write, a tag re-read, the import), keep going now.
+    if (def.key === HIGHLEVEL && result.ok) await continueCatchUp(orgId(req));
     res.json(result);
   }),
 );

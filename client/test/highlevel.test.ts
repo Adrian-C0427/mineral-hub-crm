@@ -111,3 +111,16 @@ describe("tagRefreshText", () => {
       .toBe("Tags re-read today — no contact's tags had changed.");
   });
 });
+
+describe("crmTagsText", () => {
+  it("explains a missing permission, shows progress, then the steady state; nothing while off", async () => {
+    const { crmTagsText } = await import("../src/lib/highlevel");
+    const t = { enabled: true, removing: false, working: false, pending: 0, tagged: 9_812, error: null, lastWriteAt: null, written: 9_812 };
+    expect(crmTagsText({ ...t, enabled: false })).toBeNull();
+    expect(crmTagsText({ ...t, error: "permission" })?.warn).toBe(true);
+    expect(crmTagsText({ ...t, error: "permission" })?.text).toMatch(/contacts\.write/);
+    expect(crmTagsText({ ...t, working: true, pending: 3_100 })?.text).toBe("Tagging contacts in HighLevel: 3,100 contacts left to check.");
+    expect(crmTagsText({ ...t, enabled: false, removing: true, working: true, pending: 40 })?.text).toBe("Removing Mineral Hub's tags from HighLevel: 40 contacts left.");
+    expect(crmTagsText(t)?.text).toBe("SMS & Acquisition tags on 9,812 contacts in HighLevel · kept in step with Reports every 15 minutes.");
+  });
+});

@@ -31,6 +31,35 @@ export interface HighLevelStatus {
   missingScopes?: string[];
   /** "Re-read tags now" — the latest one, while running and after. */
   tagRefresh?: HighLevelTagRefresh | null;
+  /** Mineral Hub's own SMS / Acquisition tags in HighLevel. */
+  crmTags?: HighLevelCrmTags;
+}
+
+export interface HighLevelCrmTags {
+  enabled: boolean; removing: boolean; working: boolean; pending: number; tagged: number;
+  error: "permission" | null; lastWriteAt: string | null; written: number;
+}
+
+/** The tags Mineral Hub writes (mirrors server/src/domain/smsTags.ts). */
+export const CRM_TAG_GROUPS: { label: string; tags: readonly string[] }[] = [
+  { label: "Texts reached before the first reply (cumulative)", tags: ["SMS - Text 1 Sent", "SMS - Text 2 Sent", "SMS - Text 3 Sent", "SMS - Text 4+ Sent"] },
+  { label: "The text their first real reply came after", tags: ["SMS - Responded - Text 1", "SMS - Responded - Text 2", "SMS - Responded - Text 3", "SMS - Responded - Text 4+"] },
+  { label: "Where they stand in your minerals pipelines (one at a time)", tags: [
+    "Acquisition - Interested", "Acquisition - Offer Made", "Acquisition - Offer Accepted", "Acquisition - Deal Created",
+    "Acquisition - Deal Closed", "Acquisition - Not Interested", "Acquisition - Do Not Contact",
+  ] },
+];
+
+/** The card line for Mineral Hub's tags in HighLevel, or null when they're off and nothing's happening. */
+export function crmTagsText(t: HighLevelCrmTags | null | undefined): { text: string; warn: boolean } | null {
+  if (!t) return null;
+  if (t.error === "permission" && (t.enabled || t.removing)) {
+    return { warn: true, text: "HighLevel refused to change tags — in XLeads, edit the “Mineral Hub CRM” Private Integration, add the contacts.write permission (the key stays the same), then press Sync now." };
+  }
+  if (t.removing) return { warn: false, text: `Removing Mineral Hub's tags from HighLevel: ${count(t.pending, "contact", "contacts")} left.` };
+  if (!t.enabled) return null;
+  if (t.working && t.pending > 0) return { warn: false, text: `Tagging contacts in HighLevel: ${count(t.pending, "contact", "contacts")} left to check.` };
+  return { warn: false, text: `SMS & Acquisition tags on ${count(t.tagged, "contact", "contacts")} in HighLevel · kept in step with Reports ${HL_SYNC_EVERY}.` };
 }
 
 export interface HighLevelTagRefresh {
