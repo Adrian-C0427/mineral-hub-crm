@@ -10,6 +10,7 @@ import { stageColor, isOpportunityPipeline, type PipelineInfo } from "../stages"
 import { PipelineSettingsModal } from "./PipelineSettingsModal";
 import { NewOpportunityModal } from "./NewOpportunityModal";
 import { useBoardSync } from "../lib/useBoardSync";
+import { useBoardWheel } from "../lib/boardWheel";
 import type { Opp, OppSummary, PipelineStage, Stage } from "../types";
 
 /**
@@ -127,6 +128,7 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
   });
   const opps = board.rows;
   const load = board.reload;
+  const kanbanRef = useBoardWheel();
 
   const autoScrollTimer = useRef<number | null>(null);
   function autoScrollTick() {
@@ -288,7 +290,7 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
   const stageCount = (pipelineId: string, stageKey: string) => (pipelineId === pipeline.id ? opps.filter((o) => o.stage === stageKey).length : null);
 
   return (
-    <div className="page pl2-page op-board">
+    <div className="page page-fill pl2-page op-board">
       <div className="page-header pl-head">
         <div className="pl-head-main">
           <h1>Pipeline</h1>
@@ -311,7 +313,7 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
         </div>
       </div>
 
-      <div className={`kanban ${drag ? "dragging" : ""}`}>
+      <div ref={kanbanRef} className={`kanban ${drag ? "dragging" : ""}`}>
         {activeStages.length === 0 && (
           <div className="pl-nostages">
             <span className="pl-nostages-title">{pipeline.name} has no stages yet</span>

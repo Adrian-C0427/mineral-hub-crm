@@ -174,9 +174,12 @@ label.pl-check:has(input:not(:checked)) { color: var(--ink-2); }
 .pl-tags button.pl-link:hover { color: var(--ink); }
 
 /* ---------------------------------------------------------------- board */
+/* The board is the one horizontal scroller (wheel routing: lib/boardWheel.ts).
+   Sideways overscroll stops here, so swiping past the first/last stage never
+   turns into a browser back/forward navigation. */
 .pl2-page .kanban {
   flex: 1; min-height: 0; display: flex; align-items: stretch; gap: 12px;
-  overflow-x: auto; overflow-y: hidden; padding-bottom: 2px;
+  overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; overscroll-behavior-x: contain;
 }
 .pl2-page .kanban-col {
   position: relative; flex: 1 0 340px; width: auto; min-width: 340px; max-width: 440px; min-height: 0; max-height: 100%;
@@ -205,8 +208,12 @@ label.pl-check:has(input:not(:checked)) { color: var(--ink-2); }
 .pl-col-uc { padding-left: 16px; font-size: 12px; font-weight: 600; color: var(--ink-2); font-variant-numeric: tabular-nums; }
 .pl-col-uc > span { font-weight: 500; color: var(--ink-4); }
 
+/* Vertical overscroll stays in the column (the page never moves), but sideways
+   deltas must chain on to the board: the old `overscroll-behavior: contain`
+   (both axes) trapped every horizontal swipe / Shift+wheel that started over a
+   column long enough to scroll. */
 .pl2-page .kanban-col-body {
-  flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
+  flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior-x: auto; overscroll-behavior-y: contain;
   padding: 10px; display: flex; flex-direction: column; gap: 8px;
 }
 .pl2-page .kanban.compact .kanban-col-body { gap: 6px; }
@@ -263,6 +270,13 @@ label.pl-check:has(input:not(:checked)) { color: var(--ink-2); }
 .pl2-page .pl-card:hover .dc-move, .pl2-page .pl-card .dc-move:focus-visible { opacity: 1; }
 .pl2-page .pl-card .dc-move:hover { border: 0; background: var(--hover-strong); color: var(--ink); }
 @media (hover: none) { .pl2-page .pl-card .dc-move { opacity: 1; } }
+/* Touch-first screens (tablets as well as phones): a swipe that starts on a
+   card scrolls the board / its column, and a press-and-hold picks the card up
+   (Pipeline.tsx). styles.css's touch-action: none stays for mouse-first
+   screens, where touch and pen drags start at once. */
+@media (hover: none) {
+  .pl2-page .deal-card.draggable { touch-action: pan-x pan-y; -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+}
 
 .pl-card-sub { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; margin-top: -3px; font-size: 12px; color: var(--ink-3); }
 .pl-card-loc { display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; }

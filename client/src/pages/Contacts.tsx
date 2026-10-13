@@ -222,7 +222,7 @@ export function Contacts() {
   ];
 
   return (
-    <div className="page contacts-page ct-page">
+    <div className="page page-fill contacts-page ct-page">
       <div className="page-header">
         <div className="bc-head">
           <h1>Contacts</h1>

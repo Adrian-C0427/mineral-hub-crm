@@ -132,7 +132,7 @@ export function MineralAssets() {
   if (!assets) return <Spinner label="Loading mineral assets…" />;
 
   return (
-    <div className="page contacts-page assets-page">
+    <div className="page page-fill contacts-page assets-page">
       <div className="page-header">
         <div>
           <h1 style={{ marginBottom: 0 }}>Mineral Assets</h1>

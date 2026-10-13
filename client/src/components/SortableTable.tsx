@@ -1,6 +1,8 @@
 import { fmtDate } from "../lib/format";
 import { useAuth } from "../auth/AuthContext";
 import { loadProfileTablePrefs, saveProfileTablePrefs } from "../lib/tablePrefs";
+import { fillPageFloor, nestedWheelTarget, steerNestedWheel } from "../lib/fillScroll";
+import { WHEEL_GESTURE_GAP_MS, wheelPx } from "../lib/wheel";
 import { Select } from "./Select";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -447,6 +449,69 @@ export function SortableTable<T>({
     ro.observe(el);
     return () => { el.removeEventListener("scroll", update); ro.disconnect(); };
   }, [sorted.length, cols.length]);
+
+  // Viewport-height list pages (.page-fill, styles/shared.css): keep the page's
+  // floor (--page-floor) in step with this table, and when that floor makes the
+  // page scroll too, route wheel gestures over the rows between the two
+  // scrollers (lib/fillScroll.ts) so neither ever traps one.
+  useEffect(() => {
+    const el = scrollRef.current;
+    const card = el?.closest<HTMLElement>(".page-fill > .ct-card");
+    const page = card?.parentElement;
+    const outer = page?.closest<HTMLElement>(".app-main");
+    if (!el || !card || !page || !outer) return;
+    let frame = 0;
+    const measure = () => {
+      cancelAnimationFrame(frame);
+      // Next frame: writing the floor from inside the observer callback would
+      // resize what it observes in the same frame (a ResizeObserver loop error).
+      frame = requestAnimationFrame(() => {
+        const chrome = card.getBoundingClientRect().bottom - page.getBoundingClientRect().top
+          + parseFloat(getComputedStyle(page).paddingBottom) - el.offsetHeight;
+        const floor = `${fillPageFloor(chrome, el.scrollHeight + el.offsetHeight - el.clientHeight)}px`;
+        if (page.style.getPropertyValue("--page-floor") !== floor) page.style.setProperty("--page-floor", floor);
+      });
+    };
+    const ro = new ResizeObserver(measure);
+    [el, tableRef.current, card, page].forEach((n) => n && ro.observe(n));
+    // Bound to the card, not just the rows: once the page moves under a still
+    // pointer, the gesture (or the next one) lands on the pager.
+    let steering = false, lastAt = -Infinity;
+    const onWheel = (e: WheelEvent) => {
+      const deltaY = e.deltaY; // before deltaMode (see wheelPx)
+      if (e.ctrlKey || Math.abs(e.deltaX) >= Math.abs(deltaY)) return;
+      const fresh = e.timeStamp - lastAt > WHEEL_GESTURE_GAP_MS;
+      lastAt = e.timeStamp;
+      const outerMax = outer.scrollHeight - outer.clientHeight;
+      // A new gesture (a pause between wheel events) decides once. The usual
+      // case — the page fits, only the rows scroll — always stays native.
+      if (fresh) {
+        steering = false;
+        if (!e.cancelable || outerMax <= 1) return;
+      } else if (!steering) return;
+      const w = {
+        deltaY, innerTop: el.scrollTop, outerTop: outer.scrollTop, outerMax,
+        cardCutOff: card.getBoundingClientRect().bottom > outer.getBoundingClientRect().bottom + 1,
+      };
+      if (fresh) {
+        // Over the pager, a cramped page's wheel drives the rows/page as over the rows.
+        const t = e.target as Element;
+        steering = el.contains(t) ? steerNestedWheel(w) : !!t.closest?.(".ct-foot");
+      }
+      if (!steering || !e.cancelable) return;
+      e.preventDefault();
+      const px = wheelPx(deltaY, e.deltaMode, outer.clientHeight);
+      if (nestedWheelTarget(w) === "page") outer.scrollTop += px;
+      else el.scrollTop += px;
+    };
+    card.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+      card.removeEventListener("wheel", onWheel);
+      page.style.removeProperty("--page-floor");
+    };
+  }, []);
 
   // Dynamic column sizing: after every render (data, filters, edits, paging),
   // re-check which columns hold long text. Those wrap inside a width band;
