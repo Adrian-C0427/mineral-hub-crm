@@ -75,6 +75,10 @@ export function SmsDrill({ spec, query, periodLabel, onClose }: {
     ...(FUNNEL_DRILLS.includes(spec.set) ? [{
       key: "step", header: "Furthest step", type: "text" as const, value: (r: SmsContactRow) => furthestStepLabel(r.furthestStep, r.oppDead),
     }] : []),
+    ...(spec.set === "stillWaiting" || spec.set === "noReply" ? [{
+      key: "last", header: "Last texted", type: "date" as const, value: (r: SmsContactRow) => r.lastTextedAt,
+      render: (r: SmsContactRow) => fmtDateLocal(r.lastTextedAt),
+    }] : []),
     ...(spec.set === "wrongNumber" ? [{
       key: "wrong", header: "Wrong number", type: "text" as const, value: (r: SmsContactRow) => wrongNumberLabel(r),
     }] : []),

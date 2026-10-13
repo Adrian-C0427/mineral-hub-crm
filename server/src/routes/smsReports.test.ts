@@ -162,7 +162,7 @@ describe("GET /api/reports/sms", () => {
     expect(b.kpis).toMatchObject({
       wrongNumbers: 0, wrongNumberRate: null, opportunities: 0, interestedRate: null, offers: 0, offerAcceptanceRate: null, closedDeals: 0,
       textingCost: null, costPerReply: null, costPerOpportunity: null, costPerOffer: null, costPerClosedDeal: null,
-      medianAnswerSeconds: null, answeredWithinHourRate: null, neverAnsweredRate: null,
+      medianAnswerSeconds: null, answeredWithinHourRate: null, neverAnsweredRate: null, stillWaiting: 0, avgTextsBeforeReply: null,
     });
     expect(b.funnel.steps.every((s: { fromReached: number | null }) => s.fromReached === null)).toBe(true);
     expect(b.funnel).toMatchObject({ interestedRate: null, contactsPerClosedDeal: null, textsPerClosedDeal: null, historySince: null });
@@ -445,6 +445,85 @@ describe("cost, speed, best time, phone lists, carrier health", () => {
     expect(b.deltas.textingCost).toBe(0);
     expect(b.deltaKind.wrongNumberRate).toBe("points");
     expect(sqlOf("sms:funnel")).toHaveLength(2);
+  });
+});
+
+describe("still waiting and texts before a reply", () => {
+  const DAY = 86_400_000;
+  /** The instant a query bound for "texted at or after" (bound right after the NO_REPLY outcome, and again for the reached text). */
+  const sinceOf = (q: Prisma.Sql) => {
+    expect(q.values.filter((v) => v === "NO_REPLY")).toHaveLength(1);
+    const i = q.values.indexOf("NO_REPLY");
+    const [since, org, again] = q.values.slice(i + 1, i + 4);
+    expect(typeof since).toBe("string");
+    expect([org, again]).toEqual(["org_a", since]);
+    return new Date(since as string).getTime();
+  };
+  /** The tile's still-waiting condition, as SQL text. */
+  const condOf = (q: Prisma.Sql) => /AS "wrongNumbers",\s*count\(\*\) FILTER \(WHERE (.*?)\)::int AS "stillWaiting"/s.exec(q.sql)![1];
+
+  it("counts no-reply people last texted within the response window of now, and averages texts before a reply", async () => {
+    db.results["integration.findUnique"] = CONNECTED; // 14-day window
+    Object.assign(db.rawResults, {
+      "sms:cohort": [
+        { touches: 1, outcome: "RESPONDED", count: 6, unconfirmed: 0, texts: 6 },
+        { touches: 4, outcome: "RESPONDED", count: 2, unconfirmed: 0, texts: 8 },
+        { touches: 3, outcome: "NO_REPLY", count: 30, unconfirmed: 0, texts: 90 },
+      ],
+      "sms:cohort-x": [{ wrongNumbers: 0, stillWaiting: 12, responded: 8, answered: 0, within5m: 0, within1h: 0, within24h: 0, avg: null, median: null }],
+    });
+    const before = Date.now();
+    const b = (await call(OWNER, "/api/reports/sms?from=2026-09-01&to=2026-09-30")).body;
+    expect(b.kpis).toMatchObject({ stillWaiting: 12, avgTextsBeforeReply: 14 / 8, contactsReached: 38, contactsResponded: 8 });
+    // Waiting people stay in "reached": the response rate is unchanged.
+    expect(b.kpis.responseRate).toBe(8 / 38);
+    const tile = sqlOf("sms:cohort-x")[0];
+    // No reply yet, and a text that REACHED them (not a failed one) inside the window.
+    const cond = condOf(tile);
+    expect(cond).toContain(`c."outcome" = ? AND c."lastMessageAt" >= ?::timestamp`);
+    expect(cond).toMatch(/EXISTS \(SELECT 1 FROM "HighLevelMessage" m WHERE m\."organizationId" = \? AND m\."hlContactId" = c\."hlId"\s+AND m\."sentAt" >= \?::timestamp AND m\."direction" = 'outbound' AND NOT \(.*\) AND NOT \(.*\)\)/s);
+    expect(tile.values).toEqual(expect.arrayContaining([["pending", "scheduled", "queued"], ["failed", "undelivered", "opt_out"]]));
+    const since = sinceOf(tile);
+    expect(since).toBeGreaterThanOrEqual(before - 14 * DAY - 1000);
+    expect(since).toBeLessThanOrEqual(Date.now() - 14 * DAY);
+  });
+
+  it("compares both, judging still waiting against now for the comparison window too", async () => {
+    db.results["integration.findUnique"] = SCOPED;
+    db.rawResults["sms:cohort"] = [{ touches: 2, outcome: "RESPONDED", count: 5, unconfirmed: 0, texts: 10 }];
+    db.rawResults["sms:cohort-x"] = [{ wrongNumbers: 0, stillWaiting: 4, responded: 5, answered: 0, within5m: 0, within1h: 0, within24h: 0, avg: null, median: null }];
+    const b = (await call(OWNER, "/api/reports/sms?from=2026-09-01&to=2026-09-30&compareFrom=2026-08-01&compareTo=2026-08-31")).body;
+    expect(b.previous).toMatchObject({ stillWaiting: 4, avgTextsBeforeReply: 2 });
+    expect(b.deltas).toMatchObject({ stillWaiting: 0, avgTextsBeforeReply: 0 });
+    expect(b.deltaKind).toMatchObject({ stillWaiting: "relative", avgTextsBeforeReply: "relative" });
+    const [cur, prev] = sqlOf("sms:cohort-x");
+    expect(prev.values).toEqual(expect.arrayContaining([new Date("2026-08-01T00:00:00Z").toISOString()]));
+    expect(sinceOf(cur)).toBe(sinceOf(prev));
+  });
+
+  it("lists the still-waiting people with the same condition and window as the tile", async () => {
+    db.results["integration.findUnique"] = SCOPED;
+    await call(OWNER, "/api/reports/sms?from=2026-09-01&to=2026-09-30&tags=reeves%20county");
+    const tile = sqlOf("sms:cohort-x")[0];
+    const cond = condOf(tile);
+    db.raw.length = 0;
+    db.rawResults["sms:drill-count"] = [{ n: 1 }];
+    db.rawResults["sms:drill"] = [{
+      hlId: "c7", name: "Bo Reyes", tags: ["reeves county"], firstOutboundAt: new Date("2026-09-20T15:00:00Z"), touches: 3, outcome: "NO_REPLY",
+      lastMessageAt: new Date("2026-10-08T15:00:00Z"),
+    }];
+    const res = await call(VIEWER, "/api/reports/sms/contacts?from=2026-09-01&to=2026-09-30&tags=reeves%20county&set=stillWaiting");
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ total: 1 });
+    expect(res.body.rows[0]).toMatchObject({ hlId: "c7", outcome: "NO_REPLY", lastTextedAt: "2026-10-08T15:00:00.000Z" });
+    const drill = sqlOf("sms:drill-count")[0];
+    expect(drill.sql).toContain(`AND ${cond}`);
+    expect(drill.sql).toContain(MINERALS_ONLY);
+    expect(drill.values).toEqual(expect.arrayContaining(["NO_REPLY", ["reeves county"]]));
+    // Same 14-day window as the tile, a moment later.
+    expect(Math.abs(sinceOf(drill) - sinceOf(tile))).toBeLessThan(5000);
+    expectOrgScoped();
+    expect((await call(REPORTS_ONLY, "/api/reports/sms/contacts?set=stillWaiting")).status).toBe(403);
   });
 });
 

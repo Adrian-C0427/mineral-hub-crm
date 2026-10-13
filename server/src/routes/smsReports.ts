@@ -15,6 +15,9 @@
  *    quality) come from the per-contact summaries computed by
  *    domain/smsMetrics.ts summarizeContact(), dated by the contact's first
  *    reached text (firstOutboundAt) — the response cohort.
+ *  - "Still waiting" = cohort contacts with no reply yet who got a text that
+ *    reached them within the response window of now: a reply now would still
+ *    count. (A failed text doesn't restart the window, as in summarizeContact.)
  *  - Carrier health always counts ALL texting with no filters: carriers judge
  *    the sending numbers, whatever the texts were about.
  *  - Team member of a message = its sender, else the contact's assignee;
@@ -44,7 +47,7 @@ import {
   BEST_TIME_MIN_SAMPLE, DAY_MS, DELTA_KIND, DRILL_SETS, FUNNEL_SETS, NO_SENDER, NO_SOURCE, NO_TAG, TEXTED_SETS, UNASSIGNED_LABEL,
   allRange, bestTimeGrid, cohortCounts, computeKpis, costSummary, drillRow, effectiveScope, fillTrend, funnelSummary, furthestStep,
   healthDays, healthOf, lineCounts, mergeBreakdown, mergeQuality, parseReportScope, parseSmsFilters, phoneTagSets, rangeJson, readHlConfig,
-  requestedPeriod, senderName, smsDeltas, speedSummary, trendBucket,
+  requestedPeriod, senderName, smsDeltas, speedSummary, trendBucket, waitingSince,
   type CohortGroup, type CostSummary, type DayRange, type DrillRowDim, type DrillSet, type FunnelCounts, type FunnelSummary,
   type HealthCounts, type HlReportConfig, type HlUser, type PhoneGroup, type PhoneTagSets, type QualityCohortGroup,
   type QualityVolumeGroup, type ReportScope,
@@ -78,6 +81,8 @@ const STATUS = Prisma.sql`lower(btrim(coalesce(m."status", '')))`;
 const SENT = Prisma.sql`NOT (${STATUS} = ANY(${[...PENDING_STATUSES]}::text[]))`;
 const DELIVERED = Prisma.sql`${STATUS} = ANY(${[...DELIVERED_STATUSES]}::text[])`;
 const FAILED = Prisma.sql`${STATUS} = ANY(${[...FAILED_STATUSES]}::text[])`;
+/** Reached the person: went out and didn't fail (smsMetrics isReachedStatus). */
+const REACHED = Prisma.sql`${SENT} AND NOT (${FAILED})`;
 const col = (alias: string, name: string) => Prisma.raw(`${alias}."${name}"`);
 const outcomeIs = (o: SmsOutcome, alias = "c") => Prisma.sql`${col(alias, "outcome")} = ${o}`;
 
@@ -220,6 +225,16 @@ const FUNNEL_COND: Record<string, Prisma.Sql> = {
   dead: Prisma.sql`x.n > 0 AND x.alive = 0`,
 };
 
+/**
+ * Contact `c` has no reply yet but a text reached them at or after `since`
+ * (domain waitingSince), so a reply now still counts. lastMessageAt (any
+ * text, failed ones too) is the cheap first cut; the index on (org, contact,
+ * sentAt) answers the rest.
+ */
+const stillWaitingSql = (org: string, since: Date) => Prisma.sql`(${outcomeIs("NO_REPLY")} AND c."lastMessageAt" >= ${ts(since)}
+  AND EXISTS (SELECT 1 FROM "HighLevelMessage" m WHERE m."organizationId" = ${org} AND m."hlContactId" = c."hlId"
+    AND m."sentAt" >= ${ts(since)} AND ${OUTBOUND} AND ${REACHED}))`;
+
 const seconds = (a: Prisma.Sql, b: Prisma.Sql) => Prisma.sql`greatest(extract(epoch FROM ${a} - ${b}), 0)::float8`;
 
 // --- Queries ------------------------------------------------------------------
@@ -279,11 +294,13 @@ async function responseTimes(org: string, r: DayRange, f: SmsFilters, scope: Rep
   return rows[0] ?? { avg: null, median: null };
 }
 
-/** Wrong numbers and speed to lead over the cohort, in one pass. */
-async function cohortExtras(org: string, r: DayRange, f: SmsFilters, scope: ReportScope, pt: PhoneTagSets): Promise<{ wrongNumbers: number; speed: SpeedCounts }> {
+/** Wrong numbers, people still waiting on a reply and speed to lead over the cohort, in one pass. */
+async function cohortExtras(org: string, r: DayRange, f: SmsFilters, scope: ReportScope, pt: PhoneTagSets, since: Date):
+  Promise<{ wrongNumbers: number; stillWaiting: number; speed: SpeedCounts }> {
   const answered = Prisma.sql`${outcomeIs("RESPONDED")} AND c."replyAnsweredSeconds" IS NOT NULL`;
-  const rows = await prisma.$queryRaw<(SpeedCounts & { wrongNumbers: number })[]>(Prisma.sql`/* sms:cohort-x */
+  const rows = await prisma.$queryRaw<(SpeedCounts & { wrongNumbers: number; stillWaiting: number })[]>(Prisma.sql`/* sms:cohort-x */
     SELECT count(*) FILTER (WHERE ${wrongNumberSql(pt)})::int AS "wrongNumbers",
+      count(*) FILTER (WHERE ${stillWaitingSql(org, since)})::int AS "stillWaiting",
       count(*) FILTER (WHERE ${outcomeIs("RESPONDED")})::int AS responded,
       count(*) FILTER (WHERE ${answered})::int AS answered,
       count(*) FILTER (WHERE ${answered} AND c."replyAnsweredSeconds" <= 300)::int AS "within5m",
@@ -295,6 +312,7 @@ async function cohortExtras(org: string, r: DayRange, f: SmsFilters, scope: Repo
   const x = rows[0];
   return {
     wrongNumbers: x?.wrongNumbers ?? 0,
+    stillWaiting: x?.stillWaiting ?? 0,
     speed: {
       responded: x?.responded ?? 0, answered: x?.answered ?? 0, within5m: x?.within5m ?? 0, within1h: x?.within1h ?? 0,
       within24h: x?.within24h ?? 0, avg: x?.avg ?? null, median: x?.median ?? null,
@@ -347,10 +365,10 @@ interface PeriodData {
 
 /** Everything one period's KPI tiles need (the current period and the comparison window alike). */
 async function periodData(org: string, r: DayRange, f: SmsFilters, scope: ReportScope,
-  ctx: { pipelines: string[] | null; price: number | null; phoneTags: PhoneTagSets }): Promise<PeriodData> {
+  ctx: { pipelines: string[] | null; price: number | null; phoneTags: PhoneTagSets; waitingSince: Date }): Promise<PeriodData> {
   const [v, rows, times, extras, fun] = await Promise.all([
     volumeTotals(org, r, f, scope), cohortRows(org, r, f, scope), responseTimes(org, r, f, scope),
-    cohortExtras(org, r, f, scope, ctx.phoneTags), funnelCounts(org, r, f, scope, ctx.pipelines),
+    cohortExtras(org, r, f, scope, ctx.phoneTags, ctx.waitingSince), funnelCounts(org, r, f, scope, ctx.pipelines),
   ]);
   const c = cohortCounts(rows);
   const funnel = funnelSummary({ reached: c.reached, responded: c.responded, ...fun });
@@ -358,10 +376,10 @@ async function periodData(org: string, r: DayRange, f: SmsFilters, scope: Report
     { responded: c.responded, opportunities: fun.opportunity, offers: fun.offer, closed: fun.closed });
   const speed = speedSummary(extras.speed);
   const kpis = computeKpis(v, {
-    reached: c.reached, responded: c.responded, optedOut: c.optedOut,
+    reached: c.reached, responded: c.responded, optedOut: c.optedOut, respondedTexts: c.respondedTexts,
     avgSeconds: times.avg == null ? null : Math.round(times.avg),
     medianSeconds: times.median == null ? null : Math.round(times.median),
-  }, { wrongNumbers: extras.wrongNumbers, funnel, cost, speed });
+  }, { stillWaiting: extras.stillWaiting, wrongNumbers: extras.wrongNumbers, funnel, cost, speed });
   return { kpis, rows, volume: v, funnel, cost, speed };
 }
 
@@ -605,7 +623,8 @@ smsReportsRouter.get(
     const cfg = readHlConfig(row?.config);
     const bucket = trendBucket(range);
     const pipelines = funnelPipelines(cfg, scope);
-    const ctx = { pipelines, price: cfg.pricePerSegment, phoneTags };
+    // Still waiting is judged against now, for the comparison window too.
+    const ctx = { pipelines, price: cfg.pricePerSegment, phoneTags, waitingSince: waitingSince(now, cfg.responseWindowDays) };
     const tz = reportTimeZone(cfg);
 
     const [cur, prev, trend, [bdCohort, bdVolume], quality, members, slots, split, health, health7, inboundFirst, summariesPending] =
@@ -712,15 +731,15 @@ interface DrillRow {
   hlId: string; name: string | null; phone: string | null; tags: string[] | null; source: string | null;
   senderId: string | null; firstOutboundAt: Date | null; touches: number | null; outcome: string | null;
   outcomeAt: Date | null; responseSeconds: number | null; smsOptedOut: boolean | null; deletedInHl: boolean | null;
-  line?: string | null; wrongNumberAt?: Date | null; wrongNumberTouch?: number | null;
+  lastMessageAt?: Date | null; line?: string | null; wrongNumberAt?: Date | null; wrongNumberTouch?: number | null;
   replyAnsweredSeconds?: number | null; answeredBy?: string | null;
   oppN?: number | null; oppOffer?: boolean | null; oppAccepted?: boolean | null; oppContract?: boolean | null;
   oppClosed?: boolean | null; oppAlive?: number | null;
 }
 const DRILL_COLUMNS = Prisma.sql`c."name", c."phone", c."tags", c."source",
   coalesce(c."creditedHlUserId", c."assignedToHlUserId") AS "senderId", c."firstOutboundAt", c."touches", c."outcome",
-  c."outcomeAt", c."responseSeconds", c."smsOptedOut", c."deletedInHl", c."line", c."wrongNumberAt", c."wrongNumberTouch",
-  c."replyAnsweredSeconds", c."answeredByHlUserId" AS "answeredBy"`;
+  c."outcomeAt", c."responseSeconds", c."smsOptedOut", c."deletedInHl", c."lastMessageAt", c."line", c."wrongNumberAt",
+  c."wrongNumberTouch", c."replyAnsweredSeconds", c."answeredByHlUserId" AS "answeredBy"`;
 const FUNNEL_COLUMNS = Prisma.sql`, x.n AS "oppN", x.offer AS "oppOffer", x.accepted AS "oppAccepted", x.contract AS "oppContract",
   x.closed AS "oppClosed", x.alive AS "oppAlive"`;
 const DRILL_ORDER = Prisma.sql`ORDER BY coalesce(c."firstOutboundAt", c."outcomeAt", c."lastMessageAt") DESC NULLS LAST`;
@@ -743,6 +762,7 @@ function shapeContact(r: DrillRow, users: readonly HlUser[]) {
     responseSeconds: r.responseSeconds,
     optedOutInHl: r.smsOptedOut ?? false,
     deletedInHl: r.deletedInHl ?? false,
+    lastTextedAt: r.lastMessageAt ?? null,
     line: r.line ?? null,
     wrongNumberAt: r.wrongNumberAt ?? null,
     wrongNumberTouch: r.wrongNumberTouch ?? null,
@@ -826,6 +846,7 @@ smsReportsRouter.get(
       };
       const phone = PHONE_SETS[set];
       const cond = outcome[set] ? Prisma.sql`AND ${outcomeIs(outcome[set]!)}`
+        : set === "stillWaiting" ? Prisma.sql`AND ${stillWaitingSql(org, waitingSince(now, cfg.responseWindowDays))}`
         : set === "wrongNumber" ? Prisma.sql`AND ${wrongNumberSql(phoneTags)}`
         : set === "unanswered" ? Prisma.sql`AND ${outcomeIs("RESPONDED")} AND c."replyAnsweredSeconds" IS NULL`
         : funnel ? Prisma.sql`AND ${FUNNEL_COND[set]}`
@@ -873,7 +894,7 @@ smsReportsRouter.get(
         senderId: contact?.creditedHlUserId ?? contact?.assignedToHlUserId ?? null,
         firstOutboundAt: contact?.firstOutboundAt ?? null, touches: contact?.touches ?? 0, outcome: contact?.outcome ?? null,
         outcomeAt: contact?.outcomeAt ?? null, responseSeconds: contact?.responseSeconds ?? null,
-        smsOptedOut: contact?.smsOptedOut ?? false, deletedInHl: contact?.deletedInHl ?? false,
+        smsOptedOut: contact?.smsOptedOut ?? false, deletedInHl: contact?.deletedInHl ?? false, lastMessageAt: contact?.lastMessageAt ?? null,
         line: contact?.line ?? null, wrongNumberAt: contact?.wrongNumberAt ?? null, wrongNumberTouch: contact?.wrongNumberTouch ?? null,
         replyAnsweredSeconds: contact?.replyAnsweredSeconds ?? null, answeredBy: contact?.answeredByHlUserId ?? null,
       }, users),
