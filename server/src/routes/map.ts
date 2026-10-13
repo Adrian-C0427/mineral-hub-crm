@@ -150,7 +150,7 @@ mapRouter.get(
  * are served as an authed GeoJSON FeatureCollection instead. */
 
 // Shapefile sidecars: at most one .zip, or .shp + .dbf/.prj/.shx/.cpg.
-const shpUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: env.MAX_UPLOAD_BYTES, files: 6 } });
+const shpUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: env.MAX_UPLOAD_BYTES, files: 6, fields: 10, fieldSize: 16 * 1024, parts: 16 } });
 
 // Each import parses and reprojects up to 150 MB of uploads; cap replays.
 const tractImportLimiter = rateLimit({
@@ -161,6 +161,20 @@ const tractImportLimiter = rateLimit({
   keyGenerator: (req) => (req as AuthedRequest).user?.id ?? req.ip ?? "unknown",
   message: { error: "Too many shapefile imports. Wait a few minutes and try again." },
 });
+
+/**
+ * Which tracts a read may return. The demo reads its reference org's tracts,
+ * but only the UNLINKED ones: a tract linked to one of that org's deals marks
+ * what it is pursuing. A deal-scoped demo request matches nothing — the demo's
+ * own deals never own reference tracts, and a reference deal id passed in
+ * ?dealId= must not reopen the linked tracts.
+ */
+function tractScope(req: AuthedRequest, dealId: string | undefined): Prisma.MapTractWhereInput {
+  if (req.user!.referenceOrgId != null) {
+    return { organizationId: researchOrgId(req), dealId: null, ...(dealId ? { id: { in: [] } } : {}) };
+  }
+  return { organizationId: orgId(req), ...(dealId ? { dealId } : {}) };
+}
 
 /** Shown in place of the reference org's upload filenames to demo users. */
 const REFERENCE_TRACT_SOURCE = "Reference tracts";
@@ -189,7 +203,7 @@ mapRouter.get(
     // and without the upload filename (often names the prospect or lease).
     const fromReference = req.user!.referenceOrgId != null;
     const rows = await prisma.mapTract.findMany({
-      where: { organizationId: researchOrgId(req), ...(dealId ? { dealId } : fromReference ? { dealId: null } : {}) },
+      where: tractScope(req, dealId),
       orderBy: { createdAt: "asc" },
       include: { deal: { select: { id: true, name: true } } },
     });
@@ -220,7 +234,7 @@ mapRouter.get(
     const fromReference = req.user!.referenceOrgId != null;
     const groups = await prisma.mapTract.groupBy({
       by: ["importId", "sourceFile", "dealId"],
-      where: { organizationId: researchOrgId(req), ...(dealId ? { dealId } : fromReference ? { dealId: null } : {}) },
+      where: tractScope(req, dealId),
       _count: { _all: true },
       _min: { createdAt: true },
     });

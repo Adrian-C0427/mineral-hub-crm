@@ -454,7 +454,8 @@ export function cleanScope(input: SmsScope, pipelines: readonly HlPipelineRef[])
   const tags = (list: readonly string[]) => [...new Set(list.map(normalizeTag).filter(Boolean))];
   const mineralTags = tags(input.mineralTags);
   const realEstateTags = tags(input.realEstateTags);
-  const both = mineralTags.find((t) => realEstateTags.includes(t));
+  const realEstateSet = new Set(realEstateTags);
+  const both = mineralTags.find((t) => realEstateSet.has(t));
   if (both) return { ok: false, message: `The tag “${both}” can't be both minerals and real estate. Pick one.` };
   const mineralPipelineIds = [...new Set(input.mineralPipelineIds.map((p) => p.trim()).filter(Boolean))];
   if (pipelines.length) {

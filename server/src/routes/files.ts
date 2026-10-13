@@ -3,7 +3,7 @@ import multer from "multer";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, hasPermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { forbidDemo, DEMO_MESSAGES } from "../middleware/demo.js";
 import { env } from "../config.js";
 import { buildKey, putObject, getDownloadUrl, deleteObject, isAllowedMime, sniffMime, s3Configured } from "../services/s3.js";
@@ -12,7 +12,13 @@ import { isImportProvider, listProviderFiles, importProviderFile } from "../serv
 export const filesRouter = Router();
 filesRouter.use(requireAuth, requireOrg);
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: env.MAX_UPLOAD_BYTES } });
+// Beyond the file itself, cap the multipart envelope: memory storage buffers
+// every text field too, so without these one request could carry thousands of
+// large fields. The routes take one file plus a handful of short metadata fields.
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: env.MAX_UPLOAD_BYTES, files: 1, fields: 20, fieldSize: 16 * 1024, parts: 21 },
+});
 
 const metaSchema = z.object({
   dealId: z.string().optional(),
@@ -117,6 +123,11 @@ filesRouter.patch(
     if (!file) throw new HttpError(404, "File not found");
     const patch = patchSchema.parse(req.body);
     if (patch.filename === undefined && patch.folder === undefined && patch.visibleToBuyers === undefined) throw new HttpError(400, "Nothing to update");
+    // Approving a document for buyers publishes it on the PUBLIC offering page —
+    // the same act as publishing the offering, so it takes the same permission.
+    if (patch.visibleToBuyers !== undefined && !hasPermission(req, "publishOfferings")) {
+      throw new HttpError(403, "You do not have permission to publish documents to buyers");
+    }
     const updated = await prisma.fileAttachment.update({
       where: { id: file.id },
       data: {

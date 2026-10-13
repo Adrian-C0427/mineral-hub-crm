@@ -523,6 +523,15 @@ model User {
   lastName           String?
   phone              String?
   email              String     @unique
+  // When this address was last PROVEN to belong to the account holder: SSO
+  // provisioning (the provider verified it) or redeeming a password-reset link
+  // mailed to it. Null after any email change. SSO auto-links an identity to an
+  // existing account only when this is set — otherwise anyone could pre-claim
+  // someone's address and catch their first "Sign in with Google".
+  emailVerifiedAt    DateTime?
+  // Last TOTP time step accepted for this account; codes at or before it are
+  // refused (no replay within a code's ±30 s validity).
+  totpLastUsedStep   Int?
   passwordHash       String
   // Set when an owner resets this user's password; forces a change at next login.
   mustChangePassword Boolean    @default(false)

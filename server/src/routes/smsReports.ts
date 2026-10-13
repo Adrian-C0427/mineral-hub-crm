@@ -30,6 +30,7 @@
  * indexes.
  */
 import { Router, type NextFunction, type Response } from "express";
+import rateLimit from "express-rate-limit";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
@@ -53,6 +54,18 @@ import {
 
 export const smsReportsRouter = Router();
 smsReportsRouter.use(requireAuth, requireOrg, requirePermission("viewReports"));
+// One report load runs ~12 aggregate queries over the org's message history in
+// parallel; any viewReports user (VIEWER included) could otherwise loop it and
+// drain the shared connection pool for every tenant. Keyed on the user, like
+// the AI limiter, so rotating addresses doesn't help.
+smsReportsRouter.use(rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as AuthedRequest).user?.id ?? req.ip ?? "unknown",
+  message: { error: "Too many report requests. Wait a minute and try again." },
+}));
 
 const PROVIDER = "highlevel";
 

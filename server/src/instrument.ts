@@ -7,6 +7,7 @@
  */
 import * as Sentry from "@sentry/node";
 import { env } from "./config.js";
+import { scrubSentryRequest } from "./sentryScrub.js";
 
 export const sentryEnabled = Boolean(env.SENTRY.DSN);
 
@@ -15,13 +16,15 @@ if (sentryEnabled) {
     dsn: env.SENTRY.DSN,
     environment: env.NODE_ENV,
     tracesSampleRate: env.SENTRY.TRACES_SAMPLE_RATE,
-    // Scrub obvious credential-bearing fields before events leave the process.
+    // Scrub credentials before events leave the process. The SDK captures the
+    // request body as a raw string, so this must handle strings (sentryScrub.ts);
+    // transactions carry the same request data, so they are scrubbed too.
     beforeSend(event) {
-      const req = event.request;
-      if (req?.headers) { delete req.headers.authorization; delete req.headers.cookie; delete req.headers["x-api-key"]; }
-      if (req?.data && typeof req.data === "object") {
-        for (const k of ["secret", "password", "token"]) delete (req.data as Record<string, unknown>)[k];
-      }
+      scrubSentryRequest(event.request);
+      return event;
+    },
+    beforeSendTransaction(event) {
+      scrubSentryRequest(event.request);
       return event;
     },
   });

@@ -199,11 +199,11 @@ describe("demo map tracts exclude the reference org's deal-linked tracts", () =>
     });
   });
 
-  it("demo deal-scoped request still matches only that (demo) deal", async () => {
+  it("demo deal-scoped request matches nothing (demo deals never own reference tracts)", async () => {
     db.results["mapTract.findMany"] = [];
     await withApp(build(true), async (port) => {
       await fetchJson(port, "GET", "/api/map/tracts?dealId=d_demo");
-      expect((db.calls["mapTract.findMany"][0] as { where: unknown }).where).toEqual({ organizationId: REFERENCE_ORG, dealId: "d_demo" });
+      expect((db.calls["mapTract.findMany"][0] as { where: unknown }).where).toEqual({ organizationId: REFERENCE_ORG, dealId: null, id: { in: [] } });
     });
   });
 

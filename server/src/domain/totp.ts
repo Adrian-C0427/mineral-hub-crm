@@ -83,19 +83,32 @@ export function totpAt(secret: string, unixSeconds: number, opts: TotpOptions = 
  * constant-time compare per candidate to avoid timing leaks.
  */
 export function verifyTotp(secret: string, token: string, opts: TotpOptions & { window?: number; now?: number } = {}): boolean {
+  return matchTotpStep(secret, token, opts) !== null;
+}
+
+/**
+ * The time step (unix seconds / step) a submitted code belongs to, or null when
+ * it matches none in the drift window. Callers that accept a code for sign-in
+ * record this step and refuse any code at or before it, so a code can't be
+ * replayed within its validity window (RFC 6238 §5.2).
+ */
+export function matchTotpStep(secret: string, token: string, opts: TotpOptions & { window?: number; now?: number } = {}): number | null {
   const cleaned = token.replace(/\s+/g, "");
   const digits = opts.digits ?? 6;
-  if (!new RegExp(`^\\d{${digits}}$`).test(cleaned)) return false;
+  if (!new RegExp(`^\\d{${digits}}$`).test(cleaned)) return null;
   const window = opts.window ?? 1;
   const step = opts.stepSeconds ?? 30;
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
+  let matched: number | null = null;
+  // Every candidate is compared (no early exit), so timing doesn't reveal which matched.
   for (let w = -window; w <= window; w++) {
-    const candidate = totpAt(secret, nowSec + w * step, opts);
+    const at = nowSec + w * step;
+    const candidate = totpAt(secret, at, opts);
     if (candidate.length === cleaned.length && crypto.timingSafeEqual(Buffer.from(candidate), Buffer.from(cleaned))) {
-      return true;
+      matched ??= Math.floor(at / step);
     }
   }
-  return false;
+  return matched;
 }
 
 /** The otpauth:// provisioning URI an authenticator app scans or imports. */

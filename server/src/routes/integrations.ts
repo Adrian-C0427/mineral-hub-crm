@@ -22,7 +22,7 @@ import { prisma } from "../db.js";
 import type { Integration } from "@prisma/client";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
-import { demoReadOnly } from "../middleware/demo.js";
+import { demoReadOnly, forbidDemo } from "../middleware/demo.js";
 import { INTEGRATION_CATALOG, providerByKey } from "../domain/integrationCatalog.js";
 import { validateSecret, validateEnvProvider, envConfigured } from "../services/integrationProviders.js";
 import { encryptSecret, secretHint } from "../services/secrets.js";
@@ -66,7 +66,9 @@ const previewLimiter = rateLimit({
   message: { error: "Too many preview requests. Wait a moment and try again." },
 });
 const PREVIEW_PATH = "/highlevel/scope-preview";
-integrationsRouter.use((req, res, next) => (req.method !== "POST" ? next()
+// Every write is throttled, not only POSTs: a PATCH (HighLevel window / scope
+// change) rewrites every mirrored contact row and kicks off a background sync.
+integrationsRouter.use((req, res, next) => (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS" ? next()
   : req.path === PREVIEW_PATH ? previewLimiter(req, res, next)
   : actionLimiter(req, res, next)));
 
@@ -505,6 +507,9 @@ integrationsRouter.post(
 // the SPA; the SPA then finishes via the AUTHED /oauth/complete route.
 integrationsRouter.get(
   "/:provider/oauth/start",
+  // A GET, so demoReadOnly lets it through — but it begins connecting an
+  // integration, which the demo workspace never may.
+  forbidDemo(),
   asyncHandler(async (req: AuthedRequest, res) => {
     const def = requireDef(req.params.provider);
     if (def.implementation !== "oauth") throw new HttpError(400, `${def.name} does not use OAuth.`);
