@@ -7,7 +7,8 @@ import { fmtDateTime } from "../lib/format";
 import {
   HL_POLL_MS, HL_SCOPES, HL_SYNC_EVERY, RESPONSE_WINDOW_CHOICES, previewText, importProgress, importingText, totalsText,
   lastRunText, missingScopesText, tagRefreshText, crmTagsText, CRM_TAG_GROUPS, tagLine, setTagLine, togglePipeline, filterTags, previewCountsText, parsePrice,
-  type HighLevelStatus, type HighLevelScopeSettings, type LineCounts, type SmsScope, type TagLine,
+  configureFields, adoptStored, configureChanges,
+  type HighLevelStatus, type HighLevelScopeSettings, type LineCounts, type SmsScope, type TagLine, type ConfigureFields,
 } from "../lib/highlevel";
 
 // HighLevel (LeadConnector) on Settings → Integrations: the card's status
@@ -180,7 +181,9 @@ const LINE_OPTIONS: { value: TagLine; label: string }[] = [
  * estate / Neither, minerals pipelines, live split of texted people), the
  * price per text segment for cost figures, the response window and notes.
  * The filter is only sent when the admin changed it, so an untouched
- * suggestion keeps following new tags and pipelines.
+ * suggestion keeps following new tags and pipelines. The other settings
+ * start from the page's list, switch to the stored ones as soon as they load
+ * (the list may be older), and only the ones the admin changed are sent.
  */
 export function HighLevelConfigureModal({ name, config, onClose, onSaved }: {
   name: string;
@@ -196,11 +199,9 @@ export function HighLevelConfigureModal({ name, config, onClose, onSaved }: {
   const [counts, setCounts] = useState<LineCounts | null>(null);
   const [counting, setCounting] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
-  const initialPrice = config.pricePerSegment == null ? "" : String(config.pricePerSegment);
-  const [price, setPrice] = useState(initialPrice);
-  const [windowDays, setWindowDays] = useState(String(config.responseWindowDays ?? 30));
-  const [notes, setNotes] = useState(config.notes ?? "");
-  const [crmTags, setCrmTags] = useState(!!config.crmTagsEnabled);
+  const [form, setForm] = useState(() => { const f = configureFields(config); return { loaded: f, now: f }; });
+  const { price, windowDays, notes, crmTags } = form.now;
+  const set = (patch: Partial<ConfigureFields>) => setForm((f) => ({ ...f, now: { ...f.now, ...patch } }));
   const [removing, setRemoving] = useState(false);
   const [removeBusy, setRemoveBusy] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -209,7 +210,7 @@ export function HighLevelConfigureModal({ name, config, onClose, onSaved }: {
 
   useEffect(() => {
     api.get<HighLevelScopeSettings>("/integrations/highlevel/scope")
-      .then((s) => { setSettings(s); setDraft(s.scope); setCounts(s.counts); })
+      .then((s) => { setSettings(s); setDraft(s.scope); setCounts(s.counts); setForm((f) => adoptStored(f, configureFields(s))); })
       .catch((e) => setLoadError(e instanceof ApiError ? e.message : "Couldn't load your HighLevel tags and pipelines."));
   }, []);
 
@@ -230,8 +231,8 @@ export function HighLevelConfigureModal({ name, config, onClose, onSaved }: {
 
   const edit = (next: SmsScope) => { setDraft(next); setTouched(true); };
 
-  const crmTagsChanged = crmTags !== !!config.crmTagsEnabled;
-  const dirty = touched || price !== initialPrice || windowDays !== String(config.responseWindowDays ?? 30) || notes !== (config.notes ?? "") || crmTagsChanged;
+  const crmTagsChanged = crmTags !== form.loaded.crmTags;
+  const dirty = touched || Object.keys(configureChanges(form.loaded, form.now)).length > 0;
 
   function requestSave() {
     if (parsePrice(price) === "invalid") { setError("Enter the price per text segment in dollars, like 0.0091 — or leave it empty."); return; }
@@ -241,15 +242,9 @@ export function HighLevelConfigureModal({ name, config, onClose, onSaved }: {
 
   async function save() {
     setConfirming(false); setBusy(true); setError(null);
-    const p = parsePrice(price);
     try {
       const r = await api.patch<{ tagRefreshStarted?: boolean }>("/integrations/highlevel", {
-        config: {
-          responseWindowDays: Number(windowDays), notes,
-          ...(p !== "invalid" ? { pricePerSegment: p } : {}),
-          ...(touched && draft ? { scope: draft } : {}),
-          ...(crmTagsChanged ? { crmTagsEnabled: crmTags } : {}),
-        },
+        config: { ...configureChanges(form.loaded, form.now), ...(touched && draft ? { scope: draft } : {}) },
       });
       onSaved(r?.tagRefreshStarted
         ? "Settings saved. A tag in your filter isn't on any texted contact yet, so every contact's tags are being re-read from HighLevel — the card shows the progress."
@@ -281,7 +276,7 @@ export function HighLevelConfigureModal({ name, config, onClose, onSaved }: {
       <FormSection title="Texting cost">
         <div className="field">
           <label htmlFor="hl-price">Price per text segment ($)</label>
-          <input id="hl-price" className="hl-price" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.0091" autoComplete="off" />
+          <input id="hl-price" className="hl-price" inputMode="decimal" value={price} onChange={(e) => set({ price: e.target.value })} placeholder="0.0091" autoComplete="off" />
           <p className="hl-help">
             What you pay for each SMS segment you send. A text of up to 160 plain characters is one segment (70 if it has an
             emoji); longer texts are split into several. Replies you receive aren't counted. Leave it empty to hide cost in Reports.
@@ -291,7 +286,7 @@ export function HighLevelConfigureModal({ name, config, onClose, onSaved }: {
 
       <FormSection title="Tags in HighLevel">
         <label className="hl-check">
-          <input type="checkbox" checked={crmTags} onChange={(e) => setCrmTags(e.target.checked)} />
+          <input type="checkbox" checked={crmTags} onChange={(e) => set({ crmTags: e.target.checked })} />
           <span>Write SMS and Acquisition tags to your HighLevel contacts</span>
         </label>
         <p className="hl-help">
@@ -317,7 +312,7 @@ export function HighLevelConfigureModal({ name, config, onClose, onSaved }: {
       <FormSection title="Replies and syncing">
         <div className="field">
           <label>Response window</label>
-          <Select value={windowDays} onChange={setWindowDays} ariaLabel="Response window"
+          <Select value={windowDays} onChange={(v) => set({ windowDays: v })} ariaLabel="Response window"
             options={RESPONSE_WINDOW_CHOICES.map((d) => ({ value: String(d), label: `${d} days` }))} />
           <p className="hl-help">
             A reply counts as a response when it arrives within this many days of the most recent text; later replies show as late replies. Changing it recounts every contact in Reports.
@@ -329,7 +324,7 @@ export function HighLevelConfigureModal({ name, config, onClose, onSaved }: {
             Nothing to set — new texts, delivery updates and pipeline stages are checked automatically {HL_SYNC_EVERY}. Use Sync now on the card to check right away.
           </p>
         </div>
-        <div className="field"><label>Notes</label><textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Internal notes about this connection" /></div>
+        <div className="field"><label>Notes</label><textarea rows={3} value={notes} onChange={(e) => set({ notes: e.target.value })} placeholder="Internal notes about this connection" /></div>
       </FormSection>
       {error && <div className="error-text" role="alert">{error}</div>}
       {confirming && <ConfirmChanges busy={busy} onCancel={() => setConfirming(false)} onConfirm={save} />}
