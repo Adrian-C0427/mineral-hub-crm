@@ -6,6 +6,8 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
+import { useBrandLogo } from "../lib/useBrandLogo";
+import { ThemedLogo } from "../components/ThemedLogo";
 import { Spinner, Banner, Modal, EmptyState, ChipList } from "../components/ui";
 import { StatStrip, Segmented, type StatCell } from "../components/kit";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
@@ -192,6 +194,9 @@ const AXIS_TICK = { fontSize: 11, fill: "var(--ink-4)" };
 export function Reports() {
   const nav = useNavigate();
   const { user } = useAuth();
+  // Report header mark: same slot resolution as the expanded sidebar, themed
+  // like it too (a dark mark on this dark-theme card was invisible).
+  const brandLogo = useBrandLogo(user?.organization, "full");
   const [period, setPeriod] = useState<Period>("THIS_YEAR");
   const [custom, setCustom] = useState({ from: "", to: "" });
   const [compare, setCompare] = useState<Compare>("NONE");
@@ -411,9 +416,9 @@ export function Reports() {
         <div ref={reportRef} className="report-capture rp-body">
           {/* --- Executive summary --- */}
           <section className="exec-card">
-            <div className={`exec-icon ${user?.organization?.fullLogo ? "has-logo" : ""}`}>
-              {user?.organization?.fullLogo
-                ? <img src={user.organization.fullLogo} alt={user.organization.name} />
+            <div className={`exec-icon ${brandLogo.src ? "has-logo" : ""}`}>
+              {brandLogo.src
+                ? <ThemedLogo src={brandLogo.src} alt={user?.organization?.name ?? "Company logo"} onError={brandLogo.onError} />
                 : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20h16M7 16v-5M12 16V6M17 16v-8" /></svg>}
             </div>
             <div style={{ minWidth: 0 }}>

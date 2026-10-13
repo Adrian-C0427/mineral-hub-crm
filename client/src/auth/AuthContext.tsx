@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, ApiError, setAuthToken, getAuthToken, setUnauthorizedHandler } from "../api/client";
-import { saveBranding } from "../lib/branding";
+import { purgeLegacyBrandingCache } from "../lib/branding";
+import { clearLogoCache } from "../lib/logoTheme";
 
 export type OrgRole = "OWNER" | "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER";
 
@@ -74,6 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    purgeLegacyBrandingCache();
     // Only attempt to restore a session if we have a stored token.
     if (!getAuthToken()) { setLoading(false); return; }
     let alive = true;
@@ -85,7 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const boot = async (attempt = 0): Promise<void> => {
       try {
         const r = await api.get<{ user: CurrentUser }>("/auth/me");
-        if (alive) adopt(r.user);
+        if (alive) setUser(r.user);
       } catch (e) {
         const status = e instanceof ApiError ? e.status : 0;
         if (status === 401 || status === 403) {
@@ -112,19 +114,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUnauthorizedHandler(() => {
       setAuthToken(null);
       setUser(null);
-      saveBranding(null);
+      clearLogoCache();
       resetLocation();
     });
     return () => setUnauthorizedHandler(null);
   }, []);
-
-  /** Install the fresh profile + persist org branding for instant next-boot paint. */
-  const adopt = (u: CurrentUser) => {
-    setUser(u);
-    saveBranding(u.organization
-      ? { name: u.organization.name, fullLogo: u.organization.fullLogo ?? null, compactLogo: u.organization.compactLogo ?? null }
-      : null);
-  };
 
   const login = async (email: string, password: string, totpCode?: string): Promise<LoginResult> => {
     const r = await api.post<{ token?: string; twoFactorRequired?: boolean }>("/auth/login", { email, password, ...(totpCode ? { totpCode } : {}) });
@@ -151,13 +145,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await api.post("/auth/logout").catch(() => {});
     setAuthToken(null);
     setUser(null);
-    saveBranding(null); // another account must never inherit this org's mark
+    clearLogoCache(); // a signed-out tab keeps no org's processed artwork
     resetLocation(); // back to the marketing site, not a stale in-app URL
   };
 
   const refresh = async () => {
+    // Org branding (logos) rides on this profile, so the sidebar always shows
+    // the signed-in org's mark. A failed refresh throws and leaves the current
+    // user — and its logo — in place: last-known-good, never a blank.
     const r = await api.get<{ user: CurrentUser }>("/auth/me");
-    adopt(r.user);
+    setUser(r.user);
   };
 
   const can = (permission: string): boolean =>
