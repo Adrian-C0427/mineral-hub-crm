@@ -128,7 +128,7 @@ export function Buyers() {
   ];
 
   return (
-    <div className="page contacts-page bx-page">
+    <div className="page page-fill contacts-page bx-page">
       <div className="page-header">
         <div className="bc-head">
           <h1>Buyers</h1>
