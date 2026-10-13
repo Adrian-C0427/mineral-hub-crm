@@ -165,6 +165,11 @@ vi.mock("./client.js", async (importOriginal) => {
     async addContactTags(id: string, tags: string[]) {
       hl.calls.push({ kind: "addTags", params: { id, tags } });
       if (hl.refuse.has("write")) throw new real.HighLevelError("auth", { status: 403, detail: "The token is not authorized for this scope." });
+      // Like HighLevel: a tag the location doesn't have when the request arrives
+      // is created — by EVERY request in flight that adds it (a duplicate entry).
+      const missing = tags.map((t) => t.toLowerCase()).filter((t) => !hl.tags.includes(t));
+      await Promise.resolve(); await Promise.resolve(); // in flight: another write can start meanwhile
+      hl.tags.push(...missing);
       const c = hl.contacts.get(id) ?? {};
       const have = new Set(((c.tags as string[]) ?? []).map((t) => t.toLowerCase()));
       c.tags = [...((c.tags as string[]) ?? []), ...tags.map((t) => t.toLowerCase()).filter((t) => !have.has(t))]; // HighLevel lower-cases tags
@@ -579,6 +584,17 @@ describe("Mineral Hub's own tags in HighLevel", () => {
     await startCrmTagging(ORG); // switched off and on again: everyone re-checked, nothing re-written
     await run();
     expect(writes()).toHaveLength(0);
+  });
+
+  it("creates each brand-new tag once: the first write that adds it runs alone", async () => {
+    seedIntegration({}, { scope: SCOPE, crmTagsEnabled: true });
+    for (const id of ["a", "b", "c", "d", "e"]) seedContact(id, "OO");
+    await startCrmTagging(ORG);
+    await run(); await run();
+    for (const id of ["a", "b", "c", "d", "e"]) expect(hlTags(id)).toEqual(["minerals", "sms - text 1 sent", "sms - text 2 sent"]);
+    // Two writes adding a tag HighLevel doesn't have yet would each create it (seen in production).
+    expect(hl.tags.filter((t) => t.startsWith("sms - "))).toEqual(["sms - text 1 sent", "sms - text 2 sent"]);
+    expect(hlSync().crmTags).toMatchObject({ written: 5 });
   });
 
   it("follows a stage move: the contact's Acquisition tag changes on the next runs", async () => {
