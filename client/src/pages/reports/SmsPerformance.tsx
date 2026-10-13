@@ -321,7 +321,7 @@ export function SmsReportView({ filterChips, execIcon, scope, onScope, status, d
     }),
     cell("wrongNumberRate", {
       label: "Wrong-number rate", invert: true,
-      hint: `${num(k.wrongNumbers)} ${k.wrongNumbers === 1 ? "person" : "people"} reached`,
+      hint: `${num(k.wrongNumbers)} of ${num(k.contactsReached)} reached`,
       title: "People who replied that we had the wrong person, or whose number XLeads tagged as a wrong number. Not a response — the outreach carries on with their next number.",
       onClick: () => open({ title: "Wrong numbers", set: "wrongNumber" }),
     }),
@@ -399,7 +399,7 @@ export function SmsReportView({ filterChips, execIcon, scope, onScope, status, d
       </div>
       <div className="rp-kgroup">
         <div className="rp-kgroup-label">Responses</div>
-        <StatStrip min={200} cells={responses} />
+        <StatStrip min={170} cells={responses} />
       </div>
 
       <div className="chart-grid">

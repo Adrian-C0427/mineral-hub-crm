@@ -171,7 +171,7 @@ export function SpeedSection({ data, cell, open }: { data: SmsReport; cell: KpiC
       render: (r) => (r.key === "none" ? <span className="muted">{r.name}</span> : <strong>{r.name}</strong>) },
     { key: "answered", header: "Replies answered", type: "number", align: "right", value: (r) => r.answered, render: (r) => num(r.answered) },
     { key: "median", header: "Typical time to answer", type: "number", align: "right", value: (r) => r.medianSeconds, render: (r) => fmtDuration(r.medianSeconds) },
-    { key: "hour", header: "Answered within 1 hr", type: "number", align: "right", value: (r) => r.within1hRate, render: (r) => rate(r.within1hRate) },
+    { key: "hour", header: "Of those, within 1 hr", type: "number", align: "right", value: (r) => r.within1hRate, render: (r) => rate(r.within1hRate) },
   ];
   return (
     <>
@@ -333,7 +333,29 @@ export function PhoneListsSection({ data, open }: { data: SmsReport; open: OpenD
 
 // --- Carrier health -------------------------------------------------------------------
 
-interface HealthPoint extends HealthDay { label: string; optPct: number | null; failPct: number | null }
+interface HealthPoint extends HealthDay {
+  label: string; optPct: number | null; failPct: number | null;
+  /** Rolling 7 days ending this day (what's plotted — single days are too noisy). */
+  w7: { sent: number; failed: number; reached: number; optOuts: number };
+}
+
+/** Plot a rolling rate once its 7 days hold this many texts (warnings still need HEALTH_MIN_TEXTS). */
+const CHART_MIN_TEXTS = 30;
+
+/** Rolling 7-day totals per day; the rate is left blank until the window holds enough texts to judge. */
+function rollingHealth(days: readonly HealthDay[], minTexts: number): Pick<HealthPoint, "w7" | "optPct" | "failPct">[] {
+  return days.map((_, i) => {
+    const w = days.slice(Math.max(0, i - 6), i + 1);
+    const sum = (k: "sent" | "failed" | "reached" | "optOuts") => w.reduce((t, d) => t + d[k], 0);
+    const w7 = { sent: sum("sent"), failed: sum("failed"), reached: sum("reached"), optOuts: sum("optOuts") };
+    const enough = w7.sent >= minTexts;
+    return {
+      w7,
+      optPct: enough && w7.reached > 0 ? (w7.optOuts / w7.reached) * 100 : null,
+      failPct: enough ? (w7.failed / w7.sent) * 100 : null,
+    };
+  });
+}
 
 function HealthTip({ active, payload, minTexts }: { active?: boolean; payload?: { payload: HealthPoint }[]; minTexts: number }) {
   if (!active || !payload?.length) return null;
@@ -341,21 +363,24 @@ function HealthTip({ active, payload, minTexts }: { active?: boolean; payload?: 
   return (
     <div className="rp-tip">
       <div className="rp-tip-t">{p.label}</div>
+      <div className="rp-tip-row"><span>7 days to this day</span><b>{p.failPct == null ? "too few texts" : `${num(p.w7.sent)} texts`}</b></div>
+      {p.failPct != null && <div className="rp-tip-row"><span><i style={{ background: COLOR_FAILED }} />Failed (7 days)</span><b>{rate(p.failPct / 100)}</b></div>}
+      {p.optPct != null && <div className="rp-tip-row"><span><i style={{ background: COLOR_OPT_OUT }} />Asked to stop (7 days)</span><b>{rate(p.optPct / 100)}</b></div>}
+      <div className="rp-tip-t" style={{ marginTop: 6 }}>This day</div>
       <div className="rp-tip-row"><span>Texts sent</span><b>{num(p.sent)}</b></div>
       <div className="rp-tip-row"><span><i style={{ background: COLOR_FAILED }} />Failed</span><b>{num(p.failed)} · {rate(p.failureRate)}</b></div>
       <div className="rp-tip-row"><span><i style={{ background: COLOR_OPT_OUT }} />Asked to stop</span><b>{num(p.optOuts)} of {num(p.reached)} · {rate(p.optOutRate)}</b></div>
-      {p.small && <div className="sms-tip-note">Fewer than {minTexts} texts — too few to judge.</div>}
+      {p.small && p.sent > 0 && <div className="sms-tip-note">This day alone had fewer than {minTexts} texts — too few to judge by itself.</div>}
       {p.warnings.length > 0 && <div className="sms-tip-note">Over the {p.warnings.map((w) => (w === "optOut" ? "opt-out" : "failure")).join(" and ")} limit.</div>}
     </div>
   );
 }
 
-/** A day's dot: hollow when too few texts to judge, solid when over a limit, none otherwise. */
+/** A day's dot: solid when that single day went over a limit, none otherwise. */
 const healthDot = (color: string, key: "optOut" | "failure") => (props: { cx?: number; cy?: number; payload?: HealthPoint; index?: number }) => {
   const { cx, cy, payload: p } = props;
   if (cx == null || cy == null || !p || p.sent === 0) return <g key={props.index} />;
   if (p.warnings.includes(key)) return <circle key={props.index} cx={cx} cy={cy} r={4} fill={color} stroke="var(--surface)" strokeWidth={2} />;
-  if (p.small) return <circle key={props.index} cx={cx} cy={cy} r={2.5} fill="var(--surface)" stroke={color} strokeWidth={1} />;
   return <g key={props.index} />;
 };
 
@@ -373,11 +398,8 @@ export function healthWarning(h: SmsReport["carrierHealth"]): string | null {
 
 export function CarrierHealthSection({ data, id }: { data: SmsReport; id: string }) {
   const h = data.carrierHealth;
-  const pts: HealthPoint[] = h.days.map((d) => ({
-    ...d, label: dayLabel(d.day),
-    optPct: d.sent === 0 || d.optOutRate == null ? null : d.optOutRate * 100,
-    failPct: d.sent === 0 || d.failureRate == null ? null : d.failureRate * 100,
-  }));
+  const rolled = rollingHealth(h.days, CHART_MIN_TEXTS);
+  const pts: HealthPoint[] = h.days.map((d, i) => ({ ...d, label: dayLabel(d.day), ...rolled[i] }));
   const any = pts.some((p) => p.sent > 0);
   const top = Math.max(h.thresholds.failureRate * 100 * 1.3, ...pts.map((p) => Math.max(p.optPct ?? 0, p.failPct ?? 0)));
   const l7 = h.last7;
@@ -387,7 +409,7 @@ export function CarrierHealthSection({ data, id }: { data: SmsReport; id: string
         <div>
           <h3>Carrier health</h3>
           <span className="rp-chart-sub">
-            Daily opt-out and failure rates for ALL texting from your numbers (the minerals switch and filters don't apply — carriers judge the numbers)
+            Opt-out and failure rates over the 7 days up to each day, for ALL texting from your numbers (the minerals switch and filters don't apply — carriers judge the numbers). Solid dots: a single day over a limit.
           </span>
         </div>
       </div>
@@ -408,9 +430,9 @@ export function CarrierHealthSection({ data, id }: { data: SmsReport; id: string
             <ReferenceLine y={h.thresholds.optOutRate * 100} stroke={COLOR_OPT_OUT} strokeDasharray="4 4" strokeOpacity={0.7} ifOverflow="extendDomain" />
             <ReferenceLine y={h.thresholds.failureRate * 100} stroke={COLOR_FAILED} strokeDasharray="4 4" strokeOpacity={0.7} ifOverflow="extendDomain" />
             <Line type="linear" dataKey="optPct" name="Opt-out rate" stroke={COLOR_OPT_OUT} strokeWidth={2} dot={healthDot(COLOR_OPT_OUT, "optOut")}
-              activeDot={{ r: 4 }} connectNulls isAnimationActive={false} />
+              activeDot={{ r: 4 }} isAnimationActive={false} />
             <Line type="linear" dataKey="failPct" name="Failure rate" stroke={COLOR_FAILED} strokeWidth={2} dot={healthDot(COLOR_FAILED, "failure")}
-              activeDot={{ r: 4 }} connectNulls isAnimationActive={false} />
+              activeDot={{ r: 4 }} isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>
       )}
@@ -418,7 +440,7 @@ export function CarrierHealthSection({ data, id }: { data: SmsReport; id: string
         <span className="cl-item"><span className="cl-line" style={{ background: COLOR_OPT_OUT }} />Opt-out rate (people who asked to stop ÷ people reached)</span>
         <span className="cl-item"><span className="cl-line" style={{ background: COLOR_FAILED }} />Failure rate (failed ÷ sent)</span>
         <span className="cl-item"><span className="cl-line dashed" />Warning level (dashed)</span>
-        <span className="cl-item"><span className="cl-dot sms-small-dot" style={{ borderColor: "var(--ink-3)" }} />Fewer than {h.thresholds.minTexts} texts that day</span>
+        <span className="cl-item">Gaps: fewer than {CHART_MIN_TEXTS} texts in those 7 days</span>
       </div>
     </section>
   );
