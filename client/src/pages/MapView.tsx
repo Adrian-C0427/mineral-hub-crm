@@ -138,7 +138,7 @@ const DEFAULT_HEAT: HeatState = { oil: false, gas: false, intensity: 1.6, radius
 
 
 const STATUS_OPTIONS = [
-  ["ACTIVE", "Active deals"], ["ALL", "All linked deals"], ["UNDER_CONTRACT", "Under Contract"],
+  ["ACTIVE", "Active Deals"], ["ALL", "All Linked Deals"], ["UNDER_CONTRACT", "Under Contract"],
   ["PREPARING_PACKAGE", "Preparing Package"], ["SENT_TO_BUYERS", "Sent to Buyers"], ["NEGOTIATING", "Negotiating"],
   ["CLOSING", "Closing"], ["CLOSED", "Closed"], ["DEAD", "Dead"],
 ] as const;
@@ -176,7 +176,7 @@ export function MapView() {
   // Saved filter presets (named filter combinations), remembered per browser.
   const [filterPresets, setFilterPresets] = useState<FilterPreset[]>(() => loadJson<FilterPreset[]>(MAP_FILTERS_KEY, []));
   const [filterName, setFilterName] = useState("");
-  // "Save current" expands into the name field + Save / Cancel.
+  // "Save Current" expands into the name field + Save / Cancel.
   const [saveOpen, setSaveOpen] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
   // Full-screen viewing mode: the page becomes a fixed overlay filling the
@@ -883,7 +883,7 @@ export function MapView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filterPresets, statusFilter, fStates, fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses, fOperators, fFormations]);
   // Filters button badge: how many filter groups are set (deal status counts
-  // once it is anything other than the default "Active deals").
+  // once it is anything other than the default "Active Deals").
   const filterCount = (statusFilter !== "ACTIVE" ? 1 : 0) +
     [fStates, fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses, fOperators, fFormations].filter((v) => v.length > 0).length;
   const anyFilterSet = fStates.length > 0 || fCounties.length > 0 || fSurveys.length > 0 || fAbstracts.length > 0 ||
@@ -1172,28 +1172,28 @@ export function MapView() {
             {showFilters && (
               <>
                 <div className="mc-sheet-body">
-                  <MapField label="Deal status"><Select value={statusFilter} onChange={setStatusFilter} ariaLabel="Deal status" options={STATUS_OPTIONS.map(([v, l]) => ({ value: v, label: l }))} /></MapField>
+                  <MapField label="Deal Status"><Select value={statusFilter} onChange={setStatusFilter} ariaLabel="Deal Status" options={STATUS_OPTIONS.map(([v, l]) => ({ value: v, label: l }))} /></MapField>
                   {/* Cascading geography: State → County → Abstract → Survey, one per row. Map data
                       covers Texas counties and Louisiana's Haynesville parishes; the county list
                       follows the State filter. Parish values are "LA|Name" keys (Sabine and Red
                       River are also Texas counties) and display as "Sabine Parish, LA". */}
                   <MapField label="State"><SearchableMultiSelect options={[...US_STATE_OPTIONS]} labels={US_STATE_LABELS} value={fStates} onChange={setFStates} placeholder="States…" /></MapField>
-                  <MapField label="County / parish"><SearchableMultiSelect options={fStates.length ? mapCountyOptions(fStates) : meta.counties} labels={MAP_COUNTY_LABELS} value={fCounties} onChange={setFCounties} placeholder="Counties or parishes…" /></MapField>
-                  <MapField label="Abstract / section"><SearchableMultiSelect options={gisOptions.abstracts} labels={abstractFilterLabels} filterOptions={rankAbstractFilter} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstract #, section or survey…" /></MapField>
-                  <MapField label="Survey / township"><SearchableMultiSelect options={gisOptions.surveys} value={fSurveys} onChange={setFSurveys} placeholder="Surveys or townships…" /></MapField>
+                  <MapField label="County / Parish"><SearchableMultiSelect options={fStates.length ? mapCountyOptions(fStates) : meta.counties} labels={MAP_COUNTY_LABELS} value={fCounties} onChange={setFCounties} placeholder="Counties or parishes…" /></MapField>
+                  <MapField label="Abstract / Section"><SearchableMultiSelect options={gisOptions.abstracts} labels={abstractFilterLabels} filterOptions={rankAbstractFilter} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstract #, section or survey…" /></MapField>
+                  <MapField label="Survey / Township"><SearchableMultiSelect options={gisOptions.surveys} value={fSurveys} onChange={setFSurveys} placeholder="Surveys or townships…" /></MapField>
                   <div className="mc-divider" />
-                  <MapField label="Well type"><SearchableMultiSelect options={gisOptions.wellTypes} value={fWellTypes} onChange={setFWellTypes} placeholder="Well types…" /></MapField>
-                  <MapField label="Well status"><SearchableMultiSelect options={gisOptions.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} placeholder="Well statuses…" /></MapField>
+                  <MapField label="Well Type"><SearchableMultiSelect options={gisOptions.wellTypes} value={fWellTypes} onChange={setFWellTypes} placeholder="Well types…" /></MapField>
+                  <MapField label="Well Status"><SearchableMultiSelect options={gisOptions.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} placeholder="Well statuses…" /></MapField>
                   <MapField label="Operator" count={gisOptions.operators.length}><SearchableMultiSelect options={gisOptions.operators} value={fOperators} onChange={setFOperators} placeholder="Operators…" /></MapField>
                   <MapField label="Formation" count={scoped.formations.length}><SearchableMultiSelect options={scoped.formations} value={fFormations} onChange={setFFormations} placeholder="Formations…" /></MapField>
                 </div>
                 {/* Saved filters: load (name), overwrite (↻) and delete (×) per chip;
-                    "Save current" opens the name field. Saving an existing name
+                    "Save Current" opens the name field. Saving an existing name
                     overwrites that preset. */}
                 <div className="mc-saved">
                   <div className="mc-saved-head">
-                    <span className="mc-label">Saved filters</span>
-                    <button type="button" className="mc-link" disabled={!anyFilterSet && statusFilter === "ACTIVE"} onClick={clearAllFilters}>Clear all</button>
+                    <span className="mc-label">Saved Filters</span>
+                    <button type="button" className="mc-link" disabled={!anyFilterSet && statusFilter === "ACTIVE"} onClick={clearAllFilters}>Clear All</button>
                   </div>
                   <div className="mc-saved-chips">
                     {filterPresets.map((p) => (
@@ -1209,7 +1209,7 @@ export function MapView() {
                     {!saveOpen && (
                       <button type="button" className="mc-save-current" title="Save this combination to reapply it in one click." onClick={() => setSaveOpen(true)}>
                         <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-                        Save current
+                        Save Current
                       </button>
                     )}
                   </div>
