@@ -318,6 +318,15 @@
   .portal-cards { grid-template-columns: minmax(0, 1fr); }
   .portal-hero-facts { gap: 10px; }
   .portal-fact { min-width: 0; flex: 1 1 calc(50% - 10px); }
+
+  /* --- HighLevel Configure: each tag row stacks — name + count, then a full-width Minerals / Real estate / Neither switch --- */
+  .hl-tag-row { flex-wrap: wrap; row-gap: 6px; padding: 8px 10px; }
+  .hl-tag-row .seg { flex: 1 1 100%; }
+  .hl-tag-row .seg-item { flex: 1; justify-content: center; height: 36px; }
+  .hl-tag-list { max-height: 50dvh; }
+  .hl-pipes { grid-template-columns: minmax(0, 1fr); }
+  .hl-check { min-height: 40px; }
+  .hl-price { max-width: none; }
 }
 
 /* ---------------------------------------------------------------------------

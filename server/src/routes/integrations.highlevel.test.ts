@@ -207,3 +207,107 @@ describe("disconnect and listing", () => {
     });
   });
 });
+
+describe("Minerals filter and price (PATCH /highlevel)", () => {
+  const PIPES = [{ id: "pMin", name: "Minerals", stages: [] }, { id: "pRE", name: "On-Market", stages: [] }];
+  const base = (extra: Record<string, unknown> = {}) => row({ locationId: LOC, responseWindowDays: 30, hlPipelines: PIPES, hlTags: ["Leon County", "dispo"], hlSync: { phase: "live" }, ...extra });
+  const saved = () => (db.calls["integration.update"][0] as { data: { config: Record<string, unknown> } }).data.config;
+
+  it("saves a cleaned filter, recounts every contact, and keeps the internal lists out of the response", async () => {
+    db.results["integration.findUnique"] = base();
+    const r = await call("PATCH", "/highlevel", { config: { scope: { mineralTags: [" Leon  County", "leon county"], realEstateTags: ["Dispo"], mineralPipelineIds: ["pMin"] }, pricePerSegment: 0.0091 } });
+    expect(r.status).toBe(200);
+    expect(saved()).toMatchObject({
+      scope: { mineralTags: ["leon county"], realEstateTags: ["dispo"], mineralPipelineIds: ["pMin"] }, pricePerSegment: 0.0091,
+      hlPipelines: PIPES, hlTags: ["Leon County", "dispo"], hlSync: { phase: "live" },
+    });
+    expect(db.calls["highLevelContact.updateMany"]).toEqual([{ where: { organizationId: ORG }, data: { summaryDirty: true } }]);
+    expect(r.body.config).toEqual({
+      locationId: LOC, responseWindowDays: 30, pricePerSegment: 0.0091,
+      scope: { mineralTags: ["leon county"], realEstateTags: ["dispo"], mineralPipelineIds: ["pMin"] },
+    });
+  });
+
+  it("refuses a tag on both lists, an unknown pipeline, a malformed filter, and a price outside $0–$1", async () => {
+    db.results["integration.findUnique"] = base();
+    const both = await call("PATCH", "/highlevel", { config: { scope: { mineralTags: ["Tiny"], realEstateTags: ["tiny"], mineralPipelineIds: [] } } });
+    expect(both).toMatchObject({ status: 400, body: { error: expect.stringMatching(/can't be both minerals and real estate/) } });
+    const gone = await call("PATCH", "/highlevel", { config: { scope: { mineralTags: [], realEstateTags: [], mineralPipelineIds: ["pGone"] } } });
+    expect(gone.status).toBe(400);
+    expect((await call("PATCH", "/highlevel", { config: { scope: { mineralTags: "leon county" } } })).status).toBe(400);
+    expect((await call("PATCH", "/highlevel", { config: { scope: { mineralTags: [], realEstateTags: [], mineralPipelineIds: [], extra: 1 } } })).status).toBe(400);
+    const pricey = await call("PATCH", "/highlevel", { config: { pricePerSegment: 9.1 } });
+    expect(pricey).toMatchObject({ status: 400, body: { error: expect.stringMatching(/between 0 and 1/) } });
+    expect((await call("PATCH", "/highlevel", { config: { pricePerSegment: -0.01 } })).status).toBe(400);
+    expect(db.calls["integration.update"]).toBeUndefined();
+    expect(db.calls["highLevelContact.updateMany"]).toBeUndefined();
+  });
+
+  it("only recounts when the filter actually changes; null goes back to the suggestion; price alone recounts nothing", async () => {
+    const scope = { mineralTags: ["leon county"], realEstateTags: [], mineralPipelineIds: ["pMin"] };
+    db.results["integration.findUnique"] = base({ scope });
+    await call("PATCH", "/highlevel", { config: { scope: { ...scope, mineralTags: ["Leon County"] }, pricePerSegment: 0.01 } });
+    expect(db.calls["highLevelContact.updateMany"]).toBeUndefined();
+    expect(saved()).toMatchObject({ pricePerSegment: 0.01 });
+    await call("PATCH", "/highlevel", { config: { scope: null } });
+    expect(db.calls["highLevelContact.updateMany"]).toHaveLength(1);
+    expect((db.calls["integration.update"][1] as { data: { config: Record<string, unknown> } }).data.config.scope).toBeNull();
+    await call("PATCH", "/highlevel", { config: { pricePerSegment: null } });
+    expect(db.calls["highLevelContact.updateMany"]).toHaveLength(1);
+  });
+
+  it("other providers never take the HighLevel-only settings", async () => {
+    db.results["integration.findUnique"] = { ...row({ fromEmail: "a@b.test" }), provider: "resend" };
+    await call("PATCH", "/resend", { config: { pricePerSegment: 0.5, scope: { mineralTags: [], realEstateTags: [], mineralPipelineIds: [] } } });
+    const cfg = saved();
+    expect(cfg.pricePerSegment).toBeUndefined();
+    expect(cfg.scope).toBeUndefined();
+  });
+});
+
+describe("Minerals filter options and preview", () => {
+  const PIPES = [{ id: "pMin", name: "Minerals", stages: [] }, { id: "pRE", name: "On-Market", stages: [] }];
+  beforeEach(() => {
+    db.results["integration.findUnique"] = row({ locationId: LOC, hlPipelines: PIPES, hlTags: ["Leon County", "dispo", "western haynesville"], hlSync: { phase: "live" } });
+    db.results["highLevelContact.findMany"] = [
+      { hlId: "a", tags: ["leon county"] }, { hlId: "b", tags: ["Dispo"] }, { hlId: "c", tags: [] },
+      { hlId: "d", tags: ["dispo", "Leon County"] }, { hlId: "e", tags: ["wrong number-1"] },
+    ];
+    db.results["highLevelOpportunity.findMany"] = [{ hlContactId: "c", pipelineId: "pMin" }, { hlContactId: "e", pipelineId: "pRE" }];
+  });
+
+  it("GET /highlevel/scope lists every tag and pipeline with its texted people, the suggestion and its split", async () => {
+    const r = await call("GET", "/highlevel/scope");
+    expect(r.status).toBe(200);
+    expect(r.body).toEqual({
+      saved: false,
+      scope: { mineralTags: ["Leon County"], realEstateTags: [], mineralPipelineIds: ["pMin"] },
+      suggested: { mineralTags: ["Leon County"], realEstateTags: [], mineralPipelineIds: ["pMin"] },
+      tags: [
+        { name: "dispo", texted: 2 }, { name: "Leon County", texted: 2 }, { name: "wrong number-1", texted: 1 },
+        { name: "western haynesville", texted: 0 },
+      ],
+      pipelines: [{ id: "pMin", name: "Minerals", texted: 1 }, { id: "pRE", name: "On-Market", texted: 1 }],
+      counts: { texted: 5, minerals: 3, realEstate: 0, unclassified: 2 },
+      pricePerSegment: null,
+    });
+    // Texted people only: the query asks for contacts with at least one text sent, and live opportunities.
+    expect(db.calls["highLevelContact.findMany"][0]).toMatchObject({ where: { organizationId: ORG, outboundTotal: { gt: 0 } } });
+    expect(db.calls["highLevelOpportunity.findMany"][0]).toMatchObject({ where: { organizationId: ORG, deletedInHl: false } });
+  });
+
+  it("POST /highlevel/scope-preview splits texted people under a draft filter without saving it", async () => {
+    const r = await call("POST", "/highlevel/scope-preview", { scope: { mineralTags: ["leon county"], realEstateTags: ["dispo"], mineralPipelineIds: [] } });
+    expect(r).toMatchObject({ status: 200, body: { texted: 5, minerals: 2, realEstate: 1, unclassified: 2 } });
+    expect(db.calls["integration.update"]).toBeUndefined();
+    const bad = await call("POST", "/highlevel/scope-preview", { scope: { mineralTags: ["dispo"], realEstateTags: ["Dispo"], mineralPipelineIds: [] } });
+    expect(bad.status).toBe(400);
+    expect((await call("POST", "/highlevel/scope-preview", {})).status).toBe(400);
+  });
+
+  it("GET / keeps the copied pipelines and tags out of the card", async () => {
+    db.results["integration.findMany"] = [row({ locationId: LOC, hlPipelines: PIPES, hlTags: ["x"], locationTimezone: "America/Chicago", hlSync: { phase: "live" } })];
+    const card = (await call("GET", "/")).body.find((p: { key: string }) => p.key === "highlevel");
+    expect(card.config).toEqual({ locationId: LOC, locationTimezone: "America/Chicago" });
+  });
+});

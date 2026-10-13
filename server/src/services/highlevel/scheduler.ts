@@ -81,8 +81,8 @@ export async function highLevelTick(rows: readonly Integration[]): Promise<void>
   }
 }
 
-/** A one-off background run outside the schedule (e.g. after the response window changes). */
-export function kickHighLevelRun(row: Integration, reason: "window" | "manual"): void {
+/** A one-off background run outside the schedule (e.g. after the response window or Minerals filter changes). */
+export function kickHighLevelRun(row: Integration, reason: "settings" | "manual"): void {
   if (process.env.NODE_ENV === "test") return;
   const state = readSyncState(row.config);
   if (state.phase === "importing") { ensureImportLoop(row.organizationId); return; }

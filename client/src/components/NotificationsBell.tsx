@@ -18,6 +18,7 @@ const TYPE_STYLE: Record<string, { tone: "danger" | "accent" | "warn" | "success
   portal_offer: { tone: "success", d: "M4 8h16v11H4zM9 8V5h6v3M4 13h16" },
   email_reply: { tone: "accent", d: "M4 6h16v12H4zM4 7l8 6 8-6" },
   integration_error: { tone: "danger", d: "M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0zM12 17v5" },
+  sms_health: { tone: "warn", d: "M4 5h16v11H8l-4 4zM12 8v3.5M12 13.5h.01" },
 };
 const BELL_PATHS = ["M6 16v-5a6 6 0 1 1 12 0v5l1.5 2h-15L6 16z", "M10 20.5a2 2 0 0 0 4 0"];
 
