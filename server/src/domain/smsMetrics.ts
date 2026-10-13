@@ -38,6 +38,15 @@ const DELIVERED = new Set(["delivered", "read", "opened", "clicked"]);
 const PENDING = new Set(["pending", "scheduled", "queued"]);
 const FAILED = new Set(["failed", "undelivered", "opt_out"]);
 
+/**
+ * The same status lists for code that classifies in SQL (Reports aggregates in
+ * Postgres). Compare them against the column normalized the way norm() does —
+ * lower(btrim(coalesce(status, ''))) — so SQL and these helpers can't drift.
+ */
+export const DELIVERED_STATUSES: readonly string[] = [...DELIVERED];
+export const PENDING_STATUSES: readonly string[] = [...PENDING];
+export const FAILED_STATUSES: readonly string[] = [...FAILED];
+
 const norm = (status: string | null | undefined) => (status ?? "").trim().toLowerCase();
 
 /** A delivery receipt confirmed the text reached the handset. */

@@ -20,6 +20,7 @@ import { contactsRouter } from "./routes/contacts.js";
 import { offersRouter } from "./routes/offers.js";
 import { filesRouter } from "./routes/files.js";
 import { reportsRouter } from "./routes/reports.js";
+import { smsReportsRouter } from "./routes/smsReports.js";
 import { dashboardRouter, tasksRouter } from "./routes/dashboard.js";
 import { orgRouter } from "./routes/org.js";
 import { mapRouter } from "./routes/map.js";
@@ -109,6 +110,8 @@ export function createApp() {
   app.use("/api/contacts", contactsRouter);
   app.use("/api/offers", offersRouter);
   app.use("/api/files", filesRouter);
+  // Before /api/reports: the SMS report has its own router (HighLevel data).
+  app.use("/api/reports/sms", smsReportsRouter);
   app.use("/api/reports", reportsRouter);
   app.use("/api/dashboard", dashboardRouter);
   app.use("/api/tasks", tasksRouter);

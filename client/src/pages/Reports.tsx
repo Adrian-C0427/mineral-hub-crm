@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import {
   ResponsiveContainer, ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, CartesianGrid,
   BarChart, LineChart, PieChart, Pie, Cell, ReferenceLine,
@@ -21,6 +21,10 @@ import { CHART_COLORS, COLOR_REVENUE, COLOR_PROFIT, monthLabel, chartTooltip } f
 import type { DealSummary } from "../types";
 import { DateField } from "../components/DateField";
 import { ALL_PERIOD, ALL_PERIOD_LABEL, isAllPeriod, withAllPeriod } from "../lib/period";
+import { Tabs } from "../components/Tabs";
+import { EMPTY_SMS_FILTERS, type SmsFilters } from "../lib/smsReport";
+import { SmsPerformance, useSmsFilterOptions } from "./reports/SmsPerformance";
+import { DeltaPill } from "./reports/DeltaPill";
 
 interface Kpis {
   totalDeals: number; dealsAdded: number; dealsClosed: number; dealsLost: number; winRate: number;
@@ -203,6 +207,16 @@ export function Reports() {
   // Report header mark: same slot resolution as the expanded sidebar, themed
   // like it too (a dark mark on this dark-theme card was invisible).
   const brandLogo = useBrandLogo(user?.organization, "full");
+  // Which report: Deals (default) or SMS performance — in the URL (?view=sms) so it's linkable.
+  const [params, setParams] = useSearchParams();
+  const view: "deals" | "sms" = params.get("view") === "sms" ? "sms" : "deals";
+  const setView = (v: "deals" | "sms") => setParams((p) => {
+    const next = new URLSearchParams(p);
+    if (v === "sms") next.set("view", "sms"); else next.delete("view");
+    return next;
+  }, { replace: true });
+  const [smsFilters, setSmsFilters] = useState<SmsFilters>(EMPTY_SMS_FILTERS);
+  const smsOpts = useSmsFilterOptions(view === "sms");
   const [period, setPeriod] = useState<Period>("THIS_YEAR");
   const [custom, setCustom] = useState({ from: "", to: "" });
   const [compare, setCompare] = useState<Compare>("NONE");
@@ -257,6 +271,7 @@ export function Reports() {
   }, [allTime, range.from, range.to, cmp?.from, cmp?.to, filters]);
 
   useEffect(() => {
+    if (view !== "deals") return; // the SMS view loads its own report
     if (!allTime && (!range.from || !range.to)) return;
     setLoading(true);
     // Debounced: rapid filter clicks (each multi-select pick fires this
@@ -265,7 +280,7 @@ export function Reports() {
       api.get<Analytics>(`/reports/analytics?${query}`).then(setData).finally(() => setLoading(false));
     }, 300);
     return () => window.clearTimeout(t);
-  }, [query, allTime, range.from, range.to]);
+  }, [query, allTime, range.from, range.to, view]);
   // Cost per Deal / ROI drill-down (which section opens first).
   const [finDrill, setFinDrill] = useState<"cost" | "roi" | null>(null);
 
@@ -276,6 +291,13 @@ export function Reports() {
       return `${key}: ${label}`;
     }),
   );
+
+  const smsFilterChips = [
+    ...smsFilters.senders.map((id) => `Team member: ${smsOpts?.senders.find((s) => s.id === id)?.name ?? "HighLevel user"}`),
+    ...smsFilters.tags.map((t) => `Tag: ${t}`),
+    ...smsFilters.sources.map((x) => `Source: ${x}`),
+  ];
+  const viewChips = view === "sms" ? smsFilterChips : activeFilterChips;
 
   async function drillByDeal(title: string, pred: (d: DealSummary) => boolean) {
     if (!dealsRef.current) {
@@ -297,12 +319,6 @@ export function Reports() {
     onClick?: () => void; hint?: string; title?: string; realized?: boolean;
   }): StatCell {
     const hasDelta = o.d !== undefined && o.d !== null;
-    const up = hasDelta && (o.d as number) > 0;
-    // Flat = shows as 0.0% (pct() is to one decimal), so a sub-0.05% move
-    // never reads as a colored "+0%".
-    const flat = hasDelta && Math.abs(o.d as number) < 0.0005;
-    // "good" = improvement. For inverted metrics (expenses, losses) up is bad.
-    const good = flat ? null : o.invert ? !up : up;
     const text = METRIC_FMT[id](k!);
     return {
       label: o.label,
@@ -310,11 +326,8 @@ export function Reports() {
       value: (
         <>
           <span className={`rp-val ${o.faint ? "rp-faint" : ""}`}>{text}</span>
-          {hasDelta && (
-            <span className={`rp-delta ${good == null ? "flat" : good ? "good" : "bad"}`} title="Change vs the comparison period">
-              {flat ? "" : up ? "+" : "−"}{pct(Math.abs(o.d as number))}
-            </span>
-          )}
+          {/* Up is bad for inverted metrics (expenses, losses); a sub-0.05% move shows flat. */}
+          {hasDelta && <DeltaPill d={o.d as number} invert={o.invert} />}
         </>
       ),
       tone: o.tone,
@@ -324,14 +337,23 @@ export function Reports() {
     };
   }
 
+  // Report header mark: the org's logo, else the chart glyph (both views).
+  const execIcon = (
+    <div className={`exec-icon ${brandLogo.src ? "has-logo" : ""}`}>
+      {brandLogo.src
+        ? <ThemedLogo src={brandLogo.src} alt={user?.organization?.name ?? "Company logo"} onError={brandLogo.onError} />
+        : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20h16M7 16v-5M12 16V6M17 16v-8" /></svg>}
+    </div>
+  );
+
   return (
     <div className="page reports-page">
       <div className="page-header">
         <div>
           <h1>Reports &amp; analytics</h1>
           <div className="page-sub">
-            Business performance · {allTime
-              ? <>{ALL_PERIOD_LABEL}{data && <> ({fmtDate(data.range.from)} – {fmtDate(data.range.to)})</>}</>
+            {view === "sms" ? "SMS performance" : "Business performance"} · {allTime
+              ? <>{ALL_PERIOD_LABEL}{view === "deals" && data && <> ({fmtDate(data.range.from)} – {fmtDate(data.range.to)})</>}</>
               : <>{fmtDate(range.from)} – {fmtDate(range.to)}</>} · Generated {fmtDate(new Date())}
           </div>
         </div>
@@ -341,14 +363,20 @@ export function Reports() {
               options={CHIPS.map(([value, label]) => ({ value, label }))} value={period} onChange={setPeriod} />
           </div>
           <div className="rp-toolbar-btns">
-            <button className={`rbtn ${showFilters || activeFilterChips.length > 0 ? "active" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters}>
+            <button className={`rbtn ${showFilters || viewChips.length > 0 ? "active" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5h16l-6 7.5V19l-4 1.5v-8L4 5z" /></svg>
-              Filters{activeFilterChips.length > 0 && <span className="rbtn-count">{activeFilterChips.length}</span>}
+              Filters{viewChips.length > 0 && <span className="rbtn-count">{viewChips.length}</span>}
             </button>
-            <MetricsCustomize prefs={metricPrefs} onChange={setMetricPrefs} />
+            {view === "deals" && <MetricsCustomize prefs={metricPrefs} onChange={setMetricPrefs} />}
           </div>
         </div>
       </div>
+
+      <Tabs
+        tabs={[{ key: "deals" as const, label: "Deals" }, { key: "sms" as const, label: "SMS performance" }]}
+        active={view}
+        onSelect={setView}
+      />
 
       {period === "CUSTOM" && (
         <div className="rp-custom">
@@ -366,7 +394,8 @@ export function Reports() {
             <h3>Filters</h3>
             <div className="row" style={{ gap: 12 }}>
               {compare !== "NONE" && !allTime && <span className="muted">Comparison on</span>}
-              <button className="link-btn rp-clear" disabled={activeFilterChips.length === 0} onClick={() => setFilters(EMPTY_FILTERS)}>Clear filters</button>
+              <button className="link-btn rp-clear" disabled={viewChips.length === 0}
+                onClick={() => (view === "sms" ? setSmsFilters(EMPTY_SMS_FILTERS) : setFilters(EMPTY_FILTERS))}>Clear filters</button>
             </div>
           </div>
           <div className="filters-grid">
@@ -378,6 +407,23 @@ export function Reports() {
                   { value: "PREV_YEAR", label: "Same period last year" },
                 ]} />
             </div>
+            {view === "sms" ? (
+              <>
+                {/* HighLevel team members (incl. Automated / unassigned), tags, sources. */}
+                <div className="field"><label>Team members</label>
+                  <SearchableMultiSelect options={smsOpts?.senders.map((u) => u.id) ?? []} labels={idLabels(smsOpts?.senders ?? [])}
+                    value={smsFilters.senders} onChange={(senders) => setSmsFilters((f) => ({ ...f, senders }))} placeholder="Filter team…" />
+                </div>
+                <div className="field"><label>Tags</label>
+                  <SearchableMultiSelect options={smsOpts?.tags ?? []} value={smsFilters.tags}
+                    onChange={(tags) => setSmsFilters((f) => ({ ...f, tags }))} placeholder="Filter tags…" />
+                </div>
+                <div className="field"><label>Sources</label>
+                  <SearchableMultiSelect options={smsOpts?.sources ?? []} value={smsFilters.sources}
+                    onChange={(sources) => setSmsFilters((f) => ({ ...f, sources }))} placeholder="Filter sources…" />
+                </div>
+              </>
+            ) : (<>
             {/* Shared geographic hierarchy: all 50 states + cascading counties,
                 identical to Buyers/Deals/Research. */}
             <GeoFields
@@ -415,19 +461,18 @@ export function Reports() {
                 </div>
               </>
             )}
+            </>)}
           </div>
         </section>
       )}
 
-      {loading && !data ? <Spinner label="Building analytics…" /> : !data || !k ? <Banner kind="info">No data.</Banner> : (
+      {view === "sms" ? (
+        <SmsPerformance allTime={allTime} range={range} cmp={cmp} filters={smsFilters} filterChips={smsFilterChips} execIcon={execIcon} />
+      ) : loading && !data ? <Spinner label="Building analytics…" /> : !data || !k ? <Banner kind="info">No data.</Banner> : (
         <div ref={reportRef} className="report-capture rp-body">
           {/* --- Executive summary --- */}
           <section className="exec-card">
-            <div className={`exec-icon ${brandLogo.src ? "has-logo" : ""}`}>
-              {brandLogo.src
-                ? <ThemedLogo src={brandLogo.src} alt={user?.organization?.name ?? "Company logo"} onError={brandLogo.onError} />
-                : <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20h16M7 16v-5M12 16V6M17 16v-8" /></svg>}
-            </div>
+            {execIcon}
             <div style={{ minWidth: 0 }}>
               <div className="exec-title">{user?.organization?.name ?? "Mineral Hub"} · Business performance report</div>
               <p className="exec-text">
