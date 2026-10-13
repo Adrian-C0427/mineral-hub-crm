@@ -1,206 +1,307 @@
-import { useEffect, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { Modal, Req } from "./ui";
 import { Select } from "./Select";
-import { StateSelect } from "./StateSelect";
 import { DateField } from "./DateField";
+import { GeoFields } from "./GeoFields";
+import { PhoneInput } from "./PhoneInput";
+import { FormSection } from "./kit";
+import { SectionRail, useSectionRail, type RailSection } from "./SectionRail";
+import { useAbstractIndex } from "./AbstractPicker";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { isOpportunityPipeline, type PipelineInfo } from "../stages";
-import { countiesForStates } from "../lib/options";
-import { formatPhoneAsYouType, normalizePhone } from "../lib/phone";
+import { num, prettyStage } from "../lib/format";
+import { normalizePhone } from "../lib/phone";
+import { surveyLabel } from "../lib/abstracts";
+import { checkOppForm, choosePipelineStage, emptyOppForm, oppBody, oppFormFromRecord, oppPatchBody, type OppForm } from "../lib/opportunityForm";
 import type { ContactRow } from "../pages/Contacts";
 import type { Opp, UserLite } from "../types";
 
-const numOrNull = (v: string) => (v.trim() === "" || !Number.isFinite(Number(v)) ? null : Number(v));
-const strOrNull = (v: string) => (v.trim() === "" ? null : v.trim());
+export type OppFormSection = "basics" | "seller" | "property" | "acreage" | "followup";
+
+// The form's sections, in order, as listed in the rail. Only Basics holds
+// required fields; everything else can be filled in now or later.
+const SECTIONS: RailSection<OppFormSection>[] = [
+  { key: "basics", label: "Basics", required: true },
+  { key: "seller", label: "Seller & contact" },
+  { key: "property", label: "Property" },
+  { key: "acreage", label: "Acreage" },
+  { key: "followup", label: "Follow-up & notes" },
+];
+
+/** Pipelines + their active stage keys, to notice when a list changed. */
+const pipelineSig = (ps: PipelineInfo[]) => ps.map((p) => `${p.id}:${p.stages.map((s) => s.key).join(",")}`).join("|");
 
 /**
- * Create an opportunity (a lightweight prospect) in an OPPORTUNITIES pipeline.
- * Only the name is required; everything else lives behind "More details" so a
- * prospect can be captured in seconds and filled in later on its page.
+ * Create an opportunity — or, with `opp`, edit one. The same sectioned form as
+ * New deal (section rail, required-field count, summary footer, the shared
+ * field components) holding the Opportunity fields only: basics (name,
+ * pipeline, starting stage, owner), seller & contact, property (State → County
+ * → Abstract, one of each), acreage estimates, and follow-up & notes.
+ *
+ * Creating: the pipeline list is fetched fresh on open, so the pipeline sent is
+ * one that exists in this org right now; a pipeline or stage removed in the
+ * meantime is caught, the list reloaded and the user told. Editing keeps the
+ * pipeline and stage as they are (Move stage changes the stage, with its
+ * history) and saves only the fields that changed.
  */
-export function NewOpportunityModal({ pipelines, pipelineId, onClose, onCreated, onPipelinesChanged }: {
+export function NewOpportunityModal({ pipelines, pipelineId, opp, initialSection, onClose, onCreated, onSaved, onPipelinesChanged }: {
   pipelines: PipelineInfo[];
   /** Pipeline to preselect (the board's current selection). */
   pipelineId?: string;
+  /** Edit this opportunity instead of creating one. */
+  opp?: Opp;
+  /** Section to open on (the Edit button of one of the page's cards). */
+  initialSection?: OppFormSection;
   onClose: () => void;
-  onCreated: (o: Opp) => void;
+  /** Created — with where it landed, for the confirmation. */
+  onCreated?: (o: Opp, where: { pipelineName: string; stageLabel: string }) => void;
+  /** Edited — the saved record. */
+  onSaved?: (o: Opp) => void;
   /** The server's pipeline list differs from the app's copy — refresh it. */
   onPipelinesChanged?: () => void;
 }) {
+  const editing = !!opp;
   const { user } = useAuth();
-  // Fetched fresh on open: the pipeline sent to the server must be one that
-  // exists in this org right now. The app's copy is only the first paint.
+  // The values the form opened with: a blank form, or the saved record.
+  const [initial] = useState<OppForm>(() => (opp ? oppFormFromRecord(opp) : emptyOppForm(user?.id ?? "")));
+  const [f, setF] = useState<OppForm>(initial);
+  const set = (k: keyof OppForm) => (v: string) => setF((p) => ({ ...p, [k]: v }));
+
+  // --- pipeline + starting stage ------------------------------------------
+  // The app's list is only the first paint; a fresh copy replaces it on open.
   const [fresh, setFresh] = useState<PipelineInfo[] | null>(null);
-  const oppPipelines = (fresh ?? pipelines).filter(isOpportunityPipeline);
-  const pick = (list: PipelineInfo[]) => (list.some((p) => p.id === pipelineId) ? pipelineId! : list[0]?.id ?? "");
-  const [pid, setPid] = useState(() => pick(oppPipelines));
-  const refreshPipelines = (keep: boolean) =>
+  const allPipelines = fresh ?? pipelines;
+  const oppPipelines = allPipelines.filter(isOpportunityPipeline);
+  const [choice, setChoice] = useState(() => choosePipelineStage(oppPipelines, { pipelineId: "", stage: "" }, pipelineId));
+  // Whenever the list changes (fresh copy, app reload), re-check the choice:
+  // a pipeline or stage that no longer exists is never sent.
+  const oppSig = pipelineSig(oppPipelines);
+  useEffect(() => { setChoice((cur) => choosePipelineStage(oppPipelines, cur, pipelineId)); }, [oppSig]); // eslint-disable-line react-hooks/exhaustive-deps
+  const refreshPipelines = () =>
     api.get<PipelineInfo[]>("/pipeline/pipelines").then((ps) => {
-      const opp = ps.filter(isOpportunityPipeline);
       setFresh(ps);
-      setPid((cur) => (keep && opp.some((p) => p.id === cur) ? cur : pick(opp)));
-      const known = new Set(pipelines.map((p) => p.id));
-      if (ps.length !== pipelines.length || ps.some((p) => !known.has(p.id))) onPipelinesChanged?.();
-      return opp;
+      if (pipelineSig(ps) !== pipelineSig(pipelines)) onPipelinesChanged?.();
+      return ps.filter(isOpportunityPipeline);
     });
-  useEffect(() => { void refreshPipelines(true).catch(() => {}); }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const pipeline = oppPipelines.find((p) => p.id === pid);
+  useEffect(() => { if (!editing) void refreshPipelines().catch(() => {}); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pipeline = editing ? allPipelines.find((p) => p.id === opp!.pipelineId) : oppPipelines.find((p) => p.id === choice.pipelineId);
   const activeStages = pipeline?.stages.filter((s) => !s.isTerminal) ?? [];
-  const [stage, setStage] = useState(activeStages[0]?.key ?? "");
-  // Switching pipelines resets the stage to that pipeline's first active one.
-  useEffect(() => { setStage(activeStages[0]?.key ?? ""); }, [pid]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [ownerId, setOwnerId] = useState(user?.id ?? "");
+  const stageKey = editing ? opp!.stage : choice.stage;
+  const stageLabel = pipeline?.stages.find((s) => s.key === stageKey)?.label ?? (stageKey ? prettyStage(stageKey) : "");
+
+  // --- people -------------------------------------------------------------
   const [users, setUsers] = useState<UserLite[]>([]);
   const [contacts, setContacts] = useState<ContactRow[] | null>(null);
-  const [more, setMore] = useState(false);
-  const [f, setF] = useState({
-    name: "", contactId: "", sellerName: "", companyName: "", phone: "", email: "",
-    state: "", county: "", abstract: "", survey: "", estAcres: "", estNma: "", estNra: "",
-    source: "", nextFollowUpDate: "", notes: "",
-  });
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const set = (k: keyof typeof f) => (v: string) => setF((p) => ({ ...p, [k]: v }));
-
-  useEffect(() => { api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
-  // Contacts load once the optional section opens (most prospects need none).
   useEffect(() => {
-    if (!more || contacts) return;
+    api.get<UserLite[]>("/users").then(setUsers).catch(() => {});
     api.get<ContactRow[]>("/contacts").then(setContacts).catch(() => setContacts([]));
-  }, [more, contacts]);
-
+  }, []);
+  // The saved owner and linked contact show by name before (or without)
+  // their lists (edit mode).
+  const ownerOptions = users.map((u) => ({ value: u.id, label: u.name }));
+  if (opp?.owner && !users.some((u) => u.id === opp.owner!.id)) ownerOptions.unshift({ value: opp.owner.id, label: opp.owner.name });
+  const contactOptions = contacts
+    ? contacts.map((c) => ({ value: c.id, label: c.name, hint: c.entityName ?? undefined }))
+    : opp?.contact ? [{ value: opp.contact.id, label: [opp.contact.firstName, opp.contact.lastName].filter(Boolean).join(" ") || opp.contact.entityName || "Contact" }] : [];
   // Linking a contact fills the blank seller fields from it (editable after).
   function pickContact(id: string) {
     const c = contacts?.find((x) => x.id === id);
     setF((p) => ({
       ...p, contactId: id,
-      sellerName: p.sellerName || (c ? c.name : ""),
+      sellerName: p.sellerName || (c?.name ?? ""),
       companyName: p.companyName || (c?.entityName ?? ""),
-      phone: p.phone || (c?.phone ? formatPhoneAsYouType(c.phone) : ""),
+      phone: p.phone || normalizePhone(c?.phone ?? ""),
       email: p.email || (c?.email ?? ""),
     }));
   }
 
-  const dirty = Object.values(f).some((v) => v.trim() !== "");
-  const countyOptions = countiesForStates(f.state ? [f.state] : []);
+  // --- property -----------------------------------------------------------
+  const { byId } = useAbstractIndex();
+  // A GIS abstract brings its survey along — unless a survey was typed.
+  function pickAbstract(ids: string[]) {
+    const id = ids[0] ?? "";
+    setF((p) => {
+      const was = surveyLabel(byId.get(p.abstract)?.survey);
+      const next = surveyLabel(byId.get(id)?.survey);
+      return { ...p, abstract: id, survey: next && (!p.survey.trim() || p.survey === was) ? next : p.survey };
+    });
+  }
+
+  // --- validation, rail, submit ---------------------------------------------
+  const check = checkOppForm(f, { editing, pipelineId: choice.pipelineId, stage: choice.stage });
+  const changes = oppPatchBody(initial, f);
+  const dirty = Object.keys(changes).length > 0;
+  const { sec, goSec, formRef, railRef, onFormScroll } = useSectionRail<OppFormSection>(initialSection ?? "basics");
+  useEffect(() => { if (initialSection && initialSection !== "basics") goSec(initialSection, "auto"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   async function submit() {
-    if (!f.name.trim()) { setError("Give the opportunity a name."); return; }
-    if (!pid) { setError("Create an Opportunities pipeline first (Pipeline settings)."); return; }
+    if (busy) return;
+    if (opp && !dirty) { onClose(); return; }
+    if (check.missing.length) { setError(`Required: ${check.missing.join(", ")}`); goSec("basics"); return; }
+    if (check.invalid.length) { setError(check.invalid.join(" · ")); return; }
     setBusy(true); setError(null);
     try {
-      const o = await api.post<Opp>("/opportunities", {
-        name: f.name.trim(),
-        pipelineId: pid,
-        stage: stage || undefined,
-        ownerId: ownerId || null,
-        contactId: f.contactId || null,
-        sellerName: strOrNull(f.sellerName), companyName: strOrNull(f.companyName),
-        phone: normalizePhone(f.phone) || null, email: strOrNull(f.email),
-        state: strOrNull(f.state), county: strOrNull(f.county), abstract: strOrNull(f.abstract), survey: strOrNull(f.survey),
-        estAcres: numOrNull(f.estAcres), estNma: numOrNull(f.estNma), estNra: numOrNull(f.estNra),
-        source: strOrNull(f.source), nextFollowUpDate: f.nextFollowUpDate || null, notes: strOrNull(f.notes),
-      });
-      onCreated(o);
-    } catch (err) {
-      // The chosen pipeline no longer exists (deleted, or the workspace was
-      // reset elsewhere): reload the list, reselect a valid one, say so.
-      if (err instanceof ApiError && err.status === 400 && /unknown pipeline/i.test(err.message)) {
-        const opp = await refreshPipelines(false).catch(() => [] as PipelineInfo[]);
-        setError(opp.length
-          ? "That pipeline was changed or removed. The list is up to date now — check the pipeline and try again."
-          : "There is no Opportunities pipeline yet. Create one in Pipeline settings.");
+      if (opp) {
+        onSaved?.(await api.patch<Opp>(`/opportunities/${opp.id}`, changes));
       } else {
-        setError(err instanceof ApiError ? err.message : "Failed to create opportunity");
+        const o = await api.post<Opp>("/opportunities", { ...oppBody(f), pipelineId: choice.pipelineId, stage: choice.stage });
+        onCreated?.(o, { pipelineName: pipeline?.name ?? "", stageLabel: pipeline?.stages.find((s) => s.key === o.stage)?.label ?? prettyStage(o.stage) });
+      }
+    } catch (err) {
+      // The pipeline or stage no longer exists (deleted, or changed in another
+      // tab): reload the list — the choice re-resolves to a valid one — and say so.
+      if (!opp && err instanceof ApiError && err.status === 400 && /unknown pipeline|holds deals/i.test(err.message)) {
+        const left = await refreshPipelines().catch(() => null);
+        setError(left && left.length === 0
+          ? "There is no Opportunities pipeline any more. Create one in Pipeline settings."
+          : "That pipeline or stage was changed or removed. The list is up to date now — check the pipeline and stage, then try again.");
+        goSec("basics");
+      } else {
+        setError(err instanceof ApiError ? err.message : opp ? "Could not save the opportunity" : "Could not create the opportunity");
       }
       setBusy(false);
     }
   }
 
-  const stageLabel = activeStages.find((s) => s.key === stage)?.label;
+  const req = <Req />;
+  const fieldsLeft = check.missing.length;
+  const nma = f.estNma.trim() === "" || !Number.isFinite(Number(f.estNma)) ? null : Number(f.estNma);
+  const where = [pipeline?.name, stageLabel].filter(Boolean).join(" · ");
+  const isDone = (k: OppFormSection) => k === "basics" && !check.missing.length;
+  const enterSubmits = (e: React.KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); void submit(); } };
+
   return (
     <Modal
-      title="New opportunity"
-      subtitle={<>{stageLabel ? <>Starts in <strong>{stageLabel}</strong> · </> : null}only a name is required</>}
+      title={editing ? "Edit opportunity" : "New opportunity"}
+      subtitle={editing
+        ? <>In <strong>{pipeline?.name ?? "its pipeline"}</strong> · <strong>{stageLabel}</strong> — change the stage with Move stage</>
+        : <>{stageLabel ? <>Starts in <strong>{stageLabel}</strong> · </> : null}only a name is required — the rest can wait</>}
       onClose={onClose}
+      wide
       dirty={dirty}
-      footer={<>
-        <span className="modal-req-note"><Req /> Required</span>
-        <button onClick={onClose} disabled={busy}>Cancel</button>
-        <button className="primary" onClick={() => void submit()} disabled={busy || !f.name.trim() || !pid}>{busy ? "Saving…" : "Create opportunity"}</button>
-      </>}
+      footer={
+        <>
+          <div className="nd-sum">
+            <div className="nd-sum-item op-sum-where"><span>{editing ? "Pipeline · stage" : "Starts in"}</span><b className={where ? undefined : "empty"} title={where || undefined}>{where || "—"}</b></div>
+            <div className="nd-sum-item"><span>Est. NMA</span><b className={nma == null ? "empty" : undefined}>{num(nma)}</b></div>
+          </div>
+          <div className="nd-foot-actions">
+            <span className="nd-left">
+              <span className="modal-req-note"><Req /> Required</span>
+              {fieldsLeft > 0 && <span>{fieldsLeft} required field{fieldsLeft === 1 ? "" : "s"} left</span>}
+            </span>
+            <button onClick={onClose}>Cancel</button>
+            <button className="primary" onClick={() => void submit()} disabled={busy || fieldsLeft > 0 || (editing && !dirty)}
+              title={fieldsLeft ? "Enabled once required fields are filled" : editing && !dirty ? "Nothing has changed yet" : undefined}>
+              {busy ? "Saving…" : editing ? "Save changes" : "Create opportunity"}
+            </button>
+          </div>
+        </>
+      }
     >
-      <div className="nop">
-        <div className="field">
-          <label>Name <Req /></label>
-          <input value={f.name} onChange={(e) => set("name")(e.target.value)} autoFocus placeholder="e.g. Hernandez minerals · Leon Co."
-            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void submit(); } }} />
-        </div>
-        <div className="nop-grid">
-          <div className="field">
-            <label>Pipeline</label>
-            <Select value={pid} onChange={setPid} ariaLabel="Pipeline" placeholder="No opportunity pipelines"
-              options={oppPipelines.map((p) => ({ value: p.id, label: p.name }))} />
-          </div>
-          <div className="field">
-            <label>Stage</label>
-            <Select value={stage} onChange={setStage} ariaLabel="Stage" placeholder="No stages yet"
-              options={activeStages.map((s) => ({ value: s.key, label: s.label }))} />
-          </div>
-          <div className="field">
-            <label>Owner</label>
-            <Select value={ownerId} onChange={setOwnerId} ariaLabel="Owner" clearable searchable placeholder="Unassigned"
-              options={users.map((u) => ({ value: u.id, label: u.name }))} />
-          </div>
-        </div>
+      <div className="nd-shell">
+        <SectionRail sections={SECTIONS} active={sec} isDone={isDone} onPick={goSec} railRef={railRef} />
 
-        <button type="button" className={`nop-more ${more ? "open" : ""}`} aria-expanded={more} onClick={() => setMore((m) => !m)}>
-          <ChevronDown size={14} strokeWidth={2.2} aria-hidden="true" /><span>More details</span>
-          <span className="nop-more-hint">seller, property, follow-up, notes — all optional</span>
-        </button>
-
-        {more && (
-          <div className="nop-details">
-            <div className="modal-sec">Seller &amp; contact</div>
-            <div className="nop-grid">
-              <div className="field" style={{ gridColumn: "1 / -1" }}>
-                <label>Contact</label>
-                <Select value={f.contactId} onChange={pickContact} ariaLabel="Linked contact" clearable searchable
-                  placeholder={contacts ? "Search contacts…" : "Loading contacts…"} emptyText="No matching contacts"
-                  options={(contacts ?? []).map((c) => ({ value: c.id, label: c.name, hint: c.entityName ?? undefined }))} />
+        <div className="nd-form" ref={formRef} onScroll={onFormScroll}>
+          <div data-sec="basics">
+            <FormSection title="Basics">
+              <div className="nd-basics">
+                <div className="field" style={{ gridColumn: "1 / -1" }}>
+                  <label>Opportunity name {req}</label>
+                  <input value={f.name} onChange={(e) => set("name")(e.target.value)} autoFocus={!initialSection || initialSection === "basics"}
+                    placeholder="e.g. Hernandez minerals · Leon Co." onKeyDown={enterSubmits} aria-label="Opportunity name" />
+                </div>
+                <div className="field">
+                  <label>Pipeline {editing ? null : req}</label>
+                  {!editing && oppPipelines.length > 1 ? (
+                    <Select value={choice.pipelineId} onChange={(id) => setChoice((cur) => choosePipelineStage(oppPipelines, { pipelineId: id, stage: cur.pipelineId === id ? cur.stage : "" }, pipelineId))}
+                      ariaLabel="Pipeline" options={oppPipelines.map((p) => ({ value: p.id, label: p.name }))} />
+                  ) : (
+                    <div className="nd-derived">
+                      {pipeline ? <strong>{pipeline.name}</strong> : <span className="muted">{editing ? "—" : "No Opportunities pipeline yet — create one in Pipeline settings"}</span>}
+                    </div>
+                  )}
+                </div>
+                <div className="field">
+                  <label>{editing ? "Stage" : <>Starting stage {req}</>}</label>
+                  {editing ? (
+                    <div className="nd-derived"><strong>{stageLabel || "—"}</strong><span className="muted"> · change it with Move stage</span></div>
+                  ) : (
+                    <Select value={choice.stage} onChange={(stage) => setChoice((cur) => ({ ...cur, stage }))} ariaLabel="Starting stage"
+                      placeholder={pipeline ? "This pipeline has no stages yet" : "Pick a pipeline first"} disabled={!activeStages.length}
+                      options={activeStages.map((s) => ({ value: s.key, label: s.label }))} />
+                  )}
+                </div>
+                <div className="field">
+                  <label>Owner</label>
+                  <Select value={f.ownerId} onChange={set("ownerId")} ariaLabel="Owner" clearable searchable placeholder="Unassigned"
+                    options={ownerOptions} />
+                </div>
               </div>
-              <div className="field"><label>Seller name</label><input value={f.sellerName} onChange={(e) => set("sellerName")(e.target.value)} /></div>
-              <div className="field"><label>Company</label><input value={f.companyName} onChange={(e) => set("companyName")(e.target.value)} /></div>
-              <div className="field"><label>Phone</label><input value={f.phone} inputMode="tel" placeholder="(555) 000-0000" onChange={(e) => set("phone")(formatPhoneAsYouType(e.target.value))} /></div>
-              <div className="field"><label>Email</label><input value={f.email} inputMode="email" placeholder="name@example.com" onChange={(e) => set("email")(e.target.value)} /></div>
-            </div>
-
-            <div className="modal-sec">Property</div>
-            <div className="nop-grid">
-              <div className="field"><label>State</label><StateSelect value={f.state} onChange={(v) => setF((p) => ({ ...p, state: v, county: v && p.county && !countiesForStates([v]).includes(p.county) ? "" : p.county }))} /></div>
-              <div className="field">
-                <label>County</label>
-                <Select value={f.county} onChange={set("county")} ariaLabel="County" clearable searchable creatable placeholder="Search counties…" options={countyOptions} />
-              </div>
-              <div className="field"><label>Abstract</label><input value={f.abstract} onChange={(e) => set("abstract")(e.target.value)} placeholder="e.g. A-123" /></div>
-              <div className="field"><label>Survey</label><input value={f.survey} onChange={(e) => set("survey")(e.target.value)} /></div>
-              <div className="field"><label>Est. acres</label><input type="number" min={0} value={f.estAcres} onChange={(e) => set("estAcres")(e.target.value)} placeholder="0" /></div>
-              <div className="field"><label title="Estimated net mineral acres">Est. NMA</label><input type="number" min={0} value={f.estNma} onChange={(e) => set("estNma")(e.target.value)} placeholder="0" /></div>
-              <div className="field"><label title="Estimated net royalty acres">Est. NRA</label><input type="number" min={0} value={f.estNra} onChange={(e) => set("estNra")(e.target.value)} placeholder="0" /></div>
-            </div>
-
-            <div className="modal-sec">Details</div>
-            <div className="nop-grid">
-              <div className="field"><label>Source</label><input value={f.source} onChange={(e) => set("source")(e.target.value)} placeholder="Referral, mailer, courthouse…" /></div>
-              <div className="field"><label>Next follow-up</label><DateField value={f.nextFollowUpDate} onChange={set("nextFollowUpDate")} ariaLabel="Next follow-up" /></div>
-              <div className="field" style={{ gridColumn: "1 / -1" }}><label>Notes</label><textarea rows={3} value={f.notes} onChange={(e) => set("notes")(e.target.value)} placeholder="Anything worth remembering about this prospect…" /></div>
-            </div>
+            </FormSection>
           </div>
-        )}
-        {error && <div className="error-text" role="alert">{error}</div>}
+
+          <div data-sec="seller">
+            <FormSection title="Seller & contact" hint="Link a contact to fill these in from it, or type them for a seller who isn't in Contacts yet.">
+              <div className="nd-basics">
+                <div className="field" style={{ gridColumn: "1 / -1" }}>
+                  <label>Linked contact</label>
+                  <Select value={f.contactId} onChange={(id) => (id ? pickContact(id) : set("contactId")(""))} ariaLabel="Linked contact" clearable searchable
+                    placeholder={contacts ? "Search contacts…" : "Loading contacts…"} emptyText="No matching contacts" options={contactOptions} />
+                </div>
+                <div className="field"><label>Seller name</label><input value={f.sellerName} onChange={(e) => set("sellerName")(e.target.value)} placeholder="e.g. Mary Hernandez" /></div>
+                <div className="field"><label>Company</label><input value={f.companyName} onChange={(e) => set("companyName")(e.target.value)} placeholder="Trust, LLC or estate (optional)" /></div>
+                <div className="field"><label>Phone</label><PhoneInput value={f.phone} onChange={set("phone")} placeholder="(555) 000-0000" /></div>
+                <div className="field"><label>Email</label><input value={f.email} inputMode="email" autoComplete="off" onChange={(e) => set("email")(e.target.value)} placeholder="name@example.com" /></div>
+              </div>
+            </FormSection>
+          </div>
+
+          <div data-sec="property">
+            <FormSection title="Property" hint="One state, county and abstract. Pick the abstract from the county's list, or type it as written when it isn't listed.">
+              <div className="nd-grid3">
+                <GeoFields single
+                  states={f.state ? [f.state] : []} onStatesChange={(v) => set("state")(v[0] ?? "")}
+                  counties={f.county ? [f.county] : []} onCountiesChange={(v) => set("county")(v[0] ?? "")}
+                  abstractIds={f.abstract ? [f.abstract] : []} onAbstractsChange={pickAbstract}
+                />
+                <div className="field"><label>Survey</label><input value={f.survey} onChange={(e) => set("survey")(e.target.value)} placeholder="Filled in from the abstract" /></div>
+              </div>
+            </FormSection>
+          </div>
+
+          <div data-sec="acreage">
+            <FormSection title="Acreage" hint="Estimates — refine them as you learn more. Est. NMA is what the board totals per stage.">
+              <div className="nd-grid3">
+                <div className="field"><label title="Estimated gross acres of the tract">Est. gross acres</label>
+                  <input type="number" min={0} step="any" value={f.estAcres} onChange={(e) => set("estAcres")(e.target.value)} placeholder="0.00" aria-label="Estimated gross acres" />
+                </div>
+                <div className="field"><label title="Estimated net mineral acres">Est. NMA</label>
+                  <input type="number" min={0} step="any" value={f.estNma} onChange={(e) => set("estNma")(e.target.value)} placeholder="0.00" aria-label="Estimated NMA" />
+                </div>
+                <div className="field"><label title="Estimated net royalty acres">Est. NRA</label>
+                  <input type="number" min={0} step="any" value={f.estNra} onChange={(e) => set("estNra")(e.target.value)} placeholder="0.00" aria-label="Estimated NRA" />
+                </div>
+              </div>
+            </FormSection>
+          </div>
+
+          <div data-sec="followup">
+            <FormSection title="Follow-up & notes">
+              <div className="nd-grid3">
+                <div className="field"><label>Source</label><input value={f.source} onChange={(e) => set("source")(e.target.value)} placeholder="Referral, mailer, courthouse…" /></div>
+                <div className="field"><label>Next follow-up</label><DateField value={f.nextFollowUpDate} onChange={set("nextFollowUpDate")} ariaLabel="Next follow-up" /></div>
+              </div>
+              <div className="field nd-notes"><label>Notes</label><textarea rows={3} value={f.notes} onChange={(e) => set("notes")(e.target.value)} placeholder="Anything worth remembering about this prospect…" /></div>
+            </FormSection>
+          </div>
+        </div>
       </div>
+      {error && <div className="error-text nd-error" role="alert">{error}</div>}
     </Modal>
   );
 }

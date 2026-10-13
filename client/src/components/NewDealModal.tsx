@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Modal, Req } from "./ui";
 import { api, ApiError } from "../api/client";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
@@ -11,6 +11,7 @@ import { OperatorSelect } from "./OperatorSelect";
 import { findBuyerByOffsetDays } from "../lib/perAcre";
 import { fmtDate, money } from "../lib/format";
 import { FormSection } from "./kit";
+import { SectionRail, useSectionRail } from "./SectionRail";
 import {
   addDaysIso, applyAcreageEdit, AcreageNote, DaysToCloseField, editPriceGroup, emptyPriceGroup, PriceNote, RoyaltyRateField, royaltyRateError, syncPriceGroup,
   type AcreSource, type PriceField, type PriceGroup,
@@ -60,10 +61,6 @@ const SECTIONS: { key: SecKey; label: string; fields?: string[] }[] = [
   { key: "timeline", label: "Timeline & notes" },
   { key: "extras", label: "Additional deals" },
 ];
-
-const CheckIcon = ({ size = 9 }: { size?: number }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" /></svg>
-);
 
 /**
  * Create a deal — or, when `parentDealId` is passed, add an additional deal under
@@ -157,36 +154,8 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
     const fields = SECTIONS.find((x) => x.key === k)?.fields;
     return !!fields && !fields.some((m) => missing.includes(m));
   };
-  const requiredSecs = sections.filter((x) => x.fields);
-  const reqDone = requiredSecs.filter((x) => isDone(x.key)).length;
   const fieldsLeft = missing.length + assetErrors.reduce((n, e) => n + e.length, 0);
-  const [sec, setSec] = useState<SecKey>("basics");
-  const formRef = useRef<HTMLDivElement>(null);
-  const railRef = useRef<HTMLDivElement>(null);
-  const spyLock = useRef(0);
-  const goSec = (k: SecKey) => {
-    const pane = formRef.current;
-    const el = pane?.querySelector<HTMLElement>(`[data-sec="${k}"]`);
-    spyLock.current = Date.now() + 700;
-    if (pane && el) pane.scrollTo({ top: Math.max(0, el.offsetTop - 4), behavior: "smooth" });
-    setSec(k);
-  };
-  const onFormScroll = () => {
-    const pane = formRef.current;
-    if (!pane || Date.now() < spyLock.current) return;
-    const els = [...pane.querySelectorAll<HTMLElement>("[data-sec]")];
-    let cur = els[0]?.dataset.sec;
-    for (const el of els) if (el.offsetTop - 80 <= pane.scrollTop) cur = el.dataset.sec;
-    if (pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 4) cur = els[els.length - 1]?.dataset.sec;
-    if (cur && cur !== sec) setSec(cur as SecKey);
-  };
-  // On phones the rail is a sideways strip: keep the active step in view.
-  useEffect(() => {
-    const list = railRef.current;
-    const item = list?.querySelector<HTMLElement>(`[data-rail="${sec}"]`);
-    if (!list || !item || list.scrollWidth <= list.clientWidth) return;
-    list.scrollTo({ left: item.offsetLeft - (list.clientWidth - item.offsetWidth) / 2, behavior: "smooth" });
-  }, [sec]);
+  const { sec, goSec, formRef, railRef, onFormScroll } = useSectionRail<SecKey>("basics");
 
   async function submit() {
     if (missing.length) { setError(`Required: ${missing.join(", ")}`); return; }
@@ -281,28 +250,8 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
       }
     >
       <div className="nd-shell">
-        <nav className="nd-rail" aria-label="Form sections">
-          <div className="nd-rail-list" ref={railRef}>
-            {sections.map((x) => {
-              const done = isDone(x.key);
-              const active = sec === x.key;
-              return (
-                <button type="button" key={x.key} data-rail={x.key} onClick={() => goSec(x.key)}
-                  className={`nd-rail-item${active ? " active" : ""}`} aria-current={active ? "step" : undefined}>
-                  <span className={`nd-ring ${done ? "done" : x.fields ? "req" : "opt"}`} aria-hidden="true">{done && <CheckIcon />}</span>
-                  <span className="nd-rail-label">{x.label}</span>
-                  {!x.fields && <span className="nd-rail-opt">Optional</span>}
-                </button>
-              );
-            })}
-          </div>
-          <div className="nd-progress">
-            <div className="nd-progress-bar" aria-hidden="true">
-              {requiredSecs.map((x, i) => <span key={x.key} className={i < reqDone ? "done" : undefined} />)}
-            </div>
-            <span>{reqDone} of {requiredSecs.length} required sections</span>
-          </div>
-        </nav>
+        <SectionRail sections={sections.map((x) => ({ key: x.key, label: x.label, required: !!x.fields }))}
+          active={sec} isDone={isDone} onPick={goSec} railRef={railRef} />
 
         <div className="nd-form" ref={formRef} onScroll={onFormScroll}>
           <div data-sec="basics">

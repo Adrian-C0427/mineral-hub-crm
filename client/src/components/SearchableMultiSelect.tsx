@@ -19,6 +19,9 @@ interface Props {
   filterOptions?: (options: readonly string[], query: string) => string[];
   /** Locked (e.g. until a parent field is chosen): won't open; chips stay removable. */
   disabled?: boolean;
+  /** When nothing in the list matches the typed text, offer it as a value of
+   *  its own ("Use “A-123”") — for entries the reference list doesn't cover. */
+  creatable?: boolean;
 }
 
 /**
@@ -33,7 +36,7 @@ interface Props {
  * another value is one click/keystroke away: clicking the field or typing
  * reopens it with the previous selections intact as chips.
  */
-export function SearchableMultiSelect({ options, value, onChange, placeholder = "Search…", labels, single = false, filterOptions, disabled = false }: Props) {
+export function SearchableMultiSelect({ options, value, onChange, placeholder = "Search…", labels, single = false, filterOptions, disabled = false, creatable = false }: Props) {
   const show = (v: string) => labels?.[v] ?? v;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -52,7 +55,9 @@ export function SearchableMultiSelect({ options, value, onChange, placeholder = 
     return unselected.filter((o) => q === "" || o.toLowerCase().includes(q) || (labels?.[o]?.toLowerCase().includes(q) ?? false));
   }, [options, value, query, labels, filterOptions]);
 
-  const shown = filtered.slice(0, 50);
+  const typed = query.trim();
+  const custom = creatable && typed && filtered.length === 0 && !value.includes(typed) ? typed : null;
+  const shown = custom ? [custom] : filtered.slice(0, 50);
 
   useEffect(() => {
     if (!open) return;
@@ -137,7 +142,7 @@ export function SearchableMultiSelect({ options, value, onChange, placeholder = 
                 onMouseEnter={() => setActive(i)}
                 onClick={() => add(o)}
               >
-                {show(o)}
+                {o === custom ? <>Use “{o}”</> : show(o)}
               </div>
             ))
           )}

@@ -22,6 +22,10 @@ import { US_STATE_OPTIONS, US_STATE_LABELS, countiesForStates } from "../lib/opt
  *
  * `countyOptions` may be overridden (e.g. a map/research view that should only
  * offer counties that actually have data) while keeping the same UX + cascade.
+ *
+ * `single` is for records that hold ONE state, county and abstract
+ * (opportunities): each pick replaces the previous one, and the abstract also
+ * takes one typed as written when the GIS index has no match.
  */
 export function GeoFields({
   states, onStatesChange,
@@ -30,6 +34,7 @@ export function GeoFields({
   countyOptions,
   disabled,
   labels,
+  single = false,
 }: {
   states: string[];
   onStatesChange: (v: string[]) => void;
@@ -41,6 +46,8 @@ export function GeoFields({
   countyOptions?: string[];
   disabled?: boolean;
   labels?: { state?: ReactNode; county?: ReactNode; abstract?: ReactNode };
+  /** One value per level (see above). */
+  single?: boolean;
 }) {
   const availableCounties = countyOptions ?? countiesForStates(states);
   // Tell the user when a state change silently dropped county selections.
@@ -67,6 +74,9 @@ export function GeoFields({
     return () => window.clearTimeout(t);
   }, [prunedNote]);
 
+  // Single mode keeps the latest pick only.
+  const one = (set: (v: string[]) => void) => (single ? (v: string[]) => set(v.slice(-1)) : set);
+
   return (
     <>
       <div className="field">
@@ -75,8 +85,9 @@ export function GeoFields({
           options={[...US_STATE_OPTIONS]}
           labels={US_STATE_LABELS}
           value={states}
-          onChange={disabled ? () => {} : onStatesChange}
+          onChange={disabled ? () => {} : one(onStatesChange)}
           placeholder="Search states…"
+          single={single}
         />
       </div>
       <div className="field">
@@ -84,15 +95,17 @@ export function GeoFields({
         <SearchableMultiSelect
           options={availableCounties}
           value={counties}
-          onChange={disabled ? () => {} : onCountiesChange}
+          onChange={disabled ? () => {} : one(onCountiesChange)}
           placeholder="Search counties…"
+          single={single}
         />
         {prunedNote && <span className="geo-prune-note">{prunedNote}</span>}
       </div>
       {onAbstractsChange && (
         <div className="field">
           <label>{labels?.abstract ?? "Abstract"}</label>
-          <AbstractMultiPicker value={abstractIds ?? []} counties={counties} states={states} onChange={disabled ? () => {} : onAbstractsChange} />
+          <AbstractMultiPicker value={abstractIds ?? []} counties={counties} states={states} onChange={disabled ? () => {} : onAbstractsChange}
+            single={single} creatable={single} />
         </div>
       )}
     </>
