@@ -5,6 +5,7 @@ import { env, assertProductionSecrets } from "./config.js";
 import { ensureUsersHaveOrganizations } from "./services/org.js";
 import { backfillBuyerStatus } from "./services/backfill.js";
 import { startIntegrationScheduler } from "./services/integrationSync.js";
+import { startHighLevelScheduler } from "./services/highlevel/scheduler.js";
 import { startPortalReminderScheduler } from "./services/portalReminders.js";
 import { startDealAlertScheduler } from "./services/dealAlerts.js";
 import { startDemoResetScheduler } from "./services/demoReset.js";
@@ -20,6 +21,9 @@ const app = createApp();
 
 // Background re-validation of connected integrations on their configured schedule.
 startIntegrationScheduler();
+// HighLevel SMS sync: resumes an interrupted import at boot; its 15-minute live
+// sync rides the integration scheduler's tick (services/highlevel/scheduler.ts).
+startHighLevelScheduler();
 
 // Periodic reminder digest of unactioned buyer-portal offers/leads.
 startPortalReminderScheduler();

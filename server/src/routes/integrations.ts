@@ -9,6 +9,10 @@
  *  - Serialization strips every "_"-prefixed config key.
  *  - Connect, disconnect, config changes, tests, and syncs are audit-logged
  *    to ActivityLog with the acting user.
+ *
+ * HighLevel (read-only SMS mirror for Reports) connects with a Private
+ * Integration key + Location ID and has two extra routes — /highlevel/status
+ * and /highlevel/import (services/highlevel/).
  */
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
@@ -30,6 +34,10 @@ import {
   isOAuthProvider, oauthConfigured, buildAuthorizeUrl, signState, verifyState,
   exchangeCode, persistBundle,
 } from "../services/integrationOAuth.js";
+import { RESPONSE_WINDOW_OPTIONS } from "../domain/smsMetrics.js";
+import { HIGHLEVEL, highLevelStatus, validateHighLevelConnection, needsReconnect } from "../services/highlevel/sync.js";
+import { readSyncState, responseWindowOf, parseLocationId, type HlSyncState } from "../services/highlevel/mapping.js";
+import { ensureImportLoop, kickHighLevelRun } from "../services/highlevel/scheduler.js";
 
 export const integrationsRouter = Router();
 integrationsRouter.use(requireAuth, requireOrg, requirePermission("manageApiIntegrations"), demoReadOnly());
@@ -51,7 +59,9 @@ integrationsRouter.use((req, res, next) => (req.method === "POST" ? actionLimite
 // selector detail). It's used server-side to derive senderDomainWarning; the
 // client only needs that derived warning, never the raw DNS records — so keep
 // it out of the serialized config the API returns.
-const INTERNAL_CONFIG_KEYS = new Set(["eventMap", "inboundCursor", "domains"]);
+// "hlSync" / "hlUsers" are the HighLevel sync's bookkeeping (checkpoint, run
+// stats) and its user directory — the card reads GET /highlevel/status instead.
+const INTERNAL_CONFIG_KEYS = new Set(["eventMap", "inboundCursor", "domains", "hlSync", "hlUsers"]);
 
 function publicConfig(row: Integration | null): Record<string, unknown> {
   const cfg = (row?.config ?? {}) as Record<string, unknown>;
@@ -110,7 +120,115 @@ const configSchema = z.object({
   // Sender identity — Resend only (ignored by other providers).
   fromEmail: z.string().trim().email().max(320).optional(),
   fromName: z.string().trim().max(120).optional(),
+  // HighLevel only: Location ID (connect) and response window (settings).
+  locationId: z.string().trim().max(500).optional(),
+  responseWindowDays: z.number().int()
+    .refine((v) => (RESPONSE_WINDOW_OPTIONS as readonly number[]).includes(v), "Pick a response window of 7, 14, 30, 60 or 90 days.")
+    .optional(),
 });
+
+/** Keep only the settings that belong to this provider. */
+function configFor(provider: string, config: z.infer<typeof configSchema> | undefined): Record<string, unknown> {
+  const c: Record<string, unknown> = { ...(config ?? {}) };
+  if (provider === HIGHLEVEL) {
+    // HighLevel syncs on its own cadence; its location changes only by reconnecting.
+    delete c.schedule; delete c.locationId; delete c.fromEmail; delete c.fromName;
+  } else {
+    delete c.locationId; delete c.responseWindowDays;
+  }
+  return c;
+}
+
+// --- HighLevel ------------------------------------------------------------------
+
+integrationsRouter.get(
+  "/highlevel/status",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    res.json(await highLevelStatus(orgId(req)));
+  }),
+);
+
+// Start the first import (the owner has seen the preview count).
+integrationsRouter.post(
+  "/highlevel/import",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const row = await getRow(req, HIGHLEVEL);
+    if (!row || row.status === "NOT_CONNECTED") throw new HttpError(400, "Connect HighLevel before importing.");
+    if (needsReconnect(row)) throw new HttpError(400, "HighLevel needs a new key before the import can start. Use Replace key.");
+    const cfg = (row.config ?? {}) as Record<string, unknown>;
+    const state = readSyncState(cfg);
+    if (state.phase !== "preview") throw new HttpError(409, "The import has already started.");
+    const hlSync: HlSyncState = { ...state, phase: "importing", importStartedAt: new Date().toISOString() };
+    await prisma.integration.update({ where: { id: row.id }, data: { config: { ...cfg, hlSync } as never } });
+    await logActivity({
+      eventType: "integration.import_started",
+      summary: `HighLevel import started (about ${(state.preview?.texts ?? 0).toLocaleString("en-US")} texts)`,
+      organizationId: orgId(req), actorUserId: req.user?.id ?? null,
+    });
+    ensureImportLoop(orgId(req));
+    res.json(await highLevelStatus(orgId(req)));
+  }),
+);
+
+/**
+ * HighLevel connect: validate the key against the Location (and the scopes
+ * the sync needs), then store it with the preview count. Reconnecting to the
+ * SAME location keeps the sync state, so nothing is re-imported; a different
+ * location is refused while texts from the old one are stored, because the
+ * mirror can't tell two accounts' texts apart.
+ */
+async function connectHighLevel(req: AuthedRequest, secret: string, config: Record<string, unknown>, locationInput: string | undefined) {
+  const def = requireDef(HIGHLEVEL);
+  const locationId = parseLocationId(locationInput);
+  if (!locationId) {
+    throw new HttpError(400, "Enter your HighLevel Location ID — letters and numbers, found in HighLevel under Settings → Business Profile, or in the address bar after /location/.");
+  }
+  const existing = await getRow(req, HIGHLEVEL);
+  const prev = (existing?.config ?? {}) as Record<string, unknown>;
+  const prevLocation = typeof prev.locationId === "string" ? prev.locationId : null;
+  if (prevLocation && prevLocation !== locationId) {
+    const held = await prisma.highLevelMessage.findFirst({ where: { organizationId: orgId(req) }, select: { id: true } });
+    if (held) {
+      const name = typeof prev.locationName === "string" ? `“${prev.locationName}”` : prevLocation;
+      throw new HttpError(409, `This workspace already holds texts imported from HighLevel location ${name}. Connecting a different location would mix two accounts in Reports. Reconnect with a key for ${name}, or ask Mineral Hub support to clear the imported texts first.`);
+    }
+  }
+
+  const check = await validateHighLevelConnection(secret, locationId);
+  if (!check.ok) throw new HttpError(400, check.message);
+
+  const now = new Date().toISOString();
+  const prevSync = prevLocation === locationId && prev.hlSync ? readSyncState(prev) : null;
+  // Same location, import already started: keep the checkpoint and carry on.
+  const resumed = !!prevSync && prevSync.phase !== "preview";
+  const hlSync: HlSyncState = resumed
+    ? { ...prevSync!, consecutiveFailures: 0, pausedUntil: undefined, usersRefreshAt: now }
+    : { phase: "preview", preview: { texts: check.texts, at: now }, usersRefreshAt: now, ...(prevSync?.dateParam ? { dateParam: prevSync.dateParam } : {}) };
+  delete hlSync.pausedUntil;
+  const keep = Object.fromEntries(Object.entries(prev).filter(([k]) => !k.startsWith("_") && k !== "schedule"));
+  const cfg = {
+    ...keep, ...config,
+    locationId, locationName: check.location.name,
+    responseWindowDays: responseWindowOf(prev),
+    hlUsers: check.users, hlSync,
+    _secret: encryptSecret(secret), _hint: secretHint(secret),
+  };
+  const row = await prisma.integration.upsert({
+    where: { organizationId_provider: { organizationId: orgId(req), provider: HIGHLEVEL } },
+    create: { organizationId: orgId(req), provider: HIGHLEVEL, status: "CONNECTED", connectedAt: new Date(), lastError: null, config: cfg as never },
+    update: { status: "CONNECTED", connectedAt: new Date(), lastError: null, config: cfg as never },
+  });
+  await logActivity({
+    eventType: "integration.connected",
+    summary: `Integration ${def.name} connected (${check.location.name})`,
+    organizationId: orgId(req), actorUserId: req.user?.id ?? null,
+  });
+  if (hlSync.phase === "importing") ensureImportLoop(orgId(req));
+  const message = resumed
+    ? `Reconnected to ${check.location.name}. Syncing picks up where it left off.`
+    : `Connected to ${check.location.name}. Found ${check.texts.toLocaleString("en-US")} texts in HighLevel — nothing has been imported yet.`;
+  return { ...serialize(def, row), message };
+}
 
 const connectSchema = z.object({
   secret: z.string().min(1).max(4096).optional(),
@@ -130,6 +248,7 @@ integrationsRouter.post(
       throw new HttpError(400, `${def.name} connects via OAuth. Start the authorization at GET /api/integrations/${def.key}/oauth/start.`);
     }
     if (!secret) throw new HttpError(400, `${def.secretLabel ?? "A credential"} is required to connect ${def.name}.`);
+    if (def.key === HIGHLEVEL) return res.json(await connectHighLevel(req, secret.trim(), configFor(def.key, config), config?.locationId));
     if (def.key === "resend" && !config?.fromEmail) {
       throw new HttpError(400, "A sender email address is required to connect Resend — it becomes the From address on every email the app sends.");
     }
@@ -149,7 +268,7 @@ integrationsRouter.post(
       warning = senderDomainWarning(config!.fromEmail!, domains);
     }
 
-    const cfg = { ...(config ?? {}), ...extra, _secret: encryptSecret(secret), _hint: secretHint(secret) };
+    const cfg = { ...configFor(def.key, config), ...extra, _secret: encryptSecret(secret), _hint: secretHint(secret) };
     const row = await prisma.integration.upsert({
       where: { organizationId_provider: { organizationId: orgId(req), provider: def.key } },
       create: {
@@ -178,10 +297,16 @@ integrationsRouter.post(
     }
     const existing = await getRow(req, def.key);
     // Purge the credential, keep non-secret config for an easy reconnect.
+    // HighLevel also keeps its sync state (checkpoint, user names): the synced
+    // texts stay for Reports, and reconnecting the same location resumes
+    // instead of re-importing. NOT_CONNECTED stops its syncing.
+    const kept = def.key === HIGHLEVEL
+      ? Object.fromEntries(Object.entries((existing?.config ?? {}) as Record<string, unknown>).filter(([k]) => !k.startsWith("_")))
+      : publicConfig(existing);
     const row = await prisma.integration.upsert({
       where: { organizationId_provider: { organizationId: orgId(req), provider: def.key } },
       create: { organizationId: orgId(req), provider: def.key, status: "NOT_CONNECTED" },
-      update: { status: "NOT_CONNECTED", connectedAt: null, lastError: null, config: publicConfig(existing) as never },
+      update: { status: "NOT_CONNECTED", connectedAt: null, lastError: null, config: kept as never },
     });
     await logActivity({
       eventType: "integration.disconnected",
@@ -198,7 +323,8 @@ integrationsRouter.patch(
   "/:provider",
   asyncHandler(async (req: AuthedRequest, res) => {
     const def = requireDef(req.params.provider);
-    const { config } = z.object({ config: configSchema }).parse(req.body);
+    const { config: parsed } = z.object({ config: configSchema }).parse(req.body);
+    const config = configFor(def.key, parsed);
     const existing = await getRow(req, def.key);
     if (!existing) throw new HttpError(404, "Integration not configured");
     const prevCfg = (existing.config ?? {}) as Record<string, unknown>;
@@ -215,6 +341,10 @@ integrationsRouter.patch(
     const warning = def.key === "resend" && typeof nextCfg.fromEmail === "string"
       ? senderDomainWarning(nextCfg.fromEmail, Array.isArray(nextCfg.domains) ? (nextCfg.domains as never) : [])
       : undefined;
+    // HighLevel: a new response window changes who counts as "responded" —
+    // every stored summary is recomputed by the sync.
+    const windowChanged = def.key === HIGHLEVEL && typeof config.responseWindowDays === "number"
+      && config.responseWindowDays !== responseWindowOf(prevCfg);
     const row = await prisma.integration.update({
       where: { id: existing.id },
       data: {
@@ -222,9 +352,15 @@ integrationsRouter.patch(
         ...(warning !== undefined ? { lastError: warning } : {}),
       },
     });
+    if (windowChanged) {
+      await prisma.highLevelContact.updateMany({ where: { organizationId: orgId(req) }, data: { summaryDirty: true } });
+      if (row.status !== "NOT_CONNECTED") kickHighLevelRun(row, "window");
+    }
     await logActivity({
       eventType: "integration.config_updated",
-      summary: `Integration ${def.name} settings updated`,
+      summary: windowChanged
+        ? `Integration ${def.name} response window set to ${config.responseWindowDays} days`
+        : `Integration ${def.name} settings updated`,
       organizationId: orgId(req), actorUserId: req.user?.id ?? null,
     });
     res.json(serialize(def, row));
@@ -254,6 +390,8 @@ integrationsRouter.post(
       where: { id: row.id },
       data: result.ok ? { lastError: null, status: "CONNECTED" } : { lastError: result.message, status: "ERROR" },
     });
+    // A passing test clears a HighLevel key error; an interrupted import resumes.
+    if (result.ok && def.key === HIGHLEVEL && readSyncState(row.config).phase === "importing") ensureImportLoop(orgId(req));
     await logActivity({
       eventType: result.ok ? "integration.test_passed" : "integration.test_failed",
       summary: `Integration ${def.name} test ${result.ok ? "passed" : `failed: ${result.message}`}`,

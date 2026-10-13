@@ -363,6 +363,13 @@ input.mono-input { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, 
 }
 .integration-link-btn:hover { border-color: var(--line-hover-strong); color: var(--ink); text-decoration: none; }
 .integ-none { padding: 40px; border: 1px dashed var(--line-strong); border-radius: var(--radius-lg); text-align: center; font-size: 13px; color: var(--ink-4); }
+/* HighLevel card: sync phase lines; connect modal: setup steps + scope list. */
+.hl-summary { display: flex; flex-direction: column; gap: 6px; }
+.hl-line { margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.hl-steps { margin: 0 0 14px; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 1.5; color: var(--ink-2); }
+.hl-steps b { color: var(--ink); font-weight: 600; }
+.hl-scopes { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.hl-scopes .tag { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 500; }
 
 /* --- Phones --- */
 @media (max-width: 760px) {

@@ -282,6 +282,14 @@
 
   /* --- Research / Reports / Valuation --- */
   .rk-bar-row { grid-template-columns: 110px minmax(0, 1fr); }
+  /* Reports view switch and SMS performance: 44px tab targets, stacked heads, tappable pager. */
+  .reports-page > .asset-tabs .tab { min-height: 44px; height: 44px; }
+  .reports-page .sms-breakdown .rp-chart-head { flex-direction: column; align-items: stretch; }
+  .reports-page .sms-breakdown .seg { align-self: flex-start; }
+  .sms-pager { flex-direction: column; align-items: stretch; }
+  .sms-pager .va-pager { justify-content: space-between; }
+  .sms-pager .va-pager button { flex: 1; min-height: 40px; height: 40px; }
+  .sms-tl-meta { flex-direction: column; gap: 4px; }
   .va-page .metrics-row { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
   .va-page .assumption-groups { grid-template-columns: minmax(0, 1fr) !important; }
 

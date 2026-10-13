@@ -143,10 +143,10 @@ enum FileCategory {
 // ---------------------------------------------------------------------------
 
 model Organization {
-  id        String   @id @default(cuid())
-  name      String
+  id          String  @id @default(cuid())
+  name        String
   // Shareable, human-friendly Team ID. Acts as an always-valid reusable join key.
-  teamId    String   @unique
+  teamId      String  @unique
   // Company branding: data-URL logos (PNG/SVG/JPG/WebP, size-capped). fullLogo =
   // expanded sidebar + report/PDF headers; compactLogo = collapsed sidebar icon.
   // Null → fall back to the default Mineral Hub / MH branding.
@@ -158,8 +158,8 @@ model Organization {
   // for the org. The legacy single-contact fields below are retained for
   // back-compat and lazily migrated into the first PortalContact row; new
   // contacts live in the PortalContact table (multi-contact, see below).
-  portalSlug           String?  @unique
-  portalEnabled        Boolean  @default(false)
+  portalSlug           String? @unique
+  portalEnabled        Boolean @default(false)
   portalContactName    String?
   portalContactEmail   String?
   portalContactPhone   String?
@@ -169,11 +169,11 @@ model Organization {
   // isDemo marks the public showcase org: the demo guard (middleware/demo.ts)
   // blocks deletes, integrations, outbound email, uploads and team/security
   // changes for its users, and only the demo seeder may wipe/reseed it.
-  isDemo         Boolean @default(false)
+  isDemo          Boolean @default(false)
   // Read-only reference data: when set, Research records and imported map
   // tracts are READ from this org (live, so they track it) and never written.
   // Plain id (no FK) so nothing can cascade between the two orgs.
-  referenceOrgId String?
+  referenceOrgId  String?
   // Version of the generated demo dataset last written (services/demoSeed
   // DEMO_SEED_VERSION); a mismatch makes the API reseed the demo on boot.
   demoSeedVersion Int?
@@ -181,33 +181,35 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users             User[]
-  deals             Deal[]
-  buyers            Buyer[]
-  activityLogs      ActivityLog[]
-  inviteCodes       InviteCode[]
+  users              User[]
+  deals              Deal[]
+  buyers             Buyer[]
+  activityLogs       ActivityLog[]
+  inviteCodes        InviteCode[]
   calendarEventTypes CalendarEventType[]
   calendarEvents     CalendarEvent[]
   opportunities      Opportunity[]
-  expenses          Expense[]
-  expenseCategories ExpenseCategory[]
-  rolePermissions   RolePermissions[]
-  buyerMessages     DealBuyerMessage[]
-  emailTemplates    EmailTemplate[]
-  pipelineStages    PipelineStage[]
-  pipelines         Pipeline[]
-  contacts          Contact[]
-  contactLists      ContactList[]
-  integrations      Integration[]
-  researchDocuments ResearchDocument[]
-  researchPermits   ResearchPermit[]
-  researchIngests   ResearchIngestRun[]
-  researchWells     ResearchWell[]
-  wellAnalyses      WellAnalysis[]
-  notifications     Notification[]
-  portalContacts    PortalContact[]
-  buyerTags         BuyerTag[]
-  mapTracts         MapTract[]
+  expenses           Expense[]
+  expenseCategories  ExpenseCategory[]
+  rolePermissions    RolePermissions[]
+  buyerMessages      DealBuyerMessage[]
+  emailTemplates     EmailTemplate[]
+  pipelineStages     PipelineStage[]
+  pipelines          Pipeline[]
+  contacts           Contact[]
+  contactLists       ContactList[]
+  integrations       Integration[]
+  researchDocuments  ResearchDocument[]
+  researchPermits    ResearchPermit[]
+  researchIngests    ResearchIngestRun[]
+  researchWells      ResearchWell[]
+  wellAnalyses       WellAnalysis[]
+  notifications      Notification[]
+  portalContacts     PortalContact[]
+  buyerTags          BuyerTag[]
+  mapTracts          MapTract[]
+  highLevelContacts  HighLevelContact[]
+  highLevelMessages  HighLevelMessage[]
 }
 
 // A tract boundary imported from a user-uploaded shapefile (.shp), rendered as
@@ -226,8 +228,8 @@ model MapTract {
   geometry   Json // GeoJSON Polygon/MultiPolygon geometry, WGS84
   // Set when imported from a deal's map: the tract shows on that deal's map
   // AND the main map (one stored copy), attributed to its source deal.
-  dealId String?
-  deal   Deal?   @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  dealId     String?
+  deal       Deal?   @relation(fields: [dealId], references: [id], onDelete: SetNull)
 
   createdAt DateTime @default(now())
 
@@ -267,20 +269,20 @@ enum PortalVisibility {
 
 // Lightweight in-app notification (portal leads today; general-purpose shape).
 model Notification {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  id               String       @id @default(cuid())
+  organizationId   String
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   // Targeted user; null = visible to any org admin/owner.
-  userId         String?
-  type           String // e.g. "portal_lead"
-  title          String
-  body           String?
-  link           String? // in-app path, e.g. /buyers/:id
-  readAt         DateTime?
+  userId           String?
+  type             String // e.g. "portal_lead"
+  title            String
+  body             String?
+  link             String? // in-app path, e.g. /buyers/:id
+  readAt           DateTime?
   // Untargeted rows are one shared row for every admin/owner, so "clearing"
   // one hides it for that person only (deleting it would clear it for all).
-  hiddenForUserIds String[] @default([])
-  createdAt      DateTime  @default(now())
+  hiddenForUserIds String[]     @default([])
+  createdAt        DateTime     @default(now())
 
   @@index([organizationId, readAt])
 }
@@ -311,6 +313,83 @@ model Integration {
 
   @@unique([organizationId, provider])
   @@index([organizationId])
+}
+
+// --- HighLevel (LeadConnector) SMS mirror -----------------------------------
+// Read-only copies of the org's HighLevel texting, pulled by the scheduled sync
+// (services/highlevel/). HighLevel stays the system of record for messages;
+// these rows exist so Reports can measure outreach. Keyed by HighLevel's own
+// ids (unique per org), so a re-run or overlapping page can never duplicate a
+// row. Message WORDING is never stored: the sync keeps only what the metrics
+// need (direction, delivery status, sender, time) plus an opt-out flag
+// derived from inbound replies at import.
+
+// One HighLevel contact that has SMS activity. The outreach summary columns
+// are derived from its messages by domain/smsMetrics.ts summarizeContact()
+// and recomputed whenever its messages change (summaryDirty).
+model HighLevelContact {
+  id                 String       @id @default(cuid())
+  organizationId     String
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  hlId               String // HighLevel contact id
+  name               String?
+  phone              String? // as HighLevel stores it (usually +1XXXXXXXXXX)
+  phoneDigits        String? // domain/phone.ts normalization, for matching CRM records
+  email              String?
+  source             String? // HighLevel "Source" (often the list name)
+  tags               String[]     @default([])
+  assignedToHlUserId String? // HighLevel user the contact is assigned to
+  smsOptedOut        Boolean      @default(false) // HighLevel DND for SMS
+  hlDateAdded        DateTime?
+  hlDateUpdated      DateTime?
+  deletedInHl        Boolean      @default(false) // HighLevel returned 404; history kept
+  fetchedAt          DateTime? // last time details were pulled; null = not yet
+
+  // --- Outreach summary (derived; see summarizeContact) ---
+  firstOutboundAt    DateTime? // first REACHED outbound text = response cohort date; null when the contact texted first or was never reached
+  touches            Int       @default(0) // reached outbound texts before the sequence ended (first reply / opt-out)
+  unconfirmedTouches Int       @default(0) // of those, texts with no delivery receipt (status "sent")
+  outcome            String? // RESPONDED | OPTED_OUT | LATE_REPLY | NO_REPLY | INBOUND_FIRST | NOT_REACHED
+  outcomeAt          DateTime?
+  responseSeconds    Int? // first reached text → first counted reply (RESPONDED only)
+  creditedHlUserId   String? // sender of the first reached text (null = automated)
+  outboundTotal      Int       @default(0)
+  inboundTotal       Int       @default(0)
+  lastMessageAt      DateTime?
+  summaryDirty       Boolean   @default(true)
+  summaryWindowDays  Int? // response window the summary was computed with
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([organizationId, hlId])
+  @@index([organizationId, firstOutboundAt])
+  @@index([organizationId, phoneDigits])
+  @@index([organizationId, summaryDirty])
+  @@index([organizationId, fetchedAt])
+}
+
+// One SMS from HighLevel's conversation history (either direction).
+model HighLevelMessage {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  hlId           String // HighLevel message id
+  hlContactId    String // HighLevel contact id (joins HighLevelContact.hlId; no FK so a message can land before its contact)
+  conversationId String?
+  direction      String // "inbound" | "outbound"
+  messageType    String? // TYPE_SMS, TYPE_CAMPAIGN_SMS, …
+  status         String? // pending | scheduled | queued | sent | delivered | read | undelivered | failed | …
+  source         String? // workflow | bulk_actions | campaign | api | app (null = unknown)
+  hlUserId       String? // HighLevel user who sent it (null for most automated sends)
+  optOut         Boolean      @default(false) // inbound reply was an opt-out request (STOP, UNSUBSCRIBE, …)
+  sentAt         DateTime // HighLevel dateAdded
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@unique([organizationId, hlId])
+  @@index([organizationId, sentAt])
+  @@index([organizationId, hlContactId, sentAt])
 }
 
 // Reusable outbound email template (org-shared). Supports {{tokens}} that are
@@ -369,17 +448,17 @@ model InviteCode {
 // ---------------------------------------------------------------------------
 
 model User {
-  id           String     @id @default(cuid())
-  name         String
-  firstName    String?
-  lastName     String?
-  phone        String?
-  email        String     @unique
-  passwordHash String
+  id                 String     @id @default(cuid())
+  name               String
+  firstName          String?
+  lastName           String?
+  phone              String?
+  email              String     @unique
+  passwordHash       String
   // Set when an owner resets this user's password; forces a change at next login.
-  mustChangePassword Boolean @default(false)
-  role         Role       @default(ASSOCIATE)
-  status       UserStatus @default(ACTIVE)
+  mustChangePassword Boolean    @default(false)
+  role               Role       @default(ASSOCIATE)
+  status             UserStatus @default(ACTIVE)
 
   organizationId String?
   organization   Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
@@ -399,23 +478,23 @@ model User {
   // actually signs out every other session, which is the remediation users
   // expect after a token is stolen. Default 0 matches the implicit epoch of
   // tokens issued before this column existed, so no one is logged out on deploy.
-  sessionEpoch      Int      @default(0)
+  sessionEpoch Int @default(0)
 
   // Per-user UI theme ("dark" | "light"), or null when the user hasn't chosen.
   // Nullable-with-no-default is deliberate: the client only adopts the server
   // value when it's a REAL choice, so an unset/unavailable column never
   // overrides the device's local theme. Read defensively so a database that
   // hasn't had `prisma db push` run yet still logs users in.
-  themePreference   String?
+  themePreference String?
   // Per-user accent color (hex) applied app-wide; null = the built-in blue.
-  accentColor       String?
+  accentColor     String?
   // Secondary accent (charts, indicators, progress); null = follows accent.
-  accentColor2      String?
+  accentColor2    String?
   // Per-user initials-avatar color (hex); null = auto (name-hash palette).
-  avatarColor       String?
+  avatarColor     String?
   // Saved table layouts (Customize View), keyed by table id: column order,
   // hidden and pinned columns. Only tables the user customized appear.
-  tablePrefs        Json?
+  tablePrefs      Json?
 
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -423,26 +502,26 @@ model User {
   // member management view.
   lastActiveAt DateTime?
 
-  passwordResetTokens PasswordResetToken[]
-  ownedContacts       Contact[] @relation("ContactOwner")
-  contactActivities   ContactActivity[] @relation("ContactActivityAuthor")
-  assignedContactActivities ContactActivity[] @relation("ContactActivityAssignee")
-  oauthAccounts       OAuthAccount[]
+  passwordResetTokens       PasswordResetToken[]
+  ownedContacts             Contact[]            @relation("ContactOwner")
+  contactActivities         ContactActivity[]    @relation("ContactActivityAuthor")
+  assignedContactActivities ContactActivity[]    @relation("ContactActivityAssignee")
+  oauthAccounts             OAuthAccount[]
 
-  ownedDeals         Deal[]              @relation("DealRelationshipOwner")
-  buyerOwnerships    BuyerOwner[]
-  stageChanges       DealStageHistory[]
-  sentActivities     DealBuyerActivity[] @relation("SentActivities")
-  assignedActivities DealBuyerActivity[] @relation("AssignedActivities")
-  authoredMessages   DealBuyerMessage[]  @relation("AuthoredMessages")
-  uploadedFiles      FileAttachment[]
-  activityLogs       ActivityLog[]
-  expenses           Expense[]
-  sellerAssignments  DealSeller[]        @relation("SellerAssignments")
-  assignedDeals      Deal[]              @relation("DealAssignees")
-  calendarAssigned   CalendarEvent[]     @relation("CalendarAssignee")
-  calendarCreated    CalendarEvent[]     @relation("CalendarCreator")
-  opportunitiesOwned Opportunity[]       @relation("OpportunityOwner")
+  ownedDeals             Deal[]                  @relation("DealRelationshipOwner")
+  buyerOwnerships        BuyerOwner[]
+  stageChanges           DealStageHistory[]
+  sentActivities         DealBuyerActivity[]     @relation("SentActivities")
+  assignedActivities     DealBuyerActivity[]     @relation("AssignedActivities")
+  authoredMessages       DealBuyerMessage[]      @relation("AuthoredMessages")
+  uploadedFiles          FileAttachment[]
+  activityLogs           ActivityLog[]
+  expenses               Expense[]
+  sellerAssignments      DealSeller[]            @relation("SellerAssignments")
+  assignedDeals          Deal[]                  @relation("DealAssignees")
+  calendarAssigned       CalendarEvent[]         @relation("CalendarAssignee")
+  calendarCreated        CalendarEvent[]         @relation("CalendarCreator")
+  opportunitiesOwned     Opportunity[]           @relation("OpportunityOwner")
   notificationPreference NotificationPreference?
 
   @@index([organizationId])
@@ -543,12 +622,12 @@ model Deal {
   basins         String[]
   formations     String[]
 
-  stage                 String   @default("UNDER_CONTRACT") // PipelineStage.key
+  stage                 String    @default("UNDER_CONTRACT") // PipelineStage.key
   // Which pipeline the deal moves through. Null means the org's default
   // pipeline (pre-migration rows and the common case).
   pipelineId            String?
   pipeline              Pipeline? @relation(fields: [pipelineId], references: [id], onDelete: SetNull)
-  currentStageEnteredAt DateTime @default(now())
+  currentStageEnteredAt DateTime  @default(now())
   deadReason            String?
 
   // Anchor dates. Effective Find-Buyer-By and Final-Closing are derived from
@@ -581,19 +660,19 @@ model Deal {
   // Published deals appear on the public portal. portalSlug is an unguessable
   // share token (also the offering URL for LINK_ONLY deals). portalSummary is
   // the buyer-facing description — internal notes/pricing are never exposed.
-  publishedToPortal Boolean          @default(false)
-  portalSlug        String?          @unique
-  portalVisibility  PortalVisibility @default(LINK_ONLY)
-  portalFeatured    Boolean          @default(false)
-  portalSummary     String?
+  publishedToPortal  Boolean          @default(false)
+  portalSlug         String?          @unique
+  portalVisibility   PortalVisibility @default(LINK_ONLY)
+  portalFeatured     Boolean          @default(false)
+  portalSummary      String?
   // Per-deal publishing config: which sections show on THIS listing (contact,
   // company, description, documents, map, wells, tracts, production,
   // attachments, notes, askPrice). Null → sensible defaults. Never affects
   // other deals.
-  portalSections    Json?
+  portalSections     Json?
   // Buyer-facing asking price override. Null → use the deal's askPrice; set to
   // publish a different figure without changing the underlying deal.
-  portalAskPrice    Float?
+  portalAskPrice     Float?
   // Per-deal published contacts (the representatives shown on THIS listing). The
   // right point of contact differs per opportunity, so contact info lives on the
   // deal — not globally. `portalContacts` is the source of truth: an ordered JSON
@@ -609,18 +688,18 @@ model Deal {
 
   // --- Owned-asset fields (used when recordType = OWNED_ASSET) -------------
   // Ownership
-  acquisitionDate    DateTime?
-  purchasePrice      Float? // what we paid to acquire the asset
-  currentValue       Float? // current estimated market value
-  bookValue          Float? // carrying/book value
-  ownershipStatus    String? // e.g. "Active", "Encumbered", "Leased"
-  ownershipType      String? // e.g. "Mineral", "Royalty", "ORRI", "Working Interest"
-  workingInterest    Float? // fraction 0–1
-  netRevenueInterest Float? // fraction 0–1
+  acquisitionDate     DateTime?
+  purchasePrice       Float? // what we paid to acquire the asset
+  currentValue        Float? // current estimated market value
+  bookValue           Float? // carrying/book value
+  ownershipStatus     String? // e.g. "Active", "Encumbered", "Leased"
+  ownershipType       String? // e.g. "Mineral", "Royalty", "ORRI", "Working Interest"
+  workingInterest     Float? // fraction 0–1
+  netRevenueInterest  Float? // fraction 0–1
   // Property (counties/abstractIds/basins/formations/operator/nra/acreageNma reused)
-  surveys         String[]
-  wells           String[] // well names / API numbers on the asset
-  producingStatus String? // e.g. "Producing", "Shut-in", "Non-producing"
+  surveys             String[]
+  wells               String[] // well names / API numbers on the asset
+  producingStatus     String? // e.g. "Producing", "Shut-in", "Non-producing"
   // Financial
   royaltyIncomeAnnual Float? // estimated annual royalty income
   // Current-lease details (redesigned lease section).
@@ -641,23 +720,23 @@ model Deal {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  stageHistory   DealStageHistory[]
-  buyerActivity  DealBuyerActivity[]
-  buyerMessages  DealBuyerMessage[]
-  offers         Offer[]             @relation("DealOffers")
-  files          FileAttachment[]
-  portalEvents   PortalEvent[]
-  activityLogs   ActivityLog[]
-  sellers        DealSeller[]
-  revenueEntries AssetRevenueEntry[]
-  mapTracts      MapTract[]
-  calendarEvents CalendarEvent[]
+  stageHistory       DealStageHistory[]
+  buyerActivity      DealBuyerActivity[]
+  buyerMessages      DealBuyerMessage[]
+  offers             Offer[]                 @relation("DealOffers")
+  files              FileAttachment[]
+  portalEvents       PortalEvent[]
+  activityLogs       ActivityLog[]
+  sellers            DealSeller[]
+  revenueEntries     AssetRevenueEntry[]
+  mapTracts          MapTract[]
+  calendarEvents     CalendarEvent[]
   // The prospect this deal was converted from, if any (column lives on Opportunity).
-  fromOpportunity Opportunity?  @relation("OpportunityConvertedDeal")
+  fromOpportunity    Opportunity?            @relation("OpportunityConvertedDeal")
   contractExtensions DealContractExtension[]
   // Team members assigned to this deal/asset (multi-assignee). relationshipOwner
   // is retained as the originating/primary owner for existing metrics & reports.
-  assignees      User[]              @relation("DealAssignees")
+  assignees          User[]                  @relation("DealAssignees")
 
   @@index([stage])
   @@index([selectedBuyerId])
@@ -733,7 +812,7 @@ model AssetRevenueEntry {
 
   month    DateTime // first day of the month, UTC
   amount   Float
-  kind     String  @default("ROYALTY") // ROYALTY | LEASE_BONUS | OTHER
+  kind     String   @default("ROYALTY") // ROYALTY | LEASE_BONUS | OTHER
   operator String?
   note     String?
 
@@ -788,26 +867,26 @@ model PipelineStage {
 // present and permanent), its own board. Every org has exactly one default
 // pipeline (not deletable); users can add/rename/delete additional ones.
 model Pipeline {
-  id             String          @id @default(cuid())
-  organizationId String
-  organization   Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  name           String
-  isDefault      Boolean         @default(false)
-  position       Int             @default(0)
+  id                  String          @id @default(cuid())
+  organizationId      String
+  organization        Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name                String
+  isDefault           Boolean         @default(false)
+  position            Int             @default(0)
   // "DEALS" (the original board: deals in their stages) or "OPPORTUNITIES"
   // (prospects; see Opportunity). Pre-existing pipelines are DEALS.
-  kind           String          @default("DEALS")
-  description    String?
+  kind                String          @default("DEALS")
+  description         String?
   // Opportunity pipelines only: entering this stage converts the opportunity
   // into a deal when convertMode is "AUTO" ("MANUAL" = user clicks Convert).
   convertStageKey     String?
   convertMode         String          @default("MANUAL")
   // Deal pipeline the converted deal is created in (null = the default pipeline).
   convertToPipelineId String?
-  createdAt      DateTime        @default(now())
-  stages         PipelineStage[]
-  deals          Deal[]
-  opportunities  Opportunity[]
+  createdAt           DateTime        @default(now())
+  stages              PipelineStage[]
+  deals               Deal[]
+  opportunities       Opportunity[]
 
   @@index([organizationId])
 }
@@ -845,17 +924,17 @@ model Buyer {
 
   // Known alternate spellings/aliases (e.g. discovered during research imports),
   // used to strengthen duplicate detection and shown on the profile.
-  aliases String[] @default([])
+  aliases             String[] @default([])
   // Alias suggestions (normalized keys) the user reviewed and rejected —
   // suppressed from future "possible alias" prompts on this profile.
   dismissedAliasNorms String[] @default([])
   // Provenance: "research" marks a profile created/enriched from public-record
   // research so it can be flagged for manual completion. null = user-created.
-  source String?
+  source              String?
   // Research-derived enrichment that doesn't map to structured fields (counties/
   // states of activity, abstracts, common transaction types, counts, first/last
   // seen). Appended additively — never overwrites user-entered data.
-  researchSummary Json?
+  researchSummary     Json?
 
   // Buyer Offering Portal lead capture: when the profile was created/updated by
   // a portal submission, and whether a fuzzy match needs a human duplicate check.
@@ -865,15 +944,15 @@ model Buyer {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  buyBox        BuyBoxCriteria?
-  owners        BuyerOwner[]
-  tags          BuyerTagOnBuyer[]
-  dealActivity  DealBuyerActivity[]
-  buyerMessages DealBuyerMessage[]
-  offers        Offer[]             @relation("BuyerOffers")
-  selectedFor   Deal[]              @relation("SelectedBuyer")
-  files         FileAttachment[]
-  activityLogs  ActivityLog[]
+  buyBox         BuyBoxCriteria?
+  owners         BuyerOwner[]
+  tags           BuyerTagOnBuyer[]
+  dealActivity   DealBuyerActivity[]
+  buyerMessages  DealBuyerMessage[]
+  offers         Offer[]             @relation("BuyerOffers")
+  selectedFor    Deal[]              @relation("SelectedBuyer")
+  files          FileAttachment[]
+  activityLogs   ActivityLog[]
   calendarEvents CalendarEvent[]
 
   @@index([normalizedCompany])
@@ -1207,13 +1286,13 @@ model ResearchDocument {
   recordingDate    DateTime
   effectiveDate    DateTime?
 
-  grantor     String?
-  grantee     String?
+  grantor        String?
+  grantee        String?
   // Normalized (uppercased, punctuation/suffix-stripped) for grouping/rankings.
   // These normalize the FULL cell (the transaction group) and remain the
   // dedupe/backfill keys; the arrays below carry the individual participants.
-  grantorNorm String?
-  granteeNorm String?
+  grantorNorm    String?
+  granteeNorm    String?
   // Individual parties split from multi-party cells ("A; B / C") at import:
   // raw spellings + their normalized keys, index-aligned. Empty for legacy
   // rows (analytics fall back to splitting the raw string at read time).
@@ -1255,7 +1334,7 @@ model ResearchDocument {
   // so a single import can be deleted without touching other data. Null for
   // records created before batch tracking or by the sample seeder.
   ingestRunId String?
-  createdAt DateTime @default(now())
+  createdAt   DateTime @default(now())
 
   @@index([organizationId, state, county, recordingDate])
   @@index([organizationId, docClass, recordingDate])
@@ -1495,12 +1574,12 @@ model Contact {
   entityName String? // company / trust the person represents, if any
 
   // Classification (string keys — extensible without migrations).
-  type   String @default("PROSPECT") // SELLER | PROSPECT | LEAD | REFERRAL | OTHER
-  status String @default("NEW") // NEW | CONTACTED | ENGAGED | NEGOTIATING | CONVERTED | NOT_INTERESTED
+  type   String  @default("PROSPECT") // SELLER | PROSPECT | LEAD | REFERRAL | OTHER
+  status String  @default("NEW") // NEW | CONTACTED | ENGAGED | NEGOTIATING | CONVERTED | NOT_INTERESTED
   source String? // where this contact came from (mailer, call, referral, web…)
 
-  email String?
-  phone String?
+  email            String?
+  phone            String?
   // How this person prefers to be reached: CALL | TEXT | EMAIL | MAIL.
   preferredContact String?
 
@@ -1527,8 +1606,8 @@ model Contact {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  activities ContactActivity[]
-  lists      ContactList[]     @relation("ContactListMembers")
+  activities    ContactActivity[]
+  lists         ContactList[]     @relation("ContactListMembers")
   opportunities Opportunity[]
 
   @@index([organizationId])
@@ -1556,13 +1635,13 @@ model ContactList {
 // tasks (dueDate + completedAt), and reminders. `kind` is a string key so new
 // activity types (automated sequences, dialer events) need no schema change.
 model ContactActivity {
-  id             String       @id @default(cuid())
+  id             String   @id @default(cuid())
   organizationId String
   // Null for a standalone task created from the Dashboard (not tied to a contact).
   contactId      String?
-  contact        Contact?     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contact        Contact? @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
-  kind String // NOTE | CALL | EMAIL | SMS | TASK | REMINDER
+  kind  String // NOTE | CALL | EMAIL | SMS | TASK | REMINDER
   // Concise summary shown as the entry's heading (required in the UI for
   // notes/tasks/reminders; older rows and quick call/email logs have none).
   title String?
@@ -1573,13 +1652,13 @@ model ContactActivity {
   durationSeconds Int?
 
   // Tasks & reminders.
-  dueDate     DateTime?
-  completedAt DateTime?
+  dueDate      DateTime?
+  completedAt  DateTime?
   // Task metadata: LOW | MEDIUM | HIGH (string key — extensible without a
   // schema change) and an optional assignee (defaults to the author in UI).
   priority     String?
   assignedToId String?
-  assignedTo   User?   @relation("ContactActivityAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  assignedTo   User?     @relation("ContactActivityAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
 
   pinned Boolean @default(false)
 
@@ -1639,31 +1718,31 @@ model CalendarEventType {
 }
 
 model CalendarEvent {
-  id             String             @id @default(cuid())
-  organizationId String
-  organization   Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  title          String
+  id              String             @id @default(cuid())
+  organizationId  String
+  organization    Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  title           String
   // Removing a type leaves its events in place, shown as "Other".
-  typeId         String?
-  type           CalendarEventType? @relation(fields: [typeId], references: [id], onDelete: SetNull)
+  typeId          String?
+  type            CalendarEventType? @relation(fields: [typeId], references: [id], onDelete: SetNull)
   // Calendar day, stored at UTC midnight (same convention as task due dates).
-  date           DateTime
-  allDay         Boolean            @default(false)
-  startTime      String? // "HH:MM" (24h), null when all-day
-  endTime        String? // "HH:MM" (24h)
+  date            DateTime
+  allDay          Boolean            @default(false)
+  startTime       String? // "HH:MM" (24h), null when all-day
+  endTime         String? // "HH:MM" (24h)
   // Optional link to one deal or one buyer.
-  dealId         String?
-  deal           Deal?              @relation(fields: [dealId], references: [id], onDelete: SetNull)
-  buyerId        String?
-  buyer          Buyer?             @relation(fields: [buyerId], references: [id], onDelete: SetNull)
-  assignedToId   String?
-  assignedTo     User?              @relation("CalendarAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
-  notes          String?
-  completedAt    DateTime?
+  dealId          String?
+  deal            Deal?              @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  buyerId         String?
+  buyer           Buyer?             @relation(fields: [buyerId], references: [id], onDelete: SetNull)
+  assignedToId    String?
+  assignedTo      User?              @relation("CalendarAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  notes           String?
+  completedAt     DateTime?
   createdByUserId String?
-  createdBy      User?              @relation("CalendarCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  createdAt      DateTime           @default(now())
-  updatedAt      DateTime           @updatedAt
+  createdBy       User?              @relation("CalendarCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
   @@index([organizationId, date])
   @@index([dealId])
@@ -1677,14 +1756,14 @@ model CalendarEvent {
 // ---------------------------------------------------------------------------
 
 model Opportunity {
-  id             String       @id @default(cuid())
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  name           String
-  pipelineId     String
-  pipeline       Pipeline     @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
-  stage          String // PipelineStage.key within pipelineId
-  currentStageEnteredAt DateTime @default(now())
+  id                    String       @id @default(cuid())
+  organizationId        String
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name                  String
+  pipelineId            String
+  pipeline              Pipeline     @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  stage                 String // PipelineStage.key within pipelineId
+  currentStageEnteredAt DateTime     @default(now())
 
   ownerId String?
   owner   User?   @relation("OpportunityOwner", fields: [ownerId], references: [id], onDelete: SetNull)
@@ -1713,7 +1792,7 @@ model Opportunity {
   lastActivityAt   DateTime?
   nextFollowUpDate DateTime?
   // Set when a terminal stage is entered (e.g. why it was passed/lost).
-  closeReason String?
+  closeReason      String?
 
   // Conversion: the deal created from this opportunity (one per opportunity).
   convertedDealId String?   @unique
