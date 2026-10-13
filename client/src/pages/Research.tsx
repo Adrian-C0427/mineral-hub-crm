@@ -882,6 +882,14 @@ function GeographyTab({ qs, filters, compareOff, allTime, onDrill, onSetCounties
   const [focusAbstractRows, setFocusAbstractRows] = useState<GeoRow[]>([]);
   // Hovering a county in the side list outlines it on the map.
   const [hoverCounty, setHoverCounty] = useState<string | null>(null);
+  // Keep the drill-down in step with the page-wide County filter: when the
+  // focused county is dropped from it (Filters panel, Clear all) the drill is
+  // stale, so the map backs out to the statewide view. Other filter changes
+  // leave the user's pan/zoom alone.
+  useEffect(() => {
+    if (focusCounty && !filters.counties.some((c) => c.toUpperCase() === focusCounty.toUpperCase())) setFocusCounty(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters.counties]);
 
   useEffect(() => {
     setLoading(true);
@@ -998,6 +1006,7 @@ function GeographyTab({ qs, filters, compareOff, allTime, onDrill, onSetCounties
           <div className="rs-map-body">
             <div className="rs-map">
               <ResearchChoropleth
+                zoomable
                 stats={countyStats} metric={metric} selected={filters.counties} qs={qs}
                 // Clicking a county filters the whole Research page to it (every
                 // tab and visualization follows `qs`); "All counties"/Esc clears

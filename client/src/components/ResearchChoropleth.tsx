@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import { formatAbstract } from "../lib/abstracts";
+import { clientToView, fitView, panView, sameView, unitsPerPixel, zoomView, type ViewBox, type ViewLimits } from "../lib/svgView";
 
 /**
  * Lightweight SVG choropleth of Texas counties (no MapLibre — the boundaries
@@ -13,6 +14,13 @@ import { formatAbstract } from "../lib/abstracts";
  * and overlays the county's abstract outlines, colored by abstract-level
  * activity with hotspot abstracts outlined in red — the same hotspot visual
  * language as the county overview. "All counties" (or Esc) zooms back out.
+ *
+ * Free pan / zoom (`zoomable`): drag to pan; Ctrl/⌘ + scroll or a trackpad /
+ * touch pinch to zoom about the pointer; +/− / reset buttons; and, with the
+ * map focused, arrow keys / + / − / 0. A plain scroll wheel or a one-finger
+ * swipe keeps scrolling the PAGE (a hint says how to zoom) — the map never
+ * traps page scrolling. The user's view survives filter, metric and period
+ * changes; only a drill-down change (a different data extent) reframes it.
  */
 
 interface GeoFeature {
@@ -50,13 +58,22 @@ interface Props {
   onAbstractClick?: (abstractId: string) => void;
   /** County to outline as hovered (e.g. while its row in a side list is hovered). */
   highlightCounty?: string | null;
+  /** Free pan / zoom with on-map controls (off on the public landing page). */
+  zoomable?: boolean;
 }
 
 const W = 720, H = 680;
 const ZOOM_MS = 650;
-
-type ViewBox = [number, number, number, number];
+/** Button / keyboard steps: a quicker ease than the drill-down. */
+const STEP_MS = 220;
+const ZOOM_STEP = 1.6;
+/** Pointer travel (px) before a press becomes a drag rather than a click. */
+const DRAG_PX = 4;
+/** Deep enough to read single abstracts inside a drilled county. */
+const LIMITS: ViewLimits = { width: W, height: H, maxZoom: 128 };
 const FULL_VIEW: ViewBox = [0, 0, W, H];
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad/i.test(navigator.userAgent);
+const MOD_KEY = IS_MAC ? "⌘" : "Ctrl";
 
 const easeInOutCubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2);
 
@@ -68,15 +85,30 @@ function normAbstract(v: string | null | undefined): string {
 interface AbstractShape { abstract: string; survey: string | null; count: number; amount: number; d: string }
 interface TipLine { text: string; color?: string; muted?: boolean }
 
-export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "", abstractStats = [], focusCounty = null, onFocusChange, onAbstractClick, highlightCounty = null }: Props) {
+export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "", abstractStats = [], focusCounty = null, onFocusChange, onAbstractClick, highlightCounty = null, zoomable = false }: Props) {
   const [features, setFeatures] = useState<GeoFeature[] | null>(null);
   const [tip, setTip] = useState<{ x: number; y: number; title: string; lines: TipLine[] } | null>(null);
   const [vb, setVb] = useState<ViewBox>(FULL_VIEW);
   const [abstractShapes, setAbstractShapes] = useState<AbstractShape[] | null>(null);
   const [abstractsVisible, setAbstractsVisible] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
   const animRef = useRef<number>(0);
+  /** Where the running animation is headed (null when idle) — steps chain from it. */
+  const animTarget = useRef<ViewBox | null>(null);
   const vbRef = useRef<ViewBox>(FULL_VIEW); vbRef.current = vb;
+  // Gesture state (refs: they change every frame and never render on their own).
+  const dragRef = useRef<{ id: number; x: number; y: number; moved: boolean } | null>(null);
+  const pinchRef = useRef<{ d0: number; mid0: [number, number]; vb0: ViewBox } | null>(null);
+  const touchingRef = useRef(false);
+  const gestureRef = useRef<number | null>(null); // Safari trackpad pinch: last scale
+  /** A drag / pinch just ended — swallow the click it would otherwise fire. */
+  const suppressClick = useRef(false);
+  const [dragging, setDragging] = useState(false);
+  const [hint, setHint] = useState<{ text: string; on: boolean }>({ text: "", on: false });
+  const hintTimer = useRef<number>(0);
+  const hintShown = useRef(""); // text on screen ("" = hidden) — avoids a re-render per wheel tick
+  const helpId = useId();
 
   useEffect(() => {
     fetch("/data/tx-counties.geojson")
@@ -108,7 +140,8 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
           const X = px(x), Y = py(y);
           if (X < minX) minX = X; if (X > maxX) maxX = X;
           if (Y < minY) minY = Y; if (Y > maxY) maxY = Y;
-          return `${X.toFixed(1)},${Y.toFixed(1)}`;
+          // 0.01 units: county lines stay true to the abstract mesh at deep zoom.
+          return `${X.toFixed(2)},${Y.toFixed(2)}`;
         }).join("L") + "Z").join(""))
         .join("");
       return { name: f.properties.name, d, bbox: [minX, minY, maxX - minX, maxY - minY] as ViewBox };
@@ -131,40 +164,195 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
   const maxAbstractTotal = useMemo(() => Math.max(1, ...abstractStats.map((a) => a.total)), [abstractStats]);
 
   // ---- smooth viewBox animation ------------------------------------------
-  function animateTo(target: ViewBox) {
-    cancelAnimationFrame(animRef.current);
+  // Every view change goes through vbRef first so back-to-back events within
+  // one frame build on each other rather than on a stale render.
+  function showView(next: ViewBox) { vbRef.current = next; setVb(next); }
+  function stopAnim() { cancelAnimationFrame(animRef.current); animTarget.current = null; }
+  /** Direct manipulation (drag / pinch / wheel) — interrupts any animation. */
+  function setView(next: ViewBox) { stopAnim(); showView(next); }
+  function animateTo(target: ViewBox, ms = ZOOM_MS) {
+    stopAnim();
     const from = vbRef.current;
-    if (from.every((v, i) => Math.abs(v - target[i]) < 0.5)) { setVb(target); return; }
+    if (sameView(from, target)) { showView(target); return; }
+    animTarget.current = target;
     const t0 = performance.now();
     const step = (now: number) => {
-      const t = Math.min(1, (now - t0) / ZOOM_MS);
+      const t = Math.min(1, (now - t0) / ms);
       const k = easeInOutCubic(t);
-      setVb(from.map((v, i) => v + (target[i] - v) * k) as ViewBox);
+      showView(from.map((v, i) => v + (target[i] - v) * k) as ViewBox);
       if (t < 1) animRef.current = requestAnimationFrame(step);
+      else animTarget.current = null;
     };
     animRef.current = requestAnimationFrame(step);
   }
-  useEffect(() => () => cancelAnimationFrame(animRef.current), []);
+  useEffect(() => () => { cancelAnimationFrame(animRef.current); window.clearTimeout(hintTimer.current); }, []);
 
   const focusShape = focusCounty ? shapes.find((sh) => sh.name.toUpperCase() === focusCounty.toUpperCase()) : undefined;
+  // "Home" for the reset control: the drilled county's framing (padded bbox,
+  // viewport aspect) or the whole state.
+  const homeView = (): ViewBox => (focusShape ? fitView(focusShape.bbox, 0.16, LIMITS) : FULL_VIEW);
 
-  // Zoom in/out whenever the focused county changes.
+  // Zoom in/out whenever the focused county changes — the one case where the
+  // user's own pan/zoom is replaced, because the data extent itself changed.
   useEffect(() => {
     if (!shapes.length) return;
-    if (focusShape) {
-      const [x, y, w2, h2] = focusShape.bbox;
-      // Pad the county bbox and preserve the viewport aspect so it fills nicely.
-      const padF = 0.16;
-      let bw = w2 * (1 + padF * 2), bh = h2 * (1 + padF * 2);
-      const cx = x + w2 / 2, cy = y + h2 / 2;
-      if (bw / bh > W / H) bh = bw * (H / W); else bw = bh * (W / H);
-      animateTo([cx - bw / 2, cy - bh / 2, bw, bh]);
-    } else {
-      animateTo(FULL_VIEW);
-      setAbstractsVisible(false);
-    }
+    animateTo(homeView());
+    if (!focusShape) setAbstractsVisible(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focusCounty, shapes.length]);
+
+  // ---- free pan / zoom -----------------------------------------------------
+  function flashHint(text: string) {
+    if (hintShown.current !== text) { hintShown.current = text; setHint({ text, on: true }); }
+    window.clearTimeout(hintTimer.current);
+    hintTimer.current = window.setTimeout(() => { hintShown.current = ""; setHint((h) => ({ ...h, on: false })); }, 1400);
+  }
+  /** Step zoom about the view center (buttons / keys); chains off a running step. */
+  function stepZoom(factor: number) {
+    const base = animTarget.current ?? vbRef.current;
+    animateTo(zoomView(base, factor, [base[0] + base[2] / 2, base[1] + base[3] / 2], LIMITS), STEP_MS);
+  }
+  function stepPan(fx: number, fy: number) {
+    const base = animTarget.current ?? vbRef.current;
+    animateTo(panView(base, fx * base[2], fy * base[3], LIMITS), STEP_MS);
+  }
+  const resetView = () => animateTo(homeView(), STEP_MS);
+
+  // Wheel, touch and Safari gesture listeners are native: React's are passive,
+  // and zooming must preventDefault (page scroll / browser zoom) — but ONLY
+  // for a deliberate zoom, so ordinary scrolling still moves the page.
+  const hasShapes = shapes.length > 0;
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!zoomable || !svg) return;
+    const zoomAtClient = (factor: number, x: number, y: number) => {
+      const cur = vbRef.current;
+      setView(zoomView(cur, factor, clientToView(cur, svg.getBoundingClientRect(), x, y), LIMITS));
+      setTip(null);
+    };
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) { flashHint(`Hold ${MOD_KEY} and scroll to zoom the map`); return; }
+      e.preventDefault();
+      if (gestureRef.current != null) return; // Safari pinch is handled by its gesture events
+      // Trackpad pinches arrive as small ctrl+wheel deltas, mouse notches as
+      // ~100px; clamp so one notch is a comfortable step.
+      const d = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+      zoomAtClient(Math.exp(-Math.max(-50, Math.min(50, d)) * 0.01), e.clientX, e.clientY);
+    };
+    const pts = (t: TouchList): [[number, number], number] => {
+      const a = t[0], b = t[1];
+      return [[(a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2], Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY) || 1];
+    };
+    // Two fingers pinch-zoom and pan; one finger scrolls the page as usual.
+    let swipeFrom: [number, number] | null = null; // one-finger start (tap vs swipe)
+    const onTouchStart = (e: TouchEvent) => {
+      touchingRef.current = true;
+      swipeFrom = e.touches.length === 1 ? [e.touches[0].clientX, e.touches[0].clientY] : null;
+      if (e.touches.length === 2) {
+        stopAnim(); setTip(null);
+        const [mid0, d0] = pts(e.touches);
+        pinchRef.current = { d0, mid0, vb0: vbRef.current };
+      } else pinchRef.current = null;
+    };
+    const onTouchMove = (e: TouchEvent) => {
+      const p = pinchRef.current;
+      if (p && e.touches.length === 2) {
+        if (!e.cancelable) return; // the browser already owns this gesture (page scroll)
+        e.preventDefault();
+        suppressClick.current = true;
+        const rect = svg.getBoundingClientRect();
+        const [mid, d] = pts(e.touches);
+        const zoomed = zoomView(p.vb0, d / p.d0, clientToView(p.vb0, rect, p.mid0[0], p.mid0[1]), LIMITS);
+        const upp = unitsPerPixel(zoomed, rect);
+        setView(panView(zoomed, (mid[0] - p.mid0[0]) * upp, (mid[1] - p.mid0[1]) * upp, LIMITS));
+      } else if (!p && swipeFrom && e.touches.length === 1
+        && Math.hypot(e.touches[0].clientX - swipeFrom[0], e.touches[0].clientY - swipeFrom[1]) > 10) {
+        flashHint("Use two fingers to move the map"); // a swipe, not a tap
+      }
+    };
+    const onTouchEnd = (e: TouchEvent) => {
+      if (e.touches.length < 2) pinchRef.current = null;
+      if (e.touches.length === 0) touchingRef.current = false;
+    };
+    // Safari (macOS trackpad) reports pinches as proprietary gesture events,
+    // not ctrl+wheel. iOS fires them too — there the touch handlers own it.
+    type GestureLike = Event & { scale: number; clientX: number; clientY: number };
+    const onGestureStart = (e: Event) => { e.preventDefault(); gestureRef.current = 1; };
+    const onGestureChange = (e: Event) => {
+      e.preventDefault();
+      const g = e as GestureLike;
+      if (!touchingRef.current && gestureRef.current != null) zoomAtClient(g.scale / gestureRef.current, g.clientX, g.clientY);
+      gestureRef.current = g.scale;
+    };
+    const onGestureEnd = (e: Event) => { e.preventDefault(); gestureRef.current = null; };
+    const active = { passive: false } as const;
+    svg.addEventListener("wheel", onWheel, active);
+    svg.addEventListener("touchstart", onTouchStart, active);
+    svg.addEventListener("touchmove", onTouchMove, active);
+    svg.addEventListener("touchend", onTouchEnd);
+    svg.addEventListener("touchcancel", onTouchEnd);
+    svg.addEventListener("gesturestart", onGestureStart, active);
+    svg.addEventListener("gesturechange", onGestureChange, active);
+    svg.addEventListener("gestureend", onGestureEnd, active);
+    return () => {
+      svg.removeEventListener("wheel", onWheel);
+      svg.removeEventListener("touchstart", onTouchStart);
+      svg.removeEventListener("touchmove", onTouchMove);
+      svg.removeEventListener("touchend", onTouchEnd);
+      svg.removeEventListener("touchcancel", onTouchEnd);
+      svg.removeEventListener("gesturestart", onGestureStart);
+      svg.removeEventListener("gesturechange", onGestureChange);
+      svg.removeEventListener("gestureend", onGestureEnd);
+    };
+    // Handlers read live state through refs; re-bind only when the svg mounts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [zoomable, hasShapes]);
+
+  // Mouse / pen drag-to-pan. A press only becomes a drag past DRAG_PX, so a
+  // plain click still selects a county; pointer capture starts with the drag
+  // (capturing earlier would retarget that click to the <svg>).
+  const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    suppressClick.current = false;
+    if (e.pointerType === "touch" || e.button !== 0) return;
+    dragRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, moved: false };
+  };
+  const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    const d = dragRef.current;
+    if (!d || d.id !== e.pointerId) return;
+    // Released outside the map before the drag began (no pointerup reached us).
+    if ((e.buttons & 1) === 0) { dragRef.current = null; if (d.moved) setDragging(false); return; }
+    if (!d.moved) {
+      if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < DRAG_PX) return;
+      d.moved = true;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      setDragging(true); setTip(null);
+    }
+    const cur = vbRef.current;
+    const upp = unitsPerPixel(cur, e.currentTarget.getBoundingClientRect());
+    setView(panView(cur, (e.clientX - d.x) * upp, (e.clientY - d.y) * upp, LIMITS));
+    d.x = e.clientX; d.y = e.clientY;
+  };
+  const endDrag = (e: React.PointerEvent<SVGSVGElement>) => {
+    const d = dragRef.current;
+    if (!d || d.id !== e.pointerId) return;
+    dragRef.current = null;
+    if (d.moved) { suppressClick.current = true; setDragging(false); }
+  };
+  const onKeyDown = (e: React.KeyboardEvent<SVGSVGElement>) => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    const PAN = 0.15; // of the view per arrow press
+    switch (e.key) {
+      case "ArrowLeft": stepPan(PAN, 0); break;
+      case "ArrowRight": stepPan(-PAN, 0); break;
+      case "ArrowUp": stepPan(0, PAN); break;
+      case "ArrowDown": stepPan(0, -PAN); break;
+      case "+": case "=": stepZoom(ZOOM_STEP); break;
+      case "-": case "_": stepZoom(1 / ZOOM_STEP); break;
+      case "0": resetView(); break;
+      default: return;
+    }
+    e.preventDefault();
+  };
 
   // Load + project the focused county's abstract outlines (geometry + per-
   // abstract record count and summed transaction amount, filter-aware), fading
@@ -235,12 +423,13 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
   const focused = !!focusCounty;
 
   const moveTip = (e: React.MouseEvent, title: string, lines: TipLine[]) => {
+    if (dragRef.current?.moved || pinchRef.current) return; // no tooltips mid-gesture
     const r = wrapRef.current?.getBoundingClientRect();
     if (r) setTip({ x: e.clientX - r.left + 12, y: e.clientY - r.top + 12, title, lines });
   };
 
   return (
-    <div ref={wrapRef} className="rs-choro">
+    <div ref={wrapRef} className={`rs-choro ${zoomable ? "zoomable" : ""} ${dragging ? "dragging" : ""}`}>
       {focused && (
         <button
           type="button"
@@ -250,7 +439,18 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
           ← All counties
         </button>
       )}
-      <svg viewBox={vb.map((v) => v.toFixed(2)).join(" ")} className="rs-choro-svg">
+      <svg
+        ref={svgRef}
+        viewBox={vb.map((v) => v.toFixed(3)).join(" ")}
+        className="rs-choro-svg"
+        {...(zoomable ? {
+          // Keyboard-operable map surface: arrows pan, + / − zoom, 0 resets.
+          tabIndex: 0, role: "application", "aria-label": "Texas county activity map", "aria-describedby": helpId,
+          onPointerDown, onPointerMove, onPointerUp: endDrag, onPointerCancel: endDrag, onKeyDown,
+          // A drag / pinch that ends over a county must not also select it.
+          onClickCapture: (e: React.MouseEvent) => { if (suppressClick.current) { suppressClick.current = false; e.stopPropagation(); } },
+        } : {})}
+      >
         {shapes.map((sh) => {
           const st = statMap.get(sh.name.toUpperCase());
           const isSel = selected.some((c) => c.toUpperCase() === sh.name.toUpperCase());
@@ -271,7 +471,7 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
                 // Drilled in, the county's own choropleth wash disappears — the
                 // abstract mesh alone shows where the activity is.
                 fill: isFocus && abstractShapes?.length ? "var(--surface-1)" : fillFor(sh.name),
-                cursor: st ? "pointer" : "default", opacity: focused && !isFocus ? 0.45 : 1, transition: "opacity 300ms ease",
+                cursor: st ? "pointer" : undefined, opacity: focused && !isFocus ? 0.45 : 1, transition: "opacity 300ms ease",
               }}
               pointerEvents={isFocus && abstractShapes?.length ? "none" : undefined}
               onClick={() => {
@@ -306,7 +506,7 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
                   d={ab.d}
                   className={`rs-abs ${hot ? "hot" : ""}`}
                   strokeWidth={hot ? sw(1.4) : sw(0.35)}
-                  style={{ fill: abstractFill(stat, ab.count), cursor: active && onAbstractClick ? "pointer" : "default" }}
+                  style={{ fill: abstractFill(stat, ab.count), cursor: active && onAbstractClick ? "pointer" : undefined }}
                   onClick={() => active && onAbstractClick?.(stat?.abstractId ?? ab.abstract)}
                   onMouseMove={(e) => moveTip(e, formatAbstract({ abstract: ab.abstract, survey: ab.survey, county: focusCounty, state: "TX" }), [
                     { text: active ? `${(stat?.total ?? ab.count).toLocaleString()} records` : "No activity in period" },
@@ -333,6 +533,28 @@ export function ResearchChoropleth({ stats, metric, selected, onSelect, qs = "",
       )}
       {focused && abstractShapes !== null && abstractShapes.length === 0 && (
         <div className="rs-map-note">Abstract boundaries aren't available for this county yet.</div>
+      )}
+      {zoomable && (
+        <>
+          <span id={helpId} className="rs-sr-only">
+            Drag to pan. Hold {MOD_KEY} and scroll, or pinch, to zoom. With the map focused, arrow keys pan, plus and minus zoom, and 0 resets the view.
+          </span>
+          {/* Cooperative-gesture hint: shown when a plain scroll or one-finger
+              swipe passes over the map (and keeps scrolling the page). */}
+          <div className={`rs-choro-hint ${hint.on ? "show" : ""}`} aria-hidden="true"><span>{hint.text}</span></div>
+          {/* Same control chrome as the main Map's zoom stack. */}
+          <div className="mc-zoom rs-choro-zoom" role="group" aria-label="Map zoom">
+            <button type="button" aria-label="Zoom in" title="Zoom in" onClick={() => stepZoom(ZOOM_STEP)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+            </button>
+            <button type="button" aria-label="Zoom out" title="Zoom out" onClick={() => stepZoom(1 / ZOOM_STEP)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M5 12h14" /></svg>
+            </button>
+            <button type="button" aria-label="Reset view" title={focused ? "Reset view (fit county)" : "Reset view (all of Texas)"} onClick={resetView}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="6" /><path d="M12 2v4M12 18v4M2 12h4M18 12h4" /></svg>
+            </button>
+          </div>
+        </>
       )}
       {tip && (
         <div className="rs-map-tip" style={{ left: tip.x, top: tip.y }}>
