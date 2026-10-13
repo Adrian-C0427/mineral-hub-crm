@@ -374,6 +374,12 @@ input.mono-input { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, 
 /* HighLevel Configure: Minerals filter (live split, pipelines, tag list) and the texting price. */
 .hl-help { margin: 6px 0 0; font-size: 12px; line-height: 1.5; color: var(--ink-3); }
 .form-sec > .hl-help { margin: 0; }
+/* Tags in HighLevel (Configure): the switch, then the tag names Mineral Hub writes. */
+.hl-check { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; color: var(--ink); cursor: pointer; }
+.hl-check input { margin: 0; }
+.hl-crm-tags { display: grid; gap: 8px; margin-top: 10px; }
+.hl-crm-tags-label { font-size: 11px; color: var(--ink-3); }
+.hl-remove-tags { justify-self: start; align-self: flex-start; text-align: left; margin-top: 4px; }
 .hl-note { margin: 0; display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
 .hl-note .tag { flex: none; }
 .hl-preview { display: flex; flex-direction: column; gap: 6px; }

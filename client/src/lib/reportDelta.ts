@@ -23,15 +23,17 @@ const pts1 = (r: number) => {
 
 /**
  * `d` is the change from the server (relative ratio or rate difference);
- * `invert` marks metrics where up is bad (expenses, opt-outs, time to reply).
+ * `invert` marks metrics where up is bad (expenses, opt-outs, time to reply);
+ * `neutral` marks ones where neither direction is better (people still
+ * waiting on a reply), which keep the sign but no colour.
  * Anything that rounds to 0.0 shows unsigned and neutral, never a coloured "+0%".
  */
-export function deltaView(d: number, opts: { kind?: DeltaKind; invert?: boolean } = {}): DeltaView {
+export function deltaView(d: number, opts: { kind?: DeltaKind; invert?: boolean; neutral?: boolean } = {}): DeltaView {
   const flat = Math.abs(d) < 0.0005;
   const up = d > 0;
   const fmt = opts.kind === "points" ? pts1 : pct;
   return {
     text: `${flat ? "" : up ? "+" : "−"}${fmt(Math.abs(d))}`,
-    tone: flat ? "flat" : (opts.invert ? !up : up) ? "good" : "bad",
+    tone: flat || opts.neutral ? "flat" : (opts.invert ? !up : up) ? "good" : "bad",
   };
 }

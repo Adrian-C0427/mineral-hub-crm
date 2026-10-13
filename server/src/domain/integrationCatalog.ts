@@ -73,7 +73,7 @@ export const INTEGRATION_CATALOG: ProviderDef[] = [
   },
   {
     key: "highlevel", name: "HighLevel (LeadConnector)", category: "Email & Communication", auth: "apikey", implementation: "live",
-    description: "Brings your HighLevel texting history into Reports → SMS performance: how many texts went out, who replied, how fast, who opted out, and which lists, tags and team members get the best response. Read-only — Mineral Hub never sends, edits or deletes anything in HighLevel, and the wording of your texts is never stored. Works with white-label HighLevel accounts such as XLeads.",
+    description: "Brings your HighLevel texting history into Reports → SMS performance: how many texts went out, who replied, how fast, who opted out, and which lists, tags and team members get the best response. Mineral Hub never sends texts and never stores their wording; it only reads from HighLevel — unless you turn on HighLevel tags in Configure, which lets it add and remove its own SMS and Acquisition tags (nothing else). Works with white-label HighLevel accounts such as XLeads.",
     secretLabel: "Private Integration key", secretHint: "pit-…",
     setupUrl: "https://help.gohighlevel.com/support/solutions/articles/155000003054-private-integrations-everything-you-need-to-know",
     syncable: true,

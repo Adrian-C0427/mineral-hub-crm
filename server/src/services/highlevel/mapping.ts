@@ -68,6 +68,25 @@ export interface HlSyncState {
    * a tag no stored contact had yet.
    */
   tagRefresh?: TagRefreshState;
+  /** Writing Mineral Hub's own SMS / Acquisition tags to HighLevel (config.crmTagsEnabled). */
+  crmTags?: CrmTagState;
+}
+
+/**
+ * backlog = contacts are waiting to be (re)tagged, so runs go back to back
+ * until it clears (first switch-on, or "Remove CRM tags"); removing = take
+ * every CRM tag off instead of writing them; error "permission" = HighLevel
+ * refused a tag write (the key lacks contacts.write) — retried each run.
+ */
+export interface CrmTagState {
+  backlog?: boolean; removing?: boolean; error?: "permission" | null; errorAt?: string;
+  /** Contacts whose tags were changed in HighLevel, all time. */
+  written?: number; lastWriteAt?: string;
+}
+
+/** The owner turned on "Write SMS and Acquisition tags to HighLevel". */
+export function crmTagsEnabledOf(config: unknown): boolean {
+  return !!config && typeof config === "object" && (config as Record<string, unknown>).crmTagsEnabled === true;
 }
 
 export interface TagRefreshState { startedAt: string; total: number; changed: number; finishedAt?: string; auto?: boolean }
@@ -666,7 +685,9 @@ export function planOpportunity(prev: StoredOpp | null, next: OppFields, now: Da
   }
   if (prev.deletedInHl) data.deletedInHl = false;
   const lineMayChange = prev.pipelineId !== next.pipelineId || prev.hlContactId !== next.hlContactId || prev.deletedInHl;
-  const dirtyContacts = lineMayChange ? [...new Set([prev.hlContactId, next.hlContactId].filter((c): c is string => !!c))] : [];
+  // A new funnel step changes the contact's Acquisition tag (domain/smsTags.ts).
+  const tagMayChange = prev.step !== next.step;
+  const dirtyContacts = lineMayChange || tagMayChange ? [...new Set([prev.hlContactId, next.hlContactId].filter((c): c is string => !!c))] : [];
   return { create: false, data: Object.keys(data).length ? data : null, event, dirtyContacts };
 }
 

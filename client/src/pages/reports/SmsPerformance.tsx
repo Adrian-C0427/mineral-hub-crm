@@ -12,7 +12,7 @@ import { CollapsibleSection } from "../../components/CollapsibleSection";
 import { fmtDate, fmtDateTime, num, pct } from "../../lib/format";
 import { CHART_COLORS } from "../../lib/charts";
 import {
-  BUCKET_LABEL, SCOPE_LABEL, SMALL_SAMPLE, fmtCost, fmtDuration, smsQuery, touchLabel, trendLabel, trendTitle, withRow,
+  BUCKET_LABEL, SCOPE_LABEL, SMALL_SAMPLE, fmtAvg1, fmtCost, fmtDuration, smsQuery, touchLabel, trendLabel, trendTitle, withRow,
   type BreakdownRow, type DrillRow, type SmsFilterOptions, type SmsFilters, type SmsKpis, type SmsReport, type SmsScope, type SmsStatus,
   type TouchRate, type TrendBucket, type TrendPoint,
 } from "../../lib/smsReport";
@@ -73,6 +73,7 @@ const KPI_FMT: Record<keyof SmsKpis, (k: SmsKpis) => string> = {
   optOutRate: (k) => (k.optOutRate == null ? "N/A" : pct(k.optOutRate)),
   avgTextsPerContact: (k) => (k.avgTextsPerContact == null ? "N/A" : String(Number(k.avgTextsPerContact.toFixed(1)))),
   avgResponseSeconds: (k) => fmtDuration(k.avgResponseSeconds), medianResponseSeconds: (k) => fmtDuration(k.medianResponseSeconds),
+  stillWaiting: (k) => num(k.stillWaiting), avgTextsBeforeReply: (k) => fmtAvg1(k.avgTextsBeforeReply),
   wrongNumbers: (k) => num(k.wrongNumbers), wrongNumberRate: (k) => (k.wrongNumberRate == null ? "N/A" : pct(k.wrongNumberRate)),
   opportunities: (k) => num(k.opportunities), interestedRate: (k) => (k.interestedRate == null ? "N/A" : pct(k.interestedRate)),
   offers: (k) => num(k.offers), offerAcceptanceRate: (k) => (k.offerAcceptanceRate == null ? "N/A" : pct(k.offerAcceptanceRate)),
@@ -253,7 +254,7 @@ export function SmsReportView({ filterChips, execIcon, scope, onScope, status, d
 
   /** One KPI tile: value + comparison pill (points for rates), hint and the prior value when comparing. */
   function cell(key: keyof SmsKpis, o: {
-    label: string; hint?: string; invert?: boolean; tone?: StatCell["tone"]; title?: string; onClick?: () => void;
+    label: string; hint?: string; invert?: boolean; neutral?: boolean; tone?: StatCell["tone"]; title?: string; onClick?: () => void;
   }): StatCell {
     const d = data!.deltas?.[key];
     const text = KPI_FMT[key](k);
@@ -263,7 +264,7 @@ export function SmsReportView({ filterChips, execIcon, scope, onScope, status, d
       value: (
         <>
           <span className={`rp-val ${text === "N/A" ? "rp-faint" : ""}`}>{text}</span>
-          {d != null && <DeltaPill d={d} kind={data!.deltaKind[key]} invert={o.invert} />}
+          {d != null && <DeltaPill d={d} kind={data!.deltaKind[key]} invert={o.invert} neutral={o.neutral} />}
         </>
       ),
       tone: text === "N/A" ? undefined : o.tone,
@@ -292,6 +293,7 @@ export function SmsReportView({ filterChips, execIcon, scope, onScope, status, d
       title: "All incoming texts in the period, follow-up messages included. Response rates count each person once.",
     }),
   ];
+  // Two even rows of four (sms-even): who replied or may still, then how fast, how many texts it took, and what went wrong.
   const responses: StatCell[] = [
     cell("contactsReached", {
       label: "Contacts reached", hint: "First text delivered in this period",
@@ -307,10 +309,20 @@ export function SmsReportView({ filterChips, execIcon, scope, onScope, status, d
       hint: k.contactsReached ? `${num(k.contactsResponded)} of ${num(k.contactsReached)} reached` : "Nobody reached in this period",
       onClick: () => open({ title: "People who replied", set: "responded" }),
     }),
+    cell("stillWaiting", {
+      label: "Still waiting", neutral: true, hint: `No reply yet, texted in the last ${data.windowDays} days`,
+      title: `People first reached in this period who haven't replied yet, but one of our texts reached them in the last ${data.windowDays} days — so they can still reply and be counted. They aren't counted as non-responders until ${data.windowDays} days pass without a reply.`,
+      onClick: () => open({ title: "Still waiting on a reply", set: "stillWaiting" }),
+    }),
     cell("medianResponseSeconds", {
       label: "Time to first reply", invert: true,
       hint: k.avgResponseSeconds == null ? "No replies in this period" : `Typical (median) · average ${fmtDuration(k.avgResponseSeconds)}`,
       title: "From the first text that reached someone to their reply. Half of the replies came faster than this.",
+      onClick: () => open({ title: "People who replied", set: "responded" }),
+    }),
+    cell("avgTextsBeforeReply", {
+      label: "Texts before a reply", invert: true, hint: "Average for people who replied",
+      title: "How many of our texts reached each person who replied, counting the one they answered, on average.",
       onClick: () => open({ title: "People who replied", set: "responded" }),
     }),
     cell("optOutRate", {
@@ -397,7 +409,7 @@ export function SmsReportView({ filterChips, execIcon, scope, onScope, status, d
         <div className="rp-kgroup-label">Outreach</div>
         <StatStrip min={200} cells={outreach} />
       </div>
-      <div className="rp-kgroup">
+      <div className="rp-kgroup sms-even">
         <div className="rp-kgroup-label">Responses</div>
         <StatStrip min={170} cells={responses} />
       </div>
@@ -488,6 +500,15 @@ export function SmsReportView({ filterChips, execIcon, scope, onScope, status, d
               ? <button type="button" className="link-btn" onClick={() => open({ title: "People who replied late", set: "lateReply" })}>{num(data.notes.lateReplies)} {data.notes.lateReplies === 1 ? "person" : "people"} replied after the window</button>
               : "Nobody replied after the window"} — shown as “Replied late”, not as a response.
           </li>
+          <li>
+            <b>Still waiting</b> counts people first reached in this period who haven’t replied yet, but one of our texts reached them in the last
+            {" "}{data.windowDays} days (a failed text doesn’t count) — they can still reply in time to count. Nobody is treated as a non-responder
+            just because they haven’t replied yet. They do count as reached, so a recent period’s response rate can still rise as they reply.{" "}
+            {k.stillWaiting > 0
+              ? <button type="button" className="link-btn" onClick={() => open({ title: "Still waiting on a reply", set: "stillWaiting" })}>{num(k.stillWaiting)} {k.stillWaiting === 1 ? "person is" : "people are"} still waiting</button>
+              : "Nobody is still waiting"} ·{" "}
+            <button type="button" className="link-btn" onClick={() => open({ title: "People with no reply yet", set: "noReply" })}>see everyone with no reply, waiting or not</button>.
+          </li>
           <li><b>One person = one response.</b> Follow-up messages in the same conversation never add to response numbers. (“Replies received” counts every incoming text.)</li>
           <li><b>Opt-outs are counted separately.</b> A first reply asking to stop (STOP, unsubscribe, remove me…) is an opt-out, never a response.</li>
           <li>
@@ -500,7 +521,10 @@ export function SmsReportView({ filterChips, execIcon, scope, onScope, status, d
               ? <button type="button" className="link-btn" onClick={() => open({ title: "People who texted us first", set: "inboundFirst" })}>{num(data.notes.inboundFirstContacts)} in this period</button>
               : "none in this period"}.
           </li>
-          <li><b>Time to first reply</b> runs from the first text that reached the person to their reply. “Typical” is the median: half of the replies came faster.</li>
+          <li>
+            <b>Time to first reply</b> runs from the first text that reached the person to their reply. “Typical” is the median: half of the replies came faster.
+            {" "}<b>Texts before a reply</b> is how many of our texts reached each person who replied, counting the one they answered, on average.
+          </li>
           <li>
             <b>Wrong numbers</b> are people who replied that we had the wrong person, or whose number XLeads tagged “wrong number”. That reply is
             not a response and doesn't end the outreach — XLeads usually moves on to the person's next number.
@@ -533,10 +557,6 @@ export function SmsReportView({ filterChips, execIcon, scope, onScope, status, d
           <li>
             <b>Team members:</b> a reply is credited to whoever sent the person’s first text; for automated texts, to the person the contact is assigned to
             in HighLevel; otherwise “Automated / unassigned”. Texts sent are credited to the sender, or the assignee for automated texts.
-          </li>
-          <li>
-            Still waiting on a reply:{" "}
-            <button type="button" className="link-btn" onClick={() => open({ title: "People with no reply yet", set: "noReply" })}>see who hasn’t replied</button>.
           </li>
         </ul>
       </CollapsibleSection>

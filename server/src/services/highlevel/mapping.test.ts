@@ -321,7 +321,7 @@ describe("opportunities", () => {
       at: T("2026-10-12T11:00:00.000Z"),
     });
     expect(moved.data).toMatchObject({ stageId: "s2", step: "offer", maxRank: 2, offerAt: T("2026-10-12T11:00:00.000Z") });
-    expect(moved.dirtyContacts).toEqual([]); // same pipeline: the line can't change
+    expect(moved.dirtyContacts).toEqual(["c1"]); // same pipeline (the line can't change), but the step did: the Acquisition tag follows it
     // HighLevel's change time didn't move: the event is dated when we saw it.
     const stale = planOpportunity(before, fields({ pipelineStageId: "s2", lastStageChangeAt: "2026-09-05T00:00:00.000Z" }), NOW);
     expect(stale.event!.at).toEqual(NOW);

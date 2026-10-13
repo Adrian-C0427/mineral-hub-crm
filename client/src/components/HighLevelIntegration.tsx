@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError } from "../api/client";
-import { Modal, Spinner, ConfirmChanges } from "./ui";
+import { Modal, Spinner, ConfirmChanges, ConfirmDialog } from "./ui";
 import { Tag, ProgressBar, FormSection, Segmented, StatStrip } from "./kit";
 import { Select } from "./Select";
 import { fmtDateTime } from "../lib/format";
 import {
   HL_POLL_MS, HL_SCOPES, HL_SYNC_EVERY, RESPONSE_WINDOW_CHOICES, previewText, importProgress, importingText, totalsText,
-  lastRunText, missingScopesText, tagRefreshText, tagLine, setTagLine, togglePipeline, filterTags, previewCountsText, parsePrice,
+  lastRunText, missingScopesText, tagRefreshText, crmTagsText, CRM_TAG_GROUPS, tagLine, setTagLine, togglePipeline, filterTags, previewCountsText, parsePrice,
   type HighLevelStatus, type HighLevelScopeSettings, type LineCounts, type SmsScope, type TagLine,
 } from "../lib/highlevel";
 
@@ -41,7 +41,7 @@ export function useHighLevelStatus(enabled: boolean, refreshKey: string, onSettl
 
   useEffect(() => { if (enabled) void refresh(); }, [enabled, refreshKey, refresh]);
 
-  const busyIn = (s: HighLevelStatus | null) => s?.phase === "importing" || !!s?.tagRefresh?.running;
+  const busyIn = (s: HighLevelStatus | null) => s?.phase === "importing" || !!s?.tagRefresh?.running || !!s?.crmTags?.working;
   const working = enabled && busyIn(status);
   useEffect(() => {
     if (!working) return;
@@ -74,6 +74,7 @@ export function HighLevelSummary({ s }: { s: HighLevelStatus }) {
   const run = s.status === "ERROR" && s.lastRun && !s.lastRun.ok ? null : lastRunText(s.lastRun, s.phase);
   const missing = missingScopesText(s.missingScopes);
   const retag = s.phase === "live" ? tagRefreshText(s.tagRefresh, fmtDateTime) : null;
+  const crm = s.phase === "live" ? crmTagsText(s.crmTags) : null;
   return (
     <div className="hl-summary">
       {s.locationName && <p className="integration-meta">Location: <code>{s.locationName}</code></p>}
@@ -96,6 +97,7 @@ export function HighLevelSummary({ s }: { s: HighLevelStatus }) {
           <p className="integration-meta">{totalsText(s)} · checked automatically {HL_SYNC_EVERY}.</p>
           {retag && <p className={s.tagRefresh?.running ? "hl-line" : "integration-meta"}>{retag}</p>}
           {s.tagRefresh?.running && <ProgressBar value={importProgress(s.tagRefresh.done, s.tagRefresh.total)} />}
+          {crm && <p className={crm.warn ? "hl-warn" : "integration-meta"}>{crm.text}</p>}
         </>
       )}
       {run && s.phase !== "preview" && <p className={s.lastRun?.ok ? "integration-meta" : "error-text integration-err"}>{run}</p>}
@@ -133,8 +135,9 @@ export function HighLevelConnectModal({ name, setupUrl, locationId, onClose, onC
     <Modal title={locationId ? `Replace the ${name} key` : `Connect ${name}`} onClose={onClose} dirty={!!secret}
       footer={<><button onClick={onClose}>Cancel</button><button className="primary" onClick={connect} disabled={busy}>{busy ? "Checking with HighLevel…" : "Check & connect"}</button></>}>
       <p className="muted" style={{ marginTop: 0 }}>
-        Mineral Hub reads your HighLevel texting history to build Reports → SMS performance. It is read-only: nothing is
-        ever sent, changed or deleted in HighLevel, and the wording of your texts is never stored.
+        Mineral Hub reads your HighLevel texting history to build Reports → SMS performance. It only reads — nothing is
+        sent, changed or deleted in HighLevel unless you later turn on HighLevel tags in Configure, which adds and removes
+        only Mineral Hub's own tags — and the wording of your texts is never stored.
       </p>
       <ol className="hl-steps">
         <li>In HighLevel (your XLeads account works), open <b>Settings → Private Integrations</b> and click <b>Create new integration</b>.</li>
@@ -181,7 +184,7 @@ const LINE_OPTIONS: { value: TagLine; label: string }[] = [
  */
 export function HighLevelConfigureModal({ name, config, onClose, onSaved }: {
   name: string;
-  config: { responseWindowDays?: number; notes?: string; pricePerSegment?: number | null };
+  config: { responseWindowDays?: number; notes?: string; pricePerSegment?: number | null; crmTagsEnabled?: boolean };
   onClose: () => void;
   /** message: shown instead of the plain "Settings saved." (e.g. a tag re-read started). */
   onSaved: (message?: string) => void;
@@ -197,6 +200,9 @@ export function HighLevelConfigureModal({ name, config, onClose, onSaved }: {
   const [price, setPrice] = useState(initialPrice);
   const [windowDays, setWindowDays] = useState(String(config.responseWindowDays ?? 30));
   const [notes, setNotes] = useState(config.notes ?? "");
+  const [crmTags, setCrmTags] = useState(!!config.crmTagsEnabled);
+  const [removing, setRemoving] = useState(false);
+  const [removeBusy, setRemoveBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -224,7 +230,8 @@ export function HighLevelConfigureModal({ name, config, onClose, onSaved }: {
 
   const edit = (next: SmsScope) => { setDraft(next); setTouched(true); };
 
-  const dirty = touched || price !== initialPrice || windowDays !== String(config.responseWindowDays ?? 30) || notes !== (config.notes ?? "");
+  const crmTagsChanged = crmTags !== !!config.crmTagsEnabled;
+  const dirty = touched || price !== initialPrice || windowDays !== String(config.responseWindowDays ?? 30) || notes !== (config.notes ?? "") || crmTagsChanged;
 
   function requestSave() {
     if (parsePrice(price) === "invalid") { setError("Enter the price per text segment in dollars, like 0.0091 — or leave it empty."); return; }
@@ -241,11 +248,14 @@ export function HighLevelConfigureModal({ name, config, onClose, onSaved }: {
           responseWindowDays: Number(windowDays), notes,
           ...(p !== "invalid" ? { pricePerSegment: p } : {}),
           ...(touched && draft ? { scope: draft } : {}),
+          ...(crmTagsChanged ? { crmTagsEnabled: crmTags } : {}),
         },
       });
       onSaved(r?.tagRefreshStarted
         ? "Settings saved. A tag in your filter isn't on any texted contact yet, so every contact's tags are being re-read from HighLevel — the card shows the progress."
-        : undefined);
+        : crmTagsChanged && crmTags
+          ? "Settings saved. Mineral Hub is now tagging your texted contacts in HighLevel — the card shows the progress."
+          : undefined);
     } catch (e) { setError(e instanceof ApiError ? e.message : "Failed to save"); }
     finally { setBusy(false); }
   }
@@ -279,6 +289,31 @@ export function HighLevelConfigureModal({ name, config, onClose, onSaved }: {
         </div>
       </FormSection>
 
+      <FormSection title="Tags in HighLevel">
+        <label className="hl-check">
+          <input type="checkbox" checked={crmTags} onChange={(e) => setCrmTags(e.target.checked)} />
+          <span>Write SMS and Acquisition tags to your HighLevel contacts</span>
+        </label>
+        <p className="hl-help">
+          Mineral Hub works these out from its own record of every text and from your minerals pipelines — the same numbers as
+          Reports — and keeps them up to date {HL_SYNC_EVERY}. It only ever adds or removes these tags; your other tags are never
+          touched. Handy for smart lists and automations in HighLevel. HighLevel shows tag names in lower case.
+        </p>
+        <div className="hl-crm-tags">
+          {CRM_TAG_GROUPS.map((g) => (
+            <div key={g.label}>
+              <div className="hl-crm-tags-label">{g.label}</div>
+              <div className="hl-scopes">{g.tags.map((t) => <Tag key={t}>{t}</Tag>)}</div>
+            </div>
+          ))}
+        </div>
+        <p className="hl-help">
+          Needs one more permission on your key: in XLeads, open <b>Settings → Private Integrations</b>, edit <b>Mineral Hub CRM</b>,
+          and add <code>contacts.write</code>. The key itself stays the same.
+        </p>
+        <button type="button" className="link-btn set-btn-danger-text hl-remove-tags" onClick={() => setRemoving(true)}>Remove all Mineral Hub tags from HighLevel…</button>
+      </FormSection>
+
       <FormSection title="Replies and syncing">
         <div className="field">
           <label>Response window</label>
@@ -298,6 +333,23 @@ export function HighLevelConfigureModal({ name, config, onClose, onSaved }: {
       </FormSection>
       {error && <div className="error-text" role="alert">{error}</div>}
       {confirming && <ConfirmChanges busy={busy} onCancel={() => setConfirming(false)} onConfirm={save} />}
+      {removing && (
+        <ConfirmDialog
+          title="Remove Mineral Hub's tags from HighLevel?"
+          message="This turns tag writing off and takes every SMS and Acquisition tag Mineral Hub added off your HighLevel contacts. Your other tags stay. Reports aren't affected. You can turn tags back on any time."
+          confirmLabel="Remove the tags" danger busy={removeBusy}
+          onCancel={() => setRemoving(false)}
+          onConfirm={async () => {
+            setRemoveBusy(true);
+            try {
+              await api.post("/integrations/highlevel/crm-tags/remove", {});
+              setRemoving(false);
+              onSaved("Removing Mineral Hub's tags from HighLevel — the card shows the progress.");
+            } catch (e) { setRemoving(false); setError(e instanceof ApiError ? e.message : "Couldn't start removing the tags."); }
+            finally { setRemoveBusy(false); }
+          }}
+        />
+      )}
     </Modal>
   );
 }

@@ -18,7 +18,7 @@ const db = vi.hoisted(() => {
     return typeof r === "function" ? (r as (a: unknown) => unknown)(args) : r;
   };
   const model = (name: string) => new Proxy({}, { get: (_t, m) => record(`${name}.${String(m)}`) });
-  const prisma = new Proxy({}, { get: (_t, name) => model(String(name)) });
+  const prisma = new Proxy({}, { get: (_t, name) => (String(name).startsWith("$") ? record(String(name)) : model(String(name))) });
   return { calls, results, prisma };
 });
 const hl = vi.hoisted(() => ({ check: vi.fn() }));
@@ -205,6 +205,48 @@ describe("disconnect and listing", () => {
       connected: true, status: "CONNECTED", locationId: LOC, locationName: "Loc", phase: "importing",
       imported: 1234, contacts: 300, responseWindowDays: 14, storageEstimateMb: 3.9, preview: { texts: 6000 },
     });
+  });
+});
+
+describe("HighLevel tags written by Mineral Hub", () => {
+  const base = (extra: Record<string, unknown> = {}) => row({ locationId: LOC, _secret: "v1:x", responseWindowDays: 30, hlSync: { phase: "live" }, ...extra });
+  const configWrites = () => (db.calls["integration.update"] ?? []) as { data: { config: Record<string, unknown> } }[];
+
+  it("switching on saves the setting and marks every texted contact to be checked", async () => {
+    db.results["integration.findUnique"] = base();
+    const r = await call("PATCH", "/highlevel", { config: { crmTagsEnabled: true } });
+    expect(r.status).toBe(200);
+    expect(configWrites()[0].data.config.crmTagsEnabled).toBe(true);
+    expect(db.calls["highLevelContact.updateMany"]).toContainEqual({
+      where: { organizationId: ORG, deletedInHl: false, outboundTotal: { gt: 0 } }, data: { crmTagsPending: true },
+    });
+    expect(r.body.config.crmTagsEnabled).toBe(true);
+  });
+
+  it("switching off stops writing and leaves HighLevel's tags alone", async () => {
+    db.results["integration.findUnique"] = base({ crmTagsEnabled: true });
+    expect((await call("PATCH", "/highlevel", { config: { crmTagsEnabled: false } })).status).toBe(200);
+    expect(db.calls["highLevelContact.updateMany"]).toContainEqual({ where: { organizationId: ORG, crmTagsPending: true }, data: { crmTagsPending: false } });
+    expect(db.calls["$executeRaw"]).toBeUndefined();
+  });
+
+  it("other providers never take the setting", async () => {
+    db.results["integration.findUnique"] = row({ schedule: "manual" });
+    await call("PATCH", "/resend", { config: { crmTagsEnabled: true, notes: "x" } });
+    expect(configWrites()[0]?.data.config.crmTagsEnabled).toBeUndefined();
+  });
+
+  it("Remove CRM tags turns the setting off and marks every contact carrying one; only once the import is done", async () => {
+    db.results["$queryRaw"] = [{ n: 0 }]; // the status's "contacts carrying a CRM tag" count
+    db.results["integration.findUnique"] = base({ hlSync: { phase: "importing" } });
+    expect((await call("POST", "/highlevel/crm-tags/remove", {})).status).toBe(409);
+    db.results["integration.findUnique"] = base({ crmTagsEnabled: true });
+    const r = await call("POST", "/highlevel/crm-tags/remove", {});
+    expect(r.status).toBe(200);
+    expect(configWrites()[0].data.config.crmTagsEnabled).toBe(false);
+    expect(JSON.stringify(db.calls["$executeRaw"])).toContain("hl:crm-untag");
+    const hlSync = configWrites()[configWrites().length - 1].data.config.hlSync as Record<string, unknown>;
+    expect(hlSync.crmTags).toMatchObject({ removing: true, backlog: true });
   });
 });
 

@@ -134,6 +134,14 @@ export interface SmsKpis {
   avgTextsPerContact: number | null;
   avgResponseSeconds: number | null;
   medianResponseSeconds: number | null;
+  /**
+   * Cohort contacts with no reply yet who got a text that reached them within
+   * the response window of now: they can still reply and be counted, so they
+   * aren't non-responders yet. They stay in "reached" like everyone else.
+   */
+  stillWaiting: number;
+  /** Average reached texts before the reply, over the cohort contacts who replied. */
+  avgTextsBeforeReply: number | null;
   /** Cohort contacts who hit a wrong number (a flagged reply or an XLeads wrong-number tag). */
   wrongNumbers: number;
   wrongNumberRate: number | null;
@@ -160,23 +168,36 @@ export interface VolumeTotals {
   /** Billable segments of the texts sent (a text not yet counted = 1), and how many weren't counted yet. */
   segments?: number; unknownSegments?: number;
 }
-export interface CohortTotals { reached: number; responded: number; optedOut: number; avgSeconds: number | null; medianSeconds: number | null }
+export interface CohortTotals {
+  reached: number; responded: number; optedOut: number; avgSeconds: number | null; medianSeconds: number | null;
+  /** Reached texts the repliers got up to their reply, summed (for texts before a reply). */
+  respondedTexts?: number;
+}
 
 /** Sum the cohort's (touches, outcome) rows. */
 export function cohortCounts(rows: readonly TouchOutcomeCount[]) {
-  let reached = 0, responded = 0, optedOut = 0, lateReplies = 0;
+  let reached = 0, responded = 0, optedOut = 0, lateReplies = 0, respondedTexts = 0;
   for (const r of rows) {
     if (r.touches < 1) continue;
     reached += r.count;
-    if (r.outcome === "RESPONDED") responded += r.count;
+    if (r.outcome === "RESPONDED") { responded += r.count; respondedTexts += r.touches * r.count; }
     else if (r.outcome === "OPTED_OUT") optedOut += r.count;
     else if (r.outcome === "LATE_REPLY") lateReplies += r.count;
   }
-  return { reached, responded, optedOut, lateReplies };
+  return { reached, responded, optedOut, lateReplies, respondedTexts };
 }
+
+/**
+ * A contact with no reply yet who got a text that reached them at or after
+ * this instant can still reply and be counted: summarizeContact accepts a
+ * reply up to windowDays after the latest REACHED text (a failed one doesn't
+ * restart the window).
+ */
+export const waitingSince = (now: Date, windowDays: number) => new Date(now.getTime() - windowDays * DAY_MS);
 
 /** The newer sections' headline figures; each is optional so a caller can leave a section out. */
 export interface KpiSections {
+  stillWaiting?: number;
   wrongNumbers?: number;
   funnel?: FunnelSummary;
   cost?: CostSummary;
@@ -201,6 +222,8 @@ export function computeKpis(v: VolumeTotals, c: CohortTotals, x: KpiSections = {
     // A median/average of nobody is N/A, not 0 seconds.
     avgResponseSeconds: c.responded > 0 ? c.avgSeconds : null,
     medianResponseSeconds: c.responded > 0 ? c.medianSeconds : null,
+    stillWaiting: x.stillWaiting ?? 0,
+    avgTextsBeforeReply: c.respondedTexts == null ? null : ratio(c.respondedTexts, c.responded),
     wrongNumbers: wrong,
     wrongNumberRate: ratio(wrong, c.reached),
     opportunities: step("opportunity"),
@@ -227,6 +250,7 @@ export const DELTA_KIND: Record<keyof SmsKpis, DeltaKind> = {
   contactsTexted: "relative", contactsReached: "relative", contactsResponded: "relative",
   responseRate: "points", optedOut: "relative", optOutRate: "points", avgTextsPerContact: "relative",
   avgResponseSeconds: "relative", medianResponseSeconds: "relative",
+  stillWaiting: "relative", avgTextsBeforeReply: "relative",
   wrongNumbers: "relative", wrongNumberRate: "points",
   opportunities: "relative", interestedRate: "points", offers: "relative", offerAcceptanceRate: "points", closedDeals: "relative",
   textingCost: "relative", costPerReply: "relative", costPerOpportunity: "relative", costPerOffer: "relative", costPerClosedDeal: "relative",
@@ -687,6 +711,8 @@ export function parseSmsFilters(q: Record<string, unknown>): SmsFilters {
 
 export const DRILL_SETS = [
   "texted", "reached", "responded", "optedOut", "noReply", "lateReply", "inboundFirst",
+  // No reply yet, but a text reached them within the response window (see waitingSince).
+  "stillWaiting",
   // Wrong numbers, and the people outside "minerals" texted in the period.
   "wrongNumber", "unclassified", "realEstate",
   // Funnel steps (people at or past the step), dead opportunities, replies no team member answered.

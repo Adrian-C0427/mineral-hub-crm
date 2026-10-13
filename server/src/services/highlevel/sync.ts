@@ -48,17 +48,18 @@ import {
   summarizeContact, carrierHealth, FAILED_STATUSES, PENDING_STATUSES, type SmsMessageInput, type HealthInput,
 } from "../../domain/smsMetrics.js";
 import { classifyContact, suggestScope } from "../../domain/smsScope.js";
+import { desiredCrmTags, tagDiff, CRM_TAGS } from "../../domain/smsTags.js";
 import { HighLevelClient, HighLevelError, HL_AUTH_MESSAGE, type HlExportPage, type HlOpportunity } from "./client.js";
 import {
   readSyncState, responseWindowOf, toMessageRow, messageChanged, importStartDate, advanceCheckpoint,
   formatStartDate, startDateIgnored, toContactFields, toUserRefs, isDue, phaseAfterRun, storageEstimateMb,
   connectErrorMessage, rescanPatch, tagsChanged, weeklyRefreshLimit, toPipelineRefs, toTagNames, validTimezone,
   readPipelines, readTags, savedScopeOf, effectiveScope, sameScope, isPermissionRefusal, toOpportunityFields,
-  unknownStage, planOpportunity, healthKeys, healthAlert, healthNotice, tagRefreshRunning, tagRefreshEtaMinutes,
+  unknownStage, planOpportunity, healthKeys, healthAlert, healthNotice, tagRefreshRunning, tagRefreshEtaMinutes, crmTagsEnabledOf,
   PAGE_LIMIT, STATUS_LOOKBACK_MS, USERS_REFRESH_MS, CONTACT_REFRESH_MS, CONTACT_ACTIVE_DAYS, CONTACT_WEEKLY_MS,
   FAILURES_BEFORE_ERROR, META_REFRESH_MS, OPP_PAGE_LIMIT, IMPORT_OPPS_EVERY_MS, SUMMARY_VERSION,
   type HlSyncState, type HlPhase, type HlLastRun, type HlUserRef, type HlPipelineRef, type MessageRow,
-  type StoredOpp, type StageEventRow, type HealthWindow, type TagRefreshState,
+  type StoredOpp, type StageEventRow, type HealthWindow, type TagRefreshState, type CrmTagState,
 } from "./mapping.js";
 
 export const HIGHLEVEL = "highlevel";
@@ -140,6 +141,11 @@ export interface HighLevelStatus {
   storageEstimateMb: number | null;
   /** Optional read permissions the key lacks (e.g. "opportunities.readonly"). */
   missingScopes: string[];
+  /** Mineral Hub's own SMS / Acquisition tags in HighLevel (off unless the owner turns it on). */
+  crmTags: {
+    enabled: boolean; removing: boolean; working: boolean; pending: number; tagged: number;
+    error: "permission" | null; lastWriteAt: string | null; written: number;
+  };
   /** "Re-read tags now" — the latest one, while running and after. */
   tagRefresh: {
     running: boolean; startedAt: string; finishedAt: string | null; auto: boolean;
@@ -167,6 +173,14 @@ export async function highLevelStatus(organizationId: string): Promise<HighLevel
   const t = state.tagRefresh;
   const running = !!t && tagRefreshRunning(state);
   const pending = t && running ? await prisma.highLevelContact.count({ where: tagRefreshPendingWhere(organizationId, t) }) : 0;
+  const crm = state.crmTags ?? {};
+  const crmEnabled = crmTagsEnabledOf(cfg);
+  const [crmPending, crmTagged] = crmEnabled || crm.removing || crm.backlog
+    ? await Promise.all([
+      prisma.highLevelContact.count({ where: { organizationId, crmTagsPending: true, deletedInHl: false } }),
+      countCrmTagged(organizationId),
+    ])
+    : [0, 0];
   return {
     connected: status !== "NOT_CONNECTED",
     status,
@@ -182,6 +196,10 @@ export async function highLevelStatus(organizationId: string): Promise<HighLevel
     responseWindowDays: responseWindowOf(cfg),
     storageEstimateMb: hasState ? storageEstimateMb(texts) : null,
     missingScopes: Array.isArray(state.missingScopes) ? state.missingScopes : [],
+    crmTags: {
+      enabled: crmEnabled, removing: !!crm.removing, working: !!crm.backlog || !!crm.removing, pending: crmPending, tagged: crmTagged,
+      error: crm.error ?? null, lastWriteAt: crm.lastWriteAt ?? null, written: crm.written ?? 0,
+    },
     tagRefresh: t ? {
       running, startedAt: t.startedAt, finishedAt: t.finishedAt ?? null, auto: !!t.auto,
       total: t.total, done: running ? Math.max(0, t.total - pending) : t.total, changed: t.changed ?? 0,
@@ -198,6 +216,54 @@ export async function highLevelStatus(organizationId: string): Promise<HighLevel
  * the import itself reads every contact's current tags. Returns false when
  * it can't start (not live) and leaves a running one untouched.
  */
+// --- Mineral Hub's own HighLevel tags ------------------------------------------------------
+
+const CRM_TAGS_LOWER = CRM_TAGS.map((t) => t.toLowerCase());
+
+/** Contacts currently carrying at least one CRM tag (HighLevel stores tags lower-cased). */
+async function countCrmTagged(organizationId: string): Promise<number> {
+  const r = await prisma.$queryRaw<{ n: number }[]>(Prisma.sql`/* hl:crm-tagged */
+    SELECT count(*)::int AS n FROM "HighLevelContact" c
+    WHERE c."organizationId" = ${organizationId} AND NOT c."deletedInHl"
+      AND EXISTS (SELECT 1 FROM unnest(c."tags") t WHERE lower(t) = ANY(${CRM_TAGS_LOWER}::text[]))`);
+  return r[0]?.n ?? 0;
+}
+
+/**
+ * Turn CRM tags on (the settings route calls this after saving
+ * crmTagsEnabled = true): every texted contact is checked once, in
+ * back-to-back runs — contacts whose tags are already right cost no
+ * HighLevel request.
+ */
+export async function startCrmTagging(organizationId: string): Promise<void> {
+  const row = await prisma.integration.findUnique({ where: { organizationId_provider: { organizationId, provider: HIGHLEVEL } } });
+  if (!row || row.status === "NOT_CONNECTED") return;
+  await prisma.highLevelContact.updateMany({ where: { organizationId, deletedInHl: false, outboundTotal: { gt: 0 } }, data: { crmTagsPending: true } });
+  const prev = readSyncState(row.config).crmTags ?? {};
+  await saveState(row.id, { crmTags: { ...prev, backlog: true, removing: false, error: null } });
+}
+
+/** Turned off: stop writing (tags already in HighLevel stay until "Remove CRM tags"). */
+export async function stopCrmTagging(organizationId: string): Promise<void> {
+  const row = await prisma.integration.findUnique({ where: { organizationId_provider: { organizationId, provider: HIGHLEVEL } } });
+  if (!row) return;
+  await prisma.highLevelContact.updateMany({ where: { organizationId, crmTagsPending: true }, data: { crmTagsPending: false } });
+  const prev = readSyncState(row.config).crmTags ?? {};
+  if (row.status !== "NOT_CONNECTED") await saveState(row.id, { crmTags: { ...prev, backlog: false, removing: false } });
+}
+
+/** "Remove CRM tags": take every CRM tag off every contact in HighLevel (the setting is turned off by the caller). */
+export async function startCrmTagRemoval(organizationId: string): Promise<void> {
+  const row = await prisma.integration.findUnique({ where: { organizationId_provider: { organizationId, provider: HIGHLEVEL } } });
+  if (!row || row.status === "NOT_CONNECTED") return;
+  await prisma.$executeRaw(Prisma.sql`/* hl:crm-untag */
+    UPDATE "HighLevelContact" c SET "crmTagsPending" = true
+    WHERE c."organizationId" = ${organizationId} AND NOT c."deletedInHl"
+      AND EXISTS (SELECT 1 FROM unnest(c."tags") t WHERE lower(t) = ANY(${CRM_TAGS_LOWER}::text[]))`);
+  const prev = readSyncState(row.config).crmTags ?? {};
+  await saveState(row.id, { crmTags: { ...prev, backlog: true, removing: true, error: null } });
+}
+
 export async function startTagRefresh(organizationId: string, opts: { auto?: boolean } = {}): Promise<boolean> {
   const row = await prisma.integration.findUnique({ where: { organizationId_provider: { organizationId, provider: HIGHLEVEL } } });
   if (!row || row.status === "NOT_CONNECTED") return false;
@@ -232,6 +298,8 @@ interface Stats {
   opportunities: number; stageMoves: number; rescanned: number;
   /** Contacts whose tags changed when looked up again this run. */
   tagsChanged: number;
+  /** Contacts whose CRM tags were written to HighLevel this run. */
+  crmTagged: number;
 }
 
 interface Ctx {
@@ -644,7 +712,7 @@ async function recomputeSummaries(ctx: Ctx): Promise<void> {
     const { scope } = effectiveScope(cur?.config);
     const batch = await prisma.highLevelContact.findMany({
       where: staleSummaryWhere(ctx.org, windowDays),
-      select: { id: true, hlId: true, tags: true, updatedAt: true },
+      select: { id: true, hlId: true, tags: true, smsOptedOut: true, updatedAt: true },
       orderBy: { id: "asc" },
       take: SUMMARY_BATCH,
     });
@@ -657,9 +725,17 @@ async function recomputeSummaries(ctx: Ctx): Promise<void> {
       }),
       prisma.highLevelOpportunity.findMany({
         where: { organizationId: ctx.org, hlContactId: { in: ids }, deletedInHl: false },
-        select: { hlContactId: true, pipelineId: true },
+        select: { hlContactId: true, pipelineId: true, step: true },
       }),
     ]);
+    // CRM tags (when on, or being removed): does HighLevel need a change for this contact?
+    const crm = readSyncState(cur?.config).crmTags ?? {};
+    const tagging = crmTagsEnabledOf(cur?.config) || !!crm.removing;
+    const mineralSteps = new Map<string, string[]>();
+    for (const o of opps) {
+      if (!o.hlContactId || !scope.mineralPipelineIds.includes(o.pipelineId)) continue;
+      mineralSteps.set(o.hlContactId, [...(mineralSteps.get(o.hlContactId) ?? []), o.step]);
+    }
     const byContact = new Map<string, SmsMessageInput[]>();
     for (const m of msgs) {
       const list = byContact.get(m.hlContactId) ?? [];
@@ -676,9 +752,17 @@ async function recomputeSummaries(ctx: Ctx): Promise<void> {
     await prisma.$transaction(batch.map((b) => {
       const s = summarizeContact(byContact.get(b.hlId) ?? [], windowDays);
       const line = classifyContact(b.tags, pipelinesOf.get(b.hlId) ?? [], scope);
+      const want = !tagging || crm.removing ? [] : desiredCrmTags({
+        touches: s.touches, outcome: s.outcome, smsOptedOut: b.smsOptedOut,
+        opportunities: (mineralSteps.get(b.hlId) ?? []).map((step) => ({ step })),
+      });
+      const diff = tagging ? tagDiff(b.tags, want) : { add: [], remove: [] };
       return prisma.highLevelContact.updateMany({
         where: { id: b.id, updatedAt: b.updatedAt },
-        data: { ...s, line, summaryDirty: false, summaryWindowDays: windowDays },
+        data: {
+          ...s, line, summaryDirty: false, summaryWindowDays: windowDays,
+          ...(tagging ? { crmTagsPending: diff.add.length + diff.remove.length > 0 } : {}),
+        },
       });
     }));
     ctx.stats.summaries += batch.length;
@@ -763,6 +847,86 @@ async function fetchContacts(ctx: Ctx): Promise<void> {
     }
   };
   await Promise.all(Array.from({ length: CONTACT_CONCURRENCY }, worker));
+  if (failure) throw failure;
+}
+
+// --- Writing CRM tags ------------------------------------------------------------------------
+
+const CRM_TAGS_PER_RUN = 2_000;
+const CRM_TAG_CONCURRENCY = 2;
+
+/**
+ * Step 7b: put each pending contact's CRM tags right in HighLevel — add the
+ * missing ones, remove the ones that no longer apply, nothing else (see
+ * domain/smsTags.ts). Desired tags come from the contact's CURRENT summary
+ * and minerals opportunities, so a contact whose summary is still being
+ * recomputed waits a run. A refused write (the key lacks contacts.write)
+ * stops this step for the run and is shown on the card — the rest of the
+ * sync carries on.
+ */
+async function writeCrmTags(ctx: Ctx): Promise<void> {
+  const cur = await prisma.integration.findUnique({ where: { id: ctx.rowId }, select: { config: true } });
+  const enabled = crmTagsEnabledOf(cur?.config);
+  const crm = readSyncState(cur?.config).crmTags ?? {};
+  if (!enabled && !crm.removing) return;
+  const { scope } = effectiveScope(cur?.config);
+  const batch = await prisma.highLevelContact.findMany({
+    where: { organizationId: ctx.org, crmTagsPending: true, deletedInHl: false, summaryDirty: false },
+    select: { id: true, hlId: true, tags: true, touches: true, outcome: true, smsOptedOut: true, updatedAt: true },
+    orderBy: { updatedAt: "asc" },
+    take: CRM_TAGS_PER_RUN,
+  });
+  if (!batch.length) return;
+  const opps = crm.removing ? [] : await prisma.highLevelOpportunity.findMany({
+    where: { organizationId: ctx.org, hlContactId: { in: batch.map((b) => b.hlId) }, deletedInHl: false, pipelineId: { in: scope.mineralPipelineIds } },
+    select: { hlContactId: true, step: true },
+  });
+  const steps = new Map<string, { step: string }[]>();
+  for (const o of opps) if (o.hlContactId) steps.set(o.hlContactId, [...(steps.get(o.hlContactId) ?? []), { step: o.step }]);
+
+  let refused = false;
+  let failure: unknown = null;
+  let next = 0;
+  const worker = async () => {
+    while (!refused && !failure && next < batch.length && timeLeft(ctx)) {
+      const c = batch[next++];
+      const want = crm.removing ? [] : desiredCrmTags({ touches: c.touches, outcome: c.outcome, smsOptedOut: c.smsOptedOut, opportunities: steps.get(c.hlId) ?? [] });
+      const { add, remove } = tagDiff(c.tags, want);
+      try {
+        if (add.length || remove.length) {
+          checkDailyBudget(ctx);
+          if (add.length) await ctx.client.addContactTags(c.hlId, add);
+          if (remove.length) await ctx.client.removeContactTags(c.hlId, remove);
+          ctx.stats.crmTagged++;
+        }
+        const removed = new Set(remove.map((t) => t.toLowerCase()));
+        const tags = [...c.tags.filter((t) => !removed.has(t.toLowerCase())), ...add];
+        // Only clear the flag if nothing re-marked the contact meanwhile.
+        await prisma.highLevelContact.updateMany({ where: { id: c.id, updatedAt: c.updatedAt }, data: { tags, crmTagsPending: false } });
+      } catch (e) {
+        if (e instanceof HighLevelError && e.kind === "auth") { refused = true; return; } // reads work, so this is the missing write permission
+        if (e instanceof HighLevelError && e.kind === "notFound") {
+          await prisma.highLevelContact.update({ where: { id: c.id }, data: { deletedInHl: true, crmTagsPending: false } });
+          continue;
+        }
+        if (e instanceof HighLevelError && e.kind === "badRequest") {
+          console.warn(`[highlevel] tag write refused for contact ${c.hlId} (HTTP ${e.status}): ${e.detail ?? ""}`);
+          await prisma.highLevelContact.update({ where: { id: c.id }, data: { crmTagsPending: false } });
+          continue;
+        }
+        failure ??= e;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: CRM_TAG_CONCURRENCY }, worker));
+  const patch: CrmTagState = {
+    ...crm,
+    written: (crm.written ?? 0) + ctx.stats.crmTagged,
+    ...(ctx.stats.crmTagged ? { lastWriteAt: new Date().toISOString() } : {}),
+    ...(refused ? { error: "permission" as const, errorAt: new Date().toISOString() } : ctx.stats.crmTagged ? { error: null } : {}),
+  };
+  ctx.state.crmTags = patch;
+  await saveState(ctx.rowId, { crmTags: patch });
   if (failure) throw failure;
 }
 
@@ -859,7 +1023,7 @@ export async function runHighLevelSync(row: Integration, opts: { budgetMs: numbe
   }
   running.add(org);
   const startedAt = Date.now();
-  const stats: Stats = { newMessages: 0, updatedMessages: 0, contactsFetched: 0, summaries: 0, opportunities: 0, stageMoves: 0, rescanned: 0, tagsChanged: 0 };
+  const stats: Stats = { newMessages: 0, updatedMessages: 0, contactsFetched: 0, summaries: 0, opportunities: 0, stageMoves: 0, rescanned: 0, tagsChanged: 0, crmTagged: 0 };
   let fresh: Integration | null = null;
   let state: HlSyncState = readSyncState(row.config);
   try {
@@ -923,6 +1087,8 @@ export async function runHighLevelSync(row: Integration, opts: { budgetMs: numbe
     // so a budget stop never leaves Reports with stale counts).
     await recomputeSummaries(ctx);
     if (timeLeft(ctx)) await fetchContacts(ctx);
+    // 7b. Mineral Hub's own tags (only when the owner turned them on, or is removing them).
+    if (state.phase === "live" && timeLeft(ctx)) await writeCrmTags(ctx);
     // 8. Carrier health (all texting) — a few aggregate queries, no HighLevel requests.
     if (state.phase === "live") await checkCarrierHealth(ctx);
 
@@ -953,10 +1119,28 @@ export async function runHighLevelSync(row: Integration, opts: { budgetMs: numbe
         await logActivity({ eventType: "integration.tags_refreshed", summary: `HighLevel tags re-read for ${plural(t.total, "contact", "contacts")} (${changed.toLocaleString("en-US")} changed)`, organizationId: org });
       }
     }
-    const message = successMessage(phase, finished, stats, imported, contacts, state.preview?.texts) + retagMessage;
+    // CRM tags: runs stay back to back while contacts are waiting to be (re)tagged.
+    let crmTags: CrmTagState | undefined;
+    let crmMessage = "";
+    const crmNow = ctx.state.crmTags ?? {};
+    const taggingOn = crmTagsEnabledOf((await prisma.integration.findUnique({ where: { id: fresh.id }, select: { config: true } }))?.config);
+    if (state.phase === "live" && (taggingOn || crmNow.removing || crmNow.backlog)) {
+      const left = await prisma.highLevelContact.count({ where: { organizationId: org, crmTagsPending: true, deletedInHl: false } });
+      // A refused write (missing permission) stops the back-to-back runs; the
+      // 15-minute run keeps retrying, and the first success resumes them.
+      const stalled = crmNow.error === "permission";
+      crmTags = { ...crmNow, backlog: left > 0 && !stalled, ...(left === 0 ? { removing: false } : {}) };
+      if (crmNow.removing && left === 0) {
+        await logActivity({ eventType: "integration.crm_tags_removed", summary: "Mineral Hub's SMS / Acquisition tags were removed from HighLevel", organizationId: org });
+      }
+    }
+    if (stats.crmTagged) crmMessage = ` ${plural(stats.crmTagged, "contact's tags", "contacts' tags")} updated in HighLevel.`;
+    if (ctx.state.crmTags?.error === "permission") crmMessage = " HighLevel refused to add tags — the key needs the contacts.write permission.";
+    const message = successMessage(phase, finished, stats, imported, contacts, state.preview?.texts) + retagMessage + crmMessage;
     await saveState(fresh.id, {
       phase, imported, statusRefreshAt, consecutiveFailures: 0, pausedUntil: undefined,
       ...(tagRefresh ? { tagRefresh } : {}),
+      ...(crmTags ? { crmTags } : {}),
       lastRun: { at: new Date().toISOString(), ok: true, ...stats, ms: Date.now() - startedAt, message },
     });
     await prisma.integration.updateMany({

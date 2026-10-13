@@ -368,6 +368,10 @@ model HighLevelContact {
   // with the org's saved scope; recomputed whenever tags, opportunities or the
   // scope change.
   line                 String?
+  // Mineral Hub's own HighLevel tags (domain/smsTags.ts) need writing for this
+  // contact: set when its summary, opportunities or the tag setting change;
+  // cleared once HighLevel carries exactly the tags it should.
+  crmTagsPending       Boolean   @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -378,6 +382,7 @@ model HighLevelContact {
   @@index([organizationId, summaryDirty])
   @@index([organizationId, fetchedAt])
   @@index([organizationId, line, firstOutboundAt])
+  @@index([organizationId, crmTagsPending])
 }
 
 // One SMS from HighLevel's conversation history (either direction).
