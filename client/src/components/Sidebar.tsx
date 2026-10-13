@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { NavLink, useLocation } from "react-router-dom";
 import { ChevronRight, ChevronDown, X } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
-import { loadBranding } from "../lib/branding";
+import { useBrandLogo } from "../lib/useBrandLogo";
 import { layoutRect } from "../lib/viewport";
 import { ThemedLogo } from "./ThemedLogo";
 import { revealActiveStripItems, setMobileNavOpen, useHasTabBar, useIsPhone, useMobileNavOpen } from "../lib/mobile";
@@ -71,8 +71,11 @@ const SETTINGS_ITEM: NavItem = { label: "Settings", icon: pathIcon("M4 7h9M17 7h
 
 export function Sidebar() {
   const { user, can } = useAuth();
-  // Last-known org branding, read once per mount (see lib/branding).
-  const cachedBranding = useMemo(() => loadBranding(), []);
+  // Org branding comes with the authenticated profile — always this org's.
+  const org = user?.organization ?? null;
+  const fullLogo = useBrandLogo(org, "full");
+  const compactLogo = useBrandLogo(org, "compact");
+  const logoAlt = org?.name ?? "Company logo";
   const location = useLocation();
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
@@ -145,29 +148,18 @@ export function Sidebar() {
         </button>
       )}
       <div className="sidebar-brand">
-        {(() => {
-          // While /auth/me is still in flight (fresh page load, slow or
-          // briefly-failing API) render the last-known branding from the local
-          // cache so the logo is present from the first paint — it never
-          // "pops in" late or drops to the text fallback mid-session.
-          const org = user ? user.organization : cachedBranding;
-          // Each variant falls back to the other, so an org that uploaded only
-          // ONE logo still shows it in BOTH sidebar states (previously an org
-          // with just a compact mark rendered an empty brand row when expanded).
-          const full = org?.fullLogo ?? org?.compactLogo ?? null;
-          const compact = org?.compactLogo ?? org?.fullLogo ?? null;
-          if (!full && !compact) return <span className="brand">{railCollapsed ? "MH" : <>Mineral Hub<span className="dot">.</span></>}</span>;
-          // BOTH variants stay mounted at all times; collapse only toggles CSS
-          // visibility. Nothing remounts, reloads, or reprocesses on expand/
-          // collapse, navigation, or theme change — the logo is a persistent
-          // element, never recreated (the recurring "logo disappears" bug).
-          return (
-            <>
-              {full && <ThemedLogo variant="dark" className="sidebar-logo logo-full" src={full} alt={org?.name ?? "Company logo"} />}
-              {compact && <ThemedLogo variant="dark" className="sidebar-logo compact logo-compact" src={compact} alt={org?.name ?? "Company logo"} />}
-            </>
-          );
-        })()}
+        {/* BOTH slots stay mounted at all times; collapse only toggles CSS
+            visibility (.logo-full / .logo-compact). Nothing remounts, reloads,
+            or reprocesses on expand/collapse, navigation, or theme change.
+            Each slot resolves through lib/branding: its own upload, else the
+            other one (an org with ONE logo shows it in both states), else —
+            missing or undecodable — the default wordmark, never an empty box. */}
+        {fullLogo.src
+          ? <ThemedLogo variant="dark" className="sidebar-logo logo-full" src={fullLogo.src} alt={logoAlt} onError={fullLogo.onError} />
+          : <span className="brand logo-full">Mineral Hub<span className="dot">.</span></span>}
+        {compactLogo.src
+          ? <ThemedLogo variant="dark" className="sidebar-logo compact logo-compact" src={compactLogo.src} alt={logoAlt} onError={compactLogo.onError} />
+          : <span className="brand logo-compact">MH</span>}
       </div>
 
       <nav className="sidebar-nav">
