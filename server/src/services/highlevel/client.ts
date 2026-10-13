@@ -68,7 +68,7 @@ export class HighLevelError extends Error {
 
 // --- Response shapes (only the fields the sync reads) -------------------------
 
-export interface HlLocation { id: string; name?: string | null }
+export interface HlLocation { id: string; name?: string | null; timezone?: string | null }
 export interface HlUser {
   id: string; name?: string | null; firstName?: string | null; lastName?: string | null; email?: string | null; deleted?: boolean;
 }
@@ -94,6 +94,29 @@ export interface HlContact {
   dndSettings?: { SMS?: { status?: string | null } | null } | null;
   dateAdded?: string | null; dateUpdated?: string | null;
 }
+
+export interface HlOpportunity {
+  id: string;
+  name?: string | null;
+  monetaryValue?: number | null;
+  pipelineId?: string | null;
+  pipelineStageId?: string | null;
+  assignedTo?: string | null;
+  status?: string | null;
+  source?: string | null;
+  lastStatusChangeAt?: string | null;
+  lastStageChangeAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  contactId?: string | null;
+  contact?: { id?: string | null } | null;
+}
+export interface HlOpportunityPage {
+  opportunities: HlOpportunity[];
+  meta: { total: number | null; startAfter: number | null; startAfterId: string | null; nextPage: number | null };
+}
+export interface HlPipeline { id: string; name?: string | null; stages?: { id?: string | null; name?: string | null; position?: number | null }[] | null }
+export interface HlTag { id?: string | null; name?: string | null }
 
 export interface ExportParams {
   locationId: string;
@@ -195,6 +218,43 @@ export class HighLevelClient {
     );
     const messages = Array.isArray(r.messages) ? r.messages : [];
     return { messages, nextCursor: r.nextCursor || null, total: typeof r.total === "number" ? r.total : messages.length };
+  }
+
+  /**
+   * One page of opportunities, every status. Paged by HighLevel's
+   * startAfter + startAfterId cursor (a createdAt timestamp and an id, so —
+   * unlike the message export cursor — it is safe to keep between runs).
+   */
+  async searchOpportunities(p: { locationId: string; limit: number; startAfter?: number | null; startAfterId?: string | null }): Promise<HlOpportunityPage> {
+    const r = await this.get<{ opportunities?: HlOpportunity[]; meta?: Record<string, unknown> }>(
+      "/opportunities/search",
+      {
+        location_id: p.locationId, status: "all", limit: p.limit,
+        startAfter: p.startAfter ?? undefined, startAfterId: p.startAfterId ?? undefined,
+      },
+      VERSION_DEFAULT,
+    );
+    const m = r.meta ?? {};
+    const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : typeof v === "string" && v.trim() && Number.isFinite(Number(v)) ? Number(v) : null);
+    return {
+      opportunities: Array.isArray(r.opportunities) ? r.opportunities : [],
+      meta: {
+        total: n(m.total),
+        startAfter: n(m.startAfter),
+        startAfterId: typeof m.startAfterId === "string" && m.startAfterId ? m.startAfterId : null,
+        nextPage: n(m.nextPage),
+      },
+    };
+  }
+
+  async listPipelines(locationId: string): Promise<HlPipeline[]> {
+    const r = await this.get<{ pipelines?: HlPipeline[] }>("/opportunities/pipelines", { locationId }, VERSION_DEFAULT);
+    return Array.isArray(r.pipelines) ? r.pipelines : [];
+  }
+
+  async listTags(locationId: string): Promise<HlTag[]> {
+    const r = await this.get<{ tags?: HlTag[] }>(`/locations/${encodeURIComponent(locationId)}/tags`, {}, VERSION_DEFAULT);
+    return Array.isArray(r.tags) ? r.tags : [];
   }
 
   /** A contact; HighLevel's 404 (or a 400 saying "not found") is a notFound error. */

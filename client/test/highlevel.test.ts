@@ -5,6 +5,7 @@
 import { describe, it, expect } from "vitest";
 import {
   previewText, sizeText, importProgress, importingText, totalsText, lastRunText, RESPONSE_WINDOW_CHOICES, HL_SCOPES,
+  tagLine, setTagLine, togglePipeline, filterTags, previewCountsText, parsePrice, missingScopesText, type SmsScope,
 } from "../src/lib/highlevel";
 
 describe("HighLevel card text", () => {
@@ -38,5 +39,61 @@ describe("HighLevel card text", () => {
     expect([...RESPONSE_WINDOW_CHOICES]).toEqual([7, 14, 30, 60, 90]);
     expect(HL_SCOPES.every((s) => s.endsWith(".readonly"))).toBe(true);
     expect(HL_SCOPES).toHaveLength(8);
+  });
+});
+
+describe("HighLevel Configure — Minerals filter and price", () => {
+  const scope: SmsScope = { mineralTags: ["leon county"], realEstateTags: ["dispo"], mineralPipelineIds: ["pMin"] };
+
+  it("reads and moves a tag between Minerals / Real estate / Neither (capitals and spaces ignored)", () => {
+    expect(tagLine(scope, "Leon  County")).toBe("minerals");
+    expect(tagLine(scope, "DISPO")).toBe("realEstate");
+    expect(tagLine(scope, "tiny")).toBe("neither");
+    const moved = setTagLine(scope, "Dispo", "minerals");
+    expect(moved).toEqual({ mineralTags: ["leon county", "dispo"], realEstateTags: [], mineralPipelineIds: ["pMin"] });
+    expect(setTagLine(moved, "LEON COUNTY", "neither").mineralTags).toEqual(["dispo"]);
+    expect(setTagLine(scope, "Sub2", "realEstate").realEstateTags).toEqual(["dispo", "sub2"]);
+    expect(togglePipeline(scope, "pMin", false).mineralPipelineIds).toEqual([]);
+    expect(togglePipeline(scope, "pTiny", true).mineralPipelineIds).toEqual(["pMin", "pTiny"]);
+  });
+
+  it("filters the tag list by search and by line", () => {
+    const tags = [{ name: "Leon County" }, { name: "dispo" }, { name: "leon bullrun" }, { name: "tiny" }];
+    expect(filterTags(tags, scope, " leon ", "all").map((t) => t.name)).toEqual(["Leon County", "leon bullrun"]);
+    expect(filterTags(tags, scope, "", "minerals").map((t) => t.name)).toEqual(["Leon County"]);
+    expect(filterTags(tags, scope, "", "neither").map((t) => t.name)).toEqual(["leon bullrun", "tiny"]);
+    expect(filterTags(tags, scope, "zzz", "all")).toEqual([]);
+  });
+
+  it("words the live preview", () => {
+    expect(previewCountsText({ texted: 382, minerals: 312, realEstate: 54, unclassified: 16 })).toBe("Minerals 312 · Real estate 54 · Not classified 16 texted people");
+    expect(previewCountsText({ texted: 1, minerals: 1, realEstate: 0, unclassified: 0 })).toBe("Minerals 1 · Real estate 0 · Not classified 0 texted person");
+  });
+
+  it("parses the price per segment in dollars", () => {
+    expect(parsePrice("")).toBeNull();
+    expect(parsePrice("  ")).toBeNull();
+    expect(parsePrice("0.0091")).toBe(0.0091);
+    expect(parsePrice("$0.0091")).toBe(0.0091);
+    expect(parsePrice(".01")).toBe(0.01);
+    expect(parsePrice("0,0091")).toBe(0.0091);
+    expect(parsePrice("0.00912345")).toBe(0.009123);
+    expect(parsePrice("1")).toBe(1);
+    expect(parsePrice("9.1")).toBe("invalid");
+    expect(parsePrice("-0.01")).toBe("invalid");
+    expect(parsePrice("abc")).toBe("invalid");
+    expect(parsePrice("1e-3")).toBe("invalid");
+  });
+
+  it("explains a key that can't read opportunities or tags", () => {
+    expect(missingScopesText([])).toBeNull();
+    expect(missingScopesText(undefined)).toBeNull();
+    expect(missingScopesText(["opportunities.readonly"])).toBe("This key can't read opportunities (offers and the funnel stay empty). Use Replace key with a key that has opportunities.readonly ticked.");
+    expect(missingScopesText(["opportunities.readonly", "locations/tags.readonly"])).toMatch(/opportunities .* or the tag list .* opportunities\.readonly and locations\/tags\.readonly ticked\.$/);
+  });
+
+  it("mentions observed pipeline stage changes in the last-run line", () => {
+    const run = { at: "", ok: true, newMessages: 0, updatedMessages: 0, contactsFetched: 0, summaries: 0, ms: 1, message: "", stageMoves: 2 };
+    expect(lastRunText(run, "live")).toBe("Last check: 2 pipeline stage changes.");
   });
 });

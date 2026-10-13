@@ -22,7 +22,7 @@ import type { DealSummary } from "../types";
 import { DateField } from "../components/DateField";
 import { ALL_PERIOD, ALL_PERIOD_LABEL, isAllPeriod, withAllPeriod } from "../lib/period";
 import { Tabs } from "../components/Tabs";
-import { EMPTY_SMS_FILTERS, type SmsFilters } from "../lib/smsReport";
+import { EMPTY_SMS_FILTERS, SCOPE_LABEL, type SmsFilters, type SmsScope } from "../lib/smsReport";
 import { SmsPerformance, useSmsFilterOptions } from "./reports/SmsPerformance";
 import { DeltaPill } from "./reports/DeltaPill";
 
@@ -215,8 +215,15 @@ export function Reports() {
     if (v === "sms") next.set("view", "sms"); else next.delete("view");
     return next;
   }, { replace: true });
+  // SMS: minerals only (default) or all texting — also in the URL (?scope=all).
+  const smsScope: SmsScope = params.get("scope") === "all" ? "all" : "minerals";
+  const setSmsScope = (v: SmsScope) => setParams((p) => {
+    const next = new URLSearchParams(p);
+    if (v === "all") next.set("scope", "all"); else next.delete("scope");
+    return next;
+  }, { replace: true });
   const [smsFilters, setSmsFilters] = useState<SmsFilters>(EMPTY_SMS_FILTERS);
-  const smsOpts = useSmsFilterOptions(view === "sms");
+  const smsOpts = useSmsFilterOptions(view === "sms", smsScope);
   const [period, setPeriod] = useState<Period>("THIS_YEAR");
   const [custom, setCustom] = useState({ from: "", to: "" });
   const [compare, setCompare] = useState<Compare>("NONE");
@@ -363,6 +370,13 @@ export function Reports() {
               options={CHIPS.map(([value, label]) => ({ value, label }))} value={period} onChange={setPeriod} />
           </div>
           <div className="rp-toolbar-btns">
+            {view === "sms" && (
+              <Segmented className="rp-scope" ariaLabel="Which texting to count" value={smsScope} onChange={setSmsScope}
+                options={(["minerals", "all"] as const).map((v) => ({
+                  value: v, label: SCOPE_LABEL[v],
+                  title: v === "minerals" ? "Only people sorted into minerals by your HighLevel minerals filter" : "Every text in HighLevel, minerals and real estate",
+                }))} />
+            )}
             <button className={`rbtn ${showFilters || viewChips.length > 0 ? "active" : ""}`} onClick={() => setShowFilters((s) => !s)} aria-expanded={showFilters}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 5h16l-6 7.5V19l-4 1.5v-8L4 5z" /></svg>
               Filters{viewChips.length > 0 && <span className="rbtn-count">{viewChips.length}</span>}
@@ -467,7 +481,8 @@ export function Reports() {
       )}
 
       {view === "sms" ? (
-        <SmsPerformance allTime={allTime} range={range} cmp={cmp} filters={smsFilters} filterChips={smsFilterChips} execIcon={execIcon} />
+        <SmsPerformance allTime={allTime} range={range} cmp={cmp} filters={smsFilters} filterChips={smsFilterChips} execIcon={execIcon}
+          scope={smsScope} onScope={setSmsScope} />
       ) : loading && !data ? <Spinner label="Building analytics…" /> : !data || !k ? <Banner kind="info">No data.</Banner> : (
         <div ref={reportRef} className="report-capture rp-body">
           {/* --- Executive summary --- */}

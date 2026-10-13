@@ -9,8 +9,7 @@ import { Select } from "../components/Select";
 import { fmtDateTime } from "../lib/format";
 import { SettingsLayout } from "../components/SettingsNav";
 import { Segmented, Tag } from "../components/kit";
-import { useHighLevelStatus, HighLevelSummary, HighLevelConnectModal } from "../components/HighLevelIntegration";
-import { RESPONSE_WINDOW_CHOICES, HL_SYNC_EVERY } from "../lib/highlevel";
+import { useHighLevelStatus, HighLevelSummary, HighLevelConnectModal, HighLevelConfigureModal } from "../components/HighLevelIntegration";
 
 // The catalog lives on the SERVER (domain/integrationCatalog.ts) — the single
 // source of truth for which providers exist, how they authenticate, and how far
@@ -30,7 +29,7 @@ interface Provider {
   config: {
     schedule?: string; notes?: string; fromEmail?: string; fromName?: string; domains?: ResendDomain[];
     // HighLevel
-    locationId?: string; locationName?: string; responseWindowDays?: number;
+    locationId?: string; locationName?: string; responseWindowDays?: number; pricePerSegment?: number | null;
   };
   secretMask: string | null;
   connectedAt: string | null; lastSyncAt: string | null; lastError: string | null;
@@ -250,7 +249,15 @@ export function Integrations() {
           onConnected={(msg) => { setConnecting(null); setFlash(msg); load(); }}
         />
       )}
-      {configuring && (
+      {configuring?.key === "highlevel" && (
+        <HighLevelConfigureModal
+          name={configuring.name}
+          config={configuring.config}
+          onClose={() => setConfiguring(null)}
+          onSaved={() => { setConfiguring(null); setFlash("Settings saved."); load(); }}
+        />
+      )}
+      {configuring && configuring.key !== "highlevel" && (
         <ConfigureModal
           provider={configuring}
           onClose={() => setConfiguring(null)}
@@ -432,21 +439,14 @@ function ConfigureModal({ provider, onClose, onSaved }: { provider: Provider; on
   const [notes, setNotes] = useState(provider.config.notes ?? "");
   const [fromEmail, setFromEmail] = useState(provider.config.fromEmail ?? "");
   const [fromName, setFromName] = useState(provider.config.fromName ?? "");
-  const [windowDays, setWindowDays] = useState(String(provider.config.responseWindowDays ?? 30));
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isResend = provider.key === "resend";
-  const isHL = provider.key === "highlevel";
 
   async function save() {
     setConfirming(false); setBusy(true); setError(null);
     try {
-      if (isHL) {
-        await api.patch(`/integrations/${provider.key}`, { config: { responseWindowDays: Number(windowDays), notes } });
-        onSaved();
-        return;
-      }
       const config: Record<string, string> = { schedule, notes };
       if (isResend) {
         if (!fromEmail.trim()) { setError("Resend needs a sender email address."); setBusy(false); return; }
@@ -476,34 +476,15 @@ function ConfigureModal({ provider, onClose, onSaved }: { provider: Provider; on
           </div>
         </>
       )}
-      {isHL ? (
-        <>
-          <div className="field">
-            <label>Response window</label>
-            <Select value={windowDays} onChange={setWindowDays} ariaLabel="Response window"
-              options={RESPONSE_WINDOW_CHOICES.map((d) => ({ value: String(d), label: `${d} days` }))} />
-            <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-              A reply counts as a response when it arrives within this many days of the most recent text; later replies show as late replies. Changing it recounts every contact in Reports.
-            </p>
-          </div>
-          <div className="field">
-            <label>Automatic synchronization</label>
-            <p className="muted" style={{ fontSize: 12, margin: 0 }}>
-              Nothing to set — new texts and delivery updates are checked automatically {HL_SYNC_EVERY}. Use Sync now on the card to check right away.
-            </p>
-          </div>
-        </>
-      ) : (
-        <div className="field">
-          <label>Automatic synchronization</label>
-          <Select value={schedule} onChange={setSchedule} ariaLabel="Sync schedule"
-            options={[
-              { value: "manual", label: "Manual only" },
-              ...(provider.syncable ? [{ value: "hourly", label: "Every hour" }, { value: "daily", label: "Daily" }] : []),
-            ]} />
-          <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Automatic sync re-validates the connection on schedule and records failures on this page and in the activity log.</p>
-        </div>
-      )}
+      <div className="field">
+        <label>Automatic synchronization</label>
+        <Select value={schedule} onChange={setSchedule} ariaLabel="Sync schedule"
+          options={[
+            { value: "manual", label: "Manual only" },
+            ...(provider.syncable ? [{ value: "hourly", label: "Every hour" }, { value: "daily", label: "Daily" }] : []),
+          ]} />
+        <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>Automatic sync re-validates the connection on schedule and records failures on this page and in the activity log.</p>
+      </div>
       <div className="field"><label>Notes</label><textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Internal notes about this connection" /></div>
       {error && <div className="error-text">{error}</div>}
       {confirming && <ConfirmChanges busy={busy} onCancel={() => setConfirming(false)} onConfirm={save} />}

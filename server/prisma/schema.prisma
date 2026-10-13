@@ -181,35 +181,37 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users              User[]
-  deals              Deal[]
-  buyers             Buyer[]
-  activityLogs       ActivityLog[]
-  inviteCodes        InviteCode[]
-  calendarEventTypes CalendarEventType[]
-  calendarEvents     CalendarEvent[]
-  opportunities      Opportunity[]
-  expenses           Expense[]
-  expenseCategories  ExpenseCategory[]
-  rolePermissions    RolePermissions[]
-  buyerMessages      DealBuyerMessage[]
-  emailTemplates     EmailTemplate[]
-  pipelineStages     PipelineStage[]
-  pipelines          Pipeline[]
-  contacts           Contact[]
-  contactLists       ContactList[]
-  integrations       Integration[]
-  researchDocuments  ResearchDocument[]
-  researchPermits    ResearchPermit[]
-  researchIngests    ResearchIngestRun[]
-  researchWells      ResearchWell[]
-  wellAnalyses       WellAnalysis[]
-  notifications      Notification[]
-  portalContacts     PortalContact[]
-  buyerTags          BuyerTag[]
-  mapTracts          MapTract[]
-  highLevelContacts  HighLevelContact[]
-  highLevelMessages  HighLevelMessage[]
+  users                  User[]
+  deals                  Deal[]
+  buyers                 Buyer[]
+  activityLogs           ActivityLog[]
+  inviteCodes            InviteCode[]
+  calendarEventTypes     CalendarEventType[]
+  calendarEvents         CalendarEvent[]
+  opportunities          Opportunity[]
+  expenses               Expense[]
+  expenseCategories      ExpenseCategory[]
+  rolePermissions        RolePermissions[]
+  buyerMessages          DealBuyerMessage[]
+  emailTemplates         EmailTemplate[]
+  pipelineStages         PipelineStage[]
+  pipelines              Pipeline[]
+  contacts               Contact[]
+  contactLists           ContactList[]
+  integrations           Integration[]
+  researchDocuments      ResearchDocument[]
+  researchPermits        ResearchPermit[]
+  researchIngests        ResearchIngestRun[]
+  researchWells          ResearchWell[]
+  wellAnalyses           WellAnalysis[]
+  notifications          Notification[]
+  portalContacts         PortalContact[]
+  buyerTags              BuyerTag[]
+  mapTracts              MapTract[]
+  highLevelContacts      HighLevelContact[]
+  highLevelMessages      HighLevelMessage[]
+  highLevelOpportunities HighLevelOpportunity[]
+  highLevelStageEvents   HighLevelStageEvent[]
 }
 
 // A tract boundary imported from a user-uploaded shapefile (.shp), rendered as
@@ -346,18 +348,26 @@ model HighLevelContact {
   fetchedAt          DateTime? // last time details were pulled; null = not yet
 
   // --- Outreach summary (derived; see summarizeContact) ---
-  firstOutboundAt    DateTime? // first REACHED outbound text = response cohort date; null when the contact texted first or was never reached
-  touches            Int       @default(0) // reached outbound texts before the sequence ended (first reply / opt-out)
-  unconfirmedTouches Int       @default(0) // of those, texts with no delivery receipt (status "sent")
-  outcome            String? // RESPONDED | OPTED_OUT | LATE_REPLY | NO_REPLY | INBOUND_FIRST | NOT_REACHED
-  outcomeAt          DateTime?
-  responseSeconds    Int? // first reached text → first counted reply (RESPONDED only)
-  creditedHlUserId   String? // sender of the first reached text (null = automated)
-  outboundTotal      Int       @default(0)
-  inboundTotal       Int       @default(0)
-  lastMessageAt      DateTime?
-  summaryDirty       Boolean   @default(true)
-  summaryWindowDays  Int? // response window the summary was computed with
+  firstOutboundAt      DateTime? // first REACHED outbound text = response cohort date; null when the contact texted first or was never reached
+  touches              Int       @default(0) // reached outbound texts before the sequence ended (first reply / opt-out)
+  unconfirmedTouches   Int       @default(0) // of those, texts with no delivery receipt (status "sent")
+  outcome              String? // RESPONDED | OPTED_OUT | LATE_REPLY | NO_REPLY | INBOUND_FIRST | NOT_REACHED
+  outcomeAt            DateTime?
+  responseSeconds      Int? // first reached text → first counted reply (RESPONDED only)
+  creditedHlUserId     String? // sender of the first reached text (null = automated)
+  outboundTotal        Int       @default(0)
+  inboundTotal         Int       @default(0)
+  lastMessageAt        DateTime?
+  summaryDirty         Boolean   @default(true)
+  summaryWindowDays    Int? // response window the summary was computed with
+  wrongNumberAt        DateTime? // first "wrong number" reply (the outreach carries on after it)
+  wrongNumberTouch     Int? // reached texts before that reply
+  replyAnsweredSeconds Int? // speed to lead: counted reply → next text a team member typed
+  answeredByHlUserId   String?
+  // minerals | real_estate | unclassified — domain/smsScope.ts classifyContact
+  // with the org's saved scope; recomputed whenever tags, opportunities or the
+  // scope change.
+  line                 String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -367,6 +377,7 @@ model HighLevelContact {
   @@index([organizationId, phoneDigits])
   @@index([organizationId, summaryDirty])
   @@index([organizationId, fetchedAt])
+  @@index([organizationId, line, firstOutboundAt])
 }
 
 // One SMS from HighLevel's conversation history (either direction).
@@ -383,6 +394,8 @@ model HighLevelMessage {
   source         String? // workflow | bulk_actions | campaign | api | app (null = unknown)
   hlUserId       String? // HighLevel user who sent it (null for most automated sends)
   optOut         Boolean      @default(false) // inbound reply was an opt-out request (STOP, UNSUBSCRIBE, …)
+  wrongNumber    Boolean      @default(false) // inbound reply said we texted the wrong person
+  segments       Int? // billable SMS segments (domain/smsMetrics.ts smsSegments); null = not yet counted
   sentAt         DateTime // HighLevel dateAdded
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
@@ -390,6 +403,62 @@ model HighLevelMessage {
   @@unique([organizationId, hlId])
   @@index([organizationId, sentAt])
   @@index([organizationId, hlContactId, sentAt])
+}
+
+// One HighLevel opportunity (read-only copy). The funnel step comes from the
+// stage name (domain/smsFunnel.ts); maxRank is the furthest step ever seen so
+// an offer that later died still counts as an offer. HighLevel only reports
+// the CURRENT stage, so stage history starts the day the sync first sees it.
+model HighLevelOpportunity {
+  id                 String       @id @default(cuid())
+  organizationId     String
+  organization       Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  hlId               String
+  hlContactId        String? // joins HighLevelContact.hlId
+  pipelineId         String
+  stageId            String?
+  status             String? // open | won | lost | abandoned
+  monetaryValue      Float?
+  assignedToHlUserId String?
+  source             String?
+  name               String?
+  step               String // FunnelStep for the current stage
+  maxRank            Int          @default(1)
+  hlCreatedAt        DateTime?
+  hlUpdatedAt        DateTime?
+  lastStageChangeAt  DateTime?
+  // First time the sync saw it at (or past) each step; null = before the
+  // sync existed, or never reached.
+  offerAt            DateTime?
+  acceptedAt         DateTime?
+  contractAt         DateTime?
+  closedAt           DateTime?
+  deadAt             DateTime?
+  deletedInHl        Boolean      @default(false)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  @@unique([organizationId, hlId])
+  @@index([organizationId, hlContactId])
+  @@index([organizationId, pipelineId])
+}
+
+// A stage move the sync observed (HighLevel keeps no history over the API).
+model HighLevelStageEvent {
+  id              String       @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  opportunityHlId String
+  pipelineId      String
+  fromStageId     String?
+  toStageId       String?
+  fromStep        String?
+  toStep          String
+  at              DateTime // HighLevel lastStageChangeAt when known, else when observed
+  createdAt       DateTime     @default(now())
+
+  @@index([organizationId, at])
+  @@index([organizationId, opportunityHlId])
 }
 
 // Reusable outbound email template (org-shared). Supports {{tokens}} that are

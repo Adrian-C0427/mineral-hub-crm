@@ -9,6 +9,7 @@ export type HighLevelPhase = "preview" | "importing" | "live";
 export interface HighLevelLastRun {
   at: string; ok: boolean; newMessages: number; updatedMessages: number; contactsFetched: number;
   summaries: number; ms: number; message: string;
+  opportunities?: number; stageMoves?: number; rescanned?: number;
 }
 
 /** GET /api/integrations/highlevel/status (server/src/services/highlevel/sync.ts). */
@@ -26,6 +27,8 @@ export interface HighLevelStatus {
   lastRun: HighLevelLastRun | null;
   responseWindowDays: number;
   storageEstimateMb: number | null;
+  /** Optional read permissions the key lacks (e.g. "opportunities.readonly"). */
+  missingScopes?: string[];
 }
 
 /** Mirrors RESPONSE_WINDOW_OPTIONS in server/src/domain/smsMetrics.ts. */
@@ -92,7 +95,94 @@ export function lastRunText(run: HighLevelLastRun | null, phase: HighLevelPhase 
   const parts = [
     run.newMessages ? count(run.newMessages, "new text", "new texts") : null,
     run.updatedMessages ? count(run.updatedMessages, "delivery update", "delivery updates") : null,
+    run.stageMoves ? count(run.stageMoves, "pipeline stage change", "pipeline stage changes") : null,
     run.contactsFetched ? count(run.contactsFetched, "contact refreshed", "contacts refreshed") : null,
   ].filter(Boolean);
   return parts.length ? `Last check: ${parts.join(", ")}.` : null;
+}
+
+/** The card's note when the key can't read something optional, or null. */
+export function missingScopesText(scopes: readonly string[] | null | undefined): string | null {
+  const s = scopes ?? [];
+  if (!s.length) return null;
+  const what = [
+    s.includes("opportunities.readonly") ? "opportunities (offers and the funnel stay empty)" : null,
+    s.includes("locations/tags.readonly") ? "the tag list (the Minerals filter only shows tags found on texted people)" : null,
+  ].filter(Boolean);
+  const named = what.length ? what.join(" or ") : s.join(", ");
+  return `This key can't read ${named}. Use Replace key with a key that has ${s.join(" and ")} ticked.`;
+}
+
+// --- Minerals filter (Configure) ---------------------------------------------
+// The server classifies (server/src/domain/smsScope.ts); these only edit the
+// draft filter and word its preview.
+
+/** The org's Minerals filter (server SmsScope). */
+export interface SmsScope { mineralTags: string[]; realEstateTags: string[]; mineralPipelineIds: string[] }
+
+/** POST /api/integrations/highlevel/scope-preview — texted people under a filter. */
+export interface LineCounts { texted: number; minerals: number; realEstate: number; unclassified: number }
+
+/** GET /api/integrations/highlevel/scope. */
+export interface HighLevelScopeSettings {
+  saved: boolean;
+  scope: SmsScope;
+  suggested: SmsScope;
+  tags: { name: string; texted: number }[];
+  pipelines: { id: string; name: string; texted: number }[];
+  counts: LineCounts;
+  pricePerSegment: number | null;
+}
+
+export type TagLine = "minerals" | "realEstate" | "neither";
+
+/** Mirrors normalizeTag in server/src/domain/smsScope.ts. */
+export const normalizeTag = (t: string) => t.trim().toLowerCase().replace(/\s+/g, " ");
+
+export function tagLine(scope: SmsScope, tag: string): TagLine {
+  const k = normalizeTag(tag);
+  if (scope.mineralTags.some((t) => normalizeTag(t) === k)) return "minerals";
+  if (scope.realEstateTags.some((t) => normalizeTag(t) === k)) return "realEstate";
+  return "neither";
+}
+
+/** The filter with `tag` moved to `line` (removed from the other list). */
+export function setTagLine(scope: SmsScope, tag: string, line: TagLine): SmsScope {
+  const k = normalizeTag(tag);
+  const without = (list: string[]) => list.filter((t) => normalizeTag(t) !== k);
+  return {
+    ...scope,
+    mineralTags: line === "minerals" ? [...without(scope.mineralTags), k] : without(scope.mineralTags),
+    realEstateTags: line === "realEstate" ? [...without(scope.realEstateTags), k] : without(scope.realEstateTags),
+  };
+}
+
+export function togglePipeline(scope: SmsScope, id: string, on: boolean): SmsScope {
+  const rest = scope.mineralPipelineIds.filter((p) => p !== id);
+  return { ...scope, mineralPipelineIds: on ? [...rest, id] : rest };
+}
+
+/** Tags matching the search box and the Minerals / Real estate / Neither view. */
+export function filterTags<T extends { name: string }>(tags: readonly T[], scope: SmsScope, query: string, view: TagLine | "all"): T[] {
+  const q = normalizeTag(query);
+  return tags.filter((t) => (!q || normalizeTag(t.name).includes(q)) && (view === "all" || tagLine(scope, t.name) === view));
+}
+
+/** "Minerals 312 · Real estate 54 · Not classified 16 texted people". */
+export function previewCountsText(c: LineCounts): string {
+  return `Minerals ${n(c.minerals)} · Real estate ${n(c.realEstate)} · Not classified ${n(c.unclassified)} texted ${c.texted === 1 ? "person" : "people"}`;
+}
+
+/**
+ * The price box → dollars per segment: "" = not set (null); a number from 0
+ * to 1 with at most 6 decimals ("$0.0091" and "0,0091" are accepted); else
+ * "invalid".
+ */
+export function parsePrice(input: string): number | null | "invalid" {
+  const t = input.trim().replace(/^\$/, "").replace(",", ".").trim();
+  if (!t) return null;
+  if (!/^\d*\.?\d+$|^\d+\.$/.test(t)) return "invalid";
+  const v = Number(t);
+  if (!Number.isFinite(v) || v < 0 || v > 1) return "invalid";
+  return Math.round(v * 1_000_000) / 1_000_000;
 }

@@ -2,7 +2,9 @@
  * Reports → SMS performance routes (routes/smsReports.ts), against a fake
  * Prisma client that records every query: the response shapes for an empty
  * org (N/A, never 0% or NaN), the not-connected status, the contact-access
- * gate on drill-downs, and that every query is scoped to the caller's org.
+ * gate on drill-downs, the minerals / all-texting scope, the cost without a
+ * price, drill lists built from the same SQL as their tiles, and that every
+ * query is scoped to the caller's org.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import express from "express";
@@ -28,7 +30,7 @@ const db = vi.hoisted(() => {
     highLevelContact: model("highLevelContact", ["findUnique", "count"]),
     $queryRaw: async (q: Prisma.Sql) => {
       raw.push(q);
-      const tag = /\/\* (sms:[a-z-]+) \*\//.exec(q.sql)?.[1] ?? "?";
+      const tag = /\/\* (sms:[a-z0-9-]+) \*\//.exec(q.sql)?.[1] ?? "?";
       return rawResults[tag] ?? [];
     },
   };
@@ -114,6 +116,7 @@ describe("GET /api/reports/sms/status", () => {
     expect(res.body).toEqual({
       connected: false, status: "NOT_CONNECTED", phase: null, locationName: null, lastSyncAt: null,
       imported: 0, previewTexts: null, responseWindowDays: 30, lastError: null, hasData: false,
+      scopeSaved: false, minerals: 0, realEstate: 0, unclassified: 0,
     });
   });
 
@@ -154,7 +157,22 @@ describe("GET /api/reports/sms", () => {
     expect(b.trend.bucket).toBe("day");
     expect(b.trend.points).toHaveLength(30);
     expect(b.breakdowns).toEqual({ senders: [], tags: [], sources: [] });
-    expect(b.notes).toMatchObject({ reachedTexts: 0, unconfirmedTexts: 0, inboundFirstContacts: 0, lateReplies: 0 });
+    expect(b.notes).toMatchObject({ reachedTexts: 0, unconfirmedTexts: 0, inboundFirstContacts: 0, lateReplies: 0, unknownSegments: 0 });
+    // The newer sections: N/A wherever there is nothing to divide by.
+    expect(b.kpis).toMatchObject({
+      wrongNumbers: 0, wrongNumberRate: null, opportunities: 0, interestedRate: null, offers: 0, offerAcceptanceRate: null, closedDeals: 0,
+      textingCost: null, costPerReply: null, costPerOpportunity: null, costPerOffer: null, costPerClosedDeal: null,
+      medianAnswerSeconds: null, answeredWithinHourRate: null, neverAnsweredRate: null,
+    });
+    expect(b.funnel.steps.every((s: { fromReached: number | null }) => s.fromReached === null)).toBe(true);
+    expect(b.funnel).toMatchObject({ interestedRate: null, contactsPerClosedDeal: null, textsPerClosedDeal: null, historySince: null });
+    expect(b.speed).toMatchObject({ responded: 0, never: 0, neverRate: null, within1hRate: null, byMember: [] });
+    expect(b.bestTime).toMatchObject({ timezone: "UTC", fallback: true, cells: [], best: [] });
+    expect(b.phoneQuality).toEqual({ tags: [], sources: [] });
+    expect(b.carrierHealth.days).toHaveLength(30);
+    expect(b.carrierHealth.days.every((d: { optOutRate: number | null; small: boolean }) => d.optOutRate === null && d.small)).toBe(true);
+    expect(b.carrierHealth.last7).toMatchObject({ sent: 0, optOutRate: null, failureRate: null, warnings: [] });
+    expect(b.scopeInfo).toEqual({ saved: false, texted: { minerals: 0, realEstate: 0, unclassified: 0 } });
     expectOrgScoped();
   });
 
@@ -286,5 +304,224 @@ describe("drill-downs", () => {
 
   it("is a 404 for a contact the org doesn't have", async () => {
     expect((await call(VIEWER, "/api/reports/sms/contacts/other-org-contact/messages")).status).toBe(404);
+  });
+});
+
+// --- Minerals scope, cost, funnel, the newer drill lists ------------------------
+
+const SCOPED = {
+  ...CONNECTED,
+  connectedAt: new Date("2026-09-15T15:00:00Z"),
+  config: {
+    ...CONNECTED.config,
+    scope: { mineralTags: ["reeves county"], realEstateTags: ["sub2"], mineralPipelineIds: ["pMin", "pOna"] },
+    pricePerSegment: 0.01,
+    locationTimezone: "America/Chicago",
+    hlPipelines: [{ id: "pMin", name: "Minerals" }, { id: "pOna", name: "Offer Not Accepted" }, { id: "pJv", name: "JV's" }],
+  },
+};
+const MINERALS_ONLY = `c."line" = 'minerals'`;
+/** Queries that follow the scope; carrier health, the line split and the tag list never do. */
+const SCOPED_TAGS = ["sms:volume", "sms:trend", "sms:cohort", "sms:times", "sms:cohort-x", "sms:funnel", "sms:bd-cohort", "sms:bd-volume",
+  "sms:quality", "sms:speed-members", "sms:best-time", "sms:inbound-first"];
+const UNSCOPED_TAGS = ["sms:health-days", "sms:health-7d", "sms:line-split", "sms:tags"];
+const sqlOf = (tag: string) => db.raw.filter((q) => q.sql.includes(`/* ${tag} */`));
+/** The opportunity lateral of a query, as text. */
+const lateral = (q: Prisma.Sql) => q.sql.slice(q.sql.indexOf("LEFT JOIN LATERAL"), q.sql.indexOf("x ON TRUE"));
+
+describe("scope: minerals only (default) vs all texting", () => {
+  it("counts only contacts classified as minerals by default — except carrier health and the line split", async () => {
+    db.results["integration.findUnique"] = SCOPED;
+    const res = await call(OWNER, "/api/reports/sms?from=2026-09-01&to=2026-09-30");
+    expect(res.body.scope).toBe("minerals");
+    for (const tag of SCOPED_TAGS) {
+      expect(sqlOf(tag).length, tag).toBeGreaterThan(0);
+      for (const q of sqlOf(tag)) expect(q.sql, tag).toContain(MINERALS_ONLY);
+    }
+    for (const tag of UNSCOPED_TAGS) for (const q of sqlOf(tag)) expect(q.sql, tag).not.toContain(MINERALS_ONLY);
+    // Volume needs the contact (its line) even without a filter.
+    expect(sqlOf("sms:volume")[0].sql).toContain('LEFT JOIN "HighLevelContact" c');
+    // The funnel reads the minerals pipelines only.
+    expect(sqlOf("sms:funnel")[0].values).toEqual(expect.arrayContaining([["pMin", "pOna"]]));
+    expect(res.body.funnel.pipelines).toEqual([{ id: "pMin", name: "Minerals" }, { id: "pOna", name: "Offer Not Accepted" }]);
+    expect(res.body.funnel.historySince).toBe("2026-09-15T15:00:00.000Z");
+    expectOrgScoped();
+  });
+
+  it("counts everything with scope=all, every pipeline in the funnel, and no contact join for plain volume", async () => {
+    db.results["integration.findUnique"] = SCOPED;
+    const res = await call(OWNER, "/api/reports/sms?from=2026-09-01&to=2026-09-30&scope=all");
+    expect(res.body.scope).toBe("all");
+    for (const q of db.raw) expect(q.sql).not.toContain(MINERALS_ONLY);
+    expect(sqlOf("sms:volume")[0].sql).not.toContain("JOIN");
+    expect(sqlOf("sms:funnel")[0].sql).not.toContain('"pipelineId" = ANY');
+    expect(res.body.funnel.pipelines).toBeNull();
+    expectOrgScoped();
+  });
+
+  it("uses the suggested minerals pipelines until a filter is saved", async () => {
+    db.results["integration.findUnique"] = { ...SCOPED, config: { ...SCOPED.config, scope: null } };
+    const res = await call(OWNER, "/api/reports/sms?from=2026-09-01&to=2026-09-30");
+    expect(res.body.scopeInfo.saved).toBe(false);
+    expect(res.body.funnel.pipelines).toEqual([{ id: "pMin", name: "Minerals" }]);
+  });
+
+  it("splits the period's texted people by line and reports the scope state on /status", async () => {
+    db.results["integration.findUnique"] = SCOPED;
+    db.rawResults["sms:line-split"] = [{ line: "minerals", n: 40 }, { line: "real_estate", n: 12 }, { line: null, n: 5 }, { line: "unclassified", n: 1 }];
+    db.rawResults["sms:status-lines"] = [{ line: "minerals", n: 900 }, { line: null, n: 30 }];
+    const report = await call(OWNER, "/api/reports/sms?from=2026-09-01&to=2026-09-30");
+    expect(report.body.scopeInfo).toEqual({ saved: true, texted: { minerals: 40, realEstate: 12, unclassified: 6 } });
+    const status = await call(VIEWER, "/api/reports/sms/status");
+    expect(status.body).toMatchObject({ scopeSaved: true, minerals: 900, realEstate: 0, unclassified: 30 });
+    expect(sqlOf("sms:status-lines")[0].sql).toContain('"outboundTotal" > 0');
+  });
+
+  it("limits the filter choices to the scope's contacts", async () => {
+    await call(OWNER, "/api/reports/sms/filters");
+    expect(sqlOf("sms:filter-tags")[0].sql).toContain(MINERALS_ONLY);
+    db.raw.length = 0;
+    await call(OWNER, "/api/reports/sms/filters?scope=all");
+    expect(sqlOf("sms:filter-tags")[0].sql).not.toContain(MINERALS_ONLY);
+  });
+});
+
+describe("cost, speed, best time, phone lists, carrier health", () => {
+  const rows = () => Object.assign(db.rawResults, {
+    "sms:volume": [{ sent: 1000, delivered: 900, failed: 40, inbound: 120, contactsTexted: 400, segments: 1500, unknownSegments: 25 }],
+    "sms:cohort": [{ touches: 1, outcome: "RESPONDED", count: 50, unconfirmed: 0, texts: 50 }, { touches: 2, outcome: "NO_REPLY", count: 250, unconfirmed: 0, texts: 500 }],
+    "sms:cohort-x": [{ wrongNumbers: 30, responded: 50, answered: 40, within5m: 10, within1h: 25, within24h: 38, avg: 7200, median: 1800 }],
+    "sms:funnel": [{ opportunity: 20, offer: 10, accepted: 4, contract: 3, closed: 2, dead: 5, preExisting: 3, cohortTexts: 900,
+      oppAvg: 86400, oppMedian: 43200, closeAvg: 2e6, closeMedian: 1.5e6, closeKnown: 1 }],
+    "sms:speed-members": [{ key: "hu1", answered: 30, median: 1500, within1h: 20 }, { key: null, answered: 10, median: 4000, within1h: 5 }],
+    "sms:best-time": [{ dow: 2, hour: 10, reached: 60, responded: 12 }, { dow: 3, hour: 9, reached: 5, responded: 3 }],
+    "sms:tags": [{ v: "wrong number-1" }, { v: "landline" }, { v: "sms incapable" }, { v: "reeves county" }],
+    "sms:quality": [{ dim: "listTag", key: "reeves county", reached: 300, responded: 50, wrongNumber: 30, disconnected: 6, landline: 9, rotated: 60, exhausted: 3 }],
+    "sms:bd-volume": [{ dim: "listTag", key: "reeves county", textsSent: 1000, delivered: 900 }],
+    "sms:health-days": [{ day: "2026-09-10", sent: 500, failed: 100, reached: 380, optOuts: 4 }],
+    "sms:health-7d": [{ sent: 300, failed: 9, reached: 250, optOuts: 15 }],
+  });
+
+  it("prices the segments sent and divides by the cohort's results", async () => {
+    db.results["integration.findUnique"] = SCOPED;
+    rows();
+    const b = (await call(OWNER, "/api/reports/sms?from=2026-09-01&to=2026-09-30")).body;
+    expect(b.cost).toMatchObject({ pricePerSegment: 0.01, segments: 1500, unknownSegments: 25, total: 15, perReply: 0.3, perOpportunity: 0.75, perOffer: 1.5, perClosedDeal: 7.5 });
+    expect(b.kpis).toMatchObject({ textingCost: 15, costPerClosedDeal: 7.5, wrongNumbers: 30, wrongNumberRate: 0.1, opportunities: 20, interestedRate: 20 / 300 });
+    expect(b.notes.unknownSegments).toBe(25);
+    expect(b.funnel).toMatchObject({ dead: 5, preExisting: 3, textsPerClosedDeal: 450, toClose: { known: 1, unknown: 1 } });
+    expect(b.speed).toMatchObject({ responded: 50, answered: 40, never: 10, neverRate: 0.2, within1hRate: 0.5, medianSeconds: 1800 });
+    expect(b.speed.byMember).toEqual([
+      { key: "hu1", name: "Maria Gonzalez", answered: 30, medianSeconds: 1500, within1hRate: 20 / 30 },
+      { key: "none", name: "Team member not recorded", answered: 10, medianSeconds: 4000, within1hRate: 0.5 },
+    ]);
+    // Best time in the location's zone, bound as a parameter.
+    expect(b.bestTime).toMatchObject({ timezone: "America/Chicago", fallback: false });
+    expect(sqlOf("sms:best-time")[0].values).toContain("America/Chicago");
+    expect(b.bestTime.best.map((c: { dow: number; hour: number }) => [c.dow, c.hour])).toEqual([[2, 10]]);
+    expect(b.bestTime.cells.find((c: { dow: number }) => c.dow === 3).small).toBe(true);
+    // Phone lists: the org's tags classified once, matched exactly.
+    expect(sqlOf("sms:quality")[0].values).toEqual(expect.arrayContaining([["wrong number-1"], ["landline", "sms incapable"]]));
+    expect(b.phoneQuality.tags[0]).toMatchObject({ key: "reeves county", deliveryRate: 0.9, wrongNumberRate: 0.1, landlineRate: 0.03 });
+    // Carrier health: the breach day and the rolling 7 days.
+    expect(b.carrierHealth.breachDays).toEqual(["2026-09-10"]);
+    expect(b.carrierHealth.last7).toMatchObject({ optOutRate: 0.06, warnings: ["optOut"] });
+    expect(b.carrierHealth.thresholds).toEqual({ optOutRate: 0.05, failureRate: 0.15, minTexts: 100 });
+  });
+
+  it("shows cost as N/A without a price, however many segments went out", async () => {
+    db.results["integration.findUnique"] = { ...SCOPED, config: { ...SCOPED.config, pricePerSegment: null } };
+    rows();
+    const b = (await call(OWNER, "/api/reports/sms?from=2026-09-01&to=2026-09-30")).body;
+    expect(b.cost).toMatchObject({ pricePerSegment: null, segments: 1500, total: null, perReply: null, perOpportunity: null, perOffer: null, perClosedDeal: null });
+    expect(b.kpis.textingCost).toBeNull();
+  });
+
+  it("compares the newer KPIs too (rates in points)", async () => {
+    db.results["integration.findUnique"] = SCOPED;
+    rows();
+    const b = (await call(OWNER, "/api/reports/sms?from=2026-09-01&to=2026-09-30&compareFrom=2026-08-01&compareTo=2026-08-31")).body;
+    expect(b.previous.textingCost).toBe(15);
+    expect(b.deltas.textingCost).toBe(0);
+    expect(b.deltaKind.wrongNumberRate).toBe("points");
+    expect(sqlOf("sms:funnel")).toHaveLength(2);
+  });
+});
+
+describe("the newer drill lists", () => {
+  const NEW_SETS = ["wrongNumber", "unclassified", "realEstate", "opportunity", "offer", "accepted", "contract", "closed", "dead", "unanswered",
+    "disconnected", "landline", "rotated", "exhausted"];
+
+  it("need contact access", async () => {
+    for (const set of NEW_SETS) {
+      const res = await call(REPORTS_ONLY, `/api/reports/sms/contacts?set=${set}`);
+      expect(res.status, set).toBe(403);
+    }
+    expect(db.raw).toHaveLength(0);
+  });
+
+  it("are each scoped to the org", async () => {
+    db.results["integration.findUnique"] = SCOPED;
+    for (const set of NEW_SETS) {
+      db.raw.length = 0;
+      const res = await call(VIEWER, `/api/reports/sms/contacts?from=2026-09-01&to=2026-09-30&set=${set}`);
+      expect(res.status, set).toBe(200);
+      expectOrgScoped();
+    }
+  });
+
+  it("count a funnel step with the same opportunity rules as its tile", async () => {
+    db.results["integration.findUnique"] = SCOPED;
+    await call(OWNER, "/api/reports/sms?from=2026-09-01&to=2026-09-30");
+    const tile = sqlOf("sms:funnel")[0];
+    db.raw.length = 0;
+    db.rawResults["sms:drill"] = [{ hlId: "c1", name: "Ann", tags: [], oppN: 1, oppOffer: true, oppAccepted: true, oppContract: true, oppClosed: true, oppAlive: 1 }];
+    const res = await call(VIEWER, "/api/reports/sms/contacts?from=2026-09-01&to=2026-09-30&set=closed");
+    const drill = sqlOf("sms:drill-count")[0];
+    expect(lateral(drill)).toBe(lateral(tile));
+    expect(drill.values).toEqual(expect.arrayContaining([["pMin", "pOna"]]));
+    expect(tile.sql).toContain("count(*) FILTER (WHERE x.closed)");
+    expect(drill.sql).toContain("AND x.closed");
+    expect(drill.sql).toContain(MINERALS_ONLY);
+    expect(res.body.rows[0]).toMatchObject({ furthestStep: "closed", oppDead: false });
+  });
+
+  it("count wrong numbers and unanswered replies with the same conditions as their tiles", async () => {
+    db.results["integration.findUnique"] = SCOPED;
+    db.rawResults["sms:tags"] = [{ v: "wrong number-2" }];
+    await call(OWNER, "/api/reports/sms?from=2026-09-01&to=2026-09-30");
+    const tile = sqlOf("sms:cohort-x")[0];
+    const wrongCond = /count\(\*\) FILTER \(WHERE (.*?)\)::int AS "wrongNumbers"/s.exec(tile.sql)![1];
+    db.raw.length = 0;
+    await call(VIEWER, "/api/reports/sms/contacts?from=2026-09-01&to=2026-09-30&set=wrongNumber");
+    expect(sqlOf("sms:drill-count")[0].sql).toContain(`AND ${wrongCond}`);
+    expect(sqlOf("sms:drill-count")[0].values).toEqual(expect.arrayContaining([["wrong number-2"]]));
+    db.raw.length = 0;
+    await call(VIEWER, "/api/reports/sms/contacts?from=2026-09-01&to=2026-09-30&set=unanswered");
+    expect(sqlOf("sms:drill-count")[0].sql).toContain(`c."replyAnsweredSeconds" IS NULL`);
+  });
+
+  it("list the people outside minerals whatever the scope", async () => {
+    for (const [set, cond] of [["unclassified", `coalesce(c."line", 'unclassified') NOT IN ('minerals', 'real_estate')`], ["realEstate", `c."line" = 'real_estate'`]]) {
+      db.raw.length = 0;
+      await call(VIEWER, `/api/reports/sms/contacts?from=2026-09-01&to=2026-09-30&set=${set}`);
+      const q = sqlOf("sms:drill-count")[0];
+      expect(q.sql).toContain(cond);
+      expect(q.sql).not.toContain(MINERALS_ONLY);
+      expect(q.sql).toContain('FROM "HighLevelMessage" m');
+    }
+  });
+
+  it("narrow to a table row on top of the filters", async () => {
+    await call(VIEWER, "/api/reports/sms/contacts?from=2026-09-01&to=2026-09-30&set=reached&tags=a&tags=b&rowDim=tag&rowKey=Reeves%2C%20Oct");
+    const q = sqlOf("sms:drill-count")[0];
+    expect(q.values).toEqual(expect.arrayContaining([["a", "b"], ["Reeves, Oct"]]));
+    db.raw.length = 0;
+    db.rawResults["sms:tags"] = [{ v: "landline" }];
+    await call(VIEWER, "/api/reports/sms/contacts?from=2026-09-01&to=2026-09-30&set=landline&rowDim=listTag&rowKey=(no%20tag)");
+    const nt = sqlOf("sms:drill-count")[0];
+    expect(nt.sql).toContain("cardinality(ARRAY(SELECT lt.v");
+    expect(nt.values).toEqual(expect.arrayContaining([["landline"]]));
+    expectOrgScoped();
   });
 });

@@ -6,7 +6,7 @@ import { SortableTable, type Column } from "../../components/SortableTable";
 import { fmtDate, fmtDateLocal, fmtDateTime, num } from "../../lib/format";
 import { formatPhone } from "../../lib/phone";
 import {
-  OUTCOME_HINT, STATUS_KIND_LABEL, fmtDuration, outcomeLabel, sentByLabel,
+  FUNNEL_DRILLS, OUTCOME_HINT, STATUS_KIND_LABEL, fmtDuration, furthestStepLabel, outcomeLabel, sentByLabel, wrongNumberLabel,
   type DrillSet, type SmsContactRow, type SmsTimelineMessage,
 } from "../../lib/smsReport";
 
@@ -71,6 +71,17 @@ export function SmsDrill({ spec, query, periodLabel, onClose }: {
       render: (r) => <span title={r.outcome ? OUTCOME_HINT[r.outcome] : undefined}>{outcomeLabel(r.outcome)}</span> },
     { key: "time", header: "Time to reply", type: "number", align: "right", value: (r) => r.responseSeconds,
       render: (r) => (r.responseSeconds == null ? "—" : fmtDuration(r.responseSeconds)) },
+    // Set-specific columns: what put the person on this list.
+    ...(FUNNEL_DRILLS.includes(spec.set) ? [{
+      key: "step", header: "Furthest step", type: "text" as const, value: (r: SmsContactRow) => furthestStepLabel(r.furthestStep, r.oppDead),
+    }] : []),
+    ...(spec.set === "wrongNumber" ? [{
+      key: "wrong", header: "Wrong number", type: "text" as const, value: (r: SmsContactRow) => wrongNumberLabel(r),
+    }] : []),
+    ...(spec.set === "responded" || spec.set === "unanswered" ? [{
+      key: "answer", header: "Answered by a person", type: "number" as const, align: "right" as const, value: (r: SmsContactRow) => r.answerSeconds,
+      render: (r: SmsContactRow) => (r.answerSeconds == null ? <span className="muted">Not yet</span> : <>{fmtDuration(r.answerSeconds)}{r.answeredBy && <span className="muted"> · {r.answeredBy}</span>}</>),
+    }] : []),
   ];
 
   const total = data?.total ?? 0;
@@ -116,7 +127,10 @@ function SmsTimeline({ contact, onBack }: { contact: SmsContactRow; onBack: () =
   const cols: Column<SmsTimelineMessage & { i: number }>[] = [
     { key: "when", header: "Date & time", type: "date", value: (m) => m.sentAt, render: (m) => fmtDateTime(m.sentAt) },
     { key: "dir", header: "Direction", type: "text", value: (m) => m.direction,
-      render: (m) => (m.direction === "inbound" ? "Received" : "Sent") },
+      render: (m) => (m.direction !== "inbound" ? "Sent"
+        : m.replyKind === "wrongNumber" ? <span className="sms-by">Received <Tag tone="warn">Wrong number</Tag></span>
+        : m.replyKind === "optOut" ? <span className="sms-by">Received <Tag tone="danger">Asked to stop</Tag></span>
+        : "Received") },
     { key: "status", header: "Status", type: "text", value: (m) => STATUS_KIND_LABEL[m.statusKind],
       render: (m) => <Tag tone={STATUS_TONE[m.statusKind]}>{STATUS_KIND_LABEL[m.statusKind]}</Tag> },
     { key: "by", header: "Sent by", type: "text", value: (m) => sentByLabel(m).label,

@@ -13,10 +13,19 @@
  *     after every page, so a crash or a budget stop loses nothing.
  *  3. Live runs re-read the last 72 h once, to pick up delivery-status
  *     changes (HighLevel has no webhook for those).
- *  4. Summaries (domain/smsMetrics.ts summarizeContact) for every contact
- *     whose messages changed or whose summary used another response window.
- *  5. Contact details for new contacts, plus a daily refresh of contacts
- *     texted in the last 14 days (404 → deletedInHl, history kept).
+ *  4. Opportunities: a full pass every live run (all statuses) — funnel step
+ *     from the stage name, stage moves recorded as HighLevelStageEvent;
+ *     pipelines / tags / time zone are re-read every 6 h (with users).
+ *  5. One-time rescan of older texts for segments + wrong-number replies.
+ *  6. Summaries (domain/smsMetrics.ts summarizeContact) plus the contact's
+ *     minerals / real-estate line (domain/smsScope.ts classifyContact) for
+ *     every contact whose messages, tags or opportunities changed, or whose
+ *     summary used another response window or Minerals filter.
+ *  7. Contact details for new contacts, a daily refresh of contacts texted in
+ *     the last 14 days, and a weekly refresh of everyone, spread evenly
+ *     (404 → deletedInHl, history kept). A tag change marks the summary.
+ *  8. Live runs check carrier health (opt-outs / failed texts, last 24 h and
+ *     7 days) and raise one admin notification for a new warning.
  * Writes are idempotent upserts keyed on (organizationId, hlId) and only
  * touch rows whose stored fields actually changed, so overlapping pages and
  * re-runs never duplicate or churn rows.
@@ -31,17 +40,25 @@
  * a single long-lived API instance (Railway runs one container); a second
  * instance would need a database lock instead.
  */
-import type { Integration } from "@prisma/client";
+import { Prisma, type Integration } from "@prisma/client";
 import { prisma } from "../../db.js";
 import { decryptSecret } from "../secrets.js";
 import { logActivity } from "../activityLog.js";
-import { summarizeContact, type SmsMessageInput } from "../../domain/smsMetrics.js";
-import { HighLevelClient, HighLevelError, HL_AUTH_MESSAGE, type HlExportPage } from "./client.js";
+import {
+  summarizeContact, carrierHealth, FAILED_STATUSES, PENDING_STATUSES, type SmsMessageInput, type HealthInput,
+} from "../../domain/smsMetrics.js";
+import { classifyContact, suggestScope } from "../../domain/smsScope.js";
+import { HighLevelClient, HighLevelError, HL_AUTH_MESSAGE, type HlExportPage, type HlOpportunity } from "./client.js";
 import {
   readSyncState, responseWindowOf, toMessageRow, messageChanged, importStartDate, advanceCheckpoint,
   formatStartDate, startDateIgnored, toContactFields, toUserRefs, isDue, phaseAfterRun, storageEstimateMb,
-  connectErrorMessage, PAGE_LIMIT, STATUS_LOOKBACK_MS, USERS_REFRESH_MS, CONTACT_REFRESH_MS, CONTACT_ACTIVE_DAYS,
-  FAILURES_BEFORE_ERROR, type HlSyncState, type HlPhase, type HlLastRun, type HlUserRef, type MessageRow,
+  connectErrorMessage, rescanPatch, tagsChanged, weeklyRefreshLimit, toPipelineRefs, toTagNames, validTimezone,
+  readPipelines, readTags, savedScopeOf, effectiveScope, sameScope, isPermissionRefusal, toOpportunityFields,
+  unknownStage, planOpportunity, healthKeys, healthAlert, healthNotice,
+  PAGE_LIMIT, STATUS_LOOKBACK_MS, USERS_REFRESH_MS, CONTACT_REFRESH_MS, CONTACT_ACTIVE_DAYS, CONTACT_WEEKLY_MS,
+  FAILURES_BEFORE_ERROR, META_REFRESH_MS, OPP_PAGE_LIMIT, IMPORT_OPPS_EVERY_MS, SUMMARY_VERSION,
+  type HlSyncState, type HlPhase, type HlLastRun, type HlUserRef, type HlPipelineRef, type MessageRow,
+  type StoredOpp, type StageEventRow, type HealthWindow,
 } from "./mapping.js";
 
 export const HIGHLEVEL = "highlevel";
@@ -52,7 +69,7 @@ export const HL_KEY_UNREADABLE = "The saved HighLevel key can't be read anymore 
 export const needsReconnect = (row: Pick<Integration, "status" | "lastError">): boolean =>
   row.status === "ERROR" && (row.lastError === HL_AUTH_MESSAGE || row.lastError === HL_KEY_UNREADABLE);
 
-export type RunReason = "import" | "scheduled" | "manual" | "window";
+export type RunReason = "import" | "scheduled" | "manual" | "settings";
 
 export interface HighLevelRunResult {
   ok: boolean;
@@ -121,6 +138,8 @@ export interface HighLevelStatus {
   lastRun: HlLastRun | null;
   responseWindowDays: number;
   storageEstimateMb: number | null;
+  /** Optional read permissions the key lacks (e.g. "opportunities.readonly"). */
+  missingScopes: string[];
 }
 
 export async function highLevelStatus(organizationId: string): Promise<HighLevelStatus> {
@@ -148,6 +167,7 @@ export async function highLevelStatus(organizationId: string): Promise<HighLevel
     lastRun: state.lastRun ?? null,
     responseWindowDays: responseWindowOf(cfg),
     storageEstimateMb: hasState ? storageEstimateMb(texts) : null,
+    missingScopes: Array.isArray(state.missingScopes) ? state.missingScopes : [],
   };
 }
 
@@ -164,7 +184,10 @@ class SyncPaused extends Error {
   constructor(readonly waitMs: number, message: string) { super(message); }
 }
 
-interface Stats { newMessages: number; updatedMessages: number; contactsFetched: number; summaries: number }
+interface Stats {
+  newMessages: number; updatedMessages: number; contactsFetched: number; summaries: number;
+  opportunities: number; stageMoves: number; rescanned: number;
+}
 
 interface Ctx {
   rowId: string;
@@ -174,6 +197,10 @@ interface Ctx {
   state: HlSyncState;
   stats: Stats;
   deadline: number;
+  /** Pipelines by id (stage names → funnel steps). */
+  pipelines: Map<string, HlPipelineRef>;
+  /** Pipelines / tags / time zone were re-read this run. */
+  metaRefreshed: boolean;
 }
 
 const timeLeft = (ctx: Ctx) => Date.now() < ctx.deadline;
@@ -202,7 +229,7 @@ async function upsertMessages(org: string, rows: MessageRow[]): Promise<{ create
     where: { organizationId: org, hlId: { in: unique.map((r) => r.hlId) } },
     select: {
       id: true, hlId: true, hlContactId: true, conversationId: true, direction: true, messageType: true,
-      status: true, source: true, hlUserId: true, optOut: true, sentAt: true,
+      status: true, source: true, hlUserId: true, optOut: true, wrongNumber: true, segments: true, sentAt: true,
     },
   });
   const byHlId = new Map(existing.map((e) => [e.hlId, e]));
@@ -232,12 +259,20 @@ async function upsertMessages(org: string, rows: MessageRow[]): Promise<{ create
       data: ids.map((hlId) => ({ organizationId: org, hlId, summaryDirty: true })),
       skipDuplicates: true,
     });
-    await prisma.highLevelContact.updateMany({
-      where: { organizationId: org, hlId: { in: ids }, summaryDirty: false },
-      data: { summaryDirty: true },
-    });
+    await markContactsDirty(org, ids);
   }
-  return { created, updated: toUpdate.length };
+  // Reported as delivery updates: rows that changed for more than a newly counted segment / wrong-number flag.
+  const updated = toUpdate.filter((r) => messageChanged({ ...byHlId.get(r.hlId)!, segments: r.segments, wrongNumber: r.wrongNumber }, r)).length;
+  return { created, updated };
+}
+
+/** Flag contacts for a summary (and line) recompute. */
+async function markContactsDirty(org: string, hlIds: readonly string[]): Promise<void> {
+  if (!hlIds.length) return;
+  await prisma.highLevelContact.updateMany({
+    where: { organizationId: org, hlId: { in: [...hlIds] }, summaryDirty: false },
+    data: { summaryDirty: true },
+  });
 }
 
 interface Page { rows: MessageRow[]; last: boolean }
@@ -331,6 +366,215 @@ async function refreshRecentStatuses(ctx: Ctx): Promise<boolean> {
   return true;
 }
 
+// --- Pipelines, tags, time zone (every 6 h) ---------------------------------------
+
+export const OPPORTUNITIES_SCOPE = "opportunities.readonly";
+export const TAGS_SCOPE = "locations/tags.readonly";
+
+/**
+ * Re-read the account's pipelines (stage names → funnel steps), tags (the
+ * Minerals filter's list) and time zone (Reports' best time to text). The
+ * key may lack the two optional permissions: that is recorded in
+ * hlSync.missingScopes and the rest of the sync carries on.
+ */
+async function refreshMeta(ctx: Ctx): Promise<void> {
+  // The location read needs the permission every key has — a refusal here is a real auth failure.
+  const location = await ctx.client.getLocation(ctx.locationId);
+  const missing: string[] = [];
+  const optional = async <T>(scope: string, read: () => Promise<T>): Promise<T | null> => {
+    try { return await read(); } catch (e) {
+      if (isPermissionRefusal(e)) { missing.push(scope); return null; }
+      throw e;
+    }
+  };
+  const pipelines = await optional(OPPORTUNITIES_SCOPE, async () => toPipelineRefs(await ctx.client.listPipelines(ctx.locationId)));
+  const tags = await optional(TAGS_SCOPE, async () => toTagNames(await ctx.client.listTags(ctx.locationId)));
+
+  const cur = await prisma.integration.findUnique({ where: { id: ctx.rowId }, select: { config: true } });
+  const extra: Record<string, unknown> = { locationTimezone: validTimezone(location.timezone) };
+  if (pipelines) extra.hlPipelines = pipelines;
+  if (tags) extra.hlTags = tags;
+  // Without a saved filter, lines follow suggestScope(): new tags or pipelines can change it.
+  if (!savedScopeOf(cur?.config)) {
+    const before = suggestScope(readTags(cur?.config), readPipelines(cur?.config));
+    const after = suggestScope(tags ?? readTags(cur?.config), pipelines ?? readPipelines(cur?.config));
+    if (!sameScope(before, after)) {
+      await prisma.highLevelContact.updateMany({ where: { organizationId: ctx.org, summaryDirty: false }, data: { summaryDirty: true } });
+    }
+  }
+  ctx.state.missingScopes = missing.length ? missing : undefined;
+  ctx.state.metaRefreshAt = new Date().toISOString();
+  await saveState(ctx.rowId, { metaRefreshAt: ctx.state.metaRefreshAt, missingScopes: ctx.state.missingScopes }, extra);
+  ctx.pipelines = new Map((pipelines ?? readPipelines(cur?.config)).map((p) => [p.id, p]));
+  ctx.metaRefreshed = true;
+}
+
+/** An optional step was refused mid-run: remember it (the next meta refresh retries) and skip it. */
+async function noteMissingScope(ctx: Ctx, scope: string): Promise<void> {
+  ctx.state.missingScopes = [...new Set([...(ctx.state.missingScopes ?? []), scope])];
+  await saveState(ctx.rowId, { missingScopes: ctx.state.missingScopes });
+}
+
+// --- Opportunities ------------------------------------------------------------------
+
+const OPP_SELECT = {
+  id: true, hlId: true, hlContactId: true, pipelineId: true, stageId: true, status: true, monetaryValue: true,
+  assignedToHlUserId: true, source: true, name: true, step: true, maxRank: true, hlCreatedAt: true, hlUpdatedAt: true,
+  lastStageChangeAt: true, offerAt: true, acceptedAt: true, contractAt: true, closedAt: true, deadAt: true, deletedInHl: true,
+} as const;
+
+/** Upsert one search page: new opportunities inserted, changed ones rewritten, observed moves recorded. */
+async function upsertOpportunities(ctx: Ctx, list: readonly HlOpportunity[]): Promise<void> {
+  const rows = [...new Map(list
+    .map((o) => toOpportunityFields(o, ctx.pipelines))
+    .filter((r): r is NonNullable<typeof r> => !!r)
+    .map((r) => [r.hlId, r])).values()];
+  if (!rows.length) return;
+  const existing = await prisma.highLevelOpportunity.findMany({
+    where: { organizationId: ctx.org, hlId: { in: rows.map((r) => r.hlId) } },
+    select: OPP_SELECT,
+  });
+  const byHlId = new Map(existing.map((e) => [e.hlId, e]));
+  const now = new Date();
+  const creates: Record<string, unknown>[] = [];
+  const updates: { id: string; data: Record<string, unknown> }[] = [];
+  const events: StageEventRow[] = [];
+  const dirty = new Set<string>();
+  for (const r of rows) {
+    const prev = byHlId.get(r.hlId) ?? null;
+    const plan = planOpportunity(prev as StoredOpp | null, r, now);
+    if (plan.create) creates.push({ organizationId: ctx.org, ...plan.data });
+    else if (plan.data) updates.push({ id: prev!.id, data: plan.data });
+    if (plan.event) events.push(plan.event);
+    for (const c of plan.dirtyContacts) dirty.add(c);
+  }
+  if (creates.length) await prisma.highLevelOpportunity.createMany({ data: creates as never, skipDuplicates: true });
+  if (updates.length) {
+    await prisma.$transaction(updates.map((u) => prisma.highLevelOpportunity.update({ where: { id: u.id }, data: u.data })));
+  }
+  if (events.length) await prisma.highLevelStageEvent.createMany({ data: events.map((e) => ({ organizationId: ctx.org, ...e })) });
+  await markContactsDirty(ctx.org, [...dirty]);
+  ctx.stats.opportunities += rows.length;
+  ctx.stats.stageMoves += events.length;
+}
+
+/** After a complete pass: opportunities HighLevel no longer returns are kept, flagged deletedInHl. */
+async function markDeletedOpportunities(ctx: Ctx, seen: ReadonlySet<string>): Promise<void> {
+  const stored = await prisma.highLevelOpportunity.findMany({
+    where: { organizationId: ctx.org, deletedInHl: false },
+    select: { id: true, hlId: true, hlContactId: true },
+  });
+  const gone = stored.filter((o) => !seen.has(o.hlId));
+  for (let i = 0; i < gone.length; i += 500) {
+    await prisma.highLevelOpportunity.updateMany({ where: { id: { in: gone.slice(i, i + 500).map((o) => o.id) } }, data: { deletedInHl: true } });
+  }
+  await markContactsDirty(ctx.org, [...new Set(gone.map((o) => o.hlContactId).filter((c): c is string => !!c))]);
+}
+
+/**
+ * Step 4: one pass over every opportunity (all statuses), 100 per page. A
+ * pass the budget cuts short resumes from HighLevel's startAfter cursor next
+ * run. Deletions are only concluded from a pass that ran start to finish in
+ * one run and saw at least as many opportunities as HighLevel reported.
+ */
+async function syncOpportunities(ctx: Ctx): Promise<void> {
+  if (ctx.state.missingScopes?.includes(OPPORTUNITIES_SCOPE)) return;
+  const resumed = ctx.state.oppsCursor ?? null;
+  let cursor: { startAfter: number | null; startAfterId: string } | null = resumed;
+  const seen = new Set<string>();
+  let total: number | null = null;
+  for (;;) {
+    checkDailyBudget(ctx);
+    let page;
+    try {
+      page = await ctx.client.searchOpportunities({ locationId: ctx.locationId, limit: OPP_PAGE_LIMIT, ...cursor });
+    } catch (e) {
+      if (isPermissionRefusal(e)) { await noteMissingScope(ctx, OPPORTUNITIES_SCOPE); return; }
+      throw e;
+    }
+    total ??= page.meta.total;
+    // A stage or pipeline added since the last refresh: re-read the names before mapping steps.
+    if (!ctx.metaRefreshed && page.opportunities.some((o) => unknownStage(o, ctx.pipelines))) await refreshMeta(ctx);
+    await upsertOpportunities(ctx, page.opportunities);
+    for (const o of page.opportunities) if (typeof o.id === "string" && o.id) seen.add(o.id);
+    const next = page.meta.startAfterId ? { startAfter: page.meta.startAfter, startAfterId: page.meta.startAfterId } : null;
+    const stuck = !!next && !!cursor && next.startAfterId === cursor.startAfterId && next.startAfter === cursor.startAfter;
+    if (page.opportunities.length < OPP_PAGE_LIMIT || !next || stuck) {
+      if (!resumed && (total == null || seen.size >= total)) await markDeletedOpportunities(ctx, seen);
+      ctx.state.oppsRefreshAt = new Date().toISOString();
+      ctx.state.oppsCursor = undefined;
+      await saveState(ctx.rowId, { oppsRefreshAt: ctx.state.oppsRefreshAt, oppsCursor: undefined });
+      return;
+    }
+    cursor = next;
+    if (!timeLeft(ctx)) {
+      ctx.state.oppsCursor = cursor;
+      await saveState(ctx.rowId, { oppsCursor: cursor });
+      return;
+    }
+  }
+}
+
+// --- One-time rescan ------------------------------------------------------------------
+
+/** Write corrected segments / wrong-number flags for one page; returns how many rows changed. */
+async function applyRescan(org: string, rows: readonly MessageRow[]): Promise<number> {
+  if (!rows.length) return 0;
+  const existing = await prisma.highLevelMessage.findMany({
+    where: { organizationId: org, hlId: { in: rows.map((r) => r.hlId) } },
+    select: { id: true, hlId: true, hlContactId: true, segments: true, wrongNumber: true },
+  });
+  const byHlId = new Map(existing.map((e) => [e.hlId, e]));
+  const writes: { id: string; data: { segments: number; wrongNumber: boolean } }[] = [];
+  const dirty = new Set<string>();
+  for (const r of rows) {
+    const prev = byHlId.get(r.hlId);
+    const patch = prev ? rescanPatch(prev, r) : null;
+    if (!prev || !patch || writes.some((w) => w.id === prev.id)) continue;
+    writes.push({ id: prev.id, data: patch });
+    // Segments don't change a summary; a wrong-number reply does.
+    if (prev.wrongNumber !== patch.wrongNumber) dirty.add(prev.hlContactId);
+  }
+  if (writes.length) await prisma.$transaction(writes.map((w) => prisma.highLevelMessage.update({ where: { id: w.id }, data: w.data })));
+  await markContactsDirty(org, [...dirty]);
+  return writes.length;
+}
+
+/**
+ * Step 5 (live runs, until done): re-read the whole SMS history once,
+ * oldest first from hlSync.rescan.checkpoint, and fill segments + the
+ * wrong-number flag on rows imported before they existed. Nothing else on a
+ * row changes. Gets at most ~60% of what's left of the run, so summaries and
+ * contact lookups still happen; like the import, a run never stops for time
+ * before its checkpoint has moved.
+ */
+async function rescanHistory(ctx: Ctx): Promise<void> {
+  let r = ctx.state.rescan;
+  if (r?.done) return;
+  if (!r) {
+    const pending = await prisma.highLevelMessage.count({ where: { organizationId: ctx.org, segments: null } });
+    if (!pending) {
+      ctx.state.rescan = { done: true, updated: 0 };
+      await saveState(ctx.rowId, { rescan: ctx.state.rescan });
+      return;
+    }
+    r = { done: false, updated: 0 };
+  }
+  const initial = r.checkpoint;
+  const softDeadline = Date.now() + Math.max(0, ctx.deadline - Date.now()) * 0.6;
+  for await (const { rows, last } of pagesFrom(ctx, importStartDate(r.checkpoint))) {
+    const changed = await applyRescan(ctx.org, rows);
+    ctx.stats.rescanned += changed;
+    r = { done: last, checkpoint: advanceCheckpoint(r.checkpoint, rows), updated: (r.updated ?? 0) + changed };
+    ctx.state.rescan = r;
+    await saveState(ctx.rowId, { rescan: r, dateParam: ctx.state.dateParam });
+    if (last) return;
+    if (Date.now() >= softDeadline && (r.checkpoint !== initial || Date.now() >= ctx.deadline)) return;
+  }
+}
+
+// --- Summaries ------------------------------------------------------------------------
+
 const SUMMARY_BATCH = 200;
 
 /** Contacts whose stored summary is stale: messages changed, or computed with another window. */
@@ -339,65 +583,102 @@ const staleSummaryWhere = (org: string, windowDays: number) => ({
   OR: [{ summaryDirty: true }, { summaryWindowDays: null }, { summaryWindowDays: { not: windowDays } }],
 });
 
-/** Step 4: recompute outreach summaries in batches (summarizeContact is the single counting rule). */
+/**
+ * Step 6: recompute outreach summaries in batches (summarizeContact is the
+ * single counting rule) together with each contact's line (classifyContact
+ * over its tags and its live opportunities' pipelines). The window and the
+ * Minerals filter are re-read per batch, and a contact is only marked clean
+ * if nothing (e.g. a settings change) touched it since it was read.
+ */
 async function recomputeSummaries(ctx: Ctx): Promise<void> {
-  // Re-read the window: the owner may have changed it while this run was going.
-  const cur = await prisma.integration.findUnique({ where: { id: ctx.rowId }, select: { config: true } });
-  const windowDays = responseWindowOf(cur?.config);
   for (let i = 0; i < 10_000; i++) {
     if (i > 0 && !timeLeft(ctx)) return;
+    // Re-read the settings: the owner may change them while this run is going.
+    const cur = await prisma.integration.findUnique({ where: { id: ctx.rowId }, select: { config: true } });
+    const windowDays = responseWindowOf(cur?.config);
+    const { scope } = effectiveScope(cur?.config);
     const batch = await prisma.highLevelContact.findMany({
       where: staleSummaryWhere(ctx.org, windowDays),
-      select: { id: true, hlId: true },
+      select: { id: true, hlId: true, tags: true, updatedAt: true },
       orderBy: { id: "asc" },
       take: SUMMARY_BATCH,
     });
     if (!batch.length) return;
-    const msgs = await prisma.highLevelMessage.findMany({
-      where: { organizationId: ctx.org, hlContactId: { in: batch.map((b) => b.hlId) } },
-      select: { hlContactId: true, direction: true, status: true, sentAt: true, hlUserId: true, optOut: true },
-    });
+    const ids = batch.map((b) => b.hlId);
+    const [msgs, opps] = await Promise.all([
+      prisma.highLevelMessage.findMany({
+        where: { organizationId: ctx.org, hlContactId: { in: ids } },
+        select: { hlContactId: true, direction: true, status: true, sentAt: true, hlUserId: true, optOut: true, wrongNumber: true, source: true },
+      }),
+      prisma.highLevelOpportunity.findMany({
+        where: { organizationId: ctx.org, hlContactId: { in: ids }, deletedInHl: false },
+        select: { hlContactId: true, pipelineId: true },
+      }),
+    ]);
     const byContact = new Map<string, SmsMessageInput[]>();
     for (const m of msgs) {
       const list = byContact.get(m.hlContactId) ?? [];
       list.push(m);
       byContact.set(m.hlContactId, list);
     }
+    const pipelinesOf = new Map<string, string[]>();
+    for (const o of opps) {
+      if (!o.hlContactId) continue;
+      const list = pipelinesOf.get(o.hlContactId) ?? [];
+      list.push(o.pipelineId);
+      pipelinesOf.set(o.hlContactId, list);
+    }
     await prisma.$transaction(batch.map((b) => {
       const s = summarizeContact(byContact.get(b.hlId) ?? [], windowDays);
-      return prisma.highLevelContact.update({
-        where: { id: b.id },
-        data: { ...s, summaryDirty: false, summaryWindowDays: windowDays },
+      const line = classifyContact(b.tags, pipelinesOf.get(b.hlId) ?? [], scope);
+      return prisma.highLevelContact.updateMany({
+        where: { id: b.id, updatedAt: b.updatedAt },
+        data: { ...s, line, summaryDirty: false, summaryWindowDays: windowDays },
       });
     }));
     ctx.stats.summaries += batch.length;
   }
 }
 
+// --- Contact details ---------------------------------------------------------------------
+
 const FIRST_FETCH_PER_RUN = 600;
 const REFRESH_PER_RUN = 150;
 const CONTACT_CONCURRENCY = 4;
 
-/** Step 5: contact details — new contacts first, then the daily refresh of recently texted ones. */
+/**
+ * Step 7: contact details — new contacts first, then (live) the daily refresh
+ * of recently texted ones and the weekly refresh of everyone (so tags renamed
+ * in HighLevel show up within a week, a few contacts per run). A changed tag
+ * list marks the contact's summary (its line depends on its tags).
+ */
 async function fetchContacts(ctx: Ctx): Promise<void> {
   const now = Date.now();
+  const select = { id: true, hlId: true, tags: true } as const;
   const firsts = await prisma.highLevelContact.findMany({
     where: { organizationId: ctx.org, fetchedAt: null, deletedInHl: false },
-    select: { id: true, hlId: true },
+    select,
     orderBy: { createdAt: "asc" },
     take: FIRST_FETCH_PER_RUN,
   });
-  const refresh = ctx.state.phase === "live" ? await prisma.highLevelContact.findMany({
+  const live = ctx.state.phase === "live";
+  const refresh = live ? await prisma.highLevelContact.findMany({
     where: {
       organizationId: ctx.org, deletedInHl: false,
       fetchedAt: { lt: new Date(now - CONTACT_REFRESH_MS) },
       lastMessageAt: { gte: new Date(now - CONTACT_ACTIVE_DAYS * 86_400_000) },
     },
-    select: { id: true, hlId: true },
+    select,
     orderBy: { fetchedAt: "asc" },
     take: REFRESH_PER_RUN,
   }) : [];
-  const queue = [...firsts, ...refresh];
+  const weekly = live ? await prisma.highLevelContact.findMany({
+    where: { organizationId: ctx.org, deletedInHl: false, fetchedAt: { lt: new Date(now - CONTACT_WEEKLY_MS) } },
+    select,
+    orderBy: { fetchedAt: "asc" },
+    take: weeklyRefreshLimit(await prisma.highLevelContact.count({ where: { organizationId: ctx.org, deletedInHl: false } })),
+  }) : [];
+  const queue = [...new Map([...firsts, ...refresh, ...weekly].map((c) => [c.id, c])).values()];
   let failure: unknown = null;
   let next = 0;
   const worker = async () => {
@@ -407,7 +688,8 @@ async function fetchContacts(ctx: Ctx): Promise<void> {
         checkDailyBudget(ctx);
         let data: Record<string, unknown>;
         try {
-          data = { ...toContactFields(await ctx.client.getContact(c.hlId)), deletedInHl: false };
+          const fields = toContactFields(await ctx.client.getContact(c.hlId));
+          data = { ...fields, deletedInHl: false, ...(tagsChanged(c.tags, fields.tags) ? { summaryDirty: true } : {}) };
         } catch (e) {
           if (e instanceof HighLevelError && e.kind === "notFound") data = { deletedInHl: true }; // deleted in HighLevel: keep the row and its history
           else if (e instanceof HighLevelError && e.kind === "badRequest") {
@@ -427,6 +709,69 @@ async function fetchContacts(ctx: Ctx): Promise<void> {
   if (failure) throw failure;
 }
 
+// --- Carrier health --------------------------------------------------------------------------
+
+const DAY_MS = 86_400_000;
+
+/**
+ * A UTC instant for a "timestamp without time zone" column. A bare Date
+ * parameter is sent as timestamptz, which Postgres compares in the SESSION's
+ * time zone — not necessarily UTC (as in Reports' smsReports.ts).
+ */
+const ts = (d: Date) => Prisma.sql`${d.toISOString()}::timestamp`;
+
+/** Texts sent / failed, contacts reached and contacts who opted out in [from, to) — all texting, every line. */
+export async function healthInput(org: string, from: Date, to: Date): Promise<HealthInput> {
+  const st = Prisma.sql`lower(btrim(coalesce(m."status", '')))`;
+  const pending = Prisma.sql`${st} IN (${Prisma.join([...PENDING_STATUSES])})`;
+  const failed = Prisma.sql`${st} IN (${Prisma.join([...FAILED_STATUSES])})`;
+  const rows = await prisma.$queryRaw<{ sent: number; failed: number; reached: number; optOuts: number }[]>`
+    SELECT
+      count(*) FILTER (WHERE m."direction" = 'outbound' AND NOT (${pending}))::int AS "sent",
+      count(*) FILTER (WHERE m."direction" = 'outbound' AND ${failed})::int AS "failed",
+      count(DISTINCT m."hlContactId") FILTER (WHERE m."direction" = 'outbound' AND NOT (${pending}) AND NOT (${failed}))::int AS "reached",
+      count(DISTINCT m."hlContactId") FILTER (WHERE m."direction" = 'inbound' AND m."optOut")::int AS "optOuts"
+    FROM "HighLevelMessage" m
+    WHERE m."organizationId" = ${org} AND m."sentAt" >= ${ts(from)} AND m."sentAt" < ${ts(to)}`;
+  const r = rows[0] ?? { sent: 0, failed: 0, reached: 0, optOuts: 0 };
+  return { sent: r.sent, failed: r.failed, reachedContacts: r.reached, optOuts: r.optOuts };
+}
+
+/**
+ * Step 8 (live runs): carrier health over the last 24 hours and 7 days. A
+ * NEW warning raises one admin notification ("sms_health", mutable in
+ * notification settings) — at most one a day; a warning is announced once
+ * while it lasts (healthAlert).
+ */
+async function checkCarrierHealth(ctx: Ctx): Promise<void> {
+  const now = new Date();
+  const [day, week] = await Promise.all([
+    healthInput(ctx.org, new Date(now.getTime() - DAY_MS), now),
+    healthInput(ctx.org, new Date(now.getTime() - 7 * DAY_MS), now),
+  ]);
+  const results: Record<HealthWindow, ReturnType<typeof carrierHealth>> = { day: carrierHealth(day), week: carrierHealth(week) };
+  const active = [...healthKeys("day", results.day), ...healthKeys("week", results.week)];
+  const notified = ctx.state.healthNotified ?? [];
+  if (!active.length && !notified.length) return;
+  const anyFresh = active.some((k) => !notified.includes(k));
+  const recent = anyFresh ? await prisma.notification.findFirst({
+    where: { organizationId: ctx.org, type: "sms_health", createdAt: { gte: new Date(now.getTime() - DAY_MS) } },
+    select: { id: true },
+  }) : null;
+  const { notify, remember } = healthAlert(notified, active, !!recent);
+  if (notify) {
+    const { title, body } = healthNotice(notify, results);
+    await prisma.notification.create({
+      data: { organizationId: ctx.org, userId: null, type: "sms_health", title, body, link: "/reports?view=sms" },
+    });
+    await logActivity({ eventType: "integration.sms_health", summary: `HighLevel texting health warning: ${body}`, organizationId: ctx.org });
+  }
+  if (remember.length !== notified.length || remember.some((k) => !notified.includes(k))) {
+    ctx.state.healthNotified = remember.length ? remember : undefined;
+    await saveState(ctx.rowId, { healthNotified: ctx.state.healthNotified });
+  }
+}
+
 const fmt = (n: number) => n.toLocaleString("en-US");
 const plural = (n: number, one: string, many: string) => `${fmt(n)} ${n === 1 ? one : many}`;
 
@@ -439,7 +784,9 @@ function successMessage(phase: HlPhase, finished: boolean, s: Stats, imported: n
   const parts = [
     s.newMessages ? plural(s.newMessages, "new text", "new texts") : "no new texts",
     s.updatedMessages ? plural(s.updatedMessages, "delivery update", "delivery updates") : null,
+    s.stageMoves ? plural(s.stageMoves, "pipeline stage change", "pipeline stage changes") : null,
     s.contactsFetched ? plural(s.contactsFetched, "contact refreshed", "contacts refreshed") : null,
+    s.rescanned ? plural(s.rescanned, "older text re-checked for wrong numbers and cost", "older texts re-checked for wrong numbers and cost") : null,
   ].filter(Boolean);
   return `Up to date — ${parts.join(", ")}.`;
 }
@@ -455,7 +802,7 @@ export async function runHighLevelSync(row: Integration, opts: { budgetMs: numbe
   }
   running.add(org);
   const startedAt = Date.now();
-  const stats: Stats = { newMessages: 0, updatedMessages: 0, contactsFetched: 0, summaries: 0 };
+  const stats: Stats = { newMessages: 0, updatedMessages: 0, contactsFetched: 0, summaries: 0, opportunities: 0, stageMoves: 0, rescanned: 0 };
   let fresh: Integration | null = null;
   let state: HlSyncState = readSyncState(row.config);
   try {
@@ -471,6 +818,7 @@ export async function runHighLevelSync(row: Integration, opts: { budgetMs: numbe
     const ctx: Ctx = {
       rowId: fresh.id, org, locationId, client: new HighLevelClient({ token }), state: { ...state }, stats,
       deadline: startedAt + opts.budgetMs,
+      pipelines: new Map(readPipelines(cfg).map((p) => [p.id, p])), metaRefreshed: false,
     };
 
     if (state.phase === "preview") {
@@ -485,11 +833,12 @@ export async function runHighLevelSync(row: Integration, opts: { budgetMs: numbe
       return { ok: true, message, phase: "preview" };
     }
 
-    // 1. Team members (sender names in Reports).
+    // 1. Team members (sender names in Reports), pipelines, tags and time zone.
     if (isDue(state.usersRefreshAt, USERS_REFRESH_MS, startedAt)) {
       const users = toUserRefs(await ctx.client.listUsers(locationId));
       await saveState(fresh.id, { usersRefreshAt: new Date().toISOString() }, { hlUsers: users });
     }
+    if (isDue(state.metaRefreshAt, META_REFRESH_MS, startedAt)) await refreshMeta(ctx);
     // 2. New messages from the checkpoint.
     const caughtUp = await importMessages(ctx);
     // 3. Delivery-status refresh — at most once per live run.
@@ -497,10 +846,24 @@ export async function runHighLevelSync(row: Integration, opts: { budgetMs: numbe
     if (caughtUp && state.phase === "live" && timeLeft(ctx) && await refreshRecentStatuses(ctx)) {
       statusRefreshAt = new Date().toISOString();
     }
-    // 4. Summaries, then 5. contact details (the slow part — summaries first
+    // 4. Opportunities — every live run; while importing (runs back to back) every 15 minutes.
+    const oppsDue = state.phase === "live" || isDue(ctx.state.oppsRefreshAt, IMPORT_OPPS_EVERY_MS, startedAt);
+    if (oppsDue && timeLeft(ctx)) await syncOpportunities(ctx);
+    // Summaries computed under older rules (before wrong numbers, speed to
+    // lead and the minerals line existed) are recomputed once.
+    if (state.summaryVersion !== SUMMARY_VERSION) {
+      await prisma.highLevelContact.updateMany({ where: { organizationId: org, summaryDirty: false }, data: { summaryDirty: true } });
+      ctx.state.summaryVersion = SUMMARY_VERSION;
+      await saveState(fresh.id, { summaryVersion: SUMMARY_VERSION });
+    }
+    // 5. The one-time rescan of older texts (live only; the import already records both).
+    if (state.phase === "live" && caughtUp && timeLeft(ctx)) await rescanHistory(ctx);
+    // 6. Summaries, then 7. contact details (the slow part — summaries first
     // so a budget stop never leaves Reports with stale counts).
     await recomputeSummaries(ctx);
     if (timeLeft(ctx)) await fetchContacts(ctx);
+    // 8. Carrier health (all texting) — a few aggregate queries, no HighLevel requests.
+    if (state.phase === "live") await checkCarrierHealth(ctx);
 
     // Phase: importing → live once messages, contacts and summaries are complete.
     const windowDays = responseWindowOf((await prisma.integration.findUnique({ where: { id: fresh.id }, select: { config: true } }))?.config);

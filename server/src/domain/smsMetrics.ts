@@ -18,6 +18,9 @@
  *      OPTED_OUT  — an opt-out request (STOP, UNSUBSCRIBE, …), which never
  *                   counts as a response;
  *      LATE_REPLY — arrived after the window closed.
+ *    A "wrong number" reply is none of these: it never counts as a response
+ *    and the sequence carries on (usually on the contact's next phone). A
+ *    contact whose only replies were wrong numbers is WRONG_NUMBER.
  *    A contact with reached texts and no reply is NO_REPLY; one who texted
  *    first is INBOUND_FIRST and is left out of outreach response rates; one
  *    whose every text failed is NOT_REACHED.
@@ -32,7 +35,7 @@ export const RESPONSE_WINDOW_OPTIONS = [7, 14, 30, 60, 90] as const;
 /** Touches shown individually; later ones roll into one "n+1 or later" bucket. */
 export const TOUCH_BUCKETS = 5;
 
-export type SmsOutcome = "RESPONDED" | "OPTED_OUT" | "LATE_REPLY" | "NO_REPLY" | "INBOUND_FIRST" | "NOT_REACHED";
+export type SmsOutcome = "RESPONDED" | "OPTED_OUT" | "LATE_REPLY" | "NO_REPLY" | "WRONG_NUMBER" | "INBOUND_FIRST" | "NOT_REACHED";
 
 const DELIVERED = new Set(["delivered", "read", "opened", "clicked"]);
 const PENDING = new Set(["pending", "scheduled", "queued"]);
@@ -84,12 +87,72 @@ export function isOptOutReply(body: string | null | undefined): boolean {
   return OPT_OUT_PHRASES.some((p) => t.includes(p));
 }
 
+// Replies saying the number doesn't belong to the person we're trying to
+// reach. Kept narrow on purpose: "not interested" or "who is this?" are real
+// replies, not wrong numbers.
+const WRONG_NUMBER_PHRASES = [
+  "wrong number", "wrong person", "wrong #", "you have the wrong", "youve got the wrong", "you got the wrong",
+  "no one by that name", "nobody by that name", "no one here by", "nobody here by", "not the person you",
+  "not who you", "dont know who that is", "dont know that person", "this number doesnt belong",
+];
+
+/** True when an inbound text says we texted the wrong person. */
+export function isWrongNumberReply(body: string | null | undefined): boolean {
+  if (!body) return false;
+  const t = body.toLowerCase().replace(/['’]/g, "").replace(/[^a-z0-9# ]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  if (WRONG_NUMBER_PHRASES.some((p) => t.includes(p))) return true;
+  // "This isn't his number" / short "No, this isn't Robert" answers — not
+  // "this is not a good time".
+  if (/\bthis (isnt|is not) (his|her|their|my) (number|phone|cell)\b/.test(t)) return true;
+  return t.split(" ").length <= 5 && /^(no )?this (isnt|is not) [a-z]+$/.test(t);
+}
+
+// GSM 03.38 characters (one unit each) and the extension table (two units).
+const GSM7 = new Set(
+  "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà",
+);
+const GSM7_EXT = new Set("^{}\\[~]|€\f");
+
+/**
+ * Billable SMS segments for a message body, the way carriers count them:
+ * plain (GSM-7) text is 160 characters in one segment, 153 per segment when
+ * split; anything with an emoji or other non-GSM character is sent as
+ * Unicode — 70 in one segment, 67 per segment when split. Empty → 1.
+ */
+export function smsSegments(body: string | null | undefined): number {
+  const text = body ?? "";
+  let units = 0;
+  let gsm = true;
+  for (const ch of text) {
+    if (GSM7.has(ch)) units += 1;
+    else if (GSM7_EXT.has(ch)) units += 2;
+    else { gsm = false; break; }
+  }
+  if (gsm) return units <= 160 ? 1 : Math.ceil(units / 153);
+  // UTF-16 code units: characters outside the BMP (most emoji) take two.
+  const len = text.length;
+  return len <= 70 ? 1 : Math.ceil(len / 67);
+}
+
+/** A text typed by a team member (not an automation, bulk send or campaign). */
+export function isPersonSend(m: { source?: string | null; hlUserId: string | null }): boolean {
+  const src = (m.source ?? "").toLowerCase();
+  if (src === "app") return true;
+  if (src === "workflow" || src === "bulk_actions" || src === "campaign") return false;
+  return !!m.hlUserId;
+}
+
 export interface SmsMessageInput {
   direction: string; // "inbound" | "outbound"
   status: string | null;
   sentAt: Date;
   hlUserId: string | null;
   optOut: boolean;
+  /** Inbound reply saying we texted the wrong person (isWrongNumberReply). */
+  wrongNumber?: boolean;
+  /** HighLevel source: workflow | bulk_actions | campaign | api | app. */
+  source?: string | null;
 }
 
 export interface ContactSummary {
@@ -103,6 +166,12 @@ export interface ContactSummary {
   outboundTotal: number;
   inboundTotal: number;
   lastMessageAt: Date | null;
+  /** First "wrong number" reply, and how many reached texts preceded it. */
+  wrongNumberAt: Date | null;
+  wrongNumberTouch: number | null;
+  /** Speed to lead: counted reply → the next text a team member typed. */
+  replyAnsweredSeconds: number | null;
+  answeredByHlUserId: string | null;
 }
 
 const DAY_MS = 86_400_000;
@@ -120,6 +189,7 @@ export function summarizeContact(messages: readonly SmsMessageInput[], windowDay
     firstOutboundAt: null, touches: 0, unconfirmedTouches: 0, outcome: null, outcomeAt: null,
     responseSeconds: null, creditedHlUserId: null, outboundTotal: 0, inboundTotal: 0,
     lastMessageAt: msgs.length ? msgs[msgs.length - 1].sentAt : null,
+    wrongNumberAt: null, wrongNumberTouch: null, replyAnsweredSeconds: null, answeredByHlUserId: null,
   };
   for (const m of msgs) {
     if (m.direction === "outbound") { if (isSentStatus(m.status)) out.outboundTotal++; }
@@ -131,7 +201,8 @@ export function summarizeContact(messages: readonly SmsMessageInput[], windowDay
   // Texts marked failed before any reply: if the person replies anyway, the
   // failure receipt was wrong and those texts did reach them.
   const failedBefore: SmsMessageInput[] = [];
-  for (const m of msgs) {
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
     if (m.direction === "outbound") {
       if (!isSentStatus(m.status)) continue; // not sent yet
       anySent = true;
@@ -150,21 +221,37 @@ export function summarizeContact(messages: readonly SmsMessageInput[], windowDay
       out.touches = failedBefore.length;
       out.unconfirmedTouches = failedBefore.length;
       lastTouchAt = failedBefore[failedBefore.length - 1].sentAt;
+      failedBefore.length = 0;
     }
     if (out.touches === 0 || !lastTouchAt || !out.firstOutboundAt) {
       out.outcome = "INBOUND_FIRST";
       out.outcomeAt = m.sentAt;
       return out;
     }
+    if (m.wrongNumber && !m.optOut) {
+      // The number reached someone else. Not a response, and the outreach
+      // continues (usually on the contact's next phone number).
+      if (!out.wrongNumberAt) { out.wrongNumberAt = m.sentAt; out.wrongNumberTouch = out.touches; }
+      continue;
+    }
     out.outcomeAt = m.sentAt;
     if (m.optOut) out.outcome = "OPTED_OUT";
     else if (m.sentAt.getTime() - lastTouchAt.getTime() <= windowDays * DAY_MS) {
       out.outcome = "RESPONDED";
       out.responseSeconds = Math.max(0, Math.round((m.sentAt.getTime() - out.firstOutboundAt.getTime()) / 1000));
+      // Speed to lead: the first later text a team member typed (automated
+      // follow-ups don't count as answering the seller).
+      for (let j = i + 1; j < msgs.length; j++) {
+        const n = msgs[j];
+        if (n.direction !== "outbound" || !isSentStatus(n.status) || !isPersonSend(n)) continue;
+        out.replyAnsweredSeconds = Math.max(0, Math.round((n.sentAt.getTime() - m.sentAt.getTime()) / 1000));
+        out.answeredByHlUserId = n.hlUserId ?? null;
+        break;
+      }
     } else out.outcome = "LATE_REPLY";
     return out;
   }
-  out.outcome = out.touches > 0 ? "NO_REPLY" : anySent ? "NOT_REACHED" : null;
+  out.outcome = out.wrongNumberAt ? "WRONG_NUMBER" : out.touches > 0 ? "NO_REPLY" : anySent ? "NOT_REACHED" : null;
   return out;
 }
 
@@ -215,3 +302,30 @@ export function touchRates(rows: readonly TouchOutcomeCount[], buckets = TOUCH_B
 
 /** a ÷ b, or null (shown as N/A) when b is 0. */
 export const ratio = (a: number, b: number): number | null => (b > 0 ? a / b : null);
+
+// --- Carrier health ------------------------------------------------------
+// Carriers filter numbers whose texts draw a lot of opt-outs or bounce. These
+// are rules of thumb for "well above normal", checked per day and over the
+// last 7 days; small samples are ignored so one bad afternoon of 20 texts
+// doesn't raise an alarm.
+export const HEALTH_OPT_OUT_WARN = 0.05;
+export const HEALTH_FAILURE_WARN = 0.15;
+export const HEALTH_MIN_TEXTS = 100;
+
+export interface HealthInput { sent: number; failed: number; reachedContacts: number; optOuts: number }
+export interface HealthResult { optOutRate: number | null; failureRate: number | null; warnings: ("optOut" | "failure")[] }
+
+export function carrierHealth(x: HealthInput): HealthResult {
+  const optOutRate = ratio(x.optOuts, x.reachedContacts);
+  const failureRate = ratio(x.failed, x.sent);
+  const warnings: HealthResult["warnings"] = [];
+  if (x.sent >= HEALTH_MIN_TEXTS) {
+    if (optOutRate != null && optOutRate >= HEALTH_OPT_OUT_WARN) warnings.push("optOut");
+    if (failureRate != null && failureRate >= HEALTH_FAILURE_WARN) warnings.push("failure");
+  }
+  return { optOutRate, failureRate, warnings };
+}
+
+/** Texting cost in dollars; null when no price is set. */
+export const textingCost = (segments: number, pricePerSegment: number | null | undefined): number | null =>
+  pricePerSegment != null && pricePerSegment >= 0 ? Math.round(segments * pricePerSegment * 10000) / 10000 : null;

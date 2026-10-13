@@ -4,9 +4,11 @@ import {
   isDeliveredStatus, isFailedStatus, isPendingStatus, isSentStatus,
 } from "./smsMetrics.js";
 import {
-  DELTA_KIND, MAX_FILTER_VALUES, NO_SENDER, UNASSIGNED_LABEL, UNKNOWN_USER_LABEL,
-  allRange, bucketKeys, bucketStart, computeKpis, cohortCounts, dayRange, fillTrend, isoDay, listParam, mergeBreakdown,
-  parseIsoDay, pointChange, rangeJson, readHlConfig, relativeChange, requestedPeriod, senderName, smsDeltas, trendBucket,
+  BEST_TIME_MIN_SAMPLE, DELTA_KIND, DRILL_SETS, MAX_FILTER_VALUES, NO_SENDER, NO_TAG, UNASSIGNED_LABEL, UNKNOWN_USER_LABEL,
+  allRange, bestTimeGrid, bucketKeys, bucketStart, computeKpis, cohortCounts, costSummary, dayRange, drillRow, effectiveScope,
+  fillTrend, funnelSummary, furthestStep, healthDays, healthOf, isValidTimeZone, isoDay, lineCounts, listParam, mergeBreakdown,
+  mergeQuality, parseIsoDay, parseReportScope, phoneTagSets, pointChange, rangeJson, readHlConfig, relativeChange,
+  requestedPeriod, senderName, smsDeltas, speedSummary, trendBucket, type FunnelCounts,
 } from "./smsReport.js";
 
 const D = (s: string) => new Date(`${s}T00:00:00Z`);
@@ -149,8 +151,10 @@ describe("comparisons", () => {
     expect(pointChange(null, 0.25)).toBeNull();
   });
 
-  it("uses points for the two rates and relative change for everything else", () => {
-    expect(Object.entries(DELTA_KIND).filter(([, v]) => v === "points").map(([k]) => k).sort()).toEqual(["optOutRate", "responseRate"]);
+  it("uses points for rates and relative change for everything else", () => {
+    expect(Object.entries(DELTA_KIND).filter(([, v]) => v === "points").map(([k]) => k).sort()).toEqual([
+      "answeredWithinHourRate", "interestedRate", "neverAnsweredRate", "offerAcceptanceRate", "optOutRate", "responseRate", "wrongNumberRate",
+    ]);
     const base = computeKpis({ sent: 100, delivered: 90, failed: 5, inbound: 20, contactsTexted: 50 },
       { reached: 40, responded: 10, optedOut: 2, avgSeconds: 600, medianSeconds: 300 });
     const cur = computeKpis({ sent: 200, delivered: 180, failed: 5, inbound: 20, contactsTexted: 80 },
@@ -192,6 +196,7 @@ describe("stored config", () => {
     expect(readHlConfig(null)).toEqual({
       locationName: null, responseWindowDays: 30, hlUsers: [],
       sync: { phase: null, previewTexts: null, imported: 0, lastRun: null },
+      scope: null, pricePerSegment: null, locationTimezone: null, hlPipelines: [], hlTags: [],
     });
     const c = readHlConfig({
       locationName: "XLeads – Carsa", responseWindowDays: 14, _secret: "x",
@@ -211,5 +216,200 @@ describe("listParam", () => {
     expect(listParam(undefined)).toEqual([]);
     expect(listParam([{ x: 1 }, "ok"])).toEqual(["ok"]);
     expect(listParam(Array.from({ length: MAX_FILTER_VALUES + 50 }, (_, i) => `t${i}`))).toHaveLength(MAX_FILTER_VALUES);
+  });
+});
+
+describe("KPI settings in the stored config", () => {
+  it("reads the saved minerals filter, price and time zone, rejecting bad values", () => {
+    const c = readHlConfig({
+      scope: { mineralTags: ["reeves county"], realEstateTags: [], mineralPipelineIds: ["p1"] },
+      pricePerSegment: 0.0091, locationTimezone: "America/Chicago",
+      hlPipelines: [{ id: "p1", name: "Minerals", stages: [] }, { name: "no id" }], hlTags: ["reeves county", 7, ""],
+    });
+    expect(c.scope).toEqual({ mineralTags: ["reeves county"], realEstateTags: [], mineralPipelineIds: ["p1"] });
+    expect(c.pricePerSegment).toBe(0.0091);
+    expect(c.locationTimezone).toBe("America/Chicago");
+    expect(c.hlPipelines).toEqual([{ id: "p1", name: "Minerals" }]);
+    expect(c.hlTags).toEqual(["reeves county"]);
+    const bad = readHlConfig({ scope: { mineralTags: "reeves" }, pricePerSegment: -1, locationTimezone: "Mars/Olympus" });
+    expect([bad.scope, bad.pricePerSegment, bad.locationTimezone]).toEqual([null, null, null]);
+    expect(readHlConfig({ pricePerSegment: "0.01" }).pricePerSegment).toBeNull();
+    expect(readHlConfig({ pricePerSegment: 0 }).pricePerSegment).toBe(0); // free texting is a price
+    expect(isValidTimeZone("UTC")).toBe(true);
+    expect(isValidTimeZone("")).toBe(false);
+  });
+
+  it("uses the saved filter, else the same suggestion the sync classifies with", () => {
+    const saved = readHlConfig({ scope: { mineralTags: [], realEstateTags: ["sub2"], mineralPipelineIds: [] }, hlPipelines: [{ id: "p1", name: "Minerals" }] });
+    expect(effectiveScope(saved).mineralPipelineIds).toEqual([]);
+    const suggested = readHlConfig({ hlPipelines: [{ id: "p1", name: "Minerals v2" }, { id: "p2", name: "JV's" }], hlTags: ["leon county", "sub2"] });
+    expect(effectiveScope(suggested)).toEqual({ mineralTags: ["leon county"], realEstateTags: [], mineralPipelineIds: ["p1"] });
+  });
+
+  it("defaults the report to minerals only", () => {
+    expect(parseReportScope(undefined)).toBe("minerals");
+    expect(parseReportScope("all")).toBe("all");
+    expect(parseReportScope(["all"])).toBe("minerals");
+  });
+
+  it("counts anything not minerals or real estate (incl. not classified yet) as unclassified", () => {
+    expect(lineCounts([{ line: "minerals", n: 5 }, { line: "real_estate", n: 2 }, { line: null, n: 3 }, { line: "unclassified", n: 1 }, { line: "odd", n: 1 }]))
+      .toEqual({ minerals: 5, realEstate: 2, unclassified: 5 });
+  });
+});
+
+const FUNNEL: FunnelCounts = {
+  reached: 1000, responded: 100, opportunity: 40, offer: 20, accepted: 8, contract: 6, closed: 4, dead: 7, preExisting: 3,
+  cohortTexts: 2600, toOpportunity: { avg: 90000.4, median: 86400.6 }, toClose: { avg: 3e6, median: 2.5e6, known: 3 },
+};
+
+describe("funnelSummary", () => {
+  it("gives step-to-step and overall conversion and the per-deal figures", () => {
+    const f = funnelSummary(FUNNEL);
+    expect(f.steps.map((s) => [s.key, s.count, s.fromPrevious, s.fromReached])).toEqual([
+      ["reached", 1000, null, 1], ["responded", 100, 0.1, 0.1], ["opportunity", 40, 0.4, 0.04], ["offer", 20, 0.5, 0.02],
+      ["accepted", 8, 0.4, 0.008], ["contract", 6, 0.75, 0.006], ["closed", 4, 4 / 6, 0.004],
+    ]);
+    expect(f).toMatchObject({
+      dead: 7, preExisting: 3, interestedRate: 0.04, offerAcceptanceRate: 0.4, contactsPerOffer: 50, contactsPerClosedDeal: 250,
+      textsPerClosedDeal: 650, toOpportunity: { avgSeconds: 90000, medianSeconds: 86401 },
+      toClose: { avgSeconds: 3e6, medianSeconds: 2.5e6, known: 3, unknown: 1 },
+    });
+  });
+
+  it("is N/A on every zero denominator, never 0 or Infinity", () => {
+    const f = funnelSummary({ ...FUNNEL, reached: 0, responded: 0, opportunity: 0, offer: 0, accepted: 0, contract: 0, closed: 0, dead: 0,
+      toOpportunity: { avg: null, median: null }, toClose: { avg: null, median: null, known: 0 } });
+    expect(f.steps.every((s) => s.fromReached === null)).toBe(true);
+    expect(f.steps.slice(1).every((s) => s.fromPrevious === null)).toBe(true);
+    expect([f.interestedRate, f.offerAcceptanceRate, f.contactsPerOffer, f.contactsPerClosedDeal, f.textsPerClosedDeal]).toEqual([null, null, null, null, null]);
+    expect(f.toOpportunity).toEqual({ avgSeconds: null, medianSeconds: null });
+    expect(f.toClose).toEqual({ avgSeconds: null, medianSeconds: null, known: 0, unknown: 0 });
+  });
+
+  it("names a person's furthest step and whether every opportunity is dead now", () => {
+    const x = { n: 2, offer: true, accepted: false, contract: false, closed: false, alive: 0 };
+    expect(furthestStep(x)).toEqual({ step: "offer", dead: true });
+    expect(furthestStep({ ...x, accepted: true, contract: true, closed: true, alive: 1 })).toEqual({ step: "closed", dead: false });
+    expect(furthestStep({ ...x, offer: false, alive: 2 })).toEqual({ step: "opportunity", dead: false });
+    expect(furthestStep({ ...x, n: 0 })).toBeNull();
+  });
+});
+
+describe("costSummary", () => {
+  const results = { responded: 50, opportunities: 10, offers: 4, closed: 0 };
+  it("prices the segments and divides by each result, N/A where there is none", () => {
+    const c = costSummary(10_000, 12, 0.0091, results);
+    expect(c).toMatchObject({ pricePerSegment: 0.0091, segments: 10_000, unknownSegments: 12, total: 91 });
+    expect(c.perReply).toBeCloseTo(1.82);
+    expect(c.perOpportunity).toBeCloseTo(9.1);
+    expect(c.perOffer).toBeCloseTo(22.75);
+    expect(c.perClosedDeal).toBeNull();
+  });
+
+  it("is N/A everywhere without a price", () => {
+    expect(costSummary(10_000, 0, null, results)).toMatchObject({ total: null, perReply: null, perOpportunity: null, perOffer: null, perClosedDeal: null });
+  });
+});
+
+describe("speedSummary", () => {
+  it("shares are of everyone who replied, so never-answered completes the picture", () => {
+    const s = speedSummary({ responded: 40, answered: 30, within5m: 8, within1h: 20, within24h: 28, avg: 5000.2, median: 1800.4 });
+    expect(s).toEqual({
+      responded: 40, answered: 30, never: 10, avgSeconds: 5000, medianSeconds: 1800,
+      within5mRate: 0.2, within1hRate: 0.5, within24hRate: 0.7, neverRate: 0.25,
+    });
+    expect(speedSummary({ responded: 0, answered: 0, within5m: 0, within1h: 0, within24h: 0, avg: null, median: null }))
+      .toMatchObject({ medianSeconds: null, within1hRate: null, neverRate: null });
+  });
+});
+
+describe("computeKpis with the newer sections", () => {
+  it("lifts the headline funnel, cost, speed and wrong-number figures", () => {
+    const funnel = funnelSummary(FUNNEL);
+    const k = computeKpis({ sent: 2000, delivered: 1800, failed: 50, inbound: 300, contactsTexted: 900 },
+      { reached: 1000, responded: 100, optedOut: 20, avgSeconds: 10, medianSeconds: 5 },
+      { wrongNumbers: 80, funnel, cost: costSummary(2400, 0, 0.01, { responded: 100, opportunities: 40, offers: 20, closed: 4 }),
+        speed: speedSummary({ responded: 100, answered: 80, within5m: 10, within1h: 50, within24h: 75, avg: 900, median: 600 }) });
+    expect(k).toMatchObject({
+      wrongNumbers: 80, wrongNumberRate: 0.08, opportunities: 40, interestedRate: 0.04, offers: 20, offerAcceptanceRate: 0.4, closedDeals: 4,
+      textingCost: 24, costPerReply: 0.24, costPerOpportunity: 0.6, costPerOffer: 1.2, costPerClosedDeal: 6,
+      medianAnswerSeconds: 600, answeredWithinHourRate: 0.5, neverAnsweredRate: 0.2,
+    });
+  });
+
+  it("leaves a missing section as zeros and N/A", () => {
+    const k = computeKpis({ sent: 0, delivered: 0, failed: 0, inbound: 0, contactsTexted: 0 }, { reached: 0, responded: 0, optedOut: 0, avgSeconds: null, medianSeconds: null });
+    expect(k).toMatchObject({ wrongNumbers: 0, wrongNumberRate: null, opportunities: 0, interestedRate: null, textingCost: null, medianAnswerSeconds: null });
+  });
+});
+
+describe("bestTimeGrid", () => {
+  it("mutes small samples and picks the best three slots with enough data", () => {
+    const n = BEST_TIME_MIN_SAMPLE;
+    const g = bestTimeGrid([
+      { dow: 2, hour: 10, reached: n, responded: 4 }, // 20%
+      { dow: 3, hour: 11, reached: 50, responded: 10 }, // 20%, more data → ranks first
+      { dow: 1, hour: 9, reached: n - 1, responded: 9 }, // 47% but too few people
+      { dow: 4, hour: 18, reached: 40, responded: 6 }, // 15%
+      { dow: 5, hour: 12, reached: 40, responded: 2 }, // 5%
+      { dow: 6, hour: 8, reached: 40, responded: 0 }, // never "best"
+      { dow: 9, hour: 8, reached: 40, responded: 9 }, // not a weekday
+      { dow: 1, hour: 3, reached: 0, responded: 0 },
+    ]);
+    expect(g.cells).toHaveLength(6);
+    expect(g.cells[0]).toMatchObject({ dow: 1, hour: 9, small: true });
+    expect(g.best.map((c) => [c.dow, c.hour])).toEqual([[3, 11], [2, 10], [4, 18]]);
+  });
+});
+
+describe("phone-list quality", () => {
+  it("classifies the org's tags once with the phone-tag rules (landline includes sms incapable)", () => {
+    expect(phoneTagSets(["Wrong Number-2", "wrong number-1", "disconnected number-1", "landline", "SMS incapable", "switch phone (2)",
+      "switch phone (1)", "all numbers exhausted", "leon county", "wrong numbers list"])).toEqual({
+      wrongNumber: ["Wrong Number-2", "wrong number-1"], disconnected: ["disconnected number-1"], landline: ["landline", "SMS incapable"],
+      rotated: ["switch phone (2)"], exhausted: ["all numbers exhausted"],
+      any: ["Wrong Number-2", "wrong number-1", "disconnected number-1", "landline", "SMS incapable", "switch phone (2)", "all numbers exhausted"],
+    });
+  });
+
+  it("joins people-based shares with delivery from the texts, N/A on empty sides", () => {
+    const rows = mergeQuality(
+      [{ key: "leon county", reached: 200, responded: 20, wrongNumber: 30, disconnected: 10, landline: 4, rotated: 50, exhausted: 6 }],
+      [{ key: "leon county", sent: 500, delivered: 450 }, { key: NO_TAG, sent: 10, delivered: 9 }],
+      (k) => k,
+    );
+    expect(rows[0]).toMatchObject({
+      key: "leon county", deliveryRate: 0.9, responseRate: 0.1, wrongNumberRate: 0.15, disconnectedRate: 0.05, landlineRate: 0.02,
+      rotatedRate: 0.25, exhaustedRate: 0.03,
+    });
+    expect(rows[1]).toMatchObject({ key: NO_TAG, reached: 0, responseRate: null, wrongNumberRate: null, deliveryRate: 0.9 });
+  });
+});
+
+describe("carrier health", () => {
+  it("fills every day of the period and lists the days that breached a threshold", () => {
+    const r = dayRange(D("2026-09-29"), D("2026-10-01"));
+    const h = healthDays(r, [
+      { day: "2026-09-30", sent: 400, failed: 80, reached: 300, optOuts: 3 }, // 20% failed
+      { day: "2026-10-01", sent: 50, failed: 20, reached: 30, optOuts: 5 }, // too few texts to judge
+    ]);
+    expect(h.days.map((d) => [d.day, d.sent, d.small, d.warnings])).toEqual([
+      ["2026-09-29", 0, true, []], ["2026-09-30", 400, false, ["failure"]], ["2026-10-01", 50, true, []],
+    ]);
+    expect(h.days[0].failureRate).toBeNull();
+    expect(h.breachDays).toEqual(["2026-09-30"]);
+    expect(healthOf({ sent: 700, failed: 10, reached: 500, optOuts: 30 })).toMatchObject({ optOutRate: 0.06, warnings: ["optOut"] });
+  });
+});
+
+describe("drill sets", () => {
+  it("lists the new sets and reads a table row to narrow to", () => {
+    for (const s of ["wrongNumber", "unclassified", "realEstate", "opportunity", "offer", "accepted", "closed", "dead", "unanswered",
+      "disconnected", "landline", "rotated", "exhausted"]) expect(DRILL_SETS).toContain(s);
+    expect(drillRow({ rowDim: "listTag", rowKey: " Leon County " })).toEqual({ dim: "listTag", key: " Leon County " });
+    expect(drillRow({ rowDim: "county", rowKey: "x" })).toBeNull();
+    expect(drillRow({ rowDim: "tag" })).toBeNull();
+    expect(drillRow({ rowDim: "tag", rowKey: ["a", "b"] })).toBeNull();
   });
 });
