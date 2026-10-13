@@ -54,11 +54,11 @@ import {
   formatStartDate, startDateIgnored, toContactFields, toUserRefs, isDue, phaseAfterRun, storageEstimateMb,
   connectErrorMessage, rescanPatch, tagsChanged, weeklyRefreshLimit, toPipelineRefs, toTagNames, validTimezone,
   readPipelines, readTags, savedScopeOf, effectiveScope, sameScope, isPermissionRefusal, toOpportunityFields,
-  unknownStage, planOpportunity, healthKeys, healthAlert, healthNotice,
+  unknownStage, planOpportunity, healthKeys, healthAlert, healthNotice, tagRefreshRunning, tagRefreshEtaMinutes,
   PAGE_LIMIT, STATUS_LOOKBACK_MS, USERS_REFRESH_MS, CONTACT_REFRESH_MS, CONTACT_ACTIVE_DAYS, CONTACT_WEEKLY_MS,
   FAILURES_BEFORE_ERROR, META_REFRESH_MS, OPP_PAGE_LIMIT, IMPORT_OPPS_EVERY_MS, SUMMARY_VERSION,
   type HlSyncState, type HlPhase, type HlLastRun, type HlUserRef, type HlPipelineRef, type MessageRow,
-  type StoredOpp, type StageEventRow, type HealthWindow,
+  type StoredOpp, type StageEventRow, type HealthWindow, type TagRefreshState,
 } from "./mapping.js";
 
 export const HIGHLEVEL = "highlevel";
@@ -140,7 +140,18 @@ export interface HighLevelStatus {
   storageEstimateMb: number | null;
   /** Optional read permissions the key lacks (e.g. "opportunities.readonly"). */
   missingScopes: string[];
+  /** "Re-read tags now" — the latest one, while running and after. */
+  tagRefresh: {
+    running: boolean; startedAt: string; finishedAt: string | null; auto: boolean;
+    total: number; done: number; changed: number; etaMinutes: number;
+  } | null;
 }
+
+/** Contacts still waiting for the running tag re-read (last read before it started). */
+const tagRefreshPendingWhere = (org: string, t: TagRefreshState) => ({
+  organizationId: org, deletedInHl: false,
+  OR: [{ fetchedAt: null }, { fetchedAt: { lt: new Date(t.startedAt) } }],
+});
 
 export async function highLevelStatus(organizationId: string): Promise<HighLevelStatus> {
   const row = await prisma.integration.findUnique({ where: { organizationId_provider: { organizationId, provider: HIGHLEVEL } } });
@@ -153,6 +164,9 @@ export async function highLevelStatus(organizationId: string): Promise<HighLevel
   const state = readSyncState(cfg);
   const status = row?.status ?? "NOT_CONNECTED";
   const texts = Math.max(state.preview?.texts ?? 0, imported);
+  const t = state.tagRefresh;
+  const running = !!t && tagRefreshRunning(state);
+  const pending = t && running ? await prisma.highLevelContact.count({ where: tagRefreshPendingWhere(organizationId, t) }) : 0;
   return {
     connected: status !== "NOT_CONNECTED",
     status,
@@ -168,7 +182,36 @@ export async function highLevelStatus(organizationId: string): Promise<HighLevel
     responseWindowDays: responseWindowOf(cfg),
     storageEstimateMb: hasState ? storageEstimateMb(texts) : null,
     missingScopes: Array.isArray(state.missingScopes) ? state.missingScopes : [],
+    tagRefresh: t ? {
+      running, startedAt: t.startedAt, finishedAt: t.finishedAt ?? null, auto: !!t.auto,
+      total: t.total, done: running ? Math.max(0, t.total - pending) : t.total, changed: t.changed ?? 0,
+      etaMinutes: running ? tagRefreshEtaMinutes(pending) : 0,
+    } : null,
   };
+}
+
+/**
+ * Start "Re-read tags now" for an org: every contact is looked up in
+ * HighLevel again (current tags, assignment, opt-out), oldest-read first,
+ * in back-to-back runs (the scheduler's catch-up loop), then re-sorted into
+ * minerals / real estate / not classified. Only once the import is done —
+ * the import itself reads every contact's current tags. Returns false when
+ * it can't start (not live) and leaves a running one untouched.
+ */
+export async function startTagRefresh(organizationId: string, opts: { auto?: boolean } = {}): Promise<boolean> {
+  const row = await prisma.integration.findUnique({ where: { organizationId_provider: { organizationId, provider: HIGHLEVEL } } });
+  if (!row || row.status === "NOT_CONNECTED") return false;
+  const state = readSyncState(row.config);
+  if (state.phase !== "live") return false;
+  if (tagRefreshRunning(state)) return true;
+  const total = await prisma.highLevelContact.count({ where: { organizationId, deletedInHl: false } });
+  // Also re-read HighLevel's tag list on the next run, so tags created since
+  // the last 6-hourly refresh show up in the Minerals filter.
+  await saveState(row.id, {
+    tagRefresh: { startedAt: new Date().toISOString(), total, changed: 0, ...(opts.auto ? { auto: true } : {}) },
+    metaRefreshAt: undefined,
+  });
+  return true;
 }
 
 // --- The run ----------------------------------------------------------------------
@@ -187,6 +230,8 @@ class SyncPaused extends Error {
 interface Stats {
   newMessages: number; updatedMessages: number; contactsFetched: number; summaries: number;
   opportunities: number; stageMoves: number; rescanned: number;
+  /** Contacts whose tags changed when looked up again this run. */
+  tagsChanged: number;
 }
 
 interface Ctx {
@@ -643,6 +688,8 @@ async function recomputeSummaries(ctx: Ctx): Promise<void> {
 // --- Contact details ---------------------------------------------------------------------
 
 const FIRST_FETCH_PER_RUN = 600;
+/** Upper bound per run for "Re-read tags now" (the run's time budget is the real limit). */
+const TAG_REFRESH_PER_RUN = 2_000;
 const REFRESH_PER_RUN = 150;
 const CONTACT_CONCURRENCY = 4;
 
@@ -678,7 +725,15 @@ async function fetchContacts(ctx: Ctx): Promise<void> {
     orderBy: { fetchedAt: "asc" },
     take: weeklyRefreshLimit(await prisma.highLevelContact.count({ where: { organizationId: ctx.org, deletedInHl: false } })),
   }) : [];
-  const queue = [...new Map([...firsts, ...refresh, ...weekly].map((c) => [c.id, c])).values()];
+  // "Re-read tags now": everyone last read before it started, oldest first.
+  const t = ctx.state.tagRefresh;
+  const retag = live && t && tagRefreshRunning(ctx.state) ? await prisma.highLevelContact.findMany({
+    where: tagRefreshPendingWhere(ctx.org, t),
+    select,
+    orderBy: { fetchedAt: "asc" },
+    take: TAG_REFRESH_PER_RUN,
+  }) : [];
+  const queue = [...new Map([...firsts, ...refresh, ...retag, ...weekly].map((c) => [c.id, c])).values()];
   let failure: unknown = null;
   let next = 0;
   const worker = async () => {
@@ -689,7 +744,9 @@ async function fetchContacts(ctx: Ctx): Promise<void> {
         let data: Record<string, unknown>;
         try {
           const fields = toContactFields(await ctx.client.getContact(c.hlId));
-          data = { ...fields, deletedInHl: false, ...(tagsChanged(c.tags, fields.tags) ? { summaryDirty: true } : {}) };
+          const changed = tagsChanged(c.tags, fields.tags);
+          if (changed) ctx.stats.tagsChanged++;
+          data = { ...fields, deletedInHl: false, ...(changed ? { summaryDirty: true } : {}) };
         } catch (e) {
           if (e instanceof HighLevelError && e.kind === "notFound") data = { deletedInHl: true }; // deleted in HighLevel: keep the row and its history
           else if (e instanceof HighLevelError && e.kind === "badRequest") {
@@ -802,7 +859,7 @@ export async function runHighLevelSync(row: Integration, opts: { budgetMs: numbe
   }
   running.add(org);
   const startedAt = Date.now();
-  const stats: Stats = { newMessages: 0, updatedMessages: 0, contactsFetched: 0, summaries: 0, opportunities: 0, stageMoves: 0, rescanned: 0 };
+  const stats: Stats = { newMessages: 0, updatedMessages: 0, contactsFetched: 0, summaries: 0, opportunities: 0, stageMoves: 0, rescanned: 0, tagsChanged: 0 };
   let fresh: Integration | null = null;
   let state: HlSyncState = readSyncState(row.config);
   try {
@@ -841,13 +898,17 @@ export async function runHighLevelSync(row: Integration, opts: { budgetMs: numbe
     if (isDue(state.metaRefreshAt, META_REFRESH_MS, startedAt)) await refreshMeta(ctx);
     // 2. New messages from the checkpoint.
     const caughtUp = await importMessages(ctx);
+    // While a tag re-read runs back to back, the per-run extras keep their
+    // usual 15-minute rhythm instead of repeating every minute.
+    const retagging = tagRefreshRunning(state);
     // 3. Delivery-status refresh — at most once per live run.
     let statusRefreshAt = state.statusRefreshAt;
-    if (caughtUp && state.phase === "live" && timeLeft(ctx) && await refreshRecentStatuses(ctx)) {
+    if (caughtUp && state.phase === "live" && (!retagging || isDue(state.statusRefreshAt, IMPORT_OPPS_EVERY_MS, startedAt))
+      && timeLeft(ctx) && await refreshRecentStatuses(ctx)) {
       statusRefreshAt = new Date().toISOString();
     }
     // 4. Opportunities — every live run; while importing (runs back to back) every 15 minutes.
-    const oppsDue = state.phase === "live" || isDue(ctx.state.oppsRefreshAt, IMPORT_OPPS_EVERY_MS, startedAt);
+    const oppsDue = (state.phase === "live" && !retagging) || isDue(ctx.state.oppsRefreshAt, IMPORT_OPPS_EVERY_MS, startedAt);
     if (oppsDue && timeLeft(ctx)) await syncOpportunities(ctx);
     // Summaries computed under older rules (before wrong numbers, speed to
     // lead and the minerals line existed) are recomputed once.
@@ -875,9 +936,27 @@ export async function runHighLevelSync(row: Integration, opts: { budgetMs: numbe
     ]);
     const phase = phaseAfterRun(state.phase, { messagesCaughtUp: caughtUp, pendingContacts, dirtySummaries });
     const finished = state.phase === "importing" && phase === "live";
-    const message = successMessage(phase, finished, stats, imported, contacts, state.preview?.texts);
+    // "Re-read tags now": done once nobody is left to look up and their
+    // summaries (and minerals line) are recomputed.
+    let tagRefresh: TagRefreshState | undefined;
+    let retagMessage = "";
+    const t = ctx.state.tagRefresh;
+    if (t && tagRefreshRunning(ctx.state)) {
+      const left = await prisma.highLevelContact.count({ where: tagRefreshPendingWhere(org, t) });
+      const changed = (t.changed ?? 0) + stats.tagsChanged;
+      const done = left === 0 && dirtySummaries === 0;
+      tagRefresh = { ...t, changed, ...(done ? { finishedAt: new Date().toISOString() } : {}) };
+      retagMessage = done
+        ? ` Tags re-read for ${plural(t.total, "contact", "contacts")} — ${plural(changed, "contact's tags", "contacts' tags")} changed.`
+        : ` Re-reading tags: ${(t.total - left).toLocaleString("en-US")} of ${plural(t.total, "contact", "contacts")} done.`;
+      if (done) {
+        await logActivity({ eventType: "integration.tags_refreshed", summary: `HighLevel tags re-read for ${plural(t.total, "contact", "contacts")} (${changed.toLocaleString("en-US")} changed)`, organizationId: org });
+      }
+    }
+    const message = successMessage(phase, finished, stats, imported, contacts, state.preview?.texts) + retagMessage;
     await saveState(fresh.id, {
       phase, imported, statusRefreshAt, consecutiveFailures: 0, pausedUntil: undefined,
+      ...(tagRefresh ? { tagRefresh } : {}),
       lastRun: { at: new Date().toISOString(), ok: true, ...stats, ms: Date.now() - startedAt, message },
     });
     await prisma.integration.updateMany({

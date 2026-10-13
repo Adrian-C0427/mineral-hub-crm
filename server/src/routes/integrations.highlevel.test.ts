@@ -208,6 +208,35 @@ describe("disconnect and listing", () => {
   });
 });
 
+describe("POST /highlevel/refresh-tags", () => {
+  const updates = () => (db.calls["integration.update"] ?? []) as { data: { config: { hlSync: Record<string, unknown> } } }[];
+
+  it("refuses before and during the import (the import reads current tags itself)", async () => {
+    db.results["integration.findUnique"] = row({ locationId: LOC, hlSync: { phase: "preview" } });
+    expect((await call("POST", "/highlevel/refresh-tags", {})).status).toBe(409);
+    db.results["integration.findUnique"] = row({ locationId: LOC, hlSync: { phase: "importing" } });
+    expect((await call("POST", "/highlevel/refresh-tags", {})).status).toBe(409);
+    expect(updates()).toHaveLength(0);
+  });
+
+  it("starts a re-read of every contact once live, and asks for HighLevel's tag list again", async () => {
+    db.results["integration.findUnique"] = row({ locationId: LOC, _secret: "v1:x", hlSync: { phase: "live", metaRefreshAt: "2026-10-13T10:00:00Z" } });
+    db.results["highLevelContact.count"] = 12_410;
+    const r = await call("POST", "/highlevel/refresh-tags", {});
+    expect(r.status).toBe(200);
+    const hlSync = updates()[0].data.config.hlSync;
+    expect(hlSync.tagRefresh).toMatchObject({ total: 12_410, changed: 0 });
+    expect(hlSync.metaRefreshAt).toBeUndefined();
+  });
+
+  it("leaves a running re-read alone", async () => {
+    const t = { startedAt: "2026-10-13T16:00:00Z", total: 50, changed: 3 };
+    db.results["integration.findUnique"] = row({ locationId: LOC, _secret: "v1:x", hlSync: { phase: "live", tagRefresh: t } });
+    expect((await call("POST", "/highlevel/refresh-tags", {})).status).toBe(200);
+    expect(updates()).toHaveLength(0);
+  });
+});
+
 describe("Minerals filter and price (PATCH /highlevel)", () => {
   const PIPES = [{ id: "pMin", name: "Minerals", stages: [] }, { id: "pRE", name: "On-Market", stages: [] }];
   const base = (extra: Record<string, unknown> = {}) => row({ locationId: LOC, responseWindowDays: 30, hlPipelines: PIPES, hlTags: ["Leon County", "dispo"], hlSync: { phase: "live" }, ...extra });
@@ -254,6 +283,25 @@ describe("Minerals filter and price (PATCH /highlevel)", () => {
     expect((db.calls["integration.update"][1] as { data: { config: Record<string, unknown> } }).data.config.scope).toBeNull();
     await call("PATCH", "/highlevel", { config: { pricePerSegment: null } });
     expect(db.calls["highLevelContact.updateMany"]).toHaveLength(1);
+  });
+
+  it("a newly used tag no stored contact carries starts a tag re-read (at most once a day); a known tag doesn't", async () => {
+    db.results["integration.findUnique"] = base();
+    db.results["highLevelContact.count"] = (args: { where: { tags?: unknown } }) => (args.where.tags ? 0 : 400);
+    const r = await call("PATCH", "/highlevel", { config: { scope: { mineralTags: ["minerals"], realEstateTags: [], mineralPipelineIds: [] } } });
+    expect(r.status).toBe(200);
+    expect(r.body.tagRefreshStarted).toBe(true);
+
+    for (const k of Object.keys(db.calls)) delete db.calls[k];
+    db.results["highLevelContact.count"] = 7; // every tag already on stored contacts
+    const r2 = await call("PATCH", "/highlevel", { config: { scope: { mineralTags: ["leon county"], realEstateTags: [], mineralPipelineIds: [] } } });
+    expect(r2.body.tagRefreshStarted).toBeUndefined();
+
+    for (const k of Object.keys(db.calls)) delete db.calls[k];
+    db.results["integration.findUnique"] = base({ hlSync: { phase: "live", tagRefresh: { startedAt: new Date().toISOString(), total: 4, changed: 0, finishedAt: new Date().toISOString(), auto: true } } });
+    db.results["highLevelContact.count"] = 0;
+    const r3 = await call("PATCH", "/highlevel", { config: { scope: { mineralTags: ["brand new tag"], realEstateTags: [], mineralPipelineIds: [] } } });
+    expect(r3.body.tagRefreshStarted).toBeUndefined(); // an automatic one ran in the last day
   });
 
   it("other providers never take the HighLevel-only settings", async () => {

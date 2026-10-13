@@ -176,7 +176,7 @@ vi.mock("./client.js", async (importOriginal) => {
   return { ...real, HighLevelClient: FakeClient };
 });
 
-import { runHighLevelSync, highLevelStatus } from "./sync.js";
+import { runHighLevelSync, highLevelStatus, startTagRefresh } from "./sync.js";
 import { SUMMARY_VERSION } from "./mapping.js";
 
 const ORG = "org1";
@@ -438,6 +438,63 @@ describe("weekly contact refresh", () => {
     await run();
     expect(contact("c00")).toMatchObject({ line: "minerals", summaryDirty: false });
     expect(rows("highLevelContact").filter((c) => (c.fetchedAt as Date).getTime() >= T0)).toHaveLength(15);
+  });
+});
+
+describe("re-read tags now", () => {
+  const seed = (n: number, newTagEvery: number) => {
+    for (let i = 0; i < n; i++) {
+      const hlId = `t${String(i).padStart(2, "0")}`;
+      mem.create("highLevelContact", {
+        organizationId: ORG, hlId, tags: ["old list"], summaryDirty: false, summaryWindowDays: 30, line: "unclassified",
+        fetchedAt: new Date(T0 - 60 * 60_000), lastMessageAt: new Date(T0 - 60 * DAY),
+      });
+      hl.contacts.set(hlId, { tags: i % newTagEvery === 0 ? ["old list", "minerals"] : ["old list"] });
+    }
+  };
+
+  it("looks everyone up again, re-sorts them with the new tag, and finishes by itself", async () => {
+    seedIntegration({}, { scope: { mineralTags: ["minerals"], realEstateTags: [], mineralPipelineIds: [] } });
+    seed(30, 2);
+    // Read an hour ago, so neither the daily nor the weekly refresh would pick them up.
+    await run();
+    expect(rows("highLevelContact").filter((c) => (c.tags as string[]).includes("minerals"))).toHaveLength(0);
+
+    vi.setSystemTime(T0 + 60_000);
+    expect(await startTagRefresh(ORG)).toBe(true);
+    expect(hlSync().tagRefresh).toMatchObject({ total: 30, changed: 0 });
+    expect(hlSync().metaRefreshAt).toBeUndefined(); // HighLevel's tag list is re-read too
+    expect((await highLevelStatus(ORG)).tagRefresh).toMatchObject({ running: true, done: 0, total: 30, etaMinutes: 1 });
+
+    await run();
+    expect(rows("highLevelContact").filter((c) => (c.tags as string[]).includes("minerals"))).toHaveLength(15);
+    // Everyone looked up; their summaries (and minerals line) come next run, so it isn't finished yet.
+    expect((await highLevelStatus(ORG)).tagRefresh).toMatchObject({ running: true, done: 30 });
+
+    await run();
+    expect(rows("highLevelContact").filter((c) => c.line === "minerals")).toHaveLength(15);
+    const t = (await highLevelStatus(ORG)).tagRefresh!;
+    expect(t).toMatchObject({ running: false, done: 30, total: 30, changed: 15, etaMinutes: 0 });
+    expect(t.finishedAt).not.toBeNull();
+    expect((hlSync().lastRun as Row).message).toMatch(/Tags re-read for 30 contacts — 15 contacts' tags changed/);
+
+    // Finished: later runs leave it alone and look nobody up again.
+    hl.calls.length = 0;
+    await run();
+    expect(hlSync().tagRefresh).toMatchObject({ changed: 15 });
+  });
+
+  it("won't start before the import is done, and a second start leaves the running one as it is", async () => {
+    seedIntegration({ phase: "importing" });
+    expect(await startTagRefresh(ORG)).toBe(false);
+    expect(hlSync().tagRefresh).toBeUndefined();
+    (hlSync() as Row).phase = "live";
+    seed(4, 1);
+    expect(await startTagRefresh(ORG)).toBe(true);
+    const first = { ...(hlSync().tagRefresh as Row) };
+    vi.setSystemTime(T0 + 5 * 60_000);
+    expect(await startTagRefresh(ORG)).toBe(true);
+    expect(hlSync().tagRefresh).toEqual(first);
   });
 });
 

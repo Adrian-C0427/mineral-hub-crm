@@ -6,7 +6,7 @@ import { Select } from "./Select";
 import { fmtDateTime } from "../lib/format";
 import {
   HL_POLL_MS, HL_SCOPES, HL_SYNC_EVERY, RESPONSE_WINDOW_CHOICES, previewText, importProgress, importingText, totalsText,
-  lastRunText, missingScopesText, tagLine, setTagLine, togglePipeline, filterTags, previewCountsText, parsePrice,
+  lastRunText, missingScopesText, tagRefreshText, tagLine, setTagLine, togglePipeline, filterTags, previewCountsText, parsePrice,
   type HighLevelStatus, type HighLevelScopeSettings, type LineCounts, type SmsScope, type TagLine,
 } from "../lib/highlevel";
 
@@ -17,8 +17,8 @@ import {
 
 /**
  * The card's live status. Re-read whenever the integration list reloads
- * (refreshKey) and every HL_POLL_MS while the first import runs; when the
- * import finishes, onSettled reloads the list so the card's state follows.
+ * (refreshKey) and every HL_POLL_MS while the first import or a tag re-read
+ * runs; when it finishes, onSettled reloads the list so the card follows.
  */
 export function useHighLevelStatus(enabled: boolean, refreshKey: string, onSettled: () => void) {
   const [status, setStatus] = useState<HighLevelStatus | null>(null);
@@ -41,14 +41,15 @@ export function useHighLevelStatus(enabled: boolean, refreshKey: string, onSettl
 
   useEffect(() => { if (enabled) void refresh(); }, [enabled, refreshKey, refresh]);
 
-  const importing = enabled && status?.phase === "importing";
+  const busyIn = (s: HighLevelStatus | null) => s?.phase === "importing" || !!s?.tagRefresh?.running;
+  const working = enabled && busyIn(status);
   useEffect(() => {
-    if (!importing) return;
+    if (!working) return;
     const t = setInterval(() => {
-      void refresh().then((s) => { if (s && s.phase !== "importing") settled.current(); });
+      void refresh().then((s) => { if (s && !busyIn(s)) settled.current(); });
     }, HL_POLL_MS);
     return () => clearInterval(t);
-  }, [importing, refresh]);
+  }, [working, refresh]);
 
   async function startImport() {
     setStarting(true); setError(null);
@@ -57,7 +58,14 @@ export function useHighLevelStatus(enabled: boolean, refreshKey: string, onSettl
     finally { setStarting(false); }
   }
 
-  return { status, error, starting, startImport, refresh };
+  async function rereadTags() {
+    setStarting(true); setError(null);
+    try { setStatus(await api.post<HighLevelStatus>("/integrations/highlevel/refresh-tags", {})); }
+    catch (e) { setError(e instanceof ApiError ? e.message : "Couldn't start re-reading tags."); }
+    finally { setStarting(false); }
+  }
+
+  return { status, error, starting, startImport, rereadTags, refresh };
 }
 
 /** The HighLevel card's middle section: preview, import progress, or "up to date". */
@@ -65,6 +73,7 @@ export function HighLevelSummary({ s }: { s: HighLevelStatus }) {
   // In ERROR the card already shows lastError; don't repeat the failed run.
   const run = s.status === "ERROR" && s.lastRun && !s.lastRun.ok ? null : lastRunText(s.lastRun, s.phase);
   const missing = missingScopesText(s.missingScopes);
+  const retag = s.phase === "live" ? tagRefreshText(s.tagRefresh, fmtDateTime) : null;
   return (
     <div className="hl-summary">
       {s.locationName && <p className="integration-meta">Location: <code>{s.locationName}</code></p>}
@@ -85,6 +94,8 @@ export function HighLevelSummary({ s }: { s: HighLevelStatus }) {
             <span>{s.status === "ERROR" ? "last good check" : "checked"} {fmtDateTime(s.lastSyncAt)}</span>
           </p>
           <p className="integration-meta">{totalsText(s)} · checked automatically {HL_SYNC_EVERY}.</p>
+          {retag && <p className={s.tagRefresh?.running ? "hl-line" : "integration-meta"}>{retag}</p>}
+          {s.tagRefresh?.running && <ProgressBar value={importProgress(s.tagRefresh.done, s.tagRefresh.total)} />}
         </>
       )}
       {run && s.phase !== "preview" && <p className={s.lastRun?.ok ? "integration-meta" : "error-text integration-err"}>{run}</p>}
@@ -172,7 +183,8 @@ export function HighLevelConfigureModal({ name, config, onClose, onSaved }: {
   name: string;
   config: { responseWindowDays?: number; notes?: string; pricePerSegment?: number | null };
   onClose: () => void;
-  onSaved: () => void;
+  /** message: shown instead of the plain "Settings saved." (e.g. a tag re-read started). */
+  onSaved: (message?: string) => void;
 }) {
   const [settings, setSettings] = useState<HighLevelScopeSettings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -224,14 +236,16 @@ export function HighLevelConfigureModal({ name, config, onClose, onSaved }: {
     setConfirming(false); setBusy(true); setError(null);
     const p = parsePrice(price);
     try {
-      await api.patch("/integrations/highlevel", {
+      const r = await api.patch<{ tagRefreshStarted?: boolean }>("/integrations/highlevel", {
         config: {
           responseWindowDays: Number(windowDays), notes,
           ...(p !== "invalid" ? { pricePerSegment: p } : {}),
           ...(touched && draft ? { scope: draft } : {}),
         },
       });
-      onSaved();
+      onSaved(r?.tagRefreshStarted
+        ? "Settings saved. A tag in your filter isn't on any texted contact yet, so every contact's tags are being re-read from HighLevel — the card shows the progress."
+        : undefined);
     } catch (e) { setError(e instanceof ApiError ? e.message : "Failed to save"); }
     finally { setBusy(false); }
   }
