@@ -3,6 +3,7 @@ import {
   computeKpis, delta, buildMonthlySeries, buildBreakdowns, realizedClosedAt, countClosedWithoutDate,
   type AnalyticsDeal, type Range,
 } from "./analytics.js";
+import { impliedMargin, averageImpliedMargin } from "./metrics.js";
 
 const range: Range = { from: new Date("2026-01-01"), to: new Date("2026-12-31T23:59:59Z") };
 
@@ -94,6 +95,68 @@ describe("computeKpis", () => {
     expect(delta(10, 0)).toBeNull();
     expect(delta(0, 0)).toBe(0);
     expect(delta(150, 100)).toBeCloseTo(0.5);
+  });
+});
+
+describe("implied margin (deal page header) and its Reports average", () => {
+  it("is (ask − our price) ÷ our price: markup on cost, closing costs ignored", () => {
+    expect(impliedMargin(150_000, 100_000)).toBeCloseTo(0.5);
+    expect(impliedMargin(80_000, 100_000)).toBeCloseTo(-0.2);
+    expect(impliedMargin(100_000, 100_000)).toBe(0);
+    // The deal page shows Math.round(margin × 100): +33% for 40k over 30k.
+    expect(Math.round(impliedMargin(40_000, 30_000)! * 100)).toBe(33);
+  });
+
+  it("is null (never 0%) when an input is missing or Our Price isn't positive", () => {
+    expect(impliedMargin(null, 100_000)).toBeNull();
+    expect(impliedMargin(150_000, null)).toBeNull();
+    expect(impliedMargin(undefined, undefined)).toBeNull();
+    expect(impliedMargin(150_000, 0)).toBeNull();
+    expect(impliedMargin(150_000, -5)).toBeNull();
+    expect(impliedMargin(Number.NaN, 100_000)).toBeNull();
+    expect(impliedMargin(150_000, Number.POSITIVE_INFINITY)).toBeNull();
+  });
+
+  it("averages per-deal margins (simple mean), skipping deals it can't compute", () => {
+    const r = averageImpliedMargin([
+      { askPrice: 150_000, ourPrice: 100_000 }, // +50%
+      { askPrice: 20_000, ourPrice: 10_000 },   // +100%
+      { askPrice: 90_000, ourPrice: 100_000 },  // −10%
+      { askPrice: null, ourPrice: 100_000 },    // no ask → excluded
+      { askPrice: 50_000, ourPrice: null },     // no cost → excluded
+      { askPrice: 50_000, ourPrice: 0 },        // zero cost → excluded
+    ]);
+    expect(r.deals).toBe(3);
+    expect(r.value).toBeCloseTo((0.5 + 1 - 0.1) / 3); // 46.67%, not Σask ÷ Σcost (8.7%)
+  });
+
+  it("is N/A (null, 0 deals) with nothing eligible", () => {
+    expect(averageImpliedMargin([])).toEqual({ value: null, deals: 0 });
+    expect(averageImpliedMargin([{ askPrice: null, ourPrice: null }, { askPrice: 1, ourPrice: 0 }])).toEqual({ value: null, deals: 0 });
+  });
+
+  it("KPI covers exactly the deals closed in the period (Closing date), like the other closed-deal KPIs", () => {
+    const deals = [
+      deal({ id: "1", askPrice: 150_000, ourPrice: 100_000, closedAt: new Date("2026-03-01") }),     // +50%
+      deal({ id: "2", askPrice: 110_000, ourPrice: 100_000, closedAt: new Date("2026-06-30") }),     // +10%
+      deal({ id: "3", askPrice: 120_000, ourPrice: null, acceptedAmount: 130_000, closedAt: new Date("2026-04-01") }), // no Our Price → excluded
+      deal({ id: "4", askPrice: 300_000, ourPrice: 100_000, closedAt: new Date("2025-12-31") }),     // before the period
+      deal({ id: "5", askPrice: 300_000, ourPrice: 100_000, closedAt: null }),                       // closed, no Closing date
+      deal({ id: "6", stage: "MARKETING", askPrice: 300_000, ourPrice: 100_000 }),                    // open deal
+    ];
+    const k = computeKpis(deals, [], [], [], range);
+    expect(k.dealsClosed).toBe(3);
+    expect(k.impliedMarginDeals).toBe(2);
+    expect(k.avgImpliedMargin).toBeCloseTo(0.3);
+    // The All period / a wider window picks the 2025 deal up too.
+    const wide = computeKpis(deals, [], [], [], { from: new Date("2000-01-01"), to: range.to });
+    expect(wide.impliedMarginDeals).toBe(3);
+    expect(wide.avgImpliedMargin).toBeCloseTo((0.5 + 0.1 + 2) / 3);
+    // No eligible closed deal → N/A, and no comparison delta.
+    const none = computeKpis([deals[2]], [], [], [], range);
+    expect(none.avgImpliedMargin).toBeNull();
+    expect(none.impliedMarginDeals).toBe(0);
+    expect(delta(none.avgImpliedMargin, k.avgImpliedMargin)).toBeNull();
   });
 });
 
