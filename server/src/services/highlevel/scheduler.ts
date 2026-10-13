@@ -6,8 +6,9 @@
  *    scheduler's 15-minute tick (integrationSync.ts calls highLevelTick with
  *    the rows that tick already loaded) — no extra database wake-ups.
  *  - IMPORTING orgs run back to back (each run starts when the previous one
- *    ends) until the import reaches live. That one-time catch-up may keep the
- *    database awake; it stops by itself.
+ *    ends) until the import reaches live, and so do live orgs while a
+ *    "Re-read tags now" is running. Those catch-ups may keep the database
+ *    awake; each stops by itself.
  *  - At boot, one query resumes any import a restart interrupted (each run
  *    picks up from the persisted checkpoint).
  * Waits between import runs (backoff, HighLevel rate-limit pauses) are kept in
@@ -16,7 +17,7 @@
 import type { Integration } from "@prisma/client";
 import { prisma } from "../../db.js";
 import { runHighLevelSync, needsReconnect, HIGHLEVEL } from "./sync.js";
-import { readSyncState, isPaused } from "./mapping.js";
+import { readSyncState, isPaused, tagRefreshRunning, type HlSyncState } from "./mapping.js";
 
 /** Per-run time budget for scheduled and import runs (a run stops between pages and the next resumes). */
 export const RUN_BUDGET_MS = 50_000;
@@ -30,7 +31,10 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms).unref()
 
 const importLoops = new Set<string>();
 
-/** Start the back-to-back import runs for an org (no-op if already running or in tests). */
+/** Runs go back to back: the first import, or a tag re-read once live. */
+const catchingUp = (s: HlSyncState) => s.phase === "importing" || (s.phase === "live" && tagRefreshRunning(s));
+
+/** Start the back-to-back catch-up runs for an org — import or tag re-read (no-op if already running or in tests). */
 export function ensureImportLoop(organizationId: string): void {
   if (process.env.NODE_ENV === "test" || importLoops.has(organizationId)) return;
   importLoops.add(organizationId);
@@ -45,14 +49,14 @@ async function importLoop(organizationId: string): Promise<void> {
     const row = await prisma.integration.findUnique({ where: { organizationId_provider: { organizationId, provider: HIGHLEVEL } } });
     if (!row || row.status === "NOT_CONNECTED" || needsReconnect(row)) return;
     const state = readSyncState(row.config);
-    if (state.phase !== "importing") return; // reached live (or never started)
+    if (!catchingUp(state)) return; // import reached live / tag re-read finished (or neither started)
     if (isPaused(state, Date.now())) {
       const wait = Date.parse(state.pausedUntil!) - Date.now();
       if (wait > MAX_LOOP_WAIT_MS) return; // the 15-minute tick resumes it
       await sleep(wait + 1_000);
       continue;
     }
-    const r = await runHighLevelSync(row, { budgetMs: RUN_BUDGET_MS, reason: "import" });
+    const r = await runHighLevelSync(row, { budgetMs: RUN_BUDGET_MS, reason: state.phase === "importing" ? "import" : "scheduled" });
     if (r.skipped) { await sleep(5_000); continue; } // a manual run was in flight
     if (r.ok) { failures = 0; continue; }
     if (++failures >= LOOP_GIVE_UP_AFTER) return; // ERROR now; the 15-minute tick retries
@@ -71,7 +75,7 @@ export async function highLevelTick(rows: readonly Integration[]): Promise<void>
     if (row.provider !== HIGHLEVEL || row.status === "NOT_CONNECTED" || needsReconnect(row)) continue;
     const state = readSyncState(row.config);
     if (isPaused(state, now)) continue;
-    if (state.phase === "importing") { ensureImportLoop(row.organizationId); continue; }
+    if (catchingUp(state)) { ensureImportLoop(row.organizationId); continue; }
     if (state.phase !== "live") continue;
     try {
       await runHighLevelSync(row, { budgetMs: RUN_BUDGET_MS, reason: "scheduled" });
@@ -85,20 +89,20 @@ export async function highLevelTick(rows: readonly Integration[]): Promise<void>
 export function kickHighLevelRun(row: Integration, reason: "settings" | "manual"): void {
   if (process.env.NODE_ENV === "test") return;
   const state = readSyncState(row.config);
-  if (state.phase === "importing") { ensureImportLoop(row.organizationId); return; }
+  if (catchingUp(state)) { ensureImportLoop(row.organizationId); return; }
   if (state.phase !== "live" || needsReconnect(row)) return;
   void runHighLevelSync(row, { budgetMs: RUN_BUDGET_MS, reason })
     .catch((e) => console.error(`[highlevel] background sync failed for org ${row.organizationId}:`, e instanceof Error ? e.message : e));
 }
 
-/** Boot: resume imports a restart interrupted (one query, once). No-op in tests. */
+/** Boot: resume imports and tag re-reads a restart interrupted (one query, once). No-op in tests. */
 export function startHighLevelScheduler(): void {
   if (process.env.NODE_ENV === "test") return;
   setTimeout(() => {
     prisma.integration.findMany({ where: { provider: HIGHLEVEL, status: { in: ["CONNECTED", "ERROR"] } } })
       .then((rows) => {
         for (const row of rows) {
-          if (!needsReconnect(row) && readSyncState(row.config).phase === "importing") ensureImportLoop(row.organizationId);
+          if (!needsReconnect(row) && catchingUp(readSyncState(row.config))) ensureImportLoop(row.organizationId);
         }
       })
       .catch((e) => console.error("[highlevel] resume check failed:", e instanceof Error ? e.message : e));

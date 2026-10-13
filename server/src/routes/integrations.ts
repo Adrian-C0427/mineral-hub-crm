@@ -12,7 +12,7 @@
  *
  * HighLevel (read-only SMS mirror for Reports) connects with a Private
  * Integration key + Location ID and has extra routes — /highlevel/status,
- * /highlevel/import, and the Minerals filter's /highlevel/scope and
+ * /highlevel/import, /highlevel/refresh-tags, and the Minerals filter's /highlevel/scope and
  * /highlevel/scope-preview (services/highlevel/).
  */
 import { Router } from "express";
@@ -36,10 +36,10 @@ import {
   exchangeCode, persistBundle,
 } from "../services/integrationOAuth.js";
 import { RESPONSE_WINDOW_OPTIONS } from "../domain/smsMetrics.js";
-import { HIGHLEVEL, highLevelStatus, validateHighLevelConnection, needsReconnect } from "../services/highlevel/sync.js";
+import { HIGHLEVEL, highLevelStatus, validateHighLevelConnection, needsReconnect, startTagRefresh } from "../services/highlevel/sync.js";
 import {
   readSyncState, responseWindowOf, parseLocationId, readPipelines, savedScopeOf, sameScope, cleanScope, pricePerSegmentOf,
-  type HlSyncState,
+  newlyUsedTags, tagRefreshRunning, type HlSyncState,
 } from "../services/highlevel/mapping.js";
 import { ensureImportLoop, kickHighLevelRun } from "../services/highlevel/scheduler.js";
 import { scopeSettings, textedPeople, countLines } from "../services/highlevel/scope.js";
@@ -66,6 +66,8 @@ const previewLimiter = rateLimit({
   message: { error: "Too many preview requests. Wait a moment and try again." },
 });
 const PREVIEW_PATH = "/highlevel/scope-preview";
+/** Saving the Minerals filter starts a tag re-read by itself at most this often. */
+const AUTO_RETAG_COOLDOWN_MS = 24 * 60 * 60_000;
 // Every write is throttled, not only POSTs: a PATCH (HighLevel window / scope
 // change) rewrites every mirrored contact row and kicks off a background sync.
 integrationsRouter.use((req, res, next) => (req.method === "GET" || req.method === "HEAD" || req.method === "OPTIONS" ? next()
@@ -227,6 +229,30 @@ integrationsRouter.post(
       summary: `HighLevel import started (about ${(state.preview?.texts ?? 0).toLocaleString("en-US")} texts)`,
       organizationId: orgId(req), actorUserId: req.user?.id ?? null,
     });
+    ensureImportLoop(orgId(req));
+    res.json(await highLevelStatus(orgId(req)));
+  }),
+);
+
+// "Re-read tags now": look every contact up in HighLevel again (current tags)
+// and re-sort them for the Minerals filter. Runs in the background.
+integrationsRouter.post(
+  "/highlevel/refresh-tags",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const row = await getRow(req, HIGHLEVEL);
+    if (!row || row.status === "NOT_CONNECTED") throw new HttpError(400, "Connect HighLevel first.");
+    if (needsReconnect(row)) throw new HttpError(400, "HighLevel needs a new key first. Use Replace key.");
+    const state = readSyncState(row.config);
+    if (state.phase === "preview") throw new HttpError(409, "Start the import first — it reads every contact's current tags.");
+    if (state.phase === "importing") throw new HttpError(409, "The import is reading every contact's current tags right now — no need to re-read.");
+    if (!tagRefreshRunning(state)) {
+      if (!await startTagRefresh(orgId(req))) throw new HttpError(409, "The tag re-read couldn't start. Try Sync now, then try again.");
+      await logActivity({
+        eventType: "integration.tags_refresh_started",
+        summary: "HighLevel tags re-read started",
+        organizationId: orgId(req), actorUserId: req.user?.id ?? null,
+      });
+    }
     ensureImportLoop(orgId(req));
     res.json(await highLevelStatus(orgId(req)));
   }),
@@ -433,6 +459,25 @@ integrationsRouter.patch(
       await prisma.highLevelContact.updateMany({ where: { organizationId: orgId(req) }, data: { summaryDirty: true } });
       if (row.status !== "NOT_CONNECTED") kickHighLevelRun(row, "settings");
     }
+    // Saving re-sorts contacts from their STORED tags. A newly used tag that no
+    // stored contact carries was probably added in HighLevel after they were
+    // read (e.g. a new `minerals` tag) — re-read everyone's tags, at most once
+    // a day automatically.
+    let tagRefreshStarted = false;
+    if (scopeChanged && after && row.status !== "NOT_CONNECTED" && !needsReconnect(row)) {
+      const state = readSyncState(row.config);
+      const lastAuto = state.tagRefresh?.auto ? Date.parse(state.tagRefresh.startedAt) : 0;
+      if (state.phase === "live" && !tagRefreshRunning(state) && Date.now() - lastAuto > AUTO_RETAG_COOLDOWN_MS) {
+        let unseen = false;
+        for (const tag of newlyUsedTags(before, after)) {
+          if (await prisma.highLevelContact.count({ where: { organizationId: orgId(req), tags: { has: tag } } }) === 0) { unseen = true; break; }
+        }
+        if (unseen && await startTagRefresh(orgId(req), { auto: true })) {
+          tagRefreshStarted = true;
+          ensureImportLoop(orgId(req));
+        }
+      }
+    }
     const changes = [
       windowChanged ? `response window set to ${config.responseWindowDays} days` : null,
       scopeChanged ? (after ? "Minerals filter saved" : "Minerals filter reset to the suggestion") : null,
@@ -443,7 +488,7 @@ integrationsRouter.patch(
       summary: changes.length ? `Integration ${def.name}: ${changes.join("; ")}` : `Integration ${def.name} settings updated`,
       organizationId: orgId(req), actorUserId: req.user?.id ?? null,
     });
-    res.json(serialize(def, row));
+    res.json({ ...serialize(def, row), ...(tagRefreshStarted ? { tagRefreshStarted } : {}) });
   }),
 );
 

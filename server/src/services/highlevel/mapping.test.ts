@@ -386,3 +386,21 @@ describe("carrier health notifications", () => {
     });
   });
 });
+
+describe("tag re-read helpers", () => {
+  it("lists tags a new filter uses that the old one didn't", async () => {
+    const { newlyUsedTags } = await import("./mapping.js");
+    expect(newlyUsedTags(null, { mineralTags: ["Minerals", "leon county"], realEstateTags: ["dispo"] })).toEqual(["minerals", "leon county", "dispo"]);
+    expect(newlyUsedTags({ mineralTags: ["leon county"], realEstateTags: ["dispo"] }, { mineralTags: ["leon  County", "minerals"], realEstateTags: ["dispo"] })).toEqual(["minerals"]);
+    expect(newlyUsedTags({ mineralTags: ["a"], realEstateTags: [] }, { mineralTags: [], realEstateTags: ["a"] })).toEqual([]);
+  });
+  it("estimates minutes left at the sync's lookup pace and knows when one is running", async () => {
+    const { tagRefreshEtaMinutes, tagRefreshRunning } = await import("./mapping.js");
+    expect(tagRefreshEtaMinutes(0)).toBe(0);
+    expect(tagRefreshEtaMinutes(12)).toBe(1);
+    expect(tagRefreshEtaMinutes(12_000)).toBe(40);
+    expect(tagRefreshRunning({ phase: "live" })).toBe(false);
+    expect(tagRefreshRunning({ phase: "live", tagRefresh: { startedAt: "x", total: 1, changed: 0 } })).toBe(true);
+    expect(tagRefreshRunning({ phase: "live", tagRefresh: { startedAt: "x", total: 1, changed: 0, finishedAt: "y" } })).toBe(false);
+  });
+});

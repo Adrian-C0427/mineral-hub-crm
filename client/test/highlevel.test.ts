@@ -97,3 +97,17 @@ describe("HighLevel Configure — Minerals filter and price", () => {
     expect(lastRunText(run, "live")).toBe("Last check: 2 pipeline stage changes.");
   });
 });
+
+describe("tagRefreshText", () => {
+  it("shows progress while running and the outcome after", async () => {
+    const { tagRefreshText } = await import("../src/lib/highlevel");
+    const base = { startedAt: "2026-10-13T16:00:00Z", auto: false, total: 12_410, etaMinutes: 0 };
+    expect(tagRefreshText(null, () => "")).toBeNull();
+    expect(tagRefreshText({ ...base, running: true, finishedAt: null, done: 3_200, changed: 0, etaMinutes: 31 }, () => ""))
+      .toBe("Re-reading tags from HighLevel: 3,200 of 12,410 contacts · about 31 minutes left. Reports re-sort as it goes.");
+    expect(tagRefreshText({ ...base, running: false, finishedAt: "2026-10-13T16:41:00Z", done: 12_410, changed: 2_310 }, () => "Oct 13, 11:41 AM"))
+      .toBe("Tags re-read Oct 13, 11:41 AM — 2,310 contacts' tags changed.");
+    expect(tagRefreshText({ ...base, running: false, finishedAt: "2026-10-13T16:41:00Z", done: 12_410, changed: 0 }, () => "today"))
+      .toBe("Tags re-read today — no contact's tags had changed.");
+  });
+});

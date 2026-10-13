@@ -59,6 +59,39 @@ export interface HlSyncState {
   summaryVersion?: number;
   /** Carrier-health warnings already announced, while they last ("day:optOut", "week:failure", …). */
   healthNotified?: string[];
+  /**
+   * "Re-read tags now": every contact last read before startedAt is looked up
+   * again, in back-to-back runs, so tags added in HighLevel since (e.g. a new
+   * `minerals` tag) reach the Minerals filter without waiting for the weekly
+   * refresh. finishedAt is set once none are left and their summaries (and
+   * minerals line) are recomputed. auto = started by saving a filter that uses
+   * a tag no stored contact had yet.
+   */
+  tagRefresh?: TagRefreshState;
+}
+
+export interface TagRefreshState { startedAt: string; total: number; changed: number; finishedAt?: string; auto?: boolean }
+
+/** A tag re-read is in progress. */
+export const tagRefreshRunning = (s: HlSyncState): boolean => !!s.tagRefresh && !s.tagRefresh.finishedAt;
+
+/** Contact lookups per second the sync keeps to (HighLevel allows 100 requests / 10 s). */
+export const CONTACT_LOOKUPS_PER_SECOND = 5;
+
+/** Rough minutes left for `remaining` contact lookups. */
+export const tagRefreshEtaMinutes = (remaining: number): number =>
+  remaining > 0 ? Math.max(1, Math.ceil(remaining / CONTACT_LOOKUPS_PER_SECOND / 60)) : 0;
+
+/**
+ * Tags a newly saved Minerals filter uses that the previous one didn't
+ * (normalized). Saving a filter re-sorts contacts from their STORED tags, so
+ * a tag created in HighLevel after the contacts were last read needs a re-read.
+ */
+export function newlyUsedTags(prev: { mineralTags: string[]; realEstateTags: string[] } | null,
+  next: { mineralTags: string[]; realEstateTags: string[] }): string[] {
+  const norm = (t: string) => t.trim().toLowerCase().replace(/\s+/g, " ");
+  const had = new Set([...(prev?.mineralTags ?? []), ...(prev?.realEstateTags ?? [])].map(norm));
+  return [...new Set([...next.mineralTags, ...next.realEstateTags].map(norm))].filter((t) => t && !had.has(t));
 }
 
 /** Integration.config.hlUsers — names for HighLevel user ids in Reports. */

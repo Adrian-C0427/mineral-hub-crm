@@ -254,7 +254,7 @@ export function Integrations() {
           name={configuring.name}
           config={configuring.config}
           onClose={() => setConfiguring(null)}
-          onSaved={() => { setConfiguring(null); setFlash("Settings saved."); load(); }}
+          onSaved={(msg) => { setConfiguring(null); setFlash(msg ?? "Settings saved."); load(); }}
         />
       )}
       {configuring && configuring.key !== "highlevel" && (
@@ -358,6 +358,12 @@ function IntegrationCard({ p, busy, result, onConnect, onOAuth, onDisconnect, on
             )}
             <button className="small" disabled={busy} onClick={onTest}>{busy ? "Working…" : "Test"}</button>
             {hlPhase === "live" && <button className="small" disabled={busy} onClick={onSync}>Sync now</button>}
+            {hlPhase === "live" && (
+              <button className="small" disabled={hl.starting || errored || !!hl.status?.tagRefresh?.running} onClick={() => void hl.rereadTags()}
+                title="Look every texted contact up in HighLevel again and re-sort them for the Minerals filter — use after adding or renaming tags in HighLevel.">
+                {hl.status?.tagRefresh?.running ? "Re-reading tags…" : hl.starting ? "Starting…" : "Re-read tags now"}
+              </button>
+            )}
             <button className="small" onClick={onConfigure}>Configure</button>
             <button className="small" onClick={onConnect}>Replace key</button>
             <button className="small set-btn-danger-text" onClick={onDisconnect}>Disconnect</button>

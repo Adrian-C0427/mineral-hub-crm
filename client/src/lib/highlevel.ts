@@ -29,6 +29,24 @@ export interface HighLevelStatus {
   storageEstimateMb: number | null;
   /** Optional read permissions the key lacks (e.g. "opportunities.readonly"). */
   missingScopes?: string[];
+  /** "Re-read tags now" — the latest one, while running and after. */
+  tagRefresh?: HighLevelTagRefresh | null;
+}
+
+export interface HighLevelTagRefresh {
+  running: boolean; startedAt: string; finishedAt: string | null; auto: boolean;
+  total: number; done: number; changed: number; etaMinutes: number;
+}
+
+/** The card line for a tag re-read: progress while it runs, the outcome after. */
+export function tagRefreshText(t: HighLevelTagRefresh | null | undefined, fmtWhen: (iso: string) => string): string | null {
+  if (!t) return null;
+  if (t.running) {
+    const eta = t.etaMinutes > 0 ? ` · about ${count(t.etaMinutes, "minute", "minutes")} left` : "";
+    return `Re-reading tags from HighLevel: ${t.done.toLocaleString("en-US")} of ${count(t.total, "contact", "contacts")}${eta}. Reports re-sort as it goes.`;
+  }
+  if (!t.finishedAt) return null;
+  return `Tags re-read ${fmtWhen(t.finishedAt)} — ${t.changed === 0 ? "no contact's tags had changed" : `${count(t.changed, "contact's tags", "contacts' tags")} changed`}.`;
 }
 
 /** Mirrors RESPONSE_WINDOW_OPTIONS in server/src/domain/smsMetrics.ts. */
