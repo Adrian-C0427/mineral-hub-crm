@@ -159,8 +159,15 @@ const ENV_VALIDATORS: Record<string, () => Promise<ValidationResult>> = {
   entra: validateEntraSignin,
 };
 
+/**
+ * Providers whose key can't be checked on its own and are validated by their
+ * own connect flow instead: HighLevel needs the key AND a Location ID
+ * (services/highlevel/sync.ts validateHighLevelConnection / checkHighLevel).
+ */
+const DEDICATED_VALIDATION = new Set(["highlevel"]);
+
 export function hasSecretValidator(provider: string): boolean {
-  return provider in SECRET_VALIDATORS;
+  return provider in SECRET_VALIDATORS || DEDICATED_VALIDATION.has(provider);
 }
 
 export function isEnvProvider(provider: string): boolean {

@@ -1,0 +1,601 @@
+/**
+ * HighLevel SMS sync — mirrors the org's texting history (HighLevelMessage /
+ * HighLevelContact) so Reports can measure outreach. READ-ONLY toward
+ * HighLevel; message wording is never stored.
+ *
+ * One run (runHighLevelSync), in order, each step bounded by the run's time
+ * budget so a run can stop between pages and the next one resumes:
+ *  1. Users (every 6 h) → config.hlUsers, for sender names in Reports.
+ *  2. Messages: a FRESH export query from the persisted createdAt checkpoint
+ *     (minus a 2-minute overlap), sortBy createdAt asc, 500 per page. The
+ *     export cursor is only followed within this run — it is a point-in-time
+ *     token that may expire, so it is never persisted. The checkpoint is saved
+ *     after every page, so a crash or a budget stop loses nothing.
+ *  3. Live runs re-read the last 72 h once, to pick up delivery-status
+ *     changes (HighLevel has no webhook for those).
+ *  4. Summaries (domain/smsMetrics.ts summarizeContact) for every contact
+ *     whose messages changed or whose summary used another response window.
+ *  5. Contact details for new contacts, plus a daily refresh of contacts
+ *     texted in the last 14 days (404 → deletedInHl, history kept).
+ * Writes are idempotent upserts keyed on (organizationId, hlId) and only
+ * touch rows whose stored fields actually changed, so overlapping pages and
+ * re-runs never duplicate or churn rows.
+ *
+ * Failures: an auth error flips the integration to ERROR at once (the key was
+ * rotated or deleted — retrying can't help); anything else does after
+ * FAILURES_BEFORE_ERROR consecutive failed runs. Entering ERROR raises one
+ * admin notification. A success clears the failure count and the error.
+ *
+ * Concurrency: one run per org at a time, guarded by an in-memory set. Like
+ * the other schedulers (integrationSync.ts, portalReminders.ts) this assumes
+ * a single long-lived API instance (Railway runs one container); a second
+ * instance would need a database lock instead.
+ */
+import type { Integration } from "@prisma/client";
+import { prisma } from "../../db.js";
+import { decryptSecret } from "../secrets.js";
+import { logActivity } from "../activityLog.js";
+import { summarizeContact, type SmsMessageInput } from "../../domain/smsMetrics.js";
+import { HighLevelClient, HighLevelError, HL_AUTH_MESSAGE, type HlExportPage } from "./client.js";
+import {
+  readSyncState, responseWindowOf, toMessageRow, messageChanged, importStartDate, advanceCheckpoint,
+  formatStartDate, startDateIgnored, toContactFields, toUserRefs, isDue, phaseAfterRun, storageEstimateMb,
+  connectErrorMessage, PAGE_LIMIT, STATUS_LOOKBACK_MS, USERS_REFRESH_MS, CONTACT_REFRESH_MS, CONTACT_ACTIVE_DAYS,
+  FAILURES_BEFORE_ERROR, type HlSyncState, type HlPhase, type HlLastRun, type HlUserRef, type MessageRow,
+} from "./mapping.js";
+
+export const HIGHLEVEL = "highlevel";
+/** Stored key can't be decrypted (server encryption key changed) — like an auth error, only a reconnect fixes it. */
+export const HL_KEY_UNREADABLE = "The saved HighLevel key can't be read anymore (the server's encryption key changed). Reconnect with your key.";
+
+/** Rows whose last failure needs a person (new key) before syncing can resume. */
+export const needsReconnect = (row: Pick<Integration, "status" | "lastError">): boolean =>
+  row.status === "ERROR" && (row.lastError === HL_AUTH_MESSAGE || row.lastError === HL_KEY_UNREADABLE);
+
+export type RunReason = "import" | "scheduled" | "manual" | "window";
+
+export interface HighLevelRunResult {
+  ok: boolean;
+  /** True when nothing ran (another run in flight, or not connected). */
+  skipped?: boolean;
+  message: string;
+  phase: HlPhase | null;
+}
+
+// --- Connect-time validation ----------------------------------------------------
+
+export type ConnectCheck =
+  | { ok: true; location: { id: string; name: string }; users: HlUserRef[]; texts: number }
+  | { ok: false; message: string };
+
+/**
+ * Validate a key + Location ID before anything is stored: the location must
+ * open, and the key must be allowed to read users and texts (the scopes the
+ * sync needs). Also returns the preview count (export total at limit 10).
+ */
+export async function validateHighLevelConnection(token: string, locationId: string): Promise<ConnectCheck> {
+  // Interactive: fewer retries so a HighLevel outage fails fast in the modal.
+  const client = new HighLevelClient({ token, maxAttempts: 2, maxRetryWaitMs: 5_000 });
+  let step: "location" | "users" | "messages" = "location";
+  try {
+    const location = await client.getLocation(locationId);
+    step = "users";
+    const users = await client.listUsers(locationId);
+    step = "messages";
+    const page = await client.exportMessages({ locationId, channel: "SMS", limit: 10 });
+    return { ok: true, location: { id: location.id, name: location.name?.trim() || locationId }, users: toUserRefs(users), texts: page.total };
+  } catch (e) {
+    if (e instanceof HighLevelError) return { ok: false, message: connectErrorMessage(step, e, locationId) };
+    throw e;
+  }
+}
+
+/** The Test button: can the stored key still open the location? */
+export async function checkHighLevel(row: Integration): Promise<{ ok: boolean; message: string }> {
+  const cfg = (row.config ?? {}) as Record<string, unknown>;
+  const locationId = typeof cfg.locationId === "string" ? cfg.locationId : "";
+  if (typeof cfg._secret !== "string" || !locationId) return { ok: false, message: "No HighLevel key stored. Reconnect HighLevel." };
+  let token: string;
+  try { token = decryptSecret(cfg._secret); } catch { return { ok: false, message: HL_KEY_UNREADABLE }; }
+  try {
+    const loc = await new HighLevelClient({ token, maxAttempts: 2, maxRetryWaitMs: 5_000 }).getLocation(locationId);
+    return { ok: true, message: `HighLevel key works — connected to ${loc.name?.trim() || locationId}.` };
+  } catch (e) {
+    return { ok: false, message: e instanceof HighLevelError ? e.message : "HighLevel check failed." };
+  }
+}
+
+// --- Status (card + polling) ----------------------------------------------------
+
+export interface HighLevelStatus {
+  connected: boolean;
+  status: "NOT_CONNECTED" | "CONNECTED" | "ERROR";
+  locationId: string | null;
+  locationName: string | null;
+  phase: HlPhase | null;
+  preview: { texts: number; at: string } | null;
+  imported: number;
+  contacts: number;
+  lastSyncAt: string | null;
+  lastError: string | null;
+  lastRun: HlLastRun | null;
+  responseWindowDays: number;
+  storageEstimateMb: number | null;
+}
+
+export async function highLevelStatus(organizationId: string): Promise<HighLevelStatus> {
+  const row = await prisma.integration.findUnique({ where: { organizationId_provider: { organizationId, provider: HIGHLEVEL } } });
+  const cfg = (row?.config ?? {}) as Record<string, unknown>;
+  const [imported, contacts] = await Promise.all([
+    prisma.highLevelMessage.count({ where: { organizationId } }),
+    prisma.highLevelContact.count({ where: { organizationId } }),
+  ]);
+  const hasState = !!row && cfg.hlSync != null;
+  const state = readSyncState(cfg);
+  const status = row?.status ?? "NOT_CONNECTED";
+  const texts = Math.max(state.preview?.texts ?? 0, imported);
+  return {
+    connected: status !== "NOT_CONNECTED",
+    status,
+    locationId: typeof cfg.locationId === "string" ? cfg.locationId : null,
+    locationName: typeof cfg.locationName === "string" ? cfg.locationName : null,
+    phase: hasState ? state.phase : null,
+    preview: state.preview ?? null,
+    imported,
+    contacts,
+    lastSyncAt: row?.lastSyncAt?.toISOString() ?? null,
+    lastError: row?.lastError ?? null,
+    lastRun: state.lastRun ?? null,
+    responseWindowDays: responseWindowOf(cfg),
+    storageEstimateMb: hasState ? storageEstimateMb(texts) : null,
+  };
+}
+
+// --- The run ----------------------------------------------------------------------
+
+/** Orgs with a run in flight (see the single-instance note at the top). */
+const running = new Set<string>();
+export const isHighLevelRunning = (organizationId: string) => running.has(organizationId);
+
+/** Thrown when the integration was disconnected mid-run: stop quietly, write nothing more. */
+class SyncStopped extends Error {}
+/** HighLevel asked us to wait (429 beyond our retry budget, or today's budget nearly spent). */
+class SyncPaused extends Error {
+  constructor(readonly waitMs: number, message: string) { super(message); }
+}
+
+interface Stats { newMessages: number; updatedMessages: number; contactsFetched: number; summaries: number }
+
+interface Ctx {
+  rowId: string;
+  org: string;
+  locationId: string;
+  client: HighLevelClient;
+  state: HlSyncState;
+  stats: Stats;
+  deadline: number;
+}
+
+const timeLeft = (ctx: Ctx) => Date.now() < ctx.deadline;
+
+/** Merge into the STORED config (other writers — settings, disconnect — may have changed it mid-run). */
+async function saveState(rowId: string, patch: Partial<HlSyncState>, extra: Record<string, unknown> = {}): Promise<HlSyncState> {
+  const cur = await prisma.integration.findUnique({ where: { id: rowId }, select: { config: true, status: true } });
+  if (!cur || cur.status === "NOT_CONNECTED") throw new SyncStopped();
+  const cfg = (cur.config ?? {}) as Record<string, unknown>;
+  const next: HlSyncState = { ...readSyncState(cfg), ...patch };
+  for (const k of Object.keys(next) as (keyof HlSyncState)[]) if (next[k] === undefined) delete next[k];
+  await prisma.integration.update({ where: { id: rowId }, data: { config: { ...cfg, ...extra, hlSync: next } as never } });
+  return next;
+}
+
+/**
+ * Upsert one page of messages. New rows are inserted (ON CONFLICT DO NOTHING
+ * on (organizationId, hlId)); existing rows are rewritten only when a field
+ * changed. Contacts behind new/changed messages get a placeholder row (if
+ * unseen) and are marked for a summary recompute.
+ */
+async function upsertMessages(org: string, rows: MessageRow[]): Promise<{ created: number; updated: number }> {
+  if (!rows.length) return { created: 0, updated: 0 };
+  const unique = [...new Map(rows.map((r) => [r.hlId, r])).values()];
+  const existing = await prisma.highLevelMessage.findMany({
+    where: { organizationId: org, hlId: { in: unique.map((r) => r.hlId) } },
+    select: {
+      id: true, hlId: true, hlContactId: true, conversationId: true, direction: true, messageType: true,
+      status: true, source: true, hlUserId: true, optOut: true, sentAt: true,
+    },
+  });
+  const byHlId = new Map(existing.map((e) => [e.hlId, e]));
+  const toCreate = unique.filter((r) => !byHlId.has(r.hlId));
+  const toUpdate = unique.filter((r) => { const p = byHlId.get(r.hlId); return !!p && messageChanged(p, r); });
+
+  let created = 0;
+  if (toCreate.length) {
+    created = (await prisma.highLevelMessage.createMany({
+      data: toCreate.map((r) => ({ organizationId: org, ...r })),
+      skipDuplicates: true,
+    })).count;
+  }
+  if (toUpdate.length) {
+    await prisma.$transaction(toUpdate.map((r) => {
+      const { hlId: _hlId, ...fields } = r;
+      return prisma.highLevelMessage.update({ where: { id: byHlId.get(r.hlId)!.id }, data: fields });
+    }));
+  }
+
+  const touched = new Set<string>();
+  for (const r of toCreate) touched.add(r.hlContactId);
+  for (const r of toUpdate) { touched.add(r.hlContactId); touched.add(byHlId.get(r.hlId)!.hlContactId); }
+  if (touched.size) {
+    const ids = [...touched];
+    await prisma.highLevelContact.createMany({
+      data: ids.map((hlId) => ({ organizationId: org, hlId, summaryDirty: true })),
+      skipDuplicates: true,
+    });
+    await prisma.highLevelContact.updateMany({
+      where: { organizationId: org, hlId: { in: ids }, summaryDirty: false },
+      data: { summaryDirty: true },
+    });
+  }
+  return { created, updated: toUpdate.length };
+}
+
+interface Page { rows: MessageRow[]; last: boolean }
+
+/** One export page, oldest first (the export's sort), mapped to mirror rows. */
+async function exportPage(ctx: Ctx, opts: { cursor?: string; startDate?: string }): Promise<{ page: HlExportPage; rows: MessageRow[] }> {
+  const page = await ctx.client.exportMessages({
+    locationId: ctx.locationId, channel: "SMS", limit: PAGE_LIMIT, sortBy: "createdAt", sortOrder: "asc", ...opts,
+  });
+  return { page, rows: page.messages.map(toMessageRow).filter((r): r is MessageRow => !!r) };
+}
+
+/**
+ * First page of a query with a startDate. The format is undocumented: try ISO
+ * 8601, and on a 400/422 — or if the filter was silently ignored — epoch ms.
+ * The format that worked is remembered in hlSync.dateParam.
+ */
+async function firstPageFrom(ctx: Ctx, start: Date): Promise<{ page: HlExportPage; rows: MessageRow[] }> {
+  if (ctx.state.dateParam) return exportPage(ctx, { startDate: formatStartDate(start, ctx.state.dateParam) });
+  let iso: Awaited<ReturnType<typeof exportPage>> | null = null;
+  try {
+    iso = await exportPage(ctx, { startDate: formatStartDate(start, "iso") });
+  } catch (e) {
+    if (!(e instanceof HighLevelError && e.kind === "badRequest")) throw e;
+  }
+  if (iso && !startDateIgnored(start, iso.rows)) {
+    ctx.state.dateParam = "iso";
+    return iso;
+  }
+  const ms = await exportPage(ctx, { startDate: formatStartDate(start, "ms") });
+  ctx.state.dateParam = "ms";
+  return ms;
+}
+
+/**
+ * A fresh export query from `start` (null = the very beginning), page by
+ * page. The cursor is followed only within this run; later pages repeat the
+ * same filters. Stops early when HighLevel's daily allowance runs low.
+ */
+async function* pagesFrom(ctx: Ctx, start: Date | null): AsyncGenerator<Page> {
+  let cursor: string | undefined;
+  for (;;) {
+    checkDailyBudget(ctx);
+    const { page, rows } = !cursor && start
+      ? await firstPageFrom(ctx, start)
+      : await exportPage(ctx, { cursor, startDate: start ? formatStartDate(start, ctx.state.dateParam ?? "iso") : undefined });
+    const last = !page.nextCursor || page.messages.length === 0;
+    yield { rows, last };
+    if (last) return;
+    cursor = page.nextCursor!;
+  }
+}
+
+function checkDailyBudget(ctx: Ctx): void {
+  if (ctx.client.dailyBudgetLow) {
+    throw new SyncPaused(60 * 60_000, "HighLevel's daily request allowance is nearly used up — the sync will continue in about an hour.");
+  }
+}
+
+/** Step 2: new messages from the checkpoint. Returns whether the import reached the present. */
+async function importMessages(ctx: Ctx): Promise<boolean> {
+  const initial = ctx.state.checkpoint;
+  // Hard stop at twice the budget: never end a run for time before the
+  // checkpoint has moved, or a burst of texts inside one overlap window
+  // could be re-read forever.
+  const hardDeadline = ctx.deadline + (ctx.deadline - Date.now());
+  for await (const { rows, last } of pagesFrom(ctx, importStartDate(initial))) {
+    const r = await upsertMessages(ctx.org, rows);
+    ctx.stats.newMessages += r.created;
+    ctx.stats.updatedMessages += r.updated;
+    ctx.state.checkpoint = advanceCheckpoint(ctx.state.checkpoint, rows);
+    ctx.state.imported = (ctx.state.imported ?? 0) + r.created;
+    // Saved after every page: a crash or a budget stop resumes from here.
+    await saveState(ctx.rowId, { checkpoint: ctx.state.checkpoint, imported: ctx.state.imported, dateParam: ctx.state.dateParam });
+    if (last) return true;
+    if (Date.now() >= ctx.deadline && (ctx.state.checkpoint !== initial || Date.now() >= hardDeadline)) return false;
+  }
+  return true;
+}
+
+/** Step 3 (live runs): re-read the last 72 h for delivery-status changes. Returns true when it completed. */
+async function refreshRecentStatuses(ctx: Ctx): Promise<boolean> {
+  for await (const { rows, last } of pagesFrom(ctx, new Date(Date.now() - STATUS_LOOKBACK_MS))) {
+    const r = await upsertMessages(ctx.org, rows);
+    ctx.stats.newMessages += r.created;
+    ctx.stats.updatedMessages += r.updated;
+    ctx.state.imported = (ctx.state.imported ?? 0) + r.created;
+    if (last) return true;
+    if (!timeLeft(ctx)) return false;
+  }
+  return true;
+}
+
+const SUMMARY_BATCH = 200;
+
+/** Contacts whose stored summary is stale: messages changed, or computed with another window. */
+const staleSummaryWhere = (org: string, windowDays: number) => ({
+  organizationId: org,
+  OR: [{ summaryDirty: true }, { summaryWindowDays: null }, { summaryWindowDays: { not: windowDays } }],
+});
+
+/** Step 4: recompute outreach summaries in batches (summarizeContact is the single counting rule). */
+async function recomputeSummaries(ctx: Ctx): Promise<void> {
+  // Re-read the window: the owner may have changed it while this run was going.
+  const cur = await prisma.integration.findUnique({ where: { id: ctx.rowId }, select: { config: true } });
+  const windowDays = responseWindowOf(cur?.config);
+  for (let i = 0; i < 10_000; i++) {
+    if (i > 0 && !timeLeft(ctx)) return;
+    const batch = await prisma.highLevelContact.findMany({
+      where: staleSummaryWhere(ctx.org, windowDays),
+      select: { id: true, hlId: true },
+      orderBy: { id: "asc" },
+      take: SUMMARY_BATCH,
+    });
+    if (!batch.length) return;
+    const msgs = await prisma.highLevelMessage.findMany({
+      where: { organizationId: ctx.org, hlContactId: { in: batch.map((b) => b.hlId) } },
+      select: { hlContactId: true, direction: true, status: true, sentAt: true, hlUserId: true, optOut: true },
+    });
+    const byContact = new Map<string, SmsMessageInput[]>();
+    for (const m of msgs) {
+      const list = byContact.get(m.hlContactId) ?? [];
+      list.push(m);
+      byContact.set(m.hlContactId, list);
+    }
+    await prisma.$transaction(batch.map((b) => {
+      const s = summarizeContact(byContact.get(b.hlId) ?? [], windowDays);
+      return prisma.highLevelContact.update({
+        where: { id: b.id },
+        data: { ...s, summaryDirty: false, summaryWindowDays: windowDays },
+      });
+    }));
+    ctx.stats.summaries += batch.length;
+  }
+}
+
+const FIRST_FETCH_PER_RUN = 600;
+const REFRESH_PER_RUN = 150;
+const CONTACT_CONCURRENCY = 4;
+
+/** Step 5: contact details — new contacts first, then the daily refresh of recently texted ones. */
+async function fetchContacts(ctx: Ctx): Promise<void> {
+  const now = Date.now();
+  const firsts = await prisma.highLevelContact.findMany({
+    where: { organizationId: ctx.org, fetchedAt: null, deletedInHl: false },
+    select: { id: true, hlId: true },
+    orderBy: { createdAt: "asc" },
+    take: FIRST_FETCH_PER_RUN,
+  });
+  const refresh = ctx.state.phase === "live" ? await prisma.highLevelContact.findMany({
+    where: {
+      organizationId: ctx.org, deletedInHl: false,
+      fetchedAt: { lt: new Date(now - CONTACT_REFRESH_MS) },
+      lastMessageAt: { gte: new Date(now - CONTACT_ACTIVE_DAYS * 86_400_000) },
+    },
+    select: { id: true, hlId: true },
+    orderBy: { fetchedAt: "asc" },
+    take: REFRESH_PER_RUN,
+  }) : [];
+  const queue = [...firsts, ...refresh];
+  let failure: unknown = null;
+  let next = 0;
+  const worker = async () => {
+    while (!failure && next < queue.length && timeLeft(ctx)) {
+      const c = queue[next++];
+      try {
+        checkDailyBudget(ctx);
+        let data: Record<string, unknown>;
+        try {
+          data = { ...toContactFields(await ctx.client.getContact(c.hlId)), deletedInHl: false };
+        } catch (e) {
+          if (e instanceof HighLevelError && e.kind === "notFound") data = { deletedInHl: true }; // deleted in HighLevel: keep the row and its history
+          else if (e instanceof HighLevelError && e.kind === "badRequest") {
+            // HighLevel refuses this one contact: skip it (until the daily refresh) rather than stall the whole sync.
+            console.warn(`[highlevel] contact ${c.hlId} lookup refused (HTTP ${e.status}): ${e.detail ?? ""}`);
+            data = {};
+          } else throw e;
+        }
+        await prisma.highLevelContact.update({ where: { id: c.id }, data: { ...data, fetchedAt: new Date() } });
+        ctx.stats.contactsFetched++;
+      } catch (e) {
+        failure ??= e;
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: CONTACT_CONCURRENCY }, worker));
+  if (failure) throw failure;
+}
+
+const fmt = (n: number) => n.toLocaleString("en-US");
+const plural = (n: number, one: string, many: string) => `${fmt(n)} ${n === 1 ? one : many}`;
+
+function successMessage(phase: HlPhase, finished: boolean, s: Stats, imported: number, contacts: number, previewTexts: number | undefined): string {
+  if (finished) return `Import finished: ${plural(imported, "text", "texts")} from ${plural(contacts, "contact", "contacts")}.`;
+  if (phase === "importing") {
+    const of = previewTexts && previewTexts > imported ? ` of about ${fmt(previewTexts)}` : "";
+    return `Importing… ${fmt(imported)}${of} texts so far; ${plural(s.contactsFetched, "contact", "contacts")} looked up this round.`;
+  }
+  const parts = [
+    s.newMessages ? plural(s.newMessages, "new text", "new texts") : "no new texts",
+    s.updatedMessages ? plural(s.updatedMessages, "delivery update", "delivery updates") : null,
+    s.contactsFetched ? plural(s.contactsFetched, "contact refreshed", "contacts refreshed") : null,
+  ].filter(Boolean);
+  return `Up to date — ${parts.join(", ")}.`;
+}
+
+/**
+ * One bounded sync run for an org's HighLevel connection. Never throws:
+ * failures are recorded on the row and returned as { ok: false }.
+ */
+export async function runHighLevelSync(row: Integration, opts: { budgetMs: number; reason: RunReason }): Promise<HighLevelRunResult> {
+  const org = row.organizationId;
+  if (running.has(org)) {
+    return { ok: true, skipped: true, message: "A HighLevel sync is already running — check back in a minute.", phase: readSyncState(row.config).phase };
+  }
+  running.add(org);
+  const startedAt = Date.now();
+  const stats: Stats = { newMessages: 0, updatedMessages: 0, contactsFetched: 0, summaries: 0 };
+  let fresh: Integration | null = null;
+  let state: HlSyncState = readSyncState(row.config);
+  try {
+    // The caller's row may be stale (scheduler tick, background loop).
+    fresh = await prisma.integration.findUnique({ where: { id: row.id } });
+    if (!fresh || fresh.status === "NOT_CONNECTED") return { ok: false, skipped: true, message: "HighLevel isn't connected.", phase: null };
+    const cfg = (fresh.config ?? {}) as Record<string, unknown>;
+    state = readSyncState(cfg);
+    const locationId = typeof cfg.locationId === "string" ? cfg.locationId : "";
+    if (typeof cfg._secret !== "string" || !locationId) throw new HighLevelError("auth", { detail: "no stored key or location" });
+    let token: string;
+    try { token = decryptSecret(cfg._secret); } catch { throw new KeyUnreadable(); }
+    const ctx: Ctx = {
+      rowId: fresh.id, org, locationId, client: new HighLevelClient({ token }), state: { ...state }, stats,
+      deadline: startedAt + opts.budgetMs,
+    };
+
+    if (state.phase === "preview") {
+      // Before the import starts, a sync only refreshes the preview count.
+      const page = await ctx.client.exportMessages({ locationId, channel: "SMS", limit: 10 });
+      const message = `Found ${plural(page.total, "text", "texts")} in HighLevel. Nothing has been imported yet.`;
+      await saveState(fresh.id, {
+        preview: { texts: page.total, at: new Date().toISOString() }, consecutiveFailures: 0, pausedUntil: undefined,
+        lastRun: { at: new Date().toISOString(), ok: true, ...stats, ms: Date.now() - startedAt, message },
+      });
+      await prisma.integration.updateMany({ where: { id: fresh.id, status: { not: "NOT_CONNECTED" } }, data: { status: "CONNECTED", lastError: null } });
+      return { ok: true, message, phase: "preview" };
+    }
+
+    // 1. Team members (sender names in Reports).
+    if (isDue(state.usersRefreshAt, USERS_REFRESH_MS, startedAt)) {
+      const users = toUserRefs(await ctx.client.listUsers(locationId));
+      await saveState(fresh.id, { usersRefreshAt: new Date().toISOString() }, { hlUsers: users });
+    }
+    // 2. New messages from the checkpoint.
+    const caughtUp = await importMessages(ctx);
+    // 3. Delivery-status refresh — at most once per live run.
+    let statusRefreshAt = state.statusRefreshAt;
+    if (caughtUp && state.phase === "live" && timeLeft(ctx) && await refreshRecentStatuses(ctx)) {
+      statusRefreshAt = new Date().toISOString();
+    }
+    // 4. Summaries, then 5. contact details (the slow part — summaries first
+    // so a budget stop never leaves Reports with stale counts).
+    await recomputeSummaries(ctx);
+    if (timeLeft(ctx)) await fetchContacts(ctx);
+
+    // Phase: importing → live once messages, contacts and summaries are complete.
+    const windowDays = responseWindowOf((await prisma.integration.findUnique({ where: { id: fresh.id }, select: { config: true } }))?.config);
+    const [pendingContacts, dirtySummaries, imported, contacts] = await Promise.all([
+      prisma.highLevelContact.count({ where: { organizationId: org, fetchedAt: null, deletedInHl: false } }),
+      prisma.highLevelContact.count({ where: staleSummaryWhere(org, windowDays) }),
+      prisma.highLevelMessage.count({ where: { organizationId: org } }),
+      prisma.highLevelContact.count({ where: { organizationId: org } }),
+    ]);
+    const phase = phaseAfterRun(state.phase, { messagesCaughtUp: caughtUp, pendingContacts, dirtySummaries });
+    const finished = state.phase === "importing" && phase === "live";
+    const message = successMessage(phase, finished, stats, imported, contacts, state.preview?.texts);
+    await saveState(fresh.id, {
+      phase, imported, statusRefreshAt, consecutiveFailures: 0, pausedUntil: undefined,
+      lastRun: { at: new Date().toISOString(), ok: true, ...stats, ms: Date.now() - startedAt, message },
+    });
+    await prisma.integration.updateMany({
+      where: { id: fresh.id, status: { not: "NOT_CONNECTED" } },
+      data: { status: "CONNECTED", lastError: null, lastSyncAt: new Date() },
+    });
+    if (finished) {
+      await logActivity({ eventType: "integration.import_finished", summary: `HighLevel import finished: ${plural(imported, "text", "texts")} from ${plural(contacts, "contact", "contacts")}`, organizationId: org });
+    }
+    return { ok: true, message, phase };
+  } catch (e) {
+    if (e instanceof SyncStopped) return { ok: false, skipped: true, message: "HighLevel was disconnected.", phase: null };
+    if (!fresh) {
+      console.error(`[highlevel] sync could not start for org ${org}:`, e instanceof Error ? e.message : e);
+      return { ok: false, message: "The HighLevel sync could not start. It will try again automatically.", phase: state.phase };
+    }
+    try {
+      return await recordFailure(fresh, stats, startedAt, e);
+    } catch (inner) {
+      if (inner instanceof SyncStopped) return { ok: false, skipped: true, message: "HighLevel was disconnected.", phase: null };
+      console.error(`[highlevel] could not record sync failure for org ${org}:`, inner instanceof Error ? inner.message : inner);
+      return { ok: false, message: "The HighLevel sync failed. It will try again automatically.", phase: state.phase };
+    }
+  } finally {
+    running.delete(org);
+  }
+}
+
+class KeyUnreadable extends Error {}
+
+/** Record a failed run: pause for rate limits, count failures, enter ERROR (with one notification) when warranted. */
+async function recordFailure(row: Integration, stats: Stats, startedAt: number, e: unknown): Promise<HighLevelRunResult> {
+  const at = new Date().toISOString();
+  const ms = Date.now() - startedAt;
+  const state = readSyncState((await prisma.integration.findUnique({ where: { id: row.id }, select: { config: true } }))?.config);
+
+  // HighLevel asked us to slow down: not a connection problem — pause and resume later.
+  const rateLimited = e instanceof HighLevelError && e.kind === "rateLimit";
+  if (e instanceof SyncPaused || rateLimited) {
+    const waitMs = e instanceof SyncPaused ? e.waitMs : Math.max(60_000, (e as HighLevelError).retryAfterMs ?? 60_000);
+    const message = e instanceof SyncPaused ? e.message : (e as HighLevelError).message;
+    await saveState(row.id, {
+      pausedUntil: new Date(Date.now() + waitMs).toISOString(),
+      lastRun: { at, ok: true, ...stats, ms, message },
+    });
+    return { ok: true, message, phase: state.phase };
+  }
+
+  const auth = e instanceof KeyUnreadable || (e instanceof HighLevelError && e.kind === "auth");
+  const message = e instanceof KeyUnreadable ? HL_KEY_UNREADABLE
+    : e instanceof HighLevelError ? e.message
+    : "The HighLevel sync hit an unexpected problem. It will try again automatically.";
+  const kind = e instanceof HighLevelError ? `${e.kind}${e.status ? ` ${e.status}` : ""}${e.detail ? ` (${e.detail})` : ""}` : e instanceof Error ? e.message : String(e);
+  console.error(`[highlevel] sync failed for org ${row.organizationId}: ${kind}`);
+
+  const failures = (state.consecutiveFailures ?? 0) + 1;
+  await saveState(row.id, { consecutiveFailures: failures, lastRun: { at, ok: false, ...stats, ms, message } });
+  if (auth || failures >= FAILURES_BEFORE_ERROR) {
+    const current = await prisma.integration.findUnique({ where: { id: row.id }, select: { status: true } });
+    const entering = current?.status !== "ERROR";
+    await prisma.integration.updateMany({ where: { id: row.id, status: { not: "NOT_CONNECTED" } }, data: { status: "ERROR", lastError: message } });
+    if (entering && current?.status) await raiseErrorNotification(row.organizationId, message);
+  }
+  return { ok: false, message, phase: state.phase };
+}
+
+/** One untargeted admin notification per outage (no duplicate while one is unread). */
+async function raiseErrorNotification(organizationId: string, message: string): Promise<void> {
+  const open = await prisma.notification.findFirst({
+    where: { organizationId, type: "integration_error", link: "/settings/integrations", userId: null, readAt: null },
+    select: { id: true },
+  });
+  if (!open) {
+    await prisma.notification.create({
+      data: {
+        organizationId, userId: null, type: "integration_error",
+        title: "HighLevel sync stopped",
+        body: message,
+        link: "/settings/integrations",
+      },
+    });
+  }
+  await logActivity({ eventType: "integration.error", summary: `Integration HighLevel sync stopped: ${message}`, organizationId });
+}

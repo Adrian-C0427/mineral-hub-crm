@@ -10,8 +10,9 @@ const GROUP_OF: Record<string, string> = {
   portal_lead: "Buyer portal", portal_offer: "Buyer portal",
   email_reply: "Email",
   deal_overdue: "Deals & tasks", follow_up_due: "Deals & tasks", task_due: "Deals & tasks",
+  integration_error: "Integrations",
 };
-const GROUP_ORDER = ["Buyer portal", "Email", "Deals & tasks"];
+const GROUP_ORDER = ["Buyer portal", "Email", "Deals & tasks", "Integrations"];
 const groupRank = (label: string) => { const i = GROUP_ORDER.indexOf(label); return i < 0 ? GROUP_ORDER.length : i; };
 
 /**

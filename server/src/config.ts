@@ -130,6 +130,11 @@ export const env = {
     FROM: process.env.SMTP_FROM ?? process.env.SMTP_USER ?? "",
     SECURE: process.env.SMTP_SECURE === "true", // true for port 465
   },
+  // HighLevel API base override, for pointing local runs and tests at a mock
+  // server. IGNORED in production (services/highlevel/client.ts always uses
+  // the real https://services.leadconnectorhq.com there), so a stray env var
+  // can never send an org's HighLevel key to another host.
+  HIGHLEVEL_API_BASE: process.env.HIGHLEVEL_API_BASE ?? "",
   // Error monitoring. Inert until a DSN is set; enabled per-service.
   SENTRY: {
     DSN: process.env.SENTRY_DSN ?? "",
