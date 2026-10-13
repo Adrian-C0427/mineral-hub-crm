@@ -30,6 +30,52 @@ const clean = (v: string | null | undefined): string | null => {
   return s ? s : null;
 };
 
+// ---------------------------------------------------------------------------
+// Editable fields — one definition for create (POST) and edit (PATCH)
+// ---------------------------------------------------------------------------
+
+/** The plain columns a user edits on an opportunity (name, pipeline, stage and
+ *  the follow-up date are handled by the router: they need their own checks). */
+export interface OpportunityEditable {
+  ownerId: string | null;
+  contactId: string | null;
+  sellerName: string | null;
+  companyName: string | null;
+  phone: string | null;
+  email: string | null;
+  state: string | null;
+  county: string | null;
+  abstract: string | null;
+  survey: string | null;
+  estAcres: number | null;
+  estNma: number | null;
+  estNra: number | null;
+  source: string | null;
+  notes: string | null;
+}
+export const OPPORTUNITY_EDITABLE_KEYS = [
+  "ownerId", "contactId", "sellerName", "companyName", "phone", "email",
+  "state", "county", "abstract", "survey", "estAcres", "estNma", "estNra", "source", "notes",
+] as const satisfies readonly (keyof OpportunityEditable)[];
+
+/**
+ * Column values for the editable keys a parsed create/PATCH body names. A key
+ * the body leaves out stays out (a PATCH changes only what it sends); a blank
+ * string becomes null, so emptying a field clears it rather than storing ""
+ * (for ownerId / contactId an "" would be a broken reference).
+ */
+export function opportunityFieldValues(
+  data: { [K in keyof OpportunityEditable]?: OpportunityEditable[K] | undefined },
+): Partial<OpportunityEditable> {
+  const out: Partial<Record<keyof OpportunityEditable, string | number | null>> = {};
+  for (const k of OPPORTUNITY_EDITABLE_KEYS) {
+    if (!(k in data)) continue;
+    const v = data[k];
+    out[k] = typeof v === "string" ? clean(v) : v ?? null;
+  }
+  return out as Partial<OpportunityEditable>;
+}
+
 /** The opportunity fields conversion reads. */
 export interface ConvertibleOpportunity {
   name: string;

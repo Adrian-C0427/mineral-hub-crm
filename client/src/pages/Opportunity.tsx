@@ -1,30 +1,25 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ChevronDown, Mail, MessageSquare, Pencil, Phone, StickyNote, Users, X, Zap } from "lucide-react";
+import { ChevronDown, Mail, MessageSquare, Pencil, Phone, StickyNote, Users, Zap } from "lucide-react";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, Banner, BackLink, ConfirmDelete, OverflowMenu, EmptyState, showToast } from "../components/ui";
-import { Avatar, Segmented } from "../components/kit";
-import { Select } from "../components/Select";
-import { StateSelect } from "../components/StateSelect";
-import { DateField } from "../components/DateField";
+import { Segmented, StatStrip, type StatCell } from "../components/kit";
 import { useStages, stageColor } from "../stages";
-import { ConvertOpportunityModal, OpportunityStageModal, oppDaysInStage, followUpStatus } from "../components/OpportunityBoard";
-import { fmtDate, fmtDateLocal, fmtDateTime, num, toInputDate } from "../lib/format";
-import { countiesForStates } from "../lib/options";
-import { formatPhone, formatPhoneAsYouType, normalizePhone } from "../lib/phone";
-import type { ContactRow } from "./Contacts";
-import type { Opp, OppActivityRow, UserLite } from "../types";
+import { ConvertOpportunityModal, OpportunityStageModal, OppAbstract, oppDaysInStage, followUpStatus } from "../components/OpportunityBoard";
+import { NewOpportunityModal, type OppFormSection } from "../components/NewOpportunityModal";
+import { acres, fmtDate, fmtDateLocal, fmtDateTime } from "../lib/format";
+import { formatPhone } from "../lib/phone";
+import type { Opp, OppActivityRow } from "../types";
 
 /**
- * Opportunity page: a prospect's record — seller & contact, property, details,
- * an activity timeline and its stage history — with inline editing (click a
- * value → edit → Save, PATCH /opportunities/:id), stage moves and conversion
- * into a deal. Layout follows Deal Detail; editing follows Contact Detail.
+ * Opportunity page: a prospect's record in the Deal Detail layout — header
+ * (name, stage, pipeline; Edit, Move stage, Convert to deal), a key-facts
+ * strip, the details and tracking cards, then the activity timeline and the
+ * stage history. Edit opens the same form as New opportunity in edit mode
+ * (every field, validated, PATCH /opportunities/:id); stage moves and
+ * conversion keep their own dialogs and history.
  */
-
-const numOrNull = (v: string) => (v.trim() === "" || !Number.isFinite(Number(v)) ? null : Number(v));
-const strOrNull = (v: string) => (v.trim() === "" ? null : v.trim());
 
 /** Activity kinds offered by the composer; SYSTEM entries are server-written. */
 const KINDS: { key: string; label: string; icon: JSX.Element; cls: string }[] = [
@@ -38,48 +33,60 @@ const kindMeta = (k: string) => KINDS.find((x) => x.key === k) ?? { key: k, labe
 
 export function Opportunity() {
   const { id } = useParams<{ id: string }>();
-  const nav = useNavigate();
-  const { can } = useAuth();
-  const { pipelines, stagesOf } = useStages();
   const [opp, setOpp] = useState<Opp | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [users, setUsers] = useState<UserLite[]>([]);
-  const [contacts, setContacts] = useState<ContactRow[] | null>(null);
+  const load = useCallback(() => api.get<Opp>(`/opportunities/${id}`).then(setOpp).catch((e) => setErr(e instanceof ApiError ? e.message : "Could not load the opportunity")), [id]);
+  useEffect(() => { load(); }, [load]);
+  if (err) return <div className="page"><BackLink fallback="/pipeline" /><Banner kind="error">{err}</Banner></div>;
+  if (!opp) return <Spinner label="Loading opportunity…" />;
+  return <OpportunityRecord key={opp.id} opp={opp} onChange={setOpp} reload={load} />;
+}
+
+/** The loaded record (see the page comment above). */
+export function OpportunityRecord({ opp, onChange: setOpp, reload: load }: { opp: Opp; onChange: (o: Opp) => void; reload: () => void }) {
+  const nav = useNavigate();
+  const { can } = useAuth();
+  const { pipelines, label: anyStageLabel, reload: reloadStages, setSelectedId } = useStages();
+  // The edit form, open on one of its sections.
+  const [editing, setEditing] = useState<OppFormSection | null>(null);
   const [stageTarget, setStageTarget] = useState<string | null>(null);
   const [converting, setConverting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  const load = useCallback(() => api.get<Opp>(`/opportunities/${id}`).then(setOpp).catch((e) => setErr(e instanceof ApiError ? e.message : "Could not load the opportunity")), [id]);
-  useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, [load]);
-
-  if (err) return <div className="page"><BackLink fallback="/pipeline" /><Banner kind="error">{err}</Banner></div>;
-  if (!opp) return <Spinner />;
-
+  // The record's pipeline comes from the app's list. When that list doesn't
+  // have it (made in another tab, or the list is stale), reload the list once
+  // rather than showing another pipeline's stages.
   const pipeline = pipelines.find((p) => p.id === opp.pipelineId);
-  const stages = pipeline?.stages ?? stagesOf(opp.pipelineId);
+  const listLoaded = pipelines.some((p) => p.id !== "");
+  const reloadedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (pipeline || !listLoaded || reloadedFor.current === opp.pipelineId) return;
+    reloadedFor.current = opp.pipelineId;
+    reloadStages();
+  }, [opp.pipelineId, pipeline, listLoaded, reloadStages]);
+
+  const stages = pipeline?.stages ?? [];
   const stageOf = (key: string) => stages.find((s) => s.key === key);
-  const stageLabel = (key: string) => stageOf(key)?.label ?? key;
+  const stageLabel = (key: string) => stageOf(key)?.label ?? anyStageLabel(key);
   const converted = !!opp.convertedDealId;
   const canEdit = can("editDeals");
   // Converting creates a Deal, so it also needs createDeals (server-enforced).
   const canConvert = canEdit && can("createDeals");
-  // Converted opportunities keep their record editable but no longer move or convert.
-  const canMove = canEdit && !converted;
+  // Converted opportunities keep their record editable but no longer move or
+  // convert; moves need the pipeline's stage list.
+  const canMove = canEdit && !converted && !!pipeline;
   const terminal = !!stageOf(opp.stage)?.isTerminal;
-
-  const patch = async (body: Record<string, unknown>) => {
-    try { setOpp(await api.patch<Opp>(`/opportunities/${opp.id}`, body)); }
-    catch (e) { showToast(e instanceof ApiError ? e.message : "Could not save", "error"); throw e; }
-  };
-  const loadContacts = () => { if (!contacts) api.get<ContactRow[]>("/contacts").then(setContacts).catch(() => setContacts([])); };
+  // A deep link's Back lands on this record's board.
+  const selectBoard = () => setSelectedId(opp.pipelineId);
 
   async function remove() {
     setDeleting(true);
     try {
-      await api.del(`/opportunities/${opp!.id}`);
+      await api.del(`/opportunities/${opp.id}`);
       showToast("Opportunity deleted");
-      nav("/pipeline");
+      if (window.history.length > 1) nav(-1);
+      else { selectBoard(); nav("/pipeline", { replace: true }); }
     } catch (e) {
       setDeleting(false); setConfirmDelete(false);
       showToast(e instanceof ApiError ? e.message : "Could not delete", "error");
@@ -88,24 +95,40 @@ export function Opportunity() {
 
   const days = oppDaysInStage(opp);
   const due = followUpStatus(opp);
-  const contactName = opp.contact ? [opp.contact.firstName, opp.contact.lastName].filter(Boolean).join(" ") : null;
-  const countyOptions = countiesForStates(opp.state ? [opp.state] : []);
+  const contactName = opp.contact ? [opp.contact.firstName, opp.contact.lastName].filter(Boolean).join(" ") || opp.contact.entityName : null;
+  const place = [opp.county, opp.state].filter(Boolean).join(", ");
+  const estimates = [opp.estNra != null ? `${acres(opp.estNra)} NRA` : null, opp.estAcres != null ? `${acres(opp.estAcres)} gross acres` : null].filter(Boolean).join(" · ");
+
+  // Key facts — the prospect at a glance (Deal Detail's summary strip).
+  const facts: StatCell[] = [
+    { label: "Stage", value: stageLabel(opp.stage), sub: days === 0 ? "Moved today" : `${days} day${days === 1 ? "" : "s"} in stage` },
+    { label: "Est. NMA", value: opp.estNma != null ? acres(opp.estNma) : "—", sub: estimates || "No estimate yet" },
+    { label: "Location", value: place || "—", sub: opp.abstract || opp.survey ? <OppAbstract abstract={opp.abstract} survey={opp.survey} /> : "No abstract yet" },
+    {
+      label: "Next follow-up",
+      value: opp.nextFollowUpDate ? fmtDate(opp.nextFollowUpDate) : "Not set",
+      tone: due?.tone === "danger" ? "danger" : due?.tone === "warn" ? "warn" : "default",
+      sub: due && due.tone !== "neutral" ? due.text : opp.lastActivityAt ? `Last activity ${fmtDateLocal(opp.lastActivityAt)}` : undefined,
+    },
+    { label: "Owner", value: opp.owner?.name ?? "Unassigned", sub: `Added ${fmtDateLocal(opp.createdAt)}` },
+  ];
 
   return (
     <div className="page deal-detail opp-page">
-      <BackLink fallback="/pipeline" />
+      <BackLink fallback="/pipeline" onFallback={selectBoard} />
       <div className="page-header dd-head">
         <div className="dd-head-title">
-          <NameField name={opp.name} canEdit={canEdit} onSave={(name) => patch({ name })} />
-          <StageTag label={stageLabel(opp.stage)} color={stageColor(stages, opp.stage)} />
+          <h1>{opp.name}</h1>
+          <StageTag label={stageLabel(opp.stage)} color={pipeline ? stageColor(stages, opp.stage) : "var(--ink-4)"} />
           {pipeline && <span className="pl-badge op-pipe" title="Pipeline">{pipeline.name}</span>}
-          <span className="dd-days">{days === 0 ? "Moved today" : `${days}d in stage`}</span>
+          {converted && <span className="op-tag converted">Converted</span>}
         </div>
         <div className="dd-head-actions">
-          <div className="op-owner">
-            <Select value={opp.owner?.id ?? ""} onChange={(v) => void patch({ ownerId: v || null })} ariaLabel="Owner" clearable searchable
-              placeholder="Unassigned" disabled={!canEdit} options={users.map((u) => ({ value: u.id, label: u.name }))} />
-          </div>
+          {canEdit && (
+            <button type="button" className="op-edit-btn" onClick={() => setEditing("basics")} title="Edit every field of this opportunity">
+              <Pencil size={13} aria-hidden="true" />Edit
+            </button>
+          )}
           {canMove && <MoveStageMenu stage={opp.stage} stages={stages} onPick={setStageTarget} />}
           {canMove && canConvert && <button type="button" className="primary op-convert-btn" onClick={() => setConverting(true)}>Convert to deal</button>}
           {canEdit && <OverflowMenu items={[{ label: "Delete opportunity…", danger: true, onClick: () => setConfirmDelete(true) }]} />}
@@ -122,63 +145,57 @@ export function Opportunity() {
         <Banner kind="warn">{stageLabel(opp.stage)}{opp.closeReason ? <>: {opp.closeReason}</> : null}</Banner>
       )}
 
-      <div className="op-cards">
-        {/* ------------------------------------------------ seller & contact */}
-        <Card title="Seller & contact">
-          {opp.contact ? (
-            <div className="op-contact">
-              <Avatar name={contactName || opp.contact.entityName || "?"} size={34} />
-              <div className="op-contact-main">
-                <Link to={`/contacts/${opp.contact.id}`} className="op-contact-name">{contactName || opp.contact.entityName}</Link>
-                {contactName && opp.contact.entityName && <span className="op-contact-sub">{opp.contact.entityName}</span>}
-                <span className="op-contact-sub">{[formatPhone(opp.contact.phone) || null, opp.contact.email].filter(Boolean).join(" · ") || "No phone or email on file"}</span>
-              </div>
-              {canEdit && <button type="button" className="icon-btn op-unlink" title="Unlink contact" aria-label="Unlink contact" onClick={() => void patch({ contactId: null })}><X size={13} /></button>}
-            </div>
-          ) : (
-            <Field label="Contact" display={null} canEdit={canEdit} onStart={loadContacts}
-              editor={(v, setV) => (
-                <Select value={v} onChange={setV} ariaLabel="Linked contact" searchable clearable placeholder={contacts ? "Search contacts…" : "Loading contacts…"}
-                  emptyText="No matching contacts" options={(contacts ?? []).map((c) => ({ value: c.id, label: c.name, hint: c.entityName ?? undefined }))} />
-              )}
-              value="" body={(v) => ({ contactId: v || null })} onSave={patch} />
-          )}
-          <div className="op-rows">
-            <Field label="Seller name" display={opp.sellerName} value={opp.sellerName ?? ""} canEdit={canEdit} body={(v) => ({ sellerName: strOrNull(v) })} onSave={patch} />
-            <Field label="Company" display={opp.companyName} value={opp.companyName ?? ""} canEdit={canEdit} body={(v) => ({ companyName: strOrNull(v) })} onSave={patch} />
-            <Field label="Phone" display={opp.phone ? <a href={`tel:${opp.phone}`}>{formatPhone(opp.phone)}</a> : null} value={formatPhone(opp.phone)} canEdit={canEdit}
-              format={formatPhoneAsYouType} placeholder="(555) 000-0000" body={(v) => ({ phone: normalizePhone(v) || null })} onSave={patch} />
-            <Field label="Email" display={opp.email ? <a href={`mailto:${opp.email}`}>{opp.email}</a> : null} value={opp.email ?? ""} canEdit={canEdit} placeholder="name@example.com" body={(v) => ({ email: strOrNull(v) })} onSave={patch} />
-          </div>
-        </Card>
+      <StatStrip cells={facts} min={190} className="dd-summary" />
 
-        {/* ------------------------------------------------------- property */}
-        <Card title="Property">
-          <div className="op-rows">
-            <Field label="State" display={opp.state} value={opp.state ?? ""} canEdit={canEdit} body={(v) => ({ state: v || null })} onSave={patch}
-              editor={(v, setV) => <StateSelect value={v} onChange={setV} />} />
-            <Field label="County" display={opp.county} value={opp.county ?? ""} canEdit={canEdit} body={(v) => ({ county: v || null })} onSave={patch}
-              editor={(v, setV) => <Select value={v} onChange={setV} ariaLabel="County" searchable clearable creatable placeholder="Search counties…" options={countyOptions} />} />
-            <Field label="Abstract" display={opp.abstract} value={opp.abstract ?? ""} canEdit={canEdit} placeholder="e.g. A-123" body={(v) => ({ abstract: strOrNull(v) })} onSave={patch} />
-            <Field label="Survey" display={opp.survey} value={opp.survey ?? ""} canEdit={canEdit} body={(v) => ({ survey: strOrNull(v) })} onSave={patch} />
-            <Field label="Est. acres" display={opp.estAcres != null ? num(opp.estAcres) : null} value={opp.estAcres != null ? String(opp.estAcres) : ""} canEdit={canEdit} type="number" body={(v) => ({ estAcres: numOrNull(v) })} onSave={patch} />
-            <Field label="Est. NMA" display={opp.estNma != null ? num(opp.estNma) : null} value={opp.estNma != null ? String(opp.estNma) : ""} canEdit={canEdit} type="number" body={(v) => ({ estNma: numOrNull(v) })} onSave={patch} />
-            <Field label="Est. NRA" display={opp.estNra != null ? num(opp.estNra) : null} value={opp.estNra != null ? String(opp.estNra) : ""} canEdit={canEdit} type="number" body={(v) => ({ estNra: numOrNull(v) })} onSave={patch} />
-          </div>
-        </Card>
+      <div className="dd-top-grid">
+        <KvCard title="Opportunity details" onEdit={canEdit ? () => setEditing("seller") : undefined} groups={[
+          {
+            title: "Seller & contact",
+            rows: [
+              { k: "Linked contact", v: opp.contact ? <Link to={`/contacts/${opp.contact.id}`}>{contactName}</Link> : null },
+              { k: "Seller name", v: opp.sellerName },
+              { k: "Company", v: opp.companyName },
+              { k: "Phone", v: opp.phone ? <a href={`tel:${opp.phone}`}>{formatPhone(opp.phone)}</a> : null },
+              { k: "Email", v: opp.email ? <a href={`mailto:${opp.email}`}>{opp.email}</a> : null, title: opp.email },
+            ],
+          },
+          {
+            title: "Property",
+            rows: [
+              { k: "State", v: opp.state },
+              { k: "County", v: opp.county },
+              { k: "Abstract", v: opp.abstract ? <OppAbstract abstract={opp.abstract} /> : null },
+              { k: "Survey", v: opp.survey, title: opp.survey },
+              { k: "Est. gross acres", v: opp.estAcres != null ? acres(opp.estAcres) : null },
+              { k: "Est. NMA", v: opp.estNma != null ? acres(opp.estNma) : null },
+              { k: "Est. NRA", v: opp.estNra != null ? acres(opp.estNra) : null },
+            ],
+          },
+        ]} />
 
-        {/* -------------------------------------------------------- details */}
-        <Card title="Details">
-          <div className="op-rows">
-            <Field label="Source" display={opp.source} value={opp.source ?? ""} canEdit={canEdit} placeholder="Referral, mailer, courthouse…" body={(v) => ({ source: strOrNull(v) })} onSave={patch} />
-            <Field label="Next follow-up" value={toInputDate(opp.nextFollowUpDate)} canEdit={canEdit} body={(v) => ({ nextFollowUpDate: v || null })} onSave={patch}
-              display={opp.nextFollowUpDate ? <>{fmtDate(opp.nextFollowUpDate)}{due && due.tone !== "neutral" && <span className={`pl-due ${due.tone}`}>{due.text}</span>}</> : null}
-              editor={(v, setV) => <DateField value={v} onChange={setV} ariaLabel="Next follow-up" />} />
-            <Field label="Added on" display={fmtDateLocal(opp.createdAt)} value="" canEdit={false} body={() => ({})} onSave={patch} />
-            <Field label="Last activity" display={opp.lastActivityAt ? fmtDateTime(opp.lastActivityAt) : null} value="" canEdit={false} body={() => ({})} onSave={patch} />
+        <KvCard title="Tracking" onEdit={canEdit ? () => setEditing("followup") : undefined} groups={[
+          {
+            rows: [
+              { k: "Pipeline", v: pipeline?.name ?? null },
+              { k: "Stage", v: stageLabel(opp.stage) },
+              { k: "Owner", v: opp.owner?.name ?? null },
+              { k: "Source", v: opp.source, title: opp.source },
+              {
+                k: "Next follow-up",
+                v: opp.nextFollowUpDate ? <>{fmtDate(opp.nextFollowUpDate)}{due && due.tone !== "neutral" && <span className={`pl-due ${due.tone}`}>{due.text}</span>}</> : null,
+              },
+              { k: "Added", v: fmtDateLocal(opp.createdAt) },
+              { k: "Last activity", v: opp.lastActivityAt ? fmtDateTime(opp.lastActivityAt) : null },
+            ],
+          },
+        ]}>
+          <div className="op-notes-block">
+            <div className="ddc-group-title">Notes</div>
+            {opp.notes
+              ? <p className="op-notes">{opp.notes}</p>
+              : <p className="op-notes empty">No notes yet.{canEdit ? " Add them with Edit." : ""}</p>}
           </div>
-          <Field label="Notes" wide display={opp.notes ? <span className="op-notes">{opp.notes}</span> : null} value={opp.notes ?? ""} canEdit={canEdit} multiline body={(v) => ({ notes: strOrNull(v) })} onSave={patch} />
-        </Card>
+        </KvCard>
       </div>
 
       <div className="op-lower">
@@ -190,9 +207,11 @@ export function Opportunity() {
             <div className="op-hist">
               {[...opp.stageHistory].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)).map((h) => (
                 <div key={h.id} className="op-hist-row">
-                  <span className="op-hist-dot" style={{ background: stageColor(stages, h.toStage) }} aria-hidden="true" />
+                  <span className="op-hist-dot" style={{ background: pipeline ? stageColor(stages, h.toStage) : "var(--ink-4)" }} aria-hidden="true" />
                   <div className="op-hist-main">
-                    <span className="op-hist-move"><span className="dim">{stageLabel(h.fromStage)}</span> → <b>{stageLabel(h.toStage)}</b></span>
+                    <span className="op-hist-move">
+                      {h.fromStage ? <><span className="dim">{stageLabel(h.fromStage)}</span> → </> : <span className="dim">Created in </span>}<b>{stageLabel(h.toStage)}</b>
+                    </span>
                     {h.reason && <span className="op-hist-reason">{h.reason}</span>}
                     <span className="op-hist-meta">{fmtDateTime(h.createdAt)}{h.changedBy ? ` · ${h.changedBy.name}` : ""}</span>
                   </div>
@@ -203,6 +222,11 @@ export function Opportunity() {
         </Card>
       </div>
 
+      {editing && (
+        <NewOpportunityModal opp={opp} pipelines={pipelines} initialSection={editing}
+          onClose={() => setEditing(null)}
+          onSaved={(o) => { setEditing(null); setOpp(o); showToast("Opportunity saved."); }} />
+      )}
       {stageTarget && pipeline && (
         <OpportunityStageModal opp={opp} pipeline={pipeline} initialStage={stageTarget}
           onClose={() => setStageTarget(null)}
@@ -237,39 +261,43 @@ function Card({ title, count, children }: { title: string; count?: number; child
   );
 }
 
-function StageTag({ label, color }: { label: string; color: string }) {
-  return <span className="tag dd-stage-tag" style={{ color, background: `color-mix(in srgb, ${color} 14%, transparent)` }}>{label}</span>;
-}
+interface KvRow { k: string; v: ReactNode; title?: string | null }
 
-/** Header name: click the pencil to rename in place (Enter saves, Escape cancels). */
-function NameField({ name, canEdit, onSave }: { name: string; canEdit: boolean; onSave: (name: string) => Promise<void> }) {
-  const [editing, setEditing] = useState(false);
-  const [v, setV] = useState(name);
-  const [busy, setBusy] = useState(false);
-  const start = () => { setV(name); setEditing(true); };
-  const save = async () => {
-    const n = v.trim();
-    if (!n || busy) return;
-    if (n === name) { setEditing(false); return; }
-    setBusy(true);
-    try { await onSave(n); setEditing(false); } catch { /* toast shown by caller */ } finally { setBusy(false); }
-  };
-  if (!editing) {
-    return (
-      <>
-        <h1>{name}</h1>
-        {canEdit && <button type="button" className="icon-btn dd-rename" title="Rename opportunity" aria-label="Rename opportunity" onClick={start}><Pencil size={14} /></button>}
-      </>
-    );
-  }
+/** Read-only key/value card (Deal characteristics' view) with an Edit button. */
+function KvCard({ title, groups, onEdit, children }: {
+  title: string; groups: { title?: string; rows: KvRow[] }[]; onEdit?: () => void; children?: ReactNode;
+}) {
   return (
-    <div className="op-name-edit">
-      <input autoFocus value={v} onChange={(e) => setV(e.target.value)} aria-label="Opportunity name"
-        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void save(); } if (e.key === "Escape") setEditing(false); }} />
-      <button className="small primary" disabled={!v.trim() || busy} onClick={() => void save()}>Save</button>
-      <button className="icon-btn" title="Cancel" aria-label="Cancel rename" onClick={() => setEditing(false)}><X size={12} /></button>
+    <div className="panel dd-card ddc-card">
+      <div className="dd-card-head">
+        <h3 className="dd-card-title">{title}</h3>
+        {onEdit && <button className="small" onClick={onEdit}>Edit</button>}
+      </div>
+      <div className="dd-card-body ddc-view">
+        {groups.map((g, i) => (
+          <div key={g.title ?? i} className="ddc-group">
+            {g.title && <div className="ddc-group-title">{g.title}</div>}
+            <div className="ddc-rows">
+              {g.rows.map((r) => {
+                const empty = r.v == null || r.v === "";
+                return (
+                  <div key={r.k} className="ddc-row">
+                    <span className="ddc-k">{r.k}</span>
+                    <span className={`ddc-v ${empty ? "dim" : ""}`} title={r.title ?? (typeof r.v === "string" ? r.v : undefined)}>{empty ? "—" : r.v}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+        {children}
+      </div>
     </div>
   );
+}
+
+function StageTag({ label, color }: { label: string; color: string }) {
+  return <span className="tag dd-stage-tag" style={{ color, background: `color-mix(in srgb, ${color} 14%, transparent)` }}>{label}</span>;
 }
 
 /** "Move stage" menu (Deal Detail pattern) scoped to this pipeline's stages. */
@@ -299,77 +327,6 @@ function MoveStageMenu({ stage, stages, onPick }: { stage: string; stages: { key
             </button>
           ))}
         </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * One inline-editable field (Contact Detail pattern): click the value to edit
- * just that field; Save patches only it; Escape / ✕ restores read-only.
- */
-function Field({ label, display, value, canEdit, body, onSave, editor, type, multiline, placeholder, format, wide, onStart }: {
-  label: string;
-  display: ReactNode;
-  /** Current value as the editor's string. */
-  value: string;
-  canEdit: boolean;
-  /** Build the single-field PATCH body from the edited string. */
-  body: (v: string) => Record<string, unknown>;
-  onSave: (body: Record<string, unknown>) => Promise<void>;
-  /** Custom editor (selects, dates); default is a text input. */
-  editor?: (v: string, setV: (v: string) => void) => ReactNode;
-  type?: "text" | "number";
-  multiline?: boolean;
-  placeholder?: string;
-  /** Reformat typed text (phone numbers). */
-  format?: (v: string) => string;
-  /** Full-width row (notes). */
-  wide?: boolean;
-  /** Called when editing starts (lazy option loading). */
-  onStart?: () => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [v, setV] = useState(value);
-  const [busy, setBusy] = useState(false);
-  const empty = display == null || display === "";
-  const dirty = v !== value;
-  const start = () => { if (!canEdit) return; onStart?.(); setV(value); setEditing(true); };
-  const save = async () => {
-    if (busy || !dirty) { setEditing(false); return; }
-    setBusy(true);
-    try { await onSave(body(v)); setEditing(false); } catch { /* toast shown by caller */ } finally { setBusy(false); }
-  };
-  // Enter saves (textareas: Cmd/Ctrl + Enter, plain Enter adds a line); Escape cancels.
-  const keys = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && (!multiline || e.metaKey || e.ctrlKey)) { e.preventDefault(); void save(); }
-    if (e.key === "Escape") setEditing(false);
-  };
-  return (
-    <div className={`op-row ${wide ? "wide" : ""} ${editing ? "editing" : ""}`}>
-      <span className="op-k">{label}</span>
-      {!editing ? (
-        <span className={`op-v ${empty ? "empty" : ""} ${canEdit ? "editable" : ""}`}
-          role={canEdit ? "button" : undefined} tabIndex={canEdit ? 0 : undefined}
-          title={canEdit ? `Edit ${label.toLowerCase()}` : undefined}
-          onClick={start}
-          onKeyDown={canEdit ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); start(); } } : undefined}>
-          <span className="op-v-text">{empty ? "—" : display}</span>
-          {canEdit && <Pencil size={10} className="op-pen" aria-hidden="true" />}
-        </span>
-      ) : (
-        <span className="op-edit">
-          {editor ? editor(v, setV) : multiline ? (
-            <textarea autoFocus rows={4} value={v} placeholder={placeholder} onChange={(e) => setV(e.target.value)} onKeyDown={keys} aria-label={label} />
-          ) : (
-            <input autoFocus type={type ?? "text"} value={v} placeholder={placeholder} aria-label={label}
-              onChange={(e) => setV(format ? format(e.target.value) : e.target.value)} onKeyDown={keys} />
-          )}
-          <span className="op-edit-acts">
-            <button className="small primary" disabled={!dirty || busy} onClick={() => void save()}>Save</button>
-            <button className="icon-btn" title="Cancel" aria-label={`Cancel editing ${label.toLowerCase()}`} onClick={() => setEditing(false)}><X size={12} /></button>
-          </span>
-        </span>
       )}
     </div>
   );

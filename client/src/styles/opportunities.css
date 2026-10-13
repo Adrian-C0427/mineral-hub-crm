@@ -1,9 +1,10 @@
 /* Opportunities (prospects in OPPORTUNITIES-kind pipelines)
    Board cards (components/OpportunityBoard.tsx, on top of pipeline.css's board
-   classes), the New opportunity modal (components/NewOpportunityModal.tsx), the
-   Opportunity page (pages/Opportunity.tsx, on top of deal-detail.css's header
-   and card chrome) and the Conversion block of Pipeline settings. Everything is
-   op-/nop-/pset-conv- scoped; the deals board's own rules are untouched. */
+   classes), the New / Edit opportunity form (components/NewOpportunityModal.tsx,
+   on the New deal form's .nd-* shell in deals.css), the Opportunity page
+   (pages/Opportunity.tsx, on top of deal-detail.css's header, summary strip and
+   card chrome) and the Conversion block of Pipeline settings. Everything is
+   op-/pset-conv- scoped; the deals board's own rules are untouched. */
 
 /* ---------------------------------------------------------------- switcher marker */
 .pl-badge.pl-kind { background: var(--hover); color: var(--ink-4); font-weight: 600; }
@@ -52,78 +53,33 @@
 .op-convert-list li > b { min-width: 0; text-align: right; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
 .op-convert-list i { font-style: normal; font-weight: 500; color: var(--ink-5); }
 
-/* ---------------------------------------------------------------- New opportunity modal */
-.nop { display: flex; flex-direction: column; gap: 2px; }
-.nop .field { margin-bottom: 12px; }
-.nop-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; }
-.nop-grid > .field { min-width: 0; }
-.nop .modal-sec { margin: 6px 0 12px; }
-button.nop-more {
-  align-self: flex-start; height: 32px; min-height: 0; margin: 2px 0 10px; padding: 0 10px 0 8px; display: inline-flex; align-items: center; gap: 7px;
-  border: 1px dashed var(--line-strong); border-radius: var(--radius); background: transparent; box-shadow: none;
-  color: var(--ink-2); font-size: 12.5px; font-weight: 600;
-}
-button.nop-more:hover { border-color: var(--line-hover-strong); background: transparent; color: var(--ink); }
-button.nop-more svg { transition: transform 140ms ease; }
-button.nop-more.open svg { transform: rotate(180deg); }
-.nop-more-hint { font-weight: 500; color: var(--ink-4); }
-.nop-details { display: flex; flex-direction: column; }
+/* ---------------------------------------------------------------- New / Edit opportunity form */
+/* Footer summary: "Pipeline · stage" can run long — keep it to one line. */
+.nd-sum-item.op-sum-where { min-width: 0; }
+.nd-sum-item.op-sum-where b { max-width: 300px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 
 /* ---------------------------------------------------------------- Opportunity page */
 .opp-page .dd-head-title h1 { max-width: 100%; }
-.op-name-edit { display: flex; align-items: center; gap: 6px; min-width: 280px; }
-.op-name-edit input { flex: 1; min-width: 0; height: 36px; font-size: 16px; font-weight: 600; }
 .op-pipe { height: 22px; display: inline-flex; align-items: center; padding: 0 8px; font-size: 12px; }
-.op-owner { width: 180px; }
-.op-owner .msel-box { min-height: 34px; }
-button.dd-stage-btn.op-stage-btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink); box-shadow: none; }
-button.dd-stage-btn.op-stage-btn:hover { border-color: var(--line-hover); background: var(--surface); }
+button.dd-stage-btn.op-stage-btn,
+button.op-edit-btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink); box-shadow: none; }
+button.dd-stage-btn.op-stage-btn:hover,
+button.op-edit-btn:hover { border-color: var(--line-hover); background: var(--surface); }
+button.op-edit-btn { height: 34px; min-height: 0; padding: 0 14px; display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+button.op-edit-btn svg { color: var(--ink-3); }
 button.primary.op-convert-btn { height: 34px; min-height: 0; padding: 0 14px; font-size: 13px; font-weight: 600; }
 
-.op-cards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: var(--block-gap, 16px); }
+/* Details + tracking cards (deal-detail.css's .ddc-view rows). */
+.opp-page .ddc-v a { color: inherit; text-decoration: none; }
+.opp-page .ddc-v a:hover { color: var(--accent-ink); text-decoration: underline; }
+.opp-page .ddc-v .pl-due { margin-left: 6px; vertical-align: 1px; }
+.op-notes-block { display: flex; flex-direction: column; padding-top: 14px; }
+.op-notes { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--ink-1); white-space: pre-wrap; overflow-wrap: anywhere; }
+.op-notes.empty { color: var(--ink-5); }
+
 .op-lower { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
 .op-card-panel { margin-bottom: 0; }
 .op-card-panel > .dd-card-body { padding: 8px 20px 14px; }
-
-/* Linked contact card */
-.op-contact { display: flex; align-items: center; gap: 12px; margin: 8px 0 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-inset); }
-.op-contact-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-.op-contact-name { font-size: 13.5px; font-weight: 600; color: var(--ink); text-decoration: none; }
-.op-contact-name:hover { color: var(--accent-ink); }
-.op-contact-sub { font-size: 12px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.op-contact .op-unlink { flex: none; width: 26px; height: 26px; min-height: 0; padding: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); color: var(--ink-4); font-size: 0; }
-.op-contact .op-unlink:hover { background: var(--hover-strong); color: var(--ink); }
-
-/* Inline-editable rows: label · value (click to edit) */
-.op-rows { display: flex; flex-direction: column; }
-.op-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; padding: 7px 0; border-bottom: 1px solid var(--line-faint); }
-.op-row:last-child { border-bottom: 0; }
-.op-row.wide { flex-direction: column; align-items: stretch; gap: 4px; padding-top: 10px; }
-.op-row.editing { align-items: center; }
-.op-k { flex: none; font-size: 12.5px; color: var(--ink-3); white-space: nowrap; }
-.op-v { min-width: 0; display: inline-flex; align-items: center; gap: 6px; margin: -3px -6px; padding: 3px 6px; border-radius: var(--radius-sm); font-size: 13.5px; font-weight: 500; color: var(--ink); text-align: right; }
-.op-v-text { min-width: 0; overflow-wrap: anywhere; }
-.op-row:not(.wide) .op-v-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.op-row.wide .op-v { align-self: flex-start; text-align: left; margin: 0 -6px; }
-.op-v.empty { color: var(--ink-5); }
-.op-v.editable { cursor: pointer; }
-.op-v.editable:hover, .op-v.editable:focus-visible { background: var(--hover); }
-.op-v a { color: inherit; text-decoration: none; }
-.op-v a:hover { color: var(--accent-ink); }
-.op-v .pl-due { margin-left: 6px; }
-.op-pen { flex: none; opacity: 0; color: var(--ink-4); transition: opacity 120ms ease; }
-.op-v.editable:hover .op-pen, .op-v.editable:focus-visible .op-pen { opacity: 1; }
-.op-notes { white-space: pre-wrap; }
-.op-edit { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
-.op-edit > input, .op-edit > textarea, .op-edit > .msel { flex: 1; min-width: 0; }
-.op-edit > input { height: 32px; min-height: 32px; padding: 0 10px; font-size: 13px; }
-.op-edit > textarea { font-size: 13px; }
-.op-edit .msel-box { min-height: 32px; }
-.op-row.wide .op-edit { align-items: flex-end; }
-.op-edit-acts { flex: none; display: inline-flex; align-items: center; gap: 4px; }
-.op-edit-acts button.small { min-height: 30px; }
-.op-edit-acts .icon-btn { font-size: 0; min-height: 0; padding: 4px; color: var(--ink-3); }
-.op-edit-acts .icon-btn:hover { color: var(--ink); }
 
 /* Activity */
 .op-comp { display: flex; flex-direction: column; gap: 8px; padding: 12px 20px 14px; border-bottom: 1px solid var(--line-soft); }
@@ -177,7 +133,6 @@ button.primary.op-comp-send { height: 36px; min-height: 0; padding: 0 16px; font
 
 /* ---------------------------------------------------------------- tablets */
 @media (max-width: 1100px) {
-  .op-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .op-lower { grid-template-columns: minmax(0, 1fr); }
 }
 
@@ -187,24 +142,9 @@ button.primary.op-comp-send { height: 36px; min-height: 0; padding: 0 16px; font
   .op-search input { height: 40px; font-size: 16px; }
   .pl2-page .op-card .ovf-btn { width: 36px; height: 36px; margin: -6px -8px -6px -2px; }
 
-  .op-cards { grid-template-columns: minmax(0, 1fr); gap: 12px; }
   .op-lower { gap: 12px; }
   .opp-page .dd-head-actions { width: 100%; flex-wrap: wrap; }
-  .op-owner { flex: 1 1 100%; width: auto; }
-  .op-owner .msel-box, button.dd-stage-btn.op-stage-btn, button.primary.op-convert-btn { min-height: 40px; height: 40px; }
-  .op-name-edit { min-width: 0; width: 100%; }
-  .op-name-edit input { height: 40px; font-size: 16px; }
-
-  .op-row { flex-direction: column; align-items: stretch; gap: 2px; padding: 9px 0; }
-  .op-row .op-v { align-self: flex-start; max-width: 100%; margin: 0 -6px; text-align: left; font-size: 15px; }
-  .op-row:not(.wide) .op-v-text { white-space: normal; }
-  .op-edit { flex-wrap: wrap; }
-  .op-edit > input, .op-edit > textarea { font-size: 16px; }
-  .op-edit > input { height: 40px; min-height: 40px; }
-  .op-edit .msel-box { min-height: 40px; }
-  .op-edit-acts { margin-left: auto; }
-  .op-edit-acts button.small { min-height: 40px; }
-  .op-edit-acts .icon-btn { min-width: 40px; min-height: 40px; }
+  button.dd-stage-btn.op-stage-btn, button.primary.op-convert-btn { min-height: 40px; height: 40px; }
 
   .op-comp { padding: 12px 16px; }
   .op-comp .seg { width: 100%; align-self: stretch; overflow-x: auto; }
@@ -213,12 +153,6 @@ button.primary.op-comp-send { height: 36px; min-height: 0; padding: 0 16px; font
   button.primary.op-comp-send { height: 44px; }
   .op-comp-hint { display: none; }
   .op-activity > .dd-card-body.op-tl, .op-card-panel > .dd-card-body { padding-left: 16px; padding-right: 16px; }
-
-  .nop-grid { grid-template-columns: minmax(0, 1fr); }
-  .nop-grid > .field[style*="grid-column"] { grid-column: auto !important; }
-  button.nop-more { height: 40px; width: 100%; }
-  .nop-more-hint { display: none; }
-  .nop input, .nop textarea { font-size: 16px; }
 
   .op-convert-list li { flex-direction: column; align-items: flex-start; gap: 2px; }
   .op-convert-list li > b { text-align: left; }

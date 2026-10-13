@@ -149,12 +149,19 @@ export function AbstractMultiPicker({
   onChange,
   counties,
   states = [],
+  single = false,
+  creatable = false,
 }: {
   value: string[];
   onChange: (ids: string[]) => void;
   counties: string[];
   /** The record's states — county names repeat across states (Sabine TX / Sabine LA). */
   states?: string[];
+  /** One abstract: a pick replaces the previous one. */
+  single?: boolean;
+  /** Also accept an abstract typed as written when the index has no match
+   *  (stored as that text, not a GIS id). */
+  creatable?: boolean;
 }) {
   const { entries, byId } = useAbstractIndex();
   const countySet = useMemo(() => new Set(counties.map((c) => c.toLowerCase())), [counties]);
@@ -189,8 +196,10 @@ export function AbstractMultiPicker({
       options={options}
       labels={labels}
       value={value}
-      onChange={onChange}
+      onChange={single ? (ids) => onChange(ids.slice(-1)) : onChange}
       filterOptions={filterOptions}
+      single={single}
+      creatable={creatable}
       disabled={counties.length === 0}
       placeholder={counties.length === 0 ? "Select a county first" : "Search abstract # or survey…"}
     />

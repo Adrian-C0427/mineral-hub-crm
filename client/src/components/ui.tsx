@@ -183,9 +183,14 @@ export function ToastHost() {
  * Prefers browser back (so the list's filters/sort/page/search survive) and
  * falls back to `fallback` on a deep link with no in-app history.
  */
-export function BackLink({ fallback }: { fallback: string }) {
+export function BackLink({ fallback, onFallback }: {
+  fallback: string;
+  /** Runs before going to `fallback` — e.g. select the board the record
+   *  belongs to, so a deep link's Back lands on that board. */
+  onFallback?: () => void;
+}) {
   const nav = useNavigate();
-  const go = () => { if (window.history.length > 1) nav(-1); else nav(fallback); };
+  const go = () => { if (window.history.length > 1) nav(-1); else { onFallback?.(); nav(fallback); } };
   return (
     <button type="button" className="back-link" onClick={go}>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M19 12H5M11 6l-6 6 6 6" /></svg>
