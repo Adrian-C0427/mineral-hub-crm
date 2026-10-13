@@ -7,7 +7,7 @@
  */
 import { describe, it, expect } from "vitest";
 import {
-  EMPTY_SMS_FILTERS, dayLabel, fmtCost, fmtDuration, fmtPer, furthestStepLabel, heatLevel, hourLabel, hourShort, lineLabel, outcomeLabel,
+  EMPTY_SMS_FILTERS, dayLabel, fmtAvg1, fmtCost, fmtDuration, fmtPer, furthestStepLabel, heatLevel, hourLabel, hourShort, lineLabel, outcomeLabel,
   sentByLabel, slotHours, slotLabel, smsQuery, touchLabel, trendLabel, trendTitle, withRow, wrongNumberLabel,
 } from "../src/lib/smsReport";
 import { deltaView } from "../src/lib/reportDelta";
@@ -104,6 +104,11 @@ describe("deltaView (Reports comparison pill)", () => {
     expect(deltaView(-0.3, { invert: true }).tone).toBe("good");
     expect(deltaView(0.0004)).toEqual({ text: "0%", tone: "flat" });
   });
+
+  it("keeps the sign but no colour where neither direction is better (people still waiting)", () => {
+    expect(deltaView(0.5, { neutral: true })).toEqual({ text: "+50%", tone: "flat" });
+    expect(deltaView(-0.25, { neutral: true, invert: true })).toEqual({ text: "−25%", tone: "flat" });
+  });
 });
 
 describe("KPI section helpers", () => {
@@ -116,6 +121,13 @@ describe("KPI section helpers", () => {
     expect(fmtPer(135.727)).toBe("135.7");
     expect(fmtPer(1234)).toBe("1,234");
     expect(fmtPer(null)).toBe("N/A");
+    // Averages (texts before a reply) always show one decimal.
+    expect(fmtAvg1(1.4444)).toBe("1.4");
+    expect(fmtAvg1(2)).toBe("2.0");
+    expect(fmtAvg1(1.75)).toBe("1.8");
+    expect(fmtAvg1(1234.56)).toBe("1,234.6");
+    expect(fmtAvg1(null)).toBe("N/A");
+    expect(fmtAvg1(Number.NaN)).toBe("N/A");
   });
 
   it("names business lines, funnel steps and why someone is a wrong number", () => {

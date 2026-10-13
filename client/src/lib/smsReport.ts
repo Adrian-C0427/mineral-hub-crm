@@ -20,6 +20,10 @@ export interface SmsKpis {
   optedOut: number; optOutRate: number | null;
   avgTextsPerContact: number | null;
   avgResponseSeconds: number | null; medianResponseSeconds: number | null;
+  /** No reply yet but last texted within the response window: they can still reply and count. */
+  stillWaiting: number;
+  /** Average texts the people who replied got up to their reply; null = nobody replied. */
+  avgTextsBeforeReply: number | null;
   wrongNumbers: number; wrongNumberRate: number | null;
   opportunities: number; interestedRate: number | null; offers: number; offerAcceptanceRate: number | null; closedDeals: number;
   /** Dollars; null = no price per segment set. */
@@ -131,7 +135,7 @@ export interface SmsFilterOptions { senders: { id: string; name: string }[]; tag
 export interface SmsFilters { senders: string[]; tags: string[]; sources: string[] }
 export const EMPTY_SMS_FILTERS: SmsFilters = { senders: [], tags: [], sources: [] };
 
-export type DrillSet = "texted" | "reached" | "responded" | "optedOut" | "noReply" | "lateReply" | "inboundFirst"
+export type DrillSet = "texted" | "reached" | "responded" | "optedOut" | "noReply" | "lateReply" | "inboundFirst" | "stillWaiting"
   | "wrongNumber" | "unclassified" | "realEstate"
   | "opportunity" | "offer" | "accepted" | "contract" | "closed" | "dead" | "unanswered"
   | "disconnected" | "landline" | "rotated" | "exhausted";
@@ -144,6 +148,8 @@ export interface SmsContactRow {
   hlId: string; name: string | null; phone: string | null; tags: string[]; source: string | null;
   teamMember: string; firstTextedAt: string | null; textsBeforeReply: number; outcome: string | null;
   outcomeAt: string | null; responseSeconds: number | null; optedOutInHl: boolean; deletedInHl: boolean;
+  /** Their most recent text either way. */
+  lastTextedAt: string | null;
   line: string | null; wrongNumberAt: string | null; wrongNumberTouch: number | null;
   answerSeconds: number | null; answeredBy: string | null;
   /** Funnel lists only. */
@@ -299,6 +305,10 @@ export function fmtCost(v: number | null | undefined): string {
 /** "135.7", "4"; null = N/A. */
 export const fmtPer = (v: number | null | undefined): string =>
   v == null || !Number.isFinite(v) ? "N/A" : Number(v.toFixed(1)).toLocaleString("en-US");
+
+/** An average always to one decimal: "1.4", "2.0", "1,234.6"; null = N/A. */
+export const fmtAvg1 = (v: number | null | undefined): string =>
+  v == null || !Number.isFinite(v) ? "N/A" : v.toLocaleString("en-US", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 
 /** ISO weekday (1 = Monday) → "Mon". */
 export const DOW_LABEL = ["", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];

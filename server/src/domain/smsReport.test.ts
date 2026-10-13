@@ -1,14 +1,14 @@
 import { describe, it, expect } from "vitest";
 import {
   DELIVERED_STATUSES, FAILED_STATUSES, PENDING_STATUSES,
-  isDeliveredStatus, isFailedStatus, isPendingStatus, isSentStatus,
+  isDeliveredStatus, isFailedStatus, isPendingStatus, isSentStatus, summarizeContact,
 } from "./smsMetrics.js";
 import {
   BEST_TIME_MIN_SAMPLE, DELTA_KIND, DRILL_SETS, MAX_FILTER_VALUES, NO_SENDER, NO_TAG, UNASSIGNED_LABEL, UNKNOWN_USER_LABEL,
   allRange, bestTimeGrid, bucketKeys, bucketStart, computeKpis, cohortCounts, costSummary, dayRange, drillRow, effectiveScope,
   fillTrend, funnelSummary, furthestStep, healthDays, healthOf, isValidTimeZone, isoDay, lineCounts, listParam, mergeBreakdown,
   mergeQuality, parseIsoDay, parseReportScope, phoneTagSets, pointChange, rangeJson, readHlConfig, relativeChange,
-  requestedPeriod, senderName, smsDeltas, speedSummary, trendBucket, type FunnelCounts,
+  requestedPeriod, senderName, smsDeltas, speedSummary, trendBucket, waitingSince, type FunnelCounts,
 } from "./smsReport.js";
 
 const D = (s: string) => new Date(`${s}T00:00:00Z`);
@@ -133,7 +133,68 @@ describe("KPIs", () => {
       { touches: 1, outcome: "RESPONDED", count: 10 }, { touches: 2, outcome: "NO_REPLY", count: 30 },
       { touches: 1, outcome: "OPTED_OUT", count: 2 }, { touches: 3, outcome: "LATE_REPLY", count: 1 },
       { touches: 0, outcome: "INBOUND_FIRST", count: 9 },
-    ])).toEqual({ reached: 43, responded: 10, optedOut: 2, lateReplies: 1 });
+    ])).toEqual({ reached: 43, responded: 10, optedOut: 2, lateReplies: 1, respondedTexts: 10 });
+  });
+});
+
+describe("still waiting and texts before a reply", () => {
+  it("averages the texts each replier got up to their reply (N/A when nobody replied)", () => {
+    const c = cohortCounts([
+      { touches: 1, outcome: "RESPONDED", count: 6 }, { touches: 3, outcome: "RESPONDED", count: 2 },
+      { touches: 5, outcome: "NO_REPLY", count: 40 }, { touches: 2, outcome: "OPTED_OUT", count: 1 },
+    ]);
+    expect(c.respondedTexts).toBe(12);
+    const v = { sent: 300, delivered: 280, failed: 5, inbound: 20, contactsTexted: 49 };
+    const k = computeKpis(v, { reached: c.reached, responded: c.responded, optedOut: c.optedOut, avgSeconds: 60, medianSeconds: 60, respondedTexts: c.respondedTexts });
+    expect(k.avgTextsBeforeReply).toBe(1.5);
+    expect(computeKpis(v, { reached: 40, responded: 0, optedOut: 0, avgSeconds: null, medianSeconds: null, respondedTexts: 0 }).avgTextsBeforeReply).toBeNull();
+    // A caller that doesn't count it leaves it N/A, never 0.
+    expect(computeKpis(v, { reached: 40, responded: 5, optedOut: 0, avgSeconds: null, medianSeconds: null }).avgTextsBeforeReply).toBeNull();
+  });
+
+  it("lifts the still-waiting count, 0 when not counted", () => {
+    const v = { sent: 0, delivered: 0, failed: 0, inbound: 0, contactsTexted: 0 };
+    const c = { reached: 10, responded: 2, optedOut: 0, avgSeconds: null, medianSeconds: null };
+    expect(computeKpis(v, c, { stillWaiting: 7 }).stillWaiting).toBe(7);
+    expect(computeKpis(v, c).stillWaiting).toBe(0);
+    // Waiting people stay in the response rate's "reached".
+    expect(computeKpis(v, c, { stillWaiting: 7 }).responseRate).toBe(0.2);
+  });
+
+  it("waits the response window back from now — the same window a reply is still counted in", () => {
+    expect(waitingSince(NOW, 30).toISOString()).toBe("2026-09-12T18:30:00.000Z");
+    expect(waitingSince(NOW, 7).toISOString()).toBe("2026-10-05T18:30:00.000Z");
+    // Someone last texted exactly at the cut-off who replies now still counts as a response.
+    const last = waitingSince(NOW, 30);
+    const s = summarizeContact([
+      { direction: "outbound", status: "delivered", sentAt: last, hlUserId: null, optOut: false },
+      { direction: "inbound", status: "delivered", sentAt: NOW, hlUserId: null, optOut: false },
+    ], 30);
+    expect(s.outcome).toBe("RESPONDED");
+  });
+
+  it("only a text that reached them keeps someone waiting: a failed one doesn't restart the window", () => {
+    const since = waitingSince(NOW, 30);
+    const day = 86_400_000;
+    const msgs = [
+      { direction: "outbound", status: "delivered", sentAt: new Date(since.getTime() - 10 * day), hlUserId: null, optOut: false },
+      { direction: "outbound", status: "failed", sentAt: new Date(NOW.getTime() - day), hlUserId: null, optOut: false },
+    ];
+    expect(summarizeContact(msgs, 30).outcome).toBe("NO_REPLY");
+    // Their last text is recent, but a reply now comes 40 days after the last one that reached them.
+    const reply = { direction: "inbound", status: "delivered", sentAt: NOW, hlUserId: null, optOut: false };
+    expect(summarizeContact([...msgs, reply], 30).outcome).toBe("LATE_REPLY");
+  });
+
+  it("compares both as a relative change", () => {
+    expect(DELTA_KIND.stillWaiting).toBe("relative");
+    expect(DELTA_KIND.avgTextsBeforeReply).toBe("relative");
+    const v = { sent: 0, delivered: 0, failed: 0, inbound: 0, contactsTexted: 0 };
+    const prev = computeKpis(v, { reached: 10, responded: 4, optedOut: 0, avgSeconds: null, medianSeconds: null, respondedTexts: 8 }, { stillWaiting: 20 });
+    const cur = computeKpis(v, { reached: 10, responded: 4, optedOut: 0, avgSeconds: null, medianSeconds: null, respondedTexts: 12 }, { stillWaiting: 30 });
+    const d = smsDeltas(cur, prev);
+    expect(d.stillWaiting).toBe(0.5);
+    expect(d.avgTextsBeforeReply).toBe(0.5);
   });
 });
 
@@ -405,7 +466,7 @@ describe("carrier health", () => {
 
 describe("drill sets", () => {
   it("lists the new sets and reads a table row to narrow to", () => {
-    for (const s of ["wrongNumber", "unclassified", "realEstate", "opportunity", "offer", "accepted", "closed", "dead", "unanswered",
+    for (const s of ["stillWaiting", "wrongNumber", "unclassified", "realEstate", "opportunity", "offer", "accepted", "closed", "dead", "unanswered",
       "disconnected", "landline", "rotated", "exhausted"]) expect(DRILL_SETS).toContain(s);
     expect(drillRow({ rowDim: "listTag", rowKey: " Leon County " })).toEqual({ dim: "listTag", key: " Leon County " });
     expect(drillRow({ rowDim: "county", rowKey: "x" })).toBeNull();

@@ -23,7 +23,7 @@ const COLOR_FAILED = CHART_COLORS[3];
 
 /** One KPI tile with its comparison pill (SmsPerformance's `cell`). */
 export type KpiCell = (key: keyof SmsKpis, o: {
-  label: string; hint?: string; invert?: boolean; tone?: StatCell["tone"]; title?: string; onClick?: () => void;
+  label: string; hint?: string; invert?: boolean; neutral?: boolean; tone?: StatCell["tone"]; title?: string; onClick?: () => void;
 }) => StatCell;
 /** Open a drill-down; `row` narrows it to one table row. */
 export type OpenDrill = (spec: DrillSpec, row?: DrillRow) => void;

@@ -433,6 +433,15 @@
 .sms-inline-btn { min-height: 0; padding: 0; font-size: inherit; font-weight: 600; color: var(--accent-ink); vertical-align: baseline; }
 .sms-inline-btn:hover { color: var(--accent-ink-hover); }
 .reports-page .rp-kgroup > .sms-caption { margin: 0; }
+/* Responses: its eight tiles as two even rows of four, two per row when the column is narrow — auto-fit would leave one or
+   two tiles alone on a row at most widths. Phones keep the one-column strip below (hence the min-width). */
+@media (min-width: 761px) {
+  .reports-page .rp-kgroup.sms-even { container-type: inline-size; }
+  .reports-page .sms-even > .stat-strip { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+  @container (max-width: 719px) {
+    .reports-page .sms-even > .stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  }
+}
 .sms-funnel-rows { display: flex; flex-direction: column; gap: 2px; }
 .sms-funnel-row { width: 100%; min-height: 0; display: grid; grid-template-columns: minmax(110px, 140px) minmax(0, 1fr) 64px minmax(170px, 260px); align-items: center; gap: 12px; padding: 5px 6px; border: 0; border-radius: var(--radius-sm); background: transparent; box-shadow: none; text-align: left; color: var(--ink); }
 .sms-funnel-row:hover:not(:disabled) { background: var(--surface-2); border: 0; }
