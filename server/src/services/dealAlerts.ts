@@ -17,6 +17,7 @@
 import { prisma } from "../db.js";
 import { isOverdue } from "../domain/priority.js";
 import { TERMINAL_STAGE_KEYS } from "../domain/stages.js";
+import { taskDueNotice } from "../domain/tasks.js";
 
 const TICK_MS = 6 * 60 * 60 * 1000;        // sweep every 6 hours
 const REALERT_MS = 3 * 24 * 60 * 60 * 1000; // resurface a persisting condition after ~3 days
@@ -94,30 +95,20 @@ export async function runDealAlertSweep(now = new Date()): Promise<{ overdue: nu
   const dueTasks = await prisma.contactActivity.findMany({
     where: { kind: "TASK", completedAt: null, dueDate: { lte: now } },
     select: {
-      id: true, title: true, body: true, dueDate: true, organizationId: true,
+      id: true, title: true, body: true, dueDate: true, completedAt: true, organizationId: true,
       assignedToId: true, createdById: true,
       contact: { select: { id: true, firstName: true, lastName: true, entityName: true } },
     },
   });
   let tasks = 0;
   for (const t of dueTasks) {
-    const link = t.contact ? `/contacts/${t.contact.id}?task=${t.id}` : `/?task=${t.id}`;
-    const key = `${t.organizationId}|task_due|${link}`;
+    // Same wording/recipient/link editing a task rewrites its alert with.
+    const notice = taskDueNotice(t, now);
+    if (!notice) continue;
+    const key = `${t.organizationId}|task_due|${notice.link}`;
     if (seen.has(key)) continue;
-    const who = t.contact ? [t.contact.firstName, t.contact.lastName].filter(Boolean).join(" ") || t.contact.entityName || "contact" : null;
-    const overdueDays = Math.floor((now.getTime() - t.dueDate!.getTime()) / 86_400_000);
     await prisma.notification.create({
-      data: {
-        organizationId: t.organizationId,
-        userId: t.assignedToId ?? t.createdById,
-        type: "task_due",
-        title: overdueDays > 0 ? `Task overdue: ${(t.title ?? t.body).slice(0, 80)}` : `Task due: ${(t.title ?? t.body).slice(0, 80)}`,
-        body: (() => {
-          const when = overdueDays > 0 ? `${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue.` : "due today.";
-          return who ? `On ${who} · ${when}` : when[0].toUpperCase() + when.slice(1);
-        })(),
-        link,
-      },
+      data: { organizationId: t.organizationId, type: "task_due", ...notice },
     });
     seen.add(key);
     tasks++;

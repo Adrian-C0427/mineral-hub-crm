@@ -7,7 +7,7 @@ import "react-grid-layout/css/styles.css";
 import "react-resizable/css/styles.css";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Modal, Req, Spinner, StageBadge, showToast } from "../components/ui";
+import { Modal, Spinner, StageBadge, showToast } from "../components/ui";
 import { ApiError } from "../api/client";
 import { Select } from "../components/Select";
 import { Segmented, StatStrip, Tag } from "../components/kit";
@@ -16,6 +16,8 @@ import { compactMoney, money, fmtDate, fmtDateLocal } from "../lib/format";
 import { useStages } from "../stages";
 import { CalendarGlyph } from "../components/PeriodSegmented";
 import { DateField } from "../components/DateField";
+import { TASK_PRIORITY_META, TaskFormModal } from "../components/TaskForm";
+import { dashTaskValues, newTaskValues, taskEditBody } from "../lib/tasks";
 import { useTheme, isLightTheme } from "../theme";
 import { layoutRect } from "../lib/viewport";
 import { useIsPhonePortrait } from "../lib/mobile";
@@ -71,6 +73,8 @@ interface DashTask {
   completedAt?: string | null; createdAt?: string;
   /** The viewer may complete it (its owner/author, or a contact manager). */
   canComplete?: boolean;
+  /** The viewer may edit it — the same rule as completing it. */
+  canEdit?: boolean;
 }
 
 interface DashboardData {
@@ -367,7 +371,7 @@ export function Dashboard() {
     [visibleIds, prefs.layout],
   );
 
-  const taskModal = openTaskId ? <TaskDetailModal id={openTaskId} onClose={closeTask} onChanged={() => setTaskRefresh((n) => n + 1)} /> : null;
+  const taskModal = openTaskId ? <TaskDetailModal id={openTaskId} users={users} onClose={closeTask} onChanged={() => setTaskRefresh((n) => n + 1)} /> : null;
   if (!d) {
     return (
       <>
@@ -1021,13 +1025,9 @@ export function Dashboard() {
 // Tasks widget — every outstanding contact task that needs attention (overdue,
 // due today, or due within the next week). Checking a task completes it in the
 // database and removes it from the widget instantly; clicking the row opens
-// the contact workspace with that task in focus.
+// the task (a contact task opens on the contact's workspace, where it can be
+// edited; a standalone one in the task modal here).
 // ---------------------------------------------------------------------------
-const TASK_PRIORITY_META: Record<string, { label: string; tone: "danger" | "warn" | "neutral"; dot: string }> = {
-  HIGH: { label: "High", tone: "danger", dot: "var(--danger)" },
-  MEDIUM: { label: "Medium", tone: "warn", dot: "var(--warn)" },
-  LOW: { label: "Low", tone: "neutral", dot: "var(--ink-3)" },
-};
 
 /**
  * Whose tasks the widget lists: "me" (default — My Tasks), "all" users, or one
@@ -1147,90 +1147,45 @@ function TasksWidget({ initial, users, refreshKey, onOpenTask, onChanged }: {
   );
 }
 
-const PRIORITY_CHOICES = [
-  { key: "LOW", label: "Low" }, { key: "MEDIUM", label: "Medium" }, { key: "HIGH", label: "High" },
-] as const;
-
 /**
  * New task from the Dashboard: for yourself or assigned to a teammate (who is
- * notified, with a link that opens the task).
+ * notified, with a link that opens the task). The same form edits it later.
  */
 function CreateTaskModal({ users, onClose, onCreated }: {
   users: { id: string; name: string }[]; onClose: () => void; onCreated: () => void;
 }) {
   const { user } = useAuth();
-  const [title, setTitle] = useState("");
-  const [details, setDetails] = useState("");
-  const [assignee, setAssignee] = useState(user?.id ?? "");
-  const [priority, setPriority] = useState<"LOW" | "MEDIUM" | "HIGH">("MEDIUM");
-  const [due, setDue] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const options = [
-    { value: user?.id ?? "", label: `Me (${user?.name ?? "you"})` },
-    ...users.filter((u) => u.id !== user?.id).map((u) => ({ value: u.id, label: u.name })),
-  ];
-  const ready = title.trim() !== "" && due !== "";
-
-  async function submit() {
-    if (!ready || busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const created = await api.post<DashTask & { notified: boolean }>("/tasks", {
-        title: title.trim(), details: details.trim() || null, priority, dueDate: due,
-        assignedToId: assignee && assignee !== user?.id ? assignee : null,
-      });
-      showToast(created.notified
-        ? `Task created and assigned to ${created.assignedTo?.name ?? "your teammate"} — they've been notified.`
-        : "Task created.");
-      onCreated();
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : "Could not create the task");
-    } finally { setBusy(false); }
-  }
-
   return (
-    <Modal title="New task" subtitle={<>For you or a teammate. Assigned teammates are notified.</>} onClose={onClose}
-      dirty={title.trim() !== "" || details.trim() !== "" || due !== ""}
-      footer={
-        <>
-          <span className="modal-req-note"><Req /> Required</span>
-          <button onClick={onClose}>Cancel</button>
-          <button className="primary" onClick={() => void submit()} disabled={!ready || busy}>{busy ? "Creating…" : "Create task"}</button>
-        </>
-      }>
-      <div className="field"><label>Task {<Req />}</label>
-        <input value={title} onChange={(e) => setTitle(e.target.value)} autoFocus maxLength={200} placeholder="e.g. Call the title company about the Leon closing" />
-      </div>
-      <div className="field"><label>Details</label>
-        <textarea rows={3} value={details} onChange={(e) => setDetails(e.target.value)} placeholder="Anything the assignee should know" />
-      </div>
-      <div className="dash-task-form-row">
-        <div className="field"><label>Assign to</label>
-          <Select value={assignee} onChange={(v) => setAssignee(v || user?.id || "")} options={options} searchable={options.length > 8} ariaLabel="Assign to" />
-        </div>
-        <div className="field"><label>Due date {<Req />}</label>
-          <DateField value={due} onChange={setDue} ariaLabel="Due date" />
-        </div>
-      </div>
-      <div className="field" style={{ marginBottom: 0 }}><label>Priority</label>
-        <Segmented accent className="dash-pri-seg" ariaLabel="Priority" value={priority} onChange={setPriority}
-          options={PRIORITY_CHOICES.map((p) => ({ value: p.key, label: p.label, dot: TASK_PRIORITY_META[p.key].dot }))} />
-      </div>
-      {error && <div className="error-text" style={{ marginTop: 12 }}>{error}</div>}
-    </Modal>
+    <TaskFormModal mode="create" initial={newTaskValues(user?.id ?? "")} users={users} dueRequired
+      subtitle={<>For you or a teammate. Assigned teammates are notified.</>} onClose={onClose}
+      onSubmit={async (v) => {
+        const created = await api.post<DashTask & { notified: boolean }>("/tasks", {
+          title: v.title.trim(), details: v.details.trim() || null, priority: v.priority, dueDate: v.due,
+          assignedToId: v.assignee && v.assignee !== user?.id ? v.assignee : null,
+        });
+        showToast(created.notified
+          ? `Task created and assigned to ${created.assignedTo?.name ?? "your teammate"} — they've been notified.`
+          : "Task created.");
+        onCreated();
+      }} />
   );
 }
 
-/** One task, opened from a notification or a standalone task's row. */
-function TaskDetailModal({ id, onClose, onChanged }: { id: string; onClose: () => void; onChanged: () => void }) {
+/**
+ * One task, opened from a notification or a standalone task's row. "Edit"
+ * switches to the task form (the same one that created it); saving returns
+ * here with the stored values and refreshes the Tasks widget.
+ */
+function TaskDetailModal({ id, users, onClose, onChanged }: {
+  id: string; users: { id: string; name: string }[]; onClose: () => void; onChanged: () => void;
+}) {
   const [task, setTask] = useState<DashTask | null>(null);
   const [missing, setMissing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
   useEffect(() => {
     let live = true;
-    setTask(null); setMissing(false);
+    setTask(null); setMissing(false); setEditing(false);
     api.get<DashTask>(`/tasks/${encodeURIComponent(id)}`)
       .then((t) => { if (live) setTask(t); })
       .catch(() => { if (live) setMissing(true); });
@@ -1249,6 +1204,24 @@ function TaskDetailModal({ id, onClose, onChanged }: { id: string; onClose: () =
     } finally { setBusy(false); }
   }
 
+  if (editing && task) {
+    return (
+      <TaskFormModal mode="edit" initial={dashTaskValues(task)} users={users} assigneeName={task.assignedTo?.name}
+        dueRequired={!task.contactId} detailsRequired={!!task.contactId}
+        subtitle={task.contactName ? <>On {task.contactName}</> : undefined}
+        onClose={() => setEditing(false)}
+        onSubmit={async (v) => {
+          const saved = await api.patch<DashTask & { notified?: boolean }>(`/tasks/${task.id}`, taskEditBody("TASK", v));
+          setTask(saved);
+          setEditing(false);
+          onChanged();
+          showToast(saved.notified
+            ? `Task updated and assigned to ${saved.assignedTo?.name ?? "your teammate"} — they've been notified.`
+            : "Task updated.");
+        }} />
+    );
+  }
+
   const pr = task ? TASK_PRIORITY_META[task.priority] ?? TASK_PRIORITY_META.MEDIUM : null;
   const todayKey = new Date().toISOString().slice(0, 10);
   const overdue = !!task?.dueDate && !task.completedAt && task.dueDate.slice(0, 10) < todayKey;
@@ -1258,6 +1231,7 @@ function TaskDetailModal({ id, onClose, onChanged }: { id: string; onClose: () =
         <>
           {task?.contactId && <Link to={`/contacts/${task.contactId}?task=${task.id}`} className="btn-ghost-link" style={{ marginRight: "auto" }}>Open contact</Link>}
           <button onClick={onClose}>Close</button>
+          {task?.canEdit && <button onClick={() => setEditing(true)} disabled={busy}>Edit</button>}
           {task?.canComplete && (
             task.completedAt
               ? <button onClick={() => void setCompleted(false)} disabled={busy}>Reopen task</button>
