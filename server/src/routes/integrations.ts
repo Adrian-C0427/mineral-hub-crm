@@ -11,8 +11,9 @@
  *    to ActivityLog with the acting user.
  *
  * HighLevel (read-only SMS mirror for Reports) connects with a Private
- * Integration key + Location ID and has two extra routes — /highlevel/status
- * and /highlevel/import (services/highlevel/).
+ * Integration key + Location ID and has extra routes — /highlevel/status,
+ * /highlevel/import, and the Minerals filter's /highlevel/scope and
+ * /highlevel/scope-preview (services/highlevel/).
  */
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
@@ -36,8 +37,12 @@ import {
 } from "../services/integrationOAuth.js";
 import { RESPONSE_WINDOW_OPTIONS } from "../domain/smsMetrics.js";
 import { HIGHLEVEL, highLevelStatus, validateHighLevelConnection, needsReconnect } from "../services/highlevel/sync.js";
-import { readSyncState, responseWindowOf, parseLocationId, type HlSyncState } from "../services/highlevel/mapping.js";
+import {
+  readSyncState, responseWindowOf, parseLocationId, readPipelines, savedScopeOf, sameScope, cleanScope, pricePerSegmentOf,
+  type HlSyncState,
+} from "../services/highlevel/mapping.js";
 import { ensureImportLoop, kickHighLevelRun } from "../services/highlevel/scheduler.js";
+import { scopeSettings, textedPeople, countLines } from "../services/highlevel/scope.js";
 
 export const integrationsRouter = Router();
 integrationsRouter.use(requireAuth, requireOrg, requirePermission("manageApiIntegrations"), demoReadOnly());
@@ -51,7 +56,19 @@ const actionLimiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many integration actions. Try again in a few minutes." },
 });
-integrationsRouter.use((req, res, next) => (req.method === "POST" ? actionLimiter(req, res, next) : next()));
+// The Minerals filter's live preview only reads this workspace's own rows, as
+// the admin edits — it gets its own, roomier limit instead.
+const previewLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 300,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many preview requests. Wait a moment and try again." },
+});
+const PREVIEW_PATH = "/highlevel/scope-preview";
+integrationsRouter.use((req, res, next) => (req.method !== "POST" ? next()
+  : req.path === PREVIEW_PATH ? previewLimiter(req, res, next)
+  : actionLimiter(req, res, next)));
 
 // Internal bookkeeping keys that would only bloat the payload (the calendar
 // event map can hold hundreds of entries).
@@ -59,9 +76,11 @@ integrationsRouter.use((req, res, next) => (req.method === "POST" ? actionLimite
 // selector detail). It's used server-side to derive senderDomainWarning; the
 // client only needs that derived warning, never the raw DNS records — so keep
 // it out of the serialized config the API returns.
-// "hlSync" / "hlUsers" are the HighLevel sync's bookkeeping (checkpoint, run
-// stats) and its user directory — the card reads GET /highlevel/status instead.
-const INTERNAL_CONFIG_KEYS = new Set(["eventMap", "inboundCursor", "domains", "hlSync", "hlUsers"]);
+// "hlSync" / "hlUsers" / "hlPipelines" / "hlTags" are the HighLevel sync's
+// bookkeeping (checkpoint, run stats) and its copies of the account's users,
+// pipelines and tags — the card reads GET /highlevel/status and the
+// Configure form GET /highlevel/scope instead.
+const INTERNAL_CONFIG_KEYS = new Set(["eventMap", "inboundCursor", "domains", "hlSync", "hlUsers", "hlPipelines", "hlTags"]);
 
 function publicConfig(row: Integration | null): Record<string, unknown> {
   const cfg = (row?.config ?? {}) as Record<string, unknown>;
@@ -114,17 +133,26 @@ integrationsRouter.get(
   }),
 );
 
+const scopeSchema = z.object({
+  mineralTags: z.array(z.string().max(200)).max(5000),
+  realEstateTags: z.array(z.string().max(200)).max(5000),
+  mineralPipelineIds: z.array(z.string().max(100)).max(500),
+}).strict();
+
 const configSchema = z.object({
   schedule: z.enum(["manual", "hourly", "daily"]).optional(),
   notes: z.string().max(2000).optional(),
   // Sender identity — Resend only (ignored by other providers).
   fromEmail: z.string().trim().email().max(320).optional(),
   fromName: z.string().trim().max(120).optional(),
-  // HighLevel only: Location ID (connect) and response window (settings).
+  // HighLevel only: Location ID (connect), response window, Minerals filter
+  // (null = use the suggestion) and the texting price per SMS segment ($).
   locationId: z.string().trim().max(500).optional(),
   responseWindowDays: z.number().int()
     .refine((v) => (RESPONSE_WINDOW_OPTIONS as readonly number[]).includes(v), "Pick a response window of 7, 14, 30, 60 or 90 days.")
     .optional(),
+  scope: scopeSchema.nullable().optional(),
+  pricePerSegment: z.number().nullable().optional(),
 });
 
 /** Keep only the settings that belong to this provider. */
@@ -134,9 +162,17 @@ function configFor(provider: string, config: z.infer<typeof configSchema> | unde
     // HighLevel syncs on its own cadence; its location changes only by reconnecting.
     delete c.schedule; delete c.locationId; delete c.fromEmail; delete c.fromName;
   } else {
-    delete c.locationId; delete c.responseWindowDays;
+    delete c.locationId; delete c.responseWindowDays; delete c.scope; delete c.pricePerSegment;
   }
   return c;
+}
+
+/** Dollars per segment: 0–1, at most 6 decimals (e.g. 0.0091). */
+function cleanPrice(v: number): number {
+  if (!Number.isFinite(v) || v < 0 || v > 1) {
+    throw new HttpError(400, "Enter the price per text segment in dollars, between 0 and 1 — for example 0.0091.");
+  }
+  return Math.round(v * 1_000_000) / 1_000_000;
 }
 
 // --- HighLevel ------------------------------------------------------------------
@@ -145,6 +181,30 @@ integrationsRouter.get(
   "/highlevel/status",
   asyncHandler(async (req: AuthedRequest, res) => {
     res.json(await highLevelStatus(orgId(req)));
+  }),
+);
+
+// The Configure form's Minerals filter: tags and pipelines with their counts
+// of texted people, the saved filter (or the suggestion) and how it splits them.
+integrationsRouter.get(
+  "/highlevel/scope",
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const row = await getRow(req, HIGHLEVEL);
+    if (!row) throw new HttpError(404, "Connect HighLevel first.");
+    res.json(await scopeSettings(orgId(req), row.config));
+  }),
+);
+
+// Live preview of a draft filter: counts only, nothing is saved.
+integrationsRouter.post(
+  PREVIEW_PATH,
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { scope } = z.object({ scope: scopeSchema }).parse(req.body);
+    const row = await getRow(req, HIGHLEVEL);
+    if (!row) throw new HttpError(404, "Connect HighLevel first.");
+    const clean = cleanScope(scope, readPipelines(row.config));
+    if (!clean.ok) throw new HttpError(400, clean.message);
+    res.json(countLines(await textedPeople(orgId(req)), clean.scope));
   }),
 );
 
@@ -336,6 +396,14 @@ integrationsRouter.patch(
     const preserved = Object.fromEntries(
       Object.entries(prevCfg).filter(([k]) => !k.startsWith("_") && !(k in config)),
     );
+    if (def.key === HIGHLEVEL) {
+      if (typeof parsed.pricePerSegment === "number") config.pricePerSegment = cleanPrice(parsed.pricePerSegment);
+      if (parsed.scope) {
+        const clean = cleanScope(parsed.scope, readPipelines(prevCfg));
+        if (!clean.ok) throw new HttpError(400, clean.message);
+        config.scope = clean.scope;
+      }
+    }
     const nextCfg: Record<string, unknown> = { ...preserved, ...config };
     // A changed Resend sender is re-checked against the stored domain snapshot.
     const warning = def.key === "resend" && typeof nextCfg.fromEmail === "string"
@@ -345,6 +413,13 @@ integrationsRouter.patch(
     // every stored summary is recomputed by the sync.
     const windowChanged = def.key === HIGHLEVEL && typeof config.responseWindowDays === "number"
       && config.responseWindowDays !== responseWindowOf(prevCfg);
+    // …and a new Minerals filter changes every contact's line (minerals / real estate / not classified).
+    const before = savedScopeOf(prevCfg);
+    const after = savedScopeOf(nextCfg);
+    const scopeChanged = def.key === HIGHLEVEL && config.scope !== undefined
+      && !(before && after && sameScope(before, after)) && !(!before && !after);
+    const priceChanged = def.key === HIGHLEVEL && config.pricePerSegment !== undefined
+      && config.pricePerSegment !== pricePerSegmentOf(prevCfg);
     const row = await prisma.integration.update({
       where: { id: existing.id },
       data: {
@@ -352,15 +427,18 @@ integrationsRouter.patch(
         ...(warning !== undefined ? { lastError: warning } : {}),
       },
     });
-    if (windowChanged) {
+    if (windowChanged || scopeChanged) {
       await prisma.highLevelContact.updateMany({ where: { organizationId: orgId(req) }, data: { summaryDirty: true } });
-      if (row.status !== "NOT_CONNECTED") kickHighLevelRun(row, "window");
+      if (row.status !== "NOT_CONNECTED") kickHighLevelRun(row, "settings");
     }
+    const changes = [
+      windowChanged ? `response window set to ${config.responseWindowDays} days` : null,
+      scopeChanged ? (after ? "Minerals filter saved" : "Minerals filter reset to the suggestion") : null,
+      priceChanged ? (config.pricePerSegment == null ? "texting price cleared" : `texting price set to $${config.pricePerSegment} per segment`) : null,
+    ].filter(Boolean);
     await logActivity({
       eventType: "integration.config_updated",
-      summary: windowChanged
-        ? `Integration ${def.name} response window set to ${config.responseWindowDays} days`
-        : `Integration ${def.name} settings updated`,
+      summary: changes.length ? `Integration ${def.name}: ${changes.join("; ")}` : `Integration ${def.name} settings updated`,
       organizationId: orgId(req), actorUserId: req.user?.id ?? null,
     });
     res.json(serialize(def, row));
