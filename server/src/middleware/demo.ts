@@ -7,7 +7,13 @@ import type { AuthedRequest } from "./auth.js";
  * Prospects share one login, so the demo must stay presentable for the next
  * visitor and must never reach anything real. Demo users can browse and use
  * the app normally (create and edit deals, buyers, tasks, offers…; the
- * dataset is reseeded nightly), but these are refused server-side:
+ * dataset is reseeded nightly).
+ *
+ * DENY BY DEFAULT: a demo user's write (any method but GET/HEAD/OPTIONS) is
+ * refused unless it matches DEMO_WRITE_ALLOWLIST below. A route added later is
+ * therefore locked for the demo until someone decides otherwise — and
+ * demo.routes.test.ts walks every route the app registers, so that decision is
+ * made explicitly in review rather than by accident. Locked, among others:
  *   - deleting records (single or bulk),
  *   - integrations, organization/team/role/invite settings, user management,
  *   - account security (password, 2FA, profile email), joining other orgs,
@@ -16,9 +22,11 @@ import type { AuthedRequest } from "./auth.js";
  *     org — see researchOrgId), shapefile imports,
  *   - AI generation (billed per call).
  * Outbound email is suppressed separately (services/email.ts), so "send" flows
- * still work end to end without delivering anything.
+ * still work end to end without delivering anything; the demo org's public
+ * portal answers only demo sessions (routes/portal.ts), so nothing a visitor
+ * writes is ever served to the public.
  *
- * Reads (GET/HEAD/OPTIONS) always pass. Non-demo users are never affected.
+ * Reads always pass. Non-demo users are never affected.
  */
 
 const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
@@ -28,28 +36,134 @@ const SETTINGS_MESSAGE = "This setting is locked in the demo workspace.";
 const UPLOAD_MESSAGE = "Uploading and importing files is turned off in the demo workspace.";
 const REFERENCE_MESSAGE = "Research and map data are read-only in the demo workspace.";
 const AI_MESSAGE = "AI drafting is turned off in the demo workspace.";
+const DEFAULT_MESSAGE = "This action is turned off in the demo workspace.";
 
-/** DELETEs a demo user may still make: their own notifications and saved table layouts. */
-const DELETE_ALLOWED = [/^\/api\/notifications(\/|$)/, /^\/api\/auth\/table-prefs\//];
+/**
+ * Every write a demo user may make, as "METHOD /path" with Express-style
+ * :params (one path segment each). Keep it to the visitor's own CRM records.
+ */
+export const DEMO_WRITE_ALLOWLIST: readonly string[] = [
+  // Session + personal UI state.
+  "POST /api/auth/logout",
+  "PUT /api/auth/table-prefs/:tableId",
+  "PATCH /api/auth/preferences",
+  "PUT /api/notifications/preferences",
+  "POST /api/notifications/:id/read",
+  "POST /api/notifications/read-all",
+  "DELETE /api/notifications",
+  "DELETE /api/notifications/:id",
 
-/** Mutations a demo user may make under otherwise-locked prefixes. */
-const AUTH_ALLOWED = [/^\/api\/auth\/logout$/, /^\/api\/auth\/table-prefs\//, /^\/api\/auth\/preferences$/];
-const RESEARCH_ALLOWED = [/^\/api\/research\/relationships\/transactions$/, /^\/api\/research\/buyers\/(preview|commit)$/];
+  // Pipelines (no deletes).
+  "POST /api/pipeline/pipelines",
+  "POST /api/pipeline/pipelines/reorder",
+  "PATCH /api/pipeline/pipelines/:id",
+  "POST /api/pipeline/stages",
+  "PATCH /api/pipeline/stages/:id",
+  "POST /api/pipeline/stages/reorder",
 
-const BLOCKED: { test: RegExp; message: string }[] = [
-  { test: /^\/api\/integrations(\/|$)/, message: SETTINGS_MESSAGE },
-  { test: /^\/api\/org(\/|$)/, message: SETTINGS_MESSAGE },
-  { test: /^\/api\/users(\/|$)/, message: SETTINGS_MESSAGE },
-  { test: /^\/api\/ai(\/|$)/, message: AI_MESSAGE },
-  { test: /^\/api\/import(\/|$)/, message: UPLOAD_MESSAGE },
-  { test: /^\/api\/(buyers|contacts)\/import(\/|$)/, message: UPLOAD_MESSAGE },
-  { test: /^\/api\/wells\/import\//, message: UPLOAD_MESSAGE },
-  { test: /^\/api\/files\/?$/, message: UPLOAD_MESSAGE },
-  { test: /^\/api\/files\/[^/]+\/replace$/, message: UPLOAD_MESSAGE },
-  { test: /^\/api\/files\/cloud\//, message: UPLOAD_MESSAGE },
-  { test: /^\/api\/map\/tracts\/import$/, message: REFERENCE_MESSAGE },
-  { test: /^\/api\/(deals|buyers|contacts)\/bulk-delete$/, message: DELETE_MESSAGE },
+  // Deals.
+  "POST /api/deals",
+  "PATCH /api/deals/:id",
+  "POST /api/deals/:id/email", // delivery suppressed for the demo org
+  "PATCH /api/deals/:id/portal", // demo portal is visible to demo sessions only
+  "POST /api/deals/:id/assets/publish",
+  "POST /api/deals/:id/extend",
+  "POST /api/deals/:id/stage",
+  "POST /api/deals/:id/stage/undo",
+  "POST /api/deals/:id/activity",
+  "POST /api/deals/:id/activity/:buyerId/messages",
+  "PATCH /api/deals/:id/activity/:buyerId/messages/:messageId",
+  "POST /api/deals/:id/contact-bulk",
+  "POST /api/deals/:id/accept-offer",
+  "POST /api/deals/:id/sellers",
+  "PATCH /api/deals/:id/sellers/:sellerId",
+  "POST /api/deals/:id/convert",
+  "POST /api/deals/:id/asset-mode",
+  "POST /api/deals/:id/split",
+  "POST /api/deals/:id/revenue",
+  "POST /api/deals/:id/doc-folders",
+  "POST /api/deals/bulk-assign",
+  "POST /api/deals/bulk-archive",
+
+  // Opportunities.
+  "POST /api/opportunities",
+  "PATCH /api/opportunities/:id",
+  "POST /api/opportunities/:id/stage",
+  "POST /api/opportunities/:id/convert",
+  "POST /api/opportunities/:id/activities",
+
+  // Buyers.
+  "POST /api/buyers",
+  "PATCH /api/buyers/:id",
+  "POST /api/buyers/:id/aliases",
+  "POST /api/buyers/:id/merge",
+  "POST /api/buyers/merge-undo/:logId",
+  "POST /api/buyers/:id/alias-dismissals",
+  "POST /api/buyers/bulk-assign",
+
+  // Contacts.
+  "POST /api/contacts",
+  "PATCH /api/contacts/:id",
+  "POST /api/contacts/:id/activities",
+  "PATCH /api/contacts/:id/activities/:aid",
+  "POST /api/contacts/lists/all",
+  "PATCH /api/contacts/lists/:listId",
+  "POST /api/contacts/bulk-update",
+  "POST /api/contacts/bulk-lists",
+
+  // Offers, tasks, calendar, templates, expenses.
+  "POST /api/offers",
+  "PATCH /api/offers/:id",
+  "POST /api/tasks",
+  "PATCH /api/tasks/:id",
+  "POST /api/calendar/events",
+  "PATCH /api/calendar/events/:id",
+  "POST /api/calendar/types",
+  "PATCH /api/calendar/types/:id",
+  "POST /api/email-templates",
+  "PATCH /api/email-templates/:id",
+  "POST /api/expenses",
+  "PATCH /api/expenses/:id",
+  "POST /api/expenses/bulk", // except action "delete" (see demoBlockReason)
+  "POST /api/expenses/categories",
+  "PATCH /api/expenses/categories/:id",
+  "POST /api/expenses/categories/reorder",
+
+  // Files: rename / move / buyer visibility only — no uploads.
+  "PATCH /api/files/:id",
+
+  // Research: buyer discovery into the demo's OWN buyer list (reads reference data).
+  "POST /api/research/relationships/transactions",
+  "POST /api/research/buyers/preview",
+  "POST /api/research/buyers/commit",
+
+  // Well analysis on the demo's own wells (public state data cache fills).
+  "POST /api/wells",
+  "PATCH /api/wells/:id",
+  "POST /api/wells/import-rrc",
+  "POST /api/wells/import-sonris",
+  "POST /api/wells/analyze",
+  "POST /api/wells/analyses",
+  "PATCH /api/wells/analyses/:id",
+
+  // Public buyer-portal forms (open to everyone; demo sessions are no different).
+  "POST /api/portal/:orgSlug/leads",
+  "POST /api/portal/offering/:slug/offers",
 ];
+
+type Rule = { method: string; re: RegExp };
+
+function compile(entry: string): Rule {
+  const [method, path] = entry.split(" ");
+  const body = path
+    .toLowerCase()
+    .split("/")
+    .map((seg) => (seg.startsWith(":") ? "[^/]+" : seg.replace(/[.*+?^${}()|[\]\\-]/g, "\\$&")))
+    .join("/");
+  return { method, re: new RegExp(`^${body}$`) };
+}
+
+const RULES: Rule[] = DEMO_WRITE_ALLOWLIST.map(compile);
 
 /**
  * The path as Express ROUTES it, in the form the policy matches. Express
@@ -62,6 +176,16 @@ function normalizePath(path: string): string {
   return p.length > 1 ? p.replace(/\/+$/, "") : p;
 }
 
+/** The refusal message a visitor sees — grouped by area, for the toast. */
+function refusalMessage(method: string, p: string): string {
+  if (method === "DELETE" || /\/bulk-delete$|\/delete$/.test(p)) return DELETE_MESSAGE;
+  if (/^\/api\/ai(\/|$)/.test(p)) return AI_MESSAGE;
+  if (/\/import(\/|$)|^\/api\/files(\/|$)/.test(p)) return UPLOAD_MESSAGE;
+  if (/^\/api\/(research|map)(\/|$)/.test(p)) return REFERENCE_MESSAGE;
+  if (/^\/api\/(auth|org|users|integrations)(\/|$)/.test(p)) return SETTINGS_MESSAGE;
+  return DEFAULT_MESSAGE;
+}
+
 /**
  * Why a demo user's request is refused, or null when it may proceed. Pure, so
  * the policy is unit-tested directly. `path` is the URL path (no query).
@@ -71,15 +195,10 @@ export function demoBlockReason(method: string, path: string, body?: unknown): s
   if (READ_METHODS.has(m)) return null;
   const p = normalizePath(path);
 
-  if (m === "DELETE") return DELETE_ALLOWED.some((r) => r.test(p)) ? null : DELETE_MESSAGE;
-
-  if (/^\/api\/auth(\/|$)/.test(p)) return AUTH_ALLOWED.some((r) => r.test(p)) ? null : SETTINGS_MESSAGE;
-  if (/^\/api\/research(\/|$)/.test(p)) return RESEARCH_ALLOWED.some((r) => r.test(p)) ? null : REFERENCE_MESSAGE;
-
-  for (const b of BLOCKED) if (b.test.test(p)) return b.message;
+  if (!RULES.some((r) => r.method === m && r.re.test(p))) return refusalMessage(m, p);
 
   // Bulk endpoints that take an action in the body (expenses: delete | reimburse | …).
-  if (/\/bulk$/.test(p) && body && typeof body === "object" && (body as { action?: unknown }).action === "delete") {
+  if (/\/bulk$/.test(p) && body && typeof body === "object" && String((body as { action?: unknown }).action).toLowerCase() === "delete") {
     return DELETE_MESSAGE;
   }
   return null;

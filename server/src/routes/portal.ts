@@ -9,6 +9,7 @@ import { normalizePhone } from "../domain/phone.js";
 import { getDownloadUrl, s3Configured } from "../services/s3.js";
 import { portalRateLimited, PORTAL_READ_MAX_PER_WINDOW } from "../services/portalRateLimit.js";
 import { pushTeams } from "../services/notifyPush.js";
+import type { AuthedRequest } from "../middleware/auth.js";
 
 /**
  * Buyer Offering Portal — the PUBLIC (unauthenticated) API.
@@ -182,9 +183,28 @@ async function orgPayload(o: OrgLike) {
   };
 }
 
-async function orgBySlug(slug: string) {
+/**
+ * Is this org's portal open to this request? portalEnabled is the owner's kill
+ * switch. The DEMO org's portal additionally answers only sessions of that demo
+ * org: every prospect shares the demo login and can edit its offerings, so
+ * anything they write must never be served to the public under our domain
+ * (phishing copy, contact details, files). A non-demo visitor gets the same 404
+ * as an unknown slug. attachUser runs app-wide, so a demo session's bearer
+ * token (sent by the SPA's portal client) is already resolved on req.user.
+ */
+export function portalOpenTo<O extends { id: string; portalEnabled: boolean; isDemo: boolean }>(
+  org: O | null | undefined,
+  req: import("express").Request,
+): org is O {
+  if (!org?.portalEnabled) return false;
+  if (!org.isDemo) return true;
+  const user = (req as AuthedRequest).user;
+  return !!user?.isDemo && user.organizationId === org.id;
+}
+
+async function orgBySlug(slug: string, req: import("express").Request) {
   const org = await prisma.organization.findUnique({ where: { portalSlug: slug } });
-  if (!org || !org.portalEnabled) throw new HttpError(404, "Portal not found");
+  if (!org || !portalOpenTo(org, req)) throw new HttpError(404, "Portal not found");
   return org;
 }
 
@@ -207,7 +227,7 @@ portalRouter.get(
   "/:orgSlug",
   asyncHandler(async (req, res) => {
     await guardPortalRead(req);
-    const org = await orgBySlug(String(req.params.orgSlug));
+    const org = await orgBySlug(String(req.params.orgSlug), req);
     const deals = await prisma.deal.findMany({
       where: { organizationId: org.id, publishedToPortal: true, portalVisibility: "PUBLIC" },
       orderBy: [{ portalFeatured: "desc" }, { updatedAt: "desc" }],
@@ -223,7 +243,7 @@ portalRouter.get(
   "/:orgSlug/features",
   asyncHandler(async (req, res) => {
     await guardPortalRead(req);
-    const org = await orgBySlug(String(req.params.orgSlug));
+    const org = await orgBySlug(String(req.params.orgSlug), req);
     const deals = await prisma.deal.findMany({
       where: { organizationId: org.id, publishedToPortal: true, portalVisibility: "PUBLIC" },
       select: { portalSlug: true, name: true, abstractIds: true },
@@ -316,7 +336,7 @@ portalRouter.get(
         assets: { select: { id: true, name: true, counties: true, states: true, state: true, nra: true, assetTypes: true, operator: true }, orderBy: { createdAt: "asc" } },
       },
     });
-    if (!deal || !deal.publishedToPortal || !deal.organization?.portalEnabled) {
+    if (!deal || !deal.publishedToPortal || !portalOpenTo(deal.organization, req)) {
       throw new HttpError(404, "Offering not found");
     }
     recordPortalEvent(deal.id, "VIEW", visitorKeyFrom(req));
@@ -391,9 +411,9 @@ portalRouter.get(
     await guardPortalRead(req);
     const deal = await prisma.deal.findUnique({
       where: { portalSlug: String(req.params.slug) },
-      select: { publishedToPortal: true, abstractIds: true, organization: { select: { portalEnabled: true } } },
+      select: { publishedToPortal: true, abstractIds: true, organization: { select: { id: true, portalEnabled: true, isDemo: true } } },
     });
-    if (!deal || !deal.publishedToPortal || !deal.organization?.portalEnabled) throw new HttpError(404, "Offering not found");
+    if (!deal || !deal.publishedToPortal || !portalOpenTo(deal.organization, req)) throw new HttpError(404, "Offering not found");
     if (!deal.abstractIds.length) return res.json({ type: "FeatureCollection", features: [] });
     const rows = await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string; geom: string }[]>(
       `SELECT id, abstract, survey, county, ST_AsGeoJSON(geom, 6) AS geom FROM gis.abstracts WHERE id = ANY($1::text[])`,
@@ -422,7 +442,7 @@ portalRouter.get(
       // portalEnabled is the org's portal kill switch. Every other portal route
       // honours it; this one didn't, so a saved document link kept minting fresh
       // presigned URLs after an owner had taken the portal down.
-      include: { deal: { select: { portalSlug: true, publishedToPortal: true, organization: { select: { portalEnabled: true } } } } },
+      include: { deal: { select: { portalSlug: true, publishedToPortal: true, organization: { select: { id: true, portalEnabled: true, isDemo: true } } } } },
     });
     if (
       !file ||
@@ -430,7 +450,7 @@ portalRouter.get(
       !file.deal ||
       file.deal.portalSlug !== req.params.slug ||
       !file.deal.publishedToPortal ||
-      !file.deal.organization?.portalEnabled
+      !portalOpenTo(file.deal.organization, req)
     ) {
       throw new HttpError(404, "Document not found");
     }
@@ -469,7 +489,7 @@ const leadSchema = z.object({
 portalRouter.post(
   "/:orgSlug/leads",
   asyncHandler(async (req, res) => {
-    const org = await orgBySlug(String(req.params.orgSlug));
+    const org = await orgBySlug(String(req.params.orgSlug), req);
     const ip = req.ip ?? "unknown";
     if (await portalRateLimited("portal-submit", ip)) throw new HttpError(429, "Too many submissions — please try again later");
     const lead = leadSchema.parse(req.body);
@@ -591,9 +611,9 @@ portalRouter.post(
 
     const deal = await prisma.deal.findUnique({
       where: { portalSlug: String(req.params.slug) },
-      select: { id: true, name: true, organizationId: true, publishedToPortal: true, relationshipOwnerId: true, organization: { select: { portalEnabled: true } } },
+      select: { id: true, name: true, organizationId: true, publishedToPortal: true, relationshipOwnerId: true, organization: { select: { id: true, portalEnabled: true, isDemo: true } } },
     });
-    if (!deal || !deal.publishedToPortal || !deal.organization?.portalEnabled || !deal.organizationId) {
+    if (!deal || !deal.publishedToPortal || !portalOpenTo(deal.organization, req) || !deal.organizationId) {
       throw new HttpError(404, "Offering not found");
     }
 

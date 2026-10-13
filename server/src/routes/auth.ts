@@ -16,7 +16,7 @@ import { normalizePhone } from "../domain/phone.js";
 import { sendEmail } from "../services/email.js";
 import { demoLoginConfig } from "../services/demo.js";
 import {
-  generateSecret, verifyTotp, otpauthUri, generateRecoveryCodes, hashRecoveryCode,
+  generateSecret, verifyTotp, matchTotpStep, otpauthUri, generateRecoveryCodes, hashRecoveryCode,
 } from "../domain/totp.js";
 import {
   getProvider, enabledProviders, buildAuthorizeUrl, exchangeCode, fetchProfile,
@@ -108,19 +108,63 @@ function revealTotpSecret(stored: string): string {
   try { return decryptSecret(stored); } catch { return stored; }
 }
 
-/** Verify a submitted 2FA value against the user's TOTP secret or recovery codes. */
-async function verifySecondFactor(user: { id: string; totpSecret: string | null; totpRecoveryCodes: string[] }, code: string): Promise<boolean> {
-  if (user.totpSecret && verifyTotp(revealTotpSecret(user.totpSecret), code)) return true;
-  // Recovery code: single-use — consume it on success.
-  const hash = hashRecoveryCode(code);
-  if (user.totpRecoveryCodes.includes(hash)) {
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { totpRecoveryCodes: user.totpRecoveryCodes.filter((h) => h !== hash) },
-    });
-    return true;
+/**
+ * Per-ACCOUNT ceiling on failed second-factor attempts. /login and /oauth/2fa
+ * are throttled per IP only, so someone holding the password (or a completed
+ * SSO pre-auth token) and many addresses could otherwise grind the 6-digit
+ * code space. Counted across every path that checks a second factor. In
+ * memory: the API runs as one instance; a restart only resets the window.
+ */
+const secondFactorFailures = new Map<string, { n: number; resetAt: number }>();
+
+function secondFactorLocked(userId: string, now = Date.now()): boolean {
+  const f = secondFactorFailures.get(userId);
+  if (f && f.resetAt <= now) secondFactorFailures.delete(userId);
+  return (secondFactorFailures.get(userId)?.n ?? 0) >= LOGIN_RATE_LIMIT.MAX_ATTEMPTS;
+}
+
+function recordSecondFactorFailure(userId: string, now = Date.now()): void {
+  const f = secondFactorFailures.get(userId);
+  if (!f || f.resetAt <= now) secondFactorFailures.set(userId, { n: 1, resetAt: now + LOGIN_RATE_LIMIT.WINDOW_MS });
+  else f.n++;
+  // Bounded: drop expired entries once the map grows.
+  if (secondFactorFailures.size > 10_000) {
+    for (const [k, v] of secondFactorFailures) if (v.resetAt <= now) secondFactorFailures.delete(k);
   }
-  return false;
+}
+
+/**
+ * Verify a submitted 2FA value against the user's TOTP secret or recovery codes.
+ * Both are single-use, claimed ATOMICALLY in the database: a TOTP code's time
+ * step must be later than the last one accepted (no replay within its ±30 s
+ * window), and a recovery code is removed with array_remove guarded by its
+ * presence — two parallel requests can't both spend one code, and spending one
+ * can't resurrect another (a read-modify-write of the array could).
+ */
+async function verifySecondFactor(user: { id: string; totpSecret: string | null; totpRecoveryCodes: string[] }, code: string): Promise<boolean> {
+  if (secondFactorLocked(user.id)) {
+    throw new HttpError(429, "Too many verification attempts for this account. Try again later.");
+  }
+  let ok = false;
+  const step = user.totpSecret ? matchTotpStep(revealTotpSecret(user.totpSecret), code) : null;
+  if (step !== null) {
+    const claimed = await prisma.user.updateMany({
+      where: { id: user.id, OR: [{ totpLastUsedStep: null }, { totpLastUsedStep: { lt: step } }] },
+      data: { totpLastUsedStep: step },
+    });
+    ok = claimed.count === 1;
+  } else {
+    const hash = hashRecoveryCode(code);
+    if (user.totpRecoveryCodes.includes(hash)) {
+      const removed = await prisma.$executeRaw`
+        UPDATE "User" SET "totpRecoveryCodes" = array_remove("totpRecoveryCodes", ${hash})
+         WHERE "id" = ${user.id} AND ${hash} = ANY("totpRecoveryCodes")`;
+      ok = removed === 1;
+    }
+  }
+  if (ok) secondFactorFailures.delete(user.id);
+  else recordSecondFactorFailure(user.id);
+  return ok;
 }
 
 const loginSchema = z.object({
@@ -515,18 +559,29 @@ authRouter.patch(
     const clash = await prisma.user.findFirst({ where: { email, NOT: { id: req.user!.id } } });
     if (clash) throw new HttpError(409, "Another account already uses that email");
 
-    const user = await prisma.user.update({
-      where: { id: req.user!.id },
-      data: {
-        firstName: data.firstName,
-        lastName: data.lastName,
-        phone: data.phone,
-        email,
-        name: `${data.firstName} ${data.lastName}`,
-        // NOTE: no passwordHash here — profile saves never change the password.
-      },
-      select: { id: true, name: true, email: true, role: true, firstName: true, lastName: true, phone: true },
-    });
+    // A NEW address is unproven until a reset link mailed to it is redeemed:
+    // clear the verified marker (SSO won't auto-link to it), and burn any
+    // outstanding reset links — they were mailed to the OLD address, and
+    // redeeming one would otherwise "prove" the new one.
+    const emailChanged = email !== existing.email.toLowerCase();
+    const [user] = await prisma.$transaction([
+      prisma.user.update({
+        where: { id: req.user!.id },
+        data: {
+          firstName: data.firstName,
+          lastName: data.lastName,
+          phone: data.phone,
+          email,
+          name: `${data.firstName} ${data.lastName}`,
+          ...(emailChanged ? { emailVerifiedAt: null } : {}),
+          // NOTE: no passwordHash here — profile saves never change the password.
+        },
+        select: { id: true, name: true, email: true, role: true, firstName: true, lastName: true, phone: true },
+      }),
+      ...(emailChanged
+        ? [prisma.passwordResetToken.updateMany({ where: { userId: req.user!.id, usedAt: null }, data: { usedAt: new Date() } })]
+        : []),
+    ]);
     res.json({ user });
   }),
 );
@@ -634,25 +689,35 @@ authRouter.post(
       .object({ token: z.string().min(1), password: z.string().min(8, "Password must be at least 8 characters") })
       .parse(req.body);
 
+    const invalid = () => new HttpError(400, "This reset link is invalid or has expired. Request a new one.");
     const row = await prisma.passwordResetToken.findUnique({ where: { tokenHash: sha256(token) } });
-    if (!row || row.usedAt || row.expiresAt < new Date()) {
-      throw new HttpError(400, "This reset link is invalid or has expired. Request a new one.");
-    }
-    await prisma.$transaction([
+    if (!row || row.usedAt || row.expiresAt < new Date()) throw invalid();
+    const passwordHash = await hashPassword(password);
+    await prisma.$transaction(async (tx) => {
+      // Claim the token FIRST, conditionally: two parallel redemptions of one
+      // link both pass the read above, but only one can flip usedAt from null —
+      // the other matches no row and its transaction rolls back untouched.
+      const now = new Date();
+      const claimed = await tx.passwordResetToken.updateMany({
+        where: { id: row.id, usedAt: null, expiresAt: { gt: now } },
+        data: { usedAt: now },
+      });
+      if (claimed.count !== 1) throw invalid();
       // sessionEpoch bump evicts every existing session: someone resetting a
       // forgotten password is exactly the case where an attacker may be holding
       // a live token. No re-issue here — the user signs in fresh afterwards.
-      prisma.user.update({
+      // Redeeming a link mailed to the account's address proves the address
+      // (email changes burn outstanding links, so it is still the current one).
+      await tx.user.update({
         where: { id: row.userId },
-        data: { passwordHash: await hashPassword(password), sessionEpoch: { increment: 1 } },
-      }),
-      prisma.passwordResetToken.update({ where: { id: row.id }, data: { usedAt: new Date() } }),
+        data: { passwordHash, sessionEpoch: { increment: 1 }, emailVerifiedAt: now },
+      });
       // Invalidate any other outstanding tokens for this user.
-      prisma.passwordResetToken.updateMany({
+      await tx.passwordResetToken.updateMany({
         where: { userId: row.userId, usedAt: null, id: { not: row.id } },
-        data: { usedAt: new Date() },
-      }),
-    ]);
+        data: { usedAt: now },
+      });
+    });
     res.json({ ok: true });
   }),
 );
@@ -718,10 +783,12 @@ authRouter.post(
     const user = await prisma.user.findUnique({ where: { id: req.user!.id }, select: { totpSecret: true, totpEnabled: true } });
     if (user?.totpEnabled) throw new HttpError(400, "Two-factor authentication is already enabled.");
     if (!user?.totpSecret) throw new HttpError(400, "Start setup first (no pending secret).");
-    if (!verifyTotp(revealTotpSecret(user.totpSecret), code)) throw new HttpError(400, "That code is incorrect or expired. Try the current code from your authenticator app.");
+    const step = matchTotpStep(revealTotpSecret(user.totpSecret), code);
+    if (step === null) throw new HttpError(400, "That code is incorrect or expired. Try the current code from your authenticator app.");
 
     const { codes, hashes } = generateRecoveryCodes();
-    await prisma.user.update({ where: { id: req.user!.id }, data: { totpEnabled: true, totpRecoveryCodes: hashes } });
+    // The enrollment code is spent: it can't be replayed for a sign-in.
+    await prisma.user.update({ where: { id: req.user!.id }, data: { totpEnabled: true, totpRecoveryCodes: hashes, totpLastUsedStep: step } });
     res.json({ enabled: true, recoveryCodes: codes });
   }),
 );
@@ -738,7 +805,7 @@ authRouter.post(
     if (!user?.totpEnabled) throw new HttpError(400, "Two-factor authentication is not enabled.");
     const ok = await verifySecondFactor(user, code);
     if (!ok) throw new HttpError(400, "Verification failed. Enter a current code or a recovery code.");
-    await prisma.user.update({ where: { id: req.user!.id }, data: { totpEnabled: false, totpSecret: null, totpRecoveryCodes: [] } });
+    await prisma.user.update({ where: { id: req.user!.id }, data: { totpEnabled: false, totpSecret: null, totpRecoveryCodes: [], totpLastUsedStep: null } });
     res.json({ enabled: false });
   }),
 );
@@ -801,7 +868,13 @@ authRouter.get(
     if (!provider) return fail("Sign-in provider not configured");
     const code = typeof req.query.code === "string" ? req.query.code : null;
     const state = typeof req.query.state === "string" ? req.query.state : null;
-    if (req.query.error) return fail(String(req.query.error));
+    // Never reflect the provider's raw `error` onto the login page: it is a
+    // third-party/attacker-controlled string (a crafted callback link would put
+    // any text there). Log it; show a fixed message.
+    if (req.query.error) {
+      console.warn(`[sso-callback] ${req.params.provider} returned error: ${String(req.query.error).slice(0, 200)}`);
+      return fail("The sign-in provider declined the request. Please try again.");
+    }
     if (!code || !state) return fail("Missing authorization code");
 
     // The nonce is single-use: clear it before doing anything else, so a
@@ -832,7 +905,8 @@ authRouter.get(
       const { accessToken, idClaims } = await exchangeCode(provider, code);
       profile = await fetchProfile(provider, accessToken, idClaims);
     } catch (e) {
-      return fail(e instanceof Error ? e.message : "Sign-in failed");
+      console.warn(`[sso-callback] ${provider.key} exchange failed: ${e instanceof Error ? e.message : e}`);
+      return fail("Sign-in failed. Please try again.");
     }
 
     // Resolve the user: existing OAuth link → existing email → brand-new account.
@@ -853,6 +927,14 @@ authRouter.get(
       }
       const byEmail = await prisma.user.findUnique({ where: { email: profile.email } });
       if (byEmail) {
+        // Auto-link only to an account whose address is PROVEN. Local emails
+        // are otherwise unverified: anyone could set theirs (or create a user)
+        // with someone else's address and wait — that person's first SSO
+        // sign-in would land in the attacker's account, which the attacker
+        // still holds the password to. Never linked, never auto-created here.
+        if (!byEmail.emailVerifiedAt) {
+          return fail("An account with this email already exists, but its address hasn't been confirmed yet. Sign in with your email and password — or use \"Forgot password\" once to confirm the address — and then you can use this sign-in option.");
+        }
         user = byEmail;
         await prisma.oAuthAccount.create({ data: { userId: byEmail.id, provider: provider.key, providerAccountId: profile.providerAccountId, email: profile.email } });
       } else {
@@ -878,6 +960,7 @@ authRouter.get(
             data: {
               name: profile.name ?? profile.email!,
               email: profile.email!,
+              emailVerifiedAt: new Date(), // the provider verified it (checked above)
               // No password login for SSO-provisioned accounts until they set one via reset.
               passwordHash: await hashPassword(crypto.randomBytes(32).toString("hex")),
               // Same rule as /register: the legacy account role is OWNER only

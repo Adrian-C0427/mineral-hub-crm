@@ -793,6 +793,7 @@ function emptyBox() {
 dealsRouter.get(
   "/:id/matches",
   requirePermission("viewDeals"),
+  requirePermission("viewBuyers"), // it returns the org's buyer roster
   asyncHandler(async (req: AuthedRequest, res) => {
     const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!deal) throw new HttpError(404, "Deal not found");

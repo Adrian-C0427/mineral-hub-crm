@@ -26,12 +26,30 @@ export interface SmsScope {
 
 export const normalizeTag = (t: string) => t.trim().toLowerCase().replace(/\s+/g, " ");
 
+/** A scope's lookup sets, built once per scope object (not once per contact). */
+type CompiledScope = { minerals: Set<string>; realEstate: Set<string>; pipelines: Set<string> };
+const compiled = new WeakMap<SmsScope, CompiledScope>();
+
+function compileScope(scope: SmsScope): CompiledScope {
+  let c = compiled.get(scope);
+  if (!c) {
+    c = {
+      minerals: new Set(scope.mineralTags.map(normalizeTag)),
+      realEstate: new Set(scope.realEstateTags.map(normalizeTag)),
+      pipelines: new Set(scope.mineralPipelineIds),
+    };
+    compiled.set(scope, c);
+  }
+  return c;
+}
+
 export function classifyContact(tags: readonly string[], pipelineIds: readonly string[], scope: SmsScope): BusinessLine {
+  // Callers classify thousands of contacts against one scope (up to 5000 tags a
+  // side): rebuilding its Sets per contact made one preview O(contacts × tags).
+  const { minerals, realEstate, pipelines } = compileScope(scope);
+  if (pipelineIds.some((id) => pipelines.has(id))) return "minerals";
   const have = new Set(tags.map(normalizeTag));
-  const minerals = new Set(scope.mineralTags.map(normalizeTag));
-  if (pipelineIds.some((id) => scope.mineralPipelineIds.includes(id))) return "minerals";
   for (const t of have) if (minerals.has(t)) return "minerals";
-  const realEstate = new Set(scope.realEstateTags.map(normalizeTag));
   for (const t of have) if (realEstate.has(t)) return "real_estate";
   return "unclassified";
 }

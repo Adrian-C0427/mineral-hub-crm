@@ -4,7 +4,7 @@ import { z } from "zod";
 import type { Prisma, ResearchDocClass, ResearchDocType, ResearchPermitStatus, WellTrajectory } from "@prisma/client";
 import { prisma, withDbRetry } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requirePermission, orgId, researchOrgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, hasPermission, orgId, researchOrgId, type AuthedRequest } from "../middleware/auth.js";
 import {
   autoGranularity, bucketKey, bucketRange, detectHotspot, historyWindows,
   normalizeEntity, rollingAverage, splitAbstracts, splitParties, surgeSeverity, trend, type Trend,
@@ -1061,6 +1061,10 @@ researchRouter.post(
         mergeIntoBuyerId: z.string().optional(),
       })).min(1).max(500),
     }).parse(req.body);
+    // Creating takes createBuyers (the route gate); merging EDITS an existing buyer.
+    if (decisions.some((d) => d.action === "merge") && !hasPermission(req, "editBuyers")) {
+      throw new HttpError(403, "You do not have permission to edit buyers");
+    }
 
     const byKey = await docsByGrantee(researchOrgId(req), decisions.map((d) => d.key));
     // Ensure this org's "Research Imported" tag exists (tags are per-org).

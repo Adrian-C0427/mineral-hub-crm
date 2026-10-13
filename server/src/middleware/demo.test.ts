@@ -27,7 +27,7 @@ describe("demo guard policy", () => {
     expect(blocked("POST", "/api/research/buyers/preview")).toBe(false);
     expect(blocked("POST", "/api/research/relationships/transactions")).toBe(false);
     expect(blocked("POST", "/api/auth/logout")).toBe(false);
-    expect(blocked("PUT", "/api/auth/preferences")).toBe(false);
+    expect(blocked("PATCH", "/api/auth/preferences")).toBe(false);
     expect(blocked("DELETE", "/api/notifications/n1")).toBe(false);
   });
 

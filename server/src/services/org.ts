@@ -187,13 +187,30 @@ export async function resolveJoinToken(
   return { organizationId: invite.organizationId, inviteCodeId: invite.id, role };
 }
 
-/** Increment usage after a successful join. */
+/**
+ * Claim one use of an invite after a successful join — atomically. The cap is
+ * re-checked IN the increment (not only in resolveJoinToken, a separate read),
+ * so two sign-ups racing on a single-use code can't both get in: the loser's
+ * update matches no row and its throw rolls back its whole join transaction.
+ */
 export async function consumeInvite(
   inviteCodeId: string | null,
   tx: Prisma.TransactionClient | typeof prisma = prisma,
 ): Promise<void> {
   if (!inviteCodeId) return;
-  await tx.inviteCode.update({ where: { id: inviteCodeId }, data: { uses: { increment: 1 } } });
+  const claimed = await tx.inviteCode.updateMany({
+    where: {
+      id: inviteCodeId,
+      active: true,
+      OR: [
+        { reusable: false, uses: { lt: 1 } },
+        { reusable: true, maxUses: null },
+        { reusable: true, uses: { lt: tx.inviteCode.fields.maxUses } },
+      ],
+    },
+    data: { uses: { increment: 1 } },
+  });
+  if (claimed.count !== 1) throw new HttpError(400, "That invite code has already been used");
 }
 
 /**

@@ -243,7 +243,7 @@ pipelineStagesRouter.patch(
       where: { id: stage.id },
       data: { ...(label !== undefined ? { label } : {}), ...(color !== undefined ? { color } : {}) },
     });
-    const out = await prisma.pipelineStage.findMany({ where: { pipelineId: stage.pipelineId }, orderBy: { position: "asc" } });
+    const out = await prisma.pipelineStage.findMany({ where: { organizationId: orgId(req), pipelineId: stage.pipelineId }, orderBy: { position: "asc" } });
     res.json(out.map(serialize));
   }),
 );

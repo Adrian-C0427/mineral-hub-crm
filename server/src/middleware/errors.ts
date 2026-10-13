@@ -40,6 +40,16 @@ export function errorHandler(err: unknown, _req: Request, res: Response, _next: 
     res.status(403).json({ error: "This app's address isn't allowed to call the API (CORS). Check the server's CORS_ORIGINS setting." });
     return;
   }
+  // multer rejects an upload over its limits (file size, field count/size,
+  // parts) with a MulterError that carries a code but no status, so it used to
+  // fall through to the 500 branch — a client mistake reported as a fault.
+  if (err instanceof Error && err.name === "MulterError") {
+    const code = (err as { code?: string }).code;
+    res.status(code === "LIMIT_FILE_SIZE" ? 413 : 400).json({
+      error: code === "LIMIT_FILE_SIZE" ? "That file is too large to upload." : "The upload could not be read: too many or too large form fields.",
+    });
+    return;
+  }
   // body-parser (express.json) signals a rejected payload — over the size limit,
   // or malformed JSON — by throwing an Error that carries an HTTP status instead
   // of extending HttpError. Those fell through to the 500 branch below, so a

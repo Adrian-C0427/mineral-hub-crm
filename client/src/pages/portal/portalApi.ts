@@ -1,6 +1,8 @@
-// Public portal fetch helpers — no auth token, no session. Uses the same
-// VITE_API_BASE the app client uses so dev proxy and Railway both work.
-import { API_BASE } from "../../api/client";
+// Public portal fetch helpers. Uses the same VITE_API_BASE the app client uses
+// so dev proxy and Railway both work. Buyers have no session; a signed-in CRM
+// user's token rides along only so the API can recognise a DEMO session — the
+// demo workspace's portal answers demo sessions alone (server routes/portal.ts).
+import { API_BASE, getAuthToken } from "../../api/client";
 
 export interface PortalContact {
   id: string; name: string; title: string | null; email: string | null;
@@ -50,8 +52,16 @@ export function visitorId(): string {
   } catch { return "anon-no-storage"; }
 }
 
+/** Headers for every portal request: the visitor id, plus the session token when there is one. */
+export function portalHeaders(base?: Record<string, string>): Record<string, string> {
+  const h: Record<string, string> = { ...(base ?? {}), "x-mh-visitor": visitorId() };
+  const t = getAuthToken();
+  if (t) h.Authorization = `Bearer ${t}`;
+  return h;
+}
+
 export async function portalGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}/api/portal${path}`, { headers: { "x-mh-visitor": visitorId() } });
+  const res = await fetch(`${API_BASE}/api/portal${path}`, { headers: portalHeaders() });
   if (!res.ok) {
     const body = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(body.error ?? `Request failed (${res.status})`);
@@ -61,7 +71,7 @@ export async function portalGet<T>(path: string): Promise<T> {
 
 export async function portalPost<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}/api/portal${path}`, {
-    method: "POST", headers: { "Content-Type": "application/json", "x-mh-visitor": visitorId() }, body: JSON.stringify(body),
+    method: "POST", headers: portalHeaders({ "Content-Type": "application/json" }), body: JSON.stringify(body),
   });
   if (!res.ok) {
     const data = (await res.json().catch(() => ({}))) as { error?: string };

@@ -41,7 +41,7 @@ const detailInclude = {
 
 /** Full `Opp` payload. History/activity rows store bare user ids, so the
  *  names are resolved in one lookup. Cross-org ids read as 404. */
-async function loadOpportunity(tx: Tx, organizationId: string, id: string) {
+async function loadOpportunity(tx: Tx, organizationId: string, id: string, req: AuthedRequest) {
   const o = await tx.opportunity.findFirst({ where: { id, organizationId }, include: detailInclude });
   if (!o) throw new HttpError(404, "Opportunity not found");
   const userIds = new Set<string>();
@@ -51,11 +51,15 @@ async function loadOpportunity(tx: Tx, organizationId: string, id: string) {
     ? await tx.user.findMany({ where: { id: { in: [...userIds] } }, select: { id: true, name: true } })
     : [];
   const byId = new Map(users.map((u) => [u.id, u]));
-  return serializeOpportunity({
+  const out = serializeOpportunity({
     ...o,
     stageHistory: o.stageHistory.map((h) => ({ ...h, changedBy: h.changedByUserId ? byId.get(h.changedByUserId) ?? null : null })),
     activities: o.activities.map((a) => ({ ...a, createdBy: a.createdByUserId ? byId.get(a.createdByUserId) ?? null : null })),
   });
+  // The LINKED Contact record's phone/email are contact data: shown only to
+  // callers who may view contacts (the opportunity's own fields are its own).
+  if (out.contact && !hasPermission(req, "viewContacts")) out.contact = { ...out.contact, phone: null, email: null };
+  return out;
 }
 
 /** The caller's opportunity (summary row) or 404. */
@@ -238,7 +242,7 @@ opportunitiesRouter.get(
   "/:id",
   requirePermission("viewDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    res.json(await loadOpportunity(prisma, orgId(req), req.params.id));
+    res.json(await loadOpportunity(prisma, orgId(req), req.params.id, req));
   }),
 );
 
@@ -275,7 +279,7 @@ opportunitiesRouter.post(
       await tx.opportunityStageHistory.create({ data: { opportunityId: o.id, fromStage: "", toStage: stage, changedByUserId: req.user!.id } });
       return o;
     });
-    res.status(201).json(await loadOpportunity(prisma, org, created.id));
+    res.status(201).json(await loadOpportunity(prisma, org, created.id, req));
   }),
 );
 
@@ -294,7 +298,7 @@ opportunitiesRouter.patch(
     if (data.name !== undefined) patch.name = data.name;
     if (data.nextFollowUpDate !== undefined) patch.nextFollowUpDate = toDay(data.nextFollowUpDate);
     await prisma.opportunity.update({ where: { id: o.id }, data: patch });
-    res.json(await loadOpportunity(prisma, org, o.id));
+    res.json(await loadOpportunity(prisma, org, o.id, req));
   }),
 );
 
@@ -329,7 +333,7 @@ opportunitiesRouter.post(
     const target = stages.find((s) => s.key === toStage);
     if (!target) throw new HttpError(400, "Unknown pipeline stage");
     if (toStage === o.stage) {
-      res.json(await loadOpportunity(prisma, org, o.id));
+      res.json(await loadOpportunity(prisma, org, o.id, req));
       return;
     }
     // Landing on the AUTO-convert stage creates a Deal: same gate as POST /deals.
@@ -366,7 +370,7 @@ opportunitiesRouter.post(
         await convertInTx(tx, { organizationId: org, user, opportunityId: o.id });
       }
     });
-    res.json(await loadOpportunity(prisma, org, o.id));
+    res.json(await loadOpportunity(prisma, org, o.id, req));
   }),
 );
 
@@ -385,7 +389,7 @@ opportunitiesRouter.post(
     if (o.convertedDealId) throw new HttpError(409, "This opportunity has already been converted to a deal");
     const user = { id: req.user!.id, name: req.user!.name };
     const dealId = await prisma.$transaction((tx) => convertInTx(tx, { organizationId: org, user, opportunityId: o.id, targetPipelineId: pipelineId }));
-    res.json({ opportunity: await loadOpportunity(prisma, org, o.id), deal: await dealDetail(org, dealId) });
+    res.json({ opportunity: await loadOpportunity(prisma, org, o.id, req), deal: await dealDetail(org, dealId) });
   }),
 );
 
