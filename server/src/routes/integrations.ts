@@ -52,6 +52,12 @@ integrationsRouter.use(requireAuth, requireOrg, requirePermission("manageApiInte
 // HighLevel / SMS performance is for live workspaces only: the demo neither lists
 // it nor reaches any of its routes (/highlevel/* and /:provider/* for highlevel).
 integrationsRouter.use("/highlevel", forbidDemo(DEMO_MESSAGES.LIVE_ONLY));
+// The mount above matches the RAW path, but :provider is decoded — so
+// /%68ighlevel/... would slip past it into the /:provider/* routes. Check the
+// decoded value too.
+const forbidDemoLiveOnly = forbidDemo(DEMO_MESSAGES.LIVE_ONLY);
+integrationsRouter.param("provider", (req, res, next, provider: string) =>
+  (String(provider).toLowerCase() === HIGHLEVEL ? forbidDemoLiveOnly(req as AuthedRequest, res, next) : next()));
 
 // connect/test/sync trigger outbound requests to third parties — cap how fast an
 // admin (or a stolen admin session) can fire them. Read routes are unaffected.
