@@ -38,11 +38,14 @@ import { PERMISSIONS } from "../domain/permissions.js";
 const ORG = "org_main";
 const LOC = "locMock000000000001";
 
+/** Set per test: call as the demo workspace's owner instead of a live one. */
+let asDemo = false;
+
 function asOwner(req: AuthedRequest, _res: express.Response, next: express.NextFunction) {
   req.user = {
     id: "u1", role: "OWNER", name: "Owner", email: "owner@local.test", firstName: null, lastName: null, phone: null,
     organizationId: ORG, orgRole: "OWNER", permissions: [...PERMISSIONS], mustChangePassword: false,
-    isDemo: false, referenceOrgId: null,
+    isDemo: asDemo, referenceOrgId: null,
   };
   next();
 }
@@ -71,6 +74,7 @@ const row = (config: Record<string, unknown>, status = "CONNECTED") => ({
 });
 
 beforeEach(() => {
+  asDemo = false;
   for (const k of Object.keys(db.calls)) delete db.calls[k];
   for (const k of Object.keys(db.results)) delete db.results[k];
   hl.check.mockReset();
@@ -411,5 +415,25 @@ describe("Minerals filter options and preview", () => {
     db.results["integration.findMany"] = [row({ locationId: LOC, hlPipelines: PIPES, hlTags: ["x"], locationTimezone: "America/Chicago", hlSync: { phase: "live" } })];
     const card = (await call("GET", "/")).body.find((p: { key: string }) => p.key === "highlevel");
     expect(card.config).toEqual({ locationId: LOC, locationTimezone: "America/Chicago" });
+  });
+});
+
+describe("HighLevel is for live workspaces only", () => {
+  it("the demo workspace doesn't see it in the list and can't reach any of its routes", async () => {
+    db.results["integration.findMany"] = [];
+    const live = await call("GET", "/");
+    expect(live.body.map((p: { key: string }) => p.key)).toContain("highlevel");
+    asDemo = true;
+    const demo = await call("GET", "/");
+    expect(demo.status).toBe(200);
+    expect(demo.body.map((p: { key: string }) => p.key)).not.toContain("highlevel");
+    expect(demo.body.length).toBe(live.body.length - 1);
+    for (const [method, path] of [["GET", "/highlevel/status"], ["GET", "/highlevel/scope"], ["POST", "/highlevel/scope-preview"], ["GET", "/highlevel/oauth/start"]] as const) {
+      const res = await call(method, path, method === "POST" ? { scope: { mineralTags: [], realEstateTags: [], mineralPipelineIds: [] } } : undefined);
+      expect(res.status, path).toBe(403);
+      expect(res.body, path).toMatchObject({ demo: true });
+      // Reads get the live-only answer; writes are already refused by the demo's read-only lock.
+      if (method === "GET") expect(res.body.error, path).toBe("SMS performance and HighLevel are available in live workspaces only.");
+    }
   });
 });
