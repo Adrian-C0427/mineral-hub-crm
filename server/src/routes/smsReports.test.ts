@@ -143,7 +143,7 @@ describe("GET /api/reports/sms/status", () => {
     for (const path of ["/status", "/filters", "", "/contacts?set=reached", "/contacts/c1/messages"]) {
       const res = await call(DEMO_OWNER, `/api/reports/sms${path}`);
       expect(res.status, path).toBe(403);
-      expect(res.body).toMatchObject({ error: "SMS performance is available in live workspaces only.", demo: true });
+      expect(res.body).toMatchObject({ error: "SMS performance and HighLevel are available in live workspaces only.", demo: true });
     }
     expect(db.raw).toHaveLength(0);
     expect(Object.keys(db.calls)).toHaveLength(0);

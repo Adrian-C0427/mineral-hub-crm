@@ -22,7 +22,7 @@ import { prisma } from "../db.js";
 import type { Integration } from "@prisma/client";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
-import { demoReadOnly, forbidDemo } from "../middleware/demo.js";
+import { demoReadOnly, forbidDemo, DEMO_MESSAGES } from "../middleware/demo.js";
 import { INTEGRATION_CATALOG, providerByKey } from "../domain/integrationCatalog.js";
 import { validateSecret, validateEnvProvider, envConfigured } from "../services/integrationProviders.js";
 import { encryptSecret, secretHint } from "../services/secrets.js";
@@ -49,6 +49,9 @@ import { scopeSettings, textedPeople, countLines } from "../services/highlevel/s
 
 export const integrationsRouter = Router();
 integrationsRouter.use(requireAuth, requireOrg, requirePermission("manageApiIntegrations"), demoReadOnly());
+// HighLevel / SMS performance is for live workspaces only: the demo neither lists
+// it nor reaches any of its routes (/highlevel/* and /:provider/* for highlevel).
+integrationsRouter.use("/highlevel", forbidDemo(DEMO_MESSAGES.LIVE_ONLY));
 
 // connect/test/sync trigger outbound requests to third parties — cap how fast an
 // admin (or a stolen admin session) can fire them. Read routes are unaffected.
@@ -136,7 +139,8 @@ integrationsRouter.get(
   asyncHandler(async (req: AuthedRequest, res) => {
     const rows = await prisma.integration.findMany({ where: { organizationId: orgId(req) } });
     const byProvider = new Map(rows.map((r) => [r.provider, r]));
-    res.json(INTEGRATION_CATALOG.map((def) => serialize(def, byProvider.get(def.key) ?? null)));
+    const catalog = req.user?.isDemo ? INTEGRATION_CATALOG.filter((def) => def.key !== HIGHLEVEL) : INTEGRATION_CATALOG;
+    res.json(catalog.map((def) => serialize(def, byProvider.get(def.key) ?? null)));
   }),
 );
 
