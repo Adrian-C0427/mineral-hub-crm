@@ -38,6 +38,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, hasPermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { forbidDemo, DEMO_MESSAGES } from "../middleware/demo.js";
 import {
   DELIVERED_STATUSES, FAILED_STATUSES, HEALTH_FAILURE_WARN, HEALTH_MIN_TEXTS, HEALTH_OPT_OUT_WARN, PENDING_STATUSES, TOUCH_BUCKETS,
   touchRates, isDeliveredStatus, isFailedStatus, isPendingStatus, type SmsOutcome, type TouchOutcomeCount,
@@ -56,7 +57,8 @@ import {
 } from "../domain/smsReport.js";
 
 export const smsReportsRouter = Router();
-smsReportsRouter.use(requireAuth, requireOrg, requirePermission("viewReports"));
+// Live workspaces only: the demo workspace has no texting history and doesn't show the tab.
+smsReportsRouter.use(requireAuth, requireOrg, requirePermission("viewReports"), forbidDemo(DEMO_MESSAGES.LIVE_ONLY));
 // One report load runs ~12 aggregate queries over the org's message history in
 // parallel; any viewReports user (VIEWER included) could otherwise loop it and
 // drain the shared connection pool for every tenant. Keyed on the user, like

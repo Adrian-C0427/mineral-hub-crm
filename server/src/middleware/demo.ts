@@ -36,6 +36,7 @@ const SETTINGS_MESSAGE = "This setting is locked in the demo workspace.";
 const UPLOAD_MESSAGE = "Uploading and importing files is turned off in the demo workspace.";
 const REFERENCE_MESSAGE = "Research and map data are read-only in the demo workspace.";
 const AI_MESSAGE = "AI drafting is turned off in the demo workspace.";
+const LIVE_ONLY_MESSAGE = "SMS performance is available in live workspaces only.";
 const DEFAULT_MESSAGE = "This action is turned off in the demo workspace.";
 
 /**
@@ -234,4 +235,4 @@ export function forbidDemo(message: string = SETTINGS_MESSAGE) {
   };
 }
 
-export const DEMO_MESSAGES = { SETTINGS: SETTINGS_MESSAGE, UPLOAD: UPLOAD_MESSAGE, AI: AI_MESSAGE } as const;
+export const DEMO_MESSAGES = { SETTINGS: SETTINGS_MESSAGE, UPLOAD: UPLOAD_MESSAGE, AI: AI_MESSAGE, LIVE_ONLY: LIVE_ONLY_MESSAGE } as const;

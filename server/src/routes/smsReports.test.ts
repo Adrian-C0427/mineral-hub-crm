@@ -45,18 +45,19 @@ import { errorHandler } from "../middleware/errors.js";
 import type { AuthedRequest } from "../middleware/auth.js";
 import type { OrgRole, Permission } from "../domain/permissions.js";
 
-type Caller = { orgRole: OrgRole; permissions: Permission[] };
+type Caller = { orgRole: OrgRole; permissions: Permission[]; isDemo?: boolean };
 const OWNER: Caller = { orgRole: "OWNER", permissions: [] };
 const VIEWER: Caller = { orgRole: "VIEWER", permissions: ["viewReports", "viewContacts"] };
 const REPORTS_ONLY: Caller = { orgRole: "MEMBER", permissions: ["viewReports"] };
 const NO_REPORTS: Caller = { orgRole: "MEMBER", permissions: ["viewContacts"] };
+const DEMO_OWNER: Caller = { orgRole: "OWNER", permissions: [], isDemo: true };
 
 async function call(caller: Caller, path: string) {
   const app = express();
   app.use((req: AuthedRequest, _res, next) => {
     req.user = {
       id: "u_1", role: "ASSOCIATE", name: "Test", email: "t@local.test", firstName: null, lastName: null, phone: null,
-      organizationId: "org_a", orgRole: caller.orgRole, permissions: caller.permissions, mustChangePassword: false, isDemo: false, referenceOrgId: null,
+      organizationId: "org_a", orgRole: caller.orgRole, permissions: caller.permissions, mustChangePassword: false, isDemo: caller.isDemo ?? false, referenceOrgId: null,
     };
     next();
   });
@@ -135,6 +136,17 @@ describe("GET /api/reports/sms/status", () => {
 
   it("needs viewReports", async () => {
     expect((await call(NO_REPORTS, "/api/reports/sms/status")).status).toBe(403);
+  });
+
+  it("is for live workspaces only: the demo workspace gets nothing, and nothing is queried", async () => {
+    db.results["integration.findUnique"] = CONNECTED;
+    for (const path of ["/status", "/filters", "", "/contacts?set=reached", "/contacts/c1/messages"]) {
+      const res = await call(DEMO_OWNER, `/api/reports/sms${path}`);
+      expect(res.status, path).toBe(403);
+      expect(res.body).toMatchObject({ error: "SMS performance is available in live workspaces only.", demo: true });
+    }
+    expect(db.raw).toHaveLength(0);
+    expect(Object.keys(db.calls)).toHaveLength(0);
   });
 });
 

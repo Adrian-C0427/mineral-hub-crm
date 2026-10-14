@@ -208,8 +208,10 @@ export function Reports() {
   // like it too (a dark mark on this dark-theme card was invisible).
   const brandLogo = useBrandLogo(user?.organization, "full");
   // Which report: Deals (default) or SMS performance — in the URL (?view=sms) so it's linkable.
+  // SMS performance is for live workspaces only: the demo workspace never shows it.
+  const smsAvailable = !user?.organization?.isDemo;
   const [params, setParams] = useSearchParams();
-  const view: "deals" | "sms" = params.get("view") === "sms" ? "sms" : "deals";
+  const view: "deals" | "sms" = smsAvailable && params.get("view") === "sms" ? "sms" : "deals";
   const setView = (v: "deals" | "sms") => setParams((p) => {
     const next = new URLSearchParams(p);
     if (v === "sms") next.set("view", "sms"); else next.delete("view");
@@ -386,11 +388,13 @@ export function Reports() {
         </div>
       </div>
 
-      <Tabs
-        tabs={[{ key: "deals" as const, label: "Deals" }, { key: "sms" as const, label: "SMS performance" }]}
-        active={view}
-        onSelect={setView}
-      />
+      {smsAvailable && (
+        <Tabs
+          tabs={[{ key: "deals" as const, label: "Deals" }, { key: "sms" as const, label: "SMS performance" }]}
+          active={view}
+          onSelect={setView}
+        />
+      )}
 
       {period === "CUSTOM" && (
         <div className="rp-custom">
