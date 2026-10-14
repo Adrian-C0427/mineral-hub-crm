@@ -436,4 +436,16 @@ describe("HighLevel is for live workspaces only", () => {
       if (method === "GET") expect(res.body.error, path).toBe("SMS performance and HighLevel are available in live workspaces only.");
     }
   });
+
+  it("an encoded spelling of /highlevel doesn't get past the demo lock on /:provider routes", async () => {
+    asDemo = true;
+    for (const path of ["/%68ighlevel/oauth/start", "/%48igh%4cevel/oauth/start"]) {
+      const res = await call("GET", path);
+      expect(res.status, path).toBe(403);
+      expect(res.body, path).toMatchObject({ demo: true, error: "SMS performance and HighLevel are available in live workspaces only." });
+    }
+    // Other providers' /:provider routes still answer the demo normally (oauth/start has its own lock).
+    const other = await call("GET", "/%67oogle/oauth/start");
+    expect(other.body.error).not.toBe("SMS performance and HighLevel are available in live workspaces only.");
+  });
 });
