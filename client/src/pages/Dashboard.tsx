@@ -97,8 +97,9 @@ interface DashboardData {
     month: string; isCurrent: boolean; profit: number; projected: number;
     /** Profit at asking price for the bucket's no-offer deals (optional: older API). */
     atAsk?: number;
-    /** The deals behind the bar — closed in (or scheduled to close in) the bucket. */
-    deals?: { id: string; name: string; stage: string; kind: "closed" | "projected" | "atAsk"; amount: number | null; profit: number; date: string }[];
+    /** The deals behind the bar — closed in (or scheduled to close in) the bucket.
+     *  `extended`: `date` is the Extended closing of an explicitly extended deal. */
+    deals?: { id: string; name: string; stage: string; kind: "closed" | "projected" | "atAsk"; amount: number | null; profit: number; date: string; extended?: boolean }[];
   }[];
   /** Real historical series for the KPI sparklines (optional: older API). */
   trends?: { activeDealsWeekly: number[]; avgProfitPerDeal: number[]; closedWeekly: number[]; offersWeekly: number[] };
@@ -798,7 +799,9 @@ export function Dashboard() {
               <StageBadge stage={x.stage} />
             </div>
             <div className="drill-row-meta">
-              <span className="muted">{fmtDate(x.date)}</span>
+              <span className="muted" title={x.extended ? "Extended closing — this deal's closing was extended" : undefined}>
+                {fmtDate(x.date)}{x.extended ? " · extended" : ""}
+              </span>
               {x.amount != null && <span>{money(x.amount)}</span>}
               <span className={`drill-profit ${x.profit >= 0 ? "pos" : "neg"}`}>{money(x.profit)}</span>
             </div>
@@ -831,8 +834,8 @@ export function Dashboard() {
           </div>
         </div>
         {group("Closed this month", "Realized — keyed on the Contract Timeline's Closing date; profit uses the accepted offer.", closed)}
-        {group("Scheduled to close", "Projected — active deals with an offer whose anticipated closing lands in this month.", projected)}
-        {group("At asking price", "Active deals with no offer yet — profit if sold at the asking price", atAsking)}
+        {group("Scheduled to close", "Projected — active deals with an offer whose Closing date (Extended closing once extended) lands in this month.", projected)}
+        {group("At asking price", "Active deals with no offer yet — profit if sold at the asking price, by the same closing date", atAsking)}
       </Modal>
     );
   })();

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { dashboardWindow, windowBuckets, profitAtAskSeries } from "./dashboard.js";
+import { dashboardWindow, windowBuckets, profitAtAskSeries, projectedProfitSeries } from "./dashboard.js";
+import { closingIsExtended, profitClosingDate } from "../domain/dates.js";
 
 const NOW = new Date("2026-07-15T18:00:00Z");
 
@@ -107,5 +108,67 @@ describe("profitAtAskSeries", () => {
     ], (d) => d.closing, bucketIdx);
     expect(s.total).toBe(20000 - 11000);
     expect(s.byBucket.get(4)).toBe(9000);
+  });
+});
+
+describe("projected and at-asking series — closing month", () => {
+  const buckets = windowBuckets(dashboardWindow("YTD", NOW), NOW);
+  const bucketIdx = (dt: Date) => buckets.findIndex((b) => dt.getUTCFullYear() === b.y && dt.getUTCMonth() === b.m);
+  const day = (s: string) => new Date(`${s}T00:00:00Z`);
+  // The same closing rule the route passes to both series.
+  type D = ReturnType<typeof deal>;
+  const closingOf = (d: D) => profitClosingDate(d);
+  const extendedOf = (d: D) => closingIsExtended(d);
+  // Closing Mar 25: the auto Extended closing (Closing + 15) is Apr 9.
+  const deal = (o: { id: string; offers?: number[]; ask?: number | null; closing?: string | null; override?: string | null; extensions?: number }) => ({
+    id: o.id, name: o.id, stage: "ACTIVE", askPrice: o.ask ?? 150000, ourPrice: 100000, estimatedClosingCosts: null,
+    offers: (o.offers ?? []).map((amount): { id?: string; amount: number } => ({ amount })), selectedOfferId: null as string | null,
+    dateUnderContract: null, originalClosingDate: o.closing === undefined ? day("2026-03-25") : o.closing ? day(o.closing) : null,
+    findBuyerByDateOverride: null, finalClosingDateOverride: o.override ? day(o.override) : null, daysToClose: null,
+    extensionCount: o.extensions ?? 0,
+  });
+  const months = (s: { bucketDeals: { i: number; entry: { id: string } }[] }) => Object.fromEntries(s.bucketDeals.map((x) => [x.entry.id, buckets[x.i].label]));
+
+  it("keeps unextended deals in their Closing month in both series, even with a stored Extended closing", () => {
+    const deals = [
+      deal({ id: "proj", offers: [130000] }),
+      deal({ id: "ask" }),
+      deal({ id: "projStored", offers: [130000], override: "2026-04-09" }),
+      deal({ id: "askStored", override: "2026-04-09" }),
+    ];
+    expect(months(projectedProfitSeries(deals, closingOf, bucketIdx, extendedOf))).toEqual({ proj: "Mar", projStored: "Mar" });
+    expect(months(profitAtAskSeries(deals, closingOf, bucketIdx, extendedOf))).toEqual({ ask: "Mar", askStored: "Mar" });
+  });
+
+  it("moves explicitly extended deals to their Extended closing month in both series and flags them", () => {
+    const deals = [deal({ id: "proj", offers: [130000], override: "2026-04-24", extensions: 1 }), deal({ id: "ask", override: "2026-04-24", extensions: 1 })];
+    const proj = projectedProfitSeries(deals, closingOf, bucketIdx, extendedOf);
+    const ask = profitAtAskSeries(deals, closingOf, bucketIdx, extendedOf);
+    expect(months(proj)).toEqual({ proj: "Apr" });
+    expect(months(ask)).toEqual({ ask: "Apr" });
+    expect(proj.bucketDeals[0].entry).toMatchObject({ date: "2026-04-24", extended: true, kind: "projected", profit: 30000 });
+    expect(ask.bucketDeals[0].entry).toMatchObject({ date: "2026-04-24", extended: true, kind: "atAsk", profit: 50000 });
+  });
+
+  it("re-buckets as soon as the extension status or a date changes", () => {
+    const before = deal({ id: "d", offers: [130000] });
+    const extended = { ...before, finalClosingDateOverride: day("2026-04-24"), extensionCount: 1 };
+    const reExtended = { ...extended, finalClosingDateOverride: day("2026-05-09"), extensionCount: 2 };
+    const closingEdited = { ...before, originalClosingDate: day("2026-06-03") };
+    for (const [d, m] of [[before, "Mar"], [extended, "Apr"], [reExtended, "May"], [closingEdited, "Jun"]] as const) {
+      expect(months(projectedProfitSeries([d], closingOf, bucketIdx, extendedOf))).toEqual({ d: m });
+    }
+    expect(projectedProfitSeries([before], closingOf, bucketIdx, extendedOf).bucketDeals[0].entry.extended).toBeUndefined();
+  });
+
+  it("projected totals match the KPI population: accepted offer wins, every offered deal counts, dated or not", () => {
+    const s = projectedProfitSeries([
+      { ...deal({ id: "acc", offers: [] }), offers: [{ id: "o1", amount: 120000 }, { id: "o2", amount: 140000 }], selectedOfferId: "o1" },
+      deal({ id: "best", offers: [110000, 125000] }),
+      deal({ id: "undated", offers: [105000], closing: null }),
+      deal({ id: "noOffer" }),
+    ], closingOf, bucketIdx, extendedOf);
+    expect(s.total).toBe(20000 + 25000 + 5000);
+    expect(s.byBucket.get(2)).toBe(45000); // March: acc + best; undated is in the total only
   });
 });

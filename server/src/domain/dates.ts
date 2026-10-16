@@ -8,6 +8,8 @@ import { DEADLINE_RULES } from "../config.js";
  *                  Without a stored Days to Close, the window is read from
  *                  Original Closing − Date Under Contract; failing that, 30.
  * Final Closing  = Original Closing    + 15 calendar days  (override wins)
+ * Profit month   = Original Closing, or Final Closing ONLY once extended
+ *                  (profitClosingDate / closingIsExtended)
  *
  * Every consumer (priority calc, banners, tables, cards, reports) MUST call
  * resolveDealDates — never reimplement this math anywhere else.
@@ -94,6 +96,36 @@ export function nextContractExtension(deal: DealDateInputs): { fromDate: Date; t
   const { finalClosingDate } = resolveDealDates(deal);
   if (!finalClosingDate) return null;
   return { fromDate: finalClosingDate, toDate: addCalendarDays(finalClosingDate, CONTRACT_EXTENSION_DAYS), days: CONTRACT_EXTENSION_DAYS };
+}
+
+/** What decides which closing date a deal's projected / at-asking profit lands on. */
+export interface ProfitClosingInputs extends DealDateInputs {
+  /** The deal's DealContractExtension rows — written ONLY by Extend Closing. */
+  extensionCount: number;
+}
+
+/**
+ * The deal's persisted extension status: the user ran Extend Closing on the
+ * Deal page (a DealContractExtension row exists) and the extended date it
+ * stored (finalClosingDateOverride) still stands. Having an Extended closing
+ * date is NOT evidence of an extension — resolveDealDates derives Closing +
+ * 15 days for every dated deal, and an override with no Extend record (a
+ * hand-set date from before the button existed, or an API write) was never
+ * an extension either.
+ */
+export function closingIsExtended(deal: Pick<ProfitClosingInputs, "finalClosingDateOverride" | "extensionCount">): boolean {
+  return deal.extensionCount > 0 && deal.finalClosingDateOverride != null;
+}
+
+/**
+ * The closing date a deal's projected profit and profit at asking price are
+ * attributed to: the Extended closing ONLY once the closing was explicitly
+ * extended (closingIsExtended), otherwise the Closing date exactly as entered.
+ * The Closing date itself is never changed by an extension. Null when the
+ * deal has no date to attribute to.
+ */
+export function profitClosingDate(deal: ProfitClosingInputs): Date | null {
+  return closingIsExtended(deal) ? resolveDealDates(deal).finalClosingDate : deal.originalClosingDate;
 }
 
 /** "Oct 31, 2026" — the UTC calendar day, for pre-rendered strings such as
