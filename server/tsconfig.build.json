@@ -1,0 +1,8 @@
+{
+  // Production build (Railway): the app only. Test files are type-checked by
+  // tsconfig.json (editor / `tsc --noEmit -p .`) and run by vitest, which is a
+  // root workspace devDependency — so the API's isolated Railway install never
+  // pulls test tooling (npm 9 crashes resolving vitest/vite optional peers).
+  "extends": "./tsconfig.json",
+  "exclude": ["node_modules", "dist", "src/**/*.test.ts"]
+}

@@ -18,6 +18,9 @@
   "engines": {
     "node": ">=20"
   },
+  "devDependencies": {
+    "vitest": "^4.1.11"
+  },
   "overrides": {
     "qs": "^6.16.0",
     "proxy-addr": "^2.0.8"
