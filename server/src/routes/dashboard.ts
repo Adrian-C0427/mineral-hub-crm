@@ -6,6 +6,7 @@ import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest }
 import { serializeDeal } from "../serializers.js";
 import { acquisitionCost, dealNetProfit, dealSalePrice, profitAtAsk } from "../domain/metrics.js";
 import { avgMoney, roundMoney, sumMoney } from "../domain/money.js";
+import { closingIsExtended, profitClosingDate } from "../domain/dates.js";
 import { ensureStages, TERMINAL_STAGE_KEYS } from "../domain/stages.js";
 import { allTimeSpan, isAllPeriod } from "../domain/period.js";
 import { TASK_PRIORITIES, taskAssignedNotice, taskEditSchema } from "../domain/tasks.js";
@@ -97,36 +98,37 @@ export type BucketDeal = {
   /** closed = realized, projected = has an offer, atAsk = no offer yet (profit at asking price). */
   kind: "closed" | "projected" | "atAsk";
   amount: number | null; profit: number; date: string;
+  /** Present (true) when `date` is the Extended closing of an explicitly extended deal. */
+  extended?: true;
 };
 
-/** The scalars the at-asking series needs from an active deal. */
-type AtAskDeal = {
+/** The scalars the projected and at-asking series need from an active deal. */
+type ActiveProfitDeal = {
   id: string; name: string; stage: string;
   askPrice: number | null; ourPrice: number | null; purchasePrice?: number | null; estimatedClosingCosts: number | null;
-  offers: { amount: number }[];
+  offers: { id?: string; amount: number; status?: string }[];
+  selectedOfferId?: string | null;
 };
 
+type SeriesResult = { total: number; byBucket: Map<number, number>; bucketDeals: { i: number; entry: BucketDeal }[] };
+
 /**
- * "Profit at asking price" series — the third, mutually exclusive population
- * next to realized (closed) and projected (active with an offer): active deals
- * with NO offers at all and both prices set (ask − Our Cost − closing costs).
- * `total` is the headline sum over that whole population; the per-bucket maps
- * only hold deals whose resolved closing date lands on the chart's axis (a
- * deal with no resolvable date, or one outside the window, is in the total
- * but on no bar). Pure so it can be unit-tested without a database.
+ * Shared bucketing for the two active-deal series. Every deal's profit is in
+ * `total`; only deals whose closing date (see profitClosingDate — the Closing
+ * date, or the Extended closing once explicitly extended) lands on the
+ * chart's axis are on a bar.
  */
-export function profitAtAskSeries<T extends AtAskDeal>(
-  deals: T[],
+function bucketSeries<T extends ActiveProfitDeal>(
+  rows: { d: T; profit: number; amount: number | null }[],
+  kind: "projected" | "atAsk",
   closingDateOf: (d: T) => Date | string | null | undefined,
   bucketIdx: (dt: Date) => number,
-): { total: number; byBucket: Map<number, number>; bucketDeals: { i: number; entry: BucketDeal }[] } {
+  extendedOf?: (d: T) => boolean,
+): SeriesResult {
   let total = 0;
   const byBucket = new Map<number, number>();
   const bucketDeals: { i: number; entry: BucketDeal }[] = [];
-  for (const d of deals) {
-    if (d.offers.length) continue; // has an offer → it's in Projected, never here
-    const profit = profitAtAsk(d.askPrice, acquisitionCost(d), d.estimatedClosingCosts);
-    if (profit == null) continue;
+  for (const { d, profit, amount } of rows) {
     total += profit; // each profit is already to the cent; rounded once at return
     const when = closingDateOf(d);
     if (!when) continue;
@@ -134,10 +136,59 @@ export function profitAtAskSeries<T extends AtAskDeal>(
     const i = bucketIdx(dt);
     if (i < 0) continue;
     byBucket.set(i, (byBucket.get(i) ?? 0) + profit);
-    bucketDeals.push({ i, entry: { id: d.id, name: d.name, stage: d.stage, kind: "atAsk", amount: d.askPrice, profit, date: dt.toISOString().slice(0, 10) } });
+    bucketDeals.push({
+      i,
+      entry: { id: d.id, name: d.name, stage: d.stage, kind, amount, profit, date: dt.toISOString().slice(0, 10), ...(extendedOf?.(d) ? { extended: true as const } : {}) },
+    });
   }
   for (const [i, v] of byBucket) byBucket.set(i, roundMoney(v));
   return { total: roundMoney(total), byBucket, bucketDeals };
+}
+
+/**
+ * "Projected profit" series — active deals with at least one offer (the
+ * accepted offer wins over the best one), the SAME population as the
+ * Projected Profit KPI, bucketed by the same closing date as the at-asking
+ * series. Pure so it can be unit-tested without a database.
+ */
+export function projectedProfitSeries<T extends ActiveProfitDeal>(
+  deals: T[],
+  closingDateOf: (d: T) => Date | string | null | undefined,
+  bucketIdx: (dt: Date) => number,
+  extendedOf?: (d: T) => boolean,
+): SeriesResult {
+  const rows: { d: T; profit: number; amount: number | null }[] = [];
+  for (const d of deals) {
+    const amount = dealSalePrice(d.offers, d.selectedOfferId);
+    if (amount == null) continue;
+    rows.push({ d, amount, profit: dealNetProfit(amount, d) });
+  }
+  return bucketSeries(rows, "projected", closingDateOf, bucketIdx, extendedOf);
+}
+
+/**
+ * "Profit at asking price" series — the third, mutually exclusive population
+ * next to realized (closed) and projected (active with an offer): active deals
+ * with NO offers at all and both prices set (ask − Our Cost − closing costs).
+ * `total` is the headline sum over that whole population; the per-bucket maps
+ * only hold deals whose closing date lands on the chart's axis (a deal with
+ * no date, or one outside the window, is in the total but on no bar). Pure so
+ * it can be unit-tested without a database.
+ */
+export function profitAtAskSeries<T extends ActiveProfitDeal>(
+  deals: T[],
+  closingDateOf: (d: T) => Date | string | null | undefined,
+  bucketIdx: (dt: Date) => number,
+  extendedOf?: (d: T) => boolean,
+): SeriesResult {
+  const rows: { d: T; profit: number; amount: number | null }[] = [];
+  for (const d of deals) {
+    if (d.offers.length) continue; // has an offer → it's in Projected, never here
+    const profit = profitAtAsk(d.askPrice, acquisitionCost(d), d.estimatedClosingCosts);
+    if (profit == null) continue;
+    rows.push({ d, profit, amount: d.askPrice });
+  }
+  return bucketSeries(rows, "atAsk", closingDateOf, bucketIdx, extendedOf);
 }
 
 dashboardRouter.get(
@@ -161,7 +212,12 @@ dashboardRouter.get(
     // authenticated read batch (Sentry MINERAL-HUB-API-6). Happy path unchanged.
     const [allActive, closedDeals, activeOffers] = await withDbRetry(() =>
       Promise.all([
-        prisma.deal.findMany({ where: { stage: { notIn: [...TERMINAL_STAGE_KEYS] }, organizationId: org, ...IN_PIPELINE }, include: { ...dealInclude, offers: true } }),
+        // The deal's Extend records are its persisted extension status
+        // (closingIsExtended) — they decide which closing month its profit lands on.
+        prisma.deal.findMany({
+          where: { stage: { notIn: [...TERMINAL_STAGE_KEYS] }, organizationId: org, ...IN_PIPELINE },
+          include: { ...dealInclude, offers: true, contractExtensions: { select: { id: true } } },
+        }),
         prisma.deal.findMany({
           where: { stage: "CLOSED", organizationId: org, ...IN_PIPELINE },
           include: { ...dealInclude, selectedOffer: true },
@@ -173,14 +229,19 @@ dashboardRouter.get(
       ]),
     );
 
+    // Projected and at-asking profit land on the deal's Closing date — the
+    // Extended closing ONLY once the closing was explicitly extended (Extend
+    // Closing on the Deal page). The Extended closing every dated deal shows
+    // (Closing + 15 days) moves nothing on its own.
+    const extensionOf = (d: (typeof allActive)[number]) => ({ ...d, extensionCount: d.contractExtensions.length });
+    const activeClosingOf = (d: (typeof allActive)[number]) => profitClosingDate(extensionOf(d));
+    const activeExtendedOf = (d: (typeof allActive)[number]) => closingIsExtended(extensionOf(d));
+
     // "All" spans every dated deal on the chart: closed deals' Closing dates
-    // and active deals' resolved closing dates (projected / at-asking bars),
+    // and active deals' profit closing dates (projected / at-asking bars),
     // through today.
     const allSpan = isAllPeriod(period)
-      ? allTimeSpan([
-        ...closedDeals.map((d) => d.originalClosingDate),
-        ...allActive.map((d) => { const fc = serializeDeal(d, now).finalClosingDate; return fc ? new Date(fc) : null; }),
-      ], now)
+      ? allTimeSpan([...closedDeals.map((d) => d.originalClosingDate), ...allActive.map(activeClosingOf)], now)
       : undefined;
     const win = dashboardWindow(period, now, req.query.from, req.query.to, allSpan);
     const allTime = win.label === "All";
@@ -299,28 +360,16 @@ dashboardRouter.get(
     }
     // Projected profit by month — SAME population as the Projected Profit KPI
     // above (any active deal with at least one offer; accepted offer wins over
-    // best offer), bucketed by the deal's anticipated closing month. The KPI
-    // and this chart must never disagree: a user who sees "$30K projected"
-    // up top has to find that $30K on this axis.
-    const monthlyProjected = new Map<number, number>();
-    for (const d of allActive) {
-      const amount = dealSalePrice(d.offers, d.selectedOfferId);
-      if (amount == null) continue;
-      const s = serializeDeal(d, now);
-      if (!s.finalClosingDate) continue;
-      const i = bucketIdx(new Date(s.finalClosingDate));
-      if (i < 0) continue;
-      const profit = dealNetProfit(amount, d);
-      monthlyProjected.set(i, (monthlyProjected.get(i) ?? 0) + profit);
-      pushBucketDeal(i, {
-        id: d.id, name: d.name, stage: d.stage, kind: "projected",
-        amount, profit, date: new Date(s.finalClosingDate).toISOString().slice(0, 10),
-      });
-    }
+    // best offer), bucketed by the deal's profit closing date (activeClosingOf).
+    // The KPI and this chart must never disagree: a user who sees "$30K
+    // projected" up top has to find that $30K on this axis.
+    const projected = projectedProfitSeries(allActive, activeClosingOf, bucketIdx, activeExtendedOf);
+    const monthlyProjected = projected.byBucket;
+    for (const { i, entry } of projected.bucketDeals) pushBucketDeal(i, entry);
     // Profit at asking price by month — the active deals the Projected series
-    // leaves out (no offer yet), bucketed by the SAME resolved closing date.
+    // leaves out (no offer yet), bucketed by the SAME closing-date rule.
     // Realized / Projected / At-asking never overlap, so the three stack.
-    const atAsk = profitAtAskSeries(allActive, (d) => serializeDeal(d, now).finalClosingDate, bucketIdx);
+    const atAsk = profitAtAskSeries(allActive, activeClosingOf, bucketIdx, activeExtendedOf);
     for (const { i, entry } of atAsk.bucketDeals) pushBucketDeal(i, entry);
     const kindOrder: Record<BucketDeal["kind"], number> = { closed: 0, projected: 1, atAsk: 2 };
     const profitByMonth = buckets.map((b, i) => ({
