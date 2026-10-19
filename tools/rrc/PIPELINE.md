@@ -172,3 +172,57 @@ Notes:
   permits, PDQ slice → 6,020 Freestone production rows.
 
 Increment 3 = Railway cron + failure watchdog.
+
+
+## 2026-10 refresh: bundled, loaded on deploy
+
+The production database isn't reachable from the build machine, so the
+Leon / Freestone / Cherokee refresh ships as **bundles in the repo**
+(`server/data/rrc/*.json.gz`). The API loads them at boot through the same
+versioned, advisory-locked, single-transaction loader as the Louisiana data
+(`services/rrcRefresh.ts` on top of `services/gisRegions.loadVersionedDataset`).
+Each bundle loads once per content version; later boots are no-ops.
+
+| Bundle | Contents | Loader behavior |
+| --- | --- | --- |
+| `tx-rrc-wells.json.gz` | surface wells with normalized status, deviated wellbores (bottom hole + approximate path), status history, recent permits, source snapshot dates | upsert; status always from the snapshot, descriptive fields only replace a stored value when the snapshot has one; wells missing from RRC's complete layer are archived to `rrc.retired_wells`, then removed, unless a `ResearchWell` links to them (kept, flagged) |
+| `tx-rrc-abstracts.json.gz` | abstract/survey polygons from RRC's survey layer, NAD83 | upsert; stale ones archived to `gis.abstracts_retired`, then removed, unless a deal references them |
+| `tx-rrc-production.json.gz` | newest 12 months of lease production | upsert on the natural key; never deletes |
+
+Counts land in `rrc.refresh_log`; file names and snapshot dates in `rrc.source_snapshot`.
+
+### Rebuilding (next month)
+
+1. Download into `~/rrc-data/<yyyy-mm>/` (never under Desktop/Documents): `well{fips}.zip` +
+   `surv{fips}.zip` per county, `OG_WELLBORE_EWA_Report_<date>.csv`, `daf802.txt.gz`
+   (NOT the frozen `daf802.txt`), `dbf900.ebc.gz` (NOT the frozen `dbf900.ebc`),
+   `uif700a.txt.gz`, `PDQ_DSV.zip`. The MFT portal is a browser download.
+2. From `server/`:
+   `npx tsx src/scripts/buildRrcRefresh.ts --data-dir ~/rrc-data/<yyyy-mm> --as-of <today> --dbf900-date <MFT date> --uic-date <MFT date>`
+3. Review `docs/reports/rrc-refresh-<as-of>/` (reconciliation, corrections, needs-investigation, missing locations).
+4. Bump `TILE_DATA_VERSION` (client/src/lib/mapLayers.ts), open a PR, merge, deploy.
+
+### Status rules (domain/wellStatus.ts)
+
+Normalized statuses: Permitted · Drilling · Producing · Shut-In · Plugged · Injection · Disposal · Other/Unknown.
+RRC's own finer wording stays alongside as `status_detail` (temporarily abandoned,
+14(b)(2), dry hole, expired permit…), with `status_source`, `status_as_of`, and an
+uncertainty `status_flag` (needs-investigation, no-recent-production, map-only, unverified).
+
+Source priority: the Wellbore Query's on-schedule rows (RRC's proration schedule,
+including the wellbore's inactive date), then a W-3 plug date, then the drilling
+permit (approval, spud, expiry, cancellation), then the UIC permit (disposal vs
+injection), and the RRC map symbol only as a tie-breaker or for wells without an
+API number. Production is never used to call a well Producing; it only flags a
+scheduled producer with no production reported for 12+ months.
+
+### Geometry notes
+
+- RRC's lateral lines are straight 2-point surface → bottom-hole segments, so every
+  wellbore path is labelled approximate. RRC publishes directional surveys only as
+  scanned images.
+- RRC's survey polygons are NAD27. They're converted with the NAD27 → NAD83 shift
+  RRC itself applied to each county's wells: a quadratic surface fit, under 0.2 ft
+  median residual. The previous OTLS-sourced abstracts sat about 35 ft off RRC's frame.
+- UT BEG has withdrawn the OTLS abstracts layer. RRC's per-county survey layer is
+  the replacement.

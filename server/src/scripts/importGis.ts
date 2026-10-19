@@ -14,6 +14,11 @@
  * truth. To add/refresh a county: run fetch_abstracts.py, then this script.
  * Counties whose files are absent are simply left untouched in the DB.
  *
+ * NOTE (2026-10): UT BEG has withdrawn the OTLS abstracts layer
+ * fetch_abstracts.py reads. RRC's own survey layer (surv{fips}.zip) is the
+ * authoritative replacement; the 3 well counties are refreshed from it by
+ * scripts/buildRrcRefresh.ts + the boot loader (services/rrcRefresh.ts).
+ *
  * Usage: npx tsx src/scripts/importGis.ts            (from server/)
  */
 import fs from "node:fs";
@@ -87,14 +92,32 @@ async function importCounties(): Promise<number> {
 
 async function importAbstracts(file: string): Promise<{ county: string; count: number }> {
   const fc = readGeojson(file);
-  // Dedupe by id — the original hand-built Leon/Freestone files carry a couple
-  // of intra-file duplicates that the newer fetch script already filters out.
-  const seen = new Set<string>();
-  fc.features = fc.features.filter((f) => {
+  // Repeated ids are ONE abstract split into pieces (a road, a county line):
+  // merge the pieces into a MultiPolygon. Dropping the later pieces — what
+  // this used to do — lost real survey area from the map and from well
+  // attribution. A repeated number under a different survey is a different
+  // abstract and keeps its own row ("<id>~2").
+  const byId = new Map<string, GJFeature[]>();
+  for (const f of fc.features) {
     const id = String(f.properties.id);
-    if (seen.has(id)) return false;
-    seen.add(id);
-    return true;
+    byId.set(id, [...(byId.get(id) ?? []), f]);
+  }
+  const polys = (g: GJFeature["geometry"]) => (g.type === "MultiPolygon" ? (g.coordinates as unknown[]) : [g.coordinates]);
+  fc.features = [...byId.entries()].flatMap(([id, fs]) => {
+    const bySurvey = new Map<string, GJFeature[]>();
+    for (const f of fs) {
+      const k = `${String(f.properties.abstract ?? "")}|${String(f.properties.survey ?? "")}`;
+      bySurvey.set(k, [...(bySurvey.get(k) ?? []), f]);
+    }
+    return [...bySurvey.values()].map((parts, k) => ({
+      ...parts[0],
+      properties: {
+        ...parts[0].properties,
+        id: k === 0 ? id : `${id}~${k + 1}`,
+        area: parts.reduce((t, f) => t + Number(f.properties.area ?? 0), 0),
+      },
+      geometry: parts.length === 1 ? parts[0].geometry : { type: "MultiPolygon", coordinates: parts.flatMap((f) => polys(f.geometry)) },
+    }));
   });
   const county = String(fc.features[0]?.properties.county ?? "?");
   const fips = String(fc.features[0]?.properties.countyFips ?? "?");
@@ -115,9 +138,10 @@ async function importAbstracts(file: string): Promise<{ county: string; count: n
       String(f.properties.id),
       String(f.properties.countyFips),
       String(f.properties.county),
-      // Source labels occasionally carry a stray '?' (upstream disambiguator
-      // for duplicate abstract numbers) — strip it so labels display cleanly.
-      ((f.properties.abstract as string | null) ?? null)?.replace(/\?/g, "") ?? null,
+      // Kept exactly as recorded: "A-?5" is an UNNUMBERED tract (state land,
+      // school-file land), not abstract 5 — stripping the "?" made the two
+      // collide as one "A-5" with two surveys.
+      (f.properties.abstract as string | null) ?? null,
       (f.properties.survey as string | null) ?? null,
       (f.properties.area as number | null) ?? null,
       JSON.stringify(f.geometry),

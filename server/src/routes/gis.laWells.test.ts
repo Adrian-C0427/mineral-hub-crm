@@ -19,7 +19,8 @@ describe("tile SQL", () => {
     expect(sql).toContain("FROM sonris.wells lw, wanted w WHERE lw.geom && w.box");
     expect(sql).toContain("FROM sonris.wellbores lb");
     expect(sql).toContain("LEFT JOIN sonris.wells lsw ON lsw.fid = lb.surface_fid");
-    expect(sql.match(/UNION ALL/g)?.length).toBe(2);
+    // wells, wellbores and bottom holes each union in a Louisiana half.
+    expect(sql.match(/UNION ALL/g)?.length).toBe(3);
     // Only one 'wells' and one 'wellbores' layer exist.
     expect(sql.match(/ST_AsMVT\(well_mvt, 'wells'/g)?.length).toBe(1);
     expect(sql.match(/ST_AsMVT\(bore_mvt, 'wellbores'/g)?.length).toBe(1);

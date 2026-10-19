@@ -10,6 +10,7 @@ import { StatStrip, Tag, type StatCell } from "../components/kit";
 import { Select } from "../components/Select";
 import { WellImport } from "../components/WellImport";
 import { compactMoney, money, prettyEnum, fmtDate, fmtDateTime, fmtDateLocal } from "../lib/format";
+import { SOURCE_LABEL, STATUS_FLAG_LABEL } from "../lib/wellStatus";
 import { monthLabel, chartTooltip } from "../lib/charts";
 import { formatAbstract } from "../lib/abstracts";
 import { countyStateShort, isLaWellFid, unitProductionTitle } from "../lib/laWells";
@@ -162,13 +163,18 @@ const FC_DASH = "5 4";
 /** Well status (WellRow enum) → tag tone. */
 const statusTone = (s: string): "success" | "warn" | "danger" | "neutral" =>
   s === "PRODUCING" ? "success" : s === "SHUT_IN" ? "warn" : "neutral";
-/** RRC free-text status (nearby wells) → text tone class. */
+/** RRC map status (nearby wells) → text tone class. */
 const rrcStatusClass = (s: string | null): string => {
   const v = (s ?? "").toLowerCase();
   if (v.includes("produc")) return "ok";
-  if (v.includes("shut")) return "warn";
-  if (v.includes("cancel") || v.includes("abandon")) return "bad";
+  if (v.includes("shut") || v.includes("drilling")) return "warn";
+  if (v.includes("cancel") || v.includes("abandon") || v.includes("plug")) return "bad";
   return "";
+};
+
+const HISTORY_EVENT: Record<string, string> = {
+  "permit-issued": "Permit issued", spud: "Spudded", completed: "Completed", "shut-in": "Shut in", plugged: "Plugged",
+  "status-refresh": "Status (RRC refresh)", "previous-status": "Shown before the refresh",
 };
 
 // ---------------------------------------------------------------------------
@@ -580,14 +586,23 @@ interface Dossier {
   wellId: string;
   linked: boolean;
   identity: { api8: string | null; api10: string | null; wellNo: string | null; rrcWellId: string | null; fid: number | null; name: string; county: string; district: string | null; state: string; abstract: string | null; survey: string | null; latitude: number | null; longitude: number | null; serial?: number | null; locationNote?: string | null };
-  status: { symbol: string | null; type: string | null; status: string | null; category: string | null; oilGas: string | null; spudDate: string | null; plugDate: string | null; lastProd: string | null };
+  status: {
+    symbol: string | null; type: string | null; status: string | null; category: string | null; oilGas: string | null; spudDate: string | null; plugDate: string | null; lastProd: string | null;
+    /** RRC refresh: why the status is what it is, how sure, and from which RRC file. */
+    profile?: string | null; detail?: string | null; flag?: string | null; note?: string | null; source?: string | null; asOf?: string | null;
+    since?: string | null; adminStatus?: string | null; permitNo?: string | null; permitDate?: string | null; permitExpires?: string | null;
+    completionDate?: string | null; shutInDate?: string | null; injectionType?: string | null; locationFlag?: string | null; locationNote?: string | null;
+    geomFlag?: string | null; sources?: Record<string, string> | null;
+  };
+  history?: { date: string | null; event: string; status: string | null; detail: string | null; source: string }[];
+  sourceFiles?: { id: string; name: string | null; file: string | null; asOf: string | null }[];
   formations: string[];
   field: { fieldNo: string | null; fieldName: string | null; reservoirs: { district: string; fieldNo: string; name: string; type: string | null }[] };
   lease: { leaseNo: string; leaseName: string | null; district: string | null; ogCode: string; wellsOnLease: number; production: { months: number; firstMonth: string | null; lastMonth: string | null; cumOilBbl: number; cumGasMcf: number } | null } | null;
   operators: { current: { operatorNo: string | null; name: string | null }; history: { operatorNo: string | null; name: string | null; source: "production" | "permit"; from: string | null; to: string | null }[] };
   permits: { statusNo: string; permitDate: string | null; operator: string | null; operatorNo: string | null; leaseName: string | null; wellNo: string | null; district: string | null }[];
   completions: { trackingNo: string; filingType: string | null; status: string | null; filedDate: string | null; completionDate: string | null; operatorNo: string | null; fieldName: string | null; wellName: string | null; wellNo: string | null; survey: string | null }[];
-  wellbore: { laterals: { fid: number; type: string | null; lengthFt: number }[]; totalLateralFt: number };
+  wellbore: { laterals: { fid: number; type: string | null; lengthFt: number; approximate?: boolean; bottomHole?: [number, number] | null; status?: string | null; bhSource?: string | null; api?: string | null }[]; totalLateralFt: number };
   cumulative: { oilBbl: number | null; gasMcf: number | null } | null;
   nearby: { fid: number; api: string | null; name: string; operator: string | null; status: string | null; type: string | null; distanceFt: number }[];
   offsetOperators: string[];
@@ -647,15 +662,26 @@ function WellRecord({ well }: { well: WellRow }) {
             <Kv label={d.identity.state === "LA" ? "Section" : "Abstract"} value={d.identity.abstract ? formatAbstract({ abstract: d.identity.abstract, survey: d.identity.survey, county: d.identity.county, state: d.identity.state }) : null} />
             <Kv label={d.identity.state === "LA" ? "Township / range" : "Survey"} value={d.identity.survey} />
             <Kv label="Surface location" value={d.identity.latitude != null ? `${d.identity.latitude.toFixed(5)}, ${d.identity.longitude?.toFixed(5)}${d.identity.locationNote ? ` (${d.identity.locationNote})` : ""}` : null} />
-            <Kv label="Well type" value={[d.status.oilGas, d.status.type].filter(Boolean).join(" · ") || null} />
-            <Kv label="Status" value={d.status.status} />
+            <Kv label="Well type" value={[...new Set([d.status.oilGas, d.status.type].filter(Boolean))].join(" · ") || null} />
+            <Kv label="Status" value={d.status.status && `${d.status.status}${d.status.detail ? ` · ${d.status.detail}` : ""}`} />
+            <Kv label="Status check" value={d.status.flag ? `${STATUS_FLAG_LABEL[d.status.flag] ?? d.status.flag}${d.status.note ? ` — ${d.status.note}` : ""}` : null} />
+            <Kv label="Status source" value={d.status.source ? `${SOURCE_LABEL[d.status.source] ?? d.status.source}${(() => { const f = d.sourceFiles?.find((x) => x.id === d.status.source || (d.status.source === "permit" && x.id === "permits")); return f?.asOf ? ` · as of ${f.asOf}` : ""; })()}` : null} />
+            <Kv label="RRC schedule type" value={d.status.adminStatus?.toLowerCase()} />
+            <Kv label="Profile" value={d.status.profile} />
+            <Kv label="Permit" value={d.status.permitNo && `#${d.status.permitNo}${d.status.permitDate ? ` · issued ${fmtDate(d.status.permitDate)}` : ""}${d.status.permitExpires ? ` · expires ${fmtDate(d.status.permitExpires)}` : ""}`} />
             <Kv label="Spud date" value={d.status.spudDate && fmtDate(d.status.spudDate)} />
+            <Kv label="Completed" value={d.status.completionDate && fmtDate(d.status.completionDate)} />
+            <Kv label="Shut in since" value={d.status.shutInDate && fmtDate(d.status.shutInDate)} />
             <Kv label="Plug date" value={d.status.plugDate && fmtDate(d.status.plugDate)} />
+            <Kv label="Injection type" value={d.status.injectionType} />
+            <Kv label="Location check" value={d.status.locationNote} />
             <Kv label="Last production" value={d.status.lastProd} />
             <Kv label="Field" value={d.field.fieldName && `${d.field.fieldName}${d.field.fieldNo ? ` (#${d.field.fieldNo})` : ""}`} />
             <Kv label="Reservoir(s)" value={d.field.reservoirs.length ? <ChipList items={d.field.reservoirs.map((r) => `${r.name}${r.type ? ` (${r.type})` : ""}`)} /> : null} />
             <Kv label="Operator (current)" value={d.operators.current.name && `${d.operators.current.name}${d.operators.current.operatorNo ? ` · P-5 #${d.operators.current.operatorNo}` : ""}`} />
-            <Kv label="Wellbore" value={d.wellbore.laterals.length ? `${d.wellbore.laterals.length} lateral${d.wellbore.laterals.length > 1 ? "s" : ""} · ${fmtVol(d.wellbore.totalLateralFt)} ft mapped` : null} />
+            <Kv label="Wellbore" value={d.wellbore.laterals.length
+              ? `${d.wellbore.laterals.length} ${d.status.profile === "Directional" ? "directional bore" : "lateral"}${d.wellbore.laterals.length > 1 ? "s" : ""} · ${fmtVol(d.wellbore.totalLateralFt)} ft surface → bottom hole (approximate, straight line)`
+              : d.status.geomFlag === "missing-bottom-hole" ? "Horizontal/directional — no bottom-hole location in RRC's layers" : null} />
             <Kv label="RRC cumulative" value={d.cumulative ? `${fmtVol(d.cumulative.oilBbl)} bbl oil · ${fmtVol(d.cumulative.gasMcf)} mcf gas` : null} />
           </div>
 
@@ -677,6 +703,16 @@ function WellRecord({ well }: { well: WellRow }) {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {(d.history?.length ?? 0) > 0 && (
+            <div className="va-rec-sec">
+              <RecTable title="Status history (RRC)" head={<><th>Date</th><th>Event</th><th>Status</th><th>Detail</th></>}>
+                {d.history!.map((h, i) => (
+                  <tr key={`${h.event}-${h.date}-${i}`}><td className="dim">{h.date ? fmtDate(h.date) : "—"}</td><td>{HISTORY_EVENT[h.event] ?? h.event}</td><td>{h.status ?? "—"}</td><td className="dim">{h.detail ?? ""}</td></tr>
+                ))}
+              </RecTable>
             </div>
           )}
 

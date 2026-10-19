@@ -1,5 +1,6 @@
 import * as maplibregl from "maplibre-gl";
 import { API_BASE } from "../api/client";
+import { LEGACY_STATUS, STATUS_COLORS } from "./wellStatus";
 
 // Shared cadastral map layer stack used identically by the main map (MapView)
 // and the per-deal map (DealMap), so the two can never visually drift. Callers
@@ -10,7 +11,7 @@ import { API_BASE } from "../api/client";
  * an hour keyed by full URL, so a new value makes every client abandon its
  * stale tiles immediately; the server ignores the query param (its own LRU
  * clears on the deploy that ships the bump). */
-export const TILE_DATA_VERSION = "2026-10-09";
+export const TILE_DATA_VERSION = "2026-10-18";
 
 /** Cadastral vector tiles from PostGIS (/api/gis/tiles). Absolute URL required
  * by MapLibre; falls back to the page origin in dev (Vite proxies /api). */
@@ -20,13 +21,19 @@ export const ABSTRACT_TILES = `${API_BASE || window.location.origin}/api/gis/til
  * boundaries + names carry the view. */
 export const MIN_ABSTRACT_ZOOM = 8;
 
-// Wells colored by RRC status.
-export const STATUS_COLOR = [
-  "match", ["get", "status"],
-  "Producing", "#22c55e", "Shut-In", "#f59e0b", "Plugged", "#6b7280", "Permitted", "#3b82f6",
-  "Dry Hole", "#78350f", "Active", "#7c3aed", "Canceled/Abandoned", "#9ca3af", "Surface location", "#0ea5e9",
-  "#64748b",
-] as unknown as maplibregl.ExpressionSpecification;
+/** A `match` on a status property → its color (normalized vocabulary, plus
+ * the pre-2026-10 values so tiles cached before the refresh still color). */
+export function statusColorExpr(prop: string): maplibregl.ExpressionSpecification {
+  return [
+    "match", ["get", prop],
+    ...Object.entries(STATUS_COLORS).flat(),
+    ...Object.entries(LEGACY_STATUS).flatMap(([legacy, s]) => [legacy, STATUS_COLORS[s]]),
+    STATUS_COLORS["Other/Unknown"],
+  ] as unknown as maplibregl.ExpressionSpecification;
+}
+
+// Wells colored by normalized status.
+export const STATUS_COLOR = statusColorExpr("status");
 
 type Expr = maplibregl.ExpressionSpecification;
 const SEL = ["boolean", ["feature-state", "selected"], false] as unknown as Expr;
@@ -71,11 +78,24 @@ export function wellsPaint() {
   };
 }
 
-/** Paint for the wellbore laterals layer. */
+/** Paint for the wellbore laterals layer. Dashed: every path is the straight
+ * surface → bottom-hole line, approximate (RRC publishes no trajectory data). */
 export function wellboresPaint() {
   return {
     "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1, 15, 2.5] as unknown as Expr,
-    "line-opacity": 0.8,
+    "line-opacity": 0.85,
+    "line-dasharray": [2.5, 1.5],
+  };
+}
+
+/** Paint for bottom-hole points: hollow, ringed in the wellbore's status color. */
+export function bottomHolesPaint() {
+  return {
+    "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 2.2, 13, 3.4, 16, 5.5] as unknown as Expr,
+    "circle-color": "#ffffff",
+    "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 10, 1.2, 15, 2] as unknown as Expr,
+    "circle-stroke-color": statusColorExpr("boreStatus"),
+    "circle-opacity": 0.95,
   };
 }
 
@@ -98,7 +118,7 @@ export function styleWithGlyphs(): maplibregl.StyleSpecification {
 export function addCadastralLayers(map: maplibregl.Map, countyLabels: GeoJSON.FeatureCollection): void {
   // One multi-layer vector source: counties (every zoom), abstracts, wells,
   // wellbores. promoteId maps each layer's key to its feature id.
-  map.addSource("abstracts", { type: "vector", tiles: [ABSTRACT_TILES], minzoom: 0, maxzoom: 14, promoteId: { abstracts: "id", wells: "fid", wellbores: "fid" } });
+  map.addSource("abstracts", { type: "vector", tiles: [ABSTRACT_TILES], minzoom: 0, maxzoom: 14, promoteId: { abstracts: "id", wells: "fid", wellbores: "fid", bottomholes: "fid" } });
   // County name labels (DB-derived points, always inside their polygon).
   // Louisiana points carry a `label` ("Caddo Parish") so a parish never reads
   // as the same-named Texas county; Texas points print their name.
@@ -128,6 +148,11 @@ export function addCadastralLayers(map: maplibregl.Map, countyLabels: GeoJSON.Fe
     "line-color": ["match", ["get", "wellboreType"], "Horizontal", "#0f766e", "Directional", "#9333ea", "#0f766e"],
     ...borePaint } });
   map.addLayer({ id: "wellbores-sel", type: "line", source: "abstracts", "source-layer": "wellbores", minzoom: 10, filter: ["==", ["get", "surfaceId"], -1], paint: { "line-color": "#111827", "line-width": 3 } });
+  // Bottom-hole locations of horizontal / directional wellbores (the far end
+  // of each path). Selectable: they open their surface well.
+  map.addLayer({ id: "bottomholes", type: "circle", source: "abstracts", "source-layer": "bottomholes", minzoom: 10, paint: bottomHolesPaint() });
+  map.addLayer({ id: "bottomholes-sel", type: "circle", source: "abstracts", "source-layer": "bottomholes", minzoom: 10, filter: ["==", ["get", "surfaceId"], -1], paint: {
+    "circle-radius": 6, "circle-color": "rgba(0,0,0,0)", "circle-stroke-width": 2.5, "circle-stroke-color": "#111827" } });
   // Surface wells — colored by RRC status; selection via feature-state.
   map.addLayer({ id: "wells", type: "circle", source: "abstracts", "source-layer": "wells", minzoom: 9, paint: {
     "circle-color": STATUS_COLOR,

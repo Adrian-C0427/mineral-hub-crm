@@ -125,6 +125,8 @@ input[type="radio"]:disabled { opacity: 0.5; cursor: not-allowed; }
 .msel-opt-hint { color: var(--ink-4); font-size: 11.5px; }
 .msel-opt-check { color: var(--accent); }
 .msel-empty { padding: 8px 10px; font-size: 13px; color: var(--ink-3); }
+/* Footer when the menu renders only the first page of a long list. */
+.msel-more { padding: 6px 10px 4px; font-size: 11.5px; color: var(--ink-4); border-top: 1px solid var(--line); margin-top: 4px; }
 .msel-search { border-bottom-color: var(--line); color: var(--ink); }
 /* "Select all / Deselect all" row: sticks to the top edge of the menu. */
 .msel-bulk { margin: -4px -4px 4px; padding: 6px 10px; gap: 10px; background: var(--raised); border-bottom: 1px solid var(--line); }

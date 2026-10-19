@@ -473,6 +473,8 @@ interface RrcWellRow {
   status: string | null; field_name: string | null; formations: string[] | null;
   spud_date: Date | null; abstract: string | null; survey: string | null;
   lon: number | null; lat: number | null;
+  /** Refreshed wellbore profile (rrc.wells.profile), when the RRC refresh has run. */
+  profile?: string | null;
 }
 
 /** A Well Analysis well: the ResearchWell row to write + its monthly volumes. */
@@ -566,18 +568,19 @@ async function loadWells(db: Db, clock: Clock, rng: Rng, log: (m: string) => voi
         `WITH c AS (
            SELECT fid, api8, api10, well_no, lease_no, lease_name, operator, county, district, oil_gas,
                   type, status, field_name, formations, spud_date, abstract, survey,
-                  ST_X(geom) AS lon, ST_Y(geom) AS lat
-             FROM rrc.wells
+                  ST_X(geom) AS lon, ST_Y(geom) AS lat, to_jsonb(w) ->> 'profile' AS profile
+             FROM rrc.wells w
             WHERE upper(county) = upper($1) AND lease_no IS NOT NULL AND district IS NOT NULL
               AND coalesce(api10, api8) IS NOT NULL
-              AND (coalesce(type, '') ~* 'HORIZ' OR coalesce(well_no, '') ~* '[0-9]H$')
+              -- Horizontal: the refreshed wellbore profile, else the older heuristics.
+              AND (to_jsonb(w) ->> 'profile' = 'Horizontal' OR coalesce(type, '') ~* 'HORIZ' OR coalesce(well_no, '') ~* '[0-9]H$')
             ORDER BY spud_date DESC NULLS LAST, fid
             LIMIT 60)
          SELECT c.* FROM c
           WHERE EXISTS (SELECT 1 FROM rrc.production p
                          WHERE p.lease_no = c.lease_no AND p.district = c.district
                            AND p.og_code = CASE WHEN c.oil_gas = 'Gas' THEN 'G' ELSE 'O' END)
-          ORDER BY (CASE WHEN coalesce(c.status, '') ~* 'PRODUC|ACTIVE|FLOW' THEN 0 ELSE 1 END), c.spud_date DESC NULLS LAST, c.fid
+          ORDER BY (CASE WHEN coalesce(c.status, '') ~* 'PRODUC' THEN 0 ELSE 1 END), c.spud_date DESC NULLS LAST, c.fid
           LIMIT 3`, county);
       const fresh = rows.filter((w) => { const api = w.api10 ?? w.api8 ?? ""; if (!api || seen.has(api)) return false; seen.add(api); return true; });
       if (!fresh.length) continue;
@@ -599,7 +602,7 @@ async function loadWells(db: Db, clock: Clock, rng: Rng, log: (m: string) => voi
             state: "TX",
             county: w.county,
             status: classifyWellStatus(w.status ?? ""),
-            trajectory: classifyTrajectory(/HORIZ|\dH\b/i.test(`${w.type ?? ""} ${w.well_no ?? ""}`) ? "H" : ""),
+            trajectory: classifyTrajectory(w.profile === "Horizontal" || /HORIZ|\dH\b/i.test(`${w.type ?? ""} ${w.well_no ?? ""}`) ? "H" : ""),
             wellType: w.oil_gas ?? w.type,
             spudDate: w.spud_date,
             firstProdDate: first ? ymToDate(first) : null,

@@ -10,6 +10,7 @@ import { Select } from "../components/Select";
 import { downloadCsv } from "../lib/csv";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION, PARISHES, STATE_FIPS, MAP_COUNTY_LABELS, mapCountyOptions } from "../lib/counties";
 import { addCadastralLayers, addTractLayers, tractInfo, TRACT_SOURCE, STATUS_COLOR, type TractInfo, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
+import { normalizeWellStatus, SOURCE_LABEL, STATUS_COLORS, STATUS_FLAG_LABEL, WELL_STATUSES } from "../lib/wellStatus";
 import { collectCoords, bboxOfPoints } from "../lib/geo";
 import { FormSection } from "../components/kit";
 import { MapLayersPanel } from "../components/MapLayersPanel";
@@ -46,15 +47,31 @@ type FC = { type: "FeatureCollection"; features: GeoFeature[] };
 type GeoFeature = { type: "Feature"; id?: number; properties: Record<string, unknown>; geometry: { type: string; coordinates: unknown } };
 /** A clicked cadastral unit: a Texas abstract, or a Louisiana PLSS section (state "LA"). */
 type SelAbstract = { kind: "abstract"; id: string; abstract: string; survey: string; county: string; state: string };
+/** One Abstract-filter option from /gis/options (an abstract/survey combination, keyed by GIS id). */
+type AbstractOption = { id: string; abstract: string | null; survey: string | null; county: string; state: string | null };
 type WellPermit = { statusNo: string; permitDate: string | null; operator: string | null; leaseName: string | null; wellNo: string | null; acres: number | null; survey: string | null; abstract: string | null };
 type WellCompletion = { trackingNo: string; filingType: string | null; status: string | null; filedDate: string | null; completionDate: string | null; fieldName: string | null };
+/** A deviated wellbore of the well (RRC refresh): bottom hole + approximate straight path. */
+type WellBore = { fid: number; profile: string | null; stcode: string | null; api: string | null; status: string | null; statusDetail: string | null; bottomHole: [number, number] | null; offsetFt: number | null; approximate: boolean; bhSource: string | null; lineSource: string | null; geomFlag: string | null };
+type WellHistoryEvent = { date: string | null; event: string; status: string | null; detail: string | null; source: string };
+type WellSourceFile = { id: string; name: string | null; file: string | null; asOf: string | null };
+/** The normalized status and its evidence (RRC refresh, 2026-10). */
+type WellRefresh = {
+  profile?: string | null; statusDetail?: string | null; statusFlag?: string | null; statusNote?: string | null;
+  statusSource?: string | null; statusAsOf?: string | null; statusSince?: string | null; adminStatus?: string | null;
+  permitNo?: string | null; permitDate?: string | null; permitExpires?: string | null; completionDate?: string | null;
+  shutInDate?: string | null; injectionType?: string | null; locationFlag?: string | null; locationNote?: string | null;
+  geomFlag?: string | null; sources?: Record<string, string> | null; bores?: WellBore[]; history?: WellHistoryEvent[]; sourceFiles?: WellSourceFile[];
+};
 type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; operator: string | null; leaseName: string | null; leaseNo: string | null; field: string | null; oilGas: string | null; district: string | null; cumOil: number | null; cumGas: number | null; lastProd: string | null; formations: string | null; unitAcres?: number | null; spudDate?: string | null; plugDate?: string | null; permits?: WellPermit[]; completions?: WellCompletion[];
   /** "TX" | "LA" (tile `state`); Louisiana wells carry their SONRIS record in `la`. */
-  state?: string; la?: LaWellDetail };
+  state?: string; la?: LaWellDetail } & WellRefresh;
 type SelWell = { kind: "well" } & WellProps;
 type SelHotspot = { kind: "hotspot"; summary: AreaSummary; periodLabel: string };
 type SelTract = { kind: "tract" } & TractInfo;
-type Selected = SelAbstract | SelWell | SelHotspot | SelTract | null;
+/** A wellbore whose surface well is outside the refreshed counties (only the bore is on the map). */
+type SelBore = { kind: "bore"; fid: number; surfaceId: number; api: string | null; wellboreType: string | null; boreStatus: string | null; bhSource: string | null };
+type Selected = SelAbstract | SelWell | SelHotspot | SelTract | SelBore | null;
 
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
 
@@ -92,6 +109,8 @@ interface MapCam { center: [number, number]; zoom: number }
 interface MapFilterState {
   status: string; states?: string[]; counties: string[]; surveys: string[]; abstracts: string[];
   wellTypes: string[]; wellStatuses: string[]; operators: string[]; formations: string[];
+  /** Wellbore profile (added with the 2026-10 RRC refresh; absent in older presets). */
+  profiles?: string[];
 }
 interface FilterPreset { name: string; filters: MapFilterState }
 function loadJson<T>(key: string, fallback: T): T {
@@ -192,6 +211,7 @@ export function MapView() {
   const [fSurveys, setFSurveys] = useState<string[]>([]);
   const [fAbstracts, setFAbstracts] = useState<string[]>([]);
   const [fWellTypes, setFWellTypes] = useState<string[]>([]);
+  const [fProfiles, setFProfiles] = useState<string[]>([]);
   const [fWellStatuses, setFWellStatuses] = useState<string[]>([]);
   const [fOperators, setFOperators] = useState<string[]>([]);
   const [fFormations, setFFormations] = useState<string[]>([]);
@@ -200,17 +220,26 @@ export function MapView() {
   const [meta, setMeta] = useState<{ counties: string[] }>({ counties: [] });
   // Survey/abstract filter options come from the GIS API (PostGIS), scoped to the
   // selected counties — no abstract data needs to be downloaded to filter it.
-  const [gisOptions, setGisOptions] = useState<{ surveys: string[]; abstracts: string[]; wellTypes: string[]; wellStatuses: string[]; operators: string[]; wellCount: number }>({ surveys: [], abstracts: [], wellTypes: [], wellStatuses: [], operators: [], wellCount: 0 });
-  // Abstract filter values stay the bare GIS labels the extent API expects;
-  // they DISPLAY with survey + county + state and rank by number as you type.
+  const [gisOptions, setGisOptions] = useState<{ surveys: string[]; abstracts: AbstractOption[]; wellTypes: string[]; wellProfiles?: string[]; wellStatuses: string[]; operators: string[]; wellCount: number }>({ surveys: [], abstracts: [], wellTypes: [], wellStatuses: [], operators: [], wellCount: 0 });
+  // Abstract filter: one option per abstract/survey combination, keyed by its
+  // GIS id ("TX-289281") — never collapsed to a bare number, so every abstract
+  // of the selected counties is listed and searchable by number OR survey.
+  // Values from saved filters predating ids (bare labels) stay valid.
   const absIndex = useAbstractIndex();
-  const abstractFilterLabels = useMemo(
-    () => Object.fromEntries(gisOptions.abstracts.map((a) => [a, absIndex.labelAmong(a, fCounties)])),
-    [gisOptions.abstracts, absIndex, fCounties],
-  );
+  const abstractById = useMemo(() => new Map(gisOptions.abstracts.map((a) => [a.id, a])), [gisOptions.abstracts]);
+  const abstractFilterLabels = useMemo(() => {
+    const multi = fCounties.length !== 1;
+    const out: Record<string, string> = {};
+    for (const a of gisOptions.abstracts) {
+      const base = a.abstract ? abstractShortLabel({ abstract: a.abstract, survey: a.survey }) : `No abstract number · ${surveyLabel(a.survey) || "unnamed tract"}`;
+      out[a.id] = multi ? `${base} · ${countyStateLabel(a.county, a.state)}` : base;
+    }
+    return out;
+  }, [gisOptions.abstracts, fCounties.length]);
+  const abstractFilterOptions = useMemo(() => [...new Set([...gisOptions.abstracts.map((a) => a.id), ...fAbstracts])], [gisOptions.abstracts, fAbstracts]);
   const rankAbstractFilter = useCallback((opts: readonly string[], q: string) =>
-    q.trim() ? rankAbstracts(opts, q, (a) => ({ abstract: a, text: abstractFilterLabels[a] ?? a })) : [...opts],
-  [abstractFilterLabels]);
+    q.trim() ? rankAbstracts(opts, q, (id) => ({ abstract: abstractById.get(id)?.abstract ?? id, text: abstractFilterLabels[id] ?? id })) : [...opts],
+  [abstractFilterLabels, abstractById]);
   const [sug, setSug] = useState<Suggest | null>(null);
   const [searchFocus, setSearchFocus] = useState(false);
   const searchBoxRef = useRef<HTMLDivElement>(null);
@@ -377,6 +406,12 @@ export function MapView() {
           const ring = map.queryRenderedFeatures(bx, { layers: ["permit-hl"] }).find((f) => f.properties?.fid != null);
           if (ring) { void openWell(Number(ring.properties.fid)); return; }
         }
+        // A bottom hole or wellbore path opens the well it belongs to.
+        if (!hits.length && layersRef.current.wellbores) {
+          const boreLayers = ["bottomholes", "wellbores"].filter((l) => map.getLayer(l));
+          const bore = boreLayers.length ? map.queryRenderedFeatures(bx, { layers: boreLayers }).find((f) => f.properties?.surfaceId != null) : undefined;
+          if (bore) { void openBore(bore.properties as Record<string, unknown>); return; }
+        }
         // De-dupe by fid (a feature can appear once), keep distinct wells.
         const seen = new Map<number, WellProps>();
         for (const h of hits) { const p = h.properties as Record<string, unknown>; const fid = Number(p.fid); if (!seen.has(fid)) seen.set(fid, toWellProps(p)); }
@@ -408,8 +443,10 @@ export function MapView() {
         if (selAbstractRef.current === id) { clearSelection(); return; }
         selectAbstract(id, feats[0].properties as Record<string, unknown>);
       });
-      map.on("mouseenter", "wells", () => (map.getCanvas().style.cursor = "pointer"));
-      map.on("mouseleave", "wells", () => (map.getCanvas().style.cursor = ""));
+      for (const layer of ["wells", "bottomholes", "wellbores"]) {
+        map.on("mouseenter", layer, () => (map.getCanvas().style.cursor = "pointer"));
+        map.on("mouseleave", layer, () => (map.getCanvas().style.cursor = ""));
+      }
       // Heat hover tooltip: summarize the production points under the cursor.
       // rAF-throttled so dense counties stay smooth while panning.
       let hoverPending = false;
@@ -458,6 +495,7 @@ export function MapView() {
       if (selAbstractRef.current) map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id: selAbstractRef.current }, { selected: false });
       if (selWellRef.current != null) map.setFeatureState({ source: "abstracts", sourceLayer: "wells", id: selWellRef.current }, { selected: false });
       if (map.getLayer("wellbores-sel")) map.setFilter("wellbores-sel", ["==", ["get", "surfaceId"], -1]);
+      if (map.getLayer("bottomholes-sel")) map.setFilter("bottomholes-sel", ["==", ["get", "surfaceId"], -1]);
     }
     selAbstractRef.current = null; selWellRef.current = null;
     setSelected(null); setChoices(null);
@@ -476,6 +514,7 @@ export function MapView() {
     selWellRef.current = w.fid;
     map.setFeatureState({ source: "abstracts", sourceLayer: "wells", id: w.fid }, { selected: true });
     if (map.getLayer("wellbores-sel")) map.setFilter("wellbores-sel", ["==", ["get", "surfaceId"], w.fid]);
+    if (map.getLayer("bottomholes-sel")) map.setFilter("bottomholes-sel", ["==", ["get", "surfaceId"], w.fid]);
     setSelected({ kind: "well", ...w });
   }
   // Full panel detail (operator, lease, cums, spud/plug, permits, completions)
@@ -493,10 +532,26 @@ export function MapView() {
         unitAcres: d.unitAcres != null ? Number(d.unitAcres) : null,
         permits: (d.permits as WellPermit[]) ?? [],
         completions: (d.completions as WellCompletion[]) ?? [],
+        ...refreshOf(d),
       } as WellProps);
       const map = mapRef.current;
       if (fly && map && typeof d.lon === "number") map.flyTo({ center: [d.lon as number, d.lat as number], zoom: Math.max(map.getZoom(), 13), duration: 800 });
     } catch { /* well not in the database */ }
+  }
+  // A clicked bottom hole / wellbore path: its surface well's panel — or, when
+  // the surface location lies outside the refreshed counties, the bore alone.
+  async function openBore(p: Record<string, unknown>) {
+    const surfaceId = Number(p.surfaceId);
+    try {
+      await api.get(`/gis/wells/${surfaceId}`);
+      await openWell(surfaceId);
+    } catch {
+      clearSelection();
+      setSelected({
+        kind: "bore", fid: Number(p.fid), surfaceId, api: (p.api as string) || null,
+        wellboreType: (p.wellboreType as string) || null, boreStatus: (p.boreStatus as string) || null, bhSource: (p.bhSource as string) || null,
+      });
+    }
   }
   // (Wells are opened via openWell — search results carry the fid directly.)
   async function selectAbstractById(id: string) {
@@ -533,6 +588,7 @@ export function MapView() {
     vis("abstracts-fill", L.boundaries); vis("abstracts-line", L.boundaries);
     vis("abstracts-num", L.absNums); vis("abstracts-survey", L.surveyNames);
     vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores); vis("permit-hl-bores", L.wellbores);
+    vis("bottomholes", L.wellbores); vis("bottomholes-sel", L.wellbores);
     vis("tracts-fill", L.tracts); vis("tracts-line", L.tracts); vis("tracts-label", L.tracts);
     applyHighlight();
   }
@@ -544,6 +600,8 @@ export function MapView() {
     const map = mapRef.current; if (!map || !styleReady.current || !map.getLayer("wells")) return;
     const cl: unknown[] = [];
     if (fWellTypes.length) cl.push(["in", ["get", "type"], ["literal", fWellTypes]]);
+    // Wellbore profile (Vertical / Horizontal / Directional) — RRC refresh.
+    if (fProfiles.length) cl.push(["in", ["get", "profile"], ["literal", fProfiles]]);
     if (fWellStatuses.length) cl.push(["in", ["get", "status"], ["literal", fWellStatuses]]);
     // Operator filters HIDE, exactly like type/status: only wells operated by
     // the selected operator(s) stay on the map (a null-operator well is not
@@ -562,6 +620,7 @@ export function MapView() {
       ? (["any", ["!", ["has", "type"]], ["all", ...cl]] as unknown as maplibregl.ExpressionSpecification)
       : null;
     if (map.getLayer("wellbores")) map.setFilter("wellbores", boreExpr);
+    if (map.getLayer("bottomholes")) map.setFilter("bottomholes", boreExpr);
   }
 
   // Recompute the period-attributed production points from current filters, then
@@ -686,7 +745,7 @@ export function MapView() {
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
-  useEffect(applyWellFilter, [fWellTypes, fWellStatuses, fOperators]);
+  useEffect(applyWellFilter, [fWellTypes, fProfiles, fWellStatuses, fOperators]);
 
   // Drilling-permit highlight: resolve the URL's permit filters to wells. The
   // server re-counts exactly the set the Research metric counted (same filters,
@@ -854,7 +913,7 @@ export function MapView() {
   function currentFilters(): MapFilterState {
     return {
       status: statusFilter, states: fStates, counties: fCounties, surveys: fSurveys, abstracts: fAbstracts,
-      wellTypes: fWellTypes, wellStatuses: fWellStatuses, operators: fOperators, formations: fFormations,
+      wellTypes: fWellTypes, profiles: fProfiles, wellStatuses: fWellStatuses, operators: fOperators, formations: fFormations,
     };
   }
   function persistFilterPresets(next: FilterPreset[]) {
@@ -870,7 +929,11 @@ export function MapView() {
     setStatusFilter(f.status ?? "ACTIVE");
     setFStates(f.states ?? []);
     setFCounties(f.counties ?? []); setFSurveys(f.surveys ?? []); setFAbstracts(f.abstracts ?? []);
-    setFWellTypes(f.wellTypes ?? []); setFWellStatuses(f.wellStatuses ?? []);
+    // Pre-refresh presets: "Horizontal"/"Directional" were well TYPES; they are profiles now.
+    const legacyProfiles: string[] = (f.wellTypes ?? []).filter((t) => t === "Horizontal" || t === "Directional");
+    setFWellTypes((f.wellTypes ?? []).filter((t) => !legacyProfiles.includes(t)));
+    setFProfiles([...new Set([...(f.profiles ?? []), ...legacyProfiles])]);
+    setFWellStatuses([...new Set((f.wellStatuses ?? []).map(normalizeWellStatus))]);
     setFOperators(f.operators ?? []); setFFormations(f.formations ?? []);
   }
   function deleteFilterPreset(name: string) {
@@ -881,13 +944,13 @@ export function MapView() {
     const cur = JSON.stringify(currentFilters());
     return filterPresets.find((p) => JSON.stringify({ ...p.filters, status: p.filters.status ?? "ACTIVE" }) === cur)?.name ?? null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterPresets, statusFilter, fStates, fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses, fOperators, fFormations]);
+  }, [filterPresets, statusFilter, fStates, fCounties, fSurveys, fAbstracts, fWellTypes, fProfiles, fWellStatuses, fOperators, fFormations]);
   // Filters button badge: how many filter groups are set (deal status counts
   // once it is anything other than the default "Active Deals").
   const filterCount = (statusFilter !== "ACTIVE" ? 1 : 0) +
-    [fStates, fCounties, fSurveys, fAbstracts, fWellTypes, fWellStatuses, fOperators, fFormations].filter((v) => v.length > 0).length;
+    [fStates, fCounties, fSurveys, fAbstracts, fWellTypes, fProfiles, fWellStatuses, fOperators, fFormations].filter((v) => v.length > 0).length;
   const anyFilterSet = fStates.length > 0 || fCounties.length > 0 || fSurveys.length > 0 || fAbstracts.length > 0 ||
-    fWellTypes.length > 0 || fWellStatuses.length > 0 || fOperators.length > 0 || fFormations.length > 0;
+    fWellTypes.length > 0 || fProfiles.length > 0 || fWellStatuses.length > 0 || fOperators.length > 0 || fFormations.length > 0;
   // Size the map to fill from its top down to the viewport bottom (footer), with
   // a small gap — recomputed on resize and whenever the controls row changes
   // height (a panel opening/closing), so there is never blank space below it.
@@ -967,7 +1030,7 @@ export function MapView() {
   const clearAllFilters = () => {
     setStatusFilter("ACTIVE");
     setFStates([]); setFCounties([]); setFSurveys([]); setFAbstracts([]);
-    setFWellTypes([]); setFWellStatuses([]); setFOperators([]); setFFormations([]);
+    setFWellTypes([]); setFProfiles([]); setFWellStatuses([]); setFOperators([]); setFFormations([]);
   };
 
   return (
@@ -1123,7 +1186,7 @@ export function MapView() {
               { key: "boundaries", label: "Abstract boundaries" }, { key: "absNums", label: "Abstract numbers" },
               { key: "surveyNames", label: "Survey names" }, { key: "deals", label: "Active deals" },
               { key: "assets", label: "Mineral assets (owned)" },
-              { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores (laterals)" },
+              { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores + bottom holes" },
               { key: "tracts", label: "Imported tracts" },
             ]}
             layers={layers}
@@ -1179,10 +1242,11 @@ export function MapView() {
                       River are also Texas counties) and display as "Sabine Parish, LA". */}
                   <MapField label="State"><SearchableMultiSelect options={[...US_STATE_OPTIONS]} labels={US_STATE_LABELS} value={fStates} onChange={setFStates} placeholder="States…" /></MapField>
                   <MapField label="County / Parish"><SearchableMultiSelect options={fStates.length ? mapCountyOptions(fStates) : meta.counties} labels={MAP_COUNTY_LABELS} value={fCounties} onChange={setFCounties} placeholder="Counties or parishes…" /></MapField>
-                  <MapField label="Abstract / Section"><SearchableMultiSelect options={gisOptions.abstracts} labels={abstractFilterLabels} filterOptions={rankAbstractFilter} value={fAbstracts} onChange={setFAbstracts} placeholder="Abstract #, section or survey…" /></MapField>
+                  <MapField label="Abstract / Section" count={gisOptions.abstracts.length || undefined}><SearchableMultiSelect options={abstractFilterOptions} labels={abstractFilterLabels} filterOptions={rankAbstractFilter} value={fAbstracts} onChange={setFAbstracts} disabled={!fCounties.length && !fAbstracts.length} placeholder={fCounties.length ? "Abstract #, section or survey…" : "Choose a county first"} /></MapField>
                   <MapField label="Survey / Township"><SearchableMultiSelect options={gisOptions.surveys} value={fSurveys} onChange={setFSurveys} placeholder="Surveys or townships…" /></MapField>
                   <div className="mc-divider" />
                   <MapField label="Well Type"><SearchableMultiSelect options={gisOptions.wellTypes} value={fWellTypes} onChange={setFWellTypes} placeholder="Well types…" /></MapField>
+                  <MapField label="Wellbore Profile"><SearchableMultiSelect options={gisOptions.wellProfiles ?? []} value={fProfiles} onChange={setFProfiles} placeholder="Vertical, horizontal, directional…" /></MapField>
                   <MapField label="Well Status"><SearchableMultiSelect options={gisOptions.wellStatuses} value={fWellStatuses} onChange={setFWellStatuses} placeholder="Well statuses…" /></MapField>
                   <MapField label="Operator" count={gisOptions.operators.length}><SearchableMultiSelect options={gisOptions.operators} value={fOperators} onChange={setFOperators} placeholder="Operators…" /></MapField>
                   <MapField label="Formation" count={scoped.formations.length}><SearchableMultiSelect options={scoped.formations} value={fFormations} onChange={setFFormations} placeholder="Formations…" /></MapField>
@@ -1311,9 +1375,9 @@ export function MapView() {
             </div>
           ) : (
             <div className="mcx-legend-rows">
-              <Legend color="#22c55e" label="Producing" /><Legend color="#f59e0b" label="Shut-in" /><Legend color="#6b7280" label="Plugged" />
-              <Legend color="#3b82f6" label="Permitted" /><Legend color="#78350f" label="Dry hole" /><Legend color="#7c3aed" label="Injection/Disposal" />
-              {layers.wellbores && <Legend color="#0f766e" label="Wellbore (lateral)" line />}
+              {WELL_STATUSES.map((st) => <Legend key={st} color={STATUS_COLORS[st]} label={st} />)}
+              {layers.wellbores && <Legend color="#0f766e" label="Wellbore path (approximate)" line dashed />}
+              {layers.wellbores && <Legend color="#0f766e" label="Bottom hole" ring />}
               {permitReq && <Legend color={PERMIT_HL_COLOR} label="Highlighted permit" />}
             </div>
           ))}
@@ -1362,16 +1426,24 @@ export function MapView() {
             ) : selected.kind === "well" ? (
               <>
                 <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.leaseName || "Well"} {selected.wellNo ? `#${selected.wellNo}` : ""}</h3><div className="muted" style={{ fontSize: 12 }}>{selected.symbol}</div></div><button className="icon-btn" aria-label="Close" onClick={clearSelection}>×</button></div>
+                <WellStatusBlock w={selected} />
                 <div className="dd-grid mc-kv">
                   <KV k="Operator" v={selected.operator} /><KV k="Oil / Gas" v={selected.oilGas} />
                   <KV k="Lease" v={selected.leaseName} /><KV k="RRC Lease #" v={selected.leaseNo} />
                   <KV k="Field" v={selected.field} /><KV k="API" v={selected.api} />
                   <KV k="Well No." v={selected.wellNo} /><KV k="Type" v={selected.type} />
-                  <KV k="Status" v={selected.status} /><KV k="County" v={selected.county} />
+                  <KV k="Profile" v={selected.profile} /><KV k="County" v={selected.county} />
                   <KV k="Abstract" v={selected.abstract ? abstractShortLabel({ abstract: selected.abstract }) : null} /><KV k="Survey" v={selected.survey} />
-                  <KV k="Spud/permit" v={selected.spudDate} /><KV k="Plugged" v={selected.plugDate} />
+                  {/* RRC milestones: only the ones this well has. */}
+                  {selected.permitNo && <KV k="Permit" v={`#${selected.permitNo}${selected.permitDate ? ` · ${selected.permitDate}` : ""}`} />}
+                  {selected.spudDate && <KV k="Spudded" v={selected.spudDate} />}
+                  {selected.completionDate && <KV k="Completed" v={selected.completionDate} />}
+                  {selected.shutInDate && <KV k="Shut in since" v={selected.shutInDate} />}
+                  {selected.plugDate && <KV k="Plugged" v={selected.plugDate} />}
+                  {selected.injectionType && <KV k="Injection type" v={selected.injectionType} />}
                   <KV k="Unit size" v={selected.unitAcres != null ? `${num(selected.unitAcres)} ac` : null} />
                 </div>
+                <WellBoresBlock w={selected} />
                 {selected.formations && (
                   <div className="kv" style={{ marginTop: 8 }}><span className="k">Formations (RRC W-2)</span><span className="v wrap">{selected.formations}</span></div>
                 )}
@@ -1420,12 +1492,21 @@ export function MapView() {
                     ))}
                   </>
                 )}
+                <WellHistoryBlock w={selected} />
                 {/* fid resolves the exact rrc well (production is read live from
                     the centralized dataset); the API label is a readable fallback. */}
                 <Link className="primary mc-fp-cta" to={`/valuation?fid=${selected.fid}&well=${encodeURIComponent(selected.api || selected.api8 || "")}`}>
                   Open in Well Analysis →
                 </Link>
                 <p className="mc-fp-note">Operator, lease, field, dates, permits, and completions are from RRC records (lease-level; oil is reported per lease). Formation shows where a W-2 was filed.</p>
+              </>
+            ) : selected.kind === "bore" ? (
+              <>
+                <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.wellboreType ?? "Wellbore"} wellbore</h3><div className="muted" style={{ fontSize: 12 }}>{selected.api ? `API ${selected.api}` : `Bottom-hole record ${selected.fid}`}</div></div><button className="icon-btn" aria-label="Close" onClick={clearSelection}>×</button></div>
+                <div className="dd-grid mc-kv">
+                  <KV k="Status" v={selected.boreStatus} /><KV k="Bottom hole" v={selected.bhSource === "rrc-lateral-end" ? "End of RRC's lateral line" : "RRC bottom-hole record"} />
+                </div>
+                <p className="mc-fp-note">This wellbore's bottom hole is in a refreshed county, but its surface location is in a county outside Leon, Freestone and Cherokee, so its full well record isn't loaded. The path is approximate (a straight line from the surface to the bottom hole).</p>
               </>
             ) : selected.kind === "hotspot" ? (
               <>
@@ -1538,8 +1619,34 @@ function MapField({ label, count, children }: { label: string; count?: number; c
   );
 }
 
-function Legend({ color, label, line }: { color: string; label: string; line?: boolean }) {
-  return <div className="mcx-legend-row"><span className={line ? "line" : "dot"} style={{ background: color }} />{label}</div>;
+function Legend({ color, label, line, dashed, ring }: { color: string; label: string; line?: boolean; dashed?: boolean; ring?: boolean }) {
+  const style: React.CSSProperties = ring
+    ? { background: "#ffffff", boxShadow: `inset 0 0 0 2px ${color}` }
+    : dashed ? { background: `repeating-linear-gradient(90deg, ${color} 0 5px, transparent 5px 8px)` } : { background: color };
+  return <div className="mcx-legend-row"><span className={line ? "line" : "dot"} style={style} />{label}</div>;
+}
+
+/** The refresh fields of a /gis/wells/:fid response. */
+function refreshOf(d: Record<string, unknown>): WellRefresh {
+  const s = (k: string) => (typeof d[k] === "string" ? (d[k] as string) : null);
+  return {
+    profile: s("profile"), statusDetail: s("statusDetail"), statusFlag: s("statusFlag"), statusNote: s("statusNote"),
+    statusSource: s("statusSource"), statusAsOf: s("statusAsOf")?.slice(0, 10) ?? null, statusSince: s("statusSince")?.slice(0, 10) ?? null,
+    adminStatus: s("adminStatus"), permitNo: s("permitNo"), permitDate: s("permitDate")?.slice(0, 10) ?? null,
+    permitExpires: s("permitExpires")?.slice(0, 10) ?? null, completionDate: s("completionDate")?.slice(0, 10) ?? null,
+    shutInDate: s("shutInDate")?.slice(0, 10) ?? null, injectionType: s("injectionType"),
+    locationFlag: s("locationFlag"), locationNote: s("locationNote"), geomFlag: s("geomFlag"),
+    sources: (d.sources as Record<string, string> | null) ?? null,
+    bores: (d.bores as WellBore[] | undefined) ?? [], history: (d.history as WellHistoryEvent[] | undefined) ?? [],
+    sourceFiles: (d.sourceFiles as WellSourceFile[] | undefined) ?? [],
+  };
+}
+
+/** "RRC Wellbore Query · as of 2026-10-02" for a source id, from the well's source files. */
+function sourceLine(id: string | null | undefined, files: WellSourceFile[] | undefined): string | null {
+  if (!id) return null;
+  const f = files?.find((x) => x.id === id || (id === "permit" && x.id === "permits"));
+  return `${SOURCE_LABEL[id] ?? id}${f?.asOf ? ` · as of ${f.asOf}` : ""}`;
 }
 /** Full-width layer checkbox tile (Map Panels reference): 38px row with a
  *  filled blue checkbox when on and a blue-tinted row background. */
@@ -1669,6 +1776,74 @@ function LaWellPanel({ w, onClose }: { w: LaWellDetail; onClose: () => void }) {
         Open in Well Analysis →
       </Link>
       <p className="mc-fp-note">Well record, status and unit production from the Louisiana Office of Conservation (SONRIS) public data. The map colors it with the matching Texas status ({w.status}).</p>
+    </>
+  );
+}
+
+/** The well's normalized status, why, how sure, and where it came from. */
+function WellStatusBlock({ w }: { w: WellProps }) {
+  const status = normalizeWellStatus(w.status);
+  const color = STATUS_COLORS[status as keyof typeof STATUS_COLORS] ?? STATUS_COLORS["Other/Unknown"];
+  const flags = [
+    w.statusFlag ? { label: STATUS_FLAG_LABEL[w.statusFlag] ?? w.statusFlag, note: w.statusNote } : null,
+    w.locationFlag ? { label: "Location uncertain", note: w.locationNote } : null,
+    w.geomFlag === "missing-bottom-hole" ? { label: "No bottom-hole location", note: "RRC's layers have no bottom-hole point for this horizontal/directional well." } : null,
+  ].filter((f): f is { label: string; note: string | null | undefined } => !!f);
+  const source = sourceLine(w.statusSource, w.sourceFiles);
+  return (
+    <div className="mc-status-block">
+      <div className="mc-status-line">
+        <span className="mc-status-dot" style={{ background: color }} />
+        <strong>{status || "—"}</strong>
+        {w.statusDetail && <span className="muted"> · {w.statusDetail}</span>}
+      </div>
+      {w.adminStatus && <div className="muted" style={{ fontSize: 12 }}>RRC schedule: {w.adminStatus.toLowerCase()}</div>}
+      {flags.map((f) => (
+        <div key={f.label} className="mc-status-flag" title={f.note ?? undefined}>
+          <strong>{f.label}</strong>{f.note ? <span> — {f.note}</span> : null}
+        </div>
+      ))}
+      {source && <div className="muted" style={{ fontSize: 11.5 }}>Status source: {source}</div>}
+    </div>
+  );
+}
+
+/** Horizontal / directional wellbores: bottom holes and their approximate paths. */
+function WellBoresBlock({ w }: { w: WellProps }) {
+  const bores = w.bores ?? [];
+  if (!bores.length) return null;
+  return (
+    <>
+      <div className="mc-fp-sec">Wellbore paths (approximate)</div>
+      {bores.map((b) => (
+        <div key={b.fid} className="mc-fp-row">
+          <span>{b.profile ?? "Wellbore"}{b.stcode ? ` ${b.stcode}` : ""}{b.status ? ` · ${b.status}` : ""}</span>
+          <span className="muted">{b.offsetFt != null ? `${num(b.offsetFt)} ft` : ""}{b.bhSource === "rrc-lateral-end" ? " · BH from RRC line end" : ""}</span>
+        </div>
+      ))}
+      <p className="mc-fp-note">Each path is a straight line from the surface location to RRC's bottom-hole location. RRC publishes directional surveys only as scanned images, so the true trajectory isn't drawn.</p>
+    </>
+  );
+}
+
+const HISTORY_EVENT: Record<string, string> = {
+  "permit-issued": "Permit issued", spud: "Spudded", completed: "Completed", "shut-in": "Shut in", plugged: "Plugged",
+  "status-refresh": "Status (RRC refresh)", "previous-status": "Shown before refresh",
+};
+
+/** RRC's dated events for the well, oldest first, with each status the well has shown. */
+function WellHistoryBlock({ w }: { w: WellProps }) {
+  const h = w.history ?? [];
+  if (!h.length) return null;
+  return (
+    <>
+      <div className="mc-fp-sec">Status history</div>
+      {h.slice(-8).map((e, i) => (
+        <div key={`${e.event}-${e.date}-${i}`} className="mc-fp-row">
+          <span>{HISTORY_EVENT[e.event] ?? e.event}{e.status ? ` · ${e.status}` : ""}{e.detail && e.event !== "status-refresh" ? <span className="muted"> · {e.detail}</span> : null}</span>
+          <span className="muted">{e.date ?? "—"}</span>
+        </div>
+      ))}
     </>
   );
 }

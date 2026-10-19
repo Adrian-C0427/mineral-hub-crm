@@ -6,7 +6,7 @@ import {
   type GisDb, type GisDbRunner, type VersionedLoadResult,
 } from "./gisRegions.js";
 import {
-  classifyLaBore, classifyLaWell, LA_FID_SPAN, laBoreFid, laWellFid, type MapClass,
+  classifyLaBore, classifyLaWell, LA_CLASSIFIER_VERSION, LA_FID_SPAN, laBoreFid, laWellFid, type MapClass,
 } from "../domain/sonrisWells.js";
 
 /**
@@ -92,7 +92,9 @@ const seqId = (v: unknown): v is number => typeof v === "number" && Number.isInt
  */
 export function parseLaWellDataset(json: Buffer | string, key = LA_WELLS_DATASET_KEY, parish = LA_WELLS_PARISH): LaWellDataset {
   const text = typeof json === "string" ? json : json.toString("utf8");
-  const version = crypto.createHash("sha256").update(text).digest("hex").slice(0, 16);
+  // Salted with the classifier version: a change in how codes map to statuses
+  // re-classifies the stored wells on the next boot even though the file is unchanged.
+  const version = crypto.createHash("sha256").update(`${LA_CLASSIFIER_VERSION}\n${text}`).digest("hex").slice(0, 16);
   const raw = JSON.parse(text) as { key?: unknown; wells?: unknown[]; bores?: unknown[]; production?: unknown[] };
   if (raw.key !== undefined && raw.key !== key) throw new Error(`${key}: file is dataset "${String(raw.key)}"`);
   if (!Array.isArray(raw.wells) || !raw.wells.length) throw new Error(`${key}: no wells`);

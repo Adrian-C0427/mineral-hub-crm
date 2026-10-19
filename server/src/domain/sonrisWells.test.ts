@@ -3,6 +3,7 @@ import {
   bucketFromWording, classifyLaBore, classifyLaWell, distanceFt, isLaFid, LA_FID_BASE, LA_FID_SPAN, LA_STATUS_BUCKET,
   laBoreFid, laSerialOfFid, laWellFid, sectionLabelOf, shapeUnitProduction, ymShift, type UnitProductionRow,
 } from "./sonrisWells.js";
+import { WELL_STATUSES } from "./wellStatus.js";
 
 // Louisiana wells share the map's `wells`/`wellbores` tile layers (promoteId
 // "fid") and its Texas status vocabulary, so the id namespace and the mapping
@@ -24,8 +25,8 @@ describe("fid namespace", () => {
   });
 });
 
-describe("status / type mapping (Texas vocabulary)", () => {
-  const TX_STATUSES = ["Producing", "Shut-In", "Plugged", "Permitted", "Dry Hole", "Active", "Canceled/Abandoned", "Unknown"];
+describe("status / type mapping (the shared normalized vocabulary)", () => {
+  const TX_STATUSES: readonly string[] = WELL_STATUSES;
   const TX_TYPES = ["Oil", "Gas", "Oil/Gas", "Location", "Dry Hole", "Injection/Disposal", "Unknown"];
 
   it("maps every Red River Parish status code", () => {
@@ -39,25 +40,25 @@ describe("status / type mapping (Texas vocabulary)", () => {
       ["30", "Plugged And Abandoned Oil", "10", "Plugged", "Oil", "Plugged Oil"],
       ["30", "Plugged And Abandoned Dry Gas", "25", "Plugged", "Gas", "Plugged Gas"],
       ["30", "Plugged And Abandoned No Product Specified", "00", "Plugged", "Unknown", "Well"],
-      ["29", "Dry And Plugged No Product Specified", "00", "Dry Hole", "Dry Hole", "Dry Hole"],
-      ["31", "Shut-In Dry Hole -Future Utility No Product Specified", "00", "Dry Hole", "Dry Hole", "Dry Hole"],
+      ["29", "Dry And Plugged No Product Specified", "00", "Plugged", "Dry Hole", "Dry Hole"],
+      ["31", "Shut-In Dry Hole -Future Utility No Product Specified", "00", "Shut-In", "Dry Hole", "Dry Hole"],
       ["01", "Permitted", "00", "Permitted", "Location", "Permitted Location"],
-      ["03", "Permit Expired", null, "Canceled/Abandoned", "Location", "Canceled/Abandoned Location"],
-      ["09", "Active- Injection Commercial Swd", "00", "Active", "Injection/Disposal", "Injection/Disposal"],
-      ["09", "Active- Injection Aquifer Remediation", "00", "Active", "Injection/Disposal", "Injection/Disposal"],
+      ["03", "Permit Expired", null, "Other/Unknown", "Location", "Expired/Canceled Location"],
+      ["09", "Active- Injection Commercial Swd", "00", "Disposal", "Injection/Disposal", "Injection/Disposal"],
+      ["09", "Active- Injection Aquifer Remediation", "00", "Injection", "Injection/Disposal", "Injection/Disposal"],
       ["26", "Act 404 Orphan Well-Injection And Mining No Product Specified", "00", "Shut-In", "Injection/Disposal", "Injection/Disposal"],
       ["23", "Act 404 Orphan Well-Eng Oil", "10", "Shut-In", "Oil", "Shut-In (Oil)"],
       ["28", "Unable To Locate Well-No Plugged And Abandoned Gas", "20", "Shut-In", "Gas", "Shut-In (Gas)"],
       ["22", "Reverted To Single Completion No Product Specified", "00", "Plugged", "Unknown", "Well"],
       ["24", "Rvrtd L/O-Resident Consumption Gas", "20", "Shut-In", "Gas", "Shut-In (Gas)"],
-      ["80", "* Unknown * No Product Specified", "00", "Unknown", "Unknown", "Well"],
+      ["80", "* Unknown * No Product Specified", "00", "Other/Unknown", "Unknown", "Well"],
     ];
     for (const [code, text, product, status, type, symbol] of cases) {
       expect(classifyLaWell(code, text, product), `${code} ${text}`).toEqual({ status, type, symbol });
     }
   });
 
-  it("only ever emits the Texas status/type vocabulary the paint and filters use", () => {
+  it("only ever emits the status/type vocabulary the paint and filters use", () => {
     for (const code of [...Object.keys(LA_STATUS_BUCKET), "02", "45", "99"]) {
       for (const product of ["00", "10", "20", "25", null]) {
         const c = classifyLaWell(code, "Something", product);
@@ -70,13 +71,15 @@ describe("status / type mapping (Texas vocabulary)", () => {
   it("falls back to the wording for codes not in the table", () => {
     expect(bucketFromWording("Plugged And Abandoned Gas")).toBe("Plugged");
     expect(bucketFromWording("Unable To Locate Well-No Plugged And Abandoned Oil")).toBe("Shut-In");
-    expect(bucketFromWording("Dry And Plugged Oil")).toBe("Dry Hole");
-    expect(bucketFromWording("Active- Injection Produced Salt Water")).toBe("Active");
+    expect(bucketFromWording("Dry And Plugged Oil")).toBe("Plugged");
+    expect(bucketFromWording("Shut-In Dry Hole")).toBe("Shut-In");
+    expect(bucketFromWording("Active- Injection Produced Salt Water")).toBe("Disposal");
+    expect(bucketFromWording("Active- Injection Enhanced Recovery")).toBe("Injection");
     expect(bucketFromWording("Shut-In Future Utility")).toBe("Shut-In");
     expect(bucketFromWording("Active - Producing Gas")).toBe("Producing");
-    expect(bucketFromWording("Permit Revoked")).toBe("Canceled/Abandoned");
+    expect(bucketFromWording("Permit Revoked")).toBe("Other/Unknown");
     expect(bucketFromWording("Permit To Drill")).toBe("Permitted");
-    expect(bucketFromWording("Something new")).toBe("Unknown");
+    expect(bucketFromWording("Something new")).toBe("Other/Unknown");
     expect(classifyLaWell("45", "Plugged And Abandoned Gas", "20")).toEqual({ status: "Plugged", type: "Gas", symbol: "Plugged Gas" });
   });
 });

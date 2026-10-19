@@ -42,9 +42,9 @@ describe("planExtentQuery precedence", () => {
     const plan = planExtentQuery({ counties: "Leon", abstracts: ["101", "202"] })!;
     expect(plan.sql).toContain("FROM gis.abstracts");
     expect(plan.sql).toContain("(state = ANY($1::text[]) AND county = ANY($2::text[]))");
-    // Abstract values are compared against the display form ('?' stripped),
-    // matching what /gis/options and the vector tiles serve.
-    expect(plan.sql).toContain("replace(abstract, '?', '') = ANY($3::text[])");
+    // Bare labels (saved filters from before abstract ids) compare against
+    // RRC's label as stored — an unnumbered tract's "?" is no longer stripped.
+    expect(plan.sql).toContain("abstract = ANY($3::text[])");
     expect(plan.params).toEqual([["TX"], ["Leon"], ["101", "202"]]);
   });
 

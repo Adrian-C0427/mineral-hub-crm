@@ -129,7 +129,7 @@ export function DealMap({ abstractIds, dealId, noun = "deal", abstractsWhere = "
     const vis = (id: string, on: boolean) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
     vis("abstracts-fill", L.boundaries); vis("abstracts-line", L.boundaries);
     vis("abstracts-num", L.numbers); vis("abstracts-survey", L.surveys);
-    vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores);
+    vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores); vis("bottomholes", L.wellbores); vis("bottomholes-sel", L.wellbores);
     vis("tracts-fill", L.tracts); vis("tracts-line", L.tracts); vis("tracts-label", L.tracts);
   }
 
@@ -194,7 +194,7 @@ export function DealMap({ abstractIds, dealId, noun = "deal", abstractsWhere = "
             defs={[
               { key: "boundaries", label: "Abstract boundaries" }, { key: "numbers", label: "Abstract numbers" },
               { key: "surveys", label: "Survey names" }, { key: "wells", label: "Wells" },
-              { key: "wellbores", label: "Wellbores (laterals)" },
+              { key: "wellbores", label: "Wellbores (approx. paths)" },
               ...(dealId ? [{ key: "tracts", label: "Imported tracts" }] : []),
             ]}
             layers={layers}

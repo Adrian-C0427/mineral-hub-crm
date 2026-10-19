@@ -141,7 +141,12 @@ export interface ResearchFilters {
   sellers: string[];  // grantorNorm keys
   operators: string[]; // operatorNorm keys
   surveys: string[];
+  /** Bare abstract numbers ("22") — matched in any county in scope. */
   abstractIds: string[];
+  /** County-qualified abstracts ("TX|Leon|22", the records' own key) — each
+   * county's abstract 22 is a different abstract, so the filter lists and
+   * matches them separately. */
+  abstractKeys: AbstractKey[];
   statuses: string[];
   trajectories: string[];
   /** Conveyed-interest range, percent (0–100) — documents only. */
@@ -159,7 +164,17 @@ function pctParam(v: unknown): number | undefined {
 // open bounds, no comparison/history baseline.
 interface Window { from: Date; to: Date; all?: boolean }
 
+export interface AbstractKey { state: string; county: string; abstractId: string }
+/** "TX|Leon|22" → { state, county, abstractId }; null for a bare number. */
+export function parseAbstractKey(v: string): AbstractKey | null {
+  const m = /^([A-Z]{2})\|([^|]+)\|(.+)$/.exec(v.trim());
+  return m ? { state: m[1], county: m[2], abstractId: m[3] } : null;
+}
+export const abstractKeyOf = (k: AbstractKey): string => `${k.state}|${k.county}|${k.abstractId}`;
+const hasAbstractFilter = (f: ResearchFilters) => f.abstractIds.length > 0 || f.abstractKeys.length > 0;
+
 export function parseFilters(q: Record<string, unknown>): ResearchFilters {
+  const abstracts = [...arr(q.abstractId), ...arr(q.abstract)].slice(0, MAX_FILTER_VALUES);
   return {
     states: arr(q.state),
     counties: arr(q.county),
@@ -172,7 +187,8 @@ export function parseFilters(q: Record<string, unknown>): ResearchFilters {
     // Both spellings are accepted (?abstractId=…&abstractId=… and ?abstract=…)
     // — different callers grew up on different sides of a merge. Re-sliced after
     // the merge so the two spellings together can't double the cap.
-    abstractIds: [...arr(q.abstractId), ...arr(q.abstract)].slice(0, MAX_FILTER_VALUES),
+    abstractIds: abstracts.filter((a) => !parseAbstractKey(a)),
+    abstractKeys: abstracts.map(parseAbstractKey).filter((k): k is AbstractKey => !!k),
     statuses: arr(q.permitStatus),
     trajectories: arr(q.trajectory),
     interestMin: pctParam(q.interestMin),
@@ -255,7 +271,12 @@ function docWhere(org: string, f: ResearchFilters, win?: Window): Prisma.Researc
   const and: Prisma.ResearchDocumentWhereInput[] = [];
   if (f.buyers.length) and.push({ OR: [{ granteeNorm: { in: f.buyers } }, { granteeNorms: { hasSome: f.buyers } }] });
   if (f.sellers.length) and.push({ OR: [{ grantorNorm: { in: f.sellers } }, { grantorNorms: { hasSome: f.sellers } }] });
-  if (f.abstractIds.length) and.push({ OR: [{ abstractIds: { hasSome: f.abstractIds } }, { abstractId: { in: f.abstractIds } }] });
+  if (hasAbstractFilter(f)) {
+    and.push({ OR: [
+      ...(f.abstractIds.length ? [{ abstractIds: { hasSome: f.abstractIds } }, { abstractId: { in: f.abstractIds } }] : []),
+      ...f.abstractKeys.map((k) => ({ state: k.state, county: k.county, OR: [{ abstractIds: { has: k.abstractId } }, { abstractId: k.abstractId }] })),
+    ] });
+  }
   if (and.length) w.AND = and;
   return w;
 }
@@ -316,7 +337,12 @@ function permitWhere(org: string, f: ResearchFilters, win?: Window): Prisma.Rese
   if (f.counties.length) w.county = { in: f.counties };
   if (f.operators.length) w.operatorNorm = { in: f.operators };
   if (f.surveys.length) w.survey = { in: f.surveys };
-  if (f.abstractIds.length) w.abstractId = { in: f.abstractIds };
+  if (hasAbstractFilter(f)) {
+    w.AND = [{ OR: [
+      ...(f.abstractIds.length ? [{ abstractId: { in: f.abstractIds } }] : []),
+      ...f.abstractKeys.map((k) => ({ state: k.state, county: k.county, abstractId: k.abstractId })),
+    ] }];
+  }
   if (f.statuses.length) w.status = { in: f.statuses as ResearchPermitStatus[] };
   if (f.trajectories.length) w.trajectory = { in: f.trajectories as WellTrajectory[] };
   return w;
@@ -375,7 +401,7 @@ async function loadRrcPermits(f: ResearchFilters, win: Window): Promise<PermitRo
     // the well's assignment as fallback for the few pre-acreage-era permits.
     const rows = await prisma.$queryRawUnsafe<{ permitDate: Date; county: string; operator: string | null; api8: string | null; wellNo: string | null; abstract: string | null; survey: string | null }[]>(
       `SELECT p.permit_date AS "permitDate", p.county, p.operator, p.api8, p.well_no AS "wellNo",
-              COALESCE(p.abstract, replace(w.abstract, '?', '')) AS abstract,
+              COALESCE(p.abstract, w.abstract) AS abstract,
               COALESCE(p.survey, w.survey) AS survey
          FROM rrc.permits p
          LEFT JOIN rrc.wells w ON w.api8 = p.api8
@@ -388,7 +414,8 @@ async function loadRrcPermits(f: ResearchFilters, win: Window): Promise<PermitRo
       if (f.operators.length && !f.operators.includes(operatorNorm)) continue;
       const trajectory: WellTrajectory = /H[A-Z]?$/.test((r.wellNo ?? "").trim().toUpperCase()) ? "HORIZONTAL" : "UNKNOWN";
       if (f.trajectories.length && !f.trajectories.includes(trajectory)) continue;
-      if (f.abstractIds.length && !(r.abstract && f.abstractIds.includes(r.abstract))) continue;
+      if (hasAbstractFilter(f) && !(r.abstract && (f.abstractIds.includes(r.abstract)
+        || f.abstractKeys.some((k) => k.state === "TX" && k.county === r.county && k.abstractId === r.abstract)))) continue;
       if (f.surveys.length && !(r.survey && f.surveys.includes(r.survey))) continue;
       out.push({
         activityDate: r.permitDate, state: "TX", county: r.county,
@@ -1393,7 +1420,8 @@ researchRouter.get(
       ]);
       return res.json({
         counties: [...new Set([...docVals.counties.values()].map((c) => c.county))].sort((a, b) => a.localeCompare(b)),
-        abstracts: [...new Set([...docVals.abstracts.values()].map((a) => a.abstractId))]
+        // County-qualified: every county's abstract is its own option.
+        abstracts: [...docVals.abstracts.values()].map(abstractKeyOf)
           .sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
         surveys: [...new Set([...docVals.surveys.values()].map((s) => s.survey))].sort((a, b) => a.localeCompare(b)),
         docTypes: [...docVals.docTypes].sort(),
@@ -1412,7 +1440,7 @@ researchRouter.get(
       try {
         const [counties, abstracts, surveys] = await Promise.all([
           prisma.$queryRawUnsafe<{ v: string }[]>(`SELECT DISTINCT county v FROM rrc.permits WHERE ${where} ORDER BY 1`, ...params),
-          prisma.$queryRawUnsafe<{ v: string }[]>(`SELECT DISTINCT abstract v FROM rrc.permits WHERE abstract IS NOT NULL AND ${where} ORDER BY 1`, ...params),
+          prisma.$queryRawUnsafe<{ v: string }[]>(`SELECT DISTINCT 'TX|' || county || '|' || abstract v FROM rrc.permits WHERE abstract IS NOT NULL AND ${where} ORDER BY 1`, ...params),
           prisma.$queryRawUnsafe<{ v: string }[]>(`SELECT DISTINCT survey v FROM rrc.permits WHERE survey IS NOT NULL AND ${where} ORDER BY 1`, ...params),
         ]);
         return res.json({
@@ -1425,14 +1453,14 @@ researchRouter.get(
     const where = permitWhere(org, f, win);
     const [counties, abstracts, surveys, statuses, trajectories] = await Promise.all([
       prisma.researchPermit.groupBy({ by: ["county"], where, orderBy: { county: "asc" } }),
-      prisma.researchPermit.groupBy({ by: ["abstractId"], where, orderBy: { abstractId: "asc" } }),
+      prisma.researchPermit.groupBy({ by: ["state", "county", "abstractId"], where, orderBy: { abstractId: "asc" } }),
       prisma.researchPermit.groupBy({ by: ["survey"], where, orderBy: { survey: "asc" } }),
       prisma.researchPermit.groupBy({ by: ["status"], where, orderBy: { status: "asc" } }),
       prisma.researchPermit.groupBy({ by: ["trajectory"], where, orderBy: { trajectory: "asc" } }),
     ]);
     res.json({
       counties: counties.map((r) => r.county).filter(Boolean),
-      abstracts: abstracts.map((r) => r.abstractId).filter((v): v is string => !!v),
+      abstracts: abstracts.filter((r) => !!r.abstractId).map((r) => abstractKeyOf({ state: r.state, county: r.county, abstractId: r.abstractId! })),
       surveys: surveys.map((r) => r.survey).filter((v): v is string => !!v),
       statuses: statuses.map((r) => r.status).filter(Boolean),
       trajectories: trajectories.map((r) => r.trajectory).filter(Boolean),
@@ -1514,7 +1542,7 @@ researchRouter.get(
     const org = researchOrgId(req); // reference data (demo reads its reference org)
     const f = parseFilters(req.query as Record<string, unknown>);
     const win = parseWindow(req.query as Record<string, unknown>);
-    if (!f.abstractIds.length) {
+    if (!hasAbstractFilter(f)) {
       res.json({ total: 0, buyers: [] });
       return;
     }
@@ -1694,7 +1722,17 @@ researchRouter.get(
     const params: unknown[] = [win.from, win.to];
     const add = (cond: string, value: unknown) => { params.push(value); conds.push(cond.replace("?", `$${params.length}`)); };
     if (f.counties.length) add(`p.county = ANY(?::text[])`, f.counties);
-    if (f.abstractIds.length) add(`p.abstract = ANY(?::text[])`, f.abstractIds);
+    if (hasAbstractFilter(f)) {
+      const parts: string[] = [];
+      if (f.abstractIds.length) { params.push(f.abstractIds); parts.push(`p.abstract = ANY($${params.length}::text[])`); }
+      const tx = f.abstractKeys.filter((k) => k.state === "TX");
+      if (tx.length) {
+        params.push(tx.map((k) => k.county)); const c = params.length;
+        params.push(tx.map((k) => k.abstractId)); const a = params.length;
+        parts.push(`(p.county, p.abstract) IN (SELECT * FROM unnest($${c}::text[], $${a}::text[]))`);
+      }
+      conds.push(parts.length ? `(${parts.join(" OR ")})` : "FALSE");
+    }
     if (f.surveys.length) add(`p.survey = ANY(?::text[])`, f.surveys);
     if (q) {
       params.push(`%${q.replace(/[%_\\]/g, "\\$&")}%`);

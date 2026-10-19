@@ -218,6 +218,11 @@
 .mc-fp-card { border-top: 1px solid var(--line-soft); padding: 10px 0; }
 .mc-fp-cta { display: flex; justify-content: center; margin-top: 12px; padding: 8px 12px; border-radius: var(--radius); }
 .mc-fp-note { margin: 10px 0 0; font-size: 12px; line-height: 1.5; color: var(--ink-4); }
+/* Well panel: normalized status, its RRC detail, any uncertainty flag, its source. */
+.mc-status-block { display: grid; gap: 3px; margin: 2px 0 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--raised); font-size: 13px; }
+.mc-status-line { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.mc-status-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; align-self: center; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12); }
+.mc-status-flag { font-size: 12px; line-height: 1.45; color: var(--ink-2); padding: 4px 6px; border-radius: var(--radius-sm); background: color-mix(in srgb, #f59e0b 12%, transparent); }
 .mc-choice { border-top: 1px solid var(--line-soft); border-radius: 0; cursor: pointer; padding: 8px 4px; }
 .mc-choice:hover { background: var(--hover); }
 
