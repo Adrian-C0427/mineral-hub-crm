@@ -276,18 +276,27 @@ export function deriveWellStatus(i: StatusInputs): DerivedStatus {
     }
 
     if (producingRows.length) {
-      // RRC's inactive-well tracking: a wellbore shut-in date means no
-      // production for 12+ months even though the completion keeps its
-      // PRODUCING classification on the schedule.
+      // RRC's inactive-well tracking: the wellbore's shut-in date is the month
+      // it stopped producing, while the completion keeps its PRODUCING
+      // classification on the schedule. RRC clears it only after sustained
+      // production, so a reactivated gas well (its lease IS the well) can
+      // report production past that date — when that production is recent,
+      // the records disagree on whether it is shut in now.
       const inactive = producingRows.every((r) => r.wbShutIn);
       if (inactive) {
         const since = maxOf(producingRows.map((r) => r.wbShutIn));
         const b14 = producingRows.some((r) => r.b14b2);
+        const wellLevelProd = on.every((r) => r.oilGas === "G");
+        const recent = shiftYm(i.prodNewestYm, -(NO_PRODUCTION_FLAG_MONTHS - 1));
+        const producedSince = wellLevelProd && !!since && !!i.lastProdYm && i.lastProdYm >= since && i.lastProdYm >= recent;
+        const last = i.lastProdYm ? ` Last reported production: ${ymLabel(i.lastProdYm)}.` : "";
         return {
           ...base, status: "Shut-In",
           detail: `Inactive since ${since ? ymLabel(since) : "an unrecorded date"}${b14 ? " · 14(b)(2) extension" : ""}`,
-          flag: null, since: rrcIsoDate(since),
-          note: "RRC classifies the completion as producing but tracks the wellbore as inactive (no production for 12+ months).",
+          flag: producedSince ? "needs-investigation" : null, since: rrcIsoDate(since),
+          note: producedSince
+            ? `RRC's wellbore record shows it shut in since ${ymLabel(since!)}, but the well has reported production since then, most recently ${ymLabel(i.lastProdYm!)}. RRC keeps a wellbore inactive until production is sustained.`
+            : `RRC classifies the completion as producing, but its wellbore record shows it shut in since ${since ? ymLabel(since) : "an unrecorded date"}.${last}`,
         };
       }
       const cutoff = shiftYm(i.prodNewestYm, -(NO_PRODUCTION_FLAG_MONTHS - 1));

@@ -67,11 +67,20 @@ export function unitAcresOf(list: readonly PermitAcreage[] | undefined, fieldNo:
   return null;
 }
 
+/** A drilling permit's status facts plus who filed it (daf802 01 + 02 records). */
+export interface PermitFiling extends PermitFacts {
+  wellNo?: string;
+  operator?: string | null;
+  operatorNo?: string | null;
+  leaseName?: string | null;
+  district?: string | null;
+}
+
 export interface WellContext {
   /** Acres assigned per well from the Oil/Gas Ledgers (ledger.ts keys). */
   assigned?: { gas: Map<string, AssignedAcres>; oil: Map<string, AssignedAcres> };
   ewa: Map<string, EwaRec[]>;
-  permits: Map<string, PermitFacts[]>;
+  permits: Map<string, PermitFiling[]>;
   acreage: Map<string, PermitAcreage[]>;
   uic: Map<string, UicFacts>;
   formations: Map<string, string[]>;
@@ -82,7 +91,7 @@ export interface WellContext {
 }
 
 /** Latest permit of an API (by issue date, then permit number). */
-export function latestPermit(list: readonly PermitFacts[] | undefined): PermitFacts | null {
+export function latestPermit<T extends PermitFacts>(list: readonly T[] | undefined): T | null {
   if (!list?.length) return null;
   return list.reduce((a, b) => ((b.issued ?? "") > (a.issued ?? "") || ((b.issued ?? "") === (a.issued ?? "") && b.permitNo > a.permitNo) ? b : a));
 }
@@ -166,6 +175,11 @@ export function assembleWell(
   else if (derived.source === "permit") src.status = "permits";
   else src.status = "gis-wells";
   if (primary) for (const k of ["operator", "lease", "field", "oilGas", "wellNo", "completionDate", "plugDate", "shutInDate"]) src[k] = "wellbore-query";
+  // No completion on the Wellbore Query (permitted, drilling, never drilled —
+  // RRC often lists such an API with an empty row): the newest permit names
+  // the operator and lease, as RRC's map popup does.
+  const filing = primary?.OPERATOR_NAME ? null : permit;
+  if (filing?.operator) src.operator = src.lease = "permits";
   if (permit) { src.permit = "permits"; src.spudDate = "permits"; }
   if (unit) src.unitAcres = "permits";
   if (assigned) src.assignedAcres = "proration-ledger";
@@ -175,14 +189,14 @@ export function assembleWell(
 
   const row: WellRow = {
     fid, api8, api10: api8 ? `42${api8}` : null,
-    wellNo: primary?.WELL_NO || own?.rec.CWELLNUM || null,
+    wellNo: primary?.WELL_NO || own?.rec.CWELLNUM || filing?.wellNo || null,
     wellId: r.WELLID || null,
     county: s.county.name,
-    district: primary?.DISTRICT || null,
+    district: primary?.DISTRICT || filing?.district || null,
     leaseNo: primary?.LEASE_NUMBER || null,
-    leaseName: primary?.LEASE_NAME || null,
-    operator: primary?.OPERATOR_NAME || null,
-    operatorNo: primary?.OPERATOR_NUMBER || null,
+    leaseName: primary?.LEASE_NAME || filing?.leaseName || null,
+    operator: primary?.OPERATOR_NAME || filing?.operator || null,
+    operatorNo: primary?.OPERATOR_NUMBER || filing?.operatorNo || null,
     fieldNo: primary?.FIELD_NUMBER || null,
     fieldName: primary?.FIELD_NAME || null,
     oilGas: primary?.OIL_GAS_CODE === "O" ? "Oil" : primary?.OIL_GAS_CODE === "G" ? "Gas" : null,

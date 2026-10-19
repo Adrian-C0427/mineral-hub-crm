@@ -38,6 +38,22 @@ describe("deriveWellStatus — RRC's proration schedule", () => {
     expect(s.detail).toBe("Inactive since 2019-01 · 14(b)(2) extension");
   });
 
+  it("an inactive wellbore's note gives the shut-in month and the last production, never a 12-month claim", () => {
+    const s = deriveWellStatus(inputs({ ewa: [row({ wbShutIn: "202607" })], lastProdYm: "202606" }));
+    expect(s).toMatchObject({ status: "Shut-In", detail: "Inactive since 2026-07", flag: null });
+    expect(s.note).toBe("RRC classifies the completion as producing, but its wellbore record shows it shut in since 2026-07. Last reported production: 2026-06.");
+  });
+
+  it("flags a gas well still tracked inactive that has reported production since", () => {
+    const s = deriveWellStatus(inputs({ ewa: [row({ wbShutIn: "202003", b14b2: true })], lastProdYm: "202607" }));
+    expect(s).toMatchObject({ status: "Shut-In", flag: "needs-investigation", detail: "Inactive since 2020-03 · 14(b)(2) extension" });
+    expect(s.note).toContain("most recently 2026-07");
+    // Production after the shut-in date that has since stopped again: no doubt about now.
+    expect(deriveWellStatus(inputs({ ewa: [row({ wbShutIn: "201706" })], lastProdYm: "201903" })).flag).toBeNull();
+    // Oil production is reported per lease, so other wells on it can explain it: no flag.
+    expect(deriveWellStatus(inputs({ ewa: [row({ oilGas: "O", wbShutIn: "202003" })], lastProdYm: "202607" })).flag).toBeNull();
+  });
+
   it("keeps RRC's finer shut-in wording (temporarily abandoned, shut in)", () => {
     expect(deriveWellStatus(inputs({ ewa: [row({ wellType: "TEMP ABANDONED" })] })))
       .toMatchObject({ status: "Shut-In", detail: "Temporarily abandoned" });

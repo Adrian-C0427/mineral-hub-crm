@@ -11,7 +11,7 @@ export type WellStatus = (typeof WELL_STATUSES)[number];
 /** Map/legend color per status. */
 export const STATUS_COLORS: Record<WellStatus, string> = {
   Permitted: "#3b82f6",
-  Drilling: "#0891b2",
+  Drilling: "#dc2626",
   Producing: "#22c55e",
   "Shut-In": "#f59e0b",
   Plugged: "#6b7280",
