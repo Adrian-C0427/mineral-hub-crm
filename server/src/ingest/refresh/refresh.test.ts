@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assembleBores, buildAbstracts, primaryEwaRow, stableHash, unitAcresOf, type BottomRecord, type EwaRec, type LateralRecord, type PermitAcreage, type SurfaceRecord, type WellContext } from "./assemble.js";
+import { assembleBores, assembleWell, buildAbstracts, primaryEwaRow, stableHash, unitAcresOf, type BottomRecord, type EwaRec, type LateralRecord, type PermitAcreage, type SurfaceRecord, type WellContext } from "./assemble.js";
 import { parseAbstractsDataset, parseProductionDataset, parseWellsDataset, ABSTRACTS_DATASET, PRODUCTION_DATASET, WELLS_DATASET } from "./dataset.js";
 import { fitDatumShift, type ControlPoint } from "./datum.js";
 import { comp3, gasLedgerKey, oilLedgerKey, parseGasLedger } from "./ledger.js";
@@ -164,6 +164,19 @@ describe("wellbores", () => {
     expect(bores.map((b) => b.fid)).toEqual([200, 400]);
     expect(bores[0]).toMatchObject({ profile: "Horizontal", bhSource: "rrc-bottom-hole", lineSource: "rrc-lateral", approximate: true, path: [[-96.238143, 31.234578], [-96.215786, 31.214694]] });
     expect(bores[1]).toMatchObject({ bhSource: "rrc-lateral-end", bh: [-96.2499, 31.2601], approximate: true });
+  });
+
+  it("a well with no completion takes its operator and lease from its newest permit", () => {
+    const permits = new Map([["28932216", [
+      { permitNo: "0700001", issued: "20100101", spud: null, expires: "20120101", cancelled: null, cancelledFlag: "", horizontal: true, wellNo: "1H", operator: "OLD OPERATOR", operatorNo: "000001", leaseName: "OLD LEASE", district: "05" },
+      { permitNo: "0910187", issued: "20250904", spud: null, expires: "20270904", cancelled: null, cancelledFlag: "", horizontal: true, wellNo: "1H", operator: "AETHON ENERGY OPERATING LLC", operatorNo: "008912", leaseName: "LEON", district: "05" },
+    ]]]);
+    const s = { rec: { SURFACE_ID: "1471190", SYMNUM: "86", API: "28932216", LONG27: "-96.1", LAT27: "31.1", LONG83: "-96.1", LAT83: "31.1" }, county: leon, lonLat83: [-96.1, 31.1] as [number, number] };
+    // RRC lists the API on the Wellbore Query with an empty row (no completion yet).
+    const ewa = new Map([["28932216", [{ ...Object.fromEntries(EWA_FIELDS.map((f) => [f, ""])), ON_SCHEDULE: "N", OG_WELLBORE_EWA_ID: "1" } as EwaRec]]]);
+    const { row } = assembleWell(s, [], [], { ...ctx, permits, ewa }, identity);
+    expect(row).toMatchObject({ status: "Permitted", operator: "AETHON ENERGY OPERATING LLC", operatorNo: "008912", leaseName: "LEON", wellNo: "1H", district: "05" });
+    expect(row.sources).toMatchObject({ operator: "permits", lease: "permits" });
   });
 });
 

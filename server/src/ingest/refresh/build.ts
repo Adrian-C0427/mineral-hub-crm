@@ -13,7 +13,7 @@ import { normalizeStatus, rrcIsoDate, shiftYm, uicKind, type DerivedStatus, type
 import { foldRecord, DBF900_RECORD_SIZE, type WellboreFacts } from "../loaders/wellbore.js";
 import { parsePermitApi, parsePermitRoot } from "../loaders/permits.js";
 import {
-  assembleBores, assembleWell, buildAbstracts, historyOf, leaseKey, lonLat,
+  assembleBores, assembleWell, buildAbstracts, historyOf, leaseKey, lonLat, type PermitFiling,
   type AbstractBuildStats, type BottomRecord, type EwaRec, type LateralRecord, type LeaseProduction, type PermitAcreage, type SurfaceRecord, type WellContext,
 } from "./assemble.js";
 import {
@@ -157,7 +157,7 @@ export async function buildRefresh(o: BuildOptions): Promise<BuildResult> {
 
   // 3. Drilling permits (daf802): status facts for every API, permit rows for the counties.
   log("drilling permits…");
-  const permits = new Map<string, PermitFacts[]>();
+  const permits = new Map<string, PermitFiling[]>();
   const acreage = new Map<string, PermitAcreage[]>();
   const permitRows = new Map<string, PermitRow>();
   const permitCutoff = `${Number(o.asOf.slice(0, 4)) - (o.permitYears ?? 6)}-${o.asOf.slice(4, 6)}-${o.asOf.slice(6, 8)}`;
@@ -188,7 +188,9 @@ export async function buildRefresh(o: BuildOptions): Promise<BuildResult> {
       if (!apis.has(d.api8) && !codes.has(root.countyCode)) continue;
       if (root.appFlag && root.appFlag !== "A") continue; // only issued permits have status meaning
       const list = permits.get(d.api8) ?? [];
-      if (!list.some((x) => x.permitNo === d.permitNo)) list.push(d);
+      if (!list.some((x) => x.permitNo === d.permitNo)) {
+        list.push({ ...d, operator: root.operatorName || null, operatorNo: root.operatorNo || null, leaseName: root.leaseName || null, district: root.district || null });
+      }
       permits.set(d.api8, list);
       // Acreage: the permit's lease/unit acres now; its per-field and
       // bottom-hole acres arrive on the records that follow.
