@@ -78,13 +78,11 @@ export function wellsPaint() {
   };
 }
 
-/** Paint for the wellbore laterals layer. Dashed: every path is the straight
- * surface → bottom-hole line, approximate (RRC publishes no trajectory data). */
+/** Paint for the wellbore paths layer (surface location → bottom hole). */
 export function wellboresPaint() {
   return {
     "line-width": ["interpolate", ["linear"], ["zoom"], 10, 1, 15, 2.5] as unknown as Expr,
     "line-opacity": 0.85,
-    "line-dasharray": [2.5, 1.5],
   };
 }
 

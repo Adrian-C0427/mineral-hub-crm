@@ -146,7 +146,7 @@ export function PortalMap({ features, height = 420, onSelect, legendLabel = "Thi
           defs={[
             { key: "counties", label: "Counties" }, { key: "boundaries", label: "Abstract boundaries" },
             { key: "numbers", label: "Abstract numbers" }, { key: "surveys", label: "Survey names" },
-            { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores (approx. paths)" },
+            { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores" },
           ]}
           layers={layers}
           onToggle={(k) => toggle(k as keyof LayerState)}

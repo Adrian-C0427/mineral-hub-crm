@@ -194,7 +194,7 @@ export function DealMap({ abstractIds, dealId, noun = "deal", abstractsWhere = "
             defs={[
               { key: "boundaries", label: "Abstract boundaries" }, { key: "numbers", label: "Abstract numbers" },
               { key: "surveys", label: "Survey names" }, { key: "wells", label: "Wells" },
-              { key: "wellbores", label: "Wellbores (approx. paths)" },
+              { key: "wellbores", label: "Wellbores" },
               ...(dealId ? [{ key: "tracts", label: "Imported tracts" }] : []),
             ]}
             layers={layers}

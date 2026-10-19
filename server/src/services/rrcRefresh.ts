@@ -67,10 +67,11 @@ export const WELLS_DDL: readonly string[] = [
     "status_since date", "status_as_of date", "admin_status text", "permit_no text", "permit_date date",
     "permit_expires date", "completion_date date", "shut_in_date date", "injection_type text",
     "location_flag text", "location_note text", "geom_flag text", "sources jsonb", "refreshed_at timestamptz",
+    "unit_acres numeric(10,2)", "unit_acres_source text", "assigned_acres numeric(10,3)", "assigned_acres_ym text",
   ].map((c) => `ALTER TABLE rrc.wells ADD COLUMN IF NOT EXISTS ${c}`),
   ...[
     "api8 text", "status text", "status_detail text", "bh_geom geometry(Point, 4326)", "bh_source text",
-    "line_source text", "approximate boolean", "geom_flag text",
+    "line_source text", "approximate boolean", "geom_flag text", "bh_planned boolean",
   ].map((c) => `ALTER TABLE rrc.wellbores ADD COLUMN IF NOT EXISTS ${c}`),
   `CREATE INDEX IF NOT EXISTS wellbores_bh_gist ON rrc.wellbores USING GIST (bh_geom)`,
   `CREATE INDEX IF NOT EXISTS wellbores_county_idx ON rrc.wellbores (county)`,
@@ -186,6 +187,11 @@ const WELL_COLUMNS: { col: string; key: keyof WellsDataset["wells"][number] | nu
   { col: "permit_expires", key: "permitExpires", cast: "date", mode: "keep-if-null" },
   { col: "completion_date", key: "completionDate", cast: "date", mode: "keep-if-null" },
   { col: "injection_type", key: "injectionType", mode: "replace" },
+  { col: "unit_acres", key: "unitAcres", cast: "numeric", mode: "keep-if-null" },
+  { col: "unit_acres_source", key: "unitAcresSource", mode: "keep-if-null" },
+  // Current proration acreage: a well off the schedule has none.
+  { col: "assigned_acres", key: "assignedAcres", cast: "numeric", mode: "replace" },
+  { col: "assigned_acres_ym", key: "assignedAcresYm", mode: "replace" },
   { col: "location_flag", key: "locationFlag", mode: "replace" },
   { col: "location_note", key: "locationNote", mode: "replace" },
   { col: "geom_flag", key: "geomFlag", mode: "replace" },
@@ -216,24 +222,26 @@ export function buildWellUpsert(rows: WellsDataset["wells"], asOf: string): { sq
 }
 
 export function buildBoreInsert(rows: WellsDataset["bores"]): { sql: string; params: unknown[] } {
-  const n = 15;
+  const n = 16;
   const params: unknown[] = [];
   const values = rows.map((b, j) => {
     params.push(
       b.fid, b.surfaceFid, b.api10, b.profile, b.stcode, b.county, JSON.stringify({ type: "LineString", coordinates: b.path }),
       b.api8, b.status, b.statusDetail, JSON.stringify({ type: "Point", coordinates: b.bh }), b.bhSource, b.lineSource, b.approximate, b.geomFlag,
+      b.planned ?? false,
     );
     const p = (k: number) => `$${j * n + k}`;
     return `(${p(1)}, ${p(2)}, ${p(3)}, ${p(4)}, ${p(5)}, ${p(6)}, ST_SetSRID(ST_GeomFromGeoJSON(${p(7)}), 4326), ${p(8)}, ${p(9)}, ${p(10)},
-             ST_SetSRID(ST_GeomFromGeoJSON(${p(11)}), 4326), ${p(12)}, ${p(13)}, ${p(14)}::boolean, ${p(15)})`;
+             ST_SetSRID(ST_GeomFromGeoJSON(${p(11)}), 4326), ${p(12)}, ${p(13)}, ${p(14)}::boolean, ${p(15)}, ${p(16)}::boolean)`;
   });
   return {
-    sql: `INSERT INTO rrc.wellbores (fid, surface_fid, api10, wellbore_type, stcode, county, geom, api8, status, status_detail, bh_geom, bh_source, line_source, approximate, geom_flag)
+    sql: `INSERT INTO rrc.wellbores (fid, surface_fid, api10, wellbore_type, stcode, county, geom, api8, status, status_detail, bh_geom, bh_source, line_source, approximate, geom_flag, bh_planned)
           VALUES ${values.join(", ")}
           ON CONFLICT (fid) DO UPDATE SET surface_fid = EXCLUDED.surface_fid, api10 = EXCLUDED.api10, wellbore_type = EXCLUDED.wellbore_type,
             stcode = EXCLUDED.stcode, county = EXCLUDED.county, geom = EXCLUDED.geom, api8 = EXCLUDED.api8, status = EXCLUDED.status,
             status_detail = EXCLUDED.status_detail, bh_geom = EXCLUDED.bh_geom, bh_source = EXCLUDED.bh_source,
-            line_source = EXCLUDED.line_source, approximate = EXCLUDED.approximate, geom_flag = EXCLUDED.geom_flag`,
+            line_source = EXCLUDED.line_source, approximate = EXCLUDED.approximate, geom_flag = EXCLUDED.geom_flag,
+            bh_planned = EXCLUDED.bh_planned`,
     params,
   };
 }

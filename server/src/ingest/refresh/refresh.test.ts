@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { assembleBores, buildAbstracts, primaryEwaRow, stableHash, type BottomRecord, type EwaRec, type LateralRecord, type SurfaceRecord, type WellContext } from "./assemble.js";
+import { assembleBores, buildAbstracts, primaryEwaRow, stableHash, unitAcresOf, type BottomRecord, type EwaRec, type LateralRecord, type PermitAcreage, type SurfaceRecord, type WellContext } from "./assemble.js";
 import { parseAbstractsDataset, parseProductionDataset, parseWellsDataset, ABSTRACTS_DATASET, PRODUCTION_DATASET, WELLS_DATASET } from "./dataset.js";
 import { fitDatumShift, type ControlPoint } from "./datum.js";
-import { CsvSplitter, EWA_FIELDS, ewaRecord, parsePermitDetail, parsePermitRootFacts, parseUicRoot } from "./records.js";
+import { comp3, gasLedgerKey, oilLedgerKey, parseGasLedger } from "./ledger.js";
+import { encodeCp037 } from "../ebcdic.js";
+import { bottomHoleAcres, CsvSplitter, EWA_FIELDS, ewaRecord, fieldAcres, parsePermitDetail, parsePermitRootFacts, parseUicRoot, permitFieldNo } from "./records.js";
 import { ringsToMultiPolygon, type Pt, type Shape } from "./shapefile.js";
 
 /** A fixed-width line with values placed at 0-based offsets. */
@@ -144,7 +146,7 @@ describe("abstract polygons", () => {
 describe("wellbores", () => {
   const leon = { code: "289", name: "Leon" };
   const identity = { apply: (lon: number, lat: number): [number, number] => [lon + 0.0001, lat + 0.0001], mismatchFt: () => 0, inliers: 0, total: 0, residualFt: { p50: 0, p90: 0 } };
-  const ctx: WellContext = { ewa: new Map(), permits: new Map(), uic: new Map(), formations: new Map(), dbfPlug: new Map(), production: new Map(), prodNewestYm: "202607", asOf: "20261018" };
+  const ctx: WellContext = { ewa: new Map(), permits: new Map(), acreage: new Map(), uic: new Map(), formations: new Map(), dbfPlug: new Map(), production: new Map(), prodNewestYm: "202607", asOf: "20261018" };
   const surf = { rec: { SURFACE_ID: "100", SYMNUM: "86", API: "28932181" }, county: leon, lonLat83: [-96.238143, 31.234578] as [number, number] };
 
   it("builds approximate surface → bottom-hole paths; vertical holes get none; neighbor-county bottoms come from RRC's line end", () => {
@@ -180,5 +182,49 @@ describe("bundled datasets validate", () => {
     expect(() => parseWellsDataset(JSON.stringify({ ...wells, wells: [{ ...well, county: "Anderson" }] }))).toThrow();
     expect(() => parseAbstractsDataset(JSON.stringify({ key: ABSTRACTS_DATASET.key, counties: [{ code: "289", name: "Leon" }], abstracts: [{ id: "TX-1", county: "Leon", countyFips: "161", geom: [] }] }))).toThrow();
     expect(() => parseProductionDataset(JSON.stringify({ key: PRODUCTION_DATASET.key, counties: [{ code: "289", name: "Leon" }], fromYm: 202508, toYm: 202607, rows: [["O", "05", "1", 202401, "Leon", "", "", "", 1, 0, 0, 0]] }))).toThrow();
+  });
+});
+
+describe("unit size (permit acreage)", () => {
+  it("reads lease, per-field and bottom-hole acres at their real offsets", () => {
+    expect(fieldAcres("0405ALEXANDER, JOHN D.              09800   1  0006496300000000000000000")).toBe(649.63);
+    expect(permitFieldNo("0372908500GG N198608261985102500000000000000000000")).toBe("72908500");
+    expect(bottomHoleAcres(fixed(262, [[0, "10"], [81, "00026500"]]))).toBe(265);
+    expect(fieldAcres("0406CARTER                          09800   1  0000000000000")).toBeNull();
+  });
+  it("takes the newest permit that reports acreage, the producing field's when listed", () => {
+    const list: PermitAcreage[] = [
+      { permitNo: "0012063", issued: "19771114", surface: 40, fields: {}, bhl: null },
+      { permitNo: "0403310", issued: "19920909", surface: 140, fields: { "38274666": 160 }, bhl: null },
+      { permitNo: "0500000", issued: "20050101", surface: null, fields: {}, bhl: null },
+    ];
+    expect(unitAcresOf(list, "38274666")).toEqual({ acres: 160, permitNo: "0403310", issued: "19920909" });
+    expect(unitAcresOf(list, "99999999")!.acres).toBe(140);
+    expect(unitAcresOf([{ permitNo: "1", issued: null, surface: null, fields: {}, bhl: 265 }], null)!.acres).toBe(265);
+    expect(unitAcresOf([], null)).toBeNull();
+  });
+});
+
+describe("Oil & Gas Ledger acreage", () => {
+  it("decodes packed decimals (COMP-3)", () => {
+    expect(comp3(Buffer.from([0x03, 0x20, 0x00, 0x0c]), 0, 4, 3)).toBe(320);   // +0320000 → 320.000
+    expect(comp3(Buffer.from([0x05, 0x15, 0x4c]), 0, 3, 2)).toBe(51.54);        // +05154 → 51.54
+    expect(comp3(Buffer.from([0x00, 0x01, 0x2d]), 0, 3, 2)).toBe(-0.12);
+    expect(comp3(Buffer.from([0x40, 0x40, 0x40]), 0, 3, 2)).toBeNull();         // EBCDIC spaces, not packed
+  });
+  it("reads the newest month's acres from a gas well record", () => {
+    const rec = Buffer.alloc(2120, 0x40);
+    encodeCp037("5" + "05" + " " + "05189550" + "170038" + "295907").copy(rec, 0); // id 5, district 05, field, operator, gas id
+    const seg = (k: number, ym: string, acresPacked: number[]) => {
+      encodeCp037(ym).copy(rec, 316 + k * 116);
+      Buffer.from(acresPacked).copy(rec, 316 + k * 116 + 75);
+    };
+    seg(0, "202609", [0x06, 0x40, 0x00, 0x0c]);
+    seg(1, "202610", [0x02, 0x10, 0x55, 0x4c]);
+    const m = parseGasLedger(rec);
+    expect(m.get(gasLedgerKey("05", "295907"))).toEqual({ acres: 210.554, ym: "202610" });
+  });
+  it("matches ledger well numbers however they're spaced", () => {
+    expect(oilLedgerKey("05", "01800", "2 D")).toBe(oilLedgerKey("05", "1800", "2D"));
   });
 });

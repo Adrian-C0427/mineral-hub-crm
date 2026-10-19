@@ -196,9 +196,12 @@ Counts land in `rrc.refresh_log`; file names and snapshot dates in `rrc.source_s
 1. Download into `~/rrc-data/<yyyy-mm>/` (never under Desktop/Documents): `well{fips}.zip` +
    `surv{fips}.zip` per county, `OG_WELLBORE_EWA_Report_<date>.csv`, `daf802.txt.gz`
    (NOT the frozen `daf802.txt`), `dbf900.ebc.gz` (NOT the frozen `dbf900.ebc`),
-   `uif700a.txt.gz`, `PDQ_DSV.zip`. The MFT portal is a browser download.
+   `uif700a.txt.gz`, `PDQ_DSV.zip`, and the Oil & Gas Ledgers `gsf002l.ebc.gz` (gas,
+   districts 4–6) + `olf003l.ebc.gz` / `olf005l.ebc.gz` (oil, districts 3 and 5–6).
+   Use the `.gz` copies: the uncompressed ones on the portal are frozen. The MFT
+   portal is a browser download.
 2. From `server/`:
-   `npx tsx src/scripts/buildRrcRefresh.ts --data-dir ~/rrc-data/<yyyy-mm> --as-of <today> --dbf900-date <MFT date> --uic-date <MFT date>`
+   `npx tsx src/scripts/buildRrcRefresh.ts --data-dir ~/rrc-data/<yyyy-mm> --as-of <today> --dbf900-date <MFT date> --uic-date <MFT date> --ledger-date <MFT date>`
 3. Review `docs/reports/rrc-refresh-<as-of>/` (reconciliation, corrections, needs-investigation, missing locations).
 4. Bump `TILE_DATA_VERSION` (client/src/lib/mapLayers.ts), open a PR, merge, deploy.
 
@@ -226,3 +229,13 @@ scheduled producer with no production reported for 12+ months.
   median residual. The previous OTLS-sourced abstracts sat about 35 ft off RRC's frame.
 - UT BEG has withdrawn the OTLS abstracts layer. RRC's per-county survey layer is
   the replacement.
+
+### Unit size
+
+- `unit_acres` holds the W-1 lease / pooled-unit acreage from the **newest permit in RRC's full history** that reports it. It uses that permit's acres for the field the well produces from, else its lease/unit acres, else its bottom-hole lease acres.
+- The retained `rrc.permits` table (6 years) is not used for this, so wells permitted before 2020 keep their unit size.
+- Pre-September-1986 permits carry different application and permit numbers. A permit record is paired with the application record directly above it, not by number.
+- `assigned_acres` is the acreage RRC's proration schedule currently assigns the well (Oil/Gas Ledger). It is often a share of the pooled unit, so it is shown as its own value. It stands in for unit size, labelled "assigned", only where no permit reports acreage.
+- Manual position errors found and corrected:
+  - daf802 `DA-FIELD-ACRES` is at 48–55, not 46.
+  - Every 02-segment position is manual − 3 (0-based).

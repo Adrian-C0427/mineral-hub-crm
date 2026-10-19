@@ -2,12 +2,13 @@
  * Build the bundled Texas RRC refresh from the raw RRC downloads.
  *
  *   npx tsx src/scripts/buildRrcRefresh.ts --data-dir ~/rrc-data/2026-10 \
- *     --as-of 2026-10-18 --dbf900-date 2026-10-17 --uic-date 2026-10-01 \
+ *     --as-of 2026-10-18 --dbf900-date 2026-10-17 --uic-date 2026-10-01 --ledger-date 2026-10-16 \
  *     [--pdq-tsv /path/to/county-lease.tsv]
  *
  * Reads (from --data-dir): well{fips}.zip + surv{fips}.zip per county,
  * OG_WELLBORE_EWA_Report_<date>.csv, daf802.txt.gz, uif700a.txt.gz,
- * dbf900.ebc.gz, PDQ_DSV.zip. Writes server/data/rrc/*.json.gz (loaded at
+ * dbf900.ebc.gz, PDQ_DSV.zip, and the Oil & Gas Ledgers gsf002l / olf003l /
+ * olf005l .ebc.gz (acres assigned per well). Writes server/data/rrc/*.json.gz (loaded at
  * boot by services/rrcRefresh.ts), the reconciliation under
  * docs/reports/rrc-refresh-<as-of>/, and the refreshed status vocabulary into
  * the static heat-map well files (client/public/data/{county}-wells.geojson).
@@ -77,7 +78,20 @@ function refreshHeatFiles(wells: readonly WellRow[]): string[] {
   return touched;
 }
 
-function reportMarkdown(r: RefreshReport, asOf: string, sizes: Record<string, number>): string {
+type UnitCoverage = Record<string, { wells: number; unit: number; assignedOnly: number; neither: number }>;
+function unitSizeCoverage(wells: readonly WellRow[]): UnitCoverage {
+  const out: UnitCoverage = {};
+  for (const w of wells) {
+    const c = (out[w.status] ??= { wells: 0, unit: 0, assignedOnly: 0, neither: 0 });
+    c.wells++;
+    if (w.unitAcres != null) c.unit++;
+    else if (w.assignedAcres != null) c.assignedOnly++;
+    else c.neither++;
+  }
+  return Object.fromEntries(Object.entries(out).sort((x, y) => y[1].wells - x[1].wells));
+}
+
+function reportMarkdown(r: RefreshReport, asOf: string, sizes: Record<string, number>, unitCoverage: UnitCoverage): string {
   const s = r.summary as Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   const table = (o: Record<string, number>) => Object.entries(o).map(([k, v]) => `| ${k} | ${v.toLocaleString("en-US")} |`).join("\n");
   const lines = [
@@ -135,7 +149,15 @@ function reportMarkdown(r: RefreshReport, asOf: string, sizes: Record<string, nu
     "|---|---|",
     table(Object.fromEntries(Object.entries(s.geometry).filter(([, v]) => typeof v === "number")) as Record<string, number>),
     "",
-    "Every wellbore path is the straight line from RRC's surface location to its bottom-hole location and is labelled approximate: RRC publishes directional surveys only as scanned images, so no true trajectory exists in its bulk data.",
+    "Every wellbore path runs straight from RRC's surface location to its bottom-hole location — the same line RRC's own map draws. RRC publishes directional surveys only as scanned images, so its bulk data holds no trajectory points between the two. A bottom hole on a well that isn't completed yet is RRC's permitted target and is labelled planned.",
+    "",
+    "### Unit size",
+    "",
+    "Unit size is the lease / pooled-unit acreage from the newest W-1 permit that reports it. Acres assigned is the acreage RRC's proration schedule assigns the well (Oil & Gas Ledgers), shown on its own, and in place of unit size only where no permit reports acreage.",
+    "",
+    "| Status | Wells | Unit size (W-1) | Acres assigned only | Neither |",
+    "|---|---|---|---|---|",
+    ...Object.entries(unitCoverage).map(([st, c]) => `| ${st} | ${c.wells} | ${c.unit} | ${c.assignedOnly} | ${c.neither} |`),
     "",
     "### Abstracts (RRC survey layer)",
     "",
@@ -171,9 +193,14 @@ async function main(): Promise<void> {
   const pdqTsvIdx = process.argv.indexOf("--pdq-tsv");
   const result = await buildRefresh({
     dataDir, counties: COUNTIES, asOf: ymd(asOfIso),
-    files: { ewa, permits: "daf802.txt.gz", uic: "uif700a.txt.gz", dbf900: "dbf900.ebc.gz", pdq: "PDQ_DSV.zip" },
+    files: {
+      ewa, permits: "daf802.txt.gz", uic: "uif700a.txt.gz", dbf900: "dbf900.ebc.gz", pdq: "PDQ_DSV.zip",
+      // Oil & Gas Ledgers covering the counties' districts: gas 4–6, oil 3 and 5–6.
+      gasLedgers: ["gsf002l.ebc.gz"].filter((f) => fs.existsSync(path.join(dataDir, f))),
+      oilLedgers: ["olf003l.ebc.gz", "olf005l.ebc.gz"].filter((f) => fs.existsSync(path.join(dataDir, f))),
+    },
     pdqTsv: pdqTsvIdx >= 0 ? process.argv[pdqTsvIdx + 1] : undefined,
-    asOfDates: { dbf900: arg("dbf900-date"), uic: arg("uic-date") },
+    asOfDates: { dbf900: arg("dbf900-date"), uic: arg("uic-date"), ledgers: arg("ledger-date", "") || undefined },
     log: (m) => console.log(`[build] ${m}`),
   });
 
@@ -185,7 +212,7 @@ async function main(): Promise<void> {
   };
   const reportDir = path.join(ROOT, "docs/reports", `rrc-refresh-${asOfIso}`);
   fs.mkdirSync(reportDir, { recursive: true });
-  fs.writeFileSync(path.join(reportDir, "README.md"), reportMarkdown(result.report, asOfIso, sizes));
+  fs.writeFileSync(path.join(reportDir, "README.md"), reportMarkdown(result.report, asOfIso, sizes, unitSizeCoverage(result.wells.wells)));
   fs.writeFileSync(path.join(reportDir, "corrections.csv"), csv(result.report.corrections));
   fs.writeFileSync(path.join(reportDir, "needs-investigation.csv"), csv(result.report.investigate));
   fs.writeFileSync(path.join(reportDir, "missing-location.csv"), csv(result.report.missingLocation));

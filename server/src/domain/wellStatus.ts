@@ -357,7 +357,17 @@ export function deriveWellStatus(i: StatusInputs): DerivedStatus {
   const p = i.permit;
   if (p) {
     const base = { source: "permit" as const, adminStatus: null };
-    if (p.cancelled || p.cancelledFlag === "P" || p.cancelledFlag === "F") {
+    const cancelled = !!(p.cancelled || p.cancelledFlag === "P" || p.cancelledFlag === "F");
+    const expired = !p.spud && !!p.expires && p.expires < i.asOf;
+    // An old permit that lapsed on paper doesn't mean nothing was drilled:
+    // when RRC's map shows the hole plugged (or a dry hole), it was drilled.
+    if ((cancelled || expired) && mapPlugged) {
+      return {
+        ...base, status: "Plugged", detail: sym?.detail ?? null, flag: "unverified", source: "map-symbol", since: null,
+        note: `The RRC map shows the well plugged; its permit ${p.permitNo} ${cancelled ? "was cancelled" : "expired"} with no spud or completion on file.`,
+      };
+    }
+    if (cancelled) {
       return { ...base, status: "Other/Unknown", detail: `Permit ${p.permitNo} cancelled${p.cancelled ? ` ${rrcIsoDate(p.cancelled)}` : ""}`, flag: null, note: null, since: rrcIsoDate(p.cancelled) };
     }
     if (p.spud) {

@@ -854,6 +854,8 @@ wellsRouter.get(
         permitNo: jStr("permit_no"), permitDate: jStr("permit_date"), permitExpires: jStr("permit_expires"),
         completionDate: jStr("completion_date"), shutInDate: jStr("shut_in_date"), injectionType: jStr("injection_type"),
         locationFlag: jStr("location_flag"), locationNote: jStr("location_note"), geomFlag: jStr("geom_flag"),
+        unitAcres: j.unit_acres != null ? Number(j.unit_acres) : null, unitAcresSource: jStr("unit_acres_source"),
+        assignedAcres: j.assigned_acres != null ? Number(j.assigned_acres) : null, assignedAcresYm: jStr("assigned_acres_ym"),
         sources: (j.sources as Record<string, string> | undefined) ?? null,
       },
       history: refresh?.history ?? [],
@@ -887,9 +889,9 @@ wellsRouter.get(
           const d = refresh?.bores.find((x) => x.fid === b.fid);
           return {
             fid: b.fid, type: b.wellbore_type, lengthFt: Math.round(b.length_ft),
-            // Straight surface → bottom-hole: RRC has no trajectory surveys in bulk, so the path is approximate.
+            // Surface → bottom hole, as RRC's map draws it (RRC's bulk data has no survey points between).
             approximate: d?.approximate ?? true, bottomHole: d?.bottomHole ?? null, status: d?.status ?? null,
-            bhSource: d?.bhSource ?? null, api: d?.api ?? null,
+            bhSource: d?.bhSource ?? null, api: d?.api ?? null, planned: d?.planned ?? false,
           };
         }),
         totalLateralFt: Math.round(wellbores.reduce((s, b) => s + b.length_ft, 0)),

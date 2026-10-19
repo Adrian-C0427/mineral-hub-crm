@@ -98,6 +98,11 @@ describe("deriveWellStatus — permit stage", () => {
     expect(s).toMatchObject({ status: "Other/Unknown", detail: "Permit expired 2010-08-22 · not drilled" });
   });
 
+  it("a lapsed permit never overrides a map symbol that shows the hole plugged", () => {
+    const s = deriveWellStatus(inputs({ symbol: 3, ewa: [], permit: permit({ issued: "19770701", expires: "19780701" }) }));
+    expect(s).toMatchObject({ status: "Plugged", detail: "Dry hole", source: "map-symbol", flag: "unverified" });
+  });
+
   it("a cancelled permit reads cancelled", () => {
     expect(deriveWellStatus(inputs({ symbol: 9, ewa: [], permit: permit({ cancelledFlag: "P" }) })).detail).toContain("cancelled");
   });
