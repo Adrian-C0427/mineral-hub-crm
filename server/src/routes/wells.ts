@@ -12,6 +12,8 @@ import { MAX_CSV_CHARS } from "../config.js";
 import { escapeLike, MIN_SEARCH_CHARS } from "../domain/search.js";
 import { isLaFid, LA_PRODUCT_LABEL, laWellFid, sectionLabelOf } from "../domain/sonrisWells.js";
 import { sonrisWellsAvailable } from "../services/sonrisWells.js";
+import { rrcRefreshAvailable } from "../services/rrcRefresh.js";
+import { rrcWellRefreshDetail } from "../services/rrcWellQueries.js";
 import { identifierDigits, LA_WELL_SQL, laUnitProduction, type LaWellRecord } from "../services/sonrisQueries.js";
 
 /**
@@ -395,6 +397,20 @@ interface RrcWellRow {
   status: string | null; field_name: string | null; formations: string[] | null;
   spud_date: Date | null; abstract: string | null; survey: string | null;
   lon: number | null; lat: number | null;
+  /** The whole row as jsonb — the RRC-refresh columns (profile, status_detail…) without depending on them existing. */
+  j?: Record<string, unknown> | null;
+}
+
+/**
+ * Well Analysis trajectory of an RRC well: the refreshed wellbore profile
+ * when present, else the old heuristics (an "H" well number).
+ */
+export function rrcTrajectory(w: Pick<RrcWellRow, "type" | "well_no" | "j">): WellTrajectory {
+  const profile = typeof w.j?.profile === "string" ? w.j.profile : null;
+  if (profile === "Horizontal") return "HORIZONTAL";
+  if (profile === "Directional") return "DIRECTIONAL";
+  if (profile === "Vertical") return "VERTICAL";
+  return classifyTrajectory(/HORIZ|\dH\b/i.test(`${w.type ?? ""} ${w.well_no ?? ""}`) ? "H" : "");
 }
 
 wellsRouter.get(
@@ -498,8 +514,9 @@ wellsRouter.post(
     const rows = await prisma.$queryRawUnsafe<RrcWellRow[]>(
       `SELECT fid, api8, api10, well_no, lease_no, lease_name, operator, county, district, oil_gas,
               type, status, field_name, formations, spud_date, abstract, survey,
-              ST_X(geom) AS lon, ST_Y(geom) AS lat
-         FROM rrc.wells WHERE ${body.fid !== undefined ? "fid = $1" : "(api8 = $1 OR api10 = $1)"} LIMIT 1`,
+              ST_X(geom) AS lon, ST_Y(geom) AS lat, to_jsonb(w) - 'geom' AS j
+         FROM rrc.wells w WHERE ${body.fid !== undefined ? "fid = $1" : "(api8 = $1 OR api10 = $1)"}
+        ORDER BY fid LIMIT 1`,
       body.fid !== undefined ? body.fid : body.api!.replace(/-/g, ""),
     );
     const w = rows[0];
@@ -516,7 +533,7 @@ wellsRouter.post(
       state: "TX",
       county: w.county,
       status: classifyWellStatus(w.status ?? ""),
-      trajectory: classifyTrajectory(/HORIZ|\dH\b/i.test(`${w.type ?? ""} ${w.well_no ?? ""}`) ? "H" : ""),
+      trajectory: rrcTrajectory(w),
       wellType: w.oil_gas ?? w.type,
       spudDate: w.spud_date,
       abstractId: w.abstract,
@@ -748,8 +765,9 @@ wellsRouter.get(
           `SELECT fid, api8, api10, well_no, well_id, symbol, type, status, category, county, district,
                   lease_no, lease_name, operator, operator_no, field_no, field_name, oil_gas, formations,
                   spud_date, plug_date, cum_oil, cum_gas, last_prod, abstract, survey,
-                  ST_X(geom) AS lon, ST_Y(geom) AS lat
-             FROM rrc.wells WHERE ${fid !== null ? "fid = $1" : "(api8 = $1 OR api10 = '42' || $1)"} LIMIT 1`,
+                  ST_X(geom) AS lon, ST_Y(geom) AS lat, to_jsonb(w) - 'geom' AS j
+             FROM rrc.wells w WHERE ${fid !== null ? "fid = $1" : "(api8 = $1 OR api10 = '42' || $1)"}
+            ORDER BY fid LIMIT 1`,
           fid !== null ? fid : api8Guess)
       : [];
     const rw = rrcRows[0];
@@ -758,7 +776,7 @@ wellsRouter.get(
     // Everything below is guarded: each section loads only when its key exists,
     // and a missing section is simply empty in the response.
     const og = rw?.oil_gas === "Gas" ? "G" : "O";
-    const [wellbores, permits, completions, prodOperators, leaseStats, leaseWells, fieldRows, nearby] = await Promise.all([
+    const [wellbores, permits, completions, prodOperators, leaseStats, leaseWells, fieldRows, nearby, refresh] = await Promise.all([
       rw ? prisma.$queryRawUnsafe<{ fid: number; wellbore_type: string | null; length_ft: number }[]>(
         `SELECT fid, wellbore_type, ST_Length(geom::geography) * 3.28084 AS length_ft
            FROM rrc.wellbores WHERE surface_fid = $1 ORDER BY length_ft DESC`, rw.fid) : [],
@@ -791,7 +809,10 @@ wellsRouter.get(
            FROM rrc.wells w1 JOIN rrc.wells w2
              ON w2.fid <> w1.fid AND ST_DWithin(w2.geom::geography, w1.geom::geography, 1609)
           WHERE w1.fid = $1 ORDER BY distance_m LIMIT 12`, rw.fid) : [],
+      rw && rrcRefreshAvailable() ? rrcWellRefreshDetail(rw.fid) : Promise.resolve(null),
     ]);
+    const j = rw?.j ?? {};
+    const jStr = (k: string): string | null => (typeof j[k] === "string" ? (j[k] as string) : null);
 
     // Operator history merges the three sources the data actually has:
     // production eras (authoritative months), permit-time operators (historic),
@@ -827,7 +848,16 @@ wellsRouter.get(
         spudDate: (rw?.spud_date ?? well.spudDate)?.toISOString().slice(0, 10) ?? null,
         plugDate: rw?.plug_date?.toISOString().slice(0, 10) ?? null,
         lastProd: rw?.last_prod ?? null,
+        // RRC refresh: why the status is what it is, and how sure.
+        profile: jStr("profile"), detail: jStr("status_detail"), flag: jStr("status_flag"), note: jStr("status_note"),
+        source: jStr("status_source"), asOf: jStr("status_as_of"), since: jStr("status_since"), adminStatus: jStr("admin_status"),
+        permitNo: jStr("permit_no"), permitDate: jStr("permit_date"), permitExpires: jStr("permit_expires"),
+        completionDate: jStr("completion_date"), shutInDate: jStr("shut_in_date"), injectionType: jStr("injection_type"),
+        locationFlag: jStr("location_flag"), locationNote: jStr("location_note"), geomFlag: jStr("geom_flag"),
+        sources: (j.sources as Record<string, string> | undefined) ?? null,
       },
+      history: refresh?.history ?? [],
+      sourceFiles: refresh?.sourceFiles ?? [],
       formations: rw?.formations ?? (well.formation ? [well.formation] : []),
       field: {
         fieldNo: rw?.field_no ?? null, fieldName: rw?.field_name ?? well.fieldName,
@@ -853,7 +883,15 @@ wellsRouter.get(
         completionDate: c.completionDate?.toISOString().slice(0, 10) ?? null,
       })),
       wellbore: {
-        laterals: wellbores.map((b) => ({ fid: b.fid, type: b.wellbore_type, lengthFt: Math.round(b.length_ft) })),
+        laterals: wellbores.map((b) => {
+          const d = refresh?.bores.find((x) => x.fid === b.fid);
+          return {
+            fid: b.fid, type: b.wellbore_type, lengthFt: Math.round(b.length_ft),
+            // Straight surface → bottom-hole: RRC has no trajectory surveys in bulk, so the path is approximate.
+            approximate: d?.approximate ?? true, bottomHole: d?.bottomHole ?? null, status: d?.status ?? null,
+            bhSource: d?.bhSource ?? null, api: d?.api ?? null,
+          };
+        }),
         totalLateralFt: Math.round(wellbores.reduce((s, b) => s + b.length_ft, 0)),
       },
       cumulative: rw && (rw.cum_oil != null || rw.cum_gas != null)

@@ -56,7 +56,7 @@ export default function LandingMap() {
     const vis = (id: string, on: boolean) => map.getLayer(id) && map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
     vis("abstracts-fill", L.boundaries); vis("abstracts-line", L.boundaries);
     vis("abstracts-num", L.numbers); vis("abstracts-survey", L.surveys);
-    vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores);
+    vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores); vis("bottomholes", L.wellbores); vis("bottomholes-sel", L.wellbores);
   }
   useEffect(applyVis, [layers]);
   const Tog = ({ k, label }: { k: keyof typeof layers; label: string }) => (

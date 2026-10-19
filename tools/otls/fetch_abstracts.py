@@ -8,6 +8,9 @@ map consumes:
   client/public/data/{key}-abstracts-index.json  (search index, no geometry)
 
 Source: maps.texnet.beg.utexas.edu/arcgis/rest/services/otls/MapServer/0
+NOTE (2026-10): BEG has withdrawn that layer (only "Blocks", layer 1, remains).
+RRC's per-county survey layer (surv{fips}.zip, surv{fips}p) carries the same
+fields and is the authoritative replacement — see server/src/scripts/buildRrcRefresh.ts.
 Field ABSTRACT_N = zero-padded 3-digit county FIPS + abstract number, so
 `ABSTRACT_N LIKE '<fips>%'` isolates exactly one county's abstracts. LEVEL1_SUR
 is the survey name; ABSTRACT_L is the label (e.g. "A-653").
@@ -107,13 +110,13 @@ def main():
             if not an or not f.get("geometry"):
                 continue
             fid = f"TX-{an}"
-            if fid in seen:
-                continue
+            # Repeated ABSTRACT_N = one abstract split into pieces: emit every
+            # piece (importGis.ts merges same-id pieces into a MultiPolygon).
             seen.add(fid)
             survey = (f["properties"].get("LEVEL1_SUR") or "").strip() or None
-            # Some ABSTRACT_L labels carry a stray "?" (upstream disambiguator
-            # for duplicate abstract numbers) — strip it for clean display.
-            abstract = (f["properties"].get("ABSTRACT_L") or "").strip().replace("?", "") or None
+            # "A-?5" marks an UNNUMBERED tract (state / school-file land) — keep
+            # the "?": stripping it collided the tract with the real A-5.
+            abstract = (f["properties"].get("ABSTRACT_L") or "").strip() or None
             geom = f["geometry"]
             geom["coordinates"] = round_coords(geom["coordinates"])
             props = {

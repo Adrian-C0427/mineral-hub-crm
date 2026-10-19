@@ -9,6 +9,8 @@ import { abstractNumber, countyLabel, countyStateLabel, isSectionLabel, rankAbst
 import { countyKey, countyNoun, countyScopePredicate, countySearchTerm, GIS_STATES, louisianaParishNames, parsePlssQuery, texasCountyNames } from "../domain/gisRegion.js";
 import { isLaFid, laParishLabel } from "../domain/sonrisWells.js";
 import { sonrisWellsAvailable } from "../services/sonrisWells.js";
+import { rrcRefreshAvailable } from "../services/rrcRefresh.js";
+import { rrcWellRefreshDetail } from "../services/rrcWellQueries.js";
 import { identifierDigits, LA_WELL_SQL, laWellDetail } from "../services/sonrisQueries.js";
 
 /**
@@ -73,6 +75,17 @@ function cacheGet(key: string): Buffer | undefined {
 }
 
 /**
+ * An abstract's label exactly as RRC records it. RRC marks an unnumbered tract
+ * (state land, school-file land) with a "?" — "A-?5" is NOT abstract 5 — so the
+ * "?" is never stripped. Rows imported while an earlier importer stripped it
+ * still carry it in their id ("TX-289?5"); the label is restored from the id.
+ */
+export function abstractLabelSql(alias: string): string {
+  return `(CASE WHEN ${alias}.id LIKE 'TX-%?%' AND strpos(coalesce(${alias}.abstract, ''), '?') = 0
+                THEN 'A-' || substr(${alias}.id, strpos(${alias}.id, '?')) ELSE ${alias}.abstract END)`;
+}
+
+/**
  * The tile query. Bbox filter runs against the 4326 GIST indexes; only
  * intersecting rows get transformed/clipped. ST_AsMVTGeom quantizes to the
  * tile grid, so payload size tracks the viewport, not the tables. An MVT is a
@@ -87,21 +100,36 @@ function cacheGet(key: string): Buffer | undefined {
  * township ("T12N R10W"), and `state` tells the two apart ('TX' | 'LA').
  * $1/$2/$3 = z/x/y.
  */
-export function buildTileSql(sonris: boolean): string {
+export function buildTileSql(sonris: boolean, refreshed = true): string {
   const mvt = (g: string) => `ST_AsMVTGeom(ST_Transform(${g}, 3857), w.env, ${TILE_EXTENT}, ${TILE_BUFFER}, true)`;
+  // Columns the RRC refresh adds (services/rrcRefresh.ts DDL); until it has
+  // run on a database the tiles carry them as nulls and skip bottom holes.
+  const col = (expr: string, type: string) => (refreshed ? expr : `NULL::${type}`);
   const laWells = sonris ? `
          UNION ALL
          SELECT ${mvt("lw.geom")} AS geom,
                 lw.fid, NULL::text AS api8, lw.well_no AS "wellNo", lw.symbol, lw.type, lw.status,
                 lw.parish AS county, lw.operator, CASE WHEN lw.section > 0 THEN 'Sec ' || lw.section END AS abstract,
-                lw.township AS survey, 'LA'::text AS state
+                lw.township AS survey, 'LA'::text AS state, NULL::text AS profile, NULL::text AS "statusFlag"
            FROM sonris.wells lw, wanted w WHERE lw.geom && w.box` : "";
+  // Louisiana publishes straight surface → bottom-hole lines only: approximate.
   const laBores = sonris ? `
          UNION ALL
          SELECT ${mvt("lb.geom")} AS geom,
                 lb.fid, lb.surface_fid AS "surfaceId", lb.wellbore_type AS "wellboreType",
                 lsw.type, lsw.status, lsw.parish AS county, lsw.operator,
-                CASE WHEN lsw.section > 0 THEN 'Sec ' || lsw.section END AS abstract, lsw.township AS survey, 'LA'::text AS state
+                CASE WHEN lsw.section > 0 THEN 'Sec ' || lsw.section END AS abstract, lsw.township AS survey, 'LA'::text AS state,
+                lsw.status AS "boreStatus", true AS approximate, 'endpoints'::text AS "lineSource", NULL::text AS api, NULL::text AS profile
+           FROM sonris.wellbores lb
+           LEFT JOIN sonris.wells lsw ON lsw.fid = lb.surface_fid, wanted w
+          WHERE lb.geom && w.box` : "";
+  const laBottoms = sonris ? `
+         UNION ALL
+         SELECT ${mvt("ST_EndPoint(lb.geom)")} AS geom,
+                lb.fid, lb.surface_fid AS "surfaceId", lb.wellbore_type AS "wellboreType",
+                lsw.type, lsw.status, lsw.parish AS county, lsw.operator,
+                CASE WHEN lsw.section > 0 THEN 'Sec ' || lsw.section END AS abstract, lsw.township AS survey, 'LA'::text AS state,
+                lsw.status AS "boreStatus", 'sonris-bottom-hole'::text AS "bhSource", NULL::text AS api, NULL::text AS profile
            FROM sonris.wellbores lb
            LEFT JOIN sonris.wells lsw ON lsw.fid = lb.surface_fid, wanted w
           WHERE lb.geom && w.box` : "";
@@ -114,23 +142,37 @@ export function buildTileSql(sonris: boolean): string {
        ),
        abs_mvt AS (
          SELECT ${mvt("a.geom")} AS geom,
-                a.id, a.state, a.county, replace(a.abstract, '?', '') AS abstract, a.survey, a.area_m2 AS area
+                a.id, a.state, a.county, ${abstractLabelSql("a")} AS abstract, a.survey, a.area_m2 AS area
            FROM gis.abstracts a, wanted w WHERE a.geom && w.box
        ),
        well_mvt AS (
          SELECT ${mvt("wl.geom")} AS geom,
                 wl.fid, wl.api8, wl.well_no AS "wellNo", wl.symbol, wl.type, wl.status,
-                wl.county, wl.operator, replace(wl.abstract, '?', '') AS abstract, wl.survey, 'TX'::text AS state
+                wl.county, wl.operator, wl.abstract, wl.survey, 'TX'::text AS state,
+                ${col("wl.profile", "text")} AS profile, ${col("wl.status_flag", "text")} AS "statusFlag"
            FROM rrc.wells wl, wanted w WHERE wl.geom && w.box${laWells}
        ),
        bore_mvt AS (
          SELECT ${mvt("b.geom")} AS geom,
                 b.fid, b.surface_fid AS "surfaceId", b.wellbore_type AS "wellboreType",
-                sw.type, sw.status, sw.county, sw.operator, replace(sw.abstract, '?', '') AS abstract, sw.survey, 'TX'::text AS state
+                sw.type, sw.status, sw.county, sw.operator, sw.abstract, sw.survey, 'TX'::text AS state,
+                ${col("b.status", "text")} AS "boreStatus", ${col("coalesce(b.approximate, true)", "boolean")} AS approximate,
+                ${col("b.line_source", "text")} AS "lineSource", b.api10 AS api, ${col("sw.profile", "text")} AS profile
            FROM rrc.wellbores b
            LEFT JOIN rrc.wells sw ON sw.fid = b.surface_fid, wanted w
           WHERE b.geom && w.box${laBores}
-       ),
+       ),${refreshed ? `
+       -- Bottom-hole points of deviated wellbores (horizontal / directional):
+       -- selectable, linked to their surface well by surfaceId.
+       bh_mvt AS (
+         SELECT ${mvt("b.bh_geom")} AS geom,
+                b.fid, b.surface_fid AS "surfaceId", b.wellbore_type AS "wellboreType",
+                sw.type, sw.status, sw.county, sw.operator, sw.abstract, sw.survey, 'TX'::text AS state,
+                b.status AS "boreStatus", b.bh_source AS "bhSource", b.api10 AS api, sw.profile
+           FROM rrc.wellbores b
+           LEFT JOIN rrc.wells sw ON sw.fid = b.surface_fid, wanted w
+          WHERE b.bh_geom && w.box${laBottoms}
+       ),` : ""}
        dome_mvt AS (
          -- East Texas Basin salt dome outlines, digitized from BEG RI-140's
          -- per-dome structure-contour maps (basis = which contour was traced).
@@ -142,7 +184,8 @@ export function buildTileSql(sonris: boolean): string {
            || coalesce((SELECT ST_AsMVT(dome_mvt, 'saltdomes', ${TILE_EXTENT}, 'geom') FROM dome_mvt WHERE geom IS NOT NULL), ''::bytea)
            || CASE WHEN $1::int >= ${ABSTRACTS_MIN_ZOOM} THEN coalesce((SELECT ST_AsMVT(abs_mvt, 'abstracts', ${TILE_EXTENT}, 'geom') FROM abs_mvt WHERE geom IS NOT NULL), ''::bytea) ELSE ''::bytea END
            || CASE WHEN $1::int >= ${WELLS_MIN_ZOOM} THEN coalesce((SELECT ST_AsMVT(well_mvt, 'wells', ${TILE_EXTENT}, 'geom') FROM well_mvt WHERE geom IS NOT NULL), ''::bytea) ELSE ''::bytea END
-           || CASE WHEN $1::int >= ${BORES_MIN_ZOOM} THEN coalesce((SELECT ST_AsMVT(bore_mvt, 'wellbores', ${TILE_EXTENT}, 'geom') FROM bore_mvt WHERE geom IS NOT NULL), ''::bytea) ELSE ''::bytea END AS tile`;
+           || CASE WHEN $1::int >= ${BORES_MIN_ZOOM} THEN coalesce((SELECT ST_AsMVT(bore_mvt, 'wellbores', ${TILE_EXTENT}, 'geom') FROM bore_mvt WHERE geom IS NOT NULL), ''::bytea) ELSE ''::bytea END${refreshed ? `
+           || CASE WHEN $1::int >= ${BORES_MIN_ZOOM} THEN coalesce((SELECT ST_AsMVT(bh_mvt, 'bottomholes', ${TILE_EXTENT}, 'geom') FROM bh_mvt WHERE geom IS NOT NULL), ''::bytea) ELSE ''::bytea END` : ""} AS tile`;
 }
 
 export const gisTilesRouter = Router();
@@ -186,7 +229,7 @@ gisTilesRouter.get(
     // The retry is happy-path-transparent — the query runs once when the DB is
     // reachable, and only re-runs on a connection error.
     const rows = await withDbRetry(() =>
-      prisma.$queryRawUnsafe<{ tile: Buffer | null }[]>(buildTileSql(sonrisWellsAvailable()), z, x, y));
+      prisma.$queryRawUnsafe<{ tile: Buffer | null }[]>(buildTileSql(sonrisWellsAvailable(), rrcRefreshAvailable()), z, x, y));
     const tile = rows[0]?.tile;
     if (!tile || tile.length === 0) return res.status(204).end();
     cachePut(key, tile);
@@ -243,14 +286,15 @@ interface WellReferenceIndex {
   formations: RefEntry[];
   /** Filter-option lists for the unscoped (no county selected) /options call. */
   types: string[];
+  /** Wellbore profiles (Vertical / Horizontal / Directional) — after the RRC refresh. */
+  profiles: string[];
   statuses: string[];
   wellCount: number;
   surveys: string[];
-  abstracts: string[];
 }
 
 const EMPTY_REFERENCE: WellReferenceIndex = {
-  operators: [], fields: [], formations: [], types: [], statuses: [], wellCount: 0, surveys: [], abstracts: [],
+  operators: [], fields: [], formations: [], types: [], profiles: [], statuses: [], wellCount: 0, surveys: [],
 };
 
 /** Reference data is re-imported monthly; re-read it a few times a day. */
@@ -267,7 +311,10 @@ async function loadReferenceIndex(): Promise<WellReferenceIndex> {
     `SELECT ${col} AS name, count(*)::int AS n, ST_Extent(geom)::text AS ext
        FROM rrc.wells WHERE ${col} IS NOT NULL AND ${col} <> '' GROUP BY ${col}`,
   );
-  const [operators, fields, formations, wellAgg, absAgg] = await Promise.all([
+  const profileAgg = rrcRefreshAvailable()
+    ? prisma.$queryRawUnsafe<{ profiles: string[] | null }[]>(`SELECT array_agg(DISTINCT profile) FILTER (WHERE profile IS NOT NULL) AS profiles FROM rrc.wells`)
+    : Promise.resolve([{ profiles: [] as string[] }]);
+  const [operators, fields, formations, wellAgg, absAgg, profRows] = await Promise.all([
     agg("operator"),
     agg("field_name"),
     prisma.$queryRawUnsafe<{ name: string; n: number; ext: string | null }[]>(
@@ -280,11 +327,10 @@ async function loadReferenceIndex(): Promise<WellReferenceIndex> {
               count(*)::int AS n
          FROM rrc.wells`,
     ),
-    prisma.$queryRawUnsafe<{ surveys: string[] | null; abstracts: string[] | null }[]>(
-      `SELECT array_agg(DISTINCT survey) FILTER (WHERE survey IS NOT NULL) AS surveys,
-              array_agg(DISTINCT replace(abstract, '?', '')) FILTER (WHERE abstract IS NOT NULL) AS abstracts
-         FROM gis.abstracts`,
+    prisma.$queryRawUnsafe<{ surveys: string[] | null }[]>(
+      `SELECT array_agg(DISTINCT survey) FILTER (WHERE survey IS NOT NULL) AS surveys FROM gis.abstracts`,
     ),
+    profileAgg,
   ]);
   const entries = (rows: { name: string; n: number; ext: string | null }[]): RefEntry[] =>
     rows.map((r) => ({ name: r.name, n: r.n, bbox: parseExtent(r.ext) }));
@@ -298,10 +344,10 @@ async function loadReferenceIndex(): Promise<WellReferenceIndex> {
     fields: mergeRefEntries(entries(fields), la ? entries(la.fields) : []),
     formations: entries(formations),
     types: [...new Set([...(w?.types ?? []), ...(la?.types ?? [])])].sort(),
+    profiles: sortProfiles(profRows[0]?.profiles ?? []),
     statuses: [...new Set([...(w?.statuses ?? []), ...(la?.statuses ?? [])])].sort(),
     wellCount: (w?.n ?? 0) + (la?.n ?? 0),
     surveys: (a?.surveys ?? []).sort(),
-    abstracts: (a?.abstracts ?? []).sort((x, y) => x.localeCompare(y, undefined, { numeric: true })),
   };
 }
 
@@ -456,13 +502,14 @@ gisRouter.get(
         // Louisiana sections by township/range and/or section number.
         ? prisma.$queryRawUnsafe<AbsRow[]>(
           SUGGEST_SQL.plssSections, plss.township, plss.section)
-        // Abstract number OR survey name (both live on gis.abstracts). Labels are
-        // matched and returned with the source data's stray '?' stripped.
+        // Abstract number OR survey name (both live on gis.abstracts). Every
+        // abstract/survey combination is its own row, keyed by id; labels are
+        // RRC's own ("A-?5" — an unnumbered tract — is not abstract 5).
         : prisma.$queryRawUnsafe<AbsRow[]>(
-        `SELECT id, replace(abstract, '?', '') AS abstract, survey, county, state,
-                GREATEST(similarity(replace(coalesce(abstract,''), '?', ''), $2), similarity(coalesce(survey,''), $2)) AS score
-           FROM gis.abstracts
-          WHERE replace(abstract, '?', '') ILIKE $1 ESCAPE '\\' OR survey ILIKE $1 ESCAPE '\\'
+        `SELECT id, ${abstractLabelSql("gis_a")} AS abstract, survey, county, state,
+                GREATEST(similarity(coalesce(abstract,''), $2), similarity(coalesce(survey,''), $2)) AS score
+           FROM gis.abstracts gis_a
+          WHERE abstract ILIKE $1 ESCAPE '\\' OR survey ILIKE $1 ESCAPE '\\'
           -- Exact abstract numbers, then numbers starting with the typed digits,
           -- survive the LIMIT ahead of mere trigram similarity ($3 = digits typed).
           ORDER BY CASE WHEN $3 = '' THEN 2
@@ -568,11 +615,11 @@ gisRouter.get(
     const rows = await prisma.$queryRawUnsafe<
       { id: string; abstract: string | null; survey: string | null; county: string; state: string; lon: number; lat: number }[]
     >(
-      `SELECT id, replace(abstract, '?', '') AS abstract, survey, county, state,
+      `SELECT id, ${abstractLabelSql("gis_a")} AS abstract, survey, county, state,
               ST_X(ST_PointOnSurface(geom)) AS lon, ST_Y(ST_PointOnSurface(geom)) AS lat
-         FROM gis.abstracts
-        WHERE replace(abstract, '?', '') ILIKE $1 ESCAPE '\\' OR survey ILIKE $1 ESCAPE '\\'
-        ORDER BY GREATEST(similarity(replace(coalesce(abstract, ''), '?', ''), $2), similarity(coalesce(survey, ''), $2)) DESC,
+         FROM gis.abstracts gis_a
+        WHERE abstract ILIKE $1 ESCAPE '\\' OR survey ILIKE $1 ESCAPE '\\'
+        ORDER BY GREATEST(similarity(coalesce(abstract, ''), $2), similarity(coalesce(survey, ''), $2)) DESC,
                  county, abstract
         LIMIT 100`,
       `%${escapeLike(q)}%`, q,
@@ -621,20 +668,13 @@ gisRouter.get(
       if (!la) return res.status(404).json({ error: "well not found" });
       return res.json(la);
     }
-    const rows = await prisma.$queryRawUnsafe<Record<string, unknown>[]>(
-      `SELECT fid, api8, api10 AS api, well_no AS "wellNo", well_id AS "wellId", symbol, type, status,
-              county, district, lease_no AS "leaseNo", lease_name AS "leaseName",
-              operator, operator_no AS "operatorNo", field_no AS "fieldNo", field_name AS field,
-              oil_gas AS "oilGas", formations, spud_date AS "spudDate", plug_date AS "plugDate",
-              cum_oil AS "cumOil", cum_gas AS "cumGas", last_prod AS "lastProd",
-              replace(abstract, '?', '') AS abstract, survey, abstract_id AS "abstractId",
-              ST_X(geom) AS lon, ST_Y(geom) AS lat
-         FROM rrc.wells WHERE fid = $1`,
+    const rows = await prisma.$queryRawUnsafe<{ row: Record<string, unknown>; lon: number; lat: number }[]>(
+      `SELECT to_jsonb(w) - 'geom' AS row, ST_X(w.geom) AS lon, ST_Y(w.geom) AS lat FROM rrc.wells w WHERE w.fid = $1`,
       fid,
     );
     if (!rows.length) return res.status(404).json({ error: "well not found" });
-    const well = rows[0];
-    const [permits, completions, unitAcresRow] = await Promise.all([
+    const well = rrcWellDetail(rows[0].row, rows[0].lon, rows[0].lat);
+    const [permits, completions, unitAcresRow, refresh] = await Promise.all([
       prisma.$queryRawUnsafe<Record<string, unknown>[]>(
         `SELECT status_no AS "statusNo", permit_date AS "permitDate", operator, lease_name AS "leaseName", well_no AS "wellNo", acres::float8 AS acres, survey, abstract
            FROM rrc.permits WHERE api8 = $1 ORDER BY permit_date DESC NULLS LAST LIMIT 12`,
@@ -651,10 +691,52 @@ gisRouter.get(
           WHERE api8 = $1 AND acres IS NOT NULL
           ORDER BY permit_date DESC NULLS LAST LIMIT 1`,
         String(well.api8 ?? "")),
+      rrcRefreshAvailable() ? rrcWellRefreshDetail(fid) : Promise.resolve(null),
     ]);
-    res.json({ ...well, permits, completions, unitAcres: unitAcresRow[0]?.acres ?? null });
+    res.json({ ...well, permits, completions, unitAcres: unitAcresRow[0]?.acres ?? null, ...(refresh ?? {}) });
   }),
 );
+
+/** Vertical, Horizontal, Directional — in that order, whichever are present. */
+const sortProfiles = (ps: readonly string[]): string[] => ["Vertical", "Horizontal", "Directional"].filter((p) => ps.includes(p));
+
+/** A GIS abstract id ("TX-289281", "TX-289?5", "LA-…") as opposed to a bare label ("A-281", "Sec 12"). */
+export const isAbstractId = (v: string): boolean => /^(TX|LA)-\S/.test(v);
+
+/** One Abstract-filter option: an abstract/survey combination, keyed by its GIS id. */
+export interface AbstractOption { id: string; abstract: string | null; survey: string | null; county: string; state: string | null }
+
+/** Numeric by abstract number (unnumbered tracts last), then label, survey, id — a stable, human order. */
+export function sortAbstractOptions(rows: AbstractOption[]): AbstractOption[] {
+  // The number in the label ("A-?5" sorts beside A-5; "Sec 12" by 12); no label sorts last.
+  const key = (a: AbstractOption) => { const n = parseInt((a.abstract ?? "").replace(/[^0-9]/g, ""), 10); return Number.isFinite(n) ? n : Infinity; };
+  const unnumbered = (a: AbstractOption) => ((a.abstract ?? "").includes("?") ? 1 : 0);
+  return rows.slice().sort((a, b) => key(a) - key(b) || unnumbered(a) - unnumbered(b)
+    || (a.abstract ?? "").localeCompare(b.abstract ?? "") || (a.survey ?? "").localeCompare(b.survey ?? "")
+    || a.county.localeCompare(b.county) || a.id.localeCompare(b.id));
+}
+
+/**
+ * The map panel's shape of one rrc.wells row (read as jsonb, so a database
+ * the RRC refresh hasn't reached yet — no status_* columns — still serves).
+ */
+export function rrcWellDetail(r: Record<string, unknown>, lon: number, lat: number): Record<string, unknown> {
+  const v = (k: string) => (r[k] === undefined ? null : r[k]);
+  return {
+    fid: v("fid"), api8: v("api8"), api: v("api10"), wellNo: v("well_no"), wellId: v("well_id"), symbol: v("symbol"),
+    type: v("type"), status: v("status"), county: v("county"), district: v("district"), leaseNo: v("lease_no"),
+    leaseName: v("lease_name"), operator: v("operator"), operatorNo: v("operator_no"), fieldNo: v("field_no"),
+    field: v("field_name"), oilGas: v("oil_gas"), formations: v("formations"), spudDate: v("spud_date"), plugDate: v("plug_date"),
+    cumOil: v("cum_oil"), cumGas: v("cum_gas"), lastProd: v("last_prod"), abstract: v("abstract"), survey: v("survey"),
+    abstractId: v("abstract_id"), lon, lat,
+    // RRC refresh (2026-10): normalized status + its evidence.
+    profile: v("profile"), statusDetail: v("status_detail"), statusFlag: v("status_flag"), statusNote: v("status_note"),
+    statusSource: v("status_source"), statusSince: v("status_since"), statusAsOf: v("status_as_of"), adminStatus: v("admin_status"),
+    permitNo: v("permit_no"), permitDate: v("permit_date"), permitExpires: v("permit_expires"), completionDate: v("completion_date"),
+    shutInDate: v("shut_in_date"), injectionType: v("injection_type"), locationFlag: v("location_flag"), locationNote: v("location_note"),
+    geomFlag: v("geom_flag"), sources: v("sources"), refreshedAt: v("refreshed_at"),
+  };
+}
 
 // Bound the raw string so a pathological county list can't build a giant
 // ANY($1::text[]) array; the names are sliced again below as defense in depth.
@@ -680,8 +762,11 @@ gisRouter.get(
       const ref = await referenceIndex();
       res.json({
         surveys: ref.surveys,
-        abstracts: ref.abstracts,
+        // Abstracts are listed per county (each abstract/survey combination is
+        // its own entry); statewide there are 300k+, so pick a county first.
+        abstracts: [],
         wellTypes: ref.types,
+        wellProfiles: ref.profiles,
         wellStatuses: ref.statuses,
         operators: ref.operators.map((o) => o.name).sort(),
         wellCount: ref.wellCount,
@@ -697,16 +782,21 @@ gisRouter.get(
       `SELECT DISTINCT survey AS v FROM gis.abstracts WHERE ${scope} survey IS NOT NULL ORDER BY v`,
       ...params,
     );
-    const abstracts = await prisma.$queryRawUnsafe<{ v: string }[]>(
-      `SELECT DISTINCT replace(abstract, '?', '') AS v FROM gis.abstracts WHERE ${scope} abstract IS NOT NULL ORDER BY v`,
+    // Every abstract/survey combination of the counties, keyed by its GIS id —
+    // never collapsed to a bare number, and including tracts RRC left
+    // unnumbered (no label) so none can go missing from the filter.
+    const abstracts = await prisma.$queryRawUnsafe<AbstractOption[]>(
+      `SELECT id, ${abstractLabelSql("gis.abstracts")} AS abstract, survey, county, state
+         FROM gis.abstracts WHERE ${scope} true`,
       ...params,
     );
     // Well-derived filter option lists from rrc.wells (RRC = Texas only), so
     // only the Texas counties among the selection can scope them…
     const txNames = texasCountyNames(names);
     const wellAgg = txNames.length
-      ? await prisma.$queryRawUnsafe<{ types: string[]; statuses: string[]; operators: string[]; n: number }[]>(
+      ? await prisma.$queryRawUnsafe<{ types: string[]; statuses: string[]; operators: string[]; profiles: string[] | null; n: number }[]>(
         `SELECT array_agg(DISTINCT type) FILTER (WHERE type IS NOT NULL) AS types,
+                ${rrcRefreshAvailable() ? "array_agg(DISTINCT profile) FILTER (WHERE profile IS NOT NULL)" : "NULL::text[]"} AS profiles,
                 array_agg(DISTINCT status) FILTER (WHERE status IS NOT NULL) AS statuses,
                 array_agg(DISTINCT operator) FILTER (WHERE operator IS NOT NULL) AS operators,
                 count(*)::int AS n
@@ -731,8 +821,9 @@ gisRouter.get(
     const union = (a?: string[] | null, b?: string[] | null) => [...new Set([...(a ?? []), ...(b ?? [])])].sort();
     res.json({
       surveys: surveys.map((r) => r.v),
-      abstracts: abstracts.map((r) => r.v).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+      abstracts: sortAbstractOptions(abstracts),
       wellTypes: union(w?.types, l?.types),
+      wellProfiles: sortProfiles(w?.profiles ?? []),
       wellStatuses: union(w?.statuses, l?.statuses),
       operators: union(w?.operators, l?.operators),
       wellCount: (w?.n ?? 0) + (l?.n ?? 0),
@@ -763,13 +854,22 @@ export function planExtentQuery(q: Record<string, unknown>, opts: { sonris?: boo
 
   const params: string[][] = [];
   const cond = (col: string, vals: string[]): string => { params.push(vals); return `${col} = ANY($${params.length}::text[])`; };
+  // Abstract filter values are GIS ids ("TX-289281", "LA-…"); saved filters
+  // from before ids carry bare labels ("A-281", "Sec 12"), still honored.
+  const absIds = abstracts.filter(isAbstractId), absLabels = abstracts.filter((a) => !isAbstractId(a));
+  const anyOf = (vals: string[]): string => { params.push(vals); return ` = ANY($${params.length}::text[])`; };
+  /** The abstract predicate: ids through `byId`, legacy labels through `byLabel`, OR'd when both. */
+  const either = (byId: (anyParam: string) => string, byLabel: (anyParam: string) => string): string => {
+    const parts = [...(absIds.length ? [byId(anyOf(absIds))] : []), ...(absLabels.length ? [byLabel(anyOf(absLabels))] : [])];
+    return parts.length > 1 ? `(${parts.join(" OR ")})` : parts[0];
+  };
 
   if (wellTypes.length || wellStatuses.length || operators.length) {
     const conds: string[] = [];
     // rrc.wells is Texas-only (RRC): a Louisiana parish matches no well there.
     if (counties.length) conds.push(cond("county", texasCountyNames(counties)));
     if (surveys.length) conds.push(cond("survey", surveys));
-    if (abstracts.length) conds.push(cond("replace(abstract, '?', '')", abstracts));
+    if (abstracts.length) conds.push(either((c) => `abstract_id${c}`, (c) => `abstract${c}`));
     if (wellTypes.length) conds.push(cond("type", wellTypes));
     if (wellStatuses.length) conds.push(cond("status", wellStatuses));
     if (operators.length) conds.push(cond("operator", operators));
@@ -779,7 +879,12 @@ export function planExtentQuery(q: Record<string, unknown>, opts: { sonris?: boo
     const la: string[] = [];
     if (counties.length) la.push(cond("parish", louisianaParishNames(counties)));
     if (surveys.length) la.push(cond("township", surveys));
-    if (abstracts.length) la.push(cond("('Sec ' || section)", abstracts));
+    if (abstracts.length) {
+      la.push(either(
+        (c) => `EXISTS (SELECT 1 FROM gis.abstracts la_a WHERE la_a.id${c} AND la_a.state = 'LA' AND la_a.abstract = 'Sec ' || section AND la_a.survey = township)`,
+        (c) => `('Sec ' || section)${c}`,
+      ));
+    }
     if (wellTypes.length) la.push(cond("type", wellTypes));
     if (wellStatuses.length) la.push(cond("status", wellStatuses));
     if (operators.length) la.push(cond("operator", operators));
@@ -795,7 +900,7 @@ export function planExtentQuery(q: Record<string, unknown>, opts: { sonris?: boo
     const conds: string[] = [];
     if (counties.length) conds.push(countyScopePredicate(counties, params));
     if (surveys.length) conds.push(cond("survey", surveys));
-    if (abstracts.length) conds.push(cond("replace(abstract, '?', '')", abstracts));
+    if (abstracts.length) conds.push(either((c) => `id${c}`, (c) => `abstract${c}`));
     return { sql: `SELECT ST_Extent(geom)::text AS ext FROM gis.abstracts WHERE ${conds.join(" AND ")}`, params };
   }
   if (counties.length) {
@@ -831,7 +936,7 @@ gisRouter.get(
   "/abstracts-index",
   asyncHandler(async (_req, res) => {
     const rows = await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string; countyFips: string; state: string | null }[]>(
-      `SELECT id, replace(abstract, '?', '') AS abstract, survey, county, county_fips AS "countyFips", state FROM gis.abstracts ORDER BY county, abstract`,
+      `SELECT id, ${abstractLabelSql("gis_a")} AS abstract, survey, county, county_fips AS "countyFips", state FROM gis.abstracts gis_a ORDER BY county, abstract, id`,
     );
     // Shared, org-independent reference geometry — safe to cache so this full
     // ~11k-row fetch isn't repeated on every map load.
@@ -847,8 +952,8 @@ gisRouter.get(
     const ids = String(req.query.ids ?? "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 500);
     if (!ids.length) return res.json({ type: "FeatureCollection", features: [] });
     const rows = await prisma.$queryRawUnsafe<{ id: string; abstract: string | null; survey: string | null; county: string; state: string; area: number | null; geom: string }[]>(
-      `SELECT id, replace(abstract, '?', '') AS abstract, survey, county, state, area_m2 AS area, ST_AsGeoJSON(geom, 6) AS geom
-         FROM gis.abstracts WHERE id = ANY($1::text[])`,
+      `SELECT id, ${abstractLabelSql("gis_a")} AS abstract, survey, county, state, area_m2 AS area, ST_AsGeoJSON(geom, 6) AS geom
+         FROM gis.abstracts gis_a WHERE id = ANY($1::text[])`,
       ids,
     );
     res.json({
@@ -912,9 +1017,9 @@ gisRouter.get(
     const rows = await prisma.$queryRawUnsafe<
       { id: string; abstract: string | null; survey: string | null; county: string; state: string; minx: number; miny: number; maxx: number; maxy: number }[]
     >(
-      `SELECT id, replace(abstract, '?', '') AS abstract, survey, county, state,
+      `SELECT id, ${abstractLabelSql("gis_a")} AS abstract, survey, county, state,
               ST_XMin(geom) AS minx, ST_YMin(geom) AS miny, ST_XMax(geom) AS maxx, ST_YMax(geom) AS maxy
-         FROM gis.abstracts WHERE id = $1`,
+         FROM gis.abstracts gis_a WHERE id = $1`,
       String(req.params.id),
     );
     if (!rows.length) return res.status(404).json({ error: "abstract not found" });

@@ -14,7 +14,14 @@
  *
  * Idempotent: wells/wellbores are replaced per county on re-run.
  *
- * Usage: npx tsx src/scripts/importRrcWells.ts
+ * SUPERSEDED (2026-10): Leon, Freestone and Cherokee wells now come from the
+ * bundled RRC refresh (scripts/buildRrcRefresh.ts → server/data/rrc, loaded at
+ * boot by services/rrcRefresh.ts) with normalized statuses, bottom holes and
+ * status history. Running this would REPLACE those rows with the July 2026
+ * pipeline's output (old status vocabulary, no bottom holes), so it refuses
+ * unless --force is passed.
+ *
+ * Usage: npx tsx src/scripts/importRrcWells.ts --force
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -187,6 +194,10 @@ async function importCounty(key: string, db900: Record<string, Dbf900>): Promise
 }
 
 async function main(): Promise<void> {
+  if (!process.argv.includes("--force")) {
+    console.error("importRrcWells is superseded by the bundled RRC refresh (see the header); pass --force to run it anyway.");
+    process.exit(1);
+  }
   console.log("DDL: rrc.wells / rrc.wellbores…");
   await ddl();
   const db900 = JSON.parse(fs.readFileSync(DBF900, "utf8")) as Record<string, Dbf900>;

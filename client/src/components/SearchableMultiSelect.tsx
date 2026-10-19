@@ -146,6 +146,10 @@ export function SearchableMultiSelect({ options, value, onChange, placeholder = 
               </div>
             ))
           )}
+          {/* The list renders a window; say so, so nothing reads as missing. */}
+          {!custom && filtered.length > shown.length && (
+            <div className="msel-more">Showing {shown.length} of {filtered.length.toLocaleString("en-US")} — type to narrow</div>
+          )}
         </div>,
         document.body,
       )}

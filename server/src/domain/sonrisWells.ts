@@ -18,6 +18,7 @@
  *
  * Mirrored client-side in client/src/lib/laWells.ts — keep the two in step.
  */
+import type { WellStatus } from "./wellStatus.js";
 
 export const LA_FID_BASE = 2_000_000_000;
 /** Exclusive ceiling on a serial / bore sequence (keeps fids < 2^31 − 1). */
@@ -32,17 +33,24 @@ export const laSerialOfFid = (fid: number): number | null => (isLaFid(fid) ? fid
 // ---------------------------------------------------------------------------
 // Status / type vocabulary
 //
-// The map's paint, legend, status/type filters and Well Analysis all speak the
-// Texas RRC vocabulary (tools/rrc/build_wells.py SYM table):
-//   status: Producing · Shut-In · Plugged · Permitted · Dry Hole · Active
-//           (injection/disposal) · Canceled/Abandoned · Unknown
+// The map's paint, legend, status/type filters and Well Analysis all speak ONE
+// normalized vocabulary (domain/wellStatus.ts), shared with Texas:
+//   status: Permitted · Drilling · Producing · Shut-In · Plugged · Injection ·
+//           Disposal · Other/Unknown
 //   type:   Oil · Gas · Oil/Gas · Location · Dry Hole · Injection/Disposal · Unknown
 // Louisiana's status codes map onto it below; the state's own wording is kept
 // separately (status_text) for the popup.
 // ---------------------------------------------------------------------------
 
-export type MapStatus = "Producing" | "Shut-In" | "Plugged" | "Permitted" | "Dry Hole" | "Active" | "Canceled/Abandoned" | "Unknown";
+export type MapStatus = WellStatus;
 export interface MapClass { status: MapStatus; type: string; symbol: string }
+
+/**
+ * Bumped whenever the code → status mapping below changes: it salts the
+ * bundled dataset's version (services/sonrisWells.parseLaWellDataset), so the
+ * boot loader re-classifies the stored wells once with the new mapping.
+ */
+export const LA_CLASSIFIER_VERSION = "2026-10-normalized";
 
 /** SONRIS product code → label ("00" = no product specified). */
 export const LA_PRODUCT_LABEL: Record<string, string> = { "10": "Oil", "20": "Gas", "25": "Dry gas" };
@@ -55,11 +63,11 @@ export function productType(product: string | null | undefined): "Oil" | "Gas" |
 }
 
 /**
- * Louisiana status code → map status bucket. Codes seen in Red River Parish;
+ * Louisiana status code → map status. Codes seen in Red River Parish;
  * anything else falls back to the wording (classifyLaWell).
  *   01 Permitted                                   → Permitted
- *   03 Permit Expired                              → Canceled/Abandoned (Texas' expired/canceled location)
- *   09 Active - Injection (SWD, ER, remediation…)  → Active (Injection/Disposal)
+ *   03 Permit Expired                              → Other/Unknown (expired, never drilled)
+ *   09 Active - Injection (SWD, ER, remediation…)  → Injection, or Disposal for salt-water disposal wording
  *   10 Active - Producing                          → Producing
  *   20 PA-35 Temporarily inactive                  → Shut-In
  *   22 Reverted to single completion               → Plugged (this completion is closed off)
@@ -67,17 +75,17 @@ export function productType(product: string | null | undefined): "Oil" | "Gas" |
  *   24 Reverted to lease operation / resident use  → Shut-In (no commercial production)
  *   26 Act 404 Orphan well - injection             → Shut-In (Injection/Disposal)
  *   28 Unable to locate - no P&A on record         → Shut-In (unplugged per the record, inactive)
- *   29 Dry and plugged                             → Dry Hole
+ *   29 Dry and plugged                             → Plugged (type Dry Hole)
  *   30 Plugged and abandoned                       → Plugged
- *   31 Shut-in dry hole - future utility           → Dry Hole
+ *   31 Shut-in dry hole - future utility           → Shut-In (type Dry Hole — not plugged)
  *   33 / 34 Shut-in productive (future utility or not) → Shut-In
  *   37 Shut-in waiting on market                   → Shut-In
- *   80 Unknown                                     → Unknown
+ *   80 Unknown                                     → Other/Unknown
  */
 export const LA_STATUS_BUCKET: Record<string, MapStatus> = {
   "01": "Permitted",
-  "03": "Canceled/Abandoned",
-  "09": "Active",
+  "03": "Other/Unknown",
+  "09": "Injection",
   "10": "Producing",
   "20": "Shut-In",
   "22": "Plugged",
@@ -85,43 +93,54 @@ export const LA_STATUS_BUCKET: Record<string, MapStatus> = {
   "24": "Shut-In",
   "26": "Shut-In",
   "28": "Shut-In",
-  "29": "Dry Hole",
+  "29": "Plugged",
   "30": "Plugged",
-  "31": "Dry Hole",
+  "31": "Shut-In",
   "33": "Shut-In",
   "34": "Shut-In",
   "37": "Shut-In",
-  "80": "Unknown",
+  "80": "Other/Unknown",
 };
+
+/** True when the state's wording describes salt-water disposal rather than injection for recovery. */
+const isDisposalWording = (text: string): boolean => /\bswd\b|disposal|salt water/i.test(text);
+
+/** A dry HOLE in the state's wording — "Dry Gas" is a product, not a dry hole. */
+const DRY_HOLE = /\bdry\b(?!\s+gas)/i;
 
 /** Bucket from the state's wording, for a code not in the table. Order matters. */
 export function bucketFromWording(text: string): MapStatus {
   const t = text.toLowerCase();
-  if (/\bdry\b/.test(t)) return "Dry Hole";
+  if (DRY_HOLE.test(t)) return /shut-?\s?in/.test(t) ? "Shut-In" : "Plugged";
   if (/plugged and abandoned|\bp\s*&\s*a\b/.test(t) && !/\bno plugged\b/.test(t)) return "Plugged";
-  if (/inject|disposal|\bswd\b/.test(t) && /\bactive\b/.test(t)) return "Active";
+  if (/inject|disposal|\bswd\b/.test(t) && /\bactive\b/.test(t)) return isDisposalWording(t) ? "Disposal" : "Injection";
   if (/shut-?\s?in|inactive|orphan|unable to locate|revert/.test(t)) return "Shut-In";
   if (/producing/.test(t)) return "Producing";
-  if (/expired|cancel|revoked/.test(t)) return "Canceled/Abandoned";
+  if (/expired|cancel|revoked/.test(t)) return "Other/Unknown";
   if (/permit/.test(t)) return "Permitted";
-  return "Unknown";
+  return "Other/Unknown";
 }
 
 /** True when the state's wording describes an injection / disposal well. */
 const isInjection = (code: string, text: string): boolean => code === "09" || code === "26" || /inject|disposal|\bswd\b/i.test(text);
+/** Dry-hole codes / wording (plugged or shut in): the type reads "Dry Hole". */
+const isDryHole = (code: string, text: string): boolean => code === "29" || code === "31" || DRY_HOLE.test(text);
 
 /**
- * The map classification (status bucket, type, symbol) of one Louisiana well,
- * in the Texas vocabulary. Type follows the product where the state recorded
- * one; otherwise the bucket decides (a location, a dry hole, an injection
+ * The map classification (status, type, symbol) of one Louisiana well, in
+ * the shared vocabulary. Type follows the product where the state recorded
+ * one; otherwise the status decides (a location, a dry hole, an injection
  * well) and an unrecorded product reads "Unknown" — never a guessed oil/gas.
  */
 export function classifyLaWell(statusCode: string, statusText: string, product: string | null | undefined): MapClass {
-  const status = LA_STATUS_BUCKET[statusCode] ?? bucketFromWording(statusText);
+  let status = LA_STATUS_BUCKET[statusCode] ?? bucketFromWording(statusText);
+  if (status === "Injection" && isDisposalWording(statusText)) status = "Disposal";
   const prod = productType(product);
   if (status === "Permitted") return { status, type: "Location", symbol: "Permitted Location" };
-  if (status === "Canceled/Abandoned") return { status, type: "Location", symbol: "Canceled/Abandoned Location" };
-  if (status === "Dry Hole") return { status, type: "Dry Hole", symbol: "Dry Hole" };
+  if (statusCode === "03" || (status === "Other/Unknown" && /expired|cancel|revoked/i.test(statusText))) {
+    return { status, type: "Location", symbol: "Expired/Canceled Location" };
+  }
+  if (isDryHole(statusCode, statusText)) return { status, type: "Dry Hole", symbol: "Dry Hole" };
   if (isInjection(statusCode, statusText)) return { status, type: "Injection/Disposal", symbol: "Injection/Disposal" };
   const type = prod ?? "Unknown";
   switch (status) {

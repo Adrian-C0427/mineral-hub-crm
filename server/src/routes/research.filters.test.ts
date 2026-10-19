@@ -11,7 +11,7 @@
  * lists at the same bound.
  */
 import { describe, it, expect } from "vitest";
-import { parseFilters, MAX_FILTER_VALUES } from "./research.js";
+import { abstractKeyOf, parseAbstractKey, parseFilters, MAX_FILTER_VALUES } from "./research.js";
 
 const many = (n: number, prefix = "v") => Array.from({ length: n }, (_, i) => `${prefix}${i}`);
 
@@ -54,5 +54,23 @@ describe("research filter value caps", () => {
     expect(f.counties).toEqual(["Freestone"]);
     expect(f.surveys).toEqual([]);
     expect(f.states).toEqual([]);
+  });
+});
+
+describe("county-qualified abstract filter values", () => {
+  it("splits 'STATE|County|number' keys from bare numbers", () => {
+    const f = parseFilters({ abstract: ["TX|Leon|22", "22", "TX|Freestone|22"], abstractId: "TX|Leon|?5" });
+    expect(f.abstractIds).toEqual(["22"]);
+    // ?abstractId= values come first (the two spellings are concatenated).
+    expect(f.abstractKeys).toEqual([
+      { state: "TX", county: "Leon", abstractId: "?5" },
+      { state: "TX", county: "Leon", abstractId: "22" },
+      { state: "TX", county: "Freestone", abstractId: "22" },
+    ]);
+  });
+  it("round-trips a key and rejects anything else", () => {
+    expect(abstractKeyOf(parseAbstractKey("TX|San Augustine|A-12")!)).toBe("TX|San Augustine|A-12");
+    expect(parseAbstractKey("A-12")).toBeNull();
+    expect(parseAbstractKey("Leon|12")).toBeNull();
   });
 });

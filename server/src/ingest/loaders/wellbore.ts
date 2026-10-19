@@ -93,7 +93,9 @@ export async function loadWellboreEnrichment(
            formations = CASE WHEN cardinality($2::text[]) > 0 THEN $2::text[] ELSE formations END,
            lease_name = COALESCE(lease_name, $3),
            survey     = COALESCE(survey, $4),
-           plug_date  = COALESCE($5::date, plug_date)
+           -- A plug date belongs on a well only when it IS plugged (a re-entered
+           -- or plugged-back wellbore keeps its old W-3 in status history).
+           plug_date  = CASE WHEN status IN ('Plugged', 'Dry Hole') THEN COALESCE($5::date, plug_date) ELSE plug_date END
          WHERE api8 = $1`,
         f.api8, f.formations, f.leaseName, f.survey, f.plugDate,
       );

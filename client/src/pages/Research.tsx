@@ -12,7 +12,7 @@ import { Toggle } from "../components/Toggle";
 import { useRowSelection, BulkBar } from "../components/bulk";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { useAbstractIndex } from "../components/AbstractPicker";
-import { rankAbstracts, stateName } from "../lib/abstracts";
+import { rankAbstracts } from "../lib/abstracts";
 import { Select } from "../components/Select";
 import { GeoFields } from "../components/GeoFields";
 import { SortableTable, type Column } from "../components/SortableTable";
@@ -799,6 +799,18 @@ function ResearchSurveyFilter({ options, states, counties, value, onChange }: {
   );
 }
 
+/** "TX|Leon|22" — a county-qualified abstract filter value (server: research.ts parseAbstractKey). */
+const researchAbstractKey = (o: { state: string; county: string; abstractId: string }) => `${o.state}|${o.county}|${o.abstractId}`;
+function splitResearchAbstractKey(v: string): { state: string | null; county: string | null; abstractId: string } {
+  const m = /^([A-Z]{2})\|([^|]+)\|(.+)$/.exec(v);
+  return m ? { state: m[1], county: m[2], abstractId: m[3] } : { state: null, county: null, abstractId: v };
+}
+/** Label for a Research abstract filter value — county-qualified keys name their survey + county. */
+function researchAbstractLabel(v: string, absIndex: ReturnType<typeof useAbstractIndex>, counties: string[]): string {
+  const k = splitResearchAbstractKey(v);
+  return k.county ? absIndex.label(k.abstractId, k.county, k.state) : absIndex.labelAmong(v, counties);
+}
+
 function ResearchAbstractFilter({ options, states, counties, value, onChange }: {
   options: { state: string; county: string; abstractId: string }[];
   states: string[]; counties: string[];
@@ -812,24 +824,18 @@ function ResearchAbstractFilter({ options, states, counties, value, onChange }: 
       (!states.length || ss.has(o.state.toUpperCase())));
   }, [options, states.join("|"), counties.join("|")]); // eslint-disable-line react-hooks/exhaustive-deps
   const absIndex = useAbstractIndex();
+  // One option per county's abstract, keyed "STATE|County|number" (the
+  // records' own key): the same number in two counties is two abstracts, so
+  // each lists separately with its own survey — never "A-22 · 2 counties".
   const labels = useMemo(() => {
-    // The same abstract number can exist in several counties; show each once
-    // with every county it's in so the choice stays unambiguous.
-    const where = new Map<string, { county: string; state: string }[]>();
-    for (const o of scoped) where.set(o.abstractId, [...(where.get(o.abstractId) ?? []), o]);
     const m: Record<string, string> = {};
-    for (const [id, locs] of where) {
-      if (locs.length === 1) { m[id] = absIndex.label(id, locs[0].county, locs[0].state); continue; }
-      const cs = [...new Set(locs.map((l) => l.county))].sort();
-      const ss = [...new Set(locs.map((l) => stateName(l.state)))];
-      m[id] = `Abstract ${id.replace(/^a\s*-\s*/i, "")} · ${cs.length <= 3 ? `${cs.join(", ")} Counties` : `${cs.length} counties`}, ${ss.join(" / ")}`;
-    }
+    for (const o of scoped) m[researchAbstractKey(o)] = absIndex.label(o.abstractId, o.county, o.state);
     return m;
   }, [scoped, absIndex]);
-  const ids = useMemo(() => [...new Set(scoped.map((o) => o.abstractId))], [scoped]);
+  const ids = useMemo(() => [...new Set(scoped.map(researchAbstractKey))], [scoped]);
   // Number-first ranking as you type; numeric order when the box is empty.
   const rank = useCallback((opts: readonly string[], q: string) =>
-    rankAbstracts(opts, q, (id) => ({ abstract: id, text: labels[id] ?? id })), [labels]);
+    rankAbstracts(opts, q, (id) => ({ abstract: splitResearchAbstractKey(id).abstractId, text: labels[id] ?? id })), [labels]);
 
   // Cascade pruning, mirroring GeoFields' county behavior.
   useEffect(() => {
@@ -2116,11 +2122,11 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
   const [rf, setRf] = useState<RecFilters>(EMPTY_REC_FILTERS);
   const [opts, setOpts] = useState<RecOptions>({ counties: [], abstracts: [] });
   const recAbstractLabels = useMemo(
-    () => Object.fromEntries(opts.abstracts.map((a) => [a, absIndex.labelAmong(a, rf.counties)])),
+    () => Object.fromEntries(opts.abstracts.map((a) => [a, researchAbstractLabel(a, absIndex, rf.counties)])),
     [opts.abstracts, absIndex, rf.counties],
   );
   const rankRecAbstracts = useCallback((o: readonly string[], q: string) =>
-    rankAbstracts(o, q, (a) => ({ abstract: a, text: recAbstractLabels[a] ?? a })), [recAbstractLabels]);
+    rankAbstracts(o, q, (a) => ({ abstract: splitResearchAbstractKey(a).abstractId, text: recAbstractLabels[a] ?? a })), [recAbstractLabels]);
   // The instrument filter is typed too — same debounce so it re-queries
   // smoothly instead of once per keystroke.
   const [instrumentQ, setInstrumentQ] = useState("");
@@ -2402,7 +2408,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
         <section className="rs-card rs-topbuyers">
           <div className="rs-topbuyers-head">
             <span className="rs-strong">
-              Top buyers — {selAbstracts.map((a) => absIndex.labelAmong(a, rf.counties)).join("; ")}
+              Top buyers — {selAbstracts.map((a) => researchAbstractLabel(a, absIndex, rf.counties)).join("; ")}
             </span>
             <span className="rs-mid rs-small">
               {num(absBuyers.total)} buyer{absBuyers.total === 1 ? "" : "s"} in this period

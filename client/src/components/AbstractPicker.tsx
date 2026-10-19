@@ -80,10 +80,10 @@ export function useAbstractIndex() {
         const where = ps.length <= 3 ? `${ps.join(", ")} ${ps.length === 1 ? "Parish" : "Parishes"}` : `${ps.length} parishes`;
         return `Sec ${sectionNumber(abstract)} · ${hits.length} townships · ${where}, ${stateName(hits[0].state ?? "LA")}`;
       }
-      // The same number in several counties: say where, since it's ambiguous.
-      const cs = [...new Set(hits.map((e) => e.county))].sort();
-      const where = cs.length <= 3 ? `${cs.join(", ")} ${cs.length === 1 ? "County" : "Counties"}` : `${cs.length} counties`;
-      return `A-${n} · ${hits.length} surveys · ${where}, ${stateName(hits[0].state ?? "TX")}`;
+      // The same number in several places is several abstracts: name each
+      // survey with its county rather than collapsing them to a count.
+      const each = hits.map((e) => `${surveyLabel(e.survey) || "no survey"} (${e.county})`);
+      return `A-${n} · ${each.slice(0, 3).join(" / ")}${each.length > 3 ? ` / +${each.length - 3} more` : ""}`;
     };
     return { entries, byId, find, label, labelAmong };
   }, [entries]);

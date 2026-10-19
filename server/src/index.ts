@@ -12,6 +12,7 @@ import { startDemoResetScheduler } from "./services/demoReset.js";
 import { backfillTransactionInterests } from "./services/researchInterestBackfill.js";
 import { ensureGisRegions } from "./services/gisRegions.js";
 import { ensureSonrisWells } from "./services/sonrisWells.js";
+import { ensureRrcRefresh } from "./services/rrcRefresh.js";
 import { clearGisCaches } from "./routes/gis.js";
 
 // Fail closed: in production, refuse to boot with default/missing secret keys.
@@ -53,13 +54,19 @@ backfillTransactionInterests().catch((e) =>
 // (Texas rows are never touched). Then the bundled Louisiana WELL data (Red
 // River Parish wells, bores, unit production) into the sonris schema — run
 // after, not alongside, since both create gis.dataset_version on a first boot.
-// Tiles/reference lists cached while either ran are dropped after.
+// Then the bundled Texas RRC refresh (server/data/rrc: abstracts, wells +
+// statuses + wellbores, recent production — services/rrcRefresh.ts), each
+// loaded once per content version in its own transaction.
+// Tiles/reference lists cached while any of them ran are dropped after.
 ensureGisRegions()
   .then((loaded) => { if (loaded) clearGisCaches(); })
   .catch((e) => console.error("GIS region load failed:", e instanceof Error ? e.message : e))
   .then(() => ensureSonrisWells())
   .then((ready) => { if (ready) clearGisCaches(); })
-  .catch((e) => console.error("Louisiana well load failed:", e instanceof Error ? e.message : e));
+  .catch((e) => console.error("Louisiana well load failed:", e instanceof Error ? e.message : e))
+  .then(() => ensureRrcRefresh())
+  .then((loaded) => { if (loaded) clearGisCaches(); })
+  .catch((e) => console.error("RRC refresh load failed:", e instanceof Error ? e.message : e));
 
 app.listen(env.PORT, () => {
   // eslint-disable-next-line no-console

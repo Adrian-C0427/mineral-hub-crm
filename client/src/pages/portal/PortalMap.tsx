@@ -3,6 +3,7 @@ import * as maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import "../../lib/maplibreWorker";
 import { addCadastralLayers, styleWithGlyphs, watchGisHealth } from "../../lib/mapLayers";
+import { STATUS_COLORS } from "../../lib/wellStatus";
 import { MapLayersPanel } from "../../components/MapLayersPanel";
 import { collectCoords, bboxOfPoints } from "../../lib/geo";
 import type { FC } from "./portalApi";
@@ -13,13 +14,10 @@ const DEFAULT_LAYERS = { counties: true, boundaries: true, numbers: true, survey
 type LayerState = typeof DEFAULT_LAYERS;
 
 /** Legend swatches for the shared wells layer — the same colours its paint uses
- *  (lib/mapLayers STATUS_COLOR); everything else falls under "Other". */
-const WELL_LEGEND = [
-  { label: "Producing", color: "#22c55e" },
-  { label: "Shut-in", color: "#f59e0b" },
-  { label: "Permitted", color: "#3b82f6" },
-  { label: "Plugged", color: "#6b7280" },
-];
+ *  (lib/wellStatus STATUS_COLORS); the rest (injection, disposal, other) stay
+ *  off the compact public legend. */
+const WELL_LEGEND = (["Producing", "Shut-In", "Drilling", "Permitted", "Plugged"] as const)
+  .map((label) => ({ label, color: STATUS_COLORS[label] }));
 
 /** Imperative hooks for hosts that put map actions outside the map (e.g. "Locate tract"). */
 export interface PortalMapApi { recenter: () => void }
@@ -59,7 +57,7 @@ export function PortalMap({ features, height = 420, onSelect, legendLabel = "Thi
     vis("abstracts-num", L.numbers);
     vis("abstracts-survey", L.surveys);
     vis("wells", L.wells);
-    vis("wellbores", L.wellbores);
+    vis("wellbores", L.wellbores); vis("bottomholes", L.wellbores);
   }
 
   const resetView = () => { if (homeBounds.current) mapRef.current?.fitBounds(homeBounds.current, { padding: 50, maxZoom: 13, duration: 500 }); };
@@ -148,7 +146,7 @@ export function PortalMap({ features, height = 420, onSelect, legendLabel = "Thi
           defs={[
             { key: "counties", label: "Counties" }, { key: "boundaries", label: "Abstract boundaries" },
             { key: "numbers", label: "Abstract numbers" }, { key: "surveys", label: "Survey names" },
-            { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores (laterals)" },
+            { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores (approx. paths)" },
           ]}
           layers={layers}
           onToggle={(k) => toggle(k as keyof LayerState)}
