@@ -21,6 +21,8 @@ export interface WellBoreDetail {
   bhSource: string | null;
   lineSource: string | null;
   geomFlag: string | null;
+  /** Not yet completed: the bottom hole is RRC's permitted target, not a drilled location. */
+  planned: boolean;
 }
 
 export interface WellHistoryEvent { date: string | null; event: string; status: string | null; detail: string | null; source: string }
@@ -30,7 +32,8 @@ export const WELL_BORES_SQL = `
   SELECT fid, wellbore_type AS profile, stcode, api10 AS api, status, status_detail AS "statusDetail",
          CASE WHEN bh_geom IS NOT NULL THEN json_build_array(ST_X(bh_geom), ST_Y(bh_geom)) END AS "bottomHole",
          round(ST_Length(geom::geography) * 3.28084)::int AS "offsetFt",
-         coalesce(approximate, true) AS approximate, bh_source AS "bhSource", line_source AS "lineSource", geom_flag AS "geomFlag"
+         coalesce(approximate, true) AS approximate, bh_source AS "bhSource", line_source AS "lineSource", geom_flag AS "geomFlag",
+         coalesce(bh_planned, false) AS planned
     FROM rrc.wellbores WHERE surface_fid = $1 ORDER BY fid`;
 
 export const WELL_HISTORY_SQL = `

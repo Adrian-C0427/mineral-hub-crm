@@ -593,6 +593,7 @@ interface Dossier {
     since?: string | null; adminStatus?: string | null; permitNo?: string | null; permitDate?: string | null; permitExpires?: string | null;
     completionDate?: string | null; shutInDate?: string | null; injectionType?: string | null; locationFlag?: string | null; locationNote?: string | null;
     geomFlag?: string | null; sources?: Record<string, string> | null;
+    unitAcres?: number | null; unitAcresSource?: string | null; assignedAcres?: number | null; assignedAcresYm?: string | null;
   };
   history?: { date: string | null; event: string; status: string | null; detail: string | null; source: string }[];
   sourceFiles?: { id: string; name: string | null; file: string | null; asOf: string | null }[];
@@ -602,7 +603,7 @@ interface Dossier {
   operators: { current: { operatorNo: string | null; name: string | null }; history: { operatorNo: string | null; name: string | null; source: "production" | "permit"; from: string | null; to: string | null }[] };
   permits: { statusNo: string; permitDate: string | null; operator: string | null; operatorNo: string | null; leaseName: string | null; wellNo: string | null; district: string | null }[];
   completions: { trackingNo: string; filingType: string | null; status: string | null; filedDate: string | null; completionDate: string | null; operatorNo: string | null; fieldName: string | null; wellName: string | null; wellNo: string | null; survey: string | null }[];
-  wellbore: { laterals: { fid: number; type: string | null; lengthFt: number; approximate?: boolean; bottomHole?: [number, number] | null; status?: string | null; bhSource?: string | null; api?: string | null }[]; totalLateralFt: number };
+  wellbore: { laterals: { fid: number; type: string | null; lengthFt: number; approximate?: boolean; bottomHole?: [number, number] | null; status?: string | null; bhSource?: string | null; api?: string | null; planned?: boolean }[]; totalLateralFt: number };
   cumulative: { oilBbl: number | null; gasMcf: number | null } | null;
   nearby: { fid: number; api: string | null; name: string; operator: string | null; status: string | null; type: string | null; distanceFt: number }[];
   offsetOperators: string[];
@@ -674,13 +675,18 @@ function WellRecord({ well }: { well: WellRow }) {
             <Kv label="Shut in since" value={d.status.shutInDate && fmtDate(d.status.shutInDate)} />
             <Kv label="Plug date" value={d.status.plugDate && fmtDate(d.status.plugDate)} />
             <Kv label="Injection type" value={d.status.injectionType} />
+            <Kv label="Unit size" value={d.status.unitAcres != null
+              ? `${d.status.unitAcres.toLocaleString("en-US", { maximumFractionDigits: 2 })} ac${d.status.unitAcresSource ? ` · ${d.status.unitAcresSource}` : ""}`
+              : d.status.assignedAcres != null ? `${d.status.assignedAcres.toLocaleString("en-US", { maximumFractionDigits: 2 })} ac assigned to the well (no W-1 unit acreage on file)` : null} />
+            <Kv label="Acres assigned" value={d.status.unitAcres != null && d.status.assignedAcres != null
+              ? `${d.status.assignedAcres.toLocaleString("en-US", { maximumFractionDigits: 2 })} ac · RRC proration schedule${d.status.assignedAcresYm ? `, ${d.status.assignedAcresYm}` : ""}` : null} />
             <Kv label="Location check" value={d.status.locationNote} />
             <Kv label="Last production" value={d.status.lastProd} />
             <Kv label="Field" value={d.field.fieldName && `${d.field.fieldName}${d.field.fieldNo ? ` (#${d.field.fieldNo})` : ""}`} />
             <Kv label="Reservoir(s)" value={d.field.reservoirs.length ? <ChipList items={d.field.reservoirs.map((r) => `${r.name}${r.type ? ` (${r.type})` : ""}`)} /> : null} />
             <Kv label="Operator (current)" value={d.operators.current.name && `${d.operators.current.name}${d.operators.current.operatorNo ? ` · P-5 #${d.operators.current.operatorNo}` : ""}`} />
             <Kv label="Wellbore" value={d.wellbore.laterals.length
-              ? `${d.wellbore.laterals.length} ${d.status.profile === "Directional" ? "directional bore" : "lateral"}${d.wellbore.laterals.length > 1 ? "s" : ""} · ${fmtVol(d.wellbore.totalLateralFt)} ft surface → bottom hole (approximate, straight line)`
+              ? `${d.wellbore.laterals.length} ${d.status.profile === "Directional" ? "directional bore" : "lateral"}${d.wellbore.laterals.length > 1 ? "s" : ""} · ${fmtVol(d.wellbore.totalLateralFt)} ft surface → ${d.wellbore.laterals.every((l) => l.planned) ? "planned " : ""}bottom hole`
               : d.status.geomFlag === "missing-bottom-hole" ? "Horizontal/directional — no bottom-hole location in RRC's layers" : null} />
             <Kv label="RRC cumulative" value={d.cumulative ? `${fmtVol(d.cumulative.oilBbl)} bbl oil · ${fmtVol(d.cumulative.gasMcf)} mcf gas` : null} />
           </div>

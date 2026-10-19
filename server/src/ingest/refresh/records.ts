@@ -158,6 +158,26 @@ export function parsePermitDetail(line: string): PermitDetail | null {
   };
 }
 
+/**
+ * Acreage on a drilling permit — the W-1's lease / pooled-unit size, the
+ * "unit size" a well shows. Three places carry it:
+ *   02 DA-SURFACE-ACRES   [325:333]  lease/unit acres at the surface location
+ *   04 DA-FIELD-ACRES     [47:55]    acres for one field of the permit (follows
+ *                                    that field's 03 record; the manual prints
+ *                                    position 46, but WELL-NUMBER ends at 47 —
+ *                                    verified against real records)
+ *   05/10 DA-…-BHL-ACRES  [81:89]    acres of the lease at the bottom hole
+ * All are 9(6)V9(2): 8 zoned digits, two implied decimals; zero = unreported.
+ */
+export const acresAt = (line: string, start: number): number | null => {
+  const raw = line.slice(start, start + 8);
+  return /^\d{8}$/.test(raw) && Number(raw) > 0 ? Number(raw) / 100 : null;
+};
+/** 03 DAFIELD: the field number a following 04/05 record belongs to. */
+export const permitFieldNo = (line: string): string | null => (line.startsWith("03") && /^\d{8}$/.test(line.slice(2, 10)) ? line.slice(2, 10) : null);
+export const fieldAcres = (line: string): number | null => (line.startsWith("04") ? acresAt(line, 47) : null);
+export const bottomHoleAcres = (line: string): number | null => (line.startsWith("05") || line.startsWith("10") ? acresAt(line, 81) : null);
+
 // ---------------------------------------------------------------------------
 // UIC permits (uif700a)
 // ---------------------------------------------------------------------------

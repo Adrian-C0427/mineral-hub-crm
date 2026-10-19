@@ -693,7 +693,10 @@ gisRouter.get(
         String(well.api8 ?? "")),
       rrcRefreshAvailable() ? rrcWellRefreshDetail(fid) : Promise.resolve(null),
     ]);
-    res.json({ ...well, permits, completions, unitAcres: unitAcresRow[0]?.acres ?? null, ...(refresh ?? {}) });
+    // Unit size: the refreshed well's own (newest permit in RRC's full history
+    // that reports one); the retained permits are the fallback.
+    const unitAcres = well.unitAcres != null ? Number(well.unitAcres) : unitAcresRow[0]?.acres ?? null;
+    res.json({ ...well, permits, completions, unitAcres, ...(refresh ?? {}) });
   }),
 );
 
@@ -735,6 +738,8 @@ export function rrcWellDetail(r: Record<string, unknown>, lon: number, lat: numb
     permitNo: v("permit_no"), permitDate: v("permit_date"), permitExpires: v("permit_expires"), completionDate: v("completion_date"),
     shutInDate: v("shut_in_date"), injectionType: v("injection_type"), locationFlag: v("location_flag"), locationNote: v("location_note"),
     geomFlag: v("geom_flag"), sources: v("sources"), refreshedAt: v("refreshed_at"),
+    unitAcres: v("unit_acres"), unitAcresSource: v("unit_acres_source"),
+    assignedAcres: v("assigned_acres"), assignedAcresYm: v("assigned_acres_ym"),
   };
 }
 

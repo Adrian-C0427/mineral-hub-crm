@@ -1,5 +1,5 @@
 fid,api8,county,before,after,detail,source
-435663,07330577,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+435663,07330577,Cherokee,Permitted,Other/Unknown,Permit expired 1985-04-11 · not drilled,permit
 435669,,Cherokee,Producing,Other/Unknown,Gas (RRC map symbol),map-symbol
 435670,07330065,Cherokee,Producing,Other/Unknown,"Off schedule, no plugging record",wellbore-query
 435671,07330078,Cherokee,Producing,Shut-In,Inactive since 2019-01 · 14(b)(2) extension,wellbore-query
@@ -38,7 +38,7 @@ fid,api8,county,before,after,detail,source
 438544,28930553,Leon,Active,Shut-In,Shut in since 2003-12 · 14(b)(2) extension,wellbore-query
 438550,28930864,Leon,Permitted,Other/Unknown,Permit expired 1988-01-21 · not drilled,permit
 438738,28900553,Leon,Producing,Shut-In,Shut in since 2000-08 · 14(b)(2) extension,wellbore-query
-438742,28930289,Leon,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
+438742,28930289,Leon,Producing,Other/Unknown,Permit expired 1978-02-03 · not drilled,permit
 438744,28980106,Leon,Producing,Shut-In,Shut in since 2000-08 · 14(b)(2) extension,wellbore-query
 438745,28930778,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 438757,28931148,Leon,Producing,Plugged,,wellbore-query
@@ -55,15 +55,15 @@ fid,api8,county,before,after,detail,source
 438871,28930655,Leon,Producing,Shut-In,Shut in since 2000-08 · 14(b)(2) extension,wellbore-query
 438874,28920037,Leon,Producing,Shut-In,Shut in since 2014-05 · 14(b)(2) extension,wellbore-query
 438879,28930567,Leon,Producing,Shut-In,Shut in since 2025-01 · 14(b)(2) extension,wellbore-query
-438880,28930762,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-438881,28930760,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+438880,28930762,Leon,Permitted,Other/Unknown,Permit expired 1987-01-23 · not drilled,permit
+438881,28930760,Leon,Permitted,Other/Unknown,Permit expired 1987-01-23 · not drilled,permit
 438882,,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-438883,28930779,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+438883,28930779,Leon,Permitted,Other/Unknown,Permit expired 1987-02-27 · not drilled,permit
 438885,,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 438889,28900513,Leon,Active,Other/Unknown,Water supply well,wellbore-query
 438892,28900508,Leon,Active,Shut-In,Shut in since 2002-05 · 14(b)(2) extension,wellbore-query
 439028,28930989,Leon,Permitted,Other/Unknown,Permit expired 1989-05-04 · not drilled,permit
-439029,28930785,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+439029,28930785,Leon,Permitted,Other/Unknown,Permit expired 1987-03-11 · not drilled,permit
 439036,28930765,Leon,Producing,Shut-In,No production (RRC well type) since 2025-01 · 14(b)(2) extension,wellbore-query
 439037,28930314,Leon,Producing,Shut-In,No production (RRC well type) since 2025-01 · 14(b)(2) extension,wellbore-query
 439038,,Leon,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
@@ -86,8 +86,8 @@ fid,api8,county,before,after,detail,source
 439097,28900545,Leon,Producing,Shut-In,Shut in since 2000-08 · 14(b)(2) extension,wellbore-query
 439098,28900534,Leon,Active,Shut-In,Shut in since 2000-08 · 14(b)(2) extension,wellbore-query
 439099,28900546,Leon,Producing,Shut-In,Shut in since 2000-08 · 14(b)(2) extension,wellbore-query
-439107,28930761,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-439108,28930780,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+439107,28930761,Leon,Permitted,Other/Unknown,Permit expired 1987-01-23 · not drilled,permit
+439108,28930780,Leon,Permitted,Other/Unknown,Permit expired 1987-02-27 · not drilled,permit
 439109,28980207,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 439110,,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 439112,28900532,Leon,Plugged,Shut-In,Shut in since 2000-08 · 14(b)(2) extension,wellbore-query
@@ -145,7 +145,7 @@ fid,api8,county,before,after,detail,source
 439247,28930652,Leon,Active,Shut-In,Shut in since 2004-04 · 14(b)(2) extension,wellbore-query
 439248,28930702,Leon,Active,Shut-In,Shut in since 2004-04 · 14(b)(2) extension,wellbore-query
 439249,28930659,Leon,Producing,Shut-In,Shut in since 2002-03 · 14(b)(2) extension,wellbore-query
-439250,28930666,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+439250,28930666,Leon,Permitted,Other/Unknown,Permit expired 1986-05-07 · not drilled,permit
 439251,28930905,Leon,Active,Shut-In,Shut in since 2000-01 · 14(b)(2) extension,wellbore-query
 439260,28930615,Leon,Producing,Shut-In,Shut in since 2003-03 · 14(b)(2) extension,wellbore-query
 439263,28930696,Leon,Producing,Shut-In,No production (RRC well type) since 2019-10 · 14(b)(2) extension,wellbore-query
@@ -155,7 +155,7 @@ fid,api8,county,before,after,detail,source
 439279,28930751,Leon,Producing,Shut-In,No production (RRC well type) since 2025-01 · 14(b)(2) extension,wellbore-query
 439280,28930871,Leon,Producing,Shut-In,No production (RRC well type) since 2025-01 · 14(b)(2) extension,wellbore-query
 439281,28930887,Leon,Producing,Shut-In,No production (RRC well type) since 2025-01 · 14(b)(2) extension,wellbore-query
-439283,28930674,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+439283,28930674,Leon,Permitted,Other/Unknown,Permit expired 1986-05-20 · not drilled,permit
 439289,28930870,Leon,Producing,Shut-In,Shut in since 1998-01 · 14(b)(2) extension,wellbore-query
 439290,28930964,Leon,Producing,Shut-In,Shut in since 2003-03 · 14(b)(2) extension,wellbore-query
 439291,28930908,Leon,Producing,Shut-In,Shut in since 2009-03 · 14(b)(2) extension,wellbore-query
@@ -178,11 +178,11 @@ fid,api8,county,before,after,detail,source
 439349,28930885,Leon,Producing,Shut-In,Shut in since 2021-01 · 14(b)(2) extension,wellbore-query
 439361,28930714,Leon,Producing,Shut-In,Shut in since 2000-03 · 14(b)(2) extension,wellbore-query
 439373,28930959,Leon,Permitted,Other/Unknown,Permit expired 1988-11-17 · not drilled,permit
-439375,28930754,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-439376,28930641,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+439375,28930754,Leon,Permitted,Other/Unknown,Permit expired 1987-01-30 · not drilled,permit
+439376,28930641,Leon,Permitted,Other/Unknown,Permit expired 1986-03-25 · not drilled,permit
 439389,28930810,Leon,Producing,Shut-In,Shut in since 2017-04 · 14(b)(2) extension,wellbore-query
 439390,28930723,Leon,Producing,Shut-In,Shut in since 2005-03 · 14(b)(2) extension,wellbore-query
-439393,28930793,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+439393,28930793,Leon,Permitted,Other/Unknown,Permit expired 1987-04-07 · not drilled,permit
 439394,28930635,Leon,Producing,Shut-In,Shut in since 2019-03 · 14(b)(2) extension,wellbore-query
 439395,28930584,Leon,Producing,Shut-In,Shut in since 2014-03 · 14(b)(2) extension,wellbore-query
 439396,28930787,Leon,Producing,Shut-In,Shut in since 2014-03 · 14(b)(2) extension,wellbore-query
@@ -219,7 +219,7 @@ fid,api8,county,before,after,detail,source
 439495,28930768,Leon,Producing,Shut-In,Shut in since 1998-01 · 14(b)(2) extension,wellbore-query
 439496,28930824,Leon,Producing,Shut-In,Shut in since 2014-10 · 14(b)(2) extension,wellbore-query
 439497,28930884,Leon,Producing,Shut-In,Shut in since 2019-03 · 14(b)(2) extension,wellbore-query
-439499,28930805,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+439499,28930805,Leon,Permitted,Other/Unknown,Permit expired 1987-05-28 · not drilled,permit
 439500,,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 439501,28930861,Leon,Permitted,Other/Unknown,Permit expired 1988-01-13 · not drilled,permit
 439516,28930936,Leon,Active,Shut-In,Shut in since 1998-01 · 14(b)(2) extension,wellbore-query
@@ -295,7 +295,7 @@ fid,api8,county,before,after,detail,source
 439971,,Leon,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 439972,28900155,Leon,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 440551,,Leon,Producing,Other/Unknown,Gas (RRC map symbol),map-symbol
-440553,28930631,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+440553,28930631,Leon,Permitted,Other/Unknown,Permit expired 1986-03-13 · not drilled,permit
 440554,,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 440641,,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 440642,,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
@@ -310,7 +310,6 @@ fid,api8,county,before,after,detail,source
 441861,,Leon,Producing,Other/Unknown,Oil/Gas (RRC map symbol),map-symbol
 441868,28931129,Leon,Permitted,Other/Unknown,Permit expired 1993-01-25 · not drilled,permit
 441872,28931054,Leon,Permitted,Other/Unknown,Permit expired 1992-03-01 · not drilled,permit
-441890,16100417,Freestone,Dry Hole,Other/Unknown,Permit 0400626 cancelled 1993-05-21,permit
 441893,16131189,Freestone,Active,Producing,,wellbore-query
 441894,16131064,Freestone,Producing,Shut-In,Shut in since 2006-12 · 14(b)(2) extension,wellbore-query
 441897,16131179,Freestone,Permitted,Other/Unknown,Permit expired 1994-02-27 · not drilled,permit
@@ -328,8 +327,8 @@ fid,api8,county,before,after,detail,source
 442045,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 442046,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 442047,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-442048,16130932,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-442049,16131006,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+442048,16130932,Freestone,Permitted,Other/Unknown,Permit expired 1986-04-23 · not drilled,permit
+442049,16131006,Freestone,Permitted,Other/Unknown,Permit expired 1986-04-23 · not drilled,permit
 442051,16130970,Freestone,Producing,Plugged,,wellbore-query
 442053,16131051,Freestone,Plugged,Shut-In,Temporarily abandoned since 2001-01 · 14(b)(2) extension,wellbore-query
 442086,16130933,Freestone,Producing,Plugged,,wellbore-query
@@ -357,7 +356,6 @@ fid,api8,county,before,after,detail,source
 443288,,Cherokee,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 443289,07330306,Cherokee,Plugged,Producing,,wellbore-query
 443308,07380004,Cherokee,Producing,Shut-In,Inactive since 2012-06 · 14(b)(2) extension,wellbore-query
-443312,07330136,Cherokee,Dry Hole,Other/Unknown,Permit expired 1998-11-26 · not drilled,permit
 443323,07330092,Cherokee,Producing,Plugged,,wellbore-query
 443330,,Cherokee,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 443337,07330383,Cherokee,Producing,Shut-In,Temporarily abandoned since 2008-09 · 14(b)(2) extension,wellbore-query
@@ -383,7 +381,7 @@ fid,api8,county,before,after,detail,source
 443480,,Cherokee,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 443481,,Cherokee,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 443482,,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-443483,07330012,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+443483,07330012,Cherokee,Permitted,Other/Unknown,Permit expired 1986-05-01 · not drilled,permit
 443484,,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 443485,,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 443486,,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
@@ -420,11 +418,11 @@ fid,api8,county,before,after,detail,source
 443587,07330963,Cherokee,Producing,Shut-In,Temporarily abandoned since 2009-06 · 14(b)(2) extension,wellbore-query
 443588,07330964,Cherokee,Permitted,Other/Unknown,Permit expired 2001-11-19 · not drilled,permit
 443635,07330511,Cherokee,Producing,Shut-In,Temporarily abandoned since 2015-03 · 14(b)(2) extension,wellbore-query
-445256,07330434,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+445256,07330434,Cherokee,Permitted,Other/Unknown,Permit expired 1982-06-15 · not drilled,permit
 445316,07330867,Cherokee,Permitted,Plugged,,wellbore-query
 445344,07330473,Cherokee,Producing,Shut-In,Shut in since 2017-04 · 14(b)(2) extension,wellbore-query
 445346,07330493,Cherokee,Producing,Shut-In,Shut in since 2014-12 · 14(b)(2) extension,wellbore-query
-445347,07330627,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+445347,07330627,Cherokee,Permitted,Other/Unknown,Permit expired 1985-12-31 · not drilled,permit
 445348,07330747,Cherokee,Permitted,Other/Unknown,Permit expired 1989-04-18 · not drilled,permit
 445362,07330343,Cherokee,Producing,Shut-In,Inactive since 2026-07,wellbore-query
 445367,,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
@@ -442,7 +440,7 @@ fid,api8,county,before,after,detail,source
 445636,07300808,Cherokee,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 445638,07300784,Cherokee,Active,Disposal,Disposal into a productive zone (H-1),uic
 445644,,Cherokee,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
-445648,07330646,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+445648,07330646,Cherokee,Permitted,Other/Unknown,Permit expired 1986-03-29 · not drilled,permit
 445649,,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 445689,,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 445690,,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
@@ -532,10 +530,10 @@ fid,api8,county,before,after,detail,source
 446475,,Cherokee,Producing,Other/Unknown,Gas (RRC map symbol),map-symbol
 446477,07330358,Cherokee,Canceled/Abandoned,Plugged,,wellbore-query
 446507,,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-446508,07330422,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+446508,07330422,Cherokee,Permitted,Other/Unknown,Spudded 1981-04-26 · no completion filed,permit
 446524,,Cherokee,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 446525,,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-446526,07380054,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+446526,07380054,Cherokee,Permitted,Other/Unknown,Permit expired 1980-10-25 · not drilled,permit
 446542,,Cherokee,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 446588,07330323,Cherokee,Producing,Shut-In,Temporarily abandoned since 2022-07 · 14(b)(2) extension,wellbore-query
 446589,07330315,Cherokee,Producing,Shut-In,Temporarily abandoned since 2022-07 · 14(b)(2) extension,wellbore-query
@@ -552,7 +550,7 @@ fid,api8,county,before,after,detail,source
 446815,,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 446816,,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 446990,28930563,Leon,Producing,Shut-In,Inactive since 2006-09 · 14(b)(2) extension,wellbore-query
-446996,28930651,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+446996,28930651,Leon,Permitted,Other/Unknown,Permit expired 1986-04-10 · not drilled,permit
 447029,28931294,Leon,Producing,Shut-In,Inactive since 2026-07,wellbore-query
 447031,28931298,Leon,Producing,Shut-In,Inactive since 2026-07,wellbore-query
 447032,28931302,Leon,Producing,Shut-In,Inactive since 2026-07,wellbore-query
@@ -566,12 +564,12 @@ fid,api8,county,before,after,detail,source
 447545,28980195,Leon,Plugged,Producing,,wellbore-query
 447558,,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 447561,,Leon,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
-447570,28930744,Leon,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
+447570,28930744,Leon,Producing,Other/Unknown,Permit expired 1986-12-03 · not drilled,permit
 447580,28930480,Leon,Producing,Shut-In,Shut in since 1998-01 · 14(b)(2) extension,wellbore-query
 447583,28930296,Leon,Producing,Shut-In,No production (RRC well type) since 2023-01 · 14(b)(2) extension,wellbore-query
-447588,28930741,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-447592,28930364,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-447601,28930752,Leon,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+447588,28930741,Leon,Permitted,Other/Unknown,Permit expired 1986-11-22 · not drilled,permit
+447592,28930364,Leon,Permitted,Other/Unknown,Permit expired 1981-01-11 · not drilled,permit
+447601,28930752,Leon,Permitted,Other/Unknown,Permit expired 1986-07-03 · not drilled,permit
 447603,28931095,Leon,Producing,Shut-In,Inactive since 2026-07,wellbore-query
 447604,28931142,Leon,Permitted,Other/Unknown,Permit expired 1993-09-17 · not drilled,permit
 447605,28931114,Leon,Permitted,Other/Unknown,Permit expired 1992-11-16 · not drilled,permit
@@ -615,8 +613,8 @@ fid,api8,county,before,after,detail,source
 447776,16130721,Freestone,Producing,Shut-In,Temporarily abandoned since 2014-09 · 14(b)(2) extension,wellbore-query
 447785,16130177,Freestone,Producing,Shut-In,Temporarily abandoned since 2024-07 · 14(b)(2) extension,wellbore-query
 447787,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-447788,16130728,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-447790,16130840,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+447788,16130728,Freestone,Permitted,Other/Unknown,Permit expired 1983-03-26 · not drilled,permit
+447790,16130840,Freestone,Permitted,Other/Unknown,Permit expired 1984-07-27 · not drilled,permit
 447803,16131235,Freestone,Producing,Shut-In,Temporarily abandoned since 1998-07 · 14(b)(2) extension,wellbore-query
 447812,28931147,Leon,Producing,Shut-In,Inactive since 2026-07,wellbore-query
 447818,28931263,Leon,Producing,Shut-In,Inactive since 2026-07,wellbore-query
@@ -644,7 +642,7 @@ fid,api8,county,before,after,detail,source
 447932,28931289,Leon,Producing,Shut-In,Inactive since 2026-07,wellbore-query
 447934,28931309,Leon,Producing,Shut-In,Inactive since 2026-07,wellbore-query
 450253,16130734,Freestone,Producing,Shut-In,Temporarily abandoned since 2001-01 · 14(b)(2) extension,wellbore-query
-450260,16130662,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+450260,16130662,Freestone,Permitted,Other/Unknown,Permit 0114891 cancelled 1982-05-28,permit
 450261,16100648,Freestone,Producing,Shut-In,Temporarily abandoned since 2013-08 · 14(b)(2) extension,wellbore-query
 450262,,Freestone,Producing,Other/Unknown,Gas (RRC map symbol),map-symbol
 450272,16130540,Freestone,Producing,Shut-In,Temporarily abandoned since 2024-09 · 14(b)(2) extension,wellbore-query
@@ -717,9 +715,9 @@ fid,api8,county,before,after,detail,source
 450585,16130392,Freestone,Producing,Shut-In,Temporarily abandoned since 2016-06 · 14(b)(2) extension,wellbore-query
 450590,16130465,Freestone,Producing,Shut-In,Temporarily abandoned since 2025-11,wellbore-query
 450598,,Freestone,Producing,Other/Unknown,Gas (RRC map symbol),map-symbol
-450615,16130710,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+450615,16130710,Freestone,Permitted,Other/Unknown,Permit expired 1982-11-12 · not drilled,permit
 450616,16130175,Freestone,Permitted,Producing,,wellbore-query
-450619,16130387,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+450619,16130387,Freestone,Permitted,Other/Unknown,Permit expired 1978-08-19 · not drilled,permit
 450629,,Freestone,Producing,Other/Unknown,Gas (RRC map symbol),map-symbol
 450630,,Freestone,Producing,Other/Unknown,Gas (RRC map symbol),map-symbol
 450637,,Freestone,Producing,Other/Unknown,Gas (RRC map symbol),map-symbol
@@ -820,7 +818,7 @@ fid,api8,county,before,after,detail,source
 451559,,Freestone,Producing,Other/Unknown,Gas (RRC map symbol),map-symbol
 451560,,Freestone,Producing,Other/Unknown,Gas (RRC map symbol),map-symbol
 451596,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-451597,16130713,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+451597,16130713,Freestone,Permitted,Other/Unknown,Permit expired 1982-11-24 · not drilled,permit
 451598,16130178,Freestone,Producing,Plugged,,wellbore-query
 451600,16130484,Freestone,Producing,Shut-In,Inactive since 2026-07,wellbore-query
 451602,16131156,Freestone,Producing,Shut-In,Inactive since 2020-08 · 14(b)(2) extension,wellbore-query
@@ -859,7 +857,7 @@ fid,api8,county,before,after,detail,source
 451727,16130853,Freestone,Producing,Shut-In,Partially plugged since 2001-06 · 14(b)(2) extension,wellbore-query
 451736,16130494,Freestone,Producing,Plugged,,wellbore-query
 451741,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
-451742,16130664,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+451742,16130664,Freestone,Permitted,Other/Unknown,Permit expired 1982-04-24 · not drilled,permit
 451745,16130991,Freestone,Producing,Shut-In,Inactive since 2017-08 · 14(b)(2) extension,wellbore-query
 451748,16131226,Freestone,Producing,Shut-In,Temporarily abandoned since 2007-10 · 14(b)(2) extension,wellbore-query
 451749,16100770,Freestone,Producing,Other/Unknown,"Off schedule, no plugging record",wellbore-query
@@ -871,8 +869,8 @@ fid,api8,county,before,after,detail,source
 451769,16131589,Freestone,Producing,Shut-In,Temporarily abandoned since 2024-05 · 14(b)(2) extension,wellbore-query
 451770,16131609,Freestone,Permitted,Other/Unknown,Permit expired 2001-07-06 · not drilled,permit
 452030,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-452035,16130957,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-452037,16130619,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+452035,16130957,Freestone,Permitted,Other/Unknown,Permit expired 1985-10-18 · not drilled,permit
+452037,16130619,Freestone,Permitted,Other/Unknown,Permit expired 1981-09-12 · not drilled,permit
 452039,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452040,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452055,16131059,Freestone,Active,Plugged,,wellbore-query
@@ -900,7 +898,7 @@ fid,api8,county,before,after,detail,source
 452166,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452167,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452168,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-452169,16130848,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+452169,16130848,Freestone,Permitted,Other/Unknown,Permit expired 1984-08-24 · not drilled,permit
 452170,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452171,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452172,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
@@ -1012,13 +1010,13 @@ fid,api8,county,before,after,detail,source
 452474,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 452475,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 452476,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
-452478,16180131,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
+452478,16180131,Freestone,Producing,Other/Unknown,Permit expired 1983-03-17 · not drilled,permit
 452517,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452518,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452519,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452520,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452521,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-452522,16131026,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+452522,16131026,Freestone,Permitted,Other/Unknown,Permit expired 1986-08-20 · not drilled,permit
 452523,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452524,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452525,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
@@ -1048,7 +1046,7 @@ fid,api8,county,before,after,detail,source
 452554,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452555,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452556,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-452557,16130555,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+452557,16130555,Freestone,Permitted,Other/Unknown,Permit expired 1980-11-12 · not drilled,permit
 452558,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452559,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452560,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
@@ -1057,7 +1055,7 @@ fid,api8,county,before,after,detail,source
 452592,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 452609,16131098,Freestone,Active,Shut-In,Shut in since 2013-12 · 14(b)(2) extension,wellbore-query
 452610,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
-452611,16180137,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+452611,16180137,Freestone,Permitted,Other/Unknown,Permit expired 1984-08-27 · not drilled,permit
 452613,16131091,Freestone,Permitted,Other/Unknown,Permit expired 1990-02-17 · not drilled,permit
 452614,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 452615,,Freestone,Active,Other/Unknown,Injection/Disposal from Oil (RRC map symbol),map-symbol
@@ -1066,8 +1064,8 @@ fid,api8,county,before,after,detail,source
 452620,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452622,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 452625,16180112,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
-452636,16130864,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-452637,16131039,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+452636,16130864,Freestone,Permitted,Other/Unknown,Permit expired 1985-10-13 · not drilled,permit
+452637,16131039,Freestone,Permitted,Other/Unknown,Permit expired 1987-12-02 · not drilled,permit
 452639,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 452640,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 452641,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
@@ -1132,7 +1130,7 @@ fid,api8,county,before,after,detail,source
 452733,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452734,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 452735,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
-452736,16130534,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+452736,16130534,Freestone,Permitted,Other/Unknown,Permit expired 1980-07-06 · not drilled,permit
 452738,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 452739,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 452740,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
@@ -1141,7 +1139,7 @@ fid,api8,county,before,after,detail,source
 452743,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 452745,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
 452746,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
-452747,16130528,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+452747,16130528,Freestone,Permitted,Other/Unknown,Spudded 1979-06-25 · no completion filed,permit
 452749,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 452768,,Freestone,Producing,Other/Unknown,Oil/Gas (RRC map symbol),map-symbol
 452769,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
@@ -1154,7 +1152,7 @@ fid,api8,county,before,after,detail,source
 453712,16130887,Freestone,Producing,Shut-In,Inactive since 2026-07,wellbore-query
 453713,16130871,Freestone,Producing,Shut-In,Inactive since 2019-03 · 14(b)(2) extension,wellbore-query
 453714,16130843,Freestone,Producing,Shut-In,Temporarily abandoned since 2016-10 · 14(b)(2) extension,wellbore-query
-453727,16130651,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+453727,16130651,Freestone,Permitted,Other/Unknown,Permit expired 1982-02-23 · not drilled,permit
 453728,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 453741,16100370,Freestone,Producing,Other/Unknown,"Off schedule, no plugging record",wellbore-query
 453760,16131349,Freestone,Permitted,Other/Unknown,Spudded 2000-11-17 · no completion filed,permit
@@ -1197,14 +1195,14 @@ fid,api8,county,before,after,detail,source
 453862,16130688,Freestone,Producing,Shut-In,Temporarily abandoned since 2019-06 · 14(b)(2) extension,wellbore-query
 453864,16131114,Freestone,Producing,Shut-In,Temporarily abandoned since 2024-07 · 14(b)(2) extension,wellbore-query
 453877,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-453878,16130834,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-453879,16130966,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+453878,16130834,Freestone,Permitted,Other/Unknown,Permit expired 1984-07-11 · not drilled,permit
+453879,16130966,Freestone,Permitted,Other/Unknown,Permit expired 1985-12-06 · not drilled,permit
 453880,16131143,Freestone,Permitted,Other/Unknown,Permit expired 1992-09-24 · not drilled,permit
 453881,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 453885,16131136,Freestone,Producing,Plugged,,wellbore-query
 453887,16131234,Freestone,Producing,Shut-In,Temporarily abandoned since 2014-02 · 14(b)(2) extension,wellbore-query
 453889,16131069,Freestone,Producing,Shut-In,Inactive since 2019-08 · 14(b)(2) extension,wellbore-query
-453891,16130971,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+453891,16130971,Freestone,Permitted,Other/Unknown,Permit expired 1985-12-18 · not drilled,permit
 453892,16131121,Freestone,Producing,Shut-In,Temporarily abandoned since 2025-01 · 14(b)(2) extension,wellbore-query
 453893,16130448,Freestone,Producing,Shut-In,Inactive since 2026-06,wellbore-query
 453897,16130035,Freestone,Producing,Plugged,,wellbore-query
@@ -1224,10 +1222,10 @@ fid,api8,county,before,after,detail,source
 454016,16131172,Freestone,Producing,Shut-In,Inactive since 2026-07,wellbore-query
 454017,16130667,Freestone,Producing,Shut-In,Inactive since 2024-09 · 14(b)(2) extension,wellbore-query
 454019,16131141,Freestone,Permitted,Other/Unknown,Permit expired 1992-07-30 · not drilled,permit
-454020,16130729,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+454020,16130729,Freestone,Permitted,Other/Unknown,Permit expired 1983-03-23 · not drilled,permit
 454021,16131129,Freestone,Permitted,Other/Unknown,Permit expired 1992-04-19 · not drilled,permit
 454022,16131222,Freestone,Producing,Shut-In,Temporarily abandoned since 2024-01 · 14(b)(2) extension,wellbore-query
-454024,16130467,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+454024,16130467,Freestone,Permitted,Other/Unknown,Permit 0038673 cancelled 1979-09-26,permit
 454040,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 454053,16131461,Freestone,Permitted,Other/Unknown,Permit expired 1999-11-26 · not drilled,permit
 454054,16131460,Freestone,Producing,Shut-In,Inactive since 2017-03 · 14(b)(2) extension,wellbore-query
@@ -1240,7 +1238,7 @@ fid,api8,county,before,after,detail,source
 454291,16130784,Freestone,Producing,Injection,Secondary/tertiary recovery,uic
 454292,16130776,Freestone,Producing,Shut-In,Shut in since 1998-01 · 14(b)(2) extension,wellbore-query
 454293,16130731,Freestone,Producing,Shut-In,Shut in since 2006-12 · 14(b)(2) extension,wellbore-query
-454295,16130814,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+454295,16130814,Freestone,Permitted,Other/Unknown,Permit expired 1984-05-16 · not drilled,permit
 454297,16130813,Freestone,Producing,Shut-In,Inactive since 2011-11 · 14(b)(2) extension,wellbore-query
 454320,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 454321,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
@@ -1271,13 +1269,13 @@ fid,api8,county,before,after,detail,source
 454378,,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 454381,16180122,Freestone,Producing,Shut-In,Shut in since 2010-12 · 14(b)(2) extension,wellbore-query
 454382,,Freestone,Producing,Other/Unknown,Oil (RRC map symbol),map-symbol
-454383,16130883,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-454384,16130882,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+454383,16130883,Freestone,Permitted,Other/Unknown,Permit expired 1984-12-22 · not drilled,permit
+454384,16130882,Freestone,Permitted,Other/Unknown,Permit expired 1984-12-22 · not drilled,permit
 454392,16131120,Freestone,Permitted,Other/Unknown,Permit expired 1992-01-03 · not drilled,permit
 454394,,Freestone,Producing,Other/Unknown,Oil/Gas (RRC map symbol),map-symbol
 454396,16130608,Freestone,Active,Disposal,Disposal into a productive zone (H-1),uic
 454397,16130703,Freestone,Producing,Shut-In,Shut in since 2006-08 · 14(b)(2) extension,wellbore-query
-454399,16130881,Freestone,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+454399,16130881,Freestone,Permitted,Other/Unknown,Permit expired 1984-12-22 · not drilled,permit
 454401,16131308,Freestone,Producing,Shut-In,Inactive since 2026-07,wellbore-query
 454404,16131337,Freestone,Producing,Shut-In,Inactive since 2026-07,wellbore-query
 454406,16131367,Freestone,Producing,Shut-In,Inactive since 2026-07,wellbore-query
@@ -1327,14 +1325,14 @@ fid,api8,county,before,after,detail,source
 619364,07300123,Cherokee,Producing,Plugged,,wellbore-query
 619369,07300105,Cherokee,Producing,Plugged,,wellbore-query
 619388,,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
-619391,07330707,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+619391,07330707,Cherokee,Permitted,Other/Unknown,Permit expired 1986-11-01 · not drilled,permit
 619395,07330384,Cherokee,Producing,Shut-In,Inactive since 2026-07,wellbore-query
 619400,07330396,Cherokee,Producing,Shut-In,Inactive since 2026-07,wellbore-query
 619411,07330798,Cherokee,Permitted,Other/Unknown,Permit expired 1994-10-27 · not drilled,permit
 619414,07330811,Cherokee,Producing,Shut-In,Inactive since 2023-01 · 14(b)(2) extension,wellbore-query
 619415,07330876,Cherokee,Producing,Shut-In,No production (RRC well type) since 2025-01 · 14(b)(2) extension,wellbore-query
 619417,07330942,Cherokee,Producing,Shut-In,Shut in since 2016-06 · 14(b)(2) extension,wellbore-query
-619500,07330690,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+619500,07330690,Cherokee,Permitted,Other/Unknown,Permit expired 1986-12-18 · not drilled,permit
 619501,,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 619502,,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
 620518,,Cherokee,Producing,Other/Unknown,Gas (RRC map symbol),map-symbol
@@ -1343,7 +1341,7 @@ fid,api8,county,before,after,detail,source
 620540,07330472,Cherokee,Producing,Shut-In,Inactive since 2026-07,wellbore-query
 620543,07330657,Cherokee,Producing,Shut-In,Temporarily abandoned since 2025-07 · 14(b)(2) extension,wellbore-query
 620544,07330673,Cherokee,Producing,Shut-In,Temporarily abandoned since 2025-07 · 14(b)(2) extension,wellbore-query
-620546,07330706,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol
+620546,07330706,Cherokee,Permitted,Other/Unknown,Permit expired 1987-04-24 · not drilled,permit
 620561,,Cherokee,Producing,Other/Unknown,Gas (RRC map symbol),map-symbol
 620582,07330390,Cherokee,Producing,Shut-In,Inactive since 2026-07,wellbore-query
 620583,,Cherokee,Permitted,Other/Unknown,Permitted Location (RRC map symbol),map-symbol

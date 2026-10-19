@@ -14,26 +14,27 @@ import { foldRecord, DBF900_RECORD_SIZE, type WellboreFacts } from "../loaders/w
 import { parsePermitApi, parsePermitRoot } from "../loaders/permits.js";
 import {
   assembleBores, assembleWell, buildAbstracts, historyOf, leaseKey, lonLat,
-  type AbstractBuildStats, type BottomRecord, type EwaRec, type LateralRecord, type LeaseProduction, type SurfaceRecord, type WellContext,
+  type AbstractBuildStats, type BottomRecord, type EwaRec, type LateralRecord, type LeaseProduction, type PermitAcreage, type SurfaceRecord, type WellContext,
 } from "./assemble.js";
 import {
   ABSTRACTS_DATASET, PRODUCTION_DATASET, WELLS_DATASET,
   type AbstractsDataset, type CountyScope, type HistoryRow, type PermitRow, type ProductionDataset, type ProductionTuple, type SourceSnapshot, type WellRow, type WellsDataset,
 } from "./dataset.js";
 import { fitDatumShift, type DatumShift } from "./datum.js";
-import { CsvSplitter, ewaRecord, parsePermitDetail, parsePermitRootFacts, parseUicRoot } from "./records.js";
+import { bottomHoleAcres, CsvSplitter, ewaRecord, fieldAcres, parsePermitDetail, parsePermitRootFacts, parseUicRoot, permitFieldNo } from "./records.js";
 import { readDbf, readShp } from "./shapefile.js";
+import { parseGasLedger, parseOilLedger, type AssignedAcres } from "./ledger.js";
 
 export interface BuildOptions {
   dataDir: string;
   counties: CountyScope[];
   /** Evaluation date, YYYYMMDD (permit expiry / drilling window). */
   asOf: string;
-  files: { ewa: string; permits: string; uic: string; dbf900: string; pdq: string };
+  files: { ewa: string; permits: string; uic: string; dbf900: string; pdq: string; gasLedgers?: string[]; oilLedgers?: string[] };
   /** Pre-extracted PDQ county-lease TSV (pdqExtract format) — skips streaming the 3.8 GB zip. */
   pdqTsv?: string;
   /** Snapshot dates for files that carry none internally (RRC MFT "Last Modified"), YYYY-MM-DD. */
-  asOfDates: { dbf900: string; uic: string };
+  asOfDates: { dbf900: string; uic: string; ledgers?: string };
   /** Production months bundled (newest N). */
   productionMonths?: number;
   /** Permit retention (years), matching the ingest loader's rolling window. */
@@ -157,23 +158,45 @@ export async function buildRefresh(o: BuildOptions): Promise<BuildResult> {
   // 3. Drilling permits (daf802): status facts for every API, permit rows for the counties.
   log("drilling permits…");
   const permits = new Map<string, PermitFacts[]>();
+  const acreage = new Map<string, PermitAcreage[]>();
   const permitRows = new Map<string, PermitRow>();
   const permitCutoff = `${Number(o.asOf.slice(0, 4)) - (o.permitYears ?? 6)}-${o.asOf.slice(4, 6)}-${o.asOf.slice(6, 8)}`;
   let permitsAsOf = "";
   {
     let root: ReturnType<typeof parsePermitRootFacts> = null;
     let legacyRoot: ReturnType<typeof parsePermitRoot> = null;
+    // The in-scope permit whose 03/04/05/10 records follow, and its current field.
+    let acres: PermitAcreage | null = null;
+    let field: string | null = null;
     for await (const line of lineStream(p(o.files.permits))) {
-      if (line.startsWith("01")) { root = parsePermitRootFacts(line); legacyRoot = parsePermitRoot(line); continue; }
+      if (line.startsWith("01")) { root = parsePermitRootFacts(line); legacyRoot = parsePermitRoot(line); acres = null; field = null; continue; }
+      if (acres) {
+        const f = permitFieldNo(line);
+        if (f) { field = f; continue; }
+        const fa = fieldAcres(line);
+        if (fa && field) { acres.fields[field] ??= fa; continue; }
+        const ba = bottomHoleAcres(line);
+        if (ba) { acres.bhl ??= ba; continue; }
+      }
       if (!line.startsWith("02") || !root) continue;
+      // A permit record follows its application (01) record. Their keys match
+      // only since Sept 1986: before that RRC numbered applications (status
+      // numbers) and permits separately, so pair by position, checking county.
       const d = parsePermitDetail(line);
-      if (!d || d.key !== root.key) continue;
+      if (!d || d.key.slice(9) !== root.key.slice(9)) continue;
       if (d.issued && d.issued > permitsAsOf) permitsAsOf = d.issued;
       if (!apis.has(d.api8) && !codes.has(root.countyCode)) continue;
       if (root.appFlag && root.appFlag !== "A") continue; // only issued permits have status meaning
       const list = permits.get(d.api8) ?? [];
       if (!list.some((x) => x.permitNo === d.permitNo)) list.push(d);
       permits.set(d.api8, list);
+      // Acreage: the permit's lease/unit acres now; its per-field and
+      // bottom-hole acres arrive on the records that follow.
+      const surfaceAcres = parsePermitApi(line)?.acres ?? null;
+      const al = acreage.get(d.api8) ?? [];
+      acres = al.find((x) => x.permitNo === d.permitNo) ?? null;
+      if (!acres) { acres = { permitNo: d.permitNo, issued: d.issued, surface: surfaceAcres, fields: {}, bhl: null }; al.push(acres); acreage.set(d.api8, al); }
+      field = null;
       const c = countyByCode.get(root.countyCode);
       if (c && legacyRoot && legacyRoot.permitDate && legacyRoot.permitDate >= permitCutoff) {
         const loc = parsePermitApi(line);
@@ -288,9 +311,15 @@ export async function buildRefresh(o: BuildOptions): Promise<BuildResult> {
     } catch { return { extract: null, newest: String(newestYm) }; }
   })();
 
+  // 6b. Oil/Gas Ledgers: acres RRC assigns each scheduled well (small files, read whole).
+  const assigned = { gas: new Map<string, AssignedAcres>(), oil: new Map<string, AssignedAcres>() };
+  for (const f of o.files.gasLedgers ?? []) parseGasLedger(zlib.gunzipSync(fs.readFileSync(p(f))), assigned.gas);
+  for (const f of o.files.oilLedgers ?? []) parseOilLedger(zlib.gunzipSync(fs.readFileSync(p(f))), assigned.oil);
+  if (o.files.gasLedgers?.length || o.files.oilLedgers?.length) log(`ledgers: ${assigned.gas.size} gas + ${assigned.oil.size} oil wells with assigned acres`);
+
   // 7. Assemble wells, bores, history.
   log("assembling…");
-  const ctx: WellContext = { ewa, permits, uic, formations, dbfPlug, production: leaseProd, prodNewestYm: String(newestYm), asOf: o.asOf };
+  const ctx: WellContext = { ewa, permits, acreage, assigned, uic, formations, dbfPlug, production: leaseProd, prodNewestYm: String(newestYm), asOf: o.asOf };
   const bottomsBySurface = new Map<number, BottomRecord[]>();
   for (const b of bottoms.values()) {
     const sid = Number(b.rec.SURFACE_ID);
@@ -326,6 +355,9 @@ export async function buildRefresh(o: BuildOptions): Promise<BuildResult> {
     { id: "wellbore-master", name: "RRC Full Wellbore (dbf900)", file: o.files.dbf900, asOf: o.asOfDates.dbf900 },
     { id: "production", name: `RRC Production Data Query dump (newest month ${pdqDates.newest})`, file: o.files.pdq, asOf: pdqDates.extract ?? refreshDate },
     { id: "gis-surveys", name: "RRC Survey Layers by County (abstract polygons)", file: o.counties.map((c) => `surv${c.code}.zip`).join(", "), asOf: survDate },
+    ...(o.asOfDates.ledgers && (o.files.gasLedgers?.length || o.files.oilLedgers?.length)
+      ? [{ id: "proration-ledger", name: "RRC Oil & Gas Ledgers (proration schedule)", file: [...(o.files.gasLedgers ?? []), ...(o.files.oilLedgers ?? [])].join(", "), asOf: o.asOfDates.ledgers }]
+      : []),
   ];
 
   const wells = [...wellsByFid.values()].map((w) => w.row);

@@ -75,6 +75,13 @@ export interface WellRow {
   cumGas: number | null;
   formations: string[] | null;
   injectionType: string | null;
+  /** Lease / pooled-unit acres from the newest W-1 permit that reports them. */
+  unitAcres: number | null;
+  unitAcresSource: string | null;
+  /** Acres RRC's proration schedule currently assigns the well (Oil/Gas Ledger) — may be a share of the unit. */
+  assignedAcres: number | null;
+  /** Ledger month those acres are from (YYYY-MM). */
+  assignedAcresYm: string | null;
   locationFlag: string | null;
   locationNote: string | null;
   geomFlag: string | null;
@@ -99,6 +106,8 @@ export interface BoreRow {
   bh: LonLat;
   /** "rrc-bottom-hole" (RRC's bottom-hole record) or "rrc-lateral-end" (end of RRC's lateral line — the record sits in an adjacent county's file). */
   bhSource: string;
+  /** The well isn't completed yet: RRC's bottom hole is the PERMITTED target, not a drilled location. */
+  planned: boolean;
   /** Surface → bottom hole. Straight: no directional-survey trajectory exists in RRC's bulk data, so every path is approximate. */
   path: LonLat[];
   /** "rrc-lateral" (RRC drew the line) or "endpoints" (joined from RRC's surface and bottom-hole points). */

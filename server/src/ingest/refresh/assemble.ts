@@ -10,6 +10,7 @@ import {
 import { distanceFt, type DatumShift } from "./datum.js";
 import type { AbstractRow, BoreRow, CountyScope, HistoryRow, LonLat, WellRow } from "./dataset.js";
 import type { EwaField } from "./records.js";
+import { gasLedgerKey, oilLedgerKey, type AssignedAcres } from "./ledger.js";
 import { ringsToMultiPolygon, type DbfRecord, type Pt, type Shape } from "./shapefile.js";
 
 export type EwaRec = Record<EwaField, string>;
@@ -46,9 +47,32 @@ export function primaryEwaRow(rows: readonly EwaRec[]): EwaRec | null {
 export interface LeaseProduction { lastYm: string; cumOil: number; cumGas: number }
 export const leaseKey = (og: string, district: string, lease: string) => `${og}|${district.trim()}|${lease.trim().replace(/^0+(?=\d)/, "")}`;
 
+/** Acreage one drilling permit reports (records.ts): lease/unit, per field, at the bottom hole. */
+export interface PermitAcreage { permitNo: string; issued: string | null; surface: number | null; fields: Record<string, number>; bhl: number | null }
+
+/**
+ * A well's unit size: the newest permit that reports one — its acres for the
+ * field the well produces from when the permit lists that field, else its
+ * lease/pooled-unit acres, else any field's, else the bottom-hole lease's.
+ * Every permit in RRC's file counts (not just the retained 6 years), which
+ * is what puts a unit size on wells permitted before 2020.
+ */
+export function unitAcresOf(list: readonly PermitAcreage[] | undefined, fieldNo: string | null): { acres: number; permitNo: string; issued: string | null } | null {
+  if (!list?.length) return null;
+  const newestFirst = [...list].sort((a, b) => (b.issued ?? "").localeCompare(a.issued ?? "") || b.permitNo.localeCompare(a.permitNo));
+  for (const p of newestFirst) {
+    const acres = (fieldNo ? p.fields[fieldNo] : undefined) ?? p.surface ?? Object.values(p.fields)[0] ?? p.bhl;
+    if (acres) return { acres, permitNo: p.permitNo, issued: p.issued };
+  }
+  return null;
+}
+
 export interface WellContext {
+  /** Acres assigned per well from the Oil/Gas Ledgers (ledger.ts keys). */
+  assigned?: { gas: Map<string, AssignedAcres>; oil: Map<string, AssignedAcres> };
   ewa: Map<string, EwaRec[]>;
   permits: Map<string, PermitFacts[]>;
+  acreage: Map<string, PermitAcreage[]>;
   uic: Map<string, UicFacts>;
   formations: Map<string, string[]>;
   dbfPlug: Map<string, string>;
@@ -128,6 +152,13 @@ export function assembleWell(
   const ctl = { lon27: Number(r.LONG27), lat27: Number(r.LAT27), lon83: Number(r.LONG83), lat83: Number(r.LAT83) };
   const mismatch = shift.mismatchFt(ctl);
   const symText = symbolInfo(symbol)?.label ?? symbolInfo(surfSym)?.label ?? null;
+  const unit = api8 ? unitAcresOf(ctx.acreage.get(api8), primary?.FIELD_NUMBER || null) : null;
+  // Only a well on the schedule has current proration acreage.
+  const assigned = primary && primary.ON_SCHEDULE === "Y" && ctx.assigned
+    ? (primary.OIL_GAS_CODE === "G"
+      ? ctx.assigned.gas.get(gasLedgerKey(primary.DISTRICT, primary.LEASE_NUMBER))
+      : ctx.assigned.oil.get(oilLedgerKey(primary.DISTRICT, primary.LEASE_NUMBER, primary.WELL_NO))) ?? null
+    : null;
 
   const src: Record<string, string> = { geom: "gis-wells", symbol: "gis-wells", profile: "gis-wells" };
   if (derived.source === "wellbore-query") src.status = "wellbore-query";
@@ -136,6 +167,8 @@ export function assembleWell(
   else src.status = "gis-wells";
   if (primary) for (const k of ["operator", "lease", "field", "oilGas", "wellNo", "completionDate", "plugDate", "shutInDate"]) src[k] = "wellbore-query";
   if (permit) { src.permit = "permits"; src.spudDate = "permits"; }
+  if (unit) src.unitAcres = "permits";
+  if (assigned) src.assignedAcres = "proration-ledger";
   if (prod) src.lastProd = src.cum = "production";
   if (api8 && ctx.formations.get(api8)?.length) src.formations = "wellbore-master";
   if (derived.status === "Injection" || derived.status === "Disposal") src.injectionType = derived.source === "uic" ? "uic" : "wellbore-query";
@@ -169,6 +202,10 @@ export function assembleWell(
     cumGas: prod ? prod.cumGas : null,
     formations: (api8 && ctx.formations.get(api8)) || null,
     injectionType: derived.status === "Injection" || derived.status === "Disposal" ? derived.detail : null,
+    unitAcres: unit?.acres ?? null,
+    unitAcresSource: unit ? `W-1 permit ${unit.permitNo}${unit.issued ? ` (${rrcIsoDate(unit.issued)})` : ""}` : null,
+    assignedAcres: assigned ? Math.round(assigned.acres * 1000) / 1000 : null,
+    assignedAcresYm: assigned ? `${assigned.ym.slice(0, 4)}-${assigned.ym.slice(4, 6)}` : null,
     locationFlag: mismatch > COORD_MISMATCH_FT ? "coordinate-mismatch" : null,
     locationNote: mismatch > COORD_MISMATCH_FT ? `RRC's NAD27 and NAD83 coordinates for this well disagree by ${Math.round(mismatch)} ft; the map uses RRC's NAD83 point.` : null,
     geomFlag: null,
@@ -179,7 +216,12 @@ export function assembleWell(
 }
 
 /**
- * Deviated wellbores (horizontal / directional / sidetrack) of the refresh:
+ * Deviated wellbores (horizontal / directional / sidetrack) of the refresh.
+ * Each path joins RRC's surface location to RRC's bottom-hole location —
+ * exactly the line RRC's own map draws (its lateral lines are these same two
+ * points; measured against the live map: within ~3 ft on 1,298 of 1,300).
+ * RRC's bulk data holds no points between the two (directional surveys are
+ * scanned images), so no curve is invented:
  *  - every bottom-hole record ("b" layer) at least DEVIATED_MIN_FT from its
  *    surface spot, or flagged H1…/D1… codes by RRC;
  *  - plus RRC lateral lines ("l" layer) whose bottom-hole record lives in a
@@ -231,6 +273,9 @@ export function assembleBores(
       profile: profileOf(stcode, sid, offset), county: b.county.name,
       status: st.status, statusDetail: st.detail,
       bh, bhSource: "rrc-bottom-hole",
+      // RRC spots a permitted location's bottom hole from the W-1 plat; it moves
+      // to the as-drilled point when the completion is filed.
+      planned: num(b.rec.SYMNUM) === 2 || st.status === "Permitted" || st.status === "Drilling",
       path: [surface, bh], lineSource: line ? "rrc-lateral" : "endpoints", approximate: true,
       geomFlag: surf ? null : "surface-outside-scope",
     });
@@ -250,6 +295,7 @@ export function assembleBores(
       profile: profileOf(stcode, sid, distanceFt(surface, bh)), county: l.county.name,
       status: st.status, statusDetail: st.detail,
       bh, bhSource: "rrc-lateral-end",
+      planned: st.status === "Permitted" || st.status === "Drilling",
       path: [surface, bh], lineSource: "rrc-lateral", approximate: true,
       geomFlag: surf ? null : "surface-outside-scope",
     });

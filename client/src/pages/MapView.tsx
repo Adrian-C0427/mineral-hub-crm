@@ -51,8 +51,8 @@ type SelAbstract = { kind: "abstract"; id: string; abstract: string; survey: str
 type AbstractOption = { id: string; abstract: string | null; survey: string | null; county: string; state: string | null };
 type WellPermit = { statusNo: string; permitDate: string | null; operator: string | null; leaseName: string | null; wellNo: string | null; acres: number | null; survey: string | null; abstract: string | null };
 type WellCompletion = { trackingNo: string; filingType: string | null; status: string | null; filedDate: string | null; completionDate: string | null; fieldName: string | null };
-/** A deviated wellbore of the well (RRC refresh): bottom hole + approximate straight path. */
-type WellBore = { fid: number; profile: string | null; stcode: string | null; api: string | null; status: string | null; statusDetail: string | null; bottomHole: [number, number] | null; offsetFt: number | null; approximate: boolean; bhSource: string | null; lineSource: string | null; geomFlag: string | null };
+/** A deviated wellbore of the well (RRC refresh): its bottom hole and the path to it. */
+type WellBore = { fid: number; profile: string | null; stcode: string | null; api: string | null; status: string | null; statusDetail: string | null; bottomHole: [number, number] | null; offsetFt: number | null; approximate: boolean; bhSource: string | null; lineSource: string | null; geomFlag: string | null; planned?: boolean };
 type WellHistoryEvent = { date: string | null; event: string; status: string | null; detail: string | null; source: string };
 type WellSourceFile = { id: string; name: string | null; file: string | null; asOf: string | null };
 /** The normalized status and its evidence (RRC refresh, 2026-10). */
@@ -62,6 +62,8 @@ type WellRefresh = {
   permitNo?: string | null; permitDate?: string | null; permitExpires?: string | null; completionDate?: string | null;
   shutInDate?: string | null; injectionType?: string | null; locationFlag?: string | null; locationNote?: string | null;
   geomFlag?: string | null; sources?: Record<string, string> | null; bores?: WellBore[]; history?: WellHistoryEvent[]; sourceFiles?: WellSourceFile[];
+  /** Acres RRC's proration schedule assigns the well (may be a share of the unit). */
+  assignedAcres?: number | null; assignedAcresYm?: string | null;
 };
 type WellProps = { fid: number; api: string; api8: string; wellNo: string | null; wellId: string; symbol: string; type: string; status: string; county: string; abstract: string | null; survey: string | null; operator: string | null; leaseName: string | null; leaseNo: string | null; field: string | null; oilGas: string | null; district: string | null; cumOil: number | null; cumGas: number | null; lastProd: string | null; formations: string | null; unitAcres?: number | null; spudDate?: string | null; plugDate?: string | null; permits?: WellPermit[]; completions?: WellCompletion[];
   /** "TX" | "LA" (tile `state`); Louisiana wells carry their SONRIS record in `la`. */
@@ -1376,7 +1378,7 @@ export function MapView() {
           ) : (
             <div className="mcx-legend-rows">
               {WELL_STATUSES.map((st) => <Legend key={st} color={STATUS_COLORS[st]} label={st} />)}
-              {layers.wellbores && <Legend color="#0f766e" label="Wellbore path (approximate)" line dashed />}
+              {layers.wellbores && <Legend color="#0f766e" label="Wellbore path" line />}
               {layers.wellbores && <Legend color="#0f766e" label="Bottom hole" ring />}
               {permitReq && <Legend color={PERMIT_HL_COLOR} label="Highlighted permit" />}
             </div>
@@ -1441,7 +1443,9 @@ export function MapView() {
                   {selected.shutInDate && <KV k="Shut in since" v={selected.shutInDate} />}
                   {selected.plugDate && <KV k="Plugged" v={selected.plugDate} />}
                   {selected.injectionType && <KV k="Injection type" v={selected.injectionType} />}
-                  <KV k="Unit size" v={selected.unitAcres != null ? `${num(selected.unitAcres)} ac` : null} />
+                  <KV k="Unit size" v={selected.unitAcres != null ? `${num(selected.unitAcres)} ac`
+                    : selected.assignedAcres != null ? `${num(selected.assignedAcres)} ac assigned` : null} />
+                  {selected.unitAcres != null && selected.assignedAcres != null && <KV k="Acres assigned" v={`${num(selected.assignedAcres)} ac`} />}
                 </div>
                 <WellBoresBlock w={selected} />
                 {selected.formations && (
@@ -1506,7 +1510,7 @@ export function MapView() {
                 <div className="dd-grid mc-kv">
                   <KV k="Status" v={selected.boreStatus} /><KV k="Bottom hole" v={selected.bhSource === "rrc-lateral-end" ? "End of RRC's lateral line" : "RRC bottom-hole record"} />
                 </div>
-                <p className="mc-fp-note">This wellbore's bottom hole is in a refreshed county, but its surface location is in a county outside Leon, Freestone and Cherokee, so its full well record isn't loaded. The path is approximate (a straight line from the surface to the bottom hole).</p>
+                <p className="mc-fp-note">This wellbore's bottom hole is in a refreshed county, but its surface location is in a county outside Leon, Freestone and Cherokee, so its full well record isn't loaded.</p>
               </>
             ) : selected.kind === "hotspot" ? (
               <>
@@ -1637,6 +1641,7 @@ function refreshOf(d: Record<string, unknown>): WellRefresh {
     shutInDate: s("shutInDate")?.slice(0, 10) ?? null, injectionType: s("injectionType"),
     locationFlag: s("locationFlag"), locationNote: s("locationNote"), geomFlag: s("geomFlag"),
     sources: (d.sources as Record<string, string> | null) ?? null,
+    assignedAcres: d.assignedAcres != null ? Number(d.assignedAcres) : null, assignedAcresYm: s("assignedAcresYm"),
     bores: (d.bores as WellBore[] | undefined) ?? [], history: (d.history as WellHistoryEvent[] | undefined) ?? [],
     sourceFiles: (d.sourceFiles as WellSourceFile[] | undefined) ?? [],
   };
@@ -1808,20 +1813,20 @@ function WellStatusBlock({ w }: { w: WellProps }) {
   );
 }
 
-/** Horizontal / directional wellbores: bottom holes and their approximate paths. */
+/** Horizontal / directional wellbores: their bottom holes and paths. */
 function WellBoresBlock({ w }: { w: WellProps }) {
   const bores = w.bores ?? [];
   if (!bores.length) return null;
   return (
     <>
-      <div className="mc-fp-sec">Wellbore paths (approximate)</div>
+      <div className="mc-fp-sec">Wellbore paths</div>
       {bores.map((b) => (
         <div key={b.fid} className="mc-fp-row">
           <span>{b.profile ?? "Wellbore"}{b.stcode ? ` ${b.stcode}` : ""}{b.status ? ` · ${b.status}` : ""}</span>
-          <span className="muted">{b.offsetFt != null ? `${num(b.offsetFt)} ft` : ""}{b.bhSource === "rrc-lateral-end" ? " · BH from RRC line end" : ""}</span>
+          <span className="muted">{b.offsetFt != null ? `${num(b.offsetFt)} ft to ${b.planned ? "planned " : ""}bottom hole` : ""}</span>
         </div>
       ))}
-      <p className="mc-fp-note">Each path is a straight line from the surface location to RRC's bottom-hole location. RRC publishes directional surveys only as scanned images, so the true trajectory isn't drawn.</p>
+      <p className="mc-fp-note">Paths run from the well's surface location to RRC's bottom-hole location{bores.some((b) => b.planned) ? "; a planned bottom hole is the permitted target until the completion is filed" : ""}.</p>
     </>
   );
 }

@@ -17,6 +17,7 @@ fid,api8,county,status,flag,note
 445684,07300552,Cherokee,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 93 ft; the map uses RRC's NAD83 point.
 446362,07330054,Cherokee,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 93 ft; the map uses RRC's NAD83 point.
 446363,07330028,Cherokee,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 93 ft; the map uses RRC's NAD83 point.
+446508,07330422,Cherokee,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
 446749,28930344,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
 446766,28930428,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 101 ft; the map uses RRC's NAD83 point.
 447683,28931297,Leon,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
@@ -41,6 +42,7 @@ fid,api8,county,status,flag,note
 452235,16100013,Freestone,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
 452390,16180100,Freestone,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
 452598,16100142,Freestone,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 100 ft; the map uses RRC's NAD83 point.
+452747,16130528,Freestone,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
 453741,16100370,Freestone,Other/Unknown,needs-investigation,"Completed 1965, no longer on RRC's proration schedule, and no plugging report is on file."
 453760,16131349,Freestone,Other/Unknown,needs-investigation,Spudded more than 24 months ago with no completion or plugging report on file.
 453904,16131445,Freestone,Plugged,coordinate-mismatch,RRC's NAD27 and NAD83 coordinates for this well disagree by 98 ft; the map uses RRC's NAD83 point.
