@@ -61,3 +61,44 @@ if __name__ == "__main__":
         print(f"{path.split('/')[-1]:22} {name:6} close {r['close']:2}px halfw {r['halfWidthPx']:.1f}px | {ac:9.2f} ac vs called {called} ({100*(ac-called)/called:+.2f}%)")
         vis = (img * 0.45 + 140).astype(np.uint8); cv2.polylines(vis, [r["outer"].astype(np.int32)], True, (255, 0, 255), 4)
         cv2.imwrite(path.replace(".png", "_o3.png"), cv2.resize(vis, None, fx=0.25, fy=0.25))
+
+
+def verify_trace(bgr, contour, unit_mask, dpi=300, near_px=None):
+    """Is the traced outline really the plat's unit boundary? Sample the outline every few pixels:
+      onInk  = share of samples with boundary ink (the unit's color, or dark line) within ~1 ft-line width,
+      marked = share of samples with the unit's own marking (hatch ticks / heavy dashes) within ~15 ft.
+    A region traced through someone else's linework shows up as long stretches with no unit marking."""
+    k = dpi / 300
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    dark = (gray < 130).astype(np.uint8)
+    unit = (unit_mask > 0).astype(np.uint8)
+    d_ink = cv2.distanceTransform(1 - np.maximum(dark, unit), cv2.DIST_L2, 5)
+    d_unit = cv2.distanceTransform(1 - unit, cv2.DIST_L2, 5)
+    c = np.asarray(contour, float).reshape(-1, 2)
+    step = max(1, int(len(c) / 2000))
+    pts = c[::step].round().astype(int)
+    H, W = gray.shape
+    pts = pts[(pts[:, 0] >= 0) & (pts[:, 0] < W) & (pts[:, 1] >= 0) & (pts[:, 1] < H)]
+    if not len(pts): return 0.0, 0.0
+    on = float((d_ink[pts[:, 1], pts[:, 0]] <= 4 * k).mean())
+    marked = float((d_unit[pts[:, 1], pts[:, 0]] <= (near_px or 45 * k)).mean())
+    return on, marked
+
+
+def trace_completeness(bgr, contour, unit_mask, ocr=None, dpi=300):
+    """Share of the plat's unit-colored marking (text labels removed) that lies along the traced
+    outline. A complete trace uses nearly all of it; a trace that missed part of the boundary
+    (or picked a small enclosed pocket) leaves much of it unused."""
+    k = dpi / 300
+    m = (unit_mask > 0).astype(np.uint8)
+    if ocr:
+        for l in ocr["lines"]:
+            x, y, w, h = [int(round(v)) for v in l["box"]]
+            m[max(0, y - 4): y + h + 4, max(0, x - 4): x + w + 4] = 0
+    m = cv2.morphologyEx(m, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+    total = int(m.sum())
+    if total == 0: return 0.0
+    line = np.zeros_like(m)
+    cv2.polylines(line, [np.asarray(contour, np.int32).reshape(-1, 1, 2)], True, 1, 1)
+    d = cv2.distanceTransform(1 - line, cv2.DIST_L2, 5)
+    return float(((d <= 50 * k) & (m > 0)).sum() / total)

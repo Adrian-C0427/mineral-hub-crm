@@ -21,7 +21,8 @@ def xform(pts, th, s, tx, ty):
 
 SCALE_TOL = 0.006  # both plats print at the same stated scale; allow 0.6% for printing
 
-def register(unit_img, wl_img, s0, label=None, coarse=0.15):
+def register(unit_img, wl_img, s0, label=None, coarse=0.15, rot_window=None):
+    """rot_window=(center_deg, tol_deg) limits the rotation (unit plat -> well plat pixels) to that window."""
     u = unit_outline(unit_img)
     if not u: return None
     contour = u[2]["outer"].astype(np.float64)
@@ -34,7 +35,9 @@ def register(unit_img, wl_img, s0, label=None, coarse=0.15):
     prox = cv2.GaussianBlur((small > 0).astype(np.float32), (0, 0), 2.0)
     c0 = pts.mean(0)
     best = []
-    for deg in range(0, 360, 3):
+    def in_win(deg):
+        return rot_window is None or abs((deg - rot_window[0] + 180) % 360 - 180) <= rot_window[1]
+    for deg in ([d for d in range(0, 360, 3) if in_win(d)] if rot_window is None or rot_window[1] >= 3 else [rot_window[0]]):
         th = math.radians(deg)
         q = xform(pts - c0, th, s0 * coarse, 0, 0)
         mn = q.min(0); size = (q.max(0) - mn + 3).astype(int)
@@ -65,6 +68,7 @@ def register(unit_img, wl_img, s0, label=None, coarse=0.15):
                 for sgn in (1, -1):
                     q = p.copy(); q[k] += sgn * steps[k]
                     if abs(q[1] / s0 - 1) > SCALE_TOL: continue
+                    if not in_win(math.degrees(q[0])): continue
                     c, _ = cost(q)
                     if c < cur: p, cur, improved = q, c, True
             if not improved:

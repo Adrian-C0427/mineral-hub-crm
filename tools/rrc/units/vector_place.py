@@ -16,7 +16,10 @@ def red_corners(page, dpi=300, min_span_pt=20):
     mat = page.rotation_matrix * fitz.Matrix(dpi / 72, dpi / 72)
     pts = []
     for d in page.get_drawings():
-        if tuple(round(x, 2) for x in (d.get("fill") or ())) != (1.0, 0.0, 0.0): continue
+        filled = tuple(round(x, 2) for x in (d.get("fill") or ())) == (1.0, 0.0, 0.0)
+        stroked = d["type"] == "s" and tuple(round(x, 2) for x in (d.get("color") or ())) == (1.0, 0.0, 0.0) and (d.get("width") or 0) >= 0.5 and not (d.get("dashes") or "").startswith("[") or False
+        if d["type"] == "s" and tuple(round(x, 2) for x in (d.get("color") or ())) == (1.0, 0.0, 0.0) and (d.get("dashes") in (None, "[] 0")): stroked = True
+        if not (filled or stroked): continue
         vs = []
         for it in d["items"]:
             if it[0] == "l": vs += [it[1], it[2]]
@@ -44,7 +47,9 @@ def place(page, img_bgr, pts, scale, dpi, scorer):
     D = np.abs(C[:, None] - C[None, :]) / abs(P["BHL"] - P["SHL"])
     win = np.zeros(D.shape, bool)
     for sc in ([scale] if scale else COMMON_SCALES):
-        win |= (D >= dpi / sc * (1 - SCALE_TOL)) & (D <= dpi / sc * (1 + SCALE_TOL))
+        # vector plats are sometimes printed at an odd scale (JBC Ranch: "1100 feet" bar on a 1"=1000' title);
+        # the 3-point residual and the survey-line check verify the result, so search +/-15%
+        win |= (D >= dpi / sc * 0.85) & (D <= dpi / sc * 1.15)
     ii, jj = np.nonzero(win)
     if not len(ii): return {"ok": False, "why": "no red-path corner pair at the plat's scale"}
     z = (P["BHL"] - P["SHL"]) / (C[jj] - C[ii]); t = P["SHL"] - z * C[ii]

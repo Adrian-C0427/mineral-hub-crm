@@ -11,10 +11,13 @@ def job(m):
     global SEG
     if SEG is None: SEG = survey_check.abstract_lines_sp(ABSTRACTS)
     ocr = json.load(open(f"{U}/work/ocr/{m['id']}.json"))
-    pts, datum, zone, how = parse.control_points(ocr)
+    pts, datum, zone, how, alts = parse.control_points(ocr, with_alternates=True)
     r = {"id": m["id"], "pts": pts, "ptsFrom": how, "datum": datum, "zone": zone, "scale": parse.scale_ft_per_in(ocr), "units": parse.called_units(ocr)}
     if len(pts) >= 2 and "BHL" in pts:
-        g = georef.solve(f"{U}/work/img/{m['id']}.png", pts, r["scale"], m["dpi"], survey_segments=SEG)
+        text = " ".join(l["text"].upper() for l in ocr["lines"])
+        ink = 200 if ("BOWMAN" in text or "GRIFFIS" in text) else 150  # Bowman draws survey lines light grey
+        g = georef.solve_any(f"{U}/work/img/{m['id']}.png", pts, alts, r["scale"], m["dpi"], survey_segments=SEG, survey_ink=ink)
+        if g.get("ok") and g.get("pointsUsed"): r["pts"] = {k: tuple(v) for k, v in g["pointsUsed"].items()}
         r["georef"] = g
     return r
 

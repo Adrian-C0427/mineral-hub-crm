@@ -45,7 +45,7 @@ def do(pid, seg, w1_acres):
     if not g.get("ok"): return dict(base, fail=f"placement: {g.get('why')}", georef=g)
     mask = heavy_dash_mask(gray, dpi)
     comp = None
-    for k in (31, 45, 61, 81):
+    for k in (31, 45, 61, 81, 101, 121):  # acreage + completeness gate whatever the bridging produces
         closed = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
         comp, hole = fill_holes_region(closed)
         if comp is not None and hole > 20000 * (dpi / 300) ** 2: break
@@ -63,7 +63,19 @@ def do(pid, seg, w1_acres):
     called = min(labels, key=lambda a: abs(a - w1_acres)) if labels and w1_acres else None
     H, W = gray.shape
     clipped = bool(outer[:, 0].min() <= 3 or outer[:, 1].min() <= 3 or outer[:, 0].max() >= W - 4 or outer[:, 1].max() >= H - 4)
-    return dict(base, name=None, calledAcres=called, w1Acres=w1_acres, mappedAcres=round(mapped, 2),
+    # completeness: share of the heavy-dash marking (text removed) along the traced outline
+    from outline3 import trace_completeness
+    # only dash-shaped marks count (small, elongated): not the scale bar, north arrow or title block
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+    dash_mask = np.zeros_like(mask)
+    for i in range(1, n):
+        a_ = stats[i, cv2.CC_STAT_AREA]
+        if not (200 * (dpi / 300) ** 2 <= a_ <= 4000 * (dpi / 300) ** 2): continue
+        ys, xs = np.nonzero(lab == i)
+        (_, _), (w, h), _ = cv2.minAreaRect(np.c_[xs, ys].astype(np.float32))
+        if max(w, h) >= 2.0 * max(1.0, min(w, h)): dash_mask[lab == i] = 255
+    comp = trace_completeness(img, outer, dash_mask, json.load(open(f"{U}/work/ocr/{pid}.json")), dpi)
+    return dict(base, name=None, calledAcres=called, w1Acres=w1_acres, mappedAcres=round(mapped, 2), completeness=round(comp, 3),
                 mappedDiffPct=round(100 * (mapped - called) / called, 2) if called else None, clipped=clipped,
                 controlResidualFt=max(g["residualFt"].values()), halfWidthFt=round(halfw_ft, 2), georef=g,
                 sp=sp[:: max(1, len(sp) // 4000)].round(2).tolist())
@@ -72,7 +84,7 @@ def do(pid, seg, w1_acres):
 if __name__ == "__main__":
     wells = {w["api8"]: w for w in json.load(gzip.open(sys.argv[1]))["wells"] if w["api8"]}
     seg = survey_check.abstract_lines_sp(f"{U}/work/tx-rrc-abstracts.json.gz")
-    ids = [pid for pid, m in INV.items() if m["api"] in MITSUI and m.get("vector") and len(SCAN[pid]["pts"]) >= 3]
+    ids = [pid for pid, m in INV.items() if m["api"] in MITSUI and m.get("vector") and len(SCAN[pid]["pts"]) >= 3]  # incl. O. Henson + JBC Ranch now
     res = [do(pid, seg, wells.get(INV[pid]["api"], {}).get("unitAcres")) for pid in ids]
     json.dump(res, open(f"{U}/work/units_sp_vector.json", "w"))
     for r in res:

@@ -273,9 +273,11 @@ export function addUnitLayers(map: maplibregl.Map, beforeId?: string): void {
 export interface UnitInfo {
   id: string; name: string; operator: string; county: string;
   calledAcres: number; mappedAcres: number;
+  /** % the plat's drawing differs from its called acres, when more than 2.5% (null otherwise). */
+  drawnVsCalledPct: number | null;
   wells: { api: string; lease: string | null; wellNo: string | null; permit: string }[];
   plat: { permit: string; rrcId: string; url: string; file: string } | null;
-  placement: { method: "unit-plat" | "well-plat"; controlResidualFt: number; within10ftPct: number | null } | null;
+  placement: { method: "unit-plat" | "well-plat"; basis?: "well-points" | "survey-lines"; controlResidualFt: number; within10ftPct: number | null } | null;
 }
 export function unitInfo(p: Record<string, unknown>): UnitInfo {
   const json = <T,>(v: unknown, fallback: T): T => {
@@ -285,6 +287,7 @@ export function unitInfo(p: Record<string, unknown>): UnitInfo {
   return {
     id: String(p.id ?? ""), name: String(p.name ?? "Pooled unit"), operator: String(p.operator ?? ""), county: String(p.county ?? ""),
     calledAcres: Number(p.calledAcres), mappedAcres: Number(p.mappedAcres),
+    drawnVsCalledPct: p.drawnVsCalledPct == null || p.drawnVsCalledPct === "" || !Number.isFinite(Number(p.drawnVsCalledPct)) ? null : Number(p.drawnVsCalledPct),
     wells: json(p.wells, []), plat: json(p.plat, null), placement: json(p.placement, null),
   };
 }

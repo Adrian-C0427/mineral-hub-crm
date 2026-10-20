@@ -1676,9 +1676,11 @@ function UnitPanel({ unit, onClose }: { unit: UnitInfo; onClose: () => void }) {
       {unit.plat?.url && <p style={{ fontSize: 12, margin: "8px 0 0" }}><a href={unit.plat.url} target="_blank" rel="noreferrer">Open the RRC permit plat</a></p>}
       <p className="mc-fp-note">
         Outline as drawn on the operator's permit plat (unit size is the acreage the plat calls).
-        {pl && ` Placed from the plat's surveyed well points (within ${pl.controlResidualFt < 1 ? "1" : Math.ceil(pl.controlResidualFt)} ft)`}
+        {pl && pl.basis === "survey-lines" && " Placed from the plat's printed surface location, turned and scaled until RRC's survey lines fall on the plat's own"}
+        {pl && pl.basis !== "survey-lines" && ` Placed from the plat's surveyed well points (within ${pl.controlResidualFt < 1 ? "1" : Math.ceil(pl.controlResidualFt)} ft)`}
         {pl?.method === "unit-plat" && pl.within10ftPct != null && `; ${Math.round(pl.within10ftPct)}% of its edge matches the well plat within about 10 ft`}
         {pl && "."}
+        {unit.drawnVsCalledPct != null && ` The plat's own drawing measures ${Math.abs(unit.drawnVsCalledPct).toFixed(1)}% ${unit.drawnVsCalledPct > 0 ? "more" : "less"} than the acres it calls; the map follows the drawing.`}
       </p>
     </>
   );
