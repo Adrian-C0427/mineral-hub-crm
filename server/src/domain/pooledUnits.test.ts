@@ -27,6 +27,27 @@ describe("pooled units bundle", () => {
     expect(f.properties).toMatchObject({ name: "Eva Lanier Gas Unit", operator: "Comstock", calledAcres: 701.4459, label: "Eva Lanier Gas Unit\n701.45 ac" });
     expect(JSON.parse(String(f.properties?.wells))).toEqual([{ api: "28932181", lease: "LANIER CW", wellNo: "1H", permit: "887233" }]);
     expect(JSON.parse(String(f.properties?.placement))).toMatchObject({ method: "unit-plat", within10ftPct: 98 });
+    expect(f.properties?.drawnVsCalledPct).toBeNull();
+  });
+
+  it("carries the drawn-vs-called note when the plat's drawing differs from its called acres", () => {
+    const fc = pooledUnitsGeoJSON(parsePooledUnits(bundle([unit({ mappedAcres: 750.3, drawnVsCalledPct: 7.0 })]), "v1"));
+    expect(fc.features[0].properties).toMatchObject({ mappedAcres: 750.3, drawnVsCalledPct: 7.0 });
+    expect(() => parsePooledUnits(bundle([unit({ drawnVsCalledPct: 40 })]), "v")).toThrow(/drawnVsCalledPct/);
+  });
+
+  it("passes each unit's color index through, and rejects a bad one", () => {
+    const fc = pooledUnitsGeoJSON(parsePooledUnits(bundle([unit({ colorIndex: 3 })]), "v"));
+    expect(fc.features[0].properties?.colorIndex).toBe(3);
+    expect(pooledUnitsGeoJSON(parsePooledUnits(bundle([unit()]), "v")).features[0].properties?.colorIndex).toBeNull();
+    expect(() => parsePooledUnits(bundle([unit({ colorIndex: 2.5 })]), "v")).toThrow(/colorIndex/);
+  });
+
+  it("accepts the survey-line placement basis of older scanned plats and rejects unknown ones", () => {
+    const old = unit({ placement: { method: "well-plat", basis: "survey-lines", controlResidualFt: 0, within10ftPct: null } });
+    expect(JSON.parse(String(pooledUnitsGeoJSON(parsePooledUnits(bundle([old]), "v")).features[0].properties?.placement))).toMatchObject({ basis: "survey-lines" });
+    const bad = unit({ placement: { method: "well-plat", basis: "guess" as never, controlResidualFt: 0, within10ftPct: null } });
+    expect(() => parsePooledUnits(bundle([bad]), "v")).toThrow(/placement basis/);
   });
 
   it("rejects a malformed bundle instead of half-serving it", () => {

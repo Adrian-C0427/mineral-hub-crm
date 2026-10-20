@@ -961,7 +961,9 @@ gisRouter.get(
   asyncHandler(async (req, res) => {
     const p = pooledUnitsPayload();
     if (!p) return res.json({ type: "FeatureCollection", features: [] });
-    res.setHeader("Cache-Control", "private, max-age=3600");
+    // Revalidate every load (a 304 when unchanged): the bundle changes with each deploy, and a
+    // max-age would keep showing the previous release's outlines for up to that long.
+    res.setHeader("Cache-Control", "private, no-cache");
     res.setHeader("ETag", p.etag);
     if (req.headers["if-none-match"] === p.etag) return res.status(304).end();
     res.type("application/json").send(p.body);

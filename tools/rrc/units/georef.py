@@ -163,7 +163,7 @@ SURVEY_MIN = 0.5   # share of RRC survey-line samples within 30 ft of the plat's
 SHARP_MIN = 1.4    # ... versus the same placement nudged 300 ft / turned 2 deg
 
 
-def solve(img_path, pts, scale, dpi, min_support=0.75, survey_segments=None):
+def solve(img_path, pts, scale, dpi, min_support=0.75, survey_segments=None, survey_ink=150):
     """Find the SHL/PP/BHL circle markers whose layout matches the printed coordinates.
     SHL, PP and BHL often sit nearly on one line, so a residual check alone accepts any three
     marks in a row; the drawn well path between the matched points decides among candidates,
@@ -176,7 +176,7 @@ def solve(img_path, pts, scale, dpi, min_support=0.75, survey_segments=None):
     survey = None
     if survey_segments is not None:
         from survey_check import SurveyScorer
-        survey = SurveyScorer(img, *survey_segments)
+        survey = SurveyScorer(img, *survey_segments, ink_below=survey_ink)
     if len(cs) < 3: return {"ok": False, "why": "too few circle markers", "circles": len(cs)}
     P = {k: complex(v[0], v[1]) for k, v in pts.items()}
     C = np.array([complex(c[0], -c[1]) for c in cs])
@@ -249,8 +249,8 @@ def solve(img_path, pts, scale, dpi, min_support=0.75, survey_segments=None):
     if sup < 0.75:
         return {"ok": False, "why": f"well path drawn along only {sup:.0%} of the matched points", "circles": len(cs)}
     real = all(len(m[k]) < 4 or m[k][3] for k in order)  # circle-based points are all real markers
-    if not real:
-        return {"ok": False, "why": "a control point isn't on a detected marker (no independent check)", "circles": len(cs)}
+    if not real and not (survey is not None and s0 >= 0.45 and sharp >= 1.6 and sup >= 0.9):
+        return {"ok": False, "why": "a control point isn't on a detected marker and the survey lines don't confirm it strongly", "circles": len(cs)}
     H_, W_ = gray.shape
     if any(not (0.05 * W_ < m[k][0] < 0.95 * W_ and 0.04 * H_ < m[k][1] < 0.96 * H_) for k in order):
         return {"ok": False, "why": "matched points fall on the sheet's border, not the map", "circles": len(cs)}
@@ -262,3 +262,19 @@ def solve(img_path, pts, scale, dpi, min_support=0.75, survey_segments=None):
             "pixels": {k: m[k][:2] for k in keys}, "circles": len(cs), "impliedScale": ftpx * dpi, "pathSupport": round(sup, 3),
             "scaleChecked": scale or "standard scales", "surveyMatch": round(s0, 3), "surveySharpness": round(sharp, 2), "surveySamples": n,
             "markersFrom": "circles" if from_circles else "drawn well path"}
+
+
+def solve_any(img_path, pts, alts, scale, dpi, **kw):
+    """Try the printed coordinates and, where a point's X/Y and lat/long disagree (one was misread),
+    each alternative; keep the placement that passes with the strongest survey-line confirmation."""
+    import itertools
+    keys = sorted(alts)
+    best = None
+    for choice in (itertools.product(*[range(len(alts[k])) for k in keys]) if keys else [()]):
+        p = dict(pts)
+        for k, c in zip(keys, choice): p[k] = tuple(alts[k][c])
+        r = solve(img_path, p, scale, dpi, **kw)
+        r["pointsUsed"] = {k: list(v) for k, v in p.items()}
+        score = (bool(r.get("ok")), (r.get("surveyMatch") or 0) * (r.get("surveySharpness") or 0))
+        if best is None or score > best[0]: best = (score, r)
+    return best[1]

@@ -9,7 +9,7 @@ import { US_STATE_OPTIONS, US_STATE_LABELS } from "../lib/options";
 import { Select } from "../components/Select";
 import { downloadCsv } from "../lib/csv";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION, PARISHES, STATE_FIPS, MAP_COUNTY_LABELS, mapCountyOptions } from "../lib/counties";
-import { addCadastralLayers, addTractLayers, addUnitLayers, tractInfo, unitInfo, TRACT_SOURCE, UNIT_SOURCE, UNIT_OPERATOR_COLORS, STATUS_COLOR, type TractInfo, type UnitInfo, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
+import { addCadastralLayers, addTractLayers, addUnitLayers, tractInfo, unitInfo, unitColor, TRACT_SOURCE, UNIT_SOURCE, UNIT_PALETTE, STATUS_COLOR, type TractInfo, type UnitInfo, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
 import { normalizeWellStatus, SOURCE_LABEL, STATUS_COLORS, STATUS_FLAG_LABEL, WELL_STATUSES } from "../lib/wellStatus";
 import { collectCoords, bboxOfPoints } from "../lib/geo";
 import { FormSection } from "../components/kit";
@@ -1407,7 +1407,7 @@ export function MapView() {
               {layers.wellbores && <Legend color="#0f766e" label="Wellbore path" line />}
               {layers.wellbores && <Legend color="#0f766e" label="Bottom hole" ring />}
               {permitReq && <Legend color={PERMIT_HL_COLOR} label="Highlighted permit" />}
-              {layers.units && Object.entries(UNIT_OPERATOR_COLORS).map(([op, c]) => <Legend key={op} color={c} label={`${op} pooled unit`} line />)}
+              {layers.units && <Legend color={UNIT_PALETTE[0]} stripes={UNIT_PALETTE} label="Pooled units" />}
             </div>
           ))}
         </div>
@@ -1659,7 +1659,7 @@ function UnitPanel({ unit, onClose }: { unit: UnitInfo; onClose: () => void }) {
   const pl = unit.placement;
   return (
     <>
-      <div className="section-head"><div><h3 style={{ margin: 0 }}>{unit.name}</h3><div className="muted" style={{ fontSize: 12 }}>{[`${unit.operator} pooled unit`, unit.county ? `${unit.county} County` : null].filter(Boolean).join(" · ")}</div></div><button className="icon-btn" aria-label="Close" onClick={onClose}>×</button></div>
+      <div className="section-head"><div><h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}><span aria-hidden style={{ width: 12, height: 12, borderRadius: 2, flex: "none", background: unitColor(unit) }} />{unit.name}</h3><div className="muted" style={{ fontSize: 12 }}>{[`${unit.operator} pooled unit`, unit.county ? `${unit.county} County` : null].filter(Boolean).join(" · ")}</div></div><button className="icon-btn" aria-label="Close" onClick={onClose}>×</button></div>
       <div className="dd-grid mc-kv" style={{ marginTop: 6 }}>
         <KV k="Unit size" v={acres(unit.calledAcres)} />
         <KV k="Mapped outline" v={`${acres(unit.mappedAcres)}${diffPct != null ? ` (${diffPct >= 0 ? "+" : ""}${diffPct.toFixed(1)}%)` : ""}`} />
@@ -1676,15 +1676,22 @@ function UnitPanel({ unit, onClose }: { unit: UnitInfo; onClose: () => void }) {
       {unit.plat?.url && <p style={{ fontSize: 12, margin: "8px 0 0" }}><a href={unit.plat.url} target="_blank" rel="noreferrer">Open the RRC permit plat</a></p>}
       <p className="mc-fp-note">
         Outline as drawn on the operator's permit plat (unit size is the acreage the plat calls).
-        {pl && ` Placed from the plat's surveyed well points (within ${pl.controlResidualFt < 1 ? "1" : Math.ceil(pl.controlResidualFt)} ft)`}
+        {pl && pl.basis === "survey-lines" && " Placed from the plat's printed surface location, turned and scaled until RRC's survey lines fall on the plat's own"}
+        {pl && pl.basis !== "survey-lines" && ` Placed from the plat's surveyed well points (within ${pl.controlResidualFt < 1 ? "1" : Math.ceil(pl.controlResidualFt)} ft)`}
         {pl?.method === "unit-plat" && pl.within10ftPct != null && `; ${Math.round(pl.within10ftPct)}% of its edge matches the well plat within about 10 ft`}
         {pl && "."}
+        {unit.drawnVsCalledPct != null && ` The plat's own drawing measures ${Math.abs(unit.drawnVsCalledPct).toFixed(1)}% ${unit.drawnVsCalledPct > 0 ? "more" : "less"} than the acres it calls; the map follows the drawing.`}
       </p>
     </>
   );
 }
 
-function Legend({ color, label, line, dashed, ring }: { color: string; label: string; line?: boolean; dashed?: boolean; ring?: boolean }) {
+function Legend({ color, label, line, dashed, ring, stripes }: { color: string; label: string; line?: boolean; dashed?: boolean; ring?: boolean; stripes?: readonly string[] }) {
+  if (stripes) {
+    const w = 100 / stripes.length;
+    const bg = `linear-gradient(90deg, ${stripes.map((c, i) => `${c} ${i * w}% ${(i + 1) * w}%`).join(", ")})`;
+    return <div className="mcx-legend-row"><span className="dot" style={{ background: bg, width: 16, height: 9, borderRadius: 2 }} />{label}</div>;
+  }
   const style: React.CSSProperties = ring
     ? { background: "#ffffff", boxShadow: `inset 0 0 0 2px ${color}` }
     : dashed ? { background: `repeating-linear-gradient(90deg, ${color} 0 5px, transparent 5px 8px)` } : { background: color };

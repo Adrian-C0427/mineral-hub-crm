@@ -56,6 +56,17 @@ class Shift:
         A = _terms(np.asarray(lon) - self.x0, np.asarray(lat) - self.y0)
         return lon + A @ self.cx, lat + A @ self.cy
 
+    def to_json(self):
+        return {"x0": self.x0, "y0": self.y0, "cx": list(map(float, self.cx)), "cy": list(map(float, self.cy)),
+                "inliers": self.inliers, "total": self.total, "p50Ft": self.p50, "p90Ft": self.p90}
+
+    @classmethod
+    def from_json(cls, d):
+        s = cls.__new__(cls)
+        s.x0, s.y0, s.cx, s.cy = d["x0"], d["y0"], np.array(d["cx"]), np.array(d["cy"])
+        s.inliers, s.total, s.p50, s.p90 = d["inliers"], d["total"], d["p50Ft"], d["p90Ft"]
+        return s
+
 
 def sp27_to_lonlat83(xy, shift):
     xy = np.asarray(xy, float)
@@ -64,6 +75,15 @@ def sp27_to_lonlat83(xy, shift):
     return np.stack([lon83, lat83], 1)
 
 
+CACHE = os.path.expanduser("~/rrc-data/unit-plats/work/datum_shift.json")
+
+
 def default_shift():
+    """RRC's shift fitted from the Freestone (161) + Leon (289) well layers of the 2026-10 refresh; the fit
+    is saved to work/datum_shift.json so later runs don't need those (large) layer files."""
+    import json
+    if os.path.exists(CACHE): return Shift.from_json(json.load(open(CACHE)))
     d = os.path.expanduser("~/rrc-data/2026-10")
-    return Shift([f"{d}/well289.zip", f"{d}/well161.zip"])
+    s = Shift([f"{d}/well289.zip", f"{d}/well161.zip"])
+    json.dump(s.to_json(), open(CACHE, "w"), indent=1)
+    return s

@@ -243,21 +243,39 @@ export function addTractLayers(map: maplibregl.Map, beforeId?: string): void {
 /** Source id of the pooled-unit overlay (operators' RRC permit plats; server domain/pooledUnits). */
 export const UNIT_SOURCE = "pooled-units";
 export const UNIT_LAYERS = ["units-fill", "units-line", "units-label"] as const;
-/** One hue per operator, chosen apart from the well-status and tract colors. */
-export const UNIT_OPERATOR_COLORS: Record<string, string> = { Comstock: "#b45309", Mitsui: "#be185d" };
+/**
+ * One color per unit, so neighbouring units stand apart: the bundle gives each unit an index into
+ * this palette, chosen so no two touching or overlapping units share a color (tools/rrc/units
+ * stage4_bundle.py keeps the same list in the same order). Deep, saturated tones that read as areas
+ * next to the brighter well-status dots.
+ */
+export const UNIT_PALETTE = ["#c2410c", "#a16207", "#4d7c0f", "#15803d", "#0e7490", "#1d4ed8", "#6d28d9", "#be185d"] as const;
+/** Fallback for a bundle without color indexes: one hue per operator. */
+const UNIT_OPERATOR_COLORS: Record<string, string> = { Comstock: "#b45309", Mitsui: "#be185d" };
 const UNIT_FALLBACK_COLOR = "#57534e";
+
+/** The color a unit is drawn in (same rule as the map layers). */
+export function unitColor(u: { colorIndex: number | null; operator: string }): string {
+  if (u.colorIndex != null && Number.isInteger(u.colorIndex) && u.colorIndex >= 0 && u.colorIndex < UNIT_PALETTE.length) return UNIT_PALETTE[u.colorIndex];
+  return UNIT_OPERATOR_COLORS[u.operator] ?? UNIT_FALLBACK_COLOR;
+}
 
 /**
  * Pooled-unit outlines as drawn on the operators' permit plats, placed from
  * each plat's surveyed points (see server domain/pooledUnits for the checks a
- * unit passed to be included). Solid outline, faint fill, name + called acres
- * from zoom 11; inserted under `beforeId` so wells and tracts stay on top.
+ * unit passed to be included). Each unit in its own color: outline, light
+ * fill, and name + called acres from zoom 11; inserted under `beforeId` so
+ * wells and tracts stay on top.
  */
 export function addUnitLayers(map: maplibregl.Map, beforeId?: string): void {
   map.addSource(UNIT_SOURCE, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-  const color = ["match", ["get", "operator"], ...Object.entries(UNIT_OPERATOR_COLORS).flat(), UNIT_FALLBACK_COLOR] as unknown as maplibregl.ExpressionSpecification;
+  const byOperator = ["match", ["get", "operator"], ...Object.entries(UNIT_OPERATOR_COLORS).flat(), UNIT_FALLBACK_COLOR];
+  // index -> palette color; a bundle without indexes falls back to the operator's color. (A
+  // ["literal", [...colors]] array fails style validation, "array<color>" vs "array<string>",
+  // which silently drops the layer, hence the match.)
+  const color = ["match", ["get", "colorIndex"], ...UNIT_PALETTE.flatMap((c, i) => [i, c]), byOperator] as unknown as maplibregl.ExpressionSpecification;
   const before = beforeId && map.getLayer(beforeId) ? beforeId : undefined;
-  map.addLayer({ id: "units-fill", type: "fill", source: UNIT_SOURCE, paint: { "fill-color": color, "fill-opacity": 0.07 } }, before);
+  map.addLayer({ id: "units-fill", type: "fill", source: UNIT_SOURCE, paint: { "fill-color": color, "fill-opacity": 0.14 } }, before);
   map.addLayer({ id: "units-line", type: "line", source: UNIT_SOURCE, paint: {
     "line-color": color,
     "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1, 12, 2, 15, 3] as unknown as maplibregl.ExpressionSpecification,
@@ -273,9 +291,13 @@ export function addUnitLayers(map: maplibregl.Map, beforeId?: string): void {
 export interface UnitInfo {
   id: string; name: string; operator: string; county: string;
   calledAcres: number; mappedAcres: number;
+  /** Index into UNIT_PALETTE (null for an older bundle: the operator's color is used). */
+  colorIndex: number | null;
+  /** % the plat's drawing differs from its called acres, when more than 2.5% (null otherwise). */
+  drawnVsCalledPct: number | null;
   wells: { api: string; lease: string | null; wellNo: string | null; permit: string }[];
   plat: { permit: string; rrcId: string; url: string; file: string } | null;
-  placement: { method: "unit-plat" | "well-plat"; controlResidualFt: number; within10ftPct: number | null } | null;
+  placement: { method: "unit-plat" | "well-plat"; basis?: "well-points" | "survey-lines"; controlResidualFt: number; within10ftPct: number | null } | null;
 }
 export function unitInfo(p: Record<string, unknown>): UnitInfo {
   const json = <T,>(v: unknown, fallback: T): T => {
@@ -285,6 +307,8 @@ export function unitInfo(p: Record<string, unknown>): UnitInfo {
   return {
     id: String(p.id ?? ""), name: String(p.name ?? "Pooled unit"), operator: String(p.operator ?? ""), county: String(p.county ?? ""),
     calledAcres: Number(p.calledAcres), mappedAcres: Number(p.mappedAcres),
+    colorIndex: p.colorIndex == null || p.colorIndex === "" || !Number.isInteger(Number(p.colorIndex)) ? null : Number(p.colorIndex),
+    drawnVsCalledPct: p.drawnVsCalledPct == null || p.drawnVsCalledPct === "" || !Number.isFinite(Number(p.drawnVsCalledPct)) ? null : Number(p.drawnVsCalledPct),
     wells: json(p.wells, []), plat: json(p.plat, null), placement: json(p.placement, null),
   };
 }

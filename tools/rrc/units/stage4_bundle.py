@@ -1,11 +1,19 @@
 """Stage 4: QA gate, de-duplicate, convert to NAD83 and write the Mineral Hub bundle + report.
 
 A unit is published only if:
-  * its well-location plat was placed from three surveyed points, worst residual <= 25 ft;
+  * its well-location plat was placed from three surveyed points, worst residual <= 25 ft, confirmed by
+    RRC's survey lines (older scanned plats: one printed point + a strict survey-line match);
   * unit-plat outlines: the traced outline lines up with the well plat (label inside, >= 60% of the
-    in-frame edge within ~10 ft, >= 30% of the edge in frame) and both the traced and the mapped
-    area are within 2.5% of the plat's called acres;
-  * well-plat outlines: closed on the sheet (not cut off by the frame), area within 2.5% of called acres.
+    in-frame edge within ~10 ft or a sharp partial fit, >= 30% of the edge in frame), AND RRC's survey
+    lines fall on the unit plat's own survey lines at that placement (sharpness >= 1.15; >= 1.10 with a
+    >= 60% fit at an expected orientation) unless the outline sits on the well plat's drawing almost
+    everywhere (>= 75% within ~10 ft). A name label outside the outline (a callout) is accepted only
+    when that check is decisive (>= 1.6); and the unit plat's survey names (e.g. "A-267") land in their
+    own RRC surveys (at least half of those that can be checked);
+  * well-plat outlines: closed on the sheet (not cut off by the frame);
+  * area within 2.5% of the called acres, or within 15% when the trace is verified complete
+    (published with a drawn-vs-called note). Older scanned plats: 2.5%, no allowance, and the well's
+    drawn surface location inside the outline.
 """
 import sys, os, re, json, gzip, math, datetime, collections
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -16,11 +24,15 @@ import datum
 
 U = os.path.expanduser("~/rrc-data/unit-plats")
 MAX_AREA_PCT = 2.5
+MAX_DRAWN_PCT = 15.0      # drawn-vs-called differences up to this are published with a note
+MIN_COMPLETE = 0.95
 MIN_WITHIN10 = 0.60       # ... or a sharp partial fit:
 MIN_FIT_SHARP = 1.6       # outline fits >= 1.6x better than the same outline nudged 150 ft / turned 2 deg
 MIN_FIT = 0.20
 MIN_IN_FRAME = 0.30
 MAX_CONTROL_FT = 25.0
+UNIT_SURVEY_SHARP = 1.15  # registration check on the unit plat's own survey lines (stage3 unit_survey)
+STRONG_WITHIN10 = 0.75
 
 
 def norm_name(n):
@@ -47,18 +59,73 @@ def clean_ocr_name(n):
     return f if re.fullmatch(r"[A-Za-z0-9 .,'\"&()#/-]+", f.strip()) else None
 
 
+# One color per unit on the map: client/src/lib/mapLayers.ts UNIT_PALETTE holds the same colors in the
+# same order; the bundle carries each unit's index into it.
+UNIT_PALETTE = ["#c2410c", "#a16207", "#4d7c0f", "#15803d", "#0e7490", "#1d4ed8", "#6d28d9", "#be185d"]
+NEIGHBOR_FT = 150.0  # outlines this close (or overlapping) count as neighbours
+
+
+def color_units(polys, ids):
+    """Color index per unit so that no two neighbouring units share a color: largest neighbourhoods
+    first, each taking the free color whose hue is farthest from its neighbours' (ties: least used)."""
+    import colorsys
+    from shapely.strtree import STRtree
+    hue = [colorsys.rgb_to_hls(*(int(c[i:i + 2], 16) / 255 for i in (1, 3, 5)))[0] * 360 for c in UNIT_PALETTE]
+    hd = lambda a, b: min(abs(hue[a] - hue[b]), 360 - abs(hue[a] - hue[b]))
+    grown = [p.buffer(NEIGHBOR_FT / 2) for p in polys]
+    tree = STRtree(grown)
+    nb = [set() for _ in polys]
+    for i, g in enumerate(grown):
+        for j in map(int, tree.query(g)):
+            if j != i and g.intersects(grown[j]): nb[i].add(j); nb[j].add(i)
+    color, used = [None] * len(polys), [0] * len(UNIT_PALETTE)
+    for i in sorted(range(len(polys)), key=lambda i: (-len(nb[i]), ids[i])):
+        taken = {color[j] for j in nb[i] if color[j] is not None}
+        free = [c for c in range(len(UNIT_PALETTE)) if c not in taken]
+        if free: c = max(free, key=lambda c: (min((hd(c, t) for t in taken), default=180.0), -used[c], -c))
+        else: c = min(range(len(UNIT_PALETTE)), key=lambda c: (sum(color[j] == c for j in nb[i]), used[c]))
+        color[i] = c; used[c] += 1
+    clashes = sum(1 for i in range(len(polys)) for j in nb[i] if j > i and color[i] == color[j])
+    return color, max((len(n) for n in nb), default=0), clashes
+
+
+def unit_survey_agrees(sharp, within10, orient_dev):  # same rule as stage3_units.unit_survey_agrees
+    return sharp >= UNIT_SURVEY_SHARP or within10 >= STRONG_WITHIN10 or (sharp >= 1.10 and within10 >= 0.60 and orient_dev <= 15)
+
+
 def passes(c):
     why = []
     if c.get("controlResidualFt", 99) > MAX_CONTROL_FT: why.append(f"well plat placement off by {c['controlResidualFt']:.0f} ft")
     if c["kind"] == "unit-plat":
-        if c.get("labelInside") is False: why.append("unit's name label falls outside the lined-up outline")
+        dev = min(abs((c.get("rotationDeg", 0) + 180) % 360 - 180), abs((c.get("rotationDeg", 0) - c.get("wlRotationDeg", 0) + 180) % 360 - 180))
+        # a label printed in a callout outside the unit (with a leader) is fine when the unit plat's own
+        # survey lines confirm the placement decisively
+        if c.get("labelInside") is False and not (c.get("unitSurveySharpness", 0) >= 1.6 and c.get("within10ft", 0) >= 0.5 and dev <= 15):
+            why.append("unit's name label falls outside the lined-up outline")
         if c.get("inFrame", 0) < MIN_IN_FRAME: why.append(f"only {c['inFrame']:.0%} of the unit lies on the well plat")
         elif c.get("within10ft", 0) < MIN_WITHIN10 and not (c.get("fitSharpness", 0) >= MIN_FIT_SHARP and c.get("fit", 0) >= MIN_FIT):
             why.append(f"outline doesn't line up decisively with the well plat (fit {c.get('fit', 0):.0%}, sharpness {c.get('fitSharpness', 0):.2f})")
-        if abs(c.get("tracedDiffPct", 99)) > MAX_AREA_PCT: why.append(f"traced area {c['tracedDiffPct']:+.1f}% from called acres")
+        if not unit_survey_agrees(c.get("unitSurveySharpness", 0), c.get("within10ft", 0), dev):
+            why.append(f"at this placement RRC's survey lines miss the unit plat's own ({c.get('unitSurveyMatch', 0):.0%}, sharpness {c.get('unitSurveySharpness', 0):.2f})")
+        n_lab, ok_lab = c.get("surveyNamesCounted", 0), c.get("surveyNamesConsistent", 0)
+        if n_lab and ok_lab < 0.5 * n_lab:
+            why.append(f"at this placement the unit plat's survey names land in other surveys ({ok_lab} of {n_lab} in their own)")
+        t = abs(c.get("tracedDiffPct", 99))
+        if t > MAX_AREA_PCT and not (t <= MAX_DRAWN_PCT and c.get("completeness", 0) >= MIN_COMPLETE): why.append(f"traced area {c['tracedDiffPct']:+.1f}% from called acres")
     elif c.get("clipped"):
         why.append("outline runs off the well plat's sheet")
-    if abs(c.get("mappedDiffPct", 99)) > MAX_AREA_PCT: why.append(f"mapped area {c.get('mappedDiffPct', 0):+.1f}% from called acres")
+    if c["kind"] == "old-plat":
+        if c.get("wellInsideFt", -1e9) < -100: why.append("the well's drawn surface location is outside this outline")
+        n_lab, ok_lab = c.get("surveyNamesCounted", 0), c.get("surveyNamesConsistent", 0)
+        if n_lab and ok_lab < 0.5 * n_lab: why.append(f"the plat's survey names land in other surveys ({ok_lab} of {n_lab} in their own)")
+        if abs(c.get("mappedDiffPct", 99)) > MAX_AREA_PCT: why.append(f"mapped area {c.get('mappedDiffPct', 0):+.1f}% from the W-1 unit acres")
+        return why
+    # Acreage: within 2.5% of the called acres, or -- when the trace is verified complete (it accounts for
+    # >= 95% of the unit's own boundary marking) -- within 15%, published with both figures shown, since
+    # the plat's drawing itself differs from the acres written on it.
+    d = abs(c.get("mappedDiffPct", 99)); comp = c.get("completeness", 0)
+    if d > MAX_AREA_PCT and not (d <= MAX_DRAWN_PCT and comp >= MIN_COMPLETE):
+        why.append(f"mapped area {c.get('mappedDiffPct', 0):+.1f}% from called acres" + (f" (trace accounts for {comp:.0%} of the unit's marking)" if d <= MAX_DRAWN_PCT else ""))
     return why
 
 
@@ -68,11 +135,18 @@ def main(wells_bundle, out_bundle, report_dir):
     W = {w["api8"]: w for w in json.load(gzip.open(wells_bundle))["wells"] if w["api8"]}
     shift = datum.default_shift()
     scan = {r["id"]: r for r in json.load(open(f"{U}/work/scan.json"))}
+    old_place = json.load(open(f"{U}/work/old_place.json")) if os.path.exists(f"{U}/work/old_place.json") else {}
+    for pid, g in old_place.items():  # older scanned plats placed by survey lines (old_plats.py)
+        if g.get("ok") and pid in scan: scan[pid]["georef"] = dict(g, oldPlat=True)
     vec = json.load(open(f"{U}/work/units_sp_vector.json")) if os.path.exists(f"{U}/work/units_sp_vector.json") else []
     for c in vec:  # Mitsui plats don't name the unit: it is the well's unit
         w = W.get(c["api"], {})
         c["name"] = f"{title(w.get('leaseName') or 'Unit')} {w.get('wellNo') or ''} Unit".replace("  ", " ")
-    cands = [c for c in sp["unitPlats"] + sp["wellPlatUnits"] + vec if "fail" not in c and c.get("calledAcres")]
+    old = sp.get("oldPlatUnits", [])
+    for c in old:  # older plats: the unit is the well's (W-1) unit
+        w = W.get(c["api"], {}); n = title(w.get("leaseName") or "Unit")
+        c["name"] = n if re.search(r"\bunit\b", n, re.I) else f"{n} Unit"
+    cands = [c for c in sp["unitPlats"] + sp["wellPlatUnits"] + vec + old if "fail" not in c and c.get("calledAcres")]
     import cv2
     from fit_sharpness import FitScorer
     for c in cands:  # how decisively each lined-up unit plat sits on its well plat
@@ -110,10 +184,14 @@ def main(wells_bundle, out_bundle, report_dir):
             rejected.append({"unit": title(cs[0]["name"]), "calledAcres": cs[0]["calledAcres"], "wells": sorted({f"{v['lease']} {v['wellNo']}" for v in wells.values()}), "why": sorted({w for c in cs for w in passes(c)}),
                              "plats": sorted({c["file"] for c in cs})})
             continue
-        best = sorted(ok, key=lambda c: (c["kind"] != "unit-plat", -(c.get("fitSharpness") or 0), abs(c["mappedDiffPct"])))[0]
+        best = sorted(ok, key=lambda c: (c["kind"] != "unit-plat", c["kind"] == "old-plat", -(c.get("fitSharpness") or 0), abs(c["mappedDiffPct"])))[0]
         poly = make_valid(Polygon(best["sp"]))
         if poly.geom_type != "Polygon": poly = max(getattr(poly, "geoms", [poly]), key=lambda g: g.area)
-        poly = poly.buffer(-best.get("halfWidthFt", 0.0), join_style=2).simplify(4.0, preserve_topology=True)
+        poly = poly.buffer(0)
+        if poly.geom_type != "Polygon": poly = max(getattr(poly, "geoms", [poly]), key=lambda g: g.area)
+        inset = poly.buffer(-best.get("halfWidthFt", 0.0), join_style=2)
+        if inset.geom_type != "Polygon": inset = max(getattr(inset, "geoms", [inset]), key=lambda g: g.area) if not inset.is_empty else inset
+        poly = (inset if not inset.is_empty else poly).simplify(4.0, preserve_topology=True)
         if poly.is_empty or poly.geom_type != "Polygon": rejected.append({"unit": title(best["name"]), "calledAcres": best["calledAcres"], "why": ["outline collapsed when cleaned"]}); continue
         acres = poly.area / 43560
         sp_polys.append(poly)
@@ -127,7 +205,9 @@ def main(wells_bundle, out_bundle, report_dir):
             "calledAcres": float(best["calledAcres"]), "mappedAcres": round(acres, 2),
             "wells": sorted(wells.values(), key=lambda v: (v["lease"] or "", v["wellNo"] or "")),
             "plat": {"permit": best["permit"], "rrcId": man.get("id") or best["plat"], "url": man.get("url") or "", "file": man.get("origName") or best["file"]},
-            "placement": {"method": best["kind"], "controlResidualFt": round(best["controlResidualFt"], 2), "within10ftPct": round(100 * best["within10ft"], 1) if best["kind"] == "unit-plat" else None},
+            "drawnVsCalledPct": round(100 * (acres - best["calledAcres"]) / best["calledAcres"], 1) if abs(100 * (acres - best["calledAcres"]) / best["calledAcres"]) > MAX_AREA_PCT else None,
+            "placement": {"method": "well-plat" if best["kind"] == "old-plat" else best["kind"], "basis": "survey-lines" if best["kind"] == "old-plat" else "well-points",
+                          "controlResidualFt": round(best["controlResidualFt"], 2), "within10ftPct": round(100 * best["within10ft"], 1) if best["kind"] == "unit-plat" else None},
             "_fit": {"fit": best.get("fit"), "fitSharpness": best.get("fitSharpness"), "within10ft": best.get("within10ft")},
             "rings": [[[round(x, 6), round(y, 6)] for x, y in r] for r in rings],
             "_qa": {"wlPlat": best.get("wlPlat") or best["plat"], "sourcePlat": best["plat"], "areaDiffPct": round(100 * (acres - best["calledAcres"]) / best["calledAcres"], 2),
@@ -145,7 +225,11 @@ def main(wells_bundle, out_bundle, report_dir):
         have = {(w["api"], w["permit"]) for w in units[dup]["wells"]}
         units[dup]["wells"] += [w for w in units[i]["wells"] if (w["api"], w["permit"]) not in have]
         units[dup].setdefault("_alsoDrawnAs", []).append({"name": units[i]["name"], "calledAcres": units[i]["calledAcres"], "plat": units[i]["plat"]["file"]})
+    polys = [sp_polys[i] for i in sorted(keep)]
     units = [units[i] for i in sorted(keep)]
+    colors, max_nb, clashes = color_units(polys, [u["id"] for u in units])
+    for u, c in zip(units, colors): u["colorIndex"] = c
+    print(f"unit colors: {len(UNIT_PALETTE)}-color palette, most neighbours of one unit {max_nb}, neighbouring units sharing a color {clashes}")
     for u in units: u["wells"].sort(key=lambda v: (v["lease"] or "", v["wellNo"] or ""))
     print(f"merged {len(merged_into)} duplicate drawings into the units they repeat")
     ds = {"key": "rrc-tx-pooled-units", "builtAt": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),

@@ -23,6 +23,9 @@ def sp_to_px(t, xy):
 def main():
     qa = json.load(open(f"{U}/work/bundle_qa.json"))
     scan = {r["id"]: r for r in json.load(open(f"{U}/work/scan.json"))}
+    old_place = json.load(open(f"{U}/work/old_place.json")) if os.path.exists(f"{U}/work/old_place.json") else {}
+    for pid, g in old_place.items():  # older scanned plats placed by survey lines (old_plats.py)
+        if g.get("ok") and pid in scan: scan[pid]["georef"] = dict(g, oldPlat=True)
     sp = json.load(open(f"{U}/work/units_sp.json"))
     src = {(c["plat"], c.get("wlPlat")): c for c in sp["unitPlats"] + sp["wellPlatUnits"] if "fail" not in c}
     out = f"{U}/work/qa"; os.makedirs(out, exist_ok=True)
@@ -31,6 +34,7 @@ def main():
         wl = u["_qa"]["wlPlat"]; t = u["_qa"]["transform"]
         img = cv2.imread(f"{U}/work/img/{wl}.png")
         poly = Polygon(u["_qa"]["spOuter"]).buffer(-u["_qa"]["halfWidthFt"], join_style=2)
+        if poly.geom_type == "MultiPolygon": poly = max(poly.geoms, key=lambda g: g.area)  # same rule as the bundle's inset
         px = sp_to_px(t, np.array(poly.exterior.coords))
         g = scan.get(wl, {}).get("georef") or {"pixels": {}}
         vis = (img * 0.55 + 110).astype(np.uint8)
