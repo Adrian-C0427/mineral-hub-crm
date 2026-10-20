@@ -32,6 +32,8 @@ export interface PooledUnit {
   mappedAcres: number;
   /** Set when the plat's own drawing differs from its called acres by more than 2.5% (mapped vs called, %). */
   drawnVsCalledPct?: number | null;
+  /** Index into the map's unit palette, chosen so neighbouring units never share a color. */
+  colorIndex?: number | null;
   wells: PooledUnitWell[];
   plat: { permit: string; rrcId: string; url: string; file: string };
   placement: {
@@ -76,6 +78,9 @@ export function parsePooledUnits(json: Buffer | string, version: string): Pooled
     if (u.placement?.basis != null && u.placement.basis !== "well-points" && u.placement.basis !== "survey-lines") {
       throw new Error(`pooled units: ${u.id} has an unknown placement basis`);
     }
+    if (u.colorIndex != null && !(Number.isInteger(u.colorIndex) && u.colorIndex >= 0 && u.colorIndex < 64)) {
+      throw new Error(`pooled units: ${u.id} has a bad colorIndex`);
+    }
     if (u.drawnVsCalledPct != null && !(Number.isFinite(u.drawnVsCalledPct) && Math.abs(u.drawnVsCalledPct) <= 15)) {
       throw new Error(`pooled units: ${u.id} has an out-of-range drawnVsCalledPct`);
     }
@@ -102,6 +107,7 @@ export function pooledUnitsGeoJSON(ds: PooledUnitsDataset): GeoJSON.FeatureColle
         calledAcres: u.calledAcres,
         mappedAcres: u.mappedAcres,
         drawnVsCalledPct: u.drawnVsCalledPct ?? null,
+        colorIndex: u.colorIndex ?? null,
         label: `${u.name}\n${u.calledAcres.toLocaleString("en-US", { maximumFractionDigits: 2 })} ac`,
         // MapLibre flattens nested properties to strings; keep the structured bits as JSON.
         wells: JSON.stringify(u.wells),

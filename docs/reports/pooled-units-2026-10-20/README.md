@@ -79,6 +79,8 @@ Nothing is drawn by hand or estimated.
 - **Well paths.** 119 of 130 unit-well pairs have the well's RRC path crossing or touching the unit. The other 11 are neighbouring units the plat also shows (100-700 ft away), which is why the map panel says "Shown on the permit plat for...".
 - **Visual review.** Every published outline was drawn back onto its plat and reviewed by eye (`work/qa/` in the pipeline folder). For the older plats, RRC's survey lines were also drawn through every accepted placement. That review caught a placement that had locked onto the sheet border (Gresham Trust #3); the border is now removed before matching.
 
+**On the map**, each unit is drawn in its own color (outline, light fill and label), picked from an 8-color palette so that no two touching or overlapping units share one. The unit's panel shows the same color.
+
 Where the same unit appears on several wells' plats, it is published once: outlines overlapping at least 80%, with called acres within 2%, are one unit, and all their wells are listed.
 
 ## Units on the map

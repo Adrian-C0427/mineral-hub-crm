@@ -59,6 +59,36 @@ def clean_ocr_name(n):
     return f if re.fullmatch(r"[A-Za-z0-9 .,'\"&()#/-]+", f.strip()) else None
 
 
+# One color per unit on the map: client/src/lib/mapLayers.ts UNIT_PALETTE holds the same colors in the
+# same order; the bundle carries each unit's index into it.
+UNIT_PALETTE = ["#c2410c", "#a16207", "#4d7c0f", "#15803d", "#0e7490", "#1d4ed8", "#6d28d9", "#be185d"]
+NEIGHBOR_FT = 150.0  # outlines this close (or overlapping) count as neighbours
+
+
+def color_units(polys, ids):
+    """Color index per unit so that no two neighbouring units share a color: largest neighbourhoods
+    first, each taking the free color whose hue is farthest from its neighbours' (ties: least used)."""
+    import colorsys
+    from shapely.strtree import STRtree
+    hue = [colorsys.rgb_to_hls(*(int(c[i:i + 2], 16) / 255 for i in (1, 3, 5)))[0] * 360 for c in UNIT_PALETTE]
+    hd = lambda a, b: min(abs(hue[a] - hue[b]), 360 - abs(hue[a] - hue[b]))
+    grown = [p.buffer(NEIGHBOR_FT / 2) for p in polys]
+    tree = STRtree(grown)
+    nb = [set() for _ in polys]
+    for i, g in enumerate(grown):
+        for j in map(int, tree.query(g)):
+            if j != i and g.intersects(grown[j]): nb[i].add(j); nb[j].add(i)
+    color, used = [None] * len(polys), [0] * len(UNIT_PALETTE)
+    for i in sorted(range(len(polys)), key=lambda i: (-len(nb[i]), ids[i])):
+        taken = {color[j] for j in nb[i] if color[j] is not None}
+        free = [c for c in range(len(UNIT_PALETTE)) if c not in taken]
+        if free: c = max(free, key=lambda c: (min((hd(c, t) for t in taken), default=180.0), -used[c], -c))
+        else: c = min(range(len(UNIT_PALETTE)), key=lambda c: (sum(color[j] == c for j in nb[i]), used[c]))
+        color[i] = c; used[c] += 1
+    clashes = sum(1 for i in range(len(polys)) for j in nb[i] if j > i and color[i] == color[j])
+    return color, max((len(n) for n in nb), default=0), clashes
+
+
 def unit_survey_agrees(sharp, within10, orient_dev):  # same rule as stage3_units.unit_survey_agrees
     return sharp >= UNIT_SURVEY_SHARP or within10 >= STRONG_WITHIN10 or (sharp >= 1.10 and within10 >= 0.60 and orient_dev <= 15)
 
@@ -195,7 +225,11 @@ def main(wells_bundle, out_bundle, report_dir):
         have = {(w["api"], w["permit"]) for w in units[dup]["wells"]}
         units[dup]["wells"] += [w for w in units[i]["wells"] if (w["api"], w["permit"]) not in have]
         units[dup].setdefault("_alsoDrawnAs", []).append({"name": units[i]["name"], "calledAcres": units[i]["calledAcres"], "plat": units[i]["plat"]["file"]})
+    polys = [sp_polys[i] for i in sorted(keep)]
     units = [units[i] for i in sorted(keep)]
+    colors, max_nb, clashes = color_units(polys, [u["id"] for u in units])
+    for u, c in zip(units, colors): u["colorIndex"] = c
+    print(f"unit colors: {len(UNIT_PALETTE)}-color palette, most neighbours of one unit {max_nb}, neighbouring units sharing a color {clashes}")
     for u in units: u["wells"].sort(key=lambda v: (v["lease"] or "", v["wellNo"] or ""))
     print(f"merged {len(merged_into)} duplicate drawings into the units they repeat")
     ds = {"key": "rrc-tx-pooled-units", "builtAt": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),

@@ -36,6 +36,13 @@ describe("pooled units bundle", () => {
     expect(() => parsePooledUnits(bundle([unit({ drawnVsCalledPct: 40 })]), "v")).toThrow(/drawnVsCalledPct/);
   });
 
+  it("passes each unit's color index through, and rejects a bad one", () => {
+    const fc = pooledUnitsGeoJSON(parsePooledUnits(bundle([unit({ colorIndex: 3 })]), "v"));
+    expect(fc.features[0].properties?.colorIndex).toBe(3);
+    expect(pooledUnitsGeoJSON(parsePooledUnits(bundle([unit()]), "v")).features[0].properties?.colorIndex).toBeNull();
+    expect(() => parsePooledUnits(bundle([unit({ colorIndex: 2.5 })]), "v")).toThrow(/colorIndex/);
+  });
+
   it("accepts the survey-line placement basis of older scanned plats and rejects unknown ones", () => {
     const old = unit({ placement: { method: "well-plat", basis: "survey-lines", controlResidualFt: 0, within10ftPct: null } });
     expect(JSON.parse(String(pooledUnitsGeoJSON(parsePooledUnits(bundle([old]), "v")).features[0].properties?.placement))).toMatchObject({ basis: "survey-lines" });
