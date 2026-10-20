@@ -10,6 +10,7 @@ import { countyKey, countyNoun, countyScopePredicate, countySearchTerm, GIS_STAT
 import { isLaFid, laParishLabel } from "../domain/sonrisWells.js";
 import { sonrisWellsAvailable } from "../services/sonrisWells.js";
 import { rrcRefreshAvailable } from "../services/rrcRefresh.js";
+import { pooledUnitsPayload } from "../services/pooledUnits.js";
 import { rrcWellRefreshDetail } from "../services/rrcWellQueries.js";
 import { identifierDigits, LA_WELL_SQL, laWellDetail } from "../services/sonrisQueries.js";
 
@@ -947,6 +948,23 @@ gisRouter.get(
     // ~11k-row fetch isn't repeated on every map load.
     res.setHeader("Cache-Control", "public, max-age=3600");
     res.json(rows);
+  }),
+);
+
+/**
+ * Pooled-unit outlines from operators' RRC permit plats (domain/pooledUnits).
+ * Static, org-independent reference data shipped with the build: one cached
+ * payload, revalidated by ETag.
+ */
+gisRouter.get(
+  "/units",
+  asyncHandler(async (req, res) => {
+    const p = pooledUnitsPayload();
+    if (!p) return res.json({ type: "FeatureCollection", features: [] });
+    res.setHeader("Cache-Control", "private, max-age=3600");
+    res.setHeader("ETag", p.etag);
+    if (req.headers["if-none-match"] === p.etag) return res.status(304).end();
+    res.type("application/json").send(p.body);
   }),
 );
 

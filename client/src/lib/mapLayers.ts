@@ -240,6 +240,55 @@ export function addTractLayers(map: maplibregl.Map, beforeId?: string): void {
     paint: { "text-color": "#115e59", "text-halo-color": "#ffffff", "text-halo-width": 1.4 } }, before);
 }
 
+/** Source id of the pooled-unit overlay (operators' RRC permit plats; server domain/pooledUnits). */
+export const UNIT_SOURCE = "pooled-units";
+export const UNIT_LAYERS = ["units-fill", "units-line", "units-label"] as const;
+/** One hue per operator, chosen apart from the well-status and tract colors. */
+export const UNIT_OPERATOR_COLORS: Record<string, string> = { Comstock: "#b45309", Mitsui: "#be185d" };
+const UNIT_FALLBACK_COLOR = "#57534e";
+
+/**
+ * Pooled-unit outlines as drawn on the operators' permit plats, placed from
+ * each plat's surveyed points (see server domain/pooledUnits for the checks a
+ * unit passed to be included). Solid outline, faint fill, name + called acres
+ * from zoom 11; inserted under `beforeId` so wells and tracts stay on top.
+ */
+export function addUnitLayers(map: maplibregl.Map, beforeId?: string): void {
+  map.addSource(UNIT_SOURCE, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  const color = ["match", ["get", "operator"], ...Object.entries(UNIT_OPERATOR_COLORS).flat(), UNIT_FALLBACK_COLOR] as unknown as maplibregl.ExpressionSpecification;
+  const before = beforeId && map.getLayer(beforeId) ? beforeId : undefined;
+  map.addLayer({ id: "units-fill", type: "fill", source: UNIT_SOURCE, paint: { "fill-color": color, "fill-opacity": 0.07 } }, before);
+  map.addLayer({ id: "units-line", type: "line", source: UNIT_SOURCE, paint: {
+    "line-color": color,
+    "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1, 12, 2, 15, 3] as unknown as maplibregl.ExpressionSpecification,
+    "line-opacity": 0.9 } }, before);
+  map.addLayer({ id: "units-label", type: "symbol", source: UNIT_SOURCE, minzoom: 11, layout: {
+    "text-field": ["get", "label"] as unknown as maplibregl.ExpressionSpecification, "text-font": ["Noto Sans Regular"],
+    "text-size": ["interpolate", ["linear"], ["zoom"], 11, 10, 14, 13] as unknown as maplibregl.ExpressionSpecification,
+    "text-allow-overlap": false, "text-optional": true, "symbol-placement": "point" },
+    paint: { "text-color": color, "text-halo-color": "#ffffff", "text-halo-width": 1.4 } }, before);
+}
+
+/** A clicked pooled unit, as the map panel shows it. */
+export interface UnitInfo {
+  id: string; name: string; operator: string; county: string;
+  calledAcres: number; mappedAcres: number;
+  wells: { api: string; lease: string | null; wellNo: string | null; permit: string }[];
+  plat: { permit: string; rrcId: string; url: string; file: string } | null;
+  placement: { method: "unit-plat" | "well-plat"; controlResidualFt: number; within10ftPct: number | null } | null;
+}
+export function unitInfo(p: Record<string, unknown>): UnitInfo {
+  const json = <T,>(v: unknown, fallback: T): T => {
+    if (typeof v !== "string") return (v as T) ?? fallback;
+    try { return JSON.parse(v) as T; } catch { return fallback; }
+  };
+  return {
+    id: String(p.id ?? ""), name: String(p.name ?? "Pooled unit"), operator: String(p.operator ?? ""), county: String(p.county ?? ""),
+    calledAcres: Number(p.calledAcres), mappedAcres: Number(p.mappedAcres),
+    wells: json(p.wells, []), plat: json(p.plat, null), placement: json(p.placement, null),
+  };
+}
+
 /** A clicked imported tract: its name, source file, owning deal, and attributes. */
 export interface TractInfo {
   id: string; name: string; sourceFile: string;
