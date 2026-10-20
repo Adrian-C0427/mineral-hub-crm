@@ -9,7 +9,7 @@ import { US_STATE_OPTIONS, US_STATE_LABELS } from "../lib/options";
 import { Select } from "../components/Select";
 import { downloadCsv } from "../lib/csv";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION, PARISHES, STATE_FIPS, MAP_COUNTY_LABELS, mapCountyOptions } from "../lib/counties";
-import { addCadastralLayers, addTractLayers, tractInfo, TRACT_SOURCE, STATUS_COLOR, type TractInfo, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
+import { addCadastralLayers, addTractLayers, addUnitLayers, tractInfo, unitInfo, TRACT_SOURCE, UNIT_SOURCE, UNIT_OPERATOR_COLORS, STATUS_COLOR, type TractInfo, type UnitInfo, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
 import { normalizeWellStatus, SOURCE_LABEL, STATUS_COLORS, STATUS_FLAG_LABEL, WELL_STATUSES } from "../lib/wellStatus";
 import { collectCoords, bboxOfPoints } from "../lib/geo";
 import { FormSection } from "../components/kit";
@@ -71,9 +71,10 @@ type WellProps = { fid: number; api: string; api8: string; wellNo: string | null
 type SelWell = { kind: "well" } & WellProps;
 type SelHotspot = { kind: "hotspot"; summary: AreaSummary; periodLabel: string };
 type SelTract = { kind: "tract" } & TractInfo;
+type SelUnit = { kind: "unit" } & UnitInfo;
 /** A wellbore whose surface well is outside the refreshed counties (only the bore is on the map). */
 type SelBore = { kind: "bore"; fid: number; surfaceId: number; api: string | null; wellboreType: string | null; boreStatus: string | null; bhSource: string | null };
-type Selected = SelAbstract | SelWell | SelHotspot | SelTract | SelBore | null;
+type Selected = SelAbstract | SelWell | SelHotspot | SelTract | SelUnit | SelBore | null;
 
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
 
@@ -104,8 +105,8 @@ const MAP_LAYERS_KEY = "mh-map-layers:v1";
 const MAP_DOCK_KEY = "mh-map-dock:v1";
 const MAP_VIEW_KEY = "mh-map-view:v1";
 const MAP_FILTERS_KEY = "mh-map-filters:v1";
-type MapLayers = { boundaries: boolean; absNums: boolean; surveyNames: boolean; deals: boolean; assets: boolean; wells: boolean; wellbores: boolean; tracts: boolean };
-const DEFAULT_MAP_LAYERS: MapLayers = { boundaries: true, absNums: true, surveyNames: true, deals: true, assets: true, wells: true, wellbores: true, tracts: true };
+type MapLayers = { boundaries: boolean; absNums: boolean; surveyNames: boolean; deals: boolean; assets: boolean; wells: boolean; wellbores: boolean; tracts: boolean; units: boolean };
+const DEFAULT_MAP_LAYERS: MapLayers = { boundaries: true, absNums: true, surveyNames: true, deals: true, assets: true, wells: true, wellbores: true, tracts: true, units: true };
 interface MapCam { center: [number, number]; zoom: number }
 /** A named, reusable combination of every filter on the Filters panel. */
 interface MapFilterState {
@@ -352,6 +353,12 @@ export function MapView() {
       void loadTracts();
       map.on("mouseenter", "tracts-fill", () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", "tracts-fill", () => (map.getCanvas().style.cursor = ""));
+      // Pooled units from operators' permit plats (reference data, all orgs),
+      // under the tracts so an imported boundary stays on top.
+      addUnitLayers(map, "tracts-fill");
+      void loadUnits();
+      map.on("mouseenter", "units-fill", () => (map.getCanvas().style.cursor = "pointer"));
+      map.on("mouseleave", "units-fill", () => (map.getCanvas().style.cursor = ""));
 
       // Production heat map — inserted below the cadastral fill so parcels and
       // labels stay readable over it. Weight `w` is pre-normalized to [0,1] per
@@ -435,6 +442,15 @@ export function MapView() {
           if (tf.length) {
             clearSelection();
             setSelected({ kind: "tract", ...tractInfo(tf[0].properties as Record<string, unknown>) });
+            return;
+          }
+        }
+        // A pooled unit (from the operator's permit plat).
+        if (layersRef.current.units && map.getLayer("units-fill")) {
+          const uf = map.queryRenderedFeatures(e.point, { layers: ["units-fill"] });
+          if (uf.length) {
+            clearSelection();
+            setSelected({ kind: "unit", ...unitInfo(uf[0].properties as Record<string, unknown>) });
             return;
           }
         }
@@ -592,6 +608,7 @@ export function MapView() {
     vis("wells", L.wells); vis("wellbores", L.wellbores); vis("wellbores-sel", L.wellbores); vis("permit-hl-bores", L.wellbores);
     vis("bottomholes", L.wellbores); vis("bottomholes-sel", L.wellbores);
     vis("tracts-fill", L.tracts); vis("tracts-line", L.tracts); vis("tracts-label", L.tracts);
+    vis("units-fill", L.units); vis("units-line", L.units); vis("units-label", L.units);
     applyHighlight();
   }
   // Filter behavior: filters never restyle the map — instead the map zooms to
@@ -900,6 +917,14 @@ export function MapView() {
       (mapRef.current?.getSource(TRACT_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(fc);
     } catch { /* overlay is optional — the map works without it */ }
   }
+  // Pooled-unit outlines (static reference data; the server caches it and
+  // revalidates by ETag).
+  async function loadUnits() {
+    try {
+      const fc = await api.get<GeoJSON.FeatureCollection>("/gis/units");
+      (mapRef.current?.getSource(UNIT_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(fc);
+    } catch { /* overlay is optional — the map works without it */ }
+  }
   // "Show on map" for one upload: turn the tracts layer on and frame that
   // file's boundaries (from the overlay data already loaded).
   function showImport(importId: string) {
@@ -1190,6 +1215,7 @@ export function MapView() {
               { key: "assets", label: "Mineral assets (owned)" },
               { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores + bottom holes" },
               { key: "tracts", label: "Imported tracts" },
+              { key: "units", label: "Pooled units" },
             ]}
             layers={layers}
             onToggle={(k) => toggle(k as keyof typeof layers)}
@@ -1381,6 +1407,7 @@ export function MapView() {
               {layers.wellbores && <Legend color="#0f766e" label="Wellbore path" line />}
               {layers.wellbores && <Legend color="#0f766e" label="Bottom hole" ring />}
               {permitReq && <Legend color={PERMIT_HL_COLOR} label="Highlighted permit" />}
+              {layers.units && Object.entries(UNIT_OPERATOR_COLORS).map(([op, c]) => <Legend key={op} color={c} label={`${op} pooled unit`} line />)}
             </div>
           ))}
         </div>
@@ -1548,6 +1575,8 @@ export function MapView() {
                 {selected.summary.surveys.length > 0 && <div className="kv" style={{ marginTop: 6 }}><span className="k">Surveys</span><span className="v wrap">{selected.summary.surveys.slice(0, 8).join(", ")}</span></div>}
                 <p className="mc-fp-note">Totals attribute each lease's production evenly across its wells. BOE = oil + gas/6. Click elsewhere to summarize another area.</p>
               </>
+            ) : selected.kind === "unit" ? (
+              <UnitPanel unit={selected} onClose={clearSelection} />
             ) : selected.kind === "tract" ? (
               <>
                 <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.name}</h3><div className="muted" style={{ fontSize: 12 }}>Imported tract · {selected.sourceFile}</div>{selected.dealId && <div style={{ fontSize: 12, marginTop: 2 }}>From deal <Link to={`/deals/${selected.dealId}`}>{selected.dealName ?? "Open deal"}</Link></div>}</div><button className="icon-btn" aria-label="Close" onClick={clearSelection}>×</button></div>
@@ -1620,6 +1649,38 @@ function MapField({ label, count, children }: { label: string; count?: number; c
       <div className="mc-label">{label}{count != null && <span className="mc-count">{num(count)}</span>}</div>
       {children}
     </div>
+  );
+}
+
+/** A clicked pooled unit: what the plat calls it, the wells pooled into it, and how its outline was placed. */
+function UnitPanel({ unit, onClose }: { unit: UnitInfo; onClose: () => void }) {
+  const acres = (n: number) => `${n.toLocaleString("en-US", { maximumFractionDigits: 2 })} ac`;
+  const diffPct = unit.calledAcres > 0 ? (100 * (unit.mappedAcres - unit.calledAcres)) / unit.calledAcres : null;
+  const pl = unit.placement;
+  return (
+    <>
+      <div className="section-head"><div><h3 style={{ margin: 0 }}>{unit.name}</h3><div className="muted" style={{ fontSize: 12 }}>{[`${unit.operator} pooled unit`, unit.county ? `${unit.county} County` : null].filter(Boolean).join(" · ")}</div></div><button className="icon-btn" aria-label="Close" onClick={onClose}>×</button></div>
+      <div className="dd-grid mc-kv" style={{ marginTop: 6 }}>
+        <KV k="Unit size" v={acres(unit.calledAcres)} />
+        <KV k="Mapped outline" v={`${acres(unit.mappedAcres)}${diffPct != null ? ` (${diffPct >= 0 ? "+" : ""}${diffPct.toFixed(1)}%)` : ""}`} />
+        <KV k="Permit" v={unit.plat?.permit ?? null} />
+      </div>
+      {unit.wells.length > 0 && (
+        <>
+          <div className="mc-fp-sec">{unit.wells.length === 1 ? "Well" : `${unit.wells.length} wells`}</div>
+          {unit.wells.map((w) => (
+            <div key={`${w.api}-${w.permit}`} className="mc-fp-row"><span>{[w.lease, w.wellNo].filter(Boolean).join(" ") || "Well"}</span><span className="muted">API 42-{w.api.slice(0, 3)}-{w.api.slice(3)}</span></div>
+          ))}
+        </>
+      )}
+      {unit.plat?.url && <p style={{ fontSize: 12, margin: "8px 0 0" }}><a href={unit.plat.url} target="_blank" rel="noreferrer">Open the RRC permit plat</a></p>}
+      <p className="mc-fp-note">
+        Outline as drawn on the operator's permit plat (unit size is the acreage the plat calls).
+        {pl && ` Placed from the plat's surveyed well points (within ${pl.controlResidualFt < 1 ? "1" : Math.ceil(pl.controlResidualFt)} ft)`}
+        {pl?.method === "unit-plat" && pl.within10ftPct != null && `; ${Math.round(pl.within10ftPct)}% of its edge matches the well plat within about 10 ft`}
+        {pl && "."}
+      </p>
+    </>
   );
 }
 
