@@ -1667,7 +1667,7 @@ function UnitPanel({ unit, onClose }: { unit: UnitInfo; onClose: () => void }) {
       </div>
       {unit.wells.length > 0 && (
         <>
-          <div className="mc-fp-sec">{unit.wells.length === 1 ? "Well" : `${unit.wells.length} wells`}</div>
+          <div className="mc-fp-sec">Shown on the permit plat for</div>
           {unit.wells.map((w) => (
             <div key={`${w.api}-${w.permit}`} className="mc-fp-row"><span>{[w.lease, w.wellNo].filter(Boolean).join(" ") || "Well"}</span><span className="muted">API 42-{w.api.slice(0, 3)}-{w.api.slice(3)}</span></div>
           ))}
