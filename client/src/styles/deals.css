@@ -10,10 +10,13 @@
 .deals-page > .banner,
 .deals-page > .ct-card { margin: 0; }
 
-/* --- Header: title, stat line, New deal --------------------------------- */
+/* --- Header: title, stat line, New deal ---------------------------------
+   The stat line keeps one line of height (ellipsis past it) so a longer or
+   shorter sentence never moves the tabs and everything below them. */
 .dl-head { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .dl-head h1 { margin: 0; font-size: 26px; font-weight: 600; line-height: 1.15; letter-spacing: -0.022em; color: var(--ink); }
-.dl-stats { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 13px; color: var(--ink-3); }
+.dl-stats { display: flex; flex-wrap: nowrap; align-items: center; gap: 10px; min-height: 20px; font-size: 13px; color: var(--ink-3); overflow: hidden; white-space: nowrap; }
+.dl-stats > span { flex: none; }
 .dl-stats b { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 .dl-stats b.pos { color: var(--success); }
 .dl-stats b.neg { color: var(--danger-ink); }
@@ -45,11 +48,30 @@
 .deals-page > .banner-warn strong { color: var(--warn-ink); font-weight: 600; }
 
 /* --- KPI strip: deals in view, total cost, blended $/NMA and $/NRA -------
-   The shared stat strip (kit.css), sized like the Mineral Assets strip. */
+   The shared stat strip (kit.css), sized like the Mineral Assets strip. Every
+   cell holds a fixed one-line label, value and sub-line, so the strip's height
+   is the same for every filter and the table never jumps under it. */
 .deals-page > .dl-kpis { margin: 0; }
 .dl-kpis .stat-cell { padding: 18px 22px; }
-.dl-kpis .stat-value { font-size: 26px; font-weight: 500; letter-spacing: -0.025em; line-height: 1.1; }
+.dl-kpis .stat-label, .dl-kpis .stat-sub, .dl-kpis .stat-value { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
+.dl-kpis .stat-value { font-size: 26px; font-weight: 500; letter-spacing: -0.025em; line-height: 1.1; min-height: 29px; }
+.dl-kpis .stat-sub { min-height: 17px; }
 .dl-kpi-unit { margin-left: 3px; font-size: 14px; font-weight: 500; color: var(--ink-3); letter-spacing: 0; }
+
+/* Desktop list layout: the card always fills the window below the strip, so
+   the pager stays anchored at the bottom and a view or filter that leaves
+   fewer rows doesn't pull the card (and everything in it) up the page. Rows
+   sit at the top of the table area; the space below them simply stays empty.
+   Same media query as the shared .page-fill rules (styles/shared.css). */
+@media not ((max-width: 760px) or ((pointer: coarse) and (max-height: 500px))) {
+  .deals-page.page-fill > .dl-card,
+  .deals-page.page-fill > .dl-card > .cv-table,
+  .deals-page.page-fill > .dl-card .table-edge-wrap,
+  .deals-page.page-fill > .dl-card .table-scroll { flex: 1 1 auto; }
+}
+
+/* Filter trays: the active pill moves with a short fade rather than snapping. */
+.dl-stage-filter .seg-item, .dl-visibility .seg-item { transition: background-color .12s ease, color .12s ease, box-shadow .12s ease; }
 
 /* --- Visibility (Active / Hidden / All) beside the stage filter ---------- */
 .dl-vis { display: inline-flex; align-items: center; gap: 8px; }
@@ -74,6 +96,9 @@
 }
 .deals-page .dl-card .cv-toolbar .cv-btn:hover,
 .deals-page .dl-card .cv-toolbar .cv-btn.active { border-color: var(--line-hover); }
+/* Own line, full width (scrolls sideways when there are many stages) — its
+   width differs per view, so sharing a line would re-wrap the toolbar. */
+.deals-page .dl-card .cv-toolbar .dl-stage-filter { flex: 1 0 100%; max-width: 100%; align-self: flex-start; }
 .dl-stage-filter.seg { padding: 3px; gap: 2px; border-radius: var(--radius); background: var(--surface-3); overflow-x: auto; scrollbar-width: none; }
 .dl-stage-filter.seg::-webkit-scrollbar { display: none; }
 .dl-stage-filter .seg-item { height: 26px; min-height: 26px; padding: 0 10px; border-radius: var(--radius-pill-sm); font-size: 12.5px; }
