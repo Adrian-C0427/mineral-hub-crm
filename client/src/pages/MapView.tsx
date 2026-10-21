@@ -22,7 +22,7 @@ import { type LaWellDetail, sectionTownship, unitProductionTitle, ymLabel } from
 import { abstractShortLabel, countyStateLabel, formatAbstract, isSectionLabel, rankAbstracts, sectionLabel, sectionNumber, surveyLabel } from "../lib/abstracts";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, StageBadge, PriorityBadge, ChipList } from "../components/ui";
-import { fmtDate, money, num } from "../lib/format";
+import { fmtDate, money, num, acres } from "../lib/format";
 import {
   extractWells, wellsPerLease, buildPoints, latestMonth, periodWindow, metricGeojson,
   summarize, rankings, detectHotspots, boe,
@@ -1470,9 +1470,9 @@ export function MapView() {
                   {selected.shutInDate && <KV k="Shut in since" v={selected.shutInDate} />}
                   {selected.plugDate && <KV k="Plugged" v={selected.plugDate} />}
                   {selected.injectionType && <KV k="Injection type" v={selected.injectionType} />}
-                  <KV k="Unit size" v={selected.unitAcres != null ? `${num(selected.unitAcres)} ac`
-                    : selected.assignedAcres != null ? `${num(selected.assignedAcres)} ac assigned` : null} />
-                  {selected.unitAcres != null && selected.assignedAcres != null && <KV k="Acres assigned" v={`${num(selected.assignedAcres)} ac`} />}
+                  <KV k="Unit size" v={selected.unitAcres != null ? `${acres(selected.unitAcres)} ac`
+                    : selected.assignedAcres != null ? `${acres(selected.assignedAcres)} ac assigned` : null} />
+                  {selected.unitAcres != null && selected.assignedAcres != null && <KV k="Acres assigned" v={`${acres(selected.assignedAcres)} ac`} />}
                 </div>
                 <WellBoresBlock w={selected} />
                 {selected.formations && (
@@ -1611,7 +1611,7 @@ export function MapView() {
                     {panelAssets.map((a) => (
                       <div key={a.id} className="mc-fp-card">
                         <div className="row" style={{ justifyContent: "space-between" }}><Link to={`/assets/${a.id}`} style={{ fontWeight: 600 }}>{a.name}</Link><span className="badge map-asset-badge">Mineral Asset</span></div>
-                        <div className="dd-grid mc-kv" style={{ marginTop: 6 }}><KV k="Operator" v={a.operator} /><KV k="Asset Type" v={a.assetTypes.length ? <ChipList items={a.assetTypes} /> : null} /><KV k="NMA" v={num(a.acreageNma)} /><KV k="NRA" v={num(a.nra)} /></div>
+                        <div className="dd-grid mc-kv" style={{ marginTop: 6 }}><KV k="Operator" v={a.operator} /><KV k="Asset Type" v={a.assetTypes.length ? <ChipList items={a.assetTypes} /> : null} /><KV k="NMA" v={acres(a.acreageNma)} /><KV k="NRA" v={acres(a.nra)} /></div>
                       </div>
                     ))}
                   </>
@@ -1629,7 +1629,7 @@ export function MapView() {
                       <PriorityBadge priority={d.priority} />
                     </div>
                     <div className="row" style={{ gap: 6, margin: "6px 0" }}><StageBadge stage={d.stage} />{d.selectedBuyer && <span className="muted" style={{ fontSize: 12 }}>→ {d.selectedBuyer.name}</span>}</div>
-                    <div className="dd-grid mc-kv"><KV k="Operator" v={d.operator} /><KV k="Asset Type" v={d.assetTypes.length ? <ChipList items={d.assetTypes} /> : null} /><KV k="NMA" v={num(d.acreageNma)} /><KV k="Profit est." v={money(d.profitEst)} /></div>
+                    <div className="dd-grid mc-kv"><KV k="Operator" v={d.operator} /><KV k="Asset Type" v={d.assetTypes.length ? <ChipList items={d.assetTypes} /> : null} /><KV k="NMA" v={acres(d.acreageNma)} /><KV k="Profit est." v={money(d.profitEst)} /></div>
                   </div>
                 ))}
               </>

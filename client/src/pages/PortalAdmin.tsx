@@ -4,7 +4,7 @@ import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Banner, Spinner, showToast } from "../components/ui";
 import { Segmented, StatStrip } from "../components/kit";
-import { num } from "../lib/format";
+import { acres } from "../lib/format";
 
 interface Offering {
   id: string; name: string; stage: string; counties: string[]; states: string[]; nra: number | null;
@@ -198,7 +198,7 @@ export function PortalAdmin() {
                     <span className="pa-deal-sub">{!o.publishedToPortal ? "Not published" : isPublic ? "Listed in marketplace" : "Hidden from listings"}</span>
                   </div>
                   <span className="pa-dim pa-ellip" role="cell">{loc || "—"}</span>
-                  <span className="pa-right pa-num" role="cell">{o.nra != null ? num(o.nra) : <span className="pa-faint">—</span>}</span>
+                  <span className="pa-right pa-num" role="cell">{o.nra != null ? acres(o.nra) : <span className="pa-faint">—</span>}</span>
                   <span role="cell">
                     <span className={`pa-status ${o.publishedToPortal ? "on" : ""}`}><i />{o.publishedToPortal ? "Published" : "Draft"}</span>
                   </span>

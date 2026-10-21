@@ -21,6 +21,9 @@ export interface AnalyticsDeal {
   operator: string | null;
   askPrice: number | null;
   ourPrice: number | null;
+  // Cost-basis fallback (dealCostBasis): ourPrice ?? purchasePrice ?? askPrice —
+  // the same order the dashboard, the deal serializer and buyer history use.
+  purchasePrice?: number | null;
   acceptedAmount: number | null;
   estimatedClosingCosts: number | null;
   relationshipOwnerId: string | null;

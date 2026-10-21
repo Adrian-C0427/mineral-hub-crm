@@ -13,12 +13,15 @@ import { useRowSelection, BulkActionsBar } from "../components/bulk";
 import { downloadCsv } from "../lib/csv";
 import { compactMoney, money, num, acres, fmtDate } from "../lib/format";
 import { royaltyLabel, royaltyValue } from "../lib/royalty";
-import { perAcreRate } from "../lib/perAcre";
+import { perAcreRates } from "../lib/perAcre";
 import { roundTo, sumMoney } from "../lib/money";
 import { useListState } from "../lib/listState";
 import { rememberPageScroll, usePageScrollRestore } from "../lib/pageScroll";
 import type { DealSummary, UserLite } from "../types";
 import { NewAssetModal } from "../components/NewAssetModal";
+
+/** Cost per NRA from the purchase price — the shared per-acre formula (lib/perAcre). */
+const costPerNra = (d: DealSummary) => perAcreRates(d.purchasePrice, d.acreageNma, d.nra, royaltyValue(d.royaltyRate)).perNra;
 
 // Kept for the detail page and older imports; the vocab lives in lib/assetOptions.
 export { OWNERSHIP_TYPES, OWNERSHIP_STATUSES, PRODUCING_STATUSES } from "../lib/assetOptions";
@@ -87,8 +90,10 @@ export function MineralAssets() {
     return rows;
   }, [scoped, q, statusTab]);
 
+  // Over the rows in view (tab + status + search) — the same population as the
+  // table and its totals row, so the three never disagree.
   const totals = useMemo(() => {
-    const rows = assets ?? [];
+    const rows = filtered;
     const sum = (f: (d: DealSummary) => number | null) => sumMoney(rows.map(f));
     // Unrealized gain sums each asset's own gain (current value − book value,
     // else purchase price — the server's unrealizedGainLoss). An asset missing
@@ -107,7 +112,7 @@ export function MineralAssets() {
       noValue: rows.filter((d) => d.currentValue == null).length,
       nra: roundTo(rows.reduce((s, d) => s + (d.nra ?? 0), 0), 4),
     };
-  }, [assets]);
+  }, [filtered]);
 
   if (!assets) return <Spinner label="Loading mineral assets…" />;
 
@@ -162,8 +167,8 @@ export function MineralAssets() {
     { key: "purchasePrice", header: "Cost", type: "number", align: "right", value: (d) => d.purchasePrice, render: (d) => money(d.purchasePrice),
       total: (rows) => moneyTotal(rows, (d) => d.purchasePrice) },
     // Cost per NRA reconciles with the Cost and NRA columns (total ÷ acres).
-    { key: "costPerNra", header: "Cost per NRA", type: "number", align: "right", value: (d) => perAcreRate(d.purchasePrice, d.nra),
-      render: (d) => money(perAcreRate(d.purchasePrice, d.nra), { cents: true }), legacyDefaultHidden: true, newlyAdded: true },
+    { key: "costPerNra", header: "Cost per NRA", type: "number", align: "right", value: (d) => costPerNra(d),
+      render: (d) => money(costPerNra(d), { cents: true }), legacyDefaultHidden: true, newlyAdded: true },
     { key: "currentValue", header: "Current value", type: "number", align: "right", value: (d) => d.currentValue, render: (d) => <span className="ma-strong">{money(d.currentValue)}</span>,
       total: (rows) => moneyTotal(rows, (d) => d.currentValue) },
     { key: "gain", header: "Unrealized gain", type: "number", align: "right", value: (d) => d.unrealizedGainLoss, render: (d) => signedMoney(d.unrealizedGainLoss), newlyAdded: true,
@@ -185,8 +190,8 @@ export function MineralAssets() {
     downloadCsv(`mineral-assets-${new Date().toISOString().slice(0, 10)}.csv`,
       ["Asset", "Mode", "State", "Counties", "Asset Type", "Producing", "NMA", "NRA", "Royalty Rate", "Cost", "Cost per NRA", "Current Value", "Unrealized Gain", "ROI %", "Income / yr", "Lease", "Lease Expires", "Operator", "Acquired"],
       rows.map((a) => [a.name, ASSET_MODE_LABEL[a.assetMode === "SELL" ? "SELL" : "HOLD"], a.state ?? "", a.counties.join("; "), a.assetTypes.join("/") || (a.ownershipType ?? ""), a.producingStatus ?? "",
-        a.acreageNma ?? "", a.nra ?? "", royaltyLabel(a.royaltyRate), a.purchasePrice ?? "", perAcreRate(a.purchasePrice, a.nra) ?? "", a.currentValue ?? "", a.unrealizedGainLoss ?? "",
-        a.roiSinceAcquisition?.toFixed(1) ?? "", a.royaltyIncomeAnnual ?? "", a.leaseStatuses?.join("; ") ?? "", a.leaseExpirationDate ?? "", a.operator ?? "", a.acquisitionDate ?? ""]));
+        a.acreageNma ?? "", a.nra ?? "", royaltyLabel(a.royaltyRate), a.purchasePrice ?? "", costPerNra(a) ?? "", a.currentValue ?? "", a.unrealizedGainLoss ?? "",
+        a.roiSinceAcquisition ?? "", a.royaltyIncomeAnnual ?? "", a.leaseStatuses?.join("; ") ?? "", a.leaseExpirationDate ?? "", a.operator ?? "", a.acquisitionDate ?? ""]));
 
   // Status filter: All plus each producing status present in this scope.
   const statusOptions = [
@@ -301,7 +306,7 @@ export function MineralAssets() {
           selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
           rowsPerPage={[20, 50, 100, 200]}
           paginationNoun="asset"
-          footerExtra={totals.nra ? ` · ${num(totals.nra)} total NRA` : undefined}
+          footerExtra={totals.nra ? ` · ${acres(totals.nra)} total NRA` : undefined}
         />
       </div>
 

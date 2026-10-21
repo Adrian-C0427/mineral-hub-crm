@@ -64,7 +64,7 @@ mapRouter.get(
 
     const deals = await prisma.deal.findMany({
       where,
-      include: { selectedBuyer: true, relationshipOwner: true, offers: { select: { amount: true } } },
+      include: { selectedBuyer: true, relationshipOwner: true, offers: { select: { id: true, amount: true, status: true } } },
       orderBy: { createdAt: "desc" },
       // Guard against a pathologically large org loading unbounded rows into
       // memory; well above any realistic mapped-deal count (newest first).

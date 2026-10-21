@@ -12,6 +12,7 @@ import { MoneyInput } from "./MoneyInput";
 import { DateField } from "./DateField";
 import { OperatorSelect } from "./OperatorSelect";
 import { money } from "../lib/format";
+import { royaltyValue } from "../lib/royalty";
 import { FormSection } from "./kit";
 import { SectionRail, useSectionRail } from "./SectionRail";
 import {
@@ -64,7 +65,7 @@ export function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onC
     const next = applyAcreageEdit(acre, edit);
     setAcreSource(next.source);
     setF((p) => ({ ...p, acreageNma: next.nma, nra: next.nra, royaltyRate: next.royaltyRate }));
-    setCost((g) => syncPriceGroup(g, numOrNull(next.nma), numOrNull(next.nra)));
+    setCost((g) => syncPriceGroup(g, numOrNull(next.nma), numOrNull(next.nra), royaltyValue(next.royaltyRate)));
   };
   const [states, setStates] = useState<string[]>([]);
   const [counties, setCounties] = useState<string[]>([]);
@@ -83,7 +84,7 @@ export function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onC
   const nma = numOrNull(f.acreageNma), nra = numOrNull(f.nra);
   const purchasePrice = numOrNull(cost.total);
   const currentValue = numOrNull(f.currentValue);
-  const editCost = (field: PriceField) => (v: string) => setCost((g) => editPriceGroup(g, field, v, nma, nra));
+  const editCost = (field: PriceField) => (v: string) => setCost((g) => editPriceGroup(g, field, v, nma, nra, royaltyValue(f.royaltyRate)));
 
   // Required set: the deal's identity + geography + acreage bar, with the
   // survey (an asset is a specific tract) and without a contract timeline.
@@ -246,7 +247,7 @@ export function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onC
                 <div className="field"><label>Price per NMA</label><MoneyInput decimals={2} value={cost.perNma} onChange={editCost("perNma")} ariaLabel="Purchase price per NMA" placeholder="0.00" /></div>
                 <div className="field"><label>Price per NRA</label><MoneyInput decimals={2} value={cost.perNra} onChange={editCost("perNra")} ariaLabel="Purchase price per NRA" placeholder="0.00" /></div>
                 <div className="field"><label title="Cost basis for ROI and unrealized gain">Purchase price</label>
-                  <MoneyInput value={cost.total} onChange={editCost("total")} ariaLabel="Purchase price" placeholder="0" />
+                  <MoneyInput value={cost.total} onChange={editCost("total")} decimals={2} ariaLabel="Purchase price" placeholder="0" />
                   <PriceNote g={cost} />
                 </div>
                 <div className="field"><label>Acquisition date</label><DateField value={f.acquisitionDate} onChange={(v) => setF((p) => ({ ...p, acquisitionDate: v }))} /></div>

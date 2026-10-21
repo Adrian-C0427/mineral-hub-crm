@@ -254,7 +254,7 @@ dashboardRouter.get(
     // acquisition cost (Our Price) of every active seller deal. Owned assets
     // marketed for sale are already ours (no seller contract), so they're
     // excluded; child assets count individually (each carries its own cost).
-    const underContract = sumMoney(allActive.filter((d) => d.recordType === "OPPORTUNITY").map((d) => d.ourPrice));
+    const underContract = sumMoney(allActive.filter((d) => d.recordType === "OPPORTUNITY").map((d) => acquisitionCost(d)));
 
     // Projected profit: best offer − ask − costs across active deals that have
     // offers. A deal with an ACCEPTED offer projects THAT offer (same rule as

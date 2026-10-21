@@ -10,6 +10,7 @@ import { DateField } from "./DateField";
 import { OperatorSelect } from "./OperatorSelect";
 import { findBuyerByOffsetDays } from "../lib/perAcre";
 import { fmtDate, money } from "../lib/format";
+import { royaltyValue } from "../lib/royalty";
 import { FormSection } from "./kit";
 import { SectionRail, useSectionRail } from "./SectionRail";
 import {
@@ -98,9 +99,9 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
     const next = applyAcreageEdit(acre, edit);
     setAcreSource(next.source);
     setF((p) => ({ ...p, acreageNma: next.nma, nra: next.nra, royaltyRate: next.royaltyRate }));
-    const m = numOrNull(next.nma), r = numOrNull(next.nra);
-    setCost((g) => syncPriceGroup(g, m, r));
-    setAsk((g) => syncPriceGroup(g, m, r));
+    const m = numOrNull(next.nma), r = numOrNull(next.nra), roy = royaltyValue(next.royaltyRate);
+    setCost((g) => syncPriceGroup(g, m, r, roy));
+    setAsk((g) => syncPriceGroup(g, m, r, roy));
   };
   const [states, setStates] = useState<string[]>([]);
   const [counties, setCounties] = useState<string[]>([]);
@@ -118,8 +119,8 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
   const nma = numOrNull(f.acreageNma), nra = numOrNull(f.nra);
   const ourPrice = numOrNull(cost.total);
   const askPrice = numOrNull(ask.total);
-  const editCost = (field: PriceField) => (v: string) => setCost((g) => editPriceGroup(g, field, v, nma, nra));
-  const editAsk = (field: PriceField) => (v: string) => setAsk((g) => editPriceGroup(g, field, v, nma, nra));
+  const editCost = (field: PriceField) => (v: string) => setCost((g) => editPriceGroup(g, field, v, nma, nra, royaltyValue(f.royaltyRate)));
+  const editAsk = (field: PriceField) => (v: string) => setAsk((g) => editPriceGroup(g, field, v, nma, nra, royaltyValue(f.royaltyRate)));
 
   const daysToClose = f.daysToClose.trim() !== "" && Number(f.daysToClose) > 0 ? Math.round(Number(f.daysToClose)) : null;
   const findBuyerBy = f.dateUnderContract ? addDaysIso(f.dateUnderContract, findBuyerByOffsetDays(daysToClose)) : null;
@@ -307,7 +308,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
                 <div className="field"><label>Our cost per NMA</label><MoneyInput decimals={2} value={cost.perNma} onChange={editCost("perNma")} ariaLabel="Our cost per NMA" placeholder="0.00" /></div>
                 <div className="field"><label>Our cost per NRA</label><MoneyInput decimals={2} value={cost.perNra} onChange={editCost("perNra")} ariaLabel="Our cost per NRA" placeholder="0.00" /></div>
                 <div className="field"><label title="Our price — what the property is under contract for">Acquisition cost {req}</label>
-                  <MoneyInput value={cost.total} onChange={editCost("total")} ariaLabel="Acquisition cost" placeholder="0" />
+                  <MoneyInput value={cost.total} onChange={editCost("total")} decimals={2} ariaLabel="Acquisition cost" placeholder="0" />
                   <PriceNote g={cost} />
                 </div>
               </div>
@@ -320,7 +321,7 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
                 <div className="field"><label>Asking price per NMA</label><MoneyInput decimals={2} value={ask.perNma} onChange={editAsk("perNma")} ariaLabel="Asking price per NMA" placeholder="0.00" /></div>
                 <div className="field"><label>Asking price per NRA</label><MoneyInput decimals={2} value={ask.perNra} onChange={editAsk("perNra")} ariaLabel="Asking price per NRA" placeholder="0.00" /></div>
                 <div className="field"><label>Asking price</label>
-                  <MoneyInput value={ask.total} onChange={editAsk("total")} ariaLabel="Asking price" placeholder="0" />
+                  <MoneyInput value={ask.total} onChange={editAsk("total")} decimals={2} ariaLabel="Asking price" placeholder="0" />
                   <PriceNote g={ask} />
                 </div>
                 <div className="field"><label>Est. closing costs</label><MoneyInput value={f.estimatedClosingCosts} onChange={(v) => setF((p) => ({ ...p, estimatedClosingCosts: v }))} ariaLabel="Estimated closing costs" placeholder="0" /></div>

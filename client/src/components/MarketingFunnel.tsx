@@ -24,9 +24,10 @@ export function MarketingFunnel({ metrics, matchCount, askPrice, costBasis, clos
 }) {
   const contacted = metrics.buyersContacted;
   const basis = costBasis ?? askPrice;
-  // Proceeds target at our ask: ask − closing costs (the entered estimate,
-  // else the ~3% rule of thumb) − cost basis.
-  const proceeds = askPrice != null ? roundMoney(askPrice - (closingCosts ?? askPrice * 0.03) - (costBasis ?? 0)) : null;
+  // Target at our ask = Profit at asking everywhere else in the app (server
+  // profitAtAsk): ask − cost basis − entered closing costs (none entered = 0).
+  // Needs both prices; there is no "3% guess" that other screens don't make.
+  const proceeds = askPrice != null && costBasis != null ? roundMoney(askPrice - costBasis - (closingCosts ?? 0)) : null;
   const profit = profitIn !== undefined ? profitIn
     : metrics.highOffer != null && basis != null ? roundMoney(metrics.highOffer - basis - (closingCosts ?? 0)) : null;
   const pctOf = (v: number, of: number) => (of > 0 ? Math.min(100, Math.round((v / of) * 100)) : 0);

@@ -11,6 +11,7 @@ import { Select } from "../components/Select";
 import { Segmented, StatStrip, Tag } from "../components/kit";
 import { initialsOf } from "../lib/avatarColor";
 import { compactMoney, money, fmtDate, fmtDateLocal } from "../lib/format";
+import { sumMoney } from "../lib/money";
 import { useStages } from "../stages";
 import { CalendarGlyph } from "../components/PeriodSegmented";
 import { DateField } from "../components/DateField";
@@ -408,7 +409,7 @@ export function Dashboard() {
   let runR = 0, runP = 0, runA = 0;
   const shown = d.profitByMonth.map((m) => {
     const a = m.atAsk ?? 0;
-    if (chartMode === "cumulative") { runR += m.profit; runP += m.projected; runA += a; return { r: runR, p: runP, a: runA }; }
+    if (chartMode === "cumulative") { runR = sumMoney([runR, m.profit]); runP = sumMoney([runP, m.projected]); runA = sumMoney([runA, a]); return { r: runR, p: runP, a: runA }; }
     return { r: m.profit, p: m.projected, a };
   });
   const stackOf = (s: { r: number; p: number; a: number }) => Math.max(0, s.r) + Math.max(0, s.p) + Math.max(0, s.a);

@@ -167,7 +167,7 @@ export function Buyers() {
           const rows = buyers.filter((b) => sel.selected.has(b.id));
           downloadCsv(`buyers-${new Date().toISOString().slice(0, 10)}.csv`,
             ["Company", "First Name", "Last Name", "Focus Area", "Relationship", "Close %", "Closed Deals"],
-            rows.map((b) => [b.companyName, b.contactFirstName ?? "", b.contactLastName ?? "", b.focusArea, b.relationshipStatus, b.closeRate, b.closedDeals]));
+            rows.map((b) => [b.companyName, b.contactFirstName ?? "", b.contactLastName ?? "", b.focusArea, b.relationshipStatus, b.closedDeals > 0 ? pct(b.closeRate) : "", b.closedDeals]));
         }}
       />
       <SortableTable

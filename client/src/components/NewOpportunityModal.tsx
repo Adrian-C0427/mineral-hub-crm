@@ -10,7 +10,7 @@ import { useAbstractIndex } from "./AbstractPicker";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { isOpportunityPipeline, type PipelineInfo } from "../stages";
-import { num, prettyStage } from "../lib/format";
+import { acres, prettyStage } from "../lib/format";
 import { normalizePhone } from "../lib/phone";
 import { surveyLabel } from "../lib/abstracts";
 import { checkOppForm, choosePipelineStage, emptyOppForm, oppBody, oppFormFromRecord, oppPatchBody, type OppForm } from "../lib/opportunityForm";
@@ -187,7 +187,7 @@ export function NewOpportunityModal({ pipelines, pipelineId, opp, initialSection
         <>
           <div className="nd-sum">
             <div className="nd-sum-item op-sum-where"><span>{editing ? "Pipeline · stage" : "Starts in"}</span><b className={where ? undefined : "empty"} title={where || undefined}>{where || "—"}</b></div>
-            <div className="nd-sum-item"><span>Est. NMA</span><b className={nma == null ? "empty" : undefined}>{num(nma)}</b></div>
+            <div className="nd-sum-item"><span>Est. NMA</span><b className={nma == null ? "empty" : undefined}>{acres(nma)}</b></div>
           </div>
           <div className="nd-foot-actions">
             <span className="nd-left">

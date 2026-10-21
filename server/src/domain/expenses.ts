@@ -38,48 +38,52 @@ export function aggregateExpenseDashboard(expenses: ExpenseInput[]): ExpenseDash
   const byUser = new Map<string, { name: string; total: number; outstanding: number }>();
   const reimbursedByMonth = new Map<string, number>();
 
+  // Every running sum is kept in whole cents (an integer), so a long list never
+  // drifts by a cent and total − reimbursed is exactly the outstanding figure.
   for (const e of expenses) {
-    total += e.amount;
+    const amount = Math.round(r2(e.amount) * 100);
+    total += amount;
     const catName = e.categoryName ?? "Uncategorized";
-    byCategory.set(catName, (byCategory.get(catName) ?? 0) + e.amount);
+    byCategory.set(catName, (byCategory.get(catName) ?? 0) + amount);
     const ym = monthKey(e.date);
-    byMonth.set(ym, (byMonth.get(ym) ?? 0) + e.amount);
+    byMonth.set(ym, (byMonth.get(ym) ?? 0) + amount);
 
     const uid = e.userId ?? "unknown";
     const uname = e.userName ?? "Unknown";
     const u = byUser.get(uid) ?? { name: uname, total: 0, outstanding: 0 };
-    u.total += e.amount;
+    u.total += amount;
     if (e.reimbursed) {
-      reimbursed += e.amount;
+      reimbursed += amount;
       const rym = monthKey(e.reimbursementDate ?? e.date);
-      reimbursedByMonth.set(rym, (reimbursedByMonth.get(rym) ?? 0) + e.amount);
+      reimbursedByMonth.set(rym, (reimbursedByMonth.get(rym) ?? 0) + amount);
     } else {
-      u.outstanding += e.amount;
+      u.outstanding += amount;
     }
     byUser.set(uid, u);
   }
+  const dollars = (cents: number) => cents / 100;
 
   const months = Array.from(new Set([...byMonth.keys(), ...reimbursedByMonth.keys()])).sort();
 
   return {
     totals: {
       // Running sums are rounded to the cent once, here (no float tails).
-      totalExpenses: r2(total),
-      totalReimbursed: r2(reimbursed),
-      totalOutstanding: r2(total - reimbursed),
-      companyOutstanding: r2(total - reimbursed),
+      totalExpenses: dollars(total),
+      totalReimbursed: dollars(reimbursed),
+      totalOutstanding: dollars(total - reimbursed),
+      companyOutstanding: dollars(total - reimbursed),
       count: expenses.length,
     },
-    byCategory: Array.from(byCategory, ([name, amount]) => ({ name, amount: r2(amount) })).sort((a, b) => b.amount - a.amount),
+    byCategory: Array.from(byCategory, ([name, amount]) => ({ name, amount: dollars(amount) })).sort((a, b) => b.amount - a.amount),
     byMonth: months.map((ym) => ({
       month: ym,
-      expenses: r2(byMonth.get(ym) ?? 0),
-      reimbursed: r2(reimbursedByMonth.get(ym) ?? 0),
+      expenses: dollars(byMonth.get(ym) ?? 0),
+      reimbursed: dollars(reimbursedByMonth.get(ym) ?? 0),
     })),
-    byUser: Array.from(byUser, ([userId, v]) => ({ userId, name: v.name, total: r2(v.total), outstanding: r2(v.outstanding) })).sort(
+    byUser: Array.from(byUser, ([userId, v]) => ({ userId, name: v.name, total: dollars(v.total), outstanding: dollars(v.outstanding) })).sort(
       (a, b) => b.total - a.total,
     ),
-    outstandingByUser: Array.from(byUser, ([userId, v]) => ({ userId, name: v.name, outstanding: r2(v.outstanding) }))
+    outstandingByUser: Array.from(byUser, ([userId, v]) => ({ userId, name: v.name, outstanding: dollars(v.outstanding) }))
       .filter((u) => u.outstanding > 0)
       .sort((a, b) => b.outstanding - a.outstanding),
   };

@@ -22,7 +22,7 @@ import { GeoFields } from "../components/GeoFields";
 import { useAbstractLabels, useAbstractIndex, abstractEntryShortLabel, SurveyMultiPicker } from "../components/AbstractPicker";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
 import { OperatorSelect } from "../components/OperatorSelect";
-import { perAcreRate } from "../lib/perAcre";
+import { perAcreRates } from "../lib/perAcre";
 import { monthLabel, chartTooltip } from "../lib/charts";
 import { money, num, acres, interestPct, fmtDate, toInputDate, prettyEnum } from "../lib/format";
 import { OWNERSHIP_TYPES, OWNERSHIP_STATUSES, PRODUCING_STATUSES, LEASE_STATUS_OPTIONS } from "../lib/assetOptions";
@@ -31,7 +31,7 @@ import { MoneyInput } from "../components/MoneyInput";
 import { MarketingFunnel } from "../components/MarketingFunnel";
 import { useUnsavedSection } from "../lib/unsaved";
 import { DateField } from "../components/DateField";
-import { royaltyLabel } from "../lib/royalty";
+import { royaltyLabel, royaltyValue } from "../lib/royalty";
 import { roundMoney, sumMoney } from "../lib/money";
 import { RoyaltyRateField, royaltyRateError, applyAcreageEdit, AcreageNote, type AcreageState } from "../components/DealEconomics";
 
@@ -290,7 +290,8 @@ function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdi
     setEdit(false); onSaved();
   }
 
-  const perNma = perAcreRate(asset.purchasePrice, asset.acreageNma), perNra = perAcreRate(asset.purchasePrice, asset.nra);
+  // The shared per-acre formula (lib/perAcre): per NRA through the royalty when NRA is NMA converted.
+  const { perNma, perNra } = perAcreRates(asset.purchasePrice, asset.acreageNma, asset.nra, royaltyValue(asset.royaltyRate));
   return (
     <EditCard title="Ownership" canEdit={canEdit} editing={edit} onEdit={() => setEdit(true)} onCancel={() => { setF(seed); setEdit(false); setErr(null); }} onSave={save}>
       {!edit ? (
@@ -317,7 +318,7 @@ function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdi
           <Fld l="Ownership Type"><Select value={f.ownershipType} onChange={(v) => setF({ ...f, ownershipType: v })} placeholder="—" clearable ariaLabel="Ownership type" options={OWNERSHIP_TYPES.map((t) => ({ value: t, label: t }))} /></Fld>
           <Fld l="Ownership Status"><Select value={f.ownershipStatus} onChange={(v) => setF({ ...f, ownershipStatus: v })} placeholder="—" clearable ariaLabel="Ownership status" options={OWNERSHIP_STATUSES.map((t) => ({ value: t, label: t }))} /></Fld>
           <Fld l="Acquisition Date"><DateField value={f.acquisitionDate} onChange={(v) => setF({ ...f, acquisitionDate: v })} /></Fld>
-          <Fld l="Purchase Price"><MoneyInput value={f.purchasePrice} onChange={(v) => setF({ ...f, purchasePrice: v })} ariaLabel="Purchase price" /></Fld>
+          <Fld l="Purchase Price"><MoneyInput value={f.purchasePrice} onChange={(v) => setF({ ...f, purchasePrice: v })} decimals={2} ariaLabel="Purchase price" /></Fld>
           <Fld l="Current Value"><MoneyInput value={f.currentValue} onChange={(v) => setF({ ...f, currentValue: v })} ariaLabel="Current value" /></Fld>
           <Fld l="Book Value"><MoneyInput value={f.bookValue} onChange={(v) => setF({ ...f, bookValue: v })} ariaLabel="Book value" /></Fld>
           <Fld l="Royalty Rate"><RoyaltyRateField value={f.acre.royaltyRate} onChange={(v) => editAcreage({ royaltyRate: v })} /></Fld>
@@ -403,7 +404,7 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
   const rev = useMemo(() => {
     const entries = [...(asset.revenueEntries ?? [])].sort((a, b) => a.month.localeCompare(b.month));
     const byMonth = new Map<string, number>();
-    for (const r of entries) byMonth.set(r.month.slice(0, 7), (byMonth.get(r.month.slice(0, 7)) ?? 0) + r.amount);
+    for (const r of entries) byMonth.set(r.month.slice(0, 7), sumMoney([byMonth.get(r.month.slice(0, 7)), r.amount]));
     const months = [...byMonth.entries()];
     // Average over every calendar month from the first booked month to the
     // last — a month with no entry is a $0 month, not a month left out.
@@ -441,7 +442,7 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
       <div className="ad-card-head">
         <div className="ad-card-titles">
           <h3>Financials</h3>
-          <span className="ad-card-sub">{rev.months > 0 ? `${money(totalRevenue)} booked across ${asset.revenueEntries.length} entr${asset.revenueEntries.length === 1 ? "y" : "ies"} · ${money(Math.round(rev.avg))} avg / mo` : "No revenue booked yet"}</span>
+          <span className="ad-card-sub">{rev.months > 0 ? `${money(totalRevenue)} booked across ${asset.revenueEntries.length} entr${asset.revenueEntries.length === 1 ? "y" : "ies"} · ${money(rev.avg)} avg / mo` : "No revenue booked yet"}</span>
         </div>
         <div className="ad-card-actions">
           {canEdit && (
@@ -472,7 +473,7 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
         const yieldPct = asset.currentValue ? (projected / asset.currentValue) * 100 : null;
         return (
         <div className="fin-insights">
-          <div className="fin-insight"><div className="ddx-label">Avg Monthly Revenue</div><div className="fin-insight-row"><span className="fin-insight-v">{money(Math.round(rev.avg))}</span><span className="fin-insight-h">last {rev.months} month{rev.months === 1 ? "" : "s"}</span></div></div>
+          <div className="fin-insight"><div className="ddx-label">Avg Monthly Revenue</div><div className="fin-insight-row"><span className="fin-insight-v">{money(rev.avg)}</span><span className="fin-insight-h">last {rev.months} month{rev.months === 1 ? "" : "s"}</span></div></div>
           <div className="fin-insight"><div className="ddx-label">MoM Change</div><div className="fin-insight-row"><span className="fin-insight-v" style={{ color: rev.mom == null ? undefined : rev.mom >= 0 ? "var(--green)" : "var(--red)" }}>{rev.mom == null ? "—" : `${rev.mom >= 0 ? "+" : ""}${rev.mom}%`}</span><span className="fin-insight-h">{rev.mom == null ? "needs 2 months" : `${money(rev.prior![1])} → ${money(rev.last![1])}`}</span></div></div>
           <div className="fin-insight"><div className="ddx-label">Projected 12-mo</div><div className="fin-insight-row"><span className="fin-insight-v">{money(projected)}</span><span className="fin-insight-h">at current avg</span></div></div>
           <div className="fin-insight"><div className="ddx-label">Yield on Value</div><div className="fin-insight-row"><span className="fin-insight-v">{yieldPct == null ? "—" : `${yieldPct.toFixed(1)}%`}</span><span className="fin-insight-h">{yieldPct == null ? "set current value" : `${money(projected)} / ${money(asset.currentValue)}`}</span></div></div>
@@ -497,7 +498,7 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
                 <Tooltip {...chartTooltip} labelFormatter={monthLabel} formatter={(v: number) => money(v)} />
                 {rev.avg > 0 && rev.months > 1 && (
                   <ReferenceLine y={rev.avg} stroke="var(--warn)" strokeDasharray="6 5" strokeOpacity={0.7}
-                    label={{ value: `avg ${money(Math.round(rev.avg))} / mo`, position: "insideTopRight", fill: "var(--warn)", fontSize: 11, fontWeight: 600 }} />
+                    label={{ value: `avg ${money(rev.avg)} / mo`, position: "insideTopRight", fill: "var(--warn)", fontSize: 11, fontWeight: 600 }} />
                 )}
                 <Bar dataKey="amount" name="Revenue" isAnimationActive={false} radius={[4, 4, 0, 0]} maxBarSize={120}>
                   {chartData.map((d, i) => <Cell key={i} fill={d.kind === "LEASE_BONUS" ? "#f59e0b" : REV_COLOR} />)}
@@ -557,7 +558,7 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
                 const asc = [...asset.revenueEntries].sort((a, b) => a.month.localeCompare(b.month));
                 let running = 0;
                 const enriched = asc.map((r, i) => {
-                  running += r.amount;
+                  running = sumMoney([running, r.amount]);
                   const prior = i > 0 ? asc[i - 1].amount : null;
                   const delta = prior != null && prior > 0 ? Math.round(((r.amount - prior) / prior) * 100) : null;
                   return { ...r, running, delta };
@@ -705,12 +706,14 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
 
       {/* Sale Readiness + Pricing Intelligence side by side (reference layout). */}
       {(() => {
-        const perNra = (p: number | null) => perAcreRate(p, asset.nra);
+        const perNra = (p: number | null) => perAcreRates(p, asset.acreageNma, asset.nra, royaltyValue(asset.royaltyRate)).perNra;
         const ask = asset.askPrice;
-        // Net proceeds at our ask: ask − closing costs − basis. The asset's own
-        // Est. Closing Costs when entered, else the ~3% rule of thumb.
-        const closing = ask != null ? (asset.estimatedClosingCosts ?? roundMoney(ask * 0.03)) : null;
-        const proceeds = ask != null ? roundMoney(ask - closing! - (asset.purchasePrice ?? 0)) : null;
+        // Net proceeds at our ask = the app's Profit at asking rule (server
+        // profitAtAsk): ask − what we paid (Our Cost, else purchase price) −
+        // entered closing costs (none entered = $0). No 3% guess.
+        const basis = asset.ourPrice ?? asset.purchasePrice;
+        const closing = asset.estimatedClosingCosts ?? 0;
+        const proceeds = ask != null && basis != null ? roundMoney(ask - basis - closing) : null;
         // Pricing scenarios anchored to the asset's own current value —
         // Conservative / Market / Aggressive (0.9× / 1× / 1.18×).
         const chips = asset.currentValue
@@ -799,7 +802,7 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
                   </div>
                   <div>
                     <div className="ddx-label">$ / NRA</div>
-                    <div className={`pi-v ${askNra == null ? "dim" : ""}`}>{askNra != null ? money(askNra) : "—"}</div>
+                    <div className={`pi-v ${askNra == null ? "dim" : ""}`}>{askNra != null ? money(askNra, { cents: true }) : "—"}</div>
                     {asset.nra ? <div className="pi-note">across {acres(asset.nra)} net royalty acres</div> : <div className="pi-note">set NRA on the Ownership card</div>}
                   </div>
                   <div className="pi-right">

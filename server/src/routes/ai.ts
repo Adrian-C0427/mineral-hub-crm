@@ -33,7 +33,8 @@ aiRouter.use(rateLimit({
   message: { error: "Too many AI requests. Wait a few minutes and try again." },
 }));
 
-const dealInclude = { selectedBuyer: true, relationshipOwner: true, offers: { select: { amount: true } } } as const;
+// id + status so the serializer can find the ACCEPTED offer (not just the best one) — same rule as the Deals list.
+const dealInclude = { selectedBuyer: true, relationshipOwner: true, offers: { select: { id: true, amount: true, status: true } } } as const;
 
 async function loadDealContext(req: AuthedRequest, dealId: string): Promise<{ name: string; ctx: DealContext }> {
   const deal = await prisma.deal.findFirst({ where: { id: dealId, organizationId: orgId(req) }, include: dealInclude });

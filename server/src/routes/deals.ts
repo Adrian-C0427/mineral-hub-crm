@@ -10,6 +10,7 @@ import { normalizePhone } from "../domain/phone.js";
 import { STALE_CONTACT_DAYS, LIST_LIMIT } from "../config.js";
 import { daysUntil, formatCalendarDay, nextContractExtension } from "../domain/dates.js";
 import { totalFromPerAcre } from "../domain/perAcre.js";
+import { roundMoney, roundTo } from "../domain/money.js";
 import { parseRoyaltyRate } from "../domain/royalty.js";
 import { logActivity } from "../services/activityLog.js";
 import { effectiveStatus, ENGAGED_STATUSES, BUYER_STATUSES } from "../domain/buyerStatus.js";
@@ -36,7 +37,16 @@ function toDate(v: unknown): Date | null | undefined {
   return new Date(v as string);
 }
 
-const dealInclude = { selectedBuyer: true, relationshipOwner: true, assignees: { select: { id: true, name: true, avatarColor: true } } } as const;
+// Every deal the API returns — list, detail, and the response to any edit —
+// carries the offers and child-asset scalars the serializer needs, so Profit
+// est., Buyer purchase price and the package roll-ups are the same figures no
+// matter which route produced the row.
+const dealInclude = {
+  selectedBuyer: true, relationshipOwner: true, assignees: { select: { id: true, name: true, avatarColor: true } },
+  offers: { select: { id: true, amount: true, status: true } },
+  _count: { select: { assets: true } },
+  assets: { select: { nra: true, acreageNma: true, ourPrice: true, askPrice: true } },
+} as const;
 
 /** Validate that every id is a user in the caller's org; returns the clean list. */
 async function validateOrgUsers(org: string, ids: string[]): Promise<string[]> {
@@ -86,6 +96,20 @@ const pricingFields = {
   daysToClose: z.number().int().min(1).max(3650).nullish(),
 };
 const PRICING_KEYS = ["ourCostPerNma", "ourCostPerNra", "askPricePerNma", "askPricePerNra", "daysToClose"] as const;
+
+// Numeric precision is fixed at the boundary: acreage keeps the 4 places the
+// NMA ↔ NRA conversion uses and money keeps cents, so what is STORED is exactly
+// what every screen shows and calculates with. (Before this, an NMA of 8.75234
+// was stored as typed, displayed as 8.7523, and quietly moved the total and the
+// per-acre figures away from what the display implied.)
+const ACRE_KEYS = ["acreageNma", "nra"] as const;
+const MONEY_KEYS = ["askPrice", "ourPrice", "ourCostPerNma", "ourCostPerNra", "askPricePerNma", "askPricePerNra", "estimatedClosingCosts", "purchasePrice", "currentValue", "bookValue", "royaltyIncomeAnnual"] as const;
+export function normalizeNumbers<T extends object>(data: T): T {
+  const rec = data as Record<string, unknown>;
+  for (const k of ACRE_KEYS) if (typeof rec[k] === "number" && Number.isFinite(rec[k])) rec[k] = roundTo(rec[k] as number, 4);
+  for (const k of MONEY_KEYS) if (typeof rec[k] === "number" && Number.isFinite(rec[k])) rec[k] = roundMoney(rec[k] as number);
+  return data;
+}
 
 // Scalar asset keys copied straight into a Prisma patch (arrays/scalars only).
 // Editable asset value/interest fields, copied straight through by the generic
@@ -296,7 +320,8 @@ dealsRouter.post(
   "/",
   requirePermission("createDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    const data = createSchema.parse(req.body);
+    const data = normalizeNumbers(createSchema.parse(req.body));
+    data.assets?.forEach(normalizeNumbers);
     data.royaltyRate = normalizeRoyaltyRate(data.royaltyRate);
     // A manually entered total always wins; otherwise derive it from the
     // per-acre rate × the deal's acreage (so it also satisfies "Our Price").
@@ -1067,7 +1092,7 @@ dealsRouter.patch(
     if (data.relationshipOwnerId) await validateOrgUsers(orgId(req), [data.relationshipOwnerId]);
     // Keep the single `state` synced to the first selected state (matching/map).
     if (data.states !== undefined) patch.state = data.states[0] ?? null;
-    const deal = await prisma.deal.update({ where: { id: req.params.id }, data: patch, include: dealInclude });
+    const deal = await prisma.deal.update({ where: { id: req.params.id }, data: normalizeNumbers(patch), include: dealInclude });
     res.json(serializeDeal(deal));
   }),
 );
@@ -1599,6 +1624,11 @@ dealsRouter.post(
         assetMode: toAsset ? (assetMode ?? deal.assetMode ?? "HOLD") : null,
         // Park a HOLD asset off the acquisition board; SELL / opportunity go active.
         stage: toAsset && (assetMode ?? "HOLD") === "HOLD" ? "CLOSING" : deal.stage,
+        // "What we paid" follows the record across the conversion: an asset's
+        // purchase price is the deal's Our Cost (and back), unless already set —
+        // so ROI, unrealized gain and per-acre cost never start from nothing.
+        ...(toAsset && deal.purchasePrice == null && deal.ourPrice != null ? { purchasePrice: deal.ourPrice } : {}),
+        ...(!toAsset && deal.ourPrice == null && deal.purchasePrice != null ? { ourPrice: deal.purchasePrice } : {}),
       },
       include: dealInclude,
     });
@@ -1727,7 +1757,7 @@ dealsRouter.post(
 // ==========================================================================
 const revenueSchema = z.object({
   month: z.string().regex(/^\d{4}-\d{2}$/, "Use YYYY-MM"),
-  amount: z.number(),
+  amount: z.number().transform(roundMoney), // cents, like every money figure
   kind: z.enum(["ROYALTY", "LEASE_BONUS", "OTHER"]).default("ROYALTY"),
   operator: z.string().trim().max(200).nullish(),
   note: z.string().trim().max(1000).nullish(),

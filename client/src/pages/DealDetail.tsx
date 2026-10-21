@@ -19,7 +19,7 @@ import { useAbstractLabels } from "../components/AbstractPicker";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
-import { money, num, acres, fmtDate, toInputDate, prettyEnum } from "../lib/format";
+import { money, num, acres, pct, daysBetween, fmtDate, toInputDate, prettyEnum } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { SellerDetails } from "../components/SellerDetails";
 import { DealPortalPanel } from "../components/DealPortalPanel";
@@ -30,8 +30,8 @@ import { NewDealModal } from "../components/NewDealModal";
 import { MoneyInput } from "../components/MoneyInput";
 import { MarketingFunnel } from "../components/MarketingFunnel";
 import { DateField } from "../components/DateField";
-import { royaltyLabel } from "../lib/royalty";
-import { perAcreRate } from "../lib/perAcre";
+import { royaltyLabel , royaltyValue } from "../lib/royalty";
+import { perAcreRates } from "../lib/perAcre";
 import { impliedMargin } from "../lib/metrics";
 import { OperatorSelect } from "../components/OperatorSelect";
 import {
@@ -142,10 +142,12 @@ export function DealDetail() {
   const perAcreSub = (perNma: number | null | undefined, perNra: number | null | undefined) =>
     perNma == null && perNra == null ? undefined
       : `${money(perNma, { cents: true })} / NMA · ${money(perNra, { cents: true })} / NRA`;
-  const ourPerNma = deal.ourCostPerNma ?? perAcreRate(deal.ourPrice, deal.acreageNma);
-  const ourPerNra = deal.ourCostPerNra ?? perAcreRate(deal.ourPrice, deal.nra);
-  const askPerNma = deal.askPricePerNma ?? perAcreRate(deal.askPrice, deal.acreageNma);
-  const askPerNra = deal.askPricePerNra ?? perAcreRate(deal.askPrice, deal.nra);
+  // Per-acre prices come from the totals through lib/perAcre.perAcreRates —
+  // the one formula every list and page uses — so the strip, the Deals table
+  // and the editor always agree.
+  const roy = royaltyValue(deal.royaltyRate);
+  const { perNma: ourPerNma, perNra: ourPerNra } = perAcreRates(deal.ourPrice, deal.acreageNma, deal.nra, roy);
+  const { perNma: askPerNma, perNra: askPerNra } = perAcreRates(deal.askPrice, deal.acreageNma, deal.nra, roy);
   // The shared formula (lib/metrics) — Reports' Avg implied margin averages it.
   const margin = impliedMargin(deal.askPrice, deal.ourPrice);
   const royalty = royaltyLabel(deal.royaltyRate);
@@ -154,7 +156,7 @@ export function DealDetail() {
     { label: "Asking price", value: money(deal.askPrice), sub: perAcreSub(askPerNma, askPerNra) },
     {
       label: "Implied margin",
-      value: margin != null ? `${margin >= 0 ? "+" : ""}${Math.round(margin * 100)}%` : "—",
+      value: margin != null ? `${margin >= 0 ? "+" : ""}${pct(margin)}` : "—",
       tone: margin == null ? "default" : margin >= 0 ? "success" : "danger",
       sub: "Asking price over our cost",
     },
@@ -209,7 +211,7 @@ export function DealDetail() {
       {/* Deadline alert — Find Buyer By is close (or past) and no buyer is
           attached yet. One click lands on the Buyers tab. */}
       {deal.stage !== "CLOSED" && deal.stage !== "DEAD" && !deal.selectedBuyer && deal.findBuyerByDate && (() => {
-        const days = Math.ceil((new Date(deal.findBuyerByDate).getTime() - Date.now()) / 86_400_000);
+        const days = daysBetween(deal.findBuyerByDate) ?? 0; // calendar days — the overdue rule everywhere
         if (days > 7) return null;
         const when = days < 0 ? `was ${-days} day${days === -1 ? "" : "s"} ago` : days === 0 ? "is today" : `is in ${days} day${days === 1 ? "" : "s"}`;
         return (
@@ -597,8 +599,8 @@ function AssetsSection({ deal, canEdit, canPublish, onAdd, onChanged }: {
           {/* Package total = this deal's own figures rolled up with its assets'. */}
           <div className="asset-total">
             <span className="muted">Package total</span>
-            {deal.aggNra != null && <span><strong>{num(deal.aggNra)}</strong> NRA</span>}
-            {deal.aggAcreageNma != null && <span><strong>{num(deal.aggAcreageNma)}</strong> NMA</span>}
+            {deal.aggNra != null && <span><strong>{acres(deal.aggNra)}</strong> NRA</span>}
+            {deal.aggAcreageNma != null && <span><strong>{acres(deal.aggAcreageNma)}</strong> NMA</span>}
             {deal.aggOurPrice != null && <span>Our <strong>{money(deal.aggOurPrice)}</strong></span>}
             {deal.aggAskPrice != null && <span className="asset-ask">Ask <strong>{money(deal.aggAskPrice)}</strong></span>}
           </div>
@@ -616,7 +618,7 @@ function AssetsSection({ deal, canEdit, canPublish, onAdd, onChanged }: {
                     {a.operator && <span>{a.operator}</span>}
                     {a.rrc && <span>RRC {a.rrc}</span>}
                   </span>
-                  <span className="asset-row-num">{a.nra != null ? <><strong>{num(a.nra)}</strong> NRA</> : "—"}</span>
+                  <span className="asset-row-num">{a.nra != null ? <><strong>{acres(a.nra)}</strong> NRA</> : "—"}</span>
                   <span className="asset-row-num muted">{a.ourPrice != null ? `Our ${money(a.ourPrice)}` : ""}</span>
                   <span className="asset-row-num asset-ask">{a.askPrice != null ? `Ask ${money(a.askPrice)}` : ""}</span>
                   <span className="asset-row-badges">
@@ -648,8 +650,8 @@ const numOrNull = (v: string) => (v.trim() === "" || !Number.isFinite(Number(v))
 function econFromDeal(d: DealDetailData): EconForm {
   return {
     royaltyRate: d.royaltyRate ?? "", nma: numStr(d.acreageNma), nra: numStr(d.nra), source: null,
-    cost: priceGroupFromStored(d.ourCostPerNma, d.ourCostPerNra, d.ourPrice, d.acreageNma, d.nra),
-    ask: priceGroupFromStored(d.askPricePerNma, d.askPricePerNra, d.askPrice, d.acreageNma, d.nra),
+    cost: priceGroupFromStored(d.ourCostPerNma, d.ourCostPerNra, d.ourPrice, d.acreageNma, d.nra, royaltyValue(d.royaltyRate)),
+    ask: priceGroupFromStored(d.askPricePerNma, d.askPricePerNra, d.askPrice, d.acreageNma, d.nra, royaltyValue(d.royaltyRate)),
     estimatedClosingCosts: numStr(d.estimatedClosingCosts), daysToClose: numStr(d.daysToClose),
   };
 }
@@ -686,11 +688,11 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
   // both prices' calculated fields (never the figure the user typed).
   const editAcreage = (edit: { nma?: string; nra?: string; royaltyRate?: string }) => setEcon((p) => {
     const a = applyAcreageEdit(p, edit);
-    const m = numOrNull(a.nma), r = numOrNull(a.nra);
-    return { ...p, ...a, cost: syncPriceGroup(p.cost, m, r), ask: syncPriceGroup(p.ask, m, r) };
+    const m = numOrNull(a.nma), r = numOrNull(a.nra), roy = royaltyValue(a.royaltyRate);
+    return { ...p, ...a, cost: syncPriceGroup(p.cost, m, r, roy), ask: syncPriceGroup(p.ask, m, r, roy) };
   });
   const editPrice = (group: "cost" | "ask", field: PriceField) => (v: string) =>
-    setEcon((p) => ({ ...p, [group]: editPriceGroup(p[group], field, v, numOrNull(p.nma), numOrNull(p.nra)) }));
+    setEcon((p) => ({ ...p, [group]: editPriceGroup(p[group], field, v, numOrNull(p.nma), numOrNull(p.nra), royaltyValue(p.royaltyRate)) }));
   const t = econTotals(econ);
 
   // Closing follows Date Under Contract + Days to Close (as in New
@@ -802,13 +804,13 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
           <Fld l="Our cost per NMA"><MoneyInput decimals={2} value={econ.cost.perNma} onChange={editPrice("cost", "perNma")} ariaLabel="Our cost per NMA" placeholder="0.00" /></Fld>
           <Fld l="Our cost per NRA"><MoneyInput decimals={2} value={econ.cost.perNra} onChange={editPrice("cost", "perNra")} ariaLabel="Our cost per NRA" placeholder="0.00" /></Fld>
           <Fld l="Our cost">
-            <MoneyInput value={econ.cost.total} onChange={editPrice("cost", "total")} ariaLabel="Our cost" placeholder="0" />
+            <MoneyInput value={econ.cost.total} onChange={editPrice("cost", "total")} decimals={2} ariaLabel="Our cost" placeholder="0" />
             <PriceNote g={econ.cost} />
           </Fld>
           <Fld l="Asking price per NMA"><MoneyInput decimals={2} value={econ.ask.perNma} onChange={editPrice("ask", "perNma")} ariaLabel="Asking price per NMA" placeholder="0.00" /></Fld>
           <Fld l="Asking price per NRA"><MoneyInput decimals={2} value={econ.ask.perNra} onChange={editPrice("ask", "perNra")} ariaLabel="Asking price per NRA" placeholder="0.00" /></Fld>
           <Fld l="Asking price (to buyers)">
-            <MoneyInput value={econ.ask.total} onChange={editPrice("ask", "total")} ariaLabel="Asking price" placeholder="0" />
+            <MoneyInput value={econ.ask.total} onChange={editPrice("ask", "total")} decimals={2} ariaLabel="Asking price" placeholder="0" />
             <PriceNote g={econ.ask} />
           </Fld>
           <Fld l="Est. closing costs"><MoneyInput value={econ.estimatedClosingCosts} onChange={(v) => setE({ estimatedClosingCosts: v })} ariaLabel="Estimated closing costs" /></Fld>
@@ -825,7 +827,7 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
 
 /** Compact relative day count for timeline milestones — "today", "13d ago", "in 2d". */
 function relDays(iso: string): string {
-  const days = Math.round((new Date(iso).getTime() - Date.now()) / 86_400_000);
+  const days = daysBetween(iso) ?? 0; // calendar days (UTC), like the Pipeline's due chips
   if (days === 0) return "today";
   if (days < 0) return `${-days}d ago`;
   return `in ${days}d`;

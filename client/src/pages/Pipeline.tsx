@@ -754,8 +754,8 @@ function CardBody({ deal, fields, action }: { deal: DealSummary; fields: Record<
   // Short uppercase tag for the head chip (e.g. Minerals → MI), reference-style.
   const typeTag = deal.assetTypes?.[0] ? deal.assetTypes[0].slice(0, 2).toUpperCase() : null;
   const metrics: { label: string; value: string; pos?: boolean; title?: string }[] = [];
-  if (fields.nra) metrics.push({ label: "NRA", value: num(cardNra(deal)) });
-  if (fields.nma) metrics.push({ label: "NMA", value: num(cardNma(deal)) });
+  if (fields.nra) metrics.push({ label: "NRA", value: acres(cardNra(deal)) });
+  if (fields.nma) metrics.push({ label: "NMA", value: acres(cardNma(deal)) });
   if (fields.ourPrice) metrics.push({ label: "Our price", value: money(cardOur(deal)), title: "Our price (acquisition cost)" });
   if (fields.buyerPrice) metrics.push({ label: "Buyer price", value: money(cardBuyer(deal)), title: "Buyer purchase price — accepted offer, else best offer" });
   if (fields.profit) metrics.push({ label: "Est. profit", value: money(deal.profitEst), pos: deal.profitEst != null });
