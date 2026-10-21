@@ -78,13 +78,15 @@ export interface TransferDocRow {
   instrumentNumber: string | null;
 }
 
-/** Sanity cap — a "party list" beyond this is a mangled cell, not a group. */
-const MAX_PARTIES_PER_SIDE = 8;
+/** Sanity cap — a "party list" beyond this is a mangled cell, not a group.
+ *  Generous: a probate or family conveyance can name 20+ heirs on one side,
+ *  and each of them is a real participant who must link to the record. */
+const MAX_PARTIES_PER_SIDE = 40;
 
 /** Individual participants for one side of a record. Prefers the arrays the
  *  ingest stored; legacy rows (empty arrays) are split from the raw string at
  *  read time so pre-existing data participates without a backfill. */
-function sideParties(
+export function sideParties(
   raw: string | null, norm: string | null, parties: string[], norms: string[],
 ): { norm: string; name: string }[] {
   if (norms.length > 0) {
@@ -98,7 +100,7 @@ function sideParties(
       .map((p) => ({ norm: normalizeEntity(p) ?? "", name: p }))
       .filter((p) => p.norm);
   }
-  if (split.length === 1 && split[0] !== raw?.trim()) {
+  if (split.length === 1) {
     const n = normalizeEntity(split[0]);
     if (n) return [{ norm: n, name: split[0] }];
   }
@@ -618,6 +620,106 @@ export interface GraphEdge { fromNorm: string; toNorm: string; count: number }
 export interface RelationshipGraph { nodes: GraphNode[]; edges: GraphEdge[] }
 
 /**
+ * Acquisition chains THROUGH a set of focus entities (a buyer profile and its
+ * aliases). Unlike buildChains, which starts at the graph's sources and caps
+ * by strength BEFORE anyone asks which chains hold the buyer, this walks
+ * outward from the focus: upstream (who sold to the seller, ...) and
+ * downstream (who the buyer sold to, ...), then joins the two halves. Every
+ * chain contains a focus node by construction, so the cap only ever competes
+ * among the buyer's own chains and none is lost to stronger neighbours.
+ *
+ * Paths are simple (no node twice), at most `maxDepth` hops in total, and at
+ * least 2 hops (a lone Seller→Buyer edge is the buyer's transaction history,
+ * not a chain). Shorter paths that are a prefix/suffix of a longer kept path
+ * are dropped so only the fullest paths remain.
+ */
+export function buildFocusChains(rels: Relationship[], focus: Set<string>, opts: ChainOpts = {}): { chain: AcquisitionChain; position: number; role: EntityClass }[] {
+  const maxDepth = opts.maxDepth ?? 4;
+  const minHop = opts.minHopCount ?? 1;
+  const maxChains = opts.maxChains ?? 200;
+  const edges = rels.filter((r) => r.count >= minHop);
+  if (!edges.length || !focus.size) return [];
+  const stats = classifyEntities(rels);
+  const outAdj = new Map<string, Relationship[]>();
+  const inAdj = new Map<string, Relationship[]>();
+  for (const r of edges) {
+    (outAdj.get(r.grantorNorm) ?? outAdj.set(r.grantorNorm, []).get(r.grantorNorm)!).push(r);
+    (inAdj.get(r.granteeNorm) ?? inAdj.set(r.granteeNorm, []).get(r.granteeNorm)!).push(r);
+  }
+  const nameOf = (norm: string) => stats.get(norm)?.name ?? norm;
+  const klassOf = (norm: string) => stats.get(norm)?.klass ?? "UNCLASSIFIED";
+
+  // All simple paths ending at `node` (upstream) / starting at `node`
+  // (downstream), up to `depth` hops; each as an ordered list of relationships.
+  const upstream = (node: string, depth: number, visited: Set<string>): Relationship[][] => {
+    const out: Relationship[][] = [[]];
+    if (depth === 0) return out;
+    for (const r of inAdj.get(node) ?? []) {
+      if (visited.has(r.grantorNorm)) continue;
+      const nv = new Set(visited); nv.add(r.grantorNorm);
+      for (const tail of upstream(r.grantorNorm, depth - 1, nv)) out.push([...tail, r]);
+    }
+    return out;
+  };
+  const downstream = (node: string, depth: number, visited: Set<string>): Relationship[][] => {
+    const out: Relationship[][] = [[]];
+    if (depth === 0) return out;
+    for (const r of outAdj.get(node) ?? []) {
+      if (visited.has(r.granteeNorm)) continue;
+      const nv = new Set(visited); nv.add(r.granteeNorm);
+      for (const head of downstream(r.granteeNorm, depth - 1, nv)) out.push([r, ...head]);
+    }
+    return out;
+  };
+
+  const results: { chain: AcquisitionChain; position: number; role: EntityClass }[] = [];
+  const emitted = new Set<string>();
+  for (const f of focus) {
+    if (!inAdj.has(f) && !outAdj.has(f)) continue;
+    const ups = upstream(f, maxDepth, new Set([f]));
+    for (const up of ups) {
+      const upNodes = new Set([f, ...up.map((r) => r.grantorNorm)]);
+      for (const down of downstream(f, maxDepth - up.length, upNodes)) {
+        const path = [...up, ...down];
+        if (path.length < 2) continue;
+        const nodePath = [path[0].grantorNorm, ...path.map((r) => r.granteeNorm)];
+        const sig = nodePath.join(SEP);
+        if (emitted.has(sig)) continue;
+        emitted.add(sig);
+        const counties = new Set<string>();
+        let first = Infinity, last = -Infinity;
+        const hops: ChainHop[] = path.map((r) => {
+          for (const c of r.counties) counties.add(c);
+          if (r.firstDate) first = Math.min(first, Date.parse(r.firstDate));
+          if (r.lastDate) last = Math.max(last, Date.parse(r.lastDate));
+          return { fromNorm: r.grantorNorm, from: r.grantor, toNorm: r.granteeNorm, to: r.grantee, count: r.count };
+        });
+        const position = up.length; // the focus sits after the upstream hops
+        results.push({
+          chain: {
+            nodes: nodePath.map((norm) => ({ norm, name: nameOf(norm), klass: klassOf(norm) })),
+            hops, length: hops.length,
+            strength: Math.min(...hops.map((h) => h.count)),
+            totalCount: hops.reduce((s, h) => s + h.count, 0),
+            counties: [...counties].sort(),
+            firstDate: Number.isFinite(first) ? iso(new Date(first)) : null,
+            lastDate: Number.isFinite(last) ? iso(new Date(last)) : null,
+          },
+          position, role: klassOf(f),
+        });
+      }
+    }
+  }
+  // Keep only maximal paths: drop a chain whose node sequence is contained in
+  // a longer kept chain (same order, contiguous).
+  const sigs = results.map((c) => SEP + c.chain.nodes.map((n) => n.norm).join(SEP) + SEP);
+  const kept = results.filter((_, i) => !sigs.some((other, j) => j !== i && other.length > sigs[i].length && other.includes(sigs[i])));
+  return kept
+    .sort((a, b) => b.chain.strength - a.chain.strength || b.chain.length - a.chain.length || b.chain.totalCount - a.chain.totalCount)
+    .slice(0, maxChains);
+}
+
+/**
  * Build a graph capped to the most active entities so the client render stays
  * legible. Entities are ranked by total activity; edges between kept nodes are
  * retained.
@@ -779,35 +881,10 @@ export function entityNetwork(edges: TxEdge[], focusNorms: string[], displayName
   }
 
   // Chains involving the focus, with the focus entity's position in the path.
-  //
-  // Built from the FOCUS-CENTRED subgraph (every edge reachable within the
-  // chain depth of any focus key), not the global org graph: buildChains caps
-  // its output by strength, and on the global graph a big org's strongest
-  // chains could crowd out this buyer's own paths entirely — which is exactly
-  // how merged aliases "lost" their acquisition chains. On the subgraph the
-  // cap only ever competes among this buyer's neighbourhood, so every alias
-  // key contributes its chains.
-  const reach = new Set<string>(focus);
-  {
-    const adj = new Map<string, Set<string>>();
-    const link = (a: string, b: string) => (adj.get(a) ?? adj.set(a, new Set()).get(a)!).add(b);
-    for (const r of rels) { link(r.grantorNorm, r.granteeNorm); link(r.granteeNorm, r.grantorNorm); }
-    let frontier = [...focus];
-    for (let depth = 0; depth < 4 && frontier.length; depth++) {
-      const next: string[] = [];
-      for (const n of frontier) for (const m of adj.get(n) ?? []) if (!reach.has(m)) { reach.add(m); next.push(m); }
-      frontier = next;
-    }
-  }
-  const focusRels = rels.filter((r) => reach.has(r.grantorNorm) && reach.has(r.granteeNorm));
-  const chains = buildChains(focusRels, { maxChains: 400 })
-    .map((c) => {
-      const idx = c.nodes.findIndex((n) => focus.has(n.norm));
-      if (idx < 0) return null;
-      return { chain: c, position: idx, role: c.nodes[idx].klass };
-    })
-    .filter((x): x is NonNullable<typeof x> => x != null)
-    .slice(0, 100);
+  // Walked outward FROM the focus keys (every alias), so the cap only competes
+  // among this buyer's own chains — a buyer that is one of several parties on a
+  // record, or sits deep below the graph's sources, keeps its chains.
+  const chains = buildFocusChains(rels, focus, { maxChains: 200 });
 
   // Direct-neighbourhood graph: focus + its immediate counterparties.
   const neighbours = new Set<string>(focus);

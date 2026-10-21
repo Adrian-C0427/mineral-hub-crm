@@ -9,8 +9,9 @@ import { normalizeCompany } from "../serializers.js";
 import { normalizePhone } from "../domain/phone.js";
 import { effectiveStatus } from "../domain/buyerStatus.js";
 import { closeRate } from "../domain/metrics.js";
-import { normalizeEntity } from "../domain/research.js";
-import { entityNetwork, expandDocToEdges, ENTITY_CLASS_LABEL, type TxEdge } from "../domain/researchGraph.js";
+import { normalizeEntity, parsePartyCell } from "../domain/research.js";
+import { entityNetwork, expandDocToEdges, sideParties, ENTITY_CLASS_LABEL, type TxEdge } from "../domain/researchGraph.js";
+import { dealNetProfit } from "../domain/metrics.js";
 import { nameSimilarity } from "../domain/researchBuyers.js";
 import { importRouter } from "./import.js";
 
@@ -151,12 +152,19 @@ buyersRouter.get(
     const dealHistory = activity.map((a) => {
       const isSelected = a.deal.selectedBuyerId === b.id;
       const amount = isSelected ? a.deal.selectedOffer?.amount ?? a.offerAmount : a.offerAmount;
+      // Realized profit: the same figure the dashboard and reports use (accepted
+      // offer − our cost − closing costs), and only for a deal that CLOSED with
+      // THIS buyer. A deal that closed with another buyer, or hasn't closed, has
+      // no realized profit for this relationship.
+      const profit = isSelected && a.deal.stage === "CLOSED" && a.deal.selectedOffer
+        ? dealNetProfit(a.deal.selectedOffer.amount, a.deal) : null;
       return {
         dealId: a.dealId,
         dealName: a.deal.name,
         stage: a.deal.stage,
         status: effectiveStatus(a),
         amount: amount ?? null,
+        profit,
         isSelectedBuyer: isSelected,
         date: a.lastActivityDate ?? a.dateSent ?? a.createdAt,
       };
@@ -235,7 +243,10 @@ buyersRouter.get(
     const rows = await prisma.researchDocument.findMany({
       where: {
         organizationId: { in: buyerNetworkOrgIds(req) }, docClass: "TRANSACTION",
-        grantorNorm: { not: null }, granteeNorm: { not: null },
+        AND: [
+          { OR: [{ grantorNorm: { not: null } }, { grantorNorms: { isEmpty: false } }] },
+          { OR: [{ granteeNorm: { not: null } }, { granteeNorms: { isEmpty: false } }] },
+        ],
       },
       select: {
         id: true, grantor: true, grantorNorm: true, grantee: true, granteeNorm: true,
@@ -300,45 +311,87 @@ const uniqCI = (list: string[]): string[] => {
   return [...seen.values()];
 };
 
-/** Distinct research entity keys for the org, with tx counts + best raw spelling per side. */
-async function researchEntityIndex(orgIds: string[]): Promise<Map<string, { name: string; asGrantee: number; asGrantor: number }>> {
-  const [grantees, grantors] = await Promise.all([
-    prisma.researchDocument.groupBy({
-      by: ["granteeNorm", "grantee"], where: { organizationId: { in: orgIds }, docClass: "TRANSACTION", granteeNorm: { not: null } },
-      _count: { _all: true },
-    }),
-    prisma.researchDocument.groupBy({
-      by: ["grantorNorm", "grantor"], where: { organizationId: { in: orgIds }, docClass: "TRANSACTION", grantorNorm: { not: null } },
-      _count: { _all: true },
-    }),
-  ]);
-  const idx = new Map<string, { name: string; nameCount: number; asGrantee: number; asGrantor: number }>();
-  const add = (norm: string | null, raw: string | null, n: number, side: "asGrantee" | "asGrantor") => {
-    if (!norm) return;
-    const e = idx.get(norm) ?? { name: raw ?? norm, nameCount: 0, asGrantee: 0, asGrantor: 0 };
-    e[side] += n;
-    // Display name = the most frequent raw spelling across both sides.
-    if (raw && n > e.nameCount) { e.name = raw; e.nameCount = n; }
+/**
+ * Distinct research PARTICIPANTS for the org: one entry per individual grantor
+ * or grantee, with tx counts + the most frequent raw spelling. A multi-party
+ * cell ("ABC Minerals LLC; XYZ Resources LLC") contributes each party on its
+ * own and NEVER the combined cell — a group of parties is not an entity, so it
+ * is never offered as an alias. Rows imported before parties were stored are
+ * split at read time through the same parser the importer uses.
+ */
+export interface ResearchEntity { name: string; asGrantee: number; asGrantor: number }
+export async function researchEntityIndex(orgIds: string[]): Promise<Map<string, ResearchEntity>> {
+  const idx = new Map<string, { name: string; spellings: Map<string, number>; asGrantee: number; asGrantor: number }>();
+  const add = (norm: string, raw: string, side: "asGrantee" | "asGrantor") => {
+    const e = idx.get(norm) ?? { name: raw, spellings: new Map(), asGrantee: 0, asGrantor: 0 };
+    e[side] += 1;
+    const n = (e.spellings.get(raw) ?? 0) + 1;
+    e.spellings.set(raw, n);
+    if (n > (e.spellings.get(e.name) ?? 0)) e.name = raw;
     idx.set(norm, e);
   };
-  for (const g of grantees) add(g.granteeNorm, g.grantee, g._count._all, "asGrantee");
-  for (const g of grantors) add(g.grantorNorm, g.grantor, g._count._all, "asGrantor");
-  // Multi-party groups: index each individual participant too (rows whose
-  // party arrays hold >1 entry — the groupBy above only saw the combined-cell
-  // key, which is a different norm, so this never double-counts).
-  const partyRows = await prisma.researchDocument.findMany({
-    where: {
-      organizationId: { in: orgIds }, docClass: "TRANSACTION",
-      OR: [{ granteeNorms: { isEmpty: false } }, { grantorNorms: { isEmpty: false } }],
-    },
-    select: { granteeNorms: true, granteeParties: true, grantorNorms: true, grantorParties: true },
-  });
-  for (const d of partyRows) {
-    if (d.granteeNorms.length > 1) d.granteeNorms.forEach((n, i) => add(n, d.granteeParties[i] ?? n, 1, "asGrantee"));
-    if (d.grantorNorms.length > 1) d.grantorNorms.forEach((n, i) => add(n, d.grantorParties[i] ?? n, 1, "asGrantor"));
+  const BATCH = 2000;
+  let cursor: string | undefined;
+  for (;;) {
+    const rows = await prisma.researchDocument.findMany({
+      where: { organizationId: { in: orgIds }, docClass: "TRANSACTION" },
+      select: { id: true, grantor: true, grantorNorm: true, grantee: true, granteeNorm: true, grantorParties: true, granteeParties: true, grantorNorms: true, granteeNorms: true },
+      orderBy: { id: "asc" }, take: BATCH, ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
+    });
+    for (const d of rows) {
+      for (const p of sideParties(d.grantee, d.granteeNorm, d.granteeParties, d.granteeNorms)) add(p.norm, p.name, "asGrantee");
+      for (const p of sideParties(d.grantor, d.grantorNorm, d.grantorParties, d.grantorNorms)) add(p.norm, p.name, "asGrantor");
+    }
+    if (rows.length < BATCH) break;
+    cursor = rows[rows.length - 1].id;
   }
   return new Map([...idx.entries()].map(([k, v]) => [k, { name: v.name, asGrantee: v.asGrantee, asGrantor: v.asGrantor }]));
 }
+
+/** The one party a user-supplied alias names; null when the text names several
+ *  parties ("A; B") — a group is never an alias — or nobody at all. */
+function singlePartyName(raw: string): { name: string; norm: string } | null {
+  const { parties } = parsePartyCell(raw);
+  if (parties.length !== 1) return null;
+  return { name: parties[0].name, norm: parties[0].norm };
+}
+
+/**
+ * Alias search: individual grantor/grantee names from the org's transaction
+ * records matching the typed text — never combined multi-party cells, and
+ * never names already counted as this buyer. A name another CRM buyer already
+ * claims is flagged so the client offers a profile merge instead.
+ */
+buyersRouter.get(
+  "/:id/alias-search",
+  requirePermission("viewBuyers"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const q = String(req.query.q ?? "").trim();
+    const buyer = await prisma.buyer.findFirst({
+      where: { id: req.params.id, organizationId: org },
+      select: { id: true, companyName: true, aliases: true },
+    });
+    if (!buyer) throw new HttpError(404, "Buyer not found");
+    if (q.length < 2) return res.json({ results: [] });
+    const own = new Set(buyerEntityKeys(buyer.companyName, buyer.aliases));
+    const index = await researchEntityIndex(buyerNetworkOrgIds(req));
+    const others = await prisma.buyer.findMany({ where: { organizationId: org, id: { not: buyer.id } }, select: { id: true, companyName: true, aliases: true } });
+    const normToBuyer = new Map<string, { id: string; companyName: string }>();
+    for (const b of others) for (const k of buyerEntityKeys(b.companyName, b.aliases)) if (!normToBuyer.has(k)) normToBuyer.set(k, { id: b.id, companyName: b.companyName });
+    const term = q.toUpperCase();
+    const termNorm = normalizeEntity(q) ?? term;
+    const results = [...index.entries()]
+      .filter(([norm, e]) => !own.has(norm) && (e.name.toUpperCase().includes(term) || norm.includes(termNorm)))
+      .map(([norm, e]) => {
+        const other = normToBuyer.get(norm) ?? null;
+        return { norm, name: e.name, txCount: e.asGrantee + e.asGrantor, asGrantee: e.asGrantee, asGrantor: e.asGrantor, buyerId: other?.id ?? null, buyerName: other?.companyName ?? null };
+      })
+      .sort((a, b) => Number(b.name.toUpperCase().startsWith(term)) - Number(a.name.toUpperCase().startsWith(term)) || b.txCount - a.txCount || a.name.localeCompare(b.name))
+      .slice(0, 12);
+    res.json({ results });
+  }),
+);
 
 /**
  * Possible aliases for a buyer: research entity names highly similar to the
@@ -400,8 +453,16 @@ buyersRouter.post(
       select: { id: true, companyName: true, aliases: true, dismissedAliasNorms: true },
     });
     if (!buyer) throw new HttpError(404, "Buyer not found");
-    const aliases = uniqCI([...buyer.aliases, name]).filter((a) => a.toUpperCase() !== buyer.companyName.trim().toUpperCase());
-    const norm = normalizeEntity(name);
+    // An alias names ONE party. "ABC Minerals LLC; XYZ Resources LLC" is two
+    // grantees of one deed, not a spelling of this buyer — refuse it rather
+    // than attach a group that can never match a transaction.
+    const single = singlePartyName(name);
+    if (!single) throw new HttpError(400, "An alias must be a single name. This text names several parties — add the one that is this buyer.");
+    const norm = single.norm;
+    const existingKeys = new Set(buyerEntityKeys(buyer.companyName, buyer.aliases));
+    const aliases = existingKeys.has(norm)
+      ? buyer.aliases // already counted as this buyer (another spelling of the same key)
+      : uniqCI([...buyer.aliases, single.name]).filter((a) => a.toUpperCase() !== buyer.companyName.trim().toUpperCase());
     const updated = await prisma.buyer.update({
       where: { id: buyer.id },
       data: {
@@ -417,8 +478,8 @@ buyersRouter.post(
       await prisma.activityLog.create({
         data: {
           organizationId: orgId(req), eventType: "BUYER_ALIAS_ADDED", buyerId: buyer.id, actorUserId: req.user!.id,
-          summary: `Alias "${name}" added to ${buyer.companyName}`,
-          metadata: { name },
+          summary: `Alias "${single.name}" added to ${buyer.companyName}`,
+          metadata: { name: single.name },
         },
       });
     }

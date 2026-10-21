@@ -14,14 +14,13 @@ import { StateSelect } from "../components/StateSelect";
 import { BuyerRelationships, type BuyerNetwork } from "../components/BuyerRelationships";
 import { BuyerAliasManager } from "../components/BuyerAliasManager";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
-import { money, pct, fmtDate, toInputDate } from "../lib/format";
+import { money, pct, fmtDate } from "../lib/format";
 import { sumMoney } from "../lib/money";
 import { formatPhone } from "../lib/phone";
 import { PhoneInput } from "../components/PhoneInput";
 import type { BuyBox, Relationship, UserLite } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
 import { useUnsavedSection, guarded } from "../lib/unsaved";
-import { DateField } from "../components/DateField";
 
 interface BuyerProfileData {
   id: string;
@@ -47,7 +46,7 @@ interface BuyerProfileData {
   buyBox: BuyBox;
   closeRate: number;
   closedDeals: number;
-  dealHistory: { dealId: string; dealName: string; stage: string; status: string; amount: number | null; isSelectedBuyer: boolean; date: string }[];
+  dealHistory: { dealId: string; dealName: string; stage: string; status: string; amount: number | null; profit: number | null; isSelectedBuyer: boolean; date: string }[];
 }
 
 const ARRAY_KEYS: (keyof BuyBox)[] = ["states", "counties", "basins", "formations", "assetTypes"];
@@ -137,10 +136,7 @@ export function BuyerProfile() {
         ownerIds: draft.owners.map((o) => o.id),
       }
       : editing === "buybox" ? { buyBox: draft.buyBox }
-      : {
-        relationshipStatus: draft.relationshipStatus, lastContactDate: draft.lastContactDate,
-        nextFollowUpDate: draft.nextFollowUpDate, notes: draft.notes,
-      };
+      : { relationshipStatus: draft.relationshipStatus, notes: draft.notes };
     setBusy(true); setErr(null);
     try {
       await api.patch(`/buyers/${id}`, payload);
@@ -357,30 +353,6 @@ export function BuyerProfile() {
       {/* Contact tracking */}
       <div className="bp-card">
         <SectionHead title="Contact tracking" section="tracking" />
-        {/* Follow-up alert: amber when due today or overdue. */}
-        {(() => {
-          if (!view.nextFollowUpDate) return null;
-          // Follow-up dates are calendar days stored at UTC midnight — compare
-          // day KEYS (as the dashboard's task list does), never local
-          // timestamps, or a date due today reads as a day overdue.
-          const dayKey = (d: string) => d.slice(0, 10);
-          const todayKey = new Date().toISOString().slice(0, 10);
-          const dueKey = dayKey(view.nextFollowUpDate);
-          if (dueKey > todayKey) return null;
-          const days = Math.round((Date.parse(`${dueKey}T00:00:00Z`) - Date.parse(`${todayKey}T00:00:00Z`)) / 86400000);
-          const since = view.lastContactDate
-            ? Math.round((Date.parse(`${todayKey}T00:00:00Z`) - Date.parse(`${dayKey(view.lastContactDate)}T00:00:00Z`)) / 86400000)
-            : null;
-          return (
-            <div className="bp-alert">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9.5" /><path d="M12 7.5V12l3 1.8" /></svg>
-              <div style={{ minWidth: 0 }}>
-                <div className="bp-alert-t">{days === 0 ? "Follow-up due today" : `Follow-up ${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} overdue`}</div>
-                <div className="bp-alert-s">{fmtDate(view.nextFollowUpDate)}{since != null && ` · ${since} days since last contact`}</div>
-              </div>
-            </div>
-          );
-        })()}
         <div className={editTracking ? "bp-edit bp-edit-grid" : "bp-kv-grid"}>
           {editTracking
             ? <Fld l="Close rate (computed)"><div className="bp-computed">{view.closedDeals > 0 ? `${pct(view.closeRate)} · ${view.closedDeals} closed` : "No closed deals yet"}</div></Fld>
@@ -388,8 +360,6 @@ export function BuyerProfile() {
           {editTracking ? (
             <>
               <Fld l="Status"><Select value={view.relationshipStatus} onChange={(v) => setD({ relationshipStatus: v as Relationship })} ariaLabel="Relationship status" options={[{ value: "HOT", label: "Hot" }, { value: "WARM", label: "Warm" }, { value: "COLD", label: "Cold" }]} /></Fld>
-              <Fld l="Last contact"><DateField value={toInputDate(view.lastContactDate)} onChange={(v) => setD({ lastContactDate: v || null })} /></Fld>
-              <Fld l="Next follow-up"><DateField value={toInputDate(view.nextFollowUpDate)} onChange={(v) => setD({ nextFollowUpDate: v || null })} /></Fld>
               <div className="bp-span2">
                 <Fld l="Notes"><textarea rows={4} value={view.notes ?? ""} onChange={(e) => setD({ notes: e.target.value })} placeholder="Context for the next call…" /></Fld>
               </div>
@@ -397,8 +367,6 @@ export function BuyerProfile() {
           ) : (
             <>
               <KV k="Status" v={<RelTag status={view.relationshipStatus} />} />
-              <KV k="Last contact" v={view.lastContactDate ? fmtDate(view.lastContactDate) : null} />
-              <KV k="Next follow-up" v={view.nextFollowUpDate ? fmtDate(view.nextFollowUpDate) : null} />
               <div className="bp-span2"><KV k="Notes" v={view.notes ? <span className="wrap">{view.notes}</span> : null} /></div>
             </>
           )}
@@ -446,7 +414,7 @@ export function BuyerProfile() {
         ) : (
           <div className="table-scroll">
             <table className="data-table bp-deal-table">
-              <thead><tr><th>Deal</th><th>Stage</th><th>Status</th><th className="right">Amount</th><th className="right">Date</th></tr></thead>
+              <thead><tr><th>Deal</th><th>Stage</th><th>Status</th><th className="right">Amount</th><th className="right">Profit</th><th className="right">Date</th></tr></thead>
               <tbody>
                 {view.dealHistory.map((h) => (
                   <tr key={h.dealId} className="clickable" onClick={() => nav(`/deals/${h.dealId}`)}>
@@ -454,6 +422,10 @@ export function BuyerProfile() {
                     <td><StageBadge stage={h.stage} /></td>
                     <td><StatusBadge status={h.status} /></td>
                     <td className="right bp-amt">{money(h.amount)}</td>
+                    {/* Realized profit on a deal that CLOSED with this buyer (the
+                        dashboard's figure: accepted offer − our cost − closing
+                        costs); "—" for open deals or ones that closed elsewhere. */}
+                    <td className="right bp-amt" title={h.profit == null ? (h.stage === "CLOSED" ? "Closed with another buyer" : "Not closed yet") : undefined}>{h.profit == null ? "—" : money(h.profit)}</td>
                     <td className="right bp-date">{fmtDate(h.date)}</td>
                   </tr>
                 ))}
@@ -470,6 +442,7 @@ export function BuyerProfile() {
                     <tr>
                       <td colSpan={3}>{n} deal{n === 1 ? "" : "s"} · {closed.length} closed</td>
                       <td className="right bp-total">{money(sumMoney(closed.map((h) => h.amount)))} closed</td>
+                      <td className="right bp-total">{money(sumMoney(closed.map((h) => h.profit)))} profit</td>
                       <td />
                     </tr>
                   </tfoot>

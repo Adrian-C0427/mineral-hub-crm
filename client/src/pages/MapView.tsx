@@ -1212,7 +1212,7 @@ export function MapView() {
             defs={[
               { key: "boundaries", label: "Abstract boundaries" }, { key: "absNums", label: "Abstract numbers" },
               { key: "surveyNames", label: "Survey names" }, { key: "deals", label: "Active deals" },
-              { key: "assets", label: "Mineral assets (owned)" },
+              { key: "assets", label: "Mineral assets" },
               { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores + bottom holes" },
               { key: "tracts", label: "Imported tracts" },
               { key: "units", label: "Pooled units" },
