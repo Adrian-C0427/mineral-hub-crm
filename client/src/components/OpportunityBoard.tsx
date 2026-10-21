@@ -4,7 +4,8 @@ import { api, ApiError } from "../api/client";
 import { Spinner, showToast, Modal, OverflowMenu } from "./ui";
 import { Avatar } from "./kit";
 import { Select } from "./Select";
-import { num, fmtDate, daysBetween } from "../lib/format";
+import { acres, fmtDate, daysBetween } from "../lib/format";
+import { roundTo } from "../lib/money";
 import { useAuth } from "../auth/AuthContext";
 import { stageColor, isOpportunityPipeline, type PipelineInfo } from "../stages";
 import { PipelineSettingsModal } from "./PipelineSettingsModal";
@@ -358,7 +359,7 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
           const col = stage.key;
           const color = stageColor(pipeline.stages, col);
           const colOpps = boardOpps.filter((o) => o.stage === col).sort((a, b) => oppDaysInStage(b) - oppDaysInStage(a));
-          const nma = colOpps.reduce((s, o) => s + (o.estNma ?? 0), 0);
+          const nma = roundTo(colOpps.reduce((s, o) => s + (o.estNma ?? 0), 0), 4);
           const hiddenBySearch = needle !== "" && opps.some((o) => o.stage === col);
           return (
             <div
@@ -373,7 +374,7 @@ export function OpportunityBoard({ pipeline, pipelines, switcher, showSettings, 
                   <span className="pl-col-count">{colOpps.length}</span>
                 </div>
                 <div className="pl-col-total">
-                  <span className={`pl-col-sum ${nma > 0 ? "on" : ""}`}>{num(nma)}</span>
+                  <span className={`pl-col-sum ${nma > 0 ? "on" : ""}`}>{acres(nma)}</span>
                   <span className="pl-col-metric">est. NMA</span>
                 </div>
               </div>
@@ -525,7 +526,7 @@ function OppCardBody({ opp, action }: { opp: OppSummary; action?: ReactNode }) {
         <span className="pl-card-days"><ClockIcon />{days === 0 ? "Moved today" : `${days}d in stage`}</span>
       </div>
       <div className="op-card-foot">
-        <span className="op-card-nma" title="Estimated net mineral acres">{opp.estNma != null ? `${num(opp.estNma)} NMA` : <span className="dim">NMA —</span>}</span>
+        <span className="op-card-nma" title="Estimated net mineral acres">{opp.estNma != null ? `${acres(opp.estNma)} NMA` : <span className="dim">NMA —</span>}</span>
         {due && <span className={`pl-due ${due.tone}`}>{due.text}</span>}
         {opp.owner && <span className="op-card-owner"><Avatar user={opp.owner} size={20} title={`Owner: ${opp.owner.name}`} /></span>}
       </div>
@@ -664,8 +665,8 @@ export function ConvertOpportunityModal({ opp, pipeline, pipelines, onClose, onC
     ? <>{place}{place && (opp.abstract || opp.survey) ? " · " : null}<OppAbstract abstract={opp.abstract} survey={opp.survey} /></>
     : null;
   const acreage = [
-    opp.estNma != null ? `${num(opp.estNma)} NMA` : opp.estAcres != null ? `${num(opp.estAcres)} acres` : null,
-    opp.estNra != null ? `${num(opp.estNra)} NRA` : null,
+    opp.estNma != null ? `${acres(opp.estNma)} NMA` : opp.estAcres != null ? `${acres(opp.estAcres)} acres` : null,
+    opp.estNra != null ? `${acres(opp.estNra)} NRA` : null,
   ].filter(Boolean).join(" · ");
 
   async function convert() {

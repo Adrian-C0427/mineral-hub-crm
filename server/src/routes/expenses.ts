@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { roundMoney } from "../domain/money.js";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
@@ -207,7 +208,7 @@ expensesRouter.get(
 
 const createSchema = z.object({
   date: dateStr,
-  amount: z.number().nonnegative().max(1e12),
+  amount: z.number().nonnegative().max(1e12).transform(roundMoney),
   categoryId: z.string().nullish(),
   notes: z.string().max(10_000).nullish(),
   reimbursed: z.boolean().optional(),
@@ -253,7 +254,7 @@ expensesRouter.post(
 
 const updateSchema = z.object({
   date: dateStr.optional(),
-  amount: z.number().nonnegative().max(1e12).optional(),
+  amount: z.number().nonnegative().max(1e12).transform(roundMoney).optional(),
   categoryId: z.string().nullish(),
   notes: z.string().max(10_000).nullish(),
   reimbursed: z.boolean().optional(),

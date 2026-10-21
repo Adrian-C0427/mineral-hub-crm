@@ -14,7 +14,7 @@ import { StateSelect } from "../components/StateSelect";
 import { BuyerRelationships, type BuyerNetwork } from "../components/BuyerRelationships";
 import { BuyerAliasManager } from "../components/BuyerAliasManager";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
-import { money, pct, fmtDate } from "../lib/format";
+import { money, pct, acres, fmtDate } from "../lib/format";
 import { sumMoney } from "../lib/money";
 import { formatPhone } from "../lib/phone";
 import { PhoneInput } from "../components/PhoneInput";
@@ -344,7 +344,7 @@ export function BuyerProfile() {
             <div className="bp-kv-grid">
               {/* Friendly display names — the raw key rendered "ASSETTYPES". */}
               {ARRAY_KEYS.map((k) => <KV key={k} k={BUYBOX_LABELS[k] ?? k} v={(view.buyBox[k] as string[]).length ? <ChipList items={view.buyBox[k] as string[]} /> : null} />)}
-              <KV k="Acreage" v={fmtRange(view.buyBox.minAcreage, view.buyBox.maxAcreage, (n) => n.toLocaleString("en-US"))} />
+              <KV k="Acreage" v={fmtRange(view.buyBox.minAcreage, view.buyBox.maxAcreage, (n) => acres(n))} />
               <KV k="Price" v={fmtRange(view.buyBox.minPrice, view.buyBox.maxPrice, (n) => money(n))} />
             </div>
           )}

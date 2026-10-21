@@ -164,6 +164,7 @@ async function loadAnalyticsDeals(organizationId: string): Promise<AnalyticsDeal
       operator: d.operator,
       askPrice: d.askPrice,
       ourPrice: d.ourPrice,
+      purchasePrice: d.purchasePrice,
       acceptedAmount: d.selectedOffer?.amount ?? null,
       estimatedClosingCosts: d.estimatedClosingCosts,
       relationshipOwnerId: d.relationshipOwnerId,

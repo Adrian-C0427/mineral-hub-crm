@@ -1,3 +1,4 @@
+import { roundTo } from "./money.js";
 /**
  * Lease royalty rates — the ONE parser every royalty figure goes through.
  *
@@ -103,4 +104,5 @@ export function nmaFromNra(nra: number | null, royalty: number | null): number |
   if (nra == null || royalty == null || !(royalty > 0)) return null;
   return round4(nra / (royalty * 8));
 }
-const round4 = (n: number) => Math.round(n * 10_000) / 10_000;
+// lib/money's string-shift rounder — the same 4-place rounding the client uses.
+const round4 = (n: number) => roundTo(n, 4);

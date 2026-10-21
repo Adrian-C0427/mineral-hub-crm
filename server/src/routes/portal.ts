@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { roundMoney } from "../domain/money.js";
 import { z } from "zod";
 import { randomBytes, createHmac } from "node:crypto";
 import { prisma } from "../db.js";
@@ -596,7 +597,7 @@ const offerSchema = z.object({
   contactName: z.string().trim().min(1).max(120),
   email: z.string().trim().email().max(200),
   phone: z.string().trim().max(40).optional().default("").transform(normalizePhone),
-  amount: z.number().positive().max(1e12),
+  amount: z.number().positive().max(1e12).transform(roundMoney),
   conditions: z.string().trim().max(2000).optional().default(""),
   // Optional buyer-set expiration for the offer (ISO date).
   expiresOn: z.string().trim().optional().nullable(),

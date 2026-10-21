@@ -11,6 +11,7 @@ import { StatStrip, Avatar, Tag, FormSection } from "../components/kit";
 import { Select } from "../components/Select";
 import { Toggle } from "../components/Toggle";
 import { compactMoney, money, fmtDate, toInputDate } from "../lib/format";
+import { sumMoney } from "../lib/money";
 import { downloadCsv } from "../lib/csv";
 import { CHART_COLORS, monthLabel, chartTooltip } from "../lib/charts";
 import type { UserLite } from "../types";
@@ -216,7 +217,7 @@ export function Expenses() {
                 No categories to chart yet
               </ChartEmpty>
             ) : (() => {
-              const catTotal = dash.byCategory.reduce((s, c) => s + c.amount, 0);
+              const catTotal = sumMoney(dash.byCategory.map((c) => c.amount));
               return (
                 <div className="xp-donut-wrap">
                   <div className="xp-donut">
@@ -406,9 +407,9 @@ function AllExpenses({
 
   // Running totals follow whatever is currently visible (filters + search).
   const totals = useMemo(() => {
-    let total = 0, reimbursed = 0;
-    for (const e of visible) { total += e.amount; if (e.reimbursed) reimbursed += e.amount; }
-    return { total, reimbursed, outstanding: total - reimbursed, count: visible.length };
+    const total = sumMoney(visible.map((e) => e.amount));
+    const reimbursed = sumMoney(visible.filter((e) => e.reimbursed).map((e) => e.amount));
+    return { total, reimbursed, outstanding: sumMoney([total, -reimbursed]), count: visible.length };
   }, [visible]);
 
   // Group by month (yyyy-mm), newest month first; sort rows inside each group.
@@ -433,8 +434,8 @@ function AllExpenses({
       .sort((a, b) => b[0].localeCompare(a[0]))
       .map(([month, rows]) => ({
         month, rows: rows.sort(cmp),
-        subtotal: rows.reduce((s, e) => s + e.amount, 0),
-        outstanding: rows.reduce((s, e) => s + (e.reimbursed ? 0 : e.amount), 0),
+        subtotal: sumMoney(rows.map((e) => e.amount)),
+        outstanding: sumMoney(rows.filter((e) => !e.reimbursed).map((e) => e.amount)),
       }));
   }, [visible, sort]);
 

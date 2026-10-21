@@ -21,7 +21,7 @@ import { ResearchImport } from "../components/ResearchImport";
 import { ResearchChoropleth, type CountyStat } from "../components/ResearchChoropleth";
 import { CLASS_COLORS, CLASS_FALLBACK_COLOR } from "../lib/entityClasses";
 import { downloadCsv } from "../lib/csv";
-import { fmtDate, num, prettyEnum, prettyDocType } from "../lib/format";
+import { fmtDate, num, acres, prettyEnum, prettyDocType } from "../lib/format";
 import { CHART_COLORS, chartTooltip } from "../lib/charts";
 import { DateField } from "../components/DateField";
 import { ALL_PERIOD, ALL_PERIOD_LABEL, isAllPeriod, withAllPeriod } from "../lib/period";
@@ -2296,7 +2296,7 @@ function RecordsTab({ qs, dataset }: { qs: string; dataset: Dataset }) {
     { key: "county", header: "County", value: (r) => r.county, render: (r) => <span className="rs-mid rec-nowrap">{r.county}, TX</span> },
     { key: "abstract", header: "Abstract", value: (r) => r.abstract, align: "right", render: (r) => r.abstract ? <span className="rs-mid chips-oneline"><ChipList items={[absIndex.label(r.abstract, r.county, "TX")]} /></span> : dash },
     { key: "survey", header: "Survey", value: (r) => r.survey },
-    { key: "acres", header: "Unit (ac)", value: (r) => r.acres, align: "right", type: "number", render: (r) => r.acres != null ? <span className="rs-mid rec-nowrap">{num(r.acres)}</span> : dash },
+    { key: "acres", header: "Unit (ac)", value: (r) => r.acres, align: "right", type: "number", render: (r) => r.acres != null ? <span className="rs-mid rec-nowrap">{acres(r.acres)}</span> : dash },
     { key: "apiNumber", header: "API #", value: (r) => r.api8, align: "right", render: (r) => r.api8 ? <span className="rs-mono rec-nowrap">{`42-${r.api8.slice(0, 3)}-${r.api8.slice(3)}`}</span> : dash },
   ];
 

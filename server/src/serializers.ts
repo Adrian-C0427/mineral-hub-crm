@@ -1,5 +1,5 @@
 import type { Prisma } from "@prisma/client";
-import { resolveDealDates } from "./domain/dates.js";
+import { daysUntil, resolveDealDates } from "./domain/dates.js";
 import { computePriority, isOverdue } from "./domain/priority.js";
 import { acquisitionCost, closeRate, dealNetProfit, dealSalePrice, profitAtAsk } from "./domain/metrics.js";
 import { roundMoney, roundTo, sumMoney } from "./domain/money.js";
@@ -105,7 +105,7 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
   // Owned-asset economics (null for opportunities / when inputs are missing).
   const roiSinceAcquisition =
     deal.purchasePrice && deal.purchasePrice !== 0 && deal.currentValue != null
-      ? ((deal.currentValue - deal.purchasePrice) / deal.purchasePrice) * 100
+      ? roundTo(((deal.currentValue - deal.purchasePrice) / deal.purchasePrice) * 100, 2)
       : null;
   const gainBasis = deal.bookValue ?? deal.purchasePrice;
   const unrealizedGainLoss =
@@ -191,10 +191,9 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     publishedToPortal: deal.publishedToPortal ?? false,
     portalSlug: deal.portalSlug ?? null,
     currentStageEnteredAt: deal.currentStageEnteredAt,
-    daysInStage: Math.max(
-      0,
-      Math.floor((now.getTime() - new Date(deal.currentStageEnteredAt).getTime()) / 86400000),
-    ),
+    // Calendar days (UTC), the same rule as Find Buyer By / overdue (daysUntil),
+    // so the two never disagree by a day because of the time of day.
+    daysInStage: Math.max(0, daysUntil(now, new Date(deal.currentStageEnteredAt))),
     deadReason: deal.deadReason,
     estimatedClosingCosts: deal.estimatedClosingCosts,
     notes: deal.notes,

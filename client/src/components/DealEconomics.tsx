@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { ROYALTY_RATE_OPTIONS, isPresetRoyalty, parseRoyaltyRate, royaltyLabel, royaltyShortLabel, royaltyValue } from "../lib/royalty";
-import { nmaFromNra, nraFromNma } from "../lib/perAcre";
+import { acreageLinked, nmaFromNra, nraFromNma, perAcreRates } from "../lib/perAcre";
 import { money } from "../lib/format";
 import { roundMoney } from "../lib/money";
 import { Select } from "./Select";
@@ -153,23 +153,33 @@ const cents = (n: number | null) => (n == null || !Number.isFinite(n) ? "" : Str
  * acreage (NMA/NRA already reflect the royalty-rate conversion). The typed
  * figure is never changed; a calculated one blanks when its acreage is missing.
  */
-export function syncPriceGroup(g: PriceGroup, nma: number | null, nra: number | null): PriceGroup {
+/**
+ * Recalculate the two figures the user didn't type from the one they did.
+ * The two rates are tied the same way lib/perAcre.perAcreRates ties them:
+ * when NRA is the NMA converted at the royalty, the other rate goes through
+ * the royalty (per NRA = per NMA ÷ (royalty × 8)), never through the
+ * 4-decimal NRA — so $7,000/NMA at 1/5 is $4,375/NRA on every deal.
+ */
+export function syncPriceGroup(g: PriceGroup, nma: number | null, nra: number | null, royalty: number | null = null): PriceGroup {
   const acres = (a: number | null) => (a != null && a > 0 ? a : null);
   const m = acres(nma), r = acres(nra);
+  const k = royalty != null && royalty > 0 && acreageLinked(m, r, royalty) ? royalty * 8 : null;
   switch (g.source) {
     case "perNma": {
       const rate = toNum(g.perNma);
       const total = rate != null && m != null ? rate * m : null;
-      return { ...g, total: cents(total), perNra: total != null && r != null ? cents(total / r) : "" };
+      const perNra = rate != null && k != null ? rate / k : total != null && r != null ? total / r : null;
+      return { ...g, total: cents(total), perNra: cents(perNra) };
     }
     case "perNra": {
       const rate = toNum(g.perNra);
       const total = rate != null && r != null ? rate * r : null;
-      return { ...g, total: cents(total), perNma: total != null && m != null ? cents(total / m) : "" };
+      const perNma = rate != null && k != null ? rate * k : total != null && m != null ? total / m : null;
+      return { ...g, total: cents(total), perNma: cents(perNma) };
     }
     case "total": {
-      const total = toNum(g.total);
-      return { ...g, perNma: total != null && m != null ? cents(total / m) : "", perNra: total != null && r != null ? cents(total / r) : "" };
+      const p = perAcreRates(toNum(g.total), m, r, royalty);
+      return { ...g, perNma: cents(p.perNma), perNra: cents(p.perNra) };
     }
     default:
       return g;
@@ -178,24 +188,26 @@ export function syncPriceGroup(g: PriceGroup, nma: number | null, nra: number | 
 
 /** The user typed into one figure: it becomes the driver. Clearing the driver
  *  clears what was calculated from it. */
-export function editPriceGroup(g: PriceGroup, field: PriceField, value: string, nma: number | null, nra: number | null): PriceGroup {
+export function editPriceGroup(g: PriceGroup, field: PriceField, value: string, nma: number | null, nra: number | null, royalty: number | null = null): PriceGroup {
   if (value.trim() === "") return g.source === field ? emptyPriceGroup() : { ...g, [field]: "" };
-  return syncPriceGroup({ ...g, [field]: value, source: field }, nma, nra);
+  return syncPriceGroup({ ...g, [field]: value, source: field }, nma, nra, royalty);
 }
 
 /** Editing state for a stored price: the driver is whichever stored rate
  *  reproduces the stored total, else the total itself (typed by hand). */
 export function priceGroupFromStored(
   perNma: number | null | undefined, perNra: number | null | undefined, total: number | null | undefined,
-  nma: number | null, nra: number | null,
+  nma: number | null, nra: number | null, royalty: number | null = null,
 ): PriceGroup {
+  // A rate reproduces the total when rate × acres lands within the rate's own
+  // half-cent of it (a cent-rounded rate can be off by up to 0.005 × acres).
   const matches = (rate: number | null | undefined, a: number | null) =>
-    rate != null && a != null && total != null && Math.abs(rate * a - total) < 0.01;
+    rate != null && a != null && a > 0 && total != null && Math.abs(rate * a - total) <= 0.005 * a + 0.005;
   const source: PriceField | null =
     matches(perNma, nma) ? "perNma" : matches(perNra, nra) ? "perNra"
     : total != null ? "total" : perNma != null ? "perNma" : perNra != null ? "perNra" : null;
   const g = { perNma: cents(perNma ?? null), perNra: cents(perNra ?? null), total: cents(total ?? null), source };
-  return syncPriceGroup(g, nma, nra);
+  return syncPriceGroup(g, nma, nra, royalty);
 }
 
 /** How a price group's total was reached. */
@@ -205,7 +217,7 @@ export function PriceNote({ g }: { g: PriceGroup }) {
   const rate = toNum(g.source === "perNma" ? g.perNma : g.perNra);
   return (
     <div className="nd-calc auto">
-      Calculated: {money(rate, { cents: true })} per {g.source === "perNma" ? "NMA" : "NRA"} = <strong>{money(toNum(g.total))}</strong>
+      Calculated: {money(rate, { cents: true })} per {g.source === "perNma" ? "NMA" : "NRA"} = <strong>{money(toNum(g.total), { cents: true })}</strong>
     </div>
   );
 }
