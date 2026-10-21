@@ -21,7 +21,7 @@ import {
 } from "../domain/researchBuyers.js";
 import {
   aggregateRelationships, aggregateGroupRelationships, coBuyerPartnerships, classifyEntities,
-  buildChains, chainTableRows, expandDocToEdges, ENTITY_CLASS_LABEL, type TxEdge,
+  buildChains, chainTableRows, expandDocToEdges, sideParties, ENTITY_CLASS_LABEL, type TxEdge,
 } from "../domain/researchGraph.js";
 import { normalizeCompany } from "../serializers.js";
 import { formatAbstract } from "../domain/abstractLabel.js";
@@ -231,6 +231,7 @@ interface DocRow {
   recordingDate: Date; docClass: ResearchDocClass; docType: ResearchDocType;
   state: string; county: string; abstractId: string | null; survey: string | null;
   grantee: string | null; granteeNorm: string | null; grantor: string | null; grantorNorm: string | null;
+  granteeParties: string[]; granteeNorms: string[]; grantorParties: string[]; grantorNorms: string[];
   acreage: number | null;
 }
 interface PermitRow {
@@ -355,7 +356,8 @@ async function loadDocs(org: string, f: ResearchFilters, win: Window): Promise<D
       select: {
         recordingDate: true, docClass: true, docType: true, state: true, county: true,
         abstractId: true, survey: true, grantee: true, granteeNorm: true, grantor: true,
-        grantorNorm: true, acreage: true,
+        grantorNorm: true, granteeParties: true, granteeNorms: true, grantorParties: true, grantorNorms: true,
+        acreage: true,
       },
     }),
   );
@@ -554,7 +556,8 @@ researchRouter.get(
       horizontalPermits: ps.filter((p) => p.trajectory === "HORIZONTAL").length,
       // Grantee count within the ACTIVE dataset only: deed buyers in
       // Transactions mode, lessees in Leases mode — never a mix.
-      uniqueBuyers: new Set(ds.filter((d) => d.docClass === (f.docClass ?? "TRANSACTION") && d.granteeNorm).map((d) => d.granteeNorm)).size,
+      uniqueBuyers: new Set(ds.filter((d) => d.docClass === (f.docClass ?? "TRANSACTION"))
+        .flatMap((d) => sideParties(d.grantee, d.granteeNorm, d.granteeParties, d.granteeNorms).map((p) => p.norm))).size,
       uniqueOperators: new Set(ps.map((p) => p.operatorNorm)).size,
       acreage: Math.round(ds.reduce((s, d) => s + (d.acreage ?? 0), 0)),
     });
@@ -776,9 +779,13 @@ researchRouter.get(
       // up as Top Buyers" bug) and vice versa. The page always sends docClass;
       // default to TRANSACTION so an unscoped call still can't mix datasets.
       const docs = await loadDocs(org, { ...f, docClass: f.docClass ?? "TRANSACTION" }, span);
+      // Each PARTICIPANT of a multi-party cell ranks on its own: "A; B" buying
+      // together is one acquisition for A and one for B, never a buyer "A; B".
       for (const d of docs) {
-        if (role === "buyers") bump(d.granteeNorm, d.grantee, d.recordingDate, d.county, d.acreage);
-        else bump(d.grantorNorm, d.grantor, d.recordingDate, d.county, d.acreage);
+        const parties = role === "buyers"
+          ? sideParties(d.grantee, d.granteeNorm, d.granteeParties, d.granteeNorms)
+          : sideParties(d.grantor, d.grantorNorm, d.grantorParties, d.grantorNorms);
+        for (const p of parties) bump(p.norm, p.name, d.recordingDate, d.county, d.acreage);
       }
     }
 
@@ -986,26 +993,27 @@ async function docsByGrantee(org: string, keys: string[]): Promise<Map<string, R
     byKey.set(key, list);
   };
   for (const d of docs) {
-    const matchedParticipants = d.granteeNorms
-      .map((n, i) => ({ norm: n, name: d.granteeParties[i] ?? n }))
-      .filter((p) => wanted.has(p.norm));
-    for (const p of matchedParticipants) attach(p.norm, p.name, d);
-    // Full-cell key match (single-party rows, or a caller using the group key).
-    if (d.granteeNorm && wanted.has(d.granteeNorm) && !matchedParticipants.some((p) => p.norm === d.granteeNorm)) {
-      attach(d.granteeNorm, d.grantee, d);
+    // Individual participants only (legacy rows split at read time): the name
+    // attached is the party's own spelling, never the combined cell, so a
+    // buyer built from these rows is one entity.
+    for (const p of sideParties(d.grantee, d.granteeNorm, d.granteeParties, d.granteeNorms)) {
+      if (wanted.has(p.norm)) attach(p.norm, p.name, d);
     }
   }
   const missing = keys.filter((k) => !byKey.has(k));
   if (missing.length) {
     const grantorDocs = await prisma.researchDocument.findMany({
-      where: { organizationId: org, grantorNorm: { in: missing } },
-      select: { grantor: true, grantorNorm: true, state: true, county: true, abstractId: true, docType: true, recordingDate: true },
+      where: { organizationId: org, OR: [{ grantorNorm: { in: missing } }, { grantorNorms: { hasSome: missing } }] },
+      select: { grantor: true, grantorNorm: true, grantorParties: true, grantorNorms: true, state: true, county: true, abstractId: true, docType: true, recordingDate: true },
     });
+    const missingSet = new Set(missing);
     for (const d of grantorDocs) {
-      if (!d.grantorNorm) continue;
-      const list = byKey.get(d.grantorNorm) ?? [];
-      list.push({ grantee: d.grantor, granteeNorm: d.grantorNorm, state: d.state, county: d.county, abstractId: d.abstractId, docType: d.docType, recordingDate: d.recordingDate });
-      byKey.set(d.grantorNorm, list);
+      for (const p of sideParties(d.grantor, d.grantorNorm, d.grantorParties, d.grantorNorms)) {
+        if (!missingSet.has(p.norm)) continue;
+        const list = byKey.get(p.norm) ?? [];
+        list.push({ grantee: p.name, granteeNorm: p.norm, state: d.state, county: d.county, abstractId: d.abstractId, docType: d.docType, recordingDate: d.recordingDate });
+        byKey.set(p.norm, list);
+      }
     }
   }
   return byKey;
@@ -1549,7 +1557,7 @@ researchRouter.get(
     const docs = await prisma.researchDocument.findMany({
       where: { ...docWhere(org, f, win), granteeNorm: { not: null } },
       select: {
-        grantee: true, granteeNorm: true, docClass: true, recordingDate: true,
+        grantee: true, granteeNorm: true, granteeParties: true, granteeNorms: true, docClass: true, recordingDate: true,
         consideration: true, acreage: true,
       },
     });
@@ -1559,17 +1567,20 @@ researchRouter.get(
     }
     const byNorm = new Map<string, Agg>();
     for (const d of docs) {
-      const a = byNorm.get(d.granteeNorm!) ?? {
-        name: d.grantee ?? d.granteeNorm!, count: 0, transactions: 0, leases: 0,
-        amount: 0, acreage: 0, first: d.recordingDate, last: d.recordingDate,
-      };
-      a.count++;
-      if (d.docClass === "TRANSACTION") a.transactions++; else a.leases++;
-      a.amount += d.consideration ?? 0;
-      a.acreage += d.acreage ?? 0;
-      if (d.recordingDate < a.first) a.first = d.recordingDate;
-      if (d.recordingDate > a.last) { a.last = d.recordingDate; a.name = d.grantee ?? a.name; }
-      byNorm.set(d.granteeNorm!, a);
+      // One entry per individual grantee; a group buy counts for each member.
+      for (const p of sideParties(d.grantee, d.granteeNorm, d.granteeParties, d.granteeNorms)) {
+        const a = byNorm.get(p.norm) ?? {
+          name: p.name, count: 0, transactions: 0, leases: 0,
+          amount: 0, acreage: 0, first: d.recordingDate, last: d.recordingDate,
+        };
+        a.count++;
+        if (d.docClass === "TRANSACTION") a.transactions++; else a.leases++;
+        a.amount += d.consideration ?? 0;
+        a.acreage += d.acreage ?? 0;
+        if (d.recordingDate < a.first) a.first = d.recordingDate;
+        if (d.recordingDate > a.last) { a.last = d.recordingDate; a.name = p.name; }
+        byNorm.set(p.norm, a);
+      }
     }
     const buyers = [...byNorm.entries()]
       .sort((x, y) => y[1].count - x[1].count || y[1].amount - x[1].amount)

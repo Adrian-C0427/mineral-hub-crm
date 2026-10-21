@@ -55,13 +55,64 @@ export function parseRecordDate(s: string): Date | null {
  * that resolves to neither is skipped. This lets the module scale beyond any one
  * county without manual correction.
  */
+/**
+ * Geography is stored ONE way: state as its USPS code ("TX"), county as a bare
+ * title-cased name ("Leon", "McMullen", "De Witt"). County indexes write the
+ * same place many ways ("Leon, Texas", "LEON COUNTY", "leon county, tx"), and
+ * every variant must land on the same key or Research shows one county twice.
+ */
+export const STATE_CODES: Record<string, string> = {
+  ALABAMA: "AL", ALASKA: "AK", ARIZONA: "AZ", ARKANSAS: "AR", CALIFORNIA: "CA", COLORADO: "CO", CONNECTICUT: "CT",
+  DELAWARE: "DE", FLORIDA: "FL", GEORGIA: "GA", HAWAII: "HI", IDAHO: "ID", ILLINOIS: "IL", INDIANA: "IN", IOWA: "IA",
+  KANSAS: "KS", KENTUCKY: "KY", LOUISIANA: "LA", MAINE: "ME", MARYLAND: "MD", MASSACHUSETTS: "MA", MICHIGAN: "MI",
+  MINNESOTA: "MN", MISSISSIPPI: "MS", MISSOURI: "MO", MONTANA: "MT", NEBRASKA: "NE", NEVADA: "NV", "NEW HAMPSHIRE": "NH",
+  "NEW JERSEY": "NJ", "NEW MEXICO": "NM", "NEW YORK": "NY", "NORTH CAROLINA": "NC", "NORTH DAKOTA": "ND", OHIO: "OH",
+  OKLAHOMA: "OK", OREGON: "OR", PENNSYLVANIA: "PA", "RHODE ISLAND": "RI", "SOUTH CAROLINA": "SC", "SOUTH DAKOTA": "SD",
+  TENNESSEE: "TN", TEXAS: "TX", UTAH: "UT", VERMONT: "VT", VIRGINIA: "VA", WASHINGTON: "WA", "WEST VIRGINIA": "WV",
+  WISCONSIN: "WI", WYOMING: "WY", "DISTRICT OF COLUMBIA": "DC",
+};
+const STATE_CODE_SET = new Set(Object.values(STATE_CODES));
+
+/** "Texas", "TEXAS", "tx", "Tex." → "TX". Unknown text is uppercased as before. */
 export function normState(s: string): string {
-  return s.trim().toUpperCase();
+  const t = s.trim().toUpperCase().replace(/[.,]+$/, "").replace(/\s+/g, " ");
+  if (STATE_CODES[t]) return STATE_CODES[t];
+  if (t === "TEX") return "TX";
+  if (t.startsWith("STATE OF ") && STATE_CODES[t.slice(9)]) return STATE_CODES[t.slice(9)];
+  return t;
 }
+
+/** Lower-case particles that stay lower inside a county name ("Isle of Wight"). */
+const COUNTY_LOWER = new Set(["OF", "THE", "DE", "LA", "DU", "AND"]);
+/** County names that are camel-cased in the static county lists. Keyed by the
+ *  upper-cased name; "Mc<Name>" is handled generically (every Mc county is one). */
+const COUNTY_CAMEL: Record<string, string> = {
+  DEWITT: "DeWitt", DESOTO: "DeSoto", DEKALB: "DeKalb", DEBACA: "DeBaca", LASALLE: "LaSalle", LAMOURE: "LaMoure",
+  LAPORTE: "LaPorte", LAGRANGE: "LaGrange", LARUE: "LaRue", MACOUPIN: "Macoupin", MACON: "Macon", MACOMB: "Macomb",
+};
+
+/**
+ * "LEON COUNTY", "leon", "Leon County, TX", "Leon Co." → "Leon"; "MCMULLEN" →
+ * "McMullen", "DEWITT" → "DeWitt", "ST. LANDRY PARISH" → "St. Landry". A
+ * trailing ", <state>" the clerk tacked on is dropped (the state is its own
+ * field); the county keeps the casing the static county lists use.
+ */
 export function titleCounty(s: string): string {
-  // Store county consistently ("Leon"), stripping a trailing "County" suffix.
-  const t = s.trim().replace(/\s+county$/i, "").trim();
-  return t.replace(/\w\S*/g, (w) => w[0].toUpperCase() + w.slice(1).toLowerCase());
+  let t = s.trim().replace(/\s+/g, " ");
+  // "Leon County, TX" / "Leon, Texas": the state belongs in its own column.
+  const tail = t.match(/^(.*?)[,\s]+(?:STATE OF\s+)?([A-Za-z .]+?)\.?$/i);
+  if (tail && STATE_CODE_SET.has(normState(tail[2])) && tail[1].trim()) t = tail[1].trim();
+  t = t.replace(/[\s,]+(county|co\.?|parish|borough)$/i, "").replace(/[,\s]+$/, "").trim();
+  const cap = (x: string) => (x ? x[0].toUpperCase() + x.slice(1).toLowerCase() : x);
+  const words = t.split(" ").map((w, i) => {
+    const up = w.toUpperCase();
+    if (i > 0 && COUNTY_LOWER.has(up)) return up.toLowerCase();
+    if (COUNTY_CAMEL[up]) return COUNTY_CAMEL[up];
+    if (/^MC[A-Z]/i.test(w) && w.length > 3) return "Mc" + cap(w.slice(2));
+    // Hyphenated / apostrophe parts each get a capital ("O'Brien", "Miami-Dade").
+    return w.split(/(['-])/).map((part) => (part === "'" || part === "-" ? part : cap(part))).join("");
+  });
+  return words.join(" ");
 }
 
 export type ImportCategory = "deeds" | "leases" | "permits";

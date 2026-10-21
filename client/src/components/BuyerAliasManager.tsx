@@ -152,28 +152,39 @@ export function BuyerAliasManager({ buyerId, companyName, aliases, onChanged }: 
   );
 }
 
-/** Search-driven merge/alias picker with an explicit confirm step. */
+/** A grantor/grantee name from the org's transaction records (one party, never a group). */
+interface AliasHit { norm: string; name: string; txCount: number; asGrantee: number; asGrantor: number; buyerId: string | null; buyerName: string | null }
+
+/**
+ * Search-driven merge/alias picker with an explicit confirm step. Results are
+ * individual grantor and grantee names from the transaction records only — a
+ * multi-party deed ("A; B") offers A and B separately, never "A & B" — so an
+ * alias always maps to real transaction history. A name another CRM buyer
+ * already claims becomes a profile merge instead of a plain alias.
+ */
 function MergeSearchModal({ buyerId, companyName, onClose, onDone, canMerge }: {
   buyerId: string; companyName: string; onClose: () => void; onDone: () => void; canMerge: boolean;
 }) {
-  const [buyers, setBuyers] = useState<BuyerRow[]>([]);
   const [q, setQ] = useState("");
+  const [hits, setHits] = useState<AliasHit[]>([]);
+  const [searching, setSearching] = useState(false);
   const [pick, setPick] = useState<{ kind: "merge"; buyer: BuyerRow } | { kind: "alias"; name: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  useEffect(() => {
-    api.get<BuyerRow[]>("/buyers").then((rows) => setBuyers(rows.filter((b) => b.id !== buyerId))).catch(() => setBuyers([]));
-  }, [buyerId]);
-
-  // Plain substring match — intentionally NOT similarity-gated: the user may
-  // associate completely different names on purpose.
-  const matches = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    if (!term) return [];
-    return buyers.filter((b) => b.companyName.toLowerCase().includes(term)).slice(0, 8);
-  }, [buyers, q]);
   const typed = q.trim();
+  useEffect(() => {
+    if (typed.length < 2) { setHits([]); return; }
+    let live = true;
+    setSearching(true);
+    const t = setTimeout(() => {
+      api.get<{ results: AliasHit[] }>(`/buyers/${buyerId}/alias-search?q=${encodeURIComponent(typed)}`)
+        .then((r) => { if (live) setHits(r.results); })
+        .catch(() => { if (live) setHits([]); })
+        .finally(() => { if (live) setSearching(false); });
+    }, 250);
+    return () => { live = false; clearTimeout(t); };
+  }, [buyerId, typed]);
 
   async function save() {
     if (!pick) return;
@@ -197,35 +208,39 @@ function MergeSearchModal({ buyerId, companyName, onClose, onDone, canMerge }: {
       {!pick ? (
         <>
           <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-            Search for a buyer to merge into <strong>{companyName}</strong>, or add any name as an
-            alias. Names do not need to be similar — this is an intentional association.
+            Search the grantor and grantee names in your transaction records. Pick the name that is
+            <strong> {companyName}</strong> under another spelling: its recorded history then counts
+            toward this buyer. Names do not need to be similar — this is an intentional association.
           </p>
           <input
             autoFocus
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search buyer names…"
-            aria-label="Search buyer names"
+            placeholder="Search recorded grantor / grantee names…"
+            aria-label="Search recorded names"
           />
           <div className="alias-search-results">
-            {matches.map((b) => (
-              <button type="button" className="alias-search-row" key={b.id}
-                disabled={!canMerge}
-                title={canMerge ? undefined : "Merging requires the delete-buyers permission"}
-                onClick={() => setPick({ kind: "merge", buyer: b })}>
-                <span>{b.companyName}</span>
-                <span className="alias-search-kind">CRM buyer — merge</span>
-              </button>
-            ))}
-            {typed.length > 1 && (
-              <button type="button" className="alias-search-row" onClick={() => setPick({ kind: "alias", name: typed })}>
-                <span>Add “{typed}” as an alias</span>
-                <span className="alias-search-kind">alias only</span>
-              </button>
+            {hits.map((h) => {
+              const sides = [h.asGrantee ? `${h.asGrantee} as buyer` : null, h.asGrantor ? `${h.asGrantor} as seller` : null].filter(Boolean).join(" · ");
+              return h.buyerId ? (
+                <button type="button" className="alias-search-row" key={h.norm}
+                  disabled={!canMerge}
+                  title={canMerge ? undefined : "Merging requires the delete-buyers permission"}
+                  onClick={() => setPick({ kind: "merge", buyer: { id: h.buyerId!, companyName: h.buyerName ?? h.name } as BuyerRow })}>
+                  <span>{h.name}<span className="muted" style={{ fontSize: 12 }}> · {sides}</span></span>
+                  <span className="alias-search-kind">already the buyer “{h.buyerName}” — merge profiles</span>
+                </button>
+              ) : (
+                <button type="button" className="alias-search-row" key={h.norm} onClick={() => setPick({ kind: "alias", name: h.name })}>
+                  <span>{h.name}<span className="muted" style={{ fontSize: 12 }}> · {sides}</span></span>
+                  <span className="alias-search-kind">add as alias</span>
+                </button>
+              );
+            })}
+            {typed.length >= 2 && !searching && hits.length === 0 && (
+              <p className="muted" style={{ fontSize: 12.5, margin: "6px 2px 0" }}>No recorded grantor or grantee matches “{typed}”.</p>
             )}
-            {typed.length > 1 && matches.length === 0 && (
-              <p className="muted" style={{ fontSize: 12.5, margin: "6px 2px 0" }}>No CRM buyers match — you can still add the typed name as an alias.</p>
-            )}
+            {searching && <p className="muted" style={{ fontSize: 12.5, margin: "6px 2px 0" }}>Searching…</p>}
           </div>
         </>
       ) : (

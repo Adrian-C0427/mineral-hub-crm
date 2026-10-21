@@ -268,13 +268,38 @@ const PARTY_SEPARATOR = /(?:[,;]|(?<!\d\s*)\/(?!\s*\d))+/;
  * same entity key are de-duplicated (first spelling wins). `hasInterest` is
  * true when any interest text was found in the cell.
  */
+/** Words that mark a part as an organisation, not a person's given names. */
+const ENTITY_WORDS = /\b(TRUST|ESTATE|HEIRS|RANCH|MINERALS?|ROYALT(?:Y|IES)|PARTNERS(?:HIP)?|ENERGY|RESOURCES|OIL|GAS|LAND|HOLDINGS?|FUND|BANK|CHURCH|FAMILY|INVESTMENTS?|PROPERTIES|GROUP|CAPITAL|ASSOCIATES|ACQUISITIONS?|VENTURES?|FARMS?|CATTLE|INC|LLC|LP|LTD|CORP|CO|COMPANY|TRUSTEE|TRUSTEES|DECD|DECEASED)\b/;
+
+/**
+ * "GARCIA, MARIA" / "Smith, John et ux" / "Thompson, Robert et al": the way
+ * county indexes write ONE person (surname first). Treated as a single party,
+ * not two. Only the narrow shape qualifies — a one-word surname before the
+ * comma, one to three given-name words after it, no digits and no company
+ * words on either side — so "Company A, Company B" (two multi-word names)
+ * and "Blackrock Minerals, LLC" (a suffix) still follow the separator rules.
+ */
+function isSurnameFirstPerson(raw: string): boolean {
+  const parts = raw.split(",");
+  if (parts.length !== 2 || /[;/]/.test(raw)) return false;
+  const [last, given] = parts.map((x) => x.trim());
+  if (!last || !given || /\d/.test(raw)) return false;
+  const words = (x: string) => x.toUpperCase().replace(/[^A-Z' ]+/g, " ").split(/\s+/).filter(Boolean);
+  const lastWords = words(last);
+  const givenWords = words(given).filter((w) => !["ET", "UX", "AL", "VIR", "ETUX", "ETAL", "ETVIR", "JR", "SR", "II", "III", "IV"].includes(w));
+  if (lastWords.length !== 1 || givenWords.length < 1 || givenWords.length > 3) return false;
+  if (ENTITY_WORDS.test(last.toUpperCase()) || ENTITY_WORDS.test(given.toUpperCase())) return false;
+  return true;
+}
+
 export function parsePartyCell(raw: string | null | undefined): { parties: ParsedParty[]; hasInterest: boolean } {
   if (!raw) return { parties: [], hasInterest: false };
   const out: ParsedParty[] = [];
   const byNorm = new Map<string, ParsedParty>();
   let hasInterest = false;
   let leading: { pct: number; text: string | null } | null = null;
-  for (const part of String(raw).split(PARTY_SEPARATOR)) {
+  const parts = isSurnameFirstPerson(String(raw)) ? [String(raw)] : String(raw).split(PARTY_SEPARATOR);
+  for (const part of parts) {
     const ex = extractInterest(part);
     if (ex.pct != null) hasInterest = true;
     const prev = out[out.length - 1];

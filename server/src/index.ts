@@ -10,6 +10,7 @@ import { startPortalReminderScheduler } from "./services/portalReminders.js";
 import { startDealAlertScheduler } from "./services/dealAlerts.js";
 import { startDemoResetScheduler } from "./services/demoReset.js";
 import { backfillTransactionInterests } from "./services/researchInterestBackfill.js";
+import { backfillResearchConsistency } from "./services/researchConsistencyBackfill.js";
 import { ensureGisRegions } from "./services/gisRegions.js";
 import { ensureSonrisWells } from "./services/sonrisWells.js";
 import { ensureRrcRefresh } from "./services/rrcRefresh.js";
@@ -45,9 +46,12 @@ backfillBuyerStatus().catch((e) =>
 
 // Idempotent, lossless: conveyed-interest shares written into recorded party
 // names ("ABC MINERALS LLC – 50%") become their own data on older records.
-backfillTransactionInterests().catch((e) =>
-  console.error("Conveyed-interest backfill failed:", e instanceof Error ? e.message : e),
-);
+backfillTransactionInterests()
+  .catch((e) => console.error("Conveyed-interest backfill failed:", e instanceof Error ? e.message : e))
+  // Then (same rows): geography codes, participant arrays on older records,
+  // and buyer aliases that named a whole multi-party cell.
+  .then(() => backfillResearchConsistency())
+  .catch((e) => console.error("Research consistency backfill failed:", e instanceof Error ? e.message : e));
 
 // Idempotent, additive: Louisiana Haynesville parishes + PLSS sections, bundled
 // with the server, upserted into the gis schema when missing or out of date

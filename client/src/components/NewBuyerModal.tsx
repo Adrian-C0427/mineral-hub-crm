@@ -8,7 +8,6 @@ import { GeoFields } from "./GeoFields";
 import { StateSelect } from "./StateSelect";
 import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
 import { MoneyInput } from "./MoneyInput";
-import { DateField } from "./DateField";
 import { FormSection } from "./kit";
 
 /**
@@ -21,7 +20,7 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
     companyName: "", contactFirstName: "", contactLastName: "", email: "", phone: "",
     website: "", mailingAddress: "", mailingCity: "", mailingState: "", mailingZip: "",
     minAcreage: "", maxAcreage: "", minPrice: "", maxPrice: "",
-    nextFollowUpDate: "", notes: "",
+    notes: "",
   });
   const [relationshipStatus, setRelationshipStatus] = useState<"HOT" | "WARM" | "COLD">("WARM");
   const [states, setStates] = useState<string[]>([]);
@@ -61,7 +60,6 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
         mailingState: f.mailingState || null,
         mailingZip: f.mailingZip.trim() || null,
         relationshipStatus,
-        nextFollowUpDate: f.nextFollowUpDate || null,
         notes: f.notes || null,
         buyBox: {
           states,
@@ -117,7 +115,7 @@ export function NewBuyerModal({ onClose, onCreated }: { onClose: () => void; onC
 
       <FormSection title="Follow-up & mailing address">
       <div className="nd-grid3">
-        <div className="field"><label>Next follow-up</label><DateField value={f.nextFollowUpDate} onChange={(v) => setF((p) => ({ ...p, nextFollowUpDate: v }))} /></div>
+
         <div className="field" style={{ gridColumn: "2 / -1" }}><label>Mailing address</label><input value={f.mailingAddress} onChange={set("mailingAddress")} placeholder="Street address" /></div>
         <div className="field"><label>City</label><input value={f.mailingCity} onChange={set("mailingCity")} placeholder="City" /></div>
         <div className="field"><label>State</label><StateSelect value={f.mailingState} onChange={(v) => setF((p) => ({ ...p, mailingState: v }))} /></div>
