@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
 import { PriorityBadge, StageBadge, Spinner, SearchInput, showToast } from "../components/ui";
@@ -6,7 +6,7 @@ import { royaltyLabel, royaltyValue } from "../lib/royalty";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { NewDealModal } from "../components/NewDealModal";
 import { useRowSelection, BulkActionsBar } from "../components/bulk";
-import { compactMoney, money, num, acres, fmtDate } from "../lib/format";
+import { money, num, acres, fmtDate } from "../lib/format";
 import { perAcreRates } from "../lib/perAcre";
 import { roundTo, sumMoney } from "../lib/money";
 import { dealSearchHaystack } from "../lib/dealSearch";
@@ -33,10 +33,6 @@ const VISIBILITY_OPTIONS: { value: DealsVisibility; label: string; title: string
 const blendedValue = (rate: number | null, unit: "NMA" | "NRA") =>
   rate == null ? "N/A" : <>{money(rate, { cents: true })}<span className="dl-kpi-unit">/{unit}</span></>;
 
-/** Compact money for the header stat line — "$93.7K", "$1.2M". */
-function moneyCompact(v: number): string {
-  return compactMoney(v);
-}
 
 const shortName = (name: string): string => {
   const parts = name.split(/\s+/).filter(Boolean);
@@ -227,26 +223,7 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
       ) : "—" },
   ];
 
-  // Live header stat line: what's in play and what it's projected to make.
-  // Plain sums of the Profit Est. and Our Cost columns over this scope.
   const n = scoped.length;
-  const projected = sumMoney(scoped.map((d) => d.profitEst));
-  // Under contract = what we're committed to pay sellers: seller deals only, the
-  // same population as the Dashboard tile and the Pipeline column totals (an
-  // owned asset marked for sale is already ours).
-  const underContract = sumMoney(scoped.filter((d) => d.recordType !== "OWNED_ASSET").map((d) => d.aggOurPrice ?? d.ourPrice));
-  const profitStat = (label: string) => projected
-    ? <><b className={projected < 0 ? "neg" : "pos"}>{moneyCompact(projected)}</b> {label}</>
-    : null;
-  const hiddenN = scoped.filter((d) => d.hiddenAt).length;
-  const stats: ReactNode[] = (
-    scope === "active" ? [<><b>{n}</b> active</>, underContract ? <><b>{moneyCompact(underContract)}</b> under contract</> : null, profitStat("projected profit")]
-    : scope === "closed" ? [<><b>{n}</b> closed</>, profitStat("profit")]
-    : scope === "archived" ? [<><b>{n}</b> archived</>]
-    : [<><b>{n}</b> deal{n === 1 ? "" : "s"} across every stage</>]
-  ).concat(
-    visibility === "HIDDEN" ? [<><b>hidden</b> deals only</>] : visibility === "ALL" ? [<><b>{hiddenN}</b> hidden included</>] : [],
-  ).filter(Boolean);
 
   // KPI strip — the deals in view (this scope + stage filter + search +
   // visibility). Blended cost is Σ Our cost ÷ Σ acreage (lib/blendedCost),
@@ -298,9 +275,6 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
       <div className="page-header">
         <div className="dl-head">
           <h1>{SCOPE_TITLE[scope]}</h1>
-          <div className="dl-stats">
-            {stats.map((st, i) => <Fragment key={i}>{i > 0 && <span className="dl-stats-dot" aria-hidden="true" />}<span>{st}</span></Fragment>)}
-          </div>
         </div>
         {can("createDeals") && (
           <button className="primary dl-new-btn" onClick={() => setShowNew(true)}>
