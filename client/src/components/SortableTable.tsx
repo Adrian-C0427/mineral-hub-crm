@@ -6,6 +6,7 @@ import { WHEEL_GESTURE_GAP_MS, wheelPx } from "../lib/wheel";
 import { Select } from "./Select";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { useListState } from "../lib/listState";
 
 export type SortType = "text" | "number" | "date";
 
@@ -91,6 +92,9 @@ interface Props<T> {
   paginationNoun?: string;
   /** Extra content appended to the footer count (e.g. "· $1.2M total value"). */
   footerExtra?: ReactNode;
+  /** Remember the user's sort, page size and page for this table (per browser
+   *  tab, like list search/filter state) so Back from a record restores them. */
+  stateKey?: string;
 }
 
 function compareValues(a: unknown, b: unknown, type: SortType): number {
@@ -361,8 +365,12 @@ export function SortableTable<T>({
   paginationNoun,
   footerExtra,
   totalsLabel,
+  stateKey,
 }: Props<T>) {
-  const [localSort, setLocalSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(defaultSort ?? null);
+  // Sort / paging state: remembered per tab when the caller names the table
+  // (stateKey), else plain component state that resets on remount.
+  const anonKey = useMemo(() => Math.random().toString(36).slice(2), []);
+  const [localSort, setLocalSort] = useListState<{ key: string; dir: "asc" | "desc" } | null>(stateKey ? `table:${stateKey}:sort` : `table:__anon:${anonKey}:sort`, defaultSort ?? null);
   // Server-sort mode: the caller owns the sort state and re-queries on change.
   const sort = serverSort ? serverSort.sort : localSort;
   const { ordered, visible, hidden, widths, pinnedKeys, pinnedSet, toggle, reorder, setWidth, togglePin, reset, isDefault } = useColumnPrefs(customizeId, columns);
@@ -427,12 +435,14 @@ export function SortableTable<T>({
   // the whole list, not just the visible page.
   const paginated = !!rowsPerPage && rowsPerPage.length > 0;
   const initialPageSize = defaultPageSize ?? (rowsPerPage?.includes(50) ? 50 : rowsPerPage?.[0] ?? 50);
-  const [pageSize, setPageSize] = useState(initialPageSize);
-  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useListState(stateKey ? `table:${stateKey}:pageSize` : `table:__anon:${anonKey}:pageSize`, initialPageSize);
+  const [page, setPage] = useListState(stateKey ? `table:${stateKey}:page` : `table:__anon:${anonKey}:page`, 1);
   const totalPages = paginated ? Math.max(1, Math.ceil(sorted.length / pageSize)) : 1;
   const curPage = Math.min(page, totalPages);
-  // Snap back to a valid page when the row set shrinks or the page size changes.
-  useEffect(() => { setPage(1); }, [pageSize, sorted.length]);
+  // Snap back to a valid page when the row set shrinks or the page size changes
+  // (not on the first render, which would discard a remembered page).
+  const pagingSeen = useRef(false);
+  useEffect(() => { if (pagingSeen.current) setPage(1); else pagingSeen.current = true; }, [pageSize, sorted.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const paged = paginated ? sorted.slice((curPage - 1) * pageSize, curPage * pageSize) : sorted;
 
   // Right-edge fade: a visible cue that more columns exist off-screen. (The
