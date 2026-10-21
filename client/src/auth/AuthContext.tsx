@@ -26,6 +26,8 @@ export interface CurrentUser {
   accentColor?: string | null;
   accentColor2?: string | null;
   avatarColor?: string | null;
+  /** Saved Deals list visibility (Active / Hidden / All); null = Active. */
+  dealsVisibility?: "ACTIVE" | "HIDDEN" | "ALL" | null;
 }
 
 export interface RegisterPayload {

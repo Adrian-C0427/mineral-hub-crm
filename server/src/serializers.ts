@@ -122,6 +122,8 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     name: deal.name,
     sellerNames: deal.sellerNames,
     docFolders: deal.docFolders,
+    // Hidden from the Deals list (set = hidden). Visibility only — see schema.
+    hiddenAt: deal.hiddenAt ?? null,
     recordType: deal.recordType,
     assetMode: deal.assetMode,
     // Owned-asset: ownership

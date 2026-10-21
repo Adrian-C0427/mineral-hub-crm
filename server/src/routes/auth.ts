@@ -339,20 +339,27 @@ const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
  * unset choice — or a DB that predates a column — never overrides the local
  * device state.
  */
-async function readPrefs(userId: string): Promise<{ themePreference: Theme | null; accentColor: string | null; accentColor2: string | null; avatarColor: string | null }> {
+// Deals list visibility (Hide/Unhide deals): which deals the list shows.
+const DEALS_VISIBILITY = ["ACTIVE", "HIDDEN", "ALL"] as const;
+type DealsVisibility = (typeof DEALS_VISIBILITY)[number];
+
+type Prefs = { themePreference: Theme | null; accentColor: string | null; accentColor2: string | null; avatarColor: string | null; dealsVisibility: DealsVisibility | null };
+
+async function readPrefs(userId: string): Promise<Prefs> {
   try {
     const row = await prisma.user.findUnique({
       where: { id: userId },
-      select: { themePreference: true, accentColor: true, accentColor2: true, avatarColor: true },
+      select: { themePreference: true, accentColor: true, accentColor2: true, avatarColor: true, dealsVisibility: true },
     });
     return {
       themePreference: row?.themePreference && (THEMES as readonly string[]).includes(row.themePreference) ? (row.themePreference as Theme) : null,
       accentColor: row?.accentColor && HEX_COLOR.test(row.accentColor) ? row.accentColor : null,
       accentColor2: row?.accentColor2 && HEX_COLOR.test(row.accentColor2) ? row.accentColor2 : null,
       avatarColor: row?.avatarColor && HEX_COLOR.test(row.avatarColor) ? row.avatarColor : null,
+      dealsVisibility: row?.dealsVisibility && (DEALS_VISIBILITY as readonly string[]).includes(row.dealsVisibility) ? (row.dealsVisibility as DealsVisibility) : null,
     };
   } catch {
-    return { themePreference: null, accentColor: null, accentColor2: null, avatarColor: null }; // columns not pushed yet — never break /me
+    return { themePreference: null, accentColor: null, accentColor2: null, avatarColor: null, dealsVisibility: null }; // columns not pushed yet — never break /me
   }
 }
 
@@ -438,11 +445,12 @@ authRouter.patch(
   "/preferences",
   requireAuth,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { theme, accentColor, accentColor2, avatarColor } = z.object({
+    const { theme, accentColor, accentColor2, avatarColor, dealsVisibility } = z.object({
       theme: z.enum(THEMES).optional(),
       accentColor: z.string().regex(HEX_COLOR).nullish(),
       accentColor2: z.string().regex(HEX_COLOR).nullish(),
       avatarColor: z.string().regex(HEX_COLOR).nullish(),
+      dealsVisibility: z.enum(DEALS_VISIBILITY).optional(),
     }).parse(req.body);
     let persisted = true;
     try {
@@ -453,12 +461,13 @@ authRouter.patch(
           ...(accentColor !== undefined ? { accentColor } : {}),
           ...(accentColor2 !== undefined ? { accentColor2 } : {}),
           ...(avatarColor !== undefined ? { avatarColor } : {}),
+          ...(dealsVisibility !== undefined ? { dealsVisibility } : {}),
         },
       });
     } catch {
       persisted = false;
     }
-    res.json({ theme, accentColor, accentColor2, avatarColor, persisted });
+    res.json({ theme, accentColor, accentColor2, avatarColor, dealsVisibility, persisted });
   }),
 );
 

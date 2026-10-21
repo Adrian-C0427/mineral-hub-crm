@@ -110,7 +110,13 @@ export interface DealSummary {
   aggAcreageNma?: number | null;
   aggOurPrice?: number | null;
   aggAskPrice?: number | null;
+  /** Set when the deal is hidden from the Deals list's default view (Hide deal).
+   *  Visibility only — nothing else about the deal changes. */
+  hiddenAt?: string | null;
 }
+
+/** Deals list visibility: which deals the list and its metrics include. */
+export type DealsVisibility = "ACTIVE" | "HIDDEN" | "ALL";
 
 /** Compact child-asset summary shown within its parent package on the deal page. */
 export interface AssetChild {

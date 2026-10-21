@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
-import { Banner, PriorityBadge, StageBadge, Spinner, SearchInput } from "../components/ui";
+import { Banner, PriorityBadge, StageBadge, Spinner, SearchInput, showToast } from "../components/ui";
 import { royaltyLabel, royaltyValue } from "../lib/royalty";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { NewDealModal } from "../components/NewDealModal";
@@ -15,11 +15,23 @@ import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
 import { useStages } from "../stages";
 import { useListState } from "../lib/listState";
-import { Avatar, Segmented, Tag } from "../components/kit";
-import type { DealSummary, UserLite } from "../types";
+import { Avatar, Segmented, StatStrip, Tag, type StatCell } from "../components/kit";
+import { blendedCost } from "../lib/blendedCost";
+import type { DealSummary, DealsVisibility, UserLite } from "../types";
 
 type Scope = "all" | "active" | "closed" | "archived";
 const SCOPE_TITLE: Record<Scope, string> = { all: "Deals", active: "Active Deals", closed: "Closed Deals", archived: "Archived Deals" };
+
+/** Hide/Unhide: which deals the list (and every metric on it) includes. */
+const VISIBILITY_OPTIONS: { value: DealsVisibility; label: string; title: string }[] = [
+  { value: "ACTIVE", label: "Active", title: "Deals that aren't hidden (the default view)" },
+  { value: "HIDDEN", label: "Hidden", title: "Only deals you've hidden" },
+  { value: "ALL", label: "All", title: "Hidden and active deals together" },
+];
+
+/** Blended $/acre as a KPI value: the rate with its unit, or N/A. */
+const blendedValue = (rate: number | null, unit: "NMA" | "NRA") =>
+  rate == null ? "N/A" : <>{money(rate, { cents: true })}<span className="dl-kpi-unit">/{unit}</span></>;
 
 /** Compact money for the header stat line — "$93.7K", "$1.2M". */
 function moneyCompact(v: number): string {
@@ -43,6 +55,7 @@ function costPerAcre(d: DealSummary, stored: number | null | undefined, acres: n
 }
 
 const PROFIT_AT_ASK_HINT = "Ask price − Our cost − closing costs: what we'd make selling at our current asking price. Not an offer.";
+const BLENDED_HINT = "Blended: total Our cost ÷ total acreage of the listed deals (a weighted average, not the average of each deal's rate).";
 
 /** Profit reads green (a loss reads red) wherever it appears in the table. */
 const profitCell = (v: number | null) =>
@@ -69,8 +82,14 @@ function inScope(d: DealSummary, scope: Scope): boolean {
 }
 
 export function Deals({ scope = "all" }: { scope?: Scope }) {
-  const { can } = useAuth();
+  const { can, user } = useAuth();
   const [deals, setDeals] = useState<DealSummary[] | null>(null);
+  // Visibility (Active / Hidden / All) is the user's saved choice (profile),
+  // remembered for the tab too so Back from a deal keeps it without a refetch
+  // of /me. Hidden deals are filtered out by the server query, so nothing on
+  // this page — rows, counts, totals, KPIs, exports — can include one unless
+  // the view asks for it.
+  const [visibility, setVisibilityState] = useListState<DealsVisibility>("deals:visibility", user?.dealsVisibility ?? "ACTIVE");
   // Search and stage filter are remembered per tab so Back from a deal
   // restores them (the stage filter per scope, since each scope has its own).
   const [q, setQ] = useListState("deals:q", "");
@@ -85,8 +104,19 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
   const [stageKey, setStageKey] = useListState(`deals:${scope}:stage`, "");
   const closeNew = () => { setShowNew(false); if (params.get("new")) setParams({}, { replace: true }); };
 
-  function load() { api.get<DealSummary[]>("/deals").then(setDeals); }
-  useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
+  function load() { api.get<DealSummary[]>(`/deals?visibility=${visibility.toLowerCase()}`).then(setDeals); }
+  useEffect(() => { load(); }, [visibility]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
+  function setVisibility(v: DealsVisibility) {
+    if (v === visibility) return;
+    setVisibilityState(v);
+    sel.clear();
+    api.patch("/auth/preferences", { dealsVisibility: v }).catch(() => {}); // best effort; the tab keeps the choice regardless
+  }
+  async function setHidden(ids: string[], hidden: boolean) {
+    const r = await api.post<{ updated: number }>("/deals/bulk-hidden", { ids, hidden });
+    showToast(`${r.updated} deal${r.updated === 1 ? "" : "s"} ${hidden ? "hidden from" : "restored to"} the Deals list`);
+  }
 
   const scoped = useMemo(() => (deals ?? []).filter((d) => inScope(d, scope)), [deals, scope]);
   const overdue = useMemo(() => scoped.filter((d) => d.isOverdue), [scoped]);
@@ -130,6 +160,7 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
       render: (d) => (
         <span className="dl-name">
           <span className="dl-name-txt">{d.name}</span>
+          {d.hiddenAt && visibility !== "HIDDEN" && <Tag title={`Hidden from the default Deals view since ${fmtDate(d.hiddenAt)}`}>Hidden</Tag>}
           {d.recordType === "OWNED_ASSET" && <Tag tone="accent" title="This is an owned mineral asset marked for sale — not an acquisition opportunity.">Asset · For sale</Tag>}
           {d.assetCount ? <Tag title={`${d.assetCount} asset${d.assetCount > 1 ? "s" : ""} in this seller package`}>{d.assetCount} asset{d.assetCount > 1 ? "s" : ""}</Tag> : null}
         </span>
@@ -154,12 +185,16 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
       total: (rows) => money(sumOf(rows, (d) => d.aggOurPrice ?? d.ourPrice)) },
     { key: "buyerPrice", header: "Buyer purchase price", type: "number", align: "right", value: (d) => d.buyerPurchasePrice ?? null, render: (d) => money(d.buyerPurchasePrice), legacyDefaultHidden: true, newlyAdded: true,
       total: (rows) => money(sumOf(rows, (d) => d.buyerPurchasePrice)) },
+    // Totals here are the BLENDED rate (Σ Our cost ÷ Σ acres over the listed
+    // deals) — the same figure as the KPI above the table, never a mean of rates.
     { key: "ourCostPerNma", header: "Our cost per NMA", type: "number", align: "right",
       value: (d) => costPerAcre(d, d.ourCostPerNma, d.aggAcreageNma ?? d.acreageNma),
-      render: (d) => money(costPerAcre(d, d.ourCostPerNma, d.aggAcreageNma ?? d.acreageNma), { cents: true }), newlyAdded: true },
+      render: (d) => money(costPerAcre(d, d.ourCostPerNma, d.aggAcreageNma ?? d.acreageNma), { cents: true }), newlyAdded: true,
+      total: (rows) => { const b = blendedCost(rows); return <span title={BLENDED_HINT}>{b.perNma == null ? "N/A" : money(b.perNma, { cents: true })}</span>; } },
     { key: "ourCostPerNra", header: "Our cost per NRA", type: "number", align: "right",
       value: (d) => costPerAcre(d, d.ourCostPerNra, d.aggNra ?? d.nra),
-      render: (d) => money(costPerAcre(d, d.ourCostPerNra, d.aggNra ?? d.nra), { cents: true }), newlyAdded: true },
+      render: (d) => money(costPerAcre(d, d.ourCostPerNra, d.aggNra ?? d.nra), { cents: true }), newlyAdded: true,
+      total: (rows) => { const b = blendedCost(rows); return <span title={BLENDED_HINT}>{b.perNra == null ? "N/A" : money(b.perNra, { cents: true })}</span>; } },
     // Display-only: every deal field is edited on the Deal page (Deal Characteristics).
     { key: "royaltyRate", header: "Royalty rate", type: "number", align: "right", value: (d) => royaltyValue(d.royaltyRate),
       render: (d) => royaltyCell(d.royaltyRate), legacyDefaultHidden: true, newlyAdded: true },
@@ -196,12 +231,37 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
   const profitStat = (label: string) => projected
     ? <><b className={projected < 0 ? "neg" : "pos"}>{moneyCompact(projected)}</b> {label}</>
     : null;
+  const hiddenN = scoped.filter((d) => d.hiddenAt).length;
   const stats: ReactNode[] = (
     scope === "active" ? [<><b>{n}</b> active</>, underContract ? <><b>{moneyCompact(underContract)}</b> under contract</> : null, profitStat("projected profit")]
     : scope === "closed" ? [<><b>{n}</b> closed</>, profitStat("profit")]
     : scope === "archived" ? [<><b>{n}</b> archived</>]
     : [<><b>{n}</b> deal{n === 1 ? "" : "s"} across every stage</>]
+  ).concat(
+    visibility === "HIDDEN" ? [<><b>hidden</b> deals only</>] : visibility === "ALL" ? [<><b>{hiddenN}</b> hidden included</>] : [],
   ).filter(Boolean);
+
+  // KPI strip — the deals in view (this scope + stage filter + search +
+  // visibility). Blended cost is Σ Our cost ÷ Σ acreage (lib/blendedCost),
+  // recomputed whenever the rows change, so it always matches the table.
+  const blend = blendedCost(filtered);
+  // Same plain sums as the table's totals row (entered / rolled-up acreage only).
+  const nmaInView = sumOf(filtered, (d) => d.aggAcreageNma ?? d.acreageNma);
+  const nraInView = sumOf(filtered, (d) => d.aggNra ?? d.nra);
+  const blendNote = (skipped: number, converted: number, unit: "NMA" | "NRA") => [
+    converted > 0 ? `${converted} converted from ${unit === "NMA" ? "NRA" : "NMA"} at the deal's royalty` : null,
+    skipped > 0 ? `${skipped} priced deal${skipped === 1 ? "" : "s"} without ${unit} left out` : null,
+  ].filter(Boolean).map((s) => ` · ${s}`).join("");
+  const kpis: StatCell[] = [
+    { label: "Deals in view", value: num(filtered.length),
+      sub: filtered.length ? `${acres(nmaInView)} NMA · ${acres(nraInView)} NRA` : "Nothing matches the current filters" },
+    { label: "Total acquisition cost", value: money(blend.priced ? blend.cost : null, { blank: "N/A" }),
+      sub: blend.priced ? `Our cost across ${blend.priced} priced deal${blend.priced === 1 ? "" : "s"}` : "No deal in view has an Our cost yet" },
+    { label: "Blended cost per NMA", value: blendedValue(blend.perNma, "NMA"), title: BLENDED_HINT,
+      sub: blend.perNma != null ? `${money(blend.costNma)} ÷ ${acres(blend.nma)} NMA${blendNote(blend.skippedNma, blend.convertedNma, "NMA")}` : "Needs Our cost and NMA on a deal in view" },
+    { label: "Blended cost per NRA", value: blendedValue(blend.perNra, "NRA"), title: BLENDED_HINT,
+      sub: blend.perNra != null ? `${money(blend.costNra)} ÷ ${acres(blend.nra)} NRA${blendNote(blend.skippedNra, blend.convertedNra, "NRA")}` : "Needs Our cost and NRA (or a royalty rate) on a deal in view" },
+  ];
 
   const countFor = (s: Scope) => (deals ?? []).filter((d) => inScope(d, s)).length;
   const tabLabel = (label: string, n: number) => (
@@ -244,6 +304,8 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
         </Banner>
       )}
 
+      <StatStrip min={200} className="dl-kpis" cells={kpis} />
+
       <div className="ct-card dl-card">
         <SortableTable
           customizeId={`deals-list:${scope}`}
@@ -259,6 +321,10 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
                   options={[{ value: "", label: "All stages", count: n }, ...stageOptions]}
                 />
               )}
+              <span className="dl-vis" title="Hidden deals stay in the system with everything intact; this only controls which ones this page shows and counts.">
+                <span className="dl-vis-lbl">Show</span>
+                <Segmented ariaLabel="Deal visibility" className="dl-visibility" value={visibility} onChange={setVisibility} options={VISIBILITY_OPTIONS} />
+              </span>
               {filtering && <span className="dl-showing">Showing {filtered.length} of {n}</span>}
             </>
           }
@@ -273,13 +339,17 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
               deleteUrl={can("deleteDeals") ? "/deals/bulk-delete" : undefined}
               assign={can("editDeals") ? { url: "/deals/bulk-assign", key: "assigneeIds" } : undefined}
               archiveUrl={can("editDeals") ? "/deals/bulk-archive" : undefined}
+              actions={can("editDeals") ? [
+                ...(visibility !== "HIDDEN" ? [{ label: "Hide", title: "Remove from the default Deals view and its totals (reversible; nothing else changes)", run: (ids: string[]) => setHidden(ids, true) }] : []),
+                ...(visibility !== "ACTIVE" ? [{ label: "Unhide", title: "Put back in the default Deals view", run: (ids: string[]) => setHidden(ids, false) }] : []),
+              ] : undefined}
               onExport={() => {
                 const rows = filtered.filter((d) => sel.selected.has(d.id));
                 downloadCsv(`deals-${new Date().toISOString().slice(0, 10)}.csv`,
-                  ["Deal", "Priority", "Stage", "NMA", "NRA", "Our Cost", "Our Cost per NMA", "Our Cost per NRA", "Buyer Purchase Price", "Royalty Rate", "Profit Est.", "Under Contract", "Find Buyer By", "Buyer Closing", "Current Buyer", "Owner", "Profit at Asking"],
+                  ["Deal", "Priority", "Stage", "NMA", "NRA", "Our Cost", "Our Cost per NMA", "Our Cost per NRA", "Buyer Purchase Price", "Royalty Rate", "Profit Est.", "Under Contract", "Find Buyer By", "Buyer Closing", "Current Buyer", "Owner", "Profit at Asking", "Hidden"],
                   rows.map((d) => [d.name, d.priority, d.stage, d.acreageNma ?? "", d.nra ?? "", d.aggOurPrice ?? d.ourPrice ?? "",
                     costPerAcre(d, d.ourCostPerNma, d.aggAcreageNma ?? d.acreageNma) ?? "", costPerAcre(d, d.ourCostPerNra, d.aggNra ?? d.nra) ?? "",
-                    d.buyerPurchasePrice ?? "", royaltyLabel(d.royaltyRate), d.profitEst ?? "", d.dateUnderContract ?? "", d.findBuyerByDate ?? "", d.buyerClosingDate ?? "", d.selectedBuyer?.name ?? "", d.relationshipOwner?.name ?? "", d.profitAtAsk ?? ""]));
+                    d.buyerPurchasePrice ?? "", royaltyLabel(d.royaltyRate), d.profitEst ?? "", d.dateUnderContract ?? "", d.findBuyerByDate ?? "", d.buyerClosingDate ?? "", d.selectedBuyer?.name ?? "", d.relationshipOwner?.name ?? "", d.profitAtAsk ?? "", d.hiddenAt ? "Yes" : "No"]));
               }}
             />
           }
@@ -292,9 +362,11 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
           rowClassName={(d) => (d.isOverdue ? "row-overdue" : undefined)}
           defaultSort={{ key: "priority", dir: "asc" }}
           empty={scoped.length === 0
-            ? <div className="dl-empty"><strong>{scope === "active" || scope === "all"
-              ? (can("createDeals") ? "No deals yet — click “New deal” to create your first one." : "No deals yet.")
-              : `No ${scope} deals yet.`}</strong></div>
+            ? <div className="dl-empty"><strong>{visibility === "HIDDEN"
+              ? "No hidden deals."
+              : scope === "active" || scope === "all"
+                ? (can("createDeals") ? "No deals yet — click “New deal” to create your first one." : "No deals yet.")
+                : `No ${scope} deals yet.`}</strong>{visibility === "HIDDEN" && <span>Hide a deal from its page (⋯ menu) or select deals here and choose Hide.</span>}</div>
             : <div className="dl-empty"><strong>No deals match your search.</strong><span>Try a different search{activeStage ? " or clear the stage filter" : ""}.</span></div>}
           selection={{ selected: sel.selected, onToggle: sel.toggle, onToggleAll: sel.toggleAll }}
           rowsPerPage={[20, 50, 100, 200]}
