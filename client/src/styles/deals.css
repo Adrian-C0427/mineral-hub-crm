@@ -57,15 +57,18 @@
 .dl-kpis .stat-value { font-size: 26px; font-weight: 500; letter-spacing: -0.025em; line-height: 1.1; min-height: 29px; }
 .dl-kpis .stat-sub { min-height: 17px; }
 .dl-kpi-unit { margin-left: 3px; font-size: 14px; font-weight: 500; color: var(--ink-3); letter-spacing: 0; }
-/* Six cells: two tidy rows of three up to a wide desktop, one row beyond it
-   (the figures step down a size so "$4,314.81 /NMA" fits a sixth of the
-   width). Phones keep the shared two-across rule (kit.css / mobile.css). */
-@media (min-width: 761px) and (max-width: 1599px) {
-  .deals-page > .dl-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
-}
-@media (min-width: 1600px) {
+/* Six cells on ONE row at every desktop width. The figure scales with the
+   window (clamp) and the cell padding tightens below a wide desktop, so
+   "$5,928.48 /NMA" still fits a sixth of the width on a laptop; anything
+   narrower than that ellipsizes rather than wrapping. Phones keep the shared
+   two-across rule (kit.css / mobile.css). */
+@media (min-width: 761px) {
   .deals-page > .dl-kpis { grid-template-columns: repeat(6, minmax(0, 1fr)) !important; }
-  .dl-kpis .stat-value { font-size: 23px; }
+  .dl-kpis .stat-value { font-size: clamp(18px, 1.45vw, 26px); min-height: 0; }
+  .dl-kpi-unit { font-size: clamp(11px, 0.85vw, 14px); }
+}
+@media (min-width: 761px) and (max-width: 1599px) {
+  .dl-kpis .stat-cell { padding: 14px 14px; }
 }
 
 /* Desktop list layout: the card always fills the window below the strip, so
