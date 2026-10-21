@@ -223,6 +223,8 @@
   .dl-kpis .stat-cell, .ma-stats .stat-cell { padding: 14px 16px; }
   .dl-kpis .stat-value, .ma-stats .stat-value { font-size: 20px; }
   .dl-kpi-unit { font-size: 12px; }
+  /* No hover on touch, so the sub-line wraps to show its full text here. */
+  .dl-kpis .stat-sub { white-space: normal; }
 
   /* --- Forms: one field per row --- */
   .dd-grid, .nd-grid3, .nd-basics, .nd-timeline, .ddc-grid.edit, .rec-fgrid { grid-template-columns: minmax(0, 1fr) !important; }

@@ -86,9 +86,10 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
   const [deals, setDeals] = useState<DealSummary[] | null>(null);
   // Visibility (Active / Hidden / All) is the user's saved choice (profile),
   // remembered for the tab too so Back from a deal keeps it without a refetch
-  // of /me. Hidden deals are filtered out by the server query, so nothing on
-  // this page — rows, counts, totals, KPIs, exports — can include one unless
-  // the view asks for it.
+  // of /me. The list is loaded once (hidden deals included) and the view is
+  // applied to that set before anything else — scope, counts, totals, KPIs,
+  // exports — so switching views is instant and nothing hidden can leak into
+  // a figure. (The server also filters on ?visibility for API consumers.)
   const [visibility, setVisibilityState] = useListState<DealsVisibility>("deals:visibility", user?.dealsVisibility ?? "ACTIVE");
   // Search and stage filter are remembered per tab so Back from a deal
   // restores them (the stage filter per scope, since each scope has its own).
@@ -104,9 +105,8 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
   const [stageKey, setStageKey] = useListState(`deals:${scope}:stage`, "");
   const closeNew = () => { setShowNew(false); if (params.get("new")) setParams({}, { replace: true }); };
 
-  function load() { api.get<DealSummary[]>(`/deals?visibility=${visibility.toLowerCase()}`).then(setDeals); }
-  useEffect(() => { load(); }, [visibility]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
+  function load() { api.get<DealSummary[]>("/deals?visibility=all").then(setDeals); }
+  useEffect(() => { load(); api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
   function setVisibility(v: DealsVisibility) {
     if (v === visibility) return;
     setVisibilityState(v);
@@ -118,7 +118,9 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
     showToast(`${r.updated} deal${r.updated === 1 ? "" : "s"} ${hidden ? "hidden from" : "restored to"} the Deals list`);
   }
 
-  const scoped = useMemo(() => (deals ?? []).filter((d) => inScope(d, scope)), [deals, scope]);
+  // The view's deals: hidden ones only when the view asks for them.
+  const inView = useMemo(() => (deals ?? []).filter((d) => visibility === "ALL" || (visibility === "HIDDEN") === !!d.hiddenAt), [deals, visibility]);
+  const scoped = useMemo(() => inView.filter((d) => inScope(d, scope)), [inView, scope]);
   const overdue = useMemo(() => scoped.filter((d) => d.isOverdue), [scoped]);
 
   // One segment per stage present in this scope, labelled and coloured by the
@@ -165,56 +167,58 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
           {d.assetCount ? <Tag title={`${d.assetCount} asset${d.assetCount > 1 ? "s" : ""} in this seller package`}>{d.assetCount} asset{d.assetCount > 1 ? "s" : ""}</Tag> : null}
         </span>
       ) },
-    { key: "priority", header: "Priority", type: "text",
+    // Width floors on the rest keep the columns from re-measuring to every
+    // filtered subset's content, so a stage/view switch doesn't reflow the grid.
+    { key: "priority", header: "Priority", type: "text", minWidth: 96,
       value: (d) => ({ HIGH: 0, MEDIUM: 1, LOW: 2 }[d.priority]),
       render: (d) => <span className="dl-priority"><PriorityBadge priority={d.priority} /></span> },
-    { key: "stage", header: "Stage", type: "text", value: (d) => d.stage, render: (d) => <span className="dl-stage"><StageBadge stage={d.stage} pipelineId={d.pipelineId} /></span> },
-    { key: "nma", header: "NMA", type: "number", align: "right", value: (d) => d.aggAcreageNma ?? d.acreageNma, render: (d) => num(d.aggAcreageNma ?? d.acreageNma),
+    { key: "stage", header: "Stage", type: "text", minWidth: 150, value: (d) => d.stage, render: (d) => <span className="dl-stage"><StageBadge stage={d.stage} pipelineId={d.pipelineId} /></span> },
+    { key: "nma", header: "NMA", type: "number", align: "right", minWidth: 72, value: (d) => d.aggAcreageNma ?? d.acreageNma, render: (d) => num(d.aggAcreageNma ?? d.acreageNma),
       total: (rows) => acres(sumOf(rows, (d) => d.aggAcreageNma ?? d.acreageNma)) },
     // Every column is shown by default; users hide what they don't need via
     // Customize View (saved to their profile). `legacyDefaultHidden` marks the
     // columns an older version hid by default, so a browser layout that merely
     // held those old defaults isn't mistaken for a user's choice.
     // Same rollup-then-own-value logic as NMA.
-    { key: "nra", header: "NRA", type: "number", align: "right", value: (d) => d.aggNra ?? d.nra, render: (d) => num(d.aggNra ?? d.nra), legacyDefaultHidden: true,
+    { key: "nra", header: "NRA", type: "number", align: "right", minWidth: 72, value: (d) => d.aggNra ?? d.nra, render: (d) => num(d.aggNra ?? d.nra), legacyDefaultHidden: true,
       total: (rows) => acres(sumOf(rows, (d) => d.aggNra ?? d.nra)) },
     // Financial columns. Our Cost uses the package rollup like NMA/NRA; Buyer
     // Purchase Price is the offer Profit Est. is computed from (accepted, else
     // best), so the three reconcile.
-    { key: "ourCost", header: "Our cost", type: "number", align: "right", value: (d) => d.aggOurPrice ?? d.ourPrice, render: (d) => money(d.aggOurPrice ?? d.ourPrice), legacyDefaultHidden: true, newlyAdded: true,
+    { key: "ourCost", header: "Our cost", type: "number", align: "right", minWidth: 110, value: (d) => d.aggOurPrice ?? d.ourPrice, render: (d) => money(d.aggOurPrice ?? d.ourPrice), legacyDefaultHidden: true, newlyAdded: true,
       total: (rows) => money(sumOf(rows, (d) => d.aggOurPrice ?? d.ourPrice)) },
-    { key: "buyerPrice", header: "Buyer purchase price", type: "number", align: "right", value: (d) => d.buyerPurchasePrice ?? null, render: (d) => money(d.buyerPurchasePrice), legacyDefaultHidden: true, newlyAdded: true,
+    { key: "buyerPrice", header: "Buyer purchase price", type: "number", align: "right", minWidth: 150, value: (d) => d.buyerPurchasePrice ?? null, render: (d) => money(d.buyerPurchasePrice), legacyDefaultHidden: true, newlyAdded: true,
       total: (rows) => money(sumOf(rows, (d) => d.buyerPurchasePrice)) },
     // Totals here are the BLENDED rate (Σ Our cost ÷ Σ acres over the listed
     // deals) — the same figure as the KPI above the table, never a mean of rates.
-    { key: "ourCostPerNma", header: "Our cost per NMA", type: "number", align: "right",
+    { key: "ourCostPerNma", header: "Our cost per NMA", type: "number", align: "right", minWidth: 136,
       value: (d) => costPerAcre(d, d.ourCostPerNma, d.aggAcreageNma ?? d.acreageNma),
       render: (d) => money(costPerAcre(d, d.ourCostPerNma, d.aggAcreageNma ?? d.acreageNma), { cents: true }), newlyAdded: true,
       total: (rows) => { const b = blendedCost(rows); return <span title={BLENDED_HINT}>{b.perNma == null ? "N/A" : money(b.perNma, { cents: true })}</span>; } },
-    { key: "ourCostPerNra", header: "Our cost per NRA", type: "number", align: "right",
+    { key: "ourCostPerNra", header: "Our cost per NRA", type: "number", align: "right", minWidth: 136,
       value: (d) => costPerAcre(d, d.ourCostPerNra, d.aggNra ?? d.nra),
       render: (d) => money(costPerAcre(d, d.ourCostPerNra, d.aggNra ?? d.nra), { cents: true }), newlyAdded: true,
       total: (rows) => { const b = blendedCost(rows); return <span title={BLENDED_HINT}>{b.perNra == null ? "N/A" : money(b.perNra, { cents: true })}</span>; } },
     // Display-only: every deal field is edited on the Deal page (Deal Characteristics).
-    { key: "royaltyRate", header: "Royalty rate", type: "number", align: "right", value: (d) => royaltyValue(d.royaltyRate),
+    { key: "royaltyRate", header: "Royalty rate", type: "number", align: "right", minWidth: 110, value: (d) => royaltyValue(d.royaltyRate),
       render: (d) => royaltyCell(d.royaltyRate), legacyDefaultHidden: true, newlyAdded: true },
-    { key: "profit", header: "Profit est.", type: "number", align: "right", value: (d) => d.profitEst, render: (d) => profitCell(d.profitEst),
+    { key: "profit", header: "Profit est.", type: "number", align: "right", minWidth: 110, value: (d) => d.profitEst, render: (d) => profitCell(d.profitEst),
       total: (rows) => { const t = sumOf(rows, (d) => d.profitEst); return <span className={t < 0 ? "dt-totals-neg" : "dt-totals-pos"}>{money(t)}</span>; } },
     // Profit at asking price = ask − Our Cost − closing costs (the deal's own
     // figures, like Profit est.): what we'd make selling at our ask — not an
     // offer. Columns carry no header tooltip, so the hint rides on each cell.
-    { key: "profitAtAsk", header: "Profit at asking", type: "number", align: "right", value: (d) => d.profitAtAsk ?? null, newlyAdded: true,
+    { key: "profitAtAsk", header: "Profit at asking", type: "number", align: "right", minWidth: 124, value: (d) => d.profitAtAsk ?? null, newlyAdded: true,
       render: (d) => <span title={PROFIT_AT_ASK_HINT}>{profitCell(d.profitAtAsk ?? null)}</span>,
       total: (rows) => { const t = sumOf(rows, (d) => d.profitAtAsk); return <span className={t < 0 ? "dt-totals-neg" : "dt-totals-pos"}>{money(t)}</span>; } },
-    { key: "uc", header: "Under contract", type: "date", value: (d) => d.dateUnderContract, render: (d) => dateCell(d.dateUnderContract), legacyDefaultHidden: true },
-    { key: "fbb", header: "Find buyer by", type: "date", value: (d) => d.findBuyerByDate,
+    { key: "uc", header: "Under contract", type: "date", minWidth: 118, value: (d) => d.dateUnderContract, render: (d) => dateCell(d.dateUnderContract), legacyDefaultHidden: true },
+    { key: "fbb", header: "Find buyer by", type: "date", minWidth: 118, value: (d) => d.findBuyerByDate,
       render: (d) => dateCell(d.findBuyerByDate, d.isOverdue) },
-    { key: "oc", header: "Closing", type: "date", value: (d) => d.originalClosingDate, render: (d) => dateCell(d.originalClosingDate), legacyDefaultHidden: true },
-    { key: "fc", header: "Extended closing", type: "date", value: (d) => d.finalClosingDate, render: (d) => dateCell(d.finalClosingDate) },
-    { key: "bc", header: "Buyer closing", type: "date", value: (d) => d.buyerClosingDate ?? null, render: (d) => dateCell(d.buyerClosingDate ?? null), legacyDefaultHidden: false, newlyAdded: true },
-    { key: "buyer", header: "Current buyer", type: "text", value: (d) => d.selectedBuyer?.name ?? null,
+    { key: "oc", header: "Closing", type: "date", minWidth: 110, value: (d) => d.originalClosingDate, render: (d) => dateCell(d.originalClosingDate), legacyDefaultHidden: true },
+    { key: "fc", header: "Extended closing", type: "date", minWidth: 124, value: (d) => d.finalClosingDate, render: (d) => dateCell(d.finalClosingDate) },
+    { key: "bc", header: "Buyer closing", type: "date", minWidth: 118, value: (d) => d.buyerClosingDate ?? null, render: (d) => dateCell(d.buyerClosingDate ?? null), legacyDefaultHidden: false, newlyAdded: true },
+    { key: "buyer", header: "Current buyer", type: "text", minWidth: 140, value: (d) => d.selectedBuyer?.name ?? null,
       render: (d) => <span className="ct-dim">{d.selectedBuyer?.name ?? "—"}</span> },
-    { key: "owner", header: "Owner", type: "text", value: (d) => d.relationshipOwner?.name ?? null,
+    { key: "owner", header: "Owner", type: "text", minWidth: 120, value: (d) => d.relationshipOwner?.name ?? null,
       render: (d) => d.relationshipOwner ? (
         <span className="ct-owner">
           <Avatar user={d.relationshipOwner} size={22} />
@@ -252,18 +256,22 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
     converted > 0 ? `${converted} converted from ${unit === "NMA" ? "NRA" : "NMA"} at the deal's royalty` : null,
     skipped > 0 ? `${skipped} priced deal${skipped === 1 ? "" : "s"} without ${unit} left out` : null,
   ].filter(Boolean).map((s) => ` · ${s}`).join("");
+  // Sub-lines are clamped to one line (the strip's height must not change
+  // with the filter), so each cell's tooltip carries the full sentence.
+  const subs = {
+    count: filtered.length ? `${acres(nmaInView)} NMA · ${acres(nraInView)} NRA` : "Nothing matches the current filters",
+    cost: blend.priced ? `Our cost across ${blend.priced} priced deal${blend.priced === 1 ? "" : "s"}` : "No deal in view has an Our cost yet",
+    nma: blend.perNma != null ? `${money(blend.costNma)} ÷ ${acres(blend.nma)} NMA${blendNote(blend.skippedNma, blend.convertedNma, "NMA")}` : "Needs Our cost and NMA on a deal in view",
+    nra: blend.perNra != null ? `${money(blend.costNra)} ÷ ${acres(blend.nra)} NRA${blendNote(blend.skippedNra, blend.convertedNra, "NRA")}` : "Needs Our cost and NRA (or a royalty rate) on a deal in view",
+  };
   const kpis: StatCell[] = [
-    { label: "Deals in view", value: num(filtered.length),
-      sub: filtered.length ? `${acres(nmaInView)} NMA · ${acres(nraInView)} NRA` : "Nothing matches the current filters" },
-    { label: "Total acquisition cost", value: money(blend.priced ? blend.cost : null, { blank: "N/A" }),
-      sub: blend.priced ? `Our cost across ${blend.priced} priced deal${blend.priced === 1 ? "" : "s"}` : "No deal in view has an Our cost yet" },
-    { label: "Blended cost per NMA", value: blendedValue(blend.perNma, "NMA"), title: BLENDED_HINT,
-      sub: blend.perNma != null ? `${money(blend.costNma)} ÷ ${acres(blend.nma)} NMA${blendNote(blend.skippedNma, blend.convertedNma, "NMA")}` : "Needs Our cost and NMA on a deal in view" },
-    { label: "Blended cost per NRA", value: blendedValue(blend.perNra, "NRA"), title: BLENDED_HINT,
-      sub: blend.perNra != null ? `${money(blend.costNra)} ÷ ${acres(blend.nra)} NRA${blendNote(blend.skippedNra, blend.convertedNra, "NRA")}` : "Needs Our cost and NRA (or a royalty rate) on a deal in view" },
+    { label: "Deals in view", value: num(filtered.length), sub: subs.count, title: subs.count },
+    { label: "Total acquisition cost", value: money(blend.priced ? blend.cost : null, { blank: "N/A" }), sub: subs.cost, title: subs.cost },
+    { label: "Blended cost per NMA", value: blendedValue(blend.perNma, "NMA"), sub: subs.nma, title: `${subs.nma}. ${BLENDED_HINT}` },
+    { label: "Blended cost per NRA", value: blendedValue(blend.perNra, "NRA"), sub: subs.nra, title: `${subs.nra}. ${BLENDED_HINT}` },
   ];
 
-  const countFor = (s: Scope) => (deals ?? []).filter((d) => inScope(d, s)).length;
+  const countFor = (s: Scope) => inView.filter((d) => inScope(d, s)).length;
   const tabLabel = (label: string, n: number) => (
     <span className="dl-tab">{label}<span className="tab-badge">{n}</span></span>
   );
@@ -312,7 +320,17 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
           toolbar={
             <>
               <SearchInput value={q} onChange={setQ} placeholder="Search deal, seller, abstract, survey, county, buyer…" ariaLabel="Search deals" />
-              {stageOptions.length > 1 && (
+              {/* Show sits before the stage tray: the tray's width changes with the
+                  view (its stages and counts), the Show control's never does. */}
+              <span className="dl-vis" title="Hidden deals stay in the system with everything intact; this only controls which ones this page shows and counts.">
+                <span className="dl-vis-lbl">Show</span>
+                <Segmented ariaLabel="Deal visibility" className="dl-visibility" value={visibility} onChange={setVisibility} options={VISIBILITY_OPTIONS} />
+              </span>
+              {filtering && <span className="dl-showing">Showing {filtered.length} of {n}</span>}
+              {/* The stage tray always takes its own line (deals.css) and is shown
+                  whenever there are rows, so the toolbar's height — and the rows'
+                  starting position — is the same in every view. */}
+              {stageOptions.length > 0 && (
                 <Segmented
                   ariaLabel="Filter by stage"
                   className="dl-stage-filter"
@@ -321,11 +339,6 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
                   options={[{ value: "", label: "All stages", count: n }, ...stageOptions]}
                 />
               )}
-              <span className="dl-vis" title="Hidden deals stay in the system with everything intact; this only controls which ones this page shows and counts.">
-                <span className="dl-vis-lbl">Show</span>
-                <Segmented ariaLabel="Deal visibility" className="dl-visibility" value={visibility} onChange={setVisibility} options={VISIBILITY_OPTIONS} />
-              </span>
-              {filtering && <span className="dl-showing">Showing {filtered.length} of {n}</span>}
             </>
           }
           /* Selection actions sit inside the card, under the toolbar. */
