@@ -259,8 +259,6 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
     converted > 0 ? `${converted} converted from ${unit === "NMA" ? "NRA" : "NMA"} at the deal's royalty` : null,
     skipped > 0 ? `${skipped} priced deal${skipped === 1 ? "" : "s"} without ${unit} left out` : null,
   ].filter(Boolean).map((s) => ` · ${s}`).join("");
-  // Sub-lines are clamped to one line (the strip's height must not change
-  // with the filter), so each cell's tooltip carries the full sentence.
   // Profit figures: the same sums as the table's totals row (Profit est. =
   // best/accepted offer − Our cost − closing costs; Profit at asking = ask −
   // Our cost − closing costs), over the deals that have each figure.
@@ -270,7 +268,9 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
   const profitAskTotal = sumMoney(withAsk.map((d) => d.profitAtAsk));
   const profitTone = (v: number, has: boolean): StatCell["tone"] => !has ? "default" : v < 0 ? "danger" : v > 0 ? "success" : "default";
   const dealsWith = (k: number, what: string) => `${k} deal${k === 1 ? "" : "s"} with ${what}`;
-  const subs = {
+  // Figures only — the formula / counts behind each one sit in the cell's
+  // tooltip (hover), not under the number.
+  const hint = {
     count: filtered.length ? `${acres(nmaInView)} NMA · ${acres(nraInView)} NRA` : "Nothing matches the current filters",
     cost: blend.priced ? `Our cost across ${blend.priced} priced deal${blend.priced === 1 ? "" : "s"}` : "No deal in view has an Our cost yet",
     nma: blend.perNma != null ? `${money(blend.costNma)} ÷ ${acres(blend.nma)} NMA${blendNote(blend.skippedNma, blend.convertedNma, "NMA")}` : "Needs Our cost and NMA on a deal in view",
@@ -279,12 +279,12 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
     ask: withAsk.length ? `${dealsWith(withAsk.length, "an asking price")} · ask − Our cost − closing costs` : "Needs an asking price and Our cost on a deal in view",
   };
   const kpis: StatCell[] = [
-    { label: "Deals in view", value: num(filtered.length), sub: subs.count, title: subs.count },
-    { label: "Total acquisition cost", value: money(blend.priced ? blend.cost : null, { blank: "N/A" }), sub: subs.cost, title: subs.cost },
-    { label: "Blended cost per NMA", value: blendedValue(blend.perNma, "NMA"), sub: subs.nma, title: `${subs.nma}. ${BLENDED_HINT}` },
-    { label: "Blended cost per NRA", value: blendedValue(blend.perNra, "NRA"), sub: subs.nra, title: `${subs.nra}. ${BLENDED_HINT}` },
-    { label: "Profit estimate", value: money(withEst.length ? profitEstTotal : null, { blank: "N/A" }), tone: profitTone(profitEstTotal, withEst.length > 0), sub: subs.est, title: subs.est },
-    { label: "Profit at asking", value: money(withAsk.length ? profitAskTotal : null, { blank: "N/A" }), tone: profitTone(profitAskTotal, withAsk.length > 0), sub: subs.ask, title: `${subs.ask}. ${PROFIT_AT_ASK_HINT}` },
+    { label: "Deals in view", value: num(filtered.length), title: hint.count },
+    { label: "Total acquisition cost", value: money(blend.priced ? blend.cost : null, { blank: "N/A" }), title: hint.cost },
+    { label: "Blended cost per NMA", value: blendedValue(blend.perNma, "NMA"), title: `${hint.nma}. ${BLENDED_HINT}` },
+    { label: "Blended cost per NRA", value: blendedValue(blend.perNra, "NRA"), title: `${hint.nra}. ${BLENDED_HINT}` },
+    { label: "Profit estimate", value: money(withEst.length ? profitEstTotal : null, { blank: "N/A" }), tone: profitTone(profitEstTotal, withEst.length > 0), title: hint.est },
+    { label: "Profit at asking", value: money(withAsk.length ? profitAskTotal : null, { blank: "N/A" }), tone: profitTone(profitAskTotal, withAsk.length > 0), title: `${hint.ask}. ${PROFIT_AT_ASK_HINT}` },
   ];
 
   const countFor = (s: Scope) => inView.filter((d) => inScope(d, s)).length;

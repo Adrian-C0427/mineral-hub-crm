@@ -55,7 +55,6 @@
 .dl-kpis .stat-cell { padding: 18px 22px; }
 .dl-kpis .stat-label, .dl-kpis .stat-sub, .dl-kpis .stat-value { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
 .dl-kpis .stat-value { font-size: 26px; font-weight: 500; letter-spacing: -0.025em; line-height: 1.1; min-height: 29px; }
-.dl-kpis .stat-sub { min-height: 17px; }
 .dl-kpi-unit { margin-left: 3px; font-size: 14px; font-weight: 500; color: var(--ink-3); letter-spacing: 0; }
 /* Six cells on ONE row at every desktop width. The figure scales with the
    window (clamp) and the cell padding tightens below a wide desktop, so
