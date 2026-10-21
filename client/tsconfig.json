@@ -16,5 +16,9 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  // Unit tests run with vitest from the root workspace; the client build on
+  // Railway installs only client/package.json, where vitest (and its types)
+  // are absent — so test files must stay out of `tsc -b`.
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }
