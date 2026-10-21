@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api/client";
-import { Banner, PriorityBadge, StageBadge, Spinner, SearchInput, showToast } from "../components/ui";
+import { PriorityBadge, StageBadge, Spinner, SearchInput, showToast } from "../components/ui";
 import { royaltyLabel, royaltyValue } from "../lib/royalty";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { NewDealModal } from "../components/NewDealModal";
@@ -121,7 +121,6 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
   // The view's deals: hidden ones only when the view asks for them.
   const inView = useMemo(() => (deals ?? []).filter((d) => visibility === "ALL" || (visibility === "HIDDEN") === !!d.hiddenAt), [deals, visibility]);
   const scoped = useMemo(() => inView.filter((d) => inScope(d, scope)), [inView, scope]);
-  const overdue = useMemo(() => scoped.filter((d) => d.isOverdue), [scoped]);
 
   // One segment per stage present in this scope, labelled and coloured by the
   // org's (per-pipeline) stage settings, in board order.
@@ -258,17 +257,30 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
   ].filter(Boolean).map((s) => ` · ${s}`).join("");
   // Sub-lines are clamped to one line (the strip's height must not change
   // with the filter), so each cell's tooltip carries the full sentence.
+  // Profit figures: the same sums as the table's totals row (Profit est. =
+  // best/accepted offer − Our cost − closing costs; Profit at asking = ask −
+  // Our cost − closing costs), over the deals that have each figure.
+  const withEst = filtered.filter((d) => d.profitEst != null);
+  const withAsk = filtered.filter((d) => d.profitAtAsk != null);
+  const profitEstTotal = sumMoney(withEst.map((d) => d.profitEst));
+  const profitAskTotal = sumMoney(withAsk.map((d) => d.profitAtAsk));
+  const profitTone = (v: number, has: boolean): StatCell["tone"] => !has ? "default" : v < 0 ? "danger" : v > 0 ? "success" : "default";
+  const dealsWith = (k: number, what: string) => `${k} deal${k === 1 ? "" : "s"} with ${what}`;
   const subs = {
     count: filtered.length ? `${acres(nmaInView)} NMA · ${acres(nraInView)} NRA` : "Nothing matches the current filters",
     cost: blend.priced ? `Our cost across ${blend.priced} priced deal${blend.priced === 1 ? "" : "s"}` : "No deal in view has an Our cost yet",
     nma: blend.perNma != null ? `${money(blend.costNma)} ÷ ${acres(blend.nma)} NMA${blendNote(blend.skippedNma, blend.convertedNma, "NMA")}` : "Needs Our cost and NMA on a deal in view",
     nra: blend.perNra != null ? `${money(blend.costNra)} ÷ ${acres(blend.nra)} NRA${blendNote(blend.skippedNra, blend.convertedNra, "NRA")}` : "Needs Our cost and NRA (or a royalty rate) on a deal in view",
+    est: withEst.length ? `${dealsWith(withEst.length, "an offer")} · offer − Our cost − closing costs` : "Fills in once a deal in view has an offer",
+    ask: withAsk.length ? `${dealsWith(withAsk.length, "an asking price")} · ask − Our cost − closing costs` : "Needs an asking price and Our cost on a deal in view",
   };
   const kpis: StatCell[] = [
     { label: "Deals in view", value: num(filtered.length), sub: subs.count, title: subs.count },
     { label: "Total acquisition cost", value: money(blend.priced ? blend.cost : null, { blank: "N/A" }), sub: subs.cost, title: subs.cost },
     { label: "Blended cost per NMA", value: blendedValue(blend.perNma, "NMA"), sub: subs.nma, title: `${subs.nma}. ${BLENDED_HINT}` },
     { label: "Blended cost per NRA", value: blendedValue(blend.perNra, "NRA"), sub: subs.nra, title: `${subs.nra}. ${BLENDED_HINT}` },
+    { label: "Profit estimate", value: money(withEst.length ? profitEstTotal : null, { blank: "N/A" }), tone: profitTone(profitEstTotal, withEst.length > 0), sub: subs.est, title: subs.est },
+    { label: "Profit at asking", value: money(withAsk.length ? profitAskTotal : null, { blank: "N/A" }), tone: profitTone(profitAskTotal, withAsk.length > 0), sub: subs.ask, title: `${subs.ask}. ${PROFIT_AT_ASK_HINT}` },
   ];
 
   const countFor = (s: Scope) => inView.filter((d) => inScope(d, s)).length;
@@ -306,13 +318,8 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
         active={scope}
       />
 
-      {overdue.length > 0 && (
-        <Banner kind="warn">
-          <strong>{overdue.length} overdue</strong> — past Find Buyer By with no buyer assigned.
-        </Banner>
-      )}
-
-      <StatStrip min={200} className="dl-kpis" cells={kpis} />
+      {/* Six cells: one row on a wide screen, two rows of three below that. */}
+      <StatStrip min={176} className="dl-kpis" cells={kpis} />
 
       <div className="ct-card dl-card">
         <SortableTable
