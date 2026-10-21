@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
@@ -320,7 +321,34 @@ const uniqCI = (list: string[]): string[] => {
  * split at read time through the same parser the importer uses.
  */
 export interface ResearchEntity { name: string; asGrantee: number; asGrantor: number }
-export async function researchEntityIndex(orgIds: string[]): Promise<Map<string, ResearchEntity>> {
+
+// Building the index pages through EVERY transaction record in scope, so it is
+// cached per org scope for a short window and concurrent callers share one
+// build. Alias search runs on each (debounced) keystroke; without this, every
+// keystroke was a full-table scan (security audit 2026-10-21, Low). A record
+// imported mid-window shows up once the entry expires.
+const ENTITY_INDEX_TTL_MS = 60_000;
+const ENTITY_INDEX_MAX_KEYS = 50;
+const entityIndexCache = new Map<string, { at: number; index: Promise<Map<string, ResearchEntity>> }>();
+
+export function clearResearchEntityIndexCache(): void {
+  entityIndexCache.clear();
+}
+
+export function researchEntityIndex(orgIds: string[], now: number = Date.now()): Promise<Map<string, ResearchEntity>> {
+  const key = [...new Set(orgIds)].sort().join(",");
+  const hit = entityIndexCache.get(key);
+  if (hit && now - hit.at < ENTITY_INDEX_TTL_MS) return hit.index;
+  const index = buildResearchEntityIndex(orgIds);
+  // A failed build must not be served from cache.
+  index.catch(() => { if (entityIndexCache.get(key)?.index === index) entityIndexCache.delete(key); });
+  entityIndexCache.delete(key);
+  entityIndexCache.set(key, { at: now, index });
+  while (entityIndexCache.size > ENTITY_INDEX_MAX_KEYS) entityIndexCache.delete(entityIndexCache.keys().next().value!);
+  return index;
+}
+
+async function buildResearchEntityIndex(orgIds: string[]): Promise<Map<string, ResearchEntity>> {
   const idx = new Map<string, { name: string; spellings: Map<string, number>; asGrantee: number; asGrantor: number }>();
   const add = (norm: string, raw: string, side: "asGrantee" | "asGrantor") => {
     const e = idx.get(norm) ?? { name: raw, spellings: new Map(), asGrantee: 0, asGrantor: 0 };
@@ -362,9 +390,22 @@ function singlePartyName(raw: string): { name: string; norm: string } | null {
  * never names already counted as this buyer. A name another CRM buyer already
  * claims is flagged so the client offers a profile merge instead.
  */
+// Per-user cap on the two routes that read the research entity index. Keyed on
+// the user id, like the AI limiter, so rotating IPs does not reset it. Generous
+// enough for typing in the alias search box (debounced client-side).
+const aliasLookupLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => (req as AuthedRequest).user?.id ?? req.ip ?? "unknown",
+  message: { error: "Too many alias searches. Wait a minute and try again." },
+});
+
 buyersRouter.get(
   "/:id/alias-search",
   requirePermission("viewBuyers"),
+  aliasLookupLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
     const q = String(req.query.q ?? "").trim();
@@ -401,6 +442,7 @@ buyersRouter.get(
 buyersRouter.get(
   "/:id/alias-suggestions",
   requirePermission("viewBuyers"),
+  aliasLookupLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
     const org = orgId(req);
     const buyer = await prisma.buyer.findFirst({
