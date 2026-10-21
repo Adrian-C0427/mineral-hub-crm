@@ -89,6 +89,14 @@ export function DealDetail() {
   const [showAllMatches, setShowAllMatches] = useState(false);
 
   const loadDeal = useCallback(() => api.get<DealDetailData>(`/deals/${id}`).then(setDeal), [id]);
+  // Hide / Unhide: a Deals-list visibility flag only (server POST /deals/:id/hidden).
+  async function toggleHidden() {
+    if (!deal) return;
+    const hidden = !deal.hiddenAt;
+    await api.post(`/deals/${id}/hidden`, { hidden });
+    showToast(hidden ? "Deal hidden from the Deals list — find it under Show: Hidden" : "Deal is back in the Deals list");
+    loadDeal();
+  }
   const loadMatches = useCallback(() => api.get<MatchRec[]>(`/deals/${id}/matches`).then(setMatches), [id]);
 
   useEffect(() => {
@@ -180,9 +188,21 @@ export function DealDetail() {
         </div>
         <div className="dd-head-actions">
           {can("editDeals") && <MoveStageMenu stage={deal.stage} pipelineId={deal.pipelineId} onPick={setStageTarget} />}
-          {can("deleteDeals") && <OverflowMenu items={[{ label: "Delete deal…", danger: true, onClick: () => setConfirmDelete(true) }]} />}
+          {(can("editDeals") || can("deleteDeals")) && (
+            <OverflowMenu items={[
+              ...(can("editDeals") ? [{ label: deal.hiddenAt ? "Unhide deal" : "Hide deal", onClick: () => toggleHidden() }] : []),
+              ...(can("deleteDeals") ? [{ label: "Delete deal…", danger: true, onClick: () => setConfirmDelete(true) }] : []),
+            ]} />
+          )}
         </div>
       </div>
+
+      {deal.hiddenAt && (
+        <Banner kind="info">
+          <strong>Hidden</strong> — this deal is left out of the Deals list's default view and its totals (since {fmtDate(deal.hiddenAt)}). Its stage, financials, documents and everything else are unchanged.
+          {can("editDeals") && <> <button type="button" className="small" onClick={() => toggleHidden()}>Unhide</button></>}
+        </Banner>
+      )}
 
       {deal.stage === "DEAD" && deal.deadReason && <Banner kind="error">Dead: {deal.deadReason}</Banner>}
 

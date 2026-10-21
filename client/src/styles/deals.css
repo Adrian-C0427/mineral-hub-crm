@@ -44,6 +44,17 @@
 }
 .deals-page > .banner-warn strong { color: var(--warn-ink); font-weight: 600; }
 
+/* --- KPI strip: deals in view, total cost, blended $/NMA and $/NRA -------
+   The shared stat strip (kit.css), sized like the Mineral Assets strip. */
+.deals-page > .dl-kpis { margin: 0; }
+.dl-kpis .stat-cell { padding: 18px 22px; }
+.dl-kpis .stat-value { font-size: 26px; font-weight: 500; letter-spacing: -0.025em; line-height: 1.1; }
+.dl-kpi-unit { margin-left: 3px; font-size: 14px; font-weight: 500; color: var(--ink-3); letter-spacing: 0; }
+
+/* --- Visibility (Active / Hidden / All) beside the stage filter ---------- */
+.dl-vis { display: inline-flex; align-items: center; gap: 8px; }
+.dl-vis-lbl { font-size: 12px; font-weight: 500; color: var(--ink-3); white-space: nowrap; }
+
 /* --- Table card ----------------------------------------------------------
    overflow stays visible so the Customize View menu can leave the card. */
 .deals-page .dl-card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); }

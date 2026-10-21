@@ -35,7 +35,7 @@ export function BulkBar({ count, onClear, children }: { count: number; onClear: 
  * type-DELETE confirmation stating the count.
  */
 export function BulkActionsBar({
-  selectedIds, onClear, onDone, users, itemLabel, deleteUrl, assign, archiveUrl, onExport,
+  selectedIds, onClear, onDone, users, itemLabel, deleteUrl, assign, archiveUrl, onExport, actions,
 }: {
   selectedIds: string[];
   onClear: () => void;
@@ -46,6 +46,8 @@ export function BulkActionsBar({
   assign?: { url: string; key: string };
   archiveUrl?: string;
   onExport?: () => void;
+  /** Page-specific reversible actions (no confirmation step) run on the selection. */
+  actions?: { label: string; title?: string; run: (ids: string[]) => Promise<void> }[];
 }) {
   const [modal, setModal] = useState<"delete" | "assign" | "archive" | null>(null);
   const [assignIds, setAssignIds] = useState<string[]>([]);
@@ -65,6 +67,9 @@ export function BulkActionsBar({
       <BulkBar count={count} onClear={onClear}>
         {assign && <button className="small" onClick={() => { setAssignIds([]); setModal("assign"); }}>Assign users</button>}
         {onExport && <button className="small" onClick={onExport}>Export</button>}
+        {actions?.map((a) => (
+          <button key={a.label} className="small" title={a.title} disabled={busy} onClick={() => run(() => a.run(selectedIds))}>{a.label}</button>
+        ))}
         {archiveUrl && <button className="small" onClick={() => setModal("archive")}>Archive</button>}
         {deleteUrl && <button className="small danger" onClick={() => setModal("delete")}>Delete</button>}
       </BulkBar>

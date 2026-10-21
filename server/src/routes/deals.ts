@@ -136,6 +136,14 @@ dealsRouter.get(
     // Child assets live inside their parent package — the list/pipeline shows the
     // top-level deal, not its assets (which are managed on the deal's page).
     const where = { organizationId: orgId(req), parentDealId: null } as Record<string, unknown>;
+    // ?visibility=active | hidden | all — the Deals list's Hide/Unhide control.
+    // Filtered here, in the query, so a hidden deal never reaches the list or
+    // the table-level metrics computed from it. Omitted = all: every other
+    // consumer (Pipeline, Reports, Mineral Assets, Dashboard) keeps counting
+    // hidden deals — hiding is a Deals-page working-view choice, not a status.
+    const visibility = String(req.query.visibility ?? "all").toLowerCase();
+    if (visibility === "active") where.hiddenAt = null;
+    else if (visibility === "hidden") where.hiddenAt = { not: null };
     if (rt === "OPPORTUNITY") {
       where.OR = [{ recordType: "OPPORTUNITY" }, { recordType: "OWNED_ASSET", assetMode: "SELL" }];
     } else if (rt === "OWNED_ASSET") {
@@ -1800,6 +1808,65 @@ dealsRouter.post(
       ]);
     }
     res.json({ archived: owned.length });
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Hide / Unhide — remove a deal from the Deals list's default view and its
+// metrics without touching anything else about it. Reversible; the deal keeps
+// its stage, dates, prices, offers, documents, notes and relationships, and
+// stays reachable on its own page (Deals → Hidden view, or a direct link).
+// ---------------------------------------------------------------------------
+async function setDealsHidden(req: AuthedRequest, ids: string[], hidden: boolean): Promise<number> {
+  const org = orgId(req);
+  // Only flip rows whose state actually changes, so re-hiding a hidden deal
+  // neither re-stamps hiddenAt nor writes a duplicate activity entry.
+  const rows = await prisma.deal.findMany({
+    where: { id: { in: ids }, organizationId: org, hiddenAt: hidden ? null : { not: null } },
+    select: { id: true, name: true },
+  });
+  if (!rows.length) return 0;
+  const now = new Date();
+  await prisma.$transaction(async (tx) => {
+    await tx.deal.updateMany({ where: { id: { in: rows.map((r) => r.id) } }, data: { hiddenAt: hidden ? now : null } });
+    for (const r of rows) {
+      await logActivity(
+        {
+          eventType: hidden ? "DEAL_HIDDEN" : "DEAL_UNHIDDEN",
+          summary: `${req.user!.name} ${hidden ? "hid" : "unhid"} deal "${r.name}" ${hidden ? "from" : "on"} the Deals list`,
+          organizationId: org,
+          actorUserId: req.user!.id,
+          dealId: r.id,
+        },
+        tx,
+      );
+    }
+  });
+  return rows.length;
+}
+
+const hiddenBody = z.object({ hidden: z.boolean() });
+
+dealsRouter.post(
+  "/:id/hidden",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { hidden } = hiddenBody.parse(req.body);
+    const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true } });
+    if (!deal) throw new HttpError(404, "Deal not found");
+    await setDealsHidden(req, [deal.id], hidden);
+    const updated = await prisma.deal.findUniqueOrThrow({ where: { id: deal.id }, include: dealInclude });
+    res.json(serializeDeal(updated));
+  }),
+);
+
+dealsRouter.post(
+  "/bulk-hidden",
+  requirePermission("editDeals"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const { ids, hidden } = hiddenBody.extend({ ids: z.array(z.string()).min(1).max(500) }).parse(req.body);
+    const updated = await setDealsHidden(req, ids, hidden);
+    res.json({ updated, hidden });
   }),
 );
 

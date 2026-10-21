@@ -218,6 +218,11 @@
   .grid-2, .grid-3, .chart-grid, .dd-top-grid, .sr-grid, .portal-grid, .dash-main, .dash-duo { grid-template-columns: minmax(0, 1fr) !important; }
   .metric-card, .kpi-card { min-width: 0; }
   .metric-value { overflow-wrap: anywhere; }
+  /* Deals / Mineral Assets stat strips: two across at phone width, so the
+     big figures ($6,333.33 /NMA) step down a size instead of truncating. */
+  .dl-kpis .stat-cell, .ma-stats .stat-cell { padding: 14px 16px; }
+  .dl-kpis .stat-value, .ma-stats .stat-value { font-size: 20px; }
+  .dl-kpi-unit { font-size: 12px; }
 
   /* --- Forms: one field per row --- */
   .dd-grid, .nd-grid3, .nd-basics, .nd-timeline, .ddc-grid.edit, .rec-fgrid { grid-template-columns: minmax(0, 1fr) !important; }
