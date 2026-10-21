@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState, lazy, Suspense } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
+import { Pencil } from "lucide-react";
 import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid, Cell, ReferenceLine, LabelList,
 } from "recharts";
 import { api } from "../api/client";
 import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, Banner, Modal, ConfirmDialog, BackLink, CtPill } from "../components/ui";
+import { Spinner, Banner, Modal, ConfirmDialog, ConfirmDelete, BackLink, CtPill, OverflowMenu, showToast } from "../components/ui";
 import { StatStrip, Segmented, Tag, type StatCell } from "../components/kit";
 import { Select } from "../components/Select";
 import { BuyerActivitySection } from "../components/BuyerActivitySection";
@@ -19,10 +20,12 @@ import { OfferRowActions, acceptedOfferLabel } from "../components/OfferActions"
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
 import { useAbstractLabels, useAbstractIndex, abstractEntryShortLabel, SurveyMultiPicker } from "../components/AbstractPicker";
-import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
+import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
+import { OperatorSelect } from "../components/OperatorSelect";
+import { perAcreRate } from "../lib/perAcre";
 import { monthLabel, chartTooltip } from "../lib/charts";
 import { money, num, acres, interestPct, fmtDate, toInputDate, prettyEnum } from "../lib/format";
-import { OWNERSHIP_TYPES, OWNERSHIP_STATUSES, PRODUCING_STATUSES } from "./MineralAssets";
+import { OWNERSHIP_TYPES, OWNERSHIP_STATUSES, PRODUCING_STATUSES, LEASE_STATUS_OPTIONS } from "../lib/assetOptions";
 import type { BuyerActivityRow, DealSummary, MatchRec, RevenueEntry, Seller, UserLite } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
 import { MarketingFunnel } from "../components/MarketingFunnel";
@@ -30,7 +33,7 @@ import { useUnsavedSection } from "../lib/unsaved";
 import { DateField } from "../components/DateField";
 import { royaltyLabel } from "../lib/royalty";
 import { roundMoney, sumMoney } from "../lib/money";
-import { RoyaltyRateField, royaltyRateError } from "../components/DealEconomics";
+import { RoyaltyRateField, royaltyRateError, applyAcreageEdit, AcreageNote, type AcreageState } from "../components/DealEconomics";
 
 /** Calendar months from one "YYYY-MM" to another, inclusive. */
 const monthSpan = (a: string, b: string) =>
@@ -41,9 +44,6 @@ const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ defaul
 // Mineral-asset document categories (module-specific; the shared DocumentsSection
 // provides the identical Deal-page interface around them).
 const ASSET_DOC_FOLDERS = ["Division Orders", "Deeds", "Leases", "Check Stubs", "Title", "Other"];
-
-// Current-lease selectors.
-const LEASE_STATUS_OPTIONS = ["Leased", "Held By Production", "Expired", "In Negotiation", "Unleased", "Top Lease", "Shut-in"];
 
 interface AssetDetail extends DealSummary {
   operator: string | null;
@@ -68,7 +68,12 @@ const posTone = (v: number | null | undefined): StatCell["tone"] =>
 export function MineralAssetDetail() {
   const { id } = useParams<{ id: string }>();
   const { can } = useAuth();
+  const nav = useNavigate();
   const [asset, setAsset] = useState<AssetDetail | null>(null);
+  const [renaming, setRenaming] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [confirmConvert, setConfirmConvert] = useState(false);
   const [matches, setMatches] = useState<MatchRec[] | null>(null);
   const [users, setUsers] = useState<UserLite[]>([]);
   const [tab, setTab] = useState<"hold" | "sell">("hold");
@@ -116,6 +121,11 @@ export function MineralAssetDetail() {
         <div className="ad-head-main">
           <div className="ad-title-row">
             <h1>{asset.name}</h1>
+            {canEdit && (
+              <button type="button" className="icon-btn dd-rename" title="Rename asset" aria-label="Rename asset" onClick={() => setRenaming(true)}>
+                <Pencil size={14} />
+              </button>
+            )}
             <Tag tone="warn">Owned asset</Tag>
             {typeLabel && <span className="ad-pill">{typeLabel}</span>}
             {asset.producingStatus && <span className="ad-pill"><i className={asset.producingStatus === "Producing" ? "on" : ""} />{asset.producingStatus}</span>}
@@ -131,8 +141,30 @@ export function MineralAssetDetail() {
             </button>
           )}
           {canEdit && asset.assetMode === "SELL" && <button onClick={() => setMode("HOLD")}>Move to Hold</button>}
+          {(canEdit || can("deleteDeals")) && (
+            <OverflowMenu items={[
+              ...(canEdit ? [{ label: "Convert to opportunity…", onClick: () => setConfirmConvert(true) }] : []),
+              ...(can("deleteDeals") ? [{ label: "Delete asset…", danger: true, onClick: () => setConfirmDelete(true) }] : []),
+            ]} />
+          )}
         </div>
       </div>
+      {renaming && (
+        <RenameAssetModal assetId={asset.id} current={asset.name} onClose={() => setRenaming(false)} onRenamed={() => { setRenaming(false); load(); }} />
+      )}
+      {confirmDelete && (
+        <ConfirmDelete itemLabel="asset" name={asset.name} busy={deleting} onCancel={() => setConfirmDelete(false)}
+          onConfirm={async () => {
+            setDeleting(true);
+            try { await api.del(`/deals/${asset.id}`); showToast("Asset deleted", "success"); nav("/assets"); }
+            finally { setDeleting(false); }
+          }} />
+      )}
+      {confirmConvert && (
+        <ConfirmDialog title="Convert to an acquisition opportunity?" confirmLabel="Convert" onCancel={() => setConfirmConvert(false)}
+          onConfirm={async () => { await api.post(`/deals/${asset.id}/convert`, { recordType: "OPPORTUNITY" }); setConfirmConvert(false); nav(`/deals/${asset.id}`); }}
+          message={<p style={{ margin: 0 }}>The record leaves Mineral Assets and becomes a deal in the acquisition pipeline. Documents, revenue history, buyer activity and offers all stay attached, and it can be converted back from the deal page.</p>} />
+      )}
 
       <StatStrip min={200} className="ad-hero" cells={[
         { label: "Current value", value: money(asset.currentValue) },
@@ -140,7 +172,9 @@ export function MineralAssetDetail() {
         { label: "ROI since acquisition", value: fmtPct(asset.roiSinceAcquisition), tone: posTone(asset.roiSinceAcquisition),
           sub: asset.purchasePrice != null ? `On ${money(asset.purchasePrice)} cost basis` : undefined },
         { label: "Unrealized gain / loss", value: money(asset.unrealizedGainLoss), tone: posTone(asset.unrealizedGainLoss), sub: "Current value less basis" },
-        { label: "Annual royalty income", value: money(asset.royaltyIncomeAnnual), tone: asset.royaltyIncomeAnnual ? "success" : "default", sub: "Trailing 12 mo · from revenue" },
+        { label: "Annual royalty income", value: money(asset.royaltyIncomeAnnual), tone: asset.royaltyIncomeAnnual ? "success" : "default", sub: asset.royaltyIncomeAnnual ? "Trailing 12 mo · from booked revenue" : "Book royalty revenue to fill in" },
+        { label: "Interest", value: asset.nra != null ? `${acres(asset.nra)} NRA` : asset.acreageNma != null ? `${acres(asset.acreageNma)} NMA` : "—",
+          sub: [asset.nra != null && asset.acreageNma != null ? `${acres(asset.acreageNma)} NMA` : null, royaltyLabel(asset.royaltyRate) || null].filter(Boolean).join(" · ") || undefined },
       ]} />
 
       <Tabs
@@ -187,7 +221,7 @@ function HoldTab({ asset, canEdit, onChanged }: { asset: AssetDetail; canEdit: b
         <Suspense fallback={<Spinner label="Loading map…" />}><DealMap dealId={asset.id} abstractIds={asset.abstractIds} noun="asset" abstractsWhere="the Property card" /></Suspense>
       </section>
 
-      {can("viewDocuments") && <DocumentsSection ownerType="deal" ownerId={asset.id} files={asset.files} folders={asset.docFolders?.length ? asset.docFolders : ASSET_DOC_FOLDERS} onChanged={onChanged} canEdit={canEdit} canDelete={canEdit} />}
+      {can("viewDocuments") && <DocumentsSection ownerType="deal" ownerId={asset.id} files={asset.files} folders={asset.docFolders?.length ? asset.docFolders : ASSET_DOC_FOLDERS} onChanged={onChanged} canEdit={can("manageDocuments")} canDelete={can("manageDocuments")} />}
     </div>
   );
 }
@@ -221,46 +255,78 @@ function Fld({ l, children }: { l: string; children: React.ReactNode }) {
 
 function OwnershipCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit: boolean; onSaved: () => void }) {
   const [edit, setEdit] = useState(false);
-  const [f, setF] = useState(asset);
-  useEffect(() => setF(asset), [asset]);
-  useUnsavedSection(edit, f, asset, save, () => { setF(asset); setEdit(false); });
-  const numOrNull = (v: string) => (v.trim() === "" ? null : Number(v));
+  // Editing state: the asset's own values plus the Royalty Rate / NMA / NRA
+  // trio kept in step through the shared conversion (NRA = NMA × royalty ÷ 1/8),
+  // exactly as the deal form does it.
+  const fromAsset = (a: AssetDetail) => ({
+    assetTypes: a.assetTypes, ownershipType: a.ownershipType ?? "", ownershipStatus: a.ownershipStatus ?? "",
+    acquisitionDate: toInputDate(a.acquisitionDate), rrc: a.rrc ?? "",
+    purchasePrice: a.purchasePrice != null ? String(a.purchasePrice) : "", currentValue: a.currentValue != null ? String(a.currentValue) : "",
+    bookValue: a.bookValue != null ? String(a.bookValue) : "",
+    netRevenueInterest: a.netRevenueInterest != null ? String(a.netRevenueInterest) : "", workingInterest: a.workingInterest != null ? String(a.workingInterest) : "",
+    acre: { nma: a.acreageNma != null ? String(a.acreageNma) : "", nra: a.nra != null ? String(a.nra) : "", royaltyRate: a.royaltyRate ?? "", source: null } as AcreageState,
+  });
+  const [f, setF] = useState(() => fromAsset(asset));
+  const seed = useMemo(() => fromAsset(asset), [asset]);
+  useEffect(() => setF(seed), [seed]);
+  const [err, setErr] = useState<string | null>(null);
+  useUnsavedSection(edit, f, seed, save, () => { setF(seed); setEdit(false); setErr(null); });
+  const numOrNull = (v: string) => (v.trim() === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+  const editAcreage = (e: { nma?: string; nra?: string; royaltyRate?: string }) => setF((p) => ({ ...p, acre: applyAcreageEdit(p.acre, e) }));
+  const interestOk = (v: string) => v.trim() === "" || (Number.isFinite(Number(v)) && Number(v) >= 0 && Number(v) <= 1);
 
   async function save() {
+    const royaltyErr = royaltyRateError(f.acre.royaltyRate);
+    if (royaltyErr) { setErr(`Royalty rate: ${royaltyErr}`); return; }
+    if (!interestOk(f.netRevenueInterest) || !interestOk(f.workingInterest)) { setErr("Interests are decimals between 0 and 1 (0.1875 = 18.75%)."); return; }
+    setErr(null);
     await api.patch(`/deals/${asset.id}`, {
-      assetTypes: f.assetTypes, ownershipStatus: f.ownershipStatus,
+      assetTypes: f.assetTypes, ownershipType: f.ownershipType || null, ownershipStatus: f.ownershipStatus || null,
       acquisitionDate: f.acquisitionDate || null, rrc: f.rrc || null,
-      purchasePrice: f.purchasePrice, currentValue: f.currentValue,
-      acreageNma: f.acreageNma, nra: f.nra, netRevenueInterest: f.netRevenueInterest,
+      purchasePrice: numOrNull(f.purchasePrice), currentValue: numOrNull(f.currentValue), bookValue: numOrNull(f.bookValue),
+      acreageNma: numOrNull(f.acre.nma), nra: numOrNull(f.acre.nra), royaltyRate: f.acre.royaltyRate || null,
+      netRevenueInterest: numOrNull(f.netRevenueInterest), workingInterest: numOrNull(f.workingInterest),
     });
     setEdit(false); onSaved();
   }
 
+  const perNma = perAcreRate(asset.purchasePrice, asset.acreageNma), perNra = perAcreRate(asset.purchasePrice, asset.nra);
   return (
-    <EditCard title="Ownership" canEdit={canEdit} editing={edit} onEdit={() => setEdit(true)} onCancel={() => { setF(asset); setEdit(false); }} onSave={save}>
+    <EditCard title="Ownership" canEdit={canEdit} editing={edit} onEdit={() => setEdit(true)} onCancel={() => { setF(seed); setEdit(false); setErr(null); }} onSave={save}>
       {!edit ? (
         <div className="dd-grid">
           <KV k="Asset Type" v={asset.assetTypes.map((t) => ASSET_TYPE_LABELS[t] ?? t).join(", ") || asset.ownershipType} />
+          <KV k="Ownership Type" v={asset.ownershipType} />
           <KV k="Ownership Status" v={asset.ownershipStatus} />
           <KV k="Acquisition Date" v={fmtDate(asset.acquisitionDate)} />
           <KV k="Purchase Price" v={money(asset.purchasePrice)} />
+          <KV k="Cost per NMA" v={perNma != null ? money(perNma, { cents: true }) : null} />
+          <KV k="Cost per NRA" v={perNra != null ? money(perNra, { cents: true }) : null} />
           <KV k="Current Value" v={money(asset.currentValue)} />
-          <KV k="RRC" v={asset.rrc} />
+          <KV k="Book Value" v={asset.bookValue != null ? money(asset.bookValue) : null} />
+          <KV k="Royalty Rate" v={royaltyLabel(asset.royaltyRate) || null} />
           <KV k="NMA" v={acres(asset.acreageNma)} />
           <KV k="NRA" v={acres(asset.nra)} />
-          <KV k="Net Revenue Interest" v={asset.netRevenueInterest != null ? interestPct(asset.netRevenueInterest) : "—"} />
+          <KV k="Net Revenue Interest" v={asset.netRevenueInterest != null ? interestPct(asset.netRevenueInterest) : null} />
+          <KV k="Working Interest" v={asset.workingInterest != null ? interestPct(asset.workingInterest) : null} />
+          <KV k="RRC" v={asset.rrc} />
         </div>
       ) : (
         <div className="dd-grid">
           <Fld l="Asset Type"><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={f.assetTypes} onChange={(v) => setF({ ...f, assetTypes: v })} placeholder="Search asset types…" /></Fld>
-          <Fld l="Ownership Status"><Select value={f.ownershipStatus ?? ""} onChange={(v) => setF({ ...f, ownershipStatus: v })} placeholder="—" clearable ariaLabel="Ownership status" options={OWNERSHIP_STATUSES.map((t) => ({ value: t, label: t }))} /></Fld>
-          <Fld l="Acquisition Date"><DateField value={toInputDate(f.acquisitionDate)} onChange={(v) => setF({ ...f, acquisitionDate: v })} /></Fld>
-          <Fld l="Purchase Price"><MoneyInput value={f.purchasePrice != null ? String(f.purchasePrice) : ""} onChange={(v) => setF({ ...f, purchasePrice: v === "" ? null : Number(v) })} ariaLabel="Purchase price" /></Fld>
-          <Fld l="Current Value"><input type="number" value={f.currentValue ?? ""} onChange={(e) => setF({ ...f, currentValue: numOrNull(e.target.value) })} /></Fld>
-          <Fld l="RRC"><input value={f.rrc ?? ""} onChange={(e) => setF({ ...f, rrc: e.target.value })} placeholder="RRC Number" /></Fld>
-          <Fld l="NMA"><input type="number" value={f.acreageNma ?? ""} onChange={(e) => setF({ ...f, acreageNma: numOrNull(e.target.value) })} /></Fld>
-          <Fld l="NRA"><input type="number" value={f.nra ?? ""} onChange={(e) => setF({ ...f, nra: numOrNull(e.target.value) })} /></Fld>
-          <Fld l="Net Revenue Interest"><input type="number" step="any" min={0} max={1} value={f.netRevenueInterest ?? ""} onChange={(e) => setF({ ...f, netRevenueInterest: numOrNull(e.target.value) })} placeholder="Decimal, e.g. 0.1875" title="Decimal interest between 0 and 1 (0.1875 = 18.75%)" /></Fld>
+          <Fld l="Ownership Type"><Select value={f.ownershipType} onChange={(v) => setF({ ...f, ownershipType: v })} placeholder="—" clearable ariaLabel="Ownership type" options={OWNERSHIP_TYPES.map((t) => ({ value: t, label: t }))} /></Fld>
+          <Fld l="Ownership Status"><Select value={f.ownershipStatus} onChange={(v) => setF({ ...f, ownershipStatus: v })} placeholder="—" clearable ariaLabel="Ownership status" options={OWNERSHIP_STATUSES.map((t) => ({ value: t, label: t }))} /></Fld>
+          <Fld l="Acquisition Date"><DateField value={f.acquisitionDate} onChange={(v) => setF({ ...f, acquisitionDate: v })} /></Fld>
+          <Fld l="Purchase Price"><MoneyInput value={f.purchasePrice} onChange={(v) => setF({ ...f, purchasePrice: v })} ariaLabel="Purchase price" /></Fld>
+          <Fld l="Current Value"><MoneyInput value={f.currentValue} onChange={(v) => setF({ ...f, currentValue: v })} ariaLabel="Current value" /></Fld>
+          <Fld l="Book Value"><MoneyInput value={f.bookValue} onChange={(v) => setF({ ...f, bookValue: v })} ariaLabel="Book value" /></Fld>
+          <Fld l="Royalty Rate"><RoyaltyRateField value={f.acre.royaltyRate} onChange={(v) => editAcreage({ royaltyRate: v })} /></Fld>
+          <Fld l="NMA"><input type="number" value={f.acre.nma} onChange={(e) => editAcreage({ nma: e.target.value })} placeholder="0.00" aria-label="NMA" /><AcreageNote s={f.acre} field="nma" /></Fld>
+          <Fld l="NRA"><input type="number" value={f.acre.nra} onChange={(e) => editAcreage({ nra: e.target.value })} placeholder="0.00" aria-label="NRA" /><AcreageNote s={f.acre} field="nra" /></Fld>
+          <Fld l="Net Revenue Interest"><input type="number" step="any" min={0} max={1} value={f.netRevenueInterest} onChange={(e) => setF({ ...f, netRevenueInterest: e.target.value })} placeholder="Decimal, e.g. 0.1875" title="Decimal interest between 0 and 1 (0.1875 = 18.75%)" /></Fld>
+          <Fld l="Working Interest"><input type="number" step="any" min={0} max={1} value={f.workingInterest} onChange={(e) => setF({ ...f, workingInterest: e.target.value })} placeholder="Decimal, e.g. 0.25" title="Decimal interest between 0 and 1" /></Fld>
+          <Fld l="RRC"><input value={f.rrc} onChange={(e) => setF({ ...f, rrc: e.target.value })} placeholder="RRC Number" /></Fld>
+          {err && <div className="error-text" style={{ gridColumn: "1 / -1" }}>{err}</div>}
         </div>
       )}
     </EditCard>
@@ -309,9 +375,9 @@ function PropertyCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit
             labels={{ county: "Counties", abstract: "Abstracts" }}
           />
           <Fld l="Producing Status"><Select value={f.producingStatus ?? ""} onChange={(v) => setF({ ...f, producingStatus: v })} placeholder="—" clearable ariaLabel="Producing status" options={PRODUCING_STATUSES.map((t) => ({ value: t, label: t }))} /></Fld>
-          <Fld l="Basins"><SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={f.basins} onChange={(v) => setF({ ...f, basins: v })} /></Fld>
-          <Fld l="Formations"><SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={f.formations} onChange={(v) => setF({ ...f, formations: v })} /></Fld>
-          <Fld l="Operator"><input value={f.operator ?? ""} onChange={(e) => setF({ ...f, operator: e.target.value })} /></Fld>
+          <Fld l="Basins"><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(f.counties))} value={f.basins} onChange={(v) => setF({ ...f, basins: v })} placeholder={f.counties.length ? "Suggested for these counties first…" : "Search basins…"} /></Fld>
+          <Fld l="Formations"><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(f.counties))} value={f.formations} onChange={(v) => setF({ ...f, formations: v })} placeholder={f.counties.length ? "Suggested for these counties first…" : "Search formations…"} /></Fld>
+          <Fld l="Operator"><OperatorSelect states={f.states?.length ? f.states : (f.state ? [f.state] : [])} counties={f.counties} value={f.operator ?? ""} onChange={(v) => setF({ ...f, operator: v })} /></Fld>
           <Fld l="Surveys"><SurveyMultiPicker value={f.surveys ?? []} onChange={(v) => setF({ ...f, surveys: v })} abstractIds={f.abstractIds} /></Fld>
           <Fld l="Wells"><SearchableMultiSelect options={[]} value={f.wells ?? []} onChange={(v) => setF({ ...f, wells: v })} placeholder="Type a well name/API, Enter" /></Fld>
           <div className="field" style={{ gridColumn: "1 / -1", marginBottom: 0 }}><label>Property Notes</label><textarea rows={3} value={f.notes ?? ""} onChange={(e) => setF({ ...f, notes: e.target.value })} /></div>
@@ -362,9 +428,12 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
     });
     setEdit(false); onSaved();
   }
+  const [delRev, setDelRev] = useState<RevenueEntry | null>(null);
+  const [delBusy, setDelBusy] = useState(false);
   async function delRevenue(entryId: string) {
-    await api.del(`/deals/${asset.id}/revenue/${entryId}`);
-    onSaved();
+    setDelBusy(true);
+    try { await api.del(`/deals/${asset.id}/revenue/${entryId}`); setDelRev(null); onSaved(); }
+    finally { setDelBusy(false); }
   }
 
   return (
@@ -502,7 +571,7 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
                     <td className="right" style={{ fontWeight: 700, fontVariantNumeric: "tabular-nums", color: r.delta == null ? "var(--text-faint)" : r.delta >= 0 ? "var(--green)" : "var(--red)" }}>{r.delta == null ? "—" : `${r.delta >= 0 ? "+" : ""}${r.delta}%`}</td>
                     <td className="right ct-dim" style={{ fontVariantNumeric: "tabular-nums" }}>{money(r.running)}</td>
                     <td>{r.note || "—"}</td>
-                    {canEdit && <td className="right"><button className="link-btn ad-row-del" onClick={() => delRevenue(r.id)}>Delete</button></td>}
+                    {canEdit && <td className="right"><button className="link-btn ad-row-del" onClick={() => setDelRev(r)}>Delete</button></td>}
                   </tr>
                 ));
               })()}
@@ -512,6 +581,11 @@ function FinancialsCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEd
       )}
 
       {showAddRev && <AddRevenueModal assetId={asset.id} assetName={asset.name} onClose={() => setShowAddRev(false)} onSaved={() => { setShowAddRev(false); onSaved(); }} />}
+      {delRev && (
+        <ConfirmDialog title="Delete this revenue entry?" confirmLabel={delBusy ? "Deleting…" : "Delete"} busy={delBusy} danger
+          onCancel={() => setDelRev(null)} onConfirm={() => delRevenue(delRev.id)}
+          message={<p style={{ margin: 0 }}>Remove the <strong>{money(delRev.amount)}</strong> {delRev.kind.replace("_", " ").toLowerCase()} entry for <strong>{delRev.month.slice(0, 7)}</strong>? Annual royalty income, averages and ROI update immediately.</p>} />
+      )}
     </section>
   );
 }
@@ -631,7 +705,7 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
 
       {/* Sale Readiness + Pricing Intelligence side by side (reference layout). */}
       {(() => {
-        const perNra = (p: number | null) => (p != null && asset.nra ? Math.round(p / asset.nra) : null);
+        const perNra = (p: number | null) => perAcreRate(p, asset.nra);
         const ask = asset.askPrice;
         // Net proceeds at our ask: ask − closing costs − basis. The asset's own
         // Est. Closing Costs when entered, else the ~3% rule of thumb.
@@ -713,9 +787,9 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
               </div>
               {edit ? (
                 <div className="dd-grid ad-card-body">
-                  <Fld l="Current Value"><input type="number" value={f.currentValue ?? ""} onChange={(e) => setF({ ...f, currentValue: e.target.value === "" ? null : Number(e.target.value) })} /></Fld>
+                  <Fld l="Current Value"><MoneyInput value={f.currentValue != null ? String(f.currentValue) : ""} onChange={(v) => setF({ ...f, currentValue: v === "" ? null : Number(v) })} ariaLabel="Current value" /></Fld>
                   <Fld l="Asking Price"><MoneyInput value={f.askPrice != null ? String(f.askPrice) : ""} onChange={(v) => setF({ ...f, askPrice: v === "" ? null : Number(v) })} ariaLabel="Asking price" /></Fld>
-                  <Fld l="Est. Closing Costs"><input type="number" value={f.estimatedClosingCosts ?? ""} onChange={(e) => setF({ ...f, estimatedClosingCosts: e.target.value === "" ? null : Number(e.target.value) })} /></Fld>
+                  <Fld l="Est. Closing Costs"><MoneyInput value={f.estimatedClosingCosts != null ? String(f.estimatedClosingCosts) : ""} onChange={(v) => setF({ ...f, estimatedClosingCosts: v === "" ? null : Number(v) })} ariaLabel="Estimated closing costs" /></Fld>
                 </div>
               ) : (<>
                 <div className="pi-figures">
@@ -726,7 +800,7 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
                   <div>
                     <div className="ddx-label">$ / NRA</div>
                     <div className={`pi-v ${askNra == null ? "dim" : ""}`}>{askNra != null ? money(askNra) : "—"}</div>
-                    {asset.nra ? <div className="pi-note">across {acres(asset.nra)} net royalty acres</div> : null}
+                    {asset.nra ? <div className="pi-note">across {acres(asset.nra)} net royalty acres</div> : <div className="pi-note">set NRA on the Ownership card</div>}
                   </div>
                   <div className="pi-right">
                     <div className="ddx-label">Est. Net Proceeds</div>
@@ -778,7 +852,7 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
             <thead><tr><th>Buyer</th><th className="right">Amount</th><th>Status</th><th>Expires</th><th></th></tr></thead>
             <tbody>{asset.offers.map((o) => (
               <tr key={o.id}>
-                <td>{o.buyer.name}</td><td className="right">{money(o.amount)}</td><td>{o.status === "ACCEPTED" || asset.selectedOfferId === o.id ? acceptedOfferLabel(asset.stage === "CLOSED") : prettyEnum(o.status)}</td><td>{fmtDate(o.expirationDate)}</td>
+                <td><Link to={`/buyers/${o.buyer.id}`} className="subtle-link">{o.buyer.name}</Link></td><td className="right">{money(o.amount)}</td><td>{o.status === "ACCEPTED" || asset.selectedOfferId === o.id ? acceptedOfferLabel(asset.stage === "CLOSED") : prettyEnum(o.status)}</td><td>{fmtDate(o.expirationDate)}</td>
                 <td className="right">
                   <span className="row" style={{ gap: 6, justifyContent: "flex-end", alignItems: "center" }}>
                     {o.status === "ACCEPTED" || asset.selectedOfferId === o.id ? <span className="badge resp-offer">{acceptedOfferLabel(asset.stage === "CLOSED")}</span> :
@@ -905,5 +979,42 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
         />
       )}
     </div>
+  );
+}
+
+function RenameAssetModal({ assetId, current, onClose, onRenamed }: { assetId: string; current: string; onClose: () => void; onRenamed: () => void }) {
+  const [name, setName] = useState(current);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function save() {
+    const n = name.trim();
+    if (!n) { setError("Give the asset a name."); return; }
+    if (n === current) { onClose(); return; }
+    setBusy(true); setError(null);
+    try {
+      await api.patch(`/deals/${assetId}`, { name: n });
+      showToast("Asset renamed", "success");
+      onRenamed();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not rename the asset");
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal title="Rename asset" onClose={onClose} dirty={name.trim() !== current}
+      footer={<>
+        <button onClick={onClose}>Cancel</button>
+        <button className="primary" disabled={busy || !name.trim()} onClick={save}>{busy ? "Saving…" : "Save"}</button>
+      </>}>
+      <div className="field">
+        <label>Asset name</label>
+        <input value={name} onChange={(e) => setName(e.target.value)} autoFocus
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void save(); } }} />
+      </div>
+      <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>
+        The new name shows everywhere this asset is referenced. Documents, revenue history, buyer activity and offers stay attached.
+      </p>
+      {error && <Banner kind="error">{error}</Banner>}
+    </Modal>
   );
 }
