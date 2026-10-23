@@ -49,6 +49,8 @@ export interface PooledUnit {
     controlResidualFt: number;
     /** Share of the outline within ~10 ft of the well plat's drawing (unit-plat method only). */
     within10ftPct: number | null;
+    /** Free-text provenance for units placed/verified outside the builder's own checks (shown on the map panel). */
+    note?: string;
   };
   /** Polygon rings, NAD83 [lon, lat]; the first ring is the outer boundary. */
   rings: LonLat[][];

@@ -297,7 +297,7 @@ export interface UnitInfo {
   drawnVsCalledPct: number | null;
   wells: { api: string; lease: string | null; wellNo: string | null; permit: string }[];
   plat: { permit: string; rrcId: string; url: string; file: string } | null;
-  placement: { method: "unit-plat" | "well-plat"; basis?: "well-points" | "survey-lines"; controlResidualFt: number; within10ftPct: number | null } | null;
+  placement: { method: "unit-plat" | "well-plat"; basis?: "well-points" | "survey-lines"; controlResidualFt: number; within10ftPct: number | null; note?: string } | null;
 }
 export function unitInfo(p: Record<string, unknown>): UnitInfo {
   const json = <T,>(v: unknown, fallback: T): T => {
@@ -328,5 +328,73 @@ export function tractInfo(p: Record<string, unknown>): TractInfo {
     id: String(p.__id ?? ""), name: String(p.__name ?? "Tract"), sourceFile: String(p.__source ?? ""),
     dealId: p.__dealId ? String(p.__dealId) : null, dealName: p.__dealName ? String(p.__dealName) : null,
     attrs,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// W-1 laterals and lease tracts — two more overlays read off the same permit
+// plats as the pooled units (server domain/platOverlays).
+// ---------------------------------------------------------------------------
+
+/** Source / layer ids of the W-1 laterals overlay: each permit's own plat points and lateral lines. */
+export const LATERAL_SOURCE = "w1-laterals";
+export const LATERAL_LAYERS = ["laterals-line", "laterals-point"] as const;
+export const LATERAL_COLOR = "#be123c";
+/** Source / layer ids of the lease-tract overlay (tracts a lateral crosses that were not pooled). */
+export const LEASE_SOURCE = "lease-tracts";
+export const LEASE_LAYERS = ["leases-fill", "leases-line", "leases-label"] as const;
+export const LEASE_COLOR = "#7c2d12";
+
+/**
+ * W-1 laterals: the lateral as the permit plat prints it (surface → penetration
+ * / first take → bottom hole), independent of RRC's well layers. A solid line
+ * in one colour; surface and bottom-hole points as rings, take points as dots.
+ */
+export function addLateralLayers(map: maplibregl.Map, beforeId?: string): void {
+  map.addSource(LATERAL_SOURCE, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  const before = beforeId && map.getLayer(beforeId) ? beforeId : undefined;
+  map.addLayer({ id: "laterals-line", type: "line", source: LATERAL_SOURCE, filter: ["==", ["get", "feature"], "line"], paint: {
+    "line-color": LATERAL_COLOR,
+    "line-width": ["interpolate", ["linear"], ["zoom"], 9, 1.2, 13, 2.4] as unknown as maplibregl.ExpressionSpecification,
+    "line-opacity": 0.9 } }, before);
+  map.addLayer({ id: "laterals-point", type: "circle", source: LATERAL_SOURCE, filter: ["==", ["get", "feature"], "point"], minzoom: 10, paint: {
+    "circle-radius": ["match", ["get", "role"], "take", 3, 4.5] as unknown as maplibregl.ExpressionSpecification,
+    "circle-color": ["match", ["get", "role"], "take", LATERAL_COLOR, "#ffffff"] as unknown as maplibregl.ExpressionSpecification,
+    "circle-stroke-color": LATERAL_COLOR, "circle-stroke-width": 1.6 } }, before);
+}
+
+/**
+ * Lease tracts crossed by a lateral but not pooled: a faint fill, a dashed
+ * outline (so they read differently from pooled units) and a label from zoom 11.
+ */
+export function addLeaseTractLayers(map: maplibregl.Map, beforeId?: string): void {
+  map.addSource(LEASE_SOURCE, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  const before = beforeId && map.getLayer(beforeId) ? beforeId : undefined;
+  map.addLayer({ id: "leases-fill", type: "fill", source: LEASE_SOURCE, paint: { "fill-color": LEASE_COLOR, "fill-opacity": 0.08 } }, before);
+  map.addLayer({ id: "leases-line", type: "line", source: LEASE_SOURCE, paint: {
+    "line-color": LEASE_COLOR, "line-dasharray": [3, 2],
+    "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1, 12, 1.8, 15, 2.6] as unknown as maplibregl.ExpressionSpecification,
+    "line-opacity": 0.9 } }, before);
+  map.addLayer({ id: "leases-label", type: "symbol", source: LEASE_SOURCE, minzoom: 11, layout: {
+    "text-field": ["get", "label"] as unknown as maplibregl.ExpressionSpecification, "text-font": ["Noto Sans Regular"],
+    "text-size": ["interpolate", ["linear"], ["zoom"], 11, 10, 14, 12] as unknown as maplibregl.ExpressionSpecification,
+    "text-allow-overlap": false, "text-optional": true, "symbol-placement": "point" },
+    paint: { "text-color": LEASE_COLOR, "text-halo-color": "#ffffff", "text-halo-width": 1.4 } }, before);
+}
+
+/** A clicked W-1 lateral point or line, as the map panel shows it. */
+export interface LateralInfo { api: string; apiLabel: string; well: string; operator: string; county: string; platKind: string; feature: "point" | "line"; pointCount: number; source: string }
+export function lateralInfo(p: Record<string, unknown>): LateralInfo {
+  return {
+    api: String(p.api ?? ""), apiLabel: String(p.apiLabel ?? ""), well: String(p.well ?? "Well"), operator: String(p.operator ?? ""), county: String(p.county ?? ""),
+    platKind: String(p.kind ?? ""), feature: p.feature === "line" ? "line" : "point", pointCount: Number(p.pointCount ?? 0), source: String(p.source ?? ""),
+  };
+}
+/** A clicked lease tract, as the map panel shows it. */
+export interface LeaseInfo { id: string; lease: string; operator: string; county: string; calledAcres: number; mappedAcres: number; well: string; plat: string }
+export function leaseInfo(p: Record<string, unknown>): LeaseInfo {
+  return {
+    id: String(p.id ?? ""), lease: String(p.lease ?? "Lease tract"), operator: String(p.operator ?? ""), county: String(p.county ?? ""),
+    calledAcres: Number(p.calledAcres), mappedAcres: Number(p.mappedAcres), well: String(p.well ?? ""), plat: String(p.plat ?? ""),
   };
 }
