@@ -9,7 +9,7 @@ import { US_STATE_OPTIONS, US_STATE_LABELS } from "../lib/options";
 import { Select } from "../components/Select";
 import { downloadCsv } from "../lib/csv";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION, PARISHES, STATE_FIPS, MAP_COUNTY_LABELS, mapCountyOptions } from "../lib/counties";
-import { addCadastralLayers, addTractLayers, addUnitLayers, tractInfo, unitInfo, unitColor, TRACT_SOURCE, UNIT_SOURCE, UNIT_PALETTE, STATUS_COLOR, type TractInfo, type UnitInfo, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
+import { addCadastralLayers, addTractLayers, addUnitLayers, addLateralLayers, addLeaseTractLayers, tractInfo, unitInfo, unitColor, lateralInfo, leaseInfo, TRACT_SOURCE, UNIT_SOURCE, UNIT_PALETTE, LATERAL_SOURCE, LATERAL_COLOR, LEASE_SOURCE, LEASE_COLOR, STATUS_COLOR, type TractInfo, type UnitInfo, type LateralInfo, type LeaseInfo, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
 import { normalizeWellStatus, SOURCE_LABEL, STATUS_COLORS, STATUS_FLAG_LABEL, WELL_STATUSES } from "../lib/wellStatus";
 import { collectCoords, bboxOfPoints } from "../lib/geo";
 import { FormSection } from "../components/kit";
@@ -72,9 +72,11 @@ type SelWell = { kind: "well" } & WellProps;
 type SelHotspot = { kind: "hotspot"; summary: AreaSummary; periodLabel: string };
 type SelTract = { kind: "tract" } & TractInfo;
 type SelUnit = { kind: "unit" } & UnitInfo;
+type SelLateral = { kind: "lateral" } & LateralInfo;
+type SelLease = { kind: "lease" } & LeaseInfo;
 /** A wellbore whose surface well is outside the refreshed counties (only the bore is on the map). */
 type SelBore = { kind: "bore"; fid: number; surfaceId: number; api: string | null; wellboreType: string | null; boreStatus: string | null; bhSource: string | null };
-type Selected = SelAbstract | SelWell | SelHotspot | SelTract | SelUnit | SelBore | null;
+type Selected = SelAbstract | SelWell | SelHotspot | SelTract | SelUnit | SelLateral | SelLease | SelBore | null;
 
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
 
@@ -105,8 +107,9 @@ const MAP_LAYERS_KEY = "mh-map-layers:v1";
 const MAP_DOCK_KEY = "mh-map-dock:v1";
 const MAP_VIEW_KEY = "mh-map-view:v1";
 const MAP_FILTERS_KEY = "mh-map-filters:v1";
-type MapLayers = { boundaries: boolean; absNums: boolean; surveyNames: boolean; deals: boolean; assets: boolean; wells: boolean; wellbores: boolean; tracts: boolean; units: boolean };
-const DEFAULT_MAP_LAYERS: MapLayers = { boundaries: true, absNums: true, surveyNames: true, deals: true, assets: true, wells: true, wellbores: true, tracts: true, units: true };
+type MapLayers = { boundaries: boolean; absNums: boolean; surveyNames: boolean; deals: boolean; assets: boolean; wells: boolean; wellbores: boolean; tracts: boolean; units: boolean; laterals: boolean; leases: boolean };
+// W-1 laterals start off: RRC's wellbores already show the same wells, and the plat lines are a check against them.
+const DEFAULT_MAP_LAYERS: MapLayers = { boundaries: true, absNums: true, surveyNames: true, deals: true, assets: true, wells: true, wellbores: true, tracts: true, units: true, laterals: false, leases: true };
 interface MapCam { center: [number, number]; zoom: number }
 /** A named, reusable combination of every filter on the Filters panel. */
 interface MapFilterState {
@@ -359,6 +362,18 @@ export function MapView() {
       void loadUnits();
       map.on("mouseenter", "units-fill", () => (map.getCanvas().style.cursor = "pointer"));
       map.on("mouseleave", "units-fill", () => (map.getCanvas().style.cursor = ""));
+      // Lease tracts (not pooled) sit with the units; the W-1 laterals go just
+      // under the wells so the plat lines read over every area layer.
+      addLeaseTractLayers(map, "tracts-fill");
+      void loadLeaseTracts();
+      map.on("mouseenter", "leases-fill", () => (map.getCanvas().style.cursor = "pointer"));
+      map.on("mouseleave", "leases-fill", () => (map.getCanvas().style.cursor = ""));
+      addLateralLayers(map, "wells");
+      void loadLaterals();
+      for (const id of ["laterals-line", "laterals-point"]) {
+        map.on("mouseenter", id, () => (map.getCanvas().style.cursor = "pointer"));
+        map.on("mouseleave", id, () => (map.getCanvas().style.cursor = ""));
+      }
 
       // Production heat map — inserted below the cadastral fill so parcels and
       // labels stay readable over it. Weight `w` is pre-normalized to [0,1] per
@@ -442,6 +457,24 @@ export function MapView() {
           if (tf.length) {
             clearSelection();
             setSelected({ kind: "tract", ...tractInfo(tf[0].properties as Record<string, unknown>) });
+            return;
+          }
+        }
+        // A W-1 lateral point or line (the permit plat's own coordinates).
+        if (layersRef.current.laterals && map.getLayer("laterals-line")) {
+          const lf = map.queryRenderedFeatures(bx, { layers: ["laterals-point", "laterals-line"].filter((l) => map.getLayer(l)) });
+          if (lf.length) {
+            clearSelection();
+            setSelected({ kind: "lateral", ...lateralInfo(lf[0].properties as Record<string, unknown>) });
+            return;
+          }
+        }
+        // A lease tract crossed by a lateral but not pooled.
+        if (layersRef.current.leases && map.getLayer("leases-fill")) {
+          const lf = map.queryRenderedFeatures(e.point, { layers: ["leases-fill"] });
+          if (lf.length) {
+            clearSelection();
+            setSelected({ kind: "lease", ...leaseInfo(lf[0].properties as Record<string, unknown>) });
             return;
           }
         }
@@ -609,6 +642,8 @@ export function MapView() {
     vis("bottomholes", L.wellbores); vis("bottomholes-sel", L.wellbores);
     vis("tracts-fill", L.tracts); vis("tracts-line", L.tracts); vis("tracts-label", L.tracts);
     vis("units-fill", L.units); vis("units-line", L.units); vis("units-label", L.units);
+    vis("laterals-line", L.laterals); vis("laterals-point", L.laterals);
+    vis("leases-fill", L.leases); vis("leases-line", L.leases); vis("leases-label", L.leases);
     applyHighlight();
   }
   // Filter behavior: filters never restyle the map — instead the map zooms to
@@ -925,6 +960,19 @@ export function MapView() {
       (mapRef.current?.getSource(UNIT_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(fc);
     } catch { /* overlay is optional — the map works without it */ }
   }
+  // W-1 laterals and lease tracts: the same kind of static reference data.
+  async function loadLaterals() {
+    try {
+      const fc = await api.get<GeoJSON.FeatureCollection>("/gis/w1-laterals");
+      (mapRef.current?.getSource(LATERAL_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(fc);
+    } catch { /* optional overlay */ }
+  }
+  async function loadLeaseTracts() {
+    try {
+      const fc = await api.get<GeoJSON.FeatureCollection>("/gis/lease-tracts");
+      (mapRef.current?.getSource(LEASE_SOURCE) as maplibregl.GeoJSONSource | undefined)?.setData(fc);
+    } catch { /* optional overlay */ }
+  }
   // "Show on map" for one upload: turn the tracts layer on and frame that
   // file's boundaries (from the overlay data already loaded).
   function showImport(importId: string) {
@@ -1216,6 +1264,8 @@ export function MapView() {
               { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores + bottom holes" },
               { key: "tracts", label: "Imported tracts" },
               { key: "units", label: "Pooled units" },
+              { key: "leases", label: "Lease tracts (not pooled)" },
+              { key: "laterals", label: "W-1 laterals (plat coordinates)" },
             ]}
             layers={layers}
             onToggle={(k) => toggle(k as keyof typeof layers)}
@@ -1408,6 +1458,8 @@ export function MapView() {
               {layers.wellbores && <Legend color="#0f766e" label="Bottom hole" ring />}
               {permitReq && <Legend color={PERMIT_HL_COLOR} label="Highlighted permit" />}
               {layers.units && <Legend color={UNIT_PALETTE[0]} stripes={UNIT_PALETTE} label="Pooled units" />}
+              {layers.leases && <Legend color={LEASE_COLOR} label="Lease tract (not pooled)" dashed />}
+              {layers.laterals && <Legend color={LATERAL_COLOR} label="W-1 lateral (plat coordinates)" line />}
             </div>
           ))}
         </div>
@@ -1577,6 +1629,10 @@ export function MapView() {
               </>
             ) : selected.kind === "unit" ? (
               <UnitPanel unit={selected} onClose={clearSelection} />
+            ) : selected.kind === "lateral" ? (
+              <LateralPanel lat={selected} onClose={clearSelection} />
+            ) : selected.kind === "lease" ? (
+              <LeasePanel lease={selected} onClose={clearSelection} />
             ) : selected.kind === "tract" ? (
               <>
                 <div className="section-head"><div><h3 style={{ margin: 0 }}>{selected.name}</h3><div className="muted" style={{ fontSize: 12 }}>Imported tract · {selected.sourceFile}</div>{selected.dealId && <div style={{ fontSize: 12, marginTop: 2 }}>From deal <Link to={`/deals/${selected.dealId}`}>{selected.dealName ?? "Open deal"}</Link></div>}</div><button className="icon-btn" aria-label="Close" onClick={clearSelection}>×</button></div>
@@ -1681,7 +1737,39 @@ function UnitPanel({ unit, onClose }: { unit: UnitInfo; onClose: () => void }) {
         {pl?.method === "unit-plat" && pl.within10ftPct != null && `; ${Math.round(pl.within10ftPct)}% of its edge matches the well plat within about 10 ft`}
         {pl && "."}
         {unit.drawnVsCalledPct != null && ` The plat's own drawing measures ${Math.abs(unit.drawnVsCalledPct).toFixed(1)}% ${unit.drawnVsCalledPct > 0 ? "more" : "less"} than the acres it calls; the map follows the drawing.`}
+        {pl?.note && ` ${pl.note}`}
       </p>
+    </>
+  );
+}
+
+/** A clicked W-1 lateral: the well, and which plat point or segment this is. */
+function LateralPanel({ lat, onClose }: { lat: LateralInfo; onClose: () => void }) {
+  return (
+    <>
+      <div className="section-head"><div><h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}><span aria-hidden style={{ width: 14, height: 3, flex: "none", background: LATERAL_COLOR }} />{lat.well}</h3><div className="muted" style={{ fontSize: 12 }}>{[`${lat.operator} · W-1 plat lateral`, lat.county ? `${lat.county} County` : null].filter(Boolean).join(" · ")}</div></div><button className="icon-btn" aria-label="Close" onClick={onClose}>×</button></div>
+      <div className="dd-grid mc-kv" style={{ marginTop: 6 }}>
+        <KV k="API" v={lat.apiLabel} />
+        <KV k={lat.feature === "line" ? "Segment" : "Point"} v={lat.platKind} />
+      </div>
+      <p className="mc-fp-note">Surface location, penetration / first take point and bottom hole exactly as printed on the drilling-permit (W-1) plat, in NAD27 Texas Central converted to the map. These are the permit's own coordinates, so they can differ from RRC's well layer, which places some wells up to ~2,000 ft away.</p>
+    </>
+  );
+}
+
+/** A clicked lease tract: a lease a lateral crosses that was not pooled into a unit. */
+function LeasePanel({ lease, onClose }: { lease: LeaseInfo; onClose: () => void }) {
+  const acres = (n: number) => `${n.toLocaleString("en-US", { maximumFractionDigits: 2 })} ac`;
+  const diffPct = lease.calledAcres > 0 ? (100 * (lease.mappedAcres - lease.calledAcres)) / lease.calledAcres : null;
+  return (
+    <>
+      <div className="section-head"><div><h3 style={{ margin: 0, display: "flex", alignItems: "center", gap: 8 }}><span aria-hidden style={{ width: 12, height: 12, borderRadius: 2, flex: "none", border: `2px dashed ${LEASE_COLOR}` }} />{lease.lease}</h3><div className="muted" style={{ fontSize: 12 }}>{[`${lease.operator} lease tract · not pooled`, lease.county ? `${lease.county} County` : null].filter(Boolean).join(" · ")}</div></div><button className="icon-btn" aria-label="Close" onClick={onClose}>×</button></div>
+      <div className="dd-grid mc-kv" style={{ marginTop: 6 }}>
+        <KV k="Tract size" v={acres(lease.calledAcres)} />
+        <KV k="Mapped outline" v={`${acres(lease.mappedAcres)}${diffPct != null ? ` (${diffPct >= 0 ? "+" : ""}${diffPct.toFixed(1)}%)` : ""}`} />
+        <KV k="Crossed by" v={lease.well} />
+      </div>
+      <p className="mc-fp-note">A lease the well's lateral crosses that is not part of a pooled unit, as drawn on the well-location plat ({lease.plat}). Reference only — the plat is not a boundary survey and its acreage was furnished by others.</p>
     </>
   );
 }

@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request, type Response } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { prisma, withDbRetry } from "../db.js";
@@ -11,6 +11,7 @@ import { isLaFid, laParishLabel } from "../domain/sonrisWells.js";
 import { sonrisWellsAvailable } from "../services/sonrisWells.js";
 import { rrcRefreshAvailable } from "../services/rrcRefresh.js";
 import { pooledUnitsPayload } from "../services/pooledUnits.js";
+import { leaseTractsPayload, w1LateralsPayload, type OverlayPayload } from "../services/platOverlays.js";
 import { rrcWellRefreshDetail } from "../services/rrcWellQueries.js";
 import { identifierDigits, LA_WELL_SQL, laWellDetail } from "../services/sonrisQueries.js";
 
@@ -969,6 +970,21 @@ gisRouter.get(
     res.type("application/json").send(p.body);
   }),
 );
+
+/** Static reference overlay: one cached payload, revalidated by ETag (same rule as /units). */
+function sendOverlay(req: Request, res: Response, p: OverlayPayload | null): void {
+  if (!p) { res.json({ type: "FeatureCollection", features: [] }); return; }
+  res.setHeader("Cache-Control", "private, no-cache");
+  res.setHeader("ETag", p.etag);
+  if (req.headers["if-none-match"] === p.etag) { res.status(304).end(); return; }
+  res.type("application/json").send(p.body);
+}
+
+/** W-1 laterals: each permit's own surface / take / bottom-hole points and lateral lines (domain/platOverlays). */
+gisRouter.get("/w1-laterals", asyncHandler(async (req, res) => { sendOverlay(req, res, w1LateralsPayload()); }));
+
+/** Lease tracts crossed by laterals but not pooled, as drawn on the well plats (domain/platOverlays). */
+gisRouter.get("/lease-tracts", asyncHandler(async (req, res) => { sendOverlay(req, res, leaseTractsPayload()); }));
 
 /** Full geometry for a small set of abstracts (deal footprint rendering). */
 gisRouter.get(
