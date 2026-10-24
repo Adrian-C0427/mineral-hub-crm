@@ -161,3 +161,24 @@ button.primary.op-comp-send { height: 36px; min-height: 0; padding: 0 16px; font
   .pset-conv-field > input, .pset-conv .msel-box { min-height: 40px; height: 40px; font-size: 16px; }
   .pset-new-form .seg.pset-kind .seg-item { height: 40px; }
 }
+
+/* ---------------------------------------------------------------- Opportunity profile (Deal Profile layout) */
+.opp-page .dd-top-grid .ddc-card .dd-grid { gap: 14px; }
+.opp-page .op-track-edit textarea { min-height: 96px; }
+.opp-page .seller-panel .ddc-view { padding-top: 6px; }
+.opp-page .seller-panel .dd-card-sub a { color: var(--accent-ink); }
+.opp-page .dd-location .dd-card-body { padding-top: 12px; }
+.opp-page .op-lower { margin-bottom: var(--block-gap); }
+.opp-page .op-lower > .panel { margin-bottom: 0; }
+/* Tasks (the seller contact's task records) */
+.op-tasks-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.op-task { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; }
+.op-task + .op-task { border-top: 1px solid var(--line-faint); }
+.op-task > input[type="checkbox"] { margin-top: 3px; flex: none; }
+.op-task-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; padding: 0; border: 0; background: transparent; text-align: left; color: inherit; font: inherit; box-shadow: none; min-height: 0; height: auto; cursor: pointer; }
+.op-task-main:disabled { cursor: default; }
+.op-task-title { font-size: 13.5px; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.op-task.done .op-task-title { color: var(--ink-4); text-decoration: line-through; font-weight: 500; }
+.op-task-body { font-size: 12.5px; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.op-task-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-4); }
+.op-task-due.overdue { color: var(--danger-ink); font-weight: 600; }

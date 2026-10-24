@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CONTRACT_EXTENSION_DAYS, closingIsExtended, formatCalendarDay, nextContractExtension, profitClosingDate } from "./dates.js";
+import { CONTRACT_EXTENSION_DAYS, closingIsExtended, formatCalendarDay, nextContractExtension, profitClosingDate, resolveDealDates } from "./dates.js";
 
 const day = (s: string) => new Date(`${s}T00:00:00Z`);
 
@@ -59,5 +59,28 @@ describe("profitClosingDate / closingIsExtended", () => {
 
   it("is null for an unextended deal with no Closing date", () => {
     expect(profitClosingDate({ ...base, originalClosingDate: null })).toBeNull();
+  });
+});
+
+describe("Extended closing keeps the ORIGINAL closing as its baseline", () => {
+  const d = (s: string) => new Date(`${s}T00:00:00.000Z`);
+  it("Closing moved earlier does not pull the automatic Extended closing in with it", () => {
+    // Created with Closing Dec 15 → Extended Dec 30. Closing later moved to Dec 5.
+    const r = resolveDealDates({ dateUnderContract: d("2026-11-01"), originalClosingDate: d("2026-12-05"), closingBaselineDate: d("2026-12-15"), findBuyerByDateOverride: null, finalClosingDateOverride: null });
+    expect(r.originalClosingDate).toEqual(d("2026-12-05"));
+    expect(r.finalClosingDate).toEqual(d("2026-12-30"));
+    expect(r.finalClosingIsOverridden).toBe(false);
+  });
+  it("without a stored baseline (older deals) the current Closing date still derives it", () => {
+    const r = resolveDealDates({ dateUnderContract: null, originalClosingDate: d("2026-12-05"), findBuyerByDateOverride: null, finalClosingDateOverride: null });
+    expect(r.finalClosingDate).toEqual(d("2026-12-20"));
+  });
+  it("a manually set Extended closing is never overwritten by the baseline rule", () => {
+    const r = resolveDealDates({ dateUnderContract: null, originalClosingDate: d("2026-12-05"), closingBaselineDate: d("2026-12-15"), findBuyerByDateOverride: null, finalClosingDateOverride: d("2027-01-10") });
+    expect(r.finalClosingDate).toEqual(d("2027-01-10"));
+    expect(r.finalClosingAuto).toEqual(d("2026-12-30"));
+  });
+  it("having an Extended closing date still does not mean the extension was activated", () => {
+    expect(closingIsExtended({ finalClosingDateOverride: d("2026-12-30"), extensionCount: 0 })).toBe(false);
   });
 });

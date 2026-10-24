@@ -11,6 +11,7 @@ import { startDealAlertScheduler } from "./services/dealAlerts.js";
 import { startDemoResetScheduler } from "./services/demoReset.js";
 import { backfillTransactionInterests } from "./services/researchInterestBackfill.js";
 import { backfillResearchConsistency } from "./services/researchConsistencyBackfill.js";
+import { backfillDocFolders } from "./services/docFoldersBackfill.js";
 import { ensureGisRegions } from "./services/gisRegions.js";
 import { ensureSonrisWells } from "./services/sonrisWells.js";
 import { ensureRrcRefresh } from "./services/rrcRefresh.js";
@@ -42,6 +43,12 @@ ensureUsersHaveOrganizations().catch((e) =>
 // Idempotent backfill of the new buyer pipeline status from legacy responseStatus.
 backfillBuyerStatus().catch((e) =>
   console.error("Buyer status backfill failed:", e instanceof Error ? e.message : e),
+);
+
+// Idempotent, additive: the Lease document folder on deals with a customized
+// folder list (once per deal — a later removal of the folder sticks).
+backfillDocFolders().catch((e) =>
+  console.error("Document folders backfill failed:", e instanceof Error ? e.message : e),
 );
 
 // Idempotent, lossless: conveyed-interest shares written into recorded party

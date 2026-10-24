@@ -121,10 +121,10 @@ const EMPTY_FILTERS: PipelineFilterState = {
   q: "", priority: "", states: [], counties: [], buyerId: "", assigneeId: "", overdueOnly: false,
   nraMin: "", nraMax: "", nmaMin: "", nmaMax: "", ourMin: "", ourMax: "", buyerMin: "", buyerMax: "",
 };
-// Package rollups (agg*) represent the card the user sees — display, sort, and filter on those.
-const cardNra = (d: DealSummary) => d.aggNra ?? d.nra;
-const cardNma = (d: DealSummary) => d.aggAcreageNma ?? d.acreageNma;
-const cardOur = (d: DealSummary) => d.aggOurPrice ?? d.ourPrice;
+// The card's figures — display, sort, and filter on these.
+const cardNra = (d: DealSummary) => d.nra;
+const cardNma = (d: DealSummary) => d.acreageNma;
+const cardOur = (d: DealSummary) => d.ourPrice;
 const cardBuyer = (d: DealSummary) => d.buyerPurchasePrice ?? null;
 const bound = (s: string): number | null => { const n = Number(s); return s.trim() !== "" && isFinite(n) ? n : null; };
 /** Inclusive range test; deals without the metric are excluded once a bound is set. */
@@ -764,7 +764,7 @@ function CardBody({ deal, fields, action }: { deal: DealSummary; fields: Record<
     <>
       <div className="pl-card-top">
         <span className="pl-card-name" title={deal.name}>
-          {deal.name}{deal.assetCount ? <span className="pl-card-assets"> · {deal.assetCount} asset{deal.assetCount > 1 ? "s" : ""}</span> : null}
+          {deal.name}
         </span>
         {fields.priority && (
           <span className={`pl-chip pl-pri pri-${deal.priority.toLowerCase()}`}><i />{PRIORITY_LABEL[deal.priority] ?? deal.priority}</span>

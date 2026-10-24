@@ -26,7 +26,7 @@ export function s3Configured(): boolean {
   return configured;
 }
 
-export function buildKey(scope: "deal" | "buyer", id: string, filename: string): string {
+export function buildKey(scope: "deal" | "buyer" | "opportunity", id: string, filename: string): string {
   const safe = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
   return `${scope}/${id}/${crypto.randomUUID()}-${safe}`;
 }

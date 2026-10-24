@@ -2293,38 +2293,6 @@ body.pipeline-dragging, body.pipeline-dragging * { user-select: none !important;
 /* Cross-breakpoint: keep block/grid gaps proportional on smaller screens */
 @media (max-width: 760px) { :root { --block-gap: 14px; --grid-gap: 12px; } }
 
-/* ---------------------------------------------------------------------------
-   Multi-asset seller — New Deal asset repeater + Assets/Tracts section
-   --------------------------------------------------------------------------- */
-.nd-assets { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
-.nd-assets-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
-.nd-asset-row { display: flex; align-items: flex-end; gap: 8px; flex-wrap: wrap; padding: 10px; margin-bottom: 8px;
-  border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
-.nd-asset-row .field { margin: 0; }
-.nd-asset-del { flex: 0 0 auto; width: 30px; height: 34px; border: 1px solid var(--border); border-radius: 6px;
-  background: var(--panel); color: var(--text-dim); font-size: 17px; line-height: 1; cursor: pointer; }
-.nd-asset-del:hover { color: var(--red); border-color: var(--red); }
-/* Additional-asset card = the full deal form, per asset. */
-.nd-asset-card { padding: 14px; margin-bottom: 10px; border: 1px solid var(--border); border-radius: 9px; background: var(--panel-2); }
-.nd-asset-card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.nd-asset-timeline { margin-top: 10px; display: flex; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
-.nd-asset-same { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); cursor: pointer; }
-.nd-asset-same input { width: auto; }
-
-.asset-total { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; margin-bottom: 12px;
-  padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); font-size: 13px; }
-.asset-total .muted { text-transform: uppercase; letter-spacing: 0.04em; font-size: 11px; }
-.asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
-.asset-card { display: flex; flex-direction: column; gap: 8px; padding: 13px 14px; border: 1px solid var(--border);
-  border-radius: var(--radius-lg); background: var(--panel-2); color: var(--text); text-decoration: none;
-  transition: border-color 0.12s ease, transform 0.12s ease; }
-.asset-card:hover { border-color: var(--accent); transform: translateY(-1px); text-decoration: none; }
-.asset-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.asset-card-name { font-weight: 700; font-size: 14px; }
-.asset-card-facts { display: flex; flex-wrap: wrap; gap: 6px 12px; font-size: 12.5px; color: var(--text-dim); }
-.asset-card-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 12.5px;
-  padding-top: 8px; border-top: 1px solid var(--border); }
-
 /* Customize pipeline stages editor (PipelineStagesModal) — drag-to-reorder rows
    matching the Expenses category editor. */
 .stage-editor { display: flex; flex-direction: column; gap: 8px; }

@@ -90,7 +90,9 @@ beforeEach(() => {
 describe("GET /deals — visibility is applied in the query", () => {
   it("?visibility=active leaves hidden deals out", async () => {
     await withApp(async (port) => { expect((await call(port, "GET", "/api/deals?visibility=active")).status).toBe(200); });
-    expect(listWhere()).toMatchObject({ organizationId: ORG, parentDealId: null, hiddenAt: null });
+    expect(listWhere()).toMatchObject({ organizationId: ORG, hiddenAt: null });
+    // Every deal is listed on its own — no parent/child filter.
+    expect(listWhere()).not.toHaveProperty("parentDealId");
   });
 
   it("?visibility=hidden returns only hidden deals", async () => {

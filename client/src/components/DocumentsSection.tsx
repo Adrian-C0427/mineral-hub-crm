@@ -31,7 +31,17 @@ export interface DocFile {
 
 /** Deal document folders — the reference set (kept here so Deals and the shared
  *  component never drift). Other modules pass their own via `folders`. */
-export const DEAL_DOC_FOLDERS = ["Seller PSA", "Buyer PSA", "Check Stubs", "Division Orders", "Deeds", "Title", "Other"];
+export const DEAL_DOC_FOLDERS = ["Seller PSA", "Buyer PSA", "Check Stubs", "Division Orders", "Deeds", "Title", "Lease", "Other"];
+/** Opportunity document folders (prospect paperwork before a contract exists). */
+export const OPP_DOC_FOLDERS = ["Correspondence", "Title", "Lease", "Other"];
+
+/** The folders a record shows: its stored (customized) list, else the module's
+ *  defaults. "Other" always closes the list. */
+export function effectiveFolders(stored: string[] | null | undefined, defaults: string[]): string[] {
+  if (!stored?.length) return defaults;
+  const list = stored.filter((f) => f !== "Other");
+  return [...list, "Other"];
+}
 
 function humanSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -74,7 +84,7 @@ export function DocumentsSection({
   title = "Documents",
 }: {
   /** Which owner the uploaded file attaches to (matches the /files contract). */
-  ownerType?: "deal" | "buyer";
+  ownerType?: "deal" | "buyer" | "opportunity";
   ownerId: string;
   files: DocFile[];
   /** Module-specific document folders/categories. */
@@ -140,7 +150,7 @@ export function DocumentsSection({
     catch (e) { setErr(e instanceof Error ? e.message : "Something went wrong"); }
     finally { setBusy(false); }
   }
-  const ownerField = ownerType === "buyer" ? "buyerId" : "dealId";
+  const ownerField = ownerType === "buyer" ? "buyerId" : ownerType === "opportunity" ? "opportunityId" : "dealId";
   const upload = (file: File) => run(async () => {
     const form = new FormData();
     form.append("file", file); form.append(ownerField, ownerId); form.append("folder", folder);
@@ -159,8 +169,8 @@ export function DocumentsSection({
   const move = (f: DocFile, toFolder: string) => { if (toFolder !== f.folder) run(() => api.patch(`/files/${f.id}`, { folder: toFolder })); };
 
   // --- folder management --------------------------------------------------
-  const canManageFolders = canEdit && ownerType === "deal";
-  const folderOp = (body: Record<string, unknown>) => run(() => api.post(`/deals/${ownerId}/doc-folders`, body));
+  const canManageFolders = canEdit && (ownerType === "deal" || ownerType === "opportunity");
+  const folderOp = (body: Record<string, unknown>) => run(() => api.post(`/${ownerType === "opportunity" ? "opportunities" : "deals"}/${ownerId}/doc-folders`, body));
   const reorderFolders = (from: string, to: string) => {
     if (from === to) return;
     const next = folders.filter((f) => f !== from);
@@ -544,7 +554,7 @@ interface CloudProvider { key: string; name: string; connected: boolean }
 interface CloudFile { id: string; name: string; mimeType: string; sizeBytes: number | null; modifiedAt: string | null }
 
 function CloudImportModal({ provider, folder, ownerField, ownerId, onClose, onImported }: {
-  provider: CloudProvider; folder: string; ownerField: "dealId" | "buyerId"; ownerId: string;
+  provider: CloudProvider; folder: string; ownerField: "dealId" | "buyerId" | "opportunityId"; ownerId: string;
   onClose: () => void; onImported: (count: number) => void;
 }) {
   const [q, setQ] = useState("");

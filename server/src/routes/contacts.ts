@@ -64,10 +64,17 @@ const dateField = z.string().datetime({ offset: true }).or(z.string().regex(/^\d
 // Optional free-text field: trimmed, and a blank string clears it (stored NULL).
 const optionalText = (max: number) => z.string().trim().max(max).nullish().transform((v) => (v === undefined ? undefined : v || null));
 
-const upsertSchema = z.object({
-  firstName: z.string().trim().min(1).max(200),
-  lastName: z.string().trim().min(1).max(200),
+// A contact is a person (first + last name) or an entity (entity name, filed
+// under it) — sellers created from a deal or opportunity can be either.
+const contactNameFields = z.object({
+  firstName: z.string().trim().max(200),
+  lastName: z.string().trim().max(200),
   entityName: z.string().trim().max(300).nullish(),
+});
+const hasContactName = (c: { firstName?: string; lastName?: string; entityName?: string | null }) =>
+  !!((c.firstName && c.lastName) || c.entityName || c.firstName || c.lastName);
+const upsertFields = z.object({
+  ...contactNameFields.shape,
   type: z.enum(CONTACT_TYPES).optional(),
   status: z.enum(CONTACT_STATUSES).optional(),
   source: z.string().trim().max(300).nullish(),
@@ -86,6 +93,8 @@ const upsertSchema = z.object({
   lastContactedAt: dateField,
   nextFollowUpDate: dateField,
 });
+const upsertSchema = upsertFields.refine(hasContactName, { message: "A contact needs a first and last name, or an entity name" });
+const patchSchema = upsertFields.partial();
 
 async function validateOwner(org: string, ownerId: string | null | undefined): Promise<string | null> {
   if (!ownerId) return null;
@@ -120,7 +129,8 @@ contactsRouter.post(
     const created = await prisma.contact.create({
       data: {
         organizationId: orgId(req),
-        firstName: data.firstName,
+        // An entity-only contact is filed under its entity name.
+        firstName: data.firstName || (data.lastName ? "" : data.entityName ?? ""),
         lastName: data.lastName,
         entityName: data.entityName ?? null,
         type: data.type ?? "PROSPECT",
@@ -153,7 +163,9 @@ contactsRouter.patch(
   asyncHandler(async (req: AuthedRequest, res) => {
     const existing = await prisma.contact.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!existing) throw new HttpError(404, "Contact not found");
-    const data = upsertSchema.partial().parse(req.body);
+    const data = patchSchema.parse(req.body);
+    const after = { firstName: data.firstName ?? existing.firstName, lastName: data.lastName ?? existing.lastName, entityName: data.entityName === undefined ? existing.entityName : data.entityName };
+    if (!hasContactName(after)) throw new HttpError(400, "A contact needs a first and last name, or an entity name");
     const ownerId = data.ownerId !== undefined ? await validateOwner(orgId(req), data.ownerId) : undefined;
     const updated = await prisma.contact.update({
       where: { id: existing.id },

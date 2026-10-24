@@ -23,6 +23,7 @@ const upload = multer({
 const metaSchema = z.object({
   dealId: z.string().optional(),
   buyerId: z.string().optional(),
+  opportunityId: z.string().optional(),
   category: z.enum(["PSA", "LPOA", "DEED", "PLAT_MAP", "TITLE_DOC", "OTHER"]).default("OTHER"),
   // Folder is a free label (default folders are defined client-side) so new
   // folders never require a schema/route change.
@@ -39,17 +40,7 @@ filesRouter.post(
     const file = req.file;
     if (!file) throw new HttpError(400, "No file uploaded");
     const meta = metaSchema.parse(req.body);
-    if (!!meta.dealId === !!meta.buyerId) {
-      throw new HttpError(400, "Provide exactly one of dealId or buyerId");
-    }
-    // Verify the target record belongs to the caller's organization.
-    if (meta.dealId) {
-      const d = await prisma.deal.findFirst({ where: { id: meta.dealId, organizationId: orgId(req) } });
-      if (!d) throw new HttpError(404, "Deal not found");
-    } else {
-      const b = await prisma.buyer.findFirst({ where: { id: meta.buyerId!, organizationId: orgId(req) } });
-      if (!b) throw new HttpError(404, "Buyer not found");
-    }
+    const owner = await requireFileOwner(req, meta);
 
     // Never trust the client-reported mimetype — sniff magic bytes.
     const detected = sniffMime(file.buffer, file.mimetype);
@@ -57,15 +48,14 @@ filesRouter.post(
       throw new HttpError(415, `Unsupported file type: ${detected}`);
     }
 
-    const scope = meta.dealId ? "deal" : "buyer";
-    const id = (meta.dealId ?? meta.buyerId)!;
-    const key = buildKey(scope, id, file.originalname);
+    const key = buildKey(owner.scope, owner.id, file.originalname);
     await putObject(key, file.buffer, detected);
 
     const record = await prisma.fileAttachment.create({
       data: {
         dealId: meta.dealId ?? null,
         buyerId: meta.buyerId ?? null,
+        opportunityId: meta.opportunityId ?? null,
         category: meta.category,
         folder: meta.folder,
         filename: file.originalname,
@@ -79,13 +69,35 @@ filesRouter.post(
   }),
 );
 
-// Only files whose parent deal/buyer is in the caller's org are accessible.
-// Exposed as its own predicate so every FileAttachment read here can name the
-// org, including the ones that look up a row by something other than its id.
+// Only files whose parent deal/buyer/opportunity is in the caller's org are
+// accessible. Exposed as its own predicate so every FileAttachment read here
+// can name the org, including the ones that look up a row by something other
+// than its id.
 const fileOrgScope = (organizationId: string) => [
   { deal: { organizationId } },
   { buyer: { organizationId } },
+  { opportunity: { organizationId } },
 ];
+
+/** The one record a new document attaches to — exactly one of a deal, a buyer
+ *  or an opportunity, and it must belong to the caller's organization. */
+async function requireFileOwner(req: AuthedRequest, o: { dealId?: string; buyerId?: string; opportunityId?: string }) {
+  const given = [o.dealId, o.buyerId, o.opportunityId].filter(Boolean).length;
+  if (given !== 1) throw new HttpError(400, "Provide exactly one of dealId, buyerId or opportunityId");
+  if (o.dealId) {
+    const d = await prisma.deal.findFirst({ where: { id: o.dealId, organizationId: orgId(req) }, select: { id: true } });
+    if (!d) throw new HttpError(404, "Deal not found");
+    return { scope: "deal" as const, id: d.id };
+  }
+  if (o.opportunityId) {
+    const p = await prisma.opportunity.findFirst({ where: { id: o.opportunityId, organizationId: orgId(req) }, select: { id: true } });
+    if (!p) throw new HttpError(404, "Opportunity not found");
+    return { scope: "opportunity" as const, id: p.id };
+  }
+  const b = await prisma.buyer.findFirst({ where: { id: o.buyerId!, organizationId: orgId(req) }, select: { id: true } });
+  if (!b) throw new HttpError(404, "Buyer not found");
+  return { scope: "buyer" as const, id: b.id };
+}
 
 function fileOrgWhere(id: string, organizationId: string) {
   return { id, OR: fileOrgScope(organizationId) };
@@ -158,8 +170,8 @@ filesRouter.post(
     const detected = sniffMime(file.buffer, file.mimetype);
     if (!isAllowedMime(detected)) throw new HttpError(415, `Unsupported file type: ${detected}`);
 
-    const scope = prev.dealId ? "deal" : "buyer";
-    const parentId = (prev.dealId ?? prev.buyerId)!;
+    const scope = prev.dealId ? "deal" : prev.opportunityId ? "opportunity" : "buyer";
+    const parentId = (prev.dealId ?? prev.opportunityId ?? prev.buyerId)!;
     const key = buildKey(scope, parentId, file.originalname);
     await putObject(key, file.buffer, detected);
 
@@ -168,6 +180,7 @@ filesRouter.post(
         data: {
           dealId: prev.dealId,
           buyerId: prev.buyerId,
+          opportunityId: prev.opportunityId,
           category: prev.category,
           folder: prev.folder,
           filename: file.originalname,
@@ -284,20 +297,13 @@ filesRouter.post(
       fileId: z.string().min(1).max(512),
       dealId: z.string().optional(),
       buyerId: z.string().optional(),
+      opportunityId: z.string().optional(),
       folder: z.string().trim().min(1).max(80).default("Other"),
     }).parse(req.body);
-    if (!!body.dealId === !!body.buyerId) throw new HttpError(400, "Provide exactly one of dealId or buyerId");
-
-    if (body.dealId) {
-      const d = await prisma.deal.findFirst({ where: { id: body.dealId, organizationId: orgId(req) }, select: { id: true } });
-      if (!d) throw new HttpError(404, "Deal not found");
-    } else {
-      const b = await prisma.buyer.findFirst({ where: { id: body.buyerId!, organizationId: orgId(req) }, select: { id: true } });
-      if (!b) throw new HttpError(404, "Buyer not found");
-    }
+    await requireFileOwner(req, body);
 
     const record = await importProviderFile(row, {
-      fileId: body.fileId, dealId: body.dealId ?? null, buyerId: body.buyerId ?? null,
+      fileId: body.fileId, dealId: body.dealId ?? null, buyerId: body.buyerId ?? null, opportunityId: body.opportunityId ?? null,
       folder: body.folder, uploadedByUserId: req.user?.id ?? null,
     });
     res.status(201).json(record);

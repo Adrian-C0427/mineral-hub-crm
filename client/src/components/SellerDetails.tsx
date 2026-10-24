@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { api } from "../api/client";
 import { Plus } from "lucide-react";
+import { Link } from "react-router-dom";
 import { Modal, Banner, ConfirmDelete, UserChip } from "./ui";
+import { ContactPicker, useContactOptions } from "./SellerInformation";
+import { normalizePhone } from "../lib/phone";
 import { Avatar, Tag } from "./kit";
 import { PhoneInput } from "./PhoneInput";
 import { Select } from "./Select";
@@ -117,6 +120,7 @@ function SellerCard({ s, canEdit, onEdit, onRemove }: { s: Seller; canEdit: bool
         </div>
       </div>
       <div className="seller-grid">
+        <KV k="Contact" v={s.contact ? <Link to={`/contacts/${s.contact.id}`} title="Open the shared contact record">{s.contact.name}</Link> : null} />
         <KV k="Phone" v={s.primaryPhone ? formatPhone(s.primaryPhone) : null} />
         <KV k="Email" v={s.email} />
         <KV k="Preferred contact" v={s.preferredContactMethod} />
@@ -145,6 +149,8 @@ interface FormState {
   physicalAddress: string; physicalCity: string; physicalState: string; physicalZip: string;
   mailingAddress: string; mailingCity: string; mailingState: string; mailingZip: string;
   internalNotes: string; assignedTeamMemberId: string;
+  /** Existing contact to link (new sellers; "" = none). */
+  contactId: string;
 }
 type TextKey = Exclude<keyof FormState, "sellerType">;
 
@@ -180,7 +186,11 @@ function SellerFormModal({ dealId, seller, users, onClose, onSaved }: {
     mailingZip: seller?.mailingZip ?? "",
     internalNotes: seller?.internalNotes ?? "",
     assignedTeamMemberId: seller?.assignedTeamMember?.id ?? "",
+    contactId: seller?.contact?.id ?? "",
   }));
+  // Adding a seller: pick an existing contact (search by name, company, phone
+  // or email) and the blank fields fill in from it; the server links it.
+  const picker = useContactOptions();
   // Mailing == physical (default true for a brand-new seller so the common case
   // needs no extra typing; for an existing seller, reflect what's stored —
   // treating an empty mailing address as "same as physical").
@@ -229,6 +239,7 @@ function SellerFormModal({ dealId, seller, users, onClose, onSaved }: {
       ...mail,
       internalNotes: s(f.internalNotes),
       assignedTeamMemberId: f.assignedTeamMemberId || null,
+      ...(!seller && f.contactId ? { contactId: f.contactId } : {}),
     };
     try {
       if (seller) await api.patch(`/deals/${dealId}/sellers/${seller.id}`, body);
@@ -251,6 +262,23 @@ function SellerFormModal({ dealId, seller, users, onClose, onSaved }: {
         <button className="primary" disabled={busy} onClick={save}>{busy ? "Saving…" : seller ? "Save seller" : "Add seller"}</button>
       </>}
     >
+      {!seller && picker.canSearch && (
+        <FormGroup title="Contact">
+          <ContactPicker value={f.contactId} contacts={picker.contacts} options={picker.options} loading={!picker.contacts}
+            onClear={() => setF((p) => ({ ...p, contactId: "" }))}
+            onPick={(c) => setF((p) => ({
+              ...p, contactId: c.id,
+              firstName: p.firstName || (c.firstName === c.entityName ? "" : c.firstName), lastName: p.lastName || c.lastName,
+              companyName: p.companyName || (c.entityName ?? ""), primaryPhone: p.primaryPhone || normalizePhone(c.phone ?? ""), email: p.email || (c.email ?? ""),
+              mailingAddress: p.mailingAddress || (c.mailingStreet ?? ""), mailingCity: p.mailingCity || (c.mailingCity ?? ""),
+              mailingState: p.mailingState || (c.mailingState ?? ""), mailingZip: p.mailingZip || (c.mailingZip ?? ""),
+            }))}
+            note={picker.error ?? "Every seller is a contact: pick an existing one, or the details below create one (a contact with the same email, or phone and name, is reused)."} />
+        </FormGroup>
+      )}
+      {seller?.contact && (
+        <Banner kind="info">Linked to contact <Link to={`/contacts/${seller.contact.id}`}><strong>{seller.contact.name}</strong></Link> — name, company, phone, email and mailing address edited here update that contact too.</Banner>
+      )}
       <FormGroup title="Personal information">
         <div className="grid-3">
           <Fld l="First name"><input value={f.firstName} onChange={set("firstName")} /></Fld>

@@ -25,7 +25,7 @@ const db = vi.hoisted(() => {
     opportunity: model("opportunity", ["findFirst", "create", "update"]),
     opportunityStageHistory: model("opportunityStageHistory", ["create"]),
     user: model("user", ["findMany", "findFirst"]),
-    contact: model("contact", ["findFirst"]),
+    contact: model("contact", ["findFirst", "findMany", "create", "update"]),
     $transaction: async (fn: unknown) => {
       (calls["$transaction"] ??= []).push(fn);
       return typeof fn === "function" ? (fn as (tx: unknown) => unknown)(prisma) : Promise.all(fn as Promise<unknown>[]);
@@ -106,6 +106,8 @@ beforeEach(() => {
     "user.findFirst": { id: "u_owner" },
     "user.findMany": [],
     "contact.findFirst": { id: "c_1" },
+    "contact.findMany": [],
+    "contact.create": { id: "c_new", firstName: "Mary", lastName: "Hernandez", entityName: null, phone: null, email: null, preferredContact: null, mailingStreet: null, mailingCity: null, mailingState: null, mailingZip: null },
   });
 });
 
@@ -182,17 +184,45 @@ describe("PATCH /opportunities/:id", () => {
 
 describe("POST /opportunities", () => {
   it("creates in the chosen pipeline's first active stage with a history row; blanks stored as null", async () => {
-    const res = await call(EDITOR, "POST", "/api/opportunities", { name: "Hernandez", pipelineId: "pl_opp", sellerName: " ", ownerId: "", county: "Leon" });
+    const res = await call(EDITOR, "POST", "/api/opportunities", { name: "Hernandez", pipelineId: "pl_opp", sellerName: "Ann Smith", ownerId: "", county: "Leon", source: " " });
     expect(res.status).toBe(201);
     const data = createData();
-    expect(data).toMatchObject({ organizationId: "org_a", name: "Hernandez", pipelineId: "pl_opp", stage: "NEW", sellerName: null, ownerId: null, county: "Leon" });
+    expect(data).toMatchObject({ organizationId: "org_a", name: "Hernandez", pipelineId: "pl_opp", stage: "NEW", sellerName: "Ann Smith", ownerId: null, county: "Leon", source: null });
     expect(db.calls["opportunityStageHistory.create"]).toHaveLength(1);
     expect((db.calls["pipeline.findFirst"]![0] as { where: unknown }).where).toEqual({ id: "pl_opp", organizationId: "org_a" });
   });
 
   it("keeps an explicitly chosen stage", async () => {
-    await call(EDITOR, "POST", "/api/opportunities", { name: "Hernandez", pipelineId: "pl_opp", stage: "QUALIFIED" });
+    await call(EDITOR, "POST", "/api/opportunities", { name: "Hernandez", pipelineId: "pl_opp", stage: "QUALIFIED", companyName: "Hernandez Trust" });
     expect(createData().stage).toBe("QUALIFIED");
+  });
+
+  it("needs the seller: refuses a body with no seller block, seller name, entity or contact", async () => {
+    const res = await call(EDITOR, "POST", "/api/opportunities", { name: "Hernandez", pipelineId: "pl_opp" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/seller/i);
+    expect(db.calls["opportunity.create"]).toBeUndefined();
+  });
+
+  it("a seller block creates the Contact in the same transaction and links it", async () => {
+    db.results["contact.findFirst"] = null; // nobody has this email yet
+    const res = await call(EDITOR, "POST", "/api/opportunities", {
+      name: "Hernandez", pipelineId: "pl_opp",
+      seller: { firstName: "Mary", lastName: "Hernandez", phone: "(903) 555-1234", email: "Mary@Example.com", sellerType: "INDIVIDUAL" },
+    });
+    expect(res.status).toBe(201);
+    const c = (db.calls["contact.create"]![0] as { data: Record<string, unknown> }).data;
+    expect(c).toMatchObject({ organizationId: "org_a", firstName: "Mary", lastName: "Hernandez", type: "PROSPECT", phone: "9035551234", email: "mary@example.com", ownerId: "u_ed" });
+    expect(createData()).toMatchObject({ contactId: "c_new", sellerName: "Mary Hernandez", phone: "9035551234", email: "mary@example.com" });
+    expect(db.calls["$transaction"]).toHaveLength(1);
+  });
+
+  it("a seller block naming an existing contact links it instead of creating one", async () => {
+    db.results["contact.findFirst"] = { id: "c_1", firstName: "Ann", lastName: "Lee", entityName: "Lee Minerals LLC", phone: "9030000000", email: "ann@x.com", preferredContact: null, mailingStreet: null, mailingCity: null, mailingState: null, mailingZip: null };
+    const res = await call(EDITOR, "POST", "/api/opportunities", { name: "Lee", pipelineId: "pl_opp", seller: { contactId: "c_1" } });
+    expect(res.status).toBe(201);
+    expect(db.calls["contact.create"]).toBeUndefined();
+    expect(createData()).toMatchObject({ contactId: "c_1", sellerName: "Ann Lee", companyName: "Lee Minerals LLC", phone: "9030000000", email: "ann@x.com" });
   });
 
   it("rejects a pipeline that is gone, holds deals, or a stage it doesn't have — never creating anything", async () => {

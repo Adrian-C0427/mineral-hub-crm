@@ -75,7 +75,8 @@ export function Select({
   const typed = query.trim();
   const filtered = useMemo(() => {
     const q = typed.toLowerCase();
-    const hits = q ? baseOpts.filter((o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q)) : baseOpts;
+    // Search covers the label, the value and the hint (e.g. a contact's company, phone or email).
+    const hits = q ? baseOpts.filter((o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q) || (o.hint ?? "").toLowerCase().includes(q)) : baseOpts;
     // The typed text leads the list as its own choice unless it's already an option.
     const exact = baseOpts.some((o) => o.value.toLowerCase() === q || o.label.toLowerCase() === q);
     return creatable && searchable && q && !exact ? [{ value: typed, label: `Use “${typed}”`, hint: "not in list" }, ...hits] : hits;

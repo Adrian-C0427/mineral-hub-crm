@@ -4,11 +4,11 @@ import { api } from "../api/client";
 import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
 import {
-  Spinner, Modal, Banner, ConfirmDelete, ConfirmDialog, BackLink, OverflowMenu, showToast, ChipList, EmptyState,
+  Spinner, Modal, Banner, ConfirmDelete, ConfirmDialog, BackLink, OverflowMenu, showToast, ChipList,
 } from "../components/ui";
 import { StatStrip, Tag, type StatCell } from "../components/kit";
 import { useStages } from "../stages";
-import { ChevronDown, Pencil, Plus } from "lucide-react";
+import { ChevronDown, Pencil } from "lucide-react";
 import { useUnsavedSection } from "../lib/unsaved";
 import { StageChangeModal } from "../components/StageChangeModal";
 import { LogContactModal } from "../components/LogContactModal";
@@ -23,10 +23,9 @@ import { money, num, acres, pct, daysBetween, fmtDate, toInputDate, prettyEnum }
 import { downloadCsv } from "../lib/csv";
 import { SellerDetails } from "../components/SellerDetails";
 import { DealPortalPanel } from "../components/DealPortalPanel";
-import { DocumentsSection, DEAL_DOC_FOLDERS, type DocFile } from "../components/DocumentsSection";
+import { DocumentsSection, DEAL_DOC_FOLDERS, effectiveFolders, type DocFile } from "../components/DocumentsSection";
 import { OfferRowActions, acceptedOfferLabel } from "../components/OfferActions";
-import type { AssetChild, BuyerActivityRow, ContractExtension, DealSummary, MatchRec, Seller, UserLite } from "../types";
-import { NewDealModal } from "../components/NewDealModal";
+import type { BuyerActivityRow, ContractExtension, DealSummary, MatchRec, Seller, UserLite } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
 import { MarketingFunnel } from "../components/MarketingFunnel";
 import { DateField } from "../components/DateField";
@@ -54,10 +53,6 @@ interface DealDetailData extends DealSummary {
   metrics: { buyersContacted: number; interested: number; offers: number; highOffer: number | null };
   // Contract-timeline extensions, oldest first.
   contractExtensions?: ContractExtension[];
-  // Multi-asset grouping.
-  parent: { id: string; name: string } | null;
-  assets?: AssetChild[];
-  assetCount?: number;
 }
 
 interface EditTarget { id: string; name: string; initial?: { status?: BuyerActivityRow["status"]; assignedTeamMemberId?: string | null; notes?: string | null; dateSent?: string | null; nextFollowUpDate?: string | null } }
@@ -78,13 +73,10 @@ export function DealDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [acceptOffer, setAcceptOffer] = useState<{ id: string; buyer: string; amount: number } | null>(null);
   const [acceptBusy, setAcceptBusy] = useState(false);
-  const [showAddAsset, setShowAddAsset] = useState(false);
   const [renaming, setRenaming] = useState(false);
   // Top-level tab (Mineral Assets pattern) — pure navigation; every section
   // renders exactly as before, just grouped.
-  const [tab, setTab] = useState<"general" | "additional" | "buyers" | "marketplace" | "documents">("general");
-  const [confirmSplit, setConfirmSplit] = useState(false);
-  const [splitBusy, setSplitBusy] = useState(false);
+  const [tab, setTab] = useState<"general" | "buyers" | "marketplace" | "documents">("general");
   // Match list shows the top 6 by default (reference); one click expands.
   const [showAllMatches, setShowAllMatches] = useState(false);
 
@@ -151,6 +143,7 @@ export function DealDetail() {
   // The shared formula (lib/metrics) — Reports' Avg implied margin averages it.
   const margin = impliedMargin(deal.askPrice, deal.ourPrice);
   const royalty = royaltyLabel(deal.royaltyRate);
+  const hasAcceptedOffer = deal.offers.some((o) => o.status === "ACCEPTED" || deal.selectedOfferId === o.id);
   const summary: StatCell[] = [
     { label: "Our cost", value: money(deal.ourPrice), sub: perAcreSub(ourPerNma, ourPerNra) },
     { label: "Asking price", value: money(deal.askPrice), sub: perAcreSub(askPerNma, askPerNra) },
@@ -165,7 +158,22 @@ export function DealDetail() {
       value: deal.nra != null ? `${acres(deal.nra)} NRA` : "—",
       sub: [deal.acreageNma != null ? `${acres(deal.acreageNma)} NMA` : null, royalty ? `${royalty} royalty` : null].filter(Boolean).join(" · ") || undefined,
     },
-    { label: "Extended closing", value: deal.finalClosingDate ? relDays(deal.finalClosingDate) : "—", sub: deal.finalClosingDate ? fmtDate(deal.finalClosingDate) : "Not set" },
+    // Est. profit = the ACCEPTED offer − Our cost − closing costs (the server's
+    // profitEst, which is that figure once an offer is accepted). Shown only
+    // once a buyer's offer has been accepted; it is not realized until Closed.
+    // Profit at asking = asking price − Our cost − closing costs (profitAtAsk).
+    {
+      label: "Est. profit",
+      value: hasAcceptedOffer && deal.profitEst != null ? money(deal.profitEst) : "—",
+      tone: hasAcceptedOffer && deal.profitEst != null ? (deal.profitEst < 0 ? "danger" : "success") : "default",
+      sub: hasAcceptedOffer ? (deal.stage === "CLOSED" ? "Accepted offer − our cost − closing costs" : "Accepted offer − our cost − closing costs · not realized until closed") : "No accepted offer yet",
+    },
+    {
+      label: "Profit at asking",
+      value: deal.profitAtAsk != null ? money(deal.profitAtAsk) : "—",
+      tone: deal.profitAtAsk == null ? "default" : deal.profitAtAsk < 0 ? "danger" : "success",
+      sub: deal.profitAtAsk != null ? "Asking price − our cost − closing costs" : "Needs an asking price and our cost",
+    },
   ];
 
   // Tab labels with their record counts (counts of what each tab lists).
@@ -225,13 +233,6 @@ export function DealDetail() {
         );
       })()}
 
-      {deal.parent && (
-        <Banner kind="info">
-          This is one of the additional deals under <Link to={`/deals/${deal.parent.id}`}><strong>{deal.parent.name}</strong></Link>.
-          {can("editDeals") && <> · <button type="button" className="link-btn" onClick={() => setConfirmSplit(true)}>Split into a standalone deal</button></>}
-        </Banner>
-      )}
-
       <StatStrip cells={summary} min={190} className="dd-summary" />
 
       {/* Persistent header — Deal Characteristics + Contract Timeline stay
@@ -247,7 +248,6 @@ export function DealDetail() {
       <Tabs
         tabs={[
           { key: "general" as const, label: "General" },
-          { key: "additional" as const, label: tabLabel("Additional deals", deal.assets?.length ?? 0), hidden: !!deal.parent },
           { key: "buyers" as const, label: tabLabel("Buyers", deal.buyerActivity.length) },
           { key: "marketplace" as const, label: "Marketplace" },
           { key: "documents" as const, label: tabLabel("Documents", can("viewDocuments") ? deal.files.length : 0) },
@@ -273,20 +273,6 @@ export function DealDetail() {
       {/* Embedded, isolated map showing this deal's abstracts plus any tract
           boundaries imported onto it (shapefiles — also shown on the main map). */}
       <LocationCard deal={deal} />
-      </div>
-
-      {/* Additional Deals: the extra deals grouped under this seller. Hidden on a
-          child deal (which is itself one of these — the tab is hidden too). */}
-      <div hidden={tab !== "additional"}>
-      {!deal.parent && (
-        <AssetsSection
-          deal={deal}
-          canEdit={can("editDeals")}
-          canPublish={can("publishOfferings")}
-          onAdd={() => setShowAddAsset(true)}
-          onChanged={loadDeal}
-        />
-      )}
       </div>
 
       <div hidden={tab !== "marketplace"}><DealPortalPanel dealId={deal.id} /></div>
@@ -448,7 +434,7 @@ export function DealDetail() {
       {/* Documents */}
       <div hidden={tab !== "documents"}>
       {can("viewDocuments")
-        ? <DocumentsSection ownerType="deal" ownerId={deal.id} files={deal.files} folders={deal.docFolders?.length ? deal.docFolders : DEAL_DOC_FOLDERS} onChanged={loadDeal} canEdit={can("manageDocuments")} canDelete={can("manageDocuments")} />
+        ? <DocumentsSection ownerType="deal" ownerId={deal.id} files={deal.files} folders={effectiveFolders(deal.docFolders, DEAL_DOC_FOLDERS)} onChanged={loadDeal} canEdit={can("manageDocuments")} canDelete={can("manageDocuments")} />
         : <div className="panel muted">You do not have permission to view documents.</div>}
       </div>
 
@@ -524,113 +510,6 @@ export function DealDetail() {
         />
       )}
 
-      {showAddAsset && (
-        <NewDealModal
-          parentDealId={deal.id}
-          onClose={() => setShowAddAsset(false)}
-          onCreated={() => { setShowAddAsset(false); loadDeal(); }}
-        />
-      )}
-
-      {confirmSplit && (
-        <ConfirmDialog
-          title="Split into a standalone deal?"
-          confirmLabel="Split out"
-          busy={splitBusy}
-          message={
-            <>
-              <strong>{deal.name}</strong> will become its own standalone deal, detached from the{" "}
-              <strong>{deal.parent?.name}</strong> package. All of its documents, timeline, buyer activity, offers, and
-              notes are preserved, and the seller information is copied so it stays linked.
-            </>
-          }
-          onCancel={() => setConfirmSplit(false)}
-          onConfirm={async () => {
-            setSplitBusy(true);
-            try { await api.post(`/deals/${deal.id}/split`, {}); setConfirmSplit(false); loadDeal(); }
-            finally { setSplitBusy(false); }
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Additional Deals — the extra deals grouped under this seller. Each is a full,
-// independently-marketable child deal.
-// ---------------------------------------------------------------------------
-function AssetsSection({ deal, canEdit, canPublish, onAdd, onChanged }: {
-  deal: DealDetailData; canEdit: boolean; canPublish: boolean; onAdd: () => void; onChanged: () => void;
-}) {
-  const assets = deal.assets ?? [];
-  const [busy, setBusy] = useState(false);
-  const publishedCount = assets.filter((a) => a.publishedToPortal).length;
-
-  async function publishAll(published: boolean) {
-    setBusy(true);
-    try { await api.post(`/deals/${deal.id}/assets/publish`, { published, visibility: "PUBLIC" }); onChanged(); }
-    finally { setBusy(false); }
-  }
-
-  return (
-    <div className="panel dd-card">
-      <div className="dd-card-head">
-        <div>
-          <h3 className="dd-card-title">Additional deals</h3>
-          <div className="dd-card-sub">Other interests from the same seller. Each stays independently marketable.</div>
-        </div>
-        <div className="dd-card-actions">
-          {canPublish && assets.length > 0 && (
-            publishedCount < assets.length
-              ? <button className="small" disabled={busy} onClick={() => publishAll(true)} title="Publish every deal to the buyer portal">Publish all</button>
-              : <button className="small" disabled={busy} onClick={() => publishAll(false)} title="Unpublish every deal">Unpublish all</button>
-          )}
-          {canEdit && <button className="small primary dd-add-btn" onClick={onAdd}><Plus size={13} strokeWidth={2.2} aria-hidden="true" />Add deal</button>}
-        </div>
-      </div>
-
-      {assets.length === 0 ? (
-        <EmptyState title="No additional deals yet">
-          Use <strong>Add deal</strong> to manage multiple interests from the same seller together — each stays independently marketable.
-        </EmptyState>
-      ) : (
-        <>
-          {/* Package total = this deal's own figures rolled up with its assets'. */}
-          <div className="asset-total">
-            <span className="muted">Package total</span>
-            {deal.aggNra != null && <span><strong>{acres(deal.aggNra)}</strong> NRA</span>}
-            {deal.aggAcreageNma != null && <span><strong>{acres(deal.aggAcreageNma)}</strong> NMA</span>}
-            {deal.aggOurPrice != null && <span>Our <strong>{money(deal.aggOurPrice)}</strong></span>}
-            {deal.aggAskPrice != null && <span className="asset-ask">Ask <strong>{money(deal.aggAskPrice)}</strong></span>}
-          </div>
-          <div className="asset-rows-scroll">
-            <div className="asset-rows">
-              {assets.map((a) => (
-                <Link key={a.id} to={`/deals/${a.id}`} className="asset-row">
-                  <span className="asset-row-name">
-                    <span className="asset-row-title">{a.name}</span>
-                    <StageTag stage={a.stage} />
-                  </span>
-                  <span className="asset-row-facts">
-                    {(a.counties.length > 0 || a.states.length > 0) && <ChipList items={[...a.counties, ...a.states]} max={4} />}
-                    {a.assetTypes.length > 0 && <ChipList items={a.assetTypes} />}
-                    {a.operator && <span>{a.operator}</span>}
-                    {a.rrc && <span>RRC {a.rrc}</span>}
-                  </span>
-                  <span className="asset-row-num">{a.nra != null ? <><strong>{acres(a.nra)}</strong> NRA</> : "—"}</span>
-                  <span className="asset-row-num muted">{a.ourPrice != null ? `Our ${money(a.ourPrice)}` : ""}</span>
-                  <span className="asset-row-num asset-ask">{a.askPrice != null ? `Ask ${money(a.askPrice)}` : ""}</span>
-                  <span className="asset-row-badges">
-                    {a.publishedToPortal && <Tag tone="success" dot>Published</Tag>}
-                    {a.selectedBuyer && <Tag tone="accent">→ {a.selectedBuyer.name}</Tag>}
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
     </div>
   );
 }
@@ -988,7 +867,7 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
           <Fld l="Closing with buyer"><DateField value={bc} onChange={(v) => setBc(v)} /></Fld>
           <Fld l="Closed date"><DateField value={cd} onChange={(v) => setCd(v)} /></Fld>
           <p className="ctl-note">
-            Extended closing is Closing + 15 days{deal.finalClosingDate ? ` (currently ${fmtDate(deal.finalClosingDate)})` : ""}; use <strong>Extend 15 days</strong> on the timeline to push it out.
+            Extended closing is the deal's original Closing + 15 days{deal.finalClosingDate ? ` (currently ${fmtDate(deal.finalClosingDate)})` : ""} — moving Closing earlier leaves it where it is; use <strong>Extend 15 days</strong> on the timeline to push it out.
           </p>
         </div>
       )}

@@ -146,6 +146,7 @@ export interface ImportParams {
   fileId: string;
   dealId: string | null;
   buyerId: string | null;
+  opportunityId?: string | null;
   folder: string;
   uploadedByUserId: string | null;
 }
@@ -199,11 +200,11 @@ export async function importProviderFile(row: Integration, p: ImportParams): Pro
     throw new HttpError(400, `"${filename}" (${detected}) is not an allowed document type.`);
   }
 
-  const key = buildKey(p.dealId ? "deal" : "buyer", (p.dealId ?? p.buyerId)!, filename);
+  const key = buildKey(p.dealId ? "deal" : p.opportunityId ? "opportunity" : "buyer", (p.dealId ?? p.opportunityId ?? p.buyerId)!, filename);
   await putObject(key, bytes, detected);
   const record = await prisma.fileAttachment.create({
     data: {
-      dealId: p.dealId, buyerId: p.buyerId, folder: p.folder,
+      dealId: p.dealId, buyerId: p.buyerId, opportunityId: p.opportunityId ?? null, folder: p.folder,
       filename, mimeType: detected, sizeBytes: bytes.length, s3Key: key,
       uploadedByUserId: p.uploadedByUserId,
     },

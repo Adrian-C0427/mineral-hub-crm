@@ -313,30 +313,6 @@
 .nd-form .nd-derived strong { font-weight: 600; }
 .nd-form .nd-derived .muted { color: var(--ink-4); }
 
-/* Additional deals: header button + one card per deal (full deal form). */
-.nd-form .nd-assets { margin: 0; padding: 0; border: 0; }
-.nd-assets .form-sec { position: relative; }
-.nd-assets .form-sec-head { padding-right: 120px; }
-.nd-add-deal {
-  position: absolute; top: 18px; right: 0; display: inline-flex; align-items: center; gap: 6px;
-  height: 32px; min-height: 32px; padding: 0 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-nav);
-  background: var(--surface); color: var(--ink); font-size: 12.5px; font-weight: 500; box-shadow: none;
-}
-.nd-add-deal:hover { border-color: var(--line-hover-strong); background: var(--surface); }
-.nd-form .nd-asset-card {
-  display: flex; flex-direction: column; gap: 14px; margin: 0; padding: 14px;
-  border: 1px solid var(--line); border-radius: var(--radius-md); background: var(--surface-1);
-}
-.nd-form .nd-asset-card-head { margin: 0; }
-.nd-form .nd-asset-card-head strong { font-size: 13px; font-weight: 600; color: var(--ink); }
-.nd-form .nd-asset-del {
-  width: 32px; height: 32px; min-height: 32px; padding: 0; display: flex; align-items: center; justify-content: center;
-  border: 1px solid var(--line-strong); border-radius: var(--radius); background: transparent; color: var(--ink-3); box-shadow: none;
-}
-.nd-form .nd-asset-del:hover { color: var(--danger-ink); border-color: var(--line-hover-strong); background: transparent; }
-.nd-form .nd-asset-card .dd-grid { gap: 14px; }
-.nd-form .nd-asset-timeline { margin: 0; }
-.nd-form .nd-asset-same { font-size: 13px; color: var(--ink-1); margin: 0; }
 
 /* Server / validation message, pinned above the footer. */
 .modal .nd-error { flex: none; margin: 0; padding: 10px 24px; border-top: 1px solid var(--danger-line); background: var(--danger-tint); color: var(--danger-ink); font-size: 13px; }
@@ -394,7 +370,7 @@
   .nd-form .form-sec:first-child { padding: 20px 0; }
   .nd-form .nd-basics,
   .nd-form .nd-grid3,
-  .nd-form .nd-asset-card .dd-grid { grid-template-columns: minmax(0, 1fr) !important; }
+  .seller-info .nd-grid2 { grid-template-columns: minmax(0, 1fr) !important; }
   .modal .nd-form .field > input:not([type="checkbox"]):not([type="radio"]),
   .modal .nd-form .field > textarea,
   .modal .nd-form .money-input input,
@@ -405,9 +381,6 @@
   .modal .nd-form .nd-dtc > input { height: 42px; }
   .modal .nd-form .field .msel-box input:not([type="checkbox"]) { min-height: 0; font-size: 16px; }
   .nd-form .nd-dtc .seg-control .seg { height: 36px; min-height: 36px; }
-  .nd-assets .form-sec-head { padding-right: 0; }
-  .nd-add-deal { position: static; align-self: flex-start; height: 40px; min-height: 40px; }
-  .nd-form .nd-asset-del { width: 40px; height: 40px; min-height: 40px; }
 
   /* Sticky footer: figures, then the count and the two actions. */
   .modal:has(.nd-shell) > .modal-footer { gap: 12px; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
@@ -434,3 +407,15 @@
   .modal:has(.nd-shell) > .modal-footer { padding: 8px 16px calc(8px + env(safe-area-inset-bottom)); }
   .nd-foot-actions > button { min-height: 40px; height: 40px; }
 }
+
+/* Seller Information (components/SellerInformation.tsx) — the shared seller
+   block in New deal / New opportunity and the seller editors. */
+.seller-info { display: flex; flex-direction: column; gap: 14px; }
+.seller-info .nd-grid2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px 14px; align-items: start; }
+.seller-info .nd-grid3 { display: grid; }
+.seller-info .field { margin-bottom: 0; }
+.seller-info-pick .seller-info-note { margin-top: 6px; font-size: 12px; line-height: 1.45; }
+.seller-info-pick .seller-info-note a { color: var(--accent-ink); }
+.seller-info-kind .seg { align-self: flex-start; border: 1px solid var(--line); background: var(--surface); }
+.seller-info-kind .seg-item { height: 30px; padding: 0 14px; font-size: 12.5px; font-weight: 600; }
+.seller-info-mailing { padding-top: 4px; }
