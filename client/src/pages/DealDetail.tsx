@@ -166,13 +166,13 @@ export function DealDetail() {
       label: "Est. profit",
       value: hasAcceptedOffer && deal.profitEst != null ? money(deal.profitEst) : "—",
       tone: hasAcceptedOffer && deal.profitEst != null ? (deal.profitEst < 0 ? "danger" : "success") : "default",
-      sub: hasAcceptedOffer ? (deal.stage === "CLOSED" ? "Accepted offer − our cost − closing costs" : "Accepted offer − our cost − closing costs · not realized until closed") : "No accepted offer yet",
+      sub: hasAcceptedOffer ? "Accepted offer" : "No accepted offer yet",
     },
     {
       label: "Profit at asking",
       value: deal.profitAtAsk != null ? money(deal.profitAtAsk) : "—",
       tone: deal.profitAtAsk == null ? "default" : deal.profitAtAsk < 0 ? "danger" : "success",
-      sub: deal.profitAtAsk != null ? "Asking price − our cost − closing costs" : "Needs an asking price and our cost",
+      sub: deal.profitAtAsk != null ? "Asking price" : "Needs an asking price and our cost",
     },
   ];
 
