@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { prisma } from "../db.js";
-import { documentPartyFields, parsePartyCell } from "../domain/research.js";
+import { PARTY_RULES_VERSION, documentPartyFields, parsePartyCell } from "../domain/research.js";
 import { normState, titleCounty } from "../domain/researchIngest.js";
 import { nameSimilarity } from "../domain/researchBuyers.js";
 
@@ -13,10 +13,12 @@ import { nameSimilarity } from "../domain/researchBuyers.js";
  *     title-cased name ("LEON COUNTY" / "Leon, TX" → "Leon"), on research
  *     documents, permits and import runs, so "Leon, Texas" and "Leon, TX" are
  *     one place everywhere that groups or filters by county.
- *  2. Participants: rows whose per-party arrays are empty (imported before
- *     multi-party cells were split) get them filled through the same
- *     documentPartyFields() the importer uses — names, keys and conveyed
- *     interests alike. The recorded cell is never changed.
+ *  2. Participants: every row derived under an older parser (partyRulesVersion
+ *     below PARTY_RULES_VERSION) is re-derived through the same
+ *     documentPartyFields() the importer uses — names, keys, conveyed
+ *     interests and annotations alike — then stamped with the current
+ *     version, so each rule change costs one pass. The recorded cell is never
+ *     changed.
  *  3. Buyer aliases: an alias that names SEVERAL parties ("ABC LLC; XYZ LP",
  *     a whole grantee cell saved as one alias) can never match a transaction
  *     and makes the profile look like a group. It is replaced by the one
@@ -68,26 +70,22 @@ export async function backfillResearchParticipants(db: Db = prisma): Promise<num
   let updated = 0;
   let cursor = "";
   for (;;) {
-    // Rows never split into participants, plus rows where one person written
-    // surname-first ("GARCIA, MARIA") was split into two parties — the parser
-    // now keeps that shape as one party, so they are re-derived here.
-    const rows = await db.$queryRaw<{ id: string; grantor: string | null; grantee: string | null; grantorAsRecorded: string | null; granteeAsRecorded: string | null; grantorParties: string[]; granteeParties: string[] }[]>`
-      SELECT "id", "grantor", "grantee", "grantorAsRecorded", "granteeAsRecorded", "grantorParties", "granteeParties" FROM "ResearchDocument"
-      WHERE "id" > ${cursor}
-        AND (("grantor" IS NOT NULL AND cardinality("grantorParties") = 0) OR ("grantee" IS NOT NULL AND cardinality("granteeParties") = 0)
-             OR (cardinality("grantorParties") = 2 AND COALESCE("grantorAsRecorded", "grantor") ~ '^[^,;/]+,[^,;/]+$')
-             OR (cardinality("granteeParties") = 2 AND COALESCE("granteeAsRecorded", "grantee") ~ '^[^,;/]+,[^,;/]+$'))
+    // Every row whose party fields predate the current parser rules.
+    const rows = await db.$queryRaw<{ id: string; grantor: string | null; grantee: string | null; grantorAsRecorded: string | null; granteeAsRecorded: string | null; grantorParties: string[]; granteeParties: string[]; partyInterests: unknown }[]>`
+      SELECT "id", "grantor", "grantee", "grantorAsRecorded", "granteeAsRecorded", "grantorParties", "granteeParties", "partyInterests" FROM "ResearchDocument"
+      WHERE "id" > ${cursor} AND "partyRulesVersion" < ${PARTY_RULES_VERSION}
       ORDER BY "id" LIMIT ${BATCH}`;
     if (!rows.length) break;
     cursor = rows[rows.length - 1].id;
     const writes: Prisma.PrismaPromise<unknown>[] = [];
+    const unchanged: string[] = [];
     for (const r of rows) {
       // Derive from the cell as recorded when we still have it (the display
       // cell may already be cleaned), exactly as a fresh import would.
       const pf = documentPartyFields(r.grantorAsRecorded ?? r.grantor, r.granteeAsRecorded ?? r.grantee);
-      if (!pf.grantorParties.length && !pf.granteeParties.length) continue;
       const same = (a: string[], b: string[]) => a.length === b.length && a.every((x, i) => x === b[i]);
-      if (same(pf.grantorParties, r.grantorParties) && same(pf.granteeParties, r.granteeParties)) continue; // already current
+      const sameDetail = JSON.stringify(pf.partyInterests.length ? pf.partyInterests : null) === JSON.stringify(r.partyInterests ?? null);
+      if (same(pf.grantorParties, r.grantorParties) && same(pf.granteeParties, r.granteeParties) && sameDetail) { unchanged.push(r.id); continue; }
       writes.push(db.researchDocument.update({
         where: { id: r.id },
         data: {
@@ -99,12 +97,15 @@ export async function backfillResearchParticipants(db: Db = prisma): Promise<num
           grantorNorms: pf.grantorNorms, granteeNorms: pf.granteeNorms,
           interestPct: pf.interestPct,
           partyInterests: pf.partyInterests.length ? (pf.partyInterests as unknown as Prisma.InputJsonValue) : Prisma.DbNull,
+          partyRulesVersion: PARTY_RULES_VERSION,
         },
       }));
     }
+    // Rows already current are only stamped, so the next boot skips them.
+    if (unchanged.length) writes.push(db.researchDocument.updateMany({ where: { id: { in: unchanged } }, data: { partyRulesVersion: PARTY_RULES_VERSION } }));
     if (writes.length) {
       await (db as PrismaClient).$transaction(writes);
-      updated += writes.length;
+      updated += writes.length - (unchanged.length ? 1 : 0);
     }
   }
   return updated;
@@ -118,13 +119,13 @@ export function resolveGroupAlias(alias: string, companyName: string): { keep: s
   const best = parties
     .map((p) => ({ name: p.name, score: nameSimilarity(companyName, p.name) }))
     .sort((a, b) => b.score - a.score)[0];
-  return { keep: best && best.score >= 0.72 ? best.name : null, wasGroup: true };
+  return { keep: best && best.score >= 0.8 ? best.name : null, wasGroup: true };
 }
 
 export async function backfillBuyerGroupAliases(db: Db = prisma): Promise<number> {
   const buyers = await db.$queryRaw<{ id: string; organizationId: string | null; companyName: string; aliases: string[] }[]>`
     SELECT "id", "organizationId", "companyName", "aliases" FROM "Buyer"
-    WHERE array_to_string("aliases", '|') ~ '[,;/]'`;
+    WHERE array_to_string("aliases", '|') ~* '[,;/&]| and '`;
   let updated = 0;
   for (const b of buyers) {
     const seen = new Set<string>([b.companyName.trim().toUpperCase()]);

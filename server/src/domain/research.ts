@@ -144,7 +144,7 @@ export function classifyTrajectory(raw: string | null | undefined): Trajectory {
 /** Words that may lead the share: "as to", "an undivided". */
 const INTEREST_LEAD = String.raw`(?:\bAS\s+TO\s+)?(?:(?:\bAN?\s+)?\b(?:UNDIVIDED|UNDIV|UND)\.?\s+)?`;
 /** Words that may follow the share ("of the mineral interest", "MI", "NPRI"). */
-const INTEREST_QUAL = String.raw`(?:OF|IN|THE|HIS|HER|THEIR|ITS|SAID|UNDIVIDED|UND|MINERALS?|MIN|ROYALTY|ROYALTIES|ROY|NPRI|ORRI|ORR|NMI|MI|RI|NRI|WI|O&G|OIL\s*(?:&|AND)\s*GAS)`;
+const INTEREST_QUAL = String.raw`(?:OF|IN|THE|HIS|HER|THEIR|ITS|SAID|UNDIVIDED|UND|GRANTORS?(?:'S)?|GRANTEES?(?:'S)?|MINERALS?|MIN|ROYALTY|ROYALTIES|ROY|NPRI|ORRI|ORR|NMI|MI|RI|NRI|WI|O&G|OIL\s*(?:&|AND)\s*GAS)`;
 const INTEREST_WORD = String.raw`(?:INTERESTS?|INTRS?|INTS?|INTST)`;
 /** Trailing qualifiers are consumed only when they END in an interest word
  *  ("50% undivided mineral interest") or run to the end of the party ("50%
@@ -239,10 +239,86 @@ export function normalizeEntity(name: string | null | undefined): string | null 
 /** One participant of a grantor/grantee cell, with the share of the interest
  *  recorded against it (null when the record states none). */
 export interface ParsedParty {
-  name: string;          // display name, conveyed-interest text removed
+  name: string;          // display name: interest, annotations and role words removed
   norm: string;          // grouping key (normalizeEntity)
   pct: number | null;    // 0–100
   text: string | null;   // the interest phrase as recorded ("50% interest")
+  acres: number | null;  // an acreage written against the party ("(40.00 net mineral acres)")
+  note: string | null;   // any other bracketed annotation, kept as data ("as to Tract 2")
+}
+
+/**
+ * Rules version stamped on every ResearchDocument whose party fields were
+ * derived by the current parser (ResearchDocument.partyRulesVersion). Bump it
+ * when parsePartyCell changes what it produces; the boot backfill re-derives
+ * every row below the current version exactly once.
+ *   2 — "&"/"and" between two organisations split; bracketed annotations and
+ *       role words (Trustee, Partner, Gen Pt, AIF …) leave the name.
+ */
+export const PARTY_RULES_VERSION = 2;
+
+/** Legal-form words that mark a text as a COMPLETE organisation name. */
+const LEGAL_FORM_RE = /\b(?:L\.?L\.?C|L\.?P|L\.?L\.?P|LTD|INC(?:ORPORATED)?|CORP(?:ORATION)?|CO|COMPANY|LC|PLLC|TRUST|PARTNERSHIP|ESTATE|FOUNDATION|BANK|CHURCH|ASSOCIATION|ASSN|UNIVERSITY|COLLEGE)\.?\b/i;
+
+/**
+ * "A LLC & B LP" names two parties; "SMITH & SONS LLC" and "JOHN & MARY
+ * SMITH" name one. The ampersand (or "and") is a party boundary only when
+ * EVERY piece around it is a complete organisation (carries its own legal
+ * form) — one LLC/LP/Trust in the text means one entity.
+ */
+function splitAmpersand(part: string): string[] {
+  const pieces = part.split(/\s*(?:&|\bAND\b)\s*/i).map((p) => p.trim()).filter(Boolean);
+  if (pieces.length < 2) return [part];
+  return pieces.every((p) => /[A-Za-z]/.test(p) && LEGAL_FORM_RE.test(p)) ? pieces : [part];
+}
+
+/**
+ * Role / capacity words written after a party ("… LLC, Partner", "… Gen Pt",
+ * "John Smith, Trustee", "… as AIF") describe the party's part in that one
+ * instrument, not who it is. Dropped from the name (the user's call: dropped,
+ * not kept).
+ */
+const ROLE_RE = /(?:^|[\s,;:\-–—]+)(?:AS\s+)?(?:GENERAL\s+PARTNER|GEN(?:ERAL)?\.?\s*PT(?:NR)?\.?|MANAGING\s+(?:MEMBER|PARTNER|GENERAL\s+PARTNER)|CO-?TRUSTEES?|SUCCESSOR\s+(?:CO-?)?TRUSTEES?|TRUSTEES?|TTEES?|INDEPENDENT\s+(?:CO-?)?EXECUT(?:OR|RIX)S?|EXECUT(?:OR|RIX)S?|ADMINISTRAT(?:OR|RIX)S?|ATTORNEY[\s-]+IN[\s-]+FACT|A\.?I\.?F\.?|AGENT|GUARDIAN|PARTNER|MEMBER|MANAGER|PRESIDENT|INDIVIDUALLY|INDIV\.?|P\.?O\.?A\.?|D\/?B\/?A)\.?\s*$/i;
+function stripRole(name: string): string {
+  let t = name;
+  for (let i = 0; i < 4; i++) {
+    const next = t.replace(ROLE_RE, "");
+    if (next === t) break;
+    t = next;
+  }
+  return tidyPartyName(t);
+}
+
+/** Bracketed text that only restates the conveyed interest once the share itself is gone. */
+const INTEREST_REMNANT_WORDS = new Set(["OF", "THE", "GRANTOR", "GRANTORS", "GRANTOR'S", "GRANTEE", "GRANTEES", "INTEREST", "INTERESTS", "INT", "UNDIVIDED", "MI", "RI", "MINERAL", "MINERALS", "ROYALTY", "S", "AN", "A", "IN", "AND", "TO", "ALL"]);
+const ACRES_RE = /(\d+(?:\.\d+)?)\s*(?:NET\s+MINERAL\s+ACRES?|NET\s+ROYALTY\s+ACRES?|NMA|NRA|ACRES?|AC\.?)\b/i;
+
+/**
+ * Bracketed annotations leave the name. An acreage ("(40.00 net mineral
+ * acres)") is kept as data; the empty shell a removed share leaves behind
+ * ("( of Grantor's interest)") is dropped; anything else is kept as a note.
+ */
+function extractAnnotations(name: string): { name: string; acres: number | null; note: string | null } {
+  let acres: number | null = null;
+  const notes: string[] = [];
+  const stripped = name.replace(/\(([^()]*)\)|\[([^\]]*)\]/g, (_m, a: string | undefined, b: string | undefined) => {
+    const inner = (a ?? b ?? "").trim();
+    if (!inner) return " ";
+    const m = ACRES_RE.exec(inner);
+    if (m) { if (acres == null) acres = Number(m[1]); return " "; }
+    const words = inner.toUpperCase().replace(/[^A-Z0-9' ]+/g, " ").split(/\s+/).filter(Boolean);
+    if (words.every((w) => INTEREST_REMNANT_WORDS.has(w))) return " ";
+    notes.push(inner);
+    return " ";
+  });
+  return { name: tidyPartyName(stripped), acres, note: notes.length ? notes.join("; ") : null };
+}
+
+/** One part of a cell, fully cleaned: share, annotations and role words removed. */
+function cleanPart(part: string): { name: string; pct: number | null; text: string | null; acres: number | null; note: string | null } {
+  const ex = extractInterest(part);
+  const an = extractAnnotations(ex.name);
+  return { name: stripRole(an.name), pct: ex.pct, text: ex.text, acres: an.acres, note: an.note };
 }
 
 /**
@@ -298,14 +374,19 @@ export function parsePartyCell(raw: string | null | undefined): { parties: Parse
   const byNorm = new Map<string, ParsedParty>();
   let hasInterest = false;
   let leading: { pct: number; text: string | null } | null = null;
-  const parts = isSurnameFirstPerson(String(raw)) ? [String(raw)] : String(raw).split(PARTY_SEPARATOR);
+  // A role written after the whole cell ("THOMPSON, ROBERT, TRUSTEE") goes
+  // first, so the surname-first shape underneath is still recognised.
+  const cell = stripRole(String(raw));
+  if (!cell) return { parties: [], hasInterest: false };
+  const parts = (isSurnameFirstPerson(cell) ? [cell] : cell.split(PARTY_SEPARATOR)).flatMap(splitAmpersand);
   for (const part of parts) {
-    const ex = extractInterest(part);
+    const ex = cleanPart(part);
     if (ex.pct != null) hasInterest = true;
     const prev = out[out.length - 1];
     if (prev && isSuffixOnly(ex.name)) {
       prev.name = `${prev.name}, ${ex.name}`;
       if (prev.pct == null && ex.pct != null) { prev.pct = ex.pct; prev.text = ex.text; }
+      if (prev.acres == null && ex.acres != null) prev.acres = ex.acres;
       continue;
     }
     const norm = normalizeEntity(ex.name);
@@ -318,9 +399,10 @@ export function parsePartyCell(raw: string | null | undefined): { parties: Parse
     const seen = byNorm.get(norm);
     if (seen) {
       if (seen.pct == null && ex.pct != null) { seen.pct = ex.pct; seen.text = ex.text; }
+      if (seen.acres == null && ex.acres != null) seen.acres = ex.acres;
       continue;
     }
-    const p: ParsedParty = { name: ex.name, norm, pct: ex.pct, text: ex.text };
+    const p: ParsedParty = { name: ex.name, norm, pct: ex.pct, text: ex.text, acres: ex.acres, note: ex.note };
     if (p.pct == null && leading) { p.pct = leading.pct; p.text = leading.text; }
     leading = null;
     byNorm.set(norm, p);
@@ -344,13 +426,19 @@ export function splitParties(raw: string | null | undefined): string[] {
   return parsePartyCell(raw).parties.map((p) => p.name);
 }
 
-/** A share of the conveyed interest recorded against one party of a document. */
+/**
+ * Per-party detail recorded against one party of a document: its share of
+ * the conveyed interest and/or an annotation the clerk wrote against it
+ * (an acreage, a note). Data, never part of the name.
+ */
 export interface PartyInterest {
   side: "GRANTOR" | "GRANTEE";
-  party: string; // clean display name
-  norm: string;  // grouping key
-  pct: number;   // 0–100
-  text: string;  // as recorded ("50% undivided interest")
+  party: string;        // clean display name
+  norm: string;         // grouping key
+  pct: number | null;   // 0–100, null when the record states no share for this party
+  text: string | null;  // as recorded ("50% undivided interest")
+  acres?: number | null; // "(40.00 net mineral acres)"
+  note?: string | null;  // any other bracketed annotation
 }
 
 /** Every party-name field of a ResearchDocument, derived from the raw cells. */
@@ -383,8 +471,8 @@ const round4 = (n: number) => Math.round(n * 10000) / 10000;
  */
 export function documentInterestPct(interests: PartyInterest[]): number | null {
   const total = (side: PartyInterest["side"]) => {
-    const xs = interests.filter((i) => i.side === side);
-    return xs.length ? round4(xs.reduce((a, i) => a + i.pct, 0)) : null;
+    const xs = interests.filter((i) => i.side === side && i.pct != null);
+    return xs.length ? round4(xs.reduce((a, i) => a + (i.pct ?? 0), 0)) : null;
   };
   const g = total("GRANTOR"), t = total("GRANTEE");
   const v = g != null && t != null ? (g === t ? g : null) : g ?? t;
@@ -401,16 +489,29 @@ export function documentInterestPct(interests: PartyInterest[]): number | null {
 export function documentPartyFields(grantorRaw: string | null | undefined, granteeRaw: string | null | undefined): DocumentPartyFields {
   const side = (raw: string | null | undefined, which: PartyInterest["side"]) => {
     const cell = raw && raw.trim() ? raw : null;
-    const { parties, hasInterest } = parsePartyCell(cell);
-    const clean = hasInterest ? parties.map((p) => p.name).join("; ") || null : cell;
+    const { parties } = parsePartyCell(cell);
+    // The displayed cell is the clean party list whenever cleaning changed
+    // anything — a share, an annotation, a role word, an "&" split — so no
+    // screen ever shows text the parties behind it have dropped. The cell as
+    // recorded is kept alongside (grantorAsRecorded / granteeAsRecorded).
+    const names = parties.map((p) => p.name);
+    const joined = names.join("; ");
+    // Separators alone don't count as a change ("A, B" stays as recorded).
+    const rawParts = cell ? cell.split(PARTY_SEPARATOR).map((t) => t.trim()).filter(Boolean) : [];
+    const changed = cell != null && joined !== cell.trim() && (rawParts.length !== names.length || rawParts.some((t, i) => t !== names[i]));
+    const clean = changed ? joined || null : cell;
     return {
       cell: clean,
-      recorded: hasInterest ? cell : null,
+      recorded: changed ? cell : null,
       norm: normalizeEntity(clean),
       names: parties.map((p) => p.name),
       norms: parties.map((p) => p.norm),
-      interests: parties.filter((p) => p.pct != null)
-        .map((p): PartyInterest => ({ side: which, party: p.name, norm: p.norm, pct: p.pct!, text: p.text ?? `${p.pct}%` })),
+      interests: parties.filter((p) => p.pct != null || p.acres != null || p.note != null)
+        .map((p): PartyInterest => ({
+          side: which, party: p.name, norm: p.norm,
+          pct: p.pct, text: p.pct != null ? (p.text ?? `${p.pct}%`) : null,
+          ...(p.acres != null ? { acres: p.acres } : {}), ...(p.note != null ? { note: p.note } : {}),
+        })),
     };
   };
   const gr = side(grantorRaw, "GRANTOR");
@@ -430,7 +531,7 @@ export function documentPartyFields(grantorRaw: string | null | undefined, grant
 /** Stable signature of a document's conveyed interests for duplicate
  *  detection ("" when none): the same deed at 50% and at 25% is two records. */
 export function interestSignature(interests: PartyInterest[] | null | undefined): string {
-  return (interests ?? []).map((i) => `${i.side[0]}:${i.norm}:${i.pct}`).sort().join(",");
+  return (interests ?? []).filter((i) => i.pct != null).map((i) => `${i.side[0]}:${i.norm}:${i.pct}`).sort().join(",");
 }
 
 /**

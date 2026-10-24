@@ -17,8 +17,7 @@ import { parse } from "csv-parse/sync";
 import { HttpError } from "../middleware/errors.js";
 import {
   classifyDocType, classifyPermitStatus, classifyTrajectory,
-  documentDedupeKey, documentPartyFields, interestSignature, normalizeEntity, splitAbstracts, normField,
-} from "./research.js";
+  documentDedupeKey, documentPartyFields, interestSignature, normalizeEntity, splitAbstracts, normField, PARTY_RULES_VERSION } from "./research.js";
 
 // Cap rows per ingest so a single file can't drive an unbounded parse/insert
 // pass (the char-level MAX_CSV_CHARS bound still applies to the raw body).
@@ -308,6 +307,7 @@ export async function ingestResearchCsv(args: IngestArgs): Promise<IngestSummary
         grantorParties: pf.grantorParties, granteeParties: pf.granteeParties,
         grantorNorms: pf.grantorNorms, granteeNorms: pf.granteeNorms,
         interestPct: pf.interestPct,
+        partyRulesVersion: PARTY_RULES_VERSION,
         ...(pf.partyInterests.length ? { partyInterests: pf.partyInterests as unknown as Prisma.InputJsonValue } : {}),
         abstractId,
         abstractIds: splitAbstracts(abstractId), // each abstract independently filterable

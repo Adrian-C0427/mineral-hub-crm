@@ -303,8 +303,8 @@ buyersRouter.get(
 // alias relationship (or merges two CRM buyer records).
 // --------------------------------------------------------------------------
 
-/** Minimum name similarity for an alias suggestion to be worth the user's time. */
-const ALIAS_SUGGEST_THRESHOLD = 0.72;
+/** Minimum name similarity for an alias suggestion to be shown (the user's bar: 80%+). */
+const ALIAS_SUGGEST_THRESHOLD = 0.8;
 
 const uniqCI = (list: string[]): string[] => {
   const seen = new Map<string, string>();
