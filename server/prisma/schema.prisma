@@ -1405,6 +1405,9 @@ model ResearchDocument {
   interestPct       Float?
   // Per-party detail: [{ side: "GRANTOR"|"GRANTEE", party, norm, pct, text }].
   partyInterests    Json?
+  // Parser rules the party fields were derived with (domain/research PARTY_RULES_VERSION);
+  // rows below the current version are re-derived once at boot.
+  partyRulesVersion Int      @default(0)
 
   // Geography below county level. TX: abstract/survey. Elsewhere: trs
   // ("Sec 12 T2N R3W") or whatever the state's cadastral unit is.

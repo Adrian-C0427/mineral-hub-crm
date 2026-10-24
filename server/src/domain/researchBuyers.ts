@@ -100,9 +100,21 @@ export function buildResearchBuyer(rows: ResearchDocLite[]): ResearchBuyerData |
 // Duplicate detection
 // ---------------------------------------------------------------------------
 
-/** Normalized token set of a company name (for Jaccard similarity). */
+/**
+ * Words so common in mineral-company names that sharing them says nothing
+ * about identity ("One Star Minerals" is not "Morningstar Minerals"). They
+ * earn no similarity; the distinctive words decide.
+ */
+const GENERIC_WORDS = new Set(["MINERAL", "MINERALS", "ROYALTY", "ROYALTIES", "OIL", "GAS", "ENERGY", "RESOURCES", "RESOURCE", "LAND", "LANDS", "HOLDING", "HOLDINGS",
+  "PARTNERS", "PARTNERSHIP", "COMPANY", "CO", "LLC", "LP", "LLP", "LTD", "INC", "CORP", "TRUST", "FAMILY", "PROPERTIES", "PROPERTY", "INVESTMENT", "INVESTMENTS",
+  "CAPITAL", "GROUP", "OPERATING", "PRODUCTION", "PETROLEUM", "EXPLORATION", "VENTURES", "VENTURE", "ACQUISITIONS", "ACQUISITION", "ASSOCIATES", "MANAGEMENT",
+  "FUND", "LEGACY", "THE", "OF", "AND", "A", "AN", "I", "II", "III", "IV", "V", "WEST", "EAST", "NORTH", "SOUTH", "TEXAS", "TX", "USA", "AMERICA", "AMERICAN", "ROYALTIES"]);
+
+/** Distinctive token set of a company name (generic words removed; all words when nothing distinctive is left). */
 function tokens(s: string): Set<string> {
-  return new Set((normalizeEntity(s) ?? "").split(" ").filter(Boolean));
+  const all = (normalizeEntity(s) ?? "").split(" ").filter(Boolean);
+  const distinctive = all.filter((t) => !GENERIC_WORDS.has(t));
+  return new Set(distinctive.length ? distinctive : all);
 }
 
 /** Levenshtein distance (small strings). */
@@ -138,12 +150,16 @@ export function nameSimilarity(a: string, b: string): number {
   const jaccard = union ? inter / union : 0;
 
   // Containment: shorter token set fully inside the longer (subsidiary/parent).
+  // One short shared word ("STAR") is not containment; a single distinctive
+  // word has to be substantial ("MORNINGSTAR") to carry it alone.
   const [small, big] = ta.size <= tb.size ? [ta, tb] : [tb, ta];
-  const containment = small.size ? [...small].filter((t) => big.has(t)).length / small.size : 0;
+  const smallCounts = small.size >= 2 || [...small].some((t) => t.length >= 6);
+  const containment = small.size && smallCounts ? [...small].filter((t) => big.has(t)).length / small.size : 0;
 
   const edit = 1 - editDistance(na, nb) / Math.max(na.length, nb.length);
 
-  return Math.max(jaccard, containment * 0.95, edit);
+  // Names that differ at all never score as identical.
+  return Math.min(0.97, Math.max(jaccard, containment * 0.95, edit));
 }
 
 export interface ExistingBuyerLite {

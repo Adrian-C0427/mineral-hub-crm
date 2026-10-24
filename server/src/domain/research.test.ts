@@ -291,7 +291,7 @@ describe("conveyed interest in party names", () => {
 describe("parsePartyCell / documentPartyFields", () => {
   it("attaches a comma-separated share to its party instead of inventing a party", () => {
     expect(splitParties("ABC MINERALS LLC, 50%")).toEqual(["ABC MINERALS LLC"]);
-    expect(parsePartyCell("SMITH JOHN, AS TO 1/2").parties).toEqual([{ name: "SMITH JOHN", norm: "SMITH JOHN", pct: 50, text: "AS TO 1/2" }]);
+    expect(parsePartyCell("SMITH JOHN, AS TO 1/2").parties).toEqual([{ name: "SMITH JOHN", norm: "SMITH JOHN", pct: 50, text: "AS TO 1/2", acres: null, note: null }]);
   });
   it("keeps per-party shares in multi-party cells and never splits a fraction", () => {
     const pf = documentPartyFields("SMITH JOHN", "ABC MINERALS LLC 1/2; XYZ ROYALTY LP 1/2");
@@ -327,7 +327,7 @@ describe("legal suffix after a comma", () => {
   it("stays part of the party name instead of becoming a party", () => {
     expect(splitParties("Blackrock Minerals, LLC")).toEqual(["Blackrock Minerals, LLC"]);
     expect(splitParties("SMITH JOHN, ET AL; ABC, L.L.C.")).toEqual(["SMITH JOHN, ET AL", "ABC, L.L.C."]);
-    expect(parsePartyCell("ABC, LLC – 50%").parties).toEqual([{ name: "ABC, LLC", norm: "ABC", pct: 50, text: "50%" }]);
+    expect(parsePartyCell("ABC, LLC – 50%").parties).toEqual([{ name: "ABC, LLC", norm: "ABC", pct: 50, text: "50%", acres: null, note: null }]);
     expect(splitParties("Company A, Company B")).toEqual(["Company A", "Company B"]);
   });
 });

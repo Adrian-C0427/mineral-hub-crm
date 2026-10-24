@@ -87,7 +87,12 @@ interface DocRecord {
   partyInterests?: PartyInterestRec[] | null;
   abstractId: string | null; survey: string | null; acreage: number | null; consideration: number | null; source: string;
 }
-interface PartyInterestRec { side: "GRANTOR" | "GRANTEE"; party: string; norm: string; pct: number; text: string }
+/** Per-party detail: a share of the interest and/or an annotation the clerk wrote against the party. */
+interface PartyInterestRec { side: "GRANTOR" | "GRANTEE"; party: string; norm: string; pct: number | null; text: string | null; acres?: number | null; note?: string | null }
+const shares = (r: DocRecord) => (r.partyInterests ?? []).filter((i) => i.pct != null) as (PartyInterestRec & { pct: number })[];
+const annotations = (r: DocRecord) => (r.partyInterests ?? []).filter((i) => i.acres != null || i.note);
+/** "40 NMA" / "as to Tract 2" — the annotation as data, never part of the name. */
+const annotationText = (i: PartyInterestRec) => [i.acres != null ? `${i.acres.toLocaleString("en-US", { maximumFractionDigits: 4 })} NMA` : null, i.note ?? null].filter(Boolean).join(" · ");
 
 /** "50%", "12.5%", "33.333%". */
 function fmtShare(n: number): string {
@@ -95,20 +100,27 @@ function fmtShare(n: number): string {
 }
 /** Plain-text interest for CSV: the figure, or the per-party shares when no single figure applies. */
 function interestText(r: DocRecord): string {
-  const list = r.partyInterests ?? [];
-  if (r.interestPct != null) return list.length > 1 ? `${fmtShare(r.interestPct)} (${list.map((i) => `${i.party} ${fmtShare(i.pct)}`).join("; ")})` : fmtShare(r.interestPct);
-  return list.map((i) => `${i.party} ${fmtShare(i.pct)}`).join("; ");
+  const list = shares(r);
+  const notes = annotations(r).map((i) => `${i.party}: ${annotationText(i)}`).join("; ");
+  const main = r.interestPct != null
+    ? (list.length > 1 ? `${fmtShare(r.interestPct)} (${list.map((i) => `${i.party} ${fmtShare(i.pct)}`).join("; ")})` : fmtShare(r.interestPct))
+    : list.map((i) => `${i.party} ${fmtShare(i.pct)}`).join("; ");
+  return [main, notes].filter(Boolean).join(" | ");
 }
 /** Interest conveyed cell: the figure, with each party's share beneath when several state one. */
 function InterestCell({ r }: { r: DocRecord }) {
-  const list = r.partyInterests ?? [];
-  if (r.interestPct == null && !list.length) return <span className="rs-zero">—</span>;
+  const list = shares(r);
+  const notes = annotations(r);
+  if (r.interestPct == null && !list.length && !notes.length) return <span className="rs-zero">—</span>;
   const recorded = [r.grantorAsRecorded, r.granteeAsRecorded].filter(Boolean).join(" → ");
   return (
     <span className="rec-nowrap" title={recorded ? `As recorded: ${recorded}` : undefined}>
       {r.interestPct != null && <span className="rs-strong">{fmtShare(r.interestPct)}</span>}
       {(r.interestPct == null || list.length > 1) && list.map((i) => (
         <span key={`${i.side}:${i.norm}`} className="rs-sub-line">{i.party} · {fmtShare(i.pct)}</span>
+      ))}
+      {notes.map((i) => (
+        <span key={`n:${i.side}:${i.norm}`} className="rs-sub-line muted">{i.party} · {annotationText(i)}</span>
       ))}
     </span>
   );
