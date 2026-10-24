@@ -254,22 +254,44 @@ export interface ParsedParty {
  * every row below the current version exactly once.
  *   2 — "&"/"and" between two organisations split; bracketed annotations and
  *       role words (Trustee, Partner, Gen Pt, AIF …) leave the name.
+ *   3 — an "&" inside an organisation's own name ("BROADMOOR LAND & MINERALS
+ *       LLC") no longer blocks the split of the cell it sits in; an unclosed
+ *       bracket ("( from Moroney") is an annotation too.
  */
-export const PARTY_RULES_VERSION = 2;
+export const PARTY_RULES_VERSION = 3;
 
 /** Legal-form words that mark a text as a COMPLETE organisation name. */
 const LEGAL_FORM_RE = /\b(?:L\.?L\.?C|L\.?P|L\.?L\.?P|LTD|INC(?:ORPORATED)?|CORP(?:ORATION)?|CO|COMPANY|LC|PLLC|TRUST|PARTNERSHIP|ESTATE|FOUNDATION|BANK|CHURCH|ASSOCIATION|ASSN|UNIVERSITY|COLLEGE)\.?\b/i;
 
+/** A legal form closing a text ("… LAND & MINERALS LLC"). */
+const LEGAL_FORM_END_RE = new RegExp(`${LEGAL_FORM_RE.source}\\s*$`, "i");
+
 /**
  * "A LLC & B LP" names two parties; "SMITH & SONS LLC" and "JOHN & MARY
- * SMITH" name one. The ampersand (or "and") is a party boundary only when
- * EVERY piece around it is a complete organisation (carries its own legal
- * form) — one LLC/LP/Trust in the text means one entity.
+ * SMITH" name one. Read left to right, an organisation's name runs up to its
+ * legal form, so an "&" INSIDE a name ("BROADMOOR LAND & MINERALS LLC") stays
+ * inside it and the "&" AFTER a legal form is the boundary. The cell splits
+ * only when every resulting party carries its own legal form — text left
+ * over without one means the whole cell is one entity, as written.
  */
 function splitAmpersand(part: string): string[] {
-  const pieces = part.split(/\s*(?:&|\bAND\b)\s*/i).map((p) => p.trim()).filter(Boolean);
-  if (pieces.length < 2) return [part];
-  return pieces.every((p) => /[A-Za-z]/.test(p) && LEGAL_FORM_RE.test(p)) ? pieces : [part];
+  // Keep the separators as written so a rebuilt name reads as the record did.
+  const bits = part.split(/(\s*(?:&|\bAND\b)\s*)/i);
+  if (bits.length < 3) return [part];
+  const out: string[] = [];
+  let cur = "";
+  for (let i = 0; i < bits.length; i += 2) {
+    const piece = bits[i].trim();
+    const sep = bits[i - 1] ?? "";
+    if (!piece) continue;
+    cur = cur ? `${cur}${sep}${piece}` : piece;
+    // The legal form closes the NAME; a share, annotation or role written after
+    // it ("… LP (2/3)", "… LLC, Trustee") doesn't keep the party open.
+    const bare = stripRole(extractAnnotations(extractInterest(piece).name).name);
+    if (/[A-Za-z]/.test(bare) && LEGAL_FORM_END_RE.test(bare)) { out.push(cur.trim()); cur = ""; }
+  }
+  if (cur.trim()) return [part];
+  return out.length >= 2 ? out : [part];
 }
 
 /**
@@ -301,8 +323,8 @@ const ACRES_RE = /(\d+(?:\.\d+)?)\s*(?:NET\s+MINERAL\s+ACRES?|NET\s+ROYALTY\s+AC
 function extractAnnotations(name: string): { name: string; acres: number | null; note: string | null } {
   let acres: number | null = null;
   const notes: string[] = [];
-  const stripped = name.replace(/\(([^()]*)\)|\[([^\]]*)\]/g, (_m, a: string | undefined, b: string | undefined) => {
-    const inner = (a ?? b ?? "").trim();
+  const take = (inner: string): string => {
+    inner = inner.trim();
     if (!inner) return " ";
     const m = ACRES_RE.exec(inner);
     if (m) { if (acres == null) acres = Number(m[1]); return " "; }
@@ -310,7 +332,11 @@ function extractAnnotations(name: string): { name: string; acres: number | null;
     if (words.every((w) => INTEREST_REMNANT_WORDS.has(w))) return " ";
     notes.push(inner);
     return " ";
-  });
+  };
+  const stripped = name
+    .replace(/\(([^()]*)\)|\[([^\]]*)\]/g, (_m, a: string | undefined, b: string | undefined) => take(a ?? b ?? ""))
+    // An opening bracket never closed ("… LLC ( from Moroney") annotates to the end.
+    .replace(/[([]([^()[\]]*)$/, (_m, a: string) => take(a));
   return { name: tidyPartyName(stripped), acres, note: notes.length ? notes.join("; ") : null };
 }
 

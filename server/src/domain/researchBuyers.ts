@@ -101,20 +101,24 @@ export function buildResearchBuyer(rows: ResearchDocLite[]): ResearchBuyerData |
 // ---------------------------------------------------------------------------
 
 /**
- * Words so common in mineral-company names that sharing them says nothing
+ * Words so common in mineral-company names that sharing them says little
  * about identity ("One Star Minerals" is not "Morningstar Minerals"). They
- * earn no similarity; the distinctive words decide.
+ * still belong to the name — "Horizon Minerals" and "Horizon Royalties" are
+ * different companies — so they count, at a fraction of a distinctive word's
+ * weight, instead of being thrown away.
  */
 const GENERIC_WORDS = new Set(["MINERAL", "MINERALS", "ROYALTY", "ROYALTIES", "OIL", "GAS", "ENERGY", "RESOURCES", "RESOURCE", "LAND", "LANDS", "HOLDING", "HOLDINGS",
   "PARTNERS", "PARTNERSHIP", "COMPANY", "CO", "LLC", "LP", "LLP", "LTD", "INC", "CORP", "TRUST", "FAMILY", "PROPERTIES", "PROPERTY", "INVESTMENT", "INVESTMENTS",
   "CAPITAL", "GROUP", "OPERATING", "PRODUCTION", "PETROLEUM", "EXPLORATION", "VENTURES", "VENTURE", "ACQUISITIONS", "ACQUISITION", "ASSOCIATES", "MANAGEMENT",
   "FUND", "LEGACY", "THE", "OF", "AND", "A", "AN", "I", "II", "III", "IV", "V", "WEST", "EAST", "NORTH", "SOUTH", "TEXAS", "TX", "USA", "AMERICA", "AMERICAN", "ROYALTIES"]);
 
-/** Distinctive token set of a company name (generic words removed; all words when nothing distinctive is left). */
+const GENERIC_WEIGHT = 0.3;
+const weight = (t: string) => (GENERIC_WORDS.has(t) ? GENERIC_WEIGHT : 1);
+const sumWeight = (ts: Iterable<string>) => [...ts].reduce((n, t) => n + weight(t), 0);
+
+/** The words of a company name (legal suffixes already dropped by normalizeEntity). */
 function tokens(s: string): Set<string> {
-  const all = (normalizeEntity(s) ?? "").split(" ").filter(Boolean);
-  const distinctive = all.filter((t) => !GENERIC_WORDS.has(t));
-  return new Set(distinctive.length ? distinctive : all);
+  return new Set((normalizeEntity(s) ?? "").split(" ").filter(Boolean));
 }
 
 /** Levenshtein distance (small strings). */
@@ -134,9 +138,18 @@ function editDistance(a: string, b: string): number {
 }
 
 /**
- * Similarity in [0,1] between two company names. Blends token-set Jaccard,
- * containment (parent/subsidiary), and edit-distance ratio (minor spelling),
- * taking the strongest signal.
+ * Similarity in [0,1] between two company names — how much of each WHOLE
+ * name the other explains. Three signals, the strongest wins:
+ *  - weighted word overlap (Jaccard): every word counts, generic ones at a
+ *    fraction, so "Horizon Minerals" vs "Horizon Royalties" is one word of
+ *    two, not a perfect match;
+ *  - containment (parent / subsidiary, "Morningstar Minerals" inside
+ *    "Morningstar Minerals West"): the shorter name must be carried by at least
+ *    two distinctive words, or by one long unusual word ("MORNINGSTAR") — a
+ *    single ordinary word ("HORIZON", "STAR") shared with a longer name is not
+ *    the same company;
+ *  - a typo (an edit distance of at most two characters).
+ * Names that differ at all never read as identical (capped at 0.97).
  */
 export function nameSimilarity(a: string, b: string): number {
   const na = normalizeEntity(a) ?? "";
@@ -145,20 +158,19 @@ export function nameSimilarity(a: string, b: string): number {
   if (na === nb) return 1;
 
   const ta = tokens(a), tb = tokens(b);
-  const inter = [...ta].filter((t) => tb.has(t)).length;
-  const union = new Set([...ta, ...tb]).size;
-  const jaccard = union ? inter / union : 0;
+  const shared = [...ta].filter((t) => tb.has(t));
+  const unionWeight = sumWeight(new Set([...ta, ...tb]));
+  const jaccard = unionWeight ? sumWeight(shared) / unionWeight : 0;
 
-  // Containment: shorter token set fully inside the longer (subsidiary/parent).
-  // One short shared word ("STAR") is not containment; a single distinctive
-  // word has to be substantial ("MORNINGSTAR") to carry it alone.
-  const [small, big] = ta.size <= tb.size ? [ta, tb] : [tb, ta];
-  const smallCounts = small.size >= 2 || [...small].some((t) => t.length >= 6);
-  const containment = small.size && smallCounts ? [...small].filter((t) => big.has(t)).length / small.size : 0;
+  const [small, big] = sumWeight(ta) <= sumWeight(tb) ? [ta, tb] : [tb, ta];
+  const sharedDistinctive = [...small].filter((t) => big.has(t) && !GENERIC_WORDS.has(t));
+  const carried = sharedDistinctive.length >= 2 || (sharedDistinctive.length === 1 && sharedDistinctive[0].length >= 8);
+  const smallWeight = sumWeight(small);
+  const containment = carried && smallWeight ? sumWeight([...small].filter((t) => big.has(t))) / smallWeight : 0;
 
-  const edit = 1 - editDistance(na, nb) / Math.max(na.length, nb.length);
+  const distance = editDistance(na, nb);
+  const edit = distance <= 2 ? 1 - distance / Math.max(na.length, nb.length) : 0;
 
-  // Names that differ at all never score as identical.
   return Math.min(0.97, Math.max(jaccard, containment * 0.95, edit));
 }
 
