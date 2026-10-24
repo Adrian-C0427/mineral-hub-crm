@@ -2579,11 +2579,6 @@ body.pipeline-dragging, body.pipeline-dragging * { user-select: none !important;
 .topbar-userwrap { position: relative; }
 .topbar-user { flex: none; display: flex; align-items: center; gap: 10px; height: 42px; padding: 0 8px 0 5px; border: 0; border-radius: 9px; background: transparent; text-align: left; box-shadow: none; }
 .topbar-user:hover, .topbar-user.open { background: var(--hover-strong); border: 0; }
-.topbar-avatar {
-  width: 30px; height: 30px; border-radius: 50%; flex: none; color: var(--on-accent);
-  display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700;
-}
-.topbar-avatar.lg { width: 40px; height: 40px; font-size: 13px; }
 .topbar-user-meta { display: flex; flex-direction: column; gap: 1px; line-height: 1.2; text-align: left; min-width: 0; }
 .topbar-user-name { font-size: 13px; font-weight: 600; color: var(--ink); white-space: nowrap; }
 .topbar-user-role { font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3690,7 +3685,7 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 .seller-head-add { position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
 .seller-card { background: var(--surface); border: 1px solid var(--hairline); border-radius: 9px; padding: 16px; }
 .seller-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-/* Matches the header avatar (.topbar-avatar): 32px circle, white initials;
+/* Matches the header avatar (UserAvatar / .avatar): 32px circle, white initials;
    the background color is assigned per-name inline (see lib/avatarColor). */
 .seller-avatar { width: 32px; height: 32px; border-radius: 50%; background: #1d4ed8;
   color: #fff; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
@@ -3784,9 +3779,14 @@ a.lg-name:hover { color: var(--accent); text-decoration: none; }
 
 /* Compact user chip — small circular initials avatar beside the name; the one
    way assigned users / team members render anywhere in the app. */
-.user-chip { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 600; }
-.user-chip-av { display: inline-flex; align-items: center; justify-content: center; border-radius: 50%;
-  color: #fff; font-weight: 700; flex: none; letter-spacing: 0.02em; }
+.user-chip { display: inline-flex; align-items: center; gap: 7px; min-width: 0; font-size: 12.5px; font-weight: 600; color: var(--ink, var(--text)); }
+.user-chip-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Inline in running text / meta lines (timeline "· by", task rows, KV values):
+   the name takes the surrounding size, weight and colour; only the badge is added. */
+.user-chip.inline { font-size: inherit; font-weight: inherit; color: inherit; gap: 5px; vertical-align: middle; }
+.bp-owners { display: inline-flex; flex-wrap: wrap; gap: 6px 14px; }
+.msel-opt-icon { display: inline-flex; flex: none; margin-right: 8px; vertical-align: middle; }
+.msel-single-value .msel-opt-icon { margin-right: 7px; }
 
 /* Tab strips: a hidden bold ghost reserves the active-weight width so the
    600↔700 weight change never reflows the strip on switch. */

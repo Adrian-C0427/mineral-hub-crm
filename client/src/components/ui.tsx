@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { prettyEnum } from "../lib/format";
-import { userAvatarColor, initialsOf } from "../lib/avatarColor";
+import type { AvatarUser } from "../lib/avatarColor";
+import { UserAvatar } from "./UserAvatar";
 import { layoutRect, layoutViewport, rootZoom } from "../lib/viewport";
 import { useStages } from "../stages";
 
@@ -317,24 +318,9 @@ export function MetricCard({ label, value, hint, valueColor }: { label: string; 
   );
 }
 
-/**
- * Compact user chip: small circular initials avatar (the user's chosen avatar
- * color, name-hash fallback) beside the name. The single way assigned users /
- * team members render anywhere in the app.
- */
-export function UserChip({ user, size = 18 }: { user: { name: string; avatarColor?: string | null }; size?: number }) {
-  return (
-    <span className="user-chip">
-      <span
-        className="user-chip-av"
-        aria-hidden="true"
-        style={{ width: size, height: size, fontSize: Math.round(size * 0.42), background: userAvatarColor(user) }}
-      >
-        {initialsOf(user.name)}
-      </span>
-      {user.name}
-    </span>
-  );
+/** Compact user chip — the shared user avatar with the name beside it. */
+export function UserChip({ user, size = 18 }: { user: AvatarUser; size?: number }) {
+  return <UserAvatar user={user} size={size} withName />;
 }
 
 export function Banner({ kind = "warn", children }: { kind?: "warn" | "info" | "error"; children: ReactNode }) {

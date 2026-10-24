@@ -3,20 +3,11 @@ import { Link } from "react-router-dom";
 import { Menu } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 import { useTheme } from "../theme";
-import { userAvatarColor } from "../lib/avatarColor";
+import { UserAvatar } from "./UserAvatar";
 import { api } from "../api/client";
 import { NotificationsBell } from "./NotificationsBell";
 import { ROLE_LABEL } from "../lib/roles";
 import { setMobileNavOpen, useHasTabBar, useIsPhone } from "../lib/mobile";
-
-/** Initials for the avatar chip — first letters of the first two name words. */
-const initialsOf = (name: string | undefined): string =>
-  (name ?? "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0]!.toUpperCase())
-    .join("") || "?";
 
 const MenuIcon = ({ d }: { d: string }) => (
   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={d} /></svg>
@@ -84,7 +75,7 @@ export function TopBar() {
       <span className="topbar-div" aria-hidden="true" />
       <div className="topbar-userwrap" ref={wrapRef}>
         <button type="button" className={`topbar-user ${open ? "open" : ""}`} onClick={() => setOpen((o) => !o)} aria-haspopup="menu" aria-expanded={open}>
-          <span className="topbar-avatar" aria-hidden="true" style={{ background: userAvatarColor(user) }}>{initialsOf(user?.name)}</span>
+          <UserAvatar user={user} size={30} title="" />
           <span className="topbar-user-meta">
             <span className="topbar-user-name">{user?.name}</span>
             <span className="topbar-user-role">{role}</span>
@@ -94,7 +85,7 @@ export function TopBar() {
         {open && (
           <div className="topbar-menu" role="menu">
             <div className="topbar-menu-id">
-              <span className="topbar-avatar lg" aria-hidden="true" style={{ background: userAvatarColor(user) }}>{initialsOf(user?.name)}</span>
+              <UserAvatar user={user} size={40} title="" />
               <span className="topbar-menu-who">
                 <span className="topbar-menu-name">{user?.name}</span>
                 <span className="topbar-menu-email">{user?.email}</span>

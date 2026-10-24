@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { userRefSelect, userRef, type UserRef } from "../domain/userRef.js";
 import multer from "multer";
 import { z } from "zod";
 import { prisma } from "../db.js";
@@ -207,7 +208,7 @@ filesRouter.get(
     if (!file) throw new HttpError(404, "File not found");
     // Walk the chain of prior versions: each older file points at the record
     // that superseded it, so the one this record replaced has supersededById === file.id.
-    const versions: { id: string; filename: string; sizeBytes: number; createdAt: Date; uploadedBy: string | null }[] = [];
+    const versions: { id: string; filename: string; sizeBytes: number; createdAt: Date; uploadedBy: UserRef | null }[] = [];
     let currentId = file.id;
     for (;;) {
       const prior = await prisma.fileAttachment.findFirst({
@@ -218,10 +219,10 @@ filesRouter.get(
         // future write path to that column (a bulk re-link, an import that
         // reuses ids) from turning this walk into a cross-org read.
         where: { supersededById: currentId, OR: fileOrgScope(orgId(req)) },
-        include: { uploadedBy: { select: { name: true } } },
+        include: { uploadedBy: { select: userRefSelect } },
       });
       if (!prior) break;
-      versions.push({ id: prior.id, filename: prior.filename, sizeBytes: prior.sizeBytes, createdAt: prior.createdAt, uploadedBy: prior.uploadedBy?.name ?? null });
+      versions.push({ id: prior.id, filename: prior.filename, sizeBytes: prior.sizeBytes, createdAt: prior.createdAt, uploadedBy: userRef(prior.uploadedBy) });
       currentId = prior.id;
     }
     res.json({ versions });

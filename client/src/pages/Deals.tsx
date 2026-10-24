@@ -15,7 +15,8 @@ import { Tabs } from "../components/Tabs";
 import { useAuth } from "../auth/AuthContext";
 import { useStages } from "../stages";
 import { useListState } from "../lib/listState";
-import { Avatar, Segmented, StatStrip, Tag, type StatCell } from "../components/kit";
+import { Segmented, StatStrip, Tag, type StatCell } from "../components/kit";
+import { UserAvatar, shortUserName } from "../components/UserAvatar";
 import { blendedCost } from "../lib/blendedCost";
 import type { DealSummary, DealsVisibility, UserLite } from "../types";
 
@@ -33,11 +34,6 @@ const VISIBILITY_OPTIONS: { value: DealsVisibility; label: string; title: string
 const blendedValue = (rate: number | null, unit: "NMA" | "NRA") =>
   rate == null ? "N/A" : <>{money(rate, { cents: true })}<span className="dl-kpi-unit">/{unit}</span></>;
 
-
-const shortName = (name: string): string => {
-  const parts = name.split(/\s+/).filter(Boolean);
-  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1]![0]}.` : name;
-};
 
 /**
  * Per-acre costs for a row, from the displayed Our Cost and acreage through
@@ -210,8 +206,8 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
     { key: "owner", header: "Owner", type: "text", minWidth: 120, value: (d) => d.relationshipOwner?.name ?? null,
       render: (d) => d.relationshipOwner ? (
         <span className="ct-owner">
-          <Avatar user={d.relationshipOwner} size={22} />
-          <span className="dl-owner-name">{shortName(d.relationshipOwner.name)}</span>
+          <UserAvatar user={d.relationshipOwner} size={22} />
+          <span className="dl-owner-name">{shortUserName(d.relationshipOwner)}</span>
         </span>
       ) : "—" },
   ];

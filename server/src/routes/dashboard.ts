@@ -1,3 +1,4 @@
+import { userRefSelect, userRef, type UserRef } from "../domain/userRef.js";
 import { Router } from "express";
 import { z } from "zod";
 import { prisma, withDbRetry } from "../db.js";
@@ -511,14 +512,14 @@ async function dueSoonTasksFor(org: string, meId: string, whose: string, manageA
 const taskSelect = {
   id: true, kind: true, title: true, body: true, dueDate: true, priority: true, completedAt: true, createdAt: true,
   contactId: true, assignedToId: true, createdById: true,
-  assignedTo: { select: { id: true, name: true } },
-  createdBy: { select: { id: true, name: true } },
+  assignedTo: { select: userRefSelect },
+  createdBy: { select: userRefSelect },
   contact: { select: { id: true, firstName: true, lastName: true, entityName: true } },
 } as const;
 type TaskRow = {
   id: string; kind: string; title: string | null; body: string; dueDate: Date | null; priority: string | null; completedAt: Date | null; createdAt: Date;
   contactId: string | null; assignedToId: string | null; createdById: string | null;
-  assignedTo: { id: string; name: string } | null; createdBy: { id: string; name: string } | null;
+  assignedTo: UserRef | null; createdBy: UserRef | null;
   contact: { id: string; firstName: string | null; lastName: string | null; entityName: string | null } | null;
 };
 function serializeTask(t: TaskRow, meId: string, manageAll: boolean) {

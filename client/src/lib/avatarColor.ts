@@ -40,6 +40,25 @@ export function userAvatarColor(u: { name?: string | null; avatarColor?: string 
 }
 
 /** Initials for an avatar chip — first letters of the first two name words. */
+/** A person as the avatar needs them: the display name, the first/last name the initials come from, the saved colour. */
+export interface AvatarUser { id?: string; name: string; firstName?: string | null; lastName?: string | null; avatarColor?: string | null }
+
+/** Initials from the display name: first letters of its first two words ("Mary Ann Smith" → "MA"). */
 export function initialsOf(name: string | null | undefined): string {
-  return (name ?? "").trim().split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
+  return (name ?? "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
+}
+
+/**
+ * A USER's initials: first + last name when both are known ("Adrian Campos"
+ * → "AC"), else the first and LAST word of the display name (a middle name
+ * never steals the second letter), else the first letter; "?" with no name.
+ */
+export function userInitials(u: AvatarUser | null | undefined): string {
+  const first = (u?.firstName ?? "").trim();
+  const last = (u?.lastName ?? "").trim();
+  if (first && last) return `${first[0]}${last[0]}`.toUpperCase();
+  const parts = (u?.name ?? "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return `${parts[0]![0]}${parts[parts.length - 1]![0]}`.toUpperCase();
+  if (parts.length === 1) return parts[0]![0]!.toUpperCase();
+  return "?";
 }

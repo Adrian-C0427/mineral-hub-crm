@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Modal, Req } from "./ui";
 import { Select } from "./Select";
+import { userOptions } from "./UserAvatar";
 import { DateField } from "./DateField";
 import { GeoFields } from "./GeoFields";
 import { FormSection } from "./kit";
@@ -13,7 +14,7 @@ import { isOpportunityPipeline, type PipelineInfo } from "../stages";
 import { acres, prettyStage } from "../lib/format";
 import { surveyLabel } from "../lib/abstracts";
 import { checkOppForm, choosePipelineStage, emptyOppForm, oppBody, oppFormFromRecord, oppPatchBody, type OppForm } from "../lib/opportunityForm";
-import type { Opp, UserLite } from "../types";
+import type { Opp, UserLite, UserRef } from "../types";
 
 export type OppFormSection = "basics" | "seller" | "property" | "acreage" | "followup";
 
@@ -98,8 +99,8 @@ export function NewOpportunityModal({ pipelines, pipelineId, opp, initialSection
   const [users, setUsers] = useState<UserLite[]>([]);
   useEffect(() => { api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
   // The saved owner shows by name before (or without) the list (edit mode).
-  const ownerOptions = users.map((u) => ({ value: u.id, label: u.name }));
-  if (opp?.owner && !users.some((u) => u.id === opp.owner!.id)) ownerOptions.unshift({ value: opp.owner.id, label: opp.owner.name });
+  const ownerList: UserRef[] = opp?.owner && !users.some((u) => u.id === opp.owner!.id) ? [opp.owner, ...users] : users;
+  const ownerOptions = userOptions(ownerList);
 
   // --- property -----------------------------------------------------------
   const { byId } = useAbstractIndex();

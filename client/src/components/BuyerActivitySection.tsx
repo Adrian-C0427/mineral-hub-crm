@@ -4,6 +4,7 @@ import { ChevronRight, Handshake, Inbox, Pencil, Phone, RefreshCw, Send, StickyN
 import { api, ApiError } from "../api/client";
 import { ConfirmDialog, StatusBadge, EmptyState, UserChip } from "./ui";
 import { Select } from "./Select";
+import { UserAvatar } from "./UserAvatar";
 import { money, fmtDate } from "../lib/format";
 import { BUYER_STATUS_RANK, buyerStatusLabel } from "../lib/buyerStatus";
 import type { BuyerActivityRow, CommKind, TimelineEntry } from "../types";
@@ -177,7 +178,7 @@ function TimelineItem({ entry, dealId, buyerId, canEdit, onChanged }: {
     <li className="timeline-item">
       <div className="timeline-meta">
         <span className="timeline-kind"><Icon size={13} strokeWidth={2} aria-hidden="true" /> {meta.label}</span>
-        <span className="timeline-when">{fmtDate(entry.occurredAt)}{entry.createdBy ? ` · ${entry.createdBy}` : ""}</span>
+        <span className="timeline-when">{fmtDate(entry.occurredAt)}{entry.createdBy && <> · <UserAvatar user={entry.createdBy} size={16} withName className="inline" /></>}</span>
         <span className="timeline-actions">
           {editable && !editing && (
             <button className="icon-btn timeline-act" title="Edit entry" aria-label="Edit entry" onClick={() => { setErr(null); setEditing(true); }}>

@@ -1,3 +1,5 @@
+import { UserAvatar } from "./UserAvatar";
+import type { UserRef } from "../types";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Cloud, FileText, Upload } from "lucide-react";
 import { api } from "../api/client";
@@ -23,7 +25,7 @@ export interface DocFile {
   filename: string;
   mimeType?: string;
   sizeBytes: number;
-  uploadedBy?: string | null;
+  uploadedBy?: UserRef | null;
   createdAt: string;
   updatedAt?: string;
   versionCount?: number;
@@ -216,9 +218,9 @@ export function DocumentsSection({
     { key: "createdAt", header: "Date uploaded", type: "date", value: (f) => f.createdAt, render: (f) => <span className="docx-date">{fmtDateLocal(f.createdAt)}</span> },
     { key: "updatedAt", header: "Date modified", type: "date", value: (f) => f.updatedAt ?? f.createdAt, render: (f) => <span className="docx-date dim">{fmtDateLocal(f.updatedAt ?? f.createdAt)}</span> },
     {
-      key: "uploadedBy", header: "Uploaded by", value: (f) => f.uploadedBy ?? "",
+      key: "uploadedBy", header: "Uploaded by", value: (f) => f.uploadedBy?.name ?? "",
       render: (f) => f.uploadedBy
-        ? <span className="docx-by"><Avatar name={f.uploadedBy} size={22} />{f.uploadedBy}</span>
+        ? <span className="docx-by"><UserAvatar user={f.uploadedBy} size={22} withName /></span>
         : "—",
     },
     { key: "type", header: "File type", value: (f) => fileType(f), render: (f) => <span className={`docx-type ${typeTone(fileType(f))}`}>{fileType(f)}</span> },

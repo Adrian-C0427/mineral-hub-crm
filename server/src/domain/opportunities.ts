@@ -226,7 +226,7 @@ export function convertedSeller(o: ConvertibleOpportunity, contact: ConvertibleC
 // Serializers (the API shapes the client consumes)
 // ---------------------------------------------------------------------------
 
-type UserRef = { id: string; name: string } | null;
+type UserRef = { id: string; name: string; firstName?: string | null; lastName?: string | null; avatarColor?: string | null } | null;
 
 export interface OpportunityRow {
   id: string;
@@ -264,7 +264,7 @@ export interface OpportunityContactRow {
 }
 export interface OpportunityFileRow {
   id: string; category: string; folder: string; filename: string; mimeType: string; sizeBytes: number;
-  uploadedBy: { name: string } | null; createdAt: Date; updatedAt: Date; _count: { supersedes: number };
+  uploadedBy: { id: string; name: string; firstName?: string | null; lastName?: string | null; avatarColor?: string | null } | null; createdAt: Date; updatedAt: Date; _count: { supersedes: number };
 }
 export interface OpportunityDetailRow extends OpportunityRow {
   contact: OpportunityContactRow | null;
@@ -276,7 +276,8 @@ export interface OpportunityDetailRow extends OpportunityRow {
   activities: { id: string; kind: string; body: string; createdBy: UserRef; createdAt: Date }[];
 }
 
-const userRef = (u: { id: string; name: string } | null | undefined): UserRef => (u ? { id: u.id, name: u.name } : null);
+const userRef = (u: { id: string; name: string; firstName?: string | null; lastName?: string | null; avatarColor?: string | null } | null | undefined): UserRef =>
+  (u ? { id: u.id, name: u.name, firstName: u.firstName ?? null, lastName: u.lastName ?? null, avatarColor: u.avatarColor ?? null } : null);
 
 /** Board/list card: `OppSummary`. */
 export function serializeOpportunitySummary(o: OpportunityRow) {
@@ -324,7 +325,7 @@ export function serializeOpportunity(o: OpportunityDetailRow) {
       : null,
     files: (o.files ?? []).map((f) => ({
       id: f.id, category: f.category, folder: f.folder, filename: f.filename, mimeType: f.mimeType, sizeBytes: f.sizeBytes,
-      uploadedBy: f.uploadedBy?.name ?? null, createdAt: f.createdAt, updatedAt: f.updatedAt, versionCount: f._count.supersedes,
+      uploadedBy: userRef(f.uploadedBy), createdAt: f.createdAt, updatedAt: f.updatedAt, versionCount: f._count.supersedes,
     })),
     docFolders: o.docFolders ?? [],
     convertedDeal: o.convertedDeal ? { id: o.convertedDeal.id, name: o.convertedDeal.name, stage: o.convertedDeal.stage } : null,

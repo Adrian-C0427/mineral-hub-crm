@@ -1,3 +1,4 @@
+import { userRefSelect, userRef } from "../domain/userRef.js";
 import { Router } from "express";
 import rateLimit from "express-rate-limit";
 import { z } from "zod";
@@ -137,7 +138,7 @@ buyersRouter.get(
       where: { id: req.params.id, organizationId: orgId(req) },
       include: {
         buyBox: true,
-        owners: { include: { user: { select: { id: true, name: true } } } },
+        owners: { include: { user: { select: userRefSelect } } },
         tags: { include: { tag: true } },
       },
     });
@@ -193,7 +194,7 @@ buyersRouter.get(
       aliases: b.aliases,
       createdAt: b.createdAt,
       active: b.active,
-      owners: b.owners.map((o) => ({ id: o.user.id, name: o.user.name })),
+      owners: b.owners.map((o) => userRef(o.user)),
       tags: b.tags.map((t) => ({ id: t.tag.id, name: t.tag.name })),
       buyBox: b.buyBox ?? {
         states: [], counties: [], basins: [], formations: [], assetTypes: [],

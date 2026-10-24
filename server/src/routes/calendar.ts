@@ -1,3 +1,4 @@
+import { userRefSelect, userRef } from "../domain/userRef.js";
 import { Router } from "express";
 import { z } from "zod";
 import type { CalendarEventType } from "@prisma/client";
@@ -61,7 +62,7 @@ const nameField = z.string().trim().min(1).max(60);
 const eventInclude = {
   deal: { select: { id: true, name: true } },
   buyer: { select: { id: true, name: true } },
-  assignedTo: { select: { id: true, name: true } },
+  assignedTo: { select: userRefSelect },
 } as const;
 
 /** Seeing deals (and so their closings and buyer follow-ups) needs "View deals". */
@@ -136,7 +137,7 @@ calendarRouter.get(
         },
         select: {
           id: true, kind: true, title: true, body: true, dueDate: true, completedAt: true,
-          assignedTo: { select: { id: true, name: true } },
+          assignedTo: { select: userRefSelect },
           contact: { select: { id: true, firstName: true, lastName: true, entityName: true } },
         },
       }),

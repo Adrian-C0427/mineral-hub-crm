@@ -65,11 +65,26 @@ export interface SellerContactRow {
   mailingCity: string | null;
   mailingState: string | null;
   mailingZip: string | null;
+  /** Geography of interest (filled from the first deal when the contact has none). */
+  states?: string[];
+  counties?: string[];
 }
 export const sellerContactSelect = {
   id: true, firstName: true, lastName: true, entityName: true, phone: true, email: true, preferredContact: true,
-  mailingStreet: true, mailingCity: true, mailingState: true, mailingZip: true,
+  mailingStreet: true, mailingCity: true, mailingState: true, mailingZip: true, states: true, counties: true,
 } as const;
+
+/**
+ * A contact with no geography of interest yet takes the deal's (states and
+ * counties) when it becomes that deal's seller — the contact's own entries
+ * are never overwritten.
+ */
+export async function fillContactGeography(tx: Tx, contact: SellerContactRow, geo: { states?: string[] | null; counties?: string[] | null }): Promise<void> {
+  const data: { states?: string[]; counties?: string[] } = {};
+  if (!(contact.states ?? []).length && geo.states?.length) data.states = geo.states;
+  if (!(contact.counties ?? []).length && geo.counties?.length) data.counties = geo.counties;
+  if (Object.keys(data).length) await tx.contact.update({ where: { id: contact.id }, data });
+}
 
 type Tx = Prisma.TransactionClient;
 

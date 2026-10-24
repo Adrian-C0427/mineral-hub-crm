@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Modal } from "./ui";
 import { Select } from "./Select";
+import { userOptions } from "./UserAvatar";
 import { api, ApiError } from "../api/client";
 import { toInputDate } from "../lib/format";
 import { amountFromRate } from "../lib/perAcre";
@@ -110,7 +111,7 @@ export function LogContactModal({ dealId, buyerId, buyerName, users, dealNra, de
         <div className="field">
           <label>Assigned team member</label>
           <Select value={assignee} onChange={setAssignee} placeholder="Unassigned" clearable searchable ariaLabel="Assigned team member"
-            options={users.map((u) => ({ value: u.id, label: u.name }))} />
+            options={userOptions(users)} />
         </div>
       </div>
       {status === "OFFER_RECEIVED" && (

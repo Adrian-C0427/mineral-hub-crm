@@ -9,7 +9,8 @@ import { Modal, Spinner, StageBadge, showToast } from "../components/ui";
 import { ApiError } from "../api/client";
 import { Select } from "../components/Select";
 import { Segmented, StatStrip, Tag } from "../components/kit";
-import { initialsOf } from "../lib/avatarColor";
+import { UserAvatar, userOptions } from "../components/UserAvatar";
+import type { UserRef } from "../types";
 import { compactMoney, money, fmtDate, fmtDateLocal } from "../lib/format";
 import { sumMoney } from "../lib/money";
 import { useStages } from "../stages";
@@ -67,7 +68,7 @@ const CheckIcon = ({ size = 13 }: { size?: number }) => (
 
 interface DashTask {
   id: string; title: string; details?: string | null; dueDate: string | null; priority: "LOW" | "MEDIUM" | "HIGH" | string;
-  assignedTo: { id: string; name: string } | null; createdBy?: { id: string; name: string } | null;
+  assignedTo: UserRef | null; createdBy?: UserRef | null;
   /** Null for a standalone task created from the Dashboard. */
   contactId: string | null; contactName: string | null;
   completedAt?: string | null; createdAt?: string;
@@ -302,8 +303,8 @@ export function Dashboard() {
   const [customizing, setCustomizing] = useState(false);
   // Teammates: the Tasks widget's filter/assignee lists, and matching the
   // actor at the start of an activity line.
-  const [users, setUsers] = useState<{ id: string; name: string }[]>([]);
-  useEffect(() => { api.get<{ id: string; name: string }[]>("/users").then(setUsers).catch(() => {}); }, []);
+  const [users, setUsers] = useState<UserRef[]>([]);
+  useEffect(() => { api.get<UserRef[]>("/users").then(setUsers).catch(() => {}); }, []);
   // A task opened from a notification (or a standalone task's row) —
   // `?task=<id>` in the URL, so the link is shareable and survives reloads.
   const [params, setParams] = useSearchParams();
@@ -509,11 +510,11 @@ export function Dashboard() {
     const q = a.dealId ? text.match(/^([\s\S]*?)"([^"]+)"([\s\S]*)$/) : null;
     return (
       <div className="dash-act-row" key={a.id} title={fmtDateLocal(a.createdAt)}>
-        <span className="dash-act-avatar" aria-hidden="true">
-          {actor ? initialsOf(actor.name) : (
+        {actor ? <UserAvatar user={actor} size={28} /> : (
+          <span className="dash-act-avatar" aria-hidden="true">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l3-8 4 16 3-8h4" /></svg>
-          )}
-        </span>
+          </span>
+        )}
         <span className="dash-act-text">
           {actor && <><span className="dash-act-actor">{actor.name}</span>{" "}</>}
           {q ? <>{q[1]}<Link to={`/deals/${a.dealId}`} className="dash-act-link">{q[2]}</Link>{q[3]}</> : text}
@@ -1045,7 +1046,7 @@ export function Dashboard() {
  * created here (for yourself or a teammate) and completed in place.
  */
 function TasksWidget({ initial, users, refreshKey, onOpenTask, onChanged }: {
-  initial: DashTask[]; users: { id: string; name: string }[]; refreshKey: number; onOpenTask: (id: string) => void; onChanged: () => void;
+  initial: DashTask[]; users: UserRef[]; refreshKey: number; onOpenTask: (id: string) => void; onChanged: () => void;
 }) {
   const { user } = useAuth();
   const [busy, setBusy] = useState<string | null>(null);
@@ -1070,10 +1071,10 @@ function TasksWidget({ initial, users, refreshKey, onOpenTask, onChanged }: {
     document.addEventListener("visibilitychange", onVisible);
     return () => { live = false; document.removeEventListener("visibilitychange", onVisible); };
   }, [whose, refreshKey]);
-  const userOptions = [
+  const whoseOptions = [
     { value: "me", label: "My Tasks" },
     { value: "all", label: "All Users" },
-    ...users.filter((u) => u.id !== user?.id).map((u) => ({ value: u.id, label: u.name })),
+    ...userOptions(users.filter((u) => u.id !== user?.id)),
   ];
   const showOwner = whose !== "me";
   // Due dates are calendar days stored at UTC midnight — compare day keys, not
@@ -1100,7 +1101,7 @@ function TasksWidget({ initial, users, refreshKey, onOpenTask, onChanged }: {
         </div>
         <div className="dash-tasks-tools">
           <span className="dash-task-filter">
-            <Select value={whose} onChange={(v) => setWhose(v || "me")} options={userOptions} searchable={userOptions.length > 8}
+            <Select value={whose} onChange={(v) => setWhose(v || "me")} options={whoseOptions} searchable={whoseOptions.length > 8}
               width={116} ariaLabel="Show tasks for" />
           </span>
           <button type="button" className="dash-task-add" onClick={() => setCreating(true)} title="Create a task for yourself or a teammate" aria-label="New task">
@@ -1121,12 +1122,12 @@ function TasksWidget({ initial, users, refreshKey, onOpenTask, onChanged }: {
         const overdue = dayKey != null && dayKey < todayKey;
         const dueToday = dayKey === todayKey;
         const pr = TASK_PRIORITY_META[t.priority] ?? TASK_PRIORITY_META.MEDIUM;
-        const meta = [t.contactName, showOwner && t.assignedTo ? t.assignedTo.name : null].filter(Boolean).join(" · ");
+        const who = showOwner && t.assignedTo ? <UserAvatar user={t.assignedTo} size={14} withName className="inline" /> : null;
         const body = (
           <>
             <span className="dash-task-title">{t.title}</span>
             {t.details && <span className="dash-task-sub">{t.details}</span>}
-            {meta && <span className="dash-task-meta">{meta}</span>}
+            {(t.contactName || who) && <span className="dash-task-meta">{t.contactName}{t.contactName && who ? " · " : ""}{who}</span>}
           </>
         );
         return (
@@ -1162,7 +1163,7 @@ function TasksWidget({ initial, users, refreshKey, onOpenTask, onChanged }: {
  * notified, with a link that opens the task). The same form edits it later.
  */
 function CreateTaskModal({ users, onClose, onCreated }: {
-  users: { id: string; name: string }[]; onClose: () => void; onCreated: () => void;
+  users: UserRef[]; onClose: () => void; onCreated: () => void;
 }) {
   const { user } = useAuth();
   return (
@@ -1187,7 +1188,7 @@ function CreateTaskModal({ users, onClose, onCreated }: {
  * here with the stored values and refreshes the Tasks widget.
  */
 function TaskDetailModal({ id, users, onClose, onChanged }: {
-  id: string; users: { id: string; name: string }[]; onClose: () => void; onChanged: () => void;
+  id: string; users: UserRef[]; onClose: () => void; onChanged: () => void;
 }) {
   const [task, setTask] = useState<DashTask | null>(null);
   const [missing, setMissing] = useState(false);
@@ -1260,8 +1261,8 @@ function TaskDetailModal({ id, users, onClose, onChanged }: {
           <div className="ddc-grid">
             <div><div className="ddx-label">Due</div><div className={`ddx-val ${overdue ? "neg" : ""}`}>{task.dueDate ? fmtDate(task.dueDate) : "—"}{overdue ? " · overdue" : ""}</div></div>
             <div><div className="ddx-label">Priority</div><div className="ddx-val"><Tag tone={pr!.tone}>{pr!.label}</Tag></div></div>
-            <div><div className="ddx-label">Assigned to</div><div className="ddx-val">{task.assignedTo?.name ?? "—"}</div></div>
-            <div><div className="ddx-label">Created by</div><div className="ddx-val">{task.createdBy?.name ?? "—"}{task.createdAt ? ` · ${fmtDateLocal(task.createdAt)}` : ""}</div></div>
+            <div><div className="ddx-label">Assigned to</div><div className="ddx-val">{task.assignedTo ? <UserAvatar user={task.assignedTo} size={18} withName className="inline" /> : "—"}</div></div>
+            <div><div className="ddx-label">Created by</div><div className="ddx-val">{task.createdBy ? <UserAvatar user={task.createdBy} size={18} withName className="inline" /> : "—"}{task.createdAt ? ` · ${fmtDateLocal(task.createdAt)}` : ""}</div></div>
             {task.contactName && <div><div className="ddx-label">Contact</div><div className="ddx-val">{task.contactName}</div></div>}
           </div>
         </div>

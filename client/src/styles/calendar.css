@@ -285,10 +285,6 @@ a.cal-btn.is-primary:hover { color: var(--on-accent); text-decoration: none; }
 .cal-dlink:hover { color: var(--ink-strong); text-decoration: none; }
 .cal-dnone { color: var(--ink-3); }
 .cal-who { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.cal-ini {
-  width: 22px; height: 22px; flex: none; border-radius: 50%; background: var(--chip); color: var(--ink);
-  display: inline-flex; align-items: center; justify-content: center; font-size: 9.5px; font-weight: 600;
-}
 .cal-dnote { line-height: 1.5; color: var(--ink-1); white-space: pre-wrap; overflow-wrap: anywhere; }
 .cal-src { font-size: 12px; color: var(--ink-4); }
 .cal-foot-r { display: flex; gap: 8px; }
@@ -551,7 +547,6 @@ a.cal-btn.is-primary:hover { color: var(--on-accent); text-decoration: none; }
   .cal-dlink { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .cal-dnone { font-size: 13.5px; font-weight: 600; }
   .cal-who { gap: 7px; font-size: 13.5px; font-weight: 600; }
-  .cal-ini { font-size: 10px; font-weight: 700; }
   .cal-dnotes { display: flex; flex-direction: column; gap: 5px; }
   .cal-dnotes > p { margin: 0; font-size: 13.5px; line-height: 1.55; color: var(--ink-1); text-wrap: pretty; white-space: pre-wrap; overflow-wrap: anywhere; }
 

@@ -16,6 +16,7 @@ import {
   serializeOpportunitySummary,
 } from "../domain/opportunities.js";
 import { dealDetail } from "./deals.js";
+import { userRef, userRefSelect } from "../domain/userRef.js";
 import { contactPatchFromSellerPatch, opportunitySellerFromInfo, resolveSellerContact, sellerContactSelect, sellerInfoSchema, type SellerInfo } from "../domain/sellerContact.js";
 import { splitPersonName } from "../domain/opportunities.js";
 
@@ -31,7 +32,7 @@ opportunitiesRouter.use(requireAuth, requireOrg);
 
 type Tx = Prisma.TransactionClient | typeof prisma;
 
-const userSelect = { select: { id: true, name: true } } as const;
+const userSelect = { select: userRefSelect } as const;
 const summaryInclude = { owner: userSelect } as const;
 const detailInclude = {
   owner: userSelect,
@@ -42,7 +43,7 @@ const detailInclude = {
   // Documents: current versions only (prior versions via /files/:id/versions).
   files: {
     where: { supersededById: null },
-    include: { uploadedBy: { select: { name: true } }, _count: { select: { supersedes: true } } },
+    include: { uploadedBy: { select: userRefSelect }, _count: { select: { supersedes: true } } },
     orderBy: { createdAt: "desc" as const },
   },
 } as const;
@@ -56,7 +57,7 @@ async function loadOpportunity(tx: Tx, organizationId: string, id: string, req: 
   for (const h of o.stageHistory) if (h.changedByUserId) userIds.add(h.changedByUserId);
   for (const a of o.activities) if (a.createdByUserId) userIds.add(a.createdByUserId);
   const users = userIds.size
-    ? await tx.user.findMany({ where: { id: { in: [...userIds] } }, select: { id: true, name: true } })
+    ? await tx.user.findMany({ where: { id: { in: [...userIds] } }, select: userRefSelect })
     : [];
   const byId = new Map(users.map((u) => [u.id, u]));
   const out = serializeOpportunity({

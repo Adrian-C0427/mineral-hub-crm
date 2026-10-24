@@ -7,7 +7,8 @@ import { requireAuth, requireOrg, requirePermission, orgId, researchOrgId, type 
 import { serializeDeal, serializeContractExtension } from "../serializers.js";
 import { computeMatch } from "../domain/matching.js";
 import { normalizePhone } from "../domain/phone.js";
-import { contactPatchFromSellerPatch, dealSellerFromInfo, overlayContact, resolveSellerContact, sellerContactSelect, sellerInfoSchema, type SellerContactRow } from "../domain/sellerContact.js";
+import { userRef, userRefSelect } from "../domain/userRef.js";
+import { contactPatchFromSellerPatch, dealSellerFromInfo, fillContactGeography, overlayContact, resolveSellerContact, sellerContactSelect, sellerInfoSchema, type SellerContactRow } from "../domain/sellerContact.js";
 import { STALE_CONTACT_DAYS, LIST_LIMIT } from "../config.js";
 import { daysUntil, formatCalendarDay, nextContractExtension } from "../domain/dates.js";
 import { totalFromPerAcre } from "../domain/perAcre.js";
@@ -43,7 +44,7 @@ function toDate(v: unknown): Date | null | undefined {
 // est., Buyer purchase price and the package roll-ups are the same figures no
 // matter which route produced the row.
 const dealInclude = {
-  selectedBuyer: true, relationshipOwner: true, assignees: { select: { id: true, name: true, avatarColor: true } },
+  selectedBuyer: true, relationshipOwner: true, assignees: { select: userRefSelect },
   offers: { select: { id: true, amount: true, status: true } },
   _count: { select: { assets: true } },
   assets: { select: { nra: true, acreageNma: true, ourPrice: true, askPrice: true } },
@@ -447,6 +448,8 @@ dealsRouter.post(
           ownerId: data.relationshipOwnerId ?? req.user!.id, type: "SELLER", notFound: (m) => new HttpError(400, m),
         });
         await tx.dealSeller.create({ data: { dealId: created.id, ...dealSellerFromInfo(data.seller, contact) } });
+        // The seller's geography of interest, from the deal, when the contact has none yet.
+        await fillContactGeography(tx, contact, { states: created.states.length ? created.states : created.state ? [created.state] : [], counties: created.counties });
       }
       return created;
     });
@@ -474,23 +477,23 @@ export async function dealDetail(organizationId: string, id: string) {
     where: { id, organizationId },
     include: {
       ...dealInclude,
-      stageHistory: { orderBy: { createdAt: "asc" }, include: { changedBy: { select: { name: true } } } },
+      stageHistory: { orderBy: { createdAt: "asc" }, include: { changedBy: { select: userRefSelect } } },
       offers: { include: { buyer: { select: { id: true, name: true, companyName: true } } }, orderBy: { dateSubmitted: "desc" } },
       // Only current versions; prior (superseded) versions stay reachable via /files/:id/versions.
       files: {
         where: { supersededById: null },
-        include: { uploadedBy: { select: { name: true } }, _count: { select: { supersedes: true } } },
+        include: { uploadedBy: { select: userRefSelect }, _count: { select: { supersedes: true } } },
         orderBy: { createdAt: "desc" },
       },
       buyerActivity: {
         include: {
           buyer: { include: { buyBox: true } },
-          sentBy: { select: { name: true } },
-          assignedTeamMember: { select: { id: true, name: true, avatarColor: true } },
-          messages: { orderBy: { occurredAt: "desc" }, include: { createdBy: { select: { name: true } } } },
+          sentBy: { select: userRefSelect },
+          assignedTeamMember: { select: userRefSelect },
+          messages: { orderBy: { occurredAt: "desc" }, include: { createdBy: { select: userRefSelect } } },
         },
       },
-      sellers: { include: { assignedTeamMember: { select: { id: true, name: true, avatarColor: true } }, contact: { select: sellerContactSelect } }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+      sellers: { include: { assignedTeamMember: { select: userRefSelect }, contact: { select: sellerContactSelect } }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
       revenueEntries: { orderBy: { month: "asc" } },
       // Contract-timeline extensions, oldest first (each chains from the last).
       contractExtensions: { orderBy: { createdAt: "asc" } },
@@ -507,7 +510,7 @@ export async function dealDetail(organizationId: string, id: string) {
   const extenders = extenderIds.length
     ? await prisma.user.findMany({ where: { id: { in: extenderIds } }, select: { id: true, name: true } })
     : [];
-  const extenderName = new Map(extenders.map((u) => [u.id, u.name]));
+  const extenderById = new Map(extenders.map((u) => [u.id, userRef(u)]));
   // Buyer activity rows with live match %.
   const activity = deal.buyerActivity.map((a) => {
     const match = a.buyer.buyBox
@@ -526,7 +529,7 @@ export async function dealDetail(organizationId: string, id: string) {
       lastActivityDate: a.lastActivityDate,
       nextFollowUpDate: a.nextFollowUpDate,
       notes: a.notes,
-      sentBy: a.sentBy?.name ?? null,
+      sentBy: userRef(a.sentBy),
       assignedTeamMember: a.assignedTeamMember ? { id: a.assignedTeamMember.id, name: a.assignedTeamMember.name } : null,
       timeline: a.messages.map((m) => ({
         id: m.id,
@@ -534,7 +537,7 @@ export async function dealDetail(organizationId: string, id: string) {
         subject: m.subject,
         body: m.body,
         occurredAt: m.occurredAt,
-        createdBy: m.createdBy?.name ?? null,
+        createdBy: userRef(m.createdBy),
         threadId: m.threadId,
       })),
     };
@@ -553,7 +556,7 @@ export async function dealDetail(organizationId: string, id: string) {
       id: h.id,
       fromStage: h.fromStage,
       toStage: h.toStage,
-      changedBy: h.changedBy?.name ?? null,
+      changedBy: userRef(h.changedBy),
       deadReason: h.deadReason,
       createdAt: h.createdAt,
     })),
@@ -575,13 +578,13 @@ export async function dealDetail(organizationId: string, id: string) {
       filename: f.filename,
       mimeType: f.mimeType,
       sizeBytes: f.sizeBytes,
-      uploadedBy: f.uploadedBy?.name ?? null,
+      uploadedBy: userRef(f.uploadedBy),
       createdAt: f.createdAt,
       updatedAt: f.updatedAt,
       versionCount: f._count.supersedes,
     })),
     buyerActivity: activity,
-    contractExtensions: deal.contractExtensions.map((e) => serializeContractExtension(e, e.extendedByUserId ? extenderName.get(e.extendedByUserId) ?? null : null)),
+    contractExtensions: deal.contractExtensions.map((e) => serializeContractExtension(e, e.extendedByUserId ? extenderById.get(e.extendedByUserId) ?? null : null)),
     sellers: deal.sellers.map((s) => serializeSeller(s)),
     revenueEntries: deal.revenueEntries.map((r) => ({
       id: r.id, month: r.month, amount: r.amount, kind: r.kind, operator: r.operator, note: r.note,
@@ -600,7 +603,7 @@ function serializeSeller(
     mailingAddress: string | null; mailingCity: string | null; mailingState: string | null; mailingZip: string | null;
     physicalAddress: string | null; physicalCity: string | null; physicalState: string | null; physicalZip: string | null;
     internalNotes: string | null; preferredCommunicationNotes: string | null;
-    assignedTeamMemberId: string | null; assignedTeamMember: { id: string; name: string } | null;
+    assignedTeamMemberId: string | null; assignedTeamMember: { id: string; name: string; firstName?: string | null; lastName?: string | null; avatarColor?: string | null } | null;
     contactId?: string | null; contact?: SellerContactRow | null;
     createdAt: Date; updatedAt: Date;
   },
@@ -616,7 +619,7 @@ function serializeSeller(
     mailingAddress: s.mailingAddress, mailingCity: s.mailingCity, mailingState: s.mailingState, mailingZip: s.mailingZip,
     physicalAddress: s.physicalAddress, physicalCity: s.physicalCity, physicalState: s.physicalState, physicalZip: s.physicalZip,
     internalNotes: s.internalNotes, preferredCommunicationNotes: s.preferredCommunicationNotes,
-    assignedTeamMember: s.assignedTeamMember ? { id: s.assignedTeamMember.id, name: s.assignedTeamMember.name } : null,
+    assignedTeamMember: userRef(s.assignedTeamMember),
     dateAdded: s.createdAt, updatedAt: s.updatedAt,
   };
 }
@@ -1460,7 +1463,7 @@ const sellerSchema = z.object({
   contactId: z.string().max(200).nullish(),
 });
 
-const sellerInclude = { assignedTeamMember: { select: { id: true, name: true, avatarColor: true } }, contact: { select: sellerContactSelect } } as const;
+const sellerInclude = { assignedTeamMember: { select: userRefSelect }, contact: { select: sellerContactSelect } } as const;
 
 async function ownDealOr404(req: AuthedRequest): Promise<string> {
   const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true } });

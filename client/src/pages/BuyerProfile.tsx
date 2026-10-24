@@ -8,6 +8,7 @@ import { RelTag } from "./Buyers";
 import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { Select } from "../components/Select";
+import { UserAvatar } from "../components/UserAvatar";
 import { AssigneePicker } from "../components/AssigneePicker";
 import { GeoFields } from "../components/GeoFields";
 import { StateSelect } from "../components/StateSelect";
@@ -18,7 +19,7 @@ import { money, pct, acres, fmtDate } from "../lib/format";
 import { sumMoney } from "../lib/money";
 import { formatPhone } from "../lib/phone";
 import { PhoneInput } from "../components/PhoneInput";
-import type { BuyBox, Relationship, UserLite } from "../types";
+import type { BuyBox, Relationship, UserLite, UserRef } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
 import { useUnsavedSection, guarded } from "../lib/unsaved";
 
@@ -42,7 +43,7 @@ interface BuyerProfileData {
   notes: string | null;
   aliases: string[];
   createdAt: string;
-  owners: { id: string; name: string }[];
+  owners: UserRef[];
   buyBox: BuyBox;
   closeRate: number;
   closedDeals: number;
@@ -299,7 +300,7 @@ export function BuyerProfile() {
                 <AssigneePicker
                   users={users}
                   value={view.owners.map((o) => o.id)}
-                  onChange={(ids) => setD({ owners: users.filter((u) => ids.includes(u.id)).map((u) => ({ id: u.id, name: u.name })) })}
+                  onChange={(ids) => setD({ owners: users.filter((u) => ids.includes(u.id)) })}
                   placeholder="Assign relationship owner(s)…"
                 />
               </Fld>
@@ -311,7 +312,7 @@ export function BuyerProfile() {
               <KV k="Website" v={view.website} />
               <KV k="Address" v={view.mailingAddress} />
               <KV k="City / State / ZIP" v={[view.mailingCity, view.mailingState, view.mailingZip].filter(Boolean).join(", ")} />
-              <KV k="Owner(s)" v={view.owners.length ? <ChipList items={view.owners.map((o) => o.name)} /> : null} />
+              <KV k="Owner(s)" v={view.owners.length ? <span className="bp-owners">{view.owners.map((o) => <UserAvatar key={o.id} user={o} size={18} withName />)}</span> : null} />
             </div>
           )}
         </div>

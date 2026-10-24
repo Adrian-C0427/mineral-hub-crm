@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Caret, scrollActiveIntoView, useDismiss, useMenuPosition } from "./dropdownCore";
 
@@ -7,6 +7,8 @@ export interface SelectOption {
   label: string;
   /** Optional muted sub-label shown to the right of the option. */
   hint?: string;
+  /** Optional leading icon (e.g. a user avatar), shown in the list and on the closed control. */
+  icon?: ReactNode;
 }
 
 interface Props {
@@ -159,6 +161,7 @@ export function Select({
           />
         ) : (
           <span className={`msel-single-value ${selected ? "" : "placeholder"}`}>
+            {selected?.icon && <span className="msel-opt-icon">{selected.icon}</span>}
             {selected ? selected.label : placeholder}
           </span>
         )}
@@ -184,6 +187,7 @@ export function Select({
                 onMouseEnter={() => setActive(i)}
                 onClick={() => pick(o.value)}
               >
+                {o.icon && <span className="msel-opt-icon">{o.icon}</span>}
                 <span>{o.label}</span>
                 {o.hint && <span className="msel-opt-hint">{o.hint}</span>}
                 {o.value === value && (

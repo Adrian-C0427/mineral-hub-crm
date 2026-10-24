@@ -15,7 +15,7 @@ export interface TimelineEntry {
   subject: string | null;
   body: string | null;
   occurredAt: string;
-  createdBy: string | null;
+  createdBy: UserRef | null;
   threadId: string | null;
 }
 
@@ -69,8 +69,8 @@ export interface DealSummary {
   buyerClosingDate?: string | null;
   selectedBuyer: { id: string; name: string; companyName: string } | null;
   selectedOfferId: string | null;
-  relationshipOwner: { id: string; name: string; avatarColor?: string | null } | null;
-  assignees: { id: string; name: string; avatarColor?: string | null }[];
+  relationshipOwner: UserRef | null;
+  assignees: UserRef[];
   estimatedClosingCosts: number | null;
   // Record discriminator + owned-asset fields (null/undefined for opportunities).
   recordType: RecordType;
@@ -190,7 +190,9 @@ export interface BuyerActivityRow {
   timeline: TimelineEntry[];
 }
 
-export interface UserLite { id: string; name: string; email?: string; role?: string; }
+/** A person as the API shows them everywhere (owner, assignee, creator…): the shared avatar's data. */
+export interface UserRef { id: string; name: string; firstName?: string | null; lastName?: string | null; avatarColor?: string | null }
+export interface UserLite extends UserRef { email?: string; role?: string; }
 
 export type SellerType = "INDIVIDUAL" | "TRUST" | "LLC" | "CORPORATION" | "ESTATE" | "PARTNERSHIP" | "OTHER";
 
@@ -240,7 +242,7 @@ export interface OppSummary {
   pipelineId: string;
   stage: Stage;
   currentStageEnteredAt: string;
-  owner: { id: string; name: string; avatarColor?: string | null } | null;
+  owner: UserRef | null;
   contactId: string | null;
   sellerName: string | null;
   companyName: string | null;
@@ -266,7 +268,7 @@ export interface OppStageHistoryRow {
   fromStage: Stage;
   toStage: Stage;
   reason: string | null;
-  changedBy: { id: string; name: string } | null;
+  changedBy: UserRef | null;
   createdAt: string;
 }
 
@@ -274,7 +276,7 @@ export interface OppActivityRow {
   id: string;
   kind: OppActivityKind | string;
   body: string;
-  createdBy: { id: string; name: string } | null;
+  createdBy: UserRef | null;
   createdAt: string;
 }
 
@@ -292,6 +294,46 @@ export interface Opp extends OppSummary {
   docFolders: string[];
 }
 
+/**
+ * A contact's mineral interest (GET /contacts/:id/minerals): the deal they are
+ * a seller on, or their not-yet-converted prospect — the record itself, not a
+ * copy. `status` is the deal's SYSTEM status from its stage key.
+ */
+export interface ContactMineralInterest {
+  kind: "deal" | "opportunity";
+  id: string;
+  dealId?: string;
+  opportunityId?: string;
+  name: string;
+  status: "UNDER_CONTRACT" | "CLOSED" | "DEAD" | "PROSPECT";
+  stage: string;
+  pipelineId: string | null;
+  recordType?: string;
+  currentStageEnteredAt: string;
+  states: string[];
+  counties: string[];
+  abstractIds: string[];
+  surveys: string[];
+  assetTypes?: string[];
+  grossAcres: number | null;
+  acreageNma: number | null;
+  nra: number | null;
+  royaltyRate?: string | null;
+  operator?: string | null;
+  rrc?: string | null;
+  leaseStatus?: string | null;
+  leaseStatuses?: string[];
+  leaseInfo?: string | null;
+  leaseEffectiveDate?: string | null;
+  leaseExpirationDate?: string | null;
+  ownershipPercent?: number | null;
+  isPrimary?: boolean;
+  dateUnderContract?: string | null;
+  originalClosingDate?: string | null;
+  closedDate?: string | null;
+  owner: UserRef | null;
+}
+
 /** The linked seller Contact as the opportunity shows it. */
 export interface OppContact {
   id: string; firstName: string; lastName: string; entityName: string | null; phone: string | null; email: string | null;
@@ -301,7 +343,7 @@ export interface OppContact {
 
 export interface OppFile {
   id: string; category: string; folder: string; filename: string; mimeType: string; sizeBytes: number;
-  uploadedBy: string | null; createdAt: string; updatedAt?: string; versionCount?: number;
+  uploadedBy: UserRef | null; createdAt: string; updatedAt?: string; versionCount?: number;
 }
 
 /** One "Extended +N days" action on a deal's Contract timeline (deal detail). */
@@ -310,6 +352,6 @@ export interface ContractExtension {
   fromDate: string;
   toDate: string;
   days: number;
-  extendedBy: { id: string; name: string | null } | null;
+  extendedBy: (Omit<UserRef, "name"> & { name: string | null }) | null;
   createdAt: string;
 }
