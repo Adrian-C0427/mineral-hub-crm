@@ -257,8 +257,11 @@ export interface ParsedParty {
  *   3 — an "&" inside an organisation's own name ("BROADMOOR LAND & MINERALS
  *       LLC") no longer blocks the split of the cell it sits in; an unclosed
  *       bracket ("( from Moroney") is an annotation too.
+ *   4 — once a legal form has closed a party, what follows it is OTHER parties
+ *       even without legal forms of their own ("EIGHT ROW HOLDINGS LLC & EIGHT
+ *       ROW HOLDINGS & BOYD PATRICK" is three).
  */
-export const PARTY_RULES_VERSION = 3;
+export const PARTY_RULES_VERSION = 4;
 
 /** Legal-form words that mark a text as a COMPLETE organisation name. */
 const LEGAL_FORM_RE = /\b(?:L\.?L\.?C|L\.?P|L\.?L\.?P|LTD|INC(?:ORPORATED)?|CORP(?:ORATION)?|CO|COMPANY|LC|PLLC|TRUST|PARTNERSHIP|ESTATE|FOUNDATION|BANK|CHURCH|ASSOCIATION|ASSN|UNIVERSITY|COLLEGE)\.?\b/i;
@@ -270,27 +273,49 @@ const LEGAL_FORM_END_RE = new RegExp(`${LEGAL_FORM_RE.source}\\s*$`, "i");
  * "A LLC & B LP" names two parties; "SMITH & SONS LLC" and "JOHN & MARY
  * SMITH" name one. Read left to right, an organisation's name runs up to its
  * legal form, so an "&" INSIDE a name ("BROADMOOR LAND & MINERALS LLC") stays
- * inside it and the "&" AFTER a legal form is the boundary. The cell splits
- * only when every resulting party carries its own legal form — text left
- * over without one means the whole cell is one entity, as written.
+ * inside it and the "&" AFTER a legal form is a boundary. A cell with no
+ * legal form at all is one entity as written ("JOHN & MARY SMITH"), and so is
+ * one whose only legal form ends it ("SMITH & SONS LLC"). Once a legal form
+ * has closed a party, though, the text after it is OTHER parties — with or
+ * without legal forms of their own ("EIGHT ROW HOLDINGS LLC & EIGHT ROW
+ * HOLDINGS & BOYD PATRICK" is three) — split at each "&", except that a
+ * lone first name joins the name after it ("… LLC & JOHN & MARY SMITH").
  */
 function splitAmpersand(part: string): string[] {
   // Keep the separators as written so a rebuilt name reads as the record did.
   const bits = part.split(/(\s*(?:&|\bAND\b)\s*)/i);
   if (bits.length < 3) return [part];
-  const out: string[] = [];
-  let cur = "";
+  const pieces: string[] = [];
+  const seps: string[] = [];
   for (let i = 0; i < bits.length; i += 2) {
     const piece = bits[i].trim();
-    const sep = bits[i - 1] ?? "";
     if (!piece) continue;
-    cur = cur ? `${cur}${sep}${piece}` : piece;
-    // The legal form closes the NAME; a share, annotation or role written after
-    // it ("… LP (2/3)", "… LLC, Trustee") doesn't keep the party open.
-    const bare = stripRole(extractAnnotations(extractInterest(piece).name).name);
-    if (/[A-Za-z]/.test(bare) && LEGAL_FORM_END_RE.test(bare)) { out.push(cur.trim()); cur = ""; }
+    pieces.push(piece);
+    seps.push(bits[i - 1] ?? "");
   }
-  if (cur.trim()) return [part];
+  // The legal form closes the NAME; a share, annotation or role written after
+  // it ("… LP (2/3)", "… LLC, Trustee") doesn't keep the party open.
+  const closes = pieces.map((p) => {
+    const bare = stripRole(extractAnnotations(extractInterest(p).name).name);
+    return /[A-Za-z]/.test(bare) && LEGAL_FORM_END_RE.test(bare);
+  });
+  if (!closes.some(Boolean)) return [part];
+  // Text before a legal form belongs to that name ("BROADMOOR LAND & MINERALS
+  // LLC"); each closed name is one party.
+  const out: string[] = [];
+  let cur = "";
+  let lastClose = -1;
+  for (let i = 0; i < pieces.length; i++) {
+    cur = cur ? `${cur}${seps[i]}${pieces[i]}` : pieces[i];
+    if (closes[i]) { out.push(cur.trim()); cur = ""; lastClose = i; }
+  }
+  // Whatever follows the last closed name is other parties, one per "&" — a
+  // lone first name joins the name after it ("… & JOHN & MARY SMITH").
+  for (let i = lastClose + 1; i < pieces.length; i++) {
+    const lone = !/\s/.test(pieces[i]) && i + 1 < pieces.length;
+    out.push(lone ? `${pieces[i]}${seps[i + 1]}${pieces[i + 1]}`.trim() : pieces[i]);
+    if (lone) i++;
+  }
   return out.length >= 2 ? out : [part];
 }
 

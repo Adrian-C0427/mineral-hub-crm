@@ -82,10 +82,18 @@ describe("rules v3 — an \"&\" inside a name, and unclosed brackets", () => {
     expect(names("FMTX LP & WESTERN HORIZON ENERGY LLC & BROADMOOR LAND & MINERALS LLC")).toEqual(["FMTX LP", "WESTERN HORIZON ENERGY LLC", "BROADMOOR LAND & MINERALS LLC"]);
     expect(names("BROADMOOR LAND AND MINERALS LLC and SMITH & SONS INC")).toEqual(["BROADMOOR LAND AND MINERALS LLC", "SMITH & SONS INC"]);
   });
-  it("still keeps one entity when any part lacks a legal form", () => {
+  it("keeps one entity when there is no legal form, or the only one ends the text", () => {
     expect(names("SMITH & SONS LLC")).toEqual(["SMITH & SONS LLC"]);
     expect(names("JOHN & MARY SMITH")).toEqual(["JOHN & MARY SMITH"]);
-    expect(names("ACME MINERALS LLC & JOHN SMITH")).toEqual(["ACME MINERALS LLC & JOHN SMITH"]);
+    expect(names("BROADMOOR LAND & MINERALS LLC")).toEqual(["BROADMOOR LAND & MINERALS LLC"]);
+  });
+  it("rules v4: after a legal form has closed a party, what follows is other parties", () => {
+    // The same entity written twice (with and without its LLC) is one party.
+    expect(names("EIGHT ROW HOLDINGS LLC & EIGHT ROW HOLDINGS & BOYD PATRICK")).toEqual(["EIGHT ROW HOLDINGS LLC", "BOYD PATRICK"]);
+    expect(names("EIGHT ROW HOLDINGS LLC & EIGHT ROW 1B LLC & BOYD PATRICK")).toEqual(["EIGHT ROW HOLDINGS LLC", "EIGHT ROW 1B LLC", "BOYD PATRICK"]);
+    expect(names("ACME MINERALS LLC & JOHN SMITH")).toEqual(["ACME MINERALS LLC", "JOHN SMITH"]);
+    expect(names("ACME MINERALS LLC & JOHN & MARY SMITH")).toEqual(["ACME MINERALS LLC", "JOHN & MARY SMITH"]);
+    expect(names("ACME MINERALS LLC & SMITH FAMILY TRUST & BOYD PATRICK")).toEqual(["ACME MINERALS LLC", "SMITH FAMILY TRUST", "BOYD PATRICK"]);
   });
   it("treats an opening bracket that never closes as an annotation", () => {
     const { parties } = parsePartyCell("WESTERN HORIZON ENERGY LLC ( from Moroney");
