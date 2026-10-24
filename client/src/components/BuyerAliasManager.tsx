@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { fmtDate } from "../lib/format";
 import { ConfirmDialog, Modal, showToast } from "./ui";
 import { CollapsibleSection } from "./CollapsibleSection";
 
@@ -12,16 +11,11 @@ import { CollapsibleSection } from "./CollapsibleSection";
  * chip (removable). "Merge / add alias" opens a search: pick another CRM
  * buyer to MERGE it into this one (all its data combines here, its names
  * become aliases), or add any typed name as an alias outright — no name
- * similarity required, the user is intentionally associating them. Every
- * association is audited (who, what, when), and administrators can undo an
- * incorrect merge from the history list.
+ * similarity required, the user is intentionally associating them. (The
+ * server still records every association; nothing of that is shown here.)
  */
 
 interface BuyerRow { id: string; companyName: string }
-interface HistoryEvent {
-  id: string; eventType: string; summary: string;
-  actorName: string | null; createdAt: string; undoable: boolean;
-}
 
 export function BuyerAliasManager({ buyerId, companyName, aliases, onChanged }: {
   buyerId: string;
@@ -35,32 +29,15 @@ export function BuyerAliasManager({ buyerId, companyName, aliases, onChanged }: 
   const canMerge = can("deleteBuyers");
 
   const [open, setOpen] = useState(false);
-  const [history, setHistory] = useState<HistoryEvent[]>([]);
   const [removeAlias, setRemoveAlias] = useState<string | null>(null);
-  const [undoEvent, setUndoEvent] = useState<HistoryEvent | null>(null);
   const [busy, setBusy] = useState(false);
-
-  const loadHistory = () => {
-    api.get<{ events: HistoryEvent[] }>(`/buyers/${buyerId}/merge-history`)
-      .then((d) => setHistory(d.events)).catch(() => setHistory([]));
-  };
-  useEffect(loadHistory, [buyerId]);
 
   async function doRemoveAlias(name: string) {
     setBusy(true);
     try {
       await api.del(`/buyers/${buyerId}/aliases`, { name });
       showToast(`Alias "${name}" removed.`);
-      setRemoveAlias(null); loadHistory(); onChanged();
-    } finally { setBusy(false); }
-  }
-
-  async function doUndo(e: HistoryEvent) {
-    setBusy(true);
-    try {
-      const r = await api.post<{ ok: boolean; restoredBuyer: { companyName: string } }>(`/buyers/merge-undo/${e.id}`, {});
-      showToast(`Merge undone — "${r.restoredBuyer.companyName}" restored as its own profile.`);
-      setUndoEvent(null); loadHistory(); onChanged();
+      setRemoveAlias(null); onChanged();
     } finally { setBusy(false); }
   }
 
@@ -98,25 +75,6 @@ export function BuyerAliasManager({ buyerId, companyName, aliases, onChanged }: 
               ))}
             </span>
           )}
-
-        {history.length > 0 && (
-          <>
-            <span className="alias-canon-label">Audit trail</span>
-            <div className="alias-history">
-              {history.map((e) => (
-                <div className="alias-history-row" key={e.id}>
-                  <span className="alias-history-text">
-                    {e.summary}
-                    <span className="muted"> · {e.actorName ?? "system"}, {fmtDate(e.createdAt)}</span>
-                  </span>
-                  {e.undoable && canMerge && (
-                    <button type="button" className="small" onClick={() => setUndoEvent(e)}>Undo merge</button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </>
-        )}
       </div>
 
       {open && (
@@ -124,7 +82,7 @@ export function BuyerAliasManager({ buyerId, companyName, aliases, onChanged }: 
           buyerId={buyerId}
           companyName={companyName}
           onClose={() => setOpen(false)}
-          onDone={() => { setOpen(false); loadHistory(); onChanged(); }}
+          onDone={() => { setOpen(false); onChanged(); }}
           canMerge={canMerge}
         />
       )}
@@ -136,16 +94,6 @@ export function BuyerAliasManager({ buyerId, companyName, aliases, onChanged }: 
           busy={busy}
           onCancel={() => setRemoveAlias(null)}
           onConfirm={() => doRemoveAlias(removeAlias)}
-        />
-      )}
-      {undoEvent && (
-        <ConfirmDialog
-          title="Undo this merge?"
-          message={<>The absorbed buyer profile will be restored (identity, contact info, buy box, owners, tags) and the aliases this merge added will be removed from <strong>{companyName}</strong>. Deals, offers, messages, and documents that moved during the merge remain on this buyer — nothing is deleted.</>}
-          confirmLabel="Undo merge"
-          busy={busy}
-          onCancel={() => setUndoEvent(null)}
-          onConfirm={() => doUndo(undoEvent)}
         />
       )}
     </CollapsibleSection>
@@ -252,16 +200,14 @@ function MergeSearchModal({ buyerId, companyName, onClose, onDone, canMerge }: {
                 {companyName} stays the canonical buyer. Everything from {pick.buyer.companyName} — deals,
                 offers, messages, documents, notes, buy box, owners, tags, and research history — is
                 combined here (duplicates collapse to one), and its name becomes an alias so historical
-                records stay attributed correctly. This is recorded in the audit trail and an
-                administrator can undo it.
+                records stay attributed correctly.
               </span>
             </p>
           ) : (
             <p style={{ marginTop: 0, fontSize: 13.5, lineHeight: 1.55 }}>
               Add <strong>{pick.name}</strong> as an alias of <strong>{companyName}</strong>?<br />
               <span className="muted">
-                Research activity recorded under that name will count toward this buyer. Recorded in the
-                audit trail; removable at any time.
+                Research activity recorded under that name will count toward this buyer. Removable at any time.
               </span>
             </p>
           )}
