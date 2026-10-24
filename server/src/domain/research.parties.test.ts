@@ -76,6 +76,39 @@ describe("role words are dropped from the name", () => {
   });
 });
 
+describe("rules v3 — an \"&\" inside a name, and unclosed brackets", () => {
+  it("splits a cell at the \"&\" after a legal form, not the one inside an entity's own name", () => {
+    expect(names("WESTERN HORIZON ENERGY LLC & BROADMOOR LAND & MINERALS LLC")).toEqual(["WESTERN HORIZON ENERGY LLC", "BROADMOOR LAND & MINERALS LLC"]);
+    expect(names("FMTX LP & WESTERN HORIZON ENERGY LLC & BROADMOOR LAND & MINERALS LLC")).toEqual(["FMTX LP", "WESTERN HORIZON ENERGY LLC", "BROADMOOR LAND & MINERALS LLC"]);
+    expect(names("BROADMOOR LAND AND MINERALS LLC and SMITH & SONS INC")).toEqual(["BROADMOOR LAND AND MINERALS LLC", "SMITH & SONS INC"]);
+  });
+  it("still keeps one entity when any part lacks a legal form", () => {
+    expect(names("SMITH & SONS LLC")).toEqual(["SMITH & SONS LLC"]);
+    expect(names("JOHN & MARY SMITH")).toEqual(["JOHN & MARY SMITH"]);
+    expect(names("ACME MINERALS LLC & JOHN SMITH")).toEqual(["ACME MINERALS LLC & JOHN SMITH"]);
+  });
+  it("treats an opening bracket that never closes as an annotation", () => {
+    const { parties } = parsePartyCell("WESTERN HORIZON ENERGY LLC ( from Moroney");
+    expect(parties.map((p) => p.name)).toEqual(["WESTERN HORIZON ENERGY LLC"]);
+    expect(parties[0].note).toBe("from Moroney");
+    expect(names("ACME LLC [40 acres")).toEqual(["ACME LLC"]);
+  });
+});
+
+describe("similarity measures the whole name, not one shared word", () => {
+  it("does not treat every company with HORIZON in its name as the same buyer", () => {
+    for (const other of ["HORIZON ROYALTIES LLC", "HORIZON MINERALS ACQUISITIONS GROUP INC", "WESTERN HORIZON ENERGY LLC", "NEW HORIZON OIL & GAS LTD", "WESTERN HORIZON"]) {
+      expect(nameSimilarity("HORIZON MINERALS LLC", other), other).toBeLessThan(0.85);
+    }
+    expect(nameSimilarity("HORIZON ENERGY PARTNERS LP", "WESTERN HORIZON ENERGY LLC")).toBeLessThan(0.85);
+    expect(nameSimilarity("WESTERN HORIZON ENERGY LLC", "NEW HORIZON OIL & GAS LTD")).toBeLessThan(0.6);
+  });
+  it("a misspelling still matches, a different word does not", () => {
+    expect(nameSimilarity("WESTERN HORIZON ENERGY LLC", "WESTERN HORIZN ENERGY LLC")).toBeGreaterThanOrEqual(0.85);
+    expect(nameSimilarity("WESTERN HORIZON ENERGY LLC", "WESTERN HORIZON ROYALTY LLC")).toBeLessThan(0.85);
+  });
+});
+
 describe("similarity ignores words every mineral company shares", () => {
   it("does not confuse One Star Minerals with Morningstar Minerals", () => {
     expect(nameSimilarity("ONE STAR MINERALS LLC", "MORNINGSTAR MINERALS LLC")).toBeLessThan(0.8);
