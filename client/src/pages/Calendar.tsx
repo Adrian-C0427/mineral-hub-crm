@@ -7,6 +7,8 @@ import { Select, type SelectOption } from "../components/Select";
 import { DateField } from "../components/DateField";
 import { useAuth } from "../auth/AuthContext";
 import { useIsPhonePortrait } from "../lib/mobile";
+import { UserAvatar, userOptions } from "../components/UserAvatar";
+import type { UserRef } from "../types";
 
 /* ------------------------------------------------------------------ types --
  * The /calendar contract. Hand-entered events are editable; closings,
@@ -23,7 +25,7 @@ interface CalEvent {
   start: string | null;
   end: string | null;
   link: { kind: "deal" | "buyer" | "contact"; id: string; label: string } | null;
-  assignee: { id: string; name: string } | null;
+  assignee: UserRef | null;
   notes: string | null;
   done: boolean;
   href: string | null;
@@ -37,7 +39,7 @@ interface FormState {
   allDay: boolean; link: string; who: string; notes: string;
 }
 interface Named { id: string; name: string }
-interface People { deals: Named[]; buyers: Named[]; users: Named[] }
+interface People { deals: Named[]; buyers: Named[]; users: UserRef[] }
 type TypeEdit = { mode: "edit"; id: string; value: string } | { mode: "add"; value: string } | { mode: "color"; id: string } | null;
 
 const MON = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -64,7 +66,6 @@ function fmtT(t: string | null): string {
   return `${((h + 11) % 12) + 1}${m ? ":" + pad(m) : ""}${h >= 12 ? "p" : "a"}`;
 }
 const timeRange = (e: CalEvent) => (e.allDay || !e.start ? "All day" : fmtT(e.start) + (e.end ? " – " + fmtT(e.end) : ""));
-const initials = (name: string) => name.split(/\s+/).filter(Boolean).map((w) => w[0]).join("").slice(0, 2).toUpperCase();
 const plural = (n: number) => `${n} event${n === 1 ? "" : "s"}`;
 const errText = (e: unknown) => (e instanceof ApiError && e.message ? e.message : "Something went wrong. Please try again.");
 /** Event-type colours are data: pass them to CSS, which derives the tints. */
@@ -238,9 +239,9 @@ export function Calendar() {
     if (peopleAsked.current) return;
     peopleAsked.current = true;
     const list = (path: string, allowed: boolean) => (allowed ? api.get<Named[]>(path).catch(() => [] as Named[]) : Promise.resolve([] as Named[]));
-    Promise.all([list("/deals", can("viewDeals")), list("/buyers", can("viewBuyers")), list("/users", true)])
+    Promise.all([list("/deals", can("viewDeals")), list("/buyers", can("viewBuyers")), api.get<UserRef[]>("/users").catch(() => [] as UserRef[])])
       .then(([deals, buyers, users]) => setPeople({
-        deals: deals.map((x) => ({ id: x.id, name: x.name })), buyers: buyers.map((x) => ({ id: x.id, name: x.name })), users: users.map((x) => ({ id: x.id, name: x.name })),
+        deals: deals.map((x) => ({ id: x.id, name: x.name })), buyers: buyers.map((x) => ({ id: x.id, name: x.name })), users,
       }));
   }
   function openNew() {
@@ -340,7 +341,7 @@ export function Calendar() {
           onEdit={() => openEdit(detail)} onDelete={() => removeEvent(detail)} onDone={() => toggleDone(detail)} />
       )}
       {form && (
-        <EventForm initial={form} current={editing} types={types} people={people} phone={phone} self={user ? { id: user.id, name: user.name } : null}
+        <EventForm initial={form} current={editing} types={types} people={people} phone={phone} self={user ?? null}
           onClose={() => setForm(null)}
           onSaved={(date, edited) => { setForm(null); setSel(parseKey(date)); showToast(edited ? "Event updated" : "Event added"); reload(); }} />
       )}
@@ -574,7 +575,7 @@ function EventDetail({ e, phone, canEdit, onClose, onEdit, onDelete, onDone }: {
   const linkTo = e.link ? `/${e.link.kind === "deal" ? "deals" : e.link.kind === "buyer" ? "buyers" : "contacts"}/${e.link.id}` : null;
   const link = e.link && linkTo ? <Link className="cal-dlink" to={linkTo}>{e.link.label}</Link> : <span className="cal-dnone">—</span>;
   const who = e.assignee
-    ? <span className="cal-who"><span className="cal-ini">{initials(e.assignee.name)}</span>{e.assignee.name}</span>
+    ? <span className="cal-who"><UserAvatar user={e.assignee} size={22} />{e.assignee.name}</span>
     : <span className="cal-dnone">Unassigned</span>;
   const act = (fn: () => Promise<void>) => async () => { setBusy(true); try { await fn(); } finally { setBusy(false); } };
   const doneLabel = e.done ? "Mark open" : "Mark done";
@@ -634,7 +635,7 @@ function EventDetail({ e, phone, canEdit, onClose, onEdit, onDelete, onDone }: {
 
 /* ------------------------------------------------------------- event form */
 function EventForm({ initial, current, types, people, phone, self, onClose, onSaved }: {
-  initial: FormState; current: CalEvent | undefined; types: CalType[]; people: People | null; phone: boolean; self: Named | null;
+  initial: FormState; current: CalEvent | undefined; types: CalType[]; people: People | null; phone: boolean; self: UserRef | null;
   onClose: () => void; onSaved: (date: string, edited: boolean) => void;
 }) {
   const [f, setF] = useState(initial);
@@ -658,9 +659,9 @@ function EventForm({ initial, current, types, people, phone, self, onClose, onSa
     return [{ value: "", label: "None" }, ...opts];
   }, [people, current]);
   const whoOpts = useMemo(() => {
-    const opts: SelectOption[] = (people?.users ?? []).map((x) => ({ value: x.id, label: x.name }));
-    [self, current?.assignee ?? null].forEach((p) => { if (p && !opts.some((o) => o.value === p.id)) opts.push({ value: p.id, label: p.name }); });
-    return opts.sort((a, b) => a.label.localeCompare(b.label));
+    const list: UserRef[] = [...(people?.users ?? [])];
+    [self, current?.assignee ?? null].forEach((p) => { if (p && !list.some((u) => u.id === p.id)) list.push(p); });
+    return userOptions(list).sort((a, b) => a.label.localeCompare(b.label));
   }, [people, current, self]);
 
   async function save() {

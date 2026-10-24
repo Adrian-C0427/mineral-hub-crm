@@ -6,6 +6,7 @@ import { Banner, ConfirmChanges, ConfirmDialog, OverflowMenu, showToast } from "
 import { Avatar, Tag } from "./kit";
 import { SettingsCardHead } from "./SettingsNav";
 import { Select } from "./Select";
+import { UserAvatar } from "./UserAvatar";
 import { fmtDate, fmtDateLocal } from "../lib/format";
 import { formatPhone } from "../lib/phone";
 import { ROLE_LABEL } from "../lib/roles";
@@ -13,7 +14,7 @@ import { ROLE_LABEL } from "../lib/roles";
 // teamId is null for roles that don't manage membership — it is a join
 // credential, and the API withholds it rather than showing it to everyone.
 interface OrgInfo { id: string; name: string; teamId: string | null; memberCount: number; yourRole: OrgRole | null; yourPermissions: string[] }
-interface Member { id: string; name: string; email: string; phone: string | null; orgRole: OrgRole | null; status: string; lastActiveAt: string | null; avatarColor?: string | null }
+interface Member { id: string; name: string; firstName?: string | null; lastName?: string | null; email: string; phone: string | null; orgRole: OrgRole | null; status: string; lastActiveAt: string | null; avatarColor?: string | null }
 // code is null (codeHidden) when it grants a role the caller may not hand out
 // themselves — the API withholds it. role/expiresAt are null on older codes:
 // Standard User, never expires.
@@ -675,7 +676,7 @@ function OwnerTab({ onFlash, onError, onTransferred }: { onFlash: (m: string) =>
           <div className="field">
             <label>New owner</label>
             <Select value={target} onChange={setTarget} placeholder="Select a member…" clearable searchable ariaLabel="New owner"
-              options={candidates.map((m) => ({ value: m.id, label: `${m.name} (${m.email})` }))} />
+              options={candidates.map((m) => ({ value: m.id, label: m.name, hint: m.email, icon: <UserAvatar user={m} size={18} /> }))} />
           </div>
           <button className="danger" disabled={!target} onClick={() => setConfirmingTransfer(true)}>Transfer ownership</button>
         </div>

@@ -6,8 +6,13 @@ import {
 } from "lucide-react";
 import { api } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
-import { Spinner, Banner, ConfirmDelete, EmptyState, showToast, UserChip, ChipList, OverflowMenu, BackLink } from "../components/ui";
+import { Spinner, Banner, ConfirmDelete, EmptyState, showToast, UserChip, ChipList, OverflowMenu, BackLink, StageBadge } from "../components/ui";
+import { useAbstractLabels } from "../components/AbstractPicker";
+import { ASSET_TYPE_LABELS } from "../lib/options";
+import { acres } from "../lib/format";
+import { royaltyLabel } from "../lib/royalty";
 import { Select } from "../components/Select";
+import { UserAvatar, userOptions } from "../components/UserAvatar";
 import { DateField } from "../components/DateField";
 import { Avatar, Segmented, Tag } from "../components/kit";
 import { TaskFormModal } from "../components/TaskForm";
@@ -16,7 +21,7 @@ import { fmtDate } from "../lib/format";
 import { type ContactRow, TYPES, STATUSES, PREFERRED_CONTACTS, preferredContactLabel, typeLabel, TypeTag, StatusTag } from "./Contacts";
 import { formatPhone, formatPhoneAsYouType, normalizePhone } from "../lib/phone";
 import { useIsPhonePortrait } from "../lib/mobile";
-import type { UserLite } from "../types";
+import type { ContactMineralInterest, UserLite, UserRef } from "../types";
 
 /**
  * Contact workspace (reference layout): left contact-details rail, center
@@ -41,10 +46,10 @@ export interface ContactActivityRow {
   dueDate: string | null;
   completedAt: string | null;
   priority: "LOW" | "MEDIUM" | "HIGH" | string | null;
-  assignedTo: { id: string; name: string; avatarColor?: string | null } | null;
+  assignedTo: UserRef | null;
   pinned: boolean;
   color?: string | null;
-  createdBy: { id: string; name: string } | null;
+  createdBy: UserRef | null;
   createdAt: string;
 }
 
@@ -106,6 +111,7 @@ export function ContactDetail() {
   const canManage = can("manageContacts");
 
   const [contact, setContact] = useState<ContactRow | null>(null);
+  const [minerals, setMinerals] = useState<ContactMineralInterest[]>([]);
   const [all, setAll] = useState<ContactRow[]>([]);
   const [activities, setActivities] = useState<ContactActivityRow[] | null>(null);
   const [users, setUsers] = useState<UserLite[]>([]);
@@ -131,6 +137,7 @@ export function ContactDetail() {
   const load = useCallback(() => {
     api.get<ContactRow>(`/contacts/${id}`).then(setContact).catch(() => setErr("Contact not found."));
     api.get<ContactActivityRow[]>(`/contacts/${id}/activities`).then(setActivities).catch(() => setActivities([]));
+    api.get<{ interests: ContactMineralInterest[] }>(`/contacts/${id}/minerals`).then((r) => setMinerals(r.interests)).catch(() => setMinerals([]));
   }, [id]);
   useEffect(() => {
     load();
@@ -164,7 +171,7 @@ export function ContactDetail() {
     ["activity", "Activity", timeline.length],
     ["tasks", "Tasks", acts.filter((a) => (a.kind === "TASK" || a.kind === "REMINDER") && !a.completedAt).length],
     ["notes", "Notes", acts.filter((a) => a.kind === "NOTE" || a.kind === "CALL").length],
-    ["minerals", "Minerals", 0],
+    ["minerals", "Minerals", minerals.length],
   ];
 
   return (
@@ -203,7 +210,7 @@ export function ContactDetail() {
             <div className="cw-lbl">Owner</div>
             <Select ariaLabel="Owner" clearable searchable placeholder="Unassigned" disabled={!canManage}
               value={contact.owner?.id ?? ""} onChange={(v) => void patch({ ownerId: v || null })}
-              options={users.map((u) => ({ value: u.id, label: u.name }))} />
+              options={userOptions(users)} />
           </div>
           <div>
             <div className="cw-lbl">Status</div>
@@ -260,7 +267,7 @@ export function ContactDetail() {
       </section>
 
       {/* ============================================== right: notes/tasks/... */}
-      <SidePanel contact={contact} activities={activities ?? []} canManage={canManage} onChanged={load} users={users} phoneTab={isPhone ? mtab : null} />
+      <SidePanel contact={contact} activities={activities ?? []} minerals={minerals} canManage={canManage} onChanged={load} users={users} phoneTab={isPhone ? mtab : null} />
       </div>
 
       {confirmDelete && (
@@ -342,7 +349,7 @@ function Timeline({ activities, timeline, canManage, onUpdate, onRemove, textJum
                       <span className="cw-kind-tag">{meta.tag}</span>
                       {a.kind === "CALL" && a.disposition && <Tag tone={DISPOSITION_TONE[a.disposition] ?? "neutral"}>{a.disposition}</Tag>}
                       <span className="cw-entry-meta">
-                        {fmtTime(a.createdAt)} · {a.createdBy?.name ?? "—"}
+                        {fmtTime(a.createdAt)} · {a.createdBy ? <UserAvatar user={a.createdBy} size={14} withName className="inline" /> : "—"}
                         {a.kind === "CALL" && a.durationSeconds != null && <> · {a.durationSeconds} sec</>}
                       </span>
                       {actionable && (
@@ -664,7 +671,7 @@ function FieldSections({ contact, canManage, onSave }: { contact: ContactRow; ca
           edit: { kind: "text", value: contact.source ?? "", body: (v) => ({ source: v.trim() || null }) },
         },
         // Owner is assigned from the identity card's Owner selector above.
-        { label: "Owner", display: contact.owner?.name ?? null },
+        { label: "Owner", display: contact.owner ? <UserAvatar user={contact.owner} size={18} withName className="inline" /> : null },
       ],
     },
     {
@@ -809,8 +816,8 @@ const TASK_PRIORITIES: { v: string; label: string; tone: "neutral" | "warn" | "d
   { v: "HIGH", label: "High", tone: "danger" },
 ];
 
-function SidePanel({ contact, activities, canManage, onChanged, users, phoneTab }: {
-  contact: ContactRow; activities: ContactActivityRow[]; canManage: boolean; onChanged: () => void; users: UserLite[];
+function SidePanel({ contact, activities, minerals, canManage, onChanged, users, phoneTab }: {
+  contact: ContactRow; activities: ContactActivityRow[]; minerals: ContactMineralInterest[]; canManage: boolean; onChanged: () => void; users: UserLite[];
   /** Phone tab strip selection (null on desktop, where the rail's own tabs rule). */
   phoneTab: PhoneTab | null;
 }) {
@@ -921,7 +928,7 @@ function SidePanel({ contact, activities, canManage, onChanged, users, phoneTab 
   };
 
   const TABS: [typeof tab, string, number | null][] = [
-    ["notes", "Notes", noteCount], ["tasks", "Tasks", openTasks.length], ["reminders", "Reminders", reminders.filter((r) => !r.completedAt).length], ["minerals", "Minerals", null],
+    ["notes", "Notes", noteCount], ["tasks", "Tasks", openTasks.length], ["reminders", "Reminders", reminders.filter((r) => !r.completedAt).length], ["minerals", "Minerals", minerals.length || null],
   ];
 
   return (
@@ -993,7 +1000,7 @@ function SidePanel({ contact, activities, canManage, onChanged, users, phoneTab 
                   </div>
                 )}
                 <div className="cw-note-body">{a.body}</div>
-                <div className="cw-note-foot"><span>{fmtDate(a.createdAt)}, {fmtTime(a.createdAt)}</span><span>{a.createdBy?.name ?? ""}</span></div>
+                <div className="cw-note-foot"><span>{fmtDate(a.createdAt)}, {fmtTime(a.createdAt)}</span><span>{a.createdBy ? <UserAvatar user={a.createdBy} size={14} withName className="inline" /> : ""}</span></div>
               </div>
             ))}
           </>
@@ -1016,7 +1023,7 @@ function SidePanel({ contact, activities, canManage, onChanged, users, phoneTab 
                     <div className="cw-addrow">
                       <span style={{ flex: 1, minWidth: 0 }}>
                         <Select ariaLabel="Assignee" clearable searchable placeholder="Assign to me" value={assignee} onChange={setAssignee}
-                          options={users.map((u) => ({ value: u.id, label: u.name }))} />
+                          options={userOptions(users)} />
                       </span>
                       <button className="cw-addbtn" disabled={!draft.trim() || !note.trim() || busy} onClick={() => void add("TASK")}><Plus size={13} /> Add</button>
                     </div>
@@ -1072,20 +1079,28 @@ function SidePanel({ contact, activities, canManage, onChanged, users, phoneTab 
         {tab === "minerals" && (
           <>
             <div className="cw-min-head">
-              <span className="cw-lbl">Counties of interest</span>
+              <span className="cw-lbl">Mineral interests</span>
               <Link to="/map" className="cw-maplink"><MapPin size={13} /> View on map</Link>
             </div>
-            {contact.counties.length > 0 ? (
-              <div className="cw-tags">
-                {contact.counties.map((c) => (
-                  <span key={c} className="cw-county"><MapPin size={12} /> {c}{contact.states[0] ? `, ${contact.states[0]}` : ""}</span>
-                ))}
+            {minerals.length === 0 ? (
+              <EmptyState icon={<CheckSquare size={18} />} title="No mineral interests yet">
+                The deals and prospects this contact is the seller on appear here automatically — the interest entered when a deal is created, kept in step with the deal.
+              </EmptyState>
+            ) : (
+              <div className="cw-minerals">
+                {minerals.map((m) => <MineralInterestCard key={m.id} m={m} />)}
               </div>
-            ) : null}
-            <EmptyState icon={<CheckSquare size={18} />} title="No holdings linked yet">
-              Mineral holdings tied to this contact will appear here as the acquisitions module grows —
-              for now their counties of interest are shown above.
-            </EmptyState>
+            )}
+            {contact.counties.length > 0 && (
+              <>
+                <span className="cw-lbl" style={{ marginTop: 12 }}>Counties of interest</span>
+                <div className="cw-tags">
+                  {contact.counties.map((c) => (
+                    <span key={c} className="cw-county"><MapPin size={12} /> {c}{contact.states[0] ? `, ${contact.states[0]}` : ""}</span>
+                  ))}
+                </div>
+              </>
+            )}
           </>
         )}
       </div>
@@ -1106,5 +1121,60 @@ function SidePanel({ contact, activities, canManage, onChanged, users, phoneTab 
         );
       })()}
     </aside>
+  );
+}
+
+/* ------------------------------------------------------------ minerals */
+
+const MINERAL_STATUS: Record<ContactMineralInterest["status"], { label: string; tone: "accent" | "success" | "neutral" | "violet" }> = {
+  UNDER_CONTRACT: { label: "Under contract", tone: "accent" },
+  CLOSED: { label: "Closed", tone: "success" },
+  DEAD: { label: "Archived", tone: "neutral" },
+  PROSPECT: { label: "Prospect", tone: "violet" },
+};
+
+/**
+ * One mineral interest — the deal (or prospect) this contact is the seller on,
+ * read straight from that record: the same acreage, royalty, geography and
+ * stage the Deal page shows, with the deal's system status (Under contract /
+ * Closed) from its stage key. Opens the deal / opportunity.
+ */
+function MineralInterestCard({ m }: { m: ContactMineralInterest }) {
+  const abstracts = useAbstractLabels(m.abstractIds);
+  const status = MINERAL_STATUS[m.status];
+  const to = m.kind === "deal" ? `/deals/${m.dealId}` : `/opportunities/${m.opportunityId}`;
+  const place = [m.counties.join(", "), m.states.join(", ")].filter(Boolean).join(", ");
+  const rows: [string, React.ReactNode][] = [
+    ["Location", place || null],
+    ["Abstract", m.abstractIds.length ? abstracts : null],
+    ["Survey", m.surveys.length ? m.surveys.join(", ") : null],
+    ["Asset type", m.assetTypes?.length ? m.assetTypes.map((t) => ASSET_TYPE_LABELS[t] ?? t).join(", ") : null],
+    ["Gross acres", m.grossAcres != null ? acres(m.grossAcres) : null],
+    ["NMA", m.acreageNma != null ? acres(m.acreageNma) : null],
+    ["NRA", m.nra != null ? acres(m.nra) : null],
+    ["Royalty", m.royaltyRate ? royaltyLabel(m.royaltyRate) : null],
+    ["Operator", m.operator ?? null],
+    ["Lease", [m.leaseStatus, ...(m.leaseStatuses ?? [])].filter(Boolean).join(", ") || m.leaseInfo || null],
+    ["RRC", m.rrc ?? null],
+    ["Ownership", m.ownershipPercent != null ? `${m.ownershipPercent}%${m.isPrimary ? " · primary seller" : ""}` : m.kind === "deal" && m.isPrimary ? "Primary seller" : null],
+    ["Owner", m.owner ? <UserChip user={m.owner} size={16} /> : null],
+  ];
+  return (
+    <Link to={to} className="cw-mineral">
+      <div className="cw-mineral-head">
+        <span className="cw-mineral-name">{m.name}</span>
+        <Tag tone={status.tone} dot>{status.label}</Tag>
+      </div>
+      <div className="cw-mineral-sub">
+        {m.kind === "deal" ? <>Deal · <StageBadge stage={m.stage} pipelineId={m.pipelineId} /></> : <>Prospect · <StageBadge stage={m.stage} pipelineId={m.pipelineId} /></>}
+        {m.dateUnderContract && <span className="muted"> · under contract {fmtDate(m.dateUnderContract)}</span>}
+        {m.closedDate && <span className="muted"> · closed {fmtDate(m.closedDate)}</span>}
+      </div>
+      <div className="cw-mineral-grid">
+        {rows.filter(([, v]) => v != null && v !== "").map(([k, v]) => (
+          <div key={k} className="cw-mineral-kv"><span className="cw-mineral-k">{k}</span><span className="cw-mineral-v">{v}</span></div>
+        ))}
+      </div>
+    </Link>
   );
 }

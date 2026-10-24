@@ -8,6 +8,7 @@ import { normalizePhone } from "../lib/phone";
 import { Avatar, Tag } from "./kit";
 import { PhoneInput } from "./PhoneInput";
 import { Select } from "./Select";
+import { userOptions } from "./UserAvatar";
 import { StateSelect } from "./StateSelect";
 import { formatPhone } from "../lib/phone";
 import { fmtDateLocal } from "../lib/format";
@@ -339,7 +340,7 @@ function SellerFormModal({ dealId, seller, users, onClose, onSaved }: {
             <Select value={f.assignedTeamMemberId}
               onChange={(v) => setF((p) => ({ ...p, assignedTeamMemberId: v }))}
               placeholder="Unassigned" clearable searchable ariaLabel="Assigned team member"
-              options={users.map((u) => ({ value: u.id, label: u.name }))} />
+              options={userOptions(users)} />
           </Fld>
           <Fld l="Internal notes" wide><textarea rows={3} value={f.internalNotes} onChange={set("internalNotes")} /></Fld>
         </div>

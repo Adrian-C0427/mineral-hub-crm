@@ -7,6 +7,7 @@ import {
   Spinner, Modal, Banner, ConfirmDelete, ConfirmDialog, BackLink, OverflowMenu, showToast, ChipList,
 } from "../components/ui";
 import { StatStrip, Tag, type StatCell } from "../components/kit";
+import { UserAvatar } from "../components/UserAvatar";
 import { useStages } from "../stages";
 import { ChevronDown, Pencil } from "lucide-react";
 import { useUnsavedSection } from "../lib/unsaved";
@@ -844,7 +845,7 @@ function ContractTimelineCard({ deal, onSaved }: { deal: DealDetailData; onSaved
                             <li className="ctl-ext" key={e.id}>
                               <span className="ctl-ext-lbl">Extended +{e.days} days</span>
                               <span className="ctl-ext-meta">
-                                {fmtDate(e.createdAt)}{e.extendedBy?.name ? ` · by ${e.extendedBy.name}` : ""} · to <b>{fmtDate(e.toDate)}</b>
+                                {fmtDate(e.createdAt)}{e.extendedBy?.name && <> · by <UserAvatar user={{ ...e.extendedBy, name: e.extendedBy.name }} size={14} withName className="inline" /></>} · to <b>{fmtDate(e.toDate)}</b>
                               </span>
                             </li>
                           ))}

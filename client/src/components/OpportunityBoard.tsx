@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { Spinner, showToast, Modal, OverflowMenu } from "./ui";
 import { Avatar } from "./kit";
+import { UserAvatar } from "./UserAvatar";
 import { Select } from "./Select";
 import { acres, fmtDate, daysBetween } from "../lib/format";
 import { roundTo } from "../lib/money";
@@ -706,7 +707,7 @@ export function ConvertOpportunityModal({ opp, pipeline, pipelines, onClose, onC
           <li><span>Seller</span><b>{seller ?? <i>None yet — add sellers on the deal</i>}</b></li>
           <li><span>Property</span><b>{property || <i>Not set</i>}</b></li>
           <li><span>Acreage</span><b>{acreage || <i>Not set</i>}</b></li>
-          <li><span>Owner</span><b>{opp.owner?.name ?? <i>Unassigned</i>}</b></li>
+          <li><span>Owner</span><b>{opp.owner ? <UserAvatar user={opp.owner} size={16} withName className="inline" /> : <i>Unassigned</i>}</b></li>
         </ul>
         <p className="scm-note">
           Notes, source and any abstract or survey that can't be matched carry over to the deal's notes. The opportunity stays here,

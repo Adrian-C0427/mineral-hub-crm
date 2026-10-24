@@ -20,7 +20,7 @@ usersRouter.get(
     // never password hashes.
     const users = await prisma.user.findMany({
       where: { organizationId: orgId(req) },
-      select: { id: true, name: true, email: true, role: true, status: true, createdAt: true },
+      select: { id: true, name: true, firstName: true, lastName: true, avatarColor: true, email: true, role: true, status: true, createdAt: true },
       orderBy: { name: "asc" },
     });
     res.json(users);

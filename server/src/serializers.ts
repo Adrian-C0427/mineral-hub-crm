@@ -1,3 +1,4 @@
+import { userRef, type UserRef } from "./domain/userRef.js";
 import type { Prisma } from "@prisma/client";
 import { daysUntil, resolveDealDates } from "./domain/dates.js";
 import { computePriority, isOverdue } from "./domain/priority.js";
@@ -12,7 +13,7 @@ export type DealWithRels = Prisma.DealGetPayload<{
   };
 }> & {
   offers?: { id?: string; amount: number; status?: string }[];
-  assignees?: { id: string; name: string; avatarColor?: string | null }[];
+  assignees?: { id: string; name: string; firstName?: string | null; lastName?: string | null; avatarColor?: string | null }[];
   // Multi-asset grouping (optional, populated by list/detail queries). `assets`
   // carries only the scalars needed to roll a package's aggregate up for display;
   // the full child-asset cards are emitted by the detail route via serializeAssetChild.
@@ -219,10 +220,8 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
       : null,
     selectedOfferId: deal.selectedOfferId,
     relationshipOwnerId: deal.relationshipOwnerId,
-    relationshipOwner: deal.relationshipOwner
-      ? { id: deal.relationshipOwner.id, name: deal.relationshipOwner.name, avatarColor: deal.relationshipOwner.avatarColor }
-      : null,
-    assignees: deal.assignees ?? [],
+    relationshipOwner: userRef(deal.relationshipOwner),
+    assignees: (deal.assignees ?? []).map((u) => userRef(u)),
     priority,
     profitEst,
     profitAtAsk: atAsk,
@@ -238,13 +237,13 @@ export type ContractExtensionRow = {
 };
 
 /** One "Extended +N days" entry on the Contract Timeline (deal detail). */
-export function serializeContractExtension(e: ContractExtensionRow, extendedByName: string | null) {
+export function serializeContractExtension(e: ContractExtensionRow, extendedBy: UserRef | null) {
   return {
     id: e.id,
     fromDate: e.fromDate,
     toDate: e.toDate,
     days: e.days,
-    extendedBy: e.extendedByUserId ? { id: e.extendedByUserId, name: extendedByName } : null,
+    extendedBy: extendedBy ?? (e.extendedByUserId ? { id: e.extendedByUserId, name: null, firstName: null, lastName: null, avatarColor: null } : null),
     createdAt: e.createdAt,
   };
 }

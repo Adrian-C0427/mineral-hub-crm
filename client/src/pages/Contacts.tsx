@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { Spinner, Modal, Banner, SearchInput, ConfirmDelete, Req, showToast, CtPill } from "../components/ui";
-import { StatStrip, Segmented, Tag, Avatar, FormSection } from "../components/kit";
+import { StatStrip, Segmented, Tag, FormSection } from "../components/kit";
+import { UserAvatar, shortUserName, userOptions } from "../components/UserAvatar";
 import { SortableTable, type Column } from "../components/SortableTable";
 import { useRowSelection, BulkBar } from "../components/bulk";
 import { downloadCsv } from "../lib/csv";
@@ -15,7 +16,7 @@ import { PhoneInput } from "../components/PhoneInput";
 import { DateField } from "../components/DateField";
 import { fmtDate, toInputDate } from "../lib/format";
 import { formatPhone } from "../lib/phone";
-import type { UserLite } from "../types";
+import type { UserLite, UserRef } from "../types";
 
 /**
  * Acquisitions — Contacts.
@@ -50,7 +51,7 @@ export interface ContactRow {
   notes: string | null;
   tags?: string[];
   listIds?: string[];
-  owner: { id: string; name: string; avatarColor?: string | null } | null;
+  owner: UserRef | null;
   lastContactedAt: string | null;
   nextFollowUpDate: string | null;
   createdAt: string;
@@ -91,13 +92,6 @@ export function StatusTag({ status }: { status: string }) {
   return <Tag tone={STATUS_TONES[status] ?? "neutral"} dot>{statusLabel(status)}</Tag>;
 }
 export { CtPill };
-export const initialsOf = (name: string): string =>
-  name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
-/** "Adrian Campos" → "Adrian C." (owner cell). */
-const shortName = (name: string): string => {
-  const parts = name.split(/\s+/).filter(Boolean);
-  return parts.length > 1 ? `${parts[0]} ${parts[parts.length - 1]![0]}.` : name;
-};
 
 /** Lists filter: one dashed "Lists" button opening the existing multi-select
  *  list chips (live counts), Clear and Manage lists. Closes after each pick. */
@@ -209,8 +203,8 @@ export function Contacts() {
     { key: "owner", header: "Owner", type: "text", value: (r) => r.owner?.name ?? null,
       render: (r) => r.owner ? (
         <span className="ct-owner">
-          <Avatar user={r.owner} size={22} />
-          <span className="ct-owner-name">{shortName(r.owner.name)}</span>
+          <UserAvatar user={r.owner} size={22} />
+          <span className="ct-owner-name">{shortUserName(r.owner)}</span>
         </span>
       ) : <span className="ct-unassigned">Unassigned</span> },
     { key: "last", header: "Last contact", type: "date", value: (r) => r.lastContactedAt, render: (r) => <span className="ct-last">{fmtDate(r.lastContactedAt)}</span> },
@@ -416,7 +410,7 @@ export function ContactModal({ contact, users, onClose, onSaved, onDeleted }: {
         <div className="nd-grid3">
           <div className="field"><label>Type</label><Select ariaLabel="Contact type" value={f.type} onChange={(v) => v && set("type")(v)} options={TYPES.map(([v, l]) => ({ value: v, label: l }))} /></div>
           <div className="field"><label>Status</label><Select ariaLabel="Contact status" value={f.status} onChange={(v) => v && set("status")(v)} options={STATUSES.map(([v, l]) => ({ value: v, label: l }))} /></div>
-          <div className="field"><label>Owner</label><Select ariaLabel="Owner" clearable value={f.ownerId} onChange={(v) => set("ownerId")(v ?? "")} placeholder="Unassigned" options={users.map((u) => ({ value: u.id, label: u.name }))} searchable /></div>
+          <div className="field"><label>Owner</label><Select ariaLabel="Owner" clearable value={f.ownerId} onChange={(v) => set("ownerId")(v ?? "")} placeholder="Unassigned" options={userOptions(users)} searchable /></div>
         </div>
       </FormSection>
 
@@ -526,7 +520,7 @@ function ContactsBulkBar({ selectedIds, users, lists, onClear, onDone, onExport 
             <div className="field"><label>Status</label><Select ariaLabel="Bulk status" clearable placeholder="Keep current" value={status} onChange={(v) => setStatus(v ?? "")} options={STATUSES.map(([v, l]) => ({ value: v, label: l }))} /></div>
             <div className="field"><label>Type</label><Select ariaLabel="Bulk type" clearable placeholder="Keep current" value={type} onChange={(v) => setType(v ?? "")} options={TYPES.map(([v, l]) => ({ value: v, label: l }))} /></div>
             <div className="field"><label>Assign team member</label><Select ariaLabel="Bulk owner" clearable searchable placeholder="Keep current" value={ownerId} onChange={(v) => setOwnerId(v ?? "")}
-              options={[{ value: "__clear", label: "— Unassign —" }, ...users.map((u) => ({ value: u.id, label: u.name }))]} /></div>
+              options={[{ value: "__clear", label: "— Unassign —" }, ...userOptions(users)]} /></div>
             <div className="field"><label>Next follow-up</label><DateField value={followUp} onChange={setFollowUp} /></div>
           </div>
           <div className="field"><label>Add tags</label><input value={addTags} onChange={(e) => setAddTags(e.target.value)} placeholder="Comma-separated, e.g. mailer-3, hot" /></div>

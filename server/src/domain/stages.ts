@@ -135,3 +135,14 @@ export async function lockStageRow(tx: Prisma.TransactionClient, table: "Deal" |
   if (table === "Deal") await tx.$queryRaw`SELECT id FROM "Deal" WHERE id = ${id} FOR UPDATE`;
   else await tx.$queryRaw`SELECT id FROM "Opportunity" WHERE id = ${id} FOR UPDATE`;
 }
+
+/**
+ * A deal's SYSTEM transaction status, from its stage KEY — never from the
+ * (customizable) stage label: CLOSED and DEAD are the two permanent terminal
+ * keys; every other stage of a deals pipeline is a deal under contract. This
+ * is what a seller contact's mineral interest shows for the deal.
+ */
+export type DealStatus = "UNDER_CONTRACT" | "CLOSED" | "DEAD";
+export function dealStatus(stageKey: string): DealStatus {
+  return stageKey === "CLOSED" ? "CLOSED" : stageKey === "DEAD" ? "DEAD" : "UNDER_CONTRACT";
+}

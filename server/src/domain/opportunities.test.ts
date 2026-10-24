@@ -160,7 +160,7 @@ describe("serializers", () => {
   };
   it("summary carries the board fields and no notes/phone/email", () => {
     const s = serializeOpportunitySummary(row);
-    expect(s).toMatchObject({ id: "o1", owner: { id: "u1", name: "Ann" }, estNma: 2, source: "src" });
+    expect(s).toMatchObject({ id: "o1", owner: { id: "u1", name: "Ann", firstName: null, lastName: null, avatarColor: null }, estNma: 2, source: "src" });
     expect("notes" in s).toBe(false);
     expect("phone" in s).toBe(false);
   });
@@ -179,7 +179,7 @@ describe("serializers", () => {
     expect(d.docFolders).toEqual([]);
     expect(d.convertedDeal).toEqual({ id: "d1", name: "Deal", stage: "UNDER_CONTRACT" });
     expect(d.stageHistory).toEqual([{ id: "h1", fromStage: "", toStage: "NEW_OPPORTUNITY", reason: null, changedBy: null, createdAt: t }]);
-    expect(d.activities[0].createdBy).toEqual({ id: "u1", name: "Ann" });
+    expect(d.activities[0].createdBy).toMatchObject({ id: "u1", name: "Ann" });
   });
 });
 

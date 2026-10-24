@@ -2,7 +2,8 @@ import { useState, type ReactNode } from "react";
 import { useAuth } from "../auth/AuthContext";
 import { ApiError } from "../api/client";
 import { Modal, Req } from "./ui";
-import { Select } from "./Select";
+import { Select, type SelectOption } from "./Select";
+import { UserAvatar, userOptions } from "./UserAvatar";
 import { Segmented } from "./kit";
 import { DateField } from "./DateField";
 import { taskFormChanged, taskFormMissing, type TaskFormValues, type TaskKind, type TaskPriority } from "../lib/tasks";
@@ -53,9 +54,9 @@ export function TaskFormModal({
   const noun = isTask ? "task" : "reminder";
   const ready = taskFormMissing(v, { detailsRequired, dueRequired }) == null;
 
-  const options = [
-    { value: user?.id ?? "", label: `Me (${user?.name ?? "you"})` },
-    ...users.filter((u) => u.id !== user?.id).map((u) => ({ value: u.id, label: u.name })),
+  const options: SelectOption[] = [
+    { value: user?.id ?? "", label: `Me (${user?.name ?? "you"})`, icon: <UserAvatar user={user} size={18} /> },
+    ...userOptions(users.filter((u) => u.id !== user?.id)),
   ];
   if (v.assignee && !options.some((o) => o.value === v.assignee)) options.push({ value: v.assignee, label: assigneeName ?? "Current assignee" });
 

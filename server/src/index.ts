@@ -12,6 +12,7 @@ import { startDemoResetScheduler } from "./services/demoReset.js";
 import { backfillTransactionInterests } from "./services/researchInterestBackfill.js";
 import { backfillResearchConsistency } from "./services/researchConsistencyBackfill.js";
 import { backfillDocFolders } from "./services/docFoldersBackfill.js";
+import { backfillSellerContacts } from "./services/sellerContactBackfill.js";
 import { ensureGisRegions } from "./services/gisRegions.js";
 import { ensureSonrisWells } from "./services/sonrisWells.js";
 import { ensureRrcRefresh } from "./services/rrcRefresh.js";
@@ -49,6 +50,12 @@ backfillBuyerStatus().catch((e) =>
 // folder list (once per deal — a later removal of the folder sticks).
 backfillDocFolders().catch((e) =>
   console.error("Document folders backfill failed:", e instanceof Error ? e.message : e),
+);
+
+// Idempotent: deal sellers recorded before sellers became Contacts are linked
+// to the contact they reliably are (converted opportunity, email, phone+name).
+backfillSellerContacts().catch((e) =>
+  console.error("Seller contacts backfill failed:", e instanceof Error ? e.message : e),
 );
 
 // Idempotent, lossless: conveyed-interest shares written into recorded party

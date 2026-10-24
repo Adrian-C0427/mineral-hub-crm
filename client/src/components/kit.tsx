@@ -1,6 +1,7 @@
+import { UserAvatar } from "./UserAvatar";
 import { useEffect, type ReactNode, type Ref } from "react";
 import { createPortal } from "react-dom";
-import { userAvatarColor, avatarColor } from "../lib/avatarColor";
+import { avatarColor, userInitials, type AvatarUser } from "../lib/avatarColor";
 
 /**
  * Shared building blocks of the redesign. Each is the single implementation of
@@ -92,18 +93,19 @@ export function SidePanel({ title, subtitle, onClose, children, footer, width = 
   );
 }
 
-const initialsOf = (name: string | null | undefined): string =>
-  (name ?? "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]!.toUpperCase()).join("") || "?";
-
-/** Initials avatar in the person's saved (or name-derived) colour. */
+/**
+ * Initials avatar. For a USER pass `user` (saved colour, first/last-name
+ * initials — the shared UserAvatar); for a non-user name (a contact, a seller)
+ * pass `name` and the colour derives from the name.
+ */
 export function Avatar({ user, name, size = 24, title }: {
-  user?: { name?: string | null; avatarColor?: string | null } | null; name?: string | null; size?: number; title?: string;
+  user?: AvatarUser | null; name?: string | null; size?: number; title?: string;
 }) {
-  const n = user?.name ?? name ?? "";
-  const bg = user ? userAvatarColor(user as Parameters<typeof userAvatarColor>[0]) : avatarColor(n);
+  if (user) return <UserAvatar user={user} size={size} title={title} />;
+  const n = name ?? "";
   return (
-    <span className="avatar" title={title ?? n} style={{ width: size, height: size, fontSize: Math.max(9, Math.round(size * 0.4)), background: bg }}>
-      {initialsOf(n)}
+    <span className="avatar" title={title ?? n} style={{ width: size, height: size, fontSize: Math.max(9, Math.round(size * 0.4)), background: avatarColor(n) }}>
+      {userInitials({ name: n })}
     </span>
   );
 }

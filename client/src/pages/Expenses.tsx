@@ -9,6 +9,7 @@ import { useAuth } from "../auth/AuthContext";
 import { Spinner, Banner, Modal, ConfirmDelete, ConfirmDialog } from "../components/ui";
 import { StatStrip, Avatar, Tag, FormSection } from "../components/kit";
 import { Select } from "../components/Select";
+import { userOptions } from "../components/UserAvatar";
 import { Toggle } from "../components/Toggle";
 import { compactMoney, money, fmtDate, toInputDate } from "../lib/format";
 import { sumMoney } from "../lib/money";
@@ -550,7 +551,7 @@ function AllExpenses({
         <div className="xp-fld"><label>User</label>
           <Select value={filters.userId} onChange={(v) => setFilters((f) => ({ ...f, userId: v }))}
             placeholder="All users" clearable searchable ariaLabel="Filter by user"
-            options={users.map((u) => ({ value: u.id, label: u.name }))} />
+            options={userOptions(users)} />
         </div>
         <div className="xp-fld"><label>Category</label>
           <Select value={filters.categoryId} onChange={(v) => setFilters((f) => ({ ...f, categoryId: v }))}

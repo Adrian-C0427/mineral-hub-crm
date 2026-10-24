@@ -7,6 +7,7 @@ import { Spinner, Banner, BackLink, ConfirmDelete, OverflowMenu, EmptyState, Mod
 import { Segmented, StatStrip, Tag, type StatCell } from "../components/kit";
 import { Tabs } from "../components/Tabs";
 import { Select } from "../components/Select";
+import { UserAvatar, userOptions } from "../components/UserAvatar";
 import { DateField } from "../components/DateField";
 import { GeoFields } from "../components/GeoFields";
 import { useAbstractIndex } from "../components/AbstractPicker";
@@ -22,7 +23,7 @@ import { surveyLabel } from "../lib/abstracts";
 import { acres, fmtDate, fmtDateLocal, fmtDateTime, toInputDate } from "../lib/format";
 import { formatPhone } from "../lib/phone";
 import type { ContactActivityRow } from "./ContactDetail";
-import type { Opp, OppActivityRow, UserLite } from "../types";
+import type { Opp, OppActivityRow, UserLite, UserRef } from "../types";
 // MapLibre is heavy; only load it when the Location card is shown.
 const DealMap = lazy(() => import("../components/DealMap").then((m) => ({ default: m.DealMap })));
 
@@ -132,7 +133,7 @@ export function OpportunityRecord({ opp, onChange: setOpp, reload: load }: { opp
       tone: due?.tone === "danger" ? "danger" : due?.tone === "warn" ? "warn" : "default",
       sub: due && due.tone !== "neutral" ? due.text : opp.lastActivityAt ? `Last activity ${fmtDateLocal(opp.lastActivityAt)}` : undefined,
     },
-    { label: "Owner", value: opp.owner?.name ?? "Unassigned", sub: `Added ${fmtDateLocal(opp.createdAt)}` },
+    { label: "Owner", value: opp.owner ? <UserAvatar user={opp.owner} size={24} withName className="inline" /> : "Unassigned", sub: `Added ${fmtDateLocal(opp.createdAt)}` },
   ];
 
   const tabLabel = (text: string, count: number) => count > 0
@@ -215,7 +216,7 @@ export function OpportunityRecord({ opp, onChange: setOpp, reload: load }: { opp
                       {h.fromStage ? <><span className="dim">{stageLabel(h.fromStage)}</span> → </> : <span className="dim">Created in </span>}<b>{stageLabel(h.toStage)}</b>
                     </span>
                     {h.reason && <span className="op-hist-reason">{h.reason}</span>}
-                    <span className="op-hist-meta">{fmtDateTime(h.createdAt)}{h.changedBy ? ` · ${h.changedBy.name}` : ""}</span>
+                    <span className="op-hist-meta">{fmtDateTime(h.createdAt)}{h.changedBy && <> · <UserAvatar user={h.changedBy} size={16} withName className="inline" /></>}</span>
                   </div>
                 </div>
               ))}
@@ -440,14 +441,14 @@ function TrackingCard({ opp, canEdit, users, pipelineName, stageLabel, onSaved }
   }
   useUnsavedSection(edit, f, seed, save, discard);
   const due = followUpStatus(opp);
-  const ownerOptions = users.map((u) => ({ value: u.id, label: u.name }));
-  if (opp.owner && !users.some((u) => u.id === opp.owner!.id)) ownerOptions.unshift({ value: opp.owner.id, label: opp.owner.name });
+  const ownerList: UserRef[] = opp.owner && !users.some((u) => u.id === opp.owner!.id) ? [opp.owner, ...users] : users;
+  const ownerOptions = userOptions(ownerList);
   return (
     <EditableCard title="Tracking" edit={edit} canEdit={canEdit} saving={saving} error={error} onEdit={() => setEdit(true)} onSave={() => void save()} onCancel={discard}>
       {!edit ? (
         <div className="dd-card-body ddc-view">
           <KvRows groups={[{ rows: [
-            { k: "Pipeline", v: pipelineName }, { k: "Stage", v: stageLabel }, { k: "Owner", v: opp.owner?.name ?? null }, { k: "Source", v: opp.source, title: opp.source },
+            { k: "Pipeline", v: pipelineName }, { k: "Stage", v: stageLabel }, { k: "Owner", v: opp.owner ? <UserAvatar user={opp.owner} size={18} withName className="inline" /> : null }, { k: "Source", v: opp.source, title: opp.source },
             { k: "Next follow-up", v: opp.nextFollowUpDate ? <>{fmtDate(opp.nextFollowUpDate)}{due && due.tone !== "neutral" && <span className={`pl-due ${due.tone}`}>{due.text}</span>}</> : null },
             { k: "Added", v: fmtDateLocal(opp.createdAt) }, { k: "Last activity", v: opp.lastActivityAt ? fmtDateTime(opp.lastActivityAt) : null },
           ] }]} />
@@ -621,7 +622,7 @@ function TasksCard({ contactId, users, onChanged }: { contactId: string | null; 
                     <span className="op-task-meta">
                       <Tag tone={pri.tone} dot>{pri.label}</Tag>
                       {dueKey && <span className={overdue ? "op-task-due overdue" : "op-task-due"}>{overdue ? "Overdue · " : "Due "}{fmtDate(t.dueDate!)}</span>}
-                      {t.assignedTo && <span>· {t.assignedTo.name}</span>}
+                      {t.assignedTo && <span>· <UserAvatar user={t.assignedTo} size={16} withName className="inline" /></span>}
                       {done && <span>· Completed {fmtDateLocal(t.completedAt!)}</span>}
                     </span>
                   </button>
@@ -774,7 +775,7 @@ function ActivityCard({ opp, canEdit, onLogged }: { opp: Opp; canEdit: boolean; 
               <div className="op-ev-main">
                 <div className="op-ev-head">
                   <span className="op-ev-kind">{meta.label}</span>
-                  <span className="op-ev-meta">{fmtDateTime(a.createdAt)}{a.createdBy ? ` · ${a.createdBy.name}` : ""}</span>
+                  <span className="op-ev-meta">{fmtDateTime(a.createdAt)}{a.createdBy && <> · <UserAvatar user={a.createdBy} size={16} withName className="inline" /></>}</span>
                 </div>
                 <div className="op-ev-body">{a.body}</div>
               </div>

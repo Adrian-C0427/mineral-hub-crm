@@ -3,7 +3,9 @@ import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, hasPermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { dealStatus } from "../domain/stages.js";
+import { userRef, userRefSelect } from "../domain/userRef.js";
 import { parse } from "csv-parse/sync";
 import { LIST_LIMIT, MAX_CSV_CHARS } from "../config.js";
 import type { Contact, ContactActivity, ContactList, User } from "@prisma/client";
@@ -28,7 +30,7 @@ export const CONTACT_STATUSES = ["NEW", "CONTACTED", "ENGAGED", "NEGOTIATING", "
 // How the contact prefers to be reached. Optional: NULL = no preference recorded.
 export const PREFERRED_CONTACTS = ["CALL", "TEXT", "EMAIL", "MAIL"] as const;
 
-type ContactWithOwner = Contact & { owner: Pick<User, "id" | "name" | "avatarColor"> | null; lists?: { id: string }[] };
+type ContactWithOwner = Contact & { owner: Pick<User, "id" | "name" | "firstName" | "lastName" | "avatarColor"> | null; lists?: { id: string }[] };
 
 const serialize = (c: ContactWithOwner) => ({
   id: c.id,
@@ -50,7 +52,7 @@ const serialize = (c: ContactWithOwner) => ({
   counties: c.counties,
   notes: c.notes,
   tags: c.tags,
-  owner: c.owner ? { id: c.owner.id, name: c.owner.name, avatarColor: c.owner.avatarColor } : null,
+  owner: userRef(c.owner),
   lastContactedAt: c.lastContactedAt,
   nextFollowUpDate: c.nextFollowUpDate,
   createdAt: c.createdAt,
@@ -103,7 +105,7 @@ async function validateOwner(org: string, ownerId: string | null | undefined): P
   return u.id;
 }
 
-const ownerInclude = { owner: { select: { id: true, name: true, avatarColor: true } }, lists: { select: { id: true } } } as const;
+const ownerInclude = { owner: { select: userRefSelect }, lists: { select: { id: true } } } as const;
 
 /** All contacts (org-scoped). Filtering/search is client-side for now. */
 contactsRouter.get(
@@ -221,8 +223,8 @@ export const CALL_DISPOSITIONS = ["Connected", "No Answer", "Voicemail", "Bad Nu
 export const NOTE_COLORS = ["yellow", "blue", "green", "purple", "pink", "orange"] as const;
 
 type ActivityWithAuthor = ContactActivity & {
-  createdBy: Pick<User, "id" | "name"> | null;
-  assignedTo: Pick<User, "id" | "name" | "avatarColor"> | null;
+  createdBy: Pick<User, "id" | "name" | "firstName" | "lastName" | "avatarColor"> | null;
+  assignedTo: Pick<User, "id" | "name" | "firstName" | "lastName" | "avatarColor"> | null;
 };
 const serializeActivity = (a: ActivityWithAuthor) => ({
   id: a.id,
@@ -234,16 +236,16 @@ const serializeActivity = (a: ActivityWithAuthor) => ({
   dueDate: a.dueDate,
   completedAt: a.completedAt,
   priority: a.priority,
-  assignedTo: a.assignedTo ? { id: a.assignedTo.id, name: a.assignedTo.name, avatarColor: a.assignedTo.avatarColor } : null,
+  assignedTo: userRef(a.assignedTo),
   pinned: a.pinned,
   color: a.color,
-  createdBy: a.createdBy ? { id: a.createdBy.id, name: a.createdBy.name } : null,
+  createdBy: userRef(a.createdBy),
   createdAt: a.createdAt,
 });
 
 const authorInclude = {
-  createdBy: { select: { id: true, name: true } },
-  assignedTo: { select: { id: true, name: true, avatarColor: true } },
+  createdBy: { select: userRefSelect },
+  assignedTo: { select: userRefSelect },
 } as const;
 
 /** Validate an (optional) task assignee is a member of this organization. */
@@ -267,6 +269,104 @@ contactsRouter.get(
     const c = await prisma.contact.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, include: ownerInclude });
     if (!c) throw new HttpError(404, "Contact not found");
     res.json(serialize(c));
+  }),
+);
+
+/**
+ * The contact's mineral interests — every deal they are a seller on
+ * (DealSeller.contactId) and every prospect (Opportunity.contactId) not yet
+ * converted. Nothing is copied: each entry IS the deal / opportunity record,
+ * so Deal Characteristics edits and pipeline moves show here as they happen,
+ * and the status is the deal's system status from its stage key (never the
+ * stage's display name). Deal data needs viewDeals.
+ */
+contactsRouter.get(
+  "/:id/minerals",
+  requirePermission("viewContacts"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const c = await findContact(orgId(req), req.params.id);
+    if (!hasPermission(req, "viewDeals")) { res.json({ interests: [] }); return; }
+    const sellers = await prisma.dealSeller.findMany({
+      where: { contactId: c.id, deal: { organizationId: orgId(req) } },
+      include: {
+        deal: {
+          select: {
+            id: true, name: true, stage: true, pipelineId: true, recordType: true, currentStageEnteredAt: true,
+            states: true, state: true, counties: true, abstractIds: true, surveys: true, assetTypes: true,
+            acreageNma: true, nra: true, royaltyRate: true, operator: true, rrc: true,
+            leaseStatus: true, leaseStatuses: true, leaseInfo: true, leaseEffectiveDate: true, leaseExpirationDate: true,
+            dateUnderContract: true, originalClosingDate: true, closedDate: true, createdAt: true,
+            relationshipOwner: { select: userRefSelect },
+          },
+        },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    // One interest per deal (a contact listed twice on a deal is still one interest).
+    const seen = new Set<string>();
+    const deals = sellers.filter((s) => (seen.has(s.dealId) ? false : (seen.add(s.dealId), true))).map((s) => {
+      const d = s.deal;
+      return {
+        kind: "deal" as const,
+        id: `deal:${d.id}`,
+        dealId: d.id,
+        name: d.name,
+        status: dealStatus(d.stage),
+        stage: d.stage,
+        pipelineId: d.pipelineId,
+        recordType: d.recordType,
+        currentStageEnteredAt: d.currentStageEnteredAt,
+        states: d.states.length ? d.states : d.state ? [d.state] : [],
+        counties: d.counties,
+        abstractIds: d.abstractIds,
+        surveys: d.surveys,
+        assetTypes: d.assetTypes,
+        grossAcres: null as number | null,
+        acreageNma: d.acreageNma,
+        nra: d.nra,
+        royaltyRate: d.royaltyRate,
+        operator: d.operator,
+        rrc: d.rrc,
+        leaseStatus: d.leaseStatus,
+        leaseStatuses: d.leaseStatuses,
+        leaseInfo: d.leaseInfo,
+        leaseEffectiveDate: d.leaseEffectiveDate,
+        leaseExpirationDate: d.leaseExpirationDate,
+        ownershipPercent: s.ownershipPercent,
+        isPrimary: s.isPrimary,
+        dateUnderContract: d.dateUnderContract,
+        originalClosingDate: d.originalClosingDate,
+        closedDate: d.closedDate,
+        owner: d.relationshipOwner,
+      };
+    });
+    const opps = await prisma.opportunity.findMany({
+      where: { contactId: c.id, organizationId: orgId(req), convertedDealId: null },
+      select: {
+        id: true, name: true, stage: true, pipelineId: true, currentStageEnteredAt: true, state: true, county: true, abstract: true, survey: true,
+        estAcres: true, estNma: true, estNra: true, createdAt: true, owner: { select: userRefSelect },
+      },
+      orderBy: { createdAt: "asc" },
+    });
+    const prospects = opps.map((o) => ({
+      kind: "opportunity" as const,
+      id: `opportunity:${o.id}`,
+      opportunityId: o.id,
+      name: o.name,
+      status: "PROSPECT" as const,
+      stage: o.stage,
+      pipelineId: o.pipelineId,
+      currentStageEnteredAt: o.currentStageEnteredAt,
+      states: o.state ? [o.state] : [],
+      counties: o.county ? [o.county] : [],
+      abstractIds: o.abstract ? [o.abstract] : [],
+      surveys: o.survey ? [o.survey] : [],
+      grossAcres: o.estAcres,
+      acreageNma: o.estNma,
+      nra: o.estNra,
+      owner: o.owner,
+    }));
+    res.json({ interests: [...deals, ...prospects] });
   }),
 );
 
