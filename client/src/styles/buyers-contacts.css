@@ -228,13 +228,13 @@
 .bp-card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 18px 14px; }
 .bp-card-head h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--ink); }
 .bp-card-actions { display: flex; gap: 6px; }
-.bp-page .bp-card-head button.small, .bp-page .dpp-head button.small, .bp-page .rel-alias-row button.small, .bp-page .alias-history button.small {
+.bp-page .bp-card-head button.small, .bp-page .dpp-head button.small, .bp-page .rel-alias-row button.small {
   display: inline-flex; align-items: center; gap: 6px; height: 30px; min-height: 30px; padding: 0 11px;
   border: 1px solid var(--line-strong); border-radius: var(--radius-nav); background: var(--surface-2);
   color: var(--ink); font-size: 12.5px; font-weight: 600; box-shadow: none; white-space: nowrap;
 }
 .bp-page .bp-card-head button.small:hover, .bp-page .dpp-head button.small:hover,
-.bp-page .rel-alias-row button.small:hover, .bp-page .alias-history button.small:hover { border-color: var(--line-hover); background: var(--surface-2); }
+.bp-page .rel-alias-row button.small:hover { border-color: var(--line-hover); background: var(--surface-2); }
 .bp-page .bp-card-head button.small.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .bp-page .bp-card-head button.small.primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 
@@ -287,8 +287,6 @@
   border: 0; border-radius: 50%; background: transparent; color: var(--ink-3); box-shadow: none; }
 .bp-page .alias-chip-x:hover { background: var(--danger-tint); color: var(--danger-ink); }
 .alias-none { font-size: 13px; color: var(--ink-3); }
-.bp-page .alias-history { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 6px; }
-.bp-page .alias-history-row { padding: 0; font-size: 13px; color: var(--ink); }
 
 /* Relationships */
 .bp-page .rel2-stats { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 1px; background: var(--line-soft);
@@ -635,7 +633,7 @@
   .bp-page .ovf-btn { width: 40px; }
   .bp-page .bp-card-head { flex-wrap: wrap; }
   .bp-page .bp-card-head button.small, .bp-page .dpp-head button.small,
-  .bp-page .rel-alias-row button.small, .bp-page .alias-history button.small { height: 40px; min-height: 40px; }
+  .bp-page .rel-alias-row button.small { height: 40px; min-height: 40px; }
   .bp-edit input:not([type="checkbox"]):not([type="radio"]) { height: 42px; }
   .bp-row-csz { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
   .bp-row-csz > :first-child { grid-column: 1 / -1; }
