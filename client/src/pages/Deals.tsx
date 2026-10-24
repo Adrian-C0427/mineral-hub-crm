@@ -42,14 +42,10 @@ const shortName = (name: string): string => {
 /**
  * Per-acre costs for a row, from the displayed Our Cost and acreage through
  * lib/perAcre.perAcreRates — the one formula the deal page and the editors
- * use too, so every screen shows the same $/NMA and $/NRA for a deal. (A
- * package uses its rolled-up total and acreage; its children's royalties can
- * differ, so the package's rates are plain total ÷ acres.)
+ * use too, so every screen shows the same $/NMA and $/NRA for a deal.
  */
 function costPerAcre(d: DealSummary): { perNma: number | null; perNra: number | null } {
-  const cost = d.aggOurPrice ?? d.ourPrice;
-  const nma = d.aggAcreageNma ?? d.acreageNma, nra = d.aggNra ?? d.nra;
-  return perAcreRates(cost, nma, nra, d.assetCount ? null : royaltyValue(d.royaltyRate));
+  return perAcreRates(d.ourPrice, d.acreageNma, d.nra, royaltyValue(d.royaltyRate));
 }
 
 const PROFIT_AT_ASK_HINT = "Ask price − Our cost − closing costs: what we'd make selling at our current asking price. Not an offer.";
@@ -160,7 +156,6 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
           <span className="dl-name-txt">{d.name}</span>
           {d.hiddenAt && visibility !== "HIDDEN" && <Tag title={`Hidden from the default Deals view since ${fmtDate(d.hiddenAt)}`}>Hidden</Tag>}
           {d.recordType === "OWNED_ASSET" && <Tag tone="accent" title="This is an owned mineral asset marked for sale — not an acquisition opportunity.">Asset · For sale</Tag>}
-          {d.assetCount ? <Tag title={`${d.assetCount} asset${d.assetCount > 1 ? "s" : ""} in this seller package`}>{d.assetCount} asset{d.assetCount > 1 ? "s" : ""}</Tag> : null}
         </span>
       ) },
     // Width floors on the rest keep the columns from re-measuring to every
@@ -169,20 +164,18 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
       value: (d) => ({ HIGH: 0, MEDIUM: 1, LOW: 2 }[d.priority]),
       render: (d) => <span className="dl-priority"><PriorityBadge priority={d.priority} /></span> },
     { key: "stage", header: "Stage", type: "text", minWidth: 150, value: (d) => d.stage, render: (d) => <span className="dl-stage"><StageBadge stage={d.stage} pipelineId={d.pipelineId} /></span> },
-    { key: "nma", header: "NMA", type: "number", align: "right", minWidth: 72, value: (d) => d.aggAcreageNma ?? d.acreageNma, render: (d) => acres(d.aggAcreageNma ?? d.acreageNma),
-      total: (rows) => acres(sumOf(rows, (d) => d.aggAcreageNma ?? d.acreageNma)) },
+    { key: "nma", header: "NMA", type: "number", align: "right", minWidth: 72, value: (d) => d.acreageNma, render: (d) => acres(d.acreageNma),
+      total: (rows) => acres(sumOf(rows, (d) => d.acreageNma)) },
     // Every column is shown by default; users hide what they don't need via
     // Customize View (saved to their profile). `legacyDefaultHidden` marks the
     // columns an older version hid by default, so a browser layout that merely
     // held those old defaults isn't mistaken for a user's choice.
-    // Same rollup-then-own-value logic as NMA.
-    { key: "nra", header: "NRA", type: "number", align: "right", minWidth: 72, value: (d) => d.aggNra ?? d.nra, render: (d) => acres(d.aggNra ?? d.nra), legacyDefaultHidden: true,
-      total: (rows) => acres(sumOf(rows, (d) => d.aggNra ?? d.nra)) },
-    // Financial columns. Our Cost uses the package rollup like NMA/NRA; Buyer
-    // Purchase Price is the offer Profit Est. is computed from (accepted, else
-    // best), so the three reconcile.
-    { key: "ourCost", header: "Our cost", type: "number", align: "right", minWidth: 110, value: (d) => d.aggOurPrice ?? d.ourPrice, render: (d) => money(d.aggOurPrice ?? d.ourPrice), legacyDefaultHidden: true, newlyAdded: true,
-      total: (rows) => money(sumMoney(rows.map((d) => d.aggOurPrice ?? d.ourPrice))) },
+    { key: "nra", header: "NRA", type: "number", align: "right", minWidth: 72, value: (d) => d.nra, render: (d) => acres(d.nra), legacyDefaultHidden: true,
+      total: (rows) => acres(sumOf(rows, (d) => d.nra)) },
+    // Financial columns. Buyer Purchase Price is the offer Profit Est. is
+    // computed from (accepted, else best), so the three reconcile.
+    { key: "ourCost", header: "Our cost", type: "number", align: "right", minWidth: 110, value: (d) => d.ourPrice, render: (d) => money(d.ourPrice), legacyDefaultHidden: true, newlyAdded: true,
+      total: (rows) => money(sumMoney(rows.map((d) => d.ourPrice))) },
     { key: "buyerPrice", header: "Buyer purchase price", type: "number", align: "right", minWidth: 150, value: (d) => d.buyerPurchasePrice ?? null, render: (d) => money(d.buyerPurchasePrice), legacyDefaultHidden: true, newlyAdded: true,
       total: (rows) => money(sumMoney(rows.map((d) => d.buyerPurchasePrice))) },
     // Totals here are the BLENDED rate (Σ Our cost ÷ Σ acres over the listed
@@ -229,9 +222,9 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
   // visibility). Blended cost is Σ Our cost ÷ Σ acreage (lib/blendedCost),
   // recomputed whenever the rows change, so it always matches the table.
   const blend = blendedCost(filtered);
-  // Same plain sums as the table's totals row (entered / rolled-up acreage only).
-  const nmaInView = sumOf(filtered, (d) => d.aggAcreageNma ?? d.acreageNma);
-  const nraInView = sumOf(filtered, (d) => d.aggNra ?? d.nra);
+  // Same plain sums as the table's totals row (entered acreage only).
+  const nmaInView = sumOf(filtered, (d) => d.acreageNma);
+  const nraInView = sumOf(filtered, (d) => d.nra);
   const blendNote = (skipped: number, converted: number, unit: "NMA" | "NRA") => [
     converted > 0 ? `${converted} converted from ${unit === "NMA" ? "NRA" : "NMA"} at the deal's royalty` : null,
     skipped > 0 ? `${skipped} priced deal${skipped === 1 ? "" : "s"} without ${unit} left out` : null,
@@ -345,7 +338,7 @@ export function Deals({ scope = "all" }: { scope?: Scope }) {
                 const rows = filtered.filter((d) => sel.selected.has(d.id));
                 downloadCsv(`deals-${new Date().toISOString().slice(0, 10)}.csv`,
                   ["Deal", "Priority", "Stage", "NMA", "NRA", "Our Cost", "Our Cost per NMA", "Our Cost per NRA", "Buyer Purchase Price", "Royalty Rate", "Profit Est.", "Under Contract", "Find Buyer By", "Buyer Closing", "Current Buyer", "Owner", "Profit at Asking", "Hidden"],
-                  rows.map((d) => [d.name, d.priority, d.stage, d.aggAcreageNma ?? d.acreageNma ?? "", d.aggNra ?? d.nra ?? "", d.aggOurPrice ?? d.ourPrice ?? "",
+                  rows.map((d) => [d.name, d.priority, d.stage, d.acreageNma ?? "", d.nra ?? "", d.ourPrice ?? "",
                     costPerAcre(d).perNma ?? "", costPerAcre(d).perNra ?? "",
                     d.buyerPurchasePrice ?? "", royaltyLabel(d.royaltyRate), d.profitEst ?? "", d.dateUnderContract ?? "", d.findBuyerByDate ?? "", d.buyerClosingDate ?? "", d.selectedBuyer?.name ?? "", d.relationshipOwner?.name ?? "", d.profitAtAsk ?? "", d.hiddenAt ? "Yes" : "No"]));
               }}

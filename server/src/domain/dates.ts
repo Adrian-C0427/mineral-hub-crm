@@ -7,7 +7,11 @@ import { DEADLINE_RULES } from "../config.js";
  *                  (30 → contract + 0, 40 → +10, 60 → +30, 75 → +45)
  *                  Without a stored Days to Close, the window is read from
  *                  Original Closing − Date Under Contract; failing that, 30.
- * Final Closing  = Original Closing    + 15 calendar days  (override wins)
+ * Final Closing  = Closing BASELINE    + 15 calendar days  (override wins)
+ *                  The baseline is the Closing date the deal was created with
+ *                  (closingBaselineDate), so a Closing moved earlier later on
+ *                  leaves the extended date where it was. Without a stored
+ *                  baseline (older deals) the current Closing date is used.
  * Profit month   = Original Closing, or Final Closing ONLY once extended
  *                  (profitClosingDate / closingIsExtended)
  *
@@ -22,6 +26,8 @@ export interface DealDateInputs {
   finalClosingDateOverride: Date | null;
   /** Contracted days to close; null/absent = derived from the closing date. */
   daysToClose?: number | null;
+  /** Closing date at creation (the +15 baseline); null/absent = originalClosingDate. */
+  closingBaselineDate?: Date | null;
 }
 
 export interface ResolvedDealDates {
@@ -65,8 +71,9 @@ export function resolveDealDates(deal: DealDateInputs): ResolvedDealDates {
     ? addCalendarDays(deal.dateUnderContract, findBuyerByOffsetDays(effectiveDaysToClose(deal)))
     : null;
 
-  const finalClosingAuto = deal.originalClosingDate
-    ? addCalendarDays(deal.originalClosingDate, DEADLINE_RULES.FINAL_CLOSING_DAYS_AFTER_ORIGINAL)
+  const closingBaseline = deal.closingBaselineDate ?? deal.originalClosingDate;
+  const finalClosingAuto = closingBaseline
+    ? addCalendarDays(closingBaseline, DEADLINE_RULES.FINAL_CLOSING_DAYS_AFTER_ORIGINAL)
     : null;
 
   return {

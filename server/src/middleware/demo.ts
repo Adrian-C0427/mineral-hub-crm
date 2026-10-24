@@ -67,7 +67,6 @@ export const DEMO_WRITE_ALLOWLIST: readonly string[] = [
   "PATCH /api/deals/:id",
   "POST /api/deals/:id/email", // delivery suppressed for the demo org
   "PATCH /api/deals/:id/portal", // demo portal is visible to demo sessions only
-  "POST /api/deals/:id/assets/publish",
   "POST /api/deals/:id/extend",
   "POST /api/deals/:id/stage",
   "POST /api/deals/:id/stage/undo",
@@ -80,7 +79,6 @@ export const DEMO_WRITE_ALLOWLIST: readonly string[] = [
   "PATCH /api/deals/:id/sellers/:sellerId",
   "POST /api/deals/:id/convert",
   "POST /api/deals/:id/asset-mode",
-  "POST /api/deals/:id/split",
   "POST /api/deals/:id/revenue",
   "POST /api/deals/:id/doc-folders",
   "POST /api/deals/bulk-assign",
@@ -92,6 +90,7 @@ export const DEMO_WRITE_ALLOWLIST: readonly string[] = [
   "POST /api/opportunities/:id/stage",
   "POST /api/opportunities/:id/convert",
   "POST /api/opportunities/:id/activities",
+  "POST /api/opportunities/:id/doc-folders",
 
   // Buyers.
   "POST /api/buyers",

@@ -257,8 +257,20 @@ export interface OpportunityRow {
   createdAt: Date;
 }
 
+export interface OpportunityContactRow {
+  id: string; firstName: string; lastName: string; entityName: string | null; phone: string | null; email: string | null;
+  preferredContact?: string | null;
+  mailingStreet?: string | null; mailingCity?: string | null; mailingState?: string | null; mailingZip?: string | null;
+}
+export interface OpportunityFileRow {
+  id: string; category: string; folder: string; filename: string; mimeType: string; sizeBytes: number;
+  uploadedBy: { name: string } | null; createdAt: Date; updatedAt: Date; _count: { supersedes: number };
+}
 export interface OpportunityDetailRow extends OpportunityRow {
-  contact: { id: string; firstName: string; lastName: string; entityName: string | null; phone: string | null; email: string | null } | null;
+  contact: OpportunityContactRow | null;
+  /** Documents (current versions) and the customized folder list, when loaded. */
+  files?: OpportunityFileRow[];
+  docFolders?: string[];
   convertedDeal: { id: string; name: string; stage: string } | null;
   stageHistory: { id: string; fromStage: string; toStage: string; reason: string | null; changedBy: UserRef; createdAt: Date }[];
   activities: { id: string; kind: string; body: string; createdBy: UserRef; createdAt: Date }[];
@@ -303,8 +315,18 @@ export function serializeOpportunity(o: OpportunityDetailRow) {
     email: o.email,
     notes: o.notes,
     contact: o.contact
-      ? { id: o.contact.id, firstName: o.contact.firstName, lastName: o.contact.lastName, entityName: o.contact.entityName, phone: o.contact.phone, email: o.contact.email }
+      ? {
+          id: o.contact.id, firstName: o.contact.firstName, lastName: o.contact.lastName, entityName: o.contact.entityName,
+          phone: o.contact.phone, email: o.contact.email, preferredContact: o.contact.preferredContact ?? null,
+          mailingStreet: o.contact.mailingStreet ?? null, mailingCity: o.contact.mailingCity ?? null,
+          mailingState: o.contact.mailingState ?? null, mailingZip: o.contact.mailingZip ?? null,
+        }
       : null,
+    files: (o.files ?? []).map((f) => ({
+      id: f.id, category: f.category, folder: f.folder, filename: f.filename, mimeType: f.mimeType, sizeBytes: f.sizeBytes,
+      uploadedBy: f.uploadedBy?.name ?? null, createdAt: f.createdAt, updatedAt: f.updatedAt, versionCount: f._count.supersedes,
+    })),
+    docFolders: o.docFolders ?? [],
     convertedDeal: o.convertedDeal ? { id: o.convertedDeal.id, name: o.convertedDeal.name, stage: o.convertedDeal.stage } : null,
     stageHistory: o.stageHistory.map((h) => ({ id: h.id, fromStage: h.fromStage, toStage: h.toStage, reason: h.reason, changedBy: userRef(h.changedBy), createdAt: h.createdAt })),
     activities: o.activities.map((a) => ({ id: a.id, kind: a.kind, body: a.body, createdBy: userRef(a.createdBy), createdAt: a.createdAt })),

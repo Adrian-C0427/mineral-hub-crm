@@ -4,9 +4,10 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, researchOrgId, type AuthedRequest } from "../middleware/auth.js";
-import { serializeDeal, serializeAssetChild, serializeContractExtension } from "../serializers.js";
+import { serializeDeal, serializeContractExtension } from "../serializers.js";
 import { computeMatch } from "../domain/matching.js";
 import { normalizePhone } from "../domain/phone.js";
+import { contactPatchFromSellerPatch, dealSellerFromInfo, overlayContact, resolveSellerContact, sellerContactSelect, sellerInfoSchema, type SellerContactRow } from "../domain/sellerContact.js";
 import { STALE_CONTACT_DAYS, LIST_LIMIT } from "../config.js";
 import { daysUntil, formatCalendarDay, nextContractExtension } from "../domain/dates.js";
 import { totalFromPerAcre } from "../domain/perAcre.js";
@@ -157,9 +158,10 @@ dealsRouter.get(
     // asset stays only in the Mineral Assets module. Once a sale CLOSES the
     // record leaves the assets module (it's now a Closed Deal).
     const rt = String(req.query.recordType ?? "OPPORTUNITY").toUpperCase();
-    // Child assets live inside their parent package — the list/pipeline shows the
-    // top-level deal, not its assets (which are managed on the deal's page).
-    const where = { organizationId: orgId(req), parentDealId: null } as Record<string, unknown>;
+    // Every deal of the org is listed on its own (the former "additional deals"
+    // grouping is no longer surfaced; records that were grouped stay intact and
+    // appear here as ordinary deals).
+    const where = { organizationId: orgId(req) } as Record<string, unknown>;
     // ?visibility=active | hidden | all — the Deals list's Hide/Unhide control.
     // Filtered here, in the query, so a hidden deal never reaches the list or
     // the table-level metrics computed from it. Omitted = all: every other
@@ -256,34 +258,6 @@ dealsRouter.get(
   }),
 );
 
-// --------------------------------------------------------------------------
-// Create — always into UNDER_CONTRACT
-// --------------------------------------------------------------------------
-// A child asset carries the same characteristics as a deal. Only the name is
-// required (the rest can be filled in later), so a seller's assets can be added
-// quickly during New Deal creation and refined afterward.
-const assetChildSchema = z.object({
-  name: z.string().min(1).max(500),
-  counties: z.array(z.string().max(200)).max(500).optional(),
-  state: z.string().max(10_000).nullish(),
-  states: z.array(z.string().max(200)).max(500).optional(),
-  acreageNma: z.number().nullish(),
-  nra: z.number().nullish(),
-  abstractIds: z.array(z.string().max(200)).max(500).optional(),
-  operator: z.string().max(10_000).nullish(),
-  rrc: z.string().max(10_000).nullish(),
-  askPrice: z.number().nullish(),
-  ourPrice: z.number().nullish(),
-  assetTypes: z.array(z.string().max(200)).max(500).optional(),
-  basins: z.array(z.string().max(200)).max(500).optional(),
-  formations: z.array(z.string().max(200)).max(500).optional(),
-  dateUnderContract: dateField,
-  originalClosingDate: dateField,
-  estimatedClosingCosts: z.number().nullish(),
-  notes: z.string().max(10_000).nullish(),
-});
-type AssetChildInput = z.infer<typeof assetChildSchema>;
-
 const createSchema = z.object({
   name: z.string().min(1).max(500),
   sellerNames: z.array(z.string().max(200)).max(500).optional(),
@@ -308,10 +282,10 @@ const createSchema = z.object({
   notes: z.string().max(10_000).nullish(),
   // Which pipeline the deal enters (default pipeline when omitted).
   pipelineId: z.string().max(200).nullish(),
-  // Create this deal as a child asset under an existing parent package.
-  parentDealId: z.string().max(10_000).nullish(),
-  // Or create additional child assets under THIS new deal in one shot.
-  assets: z.array(assetChildSchema).max(100).optional(),
+  // The seller (required for a new deal): an existing Contact or the details
+  // of one — resolved to a Contact and linked as the deal's primary seller in
+  // the same transaction (domain/sellerContact.ts).
+  seller: sellerInfoSchema.optional(),
   ...pricingFields,
   ...assetFields,
 });
@@ -321,27 +295,14 @@ dealsRouter.post(
   requirePermission("createDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
     const data = normalizeNumbers(createSchema.parse(req.body));
-    data.assets?.forEach(normalizeNumbers);
     data.royaltyRate = normalizeRoyaltyRate(data.royaltyRate);
     // A manually entered total always wins; otherwise derive it from the
     // per-acre rate × the deal's acreage (so it also satisfies "Our Price").
     data.ourPrice ??= totalFromPerAcre(data.ourCostPerNma, data.acreageNma, data.ourCostPerNra, data.nra);
     data.askPrice ??= totalFromPerAcre(data.askPricePerNma, data.acreageNma, data.askPricePerNra, data.nra);
     const isAsset = data.recordType === "OWNED_ASSET";
-    // Creating this deal as a child asset: the parent must be an existing
-    // top-level deal in this org (assets nest only one level deep).
-    if (data.parentDealId) {
-      const parent = await prisma.deal.findFirst({
-        where: { id: data.parentDealId, organizationId: orgId(req) },
-        select: { id: true, parentDealId: true },
-      });
-      if (!parent) throw new HttpError(404, "Parent deal not found");
-      if (parent.parentDealId) throw new HttpError(400, "An asset cannot be nested under another asset");
-    }
     // Required fields for a new acquisition opportunity (owned assets follow the
-    // asset flow and are exempt). Child assets — created directly (parentDealId)
-    // or in the assets[] batch below — behave exactly like a standalone deal and
-    // require the same fields.
+    // asset flow and are exempt).
     const dealRequired = (d: { states?: string[]; state?: string | null; counties?: string[]; nra?: number | null; acreageNma?: number | null; assetTypes?: string[]; ourPrice?: number | null; dateUnderContract?: unknown; name?: string }): string[] => {
       const states = d.states ?? (d.state ? [d.state] : []);
       const req_: [boolean, string][] = [
@@ -362,11 +323,12 @@ dealsRouter.post(
     };
     if (!isAsset) {
       const missing = dealRequired(data);
+      // A deal is always created with its seller (an existing Contact or a new one).
+      if (!data.seller) missing.push("Seller");
       if (missing.length) throw new HttpError(400, `Missing required fields: ${missing.join(", ")}`);
-    } else if (!data.parentDealId) {
-      // New standalone Mineral Assets carry the full location chain plus the
-      // standardized Asset Type. (Child assets under a package keep the deal
-      // rule set above; converting an existing deal PATCHes and isn't gated.)
+    } else {
+      // New Mineral Assets carry the full location chain plus the standardized
+      // Asset Type. (Converting an existing deal PATCHes and isn't gated.)
       const states = data.states ?? (data.state ? [data.state] : []);
       const req_: [boolean, string][] = [
         [!!data.name?.trim(), "Asset Name"],
@@ -378,13 +340,6 @@ dealsRouter.post(
       ];
       const missing = req_.filter(([ok]) => !ok).map(([, n]) => n);
       if (missing.length) throw new HttpError(400, `Missing required fields: ${missing.join(", ")}`);
-    }
-    // Every additional asset must satisfy the same required-field set.
-    if (data.assets?.length) {
-      data.assets.forEach((a, i) => {
-        const miss = dealRequired(a);
-        if (miss.length) throw new HttpError(400, `Additional deal ${i + 1} is missing required fields: ${miss.join(", ")}`);
-      });
     }
     const assigneeIds = data.assigneeIds ? await validateOrgUsers(orgId(req), data.assigneeIds) : [];
     // A caller-supplied relationship owner must be a user in the caller's org;
@@ -437,10 +392,10 @@ dealsRouter.post(
           formations: data.formations ?? [],
           dateUnderContract: toDate(data.dateUnderContract) ?? null,
           originalClosingDate: toDate(data.originalClosingDate) ?? null,
+          closingBaselineDate: toDate(data.originalClosingDate) ?? null, // the +15 baseline (domain/dates)
           estimatedClosingCosts: data.estimatedClosingCosts ?? null,
           relationshipOwnerId: data.relationshipOwnerId ?? req.user!.id,
           assignees: assigneeIds.length ? { connect: assigneeIds.map((id) => ({ id })) } : undefined,
-          parentDealId: data.parentDealId ?? null,
           notes: data.notes ?? null,
           // Owned assets skip the acquisition pipeline — park them in CLOSING so
           // they don't clutter the acquisition board unless marked for sale.
@@ -484,62 +439,18 @@ dealsRouter.post(
         tx,
       );
 
-      // Multi-asset seller flow: additional child assets created under this deal
-      // in the same transaction. Each is a full opportunity Deal.
-      if (data.assets?.length) {
-        for (const a of data.assets) {
-          const child = await tx.deal.create({
-            data: {
-              organizationId: orgId(req),
-              parentDealId: created.id,
-              name: a.name,
-              recordType: "OPPORTUNITY",
-              // Inherit the package's geography when the asset doesn't set its own.
-              counties: a.counties?.length ? a.counties : (data.counties ?? []),
-              states: a.states?.length ? a.states : (data.states ?? (data.state ? [data.state] : [])),
-              state: a.states?.[0] ?? a.state ?? data.states?.[0] ?? data.state ?? null,
-              acreageNma: a.acreageNma ?? null,
-              nra: a.nra ?? null,
-              abstractIds: a.abstractIds ?? [],
-              operator: a.operator ?? null,
-              rrc: a.rrc ?? null,
-              askPrice: a.askPrice ?? null,
-              ourPrice: a.ourPrice ?? null,
-              assetTypes: a.assetTypes ?? [],
-              basins: a.basins ?? [],
-              formations: a.formations ?? [],
-              dateUnderContract: toDate(a.dateUnderContract) ?? toDate(data.dateUnderContract) ?? null,
-              originalClosingDate: toDate(a.originalClosingDate) ?? null,
-              estimatedClosingCosts: a.estimatedClosingCosts ?? null,
-              relationshipOwnerId: data.relationshipOwnerId ?? req.user!.id,
-              notes: a.notes ?? null,
-              stage: firstStage,
-              currentStageEnteredAt: new Date(),
-            },
-          });
-          await tx.dealStageHistory.create({
-            data: { dealId: child.id, fromStage: null, toStage: firstStage, changedByUserId: req.user!.id },
-          });
-        }
-        await logActivity(
-          {
-            eventType: "DEAL_CREATED",
-            summary: `${req.user!.name} added ${data.assets.length} asset${data.assets.length > 1 ? "s" : ""} under "${created.name}"`,
-            organizationId: orgId(req),
-            actorUserId: req.user!.id,
-            dealId: created.id,
-          },
-          tx,
-        );
+      // The seller: resolve the block to a Contact (named, matched, or created)
+      // and link it as the deal's primary seller — all in this transaction, so
+      // a failure anywhere leaves no half-created deal, seller or contact.
+      if (data.seller) {
+        const { contact } = await resolveSellerContact(tx, orgId(req), data.seller, {
+          ownerId: data.relationshipOwnerId ?? req.user!.id, type: "SELLER", notFound: (m) => new HttpError(400, m),
+        });
+        await tx.dealSeller.create({ data: { dealId: created.id, ...dealSellerFromInfo(data.seller, contact) } });
       }
       return created;
     });
-    // Reload so assetCount reflects any children just created.
-    const full = await prisma.deal.findUnique({
-      where: { id: deal.id },
-      include: { ...dealInclude, offers: { select: { id: true, amount: true, status: true } }, _count: { select: { assets: true } }, assets: { select: { nra: true, acreageNma: true, ourPrice: true, askPrice: true } } },
-    });
-    res.status(201).json(serializeDeal(full ?? deal));
+    res.status(201).json(serializeDeal(deal));
   }),
 );
 
@@ -579,14 +490,10 @@ export async function dealDetail(organizationId: string, id: string) {
           messages: { orderBy: { occurredAt: "desc" }, include: { createdBy: { select: { name: true } } } },
         },
       },
-      sellers: { include: { assignedTeamMember: { select: { id: true, name: true, avatarColor: true } } }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
+      sellers: { include: { assignedTeamMember: { select: { id: true, name: true, avatarColor: true } }, contact: { select: sellerContactSelect } }, orderBy: [{ isPrimary: "desc" }, { createdAt: "asc" }] },
       revenueEntries: { orderBy: { month: "asc" } },
       // Contract-timeline extensions, oldest first (each chains from the last).
       contractExtensions: { orderBy: { createdAt: "asc" } },
-      // Multi-asset: the parent package (if this deal is a child asset) and the
-      // child assets grouped under this deal (if it is a package).
-      parentDeal: { select: { id: true, name: true } },
-      assets: { include: { selectedBuyer: true }, orderBy: { createdAt: "asc" } },
       _count: { select: { assets: true } },
     },
   });
@@ -642,7 +549,6 @@ export async function dealDetail(organizationId: string, id: string) {
   return {
     ...serializeDeal(deal, now),
     // Full child-asset cards for the package's Assets/Tracts section.
-    assets: deal.assets.map(serializeAssetChild),
     stageHistory: deal.stageHistory.map((h) => ({
       id: h.id,
       fromStage: h.fromStage,
@@ -695,11 +601,15 @@ function serializeSeller(
     physicalAddress: string | null; physicalCity: string | null; physicalState: string | null; physicalZip: string | null;
     internalNotes: string | null; preferredCommunicationNotes: string | null;
     assignedTeamMemberId: string | null; assignedTeamMember: { id: string; name: string } | null;
+    contactId?: string | null; contact?: SellerContactRow | null;
     createdAt: Date; updatedAt: Date;
   },
 ) {
+  // The linked Contact is the source of truth for the shared fields.
+  s = overlayContact(s, s.contact);
   return {
     id: s.id, isPrimary: s.isPrimary, ownershipPercent: s.ownershipPercent,
+    contact: s.contact ? { id: s.contact.id, name: `${s.contact.firstName} ${s.contact.lastName}`.trim() || s.contact.entityName || "Contact" } : null,
     firstName: s.firstName, middleName: s.middleName, lastName: s.lastName,
     companyName: s.companyName, trustName: s.trustName, sellerType: s.sellerType,
     primaryPhone: s.primaryPhone, secondaryPhone: s.secondaryPhone, email: s.email, preferredContactMethod: s.preferredContactMethod,
@@ -1084,6 +994,13 @@ dealsRouter.patch(
     const existing = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) } });
     if (!existing) throw new HttpError(404, "Deal not found");
     if ("royaltyRate" in data) patch.royaltyRate = normalizeRoyaltyRate(data.royaltyRate, existing.royaltyRate);
+    // Editing Closing never moves the automatic Extended Closing: the baseline
+    // it derives from is fixed the first time Closing is edited — the date the
+    // deal had until now (for deals created before the baseline existed) —
+    // and stays until a user explicitly changes the extended date.
+    if ("originalClosingDate" in data && existing.closingBaselineDate == null) {
+      patch.closingBaselineDate = existing.originalClosingDate ?? toDate(data.originalClosingDate) ?? null;
+    }
     if (data.assigneeIds !== undefined) {
       const ids = await validateOrgUsers(orgId(req), data.assigneeIds);
       patch.assignees = { set: ids.map((id) => ({ id })) };
@@ -1539,9 +1456,11 @@ const sellerSchema = z.object({
   internalNotes: z.string().trim().max(5000).nullish(),
   preferredCommunicationNotes: z.string().trim().max(2000).nullish(),
   assignedTeamMemberId: z.string().max(10_000).nullish(),
+  /** Link this seller to an existing Contact (the caller's org). */
+  contactId: z.string().max(200).nullish(),
 });
 
-const sellerInclude = { assignedTeamMember: { select: { id: true, name: true, avatarColor: true } } } as const;
+const sellerInclude = { assignedTeamMember: { select: { id: true, name: true, avatarColor: true } }, contact: { select: sellerContactSelect } } as const;
 
 async function ownDealOr404(req: AuthedRequest): Promise<string> {
   const deal = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true } });
@@ -1561,9 +1480,29 @@ dealsRouter.post(
     }
     // First seller on a deal becomes primary automatically.
     const count = await prisma.dealSeller.count({ where: { dealId } });
-    const seller = await prisma.dealSeller.create({
-      data: { ...(data as object), dealId, isPrimary: (data.isPrimary as boolean) ?? count === 0 },
-      include: sellerInclude,
+    const { contactId, ...cols } = data;
+    const seller = await prisma.$transaction(async (tx) => {
+      // Every seller is a Contact: link the named one, else reuse a matching
+      // contact, else create one — so the same person on two deals is one record.
+      const info = sellerInfoSchema.parse({
+        contactId: contactId ?? null, sellerType: cols.sellerType,
+        firstName: cols.firstName, lastName: cols.lastName, companyName: cols.companyName ?? cols.trustName,
+        phone: cols.primaryPhone, email: cols.email,
+        mailingAddress: cols.mailingAddress, mailingCity: cols.mailingCity, mailingState: cols.mailingState, mailingZip: cols.mailingZip,
+      });
+      const { contact } = await resolveSellerContact(tx, orgId(req), info, { ownerId: req.user!.id, type: "SELLER", notFound: (m) => new HttpError(400, m) });
+      const fromContact = dealSellerFromInfo(info, contact);
+      return tx.dealSeller.create({
+        data: {
+          ...fromContact,
+          ...(cols as object),
+          // A seller typed without a name takes the linked contact's.
+          firstName: cols.firstName ?? fromContact.firstName, lastName: cols.lastName ?? fromContact.lastName,
+          companyName: cols.companyName ?? fromContact.companyName, primaryPhone: cols.primaryPhone ?? fromContact.primaryPhone, email: cols.email ?? fromContact.email,
+          contactId: contact.id, dealId, isPrimary: (data.isPrimary as boolean) ?? count === 0,
+        },
+        include: sellerInclude,
+      });
     });
     res.status(201).json(serializeSeller(seller));
   }),
@@ -1581,7 +1520,21 @@ dealsRouter.patch(
       const u = await prisma.user.findFirst({ where: { id: data.assignedTeamMemberId as string, organizationId: orgId(req) } });
       if (!u) throw new HttpError(400, "Assigned team member is not in your organization");
     }
-    const seller = await prisma.dealSeller.update({ where: { id: existing.id }, data: data as object, include: sellerInclude });
+    const { contactId, ...cols } = data;
+    if (contactId) {
+      const c = await prisma.contact.findFirst({ where: { id: contactId, organizationId: orgId(req) }, select: { id: true } });
+      if (!c) throw new HttpError(400, "Contact not found in your organization");
+    }
+    const seller = await prisma.$transaction(async (tx) => {
+      // Shared fields edited here are the Contact's too — keep the one record
+      // consistent (the contact first, so the row below reads the new values).
+      const linked = contactId ?? existing.contactId;
+      if (linked) {
+        const patch = contactPatchFromSellerPatch(cols);
+        if (Object.keys(patch).length) await tx.contact.update({ where: { id: linked }, data: patch });
+      }
+      return tx.dealSeller.update({ where: { id: existing.id }, data: { ...(cols as object), ...(contactId ? { contactId } : {}) }, include: sellerInclude });
+    });
     // Enforce a single primary per deal.
     if (data.isPrimary === true) {
       await prisma.dealSeller.updateMany({ where: { dealId, id: { not: seller.id }, isPrimary: true }, data: { isPrimary: false } });
@@ -1667,90 +1620,6 @@ dealsRouter.post(
   }),
 );
 
-// ==========================================================================
-// Multi-asset seller transactions
-// ==========================================================================
-
-// Split a child asset out into its own standalone deal (detach from its
-// package). The asset's own data — documents, timeline, buyer activity, offers,
-// notes — already lives on this deal and is preserved unchanged; the package's
-// sellers are copied onto it (unless it already has its own) so seller context
-// stays linked without editing the originals.
-dealsRouter.post(
-  "/:id/split",
-  requirePermission("editDeals"),
-  asyncHandler(async (req: AuthedRequest, res) => {
-    const deal = await prisma.deal.findFirst({
-      where: { id: req.params.id, organizationId: orgId(req) },
-      include: { parentDeal: { include: { sellers: true } } },
-    });
-    if (!deal) throw new HttpError(404, "Deal not found");
-    if (!deal.parentDealId || !deal.parentDeal) throw new HttpError(400, "This deal is not an asset within a package");
-    const packageName = deal.parentDeal.name;
-    const parentSellers = deal.parentDeal.sellers;
-    const ownSellers = await prisma.dealSeller.count({ where: { dealId: deal.id } });
-    const updated = await prisma.$transaction(async (tx) => {
-      if (ownSellers === 0 && parentSellers.length) {
-        for (const s of parentSellers) {
-          const { id: _id, dealId: _dealId, createdAt: _c, updatedAt: _u, ...rest } = s;
-          await tx.dealSeller.create({ data: { ...rest, dealId: deal.id } });
-        }
-      }
-      const u = await tx.deal.update({ where: { id: deal.id }, data: { parentDealId: null }, include: dealInclude });
-      await logActivity(
-        {
-          eventType: "DEAL_SPLIT",
-          summary: `${req.user!.name} split asset "${deal.name}" out of "${packageName}" into its own deal`,
-          organizationId: orgId(req),
-          actorUserId: req.user!.id,
-          dealId: deal.id,
-        },
-        tx,
-      );
-      return u;
-    });
-    res.json(serializeDeal(updated));
-  }),
-);
-
-// Publish (or unpublish) selected child assets of a package to the buyer portal
-// in one action — the whole package (omit assetIds) or a chosen subset.
-dealsRouter.post(
-  "/:id/assets/publish",
-  requirePermission("publishOfferings"),
-  asyncHandler(async (req: AuthedRequest, res) => {
-    const body = z
-      .object({
-        assetIds: z.array(z.string().max(200)).max(500).optional(),
-        published: z.boolean().default(true),
-        visibility: z.enum(["PUBLIC", "LINK_ONLY"]).default("PUBLIC"),
-      })
-      .parse(req.body);
-    const pkg = await prisma.deal.findFirst({ where: { id: req.params.id, organizationId: orgId(req) }, select: { id: true } });
-    if (!pkg) throw new HttpError(404, "Deal not found");
-    const assets = await prisma.deal.findMany({
-      where: {
-        parentDealId: pkg.id,
-        organizationId: orgId(req),
-        ...(body.assetIds?.length ? { id: { in: body.assetIds } } : {}),
-      },
-      select: { id: true, portalSlug: true },
-    });
-    await prisma.$transaction(
-      assets.map((a) =>
-        prisma.deal.update({
-          where: { id: a.id },
-          data: {
-            publishedToPortal: body.published,
-            portalVisibility: body.visibility,
-            ...(body.published && !a.portalSlug ? { portalSlug: newPortalSlug() } : {}),
-          },
-        }),
-      ),
-    );
-    res.json({ updated: assets.length, published: body.published });
-  }),
-);
 
 // ==========================================================================
 // Asset revenue history (royalty / lease-bonus entries) for owned assets

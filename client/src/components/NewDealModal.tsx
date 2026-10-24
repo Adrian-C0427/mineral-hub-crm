@@ -13,6 +13,7 @@ import { fmtDate, money } from "../lib/format";
 import { royaltyValue } from "../lib/royalty";
 import { FormSection } from "./kit";
 import { SectionRail, useSectionRail } from "./SectionRail";
+import { SellerInformation, emptySellerInfo, sellerInfoBody, sellerInfoBlank, sellerInfoInvalid, sellerInfoMissing } from "./SellerInformation";
 import {
   addDaysIso, applyAcreageEdit, AcreageNote, DaysToCloseField, editPriceGroup, emptyPriceGroup, PriceNote, RoyaltyRateField, royaltyRateError, syncPriceGroup,
   type AcreSource, type PriceField, type PriceGroup,
@@ -20,64 +21,32 @@ import {
 
 const numOrNull = (v: string) => (v.trim() === "" || !Number.isFinite(Number(v)) ? null : Number(v));
 
-// An additional asset behaves exactly like a standalone deal record — the same
-// fields, dependencies, and required fields. Its contract timeline defaults to
-// the deal's (one timeline); untick "Same timeline" to give it its own.
-interface AssetRow {
-  name: string; states: string[]; counties: string[]; abstractIds: string[];
-  assetTypes: string[]; nra: string; ourPrice: string; askPrice: string;
-  operator: string; rrc: string; acreageNma: string; basins: string[]; formations: string[];
-  sameTimeline: boolean; dateUnderContract: string;
-}
-const emptyAsset = (): AssetRow => ({
-  name: "", states: [], counties: [], abstractIds: [], assetTypes: [], nra: "", ourPrice: "", askPrice: "",
-  operator: "", rrc: "", acreageNma: "", basins: [], formations: [], sameTimeline: true, dateUnderContract: "",
-});
-// Same required set as a standalone deal (Date Under Contract may be shared).
-function assetMissing(a: AssetRow): string[] {
-  const m: string[] = [];
-  if (!a.name.trim()) m.push("Deal Name");
-  if (!a.states.length) m.push("State");
-  if (!a.counties.length) m.push("County");
-  if (!a.abstractIds.length) m.push("Abstract");
-  if (!a.assetTypes.length) m.push("Asset Type");
-  // Either acreage measurement satisfies the requirement — unleased acreage
-  // has no lease royalty interest, so NRA may not apply and NMA stands in.
-  if (a.nra.trim() === "" && a.acreageNma.trim() === "") m.push("NMA or NRA");
-  if (a.ourPrice.trim() === "") m.push("Our Price");
-  if (!a.sameTimeline && !a.dateUnderContract) m.push("Date Under Contract");
-  return m;
-}
-
 // The form's sections, in order, as listed in the left rail (a step strip on
 // phones). A required section is complete once none of its fields appear in
 // the form's existing `missing` list.
-type SecKey = "basics" | "location" | "economics" | "cost" | "asking" | "timeline" | "extras";
+type SecKey = "basics" | "seller" | "location" | "economics" | "cost" | "asking" | "timeline";
 const SECTIONS: { key: SecKey; label: string; fields?: string[] }[] = [
   { key: "basics", label: "Basics", fields: ["Deal Name", "Asset Type", "Date Under Contract"] },
+  { key: "seller", label: "Seller", fields: ["Seller name", "Seller entity name"] },
   { key: "location", label: "Location", fields: ["State", "County", "Abstract"] },
   { key: "economics", label: "Economics", fields: ["NMA or NRA"] },
   { key: "cost", label: "Acquisition cost", fields: ["Acquisition Cost"] },
   { key: "asking", label: "Asking price" },
   { key: "timeline", label: "Timeline & notes" },
-  { key: "extras", label: "Additional deals" },
 ];
 
 /**
- * Create a deal — or, when `parentDealId` is passed, add an additional deal under
- * an existing seller. Either way the form is the full deal form with the same
- * required fields. During top-level creation the user can also add one or more
- * additional deals (each an identical full deal form) before saving, so a
- * multi-deal seller package is created in a single step.
+ * Create a deal: the full deal form, with the seller captured up front through
+ * the shared Seller Information block (an existing contact, or the details of
+ * a new one — the server links the contact to the deal as its primary seller).
  */
-export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
+export function NewDealModal({ onClose, onCreated, pipelineId }: {
   onClose: () => void;
   onCreated: (d: DealSummary) => void;
-  parentDealId?: string;
   /** Pipeline the new deal enters (defaults to the org's default pipeline). */
   pipelineId?: string;
 }) {
-  const asset = !!parentDealId;
+  const [seller, setSeller] = useState(emptySellerInfo);
   const [f, setF] = useState({
     name: "", operator: "", rrc: "",
     acreageNma: "", nra: "", estimatedClosingCosts: "",
@@ -109,7 +78,6 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
   const [formations, setFormations] = useState<string[]>([]);
   const [assetTypes, setAssetTypes] = useState<string[]>([]);
   const [abstractIds, setAbstractIds] = useState<string[]>([]);
-  const [assets, setAssets] = useState<AssetRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -130,10 +98,9 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
     setF((p) => (p.originalClosingDate === auto ? p : { ...p, originalClosingDate: auto }));
   }, [f.dateUnderContract, daysToClose, closingManual]);
 
-  // The primary form uses the full standalone-deal required set (identical in
-  // add-asset mode).
   const missing: string[] = [];
   if (!f.name.trim()) missing.push("Deal Name");
+  missing.push(...sellerInfoMissing(seller));
   if (!states.length) missing.push("State");
   if (!counties.length) missing.push("County");
   if (!abstractIds.length) missing.push("Abstract");
@@ -142,31 +109,22 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
   if (ourPrice == null) missing.push("Acquisition Cost");
   if (!f.dateUnderContract) missing.push("Date Under Contract");
 
-  const assetErrors = assets.map(assetMissing);
-  const anyAssetIncomplete = assetErrors.some((e) => e.length > 0);
-
-  const patchAsset = (i: number, patch: Partial<AssetRow>) =>
-    setAssets((rows) => rows.map((r, idx) => (idx === i ? { ...r, ...patch } : r)));
-
   // Section rail: progress from the required checks above, click-to-jump, and
   // a scroll-spy that follows the form as it scrolls.
-  const sections = SECTIONS.filter((x) => !(asset && x.key === "extras"));
+  const sections = SECTIONS;
   const isDone = (k: SecKey) => {
     const fields = SECTIONS.find((x) => x.key === k)?.fields;
     return !!fields && !fields.some((m) => missing.includes(m));
   };
-  const fieldsLeft = missing.length + assetErrors.reduce((n, e) => n + e.length, 0);
+  const fieldsLeft = missing.length;
   const { sec, goSec, formRef, railRef, onFormScroll } = useSectionRail<SecKey>("basics");
 
   async function submit() {
     if (missing.length) { setError(`Required: ${missing.join(", ")}`); return; }
     const royaltyErr = royaltyRateError(f.royaltyRate);
     if (royaltyErr) { setError(`Royalty rate: ${royaltyErr}`); return; }
-    if (anyAssetIncomplete) {
-      const i = assetErrors.findIndex((e) => e.length > 0);
-      setError(`Additional deal ${i + 1} is missing: ${assetErrors[i].join(", ")}`);
-      return;
-    }
+    const sellerErr = sellerInfoInvalid(seller);
+    if (sellerErr.length) { setError(sellerErr.join(" · ")); return; }
     setBusy(true);
     setError(null);
     try {
@@ -188,29 +146,13 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
         daysToClose,
         royaltyRate: f.royaltyRate || null,
         estimatedClosingCosts: numOrNull(f.estimatedClosingCosts),
-        // Seller info is captured in the structured Seller Details section on the
-        // deal page (the single source of truth) — not here.
+        // The seller: an existing contact or a new one, linked by the server as
+        // the deal's primary seller (Seller Details on the deal page).
+        seller: sellerInfoBody(seller),
         sellerNames: [],
         dateUnderContract: f.dateUnderContract || null,
         originalClosingDate: f.originalClosingDate || null,
         notes: f.notes || null,
-        // Add-asset mode: attach to the parent package.
-        ...(asset ? { parentDealId } : {}),
-        // New-deal mode: additional child assets created alongside this deal —
-        // each a full deal record; timeline defaults to the deal's.
-        ...(!asset && assets.length
-          ? {
-              assets: assets.map((a) => ({
-                name: a.name.trim(),
-                states: a.states, state: a.states[0] ?? null,
-                counties: a.counties, abstractIds: a.abstractIds,
-                assetTypes: a.assetTypes, basins: a.basins, formations: a.formations,
-                nra: numOrNull(a.nra), ourPrice: numOrNull(a.ourPrice), askPrice: numOrNull(a.askPrice),
-                operator: a.operator || null, rrc: a.rrc || null, acreageNma: numOrNull(a.acreageNma),
-                dateUnderContract: a.sameTimeline ? (f.dateUnderContract || null) : (a.dateUnderContract || null),
-              })),
-            }
-          : {}),
       });
       onCreated(deal);
     } catch (err) {
@@ -223,13 +165,11 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
   const req = <Req />;
   return (
     <Modal
-      title={asset ? "Add deal" : "New deal"}
-      subtitle={asset
-        ? <>Added under the same seller — the full deal form, independently marketable</>
-        : <>Starts in <strong>Under Contract</strong> · add sellers later in Seller Details</>}
+      title="New deal"
+      subtitle={<>Starts in <strong>Under Contract</strong> · the seller becomes a linked contact</>}
       onClose={onClose}
       wide
-      dirty={Object.values(f).some((v) => v.trim() !== "") || [cost.perNma, cost.perNra, cost.total, ask.perNma, ask.perNra, ask.total].some((v) => v !== "") || states.length > 0 || counties.length > 0 || assetTypes.length > 0}
+      dirty={Object.values(f).some((v) => v.trim() !== "") || !sellerInfoBlank(seller) || [cost.perNma, cost.perNra, cost.total, ask.perNma, ask.perNra, ask.total].some((v) => v !== "") || states.length > 0 || counties.length > 0 || assetTypes.length > 0}
       footer={
         <>
           <div className="nd-sum">
@@ -242,9 +182,9 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
               {fieldsLeft > 0 && <span>{fieldsLeft} required field{fieldsLeft === 1 ? "" : "s"} left</span>}
             </span>
             <button onClick={onClose}>Cancel</button>
-            <button className="primary" onClick={submit} disabled={busy || missing.length > 0 || anyAssetIncomplete}
+            <button className="primary" onClick={submit} disabled={busy || missing.length > 0}
               title={missing.length ? "Enabled once required fields are filled" : undefined}>
-              {busy ? "Saving…" : asset ? "Add deal" : assets.length ? `Create deal + ${assets.length} more` : "Create deal"}
+              {busy ? "Saving…" : "Create deal"}
             </button>
           </div>
         </>
@@ -262,6 +202,12 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
                 <div className="field"><label>Asset type {req}</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={assetTypes} onChange={setAssetTypes} placeholder="Search asset types…" /></div>
                 <div className="field"><label>Date under contract {req}</label><DateField value={f.dateUnderContract} onChange={(v) => setF((p) => ({ ...p, dateUnderContract: v }))} /></div>
               </div>
+            </FormSection>
+          </div>
+
+          <div data-sec="seller">
+            <FormSection title="Seller" hint="Who we are buying from. Pick an existing contact, or enter the seller and a contact is created and linked — one contact per seller, however many deals.">
+              <SellerInformation value={seller} onChange={setSeller} req={req} />
             </FormSection>
           </div>
 
@@ -350,82 +296,9 @@ export function NewDealModal({ onClose, onCreated, parentDealId, pipelineId }: {
             </FormSection>
           </div>
 
-          {/* Additional deals under the same seller. Each is an identical full deal
-              form and becomes an independently-marketable deal grouped under this
-              seller. */}
-          {!asset && (
-            <div data-sec="extras" className="nd-assets">
-              <FormSection title="Additional deals under this seller" hint="Optional. Each is a full deal, marketable separately.">
-                <button type="button" className="nd-add-deal" onClick={() => setAssets((r) => [...r, emptyAsset()])}>
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-                  Add deal
-                </button>
-                {assets.map((a, i) => (
-                  <AssetCard
-                    key={i}
-                    index={i}
-                    a={a}
-                    req={req}
-                    parentStates={states}
-                    parentCounties={counties}
-                    onPatch={(patch) => patchAsset(i, patch)}
-                    onRemove={() => setAssets((r) => r.filter((_, idx) => idx !== i))}
-                  />
-                ))}
-              </FormSection>
-            </div>
-          )}
         </div>
       </div>
       {error && <div className="error-text nd-error" role="alert">{error}</div>}
     </Modal>
-  );
-}
-
-/** One additional deal — the identical full deal form as a compact card. */
-function AssetCard({ index, a, req, parentStates, parentCounties, onPatch, onRemove }: {
-  index: number; a: AssetRow; req: React.ReactNode; parentStates: string[]; parentCounties: string[];
-  onPatch: (patch: Partial<AssetRow>) => void; onRemove: () => void;
-}) {
-  return (
-    <div className="nd-asset-card">
-      <div className="nd-asset-card-head">
-        <strong>Deal {index + 1}</strong>
-        <button type="button" className="nd-asset-del" title="Remove deal" aria-label="Remove deal" onClick={onRemove}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 7h14M10 7V5h4v2M7 7l1 12h8l1-12" /></svg>
-        </button>
-      </div>
-      <div className="field"><label>Deal name {req}</label><input value={a.name} onChange={(e) => onPatch({ name: e.target.value })} placeholder={`Deal ${index + 1}`} /></div>
-      <div className="dd-grid">
-        <GeoFields
-          states={a.states} onStatesChange={(v) => onPatch({ states: v })}
-          counties={a.counties} onCountiesChange={(v) => onPatch({ counties: v })}
-          abstractIds={a.abstractIds} onAbstractsChange={(v) => onPatch({ abstractIds: v })}
-          labels={{ state: <>State {req}</>, county: <>County {req}</>, abstract: <>Abstract {req}</> }}
-        />
-        <div className="field"><label>Asset type {req}</label><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={a.assetTypes} onChange={(v) => onPatch({ assetTypes: v })} placeholder="Search asset types…" /></div>
-        <div className="field"><label title="Net Mineral Acres · required unless NRA is provided">NMA {req}</label><input type="number" value={a.acreageNma} onChange={(e) => onPatch({ acreageNma: e.target.value })} /></div>
-        <div className="field"><label title="Net Royalty Acres · required unless NMA is provided">NRA {req}</label><input type="number" value={a.nra} onChange={(e) => onPatch({ nra: e.target.value })} /></div>
-        <div className="field"><label>Our price {req}</label><input type="number" value={a.ourPrice} onChange={(e) => onPatch({ ourPrice: e.target.value })} /></div>
-        <div className="field"><label>Basin</label><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(a.counties))} value={a.basins} onChange={(v) => onPatch({ basins: v })} placeholder="Search basins…" /></div>
-        <div className="field"><label>Formation</label><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(a.counties))} value={a.formations} onChange={(v) => onPatch({ formations: v })} placeholder="Search formations…" /></div>
-        {/* Assets inherit the deal's geography when they don't set their own. */}
-        <div className="field"><label>Operator</label>
-          <OperatorSelect states={a.states.length ? a.states : parentStates} counties={a.counties.length ? a.counties : parentCounties} value={a.operator} onChange={(v) => onPatch({ operator: v })} ariaLabel={`Deal ${index + 1} operator`} />
-        </div>
-        <div className="field"><label>RRC</label><input value={a.rrc} onChange={(e) => onPatch({ rrc: e.target.value })} placeholder="RRC number" /></div>
-        <div className="field"><label>Ask price (to buyers)</label><input type="number" value={a.askPrice} onChange={(e) => onPatch({ askPrice: e.target.value })} /></div>
-      </div>
-      {/* Contract timeline: shared with the deal by default; untick for its own. */}
-      <div className="nd-asset-timeline">
-        <label className="nd-asset-same">
-          <input type="checkbox" checked={a.sameTimeline} onChange={(e) => onPatch({ sameTimeline: e.target.checked })} />
-          <span>Same contract timeline as the deal</span>
-        </label>
-        {!a.sameTimeline && (
-          <div className="field" style={{ marginBottom: 0 }}><label>Date under contract {req}</label><DateField value={a.dateUnderContract} onChange={(v) => onPatch({ dateUnderContract: v })} /></div>
-        )}
-      </div>
-    </div>
   );
 }

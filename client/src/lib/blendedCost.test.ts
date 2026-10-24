@@ -33,13 +33,11 @@ describe("blendedCost", () => {
     expect(b.convertedNma).toBe(0);
   });
 
-  it("uses the package roll-up once, so Additional Assets count without double-counting", () => {
-    // Parent carries no own figures; its two child assets roll up to $60K over 6 NMA.
-    const pkg = deal({ assetCount: 2, aggOurPrice: 60_000, aggAcreageNma: 6, aggNra: 12 });
-    const b = blendedCost([pkg]);
+  it("counts every listed deal on its own figures (formerly grouped deals are ordinary rows)", () => {
+    const b = blendedCost([deal({ ourPrice: 40_000, acreageNma: 4, nra: 8 }), deal({ ourPrice: 20_000, acreageNma: 2, nra: 4 })]);
     expect(b.perNma).toBe(10_000);
     expect(b.perNra).toBe(5_000);
-    expect(b.priced).toBe(1);
+    expect(b.priced).toBe(2);
   });
 
   it("leaves out priced deals with no acreage instead of inflating the rate, and reports them", () => {

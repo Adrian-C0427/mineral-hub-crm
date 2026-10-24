@@ -16,6 +16,8 @@ import {
   serializeOpportunitySummary,
 } from "../domain/opportunities.js";
 import { dealDetail } from "./deals.js";
+import { contactPatchFromSellerPatch, opportunitySellerFromInfo, resolveSellerContact, sellerContactSelect, sellerInfoSchema, type SellerInfo } from "../domain/sellerContact.js";
+import { splitPersonName } from "../domain/opportunities.js";
 
 /**
  * Opportunities: lightweight prospects that live in an OPPORTUNITIES pipeline
@@ -33,10 +35,16 @@ const userSelect = { select: { id: true, name: true } } as const;
 const summaryInclude = { owner: userSelect } as const;
 const detailInclude = {
   owner: userSelect,
-  contact: { select: { id: true, firstName: true, lastName: true, entityName: true, phone: true, email: true } },
+  contact: { select: sellerContactSelect },
   convertedDeal: { select: { id: true, name: true, stage: true } },
   stageHistory: { orderBy: { createdAt: "asc" as const } },
   activities: { orderBy: { createdAt: "desc" as const } },
+  // Documents: current versions only (prior versions via /files/:id/versions).
+  files: {
+    where: { supersededById: null },
+    include: { uploadedBy: { select: { name: true } }, _count: { select: { supersedes: true } } },
+    orderBy: { createdAt: "desc" as const },
+  },
 } as const;
 
 /** Full `Opp` payload. History/activity rows store bare user ids, so the
@@ -56,9 +64,12 @@ async function loadOpportunity(tx: Tx, organizationId: string, id: string, req: 
     stageHistory: o.stageHistory.map((h) => ({ ...h, changedBy: h.changedByUserId ? byId.get(h.changedByUserId) ?? null : null })),
     activities: o.activities.map((a) => ({ ...a, createdBy: a.createdByUserId ? byId.get(a.createdByUserId) ?? null : null })),
   });
-  // The LINKED Contact record's phone/email are contact data: shown only to
-  // callers who may view contacts (the opportunity's own fields are its own).
-  if (out.contact && !hasPermission(req, "viewContacts")) out.contact = { ...out.contact, phone: null, email: null };
+  // The LINKED Contact record's phone/email/mailing address are contact data:
+  // shown only to callers who may view contacts (the opportunity's own fields
+  // are its own).
+  if (out.contact && !hasPermission(req, "viewContacts")) {
+    out.contact = { ...out.contact, phone: null, email: null, mailingStreet: null, mailingCity: null, mailingState: null, mailingZip: null };
+  }
   return out;
 }
 
@@ -121,11 +132,27 @@ const createSchema = z.object({
   pipelineId: z.string().max(200),
   stage: z.string().max(200).optional(),
   ...editableFields,
+  // The seller (required): an existing Contact or the details of one, resolved
+  // to a Contact and linked in the same transaction (domain/sellerContact.ts).
+  // It also fills the plain seller columns (sellerName/companyName/phone/email).
+  seller: sellerInfoSchema.optional(),
 });
 // Same field rules as create. The pipeline and stage are not edited here: a
 // stage change goes through POST /:id/stage (history, terminal reasons, AUTO
 // conversion) and an opportunity stays in the pipeline it was created in.
-const updateSchema = z.object({ name: z.string().trim().min(1).max(200).optional(), ...editableFields });
+const updateSchema = z.object({ name: z.string().trim().min(1).max(200).optional(), ...editableFields, seller: sellerInfoSchema.optional() });
+
+/** Seller edits mirrored onto the linked Contact: the plain columns a PATCH
+ *  names, as Contact fields (a seller name splits into first/last). */
+function contactSyncFromOppPatch(f: { sellerName?: string | null; companyName?: string | null; phone?: string | null; email?: string | null }) {
+  const name = f.sellerName !== undefined ? splitPersonName(f.sellerName) : null;
+  return contactPatchFromSellerPatch({
+    ...(name ? { firstName: name.firstName, lastName: name.lastName } : {}),
+    ...(f.companyName !== undefined ? { companyName: f.companyName } : {}),
+    ...(f.phone !== undefined ? { primaryPhone: f.phone } : {}),
+    ...(f.email !== undefined ? { email: f.email } : {}),
+  });
+}
 
 /** Validated editable columns of a create/PATCH body (blank → null; the
  *  owner and contact must belong to the caller's org). */
@@ -206,6 +233,48 @@ async function convertInTx(
 }
 
 // ---------------------------------------------------------------------------
+// Document folders — same contract as POST /deals/:id/doc-folders (the client's
+// shared Documents section): rename / remove / reorder the opportunity's folder
+// list; "Other" is the fallback folder and can't be renamed or removed.
+// ---------------------------------------------------------------------------
+const folderName = z.string().trim().min(1).max(80);
+const folderListSchema = z.array(folderName).min(1).max(30)
+  .refine((xs) => new Set(xs.map((x) => x.toLowerCase())).size === xs.length, "Folder names must be unique")
+  .refine((xs) => xs.includes("Other"), "The Other folder is required");
+const folderOpSchema = z.discriminatedUnion("op", [
+  z.object({ op: z.literal("reorder"), folders: folderListSchema }),
+  z.object({ op: z.literal("rename"), from: folderName, to: folderName, folders: folderListSchema }),
+  z.object({ op: z.literal("remove"), name: folderName, folders: folderListSchema }),
+]);
+
+opportunitiesRouter.post(
+  "/:id/doc-folders",
+  requirePermission("manageDocuments"),
+  asyncHandler(async (req: AuthedRequest, res) => {
+    const org = orgId(req);
+    const o = await prisma.opportunity.findFirst({ where: { id: req.params.id, organizationId: org }, select: { id: true } });
+    if (!o) throw new HttpError(404, "Opportunity not found");
+    const body = folderOpSchema.parse(req.body);
+    if (body.op === "rename") {
+      if (body.from === "Other") throw new HttpError(400, "The Other folder can't be renamed — it's where unfiled documents live.");
+      await prisma.$transaction([
+        prisma.opportunity.update({ where: { id: o.id }, data: { docFolders: body.folders } }),
+        prisma.fileAttachment.updateMany({ where: { opportunityId: o.id, folder: body.from }, data: { folder: body.to } }),
+      ]);
+    } else if (body.op === "remove") {
+      if (body.name === "Other") throw new HttpError(400, "The Other folder can't be removed — it's where unfiled documents live.");
+      await prisma.$transaction([
+        prisma.opportunity.update({ where: { id: o.id }, data: { docFolders: body.folders } }),
+        prisma.fileAttachment.updateMany({ where: { opportunityId: o.id, folder: body.name }, data: { folder: "Other" } }),
+      ]);
+    } else {
+      await prisma.opportunity.update({ where: { id: o.id }, data: { docFolders: body.folders } });
+    }
+    res.json({ docFolders: body.folders });
+  }),
+);
+
+// ---------------------------------------------------------------------------
 // Read
 // ---------------------------------------------------------------------------
 
@@ -260,8 +329,20 @@ opportunitiesRouter.post(
     const stage = data.stage ?? stages.find((s) => !s.isTerminal)?.key;
     if (!stage || !stages.some((s) => s.key === stage)) throw new HttpError(400, "Unknown pipeline stage");
     const fields = await editableValues(org, data);
+    // An opportunity is always created with its seller — the block, or (API
+    // callers) a linked contact / the plain seller columns.
+    if (!data.seller && !fields.contactId && !fields.sellerName && !fields.companyName) {
+      throw new HttpError(400, "Seller information is required: a seller name or entity name, or an existing contact");
+    }
     const now = new Date();
     const created = await prisma.$transaction(async (tx) => {
+      // The seller: resolve to a Contact (named, matched, or created) and link
+      // it, all in this transaction — no half-created opportunity or contact.
+      const sellerCols = data.seller
+        ? opportunitySellerFromInfo(data.seller, (await resolveSellerContact(tx, org, data.seller, {
+            ownerId: fields.ownerId ?? req.user!.id, type: "PROSPECT", notFound: (m) => new HttpError(400, m),
+          })).contact)
+        : {};
       const o = await tx.opportunity.create({
         data: {
           organizationId: org,
@@ -270,6 +351,7 @@ opportunitiesRouter.post(
           stage,
           currentStageEnteredAt: now,
           ...fields,
+          ...sellerCols,
           nextFollowUpDate: toDay(data.nextFollowUpDate) ?? null,
           lastActivityAt: now,
           createdByUserId: req.user!.id,
@@ -294,10 +376,41 @@ opportunitiesRouter.patch(
     }
     const org = orgId(req);
     const o = await ownOpportunity(req);
-    const patch: Record<string, unknown> = { lastActivityAt: new Date(), ...(await editableValues(org, data)) };
+    const fields = await editableValues(org, data);
+    const patch: Record<string, unknown> = { lastActivityAt: new Date(), ...fields };
     if (data.name !== undefined) patch.name = data.name;
     if (data.nextFollowUpDate !== undefined) patch.nextFollowUpDate = toDay(data.nextFollowUpDate);
-    await prisma.opportunity.update({ where: { id: o.id }, data: patch });
+    await prisma.$transaction(async (tx) => {
+      if (data.seller) {
+        // A seller block re-resolves the contact (link / match / create) and
+        // refreshes the plain seller columns from it.
+        const { contact } = await resolveSellerContact(tx, org, data.seller as SellerInfo, {
+          ownerId: fields.ownerId ?? o.ownerId ?? req.user!.id, type: "PROSPECT", notFound: (m) => new HttpError(400, m),
+        });
+        Object.assign(patch, opportunitySellerFromInfo(data.seller as SellerInfo, contact));
+        // The block's values are the shared ones: mirror them onto the contact.
+        const sync = contactPatchFromSellerPatch({
+          ...(data.seller.firstName != null || data.seller.lastName != null ? { firstName: data.seller.firstName, lastName: data.seller.lastName } : {}),
+          ...(data.seller.companyName != null ? { companyName: data.seller.companyName } : {}),
+          ...(data.seller.phone != null ? { primaryPhone: data.seller.phone } : {}),
+          ...(data.seller.email != null ? { email: data.seller.email } : {}),
+          ...(data.seller.mailingAddress != null ? { mailingAddress: data.seller.mailingAddress } : {}),
+          ...(data.seller.mailingCity != null ? { mailingCity: data.seller.mailingCity } : {}),
+          ...(data.seller.mailingState != null ? { mailingState: data.seller.mailingState } : {}),
+          ...(data.seller.mailingZip != null ? { mailingZip: data.seller.mailingZip } : {}),
+        });
+        if (Object.keys(sync).length) await tx.contact.update({ where: { id: contact.id }, data: sync });
+      } else {
+        // Plain seller columns edited on a linked opportunity are the Contact's
+        // shared fields too — keep the one record consistent.
+        const linked = (fields.contactId as string | null | undefined) ?? (fields.contactId === null ? null : o.contactId);
+        if (linked) {
+          const sync = contactSyncFromOppPatch(fields as { sellerName?: string | null; companyName?: string | null; phone?: string | null; email?: string | null });
+          if (Object.keys(sync).length) await tx.contact.update({ where: { id: linked }, data: sync });
+        }
+      }
+      await tx.opportunity.update({ where: { id: o.id }, data: patch });
+    });
     res.json(await loadOpportunity(prisma, org, o.id, req));
   }),
 );

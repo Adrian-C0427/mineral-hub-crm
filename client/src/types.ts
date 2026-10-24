@@ -219,6 +219,8 @@ export interface Seller {
   internalNotes: string | null;
   preferredCommunicationNotes: string | null;
   assignedTeamMember: { id: string; name: string; avatarColor?: string | null } | null;
+  /** The shared Contact this seller is linked to (source of truth for the shared fields). */
+  contact?: { id: string; name: string } | null;
   dateAdded: string;
   updatedAt: string;
 }
@@ -281,10 +283,25 @@ export interface Opp extends OppSummary {
   phone: string | null;
   email: string | null;
   notes: string | null;
-  contact: { id: string; firstName: string; lastName: string; entityName: string | null; phone: string | null; email: string | null } | null;
+  contact: OppContact | null;
   convertedDeal: { id: string; name: string; stage: Stage } | null;
   stageHistory: OppStageHistoryRow[];
   activities: OppActivityRow[];
+  /** Documents (current versions) and the customized folder list (empty = defaults). */
+  files: OppFile[];
+  docFolders: string[];
+}
+
+/** The linked seller Contact as the opportunity shows it. */
+export interface OppContact {
+  id: string; firstName: string; lastName: string; entityName: string | null; phone: string | null; email: string | null;
+  preferredContact?: string | null;
+  mailingStreet?: string | null; mailingCity?: string | null; mailingState?: string | null; mailingZip?: string | null;
+}
+
+export interface OppFile {
+  id: string; category: string; folder: string; filename: string; mimeType: string; sizeBytes: number;
+  uploadedBy: string | null; createdAt: string; updatedAt?: string; versionCount?: number;
 }
 
 /** One "Extended +N days" action on a deal's Contract timeline (deal detail). */

@@ -209,6 +209,7 @@ export function serializeDeal(deal: DealWithRels, now: Date = new Date()) {
     // raw override columns (for edit forms)
     findBuyerByDateOverride: deal.findBuyerByDateOverride,
     finalClosingDateOverride: deal.finalClosingDateOverride,
+    closingBaselineDate: deal.closingBaselineDate ?? null,
     closedDate: deal.closedDate,
     // Manual "Closing with buyer" date — entered by hand, never calculated.
     buyerClosingDate: deal.buyerClosingDate ?? null,

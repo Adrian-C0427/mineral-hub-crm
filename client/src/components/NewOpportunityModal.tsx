@@ -3,27 +3,25 @@ import { Modal, Req } from "./ui";
 import { Select } from "./Select";
 import { DateField } from "./DateField";
 import { GeoFields } from "./GeoFields";
-import { PhoneInput } from "./PhoneInput";
 import { FormSection } from "./kit";
+import { SellerInformation, emptySellerInfo, sellerInfoBody, sellerInfoFromContact, sellerInfoInvalid, sellerInfoMissing, type SellerInfoForm } from "./SellerInformation";
 import { SectionRail, useSectionRail, type RailSection } from "./SectionRail";
 import { useAbstractIndex } from "./AbstractPicker";
 import { api, ApiError } from "../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { isOpportunityPipeline, type PipelineInfo } from "../stages";
 import { acres, prettyStage } from "../lib/format";
-import { normalizePhone } from "../lib/phone";
 import { surveyLabel } from "../lib/abstracts";
 import { checkOppForm, choosePipelineStage, emptyOppForm, oppBody, oppFormFromRecord, oppPatchBody, type OppForm } from "../lib/opportunityForm";
-import type { ContactRow } from "../pages/Contacts";
 import type { Opp, UserLite } from "../types";
 
 export type OppFormSection = "basics" | "seller" | "property" | "acreage" | "followup";
 
-// The form's sections, in order, as listed in the rail. Only Basics holds
-// required fields; everything else can be filled in now or later.
+// The form's sections, in order, as listed in the rail. Basics and the seller
+// hold required fields; everything else can be filled in now or later.
 const SECTIONS: RailSection<OppFormSection>[] = [
   { key: "basics", label: "Basics", required: true },
-  { key: "seller", label: "Seller & contact" },
+  { key: "seller", label: "Seller", required: true },
   { key: "property", label: "Property" },
   { key: "acreage", label: "Acreage" },
   { key: "followup", label: "Follow-up & notes" },
@@ -67,6 +65,11 @@ export function NewOpportunityModal({ pipelines, pipelineId, opp, initialSection
   const [initial] = useState<OppForm>(() => (opp ? oppFormFromRecord(opp) : emptyOppForm(user?.id ?? "")));
   const [f, setF] = useState<OppForm>(initial);
   const set = (k: keyof OppForm) => (v: string) => setF((p) => ({ ...p, [k]: v }));
+  // The seller — the shared Seller Information block. Editing seeds it from the
+  // linked contact (the shared record), else from the opportunity's own fields.
+  const [seller, setSeller] = useState<SellerInfoForm>(() => sellerSeed(opp));
+  const sellerInitial = useState(() => sellerInfoBody(sellerSeed(opp)))[0];
+  const sellerChanged = JSON.stringify(sellerInfoBody(seller)) !== JSON.stringify(sellerInitial);
 
   // --- pipeline + starting stage ------------------------------------------
   // The app's list is only the first paint; a fresh copy replaces it on open.
@@ -93,29 +96,10 @@ export function NewOpportunityModal({ pipelines, pipelineId, opp, initialSection
 
   // --- people -------------------------------------------------------------
   const [users, setUsers] = useState<UserLite[]>([]);
-  const [contacts, setContacts] = useState<ContactRow[] | null>(null);
-  useEffect(() => {
-    api.get<UserLite[]>("/users").then(setUsers).catch(() => {});
-    api.get<ContactRow[]>("/contacts").then(setContacts).catch(() => setContacts([]));
-  }, []);
-  // The saved owner and linked contact show by name before (or without)
-  // their lists (edit mode).
+  useEffect(() => { api.get<UserLite[]>("/users").then(setUsers).catch(() => {}); }, []);
+  // The saved owner shows by name before (or without) the list (edit mode).
   const ownerOptions = users.map((u) => ({ value: u.id, label: u.name }));
   if (opp?.owner && !users.some((u) => u.id === opp.owner!.id)) ownerOptions.unshift({ value: opp.owner.id, label: opp.owner.name });
-  const contactOptions = contacts
-    ? contacts.map((c) => ({ value: c.id, label: c.name, hint: c.entityName ?? undefined }))
-    : opp?.contact ? [{ value: opp.contact.id, label: [opp.contact.firstName, opp.contact.lastName].filter(Boolean).join(" ") || opp.contact.entityName || "Contact" }] : [];
-  // Linking a contact fills the blank seller fields from it (editable after).
-  function pickContact(id: string) {
-    const c = contacts?.find((x) => x.id === id);
-    setF((p) => ({
-      ...p, contactId: id,
-      sellerName: p.sellerName || (c?.name ?? ""),
-      companyName: p.companyName || (c?.entityName ?? ""),
-      phone: p.phone || normalizePhone(c?.phone ?? ""),
-      email: p.email || (c?.email ?? ""),
-    }));
-  }
 
   // --- property -----------------------------------------------------------
   const { byId } = useAbstractIndex();
@@ -131,8 +115,11 @@ export function NewOpportunityModal({ pipelines, pipelineId, opp, initialSection
 
   // --- validation, rail, submit ---------------------------------------------
   const check = checkOppForm(f, { editing, pipelineId: choice.pipelineId, stage: choice.stage });
+  // The seller is required (a name or an entity name, or an existing contact).
+  check.missing.push(...sellerInfoMissing(seller));
+  check.invalid.push(...sellerInfoInvalid(seller));
   const changes = oppPatchBody(initial, f);
-  const dirty = Object.keys(changes).length > 0;
+  const dirty = Object.keys(changes).length > 0 || sellerChanged;
   const { sec, goSec, formRef, railRef, onFormScroll } = useSectionRail<OppFormSection>(initialSection ?? "basics");
   useEffect(() => { if (initialSection && initialSection !== "basics") goSec(initialSection, "auto"); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [error, setError] = useState<string | null>(null);
@@ -141,14 +128,18 @@ export function NewOpportunityModal({ pipelines, pipelineId, opp, initialSection
   async function submit() {
     if (busy) return;
     if (opp && !dirty) { onClose(); return; }
-    if (check.missing.length) { setError(`Required: ${check.missing.join(", ")}`); goSec("basics"); return; }
+    if (check.missing.length) { setError(`Required: ${check.missing.join(", ")}`); goSec(check.missing.some((m) => m.startsWith("Seller")) && !checkOppForm(f, { editing, pipelineId: choice.pipelineId, stage: choice.stage }).missing.length ? "seller" : "basics"); return; }
     if (check.invalid.length) { setError(check.invalid.join(" · ")); return; }
     setBusy(true); setError(null);
     try {
+      // The seller block travels as `seller`; the server resolves it to a Contact
+      // and fills the opportunity's own seller columns from it.
+      const sellerBody = sellerInfoBody(seller);
       if (opp) {
-        onSaved?.(await api.patch<Opp>(`/opportunities/${opp.id}`, changes));
+        onSaved?.(await api.patch<Opp>(`/opportunities/${opp.id}`, { ...changes, ...(sellerChanged ? { seller: sellerBody } : {}) }));
       } else {
-        const o = await api.post<Opp>("/opportunities", { ...oppBody(f), pipelineId: choice.pipelineId, stage: choice.stage });
+        const { sellerName: _sn, companyName: _cn, phone: _ph, email: _em, contactId: _ci, ...rest } = oppBody(f);
+        const o = await api.post<Opp>("/opportunities", { ...rest, seller: sellerBody, pipelineId: choice.pipelineId, stage: choice.stage });
         onCreated?.(o, { pipelineName: pipeline?.name ?? "", stageLabel: pipeline?.stages.find((s) => s.key === o.stage)?.label ?? prettyStage(o.stage) });
       }
     } catch (err) {
@@ -171,7 +162,8 @@ export function NewOpportunityModal({ pipelines, pipelineId, opp, initialSection
   const fieldsLeft = check.missing.length;
   const nma = f.estNma.trim() === "" || !Number.isFinite(Number(f.estNma)) ? null : Number(f.estNma);
   const where = [pipeline?.name, stageLabel].filter(Boolean).join(" · ");
-  const isDone = (k: OppFormSection) => k === "basics" && !check.missing.length;
+  const isDone = (k: OppFormSection) =>
+    (k === "basics" && !check.missing.some((m) => !m.startsWith("Seller"))) || (k === "seller" && !sellerInfoMissing(seller).length);
   const enterSubmits = (e: React.KeyboardEvent) => { if (e.key === "Enter") { e.preventDefault(); void submit(); } };
 
   return (
@@ -179,7 +171,7 @@ export function NewOpportunityModal({ pipelines, pipelineId, opp, initialSection
       title={editing ? "Edit opportunity" : "New opportunity"}
       subtitle={editing
         ? <>In <strong>{pipeline?.name ?? "its pipeline"}</strong> · <strong>{stageLabel}</strong> — change the stage with Move stage</>
-        : <>{stageLabel ? <>Starts in <strong>{stageLabel}</strong> · </> : null}only a name is required — the rest can wait</>}
+        : <>{stageLabel ? <>Starts in <strong>{stageLabel}</strong> · </> : null}a name and the seller are required — the rest can wait</>}
       onClose={onClose}
       wide
       dirty={dirty}
@@ -246,18 +238,8 @@ export function NewOpportunityModal({ pipelines, pipelineId, opp, initialSection
           </div>
 
           <div data-sec="seller">
-            <FormSection title="Seller & contact" hint="Link a contact to fill these in from it, or type them for a seller who isn't in Contacts yet.">
-              <div className="nd-basics">
-                <div className="field" style={{ gridColumn: "1 / -1" }}>
-                  <label>Linked contact</label>
-                  <Select value={f.contactId} onChange={(id) => (id ? pickContact(id) : set("contactId")(""))} ariaLabel="Linked contact" clearable searchable
-                    placeholder={contacts ? "Search contacts…" : "Loading contacts…"} emptyText="No matching contacts" options={contactOptions} />
-                </div>
-                <div className="field"><label>Seller name</label><input value={f.sellerName} onChange={(e) => set("sellerName")(e.target.value)} placeholder="e.g. Mary Hernandez" /></div>
-                <div className="field"><label>Company</label><input value={f.companyName} onChange={(e) => set("companyName")(e.target.value)} placeholder="Trust, LLC or estate (optional)" /></div>
-                <div className="field"><label>Phone</label><PhoneInput value={f.phone} onChange={set("phone")} placeholder="(555) 000-0000" /></div>
-                <div className="field"><label>Email</label><input value={f.email} inputMode="email" autoComplete="off" onChange={(e) => set("email")(e.target.value)} placeholder="name@example.com" /></div>
-              </div>
+            <FormSection title="Seller" hint="Who owns the minerals. Pick an existing contact, or enter the seller and a contact is created and linked — one contact per seller, however many prospects and deals.">
+              <SellerInformation value={seller} onChange={setSeller} req={req} />
             </FormSection>
           </div>
 
@@ -304,4 +286,25 @@ export function NewOpportunityModal({ pipelines, pipelineId, opp, initialSection
       {error && <div className="error-text nd-error" role="alert">{error}</div>}
     </Modal>
   );
+}
+
+/** The seller block's starting values: the linked contact (the shared record)
+ *  when there is one, else the opportunity's own seller fields; blank for a new one. */
+function sellerSeed(opp: Opp | undefined): SellerInfoForm {
+  if (!opp) return emptySellerInfo();
+  if (opp.contact) {
+    const c = opp.contact;
+    return sellerInfoFromContact({
+      id: c.id, firstName: c.firstName, lastName: c.lastName, entityName: c.entityName, phone: c.phone, email: c.email,
+      mailingStreet: c.mailingStreet ?? null, mailingCity: c.mailingCity ?? null, mailingState: c.mailingState ?? null, mailingZip: c.mailingZip ?? null,
+    });
+  }
+  const name = (opp.sellerName ?? "").trim();
+  const i = name.lastIndexOf(" ");
+  const entity = !!opp.companyName && !name;
+  return {
+    ...emptySellerInfo(), kind: entity ? "ENTITY" : "INDIVIDUAL", entityType: "OTHER",
+    firstName: i < 0 ? name : name.slice(0, i), lastName: i < 0 ? "" : name.slice(i + 1),
+    companyName: opp.companyName ?? "", phone: opp.phone ?? "", email: opp.email ?? "",
+  };
 }

@@ -174,7 +174,9 @@ describe("serializers", () => {
     });
     expect(d.phone).toBe("1");
     expect(d.notes).toBe("n");
-    expect(d.contact).toEqual({ id: "c1", firstName: "F", lastName: "L", entityName: null, phone: null, email: null });
+    expect(d.contact).toMatchObject({ id: "c1", firstName: "F", lastName: "L", entityName: null, phone: null, email: null, mailingStreet: null });
+    expect(d.files).toEqual([]);
+    expect(d.docFolders).toEqual([]);
     expect(d.convertedDeal).toEqual({ id: "d1", name: "Deal", stage: "UNDER_CONTRACT" });
     expect(d.stageHistory).toEqual([{ id: "h1", fromStage: "", toStage: "NEW_OPPORTUNITY", reason: null, changedBy: null, createdAt: t }]);
     expect(d.activities[0].createdBy).toEqual({ id: "u1", name: "Ann" });

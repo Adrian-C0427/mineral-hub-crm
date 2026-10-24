@@ -721,6 +721,11 @@ model Deal {
   // these unless an override is set. See server/src/domain/dates.ts (single resolver).
   dateUnderContract        DateTime?
   originalClosingDate      DateTime?
+  // The Closing date the deal was CREATED with (or the one it had the first
+  // time Closing was edited): the baseline the automatic Extended Closing
+  // (+15 days) is derived from, so moving Closing earlier never pulls the
+  // extended date in with it. Null = fall back to originalClosingDate.
+  closingBaselineDate      DateTime?
   findBuyerByDateOverride  DateTime?
   // Expected closing with the BUYER (entered by hand, never calculated);
   // separate from the seller-side final closing above.
@@ -803,6 +808,9 @@ model Deal {
   // Custom document-folder list for this deal/asset (rename/delete/reorder in
   // the Documents section). Empty = the module's default folder set.
   docFolders String[] @default([])
+  // Default-folder set version this deal's stored list has been brought up to
+  // (services/docFoldersBackfill.ts): 1 = the Lease folder was added.
+  docFoldersVersion Int @default(0)
 
   // Hidden from the Deals list and its table-level metrics (set = hidden,
   // null = visible). A working-view control only: the deal keeps its stage,
@@ -848,6 +856,13 @@ model DealSeller {
 
   isPrimary        Boolean @default(false)
   ownershipPercent Float? // this owner's share (for future multi-owner splits)
+
+  // The shared Contact this seller is (one Contact ↔ many deals / opportunities).
+  // The Contact holds the shared identity + contact details; the columns below
+  // are this deal's copy (deal-specific details such as trust name, physical
+  // address and internal notes live only here).
+  contactId String?
+  contact   Contact? @relation("ContactDealSellers", fields: [contactId], references: [id], onDelete: SetNull)
 
   // Personal
   firstName   String?
@@ -895,6 +910,7 @@ model DealSeller {
   updatedAt DateTime @updatedAt
 
   @@index([dealId])
+  @@index([contactId])
 }
 
 // A month of realized revenue on an owned asset (royalty, lease bonus, etc.).
@@ -1199,6 +1215,8 @@ model FileAttachment {
   deal             Deal?        @relation(fields: [dealId], references: [id], onDelete: Cascade)
   buyerId          String?
   buyer            Buyer?       @relation(fields: [buyerId], references: [id], onDelete: Cascade)
+  opportunityId    String?
+  opportunity      Opportunity? @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
   // Legacy fixed category, kept for back-compat. The folder-based document
   // manager uses `folder` (a free string) so new folders need no schema change.
   category         FileCategory @default(OTHER)
@@ -1225,6 +1243,7 @@ model FileAttachment {
 
   @@index([dealId])
   @@index([buyerId])
+  @@index([opportunityId])
 }
 
 // ---------------------------------------------------------------------------
@@ -1705,6 +1724,7 @@ model Contact {
   activities    ContactActivity[]
   lists         ContactList[]     @relation("ContactListMembers")
   opportunities Opportunity[]
+  dealSellers   DealSeller[]      @relation("ContactDealSellers")
 
   @@index([organizationId])
   @@index([organizationId, status])
@@ -1898,6 +1918,10 @@ model Opportunity {
   createdByUserId String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+
+  // Documents (same manager as deals). Empty docFolders = the module's defaults.
+  files      FileAttachment[]
+  docFolders String[]         @default([])
 
   stageHistory OpportunityStageHistory[]
   activities   OpportunityActivity[]
