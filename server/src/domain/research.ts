@@ -489,11 +489,20 @@ export function documentInterestPct(interests: PartyInterest[]): number | null {
 export function documentPartyFields(grantorRaw: string | null | undefined, granteeRaw: string | null | undefined): DocumentPartyFields {
   const side = (raw: string | null | undefined, which: PartyInterest["side"]) => {
     const cell = raw && raw.trim() ? raw : null;
-    const { parties, hasInterest } = parsePartyCell(cell);
-    const clean = hasInterest ? parties.map((p) => p.name).join("; ") || null : cell;
+    const { parties } = parsePartyCell(cell);
+    // The displayed cell is the clean party list whenever cleaning changed
+    // anything — a share, an annotation, a role word, an "&" split — so no
+    // screen ever shows text the parties behind it have dropped. The cell as
+    // recorded is kept alongside (grantorAsRecorded / granteeAsRecorded).
+    const names = parties.map((p) => p.name);
+    const joined = names.join("; ");
+    // Separators alone don't count as a change ("A, B" stays as recorded).
+    const rawParts = cell ? cell.split(PARTY_SEPARATOR).map((t) => t.trim()).filter(Boolean) : [];
+    const changed = cell != null && joined !== cell.trim() && (rawParts.length !== names.length || rawParts.some((t, i) => t !== names[i]));
+    const clean = changed ? joined || null : cell;
     return {
       cell: clean,
-      recorded: hasInterest ? cell : null,
+      recorded: changed ? cell : null,
       norm: normalizeEntity(clean),
       names: parties.map((p) => p.name),
       norms: parties.map((p) => p.norm),
