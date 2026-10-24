@@ -36,3 +36,29 @@ describe("dealStatus — the system status behind a contact's mineral interest",
     for (const k of ["UNDER_CONTRACT", "NEGOTIATING", "CLOSING", "MY_CUSTOM_STAGE"]) expect(dealStatus(k)).toBe("UNDER_CONTRACT");
   });
 });
+
+import { ambiguityOf, sellerInfoFromLegacyName, sellerInfoFromStored } from "./sellerContactBackfill.js";
+
+describe("create pass — building seller blocks from stored records, and refusing ambiguous ones", () => {
+  it("reads a legacy seller name as a person or an entity", () => {
+    expect(sellerInfoFromLegacyName("Mary Hernandez")).toMatchObject({ firstName: "Mary", lastName: "Hernandez", companyName: null });
+    expect(sellerInfoFromLegacyName("Smith, Robert")).toMatchObject({ firstName: "Robert", lastName: "Smith" });
+    expect(sellerInfoFromLegacyName("Lone Star Family Trust")).toMatchObject({ companyName: "Lone Star Family Trust", sellerType: "OTHER" });
+    expect(sellerInfoFromLegacyName("  ")).toBeNull();
+  });
+  it("reads an opportunity's plain fields; an unusable email is dropped, not fatal", () => {
+    expect(sellerInfoFromStored({ sellerName: "Ann Lee", phone: "(903) 555-0000", email: "not-an-email" })).toMatchObject({ firstName: "Ann", lastName: "Lee", phone: "9035550000", email: null });
+    expect(sellerInfoFromStored({ trustName: "Pecan Estate" })).toMatchObject({ companyName: "Pecan Estate" });
+    expect(sellerInfoFromStored({ phone: "9035550000" })).toBeNull(); // no name at all
+  });
+  it("flags two contacts answering the same reliable key instead of picking one", () => {
+    const two = [
+      { id: "a", firstName: "Mary", lastName: "Hernandez", entityName: null, email: "m@x.com", phone: null },
+      { id: "b", firstName: "Mary", lastName: "Hernandez", entityName: null, email: "m@x.com", phone: null },
+    ];
+    expect(ambiguityOf(sellerInfoFromStored({ firstName: "Mary", lastName: "Hernandez", email: "m@x.com" })!, two)).toMatch(/share the email/);
+    expect(ambiguityOf(sellerInfoFromStored({ firstName: "Mary", lastName: "Hernandez" })!, two)).toMatch(/share the name/);
+    expect(ambiguityOf(sellerInfoFromStored({ firstName: "Mary", lastName: "Hernandez" })!, two.slice(0, 1))).toBeNull();
+    expect(ambiguityOf(sellerInfoFromStored({ firstName: "Jose", lastName: "Hernandez" })!, two)).toBeNull();
+  });
+});
