@@ -19,9 +19,11 @@ describe("matchSellerToContact — only reliable identifiers link an old seller 
   it("matches on email regardless of case", () => {
     expect(matchSellerToContact(seller({ email: "MARY@example.com", firstName: "M" }), contacts, null)).toBe("c_mary");
   });
-  it("matches on phone + exact person name or entity name, never phone alone", () => {
+  it("matches on the phone number; with several contacts on one phone, the same name wins", () => {
     expect(matchSellerToContact(seller({ primaryPhone: "903-555-1234", firstName: "john", lastName: "SMITH" }), contacts, null)).toBe("c_john");
-    expect(matchSellerToContact(seller({ primaryPhone: "903-555-1234", firstName: "Jose", lastName: "Smith" }), contacts, null)).toBeNull();
+    expect(matchSellerToContact(seller({ primaryPhone: "903-555-1234", firstName: "mary", lastName: "hernandez" }), contacts, null)).toBe("c_mary");
+    expect(matchSellerToContact(seller({ primaryPhone: "903-555-1234", firstName: "Jose", lastName: "Smith" }), contacts, null)).toBe("c_mary"); // phone alone: the most recent of the two
+    expect(matchSellerToContact(seller({ primaryPhone: "(903) 555-1234" }), contacts, null)).toBe("c_mary"); // no name at all
     expect(matchSellerToContact(seller({ primaryPhone: "2145550101", companyName: "lone star family trust" }), contacts, null)).toBe("c_trust");
   });
   it("never links on a name alone", () => {
