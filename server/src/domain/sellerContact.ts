@@ -106,11 +106,13 @@ export function sellerInfoName(s: Pick<SellerInfo, "firstName" | "lastName" | "c
 /**
  * The Contact an existing contact-less seller block matches, if any:
  *   1. the same email (case-insensitive);
- *   2. the same phone number AND the same person or entity name;
+ *   2. the same phone number — a phone identifies the contact on its own
+ *      (when several contacts share it, the one with the same person or
+ *      entity name, else the most recently updated);
  *   3. with neither an email nor a phone given: the same person name AND the
  *      same entity name (none on both sides counts as the same).
  * A match on name alone with contact details present is NOT taken — two
- * different John Smiths must not be merged because one has a phone.
+ * different John Smiths must not be merged because one has an email.
  */
 export async function matchSellerContact(tx: Tx, organizationId: string, s: SellerInfo): Promise<SellerContactRow | null> {
   if (s.email) {
@@ -121,6 +123,18 @@ export async function matchSellerContact(tx: Tx, organizationId: string, s: Sell
     if (byEmail) return byEmail;
   }
   const hasName = !!(s.firstName || s.lastName);
+  const sameName = (c: SellerContactRow) =>
+    (hasName && same(c.firstName, s.firstName) && same(c.lastName, s.lastName)) || (!!s.companyName && same(c.entityName, s.companyName));
+  if (s.phone) {
+    // Stored phones are digits, but older rows may carry formatting: match on
+    // the last 10 digits, then confirm with the full normalization.
+    const tail = s.phone.slice(-10);
+    const byPhone = (await tx.contact.findMany({
+      where: { organizationId, phone: { contains: tail.slice(0, 3) } },
+      select: sellerContactSelect, orderBy: { updatedAt: "desc" }, take: 200,
+    })).filter((c) => normalizePhone(c.phone) === s.phone);
+    if (byPhone.length) return byPhone.find(sameName) ?? byPhone[0];
+  }
   const nameWhere: Prisma.ContactWhereInput[] = [];
   if (hasName) nameWhere.push({ firstName: { equals: s.firstName ?? "", mode: "insensitive" }, lastName: { equals: s.lastName ?? "", mode: "insensitive" } });
   if (s.companyName) nameWhere.push({ entityName: { equals: s.companyName, mode: "insensitive" } });
@@ -129,8 +143,7 @@ export async function matchSellerContact(tx: Tx, organizationId: string, s: Sell
     where: { organizationId, OR: nameWhere },
     select: sellerContactSelect, orderBy: { updatedAt: "desc" }, take: 50,
   });
-  if (s.phone) return candidates.find((c) => normalizePhone(c.phone) === s.phone) ?? null;
-  if (s.email) return null; // an email was given and nobody has it: a new contact
+  if (s.phone || s.email) return null; // contact details were given and nobody has them: a new contact
   // No contact details at all: the whole name must agree.
   return candidates.find((c) =>
     same(c.firstName, s.firstName) && same(c.lastName, s.lastName) && same(c.entityName, s.companyName)) ?? null;

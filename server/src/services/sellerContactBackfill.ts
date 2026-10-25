@@ -10,8 +10,9 @@ import { dealSellerFromInfo, opportunitySellerFromInfo, resolveSellerContact, se
  *
  *  Pass 1 — LINK. A deal seller row with no contact is linked to the contact
  *  it reliably is: the converted opportunity's contact (primary seller), an
- *  exact email, or an exact phone + exact person / entity name. Never a
- *  similar name.
+ *  exact email, or an exact phone number (a phone identifies the contact on
+ *  its own; when several contacts share it, the one with the same name, else
+ *  the most recently updated). Never a similar name.
  *
  *  Pass 2 — CREATE. What is still unlinked but carries seller information
  *  (a name, an entity, an email or a phone) goes through the same resolution
@@ -53,9 +54,10 @@ export function matchSellerToContact(s: SellerRow, contacts: ContactRow[], conve
   const phone = normalizePhone(s.primaryPhone);
   if (phone) {
     const first = lower(s.firstName), last = lower(s.lastName), company = lower(s.companyName);
-    const c = contacts.find((x) => normalizePhone(x.phone) === phone && (
-      (first && last && lower(x.firstName) === first && lower(x.lastName) === last)
-      || (company && lower(x.entityName) === company)));
+    const byPhone = contacts.filter((x) => normalizePhone(x.phone) === phone);
+    const named = byPhone.find((x) =>
+      (first && last && lower(x.firstName) === first && lower(x.lastName) === last) || (company && lower(x.entityName) === company));
+    const c = named ?? byPhone[0];
     if (c) return c.id;
   }
   return null;
@@ -74,8 +76,12 @@ export function ambiguityOf(s: SellerInfo, contacts: ContactRow[]): string | nul
   const first = lower(s.firstName), last = lower(s.lastName), company = lower(s.companyName);
   const sameName = (c: ContactRow) => (first || last ? lower(c.firstName) === first && lower(c.lastName) === last : true) && lower(c.entityName) === company;
   if (s.phone) {
-    const n = contacts.filter((c) => normalizePhone(c.phone) === s.phone && ((first && last && lower(c.firstName) === first && lower(c.lastName) === last) || (company && lower(c.entityName) === company))).length;
-    return n > 1 ? `${n} contacts share the phone and name` : null;
+    // A phone identifies the contact; several contacts on one phone are only
+    // ambiguous when none of them carries this seller's name.
+    const byPhone = contacts.filter((c) => normalizePhone(c.phone) === s.phone);
+    if (byPhone.length <= 1) return null;
+    const named = byPhone.filter((c) => (first && last && lower(c.firstName) === first && lower(c.lastName) === last) || (company && lower(c.entityName) === company));
+    return named.length === 1 ? null : `${byPhone.length} contacts share the phone`;
   }
   const n = contacts.filter(sameName).length;
   return n > 1 ? `${n} contacts share the name` : null;
@@ -179,13 +185,16 @@ async function createPass(organizationId: string, report: Report): Promise<void>
     where: { contactId: null, deal: { organizationId } },
     select: {
       id: true, dealId: true, firstName: true, lastName: true, companyName: true, trustName: true, email: true, primaryPhone: true,
-      mailingAddress: true, mailingCity: true, mailingState: true, mailingZip: true, deal: { select: { relationshipOwnerId: true } },
+      mailingAddress: true, mailingCity: true, mailingState: true, mailingZip: true, deal: { select: { relationshipOwnerId: true, sellerNames: true } },
     },
     orderBy: { createdAt: "asc" },
   });
   const noInfoDeals = new Set<string>();
   for (const s of sellers) {
-    const info = sellerInfoFromStored({ ...s, phone: s.primaryPhone });
+    // A seller row recorded without a name takes the deal's legacy seller name
+    // (Deal.sellerNames) so its phone / email / address still become a contact.
+    const legacy = !s.firstName && !s.lastName && !s.companyName && !s.trustName ? sellerInfoFromLegacyName(s.deal.sellerNames[0] ?? "") : null;
+    const info = sellerInfoFromStored({ ...s, phone: s.primaryPhone, ...(legacy ? { firstName: legacy.firstName, lastName: legacy.lastName, companyName: legacy.companyName } : {}) });
     if (!info) { noInfoDeals.add(s.dealId); continue; }
     const contacts = await contactsNow();
     const why = ambiguityOf(info, contacts);

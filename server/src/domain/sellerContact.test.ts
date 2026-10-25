@@ -24,8 +24,10 @@ function fakeTx(rows: SellerContactRow[]) {
     if (w.email) return rows.find((r) => (r.email ?? "").toLowerCase() === w.email!.equals.toLowerCase()) ?? null;
     return null;
   });
-  const findMany = vi.fn(async (args: { where: { OR: Record<string, { equals: string }>[] } }) =>
-    rows.filter((r) => args.where.OR.some((cond) => {
+  const findMany = vi.fn(async (args: { where: { OR?: Record<string, { equals: string }>[]; phone?: { contains: string } } }) =>
+    args.where.phone
+      ? rows.filter((r) => (r.phone ?? "").includes(args.where.phone!.contains))
+      : rows.filter((r) => (args.where.OR ?? []).some((cond) => {
       const f = cond.firstName?.equals, l = cond.lastName?.equals, e = cond.entityName?.equals;
       if (e != null) return (r.entityName ?? "").toLowerCase() === e.toLowerCase();
       return r.firstName.toLowerCase() === (f ?? "").toLowerCase() && r.lastName.toLowerCase() === (l ?? "").toLowerCase();
@@ -62,9 +64,14 @@ describe("matchSellerContact", () => {
     const { tx } = fakeTx([contact({ email: null })]);
     expect((await matchSellerContact(tx, "org", info({ firstName: "mary", lastName: "HERNANDEZ", phone: "903-555-1234" })))?.id).toBe("c1");
   });
-  it("does not merge two different people who share a phone", async () => {
+  it("a phone number alone identifies the contact (the data merges into it)", async () => {
     const { tx } = fakeTx([contact({ email: null })]);
-    expect(await matchSellerContact(tx, "org", info({ firstName: "Jose", lastName: "Hernandez", phone: "903-555-1234" }))).toBeNull();
+    expect((await matchSellerContact(tx, "org", info({ firstName: "Jose", lastName: "Hernandez", phone: "903-555-1234" })))?.id).toBe("c1");
+    expect((await matchSellerContact(tx, "org", info({ companyName: "Whatever LLC", phone: "(903) 555-1234" })))?.id).toBe("c1");
+  });
+  it("several contacts on one phone: the one with the seller's name wins", async () => {
+    const { tx } = fakeTx([contact({ id: "c_other", firstName: "Jose", lastName: "Hernandez", email: null }), contact({ email: null })]);
+    expect((await matchSellerContact(tx, "org", info({ firstName: "Mary", lastName: "Hernandez", phone: "9035551234" })))?.id).toBe("c1");
   });
   it("matches on phone + the same entity name", async () => {
     const { tx } = fakeTx([contact({ email: null, entityName: "Hernandez Family Trust" })]);
