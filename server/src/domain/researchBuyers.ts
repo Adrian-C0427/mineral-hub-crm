@@ -143,11 +143,13 @@ function editDistance(a: string, b: string): number {
  *  - weighted word overlap (Jaccard): every word counts, generic ones at a
  *    fraction, so "Horizon Minerals" vs "Horizon Royalties" is one word of
  *    two, not a perfect match;
- *  - containment (parent / subsidiary, "Morningstar Minerals" inside
- *    "Morningstar Minerals West"): the shorter name must be carried by at least
- *    two distinctive words, or by one long unusual word ("MORNINGSTAR") — a
- *    single ordinary word ("HORIZON", "STAR") shared with a longer name is not
- *    the same company;
+ *  - containment (parent / subsidiary / longer legal name: "Morningstar
+ *    Minerals" inside "Morningstar Minerals West", "Horizon Minerals" inside
+ *    "Horizon Minerals Acquisitions Group"): EVERY word of the shorter name
+ *    appears in the longer one, and the shorter name is more than one bare
+ *    word (two words, or one long unusual word like "MORNINGSTAR") — a single
+ *    ordinary word ("HORIZON", "STAR") shared with a longer name is not the
+ *    same company, and a name that shares only part of itself isn't either;
  *  - a typo (an edit distance of at most two characters).
  * Names that differ at all never read as identical (capped at 0.97).
  */
@@ -163,10 +165,17 @@ export function nameSimilarity(a: string, b: string): number {
   const jaccard = unionWeight ? sumWeight(shared) / unionWeight : 0;
 
   const [small, big] = sumWeight(ta) <= sumWeight(tb) ? [ta, tb] : [tb, ta];
-  const sharedDistinctive = [...small].filter((t) => big.has(t) && !GENERIC_WORDS.has(t));
+  const allInside = small.size > 0 && [...small].every((t) => big.has(t));
+  const distinctive = [...small].filter((t) => !GENERIC_WORDS.has(t));
+  const substantial = small.size >= 2 || (distinctive.length === 1 && distinctive[0].length >= 8);
+  // Partial containment ("Blackrock Mineral Holdings" vs "Blackrock Minerals")
+  // still counts, in proportion, when the shared distinctive words are
+  // substantial — enough for a review-level "possible duplicate", not an alias.
+  const sharedDistinctive = distinctive.filter((t) => big.has(t));
   const carried = sharedDistinctive.length >= 2 || (sharedDistinctive.length === 1 && sharedDistinctive[0].length >= 8);
   const smallWeight = sumWeight(small);
-  const containment = carried && smallWeight ? sumWeight([...small].filter((t) => big.has(t))) / smallWeight : 0;
+  const containment = allInside && distinctive.length >= 1 && substantial ? 1
+    : carried && smallWeight ? sumWeight([...small].filter((t) => big.has(t))) / smallWeight : 0;
 
   const distance = editDistance(na, nb);
   const edit = distance <= 2 ? 1 - distance / Math.max(na.length, nb.length) : 0;

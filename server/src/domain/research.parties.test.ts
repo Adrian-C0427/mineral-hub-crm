@@ -105,15 +105,22 @@ describe("rules v3 — an \"&\" inside a name, and unclosed brackets", () => {
 
 describe("similarity measures the whole name, not one shared word", () => {
   it("does not treat every company with HORIZON in its name as the same buyer", () => {
-    for (const other of ["HORIZON ROYALTIES LLC", "HORIZON MINERALS ACQUISITIONS GROUP INC", "WESTERN HORIZON ENERGY LLC", "NEW HORIZON OIL & GAS LTD", "WESTERN HORIZON"]) {
-      expect(nameSimilarity("HORIZON MINERALS LLC", other), other).toBeLessThan(0.85);
+    for (const other of ["HORIZON ROYALTIES LLC", "WESTERN HORIZON ENERGY LLC", "NEW HORIZON OIL & GAS LTD", "WESTERN HORIZON"]) {
+      expect(nameSimilarity("HORIZON MINERALS LLC", other), other).toBeLessThan(0.8);
     }
-    expect(nameSimilarity("HORIZON ENERGY PARTNERS LP", "WESTERN HORIZON ENERGY LLC")).toBeLessThan(0.85);
+    expect(nameSimilarity("HORIZON ENERGY PARTNERS LP", "WESTERN HORIZON ENERGY LLC")).toBeLessThan(0.8);
     expect(nameSimilarity("WESTERN HORIZON ENERGY LLC", "NEW HORIZON OIL & GAS LTD")).toBeLessThan(0.6);
   });
-  it("a misspelling still matches, a different word does not", () => {
-    expect(nameSimilarity("WESTERN HORIZON ENERGY LLC", "WESTERN HORIZN ENERGY LLC")).toBeGreaterThanOrEqual(0.85);
-    expect(nameSimilarity("WESTERN HORIZON ENERGY LLC", "WESTERN HORIZON ROYALTY LLC")).toBeLessThan(0.85);
+  it("but a longer legal name that contains the whole buyer name is the same company", () => {
+    expect(nameSimilarity("HORIZON MINERALS LLC", "HORIZON MINERALS ACQUISITIONS GROUP INC")).toBeGreaterThanOrEqual(0.8);
+    expect(nameSimilarity("Blackrock Minerals", "Blackrock Minerals Partners II LP")).toBeGreaterThanOrEqual(0.8);
+    // A one-word name shared with everyone is not containment.
+    expect(nameSimilarity("HORIZON LLC", "WESTERN HORIZON ENERGY LLC")).toBeLessThan(0.8);
+  });
+  it("a misspelling still matches; an affiliate differing only in a generic word is offered; a different distinctive word is not", () => {
+    expect(nameSimilarity("WESTERN HORIZON ENERGY LLC", "WESTERN HORIZN ENERGY LLC")).toBeGreaterThanOrEqual(0.8);
+    expect(nameSimilarity("WESTERN HORIZON ENERGY LLC", "WESTERN HORIZON ROYALTY LLC")).toBeGreaterThanOrEqual(0.8);
+    expect(nameSimilarity("WESTERN HORIZON ENERGY LLC", "WESTERN SKYLINE ENERGY LLC")).toBeLessThan(0.8);
   });
 });
 
