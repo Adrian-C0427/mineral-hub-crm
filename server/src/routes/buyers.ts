@@ -305,8 +305,9 @@ buyersRouter.get(
 // --------------------------------------------------------------------------
 
 /** Minimum name similarity for an alias suggestion to be shown (the user's bar:
- *  80%+). The score measures the whole name, so one shared word stays well under it. */
-const ALIAS_SUGGEST_THRESHOLD = 0.8;
+ *  70% alike or higher). The score measures the whole name, so one shared
+ *  ordinary word still stays under it. */
+const ALIAS_SUGGEST_THRESHOLD = 0.7;
 
 const uniqCI = (list: string[]): string[] => {
   const seen = new Map<string, string>();
