@@ -346,6 +346,16 @@ export interface OppFile {
   uploadedBy: UserRef | null; createdAt: string; updatedAt?: string; versionCount?: number;
 }
 
+/** One time an accepted offer set the deal's asking price (deal detail → Asking price history). */
+export interface AskPriceHistoryRow {
+  id: string; at: string; summary: string; actor: UserRef | null;
+  before: { askPrice: number | null; askPricePerNma: number | null; askPricePerNra: number | null } | null;
+  after: { askPrice: number | null; askPricePerNma: number | null; askPricePerNra: number | null } | null;
+  offerId: string | null; offerAmount: number | null; buyerId: string | null; buyerName: string | null;
+  /** A legacy deal with no Our Price kept its previous asking price as Our Price. */
+  ourPriceKeptFromAsk: number | null;
+}
+
 /** One "Extended +N days" action on a deal's Contract timeline (deal detail). */
 export interface ContractExtension {
   id: string;

@@ -455,3 +455,10 @@
 @media (pointer: coarse) and (max-height: 500px) {
   .dd-stage-menu { max-height: calc(100dvh - 96px); }
 }
+
+/* Asking price history (Deal characteristics): one line per accepted-offer sync. */
+.ddc-history { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.ddc-history-row { display: flex; gap: 12px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid var(--line-faint); font-size: 12.5px; }
+.ddc-history-when { flex: none; color: var(--ink-4); font-variant-numeric: tabular-nums; }
+.ddc-history-text { min-width: 0; color: var(--ink-1); overflow-wrap: anywhere; }
+.ddc-history-text strong { color: var(--ink); }

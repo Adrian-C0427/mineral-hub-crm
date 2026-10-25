@@ -4,6 +4,7 @@ import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
 import { requireAuth, requireOrg, requirePermission, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { logActivity } from "../services/activityLog.js";
+import { syncAskToAcceptedOffer } from "../services/acceptedOfferSync.js";
 
 export const offersRouter = Router();
 // Offers are part of a deal's negotiation — treat them as deal edits.
@@ -136,45 +137,62 @@ offersRouter.patch(
     if (data.status !== undefined) patch.status = data.status;
     if (data.notes !== undefined) patch.notes = data.notes;
     // Ensure the offer belongs to a deal in the caller's org.
-    const owned = await prisma.offer.findFirst({ where: { id: req.params.id, deal: { organizationId: orgId(req) } } });
+    const owned = await prisma.offer.findFirst({ where: { id: req.params.id, deal: { organizationId: orgId(req) } }, include: { deal: { select: { id: true, stage: true, selectedOfferId: true } } } });
     if (!owned) throw new HttpError(404, "Offer not found");
-    const offer = await prisma.offer.update({ where: { id: req.params.id }, data: patch });
-    // Amount edits flow into every derived number at read time (best offer,
-    // profit estimates, dashboard, reports) — the only STORED copy is the
-    // buyer-activity offerAmount, so keep it in sync when this offer is the
-    // buyer's latest.
-    if (data.amount !== undefined) {
-      const latest = await prisma.offer.findFirst({
-        where: { dealId: owned.dealId, buyerId: owned.buyerId },
-        orderBy: { dateSubmitted: "desc" },
-        select: { id: true },
-      });
-      if (latest?.id === offer.id) {
-        await prisma.dealBuyerActivity.updateMany({
+    const offer = await prisma.$transaction(async (tx) => {
+      const updated = await tx.offer.update({ where: { id: req.params.id }, data: patch });
+      // Amount edits flow into every derived number at read time (best offer,
+      // profit estimates, dashboard, reports) — the only STORED copy is the
+      // buyer-activity offerAmount, so keep it in sync when this offer is the
+      // buyer's latest.
+      if (data.amount !== undefined) {
+        const latest = await tx.offer.findFirst({
           where: { dealId: owned.dealId, buyerId: owned.buyerId },
-          data: { offerAmount: data.amount },
+          orderBy: { dateSubmitted: "desc" },
+          select: { id: true },
+        });
+        if (latest?.id === updated.id) {
+          await tx.dealBuyerActivity.updateMany({
+            where: { dealId: owned.dealId, buyerId: owned.buyerId },
+            data: { offerAmount: data.amount },
+          });
+        }
+      }
+      // Offers and Buyer Activity share one truth: an offer marked ACCEPTED (by
+      // any path, including API callers that skip POST /deals/:id/accept-offer)
+      // advances that buyer's activity status AND records the deal's selection,
+      // so every surface keyed on selectedOfferId/selectedBuyerId (dashboard,
+      // buyer close rate, "Selected buyer" banner, portal visibility) agrees.
+      const becomesAccepted = data.status === "ACCEPTED" && owned.status !== "ACCEPTED";
+      if (data.status === "ACCEPTED") {
+        // On a deal that has already closed, statuses are final: the buyer whose
+        // offer closed it reads CLOSED (what closing the deal sets), never a
+        // step back to ACCEPTED.
+        await tx.dealBuyerActivity.updateMany({
+          where: { dealId: owned.dealId, buyerId: owned.buyerId },
+          data: { status: owned.deal.stage === "CLOSED" ? "CLOSED" : "ACCEPTED", responseReceived: true, lastActivityDate: new Date() },
+        });
+        await tx.deal.update({
+          where: { id: owned.dealId },
+          data: { selectedOfferId: updated.id, selectedBuyerId: owned.buyerId, publishedToPortal: false },
         });
       }
-    }
-    // Offers and Buyer Activity share one truth: an offer marked ACCEPTED (by
-    // any path, including API callers that skip POST /deals/:id/accept-offer)
-    // advances that buyer's activity status AND records the deal's selection,
-    // so every surface keyed on selectedOfferId/selectedBuyerId (dashboard,
-    // buyer close rate, "Selected buyer" banner, portal visibility) agrees.
-    if (data.status === "ACCEPTED") {
-      // On a deal that has already closed, statuses are final: the buyer whose
-      // offer closed it reads CLOSED (what closing the deal sets), never a
-      // step back to ACCEPTED.
-      const parent = await prisma.deal.findUnique({ where: { id: owned.dealId }, select: { stage: true } });
-      await prisma.dealBuyerActivity.updateMany({
-        where: { dealId: owned.dealId, buyerId: owned.buyerId },
-        data: { status: parent?.stage === "CLOSED" ? "CLOSED" : "ACCEPTED", responseReceived: true, lastActivityDate: new Date() },
-      });
-      await prisma.deal.update({
-        where: { id: owned.dealId },
-        data: { selectedOfferId: offer.id, selectedBuyerId: owned.buyerId, publishedToPortal: false },
-      });
-    }
+      // The selected (controlling) offer stepping away from ACCEPTED no longer
+      // controls the deal: the selection is cleared (the asking price it set
+      // stays, with its history, until another offer is accepted or it is edited).
+      const wasControlling = owned.deal.selectedOfferId === updated.id;
+      if (data.status !== undefined && data.status !== "ACCEPTED" && wasControlling && owned.status === "ACCEPTED") {
+        await tx.deal.update({ where: { id: owned.dealId }, data: { selectedOfferId: null } });
+      }
+      // The controlling accepted offer sets the asking price: on acceptance, and
+      // whenever its amount changes afterwards — never for an accepted offer
+      // that is not the deal's selection.
+      const controls = data.status === "ACCEPTED" || (wasControlling && updated.status === "ACCEPTED");
+      if (controls && (becomesAccepted || (data.amount !== undefined && data.amount !== owned.amount))) {
+        await syncAskToAcceptedOffer(tx, { dealId: owned.dealId, offer: { id: updated.id, amount: updated.amount, buyerId: owned.buyerId }, organizationId: orgId(req), actor: req.user! });
+      }
+      return updated;
+    });
     res.json(offer);
   }),
 );

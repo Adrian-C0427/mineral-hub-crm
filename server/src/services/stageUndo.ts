@@ -14,6 +14,7 @@
  * to the caller, and still describes the deal's current state. Every row the
  * undo touches is named by id in the token — nothing is inferred at undo time.
  */
+import { syncAskToAcceptedOffer } from "./acceptedOfferSync.js";
 import jwt from "jsonwebtoken";
 import type { Prisma } from "@prisma/client";
 import { env } from "../config.js";
@@ -61,6 +62,9 @@ export interface StageUndoSnapshot {
   /** The selected offer/buyer the move recorded on the deal (it had no
    *  selected offer), with the selected buyer it had before. */
   selection?: { offerId: string; buyerId: string; prevBuyerId: string | null } | null;
+  /** Asking price (total, per NMA, per NRA) and Our Price before closing set
+   *  them from the winning offer — put back on undo. */
+  ask?: { askPrice: number | null; askPricePerNma: number | null; askPricePerNra: number | null; ourPrice: number | null; logId: string } | null;
   /** Rows the move wrote. */
   historyId: string;
   activityLogId: string;
@@ -242,10 +246,17 @@ export async function applyStageChange(
   // untouched.
   let winner: StageUndoSnapshot["winner"] = null;
   let acceptedOffer: StageUndoSnapshot["acceptedOffer"] = null;
+  let ask: StageUndoSnapshot["ask"] = null;
   if (win) {
     if (win.offer && win.offer.status !== "ACCEPTED") {
       await tx.offer.update({ where: { id: win.offer.id }, data: { status: "ACCEPTED" } });
       acceptedOffer = { offerId: win.offer.id, status: win.offer.status };
+    }
+    // The winning (now accepted, selected) offer controls the asking price.
+    if (win.offer) {
+      const before = await tx.deal.findUnique({ where: { id: deal.id }, select: { askPrice: true, askPricePerNma: true, askPricePerNra: true, ourPrice: true } });
+      const synced = await syncAskToAcceptedOffer(tx, { dealId: deal.id, offer: { id: win.offer.id, amount: win.offer.amount, buyerId: win.buyerId }, organizationId: orgId, actor: user });
+      if (synced && before) ask = { ...before, logId: synced.logId };
     }
     const act = await tx.dealBuyerActivity.findUnique({
       where: { dealId_buyerId: { dealId: deal.id, buyerId: win.buyerId } },
@@ -320,7 +331,8 @@ export async function applyStageChange(
       deadReason: deal.deadReason,
       updatedAt: deal.updatedAt.toISOString(),
     },
-    afterUpdatedAt: u.updatedAt.toISOString(),
+    // The price sync may have touched the deal after `u`; pin the final stamp.
+    afterUpdatedAt: ((await tx.deal.findUnique({ where: { id: deal.id }, select: { updatedAt: true } }))?.updatedAt ?? u.updatedAt).toISOString(),
     closedDateStamped: stampClosed,
     unpublished: terminal && deal.publishedToPortal,
     followUps,
@@ -328,6 +340,7 @@ export async function applyStageChange(
     winner,
     acceptedOffer,
     selection: select,
+    ask,
     historyId: history.id,
     activityLogId: log.id,
   };
@@ -385,6 +398,12 @@ export async function applyStageUndo(tx: Prisma.TransactionClient, snap: StageUn
   // updatedAt goes back too when nothing else has touched the deal. The where
   // clause re-checks the stage so a concurrent move cannot be overwritten.
   const untouched = sameTime(deal.updatedAt, snap.afterUpdatedAt);
+  // The asking price (and a legacy deal's kept Our Price) back to what they
+  // were before closing — written BEFORE the stage row so the stamp below is final.
+  if (snap.ask) {
+    await tx.deal.update({ where: { id: snap.dealId }, data: { askPrice: snap.ask.askPrice, askPricePerNma: snap.ask.askPricePerNma, askPricePerNra: snap.ask.askPricePerNra, ourPrice: snap.ask.ourPrice } });
+    await tx.activityLog.deleteMany({ where: { id: snap.ask.logId, dealId: snap.dealId } });
+  }
   const res = await tx.deal.updateMany({
     where: { id: snap.dealId, organizationId: snap.orgId, stage: snap.toStage, currentStageEnteredAt: new Date(snap.at) },
     data: {

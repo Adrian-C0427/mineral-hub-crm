@@ -970,6 +970,7 @@ function SellTab({ asset, matches, users, canEdit, onChanged, onSetSell, onGoHol
             <>
               <p style={{ marginTop: 0 }}>Accepting <strong>{acceptOffer.buyer}</strong>'s offer of <strong>{money(acceptOffer.amount)}</strong> will:</p>
               <ul style={{ margin: "0 0 8px", paddingLeft: 18 }}>
+                <li>Set the asking price to {money(acceptOffer.amount)} (per-acre figures follow from the acreage); the previous asking price is kept in the price history.</li>
                 <li>Mark this buyer's offer as <strong>accepted</strong>.</li>
                 <li>Move the asset sale into the <strong>Closing</strong> process.</li>
                 {asset.publishedToPortal

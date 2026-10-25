@@ -87,14 +87,17 @@ function world() {
     dealBuyerMessage: new Table("msg", tick),
     notification: new Table("notif", tick),
     offer: new Table("offer", tick),
+    buyer: new Table("buyer", tick),
     dealStageHistory: new Table("hist", tick),
     activityLog: new Table("log", tick),
   };
   db.deal.rows.push({
     id: "deal_1", organizationId: ORG, name: "Smith 40", stage: "CLOSING", currentStageEnteredAt: ENTERED,
     deadReason: null, closedDate: null, publishedToPortal: true, selectedBuyerId: "buyer_w", selectedOfferId: null,
+    askPrice: 160000, askPricePerNma: 4000, askPricePerNra: 4000, ourPrice: 100000, purchasePrice: null, acreageNma: 40, nra: 40, royaltyRate: "1/8",
     updatedAt: T0,
   });
+  db.buyer.rows.push({ id: "buyer_w", name: "Winner Minerals" });
   db.dealBuyerActivity.rows.push(
     { id: "act_w", dealId: "deal_1", buyerId: "buyer_w", status: "OFFER_RECEIVED", lastActivityDate: ENTERED, nextFollowUpDate: FOLLOW_A },
     { id: "act_x", dealId: "deal_1", buyerId: "buyer_x", status: "SENT", lastActivityDate: null, nextFollowUpDate: FOLLOW_B },
@@ -267,6 +270,20 @@ describe("stage change undo", () => {
       expect(w.db.dealBuyerActivity.rows[0].status).toBe("CLOSED");
       expect(snap.acceptedOffer).toEqual({ offerId: "offer_1", status: "ACTIVE" });
       expect(snap.selection).toEqual({ offerId: "offer_1", buyerId: "buyer_w", prevBuyerId: "buyer_w" });
+      await applyStageUndo(w.tx, verifyStageUndo(signStageUndo(snap)!, caller));
+      expect(w.dump()).toEqual(before);
+    });
+
+    it("closing sets the asking price from the winning offer (total + per-acre) with a history row; undo puts it back", async () => {
+      const w = world();
+      w.db.offer.rows.push(offer({}));
+      const before = w.dump();
+      const snap = await w.move("CLOSED");
+      expect(w.db.deal.rows[0]).toMatchObject({ askPrice: 150000, askPricePerNma: 3750, askPricePerNra: 3750, ourPrice: 100000 });
+      expect(snap.ask).toMatchObject({ askPrice: 160000, askPricePerNma: 4000, askPricePerNra: 4000, ourPrice: 100000 });
+      const log = w.db.activityLog.rows.find((r) => r.eventType === "ASK_PRICE_SYNCED");
+      expect(log).toBeTruthy();
+      expect((log!.metadata as { before: { askPrice: number }; after: { askPrice: number } }).after.askPrice).toBe(150000);
       await applyStageUndo(w.tx, verifyStageUndo(signStageUndo(snap)!, caller));
       expect(w.dump()).toEqual(before);
     });

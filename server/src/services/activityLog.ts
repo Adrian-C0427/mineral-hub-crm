@@ -13,10 +13,12 @@ export async function logActivity(
     actorUserId?: string | null;
     dealId?: string | null;
     buyerId?: string | null;
+    /** Structured details behind the summary (e.g. a before/after of a price change). */
+    metadata?: Prisma.InputJsonValue;
   },
   tx: Prisma.TransactionClient | typeof prisma = prisma,
-): Promise<void> {
-  await tx.activityLog.create({
+): Promise<{ id: string }> {
+  const row = await tx.activityLog.create({
     data: {
       eventType: params.eventType,
       summary: params.summary,
@@ -24,6 +26,9 @@ export async function logActivity(
       actorUserId: params.actorUserId ?? null,
       dealId: params.dealId ?? null,
       buyerId: params.buyerId ?? null,
+      ...(params.metadata !== undefined ? { metadata: params.metadata } : {}),
     },
   });
+  // Fake clients in tests may answer with nothing; the id is a convenience, never a requirement.
+  return { id: row?.id ?? "" };
 }

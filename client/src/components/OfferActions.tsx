@@ -166,6 +166,7 @@ function EditOfferModal({ offer, accepted, dealClosed, dealNma, dealNra, onClose
       </div>
       <p className="dd-hint offer-note">
         Changes apply immediately to the deal's metrics, profit estimates and reporting.
+        {accepted && " This is the accepted offer: a new amount also updates the deal's asking price (total, per NMA and per NRA)."}
       </p>
     </Modal>
   );
