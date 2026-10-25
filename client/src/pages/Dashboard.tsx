@@ -416,8 +416,6 @@ export function Dashboard() {
   const stackOf = (s: { r: number; p: number; a: number }) => Math.max(0, s.r) + Math.max(0, s.p) + Math.max(0, s.a);
   const maxProfit = Math.max(1, ...shown.map(stackOf));
   const { max: niceMax, ticks: axisTicks } = niceAxis(maxProfit);
-  // Index of the bucket containing today (-1 when the window is in the past).
-  const curIdx = d.profitByMonth.findIndex((m) => m.isCurrent);
   const nBuckets = d.profitByMonth.length;
 
   // Deltas only where an honest baseline exists.
@@ -600,12 +598,6 @@ export function Dashboard() {
                   {axisTicks.map((tick) => (
                     <div key={tick} className={`dash-chart-grid ${tick === 0 ? "base" : ""}`} style={{ bottom: `${(tick / niceMax) * 100}%` }} />
                   ))}
-                  {curIdx >= 0 && (
-                    <>
-                      <div className="dash-chart-today" style={{ left: `${(curIdx / nBuckets) * 100}%` }} />
-                      <div className="dash-chart-today-label" style={{ left: `${(curIdx / nBuckets) * 100}%` }}>Today</div>
-                    </>
-                  )}
                   {d.profitByMonth.every((b) => b.profit === 0 && b.projected === 0 && !b.atAsk) && (
                     <p className="dash-chart-empty">
                       No closed, projected or at-asking profit in this period — bars fill in as deals close (by their Closing date), get an offer, or carry an ask and a closing date.
