@@ -179,8 +179,10 @@ function tidyPartyName(s: string): string {
  *   "ABC Minerals LLC – 50% interest" → { name: "ABC Minerals LLC", pct: 50, text: "50% interest" }
  *   "ABC Minerals LLC (1/2 MI)"       → { name: "ABC Minerals LLC", pct: 50, text: "1/2 MI" }
  *   "ABC Minerals LLC"                → { name: "ABC Minerals LLC", pct: null, text: null }
- * Only shares in (0, 100] count; anything else is left untouched. When a name
- * carries several shares the first is the value and all are kept in `text`.
+ * Only shares in (0, 100] count as a value; a "0%" share (a recording
+ * artifact — "ABC LLC 0.0%") is still taken OUT of the name, kept in `text`,
+ * with no value. Anything else is left untouched. When a name carries several
+ * shares the first is the value and all are kept in `text`.
  */
 export function extractInterest(raw: string | null | undefined): { name: string; pct: number | null; text: string | null } {
   const src = raw ?? "";
@@ -188,8 +190,8 @@ export function extractInterest(raw: string | null | undefined): { name: string;
   let pct: number | null = null;
   const texts: string[] = [];
   const take = (m: string, v: number) => {
-    if (!(v > 0 && v <= 100)) return m;
-    if (pct == null) pct = round4(v);
+    if (!(v >= 0 && v <= 100)) return m;
+    if (pct == null && v > 0) pct = round4(v);
     texts.push(m.replace(/^[\s([]+|[\s)\]]+$/g, ""));
     return " ";
   };
@@ -260,8 +262,9 @@ export interface ParsedParty {
  *   4 — once a legal form has closed a party, what follows it is OTHER parties
  *       even without legal forms of their own ("EIGHT ROW HOLDINGS LLC & EIGHT
  *       ROW HOLDINGS & BOYD PATRICK" is three).
+ *   5 — a "0%" share ("VECTOR ENERGY PARTNERS LLC 0.0%") leaves the name too.
  */
-export const PARTY_RULES_VERSION = 4;
+export const PARTY_RULES_VERSION = 5;
 
 /** Legal-form words that mark a text as a COMPLETE organisation name. */
 const LEGAL_FORM_RE = /\b(?:L\.?L\.?C|L\.?P|L\.?L\.?P|LTD|INC(?:ORPORATED)?|CORP(?:ORATION)?|CO|COMPANY|LC|PLLC|TRUST|PARTNERSHIP|ESTATE|FOUNDATION|BANK|CHURCH|ASSOCIATION|ASSN|UNIVERSITY|COLLEGE)\.?\b/i;

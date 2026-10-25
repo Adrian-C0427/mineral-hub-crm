@@ -95,6 +95,13 @@ describe("rules v3 — an \"&\" inside a name, and unclosed brackets", () => {
     expect(names("ACME MINERALS LLC & JOHN & MARY SMITH")).toEqual(["ACME MINERALS LLC", "JOHN & MARY SMITH"]);
     expect(names("ACME MINERALS LLC & SMITH FAMILY TRUST & BOYD PATRICK")).toEqual(["ACME MINERALS LLC", "SMITH FAMILY TRUST", "BOYD PATRICK"]);
   });
+  it("rules v5: a 0% share leaves the name (kept as text, no value)", () => {
+    const { parties } = parsePartyCell("VECTOR ENERGY PARTNERS LLC 0.0%");
+    expect(parties.map((p) => p.name)).toEqual(["VECTOR ENERGY PARTNERS LLC"]);
+    expect(parties[0].pct).toBeNull();
+    expect(parties[0].text).toBe("0.0%");
+    expect(names("ABC MINERALS LLC (0% MI) & XYZ ROYALTY LP")).toEqual(["ABC MINERALS LLC", "XYZ ROYALTY LP"]);
+  });
   it("treats an opening bracket that never closes as an annotation", () => {
     const { parties } = parsePartyCell("WESTERN HORIZON ENERGY LLC ( from Moroney");
     expect(parties.map((p) => p.name)).toEqual(["WESTERN HORIZON ENERGY LLC"]);
