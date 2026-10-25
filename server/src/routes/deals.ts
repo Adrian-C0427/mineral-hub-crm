@@ -8,6 +8,7 @@ import { serializeDeal, serializeContractExtension } from "../serializers.js";
 import { computeMatch } from "../domain/matching.js";
 import { normalizePhone } from "../domain/phone.js";
 import { userRef, userRefSelect } from "../domain/userRef.js";
+import { syncAskToAcceptedOffer, ASK_SYNCED_EVENT } from "../services/acceptedOfferSync.js";
 import { contactPatchFromSellerPatch, dealSellerFromInfo, fillContactGeography, overlayContact, resolveSellerContact, sellerContactSelect, sellerInfoSchema, type SellerContactRow } from "../domain/sellerContact.js";
 import { STALE_CONTACT_DAYS, LIST_LIMIT } from "../config.js";
 import { daysUntil, formatCalendarDay, nextContractExtension } from "../domain/dates.js";
@@ -507,6 +508,13 @@ export async function dealDetail(organizationId: string, id: string) {
   // names are looked up here (a departed user shows as unknown rather than
   // blocking the row).
   const extenderIds = [...new Set(deal.contractExtensions.map((e) => e.extendedByUserId).filter((v): v is string => v != null))];
+  const priceHistory = await prisma.activityLog.findMany({
+    where: { dealId: deal.id, organizationId, eventType: ASK_SYNCED_EVENT },
+    orderBy: { createdAt: "desc" }, take: 50,
+    include: { actor: { select: userRefSelect } },
+  });
+  const buyerIdsInHistory = [...new Set(priceHistory.map((h) => h.buyerId).filter((v): v is string => v != null))];
+  const buyerNames = new Map((buyerIdsInHistory.length ? await prisma.buyer.findMany({ where: { id: { in: buyerIdsInHistory } }, select: { id: true, name: true } }) : []).map((b) => [b.id, b.name]));
   const extenders = extenderIds.length
     ? await prisma.user.findMany({ where: { id: { in: extenderIds } }, select: { id: true, name: true } })
     : [];
@@ -585,6 +593,11 @@ export async function dealDetail(organizationId: string, id: string) {
     })),
     buyerActivity: activity,
     contractExtensions: deal.contractExtensions.map((e) => serializeContractExtension(e, e.extendedByUserId ? extenderById.get(e.extendedByUserId) ?? null : null)),
+    // Asking-price history: every time an accepted offer set the price (newest first).
+    priceHistory: priceHistory.map((h) => {
+      const m = (h.metadata ?? {}) as { before?: Record<string, number | null>; after?: Record<string, number | null>; offerId?: string; offerAmount?: number; buyerId?: string; ourPriceKeptFromAsk?: number };
+      return { id: h.id, at: h.createdAt, summary: h.summary, actor: userRef(h.actor), before: m.before ?? null, after: m.after ?? null, offerId: m.offerId ?? null, offerAmount: m.offerAmount ?? null, buyerId: m.buyerId ?? null, buyerName: h.buyerId ? buyerNames.get(h.buyerId) ?? null : null, ourPriceKeptFromAsk: m.ourPriceKeptFromAsk ?? null };
+    }),
     sellers: deal.sellers.map((s) => serializeSeller(s)),
     revenueEntries: deal.revenueEntries.map((r) => ({
       id: r.id, month: r.month, amount: r.amount, kind: r.kind, operator: r.operator, note: r.note,
@@ -1402,6 +1415,8 @@ dealsRouter.post(
           data: { dealId: deal.id, fromStage: deal.stage, toStage: "CLOSING", changedByUserId: req.user!.id },
         });
       }
+      // The accepted offer now controls the asking price (total + per-acre).
+      await syncAskToAcceptedOffer(tx, { dealId: deal.id, offer: { id: offer.id, amount: offer.amount, buyerId: offer.buyerId }, organizationId: orgId(req), actor: req.user! });
       await logActivity(
         {
           eventType: "OFFER_ACCEPTED",
@@ -1413,7 +1428,8 @@ dealsRouter.post(
         },
         tx,
       );
-      return u;
+      // Re-read: the price sync above changed the asking fields after `u` was loaded.
+      return tx.deal.findUniqueOrThrow({ where: { id: u.id }, include: dealInclude });
     });
     res.json(serializeDeal(updated));
   }),

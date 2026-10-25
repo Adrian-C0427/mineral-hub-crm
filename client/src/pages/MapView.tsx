@@ -9,7 +9,7 @@ import { US_STATE_OPTIONS, US_STATE_LABELS } from "../lib/options";
 import { Select } from "../components/Select";
 import { downloadCsv } from "../lib/csv";
 import { COUNTIES, COUNTIES_WITH_WELLS, COUNTIES_WITH_PRODUCTION, PARISHES, STATE_FIPS, MAP_COUNTY_LABELS, mapCountyOptions } from "../lib/counties";
-import { addCadastralLayers, addTractLayers, addUnitLayers, addLateralLayers, addLeaseTractLayers, tractInfo, unitInfo, unitColor, lateralInfo, leaseInfo, TRACT_SOURCE, UNIT_SOURCE, UNIT_PALETTE, LATERAL_SOURCE, LATERAL_COLOR, LEASE_SOURCE, LEASE_COLOR, STATUS_COLOR, type TractInfo, type UnitInfo, type LateralInfo, type LeaseInfo, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
+import { addCadastralLayers, addTractLayers, addUnitLayers, addLateralLayers, addLeaseTractLayers, tractInfo, unitInfo, unitColor, lateralInfo, leaseInfo, TRACT_SOURCE, UNIT_SOURCE, UNIT_PALETTE, LATERAL_SOURCE, LATERAL_COLOR, LEASE_SOURCE, LEASE_COLOR, OPP_COLOR, STATUS_COLOR, type TractInfo, type UnitInfo, type LateralInfo, type LeaseInfo, styleWithGlyphs, watchGisHealth } from "../lib/mapLayers";
 import { normalizeWellStatus, SOURCE_LABEL, STATUS_COLORS, STATUS_FLAG_LABEL, WELL_STATUSES } from "../lib/wellStatus";
 import { collectCoords, bboxOfPoints } from "../lib/geo";
 import { FormSection } from "../components/kit";
@@ -21,6 +21,9 @@ import { readPermitsMapParams, withoutPermitParams } from "../lib/permitMap";
 import { type LaWellDetail, sectionTownship, unitProductionTitle, ymLabel } from "../lib/laWells";
 import { abstractShortLabel, countyStateLabel, formatAbstract, isSectionLabel, rankAbstracts, sectionLabel, sectionNumber, surveyLabel } from "../lib/abstracts";
 import { useAuth } from "../auth/AuthContext";
+import { useStages } from "../stages";
+import { UserAvatar } from "../components/UserAvatar";
+import type { UserRef } from "../types";
 import { Spinner, StageBadge, PriorityBadge, ChipList } from "../components/ui";
 import { fmtDate, money, num, acres } from "../lib/format";
 import {
@@ -37,6 +40,14 @@ interface MapDeal {
   operator: string | null; assetTypes: string[]; basins: string[]; formations: string[];
   acreageNma: number | null; nra: number | null; askPrice: number | null;
   profitEst: number | null; selectedBuyer: { id: string; name: string } | null;
+}
+/** A prospect in an Opportunity pipeline (GET /map/opportunities): the record's own
+ *  fields plus where it can honestly be drawn (its GIS abstract's point, or none). */
+interface MapOpp {
+  id: string; name: string; pipelineId: string; stage: string; currentStageEnteredAt: string;
+  seller: string | null; company: string | null; state: string | null; county: string | null; abstract: string | null; survey: string | null;
+  estAcres: number | null; estNma: number | null; estNra: number | null; nextFollowUpDate: string | null;
+  owner: UserRef | null; abstractId: string | null; placement: "abstract" | "label" | null; lon: number | null; lat: number | null;
 }
 /** An owned mineral asset on HOLD — shown as a Mineral Asset, never a deal. */
 interface MapAsset {
@@ -76,7 +87,9 @@ type SelLateral = { kind: "lateral" } & LateralInfo;
 type SelLease = { kind: "lease" } & LeaseInfo;
 /** A wellbore whose surface well is outside the refreshed counties (only the bore is on the map). */
 type SelBore = { kind: "bore"; fid: number; surfaceId: number; api: string | null; wellboreType: string | null; boreStatus: string | null; bhSource: string | null };
-type Selected = SelAbstract | SelWell | SelHotspot | SelTract | SelUnit | SelLateral | SelLease | SelBore | null;
+/** One or more opportunities at the clicked marker (several prospects can share an abstract). */
+type SelOpp = { kind: "opportunity"; abstractId: string | null; opps: MapOpp[] };
+type Selected = SelAbstract | SelWell | SelHotspot | SelTract | SelUnit | SelLateral | SelLease | SelBore | SelOpp | null;
 
 const LEON_CENTER: [number, number] = [-95.99, 31.29];
 
@@ -107,9 +120,9 @@ const MAP_LAYERS_KEY = "mh-map-layers:v1";
 const MAP_DOCK_KEY = "mh-map-dock:v1";
 const MAP_VIEW_KEY = "mh-map-view:v1";
 const MAP_FILTERS_KEY = "mh-map-filters:v1";
-type MapLayers = { boundaries: boolean; absNums: boolean; surveyNames: boolean; deals: boolean; assets: boolean; wells: boolean; wellbores: boolean; tracts: boolean; units: boolean; laterals: boolean; leases: boolean };
+type MapLayers = { boundaries: boolean; absNums: boolean; surveyNames: boolean; deals: boolean; assets: boolean; opportunities: boolean; wells: boolean; wellbores: boolean; tracts: boolean; units: boolean; laterals: boolean; leases: boolean };
 // W-1 laterals start off: RRC's wellbores already show the same wells, and the plat lines are a check against them.
-const DEFAULT_MAP_LAYERS: MapLayers = { boundaries: true, absNums: true, surveyNames: true, deals: true, assets: true, wells: true, wellbores: true, tracts: true, units: true, laterals: false, leases: true };
+const DEFAULT_MAP_LAYERS: MapLayers = { boundaries: true, absNums: true, surveyNames: true, deals: true, assets: true, opportunities: true, wells: true, wellbores: true, tracts: true, units: true, laterals: false, leases: true };
 interface MapCam { center: [number, number]; zoom: number }
 /** A named, reusable combination of every filter on the Filters panel. */
 interface MapFilterState {
@@ -191,6 +204,9 @@ export function MapView() {
 
   const [deals, setDeals] = useState<MapDeal[] | null>(null);
   const [assets, setAssets] = useState<MapAsset[]>([]);
+  const [opps, setOpps] = useState<MapOpp[]>([]);
+  const oppsRef = useRef<MapOpp[]>([]); oppsRef.current = opps;
+  const oppIds = useRef<string[]>([]);
   const [selected, setSelected] = useState<Selected>(null);
   const [choices, setChoices] = useState<WellProps[] | null>(null); // overlap disambiguation
   const [layers, setLayers] = useState<MapLayers>(() => ({ ...DEFAULT_MAP_LAYERS, ...loadJson<Partial<MapLayers>>(MAP_LAYERS_KEY, {}) }));
@@ -298,6 +314,28 @@ export function MapView() {
     for (const a of assets) for (const aid of a.abstractIds) { const l = m.get(aid) ?? []; l.push(a); m.set(aid, l); }
     return m;
   }, [assets]);
+  // Opportunities respect the geography filters (state / county); the rest of
+  // the filters are about wells. Grouped per abstract: one marker per place.
+  const oppsInView = useMemo(() => opps.filter((o) =>
+    (!fStates.length || (o.state != null && fStates.includes(o.state)))
+    && (!fCounties.length || (o.county != null && fCounties.some((c) => c.toLowerCase() === o.county!.toLowerCase() || c.toLowerCase().endsWith(`|${o.county!.toLowerCase()}`))))), [opps, fStates, fCounties]);
+  const oppsByAbstract = useMemo(() => {
+    const m = new Map<string, MapOpp[]>();
+    for (const o of oppsInView) if (o.abstractId) { const l = m.get(o.abstractId) ?? []; l.push(o); m.set(o.abstractId, l); }
+    return m;
+  }, [oppsInView]);
+  // Read through refs by applyHighlight: the map's load handler calls the
+  // closure from the first render, which must still see the latest data.
+  const oppsByAbstractRef = useRef(new Map<string, MapOpp[]>());
+  const oppsFcRef = useRef<GeoJSON.FeatureCollection>(EMPTY_FC);
+  const oppsFc = useMemo<GeoJSON.FeatureCollection>(() => ({
+    type: "FeatureCollection",
+    features: [...oppsByAbstract.entries()].filter(([, l]) => l[0].lon != null && l[0].lat != null).map(([aid, l]) => ({
+      type: "Feature" as const, properties: { abstractId: aid, ids: l.map((o) => o.id).join(","), count: l.length },
+      geometry: { type: "Point" as const, coordinates: [l[0].lon!, l[0].lat!] },
+    })),
+  }), [oppsByAbstract]);
+  oppsByAbstractRef.current = oppsByAbstract; oppsFcRef.current = oppsFc;
 
   // Formation options come from the heat-map wells (static Leon/Freestone
   // production data — the formation filter only affects the heat layer until
@@ -374,6 +412,21 @@ export function MapView() {
         map.on("mouseenter", id, () => (map.getCanvas().style.cursor = "pointer"));
         map.on("mouseleave", id, () => (map.getCanvas().style.cursor = ""));
       }
+      // Opportunities (main map only): one marker per abstract that carries
+      // prospects, at every zoom — the abstract itself tints (feature-state
+      // `opp`) once parcels draw. A count badge shows stacked prospects.
+      map.addSource("opps", { type: "geojson", data: EMPTY_FC });
+      map.addLayer({ id: "opps-sel", type: "circle", source: "opps", filter: ["==", ["get", "abstractId"], ""], paint: {
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 11, 12, 15] as unknown as maplibregl.ExpressionSpecification,
+        "circle-color": "rgba(0,0,0,0)", "circle-stroke-color": "#f59e0b", "circle-stroke-width": 3 } });
+      map.addLayer({ id: "opps-point", type: "circle", source: "opps", paint: {
+        "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 5, 9, 7, 12, 9] as unknown as maplibregl.ExpressionSpecification,
+        "circle-color": OPP_COLOR, "circle-stroke-color": "#ffffff", "circle-stroke-width": 2, "circle-opacity": 0.95 } });
+      map.addLayer({ id: "opps-count", type: "symbol", source: "opps", filter: [">", ["get", "count"], 1], layout: {
+        "text-field": ["to-string", ["get", "count"]], "text-font": ["Noto Sans Regular"], "text-size": 10, "text-allow-overlap": true },
+        paint: { "text-color": "#ffffff" } });
+      map.on("mouseenter", "opps-point", () => (map.getCanvas().style.cursor = "pointer"));
+      map.on("mouseleave", "opps-point", () => (map.getCanvas().style.cursor = ""));
 
       // Production heat map — inserted below the cadastral fill so parcels and
       // labels stay readable over it. Weight `w` is pre-normalized to [0,1] per
@@ -450,6 +503,16 @@ export function MapView() {
             return Math.hypot(sp.x - e.point.x, sp.y - e.point.y) <= 48;
           });
           if (near.length) { clearSelection(); setSelected({ kind: "hotspot", summary: summarize(near), periodLabel: periodLabelRef.current }); return; }
+        }
+        // An opportunity marker: the prospect(s) on that abstract.
+        if (layersRef.current.opportunities && map.getLayer("opps-point")) {
+          const of = map.queryRenderedFeatures(bx, { layers: ["opps-point"] });
+          if (of.length) {
+            const p = of[0].properties as { abstractId?: string; ids?: string };
+            const ids = new Set(String(p.ids ?? "").split(",").filter(Boolean));
+            selectOpps(oppsRef.current.filter((o) => ids.has(o.id)), p.abstractId ?? null);
+            return;
+          }
         }
         // An imported tract boundary (its name + shapefile attributes).
         if (layersRef.current.tracts && map.getLayer("tracts-fill")) {
@@ -547,9 +610,21 @@ export function MapView() {
       if (selWellRef.current != null) map.setFeatureState({ source: "abstracts", sourceLayer: "wells", id: selWellRef.current }, { selected: false });
       if (map.getLayer("wellbores-sel")) map.setFilter("wellbores-sel", ["==", ["get", "surfaceId"], -1]);
       if (map.getLayer("bottomholes-sel")) map.setFilter("bottomholes-sel", ["==", ["get", "surfaceId"], -1]);
+      if (map.getLayer("opps-sel")) map.setFilter("opps-sel", ["==", ["get", "abstractId"], ""]);
     }
     selAbstractRef.current = null; selWellRef.current = null;
     setSelected(null); setChoices(null);
+  }
+  /** Select the prospect(s) at a marker: ring the marker, tint their abstract, open the panel. */
+  function selectOpps(list: MapOpp[], abstractId: string | null) {
+    const map = mapRef.current; if (!map || !list.length) return;
+    clearSelection();
+    if (abstractId) {
+      selAbstractRef.current = abstractId;
+      map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id: abstractId }, { selected: true });
+      if (map.getLayer("opps-sel")) map.setFilter("opps-sel", ["==", ["get", "abstractId"], abstractId]);
+    }
+    setSelected({ kind: "opportunity", abstractId, opps: list });
   }
   function selectAbstract(id: string, props: Record<string, unknown>) {
     const map = mapRef.current; if (!map) return;
@@ -627,10 +702,15 @@ export function MapView() {
     const map = mapRef.current; if (!map || !styleReady.current) return;
     for (const id of activeIds.current) map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id }, { active: false });
     for (const id of ownedIds.current) map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id }, { owned: false });
+    for (const id of oppIds.current) map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id }, { opp: false });
     activeIds.current = layersRef.current.deals ? [...dealsByAbstract.keys()] : [];
     ownedIds.current = layersRef.current.assets ? [...assetsByAbstract.keys()] : [];
+    oppIds.current = layersRef.current.opportunities ? [...oppsByAbstractRef.current.keys()] : [];
     for (const id of activeIds.current) map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id }, { active: true });
     for (const id of ownedIds.current) map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id }, { owned: true });
+    for (const id of oppIds.current) map.setFeatureState({ source: "abstracts", sourceLayer: "abstracts", id }, { opp: true });
+    const src = map.getSource("opps") as maplibregl.GeoJSONSource | undefined;
+    if (src) src.setData(layersRef.current.opportunities ? oppsFcRef.current : EMPTY_FC);
   }
   function applyLayerVisibility() {
     const map = mapRef.current; if (!map || !styleReady.current) return;
@@ -644,6 +724,7 @@ export function MapView() {
     vis("units-fill", L.units); vis("units-line", L.units); vis("units-label", L.units);
     vis("laterals-line", L.laterals); vis("laterals-point", L.laterals);
     vis("leases-fill", L.leases); vis("leases-line", L.leases); vis("leases-label", L.leases);
+    vis("opps-point", L.opportunities); vis("opps-count", L.opportunities); vis("opps-sel", L.opportunities);
     applyHighlight();
   }
   // Filter behavior: filters never restyle the map — instead the map zooms to
@@ -751,6 +832,10 @@ export function MapView() {
   useEffect(loadDeals, [statusFilter]);
   // Owned (HOLD) mineral assets: not deals, so the deal-status filter doesn't apply.
   useEffect(() => { api.get<MapAsset[]>("/map/assets").then(setAssets).catch(() => setAssets([])); }, []);
+  // Opportunities come from the opportunity records themselves (no map copy):
+  // a fresh list every time the map opens, so new, edited, moved, converted or
+  // deleted prospects are reflected without any extra bookkeeping.
+  useEffect(() => { api.get<MapOpp[]>("/map/opportunities").then(setOpps).catch(() => setOpps([])); }, []);
   useEffect(() => {
     // Merge every county's monthly production. Keys are og|district|leaseNo and
     // RRC lease numbers are unique within a district, so counties don't collide.
@@ -769,7 +854,7 @@ export function MapView() {
       }),
     ).then((parts) => setProd(Object.assign({}, ...parts))).catch(() => {});
   }, []);
-  useEffect(applyHighlight, [dealsByAbstract, assetsByAbstract]);
+  useEffect(applyHighlight, [dealsByAbstract, assetsByAbstract, oppsByAbstract, oppsFc]);
   useEffect(applyLayerVisibility, [layers]);
   // Survey/abstract filter option lists from the GIS API, scoped to the selected
   // counties. Nothing needs to be on-screen (or downloaded) to be filterable.
@@ -939,6 +1024,7 @@ export function MapView() {
 
   const panelDeals = selected?.kind === "abstract" ? dealsByAbstract.get(selected.id) ?? [] : [];
   const panelAssets = selected?.kind === "abstract" ? assetsByAbstract.get(selected.id) ?? [] : [];
+  const panelOpps = selected?.kind === "abstract" ? oppsByAbstract.get(selected.id) ?? [] : [];
   const abstractCount = dealsByAbstract.size;
   const toggle = (k: keyof typeof layers) => setLayers((p) => ({ ...p, [k]: !p[k] }));
 
@@ -1261,6 +1347,7 @@ export function MapView() {
               { key: "boundaries", label: "Abstract boundaries" }, { key: "absNums", label: "Abstract numbers" },
               { key: "surveyNames", label: "Survey names" }, { key: "deals", label: "Active deals" },
               { key: "assets", label: "Mineral assets" },
+              { key: "opportunities", label: "Opportunities" },
               { key: "wells", label: "Wells" }, { key: "wellbores", label: "Wellbores + bottom holes" },
               { key: "tracts", label: "Imported tracts" },
               { key: "units", label: "Pooled units" },
@@ -1454,6 +1541,7 @@ export function MapView() {
           ) : (
             <div className="mcx-legend-rows">
               {WELL_STATUSES.map((st) => <Legend key={st} color={STATUS_COLORS[st]} label={st} />)}
+              {layers.opportunities && <Legend color={OPP_COLOR} label="Opportunity (prospect)" />}
               {layers.wellbores && <Legend color="#0f766e" label="Wellbore path" line />}
               {layers.wellbores && <Legend color="#0f766e" label="Bottom hole" ring />}
               {permitReq && <Legend color={PERMIT_HL_COLOR} label="Highlighted permit" />}
@@ -1502,7 +1590,9 @@ export function MapView() {
 
         {selected && !choices && (
           <div className="mc-float-panel">
-            {selected.kind === "well" && selected.la ? (
+            {selected.kind === "opportunity" ? (
+              <OpportunityPanel sel={selected} onClose={clearSelection} />
+            ) : selected.kind === "well" && selected.la ? (
               <LaWellPanel w={selected.la} onClose={clearSelection} />
             ) : selected.kind === "well" ? (
               <>
@@ -1672,10 +1762,16 @@ export function MapView() {
                     ))}
                   </>
                 )}
-                {(panelDeals.length > 0 || panelAssets.length === 0) && (
+                {panelOpps.length > 0 && (
+                  <>
+                    <div className="mc-fp-sec">{panelOpps.length} opportunit{panelOpps.length === 1 ? "y" : "ies"} (prospects)</div>
+                    {panelOpps.map((o) => <OppCard key={o.id} o={o} />)}
+                  </>
+                )}
+                {(panelDeals.length > 0 || (panelAssets.length === 0 && panelOpps.length === 0)) && (
                   <div className="mc-fp-sec">{panelDeals.length} active deal{panelDeals.length === 1 ? "" : "s"}</div>
                 )}
-                {panelDeals.length === 0 ? (panelAssets.length === 0 && <p className="muted">No active deals in this {selected.state === "LA" ? "section" : "abstract"}.</p>) : panelDeals.map((d) => (
+                {panelDeals.length === 0 ? (panelAssets.length === 0 && panelOpps.length === 0 && <p className="muted">No active deals in this {selected.state === "LA" ? "section" : "abstract"}.</p>) : panelDeals.map((d) => (
                   <div key={d.id} className="mc-fp-card">
                     <div className="row" style={{ justifyContent: "space-between" }}>
                       <span className="row" style={{ gap: 6, alignItems: "center", flexWrap: "wrap" }}>
@@ -2005,6 +2101,52 @@ function WellHistoryBlock({ w }: { w: WellProps }) {
           <span className="muted">{e.date ?? "—"}</span>
         </div>
       ))}
+    </>
+  );
+}
+
+/** One prospect, as a card: name → its profile, stage, seller and the figures the record holds. */
+function OppCard({ o }: { o: MapOpp }) {
+  return (
+    <div className="mc-fp-card">
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <Link to={`/opportunities/${o.id}`} style={{ fontWeight: 600 }}>{o.name}</Link>
+        <span className="badge map-opp-badge" title="A prospect in an Opportunity pipeline — not a deal">Opportunity</span>
+      </div>
+      <div className="row" style={{ gap: 6, margin: "6px 0" }}><StageBadge stage={o.stage} pipelineId={o.pipelineId} />{o.seller && <span className="muted" style={{ fontSize: 12 }}>{o.seller}</span>}</div>
+      <div className="dd-grid mc-kv"><KV k="County" v={o.county} /><KV k="Abstract" v={o.abstract} /><KV k="Est. NMA" v={acres(o.estNma)} /><KV k="Est. NRA" v={acres(o.estNra)} /></div>
+    </div>
+  );
+}
+
+/** The Opportunities layer's panel: one prospect in full, or the stack sharing a marker. */
+function OpportunityPanel({ sel, onClose }: { sel: SelOpp; onClose: () => void }) {
+  const { pipelines } = useStages();
+  if (sel.opps.length > 1) {
+    return (
+      <>
+        <div className="section-head"><div><h3 style={{ margin: 0 }}>{sel.opps.length} opportunities here</h3><div className="muted" style={{ fontSize: 12 }}>{[sel.opps[0].county, sel.opps[0].state].filter(Boolean).join(", ")}{sel.opps[0].abstract ? ` · ${sel.opps[0].abstract}` : ""}</div></div><button className="icon-btn" aria-label="Close" onClick={onClose}>×</button></div>
+        {sel.opps.map((o) => <OppCard key={o.id} o={o} />)}
+      </>
+    );
+  }
+  const o = sel.opps[0];
+  const pipeline = pipelines.find((p) => p.id === o.pipelineId)?.name ?? null;
+  const days = Math.max(0, Math.floor((Date.now() - +new Date(o.currentStageEnteredAt)) / 86_400_000));
+  return (
+    <>
+      <div className="section-head"><div><h3 style={{ margin: 0 }}>{o.name}</h3><div className="muted" style={{ fontSize: 12 }}>Opportunity · {o.placement === "label" ? "placed on its abstract by number" : o.placement === "abstract" ? "on its abstract" : "no map location"}</div></div><button className="icon-btn" aria-label="Close" onClick={onClose}>×</button></div>
+      <div className="row" style={{ gap: 6, margin: "6px 0" }}><StageBadge stage={o.stage} pipelineId={o.pipelineId} /><span className="muted" style={{ fontSize: 12 }}>{days}d in stage</span></div>
+      <div className="dd-grid mc-kv">
+        <KV k="Seller" v={o.seller} /><KV k="Entity" v={o.company} />
+        <KV k="County" v={o.county} /><KV k="State" v={o.state} />
+        <KV k="Abstract" v={o.abstract} /><KV k="Survey" v={o.survey} />
+        <KV k="Est. gross acres" v={acres(o.estAcres)} /><KV k="Est. NMA" v={acres(o.estNma)} /><KV k="Est. NRA" v={acres(o.estNra)} />
+        <KV k="Pipeline" v={pipeline} /><KV k="Owner" v={o.owner ? <UserAvatar user={o.owner} size={16} withName className="inline" /> : null} />
+        {o.nextFollowUpDate && <KV k="Next follow-up" v={fmtDate(o.nextFollowUpDate)} />}
+      </div>
+      <Link className="primary mc-fp-cta" to={`/opportunities/${o.id}`}>Open opportunity →</Link>
+      <p className="mc-fp-note">A prospect in an Opportunity pipeline. Converting it to a deal moves it to the Active deals layer.</p>
     </>
   );
 }

@@ -588,3 +588,6 @@
   .mc-btn, .ml2-head, .mshp-btn, .mc-sheet-x { min-height: 40px; height: 40px; }
   .mc-zoom button { width: 40px; height: 40px; }
 }
+
+/* Opportunity (prospect) badge on map panels — teal, matching the Opportunities layer marker. */
+.badge.map-opp-badge { background: color-mix(in srgb, #0d9488 16%, transparent); color: #0f766e; border-color: color-mix(in srgb, #0d9488 40%, transparent); }

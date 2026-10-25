@@ -26,7 +26,7 @@ import { SellerDetails } from "../components/SellerDetails";
 import { DealPortalPanel } from "../components/DealPortalPanel";
 import { DocumentsSection, DEAL_DOC_FOLDERS, effectiveFolders, type DocFile } from "../components/DocumentsSection";
 import { OfferRowActions, acceptedOfferLabel } from "../components/OfferActions";
-import type { BuyerActivityRow, ContractExtension, DealSummary, MatchRec, Seller, UserLite } from "../types";
+import type { AskPriceHistoryRow, BuyerActivityRow, ContractExtension, DealSummary, MatchRec, Seller, UserLite } from "../types";
 import { MoneyInput } from "../components/MoneyInput";
 import { MarketingFunnel } from "../components/MarketingFunnel";
 import { DateField } from "../components/DateField";
@@ -54,6 +54,8 @@ interface DealDetailData extends DealSummary {
   metrics: { buyersContacted: number; interested: number; offers: number; highOffer: number | null };
   // Contract-timeline extensions, oldest first.
   contractExtensions?: ContractExtension[];
+  /** Every time an accepted offer set the asking price, newest first. */
+  priceHistory?: AskPriceHistoryRow[];
 }
 
 interface EditTarget { id: string; name: string; initial?: { status?: BuyerActivityRow["status"]; assignedTeamMemberId?: string | null; notes?: string | null; dateSent?: string | null; nextFollowUpDate?: string | null } }
@@ -470,6 +472,7 @@ export function DealDetail() {
               </p>
               <ul style={{ margin: "0 0 8px", paddingLeft: 18 }}>
                 <li>Mark this buyer's offer as <strong>accepted</strong>.</li>
+                <li>Set the deal's <strong>asking price</strong> to {money(acceptOffer.amount)} (per NMA and per NRA follow from the deal's acreage); the previous asking price is kept in the price history.</li>
                 <li>Move the deal into the <strong>Closing</strong> process.</li>
                 {deal.publishedToPortal
                   ? <li>Remove the opportunity from the <strong>public Buyer Portal</strong> so it's no longer marketed to other buyers.</li>
@@ -641,6 +644,25 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
       </div>
       {!edit ? (
         <div className="dd-card-body ddc-view">
+          {(deal.priceHistory?.length ?? 0) > 0 && (
+            <div className="ddc-group">
+              <div className="ddc-group-title">Asking price history</div>
+              <ul className="ddc-history">
+                {deal.priceHistory!.map((h) => (
+                  <li key={h.id} className="ddc-history-row">
+                    <span className="ddc-history-when">{fmtDate(h.at)}</span>
+                    <span className="ddc-history-text">
+                      {money(h.before?.askPrice ?? null)} → <strong>{money(h.after?.askPrice ?? null)}</strong>
+                      {h.after?.askPricePerNma != null && <span className="muted"> · {money(h.after.askPricePerNma)}/NMA</span>}
+                      {h.after?.askPricePerNra != null && <span className="muted"> · {money(h.after.askPricePerNra)}/NRA</span>}
+                      <span className="muted"> · accepted offer{h.buyerName ? ` from ${h.buyerName}` : ""}{h.actor ? ` · ${h.actor.name}` : ""}</span>
+                      {h.ourPriceKeptFromAsk != null && <span className="muted"> · previous asking price kept as Our cost</span>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           {groups.map((g) => (
             <div key={g.title} className="ddc-group">
               <div className="ddc-group-title">{g.title}</div>
