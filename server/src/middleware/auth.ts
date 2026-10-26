@@ -4,6 +4,7 @@ import { verifySession } from "../auth/session.js";
 import { prisma, withDbRetry } from "../db.js";
 import { resolvePermissions, type OrgRole, type Permission } from "../domain/permissions.js";
 import { getRoleOverride } from "../services/rolePermCache.js";
+import type { ContactAccess } from "../domain/sellerContact.js";
 
 export interface AuthedRequest extends Request {
   user?: {
@@ -127,6 +128,12 @@ export function requirePermission(permission: Permission) {
  *  some paths of a route (e.g. a stage move that also creates a deal). */
 export function hasPermission(req: AuthedRequest, permission: Permission): boolean {
   return !!req.user && (req.user.orgRole === "OWNER" || req.user.permissions.includes(permission));
+}
+
+/** What the caller may do with a seller's Contact reached through a deal or
+ *  an opportunity (domain/sellerContact.ts). */
+export function contactAccess(req: AuthedRequest): ContactAccess {
+  return { view: hasPermission(req, "viewContacts"), manage: hasPermission(req, "manageContacts") };
 }
 
 /** Hard auth gate. 401 if not logged in. */

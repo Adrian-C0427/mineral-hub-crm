@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requirePermission, hasPermission, orgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, hasPermission, contactAccess, orgId, type AuthedRequest } from "../middleware/auth.js";
 import { logActivity } from "../services/activityLog.js";
 import { ensureStages, ensureDefaultPipeline, activeStageKeys, isOpportunityPipeline, lockStageRow } from "../domain/stages.js";
 import { parseDayKey } from "../domain/calendar.js";
@@ -17,7 +17,7 @@ import {
 } from "../domain/opportunities.js";
 import { dealDetail } from "./deals.js";
 import { userRef, userRefSelect } from "../domain/userRef.js";
-import { contactPatchFromSellerPatch, opportunitySellerFromInfo, resolveSellerContact, sellerContactSelect, sellerInfoSchema, type SellerInfo } from "../domain/sellerContact.js";
+import { CONTACT_EDIT_FORBIDDEN, contactPatchFromSellerPatch, contactSyncFor, opportunitySellerFromInfo, resolveSellerContact, sellerContactSelect, sellerInfoSchema, type ContactAccess, type SellerInfo } from "../domain/sellerContact.js";
 import { splitPersonName } from "../domain/opportunities.js";
 
 /**
@@ -155,6 +155,15 @@ function contactSyncFromOppPatch(f: { sellerName?: string | null; companyName?: 
   });
 }
 
+/** Mirror a seller edit onto its linked Contact as this caller may
+ *  (domain/sellerContact.ts contactSyncFor): changed fields only, refused
+ *  without "Manage contacts". */
+async function applyContactSync(tx: Tx, access: ContactAccess, patch: Prisma.ContactUpdateInput, contact: Parameters<typeof contactSyncFor>[2]) {
+  const sync = contactSyncFor(access, patch, contact);
+  if (!sync) throw new HttpError(403, CONTACT_EDIT_FORBIDDEN);
+  if (Object.keys(sync).length) await tx.contact.update({ where: { id: contact.id }, data: sync });
+}
+
 /** Validated editable columns of a create/PATCH body (blank → null; the
  *  owner and contact must belong to the caller's org). */
 async function editableValues(organizationId: string, data: z.infer<typeof updateSchema>) {
@@ -170,7 +179,7 @@ async function editableValues(organizationId: string, data: z.infer<typeof updat
 // ---------------------------------------------------------------------------
 async function convertInTx(
   tx: Prisma.TransactionClient,
-  p: { organizationId: string; user: { id: string; name: string }; opportunityId: string; targetPipelineId?: string | null },
+  p: { organizationId: string; user: { id: string; name: string }; opportunityId: string; targetPipelineId?: string | null; viewContacts: boolean },
 ): Promise<string> {
   const opp = await tx.opportunity.findFirst({
     where: { id: p.opportunityId, organizationId: p.organizationId },
@@ -223,7 +232,7 @@ async function convertInTx(
     },
     tx,
   );
-  const seller = convertedSeller(opp, opp.contact);
+  const seller = convertedSeller(opp, opp.contact, p.viewContacts);
   if (seller) await tx.dealSeller.create({ data: { dealId: deal.id, ...seller } });
 
   await tx.opportunity.update({ where: { id: opp.id }, data: { convertedDealId: deal.id, convertedAt: now, lastActivityAt: now } });
@@ -336,13 +345,14 @@ opportunitiesRouter.post(
       throw new HttpError(400, "Seller information is required: a seller name or entity name, or an existing contact");
     }
     const now = new Date();
+    const access = contactAccess(req);
     const created = await prisma.$transaction(async (tx) => {
       // The seller: resolve to a Contact (named, matched, or created) and link
       // it, all in this transaction — no half-created opportunity or contact.
       const sellerCols = data.seller
         ? opportunitySellerFromInfo(data.seller, (await resolveSellerContact(tx, org, data.seller, {
-            ownerId: fields.ownerId ?? req.user!.id, type: "PROSPECT", notFound: (m) => new HttpError(400, m),
-          })).contact)
+            ownerId: fields.ownerId ?? req.user!.id, type: "PROSPECT", notFound: (m) => new HttpError(400, m), manage: access.manage,
+          })).contact, access.view)
         : {};
       const o = await tx.opportunity.create({
         data: {
@@ -381,14 +391,15 @@ opportunitiesRouter.patch(
     const patch: Record<string, unknown> = { lastActivityAt: new Date(), ...fields };
     if (data.name !== undefined) patch.name = data.name;
     if (data.nextFollowUpDate !== undefined) patch.nextFollowUpDate = toDay(data.nextFollowUpDate);
+    const access = contactAccess(req);
     await prisma.$transaction(async (tx) => {
       if (data.seller) {
         // A seller block re-resolves the contact (link / match / create) and
         // refreshes the plain seller columns from it.
         const { contact } = await resolveSellerContact(tx, org, data.seller as SellerInfo, {
-          ownerId: fields.ownerId ?? o.ownerId ?? req.user!.id, type: "PROSPECT", notFound: (m) => new HttpError(400, m),
+          ownerId: fields.ownerId ?? o.ownerId ?? req.user!.id, type: "PROSPECT", notFound: (m) => new HttpError(400, m), manage: access.manage,
         });
-        Object.assign(patch, opportunitySellerFromInfo(data.seller as SellerInfo, contact));
+        Object.assign(patch, opportunitySellerFromInfo(data.seller as SellerInfo, contact, access.view));
         // The block's values are the shared ones: mirror them onto the contact.
         const sync = contactPatchFromSellerPatch({
           ...(data.seller.firstName != null || data.seller.lastName != null ? { firstName: data.seller.firstName, lastName: data.seller.lastName } : {}),
@@ -400,14 +411,15 @@ opportunitiesRouter.patch(
           ...(data.seller.mailingState != null ? { mailingState: data.seller.mailingState } : {}),
           ...(data.seller.mailingZip != null ? { mailingZip: data.seller.mailingZip } : {}),
         });
-        if (Object.keys(sync).length) await tx.contact.update({ where: { id: contact.id }, data: sync });
+        await applyContactSync(tx, access, sync, contact);
       } else {
         // Plain seller columns edited on a linked opportunity are the Contact's
         // shared fields too — keep the one record consistent.
         const linked = (fields.contactId as string | null | undefined) ?? (fields.contactId === null ? null : o.contactId);
-        if (linked) {
+        const current = linked ? await tx.contact.findFirst({ where: { id: linked, organizationId: org }, select: sellerContactSelect }) : null;
+        if (current) {
           const sync = contactSyncFromOppPatch(fields as { sellerName?: string | null; companyName?: string | null; phone?: string | null; email?: string | null });
-          if (Object.keys(sync).length) await tx.contact.update({ where: { id: linked }, data: sync });
+          await applyContactSync(tx, access, sync, current);
         }
       }
       await tx.opportunity.update({ where: { id: o.id }, data: patch });
@@ -481,7 +493,7 @@ opportunitiesRouter.post(
         data: { opportunityId: o.id, fromStage: current.stage, toStage, reason: reason?.trim() || null, changedByUserId: user.id },
       });
       if (autoConvert) {
-        await convertInTx(tx, { organizationId: org, user, opportunityId: o.id });
+        await convertInTx(tx, { organizationId: org, user, opportunityId: o.id, viewContacts: hasPermission(req, "viewContacts") });
       }
     });
     res.json(await loadOpportunity(prisma, org, o.id, req));
@@ -502,8 +514,8 @@ opportunitiesRouter.post(
     const o = await ownOpportunity(req);
     if (o.convertedDealId) throw new HttpError(409, "This opportunity has already been converted to a deal");
     const user = { id: req.user!.id, name: req.user!.name };
-    const dealId = await prisma.$transaction((tx) => convertInTx(tx, { organizationId: org, user, opportunityId: o.id, targetPipelineId: pipelineId }));
-    res.json({ opportunity: await loadOpportunity(prisma, org, o.id, req), deal: await dealDetail(org, dealId) });
+    const dealId = await prisma.$transaction((tx) => convertInTx(tx, { organizationId: org, user, opportunityId: o.id, targetPipelineId: pipelineId, viewContacts: hasPermission(req, "viewContacts") }));
+    res.json({ opportunity: await loadOpportunity(prisma, org, o.id, req), deal: await dealDetail(org, dealId, hasPermission(req, "viewContacts")) });
   }),
 );
 

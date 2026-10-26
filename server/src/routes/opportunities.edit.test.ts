@@ -53,6 +53,8 @@ import type { OrgRole, Permission } from "../domain/permissions.js";
 type Caller = { id: string; orgRole: OrgRole; permissions: Permission[] };
 const EDITOR: Caller = { id: "u_ed", orgRole: "MEMBER", permissions: ["viewDeals", "editDeals"] };
 const VIEWER: Caller = { id: "u_v", orgRole: "VIEWER", permissions: ["viewDeals"] };
+/** Deal editor who may also view and manage contacts (the built-in Member role). */
+const MEMBER: Caller = { id: "u_m", orgRole: "MEMBER", permissions: ["viewDeals", "editDeals", "viewContacts", "manageContacts"] };
 
 async function call(caller: Caller, method: string, path: string, body?: unknown) {
   const app = express();
@@ -219,10 +221,18 @@ describe("POST /opportunities", () => {
 
   it("a seller block naming an existing contact links it instead of creating one", async () => {
     db.results["contact.findFirst"] = { id: "c_1", firstName: "Ann", lastName: "Lee", entityName: "Lee Minerals LLC", phone: "9030000000", email: "ann@x.com", preferredContact: null, mailingStreet: null, mailingCity: null, mailingState: null, mailingZip: null };
-    const res = await call(EDITOR, "POST", "/api/opportunities", { name: "Lee", pipelineId: "pl_opp", seller: { contactId: "c_1" } });
+    const res = await call(MEMBER, "POST", "/api/opportunities", { name: "Lee", pipelineId: "pl_opp", seller: { contactId: "c_1" } });
     expect(res.status).toBe(201);
     expect(db.calls["contact.create"]).toBeUndefined();
     expect(createData()).toMatchObject({ contactId: "c_1", sellerName: "Ann Lee", companyName: "Lee Minerals LLC", phone: "9030000000", email: "ann@x.com" });
+  });
+
+  it("without View contacts, linking a contact copies its names but not its phone or email (audit 2026-10-26)", async () => {
+    db.results["contact.findFirst"] = { id: "c_1", firstName: "Ann", lastName: "Lee", entityName: "Lee Minerals LLC", phone: "9030000000", email: "ann@x.com", preferredContact: null, mailingStreet: null, mailingCity: null, mailingState: null, mailingZip: null };
+    const res = await call(EDITOR, "POST", "/api/opportunities", { name: "Lee", pipelineId: "pl_opp", seller: { contactId: "c_1" } });
+    expect(res.status).toBe(201);
+    expect(createData()).toMatchObject({ contactId: "c_1", sellerName: "Ann Lee", companyName: "Lee Minerals LLC", phone: null, email: null });
+    expect(db.calls["contact.update"]).toBeUndefined();
   });
 
   it("rejects a pipeline that is gone, holds deals, or a stage it doesn't have — never creating anything", async () => {
@@ -247,5 +257,47 @@ describe("POST /opportunities", () => {
     const res = await call(EDITOR, "POST", "/api/opportunities", { name: "X", pipelineId: "pl_opp", ownerId: "u_elsewhere" });
     expect(res.status).toBe(400);
     expect(db.calls["opportunity.create"]).toBeUndefined();
+  });
+});
+
+describe("seller edits on a linked opportunity — the Contact needs Manage contacts (audit 2026-10-26)", () => {
+  const linked = { id: "c_1", firstName: "Ann", lastName: "Smith", entityName: null, phone: "9030000000", email: "ann@x.com", preferredContact: null, mailingStreet: null, mailingCity: null, mailingState: null, mailingZip: null };
+  const VIEW_ONLY: Caller = { id: "u_vc", orgRole: "MEMBER", permissions: ["viewDeals", "editDeals", "viewContacts"] };
+  beforeEach(() => {
+    db.results["opportunity.findFirst"] = row({ contactId: "c_1" });
+    db.results["contact.findFirst"] = linked;
+  });
+
+  it("refuses a change to the contact from a caller who can see but not manage contacts", async () => {
+    const res = await call(VIEW_ONLY, "PATCH", "/api/opportunities/opp_1", { phone: "903-777-0000" });
+    expect(res.status).toBe(403);
+    expect(db.calls["contact.update"]).toBeUndefined();
+    expect(db.calls["opportunity.update"]).toBeUndefined();
+  });
+
+  it("lets that caller save unchanged contact values alongside other edits", async () => {
+    const res = await call(VIEW_ONLY, "PATCH", "/api/opportunities/opp_1", { phone: "(903) 000-0000", email: "ANN@x.com", estNma: 12 });
+    expect(res.status).toBe(200);
+    expect(db.calls["contact.update"]).toBeUndefined();
+    expect(updateData().estNma).toBe(12);
+  });
+
+  it("a caller who can't see contacts edits the opportunity's own columns only", async () => {
+    const res = await call(EDITOR, "PATCH", "/api/opportunities/opp_1", { phone: "903-777-0000" });
+    expect(res.status).toBe(200);
+    expect(db.calls["contact.update"]).toBeUndefined();
+    expect(updateData().phone).toBe("903-777-0000");
+  });
+
+  it("with Manage contacts the change is mirrored onto the contact (changed fields only)", async () => {
+    const res = await call(MEMBER, "PATCH", "/api/opportunities/opp_1", { phone: "9037770000", email: "ann@x.com" });
+    expect(res.status).toBe(200);
+    expect((db.calls["contact.update"]![0] as { data: Record<string, unknown> }).data).toEqual({ phone: "9037770000" });
+  });
+
+  it("a seller block can't change the contact without Manage contacts either", async () => {
+    const res = await call(VIEW_ONLY, "PATCH", "/api/opportunities/opp_1", { seller: { contactId: "c_1", email: "other@x.com" } });
+    expect(res.status).toBe(403);
+    expect(db.calls["contact.update"]).toBeUndefined();
   });
 });

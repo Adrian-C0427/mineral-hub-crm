@@ -3,13 +3,13 @@ import rateLimit from "express-rate-limit";
 import { z } from "zod";
 import { prisma } from "../db.js";
 import { asyncHandler, HttpError } from "../middleware/errors.js";
-import { requireAuth, requireOrg, requirePermission, orgId, researchOrgId, type AuthedRequest } from "../middleware/auth.js";
+import { requireAuth, requireOrg, requirePermission, orgId, researchOrgId, contactAccess, hasPermission, type AuthedRequest } from "../middleware/auth.js";
 import { serializeDeal, serializeContractExtension } from "../serializers.js";
 import { computeMatch } from "../domain/matching.js";
 import { normalizePhone } from "../domain/phone.js";
 import { userRef, userRefSelect } from "../domain/userRef.js";
 import { syncAskToAcceptedOffer, ASK_SYNCED_EVENT } from "../services/acceptedOfferSync.js";
-import { contactPatchFromSellerPatch, dealSellerFromInfo, fillContactGeography, overlayContact, resolveSellerContact, sellerContactSelect, sellerInfoSchema, type SellerContactRow } from "../domain/sellerContact.js";
+import { CONTACT_EDIT_FORBIDDEN, contactPatchFromSellerPatch, contactSyncFor, dealSellerFromInfo, fillContactGeography, overlayContact, resolveSellerContact, sellerContactSelect, sellerInfoSchema, type SellerContactRow } from "../domain/sellerContact.js";
 import { STALE_CONTACT_DAYS, LIST_LIMIT } from "../config.js";
 import { daysUntil, formatCalendarDay, nextContractExtension } from "../domain/dates.js";
 import { totalFromPerAcre } from "../domain/perAcre.js";
@@ -445,12 +445,16 @@ dealsRouter.post(
       // and link it as the deal's primary seller — all in this transaction, so
       // a failure anywhere leaves no half-created deal, seller or contact.
       if (data.seller) {
-        const { contact } = await resolveSellerContact(tx, orgId(req), data.seller, {
-          ownerId: data.relationshipOwnerId ?? req.user!.id, type: "SELLER", notFound: (m) => new HttpError(400, m),
+        const access = contactAccess(req);
+        const { contact, created: newContact } = await resolveSellerContact(tx, orgId(req), data.seller, {
+          ownerId: data.relationshipOwnerId ?? req.user!.id, type: "SELLER", notFound: (m) => new HttpError(400, m), manage: access.manage,
         });
-        await tx.dealSeller.create({ data: { dealId: created.id, ...dealSellerFromInfo(data.seller, contact) } });
-        // The seller's geography of interest, from the deal, when the contact has none yet.
-        await fillContactGeography(tx, contact, { states: created.states.length ? created.states : created.state ? [created.state] : [], counties: created.counties });
+        await tx.dealSeller.create({ data: { dealId: created.id, ...dealSellerFromInfo(data.seller, contact, access.view) } });
+        // The seller's geography of interest, from the deal, when the contact
+        // has none yet (an existing contact only for a caller who may manage contacts).
+        if (newContact || access.manage) {
+          await fillContactGeography(tx, contact, { states: created.states.length ? created.states : created.state ? [created.state] : [], counties: created.counties });
+        }
       }
       return created;
     });
@@ -465,15 +469,17 @@ dealsRouter.get(
   "/:id",
   requirePermission("viewDeals"),
   asyncHandler(async (req: AuthedRequest, res) => {
-    res.json(await dealDetail(orgId(req), req.params.id));
+    res.json(await dealDetail(orgId(req), req.params.id, hasPermission(req, "viewContacts")));
   }),
 );
 
 /**
  * The full deal-page payload (GET /deals/:id). Exported so the opportunity
  * conversion endpoint can return the new deal in exactly this shape.
+ * `viewContacts`: whether the caller may see the sellers' linked Contact
+ * details (phone, email, mailing address) — see serializeSeller.
  */
-export async function dealDetail(organizationId: string, id: string) {
+export async function dealDetail(organizationId: string, id: string, viewContacts: boolean) {
   const deal = await prisma.deal.findFirst({
     where: { id, organizationId },
     include: {
@@ -598,7 +604,7 @@ export async function dealDetail(organizationId: string, id: string) {
       const m = (h.metadata ?? {}) as { before?: Record<string, number | null>; after?: Record<string, number | null>; offerId?: string; offerAmount?: number; buyerId?: string; ourPriceKeptFromAsk?: number };
       return { id: h.id, at: h.createdAt, summary: h.summary, actor: userRef(h.actor), before: m.before ?? null, after: m.after ?? null, offerId: m.offerId ?? null, offerAmount: m.offerAmount ?? null, buyerId: m.buyerId ?? null, buyerName: h.buyerId ? buyerNames.get(h.buyerId) ?? null : null, ourPriceKeptFromAsk: m.ourPriceKeptFromAsk ?? null };
     }),
-    sellers: deal.sellers.map((s) => serializeSeller(s)),
+    sellers: deal.sellers.map((s) => serializeSeller(s, viewContacts)),
     revenueEntries: deal.revenueEntries.map((r) => ({
       id: r.id, month: r.month, amount: r.amount, kind: r.kind, operator: r.operator, note: r.note,
     })),
@@ -620,9 +626,11 @@ function serializeSeller(
     contactId?: string | null; contact?: SellerContactRow | null;
     createdAt: Date; updatedAt: Date;
   },
+  viewContacts: boolean,
 ) {
-  // The linked Contact is the source of truth for the shared fields.
-  s = overlayContact(s, s.contact);
+  // The linked Contact is the source of truth for the shared fields (its
+  // contact details only for a caller who may view contacts).
+  s = overlayContact(s, s.contact, viewContacts);
   return {
     id: s.id, isPrimary: s.isPrimary, ownershipPercent: s.ownershipPercent,
     contact: s.contact ? { id: s.contact.id, name: `${s.contact.firstName} ${s.contact.lastName}`.trim() || s.contact.entityName || "Contact" } : null,
@@ -1061,7 +1069,7 @@ dealsRouter.post(
         tx,
       );
     });
-    res.json(await dealDetail(orgId(req), deal.id));
+    res.json(await dealDetail(orgId(req), deal.id, hasPermission(req, "viewContacts")));
   }),
 );
 
@@ -1500,6 +1508,7 @@ dealsRouter.post(
     // First seller on a deal becomes primary automatically.
     const count = await prisma.dealSeller.count({ where: { dealId } });
     const { contactId, ...cols } = data;
+    const access = contactAccess(req);
     const seller = await prisma.$transaction(async (tx) => {
       // Every seller is a Contact: link the named one, else reuse a matching
       // contact, else create one — so the same person on two deals is one record.
@@ -1509,8 +1518,8 @@ dealsRouter.post(
         phone: cols.primaryPhone, email: cols.email,
         mailingAddress: cols.mailingAddress, mailingCity: cols.mailingCity, mailingState: cols.mailingState, mailingZip: cols.mailingZip,
       });
-      const { contact } = await resolveSellerContact(tx, orgId(req), info, { ownerId: req.user!.id, type: "SELLER", notFound: (m) => new HttpError(400, m) });
-      const fromContact = dealSellerFromInfo(info, contact);
+      const { contact } = await resolveSellerContact(tx, orgId(req), info, { ownerId: req.user!.id, type: "SELLER", notFound: (m) => new HttpError(400, m), manage: access.manage });
+      const fromContact = dealSellerFromInfo(info, contact, access.view);
       return tx.dealSeller.create({
         data: {
           ...fromContact,
@@ -1523,7 +1532,7 @@ dealsRouter.post(
         include: sellerInclude,
       });
     });
-    res.status(201).json(serializeSeller(seller));
+    res.status(201).json(serializeSeller(seller, access.view));
   }),
 );
 
@@ -1544,13 +1553,17 @@ dealsRouter.patch(
       const c = await prisma.contact.findFirst({ where: { id: contactId, organizationId: orgId(req) }, select: { id: true } });
       if (!c) throw new HttpError(400, "Contact not found in your organization");
     }
+    const access = contactAccess(req);
     const seller = await prisma.$transaction(async (tx) => {
       // Shared fields edited here are the Contact's too — keep the one record
       // consistent (the contact first, so the row below reads the new values).
+      // Changing the contact needs "Manage contacts" (contactSyncFor).
       const linked = contactId ?? existing.contactId;
-      if (linked) {
-        const patch = contactPatchFromSellerPatch(cols);
-        if (Object.keys(patch).length) await tx.contact.update({ where: { id: linked }, data: patch });
+      const current = linked ? await tx.contact.findFirst({ where: { id: linked, organizationId: orgId(req) }, select: sellerContactSelect }) : null;
+      if (current) {
+        const sync = contactSyncFor(access, contactPatchFromSellerPatch(cols), current);
+        if (!sync) throw new HttpError(403, CONTACT_EDIT_FORBIDDEN);
+        if (Object.keys(sync).length) await tx.contact.update({ where: { id: current.id }, data: sync });
       }
       return tx.dealSeller.update({ where: { id: existing.id }, data: { ...(cols as object), ...(contactId ? { contactId } : {}) }, include: sellerInclude });
     });
@@ -1558,7 +1571,7 @@ dealsRouter.patch(
     if (data.isPrimary === true) {
       await prisma.dealSeller.updateMany({ where: { dealId, id: { not: seller.id }, isPrimary: true }, data: { isPrimary: false } });
     }
-    res.json(serializeSeller(seller));
+    res.json(serializeSeller(seller, access.view));
   }),
 );
 
