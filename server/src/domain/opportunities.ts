@@ -184,8 +184,27 @@ export function sellerPreferredMethod(code: string | null | undefined): string |
  * there is one (name, company, phone, email, mailing address, preferred
  * method), else from the opportunity's plain seller fields. Null when there is
  * nothing to record — a hand-created deal without seller details has no row.
+ * A caller who may not view contacts (`viewContacts` false) gets the contact's
+ * names only; the phone and email come from the opportunity's own fields, so
+ * converting never copies contact details into a deal they can read.
  */
-export function convertedSeller(o: ConvertibleOpportunity, contact: ConvertibleContact | null) {
+export function convertedSeller(o: ConvertibleOpportunity, contact: ConvertibleContact | null, viewContacts = true) {
+  if (contact && !viewContacts) {
+    const phone = clean(o.phone);
+    return {
+      isPrimary: true,
+      firstName: clean(contact.firstName),
+      lastName: clean(contact.lastName),
+      companyName: clean(contact.entityName),
+      primaryPhone: phone ? normalizePhone(phone) : null,
+      email: clean(o.email),
+      preferredContactMethod: null,
+      mailingAddress: null,
+      mailingCity: null,
+      mailingState: null,
+      mailingZip: null,
+    };
+  }
   if (contact) {
     const phone = clean(contact.phone);
     return {

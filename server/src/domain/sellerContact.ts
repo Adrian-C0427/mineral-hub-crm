@@ -88,7 +88,20 @@ export async function fillContactGeography(tx: Tx, contact: SellerContactRow, ge
 
 type Tx = Prisma.TransactionClient;
 
-const lower = (v: string | null | undefined) => (v ?? "").trim().toLowerCase();
+/**
+ * What the caller may do with a seller's Contact through a deal or an
+ * opportunity: see its contact details (phone, email, mailing address —
+ * "View contacts") and change the record ("Manage contacts"). Names stay
+ * visible either way, as on the opportunity page. System callers (the
+ * backfills) have both.
+ */
+export interface ContactAccess { view: boolean; manage: boolean }
+export const SYSTEM_CONTACT_ACCESS: ContactAccess = { view: true, manage: true };
+
+/** Refusal for a seller edit that would change a contact the caller can't manage. */
+export const CONTACT_EDIT_FORBIDDEN = "Changing this seller's contact details needs the Manage contacts permission";
+
+const lower =(v: string | null | undefined) => (v ?? "").trim().toLowerCase();
 const same = (a: string | null | undefined, b: string | null | undefined) => lower(a) === lower(b);
 
 /** An entity-only contact is filed under its entity name (firstName = entity,
@@ -153,13 +166,14 @@ export async function matchSellerContact(tx: Tx, organizationId: string, s: Sell
  * Resolve the seller block to a Contact in the caller's org: the named one
  * (400 when it isn't the caller's), else a match (see matchSellerContact),
  * else a new Contact built from the block. A linked or matched contact only
- * gains details it was missing — nothing it already holds is overwritten.
+ * gains details it was missing — nothing it already holds is overwritten —
+ * and only for a caller who may manage contacts (`manage`, default true).
  */
 export async function resolveSellerContact(
   tx: Tx,
   organizationId: string,
   s: SellerInfo,
-  opts: { ownerId?: string | null; type?: "SELLER" | "PROSPECT"; notFound: (msg: string) => Error },
+  opts: { ownerId?: string | null; type?: "SELLER" | "PROSPECT"; notFound: (msg: string) => Error; manage?: boolean },
 ): Promise<{ contact: SellerContactRow; created: boolean }> {
   let existing: SellerContactRow | null = null;
   if (s.contactId) {
@@ -169,6 +183,7 @@ export async function resolveSellerContact(
     existing = await matchSellerContact(tx, organizationId, s);
   }
   if (existing) {
+    if (opts.manage === false) return { contact: existing, created: false };
     const fill: Prisma.ContactUpdateInput = {};
     if (!existing.entityName && s.companyName) fill.entityName = s.companyName;
     if (!existing.phone && s.phone) fill.phone = s.phone;
@@ -212,12 +227,20 @@ export function preferredMethodLabel(code: string | null | undefined): string | 
   return c ? PREFERRED_METHOD[c.toUpperCase()] ?? c : null;
 }
 
+/** The contact's details a caller may see: all of them with "View contacts",
+ *  none without (the row then keeps only what the caller typed). */
+const visibleDetails = (c: SellerContactRow, view: boolean) => (view ? c : null);
+
 /**
  * The deal's seller row for a resolved contact: the block's values first (what
- * the user just typed), the contact's for anything left blank.
+ * the user just typed), the contact's for anything left blank — its contact
+ * details only when the caller may view contacts (`view`, default true), so a
+ * typed name never copies a matched contact's phone or email into a row the
+ * caller can read.
  */
-export function dealSellerFromInfo(s: SellerInfo, c: SellerContactRow) {
-  const phone = s.phone ?? (c.phone ? normalizePhone(c.phone) || null : null);
+export function dealSellerFromInfo(s: SellerInfo, c: SellerContactRow, view = true) {
+  const d = visibleDetails(c, view);
+  const phone = s.phone ?? (d?.phone ? normalizePhone(d.phone) || null : null);
   const person = contactPersonName(c);
   return {
     contactId: c.id,
@@ -227,25 +250,27 @@ export function dealSellerFromInfo(s: SellerInfo, c: SellerContactRow) {
     lastName: s.lastName ?? person.lastName,
     companyName: s.companyName ?? c.entityName,
     primaryPhone: phone,
-    email: s.email ?? c.email,
-    preferredContactMethod: preferredMethodLabel(c.preferredContact),
-    mailingAddress: s.mailingAddress ?? c.mailingStreet,
-    mailingCity: s.mailingCity ?? c.mailingCity,
-    mailingState: s.mailingState ?? c.mailingState,
-    mailingZip: s.mailingZip ?? c.mailingZip,
+    email: s.email ?? d?.email ?? null,
+    preferredContactMethod: preferredMethodLabel(d?.preferredContact),
+    mailingAddress: s.mailingAddress ?? d?.mailingStreet ?? null,
+    mailingCity: s.mailingCity ?? d?.mailingCity ?? null,
+    mailingState: s.mailingState ?? d?.mailingState ?? null,
+    mailingZip: s.mailingZip ?? d?.mailingZip ?? null,
   };
 }
 
-/** The opportunity's plain seller columns for a resolved contact. */
-export function opportunitySellerFromInfo(s: SellerInfo, c: SellerContactRow) {
+/** The opportunity's plain seller columns for a resolved contact (contact
+ *  details only for a caller who may view contacts, as above). */
+export function opportunitySellerFromInfo(s: SellerInfo, c: SellerContactRow, view = true) {
+  const d = visibleDetails(c, view);
   const person = contactPersonName(c);
   const name = [s.firstName ?? person.firstName, s.lastName ?? person.lastName].filter(Boolean).join(" ").trim();
   return {
     contactId: c.id,
     sellerName: name || null,
     companyName: s.companyName ?? c.entityName,
-    phone: s.phone ?? (c.phone ? normalizePhone(c.phone) || null : null),
-    email: s.email ?? c.email,
+    phone: s.phone ?? (d?.phone ? normalizePhone(d.phone) || null : null),
+    email: s.email ?? d?.email ?? null,
   };
 }
 
@@ -273,26 +298,65 @@ export function contactPatchFromSellerPatch(p: {
   return out;
 }
 
+/** A shared field as compared for "does this edit change the contact": blank
+ *  and null agree, emails ignore case, phones compare as digits. */
+function comparable(key: string, v: unknown): string {
+  const s = typeof v === "string" ? v.trim() : "";
+  if (key === "phone") return normalizePhone(s);
+  if (key === "email") return s.toLowerCase();
+  return s;
+}
+
+/**
+ * The part of a mirrored seller edit (`contactPatchFromSellerPatch` output)
+ * that this caller applies to the linked Contact. Only fields whose value
+ * actually differs count, so a form that resends unchanged values changes
+ * nothing. With "Manage contacts" the changes are applied; a caller who can
+ * see the contact but not manage it is refused (null) when anything would
+ * change; a caller who can't even see it never changes it — the edit stays on
+ * the deal / opportunity row, and the reply never hints at what the contact
+ * holds.
+ */
+export function contactSyncFor(access: ContactAccess, patch: Prisma.ContactUpdateInput, c: SellerContactRow): Prisma.ContactUpdateInput | null {
+  const person = contactPersonName(c);
+  const current: Record<string, string | null> = {
+    firstName: person.firstName, lastName: person.lastName, entityName: c.entityName, phone: c.phone, email: c.email,
+    mailingStreet: c.mailingStreet, mailingCity: c.mailingCity, mailingState: c.mailingState, mailingZip: c.mailingZip,
+  };
+  const changes: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(patch)) {
+    if (!(k in current) || comparable(k, v) !== comparable(k, current[k])) changes[k] = v;
+  }
+  if (access.manage) return changes as Prisma.ContactUpdateInput;
+  if (!access.view) return {};
+  return Object.keys(changes).length ? null : {};
+}
+
 /** Non-empty contact value, else the seller row's own copy. */
 const pick = <T extends string | null>(c: T | undefined, s: T): T => (c != null && c !== "" ? c : s);
 
 /**
  * A DealSeller row as the API shows it: the linked Contact's shared fields
  * overlay the row's copy (the Contact is the source of truth), everything
- * deal-specific comes from the row.
+ * deal-specific comes from the row. Without "View contacts" (`view` false)
+ * only the names overlay; the contact details shown are the row's own.
  */
 export function overlayContact<S extends {
   firstName: string | null; lastName: string | null; companyName: string | null;
   primaryPhone: string | null; email: string | null;
   mailingAddress: string | null; mailingCity: string | null; mailingState: string | null; mailingZip: string | null;
-}>(s: S, c: SellerContactRow | null | undefined): S {
+}>(s: S, c: SellerContactRow | null | undefined, view = true): S {
   if (!c) return s;
   const person = contactPersonName(c);
-  return {
+  const names = {
     ...s,
     firstName: pick(person.firstName, s.firstName),
     lastName: pick(person.lastName, s.lastName),
     companyName: pick(c.entityName, s.companyName),
+  };
+  if (!view) return names;
+  return {
+    ...names,
     primaryPhone: pick(c.phone ? normalizePhone(c.phone) || null : null, s.primaryPhone),
     email: pick(c.email, s.email),
     mailingAddress: pick(c.mailingStreet, s.mailingAddress),
