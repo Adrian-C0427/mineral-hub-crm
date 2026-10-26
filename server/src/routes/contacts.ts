@@ -803,7 +803,7 @@ contactsRouter.post(
   requirePermission("manageContacts"),
   importLimiter,
   asyncHandler(async (req: AuthedRequest, res) => {
-    const { csv, mapping } = z.object({ csv: csvField, mapping: z.record(z.string()) }).parse(req.body);
+    const { csv, mapping } = z.object({ csv: csvField, mapping: z.record(z.string(), z.string()) }).parse(req.body);
     const classified = await classifyContactRows(orgId(req), csv, mapping);
     res.json({
       rows: classified.slice(0, 500).map((r) => ({
@@ -826,7 +826,7 @@ contactsRouter.post(
   asyncHandler(async (req: AuthedRequest, res) => {
     const { csv, mapping, updateDuplicates, listId } = z.object({
       csv: csvField,
-      mapping: z.record(z.string()),
+      mapping: z.record(z.string(), z.string()),
       // When true, matched duplicates get blank fields filled in (never
       // overwriting existing data) and are counted as "updated".
       updateDuplicates: z.boolean().optional(),

@@ -481,7 +481,8 @@ const leadSchema = z.object({
     maxAcreage: z.number().nonnegative().optional().nullable(),
     minPrice: z.number().nonnegative().optional().nullable(),
     maxPrice: z.number().nonnegative().optional().nullable(),
-  }).default({}),
+  // prefault: a missing buy box is parsed as {} so the list defaults above apply.
+  }).prefault({}),
   // Free-text preferences that don't map to structured buy-box fields
   // (NRA range, abstracts, surveys, operator/well-status preferences, notes).
   additionalCriteria: z.string().trim().max(4000).optional().default(""),
