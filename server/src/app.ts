@@ -31,6 +31,7 @@ import { researchRouter } from "./routes/research.js";
 import { wellsRouter } from "./routes/wells.js";
 import { aiRouter } from "./routes/ai.js";
 import { gisRouter, gisTilesRouter } from "./routes/gis.js";
+import { geoRouter } from "./routes/geo.js";
 import { portalRouter } from "./routes/portal.js";
 import { notificationsRouter } from "./routes/notifications.js";
 import { calendarRouter } from "./routes/calendar.js";
@@ -133,6 +134,7 @@ export function createApp() {
   // must be mounted before the authed /api/gis router.
   app.use("/api/gis/tiles", gisTilesRouter);
   app.use("/api/gis", gisRouter);
+  app.use("/api/geo", geoRouter);
 
   app.use(notFound);
   // Sentry captures errors before our own handler formats the response.
