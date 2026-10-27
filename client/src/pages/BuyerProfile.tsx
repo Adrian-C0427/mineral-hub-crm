@@ -14,7 +14,8 @@ import { GeoFields } from "../components/GeoFields";
 import { StateSelect } from "../components/StateSelect";
 import { BuyerRelationships, type BuyerNetwork } from "../components/BuyerRelationships";
 import { BuyerAliasManager } from "../components/BuyerAliasManager";
-import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
+import { ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
+import { basinOptions, formationOptions, useGeoCatalog } from "../lib/geoContext";
 import { money, pct, acres, fmtDate } from "../lib/format";
 import { sumMoney } from "../lib/money";
 import { formatPhone } from "../lib/phone";
@@ -150,6 +151,8 @@ export function BuyerProfile() {
 
   const setD = (patch: Partial<BuyerProfileData>) => setDraft((d) => (d ? { ...d, ...patch } : d));
   const setBox = (k: keyof BuyBox, v: unknown) => setDraft((d) => (d ? { ...d, buyBox: { ...d.buyBox, [k]: v } } : d));
+  // Full basin / formation vocabulary (the geology catalog + the legacy list): a buy box must be able to name any basin a deal can carry.
+  const geoCatalog = useGeoCatalog();
 
   /** Per-panel header: title + its own Edit (or Save/Cancel while editing). */
   function SectionHead({ title, section }: { title: string; section: Section }) {
@@ -330,10 +333,10 @@ export function BuyerProfile() {
                 />
               </div>
               <Fld l="Basins">
-                <SearchableMultiSelect options={[...TEXAS_BASIN_OPTIONS]} value={view.buyBox.basins} onChange={(v) => setBox("basins", v)} placeholder="Search basins…" />
+                <SearchableMultiSelect options={basinOptions(geoCatalog, null)} value={view.buyBox.basins} onChange={(v) => setBox("basins", v)} placeholder="Search basins…" />
               </Fld>
               <Fld l="Formations">
-                <SearchableMultiSelect options={[...TEXAS_FORMATION_OPTIONS]} value={view.buyBox.formations} onChange={(v) => setBox("formations", v)} placeholder="Search formations…" />
+                <SearchableMultiSelect options={formationOptions(geoCatalog, null)} value={view.buyBox.formations} onChange={(v) => setBox("formations", v)} placeholder="Search formations…" />
               </Fld>
               <Fld l="Asset types">
                 <SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={view.buyBox.assetTypes} onChange={(v) => setBox("assetTypes", v)} placeholder="Search asset types…" />

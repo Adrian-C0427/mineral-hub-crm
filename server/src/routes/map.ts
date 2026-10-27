@@ -58,6 +58,7 @@ mapRouter.get(
       select: {
         id: true, name: true, pipelineId: true, stage: true, currentStageEnteredAt: true, sellerName: true, companyName: true,
         state: true, county: true, abstract: true, survey: true, estAcres: true, estNma: true, estNra: true, nextFollowUpDate: true,
+        basins: true, formations: true,
         owner: { select: userRefSelect }, contact: { select: { id: true, firstName: true, lastName: true, entityName: true } },
       },
       orderBy: { createdAt: "desc" },
@@ -101,6 +102,7 @@ mapRouter.get(
         seller: seller || null, company: r.contact?.entityName ?? r.companyName ?? null,
         state: r.state, county: r.county, abstract: r.abstract, survey: r.survey,
         estAcres: r.estAcres, estNma: r.estNma, estNra: r.estNra, nextFollowUpDate: r.nextFollowUpDate,
+        basins: r.basins, formations: r.formations,
         owner: userRef(r.owner),
         abstractId, placement, lon: pt?.lon ?? null, lat: pt?.lat ?? null,
       };

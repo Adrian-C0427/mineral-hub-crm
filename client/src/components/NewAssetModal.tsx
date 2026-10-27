@@ -5,7 +5,8 @@ import { SearchableMultiSelect } from "./SearchableMultiSelect";
 import { GeoFields } from "./GeoFields";
 import { SurveyMultiPicker } from "./AbstractPicker";
 import { Select } from "./Select";
-import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
+import { ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
+import { GeoTagFields } from "./GeoTagFields";
 import { OWNERSHIP_STATUSES, PRODUCING_STATUSES, LEASE_STATUS_OPTIONS } from "../lib/assetOptions";
 import type { DealSummary } from "../types";
 import { MoneyInput } from "./MoneyInput";
@@ -210,8 +211,7 @@ export function NewAssetModal({ onClose, onCreated }: { onClose: () => void; onC
                   labels={{ state: <>State {req}</>, county: <>County {req}</>, abstract: <>Abstract {req}</> }}
                 />
                 <div className="field"><label>Survey {req}</label><SurveyMultiPicker value={surveys} onChange={setSurveys} abstractIds={abstractIds} /></div>
-                <div className="field"><label>Basin</label><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(counties))} value={basins} onChange={setBasins} placeholder={counties.length ? "Suggested for your counties first…" : "Search basins…"} /></div>
-                <div className="field"><label>Formation</label><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(counties))} value={formations} onChange={setFormations} placeholder={counties.length ? "Suggested for your counties first…" : "Search formations…"} /></div>
+                <GeoTagFields autoFill basins={basins} onBasinsChange={setBasins} formations={formations} onFormationsChange={setFormations} abstractIds={abstractIds} counties={counties} states={states} />
                 <div className="field"><label title="Operators active in the selected state and county">Operator</label>
                   <OperatorSelect states={states} counties={counties} value={f.operator} onChange={(v) => setF((p) => ({ ...p, operator: v }))} />
                 </div>

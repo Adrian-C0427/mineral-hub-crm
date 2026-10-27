@@ -369,6 +369,7 @@ export function suggestedTags(ctx: GeoContext): { basins: string[]; formations: 
 /** GeoJSON for the map overlay: one MultiPolygon feature per region of the wanted kinds. */
 export function regionsGeoJSON(ds: GeoRegionsDataset, kinds: readonly RegionKind[]): GeoJSON.FeatureCollection {
   const byId = new Map(ds.regions.map((r) => [r.id, r]));
+  const sourceName = new Map(ds.sources.map((s) => [s.id, s.name]));
   return {
     type: "FeatureCollection",
     features: ds.regions.filter((r) => kinds.includes(r.kind)).map((r, i) => ({
@@ -376,7 +377,7 @@ export function regionsGeoJSON(ds: GeoRegionsDataset, kinds: readonly RegionKind
       id: i + 1,
       properties: {
         id: r.id, name: r.name, kind: r.kind, parent: r.parent, parentName: r.parent ? byId.get(r.parent)?.name ?? null : null,
-        formation: r.formation, sources: r.sources.map((s) => s.label).join("; "), colorIndex: i % 12,
+        formation: r.formation, sources: [...new Set(r.sources.map((s) => sourceName.get(s.id) ?? s.label))].join("; "), colorIndex: i % 12,
       },
       geometry: r.geom,
     })),

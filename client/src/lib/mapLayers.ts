@@ -402,3 +402,62 @@ export function leaseInfo(p: Record<string, unknown>): LeaseInfo {
     calledAcres: Number(p.calledAcres), mappedAcres: Number(p.mappedAcres), well: String(p.well ?? ""), plat: String(p.plat ?? ""),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Basins / sub-basins / plays (GET /api/geo/regions — domain/geoRegions.ts on
+// the server): a faint tint per basin with its name at regional zooms, dashed
+// sub-basin outlines, and play outlines as a separate toggle. Drawn under the
+// abstract mesh so cadastral and well data always read on top.
+// ---------------------------------------------------------------------------
+export const GEO_SOURCE = "geo-regions";
+export const PLAY_SOURCE = "geo-plays";
+export const BASIN_LAYERS = ["basins-fill", "basins-line", "subbasins-line", "basins-label"] as const;
+export const PLAY_LAYERS = ["plays-fill", "plays-line", "plays-label"] as const;
+/** Muted, distinguishable tints — one per basin, assigned by the server's colorIndex (0–11). */
+export const BASIN_PALETTE = ["#b45309", "#0f766e", "#6d28d9", "#be185d", "#1d4ed8", "#4d7c0f", "#c2410c", "#0e7490", "#7c3aed", "#a16207", "#15803d", "#9f1239"] as const;
+export const PLAY_COLOR = "#7c2d12";
+function paletteExpr(palette: readonly string[]): maplibregl.ExpressionSpecification {
+  return ["match", ["get", "colorIndex"], ...palette.flatMap((c, i) => [i, c]), palette[0]] as unknown as maplibregl.ExpressionSpecification;
+}
+
+export function addGeoRegionLayers(map: maplibregl.Map, beforeId?: string): void {
+  const before = beforeId && map.getLayer(beforeId) ? beforeId : undefined;
+  map.addSource(GEO_SOURCE, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  const basinColor = paletteExpr(BASIN_PALETTE);
+  map.addLayer({ id: "basins-fill", type: "fill", source: GEO_SOURCE, filter: ["==", ["get", "kind"], "basin"], paint: {
+    "fill-color": basinColor,
+    "fill-opacity": ["interpolate", ["linear"], ["zoom"], 4, 0.16, 9, 0.1, 12, 0.05] as unknown as maplibregl.ExpressionSpecification } }, before);
+  map.addLayer({ id: "basins-line", type: "line", source: GEO_SOURCE, filter: ["==", ["get", "kind"], "basin"], paint: {
+    "line-color": basinColor, "line-opacity": 0.7,
+    "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1, 9, 1.8, 13, 2.4] as unknown as maplibregl.ExpressionSpecification } }, before);
+  map.addLayer({ id: "subbasins-line", type: "line", source: GEO_SOURCE, filter: ["==", ["get", "kind"], "subbasin"], paint: {
+    "line-color": basinColor, "line-opacity": 0.75, "line-dasharray": [4, 2],
+    "line-width": ["interpolate", ["linear"], ["zoom"], 4, 0.8, 9, 1.4, 13, 2] as unknown as maplibregl.ExpressionSpecification } }, before);
+  map.addLayer({ id: "basins-label", type: "symbol", source: GEO_SOURCE, maxzoom: 10.5, layout: {
+    "text-field": ["get", "name"] as unknown as maplibregl.ExpressionSpecification, "text-font": ["Noto Sans Regular"],
+    "text-size": ["interpolate", ["linear"], ["zoom"], 4, 11, 7, 15, 10, 17] as unknown as maplibregl.ExpressionSpecification,
+    "text-transform": "uppercase", "text-letter-spacing": 0.12, "text-max-width": 7,
+    "text-allow-overlap": false, "text-optional": true, "symbol-placement": "point" },
+    paint: { "text-color": basinColor, "text-opacity": 0.85, "text-halo-color": "#ffffff", "text-halo-width": 1.6 } }, before);
+
+  map.addSource(PLAY_SOURCE, { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+  map.addLayer({ id: "plays-fill", type: "fill", source: PLAY_SOURCE, paint: { "fill-color": PLAY_COLOR, "fill-opacity": 0.06 } }, before);
+  map.addLayer({ id: "plays-line", type: "line", source: PLAY_SOURCE, paint: {
+    "line-color": PLAY_COLOR, "line-opacity": 0.8, "line-dasharray": [2, 2],
+    "line-width": ["interpolate", ["linear"], ["zoom"], 4, 1, 9, 1.6, 13, 2.2] as unknown as maplibregl.ExpressionSpecification } }, before);
+  map.addLayer({ id: "plays-label", type: "symbol", source: PLAY_SOURCE, minzoom: 5.5, maxzoom: 11.5, layout: {
+    "text-field": ["get", "name"] as unknown as maplibregl.ExpressionSpecification, "text-font": ["Noto Sans Regular"],
+    "text-size": ["interpolate", ["linear"], ["zoom"], 6, 10, 10, 13] as unknown as maplibregl.ExpressionSpecification,
+    "text-letter-spacing": 0.04, "text-max-width": 8, "text-allow-overlap": false, "text-optional": true, "symbol-placement": "point" },
+    paint: { "text-color": PLAY_COLOR, "text-opacity": 0.9, "text-halo-color": "#ffffff", "text-halo-width": 1.4 } }, before);
+}
+
+/** A clicked basin, sub-basin or play, as the map panel shows it. */
+export interface RegionInfo { id: string; name: string; regionKind: "basin" | "subbasin" | "play"; parentName: string | null; formation: string | null; sources: string; colorIndex: number }
+export function regionInfo(p: Record<string, unknown>): RegionInfo {
+  const regionKind = p.kind === "subbasin" || p.kind === "play" ? p.kind : "basin";
+  return {
+    id: String(p.id ?? ""), name: String(p.name ?? "Basin"), regionKind, parentName: p.parentName ? String(p.parentName) : null,
+    formation: p.formation ? String(p.formation) : null, sources: String(p.sources ?? ""), colorIndex: Number(p.colorIndex ?? 0),
+  };
+}

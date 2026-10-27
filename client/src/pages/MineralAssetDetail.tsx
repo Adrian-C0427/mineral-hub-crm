@@ -20,7 +20,8 @@ import { OfferRowActions, acceptedOfferLabel } from "../components/OfferActions"
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
 import { useAbstractLabels, useAbstractIndex, abstractEntryShortLabel, SurveyMultiPicker } from "../components/AbstractPicker";
-import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
+import { ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
+import { GeoTagFields } from "../components/GeoTagFields";
 import { OperatorSelect } from "../components/OperatorSelect";
 import { perAcreRates } from "../lib/perAcre";
 import { monthLabel, chartTooltip } from "../lib/charts";
@@ -376,8 +377,7 @@ function PropertyCard({ asset, canEdit, onSaved }: { asset: AssetDetail; canEdit
             labels={{ county: "Counties", abstract: "Abstracts" }}
           />
           <Fld l="Producing Status"><Select value={f.producingStatus ?? ""} onChange={(v) => setF({ ...f, producingStatus: v })} placeholder="—" clearable ariaLabel="Producing status" options={PRODUCING_STATUSES.map((t) => ({ value: t, label: t }))} /></Fld>
-          <Fld l="Basins"><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(f.counties))} value={f.basins} onChange={(v) => setF({ ...f, basins: v })} placeholder={f.counties.length ? "Suggested for these counties first…" : "Search basins…"} /></Fld>
-          <Fld l="Formations"><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(f.counties))} value={f.formations} onChange={(v) => setF({ ...f, formations: v })} placeholder={f.counties.length ? "Suggested for these counties first…" : "Search formations…"} /></Fld>
+          <GeoTagFields autoFill labels={{ basin: "Basins", formation: "Formations" }} basins={f.basins} onBasinsChange={(v) => setF((p) => ({ ...p, basins: v }))} formations={f.formations} onFormationsChange={(v) => setF((p) => ({ ...p, formations: v }))} abstractIds={f.abstractIds} counties={f.counties} states={f.states?.length ? f.states : (f.state ? [f.state] : [])} />
           <Fld l="Operator"><OperatorSelect states={f.states?.length ? f.states : (f.state ? [f.state] : [])} counties={f.counties} value={f.operator ?? ""} onChange={(v) => setF({ ...f, operator: v })} /></Fld>
           <Fld l="Surveys"><SurveyMultiPicker value={f.surveys ?? []} onChange={(v) => setF({ ...f, surveys: v })} abstractIds={f.abstractIds} /></Fld>
           <Fld l="Wells"><SearchableMultiSelect options={[]} value={f.wells ?? []} onChange={(v) => setF({ ...f, wells: v })} placeholder="Type a well name/API, Enter" /></Fld>
