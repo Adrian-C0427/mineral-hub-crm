@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { env } from "../config.js";
 import { currentKeyId, decryptSecret, encryptSecret, isSealed, needsReseal, resetSecretKeys, resealSecret, rotationConfigured } from "./secrets.js";
-import { resealStoredSecrets, type RotationDb } from "./secretsRotation.js";
+import { resealStoredSecrets, rotateStoredSecrets, type RotationDb } from "./secretsRotation.js";
 
 // The rotation pass rewrites live credentials unattended, so what it reads,
 // what it writes and what it leaves alone are pinned here.
@@ -61,17 +61,30 @@ describe("resealStoredSecrets", () => {
   let integrations: { id: string; provider: string; config: unknown }[];
   let users: { id: string; totpSecret: string | null }[];
   const writes: string[] = [];
+  // Hooks run just before a write lands — a concurrent request, or a DB error.
+  let beforeWrite: (kind: "integration" | "user", id: string) => void;
   const db: RotationDb = {
     integration: {
-      findMany: async () => integrations,
-      update: async ({ where, data }) => { writes.push(`integration:${where.id}`); const r = integrations.find((i) => i.id === where.id)!; r.config = data.config; },
+      // Rows are handed out as copies, like Prisma, so a later change is visible to the compare.
+      findMany: async () => integrations.map((i) => ({ ...i, config: structuredClone(i.config) })),
+      updateMany: async ({ where, data }) => {
+        beforeWrite("integration", where.id);
+        const r = integrations.find((i) => i.id === where.id);
+        if (!r || JSON.stringify(r.config) !== JSON.stringify(where.config.equals)) return { count: 0 };
+        writes.push(`integration:${where.id}`); r.config = data.config; return { count: 1 };
+      },
     },
     user: {
-      findMany: async () => users.filter((u) => u.totpSecret != null),
-      update: async ({ where, data }) => { writes.push(`user:${where.id}`); users.find((u) => u.id === where.id)!.totpSecret = data.totpSecret; },
+      findMany: async () => users.filter((u) => u.totpSecret != null).map((u) => ({ ...u })),
+      updateMany: async ({ where, data }) => {
+        beforeWrite("user", where.id);
+        const u = users.find((x) => x.id === where.id);
+        if (!u || u.totpSecret !== where.totpSecret) return { count: 0 };
+        writes.push(`user:${where.id}`); u.totpSecret = data.totpSecret; return { count: 1 };
+      },
     },
   };
-  beforeEach(() => { writes.length = 0; });
+  beforeEach(() => { writes.length = 0; beforeWrite = () => {}; });
 
   it("re-encrypts what the previous key sealed, keeps everything else byte-for-byte, and is idempotent", async () => {
     const legacyV1 = v1Under(OLD, "hl-key");
@@ -91,7 +104,7 @@ describe("resealStoredSecrets", () => {
     users = [{ id: "u1", totpSecret: totpUnderOld }, { id: "u2", totpSecret: "JBSWY3DPEHPK3PXP" }, { id: "u3", totpSecret: null }];
 
     const r = await resealStoredSecrets(db);
-    expect(r).toEqual({ integrations: { checked: 4, resealed: 2, unreadable: ["broken (i5)"] }, totp: { checked: 1, resealed: 1, unreadable: 0 } });
+    expect(r).toEqual({ integrations: { checked: 4, resealed: 2, unreadable: ["broken (i5)"], failed: [] }, totp: { checked: 1, resealed: 1, unreadable: 0, failed: 0 } });
     expect(writes.sort()).toEqual(["integration:i1", "integration:i2", "user:u1"]);
     const c1 = integrations[0].config as Record<string, string>;
     expect(c1.apiBase).toBe("x"); expect(c1._hint).toBe("…-key");
@@ -107,5 +120,52 @@ describe("resealStoredSecrets", () => {
     const again = await resealStoredSecrets(db);
     expect(again.integrations.resealed + again.totp.resealed).toBe(0);
     expect(writes).toEqual([]);
+  });
+
+  it("never overwrites a row that changed while the pass ran, and reports it as not saved", async () => {
+    setKeys(OLD);
+    const underOld = encryptSecret("hl-key");
+    const totpUnderOld = encryptSecret("JBSWY3DPEHPK3PXP");
+    setKeys(NEW, OLD);
+    const userSaved = encryptSecret("new-hl-key");
+    const reEnrolled = encryptSecret("NEWSECRETBASE32X");
+    integrations = [{ id: "i1", provider: "highlevel", config: { apiBase: "x", _secret: underOld } }];
+    users = [{ id: "u1", totpSecret: totpUnderOld }];
+    // A user saves a new key / re-enrolls 2FA between the pass's read and its write.
+    beforeWrite = (kind) => {
+      if (kind === "integration") integrations[0].config = { apiBase: "y", _secret: userSaved };
+      else users[0].totpSecret = reEnrolled;
+    };
+    const r = await resealStoredSecrets(db);
+    expect(r.integrations).toEqual({ checked: 1, resealed: 0, unreadable: [], failed: ["highlevel (i1)"] });
+    expect(r.totp).toEqual({ checked: 1, resealed: 0, unreadable: 0, failed: 1 });
+    expect(writes).toEqual([]);
+    expect(integrations[0].config).toEqual({ apiBase: "y", _secret: userSaved });
+    expect(users[0].totpSecret).toBe(reEnrolled);
+  });
+
+  it("counts a failed write as not saved (not unreadable), and the log keeps the previous key", async () => {
+    setKeys(OLD);
+    const underOld = encryptSecret("hl-key");
+    setKeys(NEW, OLD);
+    integrations = [
+      { id: "i1", provider: "highlevel", config: { _secret: underOld } },
+      { id: "i2", provider: "broken", config: { _secret: "v2:deadbeef:AAAA:BBBB:CCCC" } },
+    ];
+    users = [];
+    beforeWrite = () => { throw new Error("connection reset"); };
+    const lines: string[] = [];
+    const r = await rotateStoredSecrets((m) => lines.push(m), db);
+    expect(r?.integrations).toEqual({ checked: 2, resealed: 0, unreadable: ["broken (i2)"], failed: ["highlevel (i1)"] });
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/keep INTEGRATION_SECRET_KEY_PREVIOUS set and restart/);
+    expect(lines[0]).not.toMatch(/can be removed/);
+
+    // Next boot, the write goes through: now the previous key can go.
+    beforeWrite = () => {};
+    lines.length = 0;
+    await rotateStoredSecrets((m) => lines.push(m), db);
+    expect(lines[0]).toMatch(/INTEGRATION_SECRET_KEY_PREVIOUS can be removed/);
+    expect(decryptSecret((integrations[0].config as Record<string, string>)._secret)).toBe("hl-key");
   });
 });
