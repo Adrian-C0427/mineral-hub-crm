@@ -8,7 +8,8 @@ describe("integration secret encryption", () => {
     const secret = "sk-ant-api03-abc123XYZ";
     const enc = encryptSecret(secret);
     expect(enc).not.toContain(secret);
-    expect(enc.startsWith("v1:")).toBe(true);
+    expect(enc.startsWith("v2:")).toBe(true);
+    expect(enc.split(":").length).toBe(5);
     expect(decryptSecret(enc)).toBe(secret);
   });
 
@@ -19,7 +20,7 @@ describe("integration secret encryption", () => {
   it("rejects tampered ciphertext", () => {
     const enc = encryptSecret("topsecret");
     const parts = enc.split(":");
-    parts[3] = Buffer.from("tampered!").toString("base64");
+    parts[4] = Buffer.from("tampered!").toString("base64");
     expect(() => decryptSecret(parts.join(":"))).toThrow();
   });
 

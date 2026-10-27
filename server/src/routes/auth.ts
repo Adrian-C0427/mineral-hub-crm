@@ -21,7 +21,7 @@ import {
 import {
   getProvider, enabledProviders, buildAuthorizeUrl, exchangeCode, fetchProfile,
 } from "../services/oauth.js";
-import { encryptSecret, decryptSecret } from "../services/secrets.js";
+import { encryptSecret, decryptSecret, isSealed } from "../services/secrets.js";
 
 export const authRouter = Router();
 
@@ -100,11 +100,11 @@ function issueSession(res: import("express").Response, user: { id: string; name:
 
 // TOTP secrets are encrypted at rest with the integrations key (AES-256-GCM,
 // services/secrets). Rows enrolled before this hardening hold base32 plaintext
-// (which never contains ":"), so the "v1:" ciphertext prefix disambiguates —
+// (which never contains ":"), so the ciphertext prefix disambiguates —
 // legacy enrollments keep verifying and are re-encrypted on their next enroll.
 const sealTotpSecret = (secret: string): string => encryptSecret(secret);
 function revealTotpSecret(stored: string): string {
-  if (!stored.startsWith("v1:")) return stored; // legacy plaintext row
+  if (!isSealed(stored)) return stored; // legacy plaintext row
   try { return decryptSecret(stored); } catch { return stored; }
 }
 

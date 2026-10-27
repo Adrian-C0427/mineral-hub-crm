@@ -96,4 +96,10 @@ this cut and stay removed.
 4. **Google**: the OAuth client now serves only Drive import
    (drive.readonly).
 5. `INTEGRATION_SECRET_KEY` set (required in production by
-   `assertProductionSecrets`).
+   `assertProductionSecrets`). **Rotating it:** move the old value to
+   `INTEGRATION_SECRET_KEY_PREVIOUS`, set the new value, deploy. Reads accept
+   both keys; boot re-encrypts every stored integration and TOTP secret under
+   the new key (`services/secretsRotation.ts`) and logs
+   `[secrets] key rotation: …` — then remove the previous variable. Ciphertext
+   is `v2:<key id>:…` so a payload under an unknown key fails with a clear
+   message instead of a bare decrypt error.
