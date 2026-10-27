@@ -4,6 +4,7 @@ import { Select } from "./Select";
 import { userOptions } from "./UserAvatar";
 import { DateField } from "./DateField";
 import { GeoFields } from "./GeoFields";
+import { GeoTagFields } from "./GeoTagFields";
 import { FormSection } from "./kit";
 import { SellerInformation, emptySellerInfo, sellerInfoBody, sellerInfoFromContact, sellerInfoInvalid, sellerInfoMissing, type SellerInfoForm } from "./SellerInformation";
 import { SectionRail, useSectionRail, type RailSection } from "./SectionRail";
@@ -13,7 +14,7 @@ import { useAuth } from "../auth/AuthContext";
 import { isOpportunityPipeline, type PipelineInfo } from "../stages";
 import { acres, prettyStage } from "../lib/format";
 import { surveyLabel } from "../lib/abstracts";
-import { checkOppForm, choosePipelineStage, emptyOppForm, oppBody, oppFormFromRecord, oppPatchBody, type OppForm } from "../lib/opportunityForm";
+import { checkOppForm, choosePipelineStage, emptyOppForm, isAbstractId, oppBody, oppFormFromRecord, oppPatchBody, type OppForm } from "../lib/opportunityForm";
 import type { Opp, UserLite, UserRef } from "../types";
 
 export type OppFormSection = "basics" | "seller" | "property" | "acreage" | "followup";
@@ -253,6 +254,9 @@ export function NewOpportunityModal({ pipelines, pipelineId, opp, initialSection
                   abstractIds={f.abstract ? [f.abstract] : []} onAbstractsChange={pickAbstract}
                 />
                 <div className="field"><label>Survey</label><input value={f.survey} onChange={(e) => set("survey")(e.target.value)} placeholder="Filled in from the abstract" /></div>
+                {/* Basin / Formation from the abstract's footprint or the county (filled in while untouched). */}
+                <GeoTagFields autoFill basins={f.basins} onBasinsChange={(v) => setF((p) => ({ ...p, basins: v }))} formations={f.formations} onFormationsChange={(v) => setF((p) => ({ ...p, formations: v }))}
+                  abstractIds={f.abstract && isAbstractId(f.abstract) ? [f.abstract] : []} counties={f.county ? [f.county] : []} states={f.state ? [f.state] : []} />
               </div>
             </FormSection>
           </div>

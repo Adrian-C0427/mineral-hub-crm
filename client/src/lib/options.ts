@@ -65,6 +65,11 @@ export const TEXAS_BASIN_OPTIONS = [
   "Burgos Basin",
   "San Marcos Arch",
   "Llano Uplift",
+  // Geologic provinces the basin layer (EPA/AAPG) can place a tract in.
+  "Kerr Basin",
+  "Strawn Basin",
+  "Ouachita Fold Belt",
+  "Orogrande Basin",
 ];
 
 // Recognized Texas formations / producing intervals (comprehensive, roughly
@@ -103,7 +108,7 @@ export const TEXAS_FORMATION_OPTIONS = [
 
 // County → basins. Broad regional assignment covering the main plays.
 const PERMIAN_DELAWARE = ["Reeves", "Loving", "Ward", "Winkler", "Pecos", "Culberson", "Jeff Davis"];
-const PERMIAN_MIDLAND = ["Midland", "Martin", "Howard", "Glasscock", "Reagan", "Upton", "Andrews", "Ector", "Crane", "Dawson", "Borden", "Sterling", "Irion", "Regan"];
+const PERMIAN_MIDLAND = ["Midland", "Martin", "Howard", "Glasscock", "Reagan", "Upton", "Andrews", "Ector", "Crane", "Dawson", "Borden", "Sterling", "Irion"];
 const FORT_WORTH = ["Tarrant", "Johnson", "Wise", "Denton", "Parker", "Hood", "Somervell", "Erath", "Palo Pinto", "Jack", "Montague"];
 const EAST_TEXAS = ["Leon", "Freestone", "Anderson", "Angelina", "Cherokee", "Houston", "Limestone", "Madison", "Panola", "Robertson", "San Augustine", "Shelby", "Nacogdoches", "Rusk", "Gregg", "Harrison", "Smith", "Henderson", "Navarro"];
 const EAGLE_FORD = ["Karnes", "DeWitt", "Gonzales", "La Salle", "McMullen", "Dimmit", "Webb", "Atascosa", "Live Oak", "Frio", "Wilson", "Maverick", "Zavala"];

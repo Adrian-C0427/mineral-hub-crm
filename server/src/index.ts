@@ -16,6 +16,8 @@ import { backfillSellerContacts } from "./services/sellerContactBackfill.js";
 import { ensureGisRegions } from "./services/gisRegions.js";
 import { ensureSonrisWells } from "./services/sonrisWells.js";
 import { ensureRrcRefresh } from "./services/rrcRefresh.js";
+import { ensureGeoRegions } from "./services/geoRegions.js";
+import { backfillGeoTags } from "./services/geoTagsBackfill.js";
 import { clearGisCaches } from "./routes/gis.js";
 
 // Fail closed: in production, refuse to boot with default/missing secret keys.
@@ -84,7 +86,17 @@ ensureGisRegions()
   .catch((e) => console.error("Louisiana well load failed:", e instanceof Error ? e.message : e))
   .then(() => ensureRrcRefresh())
   .then((loaded) => { if (loaded) clearGisCaches(); })
-  .catch((e) => console.error("RRC refresh load failed:", e instanceof Error ? e.message : e));
+  .catch((e) => console.error("RRC refresh load failed:", e instanceof Error ? e.message : e))
+  // Then the bundled basin / play outlines (server/data/gis/tx-geo-regions)
+  // into gis.geo_regions and every abstract's share of each, county by county
+  // (services/geoRegions.ts) — the source of the Basin / Formation suggestions.
+  .then(() => ensureGeoRegions())
+  .catch((e) => console.error("Basin region load failed:", e instanceof Error ? e.message : e))
+  // Then fill in Basin / Formation on deals and opportunities that have none,
+  // from the same answer the forms use (only what is at least medium
+  // confidence; hand-entered tags are never touched) — services/geoTagsBackfill.ts.
+  .then(() => backfillGeoTags())
+  .catch((e) => console.error("Basin/formation backfill failed:", e instanceof Error ? e.message : e));
 
 app.listen(env.PORT, () => {
   // eslint-disable-next-line no-console

@@ -50,12 +50,14 @@ export interface OpportunityEditable {
   estAcres: number | null;
   estNma: number | null;
   estNra: number | null;
+  basins: string[];
+  formations: string[];
   source: string | null;
   notes: string | null;
 }
 export const OPPORTUNITY_EDITABLE_KEYS = [
   "ownerId", "contactId", "sellerName", "companyName", "phone", "email",
-  "state", "county", "abstract", "survey", "estAcres", "estNma", "estNra", "source", "notes",
+  "state", "county", "abstract", "survey", "estAcres", "estNma", "estNra", "basins", "formations", "source", "notes",
 ] as const satisfies readonly (keyof OpportunityEditable)[];
 
 /**
@@ -67,10 +69,12 @@ export const OPPORTUNITY_EDITABLE_KEYS = [
 export function opportunityFieldValues(
   data: { [K in keyof OpportunityEditable]?: OpportunityEditable[K] | undefined },
 ): Partial<OpportunityEditable> {
-  const out: Partial<Record<keyof OpportunityEditable, string | number | null>> = {};
+  const out: Partial<Record<keyof OpportunityEditable, string | number | string[] | null>> = {};
   for (const k of OPPORTUNITY_EDITABLE_KEYS) {
     if (!(k in data)) continue;
     const v = data[k];
+    // Tag lists: trimmed, de-duplicated, never null (an empty list clears them).
+    if (Array.isArray(v)) { out[k] = [...new Set(v.map((s) => String(s).trim()).filter(Boolean))]; continue; }
     out[k] = typeof v === "string" ? clean(v) : v ?? null;
   }
   return out as Partial<OpportunityEditable>;
@@ -91,6 +95,8 @@ export interface ConvertibleOpportunity {
   estAcres: number | null;
   estNma: number | null;
   estNra: number | null;
+  basins?: string[];
+  formations?: string[];
   source: string | null;
   notes: string | null;
 }
@@ -154,6 +160,8 @@ export function convertedDealFields(o: ConvertibleOpportunity, actorUserId: stri
     abstractIds: abstract && isAbstractId(abstract) ? [normalizeAbstractId(abstract)] : [],
     acreageNma: o.estNma ?? o.estAcres ?? null,
     nra: o.estNra ?? null,
+    basins: o.basins ?? [],
+    formations: o.formations ?? [],
     notes: convertedDealNotes(o),
     relationshipOwnerId: o.ownerId ?? actorUserId,
   };
@@ -266,6 +274,8 @@ export interface OpportunityRow {
   estAcres: number | null;
   estNma: number | null;
   estNra: number | null;
+  basins?: string[];
+  formations?: string[];
   source: string | null;
   notes: string | null;
   lastActivityAt: Date | null;
@@ -317,6 +327,8 @@ export function serializeOpportunitySummary(o: OpportunityRow) {
     estAcres: o.estAcres,
     estNma: o.estNma,
     estNra: o.estNra,
+    basins: o.basins ?? [],
+    formations: o.formations ?? [],
     source: o.source,
     lastActivityAt: o.lastActivityAt,
     nextFollowUpDate: o.nextFollowUpDate,

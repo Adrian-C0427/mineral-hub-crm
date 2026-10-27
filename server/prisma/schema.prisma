@@ -1901,6 +1901,10 @@ model Opportunity {
   estAcres Float?
   estNma   Float?
   estNra   Float?
+  // Basin / formation tags, as on Deal (suggested from the abstract or county
+  // by services/geoRegions.ts, always editable); carried onto the converted deal.
+  basins     String[] @default([])
+  formations String[] @default([])
 
   source String?
   notes  String?

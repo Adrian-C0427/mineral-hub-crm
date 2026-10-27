@@ -19,7 +19,8 @@ import { SendDealEmailModal } from "../components/SendDealEmailModal";
 import { useAbstractLabels } from "../components/AbstractPicker";
 import { SearchableMultiSelect } from "../components/SearchableMultiSelect";
 import { GeoFields } from "../components/GeoFields";
-import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
+import { ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
+import { GeoTagFields } from "../components/GeoTagFields";
 import { money, num, acres, pct, daysBetween, fmtDate, toInputDate, prettyEnum } from "../lib/format";
 import { downloadCsv } from "../lib/csv";
 import { SellerDetails } from "../components/SellerDetails";
@@ -684,8 +685,8 @@ function CharacteristicsCard({ deal, onSaved }: { deal: DealDetailData; onSaved:
             counties={f.counties} onCountiesChange={setArr("counties")}
             abstractIds={f.abstractIds} onAbstractsChange={setArr("abstractIds")}
           />
-          <Fld l="Basin"><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(f.counties))} value={f.basins} onChange={setArr("basins")} placeholder="Search basins…" /></Fld>
-          <Fld l="Formation"><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(f.counties))} value={f.formations} onChange={setArr("formations")} placeholder="Search formations…" /></Fld>
+          {/* Suggested from the abstracts / counties; blank fields are filled in, picks are kept. */}
+          <GeoTagFields autoFill basins={f.basins} onBasinsChange={setArr("basins")} formations={f.formations} onFormationsChange={setArr("formations")} abstractIds={f.abstractIds} counties={f.counties} states={f.states ?? []} />
           <Fld l="Asset type"><SearchableMultiSelect options={[...ASSET_TYPE_OPTIONS]} labels={ASSET_TYPE_LABELS} value={f.assetTypes} onChange={setArr("assetTypes")} placeholder="Search asset types…" /></Fld>
           {/* Operator names run long — give the picker two columns. */}
           <div className="field" style={{ gridColumn: "span 2" }}>

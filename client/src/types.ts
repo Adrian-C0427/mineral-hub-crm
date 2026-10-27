@@ -253,6 +253,8 @@ export interface OppSummary {
   estAcres: number | null;
   estNma: number | null;
   estNra: number | null;
+  basins: string[];
+  formations: string[];
   source: string | null;
   lastActivityAt: string | null;
   /** Calendar day at UTC midnight (same convention as task due dates). */

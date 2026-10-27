@@ -124,6 +124,8 @@ const editableFields = {
   estAcres: z.number().nonnegative().nullish(),
   estNma: z.number().nonnegative().nullish(),
   estNra: z.number().nonnegative().nullish(),
+  basins: z.array(z.string().trim().min(1).max(120)).max(50).optional(),
+  formations: z.array(z.string().trim().min(1).max(120)).max(100).optional(),
   source: text(200),
   notes: text(10_000),
   nextFollowUpDate: dayField,

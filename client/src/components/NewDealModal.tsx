@@ -3,7 +3,8 @@ import { Modal, Req } from "./ui";
 import { api, ApiError } from "../api/client";
 import { SearchableMultiSelect } from "./SearchableMultiSelect";
 import { GeoFields } from "./GeoFields";
-import { TEXAS_BASIN_OPTIONS, TEXAS_FORMATION_OPTIONS, ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS, basinsForCounties, formationsForCounties, suggestFirst } from "../lib/options";
+import { ASSET_TYPE_OPTIONS, ASSET_TYPE_LABELS } from "../lib/options";
+import { GeoTagFields } from "./GeoTagFields";
 import type { DealSummary } from "../types";
 import { MoneyInput } from "./MoneyInput";
 import { DateField } from "./DateField";
@@ -220,8 +221,9 @@ export function NewDealModal({ onClose, onCreated, pipelineId }: {
                   abstractIds={abstractIds} onAbstractsChange={setAbstractIds}
                   labels={{ state: <>State {req}</>, county: <>County {req}</>, abstract: <>Abstract {req}</> }}
                 />
-                <div className="field"><label>Basin</label><SearchableMultiSelect options={suggestFirst(TEXAS_BASIN_OPTIONS, basinsForCounties(counties))} value={basins} onChange={setBasins} placeholder={counties.length ? "Suggested for your counties first…" : "Search basins…"} /></div>
-                <div className="field"><label>Formation</label><SearchableMultiSelect options={suggestFirst(TEXAS_FORMATION_OPTIONS, formationsForCounties(counties))} value={formations} onChange={setFormations} placeholder={counties.length ? "Suggested for your counties first…" : "Search formations…"} /></div>
+                {/* Basin / Formation: suggested (and filled in while untouched) from the
+                    abstracts' footprint or the county — see components/GeoTagFields. */}
+                <GeoTagFields autoFill basins={basins} onBasinsChange={setBasins} formations={formations} onFormationsChange={setFormations} abstractIds={abstractIds} counties={counties} states={states} />
                 <div className="field"><label title="Operators active in the selected state and county">Operator</label>
                   <OperatorSelect states={states} counties={counties} value={f.operator} onChange={(v) => setF((p) => ({ ...p, operator: v }))} />
                 </div>
