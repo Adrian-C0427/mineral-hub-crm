@@ -109,7 +109,7 @@ describe("POST /highlevel/connect", () => {
       locationId: LOC, locationName: "XLeads – Carsa Minerals", responseWindowDays: 30,
       hlUsers: [{ id: "u1", name: "Dana", email: null }], hlSync: { phase: "preview", preview: { texts: 5957 } },
     });
-    expect(String(saved._secret)).toMatch(/^v1:/);
+    expect(String(saved._secret)).toMatch(/^v2:[0-9a-f]{8}:/);
     expect(JSON.stringify(saved)).not.toContain("pit-mock-token");
     expect(r.body.config).toEqual({ locationId: LOC, locationName: "XLeads – Carsa Minerals", responseWindowDays: 30 });
     expect(r.body.message).toMatch(/Found 5,957 texts/);

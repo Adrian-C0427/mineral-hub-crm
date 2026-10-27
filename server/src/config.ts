@@ -66,6 +66,10 @@ export const env = {
   // Kept separate from JWT_SECRET so rotating session signing never orphans
   // stored credentials. Required in production; dev derives from JWT_SECRET.
   INTEGRATION_SECRET_KEY: process.env.INTEGRATION_SECRET_KEY ?? "",
+  // Rotation: the key being retired. While set, stored secrets sealed under it
+  // still read, and boot re-encrypts them under INTEGRATION_SECRET_KEY
+  // (services/secretsRotation.ts); remove it once the boot log says so.
+  INTEGRATION_SECRET_KEY_PREVIOUS: process.env.INTEGRATION_SECRET_KEY_PREVIOUS ?? "",
   // Comma-separated list of allowed browser origins (the frontend service URL).
   CORS_ORIGINS: (process.env.CORS_ORIGINS ?? "http://localhost:5173")
     .split(",")

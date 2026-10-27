@@ -19,9 +19,16 @@ import { ensureRrcRefresh } from "./services/rrcRefresh.js";
 import { ensureGeoRegions } from "./services/geoRegions.js";
 import { backfillGeoTags } from "./services/geoTagsBackfill.js";
 import { clearGisCaches } from "./routes/gis.js";
+import { rotateStoredSecrets } from "./services/secretsRotation.js";
 
 // Fail closed: in production, refuse to boot with default/missing secret keys.
 assertProductionSecrets();
+
+// After an INTEGRATION_SECRET_KEY rotation (the old key in
+// INTEGRATION_SECRET_KEY_PREVIOUS): re-encrypt every stored integration / TOTP
+// secret under the new key, then say the previous key can be removed. No-op
+// when no previous key is set.
+rotateStoredSecrets().catch((e) => console.error("Secret key rotation failed:", e instanceof Error ? e.message : e));
 
 const app = createApp();
 
